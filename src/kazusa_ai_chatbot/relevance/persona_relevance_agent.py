@@ -141,13 +141,28 @@ _SETTLED_FINAL_ACTION_CONTRACT = '''
 Return exactly one JSON object and no surrounding text:
 {"response_action":"ignore|proceed","reason_to_respond":"at most 180 characters","use_reply_feature":false,"channel_topic":"at most 60 characters","indirect_speech_context":"at most 100 characters"}'''
 
+_SETTLED_DIRECT_ADDRESS_RECHECK = '''
+
+# Direct-Address Ignore Recheck
+A valid prior pass returned ignore even though a typed character target or
+native character reply establishes the active character's participation basis.
+Re-evaluate the same settled turn. Retain ignore only when the effective latest
+fragment redirects or withdraws the character, qualifying fresh history
+already resolves the current request, or speaking depends on retained media
+that is unavailable here. Group noise, ambiguity, affection, answer quality,
+or the fact that the character spoke earlier does not cancel authoritative
+direct-address evidence. Choose proceed, or wait when the original action
+contract allows it, if none of those grounded ignore reasons applies.
+'''
+
+_SETTLED_ACTION_CONTRACTS = {
+    "more_time_available": _SETTLED_WAIT_ACTION_CONTRACT,
+    "observation_complete": _SETTLED_FINAL_ACTION_CONTRACT,
+}
+
 _SETTLED_SYSTEM_PROMPTS = {
-    "more_time_available": (
-        _SETTLED_SYSTEM_PROMPT_COMMON + _SETTLED_WAIT_ACTION_CONTRACT
-    ),
-    "observation_complete": (
-        _SETTLED_SYSTEM_PROMPT_COMMON + _SETTLED_FINAL_ACTION_CONTRACT
-    ),
+    status: _SETTLED_SYSTEM_PROMPT_COMMON + contract
+    for status, contract in _SETTLED_ACTION_CONTRACTS.items()
 }
 
 _relevance_agent_llm = LLInterface()
@@ -635,15 +650,21 @@ def _project_settled_state(
     return return_value
 
 
-def build_settled_relevance_messages(
+def _build_settled_relevance_messages(
     state: SettledRelevanceState,
-    observation_status: str = "observation_complete",
+    observation_status: str,
+    *,
+    policy_suffix: str,
 ) -> tuple[SystemMessage, HumanMessage]:
-    """Render bounded settled relevance messages."""
+    """Render bounded settled messages with one static policy suffix."""
 
     if observation_status not in {"more_time_available", "observation_complete"}:
         raise ValueError("observation_status is invalid")
-    system_prompt = _SETTLED_SYSTEM_PROMPTS[observation_status]
+    system_prompt = (
+        _SETTLED_SYSTEM_PROMPT_COMMON
+        + policy_suffix
+        + _SETTLED_ACTION_CONTRACTS[observation_status]
+    )
     payload = _project_settled_state(state)
     human_content = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     available_human_chars = SETTLED_RELEVANCE_MAX_INPUT_CHARS - len(
@@ -692,6 +713,20 @@ def build_settled_relevance_messages(
         HumanMessage(content=human_content),
     )
     return_value = messages
+    return return_value
+
+
+def build_settled_relevance_messages(
+    state: SettledRelevanceState,
+    observation_status: str = "observation_complete",
+) -> tuple[SystemMessage, HumanMessage]:
+    """Render bounded settled relevance messages."""
+
+    return_value = _build_settled_relevance_messages(
+        state,
+        observation_status,
+        policy_suffix="",
+    )
     return return_value
 
 
@@ -752,6 +787,69 @@ def _ignore_decision(reason: str) -> SettledRelevanceDecision:
     return return_value
 
 
+def _parse_settled_response(
+    response_text: str,
+    *,
+    observation_status: str,
+) -> tuple[SettledRelevanceDecision, str]:
+    """Parse one settled-model response through its exact contract."""
+
+    parsed_output = parse_llm_json_output(
+        response_text,
+        deterministic_only=True,
+    )
+    parse_status = "succeeded"
+    try:
+        decision = validate_settled_relevance_decision(
+            parsed_output,
+            observation_status=observation_status,
+        )
+    except ValueError as exc:
+        logger.warning(f"Invalid settled relevance output: {exc}")
+        decision = _ignore_decision("invalid settled relevance output")
+        parse_status = "invalid"
+    return decision, parse_status
+
+
+def _needs_direct_address_ignore_recheck(
+    decision: SettledRelevanceDecision,
+    model_payload: Mapping[str, Any],
+) -> bool:
+    """Return whether a valid ignore contradicts typed participation evidence."""
+
+    if model_payload["conversation_scope"] != "group":
+        return_value = False
+        return return_value
+    if decision["response_action"] != "ignore":
+        return_value = False
+        return return_value
+    fragments = model_payload["assembled_turn"]["fragments"]
+    return_value = any(
+        "character" in fragment["semantic_target_labels"]
+        or fragment["reply_target_label"] == "character"
+        for fragment in fragments
+    )
+    return return_value
+
+
+def _settled_return_value(
+    decision: SettledRelevanceDecision,
+    state: IMProcessState,
+) -> dict[str, Any]:
+    """Build downstream compatibility fields from one settled decision."""
+
+    return_value: dict[str, Any] = {
+        **decision,
+        "should_respond": decision["response_action"] == "proceed",
+        "user_input": state.get("user_input", ""),
+    }
+    if "turn_id" in state:
+        return_value["turn_id"] = state["turn_id"]
+    if "turn_version" in state:
+        return_value["turn_version"] = state["turn_version"]
+    return return_value
+
+
 async def relevance_agent(state: IMProcessState) -> dict[str, Any]:
     """Run settled relevance and expose the downstream compatibility fields."""
 
@@ -765,30 +863,11 @@ async def relevance_agent(state: IMProcessState) -> dict[str, Any]:
         list(messages),
         config=_relevance_agent_llm_config,
     )
-    parsed_output = parse_llm_json_output(
+    decision, parse_status = _parse_settled_response(
         str(response.content),
-        deterministic_only=True,
+        observation_status=observation_status,
     )
-    parse_status = "succeeded"
-    try:
-        decision = validate_settled_relevance_decision(
-            parsed_output,
-            observation_status=observation_status,
-        )
-    except ValueError as exc:
-        logger.warning(f"Invalid settled relevance output: {exc}")
-        decision = _ignore_decision("invalid settled relevance output")
-        parse_status = "invalid"
-
-    return_value: dict[str, Any] = {
-        **decision,
-        "should_respond": decision["response_action"] == "proceed",
-        "user_input": state.get("user_input", ""),
-    }
-    if "turn_id" in state:
-        return_value["turn_id"] = state["turn_id"]
-    if "turn_version" in state:
-        return_value["turn_version"] = state["turn_version"]
+    return_value = _settled_return_value(decision, state)
 
     await llm_tracing.record_llm_trace_step(
         trace_id=str(state.get("llm_trace_id", "")),
@@ -810,4 +889,48 @@ async def relevance_agent(state: IMProcessState) -> dict[str, Any]:
             "indirect_speech_context",
         ],
     )
+
+    model_payload = json.loads(str(messages[1].content))
+    if (
+        parse_status == "succeeded"
+        and _needs_direct_address_ignore_recheck(decision, model_payload)
+    ):
+        recheck_messages = _build_settled_relevance_messages(
+            state,
+            observation_status,
+            policy_suffix=_SETTLED_DIRECT_ADDRESS_RECHECK,
+        )
+        recheck_started_at = time.perf_counter()
+        recheck_response = await _relevance_agent_llm.ainvoke(
+            list(recheck_messages),
+            config=_relevance_agent_llm_config,
+        )
+        decision, recheck_parse_status = _parse_settled_response(
+            str(recheck_response.content),
+            observation_status=observation_status,
+        )
+        return_value = _settled_return_value(decision, state)
+        await llm_tracing.record_llm_trace_step(
+            trace_id=str(state.get("llm_trace_id", "")),
+            stage_name="persona_relevance_agent.direct_address_recheck",
+            route_name="relevance",
+            model_name=RELEVANCE_AGENT_LLM_MODEL,
+            messages=list(recheck_messages),
+            response_text=str(recheck_response.content),
+            parsed_output=return_value,
+            parse_status=recheck_parse_status,
+            status="succeeded",
+            duration_ms=max(
+                0,
+                int((time.perf_counter() - recheck_started_at) * 1000),
+            ),
+            output_state_fields=[
+                "response_action",
+                "should_respond",
+                "reason_to_respond",
+                "use_reply_feature",
+                "channel_topic",
+                "indirect_speech_context",
+            ],
+        )
     return return_value

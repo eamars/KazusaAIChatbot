@@ -40,12 +40,6 @@ from kazusa_ai_chatbot.cognition_resolver.state import (
     project_resolver_context,
     update_goal_progress,
     validate_resolver_state,
-    append_v2_resolver_observation,
-    carry_v2_resolver_working_state,
-    new_v2_resolver_working_state,
-)
-from kazusa_ai_chatbot.cognition_resolver.telemetry import (
-    build_v2_resolver_telemetry_fields,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
 from kazusa_ai_chatbot.past_dialog_cognition import (
@@ -77,67 +71,6 @@ BLOCKED_PENDING_CAPABILITIES = frozenset((
 ))
 
 logger = logging.getLogger(__name__)
-
-
-async def call_v2_resolver_loop(
-    state: Mapping[str, Any],
-    *,
-    cognition_func: Callable[[Mapping[str, Any]], Awaitable[Mapping[str, Any]]],
-    capability_func: Callable[[Mapping[str, Any], Mapping[str, Any]], Awaitable[Mapping[str, Any]]],
-    max_cycles: int,
-    origin_scope: str | None = None,
-) -> dict[str, Any]:
-    """Run V2 recurrence on working state and commit only at the caller boundary."""
-
-    resolved_origin_scope = origin_scope or str(
-        state.get("cognition_scope") or state.get("state_scope") or ""
-    )
-    if resolved_origin_scope not in {"user", "character"}:
-        trigger_source = state.get("cognitive_episode", {}).get(
-            "trigger_source",
-        ) if isinstance(state.get("cognitive_episode"), Mapping) else ""
-        resolved_origin_scope = (
-            "character"
-            if trigger_source in {
-                "reflection_signal",
-                "reflection_dry_run",
-                "internal_thought",
-            }
-            else "user"
-        )
-    working = new_v2_resolver_working_state(
-        origin_scope=resolved_origin_scope,
-        max_cycles=max_cycles,
-    )
-    current_context: dict[str, Any] = dict(state)
-    for _ in range(max_cycles):
-        cognition_output = await cognition_func(current_context)
-        current_context.update(dict(cognition_output))
-        working = carry_v2_resolver_working_state(working, cognition_output)
-        requests = list(working["pending_requests"])
-        if not requests:
-            break
-        for request in requests:
-            observation = await capability_func(request, current_context)
-            working = append_v2_resolver_observation(working, observation)
-            if isinstance(observation.get("rag_result"), Mapping):
-                current_context["rag_result"] = observation["rag_result"]
-        current_context["resolver_observations"] = list(working["observations"])
-    terminal_output = working.get("cognition_output", {})
-    core_output = terminal_output.get("cognition_core_output")
-    telemetry_source = (
-        core_output if isinstance(core_output, Mapping) else terminal_output
-    )
-    telemetry = build_v2_resolver_telemetry_fields(
-        telemetry_source.get("resolver_requests", []),
-        telemetry_source.get("resolver_progress", {}),
-    )
-    return {
-        "working_state": working,
-        "cognition_output": terminal_output,
-        "observations": list(working["observations"]),
-        "telemetry": telemetry,
-    }
 
 
 async def call_cognition_resolver_loop(

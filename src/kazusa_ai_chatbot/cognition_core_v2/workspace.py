@@ -51,7 +51,7 @@ async def collapse_bids(
             handle: {
                 "intention": bid["intention"],
                 "desired_outcome": bid["desired_outcome"],
-                "requested_route": bid["requested_route"],
+                "reason": bid["reason"],
                 "confidence": bid["confidence"],
             }
             for handle, bid in handles.items()
@@ -71,11 +71,6 @@ async def collapse_bids(
     declared_supporting = [
         handles[handle] for handle in partition["supporting_bid_handles"]
     ]
-    if any(
-        bid["requested_route"] != primary["requested_route"]
-        for bid in declared_supporting
-    ):
-        raise ValueError("supporting bid route conflicts with primary")
     suppressed = [
         handles[handle] for handle in partition["suppressed_bid_handles"]
     ]

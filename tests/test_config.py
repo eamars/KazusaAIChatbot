@@ -583,7 +583,7 @@ class TestRouteLlmConfig:
 
 
 class TestCognitionVisualDirectivesConfig:
-    def test_visual_directives_enabled_defaults_to_true(self, tmp_path):
+    def test_visual_directives_enabled_defaults_to_false(self, tmp_path):
         env = _configured_subprocess_env_without_dotenv()
         env.pop("COGNITION_VISUAL_DIRECTIVES_ENABLED", None)
 
@@ -604,7 +604,7 @@ class TestCognitionVisualDirectivesConfig:
         )
 
         assert result.returncode == 0
-        assert result.stdout.strip() == "True"
+        assert result.stdout.strip() == "False"
 
     def test_visual_directives_enabled_parses_false(self, tmp_path):
         env = _configured_subprocess_env_without_dotenv()

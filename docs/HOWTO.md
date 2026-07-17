@@ -87,7 +87,7 @@ AUDIT_LOG_TTL_DAYS=90
 DEBUG_LOG_TTL_DAYS=14
 LLM_TRACE_CAPTURE_MODE=metadata
 CONVERSATION_HISTORY_LIMIT=10
-COGNITION_VISUAL_DIRECTIVES_ENABLED=true
+COGNITION_VISUAL_DIRECTIVES_ENABLED=false
 COGNITION_TASK_WILLINGNESS_BOUNDARY_ENABLED=true
 COGNITION_RESOLVER_MAX_CYCLES=3
 COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS=120.0
@@ -258,8 +258,9 @@ models continue normally. Other 400 responses and non-unload errors are not
 retried by this recovery path.
 
 `COGNITION_VISUAL_DIRECTIVES_ENABLED` is a brain-service level switch. Set it
-to `false` to skip L3 visual-directive generation globally; adapters and
-debug-client request payloads do not control this behavior.
+to `true` to enable terminal L3 visual-directive generation globally. It
+defaults to `false`; adapters and debug-client request payloads do not control
+this behavior, and visual directives have no downstream agent.
 
 `COGNITION_TASK_WILLINGNESS_BOUNDARY_ENABLED` defaults to `true`. It enables
 the L2 task-taking willingness boundary prompt path, where

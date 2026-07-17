@@ -1,12 +1,13 @@
 """Persona V2 graph routing and resolver-boundary tests."""
 
 import inspect
-import json
-import logging
-from collections.abc import Mapping
 from unittest.mock import AsyncMock
 
 import pytest
+
+from kazusa_ai_chatbot.nodes import (
+    persona_supervisor2_msg_decontexualizer as decontextualizer_module,
+)
 
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionContractError,
@@ -20,6 +21,16 @@ from tests.cognition_core_v2_test_helpers import canonical_episode
 
 
 NOW = "2026-07-14T00:00:00Z"
+
+
+def test_decontextualizer_preserves_direct_imperative_roles() -> None:
+    """A clear command keeps its implicit character subject and user pronouns."""
+
+    prompt = decontextualizer_module._MSG_DECONTEXUALIZER_PROMPT
+
+    assert "祈使句或命令句" in prompt
+    assert "隐含动作主体是{character_name}" in prompt
+    assert "不得添加{character_name}作为语法主语" in prompt
 
 
 def _cognition_output(route: str) -> dict[str, object]:
@@ -47,6 +58,8 @@ def _cognition_output(route: str) -> dict[str, object]:
         "affect_projection": [],
         "action_requests": [],
         "resolver_requests": [],
+        "resolver_pending_resolution": None,
+        "resolver_goal_progress": None,
         "resolver_progress": {
             "status": "not_requested",
             "semantic_summary": "no resolver request",
@@ -173,69 +186,102 @@ def test_route_after_cognition_validates_v2_output_before_routing() -> None:
 
 
 @pytest.mark.asyncio
-async def test_resolver_failure_observation_excludes_exception_text(
+async def test_live_persona_loads_open_coding_run_contexts(
     monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Backend details stay outside recurrence observations and protected logs."""
+    """A user-message turn receives the existing trusted run projections."""
 
-    sensitive_text = "mongodb://secret-user:secret-password@private-host"
-    captured_observation: dict[str, object] = {}
+    captured: dict[str, object] = {}
+    contexts = [{
+        "schema_version": "coding_run_context.v1",
+        "coding_run_ref": "coding_run:run-1",
+        "status": "blocked",
+        "objective_summary": "repair the scheduler",
+        "allowed_next_actions": ["respond_to_blocker", "status"],
+        "active_blocker": None,
+        "followup_open": True,
+        "updated_at": NOW,
+    }]
 
-    async def fail_recall(*args: object, **kwargs: object) -> dict[str, object]:
-        del args
-        del kwargs
-        raise TimeoutError(sensitive_text)
+    async def load_contexts(**kwargs: object) -> list[dict[str, object]]:
+        captured.update(kwargs)
+        return contexts
 
-    async def run_one_capability_cycle(
-        state: Mapping[str, object],
-        *,
-        cognition_func: object,
-        capability_func: object,
-        max_cycles: int,
-    ) -> dict[str, object]:
-        del cognition_func
-        del max_cycles
-        observation = await capability_func(  # type: ignore[operator]
-            {
-                "capability": "local_context_recall",
-                "semantic_goal": "retrieve bounded context",
-            },
-            state,
-        )
-        captured_observation.update(observation)
+    monkeypatch.setattr(
+        persona_module,
+        "load_open_coding_run_contexts_for_scope",
+        load_contexts,
+    )
+
+    result = await persona_module._load_live_action_selection_context(
+        _persona_state(),
+    )
+
+    assert captured == {
+        "source_platform": "debug",
+        "source_channel_id": "channel-1",
+        "requester_global_user_id": "user-1",
+        "limit": 3,
+    }
+    assert result["action_selection_context"] == {"coding_runs": contexts}
+
+
+@pytest.mark.asyncio
+async def test_persona_stage_uses_canonical_resolver_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The live persona stage enters the shared recurrence and commits once."""
+
+    captured: dict[str, object] = {}
+
+    async def load_action_context(state: dict) -> dict:
+        return {**state, "action_selection_context": {"coding_runs": []}}
+
+    async def load_pending(state: dict) -> dict:
+        return state
+
+    async def run_resolver_loop(state: dict, **kwargs: object) -> dict:
+        captured["state"] = state
+        captured["kwargs"] = kwargs
         return {
-            "cognition_output": {
-                "cognition_core_output": _cognition_output("silence"),
-            },
-            "observations": [observation],
-            "telemetry": {},
+            **state,
+            "cognition_core_output": _cognition_output("silence"),
         }
 
     monkeypatch.setattr(
         persona_module,
-        "run_rag_evidence_for_persona_state",
-        fail_recall,
+        "_load_live_action_selection_context",
+        load_action_context,
     )
     monkeypatch.setattr(
         persona_module,
-        "call_v2_resolver_loop",
-        run_one_capability_cycle,
+        "load_matching_pending_resume_into_state",
+        load_pending,
+    )
+    monkeypatch.setattr(
+        persona_module,
+        "ensure_initial_resolver_inputs",
+        lambda state, *, max_cycles: state,
+    )
+    monkeypatch.setattr(
+        persona_module,
+        "call_cognition_resolver_loop",
+        run_resolver_loop,
     )
     commit = AsyncMock()
     monkeypatch.setattr(persona_module, "commit_cognition_output", commit)
-    caplog.set_level(logging.WARNING, logger=persona_module.__name__)
 
-    result = await persona_module.stage_1_goal_resolver({
+    await persona_module.stage_1_goal_resolver({
         "storage_timestamp_utc": NOW,
     })
 
-    assert captured_observation["semantic_summary"] == (
-        "local context recall failed"
+    kwargs = captured["kwargs"]
+    assert callable(kwargs["call_cognition_subgraph_func"])
+    assert callable(kwargs["execute_capability_func"])
+    assert kwargs["max_cycles"] == persona_module.COGNITION_RESOLVER_MAX_CYCLES
+    assert kwargs["capability_timeout_seconds"] == (
+        persona_module.COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS
     )
-    assert sensitive_text not in json.dumps(result["resolver_observations"])
-    assert sensitive_text not in caplog.text
-    assert "TimeoutError" in caplog.text
     commit.assert_awaited_once()
 
 
@@ -250,6 +296,11 @@ async def test_call_action_subgraph_preserves_dialog_and_trace(
     surface = AsyncMock(return_value={
         "text_surface_output_v2": {
             "content_plan": "acknowledge the current episode",
+        },
+        "visual_surface_output_v2": {
+            "schema_version": "visual_surface_output.v2",
+            "visual_directives": "terminal visual scene",
+            "selected_surface_intent": "illustrate the terminal scene",
         },
     })
     dialog = AsyncMock(return_value={
@@ -272,6 +323,15 @@ async def test_call_action_subgraph_preserves_dialog_and_trace(
     assert result["episode_trace"]["surface_outputs"][0]["fragments"] == [
         "Hello.",
         "How are you?",
+    ]
+    assert result["visual_surface_output_v2"]["visual_directives"] == (
+        "terminal visual scene"
+    )
+    dialog_state = dialog.await_args.args[0]
+    assert "text_surface_output_v2" in dialog_state
+    assert "visual_surface_output_v2" not in dialog_state
+    assert result["episode_trace"]["surface_outputs"][1]["fragments"] == [
+        "terminal visual scene"
     ]
     surface.assert_awaited_once()
     dialog.assert_awaited_once()
@@ -486,6 +546,6 @@ def test_persona_graph_commits_v2_state_before_terminal_surface() -> None:
     resolver_source = inspect.getsource(persona_module.stage_1_goal_resolver)
     terminal_source = inspect.getsource(persona_module.persona_supervisor2)
 
-    assert "call_v2_resolver_loop" in resolver_source
+    assert "call_cognition_resolver_loop" in resolver_source
     assert "cognition_state_committed" in resolver_source
     assert "cognition_core_output" in terminal_source

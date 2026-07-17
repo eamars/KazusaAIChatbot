@@ -52,7 +52,10 @@ def test_v2_connector_materializes_initial_accepted_coding_request() -> None:
     output = canonical_cognition_output(owner_user_id="global-user-001")
     output["action_requests"] = [{
         "action_kind": "accepted_coding_task_request",
+        "decision": "start",
         "semantic_goal": "complete the accepted coding task",
+        "reason": "the user accepted a new coding task",
+        "context_ref": "",
         "target_roles": [{
             "role": "target",
             "entity_kind": "user",
@@ -193,7 +196,7 @@ async def test_gate01_writing_task_runs_from_user_input_to_final_delivery(
     }
     assert trace["coding_agent_requests"] == [{
         "question": CODE_TASK,
-        "source_summary": "The user asked for delayed coding work.",
+        "source_summary": "the user accepted bounded delayed coding work",
         "workspace_root": str(tmp_path / "coding-workspace"),
         "max_answer_chars": 3000,
         "max_artifact_chars": 24000,
@@ -241,7 +244,7 @@ async def test_project_summary_question_runs_from_input_to_final_delivery(
     assert trace["delivery_tick"]["delivered_count"] == 1
     assert trace["coding_agent_requests"] == [{
         "question": PROJECT_SUMMARY_TASK,
-        "source_summary": "The user asked for delayed coding work.",
+        "source_summary": "the user accepted bounded delayed coding work",
         "workspace_root": str(tmp_path / "coding-workspace"),
         "max_answer_chars": 3000,
         "max_artifact_chars": 24000,
@@ -445,7 +448,10 @@ async def _run_full_coding_handoff_case(
         result["action_kind"]: result
         for result in acknowledgement["action_results"]
     }
-    assert action_results["speak"]["status"] == "executed"
+    assert "speak" not in action_results
+    assert acknowledgement["cognition_core_output"]["intention"]["route"] == (
+        "speech"
+    )
     assert action_results["background_work_request"]["accepted_task_state"] == (
         "scheduled"
     )
@@ -1134,33 +1140,15 @@ async def _fake_cognition_subgraph(
     if isinstance(episode, dict):
         trigger_source = str(episode.get("trigger_source", ""))
     if trigger_source == "accepted_task_result_ready":
-        action_requests = [
-            {
-                "action_kind": "speak",
-                "semantic_goal": "deliver the completed coding result",
-                "target_roles": [{
-                    "role": "target",
-                    "entity_kind": "user",
-                    "entity_id": "global-user-001",
-                }],
-                "evidence_handles": ["e1"],
-            }
-        ]
+        action_requests = []
     else:
         action_requests = [
             {
-                "action_kind": "speak",
-                "semantic_goal": "acknowledge accepted delayed coding work",
-                "target_roles": [{
-                    "role": "target",
-                    "entity_kind": "user",
-                    "entity_id": "global-user-001",
-                }],
-                "evidence_handles": ["e1"],
-            },
-            {
                 "action_kind": "background_work_request",
+                "decision": "",
                 "semantic_goal": "complete the accepted coding task",
+                "reason": "the user accepted bounded delayed coding work",
+                "context_ref": "",
                 "target_roles": [{
                     "role": "target",
                     "entity_kind": "user",

@@ -523,6 +523,26 @@ async def test_live_scope_users_resolves_original_qq_failure(
     assert trace_payload['duration_seconds'] < 30.0
 
 
+async def test_live_direct_imperative_preserves_speaker_and_addressee(
+    ensure_live_llm,
+    monkeypatch,
+) -> None:
+    """A direct command remains role-stable for downstream cognition."""
+
+    del ensure_live_llm
+    state = _base_state('张开腿，跨坐在我身上')
+    state['user_name'] = '蚝爹油'
+    result, trace_payload = await _run_case(
+        monkeypatch,
+        'direct_imperative_role_preservation',
+        state,
+    )
+
+    assert result['decontexualized_input'] == state['user_input'], trace_payload
+    assert result['referents'] == [], trace_payload
+    assert trace_payload['duration_seconds'] < 30.0
+
+
 async def test_live_scope_users_ground_display_name_target_from_observed_group_reply(
     ensure_live_llm,
     monkeypatch,

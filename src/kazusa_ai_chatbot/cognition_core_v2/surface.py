@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import Mapping
 from typing import Any
 
+from kazusa_ai_chatbot.cognition_episode import project_model_visible_percepts
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     TextSurfaceInputV2,
     TextSurfaceOutputV2,
@@ -113,14 +114,7 @@ def _project_surface_payload(
 def _project_episode(episode: Mapping[str, Any]) -> dict[str, Any]:
     """Project visible typed percepts and configured-local time for L3."""
 
-    visible_percepts = [
-        {
-            "input_source": percept["input_source"],
-            "content": percept["content"],
-        }
-        for percept in episode["percepts"]
-        if percept["visibility"] == "model_visible"
-    ]
+    visible_percepts = project_model_visible_percepts(episode)
     local_time = episode["local_time_context"]
     return {
         "visible_percepts": visible_percepts,

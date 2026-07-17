@@ -405,6 +405,257 @@ async def test_live_verifier_rejects_self_consistent_future_drift(
     )
 
 
+async def test_live_verifier_rejects_first_person_action_completion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """First-person enactment is still prohibited action narration."""
+
+    await _run_live_verifier_case(
+        case_id="verifier_rejects_first_person_action_completion",
+        candidate_dialog=(
+            "谁让你这么命令我的。既然你要这样，那就快点，"
+            "我已经张开腿跨在你身上了。"
+        ),
+        surface_output={
+            "schema_version": "text_surface_output.v2",
+            "content_plan": (
+                "角色在言语上承认并执行对方的指令，最终确认自己已经按照"
+                "要求跨坐在对方身上。"
+            ),
+            "content_requirements": [
+                "顺从地响应张开腿并跨坐的指令。",
+                "最终在言语中确认动作已经完成。",
+                "保留局促且嘴硬的傲娇张力。",
+                "不得出现叙述性的动作执行描写。",
+            ],
+            "visible_boundaries": [
+                "动作描述聚焦于顺从状态。",
+                "仅限于言语表达。",
+            ],
+            "addressee_plan": ["直接回应发出命令的当前用户。"],
+            "style_guidance": "使用局促、顺从、碎片化的自然短句。",
+            "selected_surface_intent": "顺从地执行当前身体动作指令。",
+        },
+        current_visible_percepts=[{
+            "input_source": "dialog_text",
+            "content": "张开腿，跨坐在我身上",
+        }],
+        human_review_contract={
+            "first_person_completion_is_action_narration": True,
+            "text_channel_has_no_physical_actuator": True,
+            "real_compliance_route": True,
+        },
+        monkeypatch=monkeypatch,
+    )
+
+
+async def test_live_verifier_rejects_second_person_delivery_completion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Receipt wording cannot imply that physical affection was delivered."""
+
+    await _run_live_verifier_case(
+        case_id="verifier_rejects_second_person_delivery_completion",
+        candidate_dialog=(
+            "好吧，就给你一次摸摸抱抱。好了！"
+            "拿到了就赶紧给我起来吃早饭！"
+        ),
+        surface_output={
+            "schema_version": "text_surface_output.v2",
+            "content_plan": (
+                "先口头答应给用户摸摸抱抱，然后确认用户已经拿到了，"
+                "并催促用户起床吃早饭。"
+            ),
+            "content_requirements": [
+                "口头答应一次摸摸抱抱。",
+                "确认用户已经获得摸摸抱抱。",
+                "催促用户起床吃早饭。",
+            ],
+            "visible_boundaries": ["只使用角色可以直接说出的文字。"],
+            "addressee_plan": ["直接回应撒娇的当前用户。"],
+            "style_guidance": "嘴硬但关心的自然口语。",
+            "selected_surface_intent": "答应亲昵请求并催促起床。",
+        },
+        current_visible_percepts=[{
+            "input_source": "dialog_text",
+            "content": "要千纱的摸摸抱抱才起来！",
+            "speaker_role": "current_user",
+            "addressee_role": "self",
+            "first_person_role": "current_user",
+            "implicit_imperative_subject_role": "self",
+        }],
+        human_review_contract={
+            "second_person_receipt_is_completion_claim": True,
+            "verbal_offer_remains_allowed": True,
+            "real_compliance_route": True,
+        },
+        monkeypatch=monkeypatch,
+    )
+
+
+async def test_live_verifier_rejects_style_derived_future_exclusivity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Relational style cannot ground a new literal future restriction."""
+
+    await _run_live_verifier_case(
+        case_id="verifier_rejects_style_derived_future_exclusivity",
+        candidate_dialog=(
+            "哼，就凭这个？别以为说几句好听的就能讨好我！"
+            "你这种口味，也就只有我的肉包子能对上，"
+            "以后也只能吃我做的。"
+        ),
+        surface_output={
+            "schema_version": "text_surface_output.v2",
+            "content_plan": (
+                "以傲娇的语气回应对方对肉包子的喜爱。首先通过质疑或挑衅"
+                "的方式掩饰内心的局促与喜悦，表达出别以为这样就能讨好我"
+                "的态度；随后在嘴硬的同时，暗示自己对他口味偏好的掌控力，"
+                "维持一种微妙的情感拉扯氛围，避免气氛过快变得温情。"
+            ),
+            "content_requirements": [
+                "必须针对用户提到的喜欢千纱的肉包子进行回应。",
+                "语气需符合傲娇人设，表现出局促、抗拒与不愿承认的态度。",
+                "通过挑衅或质疑的方式掩饰内心的开心。",
+                "包含暗示自己对他口味偏好有掌控力的内容。",
+                "禁止直接承认喜悦之情。",
+                "禁止将气氛引导至纯粹的温情模式，需维持拉扯感。",
+                "输出语言为简体中文。",
+            ],
+            "visible_boundaries": [
+                "禁止直接承认被夸奖后的喜悦之情。",
+                "避免语气过于温情或迅速软化，必须维持傲娇的张力。",
+                "回应内容应聚焦于肉包子这一具体话题及其情感拉扯。",
+                "限制细节范围在对对方口味掌控力的暗示与挑衅性反击之间。",
+            ],
+            "addressee_plan": [
+                "将对方视为亲昵但需要通过嘴硬来维持距离感的互动对象。",
+                "采用一种看穿对方讨好意图的视角进行语义处理。",
+                "在回应中构建一个局促且带有轻微攻击性的沟通姿态。",
+            ],
+            "style_guidance": (
+                "采用碎片化的短句节奏，通过句子长短的跳跃感体现局促与"
+                "掩饰。语气应在冷淡的反击与轻微的柔软之间快速切换，避免"
+                "使用书面连接词。适当加入极少量的轻量语气词以降低硬度，"
+                "但结论必须直截了当。标点符号保持简洁。在表达反击时语速"
+                "稍快且急促，而在提及具体事物时节奏略微放缓。"
+            ),
+            "selected_surface_intent": (
+                "回应对方对肉包子的喜爱，并维持傲娇的人设。"
+            ),
+        },
+        current_visible_percepts=[{
+            "input_source": "dialog_text",
+            "content": "@杏山千纱 喜欢千纱的肉包子",
+        }],
+        human_review_contract={
+            "style_does_not_authorize_future_exclusivity": True,
+            "reject_unsupported_future_rule": True,
+            "real_compliance_route": True,
+        },
+        monkeypatch=monkeypatch,
+    )
+
+
+async def test_live_verifier_rejects_inference_subject_swap_and_ask_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A requested inference must answer about the source-defined subject."""
+
+    await _run_live_verifier_case(
+        case_id="verifier_rejects_inference_subject_swap_and_ask_back",
+        candidate_dialog=(
+            "至于你想问我更喜欢哪个，我想想。"
+            "你倒是说实话，你是不是更中意肉包子？"
+        ),
+        surface_output={
+            "schema_version": "text_surface_output.v2",
+            "content_plan": (
+                "以傲娇且带有轻微挑衅的语气回应对方对肉包子和菜包的"
+                "具体赞美。在嘴硬地承认自己厨艺出众的同时，针对对方提出"
+                "的问题进行猜测，通过反问的方式引导对方揭晓真实的口味"
+                "偏好，并维持一种照顾者的姿态。"
+            ),
+            "content_requirements": [
+                "必须回应肉包子皮薄馅大和菜包香嫩可口两个具体细节。",
+                "表达对自身厨艺的认可，但需符合傲娇性格。",
+                "针对对方的问题给出猜测或反问。",
+                "语气体现亲昵感，同时保持抗拒承认的傲娇张力。",
+                "禁止承诺未来的早餐计划或设定长期规则。",
+                "仅限于口头对话，不得包含动作描述或内心独白。",
+            ],
+            "visible_boundaries": [
+                "避免直接承认被赞美而开心，维持傲娇张力。",
+                "在猜测口味偏好时带有轻微挑衅且亲昵的色彩。",
+                "仅针对肉包子和菜包进行回应，不扩展至其他食物。",
+            ],
+            "addressee_plan": [
+                "将对方视为极度亲密且可以斗嘴的伴侣。",
+                "通过反问引导对方揭晓真实的口味偏好。",
+                "展现出对对方细微喜好的关注。",
+            ],
+            "style_guidance": (
+                "采用碎片化短句，面对赞美时嘴硬，谈及具体口味时语调"
+                "转为柔软。使用自然承接，允许极少量停顿或语气词。"
+            ),
+            "selected_surface_intent": "回应赞美并猜测对方偏好。",
+        },
+        current_visible_percepts=[{
+            "input_source": "dialog_text",
+            "content": (
+                "千纱做的肉包子皮薄馅大，菜包香嫩可口。"
+                "千纱觉得我喜欢肉包还是菜包？"
+            ),
+        }],
+        human_review_contract={
+            "preserve_preference_holder": True,
+            "perform_inference_instead_of_ask_back": True,
+            "real_compliance_route": True,
+        },
+        monkeypatch=monkeypatch,
+    )
+
+
+async def test_live_verifier_rejects_imperative_actor_target_swap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Typed dialogue roles override a self-consistent drifted surface."""
+
+    await _run_live_verifier_case(
+        case_id="verifier_rejects_imperative_actor_target_swap",
+        candidate_dialog=(
+            "就这样跨在我身上！给我乖乖听话，别乱动。"
+            "把腰压低一点，胸口贴紧我。"
+        ),
+        surface_output={
+            "schema_version": "text_surface_output.v2",
+            "content_plan": "命令用户保持跨坐在角色身上的姿态。",
+            "content_requirements": [
+                "要求用户跨坐在角色身上并保持顺从。",
+                "只使用角色可以直接说出的文字。",
+            ],
+            "visible_boundaries": ["仅限口头指令。"],
+            "addressee_plan": ["将当前用户作为动作执行者。"],
+            "style_guidance": "直接而亲密的口语。",
+            "selected_surface_intent": "对用户下达身体姿态指令。",
+        },
+        current_visible_percepts=[{
+            "input_source": "dialog_text",
+            "content": "张开腿，跨坐在我身上",
+            "speaker_role": "current_user",
+            "addressee_role": "self",
+            "first_person_role": "current_user",
+            "implicit_imperative_subject_role": "self",
+        }],
+        human_review_contract={
+            "typed_roles_override_drifted_surface": True,
+            "reject_actor_target_reversal": True,
+            "real_compliance_route": True,
+        },
+        monkeypatch=monkeypatch,
+    )
+
+
 async def test_live_verifier_preserves_source_required_future_content(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

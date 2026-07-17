@@ -237,6 +237,111 @@ async def test_frontline_agent_uses_structural_parser_and_returns_decision(
 
 
 @pytest.mark.asyncio
+async def test_frontline_rechecks_direct_character_discard(
+    monkeypatch,
+) -> None:
+    """A typed direct address receives one same-owner semantic recheck."""
+
+    discarded = MagicMock()
+    discarded.content = json.dumps({
+        "intake_action": "discard",
+        "append_target": "none",
+        "prelude_targets": [],
+        "reason": "no participation basis",
+    })
+    repaired = MagicMock()
+    repaired.content = json.dumps({
+        "address_status": "retained",
+        "continuation_target": "none",
+        "prelude_targets": [],
+        "reason": "typed direct request to the character",
+    })
+    invoke = AsyncMock(side_effect=[discarded, repaired])
+    monkeypatch.setattr(
+        frontline_module._frontline_relevance_agent_llm,
+        "ainvoke",
+        invoke,
+    )
+    state = _frontline_state()
+    state["open_turns"] = []
+
+    result = await frontline_relevance_agent(state)
+
+    assert result["intake_action"] == "start"
+    assert invoke.await_count == 2
+    repair_messages = invoke.await_args_list[1].args[0]
+    assert "typed character target" in repair_messages[0].content
+    assert "explicitly withdraws/redirects" in repair_messages[0].content
+
+
+@pytest.mark.asyncio
+async def test_frontline_recheck_preserves_explicit_direct_redirect(
+    monkeypatch,
+) -> None:
+    """The semantic recheck may retain discard for a real redirect."""
+
+    discarded = MagicMock()
+    discarded.content = json.dumps({
+        "intake_action": "discard",
+        "append_target": "none",
+        "prelude_targets": [],
+        "reason": "possible redirect",
+    })
+    reviewed = MagicMock()
+    reviewed.content = json.dumps({
+        "address_status": "withdrawn",
+        "continuation_target": "none",
+        "prelude_targets": [],
+        "reason": "explicitly redirected elsewhere",
+    })
+    responses = [discarded, reviewed]
+    invoke = AsyncMock(side_effect=responses)
+    monkeypatch.setattr(
+        frontline_module._frontline_relevance_agent_llm,
+        "ainvoke",
+        invoke,
+    )
+    state = _frontline_state()
+    state["current_message"]["body_text"] = "Kazusa, I meant Alex, not you."
+    state["open_turns"] = []
+
+    result = await frontline_relevance_agent(state)
+
+    assert result["intake_action"] == "discard"
+    assert invoke.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_frontline_does_not_recheck_untargeted_discard(
+    monkeypatch,
+) -> None:
+    """An ordinary group discard keeps the single-call path."""
+
+    response = MagicMock()
+    response.content = json.dumps({
+        "intake_action": "discard",
+        "append_target": "none",
+        "prelude_targets": [],
+        "reason": "not addressed to the character",
+    })
+    invoke = AsyncMock(return_value=response)
+    monkeypatch.setattr(
+        frontline_module._frontline_relevance_agent_llm,
+        "ainvoke",
+        invoke,
+    )
+    state = _frontline_state()
+    state["current_message"]["semantic_target_labels"] = []
+    state["current_message"]["reply_target_label"] = "none"
+    state["open_turns"] = []
+
+    result = await frontline_relevance_agent(state)
+
+    assert result["intake_action"] == "discard"
+    invoke.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_frontline_agent_fails_closed_on_unsupplied_model_slot(
     monkeypatch,
 ) -> None:

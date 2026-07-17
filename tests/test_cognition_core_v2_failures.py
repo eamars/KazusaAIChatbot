@@ -108,6 +108,22 @@ def _fact(
     return fact
 
 
+def _appraisal_handle_refs(
+    *evidence_handles: str,
+) -> dict[str, dict[str, str]]:
+    """Build canonical prompt refs for direct appraisal validation tests."""
+
+    refs = {
+        "self": {"entity_id": "meaning:character"},
+        "current_user": {"entity_id": "relationship:user:user-c"},
+    }
+    for index, evidence_handle in enumerate(evidence_handles, start=1):
+        refs[f"ce{index}"] = {
+            "entity_id": f"candidate:event:{evidence_handle}",
+        }
+    return refs
+
+
 def test_unsupported_appraisal_can_select_no_evidence() -> None:
     """Accept an explicit no-claim result without forcing false evidence use."""
 
@@ -131,6 +147,7 @@ def test_unsupported_appraisal_can_select_no_evidence() -> None:
         },
         question,
         {"e1"},
+        _appraisal_handle_refs("e1"),
     )
 
     assert result["selected_evidence_handles"] == []
@@ -170,6 +187,7 @@ def test_candidate_proposition_rejects_mismatched_evidence() -> None:
             parsed,
             question,
             {"e1", "e2"},
+            _appraisal_handle_refs("e1", "e2"),
         )
 
 
@@ -204,7 +222,43 @@ def test_candidate_delta_rejects_mismatched_evidence() -> None:
             parsed,
             question,
             {"e1", "e2"},
+            _appraisal_handle_refs("e1", "e2"),
         )
+
+
+def test_candidate_binding_uses_canonical_projection_reference() -> None:
+    """Resolve sparse evidence ids from projection instead of handle suffixes."""
+
+    question = {
+        "question_id": "q:event_agency",
+        "question_kind": "event_agency",
+        "semantic_question": "Assess responsibility and intentionality.",
+        "evidence_handles": ["e7"],
+        "permitted_role_handles": ["ce1", "current_user", "self"],
+        "permitted_delta_paths": ["active_events.ce1.intentionality"],
+        "dependencies": [],
+    }
+    result = validate_semantic_appraisal_result(
+        {
+            "question_id": "q:event_agency",
+            "selected_evidence_handles": ["e7"],
+            "selected_role_handles": ["ce1"],
+            "propositions": [{
+                "proposition_kind": "intentionality",
+                "subject_handle": "ce1",
+                "evidence_handles": ["e7"],
+                "role_assignments": [],
+                "semantic_value": "The current action appears deliberate.",
+            }],
+            "deltas": [],
+            "explanation": "The current evidence supports intentionality.",
+        },
+        question,
+        {"e7"},
+        _appraisal_handle_refs("e7"),
+    )
+
+    assert result["propositions"][0]["subject_handle"] == "ce1"
 
 
 def test_invalid_direct_fact_leaves_state_unchanged() -> None:

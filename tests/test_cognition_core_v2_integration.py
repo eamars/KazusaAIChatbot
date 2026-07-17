@@ -79,7 +79,6 @@ class _ScriptedLLM:
                 "evidence_handles": ["e1"],
                 "expected_consequences": ["preserve continuity"],
                 "confidence": "high",
-                "requested_route": "speech",
             }
         elif "Collapse complete goal bids" in system:
             handles = sorted(payload["bids"])
@@ -88,10 +87,17 @@ class _ScriptedLLM:
                 "supporting_bid_handles": handles[1:],
                 "suppressed_bid_handles": [],
             }
-        elif "Select only a route" in system:
+        elif "semantic action plan" in system.casefold():
             result = {
-                "selected_bid_handle": "b1",
-                "route": "speech",
+                "route": (
+                    "silence"
+                    if payload["episode"]["output_mode"] == "think_only"
+                    else "speech"
+                ),
+                "action_requests": [],
+                "resolver_requests": [],
+                "resolver_pending_resolution": None,
+                "resolver_goal_progress": None,
             }
         elif "exactly style_guidance" in system:
             result = {"style_guidance": "bounded style guidance"}
@@ -193,6 +199,7 @@ def _input(
         "direct_facts": [],
         "available_actions": [],
         "available_resolver_capabilities": [],
+        "resolver_context": "resolver_status=idle",
         "scene_context": {
             "channel_scope": "private",
             "character_role": "companion",
@@ -320,8 +327,8 @@ async def test_v2_facade_projects_persistent_goal_to_entity_ref() -> None:
 
 
 @pytest.mark.asyncio
-async def test_private_output_mode_excludes_visible_bids_before_collapse() -> None:
-    """Turn an otherwise valid speech bid into deterministic private silence."""
+async def test_private_output_mode_produces_private_silence() -> None:
+    """The semantic planner respects the episode's private output mode."""
 
     llm = _ScriptedLLM()
     payload = _input(trigger_source="internal_thought")
@@ -330,14 +337,14 @@ async def test_private_output_mode_excludes_visible_bids_before_collapse() -> No
     output = await run_cognition(payload, _core_services(llm))
 
     assert output["intention"] == {
+        "selected_branch_id": "ordinary_response",
         "route": "silence",
-        "intention": "remain silent",
+        "intention": "acknowledge the grounded episode",
         "target_roles": [],
-        "reason": "no valid admitted bid",
+        "reason": "the episode supplies bounded evidence",
     }
-    assert "admitted_bid" not in output
-    assert not any("Collapse complete goal bids" in call for call in llm.calls)
-    assert not any("Select only a route" in call for call in llm.calls)
+    assert output["admitted_bid"]["branch_id"] == "ordinary_response"
+    assert any("semantic action plan" in call.casefold() for call in llm.calls)
 
 
 @pytest.mark.asyncio

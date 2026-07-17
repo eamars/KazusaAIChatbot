@@ -384,18 +384,33 @@ def _background_work_projection() -> dict[str, object]:
     return_value = {
         "capability": BACKGROUND_WORK_REQUEST_CAPABILITY,
         "available": True,
+        "availability_context": "",
         "visibility": "private",
+        "decision_mode": "closed",
+        "allowed_decisions": ["enqueue"],
+        "default_decision": "enqueue",
+        "decision_pattern": "",
+        "context_ref": "",
         "semantic_input_summary": [
             (
-                "Use when the character accepts bounded delayed text, code, "
-                "or repository-analysis work."
+                "Use only for explicitly accepted delayed work: bounded text, "
+                "code, or repository analysis produced out of turn."
             ),
             (
-                "Repository or source-code analysis stays in this delayed "
-                "work path even when it needs public source evidence."
+                "Repository analysis stays here even with public evidence."
             ),
-            "Provide a task reason and detail, not execution internals.",
-            "Pair this private request with a visible speak acknowledgement.",
+            (
+                "Never use for current-turn reasoning, local context recall, "
+                "reply preparation, rehearsal, or wording."
+            ),
+            (
+                "Never execute a physical action or generate, store, or later "
+                "present an action description."
+            ),
+            (
+                "Provide a task reason and detail without execution internals; "
+                "pair it with a visible acknowledgement."
+            ),
         ],
         "execution_boundary": (
             "durable accepted-task lifecycle records the task before chat acknowledgement"
@@ -410,39 +425,37 @@ def _accepted_coding_task_projection() -> dict[str, object]:
     return_value = {
         "capability": ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
         "available": True,
+        "availability_context": "",
         "visibility": "private",
+        "decision_mode": "closed",
+        "allowed_decisions": [
+            "start",
+            "revise_proposal",
+            "summarize",
+            "status",
+            "approve_and_verify",
+            "respond_to_blocker",
+            "cancel",
+        ],
+        "default_decision": "start",
+        "decision_pattern": "",
+        "context_ref": "",
         "semantic_input_summary": [
+            "Accepted coding work is managed as a durable run.",
             (
-                "Use for accepted coding-agent work that should be managed "
-                "as a durable run."
+                "allowed_next_actions: start, revise_proposal, summarize, "
+                "status, approve_and_verify, respond_to_blocker, cancel."
             ),
             (
-                "Use decision=start for a new coding task, decision=status "
-                "for a compact run progress check, decision=revise_proposal "
-                "to revise an awaiting proposal, decision=summarize for "
-                "changed files and attempt history, decision=approve_and_verify "
-                "only after explicit approval, decision=respond_to_blocker "
-                "only when the run asks a resumable blocker question, and "
-                "decision=cancel only when the user asks to stop that run."
+                "start creates a run; other decisions continue the "
+                "matching open run."
             ),
             (
-                "For every continuation decision, select it only when the "
-                "exact action appears in that run's allowed_next_actions. "
-                "Use a coding_run_ref from the current coding-run context; "
-                "omit it only when exactly one offered run allows that action. "
-                "When multiple offered runs allow the requested continuation, "
-                "select a visible clarification asking the user which objective "
-                "to continue instead of selecting a coding action."
+                "Use the contextual affordance decision; ask visibly when no "
+                "run is distinguishable."
             ),
-            (
-                "For approval, put requested checks such as focused pytest "
-                "or Python compile verification in detail."
-            ),
-            (
-                "For respond_to_blocker, put the user's answer to the active "
-                "blocker question in detail."
-            ),
-            "Pair this private request with a visible speak acknowledgement.",
+            "Put verification or blocker answers in detail.",
+            "Pair this private request with visible acknowledgement.",
         ],
         "execution_boundary": (
             "durable accepted-task lifecycle queues the coding-run worker"
@@ -457,10 +470,23 @@ def _future_cognition_projection() -> dict[str, object]:
     return_value = {
         "capability": TRIGGER_FUTURE_COGNITION_CAPABILITY,
         "available": True,
+        "availability_context": "private_cognition_source",
         "visibility": "private",
+        "decision_mode": "closed",
+        "allowed_decisions": ["schedule"],
+        "default_decision": "schedule",
+        "decision_pattern": "",
+        "context_ref": "",
         "semantic_input_summary": [
-            "Use when the character wants a later private cognition cycle.",
-            "Provide the semantic reason and any ordinary-language timing hint.",
+            (
+                "Use only when a concrete unresolved private task requires "
+                "another cognition cycle after the current turn."
+            ),
+            (
+                "Do not use for rehearsing the current reply, preserving "
+                "persona or style, or adding thought that can finish now."
+            ),
+            "Put the unresolved objective and any timing hint in semantic_goal.",
         ],
         "execution_boundary": "downstream scheduler builds the executable request",
     }
@@ -504,7 +530,13 @@ def _future_speak_projection() -> dict[str, object]:
     return_value = {
         "capability": FUTURE_SPEAK_CAPABILITY,
         "available": True,
+        "availability_context": "",
         "visibility": "private",
+        "decision_mode": "required_text",
+        "allowed_decisions": [],
+        "default_decision": "",
+        "decision_pattern": r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}",
+        "context_ref": "",
         "semantic_input_summary": [
             (
                 "Use when the character accepts a future reminder or delayed "
@@ -533,7 +565,13 @@ def _accepted_task_status_check_projection() -> dict[str, object]:
     return_value = {
         "capability": ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
         "available": True,
+        "availability_context": "",
         "visibility": "private",
+        "decision_mode": "closed",
+        "allowed_decisions": ["check"],
+        "default_decision": "check",
+        "decision_pattern": "",
+        "context_ref": "",
         "semantic_input_summary": [
             "Use when the user asks about already accepted delayed work.",
             "Do not include worker, queue, or job parameters.",
@@ -550,7 +588,13 @@ def _speak_projection() -> dict[str, object]:
     return_value = {
         "capability": SPEAK_CAPABILITY,
         "available": True,
+        "availability_context": "",
         "visibility": "user_visible",
+        "decision_mode": "optional",
+        "allowed_decisions": [],
+        "default_decision": "visible_reply",
+        "decision_pattern": "",
+        "context_ref": "",
         "semantic_input_summary": [
             "Use when the character wants a text surface to exist.",
             "Provide the semantic surface intent, not final wording.",
@@ -566,10 +610,17 @@ def _memory_lifecycle_projection() -> dict[str, object]:
     return_value = {
         "capability": MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
         "available": True,
+        "availability_context": "active_commitment",
         "visibility": "private",
+        "decision_mode": "closed",
+        "allowed_decisions": ["active_commitment_lifecycle"],
+        "default_decision": "active_commitment_lifecycle",
+        "decision_pattern": "",
+        "context_ref": "",
         "semantic_input_summary": [
             "Use when active commitments need semantic lifecycle review.",
-            "Provide review_kind=active_commitment_lifecycle and a short detail.",
+            "Use the fixed active_commitment_lifecycle decision and put the "
+            "concrete review objective in semantic_goal.",
         ],
         "execution_boundary": "memory lifecycle specialist chooses aliases and decisions",
     }

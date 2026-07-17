@@ -8,10 +8,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_core_v2.action_selection import (
-    _validate_route_decision,
-    select_route,
-)
 from kazusa_ai_chatbot.cognition_core_v2.branch_activation import (
     DEFAULT_BRANCH_DEFINITIONS,
     MAX_GOAL_BRANCHES,
@@ -41,8 +37,8 @@ from kazusa_ai_chatbot.cognition_core_v2 import goal_cognition as goal_module
 from kazusa_ai_chatbot.cognition_core_v2.workspace import collapse_bids
 
 
-def _bid(branch_id: str, route: str = "speech") -> dict[str, object]:
-    """Build one complete bid for workspace and route tests."""
+def _bid(branch_id: str) -> dict[str, object]:
+    """Build one complete motive bid for workspace tests."""
 
     return {
         "branch_id": branch_id,
@@ -55,7 +51,6 @@ def _bid(branch_id: str, route: str = "speech") -> dict[str, object]:
         "evidence_handles": ["e1"],
         "expected_consequences": ["preserve continuity"],
         "confidence": "high",
-        "requested_route": route,
     }
 
 
@@ -241,8 +236,8 @@ async def test_collapse_assigns_handles_in_frozen_registry_order() -> None:
     assert result["primary_branch_id"] == "autonomy_boundary"
 
 
-def test_bid_and_route_capability_fields_match_their_route_exactly() -> None:
-    """Reject missing, cross-route, and dual capability declarations."""
+def test_goal_bid_rejects_route_and_capability_authority() -> None:
+    """Goal branches cannot pre-empt the semantic action planner."""
 
     draft = {
         "intention": "perform the permitted action",
@@ -256,25 +251,11 @@ def test_bid_and_route_capability_fields_match_their_route_exactly() -> None:
         "confidence": "high",
         "requested_route": "action",
     }
-    with pytest.raises(ValueError, match="capability fields"):
+    with pytest.raises(ValueError, match="fields are not exact"):
         validate_goal_bid_draft(
             draft,
             evidence_handles={"e1"},
             role_handles=set(),
-            action_handles={"a1"},
-            resolver_handles={"r1"},
-        )
-    with pytest.raises(ValueError, match="capability fields"):
-        _validate_route_decision(
-            {
-                "selected_bid_handle": "b1",
-                "route": "evidence",
-                "action_handle": "a1",
-                "resolver_handle": "r1",
-            },
-            {"b1": _bid("ordinary_response", route="evidence")},
-            {"a1": {"action_kind": "test"}},
-            {"r1": {"capability": "test"}},
         )
 
 
@@ -282,7 +263,7 @@ def test_bid_and_route_capability_fields_match_their_route_exactly() -> None:
 async def test_goal_bid_gets_one_bounded_schema_repair(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A repairable route-field mismatch receives one LLM-owned correction."""
+    """A repairable extra authority field receives one LLM correction."""
 
     valid = {
         "intention": "respond to the direct greeting",
@@ -294,10 +275,9 @@ async def test_goal_bid_gets_one_bounded_schema_repair(
         "evidence_handles": ["e1"],
         "expected_consequences": ["the conversation continues"],
         "confidence": "high",
-        "requested_route": "speech",
     }
     responses = [
-        {**valid, "requested_resolver_handle": "r1"},
+        {**valid, "requested_route": "speech"},
         valid,
     ]
 
@@ -344,12 +324,6 @@ async def test_goal_bid_gets_one_bounded_schema_repair(
             "semantic_text": "the participant greeted the character",
             "visible_to": ["q:event_agency"],
         }],
-        [],
-        [{
-            "capability": "retrieve_context",
-            "semantic_capability": "retrieve bounded context",
-            "availability": "available",
-        }],
         SimpleNamespace(
             llm=llm,
             goal_cognition_config=SimpleNamespace(
@@ -359,10 +333,12 @@ async def test_goal_bid_gets_one_bounded_schema_repair(
         ),
     )
 
-    assert bid["requested_route"] == "speech"
+    assert bid["branch_id"] == "ordinary_response"
     assert len(llm.messages) == 2
     assert "repair" in str(llm.messages[1][0].content).casefold()
-    assert "speech, deferral, silence" in GOAL_COGNITION_PROMPT
+    assert "requested_route" not in GOAL_COGNITION_PROMPT
+    assert "action_handle" not in GOAL_COGNITION_PROMPT
+    assert "resolver_handle" not in GOAL_COGNITION_PROMPT
     assert [
         call.kwargs["stage_name"]
         for call in trace_recorder.await_args_list
@@ -390,7 +366,6 @@ async def test_goal_bid_schema_repair_stops_after_one_retry() -> None:
         "expected_consequences": ["the conversation continues"],
         "confidence": "high",
         "requested_route": "speech",
-        "requested_resolver_handle": "r1",
     }
 
     class _LLM:
@@ -408,7 +383,7 @@ async def test_goal_bid_schema_repair_stops_after_one_retry() -> None:
             return SimpleNamespace(content=json.dumps(invalid))
 
     llm = _LLM()
-    with pytest.raises(ValueError, match="capability fields"):
+    with pytest.raises(ValueError, match="fields are not exact"):
         await run_goal_cognition(
             DEFAULT_BRANCH_DEFINITIONS["ordinary_response"],
             {"scope": "user", "kind": "goal", "entity_id": "g1"},
@@ -423,12 +398,6 @@ async def test_goal_bid_schema_repair_stops_after_one_retry() -> None:
                 },
                 "semantic_text": "direct greeting",
                 "visible_to": ["q:event_agency"],
-            }],
-            [],
-            [{
-                "capability": "retrieve_context",
-                "semantic_capability": "retrieve bounded context",
-                "availability": "available",
             }],
             SimpleNamespace(llm=llm, goal_cognition_config=object()),
         )
@@ -447,36 +416,4 @@ def test_required_branch_failure_cannot_collapse_to_silence() -> None:
         _raise_for_failed_required_branches(
             execution,
             [DEFAULT_BRANCH_DEFINITIONS["ordinary_response"]],
-        )
-
-
-@pytest.mark.asyncio
-async def test_route_selection_validates_action_availability() -> None:
-    """Route-only selection cannot invent an unavailable executable action."""
-
-    class _LLM:
-        async def ainvoke(self, messages: list[object], *, config: object) -> object:
-            del messages, config
-            return type("Response", (), {
-                "content": json.dumps({
-                    "selected_bid_handle": "b1",
-                    "route": "action",
-                    "action_handle": "a1",
-                })
-            })()
-
-    services = type("Services", (), {
-        "llm": _LLM(),
-        "action_selection_config": object(),
-    })()
-    with pytest.raises(CognitionExecutionError):
-        await select_route(
-            {
-                **_bid("safety", route="action"),
-                "requested_action_kind": "protect",
-            },
-            [],
-            [],
-            [],
-            services,
         )

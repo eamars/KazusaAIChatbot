@@ -15,6 +15,9 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
 from kazusa_ai_chatbot.cognition_core_v2.semantic_source_planner import (
     plan_semantic_questions,
 )
+from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
+    project_state_for_prompt,
+)
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     build_acquaintance_user_state,
     build_character_production_state,
@@ -99,6 +102,7 @@ def _payload() -> dict[str, object]:
         "direct_facts": [],
         "available_actions": [],
         "available_resolver_capabilities": [],
+        "resolver_context": "resolver_status=idle",
         "scene_context": {
             "channel_scope": "internal",
             "character_role": "character",
@@ -123,10 +127,15 @@ def test_promoted_reflection_selects_exact_source_owned_questions() -> None:
     """Keep reflection provenance while exposing only semantic text."""
 
     payload = _payload()
+    projection = project_state_for_prompt(
+        payload["mutable_state"],
+        character_constraints=payload["character_constraints"],
+        evidence=payload["evidence"],
+    )
     questions = plan_semantic_questions(
         payload["evidence"],
         payload["mutable_state"],
-        payload["character_constraints"],
+        projection.handle_to_ref,
     )
     assert [question["question_id"] for question in questions] == list(
         EVIDENCE_SOURCE_QUESTION_IDS["promoted_reflection"]

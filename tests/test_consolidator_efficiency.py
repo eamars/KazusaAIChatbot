@@ -11,6 +11,7 @@ from kazusa_ai_chatbot.cognition_core_v2.state_models import (
 )
 from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
 from kazusa_ai_chatbot.consolidation import core as consolidator_module
+from kazusa_ai_chatbot.consolidation import memory_units as memory_units_module
 from kazusa_ai_chatbot.consolidation.origin import (
     build_user_message_consolidation_origin,
 )
@@ -130,6 +131,31 @@ def test_build_consolidator_state_forwards_native_v2_outputs() -> None:
     ]
     assert state["text_surface_output_v2"] == global_state[
         "text_surface_output_v2"
+    ]
+
+
+def test_build_consolidator_state_projects_subjective_appraisal() -> None:
+    """The memory lane receives the admitted V2 subjective reason."""
+
+    global_state = _global_state()
+    global_state["interaction_subtext"] = "  grounded subjective reason  "
+    state = consolidator_module._build_consolidator_state(
+        global_state,
+        consolidation_origin=build_user_message_consolidation_origin(
+            episode=_cognitive_episode(),
+        ),
+        consolidation_target_plan={
+            "origin_kind": "user_message",
+            "targets": [],
+        },
+    )
+
+    assert state["subjective_appraisals"] == [
+        "grounded subjective reason",
+    ]
+    payload = memory_units_module._json_payload(state)
+    assert payload["subjective_appraisal_evidence"] == [
+        "grounded subjective reason",
     ]
 
 

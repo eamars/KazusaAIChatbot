@@ -61,10 +61,17 @@ def test_episode_evidence_selects_each_family_once_with_unique_path_owners() -> 
         global_user_id="user-d",
         updated_at=NOW,
     )
-    questions = plan_semantic_questions(
-        _evidence(),
+    evidence = _evidence()
+    constraints = _constraints()
+    projection = project_state_for_prompt(
         state,
-        _constraints(),
+        character_constraints=constraints,
+        evidence=evidence,
+    )
+    questions = plan_semantic_questions(
+        evidence,
+        state,
+        projection.handle_to_ref,
     )
 
     assert [question["question_kind"] for question in questions] == list(
@@ -96,10 +103,17 @@ def test_scheduler_evidence_selects_only_goal_threat_outcome() -> None:
         global_user_id="user-d",
         updated_at=NOW,
     )
-    questions = plan_semantic_questions(
-        _evidence("scheduler_event"),
+    evidence = _evidence("scheduler_event")
+    constraints = _constraints()
+    projection = project_state_for_prompt(
         state,
-        _constraints(),
+        character_constraints=constraints,
+        evidence=evidence,
+    )
+    questions = plan_semantic_questions(
+        evidence,
+        state,
+        projection.handle_to_ref,
     )
 
     assert [question["question_kind"] for question in questions] == [
@@ -116,7 +130,16 @@ def test_each_question_receives_only_family_local_handles_and_state() -> None:
     )
     evidence = _evidence()
     constraints = _constraints()
-    questions = plan_semantic_questions(evidence, state, constraints)
+    projection = project_state_for_prompt(
+        state,
+        character_constraints=constraints,
+        evidence=evidence,
+    )
+    questions = plan_semantic_questions(
+        evidence,
+        state,
+        projection.handle_to_ref,
+    )
     by_kind = {question["question_kind"]: question for question in questions}
 
     assert "ct1" not in by_kind["event_agency"]["permitted_role_handles"]
@@ -128,11 +151,6 @@ def test_each_question_receives_only_family_local_handles_and_state() -> None:
         "permitted_role_handles"
     ]
 
-    projection = project_state_for_prompt(
-        state,
-        character_constraints=constraints,
-        evidence=evidence,
-    )
     event_state = _project_question_state(
         projection,
         by_kind["event_agency"],
@@ -145,8 +163,8 @@ def test_each_question_receives_only_family_local_handles_and_state() -> None:
     assert "character_constraints" not in event_state
 
 
-def test_candidate_handle_retains_its_exact_evidence_number() -> None:
-    """Make candidate ownership inspectable when evidence order is sparse."""
+def test_candidate_handles_share_the_projection_authority() -> None:
+    """Keep sparse evidence ids resolvable through one prompt-handle owner."""
 
     state = build_acquaintance_user_state(
         global_user_id="user-candidate-binding",
@@ -154,15 +172,32 @@ def test_candidate_handle_retains_its_exact_evidence_number() -> None:
     )
     evidence = _evidence()
     evidence[0]["evidence_handle"] = "e7"
-    questions = plan_semantic_questions(evidence, state, _constraints())
+    constraints = _constraints()
+    projection = project_state_for_prompt(
+        state,
+        character_constraints=constraints,
+        evidence=evidence,
+    )
+    questions = plan_semantic_questions(
+        evidence,
+        state,
+        projection.handle_to_ref,
+    )
     event_question = next(
         question
         for question in questions
         if question["question_kind"] == "event_agency"
     )
 
-    assert "ce7" in event_question["permitted_role_handles"]
-    assert "active_events.ce7.intentionality" in event_question[
+    assert "ce1" in projection.handle_to_ref
+    assert projection.handle_to_ref["ce1"]["entity_id"] == (
+        "candidate:event:e7"
+    )
+    assert set(event_question["permitted_role_handles"]) <= set(
+        projection.handle_to_ref
+    )
+    assert "ce1" in event_question["permitted_role_handles"]
+    assert "active_events.ce1.intentionality" in event_question[
         "permitted_delta_paths"
     ]
 
@@ -189,6 +224,7 @@ def test_v2_input_rejects_scope_mismatch_before_any_model_call() -> None:
         "direct_facts": [],
         "available_actions": [],
         "available_resolver_capabilities": [],
+        "resolver_context": "resolver_status=idle",
         "scene_context": {
             "channel_scope": "internal",
             "character_role": "character",

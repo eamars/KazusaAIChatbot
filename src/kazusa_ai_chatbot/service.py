@@ -3465,33 +3465,11 @@ async def _process_queued_chat_item(
             fallback_text = (
                 f"{character_name} is busy right now, please try again later."
             )
-            delivery_tracking_id = uuid4().hex
-            fallback_result = {
-                "platform": req.platform,
-                "platform_channel_id": req.platform_channel_id,
-                "channel_type": req.channel_type,
-                "platform_bot_id": req.platform_bot_id,
-                "character_name": character_name,
-                "global_user_id": global_user_id,
-                "final_dialog": [fallback_text],
-                "target_addressed_user_ids": [global_user_id],
-                "target_broadcast": False,
-                "delivery_tracking_id": delivery_tracking_id,
-                "llm_trace_id": llm_trace_id,
-            }
-            try:
-                await _save_assistant_message(fallback_result)
-                response = ChatResponse(
-                    messages=[fallback_text],
-                    delivery_tracking_id=delivery_tracking_id,
-                )
-                stages_reached.append("assistant_persisted")
-            except Exception as save_exc:
-                logger.exception(
-                    "Graph failure fallback suppressed because assistant "
-                    f"history persistence failed: {save_exc}"
-                )
-                response = ChatResponse()
+            response = ChatResponse(
+                messages=[fallback_text],
+                content_type="operational_error",
+                delivery_tracking_id="",
+            )
             _chat_input_queue.complete(item, response)
             (
                 error_class,
@@ -3525,8 +3503,8 @@ async def _process_queued_chat_item(
             await llm_tracing.finalize_llm_trace_run(
                 trace_id=llm_trace_id,
                 status="failed",
-                final_dialog_count=1,
-                delivery_tracking_id=delivery_tracking_id,
+                final_dialog_count=0,
+                delivery_tracking_id="",
             )
             return
 

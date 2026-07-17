@@ -5,6 +5,17 @@
 - Parent plan: `cognition_core_v2_stage_2_integration_plan.md`
 - Contract: `cognition_core_v2_stage_2_contract_spec.md`
 - Status: mandatory frozen companion to the parent plan
+
+### 2026-07-17 Checkpoint I corrective packet
+
+The active
+`development_plans/active/bugfix/cognition_core_v2_compositional_action_planning_bugfix_plan.md`
+is a mandatory Checkpoint I remediation packet. Its production-capacity,
+compositional planner, full resolver lifecycle, operational-error containment,
+disabled visual-default, focused live-LLM, frozen 20+20, restoration, and
+independent-review gates must pass before final Stage 2 closure. Its big-bang
+contract supersedes route-only action-selection requirements in earlier
+packets.
 - Purpose: exact change surface, test ownership, database isolation, commands,
   checkpoints, evidence paths, and handoffs
 - Change rule: path, test, database, or checkpoint changes require a parent-plan

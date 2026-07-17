@@ -1,4 +1,4 @@
-"""V2 resolver route-selection contract tests."""
+"""V2 semantic resolver-planning contract tests."""
 
 from __future__ import annotations
 
@@ -7,10 +7,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_core_v2.action_selection import select_route
+from kazusa_ai_chatbot.cognition_core_v2.action_selection import plan_actions
 
 
-class _ResolverRouteLLM:
+class _ResolverPlannerLLM:
     async def ainvoke(
         self,
         messages: list[object],
@@ -19,15 +19,22 @@ class _ResolverRouteLLM:
     ) -> SimpleNamespace:
         del messages, config
         return SimpleNamespace(content=json.dumps({
-            "selected_bid_handle": "b1",
             "route": "evidence",
-            "resolver_handle": "r1",
+            "action_requests": [],
+            "resolver_requests": [{
+                "bid_handle": "b1",
+                "resolver_handle": "r1",
+                "semantic_goal": "obtain grounded local context",
+                "reason": "the admitted motive has an evidence gap",
+            }],
+            "resolver_pending_resolution": None,
+            "resolver_goal_progress": None,
         }))
 
 
 @pytest.mark.asyncio
-async def test_v2_route_returns_typed_resolver_request() -> None:
-    """The route model selects an available resolver by prompt-local handle."""
+async def test_v2_planner_returns_typed_resolver_request() -> None:
+    """The planner selects an available resolver by prompt-local handle."""
 
     primary_bid = {
         "branch_id": "epistemic_exploration",
@@ -36,34 +43,37 @@ async def test_v2_route_returns_typed_resolver_request() -> None:
         "desired_outcome": "obtain grounded local context",
         "concrete_detail": "retrieve only prompt-safe evidence",
         "reason": "the current evidence is incomplete",
+        "private_monologue": "I need evidence before I decide.",
         "target_roles": [],
         "evidence_handles": ["e1"],
         "expected_consequences": ["reduce uncertainty"],
         "confidence": "high",
-        "requested_route": "evidence",
-        "requested_resolver_capability": "local_context_recall",
     }
     services = SimpleNamespace(
-        llm=_ResolverRouteLLM(),
+        llm=_ResolverPlannerLLM(),
         action_selection_config=object(),
     )
 
-    intention, action_requests, resolver_requests = await select_route(
-        primary_bid,
-        [],
-        [],
-        [{
+    result = await plan_actions(
+        primary_bid=primary_bid,
+        supporting_bids=[],
+        episode={"episode_id": "episode-1", "trigger_source": "user_message"},
+        evidence=[],
+        available_actions=[],
+        available_resolvers=[{
             "capability": "local_context_recall",
             "semantic_capability": "recall relevant context",
             "availability": "available",
         }],
-        services,
+        resolver_context="resolver_status=idle",
+        services=services,
     )
 
-    assert intention["route"] == "evidence"
-    assert action_requests == []
-    assert resolver_requests == [{
+    assert result["intention"]["route"] == "evidence"
+    assert result["action_requests"] == []
+    assert result["resolver_requests"] == [{
         "capability": "local_context_recall",
         "semantic_goal": "obtain grounded local context",
+        "reason": "the admitted motive has an evidence gap",
         "evidence_handles": ["e1"],
     }]

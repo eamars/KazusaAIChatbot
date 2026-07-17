@@ -21,6 +21,7 @@ from kazusa_ai_chatbot.consolidation.origin import (
 )
 from kazusa_ai_chatbot.consolidation.schema import (
     ConsolidatorState,
+    normalize_subjective_appraisals,
 )
 from kazusa_ai_chatbot.consolidation.target import (
     build_consolidation_target_plan,
@@ -191,6 +192,9 @@ def _build_consolidator_state(
             global_state.get("episode_trace"),
         ),
         "interaction_subtext": global_state["interaction_subtext"],
+        "subjective_appraisals": normalize_subjective_appraisals(
+            global_state["interaction_subtext"]
+        ),
         "emotional_appraisal": global_state["emotional_appraisal"],
         "character_intent": global_state["character_intent"],
         "logical_stance": global_state["logical_stance"],

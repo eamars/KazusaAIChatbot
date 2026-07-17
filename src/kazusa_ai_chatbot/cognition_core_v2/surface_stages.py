@@ -71,10 +71,22 @@ topic, and visible limit. Preserve source descriptors, attributes, qualifiers,
 quantities, polarity, and comparative degree. Non-conflicting elaboration is
 allowed, but it must not transform, replace, or compound a supplied attribute
 into a different claim. Preserve explicit entity and target specificity.
+Typed role fields on a visible percept are authoritative. For user dialog,
+speaker_role=current_user owns first-person pronouns, addressee_role=self is
+the active character, and implicit_imperative_subject_role=self owns an
+unstated command subject. Never reverse those roles even when an upstream bid
+does.
+A rhetorical question cannot substitute for a requested answer, inference,
+guess, explanation, acceptance, refusal, or negotiation. It may appear only as
+an additional character-voice beat after the requested operation is complete.
 Never generalize, euphemize, narrow, broaden, or replace a supplied referent.
 Acceptance, refusal, permission, and consent must remain bounded to the exact
 source-requested act and scope. Indefinite or unrestricted permission must not
 substitute for a specific permission.
+Possessive, controlling, exclusive, jealous, tsundere, or other expressive or
+relational style may shape the wording of source-grounded current meaning.
+Style alone cannot authorize a new semantic claim, literal future rule or
+exclusivity condition, obligation, prohibition, commitment, or expectation.
 When source meaning is limited to the current occurrence, output
 must remain silent about future claims, promises, conditions, expectations,
 threats, habits, or rules, including contrastive or teasing additions.
@@ -82,6 +94,17 @@ Preserve explicit future content when the source actually supplies or requires
 it. Do not substitute a different operation, reverse a semantic role, invent
 a condition or future rule, or introduce an unrelated topic. Record these
 invariants as explicit content requirements for the final renderer.
+The text channel has no physical actuator. For a physical request, plan only
+the character's literal verbal stance: acceptance, refusal, negotiation,
+teasing, bounded permission, or spoken instruction. Never plan or require a
+first-person execution claim that the requested movement is happening,
+finished, or established as a body position, even if an upstream bid describes
+execution. Preserve the character's stance while keeping physical enactment
+out of visible text.
+A verbal offer or permission remains allowed, but never plan a claim or
+presupposition that the requested physical act was performed, completed,
+delivered, or received, regardless of grammatical person. Do not treat virtual
+or simulated delivery as an exception.
 Physical-action topics may be discussed, accepted, refused, or negotiated in
 words, while the visible text remains literal speech rather than narrated
 execution. Do not write final dialogue. Write newly generated free text in

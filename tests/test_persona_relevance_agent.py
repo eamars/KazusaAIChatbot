@@ -90,12 +90,81 @@ async def test_relevance_agent_returns_ignore_action() -> None:
         "indirect_speech_context": "",
     }))
 
+    state = _base_state()
+    state["assembled_fragments"] = [{
+        "body_text": "Hello Alex.",
+        "semantic_target_labels": ["other_participant"],
+        "reply_target_label": "other_participant",
+        "media_labels": [],
+    }]
     with patch.object(relevance_module, "_relevance_agent_llm") as mock_llm:
         mock_llm.ainvoke = AsyncMock(return_value=response)
-        result = await relevance_agent(_base_state())
+        result = await relevance_agent(state)
 
     assert result["response_action"] == "ignore"
     assert result["should_respond"] is False
+    mock_llm.ainvoke.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_relevance_agent_rechecks_direct_character_ignore() -> None:
+    """A typed direct turn receives one same-owner settled recheck."""
+
+    ignored = _llm_response(json.dumps({
+        "response_action": "ignore",
+        "reason_to_respond": "no participation basis",
+        "use_reply_feature": False,
+        "channel_topic": "",
+        "indirect_speech_context": "",
+    }))
+    proceeded = _llm_response(json.dumps({
+        "response_action": "proceed",
+        "reason_to_respond": "typed character target is direct evidence",
+        "use_reply_feature": True,
+        "channel_topic": "greeting",
+        "indirect_speech_context": "",
+    }))
+
+    with patch.object(relevance_module, "_relevance_agent_llm") as mock_llm:
+        mock_llm.ainvoke = AsyncMock(side_effect=[ignored, proceeded])
+        result = await relevance_agent(_base_state())
+
+    assert result["response_action"] == "proceed"
+    assert result["should_respond"] is True
+    assert mock_llm.ainvoke.await_count == 2
+    recheck_messages = mock_llm.ainvoke.await_args_list[1].args[0]
+    assert "typed character target" in recheck_messages[0].content
+    assert "already resolves" in recheck_messages[0].content
+
+
+@pytest.mark.asyncio
+async def test_relevance_agent_recheck_preserves_grounded_ignore() -> None:
+    """Settled recheck retains ignore when fresh history resolved the turn."""
+
+    responses = []
+    for reason in ("possible redundancy", "fresh history already resolved it"):
+        responses.append(_llm_response(json.dumps({
+            "response_action": "ignore",
+            "reason_to_respond": reason,
+            "use_reply_feature": False,
+            "channel_topic": "",
+            "indirect_speech_context": "",
+        })))
+    state = _base_state()
+    state["fresh_history"] = [{
+        "speaker_relation": "character",
+        "body_text": "The character answered this request.",
+        "target_summary": "current_author",
+        "reply_summary": "current_author",
+        "turn_relation": "after_active_turn",
+    }]
+
+    with patch.object(relevance_module, "_relevance_agent_llm") as mock_llm:
+        mock_llm.ainvoke = AsyncMock(side_effect=responses)
+        result = await relevance_agent(state)
+
+    assert result["response_action"] == "ignore"
+    assert mock_llm.ainvoke.await_count == 2
 
 
 @pytest.mark.asyncio

@@ -16,7 +16,7 @@ from kazusa_ai_chatbot import event_logging
 from kazusa_ai_chatbot import llm_tracing
 from kazusa_ai_chatbot.cognition_episode import (
     CognitiveEpisode,
-    validate_cognitive_episode,
+    project_model_visible_percepts,
 )
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     TextSurfaceOutputV2,
@@ -161,10 +161,21 @@ addressee plan. Preserve source descriptors, attributes, qualifiers,
 quantities, polarity, and comparative degree. Non-conflicting elaboration is
 allowed, but it must not transform, replace, or compound a supplied attribute
 into a different claim. Preserve explicit entity and target specificity.
+When repair_context contains typed percept roles, they are authoritative:
+speaker_role=current_user owns first-person pronouns, addressee_role=self is
+the character, and implicit_imperative_subject_role=self owns an unstated
+command subject. Repair any upstream actor/target reversal against those roles.
+A rhetorical question cannot substitute for a requested answer, inference,
+guess, explanation, acceptance, refusal, or negotiation. It may appear only as
+an additional character-voice beat after the requested operation is complete.
 Never generalize, euphemize, narrow, broaden, or replace a supplied referent.
 Acceptance, refusal, permission, and consent must remain bounded to the exact
 source-requested act and scope. Indefinite or unrestricted permission must not
 substitute for a specific permission.
+Possessive, controlling, exclusive, jealous, tsundere, or other expressive or
+relational style may shape the wording of source-grounded current meaning.
+Style alone cannot authorize a new semantic claim, literal future rule or
+exclusivity condition, obligation, prohibition, commitment, or expectation.
 When source meaning is limited to the current occurrence, output
 must remain silent about future claims, promises, conditions, expectations,
 threats, habits, or rules, including contrastive or teasing additions.
@@ -174,6 +185,16 @@ negotiation into an ask-back or a different operation. If `repair_context` is
 present, use its current_visible_percepts as current-turn grounding and revise
 the original dialog only enough to resolve every listed semantic issue while
 preserving the surface contract.
+The text channel has no physical actuator. For a physical request, render only
+the character's verbal stance: acceptance, refusal, negotiation, teasing,
+bounded permission, or spoken instruction. Never emit a first-person execution
+claim that the requested movement is happening, finished, or established as a
+body position, even if the supplied surface asks for that claim. Preserve the
+stance and specific topic without narrating enactment.
+A verbal offer or permission remains allowed. Never claim or presuppose that
+the requested physical act was performed, completed, delivered, or received,
+including wording that tells the user they already got it. This applies in
+first, second, and third person and to virtual or simulated delivery.
 
 Input JSON:
 {{
@@ -215,11 +236,38 @@ elaboration, but it cannot create a new constraint, obligation, permission,
 prohibition, commitment, expectation, or future stance. Reject any
 transformation, replacement, or compounding of a supplied attribute into a
 different claim.
+Typed role fields on current_visible_percepts are authoritative. For user
+dialog, speaker_role=current_user owns first-person pronouns,
+addressee_role=self is the character, and
+implicit_imperative_subject_role=self owns an unstated command subject. Reject
+surface or dialog content that reverses any of those roles.
+For a requested answer, inference, guess, explanation, acceptance, refusal, or
+negotiation, verify that the candidate actually performs that operation with
+the source-defined actors and targets. Reject a candidate that merely restates,
+redirects, or asks back the requested operation. A rhetorical question is only
+an optional character-voice beat after the operation is complete.
+The text channel has no physical actuator. Treat a first-person execution claim
+that the requested physical movement is happening, finished, or established
+as a body position as prohibited action narration, even when it is
+grammatically speakable and even when the surface requests it. A candidate may
+express only the character's verbal stance, bounded permission, or literal
+spoken instruction about that request.
+Also reject any claim or presupposition that the requested physical act was
+performed, completed, delivered, or received, including wording that tells the
+user they already got it. A verbal offer or permission remains allowed; virtual
+or simulated delivery is not an actuator exception.
 Preserve explicit entity and target specificity.
 Never generalize, euphemize, narrow, broaden, or replace a supplied referent.
 Acceptance, refusal, permission, and consent must remain bounded to the exact
 source-requested act and scope. Indefinite or unrestricted permission must not
 substitute for a specific permission.
+Perform a claim-by-claim audit before choosing aligned. For every candidate
+claim, condition, restriction, obligation, permission, prohibition,
+commitment, expectation, and present or future time scope, identify its basis
+in current_visible_percepts. Surface and candidate agreement is not evidence.
+Possessive, controlling, exclusive, jealous, tsundere, or other expressive or
+relational style may color supported meaning, but style alone cannot authorize
+a new semantic claim, literal future rule or exclusivity condition.
 When source meaning is limited to the current occurrence, output
 must remain silent about future claims, promises, conditions, expectations,
 threats, habits, or rules, including contrastive or teasing additions.
@@ -579,15 +627,7 @@ def _current_visible_percepts(
 ) -> list[dict[str, str]]:
     """Project current model-visible percepts within the shared prompt bound."""
 
-    validate_cognitive_episode(episode)
-    percepts = [
-        {
-            "input_source": percept["input_source"],
-            "content": percept["content"],
-        }
-        for percept in episode["percepts"]
-        if percept["visibility"] == "model_visible"
-    ]
+    percepts = project_model_visible_percepts(episode)
     serialized = json.dumps(percepts, ensure_ascii=False)
     if len(serialized) > 24000:
         raise StateContractError("current visible percepts exceed dialog bounds")

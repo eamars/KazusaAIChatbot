@@ -41,6 +41,116 @@ async def test_live_captured_unaddressed_group_complaint_discards_frontline(
     assert result['reason'] != 'invalid frontline output'
 
 
+async def test_live_frozen_direct_chat_request_starts_frontline(
+    ensure_relevance_live_llms,
+) -> None:
+    """The frozen direct chat request must enter a candidate turn."""
+
+    del ensure_relevance_live_llms
+    state = _frontline_state(
+        '@杏山千纱 想和你聊天了',
+        targets=['character'],
+        reply_target='character',
+        continuity='',
+    )
+
+    result = await _run_frontline(
+        'RCA_direct_chat_request_frontline',
+        state,
+    )
+
+    assert result['intake_action'] == 'start'
+
+
+async def test_live_frozen_direct_relationship_question_starts_frontline(
+    ensure_relevance_live_llms,
+) -> None:
+    """The frozen direct relationship question must enter a candidate turn."""
+
+    del ensure_relevance_live_llms
+    state = _frontline_state(
+        '@杏山千纱 你喜欢我么？',
+        targets=['character'],
+        reply_target='character',
+        continuity='',
+    )
+
+    result = await _run_frontline(
+        'RCA_direct_relationship_question_frontline',
+        state,
+    )
+
+    assert result['intake_action'] == 'start'
+
+
+async def test_live_frozen_direct_chat_request_proceeds_settled(
+    ensure_relevance_live_llms,
+) -> None:
+    """The frozen direct chat request must proceed after settlement."""
+
+    del ensure_relevance_live_llms
+    state = {
+        'conversation_scope': 'group',
+        'active_character_name': '杏山千纱',
+        'assembled_fragments': [{
+            'body_text': '@杏山千纱 想和你聊天了',
+            'semantic_target_labels': ['character'],
+            'reply_target_label': 'character',
+            'media_labels': [],
+        }],
+        'media_descriptions': [],
+        'fresh_history': [],
+        'scene_context': '',
+        'relationship_context': 'very close and mutually affectionate',
+        'character_mood': 'pleased but reserved',
+        'group_attention': 'low_noise',
+        'bot_continuity': '早安。',
+        'user_profile': {'affinity': 1000},
+    }
+
+    result = await _run_settled(
+        'RCA_direct_chat_request_settled',
+        state,
+        observation_status='more_time_available',
+    )
+
+    assert result['response_action'] == 'proceed'
+
+
+async def test_live_frozen_direct_relationship_question_proceeds_settled(
+    ensure_relevance_live_llms,
+) -> None:
+    """The frozen relationship question must proceed after settlement."""
+
+    del ensure_relevance_live_llms
+    state = {
+        'conversation_scope': 'group',
+        'active_character_name': '杏山千纱',
+        'assembled_fragments': [{
+            'body_text': '@杏山千纱 你喜欢我么？',
+            'semantic_target_labels': ['character'],
+            'reply_target_label': 'character',
+            'media_labels': [],
+        }],
+        'media_descriptions': [],
+        'fresh_history': [],
+        'scene_context': '',
+        'relationship_context': 'very close and mutually affectionate',
+        'character_mood': 'pleased but reserved',
+        'group_attention': 'low_noise',
+        'bot_continuity': '我听到了。',
+        'user_profile': {'affinity': 1000},
+    }
+
+    result = await _run_settled(
+        'RCA_direct_relationship_question_settled',
+        state,
+        observation_status='more_time_available',
+    )
+
+    assert result['response_action'] == 'proceed'
+
+
 async def test_live_captured_direct_bot_mention_proceeds(
     ensure_relevance_live_llms,
 ) -> None:

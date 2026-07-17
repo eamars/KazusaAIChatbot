@@ -106,6 +106,8 @@ def canonical_cognition_output(
         "affect_projection": [],
         "action_requests": [],
         "resolver_requests": [],
+        "resolver_pending_resolution": None,
+        "resolver_goal_progress": None,
         "resolver_progress": {
             "status": "not_requested",
             "semantic_summary": "no resolver was selected",
@@ -150,6 +152,5 @@ def canonical_cognition_output(
             "evidence_handles": ["e1"],
             "expected_consequences": ["preserve continuity"],
             "confidence": "high",
-            "requested_route": "speech",
         }
     return output

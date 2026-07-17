@@ -49,7 +49,7 @@ class ActionRequestV1(TypedDict, total=False):
     decision: str
     reason: str
     detail: str
-    coding_run_ref: str
+    context_ref: str
     execution_request: str
     target_roles: list[dict[str, str]]
     evidence_handles: list[str]
@@ -516,7 +516,7 @@ def _coding_run_ref_for_request(
     ):
         return ""
     contexts = _coding_run_contexts(state)
-    direct_ref = _semantic_text(request, "coding_run_ref")
+    direct_ref = _semantic_text(request, "context_ref")
     eligible_refs = [
         context["coding_run_ref"]
         for context in contexts

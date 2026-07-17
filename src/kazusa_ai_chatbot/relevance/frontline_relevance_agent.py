@@ -44,6 +44,15 @@ class FrontlineDecision(TypedDict):
     reason: str
 
 
+class DirectAddressReview(TypedDict):
+    """Focused semantic review for a typed direct-address discard."""
+
+    address_status: Literal["retained", "withdrawn"]
+    continuation_target: Literal["none", "open_1", "open_2", "open_3"]
+    prelude_targets: list[Literal["prelude_1", "prelude_2"]]
+    reason: str
+
+
 FrontlineState = Mapping[str, Any]
 
 
@@ -143,6 +152,27 @@ only for start; otherwise use an empty list. Never invent a slot.'''
 
 _FRONTLINE_NO_PRELUDES_CONTRACT = '''
 No prelude slot is available. Return prelude_targets as [] exactly.'''
+
+_DIRECT_ADDRESS_REVIEW_PROMPT = '''You are the same frontline relevance owner
+reviewing one narrow direct-address contradiction.
+
+The current group message has authoritative typed character-target or native
+character-reply evidence. Decide whether its current meaning retains that
+address or explicitly withdraws/redirects it away from the active character.
+A nickname, summon, affection, greeting, question, request, or incomplete
+utterance retains the address. Missing useful content is not withdrawal.
+
+When address_status is retained, select continuation_target only if the current
+meaning clearly continues exactly one supplied open turn; otherwise use none,
+which starts a new turn. Select supplied prelude targets only when starting and
+they complete the current intent. When address_status is withdrawn, both the
+continuation target and preludes must be empty.
+
+Return exactly one JSON object and no surrounding text:
+{"address_status":"retained|withdrawn",
+"continuation_target":"none|open_1|open_2|open_3",
+"prelude_targets":[],"reason":"at most 80 characters"}
+Use only supplied open and prelude slots. Never invent a slot.'''
 
 _FRONTLINE_SCOPE_PROMPTS = {
     "group": (
@@ -328,13 +358,15 @@ def _frontline_system_prompt(payload: Mapping[str, Any]) -> str:
     return return_value
 
 
-def build_frontline_messages(
+def _build_frontline_messages(
     state: FrontlineState,
+    *,
+    system_suffix: str,
 ) -> tuple[SystemMessage, HumanMessage]:
-    """Render the bounded frontline system and semantic human messages."""
+    """Render bounded frontline messages with one static policy suffix."""
 
     payload = _project_frontline_state(state)
-    system_prompt = _frontline_system_prompt(payload)
+    system_prompt = _frontline_system_prompt(payload) + system_suffix
     human_content = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     available_human_chars = FRONTLINE_RELEVANCE_MAX_INPUT_CHARS - len(
         system_prompt
@@ -351,7 +383,7 @@ def build_frontline_messages(
             ensure_ascii=False,
             separators=(",", ":"),
         )
-        system_prompt = _frontline_system_prompt(payload)
+        system_prompt = _frontline_system_prompt(payload) + system_suffix
         available_human_chars = FRONTLINE_RELEVANCE_MAX_INPUT_CHARS - len(
             system_prompt
         )
@@ -374,6 +406,15 @@ def build_frontline_messages(
         HumanMessage(content=human_content),
     )
     return_value = messages
+    return return_value
+
+
+def build_frontline_messages(
+    state: FrontlineState,
+) -> tuple[SystemMessage, HumanMessage]:
+    """Render the bounded frontline system and semantic human messages."""
+
+    return_value = _build_frontline_messages(state, system_suffix="")
     return return_value
 
 
@@ -456,18 +497,160 @@ def _validate_frontline_slot_references(
         raise ValueError("frontline prelude target was not supplied")
 
 
-async def frontline_relevance_agent(state: FrontlineState) -> FrontlineDecision:
-    """Run the compact frontline route and return a validated action."""
+def _needs_direct_address_discard_recheck(
+    decision: FrontlineDecision,
+    model_payload: Mapping[str, Any],
+) -> bool:
+    """Return whether a valid discard contradicts typed direct addressing."""
 
-    messages = build_frontline_messages(state)
-    model_payload = json.loads(str(messages[1].content))
-    started_at = time.perf_counter()
-    response = await _frontline_relevance_agent_llm.ainvoke(
-        list(messages),
-        config=_frontline_relevance_agent_llm_config,
+    if model_payload["conversation_scope"] != "group":
+        return_value = False
+        return return_value
+    if decision["intake_action"] != "discard":
+        return_value = False
+        return return_value
+    current_message = model_payload["current_message"]
+    target_labels = current_message["semantic_target_labels"]
+    reply_target = current_message["reply_target_label"]
+    return_value = "character" in target_labels or reply_target == "character"
+    return return_value
+
+
+def _build_direct_address_review_messages(
+    model_payload: Mapping[str, Any],
+) -> tuple[SystemMessage, HumanMessage]:
+    """Render the narrow review against the original bounded payload."""
+
+    human_content = json.dumps(
+        model_payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
     )
+    if (
+        len(_DIRECT_ADDRESS_REVIEW_PROMPT) + len(human_content)
+        > FRONTLINE_RELEVANCE_MAX_INPUT_CHARS
+    ):
+        raise ValueError("frontline direct-address review exceeds its hard cap")
+    return_value = (
+        SystemMessage(content=_DIRECT_ADDRESS_REVIEW_PROMPT),
+        HumanMessage(content=human_content),
+    )
+    return return_value
+
+
+def _validate_direct_address_review(
+    raw: Mapping[str, Any],
+    model_payload: Mapping[str, Any],
+) -> DirectAddressReview:
+    """Validate one focused direct-address review and supplied slot usage."""
+
+    if not isinstance(raw, Mapping):
+        raise ValueError("direct-address review must be an object")
+    required = {
+        "address_status",
+        "continuation_target",
+        "prelude_targets",
+        "reason",
+    }
+    if set(raw) != required:
+        raise ValueError("direct-address review fields are not exact")
+    address_status = raw["address_status"]
+    continuation_target = raw["continuation_target"]
+    prelude_targets = raw["prelude_targets"]
+    reason = raw["reason"]
+    if address_status not in {"retained", "withdrawn"}:
+        raise ValueError("direct-address status is invalid")
+    if continuation_target not in {"none", "open_1", "open_2", "open_3"}:
+        raise ValueError("direct-address continuation target is invalid")
+    if not isinstance(prelude_targets, list):
+        raise ValueError("direct-address prelude targets must be a list")
+    if not isinstance(reason, str):
+        raise ValueError("direct-address review reason must be a string")
+
+    available_open_slots = {
+        row["slot"]
+        for row in model_payload["open_turns"]
+    }
+    if (
+        continuation_target != "none"
+        and continuation_target not in available_open_slots
+    ):
+        raise ValueError("direct-address continuation target was not supplied")
+    available_prelude_slots = {
+        row["slot"]
+        for row in model_payload["recent_preludes"]
+    }
+    clean_preludes: list[Literal["prelude_1", "prelude_2"]] = []
+    for target in prelude_targets[:2]:
+        if target not in available_prelude_slots:
+            raise ValueError("direct-address prelude target was not supplied")
+        if target not in clean_preludes:
+            clean_preludes.append(target)
+    if continuation_target != "none" and clean_preludes:
+        raise ValueError("direct-address append cannot promote preludes")
+    if address_status == "withdrawn" and (
+        continuation_target != "none" or clean_preludes
+    ):
+        raise ValueError("withdrawn direct address cannot continue a turn")
+    return_value: DirectAddressReview = {
+        "address_status": address_status,
+        "continuation_target": continuation_target,
+        "prelude_targets": clean_preludes,
+        "reason": _clip_text(reason, 80),
+    }
+    return return_value
+
+
+def _decision_from_direct_address_review(
+    review: DirectAddressReview,
+) -> FrontlineDecision:
+    """Map a validated semantic disposition to the existing intake route."""
+
+    if review["address_status"] == "withdrawn":
+        return_value = _discard_decision(review["reason"])
+        return return_value
+    continuation_target = review["continuation_target"]
+    action: Literal["start", "append"] = "start"
+    if continuation_target != "none":
+        action = "append"
+    return_value: FrontlineDecision = {
+        "intake_action": action,
+        "append_target": continuation_target,
+        "prelude_targets": list(review["prelude_targets"]),
+        "reason": review["reason"],
+    }
+    return return_value
+
+
+def _parse_direct_address_review(
+    response_text: str,
+    model_payload: Mapping[str, Any],
+) -> tuple[FrontlineDecision, str]:
+    """Parse the focused review and preserve fail-closed behavior."""
+
     parsed_output = parse_llm_json_output(
-        str(response.content),
+        response_text,
+        deterministic_only=True,
+    )
+    parse_status = "succeeded"
+    try:
+        review = _validate_direct_address_review(parsed_output, model_payload)
+        decision = _decision_from_direct_address_review(review)
+    except ValueError as exc:
+        logger.warning(f"Invalid direct-address review output: {exc}")
+        decision = _discard_decision("invalid direct-address review output")
+        parse_status = "invalid"
+    return decision, parse_status
+
+
+def _parse_frontline_response(
+    response_text: str,
+    model_payload: Mapping[str, Any],
+) -> tuple[FrontlineDecision, str]:
+    """Parse one model response through the exact structural contract."""
+
+    parsed_output = parse_llm_json_output(
+        response_text,
         deterministic_only=True,
     )
     parse_status = "succeeded"
@@ -478,6 +661,23 @@ async def frontline_relevance_agent(state: FrontlineState) -> FrontlineDecision:
         logger.warning(f"Invalid frontline output: {exc}")
         decision = _discard_decision("invalid frontline output")
         parse_status = "invalid"
+    return decision, parse_status
+
+
+async def frontline_relevance_agent(state: FrontlineState) -> FrontlineDecision:
+    """Run the compact frontline route and return a validated action."""
+
+    messages = build_frontline_messages(state)
+    model_payload = json.loads(str(messages[1].content))
+    started_at = time.perf_counter()
+    response = await _frontline_relevance_agent_llm.ainvoke(
+        list(messages),
+        config=_frontline_relevance_agent_llm_config,
+    )
+    decision, parse_status = _parse_frontline_response(
+        str(response.content),
+        model_payload,
+    )
 
     await llm_tracing.record_llm_trace_step(
         trace_id=str(state.get("llm_trace_id", "")),
@@ -497,4 +697,40 @@ async def frontline_relevance_agent(state: FrontlineState) -> FrontlineDecision:
             "reason",
         ],
     )
+
+    if (
+        parse_status == "succeeded"
+        and _needs_direct_address_discard_recheck(decision, model_payload)
+    ):
+        recheck_messages = _build_direct_address_review_messages(model_payload)
+        recheck_started_at = time.perf_counter()
+        recheck_response = await _frontline_relevance_agent_llm.ainvoke(
+            list(recheck_messages),
+            config=_frontline_relevance_agent_llm_config,
+        )
+        decision, recheck_parse_status = _parse_direct_address_review(
+            str(recheck_response.content),
+            model_payload,
+        )
+        await llm_tracing.record_llm_trace_step(
+            trace_id=str(state.get("llm_trace_id", "")),
+            stage_name="frontline_relevance_agent.direct_address_recheck",
+            route_name="frontline_relevance",
+            model_name=RELEVANCE_AGENT_LLM_MODEL,
+            messages=list(recheck_messages),
+            response_text=str(recheck_response.content),
+            parsed_output=decision,
+            parse_status=recheck_parse_status,
+            status="succeeded",
+            duration_ms=max(
+                0,
+                int((time.perf_counter() - recheck_started_at) * 1000),
+            ),
+            output_state_fields=[
+                "intake_action",
+                "append_target",
+                "prelude_targets",
+                "reason",
+            ],
+        )
     return decision

@@ -728,7 +728,7 @@ CALENDAR_SCHEDULER_PER_TRIGGER_CAPACITY = _positive_int_from_env(
 # mode. Disable this to skip the L3 visual-agent LLM call globally.
 COGNITION_VISUAL_DIRECTIVES_ENABLED = os.getenv(
     "COGNITION_VISUAL_DIRECTIVES_ENABLED",
-    "true",
+    "false",
 ).lower() in ("1", "true", "yes")
 
 COGNITION_TASK_WILLINGNESS_BOUNDARY_ENABLED = _bool_from_env(

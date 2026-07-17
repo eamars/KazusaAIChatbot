@@ -14,6 +14,9 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
 from kazusa_ai_chatbot.cognition_core_v2.semantic_source_planner import (
     plan_semantic_questions,
 )
+from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
+    project_state_for_prompt,
+)
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     build_acquaintance_user_state,
     build_character_production_state,
@@ -59,10 +62,17 @@ def test_source_kind_selects_its_exact_question_families(
         global_user_id="selection-user",
         updated_at=NOW,
     )
-    questions = plan_semantic_questions(
-        _evidence(source_kind),
+    evidence = _evidence(source_kind)
+    constraints = _constraints()
+    projection = project_state_for_prompt(
         state,
-        _constraints(),
+        character_constraints=constraints,
+        evidence=evidence,
+    )
+    questions = plan_semantic_questions(
+        evidence,
+        state,
+        projection.handle_to_ref,
     )
 
     assert [question["question_id"] for question in questions] == list(

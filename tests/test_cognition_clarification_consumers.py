@@ -18,15 +18,17 @@ def test_clarification_is_a_semantic_tendency_and_resolver_route() -> None:
     }
 
     assert "clarify" in tendencies
-    assert "evidence" in action_selection.ROUTE_PROMPT
-    assert "resolver_handle" in action_selection.ROUTE_PROMPT
+    assert "evidence" in action_selection.ACTION_PLANNING_PROMPT
+    assert "resolver_handle" in action_selection.ACTION_PLANNING_PROMPT
 
 
 def test_clarification_validation_does_not_classify_user_text() -> None:
     """Code validates handles while the model owns semantic interpretation."""
 
-    source = inspect.getsource(action_selection._validate_route_decision)
+    source = inspect.getsource(
+        action_selection._validate_action_plan_decision
+    )
 
-    assert "selected_bid_handle" in source
+    assert "bid_handle" in source
     assert "user_input" not in source
     assert "keyword" not in source

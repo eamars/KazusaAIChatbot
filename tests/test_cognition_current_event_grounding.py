@@ -152,15 +152,15 @@ async def test_appraisal_prompt_excludes_current_event_provenance_ids() -> None:
     mutable_state = payload["mutable_state"]
     constraints = payload["character_constraints"]
     evidence = payload["evidence"]
-    questions = plan_semantic_questions(
-        evidence,
-        mutable_state,
-        constraints,
-    )
     projection = project_state_for_prompt(
         mutable_state,
         character_constraints=constraints,
         evidence=evidence,
+    )
+    questions = plan_semantic_questions(
+        evidence,
+        mutable_state,
+        projection.handle_to_ref,
     )
     llm = _CapturingAppraisalLLM()
     config = make_llm_call_config("current_event_appraisal")

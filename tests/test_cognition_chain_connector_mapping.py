@@ -43,6 +43,8 @@ def _core_output() -> dict[str, object]:
         "affect_projection": [],
         "action_requests": [],
         "resolver_requests": [],
+        "resolver_pending_resolution": None,
+        "resolver_goal_progress": None,
         "resolver_progress": {
             "status": "not_requested",
             "semantic_summary": "no resolver request",
@@ -93,6 +95,7 @@ def _global_state() -> dict[str, object]:
         "indirect_speech_context": "",
         "channel_topic": "",
         "rag_result": {"memory_evidence": []},
+        "resolver_context": "resolver_state: status=idle",
     }
 
 
@@ -118,6 +121,142 @@ def test_persona_connector_maps_one_native_user_scope() -> None:
     assert payload["episode"]["target_scope"]["platform_channel_id"] == (
         "channel-test"
     )
+    assert payload["resolver_context"].startswith("resolver_state:")
+    assert "speaker of dialog_text" in payload["scene_context"][
+        "current_user_role"
+    ]
+    assert "implicit subject" in payload["scene_context"]["character_role"]
+
+
+def test_connector_projects_full_registry_capacity() -> None:
+    """Visible cognition exposes every runtime-eligible public action."""
+
+    resolvers = connector._available_resolver_affordances(_global_state())
+    actions = connector._available_action_affordances(_global_state())
+
+    assert {row["capability"] for row in resolvers} == {
+        "local_context_recall",
+        "public_answer_research",
+        "human_clarification",
+        "approval_preparation",
+        "self_goal_resolution",
+    }
+    action_kinds = {row["action_kind"] for row in actions}
+    assert "speak" not in action_kinds
+    assert "apply_memory_lifecycle_update" not in action_kinds
+    assert {
+        "background_work_request",
+        "future_speak",
+    } <= action_kinds
+    assert "trigger_future_cognition" not in action_kinds
+    assert "memory_lifecycle_update" not in action_kinds
+    assert all(row["context_ref"] == "" for row in actions)
+
+
+@pytest.mark.parametrize("trigger_source", ["internal_thought", "scheduled_recall"])
+def test_connector_projects_future_cognition_for_private_sources(
+    trigger_source: str,
+) -> None:
+    """Private cognition keeps the production scheduling capability."""
+
+    state = _global_state()
+    state["cognitive_episode"] = canonical_episode(
+        episode_id=f"private-{trigger_source}",
+        trigger_source=trigger_source,
+        output_mode="think_only",
+        content="Continue one grounded private cognition objective.",
+    )
+
+    actions = connector._available_action_affordances(state)
+    future_cognition = next(
+        row
+        for row in actions
+        if row["action_kind"] == "trigger_future_cognition"
+    )
+
+    assert future_cognition["decision_mode"] == "closed"
+    assert future_cognition["allowed_decisions"] == ["schedule"]
+    assert future_cognition["default_decision"] == "schedule"
+
+
+def test_connector_projects_memory_lifecycle_only_for_active_commitments() -> None:
+    """Lifecycle review remains available exactly when it can execute."""
+
+    state = _global_state()
+    state["rag_result"] = {
+        "memory_evidence": [],
+        "user_memory_unit_candidates": [{
+            "unit_id": "commitment-1",
+            "unit_type": "active_commitment",
+            "status": "active",
+            "fact": "Kazusa agreed to answer after checking the result.",
+        }],
+    }
+
+    actions = connector._available_action_affordances(state)
+    lifecycle = next(
+        row
+        for row in actions
+        if row["action_kind"] == "memory_lifecycle_update"
+    )
+
+    assert lifecycle["decision_mode"] == "closed"
+    assert lifecycle["allowed_decisions"] == [
+        "active_commitment_lifecycle",
+    ]
+    assert lifecycle["default_decision"] == "active_commitment_lifecycle"
+
+
+def test_connector_projects_distinct_open_coding_run_affordances() -> None:
+    """Start and each trusted open run remain separately selectable."""
+
+    state = _global_state()
+    state["action_selection_context"] = {
+        "coding_runs": [
+            {
+                "coding_run_ref": "coding_run:run-1",
+                "status": "awaiting_approval",
+                "objective_summary": "update the parser",
+                "allowed_next_actions": ["approve_and_verify", "cancel"],
+                "active_blocker": None,
+            },
+            {
+                "coding_run_ref": "coding_run:run-2",
+                "status": "blocked",
+                "objective_summary": "repair the scheduler",
+                "allowed_next_actions": ["respond_to_blocker", "status"],
+                "active_blocker": {
+                    "blocker_kind": "user_choice",
+                    "question": "Which execution boundary should apply?",
+                    "options": ["focused", "full"],
+                },
+            },
+        ],
+    }
+
+    actions = connector._available_action_affordances(state)
+    coding_actions = [
+        row
+        for row in actions
+        if row["action_kind"] == "accepted_coding_task_request"
+    ]
+
+    assert [row["context_ref"] for row in coding_actions] == [
+        "",
+        "coding_run:run-1",
+        "coding_run:run-2",
+    ]
+    assert coding_actions[0]["allowed_decisions"] == ["start"]
+    assert coding_actions[1]["allowed_decisions"] == [
+        "approve_and_verify",
+        "cancel",
+    ]
+    assert coding_actions[2]["allowed_decisions"] == [
+        "respond_to_blocker",
+        "status",
+    ]
+    assert "update the parser" in coding_actions[1]["capability"]
+    assert "Which execution boundary" in coding_actions[2]["capability"]
 
 
 def test_connector_keeps_media_as_typed_evidence_without_wire_payloads() -> None:
@@ -302,3 +441,44 @@ async def test_intermediate_commit_false_cycle_emits_no_terminal_event(
 
     replace_state.assert_not_awaited()
     record_event.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_recurrent_cycle_uses_uncommitted_replacement_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A later resolver cycle advances from the prior in-memory V2 state."""
+
+    stored_state = build_acquaintance_user_state(
+        global_user_id="user-1",
+        updated_at=NOW,
+    )
+    replacement_state = build_acquaintance_user_state(
+        global_user_id="user-1",
+        updated_at=NOW,
+    )
+    replacement_state["relationship"]["care"] = 77
+    character_state = build_character_production_state(updated_at=NOW)
+    get_user_state = AsyncMock(return_value=stored_state)
+    run_cognition = AsyncMock(return_value=_core_output())
+    monkeypatch.setattr(connector, "get_user_cognition_state", get_user_state)
+    monkeypatch.setattr(
+        connector,
+        "get_character_cognition_state",
+        AsyncMock(return_value=character_state),
+    )
+    monkeypatch.setattr(connector, "run_cognition", run_cognition)
+
+    state = _global_state()
+    state["cognition_state_update"] = {
+        "state_scope": "user",
+        "owner_key": "user-1",
+        "replacement_state": replacement_state,
+        "comparison_results": [],
+        "changed_paths": ["relationship.care"],
+    }
+    await connector.call_cognition_subgraph(state, commit=False)
+
+    get_user_state.assert_not_awaited()
+    cognition_input = run_cognition.await_args.args[0]
+    assert cognition_input["mutable_state"]["relationship"]["care"] == 77

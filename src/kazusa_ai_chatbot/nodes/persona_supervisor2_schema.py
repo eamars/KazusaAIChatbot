@@ -18,7 +18,6 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     ResolverGoalProgressV1,
     ResolverPendingResolutionV1,
     ResolverPendingResumeV1,
-    ResolverWorkingStateV2,
 )
 from kazusa_ai_chatbot.conversation_progress import ConversationProgressPromptDoc
 from kazusa_ai_chatbot.state import (
@@ -103,7 +102,6 @@ class GlobalPersonaState(TypedDict):
     rag_result: dict
 
     # Cognition resolver output and recurrence context
-    resolver_working_state: NotRequired[ResolverWorkingStateV2]
     resolver_observations: NotRequired[list[dict]]
     cognition_resolver_requests: NotRequired[list[dict]]
     cognition_resolver_progress: NotRequired[dict]

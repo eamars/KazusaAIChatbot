@@ -164,6 +164,7 @@ def _chain_input(
         "direct_facts": [],
         "available_actions": [],
         "available_resolver_capabilities": [],
+        "resolver_context": "resolver_status=idle",
         "scene_context": {
             "channel_scope": channel_scope,
             "character_role": "companion",

@@ -581,6 +581,13 @@ def _trusted_active_commitment_units(
     return _filter_active_commitment_units(prompt_context_units)
 
 
+def has_trusted_active_commitments(state: GlobalPersonaState) -> bool:
+    """Return whether lifecycle review has at least one executable target."""
+
+    return_value = bool(_trusted_active_commitment_units(state))
+    return return_value
+
+
 def _direct_active_commitment_alias_rows(
     active_commitment_units: list[dict[str, object]],
 ) -> list[dict[str, Any]]:

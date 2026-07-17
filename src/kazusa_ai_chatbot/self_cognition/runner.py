@@ -24,12 +24,18 @@ from kazusa_ai_chatbot.cognition_episode import (
 )
 from kazusa_ai_chatbot.config import (
     CHARACTER_GLOBAL_USER_ID,
+    COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS,
     COGNITION_RESOLVER_MAX_CYCLES,
 )
 from kazusa_ai_chatbot.cognition_resolver.capabilities import (
-    run_rag_evidence_for_persona_state,
+    execute_resolver_capability_request,
 )
-from kazusa_ai_chatbot.cognition_resolver.loop import call_v2_resolver_loop
+from kazusa_ai_chatbot.cognition_resolver.loop import (
+    call_cognition_resolver_loop,
+)
+from kazusa_ai_chatbot.cognition_resolver.state import (
+    ensure_initial_resolver_inputs,
+)
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     validate_text_surface_output,
 )
@@ -338,7 +344,7 @@ async def _load_residue_context_for_case(
 
 
 async def _default_cognition_client(state: dict[str, Any]) -> dict[str, Any]:
-    """Call the shared cognition graph through the native V2 resolver loop.
+    """Call the shared cognition graph through the canonical resolver loop.
 
     Args:
         state: Global persona state subset required by the cognition graph.
@@ -350,104 +356,32 @@ async def _default_cognition_client(state: dict[str, Any]) -> dict[str, Any]:
     async def cognition_cycle(
         current_state: dict[str, Any],
     ) -> dict[str, Any]:
-        result = await call_cognition_subgraph(current_state, commit=False)
-        combined = dict(current_state)
-        combined.update(result)
-        core_output = result.get("cognition_core_output")
-        combined["resolver_requests"] = list(
-            core_output.get("resolver_requests", [])
-            if isinstance(core_output, dict)
-            else []
-        )
-        return combined
+        update = await call_cognition_subgraph(current_state, commit=False)
+        return_value = dict(update)
+        return return_value
 
-    async def capability_cycle(
-        request: dict[str, Any],
-        current_state: dict[str, Any],
-    ) -> dict[str, Any]:
-        capability = str(request.get("capability", ""))
-        if capability != "local_context_recall":
-            return {
-                "observation_id": "self-cognition:unsupported-capability",
-                "capability": capability,
-                "status": "failed",
-                "semantic_summary": "requested capability is unavailable",
-                "created_at_utc": state["storage_timestamp_utc"],
-            }
-        try:
-            rag_result = await run_rag_evidence_for_persona_state(
-                current_state,  # type: ignore[arg-type]
-                agent_name="v2_self_cognition_local_context",
-                objective=str(request.get("semantic_goal", "")),
-            )
-        except Exception as exc:
-            logger.warning(
-                "Self-cognition local context recall failed: exception_type=%s",
-                type(exc).__name__,
-            )
-            return {
-                "observation_id": "self-cognition:local-context-failed",
-                "capability": capability,
-                "status": "failed",
-                "semantic_summary": "local context recall failed",
-                "created_at_utc": state["storage_timestamp_utc"],
-            }
-        return {
-            "observation_id": "self-cognition:local-context",
-            "capability": capability,
-            "status": "succeeded",
-            "semantic_summary": _resolver_result_summary(rag_result),
-            "rag_result": rag_result,
-            "created_at_utc": state["storage_timestamp_utc"],
-        }
-
-    resolved = await call_v2_resolver_loop(
-        state,
-        cognition_func=cognition_cycle,
-        capability_func=capability_cycle,
+    initialized = ensure_initial_resolver_inputs(
+        state,  # type: ignore[arg-type]
         max_cycles=COGNITION_RESOLVER_MAX_CYCLES,
-        origin_scope="character",
     )
-    cognition_output = resolved.get("cognition_output", {})
-    final_state = dict(state)
-    if isinstance(cognition_output, dict):
-        final_state.update(cognition_output)
-    final_state["resolver_observations"] = list(
-        resolved.get("observations", [])
+    resolved_state = await call_cognition_resolver_loop(
+        initialized,
+        call_cognition_subgraph_func=cognition_cycle,  # type: ignore[arg-type]
+        execute_capability_func=execute_resolver_capability_request,
+        max_cycles=COGNITION_RESOLVER_MAX_CYCLES,
+        capability_timeout_seconds=(
+            COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS
+        ),
     )
-    telemetry = resolved.get("telemetry")
-    final_state["cognition_resolver_diagnostics"] = (
-        dict(telemetry) if isinstance(telemetry, dict) else {}
-    )
-    core_output = final_state.get("cognition_core_output")
+    core_output = resolved_state.get("cognition_core_output")
     if not isinstance(core_output, dict):
         raise StateContractError(
             "V2 self-cognition completed without cognition_core_output"
         )
     await commit_cognition_output(core_output)  # type: ignore[arg-type]
-    final_state["cognition_state_committed"] = True
-    return final_state
-
-
-def _resolver_result_summary(result: object) -> str:
-    """Build a bounded semantic summary from a projected RAG result."""
-
-    if not isinstance(result, dict):
-        return "local context recall returned no usable evidence"
-    answer = result.get("answer")
-    if isinstance(answer, str) and answer.strip():
-        return answer.strip()[:1000]
-    rows = result.get("memory_evidence")
-    if isinstance(rows, list):
-        summaries = [
-            str(row.get("summary") or row.get("content"))[:300]
-            for row in rows
-            if isinstance(row, dict)
-            and isinstance(row.get("summary") or row.get("content"), str)
-        ]
-        if summaries:
-            return "; ".join(summaries)[:1000]
-    return "local context recall completed without additional grounded evidence"
+    resolved_state["cognition_state_committed"] = True
+    return_value = dict(resolved_state)
+    return return_value
 
 
 async def _default_dialog_client(state: dict[str, Any]) -> dict[str, Any]:

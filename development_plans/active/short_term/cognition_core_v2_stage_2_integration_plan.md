@@ -9,6 +9,21 @@
   candidate runtime.
 - Plan class: high_risk_migration.
 - Status: in_progress.
+
+### 2026-07-17 Checkpoint I corrective supersession
+
+The approved
+`development_plans/active/bugfix/cognition_core_v2_compositional_action_planning_bugfix_plan.md`
+supersedes this plan's route-only action-selection design during Checkpoint I.
+Goal bids no longer choose routes or capabilities. One fixed-shape semantic
+action planner owns the visible route and up to three action requests or three
+resolver requests; visible speech may coexist with up to three non-speech
+actions. The production registries, full resolver pending/HIL/approval
+lifecycle, final-only V2 state commit, terminal visual planner, and disabled
+visual default are mandatory. Checkpoint I remains open until that corrective
+plan's deterministic, real-LLM, frozen 20+20, restoration, and independent
+review gates pass. Any earlier Checkpoint I checkmark records the prior review
+pass and is not final closure for this corrective scope.
 - Mandatory skills: `development-plan`, `local-llm-architecture`,
   `no-prepost-user-input`, `py-style`, `cjk-safety`,
   `test-style-and-execution`, and `debug-llm`.

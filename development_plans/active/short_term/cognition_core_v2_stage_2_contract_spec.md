@@ -4,6 +4,18 @@
 
 - Parent plan: `cognition_core_v2_stage_2_integration_plan.md`
 - Status: mandatory frozen companion to the parent plan
+
+### 2026-07-17 Checkpoint I corrective contract supersession
+
+For action selection, resolver recurrence, operational graph failure, and the
+visual default, the approved
+`development_plans/active/bugfix/cognition_core_v2_compositional_action_planning_bugfix_plan.md`
+supersedes the route-only sections below. `RouteDecisionV2`, goal-owned route
+and capability fields, and the same-route supporting-bid restriction are
+deleted in the big-bang update. The canonical replacement is one fixed-shape
+semantic planner with a speech route orthogonal to as many as three non-speech
+actions, or as many as three resolver requests. Existing action/resolver
+registries and pending/HIL/approval persistence remain authoritative.
 - Authority: this specification is executable only when the parent plan is
   `approved` or `in_progress`
 - Precedence: for Stage 2, this specification and the parent plan supersede

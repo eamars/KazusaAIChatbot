@@ -207,10 +207,13 @@ class ActionEvalResult(TypedDict):
 
 
 class SemanticActionRequestV2(TypedDict):
-    """Route-only V2 request before action-spec materialization."""
+    """Planner-selected V2 request before action-spec materialization."""
 
     action_kind: str
+    decision: str
+    context_ref: str
     semantic_goal: str
+    reason: str
     target_roles: list[RoleRefV2]
     evidence_handles: list[str]
 
@@ -378,19 +381,31 @@ def validate_semantic_action_request_v2(
 
     if not isinstance(value, dict) or set(value) != {
         "action_kind",
+        "decision",
+        "context_ref",
         "semantic_goal",
+        "reason",
         "target_roles",
         "evidence_handles",
     }:
         raise ActionValidationError("V2 action request fields are not exact")
     action_kind = value["action_kind"]
+    decision = value["decision"]
+    context_ref = value["context_ref"]
     semantic_goal = value["semantic_goal"]
+    reason = value["reason"]
     target_roles = value["target_roles"]
     evidence_handles = value["evidence_handles"]
     if action_kind not in available_action_kinds:
         raise ActionValidationError("V2 action kind is unavailable")
     if not isinstance(semantic_goal, str) or not semantic_goal.strip():
         raise ActionValidationError("V2 semantic goal is invalid")
+    if not isinstance(decision, str):
+        raise ActionValidationError("V2 action decision is invalid")
+    if not isinstance(context_ref, str) or len(context_ref) > 200:
+        raise ActionValidationError("V2 action context ref is invalid")
+    if not isinstance(reason, str) or not reason.strip():
+        raise ActionValidationError("V2 action reason is invalid")
     if not isinstance(target_roles, list) or not isinstance(evidence_handles, list):
         raise ActionValidationError("V2 action request lists are invalid")
     for role in target_roles:

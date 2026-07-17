@@ -67,8 +67,7 @@ _QUESTION_DESCRIPTIONS = {
 def plan_semantic_questions(
     evidence: Sequence[CognitionEvidenceV2],
     mutable_state: Mapping[str, Any],
-    character_constraints: Mapping[str, Any],
-    relationship_context: Mapping[str, Any] | None = None,
+    handle_to_ref: Mapping[str, Mapping[str, str]],
 ) -> list[SemanticQuestionV2]:
     """Select at most one scoped question per evidence family.
 
@@ -85,12 +84,7 @@ def plan_semantic_questions(
         for question_kind in QUESTION_KINDS
         if any(f"q:{question_kind}" in row["visible_to"] for row in evidence_rows)
     ]
-    handle_map = _build_prompt_handles(
-        mutable_state,
-        character_constraints,
-        relationship_context,
-        evidence_rows,
-    )
+    handle_map = _index_projected_handles(handle_to_ref)
     questions: list[SemanticQuestionV2] = []
     for question_kind in selected_kinds[:MAX_SEMANTIC_QUESTIONS_PER_EPISODE]:
         question_id = f"q:{question_kind}"
@@ -157,58 +151,24 @@ def _select_evidence_rows(
     return selected
 
 
-def _build_prompt_handles(
-    state: Mapping[str, Any],
-    character_constraints: Mapping[str, Any],
-    relationship_context: Mapping[str, Any] | None,
-    evidence: Sequence[CognitionEvidenceV2],
+def _index_projected_handles(
+    handle_to_ref: Mapping[str, Mapping[str, str]],
 ) -> dict[str, str]:
-    """Build a private persistent-id to prompt-handle mapping."""
+    """Index the canonical projection map without deriving new handles."""
 
     mapping: dict[str, str] = {}
-    prefixes = {
-        "goals": "g",
-        "threats": "t",
-        "active_events": "e",
-        "knowledge_gaps": "k",
-    }
-    for field_name, prefix in prefixes.items():
-        entities = state[field_name]
-        for index, entity in enumerate(entities, start=1):
-            mapping[entity["entity_id"]] = f"{prefix}{index}"
-    relationship = state.get("relationship")
-    if relationship is None and relationship_context is not None:
-        relationship = relationship_context
-    if isinstance(relationship, Mapping):
-        mapping[relationship["relationship_id"]] = "r1"
-    drives = state.get("drives", character_constraints["drives"])
-    for index, drive_id in enumerate(drives, start=1):
-        mapping[drive_id] = f"d{index}"
-    standards = state.get("standards", character_constraints["standards"])
-    for index, standard in enumerate(standards, start=1):
-        mapping[standard["standard_id"]] = f"s{index}"
-    meaning_state = state.get(
-        "meaning_state",
-        character_constraints["meaning_state"],
-    )
-    if isinstance(meaning_state, Mapping):
-        mapping["meaning:character"] = "m1"
-    mapping["character:self"] = "self"
-    owner_user_id = state.get("owner_user_id")
-    if isinstance(owner_user_id, str) and owner_user_id:
-        mapping[f"user:{owner_user_id}"] = "current_user"
-    for row in evidence:
-        evidence_handle = row["evidence_handle"]
-        evidence_number = evidence_handle[1:]
-        mapping[f"candidate:event:{evidence_handle}"] = (
-            f"ce{evidence_number}"
+    for handle, ref in handle_to_ref.items():
+        entity_id = ref.get("entity_id")
+        if not isinstance(entity_id, str) or not entity_id:
+            raise ValueError("projected handle reference requires an entity id")
+        index_key = (
+            f"prompt_role:{handle}"
+            if handle in {"self", "current_user"}
+            else entity_id
         )
-        mapping[f"candidate:threat:{evidence_handle}"] = (
-            f"ct{evidence_number}"
-        )
-        mapping[f"candidate:knowledge_gap:{evidence_handle}"] = (
-            f"ck{evidence_number}"
-        )
+        if index_key in mapping:
+            raise ValueError("projected entity ids must be unique")
+        mapping[index_key] = handle
     return mapping
 
 

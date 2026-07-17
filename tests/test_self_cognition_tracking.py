@@ -129,12 +129,21 @@ async def test_default_self_cognition_client_uses_resolver_loop(
     ) -> dict[str, Any]:
         captured["state"] = state
         captured["kwargs"] = kwargs
-        return {"cognition_output": expected_result, "observations": []}
+        return {
+            **state,
+            **expected_result,
+            "resolver_observations": [],
+        }
 
     monkeypatch.setattr(
         runner,
-        "call_v2_resolver_loop",
+        "call_cognition_resolver_loop",
         resolver_loop,
+    )
+    monkeypatch.setattr(
+        runner,
+        "ensure_initial_resolver_inputs",
+        lambda state, *, max_cycles: state,
     )
     async def commit_cognition_output(output: dict[str, Any]) -> None:
         committed_outputs.append(output)
@@ -152,70 +161,13 @@ async def test_default_self_cognition_client_uses_resolver_loop(
     assert result["resolver_observations"] == []
     assert result["cognition_state_committed"] is True
     assert committed_outputs == [expected_result["cognition_core_output"]]
-    assert captured["state"] is state
-    assert callable(captured["kwargs"]["cognition_func"])
-    assert callable(captured["kwargs"]["capability_func"])
+    assert captured["state"]["cognitive_episode"] == state["cognitive_episode"]
+    assert callable(captured["kwargs"]["call_cognition_subgraph_func"])
+    assert callable(captured["kwargs"]["execute_capability_func"])
     assert captured["kwargs"]["max_cycles"] == runner.COGNITION_RESOLVER_MAX_CYCLES
-    assert captured["kwargs"]["origin_scope"] == "character"
-
-
-@pytest.mark.asyncio
-async def test_self_cognition_resolver_failure_redacts_exception_text(
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """Operational failure details stay outside semantic observations."""
-
-    captured: dict[str, Any] = {}
-    expected_result = {
-        "cognition_core_output": {"state_update": {"scope": "character"}},
-    }
-
-    async def resolver_loop(
-        state: dict[str, Any],
-        **kwargs: Any,
-    ) -> dict[str, Any]:
-        del state
-        captured.update(kwargs)
-        return {"cognition_output": expected_result, "observations": []}
-
-    async def commit_cognition_output(output: dict[str, Any]) -> None:
-        del output
-
-    secret = "mongodb://user:password@private-host/internal"
-
-    async def failed_recall(*args: Any, **kwargs: Any) -> dict[str, Any]:
-        del args, kwargs
-        raise TimeoutError(secret)
-
-    monkeypatch.setattr(runner, "call_v2_resolver_loop", resolver_loop)
-    monkeypatch.setattr(
-        runner,
-        "commit_cognition_output",
-        commit_cognition_output,
+    assert captured["kwargs"]["capability_timeout_seconds"] == (
+        runner.COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS
     )
-    monkeypatch.setattr(
-        runner,
-        "run_rag_evidence_for_persona_state",
-        failed_recall,
-    )
-    state = {
-        "cognitive_episode": {"trigger_source": "internal_thought"},
-        "storage_timestamp_utc": "2026-07-15T00:00:00Z",
-    }
-
-    await runner._default_cognition_client(state)
-    observation = await captured["capability_func"](
-        {
-            "capability": "local_context_recall",
-            "semantic_goal": "recall relevant context",
-        },
-        state,
-    )
-
-    assert observation["semantic_summary"] == "local context recall failed"
-    assert secret not in caplog.text
-    assert "TimeoutError" in caplog.text
 
 
 def _group_noise_case() -> dict[str, Any]:

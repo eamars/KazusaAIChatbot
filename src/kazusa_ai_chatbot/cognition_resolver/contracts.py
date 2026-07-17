@@ -32,8 +32,6 @@ MAX_RESOLVER_RAG_EVIDENCE_SUMMARY_CHARS = 320
 MAX_RESOLVER_RAG_EVIDENCE_ITEMS = 4
 MAX_RESOLVER_KNOWLEDGE_ITEMS = 8
 
-RESOLVER_WORKING_STATE_VERSION = "resolver_working_state.v2"
-
 _RAW_MARKER_RE = re.compile(r"\braw-[A-Za-z0-9_-]+")
 
 ALLOWED_RESOLVER_CAPABILITIES = frozenset((
@@ -43,6 +41,26 @@ ALLOWED_RESOLVER_CAPABILITIES = frozenset((
     "approval_preparation",
     "self_goal_resolution",
 ))
+RESOLVER_CAPABILITY_SEMANTICS = {
+    "approval_preparation": (
+        "Prepare one minimal approval question before an allowed side effect."
+    ),
+    "human_clarification": (
+        "Ask the user for one missing piece of information they control."
+    ),
+    "local_context_recall": (
+        "Retrieve local or private character, relationship, memory, prior "
+        "conversation, commitment, profile, or session-media context."
+    ),
+    "public_answer_research": (
+        "Investigate public, current, external, or source-checkable evidence "
+        "needed before a grounded visible answer."
+    ),
+    "self_goal_resolution": (
+        "Resolve or prioritize one internal self-cognition goal for an "
+        "eligible private source."
+    ),
+}
 ALLOWED_RESOLVER_PRIORITIES = frozenset(("now", "background"))
 ALLOWED_OBSERVATION_STATUSES = frozenset(("succeeded", "blocked", "failed"))
 ALLOWED_RESOLVER_STATES = frozenset((
@@ -81,19 +99,6 @@ ALLOWED_GOAL_DELIVERABLE_STATUSES = frozenset((
 
 class ResolverValidationError(ValueError):
     """Raised when a resolver contract payload is structurally invalid."""
-
-
-class ResolverWorkingStateV2(TypedDict):
-    """Episode-local V2 recurrence state carried without a database reload."""
-
-    schema_version: Literal["resolver_working_state.v2"]
-    origin_scope: Literal["user", "character"]
-    cycle_index: int
-    max_cycles: int
-    cognition_output: NotRequired[dict]
-    pending_requests: list[dict]
-    observations: list[dict]
-    terminal: bool
 
 
 class ResolverCapabilityRequestV1(TypedDict):

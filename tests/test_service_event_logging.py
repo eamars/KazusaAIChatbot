@@ -266,10 +266,11 @@ async def test_graph_failure_records_runtime_error_and_failed_pipeline(
         "_save_user_message_from_item",
         AsyncMock(return_value="row-user"),
     )
+    save_conversation = AsyncMock(return_value="row-assistant")
     monkeypatch.setattr(
         service_module,
         "save_conversation",
-        AsyncMock(return_value="row-assistant"),
+        save_conversation,
     )
     monkeypatch.setattr(
         service_module,
@@ -280,6 +281,12 @@ async def test_graph_failure_records_runtime_error_and_failed_pipeline(
         service_module,
         "build_promoted_reflection_context",
         AsyncMock(return_value={}),
+    )
+    finalize_trace = AsyncMock()
+    monkeypatch.setattr(
+        service_module.llm_tracing,
+        "finalize_llm_trace_run",
+        finalize_trace,
     )
 
     class _Graph:
@@ -293,9 +300,16 @@ async def test_graph_failure_records_runtime_error_and_failed_pipeline(
 
     await service_module._process_queued_chat_item(item)
 
-    assert item.future.result().messages == [
+    response = item.future.result()
+    assert response.messages == [
         "Character is busy right now, please try again later."
     ]
+    assert response.content_type == "operational_error"
+    assert response.delivery_tracking_id == ""
+    save_conversation.assert_not_awaited()
+    finalize_trace.assert_awaited_once()
+    assert finalize_trace.await_args.kwargs["final_dialog_count"] == 0
+    assert finalize_trace.await_args.kwargs["delivery_tracking_id"] == ""
     record_runtime_error_event.assert_awaited_once()
     runtime_kwargs = record_runtime_error_event.await_args.kwargs
     assert runtime_kwargs["error_class"] == "RuntimeError"

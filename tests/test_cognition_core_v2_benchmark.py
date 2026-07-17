@@ -168,6 +168,7 @@ def _chain_input(case: dict[str, str]) -> dict[str, object]:
         "direct_facts": [],
         "available_actions": [],
         "available_resolver_capabilities": [],
+        "resolver_context": "resolver_status=idle",
         "scene_context": {
             "channel_scope": "private",
             "character_role": "companion",

@@ -210,6 +210,7 @@ def _build_benchmark_payload(case: dict[str, str]) -> dict[str, object]:
         "direct_facts": [],
         "available_actions": [],
         "available_resolver_capabilities": [],
+        "resolver_context": "",
         "private_continuity_context": "",
         "scene_context": {
             "channel_scope": "internal",

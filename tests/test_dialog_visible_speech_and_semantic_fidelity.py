@@ -234,6 +234,12 @@ def test_runtime_prompts_define_general_speech_and_fidelity_contracts() -> None:
     assert "generalize, euphemize, narrow, broaden" in content_prompt
     assert "unrestricted permission" in content_prompt
     assert "must remain silent about future" in content_prompt
+    assert "rhetorical question cannot substitute" in content_prompt
+    assert "no physical actuator" in content_prompt
+    assert "first-person execution" in content_prompt
+    assert "style alone cannot authorize" in content_prompt
+    assert "literal future rule" in content_prompt
+    assert "exclusivity condition" in content_prompt
     assert "time scope" in content_prompt
     assert "image-generation" in visual_prompt
     assert "visual_directives" in visual_prompt
@@ -244,6 +250,13 @@ def test_runtime_prompts_define_general_speech_and_fidelity_contracts() -> None:
     assert "generalize, euphemize, narrow, broaden" in dialog_prompt
     assert "unrestricted permission" in dialog_prompt
     assert "must remain silent about future" in dialog_prompt
+    assert "rhetorical question cannot substitute" in dialog_prompt
+    assert "no physical actuator" in dialog_prompt
+    assert "first-person execution" in dialog_prompt
+    assert "performed, completed, delivered, or received" in dialog_prompt
+    assert "style alone cannot authorize" in dialog_prompt
+    assert "literal future rule" in dialog_prompt
+    assert "exclusivity condition" in dialog_prompt
     assert "unmatched enclosing punctuation" in dialog_prompt
     assert "pacing_guidance" not in dialog_prompt
     assert "visual_directives" not in dialog_prompt
@@ -254,6 +267,13 @@ def test_runtime_prompts_define_general_speech_and_fidelity_contracts() -> None:
     assert "generalize, euphemize, narrow, broaden" in verifier_prompt
     assert "unrestricted permission" in verifier_prompt
     assert "must remain silent about future" in verifier_prompt
+    assert "claim-by-claim audit" in verifier_prompt
+    assert "surface and candidate agreement is not evidence" in verifier_prompt
+    assert "merely restates" in verifier_prompt
+    assert "redirects, or asks back" in verifier_prompt
+    assert "first-person execution" in verifier_prompt
+    assert "requested physical movement" in verifier_prompt
+    assert "performed, completed, delivered, or received" in verifier_prompt
     assert "unmatched enclosing punctuation" in verifier_prompt
     assert "time scope" in verifier_prompt
 
@@ -388,6 +408,10 @@ async def test_verifier_receives_bounded_visible_percepts(
     assert compliance_payload["current_visible_percepts"] == [{
         "input_source": "dialog_text",
         "content": "Infer which option fits my stated preference.",
+        "speaker_role": "current_user",
+        "addressee_role": "self",
+        "first_person_role": "current_user",
+        "implicit_imperative_subject_role": "self",
     }]
     rendered = json.dumps(compliance_payload)
     for forbidden_field in (
@@ -438,6 +462,10 @@ async def test_negative_verdict_uses_one_grounded_llm_repair(
     assert repair_payload["repair_context"]["current_visible_percepts"] == [{
         "input_source": "dialog_text",
         "content": "Infer which option fits my stated preference.",
+        "speaker_role": "current_user",
+        "addressee_role": "self",
+        "first_person_role": "current_user",
+        "implicit_imperative_subject_role": "self",
     }]
     assert repair_payload["repair_context"]["issues"] == [
         "Remove action narration and perform the requested inference.",

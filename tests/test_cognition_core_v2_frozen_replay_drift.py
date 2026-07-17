@@ -333,12 +333,9 @@ def test_goal_bid_contract_separates_reason_from_private_monologue() -> None:
             "evidence_handles": ["e1"],
             "expected_consequences": ["the response preserves actor direction"],
             "confidence": "high",
-            "requested_route": "speech",
         },
         evidence_handles={"e1"},
         role_handles=set(),
-        action_handles=set(),
-        resolver_handles=set(),
     )
 
     assert validated["reason"].startswith("the current request")

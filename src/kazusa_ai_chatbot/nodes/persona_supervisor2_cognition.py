@@ -10,7 +10,11 @@ from typing import Any
 from kazusa_ai_chatbot import llm_tracing
 from kazusa_ai_chatbot.action_spec.registry import (
     ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
+    APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
+    MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
+    SPEAK_CAPABILITY,
     build_initial_action_capabilities,
+    project_prompt_affordances,
 )
 from kazusa_ai_chatbot.action_spec.evaluator import ActionSpecEvaluator
 from kazusa_ai_chatbot.action_spec.results import project_trace_action_result_v2
@@ -50,6 +54,11 @@ from kazusa_ai_chatbot.cognition_core_v2.state_models import (
 from kazusa_ai_chatbot.cognition_resolver.capabilities import (
     project_resolver_observation_for_cognition,
 )
+from kazusa_ai_chatbot.cognition_resolver.contracts import (
+    ALLOWED_RESOLVER_CAPABILITIES,
+    RESOLVER_CAPABILITY_REQUEST_VERSION,
+    RESOLVER_CAPABILITY_SEMANTICS,
+)
 from kazusa_ai_chatbot.db import (
     get_character_cognition_state,
     get_user_cognition_state,
@@ -64,6 +73,9 @@ from kazusa_ai_chatbot.llm_interface import (
 from kazusa_ai_chatbot.event_logging import record_cognition_v2_event
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_actions import (
     materialize_semantic_action_requests,
+)
+from kazusa_ai_chatbot.nodes.persona_supervisor2_memory_lifecycle import (
+    has_trusted_active_commitments,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
 from kazusa_ai_chatbot.time_boundary import parse_storage_utc_datetime
@@ -162,8 +174,12 @@ def build_cognition_input_from_global_state(
         timestamp,
     ))
     evidence.extend(_rag_evidence(state.get("rag_result"), timestamp))
+    resolver_observations = state.get("resolver_observations")
+    resolver_state = state.get("resolver_state")
+    if isinstance(resolver_state, Mapping):
+        resolver_observations = resolver_state.get("observations")
     evidence.extend(_resolver_observation_evidence(
-        state.get("resolver_observations"),
+        resolver_observations,
         timestamp,
     ))
     evidence.extend(_action_result_evidence(
@@ -177,6 +193,20 @@ def build_cognition_input_from_global_state(
         episode["target_scope"]["channel_type"],
         episode.get("trigger_source"),
     )
+    character_role = "active character"
+    current_user_role = "current conversation participant"
+    if (
+        episode["trigger_source"] == "user_message"
+        and "dialog_text" in episode["input_sources"]
+    ):
+        character_role = (
+            "self; direct addressee of dialog_text and implicit subject of "
+            "a direct imperative"
+        )
+        current_user_role = (
+            "current_user; speaker of dialog_text and owner of first-person "
+            "pronouns in that evidence"
+        )
     payload: CognitionCoreInputV2 = {
         "schema_version": "cognition_core_input.v2",
         "episode": dict(episode),
@@ -187,13 +217,14 @@ def build_cognition_input_from_global_state(
         "direct_facts": _typed_direct_facts(state.get("direct_facts")),
         "available_actions": _available_action_affordances(state),
         "available_resolver_capabilities": _available_resolver_affordances(state),
+        "resolver_context": _text(state.get("resolver_context"))[:8000],
         "private_continuity_context": _text(
             state.get("internal_monologue_residue_context")
         )[:1000],
         "scene_context": {
             "channel_scope": channel_scope,
-            "character_role": "character",
-            "current_user_role": "participant",
+            "character_role": character_role,
+            "current_user_role": current_user_role,
             "semantic_scene": semantic_text[:500],
             "conversation_continuity": _conversation_progress_text(
                 state.get("conversation_progress")
@@ -201,6 +232,9 @@ def build_cognition_input_from_global_state(
             "semantic_temporal_context": "immediate",
         },
     }
+    pending_resume = state.get("pending_resolver_resume")
+    if isinstance(pending_resume, Mapping):
+        payload["pending_resolver_resume"] = dict(pending_resume)
     return validate_cognition_core_input(payload)
 
 
@@ -220,11 +254,27 @@ async def call_cognition_subgraph(
         target_user_id,
         origin_scope=tuple(origin_scope) if isinstance(origin_scope, list) else origin_scope,
     )
+    prior_update = state.get("cognition_state_update")
+    prior_replacement: Mapping[str, Any] | None = None
+    if isinstance(prior_update, Mapping):
+        replacement = prior_update.get("replacement_state")
+        if (
+            prior_update.get("state_scope") == scope
+            and prior_update.get("owner_key") == owner
+            and isinstance(replacement, Mapping)
+        ):
+            prior_replacement = replacement
     if scope == "character":
-        mutable_state = await get_character_cognition_state()
+        if prior_replacement is None:
+            mutable_state = await get_character_cognition_state()
+        else:
+            mutable_state = prior_replacement
         character_state = mutable_state
     else:
-        mutable_state = await get_user_cognition_state(owner)
+        if prior_replacement is None:
+            mutable_state = await get_user_cognition_state(owner)
+        else:
+            mutable_state = prior_replacement
         character_state = await get_character_cognition_state()
     cognition_input = build_cognition_input_from_global_state(
         state,
@@ -312,7 +362,18 @@ def _project_output_to_global_state(
         "cognition_intention": output["intention"],
         "semantic_affect_projection": affect,
         "semantic_relationship_projection": output.get("relationship_projection"),
-        "resolver_capability_requests": output["resolver_requests"],
+        "resolver_capability_requests": [
+            {
+                "schema_version": RESOLVER_CAPABILITY_REQUEST_VERSION,
+                "capability_kind": request["capability"],
+                "objective": request["semantic_goal"],
+                "reason": request["reason"],
+                "priority": "now",
+            }
+            for request in output["resolver_requests"]
+        ],
+        "resolver_pending_resolution": output["resolver_pending_resolution"],
+        "resolver_goal_progress": output["resolver_goal_progress"],
         "cognition_resolver_progress": output["resolver_progress"],
         "action_specs": _materialize_v2_action_requests(output, state),
         "internal_monologue": output["private_monologue"],
@@ -355,14 +416,12 @@ def _materialize_v2_action_requests(
             raise CognitionExecutionError(
                 "V2 action request failed deterministic validation"
             )
-        decision = output["intention"]["route"]
-        if request["action_kind"] == ACCEPTED_CODING_TASK_REQUEST_CAPABILITY:
-            decision = "start"
         requests.append({
             "capability": request["action_kind"],
-            "decision": decision,
+            "decision": request["decision"],
+            "context_ref": request["context_ref"],
             "detail": request["semantic_goal"],
-            "reason": output["intention"]["reason"],
+            "reason": request["reason"],
             "target_roles": list(request["target_roles"]),
             "evidence_handles": list(request["evidence_handles"]),
         })
@@ -373,7 +432,7 @@ def _materialize_v2_action_requests(
 
 
 def _available_action_affordances(
-    state: Mapping[str, Any],
+    state: GlobalPersonaState,
 ) -> list[ActionAffordanceV2]:
     """Project the deterministic capability registry into V2 affordances."""
 
@@ -382,16 +441,164 @@ def _available_action_affordances(
         "entity_kind": "user",
         "entity_id": str(state.get("global_user_id", "")),
     }
-    return [
-        {
-            "action_kind": capability["capability_kind"],
-            "capability": capability["capability_kind"],
+    capabilities = build_initial_action_capabilities()
+    prompt_affordances = {
+        row["capability"]: row
+        for row in project_prompt_affordances(capabilities)
+    }
+    available_contexts = _available_action_contexts(state)
+    affordances: list[ActionAffordanceV2] = []
+    for capability_kind in sorted(capabilities):
+        if capability_kind in {
+            SPEAK_CAPABILITY,
+            APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
+        }:
+            continue
+        prompt_affordance = prompt_affordances[capability_kind]
+        availability_context = prompt_affordance["availability_context"]
+        if not isinstance(availability_context, str):
+            raise CognitionExecutionError(
+                "action affordance availability context is invalid"
+            )
+        if (
+            availability_context
+            and availability_context not in available_contexts
+        ):
+            continue
+        semantic_summary = prompt_affordance["semantic_input_summary"]
+        if not isinstance(semantic_summary, list):
+            raise CognitionExecutionError(
+                "action affordance semantic summary is invalid"
+            )
+        affordances.append({
+            "action_kind": capability_kind,
+            "capability": " ".join(str(row) for row in semantic_summary),
             "permission": "allowed",
+            "decision_mode": prompt_affordance["decision_mode"],
+            "allowed_decisions": list(
+                prompt_affordance["allowed_decisions"]
+            ),
+            "default_decision": str(
+                prompt_affordance["default_decision"]
+            ),
+            "decision_pattern": str(
+                prompt_affordance["decision_pattern"]
+            ),
+            "context_ref": str(prompt_affordance["context_ref"]),
             "target_roles": [current_user],
-        }
-        for capability in build_initial_action_capabilities().values()
-        if capability["capability_kind"] != "apply_memory_lifecycle_update"
-    ]
+        })
+        if capability_kind == ACCEPTED_CODING_TASK_REQUEST_CAPABILITY:
+            contextual_affordances = _coding_run_action_affordances(
+                state,
+                base_affordance=affordances[-1],
+            )
+            affordances[-1]["allowed_decisions"] = ["start"]
+            affordances[-1]["default_decision"] = "start"
+            affordances[-1]["capability"] += (
+                " This base affordance starts a new run and has no active "
+                "run context."
+            )
+            affordances.extend(contextual_affordances)
+    return affordances
+
+
+def _available_action_contexts(state: GlobalPersonaState) -> set[str]:
+    """Return trusted runtime facts used by registry availability metadata."""
+
+    contexts: set[str] = set()
+    if has_trusted_active_commitments(state):
+        contexts.add("active_commitment")
+    episode = state.get("cognitive_episode")
+    if isinstance(episode, Mapping) and episode.get("trigger_source") in {
+        "internal_thought",
+        "scheduled_recall",
+    }:
+        contexts.add("private_cognition_source")
+    return contexts
+
+
+def _coding_run_action_affordances(
+    state: Mapping[str, Any],
+    *,
+    base_affordance: ActionAffordanceV2,
+) -> list[ActionAffordanceV2]:
+    """Project one generic action handle per trusted open coding run."""
+
+    action_context = state.get("action_selection_context")
+    if not isinstance(action_context, Mapping):
+        return []
+    raw_contexts = action_context.get("coding_runs")
+    if not isinstance(raw_contexts, list):
+        return []
+    registry_decisions = {
+        "start",
+        "revise_proposal",
+        "summarize",
+        "status",
+        "approve_and_verify",
+        "respond_to_blocker",
+        "cancel",
+    }
+    affordances: list[ActionAffordanceV2] = []
+    for context in raw_contexts:
+        if not isinstance(context, Mapping):
+            continue
+        context_ref = _text(context.get("coding_run_ref"))[:200]
+        raw_decisions = context.get("allowed_next_actions")
+        if not context_ref or not isinstance(raw_decisions, list):
+            continue
+        allowed_decisions = [
+            decision
+            for decision in raw_decisions
+            if isinstance(decision, str) and decision in registry_decisions
+        ]
+        allowed_decisions = list(dict.fromkeys(allowed_decisions))
+        if not allowed_decisions:
+            continue
+        status = _text(context.get("status"))[:80]
+        objective = _text(context.get("objective_summary"))[:120]
+        blocker_summary = _coding_run_blocker_summary(
+            context.get("active_blocker")
+        )
+        semantic_context = (
+            f" Active run status: {status}. Objective: {objective}. "
+            f"Active blocker: {blocker_summary}."
+        )
+        default_decision = (
+            "status" if "status" in allowed_decisions else allowed_decisions[0]
+        )
+        affordances.append({
+            "action_kind": base_affordance["action_kind"],
+            "capability": (
+                base_affordance["capability"][:260] + semantic_context
+            )[:500],
+            "permission": base_affordance["permission"],
+            "decision_mode": "closed",
+            "allowed_decisions": allowed_decisions,
+            "default_decision": default_decision,
+            "decision_pattern": base_affordance["decision_pattern"],
+            "context_ref": context_ref,
+            "target_roles": list(base_affordance["target_roles"]),
+        })
+    return affordances
+
+
+def _coding_run_blocker_summary(value: object) -> str:
+    """Return bounded prompt-safe blocker details for one coding run."""
+
+    if not isinstance(value, Mapping):
+        return "none"
+    blocker_kind = _text(value.get("blocker_kind"))[:80]
+    question = _text(value.get("question"))[:60]
+    raw_options = value.get("options")
+    options = []
+    if isinstance(raw_options, list):
+        options = [
+            option[:40]
+            for option in raw_options
+            if isinstance(option, str) and option.strip()
+        ][:3]
+    return f"kind={blocker_kind}; question={question}; options={options}"[:100]
 
 
 def _available_resolver_affordances(
@@ -399,11 +606,14 @@ def _available_resolver_affordances(
 ) -> list[ResolverAffordanceV2]:
     """Project resolver capabilities as availability, not execution authority."""
 
-    return [{
-        "capability": "local_context_recall",
-        "semantic_capability": "retrieve bounded evidence",
-        "availability": "available",
-    }]
+    return [
+        {
+            "capability": capability,
+            "semantic_capability": RESOLVER_CAPABILITY_SEMANTICS[capability],
+            "availability": "available",
+        }
+        for capability in sorted(ALLOWED_RESOLVER_CAPABILITIES)
+    ]
 
 
 def _typed_direct_facts(value: object) -> list[dict[str, Any]]:

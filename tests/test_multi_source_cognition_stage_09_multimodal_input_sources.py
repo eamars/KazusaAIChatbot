@@ -245,6 +245,9 @@ def test_connector_projects_media_as_separate_typed_evidence() -> None:
             "cognitive_episode": episode,
             "user_input": "Please inspect the attached material.",
             "decontexualized_input": "Please inspect the attached material.",
+            "rag_result": {
+                "user_memory_unit_candidates": [],
+            },
             "user_multimedia_input": [{
                 "content_type": "image/png",
                 "description": "the image shows a whiteboard plan",

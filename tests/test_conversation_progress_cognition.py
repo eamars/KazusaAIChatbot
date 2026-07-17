@@ -62,7 +62,6 @@ class _GoalCaptureLLM:
             "evidence_handles": ["e1"],
             "expected_consequences": ["the conversation advances"],
             "confidence": "high",
-            "requested_route": "speech",
         }
         return SimpleNamespace(content=json.dumps(result))
 
@@ -187,8 +186,6 @@ async def test_goal_branch_receives_conversation_progress_before_surface() -> No
         },
         context,
         payload["evidence"],
-        [],
-        [],
         services,
     )
 

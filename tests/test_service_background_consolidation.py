@@ -1526,7 +1526,11 @@ async def test_graph_failure_does_not_stop_queue_worker(monkeypatch):
     background_tasks = BackgroundTasks()
     response = await service_module.chat(_chat_request(), background_tasks)
 
-    assert response.messages == ["Character is busy right now, please try again later."]
+    assert response.messages == [
+        "Character is busy right now, please try again later."
+    ]
+    assert response.content_type == "operational_error"
+    assert response.delivery_tracking_id == ""
     assert len(background_tasks.tasks) == 0
     await _reset_queue_state()
 

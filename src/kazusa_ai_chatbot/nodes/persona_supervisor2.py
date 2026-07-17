@@ -2,10 +2,8 @@
 
 import logging
 from collections.abc import Mapping
-from uuid import uuid4
 
 from langgraph.graph import END, START, StateGraph
-from openai import OpenAIError
 
 from kazusa_ai_chatbot.action_spec.evaluator import ActionSpecEvaluator
 from kazusa_ai_chatbot.action_spec.execution import execute_action_specs_for_trace
@@ -21,8 +19,12 @@ from kazusa_ai_chatbot.action_spec.results import (
     build_text_surface_output,
     build_visual_surface_output,
 )
+from kazusa_ai_chatbot.accepted_task import (
+    load_open_coding_run_contexts_for_scope,
+)
 from kazusa_ai_chatbot.config import (
     CHAT_HISTORY_RECENT_LIMIT,
+    COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS,
     COGNITION_RESOLVER_MAX_CYCLES,
 )
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
@@ -31,12 +33,19 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     validate_visual_surface_output,
 )
 from kazusa_ai_chatbot.cognition_resolver.capabilities import (
+    execute_resolver_capability_request,
     run_rag_evidence_for_persona_state as _run_rag_evidence_for_persona_state,
 )
-from kazusa_ai_chatbot.cognition_resolver.loop import call_v2_resolver_loop
-from kazusa_ai_chatbot.db.errors import DatabaseBackendError
-from kazusa_ai_chatbot.local_context_resolver.contracts import (
-    LocalContextValidationError,
+from kazusa_ai_chatbot.cognition_resolver.loop import (
+    call_cognition_resolver_loop,
+)
+from kazusa_ai_chatbot.cognition_resolver.pending import (
+    apply_pending_resolution,
+    load_matching_pending_resume_into_state,
+    upsert_pending_resume,
+)
+from kazusa_ai_chatbot.cognition_resolver.state import (
+    ensure_initial_resolver_inputs,
 )
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
@@ -430,7 +439,9 @@ async def call_action_subgraph(state: GlobalPersonaState) -> dict:
 
     surface_update = await call_l3_text_surface_handler(state)
     surface_state = dict(state)
-    surface_state.update(surface_update)
+    surface_state["text_surface_output_v2"] = surface_update[
+        "text_surface_output_v2"
+    ]
     speak_attempt_id = _first_valid_action_attempt_id(
         surface_state,
         SPEAK_CAPABILITY,
@@ -521,117 +532,66 @@ async def run_rag_evidence_for_persona_state(
 
 
 async def stage_1_goal_resolver(state: GlobalPersonaState) -> dict:
-    """Run episode-local V2 resolver recurrence and commit only its final result."""
+    """Run full resolver recurrence and commit only its final V2 state."""
 
     async def cognition_cycle(
-        current_state: Mapping[str, object],
-    ) -> Mapping[str, object]:
-        cycle_state = dict(current_state)
-        result = await call_cognition_subgraph(
-            cycle_state,  # type: ignore[arg-type]
+        current_state: GlobalPersonaState,
+    ) -> GlobalPersonaState:
+        update = await call_cognition_subgraph(
+            current_state,
             commit=False,
         )
-        combined = dict(cycle_state)
-        combined.update(result)
-        core_output = result.get("cognition_core_output")
-        if isinstance(core_output, Mapping):
-            combined["resolver_requests"] = list(
-                core_output.get("resolver_requests", [])
-            )
-        else:
-            combined["resolver_requests"] = []
-        return combined
+        return_value = update
+        return return_value
 
-    async def capability_cycle(
-        request: Mapping[str, object],
-        current_state: Mapping[str, object],
-    ) -> Mapping[str, object]:
-        capability = str(request.get("capability", ""))
-        if capability != "local_context_recall":
-            return {
-                "observation_id": f"resolver-observation:{uuid4().hex}",
-                "capability": capability,
-                "status": "failed",
-                "semantic_summary": "requested resolver capability is unavailable",
-                "created_at_utc": state["storage_timestamp_utc"],
-            }
-        try:
-            rag_result = await run_rag_evidence_for_persona_state(
-                current_state,  # type: ignore[arg-type]
-                agent_name="v2_resolver_local_context",
-                objective=str(request.get("semantic_goal", "")),
-            )
-        except (
-            DatabaseBackendError,
-            LocalContextValidationError,
-            OpenAIError,
-            TimeoutError,
-        ) as exc:
-            logger.warning(
-                "Local context recall failed: exception_type=%s",
-                type(exc).__name__,
-            )
-            return {
-                "observation_id": f"resolver-observation:{uuid4().hex}",
-                "capability": capability,
-                "status": "failed",
-                "semantic_summary": "local context recall failed",
-                "created_at_utc": state["storage_timestamp_utc"],
-            }
-        summary = _resolver_result_summary(rag_result)
-        return {
-            "observation_id": f"resolver-observation:{uuid4().hex}",
-            "capability": capability,
-            "status": "succeeded",
-            "semantic_summary": summary,
-            "rag_result": rag_result,
-            "created_at_utc": state["storage_timestamp_utc"],
-        }
-
-    resolved = await call_v2_resolver_loop(
-        state,
-        cognition_func=cognition_cycle,
-        capability_func=capability_cycle,
+    action_context_state = await _load_live_action_selection_context(state)
+    initialized = ensure_initial_resolver_inputs(
+        action_context_state,
         max_cycles=COGNITION_RESOLVER_MAX_CYCLES,
     )
-    final_state = dict(state)
-    cognition_output = resolved.get("cognition_output")
-    if isinstance(cognition_output, Mapping):
-        final_state.update(cognition_output)
-    final_state["resolver_observations"] = list(
-        resolved.get("observations", [])
+    initialized = await load_matching_pending_resume_into_state(initialized)
+    resolved_state = await call_cognition_resolver_loop(
+        initialized,
+        call_cognition_subgraph_func=cognition_cycle,
+        execute_capability_func=execute_resolver_capability_request,
+        max_cycles=COGNITION_RESOLVER_MAX_CYCLES,
+        capability_timeout_seconds=(
+            COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS
+        ),
+        upsert_pending_resume_func=upsert_pending_resume,
+        apply_pending_resolution_func=apply_pending_resolution,
     )
-    telemetry = resolved.get("telemetry")
-    final_state["cognition_resolver_diagnostics"] = (
-        dict(telemetry) if isinstance(telemetry, Mapping) else {}
-    )
-    core_output = final_state.get("cognition_core_output")
+    core_output = resolved_state.get("cognition_core_output")
     if not isinstance(core_output, Mapping):
         raise ValueError("V2 resolver completed without cognition_core_output")
     await commit_cognition_output(core_output)  # type: ignore[arg-type]
-    final_state["cognition_state_committed"] = True
-    return final_state  # type: ignore[return-value]
+    resolved_state["cognition_state_committed"] = True
+    return_value = dict(resolved_state)
+    return return_value
 
 
-def _resolver_result_summary(result: object) -> str:
-    """Build one bounded semantic summary from a projected RAG result."""
+async def _load_live_action_selection_context(
+    state: GlobalPersonaState,
+) -> GlobalPersonaState:
+    """Load trusted prompt-safe coding-run contexts for one live user turn."""
 
-    if not isinstance(result, Mapping):
-        return "local context recall returned no usable evidence"
-    answer = result.get("answer")
-    if isinstance(answer, str) and answer.strip():
-        return answer.strip()[:1000]
-    rows = result.get("memory_evidence")
-    if isinstance(rows, list):
-        summaries = [
-            str(row.get("summary") or row.get("content"))[:300]
-            for row in rows
-            if isinstance(row, Mapping)
-            and isinstance(row.get("summary") or row.get("content"), str)
-        ]
-        if summaries:
-            return "; ".join(summaries)[:1000]
-    return "local context recall completed without additional grounded evidence"
+    updated_state = dict(state)
+    updated_state["action_selection_context"] = {"coding_runs": []}
+    episode = state.get("cognitive_episode")
+    if not isinstance(episode, Mapping):
+        return updated_state  # type: ignore[return-value]
+    if episode.get("trigger_source") != "user_message":
+        return updated_state  # type: ignore[return-value]
+    contexts = await load_open_coding_run_contexts_for_scope(
+        source_platform=state["platform"],
+        source_channel_id=state["platform_channel_id"],
+        requester_global_user_id=state["global_user_id"],
+        limit=3,
+    )
+    updated_state["action_selection_context"] = {
+        "coding_runs": [dict(context) for context in contexts],
+    }
+    return updated_state  # type: ignore[return-value]
 
 
 def _route_after_cognition(state: GlobalPersonaState) -> str:

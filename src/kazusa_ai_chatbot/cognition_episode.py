@@ -132,6 +132,35 @@ _IMAGE_OBSERVATION_LIST_FIELDS = (
 )
 
 
+def project_model_visible_percepts(
+    episode: CognitiveEpisode,
+) -> list[dict[str, str]]:
+    """Project visible percepts with typed dialogue-role provenance."""
+
+    validate_cognitive_episode(episode)
+    user_dialog = (
+        episode["trigger_source"] == "user_message"
+        and "dialog_text" in episode["input_sources"]
+    )
+    rows: list[dict[str, str]] = []
+    for percept in episode["percepts"]:
+        if percept["visibility"] != "model_visible":
+            continue
+        row = {
+            "input_source": percept["input_source"],
+            "content": percept["content"],
+        }
+        if user_dialog and percept["input_source"] == "dialog_text":
+            row.update({
+                "speaker_role": "current_user",
+                "addressee_role": "self",
+                "first_person_role": "current_user",
+                "implicit_imperative_subject_role": "self",
+            })
+        rows.append(row)
+    return rows
+
+
 def build_text_chat_media_description_rows(
     multimedia_input: list[Mapping[str, object]],
 ) -> list[MediaDescriptionRow]:

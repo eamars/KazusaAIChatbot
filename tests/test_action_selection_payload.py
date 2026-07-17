@@ -1,14 +1,18 @@
-"""V2 route-selection payload ownership tests."""
+"""V2 semantic action-planning payload ownership tests."""
 
-from kazusa_ai_chatbot.cognition_core_v2.action_selection import ROUTE_PROMPT
+from kazusa_ai_chatbot.cognition_core_v2.action_selection import (
+    ACTION_PLANNING_PROMPT,
+)
 
 
-def test_route_prompt_owns_selection_only() -> None:
-    """The V2 router selects handles and cannot author semantic content."""
+def test_action_prompt_owns_semantic_selection_only() -> None:
+    """The planner selects grounded objectives without rewriting motives."""
 
-    prompt = ROUTE_PROMPT.casefold()
+    prompt = ACTION_PLANNING_PROMPT.casefold()
 
-    assert "selected_bid_handle" in prompt
-    assert "do not author intention" in prompt
+    assert "bid_handle" in prompt
+    assert "do not rewrite bid" in prompt
+    assert "semantic_goal" in prompt
+    assert "decision" in prompt
     assert "task_willingness" not in prompt
     assert "raw media" not in prompt

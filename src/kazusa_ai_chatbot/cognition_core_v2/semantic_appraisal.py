@@ -119,6 +119,7 @@ async def appraise_semantic_question(
             parsed_output,
             question,
             set(evidence_by_handle),
+            projection.handle_to_ref,
         )
     except Exception as exc:
         ended_at = time.perf_counter()
@@ -154,9 +155,11 @@ def validate_semantic_appraisal_result(
     parsed: object,
     question: SemanticQuestionV2,
     evidence_handles: set[str],
+    handle_to_ref: Mapping[str, Mapping[str, str]],
 ) -> SemanticAppraisalResultV2:
     """Validate one appraisal without interpreting its semantic prose."""
 
+    _validate_question_handle_authority(question, handle_to_ref)
     if not isinstance(parsed, Mapping):
         raise ValueError("semantic appraisal must return an object")
     required = {
@@ -187,13 +190,23 @@ def validate_semantic_appraisal_result(
     if not isinstance(parsed["propositions"], list) or len(parsed["propositions"]) > 8:
         raise ValueError("semantic propositions are invalid")
     propositions = [
-        _validate_proposition(row, question, selected_evidence_set)
+        _validate_proposition(
+            row,
+            question,
+            selected_evidence_set,
+            handle_to_ref,
+        )
         for row in parsed["propositions"]
     ]
     if not isinstance(parsed["deltas"], list) or len(parsed["deltas"]) > 8:
         raise ValueError("semantic deltas are invalid")
     deltas = [
-        _validate_delta(row, question, selected_evidence_set)
+        _validate_delta(
+            row,
+            question,
+            selected_evidence_set,
+            handle_to_ref,
+        )
         for row in parsed["deltas"]
     ]
     paths = [delta["target_path"] for delta in deltas]
@@ -216,6 +229,7 @@ def _validate_proposition(
     value: Any,
     question: SemanticQuestionV2,
     evidence_handles: set[str],
+    handle_to_ref: Mapping[str, Mapping[str, str]],
 ) -> dict[str, Any]:
     """Validate one semantic proposition and its role assignments."""
 
@@ -288,7 +302,11 @@ def _validate_proposition(
         assignment["entity_handle"]
         for assignment in normalized_assignments
     )
-    _validate_candidate_evidence_binding(referenced_handles, cited)
+    _validate_candidate_evidence_binding(
+        referenced_handles,
+        cited,
+        handle_to_ref,
+    )
     result = {
         "proposition_kind": proposition_kind,
         "subject_handle": subject,
@@ -305,6 +323,7 @@ def _validate_delta(
     value: Any,
     question: SemanticQuestionV2,
     evidence_handles: set[str],
+    handle_to_ref: Mapping[str, Mapping[str, str]],
 ) -> dict[str, Any]:
     """Validate one allowlisted semantic numeric delta."""
 
@@ -331,7 +350,11 @@ def _validate_delta(
         "delta evidence",
     )
     path_handle = path.split(".")[1]
-    _validate_candidate_evidence_binding([path_handle], cited)
+    _validate_candidate_evidence_binding(
+        [path_handle],
+        cited,
+        handle_to_ref,
+    )
     return {
         "target_path": path,
         "delta": delta,
@@ -361,27 +384,55 @@ def _validate_handles(
 def _validate_candidate_evidence_binding(
     candidate_handles: Sequence[str],
     cited_evidence_handles: Sequence[str],
+    handle_to_ref: Mapping[str, Mapping[str, str]],
 ) -> None:
     """Require every prompt-local candidate to cite its source evidence."""
 
     cited = set(cited_evidence_handles)
     for handle in candidate_handles:
-        evidence_handle = _candidate_evidence_handle(handle)
+        evidence_handle = _candidate_evidence_handle(handle, handle_to_ref)
         if evidence_handle is not None and evidence_handle not in cited:
             raise ValueError(
                 "causal candidate must cite its originating evidence"
             )
 
 
-def _candidate_evidence_handle(candidate_handle: str) -> str | None:
+def _candidate_evidence_handle(
+    candidate_handle: str,
+    handle_to_ref: Mapping[str, Mapping[str, str]],
+) -> str | None:
     """Map one candidate handle back to its exact evidence handle."""
 
-    for prefix in ("ce", "ct", "ck"):
-        if candidate_handle.startswith(prefix):
-            suffix = candidate_handle[len(prefix):]
-            if suffix.isdigit():
-                return f"e{suffix}"
+    ref = handle_to_ref.get(candidate_handle)
+    if ref is None:
+        return None
+    entity_id = ref.get("entity_id")
+    if not isinstance(entity_id, str) or not entity_id.startswith("candidate:"):
+        return None
+    pieces = entity_id.split(":", maxsplit=2)
+    if len(pieces) == 3 and pieces[1] in {
+        "event",
+        "threat",
+        "knowledge_gap",
+    }:
+        return pieces[2]
     return None
+
+
+def _validate_question_handle_authority(
+    question: SemanticQuestionV2,
+    handle_to_ref: Mapping[str, Mapping[str, str]],
+) -> None:
+    """Require every question handle to exist in the canonical projection."""
+
+    canonical_handles = set(handle_to_ref)
+    permitted_handles = set(question["permitted_role_handles"])
+    if not permitted_handles <= canonical_handles:
+        raise ValueError("semantic question contains a non-canonical role handle")
+    for path in question["permitted_delta_paths"]:
+        pieces = path.split(".")
+        if len(pieces) >= 3 and pieces[1] not in canonical_handles:
+            raise ValueError("semantic question contains a non-canonical path handle")
 
 
 def _require_text(value: Any, maximum: int = 200) -> str:

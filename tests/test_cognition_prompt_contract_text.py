@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from kazusa_ai_chatbot.cognition_core_v2.action_selection import ROUTE_PROMPT
+from kazusa_ai_chatbot.cognition_core_v2.action_selection import (
+    ACTION_PLANNING_PROMPT,
+)
 from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
     GOAL_COGNITION_PROMPT,
 )
@@ -49,13 +51,41 @@ def test_goal_prompt_requires_complete_grounded_bid() -> None:
         assert required_text in GOAL_COGNITION_PROMPT
 
 
-def test_collapse_and_route_prompts_select_handles_only() -> None:
-    """Prevent collapse and routing from inventing bid content."""
+def test_goal_prompt_preserves_requested_response_operation_and_roles() -> None:
+    """A bid performs the requested operation with the original actors."""
+
+    prompt = GOAL_COGNITION_PROMPT.casefold()
+
+    assert "requested response operation" in prompt
+    assert "actor, action, target or beneficiary" in prompt
+    assert "question cannot substitute" in prompt
+    assert "first-person pronouns" in prompt
+    assert "implicit imperative" in prompt
+
+
+def test_goal_prompt_treats_physical_requests_as_verbal_stance() -> None:
+    """The character brain does not invent a physical actuator."""
+
+    prompt = GOAL_COGNITION_PROMPT.casefold()
+
+    assert "no current capability or text surface actuates" in prompt
+    assert "verbal stance" in prompt
+    assert "requested physical movement occurred" in prompt
+    assert "performed, completed, delivered, or received" in prompt
+
+
+def test_collapse_and_action_prompts_preserve_bid_ownership() -> None:
+    """Prevent collapse and planning from rewriting admitted motives."""
 
     assert "prompt-local partition" in COLLAPSE_PROMPT
     assert "Do not rewrite bid content" in COLLAPSE_PROMPT
-    assert "Select only a route" in ROUTE_PROMPT
-    assert "Do not rewrite bid content" in ROUTE_PROMPT
+    assert "semantic action plan" in ACTION_PLANNING_PROMPT.casefold()
+    assert "do not rewrite bid" in ACTION_PLANNING_PROMPT.casefold()
+    assert "cannot broaden capability eligibility" in (
+        ACTION_PLANNING_PROMPT.casefold()
+    )
+    assert "generic words such as" in ACTION_PLANNING_PROMPT.casefold()
+    assert "task, action" in ACTION_PLANNING_PROMPT.casefold()
 
 
 def test_surface_prompts_leave_final_dialogue_to_dialog() -> None:
@@ -79,6 +109,7 @@ def test_generated_semantic_prompts_preserve_language_policy() -> None:
     for prompt in (
         SEMANTIC_APPRAISAL_PROMPT,
         GOAL_COGNITION_PROMPT,
+        ACTION_PLANNING_PROMPT,
         STYLE_SYSTEM_PROMPT,
         CONTENT_PLAN_SYSTEM_PROMPT,
         PREFERENCE_SYSTEM_PROMPT,
@@ -97,6 +128,7 @@ def test_semantic_prompts_preserve_typed_source_ownership() -> None:
     for prompt in (
         SEMANTIC_APPRAISAL_PROMPT,
         GOAL_COGNITION_PROMPT,
+        ACTION_PLANNING_PROMPT,
         STYLE_SYSTEM_PROMPT,
         CONTENT_PLAN_SYSTEM_PROMPT,
         PREFERENCE_SYSTEM_PROMPT,
@@ -115,7 +147,7 @@ def test_v2_prompts_do_not_restore_operational_or_scalar_gates() -> None:
         SEMANTIC_APPRAISAL_PROMPT,
         GOAL_COGNITION_PROMPT,
         COLLAPSE_PROMPT,
-        ROUTE_PROMPT,
+        ACTION_PLANNING_PROMPT,
         STYLE_SYSTEM_PROMPT,
         CONTENT_PLAN_SYSTEM_PROMPT,
         PREFERENCE_SYSTEM_PROMPT,

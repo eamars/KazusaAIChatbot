@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal, Mapping, NotRequired, TypedDict
@@ -193,6 +194,11 @@ class ActionAffordanceV2(TypedDict):
     action_kind: str
     capability: str
     permission: str
+    decision_mode: Literal["optional", "required_text", "closed"]
+    allowed_decisions: list[str]
+    default_decision: str
+    decision_pattern: str
+    context_ref: str
     target_roles: list[RoleRefV2]
 
 
@@ -287,11 +293,6 @@ class ActionBidV2(TypedDict):
     evidence_handles: list[str]
     expected_consequences: list[str]
     confidence: str
-    requested_route: Literal[
-        "speech", "evidence", "action", "deferral", "silence"
-    ]
-    requested_action_kind: NotRequired[str]
-    requested_resolver_capability: NotRequired[str]
 
 
 class GoalBidDraftV2(TypedDict):
@@ -306,11 +307,6 @@ class GoalBidDraftV2(TypedDict):
     evidence_handles: list[str]
     expected_consequences: list[str]
     confidence: str
-    requested_route: Literal[
-        "speech", "evidence", "action", "deferral", "silence"
-    ]
-    requested_action_handle: NotRequired[str]
-    requested_resolver_handle: NotRequired[str]
 
 
 class SelectedIntentionV2(TypedDict):
@@ -321,15 +317,6 @@ class SelectedIntentionV2(TypedDict):
     intention: str
     target_roles: list[RoleRefV2]
     reason: str
-
-
-class RouteDecisionV2(TypedDict):
-    """Model output restricted to route and prompt-local capability handles."""
-
-    selected_bid_handle: str
-    route: Literal["speech", "evidence", "action", "deferral", "silence"]
-    action_handle: NotRequired[str]
-    resolver_handle: NotRequired[str]
 
 
 class CollapsedIntentionV2(TypedDict):
@@ -352,19 +339,23 @@ class WorkspaceDecisionV2(TypedDict):
 
 
 class SemanticActionRequestV2(TypedDict):
-    """Route-only action request; execution remains action-spec owned."""
+    """Planner-selected action request; execution remains action-spec owned."""
 
     action_kind: str
+    decision: str
+    context_ref: str
     semantic_goal: str
+    reason: str
     target_roles: list[RoleRefV2]
     evidence_handles: list[str]
 
 
 class ResolverCapabilityRequestV2(TypedDict):
-    """Route-only resolver request; execution remains resolver owned."""
+    """Planner-selected resolver request; execution remains resolver owned."""
 
     capability: str
     semantic_goal: str
+    reason: str
     evidence_handles: list[str]
 
 
@@ -457,6 +448,8 @@ class CognitionCoreInputV2(TypedDict):
     direct_facts: list[DirectFactV2]
     available_actions: list[ActionAffordanceV2]
     available_resolver_capabilities: list[ResolverAffordanceV2]
+    resolver_context: str
+    pending_resolver_resume: NotRequired[dict[str, Any]]
     scene_context: SceneContextV2
     private_continuity_context: str
 
@@ -473,6 +466,8 @@ class CognitionCoreOutputV2(TypedDict):
     relationship_projection: NotRequired[SemanticRelationshipProjectionV2]
     action_requests: list[SemanticActionRequestV2]
     resolver_requests: list[ResolverCapabilityRequestV2]
+    resolver_pending_resolution: dict[str, Any] | None
+    resolver_goal_progress: dict[str, Any] | None
     resolver_progress: ResolverProgressV2
     selected_bid_reason: str
     private_monologue: str
@@ -582,9 +577,16 @@ def validate_cognition_core_input(
             "direct_facts",
             "available_actions",
             "available_resolver_capabilities",
+            "resolver_context",
             "scene_context",
             "private_continuity_context",
-        } | ({"relationship_context"} if "relationship_context" in payload else set()),
+        }
+        | ({"relationship_context"} if "relationship_context" in payload else set())
+        | (
+            {"pending_resolver_resume"}
+            if "pending_resolver_resume" in payload
+            else set()
+        ),
         "cognition core input",
     )
     if payload["schema_version"] != "cognition_core_input.v2":
@@ -620,6 +622,13 @@ def validate_cognition_core_input(
         )
     for row in payload["available_resolver_capabilities"]:
         _validate_resolver_affordance(row)
+    _require_bounded_text(
+        payload["resolver_context"],
+        "resolver context",
+        maximum=8000,
+    )
+    if "pending_resolver_resume" in payload:
+        _validate_pending_resolver_resume(payload["pending_resolver_resume"])
     if not isinstance(payload["scene_context"], Mapping):
         raise CognitionContractError("scene_context must be a mapping")
     _validate_scene_context(payload["scene_context"])
@@ -646,6 +655,8 @@ def validate_cognition_core_output(
             "affect_projection",
             "action_requests",
             "resolver_requests",
+            "resolver_pending_resolution",
+            "resolver_goal_progress",
             "resolver_progress",
             "selected_bid_reason",
             "private_monologue",
@@ -685,6 +696,10 @@ def validate_cognition_core_output(
         raise CognitionContractError("resolver_requests must be a list")
     for row in payload["resolver_requests"]:
         _validate_resolver_request(row)
+    _validate_resolver_lifecycle_output(
+        payload["resolver_pending_resolution"],
+        payload["resolver_goal_progress"],
+    )
     _validate_resolver_progress(payload["resolver_progress"])
     _validate_expression_policy(payload["expression_policy"])
     if "relationship_projection" in payload:
@@ -917,10 +932,8 @@ def _validate_action_bid(value: Any) -> None:
         "evidence_handles",
         "expected_consequences",
         "confidence",
-        "requested_route",
     }
-    optional = {"requested_action_kind", "requested_resolver_capability"}
-    if set(value).difference(required | optional) or not required.issubset(value):
+    if set(value) != required:
         raise CognitionContractError("action bid fields are not exact")
     for field_name in (
         "branch_id",
@@ -939,39 +952,28 @@ def _validate_action_bid(value: Any) -> None:
         value["expected_consequences"],
         "action bid.expected_consequences",
     )
-    if value["requested_route"] not in {
-        "speech",
-        "evidence",
-        "action",
-        "deferral",
-        "silence",
-    }:
-        raise CognitionContractError("action bid route is invalid")
-    route_fields = {
-        "action": {"requested_action_kind"},
-        "evidence": {"requested_resolver_capability"},
-    }.get(value["requested_route"], set())
-    if set(value) != required | route_fields:
-        raise CognitionContractError(
-            "action bid capability fields do not match its route"
-        )
-    for field_name in optional:
-        if field_name in value:
-            _require_text(value[field_name], f"action bid.{field_name}")
-
-
 def _validate_action_request(value: Any) -> None:
     """Validate one route-approved semantic action request."""
 
     if not isinstance(value, Mapping) or set(value) != {
         "action_kind",
+        "decision",
+        "context_ref",
         "semantic_goal",
+        "reason",
         "target_roles",
         "evidence_handles",
     }:
         raise CognitionContractError("action request fields are not exact")
     _require_text(value["action_kind"], "action request.action_kind")
+    _require_bounded_text(value["decision"], "action request.decision", maximum=200)
+    _require_bounded_text(
+        value["context_ref"],
+        "action request.context_ref",
+        maximum=200,
+    )
     _require_text(value["semantic_goal"], "action request.semantic_goal")
+    _require_text(value["reason"], "action request.reason")
     _validate_roles(value["target_roles"], "action request.target_roles")
     _validate_text_list(value["evidence_handles"], "action request.evidence_handles")
 
@@ -982,11 +984,13 @@ def _validate_resolver_request(value: Any) -> None:
     if not isinstance(value, Mapping) or set(value) != {
         "capability",
         "semantic_goal",
+        "reason",
         "evidence_handles",
     }:
         raise CognitionContractError("resolver request fields are not exact")
     _require_text(value["capability"], "resolver request.capability")
     _require_text(value["semantic_goal"], "resolver request.semantic_goal")
+    _require_text(value["reason"], "resolver request.reason")
     _validate_text_list(value["evidence_handles"], "resolver request.evidence_handles")
 
 
@@ -1086,12 +1090,56 @@ def _validate_action_affordance(value: Any) -> None:
         "action_kind",
         "capability",
         "permission",
+        "decision_mode",
+        "allowed_decisions",
+        "default_decision",
+        "decision_pattern",
+        "context_ref",
         "target_roles",
     }:
         raise CognitionContractError("action affordance fields are not exact")
     _require_text(value["action_kind"], "action affordance.action_kind")
     _require_text(value["capability"], "action affordance.capability")
     _require_text(value["permission"], "action affordance.permission")
+    if value["decision_mode"] not in {"optional", "required_text", "closed"}:
+        raise CognitionContractError("action affordance decision_mode is invalid")
+    _validate_text_list(
+        value["allowed_decisions"],
+        "action affordance.allowed_decisions",
+        allow_empty=True,
+    )
+    _require_bounded_text(
+        value["default_decision"],
+        "action affordance.default_decision",
+        maximum=200,
+    )
+    _require_bounded_text(
+        value["decision_pattern"],
+        "action affordance.decision_pattern",
+        maximum=200,
+    )
+    try:
+        re.compile(value["decision_pattern"])
+    except re.error as exc:
+        raise CognitionContractError(
+            "action affordance decision_pattern is invalid"
+        ) from exc
+    _require_bounded_text(
+        value["context_ref"],
+        "action affordance.context_ref",
+        maximum=200,
+    )
+    if value["decision_mode"] == "closed" and not value["allowed_decisions"]:
+        raise CognitionContractError(
+            "closed action affordance requires allowed_decisions"
+        )
+    if (
+        value["decision_mode"] == "closed"
+        and value["default_decision"] not in value["allowed_decisions"]
+    ):
+        raise CognitionContractError(
+            "closed action affordance default is outside allowed_decisions"
+        )
     _validate_roles(value["target_roles"], "action affordance.target_roles")
 
 
@@ -1527,6 +1575,45 @@ def _require_text(value: Any, label: str, maximum: int = 500) -> None:
 
     if not isinstance(value, str) or not value.strip() or len(value) > maximum:
         raise CognitionContractError(f"{label} is invalid")
+
+
+def _validate_pending_resolver_resume(value: object) -> None:
+    """Validate deterministic pending state without an import cycle."""
+
+    from kazusa_ai_chatbot.cognition_resolver.contracts import (
+        ResolverValidationError,
+        validate_resolver_pending_resume,
+    )
+
+    try:
+        validate_resolver_pending_resume(value)
+    except ResolverValidationError as exc:
+        raise CognitionContractError(
+            f"pending_resolver_resume is invalid: {exc}"
+        ) from exc
+
+
+def _validate_resolver_lifecycle_output(
+    pending_resolution: object,
+    goal_progress: object,
+) -> None:
+    """Validate canonical resolver lifecycle rows without an import cycle."""
+
+    from kazusa_ai_chatbot.cognition_resolver.contracts import (
+        ResolverValidationError,
+        validate_resolver_goal_progress,
+        validate_resolver_pending_resolution,
+    )
+
+    try:
+        if pending_resolution is not None:
+            validate_resolver_pending_resolution(pending_resolution)
+        if goal_progress is not None:
+            validate_resolver_goal_progress(goal_progress)
+    except ResolverValidationError as exc:
+        raise CognitionContractError(
+            f"resolver lifecycle output is invalid: {exc}"
+        ) from exc
 
 
 def _require_bounded_text(value: Any, label: str, maximum: int) -> None:

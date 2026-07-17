@@ -9,7 +9,7 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any
 
-from kazusa_ai_chatbot.cognition_core_v2.action_selection import select_route
+from kazusa_ai_chatbot.cognition_core_v2.action_selection import plan_actions
 from kazusa_ai_chatbot.cognition_core_v2.branch_activation import (
     select_final_branches,
     select_preliminary_branches,
@@ -20,6 +20,7 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionCoreInputV2,
     CognitionCoreOutputV2,
     CognitionCoreServicesV2,
+    CognitionContractError,
     CognitionContextLimitError,
     CognitionExecutionError,
     SemanticAppraisalResultV2,
@@ -62,6 +63,12 @@ from kazusa_ai_chatbot.cognition_core_v2.state_reducers import (
     create_deterministic_goals,
 )
 from kazusa_ai_chatbot.cognition_core_v2.workspace import collapse_bids
+from kazusa_ai_chatbot.cognition_resolver.contracts import (
+    RESOLVER_PENDING_RESOLUTION_VERSION,
+    ResolverValidationError,
+    validate_resolver_pending_resolution,
+    validate_resolver_pending_resume,
+)
 from kazusa_ai_chatbot.time_boundary import parse_storage_utc_datetime
 
 
@@ -84,7 +91,7 @@ async def run_cognition(
         "final_reduction": "skipped",
         "branch_cognition": "skipped",
         "workspace_collapse": "skipped",
-        "route_selection": "skipped",
+        "action_planning": "skipped",
     }
 
     fact_pairs = [
@@ -116,8 +123,7 @@ async def run_cognition(
     questions = plan_semantic_questions(
         payload["evidence"],
         preliminary_state,
-        payload["character_constraints"],
-        payload.get("relationship_context"),
+        projection.handle_to_ref,
     )
     stage_status["deterministic_preliminary"] = "completed"
 
@@ -255,17 +261,8 @@ async def run_cognition(
     if final_execution is not None:
         bids.extend(final_execution.results.values())
     bids = [bid for bid in bids if isinstance(bid, Mapping)]
-    generated_bids = list(bids)
     output_mode = payload["episode"]["output_mode"]
-    eligible_bids: list[ActionBidV2] = []
-    for bid in bids:
-        if _output_mode_allows_route(payload["episode"], bid["requested_route"]):
-            eligible_bids.append(bid)
-        else:
-            warnings.append(
-                f"{bid['branch_id']} bid excluded by {output_mode} output_mode"
-            )
-    bids = eligible_bids
+    generated_bids = list(bids)
     try:
         collapse = await collapse_bids(bids, services) if bids else _empty_collapse()
     except Exception as exc:
@@ -273,20 +270,30 @@ async def run_cognition(
     primary_bid = collapse.get("primary_bid")
     supporting_bids = collapse.get("supporting_bids", [])
     try:
-        intention, action_requests, resolver_requests = await select_route(
-            primary_bid,
-            supporting_bids,
-            payload["available_actions"],
-            payload["available_resolver_capabilities"],
-            services,
+        action_plan = await plan_actions(
+            primary_bid=primary_bid,
+            supporting_bids=supporting_bids,
+            episode=payload["episode"],
+            evidence=payload["evidence"],
+            available_actions=payload["available_actions"],
+            available_resolvers=payload["available_resolver_capabilities"],
+            resolver_context=payload["resolver_context"],
+            services=services,
         )
     except CognitionExecutionError:
         raise
     except Exception as exc:
-        raise CognitionExecutionError(f"route selection failed: {exc}") from exc
+        raise CognitionExecutionError(f"action planning failed: {exc}") from exc
+    intention = action_plan["intention"]
+    action_requests = action_plan["action_requests"]
+    resolver_requests = action_plan["resolver_requests"]
+    pending_resolution = _bind_pending_resolution(
+        action_plan["resolver_pending_resolution"],
+        payload.get("pending_resolver_resume"),
+    )
     _validate_output_mode(payload["episode"], intention["route"])
     stage_status["workspace_collapse"] = "completed"
-    stage_status["route_selection"] = "completed"
+    stage_status["action_planning"] = "completed"
 
     admitted_bid = _selected_bid(intention, primary_bid, supporting_bids)
     affect = project_affect(final_state["affect_activations"], final_state)
@@ -313,6 +320,8 @@ async def run_cognition(
         "affect_projection": affect,
         "action_requests": action_requests,
         "resolver_requests": resolver_requests,
+        "resolver_pending_resolution": pending_resolution,
+        "resolver_goal_progress": action_plan["resolver_goal_progress"],
         "resolver_progress": _resolver_progress(resolver_requests),
         "selected_bid_reason": (
             admitted_bid["reason"]
@@ -461,6 +470,48 @@ def _resolver_progress(
     }
 
 
+def _bind_pending_resolution(
+    semantic_choice: object,
+    pending_resume: object,
+) -> dict[str, Any] | None:
+    """Bind one model-owned decision to the active deterministic pending row."""
+
+    if semantic_choice is None:
+        return_value = None
+        return return_value
+    if not isinstance(semantic_choice, Mapping):
+        raise CognitionExecutionError("pending resolution choice is invalid")
+    if pending_resume is None:
+        raise CognitionExecutionError(
+            "pending resolution selected without an active pending row"
+        )
+    try:
+        validated_pending = validate_resolver_pending_resume(pending_resume)
+    except ResolverValidationError as exc:
+        raise CognitionExecutionError(
+            f"active pending resolver row is invalid: {exc}"
+        ) from exc
+    if validated_pending["status"] not in {
+        "waiting_for_user",
+        "waiting_for_approval",
+    }:
+        raise CognitionExecutionError("pending resolution targets a closed row")
+    resolution = {
+        "schema_version": RESOLVER_PENDING_RESOLUTION_VERSION,
+        "resume_id": validated_pending["resume_id"],
+        "decision": semantic_choice["decision"],
+        "reason": semantic_choice["reason"],
+    }
+    try:
+        validated_resolution = validate_resolver_pending_resolution(resolution)
+    except ResolverValidationError as exc:
+        raise CognitionExecutionError(
+            f"pending resolution choice is invalid: {exc}"
+        ) from exc
+    return_value = dict(validated_resolution)
+    return return_value
+
+
 def _branch_handler(
     semantic_context: Mapping[str, Any],
     state: Mapping[str, Any],
@@ -492,8 +543,6 @@ def _branch_handler(
             goal_ref,
             context,
             payload["evidence"],
-            payload["available_actions"],
-            payload["available_resolver_capabilities"],
             services,
         )
 
@@ -775,19 +824,6 @@ def _validate_output_mode(episode: Mapping[str, Any], route: str) -> None:
         raise CognitionExecutionError(
             "non-action route conflicts with scheduled_action_request output_mode"
         )
-
-
-def _output_mode_allows_route(
-    episode: Mapping[str, Any],
-    route: str,
-) -> bool:
-    """Return whether one requested route is eligible for workspace collapse."""
-
-    try:
-        _validate_output_mode(episode, route)
-    except CognitionExecutionError:
-        return False
-    return True
 
 
 def _elapsed_ms(started_at: float) -> int:
