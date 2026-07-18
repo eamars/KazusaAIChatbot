@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Mapping
 from datetime import timezone
@@ -32,6 +33,8 @@ from kazusa_ai_chatbot.config import (
 )
 from kazusa_ai_chatbot.cognition_episode import (
     CognitiveEpisodeValidationError,
+    project_dialog_response_operation,
+    project_dialog_role_explicit_content,
     validate_cognitive_episode,
 )
 from kazusa_ai_chatbot.cognition_core_v2 import run_cognition
@@ -200,12 +203,12 @@ def build_cognition_input_from_global_state(
         and "dialog_text" in episode["input_sources"]
     ):
         character_role = (
-            "self; direct addressee of dialog_text and implicit subject of "
-            "a direct imperative"
+            "the active character; direct addressee of dialog_text and "
+            "implicit subject of a direct imperative"
         )
         current_user_role = (
-            "current_user; speaker of dialog_text and owner of first-person "
-            "pronouns in that evidence"
+            "the current message author; speaker of dialog_text and owner of "
+            "first-person pronouns in that evidence"
         )
     payload: CognitionCoreInputV2 = {
         "schema_version": "cognition_core_input.v2",
@@ -646,6 +649,11 @@ def _episode_evidence(
     }.get(trigger_source, "episode")
     source_id = f"episode:{episode_id}"
     semantic_text = fallback_text
+    dialog_semantic_projection = None
+    if source_kind == "episode":
+        dialog_semantic_projection = _dialog_semantic_projection_text(
+            episode,
+        )
     percepts = episode.get("percepts")
     if isinstance(percepts, list):
         for percept in percepts:
@@ -689,7 +697,7 @@ def _episode_evidence(
                         fallback_text,
                     )
             elif content and not isinstance(cognition_source, Mapping):
-                semantic_text = content
+                semantic_text = dialog_semantic_projection or content
                 source_id = _text(percept.get("percept_id")) or source_id
             break
     semantic_text = semantic_text[:1000]
@@ -856,7 +864,17 @@ def _action_result_evidence(
 def _semantic_episode_text(state: Mapping[str, Any]) -> str:
     """Build one semantic episode description without platform wire syntax."""
 
-    value = state.get("decontexualized_input") or state.get("user_input")
+    dialog_semantic_projection = None
+    episode = state.get("cognitive_episode")
+    if isinstance(episode, dict):
+        dialog_semantic_projection = _dialog_semantic_projection_text(
+            episode,
+        )
+    value = (
+        dialog_semantic_projection
+        or state.get("decontexualized_input")
+        or state.get("user_input")
+    )
     base_text = value.strip() if isinstance(value, str) else ""
     channel_name = _text(state.get("channel_name"))
     channel_topic = _text(state.get("channel_topic"))
@@ -877,6 +895,27 @@ def _semantic_episode_text(state: Mapping[str, Any]) -> str:
         if descriptions:
             return "; ".join(descriptions)
     return "no grounded semantic episode"
+
+
+def _dialog_semantic_projection_text(
+    episode: Mapping[str, Any],
+) -> str | None:
+    """Render one model-owned current-dialog meaning for cognition."""
+
+    role_explicit_content = project_dialog_role_explicit_content(episode)
+    response_operation = project_dialog_response_operation(episode)
+    if response_operation is None:
+        return role_explicit_content
+    projection: dict[str, Any] = {
+        "response_operation": response_operation,
+    }
+    if role_explicit_content is not None:
+        projection["role_explicit_content"] = role_explicit_content
+    return json.dumps(
+        projection,
+        ensure_ascii=False,
+        sort_keys=True,
+    )
 
 
 def _conversation_progress_text(value: object) -> str:

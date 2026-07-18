@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 from openai import OpenAIError
@@ -221,12 +221,13 @@ async def run_rag_evidence_for_persona_state(
         if safety_recovery_incidents
         else ""
     )
+    execution_status = _local_context_execution_status(rag_result)
     await _record_rag_event(
         record_rag_stage_event_func,
         component=component,
         correlation_id=correlation_id,
         agent_name=agent_name,
-        status="succeeded",
+        status=execution_status,
         slot_count=_local_context_evidence_node_count(packet),
         retrieval_count=retrieval_count,
         latency_ms=_elapsed_ms(started_at),
@@ -418,10 +419,11 @@ async def _execute_local_context_recall(
         objective=request["objective"],
         reason=request["reason"],
     )
+    execution_status = _local_context_execution_status(rag_result)
     observation = _observation_base(
         request,
         state,
-        status="succeeded",
+        status=execution_status,
         prompt_safe_summary=_rag_observation_summary(rag_result),
     )
     observation["rag_result"] = rag_result
@@ -776,6 +778,13 @@ def _rag_observation_summary(rag_result: dict[str, Any]) -> str:
 
     answer = str(rag_result.get("answer", "")).strip()
     retrieval_count = _retrieval_count(rag_result)
+    execution_status = _local_context_execution_status(rag_result)
+    if execution_status == "failed":
+        summary = (
+            "Local context evidence failed with no projected rows; continue "
+            "without treating it as source-backed truth."
+        )
+        return summary
     no_confirmed_fact_markers = (
         "没有找到已确认事实",
         "没有找到相关证据",
@@ -806,6 +815,22 @@ def _rag_observation_summary(rag_result: dict[str, Any]) -> str:
         f"Local context evidence succeeded with {retrieval_count} projected rows."
     )
     return summary
+
+
+def _local_context_execution_status(
+    rag_result: dict[str, Any],
+) -> Literal["succeeded", "failed"]:
+    """Derive capability truth from projected evidence and resolver status."""
+
+    supervisor_trace = rag_result.get("supervisor_trace")
+    blocked_node_count = 0
+    if isinstance(supervisor_trace, Mapping):
+        raw_blocked_count = supervisor_trace.get("blocked_node_count", 0)
+        if isinstance(raw_blocked_count, int):
+            blocked_node_count = raw_blocked_count
+    if _retrieval_count(rag_result) == 0 and blocked_node_count > 0:
+        return "failed"
+    return "succeeded"
 
 
 def _retrieval_count(rag_result: dict[str, Any]) -> int:

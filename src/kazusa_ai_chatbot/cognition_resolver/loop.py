@@ -781,11 +781,11 @@ def _is_repeated_capability_request(
     for observation in resolver_state["observations"]:
         same_capability = observation["capability_kind"] == request["capability_kind"]
         same_objective = observation["request_objective"] == request["objective"]
-        same_timed_out_capability = (
+        same_failed_capability = (
             same_capability
-            and observation["observation_id"].startswith("resolver_obs_timeout_")
+            and observation["status"] == "failed"
         )
-        if same_capability and (same_objective or same_timed_out_capability):
+        if same_capability and (same_objective or same_failed_capability):
             return_value = True
             return return_value
     return_value = False

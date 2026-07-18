@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from collections.abc import Mapping, Sequence
 from time import perf_counter
@@ -14,6 +15,9 @@ from kazusa_ai_chatbot import llm_tracing
 from kazusa_ai_chatbot.cognition_core_v2.action_authorization import (
     authorize_action_requests,
     derive_action_route,
+)
+from kazusa_ai_chatbot.cognition_core_v2.resolver_authorization import (
+    authorize_resolver_requests,
 )
 from kazusa_ai_chatbot.action_spec.registry import (
     APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
@@ -43,6 +47,9 @@ ACTION_PLANNING_PROMPT_CAP = 24000
 ACTION_PLANNING_REPAIR_OUTPUT_CAP = 4000
 ACTION_PLANNING_ATTEMPT_LIMIT = 2
 MODEL_TEXT_CAP = 500
+
+
+logger = logging.getLogger(__name__)
 
 
 ACTION_PLANNING_PROMPT = '''You are the semantic capability-proposal boundary
@@ -259,8 +266,16 @@ async def plan_actions(
         bid_handles,
         action_handles,
     )
+    authorized_resolver_rows = await authorize_resolver_requests(
+        resolver_requests=decision["resolver_requests"],
+        bid_handles=bid_handles,
+        evidence=evidence,
+        resolver_handles=resolver_handles,
+        resolver_context=resolver_context,
+        services=services,
+    )
     resolver_requests = _materialize_resolver_requests(
-        decision["resolver_requests"],
+        authorized_resolver_rows,
         bid_handles,
         resolver_handles,
     )
@@ -335,9 +350,11 @@ async def _invoke_action_planner(
                 stage_name=stage_name,
             )
             if attempt_index + 1 >= ACTION_PLANNING_ATTEMPT_LIMIT:
-                raise ValueError(
-                    f"action plan is invalid after one replacement: {exc}"
-                ) from exc
+                logger.warning(
+                    "Action planning dropped an unusable replacement: %s",
+                    exc,
+                )
+                return _empty_action_plan_decision()
             current_messages.append(
                 _action_planning_repair_message(
                     response_text=response_text,
@@ -405,44 +422,34 @@ def _validate_action_plan_decision(
     resolver_handles: Mapping[str, ResolverAffordanceV2],
     current_goal_progress: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Validate fixed model shape, cardinality, and prompt-local ownership."""
+    """Normalize semantic choices into the canonical planner contract."""
 
     if not isinstance(parsed, Mapping):
         raise ValueError("action plan must be an object")
-    required = {
-        "action_requests",
-        "resolver_requests",
-        "resolver_pending_resolution",
-        "resolver_goal_progress",
-    }
-    if set(parsed) != required:
-        raise ValueError("action plan fields are not exact")
-    action_requests = parsed["action_requests"]
-    resolver_requests = parsed["resolver_requests"]
+    action_requests = parsed.get("action_requests", [])
+    resolver_requests = parsed.get("resolver_requests", [])
     if not isinstance(action_requests, list):
         raise ValueError("action requests must be an array")
     if not isinstance(resolver_requests, list):
         raise ValueError("resolver requests must be an array")
-    if len(action_requests) > ACTION_REQUEST_CAP:
-        raise ValueError("action plan permits at most three action requests")
-    if len(resolver_requests) > ACTION_REQUEST_CAP:
-        raise ValueError("action plan permits at most three resolver requests")
     if action_requests and resolver_requests:
         raise ValueError("action and resolver requests are mutually exclusive")
 
-    normalized_actions = [
-        _validate_action_request_row(row, bid_handles, action_handles)
-        for row in action_requests
-    ]
-    normalized_resolvers = [
-        _validate_resolver_request_row(row, bid_handles, resolver_handles)
-        for row in resolver_requests
-    ]
+    normalized_actions = _normalize_action_request_rows(
+        action_requests,
+        bid_handles,
+        action_handles,
+    )
+    normalized_resolvers = _normalize_resolver_request_rows(
+        resolver_requests,
+        bid_handles,
+        resolver_handles,
+    )
     pending_resolution = _validate_pending_resolution_choice(
-        parsed["resolver_pending_resolution"]
+        parsed.get("resolver_pending_resolution")
     )
     goal_progress = _validate_goal_progress_choice(
-        parsed["resolver_goal_progress"],
+        parsed.get("resolver_goal_progress"),
         current_goal_progress=current_goal_progress,
     )
     return_value = {
@@ -452,6 +459,60 @@ def _validate_action_plan_decision(
         "resolver_goal_progress": goal_progress,
     }
     return return_value
+
+
+def _normalize_action_request_rows(
+    values: Sequence[object],
+    bids: Mapping[str, ActionBidV2],
+    actions: Mapping[str, ActionAffordanceV2],
+) -> list[dict[str, str]]:
+    """Keep bounded canonical action proposals with valid trusted handles."""
+
+    normalized: list[dict[str, str]] = []
+    for value in values:
+        try:
+            row = _validate_action_request_row(value, bids, actions)
+        except ValueError as exc:
+            logger.warning("Action planning dropped an invalid action row: %s", exc)
+            continue
+        normalized.append(row)
+        if len(normalized) >= ACTION_REQUEST_CAP:
+            break
+    return normalized
+
+
+def _normalize_resolver_request_rows(
+    values: Sequence[object],
+    bids: Mapping[str, ActionBidV2],
+    resolvers: Mapping[str, ResolverAffordanceV2],
+) -> list[dict[str, str]]:
+    """Keep bounded canonical resolver proposals with valid trusted handles."""
+
+    normalized: list[dict[str, str]] = []
+    for value in values:
+        try:
+            row = _validate_resolver_request_row(value, bids, resolvers)
+        except ValueError as exc:
+            logger.warning(
+                "Action planning dropped an invalid resolver row: %s",
+                exc,
+            )
+            continue
+        normalized.append(row)
+        if len(normalized) >= ACTION_REQUEST_CAP:
+            break
+    return normalized
+
+
+def _empty_action_plan_decision() -> dict[str, Any]:
+    """Return the canonical fail-contained semantic proposal."""
+
+    return {
+        "action_requests": [],
+        "resolver_requests": [],
+        "resolver_pending_resolution": None,
+        "resolver_goal_progress": None,
+    }
 
 
 def _validate_action_request_row(
@@ -468,8 +529,8 @@ def _validate_action_request_row(
         "semantic_goal",
         "reason",
     }
-    if not isinstance(value, Mapping) or set(value) != required:
-        raise ValueError("action request fields are not exact")
+    if not isinstance(value, Mapping) or not required.issubset(value):
+        raise ValueError("action request fields are incomplete")
     bid_handle = value["bid_handle"]
     action_handle = value["action_handle"]
     if bid_handle not in bids:
@@ -537,8 +598,8 @@ def _validate_resolver_request_row(
         "semantic_goal",
         "reason",
     }
-    if not isinstance(value, Mapping) or set(value) != required:
-        raise ValueError("resolver request fields are not exact")
+    if not isinstance(value, Mapping) or not required.issubset(value):
+        raise ValueError("resolver request fields are incomplete")
     bid_handle = value["bid_handle"]
     resolver_handle = value["resolver_handle"]
     if bid_handle not in bids:

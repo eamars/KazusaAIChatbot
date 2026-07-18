@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from copy import deepcopy
 from typing import Any, Literal, NoReturn, NotRequired, TypedDict, get_args
 
 from kazusa_ai_chatbot.time_boundary import LocalTimeContextDoc
@@ -113,6 +114,20 @@ class TextChatCompatibilityProjection(TypedDict):
     user_name: str
 
 
+ResponseOperationRole = Literal["self", "current_user", "other", "none"]
+
+
+class DialogResponseOperation(TypedDict):
+    """Model-owned response and embedded-action role ownership."""
+
+    operation: str
+    response_owner_role: ResponseOperationRole
+    selection_owner_role: ResponseOperationRole
+    selection_required: bool
+    embedded_actor_role: ResponseOperationRole
+    embedded_target_role: ResponseOperationRole
+
+
 class CognitiveEpisodeValidationError(ValueError):
     """Raised when a cognitive episode is structurally invalid."""
 
@@ -124,6 +139,19 @@ _OUTPUT_MODES = frozenset(get_args(OutputMode))
 _LOCAL_TIME_CONTEXT_FIELDS = tuple(LocalTimeContextDoc.__annotations__)
 MAX_COGNITIVE_EPISODE_MEDIA_PERCEPTS = 4
 MAX_COGNITIVE_EPISODE_MEDIA_DESCRIPTION_CHARS = 800
+MAX_ROLE_EXPLICIT_CONTENT_CHARS = 1000
+MAX_RESPONSE_OPERATION_CHARS = 500
+ROLE_EXPLICIT_CONTENT_METADATA_KEY = "role_explicit_content"
+RESPONSE_OPERATION_METADATA_KEY = "response_operation"
+_RESPONSE_OPERATION_ROLES = frozenset({
+    "self",
+    "current_user",
+    "other",
+    "none",
+})
+_RESPONSE_OPERATION_FIELDS = frozenset(
+    DialogResponseOperation.__annotations__
+)
 _IMAGE_OBSERVATION_LIST_FIELDS = (
     "visible_text",
     "salient_visual_facts",
@@ -134,7 +162,7 @@ _IMAGE_OBSERVATION_LIST_FIELDS = (
 
 def project_model_visible_percepts(
     episode: CognitiveEpisode,
-) -> list[dict[str, str]]:
+) -> list[dict[str, Any]]:
     """Project visible percepts with typed dialogue-role provenance."""
 
     validate_cognitive_episode(episode)
@@ -142,7 +170,7 @@ def project_model_visible_percepts(
         episode["trigger_source"] == "user_message"
         and "dialog_text" in episode["input_sources"]
     )
-    rows: list[dict[str, str]] = []
+    rows: list[dict[str, Any]] = []
     for percept in episode["percepts"]:
         if percept["visibility"] != "model_visible":
             continue
@@ -151,6 +179,18 @@ def project_model_visible_percepts(
             "content": percept["content"],
         }
         if user_dialog and percept["input_source"] == "dialog_text":
+            role_explicit_content = _role_explicit_content_from_metadata(
+                percept["metadata"],
+            )
+            if role_explicit_content is not None:
+                row[ROLE_EXPLICIT_CONTENT_METADATA_KEY] = (
+                    role_explicit_content
+                )
+            response_operation = _response_operation_from_metadata(
+                percept["metadata"],
+            )
+            if response_operation is not None:
+                row[RESPONSE_OPERATION_METADATA_KEY] = response_operation
             row.update({
                 "speaker_role": "current_user",
                 "addressee_role": "self",
@@ -159,6 +199,184 @@ def project_model_visible_percepts(
             })
         rows.append(row)
     return rows
+
+
+def attach_dialog_semantic_projection(
+    episode: CognitiveEpisode,
+    role_explicit_content: str,
+    response_operation: object | None,
+) -> CognitiveEpisode:
+    """Attach one model-owned semantic projection to the dialog percept."""
+
+    validate_cognitive_episode(episode)
+    normalized_content = _validate_role_explicit_content(
+        role_explicit_content,
+    )
+    normalized_operation = (
+        validate_dialog_response_operation(response_operation)
+        if response_operation is not None
+        else None
+    )
+    updated_episode = deepcopy(episode)
+    for percept in updated_episode["percepts"]:
+        if (
+            percept["input_source"] == "dialog_text"
+            and percept["visibility"] == "model_visible"
+        ):
+            percept["metadata"][ROLE_EXPLICIT_CONTENT_METADATA_KEY] = (
+                normalized_content
+            )
+            if normalized_operation is not None:
+                percept["metadata"][RESPONSE_OPERATION_METADATA_KEY] = (
+                    normalized_operation
+                )
+            else:
+                percept["metadata"].pop(
+                    RESPONSE_OPERATION_METADATA_KEY,
+                    None,
+                )
+            validate_cognitive_episode(updated_episode)
+            return updated_episode
+    raise CognitiveEpisodeValidationError(
+        "role-explicit content requires a model-visible dialog percept"
+    )
+
+
+def has_model_visible_dialog_percept(episode: CognitiveEpisode) -> bool:
+    """Return whether an episode contains model-visible dialog input."""
+
+    validate_cognitive_episode(episode)
+    return any(
+        percept["input_source"] == "dialog_text"
+        and percept["visibility"] == "model_visible"
+        for percept in episode["percepts"]
+    )
+
+
+def project_dialog_role_explicit_content(
+    episode: CognitiveEpisode,
+) -> str | None:
+    """Return the bounded role projection from the current dialog percept."""
+
+    validate_cognitive_episode(episode)
+    for percept in episode["percepts"]:
+        if (
+            percept["input_source"] == "dialog_text"
+            and percept["visibility"] == "model_visible"
+        ):
+            return _role_explicit_content_from_metadata(percept["metadata"])
+    return None
+
+
+def project_dialog_response_operation(
+    episode: CognitiveEpisode,
+) -> DialogResponseOperation | None:
+    """Return the response-operation projection from the dialog percept."""
+
+    validate_cognitive_episode(episode)
+    for percept in episode["percepts"]:
+        if (
+            percept["input_source"] == "dialog_text"
+            and percept["visibility"] == "model_visible"
+        ):
+            return _response_operation_from_metadata(percept["metadata"])
+    return None
+
+
+def _role_explicit_content_from_metadata(
+    metadata: Mapping[str, Any],
+) -> str | None:
+    """Validate and return optional role-explicit percept metadata."""
+
+    if ROLE_EXPLICIT_CONTENT_METADATA_KEY not in metadata:
+        return None
+    return _validate_role_explicit_content(
+        metadata[ROLE_EXPLICIT_CONTENT_METADATA_KEY],
+    )
+
+
+def _response_operation_from_metadata(
+    metadata: Mapping[str, Any],
+) -> DialogResponseOperation | None:
+    """Validate and return optional response-operation metadata."""
+
+    if RESPONSE_OPERATION_METADATA_KEY not in metadata:
+        return None
+    return validate_dialog_response_operation(
+        metadata[RESPONSE_OPERATION_METADATA_KEY],
+    )
+
+
+def _validate_role_explicit_content(value: object) -> str:
+    """Validate model-owned role meaning without interpreting its semantics."""
+
+    if not isinstance(value, str):
+        raise CognitiveEpisodeValidationError(
+            "role-explicit content must be a string"
+        )
+    normalized_value = value.strip()
+    if not normalized_value:
+        raise CognitiveEpisodeValidationError(
+            "role-explicit content must not be empty"
+        )
+    if len(normalized_value) > MAX_ROLE_EXPLICIT_CONTENT_CHARS:
+        raise CognitiveEpisodeValidationError(
+            "role-explicit content exceeds the prompt bound"
+        )
+    return normalized_value
+
+
+def validate_dialog_response_operation(
+    value: object,
+) -> DialogResponseOperation:
+    """Validate response-operation shape without interpreting its meaning."""
+
+    if not isinstance(value, Mapping):
+        raise CognitiveEpisodeValidationError(
+            "response operation must be an object"
+        )
+    if set(value) != _RESPONSE_OPERATION_FIELDS:
+        raise CognitiveEpisodeValidationError(
+            "response operation fields are not exact"
+        )
+    operation = value["operation"]
+    if not isinstance(operation, str) or not operation.strip():
+        raise CognitiveEpisodeValidationError(
+            "response operation text must not be empty"
+        )
+    normalized_operation = operation.strip()
+    if len(normalized_operation) > MAX_RESPONSE_OPERATION_CHARS:
+        raise CognitiveEpisodeValidationError(
+            "response operation text exceeds the prompt bound"
+        )
+    selection_required = value["selection_required"]
+    if not isinstance(selection_required, bool):
+        raise CognitiveEpisodeValidationError(
+            "response operation selection_required must be boolean"
+        )
+    role_fields = (
+        "response_owner_role",
+        "selection_owner_role",
+        "embedded_actor_role",
+        "embedded_target_role",
+    )
+    for field_name in role_fields:
+        if value[field_name] not in _RESPONSE_OPERATION_ROLES:
+            raise CognitiveEpisodeValidationError(
+                f"response operation {field_name} is invalid"
+            )
+    if selection_required and value["selection_owner_role"] == "none":
+        raise CognitiveEpisodeValidationError(
+            "required response selection needs an owner"
+        )
+    return {
+        "operation": normalized_operation,
+        "response_owner_role": value["response_owner_role"],
+        "selection_owner_role": value["selection_owner_role"],
+        "selection_required": selection_required,
+        "embedded_actor_role": value["embedded_actor_role"],
+        "embedded_target_role": value["embedded_target_role"],
+    }
 
 
 def build_text_chat_media_description_rows(

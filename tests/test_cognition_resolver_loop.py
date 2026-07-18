@@ -755,6 +755,71 @@ async def test_loop_blocks_same_capability_retry_after_timeout() -> None:
 
 
 @pytest.mark.asyncio
+async def test_loop_blocks_renamed_retry_after_failed_observation() -> None:
+    """Failed capability work cannot be retried under a renamed objective."""
+
+    first_request = _resolver_request(
+        capability_kind="local_context_recall",
+        objective="Retrieve the prior agreement.",
+    )
+    renamed_request = _resolver_request(
+        capability_kind="local_context_recall",
+        objective="Confirm the earlier agreement with different wording.",
+    )
+    execute_count = 0
+
+    async def call_cognition(state: dict) -> dict:
+        resolver_context = state["resolver_context"]
+        if "duplicate capability request" in resolver_context:
+            return _cognition_result(
+                internal_monologue="The failed retry has been blocked.",
+                action_specs=[_speak_action_spec("Continue without the evidence.")],
+            )
+        if "status=failed" in resolver_context:
+            return _cognition_result(
+                internal_monologue="Try the same capability with new wording.",
+                resolver_requests=[renamed_request],
+            )
+        return _cognition_result(
+            internal_monologue="The prior agreement needs evidence.",
+            resolver_requests=[first_request],
+        )
+
+    async def execute_capability(
+        capability_request: dict,
+        _state: dict,
+    ) -> dict:
+        nonlocal execute_count
+        execute_count += 1
+        return {
+            "schema_version": RESOLVER_OBSERVATION_VERSION,
+            "observation_id": f"resolver_obs_failed_{execute_count}",
+            "capability_kind": capability_request["capability_kind"],
+            "request_objective": capability_request["objective"],
+            "request_reason": capability_request["reason"],
+            "status": "failed",
+            "prompt_safe_summary": "Local context resolution failed.",
+            "evidence_refs": [],
+            "created_at_utc": "2026-05-29T21:00:00+00:00",
+        }
+
+    result = await call_cognition_resolver_loop(
+        _resolver_state(),
+        call_cognition_subgraph_func=call_cognition,
+        execute_capability_func=execute_capability,
+        max_cycles=3,
+        capability_timeout_seconds=1.0,
+    )
+
+    observations = result["resolver_state"]["observations"]
+    assert execute_count == 1
+    assert result["resolver_state"]["status"] == "blocked"
+    assert observations[-1]["observation_id"] == "resolver_obs_duplicate_request"
+    assert observations[-1]["request_objective"] == renamed_request["objective"]
+    assert result["action_specs"][0]["kind"] == "speak"
+
+
+@pytest.mark.asyncio
 async def test_duplicate_final_cognition_repeated_request_gets_terminal_speak() -> None:
     """Terminal duplicate handling should not leave the user with silence."""
 

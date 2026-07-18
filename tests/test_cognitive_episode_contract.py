@@ -16,6 +16,7 @@ from kazusa_ai_chatbot.cognition_episode import (
     TargetScope,
     TextChatCompatibilityProjection,
     build_text_chat_cognitive_episode,
+    project_model_visible_percepts,
     project_text_chat_compatibility_fields,
     validate_cognitive_episode,
 )
@@ -180,6 +181,42 @@ def test_text_chat_builder_defaults_optional_collections() -> None:
     assert episode["origin_metadata"]["active_turn_platform_message_ids"] == []
     assert episode["origin_metadata"]["active_turn_conversation_row_ids"] == []
     assert episode["origin_metadata"]["debug_modes"] == {}
+
+
+def test_visible_percept_projection_includes_model_owned_role_meaning() -> None:
+    """Shared prompt projection should retain one bounded semantic role view."""
+
+    episode = _valid_episode()
+    role_explicit_content = (
+        "当前用户询问当前角色，当前角色希望当前用户下一步做什么。"
+    )
+    response_operation = {
+        "operation": "当前角色为当前用户选择一个动作",
+        "response_owner_role": "self",
+        "selection_owner_role": "self",
+        "selection_required": True,
+        "embedded_actor_role": "current_user",
+        "embedded_target_role": "self",
+    }
+    episode["percepts"][0]["metadata"]["role_explicit_content"] = (
+        role_explicit_content
+    )
+    episode["percepts"][0]["metadata"]["response_operation"] = (
+        response_operation
+    )
+
+    rows = project_model_visible_percepts(episode)
+
+    assert rows == [{
+        "input_source": "dialog_text",
+        "content": "hello from current text chat",
+        "role_explicit_content": role_explicit_content,
+        "response_operation": response_operation,
+        "speaker_role": "current_user",
+        "addressee_role": "self",
+        "first_person_role": "current_user",
+        "implicit_imperative_subject_role": "self",
+    }]
 
 
 def test_compatibility_projection_returns_current_text_chat_fields_only() -> None:

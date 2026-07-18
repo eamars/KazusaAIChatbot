@@ -26,9 +26,15 @@ from kazusa_ai_chatbot.conversation_history_prompt_projection import (
     project_conversation_history_for_llm,
 )
 from kazusa_ai_chatbot.cognition_episode import (
+    CognitiveEpisodeValidationError,
+    DialogResponseOperation,
+    MAX_ROLE_EXPLICIT_CONTENT_CHARS,
+    attach_dialog_semantic_projection,
     build_reply_media_description_rows,
     build_text_chat_media_description_rows,
+    has_model_visible_dialog_percept,
     replace_text_chat_media_percepts,
+    validate_dialog_response_operation,
 )
 from kazusa_ai_chatbot.channel_scene_projection import project_channel_topic_text
 from kazusa_ai_chatbot.db import (
@@ -487,6 +493,8 @@ _MSG_DECONTEXUALIZER_PROMPT = '''\
 - 直接对话中来源清楚的一二人称按原文保留；只有省略或群聊指向会让下游误解主体时，才补全最小必要主语或对象。
 - 字面名字、URL、文件名、引用文本和专有名词是锚点，按原文保留。
 - `referents` 记录影响理解的原文指代短语，以及当前问题里必须按人理解的可见参与者字面名称；无此类内容时输出 `[]`。
+- `role_explicit_content` 是独立的下游语义投影。自由文本统一使用中文称谓 `当前用户` 和 `当前角色` 区分直接对话参与者，并明确保留嵌套分句里的行动者、动作、对象、受益者、否定、情态和问句或请求方向。它不改变 `output` 的自然表达。
+- `response_operation` 只描述本轮要求谁回应、谁作出所需选择，以及回应内动作的行动者和对象。四个角色字段的枚举值只使用 `self`、`current_user`、`other`、`none`；`operation` 自由文本使用 `当前角色`、`当前用户` 或自然中文称谓，不混入这些英文枚举值。
 
 # 核心转换
 - 普通完整句保持原句；省略句只补全离开上下文后会缺失的主体、对象或选择项。
@@ -518,6 +526,8 @@ _MSG_DECONTEXUALIZER_PROMPT = '''\
 5. 组合 `output`。只改写动作是解析的文本片段；其余文本片段保留原文。
 6. 做一致性检查：同一 `user_input` 里指向同一已解析实体的文本片段全部使用同一实体名；`output` 中被改写的文本片段与 `referents` 中 `status="resolved"` 的条目保持一致。
 7. 若本轮有明确群聊指向对象，最后从左到右扫描 `output`；当前用户直接表达中剩余的「你 / 你的 / 你自己」按群聊指向对象处理。
+8. 单独生成 `role_explicit_content`：保持同一语义结构，把当前发言人写成 `当前用户`，把当前直接对话角色写成 `当前角色`，并逐层保留嵌套分句中谁想、让、问、说或请求谁做什么。
+9. 单独生成 `response_operation`：`response_owner_role` 是本轮应回应的角色。`selection_required` 不取决于原文是否出现“选择”：当回应需要某个角色提供输入中尚未指定的答案、判断、愿望、偏好、猜测、决定或指令时为 true，`selection_owner_role` 是拥有该内容的角色；内容已由输入明确指定时为 false。`embedded_actor_role` 和 `embedded_target_role` 保留回应内容中动作的行动者与对象。字段只描述原意，不替角色作出选择。
 
 # 主体、省略与代词规则
 - 存在群聊指向对象时，当前用户直接表达里的「你 / 你的 / 你自己」动作是解析，统一改成该群成员名；范围覆盖整条 `user_input` 的后续分句。
@@ -546,6 +556,15 @@ _MSG_DECONTEXUALIZER_PROMPT = '''\
 请务必只返回一个合法 JSON 对象：
 {{
     "output": "重写后的用户输入，或原句",
+    "role_explicit_content": "使用当前用户和当前角色明确参与者后的同义语义",
+    "response_operation": {{
+        "operation": "本轮要求的回应操作",
+        "response_owner_role": "self | current_user | other | none",
+        "selection_owner_role": "self | current_user | other | none",
+        "selection_required": true,
+        "embedded_actor_role": "self | current_user | other | none",
+        "embedded_target_role": "self | current_user | other | none"
+    }},
     "is_modified": true,
     "reasoning": "一句话说明使用了哪些证据；未修改时说明原因",
     "referents": [
@@ -555,6 +574,8 @@ _MSG_DECONTEXUALIZER_PROMPT = '''\
 
 `status="resolved"` 表示对象能从 `user_input`、`prompt_message_context`、`reply_context` 或 `chat_history` 的桥接证据确定，包括 `reply_context.reply_excerpt`；它不要求 `output` 一定改写。`status="unresolved"` 只在这些桥接字段都没有可识别对象时使用。
 `is_modified` 表示 `output` 是否不同于原句。`referents` 必须每次输出。`referent_role` 只允许 `subject`、`object`、`time`；`status` 只允许 `resolved` 或 `unresolved`。
+`role_explicit_content` 必须每次输出，控制在 1000 字符以内。它只消除角色代词歧义，不回答问题、不选择角色立场，也不增删原意；它是中文自由文本，不写 `self` 或 `current_user`。
+`response_operation` 必须每次输出且字段完整。`operation` 控制在 500 字符以内；它只标注原输入要求的回应与选择所有权，不生成回应内容，并保持中文自由文本。英文角色枚举只出现在四个角色字段中。
 '''
 
 
@@ -579,6 +600,15 @@ async def call_msg_decontexualizer(state: GlobalPersonaState) -> dict:
     user_name = state["user_name"]
     platform_user_id = state["platform_user_id"]
     user_input = state["user_input"]
+    cognitive_episode = state.get("cognitive_episode")
+    if (
+        isinstance(cognitive_episode, dict)
+        and not has_model_visible_dialog_percept(cognitive_episode)
+    ):
+        return {
+            "decontexualized_input": user_input,
+            "referents": [],
+        }
     character_name = state["character_profile"]["name"]
     system_prompt = SystemMessage(
         content=_render_msg_decontexualizer_prompt(character_name),
@@ -635,6 +665,8 @@ async def call_msg_decontexualizer(state: GlobalPersonaState) -> dict:
         reasoning = "Failed to call LLM"
         is_modified = False
         referents = []
+        role_explicit_content = None
+        response_operation = None
     else:
         try:
             result = parse_llm_json_output(llm_response.content)
@@ -648,6 +680,8 @@ async def call_msg_decontexualizer(state: GlobalPersonaState) -> dict:
             reasoning = "Failed to parse LLM output"
             is_modified = False
             referents = []
+            role_explicit_content = None
+            response_operation = None
         else:
             trace_parse_status = "succeeded"
             trace_status = "succeeded"
@@ -674,6 +708,28 @@ async def call_msg_decontexualizer(state: GlobalPersonaState) -> dict:
                     f"Decontextualizer dropped malformed referents: "
                     f"input={log_preview(user_input)} raw={log_preview(raw_referents)}"
                 )
+            role_explicit_content = _bounded_role_explicit_content(
+                result.get("role_explicit_content"),
+            )
+            response_operation = _validated_response_operation(
+                result.get("response_operation"),
+            )
+            if (
+                isinstance(state.get("cognitive_episode"), dict)
+                and role_explicit_content is None
+            ):
+                logger.warning(
+                    "Decontextualizer missing valid role-explicit content: "
+                    f"input={log_preview(user_input)}"
+                )
+            if (
+                isinstance(state.get("cognitive_episode"), dict)
+                and response_operation is None
+            ):
+                logger.warning(
+                    "Decontextualizer missing valid response operation: "
+                    f"input={log_preview(user_input)}"
+                )
 
     logger.info(
         f"Decontextualizer output: output={log_preview(output)} "
@@ -692,6 +748,17 @@ async def call_msg_decontexualizer(state: GlobalPersonaState) -> dict:
         "decontexualized_input": output,
         "referents": referents,
     }
+    if (
+        isinstance(cognitive_episode, dict)
+        and role_explicit_content is not None
+    ):
+        return_value["cognitive_episode"] = (
+            attach_dialog_semantic_projection(
+                cognitive_episode,
+                role_explicit_content,
+                response_operation,
+            )
+        )
     if "llm_response" in locals():
         await llm_tracing.record_llm_trace_step(
             trace_id=str(state.get("llm_trace_id", "")),
@@ -710,3 +777,28 @@ async def call_msg_decontexualizer(state: GlobalPersonaState) -> dict:
             ],
         )
     return return_value
+
+
+def _bounded_role_explicit_content(value: object) -> str | None:
+    """Validate model output shape and bound without judging its meaning."""
+
+    if not isinstance(value, str):
+        return None
+    normalized_value = value.strip()
+    if (
+        not normalized_value
+        or len(normalized_value) > MAX_ROLE_EXPLICIT_CONTENT_CHARS
+    ):
+        return None
+    return normalized_value
+
+
+def _validated_response_operation(
+    value: object,
+) -> DialogResponseOperation | None:
+    """Validate model output structure without inferring its semantics."""
+
+    try:
+        return validate_dialog_response_operation(value)
+    except CognitiveEpisodeValidationError:
+        return None

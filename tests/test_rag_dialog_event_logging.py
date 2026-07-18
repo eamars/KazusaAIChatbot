@@ -516,11 +516,15 @@ async def test_dialog_generator_records_llm_metadata_without_generated_text(
         '{"final_dialog": ["secret generated dialog"]}'
     )
     monkeypatch.setattr(dialog_module, "_dialog_generator_llm", llm)
-    monkeypatch.setattr(
-        dialog_module,
-        "_dialog_compliance_llm",
-        _StaticLLM('{"aligned": true, "issues": []}'),
-    )
+    for llm_name in (
+        "_dialog_semantic_fidelity_llm",
+        "_dialog_surface_integrity_llm",
+    ):
+        monkeypatch.setattr(
+            dialog_module,
+            llm_name,
+            _StaticLLM('{"aligned": true, "issues": []}'),
+        )
     monkeypatch.setattr(
         dialog_module.event_logging,
         "record_llm_stage_event",
@@ -536,15 +540,19 @@ async def test_dialog_generator_records_llm_metadata_without_generated_text(
     result = await dialog_module.dialog_generator(state)
 
     assert result["final_dialog"] == ["secret generated dialog"]
-    assert record_llm_stage_event.await_count == 2
+    assert record_llm_stage_event.await_count == 3
     record_model_contract_event.assert_not_awaited()
-    kwargs = next(
+    event_kwargs = [
         call.kwargs
         for call in record_llm_stage_event.await_args_list
-        if call.kwargs["stage_name"] == "dialog_generator"
-    )
-    assert kwargs["stage_name"] == "dialog_generator"
-    assert "secret generated dialog" not in _serialized(kwargs)
+    ]
+    assert {kwargs["stage_name"] for kwargs in event_kwargs} == {
+        "dialog_generator",
+        "dialog_semantic_fidelity",
+        "dialog_surface_integrity",
+    }
+    for kwargs in event_kwargs:
+        assert "secret generated dialog" not in _serialized(kwargs)
 
 
 @pytest.mark.asyncio
@@ -561,11 +569,15 @@ async def test_dialog_agent_records_quality_without_dialog_text(monkeypatch) -> 
             '{"final_dialog": ["secret full graph reply"]}'
         ),
     )
-    monkeypatch.setattr(
-        dialog_module,
-        "_dialog_compliance_llm",
-        _StaticLLM('{"aligned": true, "issues": []}'),
-    )
+    for llm_name in (
+        "_dialog_semantic_fidelity_llm",
+        "_dialog_surface_integrity_llm",
+    ):
+        monkeypatch.setattr(
+            dialog_module,
+            llm_name,
+            _StaticLLM('{"aligned": true, "issues": []}'),
+        )
     monkeypatch.setattr(
         dialog_module.event_logging,
         "record_dialog_quality_event",

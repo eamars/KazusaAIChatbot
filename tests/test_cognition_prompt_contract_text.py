@@ -42,25 +42,27 @@ def test_semantic_appraisal_prompt_limits_model_authority() -> None:
 def test_goal_prompt_requires_complete_grounded_bid() -> None:
     """Keep goal cognition handle-grounded and final-wording free."""
 
+    prompt = " ".join(GOAL_COGNITION_PROMPT.split())
     for required_text in (
         "independent goal cognition branch",
         "evidence handles",
-        "complete bid",
-        "Do not write final dialogue",
+        "complete grounded bid",
+        "do not write final dialog",
     ):
-        assert required_text in GOAL_COGNITION_PROMPT
+        assert required_text.casefold() in prompt.casefold()
 
 
-def test_goal_prompt_preserves_requested_response_operation_and_roles() -> None:
-    """A bid performs the requested operation with the original actors."""
+def test_goal_prompt_owns_current_judgment_and_roles() -> None:
+    """A bid chooses the present motive without reversing scene roles."""
 
-    prompt = GOAL_COGNITION_PROMPT.casefold()
+    prompt = " ".join(GOAL_COGNITION_PROMPT.casefold().split())
 
-    assert "requested response operation" in prompt
-    assert "actor, action, target or beneficiary" in prompt
-    assert "question cannot substitute" in prompt
-    assert "first-person pronouns" in prompt
-    assert "implicit imperative" in prompt
+    assert "believable present motive" in prompt
+    assert "current event" in prompt
+    assert "relationship" in prompt
+    assert "typed user-dialog roles are authoritative" in prompt
+    assert "actor" in prompt
+    assert "target" in prompt
 
 
 def test_goal_prompt_treats_physical_requests_as_verbal_stance() -> None:
@@ -68,10 +70,9 @@ def test_goal_prompt_treats_physical_requests_as_verbal_stance() -> None:
 
     prompt = GOAL_COGNITION_PROMPT.casefold()
 
-    assert "no current capability or text surface actuates" in prompt
     assert "verbal stance" in prompt
-    assert "requested physical movement occurred" in prompt
-    assert "performed, completed, delivered, or received" in prompt
+    assert "status executed" in prompt
+    assert "proves character-brain completion" in prompt
 
 
 def test_collapse_and_action_prompts_preserve_bid_ownership() -> None:
@@ -79,8 +80,10 @@ def test_collapse_and_action_prompts_preserve_bid_ownership() -> None:
 
     assert "prompt-local partition" in COLLAPSE_PROMPT
     assert "Do not rewrite bid content" in COLLAPSE_PROMPT
-    assert "semantic action plan" in ACTION_PLANNING_PROMPT.casefold()
-    assert "do not rewrite bid" in ACTION_PLANNING_PROMPT.casefold()
+    assert "semantic capability-proposal boundary" in (
+        ACTION_PLANNING_PROMPT.casefold()
+    )
+    assert "rewrite bid content" in ACTION_PLANNING_PROMPT.casefold()
     assert "cannot broaden capability eligibility" in (
         ACTION_PLANNING_PROMPT.casefold()
     )
@@ -97,10 +100,7 @@ def test_surface_prompts_leave_final_dialogue_to_dialog() -> None:
         PREFERENCE_SYSTEM_PROMPT,
         VISUAL_SYSTEM_PROMPT,
     )
-    assert all(
-        "do not write final dialogue" in prompt.lower()
-        for prompt in surface_prompts
-    )
+    assert all("final dialog" in prompt.lower() for prompt in surface_prompts)
 
 
 def test_generated_semantic_prompts_preserve_language_policy() -> None:
@@ -117,7 +117,7 @@ def test_generated_semantic_prompts_preserve_language_policy() -> None:
     ):
         normalized = " ".join(prompt.split())
         assert "Simplified Chinese" in normalized
-        assert "quoted user text" in normalized
+        assert "quoted" in normalized
         assert "proper nouns" in normalized
         assert "schema or enum tokens" in normalized
 

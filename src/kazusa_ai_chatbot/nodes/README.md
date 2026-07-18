@@ -23,16 +23,18 @@ adapter or debug client
 ```
 
 RAG and resolver capabilities return evidence. Cognition Core V2 owns semantic
-appraisal, causal state changes, goal judgment, bid collapse, route selection,
-and response goals. Deterministic connectors own validation, persistence,
-action materialization, permissions, limits, and graph routing. The V2 surface
-planner owns expression planning. `dialog_agent.py` owns final visible wording.
+appraisal, causal state changes, present character judgment, bid collapse,
+route selection, and response goals. Prior conversation and private residue
+inform that judgment without commanding one repeated posture. Deterministic
+connectors own validation, persistence, action materialization, permissions,
+limits, and graph routing. The V2 surface planner owns expressive content and
+only real visible boundaries. `dialog_agent.py` owns final visible wording.
 
 ## Module Boundary
 
 | Area | Main files | Ownership |
 | --- | --- | --- |
-| Perception | `persona_supervisor2_msg_decontexualizer.py` | Current media observation, current-message rewrite, and referent status after the brain-service relevance settlement boundary. |
+| Perception | `persona_supervisor2_msg_decontexualizer.py` | Current media observation, current-message rewrite, referent status, and one role-explicit current-turn meaning after the brain-service relevance settlement boundary. |
 | Persona graph | `persona_supervisor2.py` | Resolver recurrence, final commit ordering, action/surface routing, no-response handling, and episode trace assembly. |
 | V2 connector | `persona_supervisor2_cognition.py`, `persona_supervisor2_cognition_actions.py` | Exact `CognitionCoreInputV2` construction, state loading, V2 service binding, output projection, final state replacement, and semantic action-request materialization. |
 | Text and terminal visual connector | `persona_supervisor2_l3_surface.py` | Prompt-safe interaction-style loading, exact `TextSurfaceInputV2` construction, three-call text planning, and independent one-call visual planning. |
@@ -84,6 +86,17 @@ stage_0_msg_decontexualizer
          -> action-result trace without visible dialog
 ```
 
+For a live user message, Stage 0 returns semantic surfaces from its existing
+LLM call. `decontexualized_input` remains a natural equivalent used by
+compatibility and retrieval paths. Optional `role_explicit_content` uses the
+literal handles `current_user` and `self` to preserve nested actor, target,
+beneficiary, modality, and request direction. Optional structured
+`response_operation` records the response owner, whether an unsupplied answer
+or choice is required and who owns it, plus embedded actor and target roles.
+Deterministic code validates exact shape, enums, booleans, and bounds, then
+attaches the model-owned values unchanged to existing dialog-percept metadata.
+The raw percept content remains available beside this projection.
+
 The route decision requires a validated V2 cognition output. The presence of
 an action specification cannot create a text response and cannot substitute
 for `intention.route == "speech"`.
@@ -110,6 +123,12 @@ contract. Its input includes:
 - available action and resolver affordances; and
 - a bounded semantic scene description.
 
+When Stage 0 supplied a valid semantic projection, the connector forwards its
+`role_explicit_content` and `response_operation` unchanged as current episode
+evidence and semantic scene. Goal cognition, surface planning, and dialog
+verification therefore share one role and ownership meaning instead of
+independently interpreting nested direct pronouns.
+
 The V2 core performs deterministic preparation, scoped semantic appraisal,
 state reduction, dependency-ready goal cognition, complete-bid collapse, and
 route validation. Its output contains the replacement state, selected semantic
@@ -133,6 +152,10 @@ Only admitted `action_requests` are materialized into the existing action-spec
 execution boundary. Deterministic code revalidates capability availability,
 permissions, target bindings, and parameters. Action specs and action results
 remain trace/execution artifacts; they do not own cognition route selection.
+The proposal boundary keeps valid canonical rows and drops malformed rows
+individually. One unusable whole-object replacement degrades to an empty plan,
+and one unusable authorization replacement denies all proposed work. Speech
+remains available, while no malformed model output can grant execution.
 
 Memory-lifecycle requests follow a specialist boundary. Cognition may request
 a semantic lifecycle review, while the specialist chooses prompt-safe aliases
@@ -178,32 +201,34 @@ consumes them. The persona graph retains them as a private `image` surface with
 are excluded from every model-facing consolidation projection, source view,
 and router input.
 
-`dialog_agent.py` authors only words the character could literally type or
-say. Visible output contains no markup residue, stage-direction delimiters, or
-unmatched enclosing punctuation; the verifier rejects those forms even when no
-narrated action text remains. Dialog preserves the requested response
-operation, actors, claims, conditions, topic, time scope, and supplied
-descriptors, attributes, qualifiers, quantities, polarity, and comparative
-degree. Non-conflicting elaboration may add context without transforming,
-replacing, or compounding a supplied attribute into a different claim. It
-preserves explicit entity and target specificity; elaboration cannot
-generalize, euphemize, narrow, broaden, or replace a supplied referent.
-Acceptance, refusal, permission, and consent remain bounded to the exact
-source-requested act and scope; indefinite or unrestricted permission cannot
-substitute for a specific permission. When source meaning covers only the
-current occurrence, output remains silent about future claims, promises,
-conditions, expectations, threats, habits, rules, and contrastive or teasing
-additions. Explicit future content is preserved when the source supplies or
-requires it.
-Non-conflicting elaboration cannot create a new constraint, obligation,
-permission, prohibition, commitment, expectation, or future stance. The
-existing verifier receives the exact text surface, candidate dialog, and only
-`input_source` and `content` rows from current model-visible percepts within the
-shared 24,000-character surface-prompt bound. Those current percepts are the
-semantic authority; the text surface and candidate are proposals audited
-against them, and unsupported content is rejected even when both proposals
-agree. A negative verdict supplies the same grounding to the single allowed
-repair.
+`dialog_agent.py` authors natural, vivid chat-ready words for the character.
+Character-consistent invention, ask-backs, playful development, action
+description in plain, bracketed, first-person, or third-person form, and other
+coherent drift remain available when they fit the current input and scene.
+Two bounded
+hard-error checks run in parallel on the existing dialog-model route. Semantic
+fidelity receives only current percepts, the candidate role frame, and
+candidate dialog; it checks internal contradiction, direct current-input
+conflict, and actor/target/subject reversal. Surface integrity receives only
+permitted action results and candidate dialog; it checks false claims of
+character-brain action execution. Generated content, addressee, intent, and
+style proposals cannot outvote typed source roles. Source percepts and
+generated character speech use separate typed pronoun frames before
+actor/action/target comparison. When present, semantic fidelity uses upstream
+`role_explicit_content` for nested role direction and `response_operation` for
+response, selection, and embedded-action ownership while retaining raw
+content as the current-turn record. Deterministic code merges the two verdict
+shapes without rewriting dialog semantics. Each owner returns at most four
+issues and the duplicate-free merged result returns at most eight. Neither
+check treats novelty or
+personality strength as failure. A negative merged verdict supplies the same
+grounding to the single allowed repair.
+
+Before this dialog boundary, a typed character-owned required selection also
+activates one focused goal-level check. It prevents private continuity or a
+general submissive posture from delegating the current character's required
+choice to the user. A rejected goal is regenerated from clean typed/current
+context and rechecked; turns without the structural flag add no call.
 
 Dialog does not receive raw V2 mutable state, private branch payloads,
 suppressed bids, persistent handles, relationship scalars, or obsolete

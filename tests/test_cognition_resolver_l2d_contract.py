@@ -11,6 +11,9 @@ from kazusa_ai_chatbot.cognition_core_v2.action_selection import plan_actions
 
 
 class _ResolverPlannerLLM:
+    def __init__(self) -> None:
+        self.call_count = 0
+
     async def ainvoke(
         self,
         messages: list[object],
@@ -18,8 +21,12 @@ class _ResolverPlannerLLM:
         config: object,
     ) -> SimpleNamespace:
         del messages, config
+        self.call_count += 1
+        if self.call_count == 2:
+            return SimpleNamespace(content=json.dumps({
+                "decisions": {"c1": True},
+            }))
         return SimpleNamespace(content=json.dumps({
-            "route": "evidence",
             "action_requests": [],
             "resolver_requests": [{
                 "bid_handle": "b1",
@@ -49,15 +56,20 @@ async def test_v2_planner_returns_typed_resolver_request() -> None:
         "expected_consequences": ["reduce uncertainty"],
         "confidence": "high",
     }
+    llm = _ResolverPlannerLLM()
     services = SimpleNamespace(
-        llm=_ResolverPlannerLLM(),
+        llm=llm,
         action_selection_config=object(),
     )
 
     result = await plan_actions(
         primary_bid=primary_bid,
         supporting_bids=[],
-        episode={"episode_id": "episode-1", "trigger_source": "user_message"},
+        episode={
+            "episode_id": "episode-1",
+            "trigger_source": "user_message",
+            "output_mode": "visible_reply",
+        },
         evidence=[],
         available_actions=[],
         available_resolvers=[{
@@ -77,3 +89,4 @@ async def test_v2_planner_returns_typed_resolver_request() -> None:
         "reason": "the admitted motive has an evidence gap",
         "evidence_handles": ["e1"],
     }]
+    assert llm.call_count == 2

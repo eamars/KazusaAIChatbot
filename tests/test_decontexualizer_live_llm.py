@@ -9,6 +9,9 @@ from time import perf_counter
 import httpx
 import pytest
 
+from kazusa_ai_chatbot.cognition_episode import (
+    build_text_chat_cognitive_episode,
+)
 from kazusa_ai_chatbot.config import MSG_DECONTEXTUALIZER_LLM_BASE_URL
 from kazusa_ai_chatbot.nodes import persona_supervisor2_msg_decontexualizer as decontext
 from tests.llm_trace import write_llm_trace
@@ -197,3 +200,57 @@ async def test_live_decontextualizer_direct_second_person_preserved(
     output = str(result["decontexualized_input"])
     assert '你也不反对吧' in output, trace_payload
     assert _CHARACTER_NAME not in output, trace_payload
+
+
+async def test_live_decontextualizer_resolves_nested_direct_roles(
+    ensure_live_llm,
+    monkeypatch,
+) -> None:
+    """The upstream semantic projection should retain nested role direction."""
+
+    del ensure_live_llm
+    user_input = '请直接告诉我，你希望我下一步替你做什么。'
+    state = _base_state(user_input)
+    state["cognitive_episode"] = build_text_chat_cognitive_episode(
+        episode_id="nested-role-live-episode",
+        percept_id="nested-role-live-percept",
+        storage_timestamp_utc="2026-07-17T12:00:00+00:00",
+        local_time_context={
+            "current_local_datetime": "2026-07-18 00:00",
+            "current_local_weekday": "Saturday",
+        },
+        user_input=user_input,
+        platform="debug",
+        platform_channel_id="nested-role-private",
+        channel_type="private",
+        platform_message_id="nested-role-message",
+        platform_user_id="identity-user",
+        global_user_id="identity-global-user",
+        user_name='测试用户',
+        debug_modes={},
+        target_addressed_user_ids=[],
+        target_broadcast=False,
+    )
+
+    result, trace_payload = await _run_case(
+        monkeypatch,
+        "nested_direct_roles",
+        state,
+    )
+
+    metadata = result["cognitive_episode"]["percepts"][0]["metadata"]
+    role_explicit_content = metadata["role_explicit_content"]
+    response_operation = metadata["response_operation"]
+    assert "当前用户" in role_explicit_content, trace_payload
+    assert "当前角色" in role_explicit_content, trace_payload
+    assert "current_user" not in role_explicit_content, trace_payload
+    assert "self" not in role_explicit_content, trace_payload
+    assert "current_user" not in response_operation["operation"], trace_payload
+    assert "self" not in response_operation["operation"], trace_payload
+    assert response_operation["response_owner_role"] == "self", trace_payload
+    assert response_operation["selection_owner_role"] == "self", trace_payload
+    assert response_operation["selection_required"] is True, trace_payload
+    assert response_operation["embedded_actor_role"] == (
+        "current_user"
+    ), trace_payload
+    assert response_operation["embedded_target_role"] == "self", trace_payload

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Mapping, Sequence
 from time import perf_counter
 from typing import Any, Literal
@@ -24,6 +25,9 @@ ACTION_AUTHORIZATION_PROMPT_CAP = 16000
 ACTION_AUTHORIZATION_ATTEMPT_LIMIT = 2
 ACTION_AUTHORIZATION_OUTPUT_CAP = 3000
 ACTION_AUTHORIZATION_TEXT_CAP = 400
+
+
+logger = logging.getLogger(__name__)
 
 
 ACTION_AUTHORIZATION_PROMPT = '''You are the focused semantic authorization
@@ -159,10 +163,12 @@ async def authorize_action_requests(
         SystemMessage(content=ACTION_AUTHORIZATION_PROMPT),
         HumanMessage(content=prompt_text),
     ]
-    decisions = await _invoke_action_authorizer(
+    decisions = await invoke_semantic_authorizer(
         services=services,
         messages=messages,
         candidate_handles=list(candidate_requests),
+        stage_name="action_authorization",
+        output_state_fields=["authorized_action_requests"],
     )
     authorized_handles = {
         handle for handle, authorized in decisions.items() if authorized
@@ -174,13 +180,15 @@ async def authorize_action_requests(
     ]
 
 
-async def _invoke_action_authorizer(
+async def invoke_semantic_authorizer(
     *,
     services: CognitionCoreServicesV2,
     messages: list[BaseMessage],
     candidate_handles: list[str],
+    stage_name: str,
+    output_state_fields: list[str],
 ) -> dict[str, bool]:
-    """Invoke one focused authorizer with one bounded shape repair."""
+    """Invoke one focused semantic authorizer with one shape repair."""
 
     current_messages = list(messages)
     for attempt_index in range(ACTION_AUTHORIZATION_ATTEMPT_LIMIT):
@@ -191,10 +199,10 @@ async def _invoke_action_authorizer(
         )
         response_text = str(response.content)
         parsed: object = {}
-        stage_name = (
-            "action_authorization"
+        current_stage_name = (
+            stage_name
             if attempt_index == 0
-            else "action_authorization.repair"
+            else f"{stage_name}.repair"
         )
         try:
             parsed = parse_llm_json_output(response_text)
@@ -203,7 +211,7 @@ async def _invoke_action_authorizer(
                 candidate_handles=candidate_handles,
             )
         except ValueError as exc:
-            await _record_action_authorization_trace(
+            await _record_authorization_trace(
                 services=services,
                 messages=current_messages,
                 response_text=response_text,
@@ -211,20 +219,27 @@ async def _invoke_action_authorizer(
                 parse_status="contract_error",
                 status="failed",
                 started_at=started_at,
-                stage_name=stage_name,
+                stage_name=current_stage_name,
+                output_state_fields=output_state_fields,
             )
             if attempt_index + 1 >= ACTION_AUTHORIZATION_ATTEMPT_LIMIT:
-                raise ValueError(
-                    "action authorization is invalid after one replacement: "
-                    f"{exc}"
-                ) from exc
+                logger.warning(
+                    "%s denied all candidates after an unusable replacement: "
+                    "%s",
+                    stage_name,
+                    exc,
+                )
+                return {
+                    handle: False
+                    for handle in candidate_handles
+                }
             current_messages.append(_authorization_repair_message(
                 response_text=response_text,
                 contract_error=str(exc),
                 candidate_handles=candidate_handles,
             ))
             continue
-        await _record_action_authorization_trace(
+        await _record_authorization_trace(
             services=services,
             messages=current_messages,
             response_text=response_text,
@@ -232,7 +247,8 @@ async def _invoke_action_authorizer(
             parse_status="succeeded",
             status="succeeded",
             started_at=started_at,
-            stage_name=stage_name,
+            stage_name=current_stage_name,
+            output_state_fields=output_state_fields,
         )
         return decisions
     raise AssertionError("action-authorization attempt loop did not terminate")
@@ -294,7 +310,7 @@ def _authorization_repair_message(
     )
 
 
-async def _record_action_authorization_trace(
+async def _record_authorization_trace(
     *,
     services: CognitionCoreServicesV2,
     messages: Sequence[BaseMessage],
@@ -304,6 +320,7 @@ async def _record_action_authorization_trace(
     status: str,
     started_at: float,
     stage_name: str,
+    output_state_fields: list[str],
 ) -> None:
     """Preserve one protected semantic authorization model boundary."""
 
@@ -322,5 +339,5 @@ async def _record_action_authorization_trace(
         parse_status=parse_status,
         status=status,
         duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
-        output_state_fields=["authorized_action_requests"],
+        output_state_fields=output_state_fields,
     )

@@ -8,9 +8,6 @@ from types import SimpleNamespace
 import pytest
 
 from kazusa_ai_chatbot.cognition_core_v2.action_selection import plan_actions
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
-    CognitionExecutionError,
-)
 
 
 def _bid() -> dict[str, object]:
@@ -33,13 +30,11 @@ def _bid() -> dict[str, object]:
 
 def _decision(
     *,
-    route: str,
     action_requests: list[dict[str, str]] | None = None,
 ) -> dict[str, object]:
     """Build one exact fixed-shape planner decision."""
 
     return {
-        "route": route,
         "action_requests": action_requests or [],
         "resolver_requests": [],
         "resolver_pending_resolution": None,
@@ -50,6 +45,7 @@ def _decision(
 class _ActionLLM:
     def __init__(self, decision: dict[str, object]) -> None:
         self._decision = decision
+        self._calls = 0
 
     async def ainvoke(
         self,
@@ -58,7 +54,19 @@ class _ActionLLM:
         config: object,
     ) -> SimpleNamespace:
         del messages, config
-        return SimpleNamespace(content=json.dumps(self._decision))
+        self._calls += 1
+        response = self._decision
+        if self._calls > 1:
+            response = {
+                "decisions": {
+                    f"c{index}": True
+                    for index, _ in enumerate(
+                        self._decision["action_requests"],
+                        start=1,
+                    )
+                }
+            }
+        return SimpleNamespace(content=json.dumps(response))
 
 
 def _services(decision: dict[str, object]) -> SimpleNamespace:
@@ -77,7 +85,11 @@ async def _plan(
     return await plan_actions(
         primary_bid=_bid(),
         supporting_bids=[],
-        episode={"episode_id": "episode-1", "trigger_source": "user_message"},
+        episode={
+            "episode_id": "episode-1",
+            "trigger_source": "user_message",
+            "output_mode": "visible_reply",
+        },
         evidence=[],
         available_actions=actions,
         available_resolvers=[],
@@ -92,7 +104,6 @@ async def test_action_route_copies_only_available_typed_affordance() -> None:
 
     result = await _plan(
         _decision(
-            route="action",
             action_requests=[{
                 "bid_handle": "b1",
                 "action_handle": "a1",
@@ -114,7 +125,7 @@ async def test_action_route_copies_only_available_typed_affordance() -> None:
         }],
     )
 
-    assert result["intention"]["route"] == "action"
+    assert result["intention"]["route"] == "speech"
     assert result["action_requests"] == [{
         "action_kind": "background_work_request",
         "decision": "",
@@ -131,20 +142,21 @@ async def test_action_route_copies_only_available_typed_affordance() -> None:
 async def test_action_route_rejects_unavailable_affordance() -> None:
     """Permission and availability remain deterministic code authority."""
 
-    with pytest.raises((CognitionExecutionError, ValueError)):
-        await _plan(
-            _decision(
-                route="action",
-                action_requests=[{
-                    "bid_handle": "b1",
-                    "action_handle": "a1",
-                    "decision": "",
-                    "semantic_goal": "complete bounded work",
-                    "reason": "the admitted motive requires it",
-                }],
-            ),
-            [],
-        )
+    result = await _plan(
+        _decision(
+            action_requests=[{
+                "bid_handle": "b1",
+                "action_handle": "a1",
+                "decision": "",
+                "semantic_goal": "complete bounded work",
+                "reason": "the admitted motive requires it",
+            }],
+        ),
+        [],
+    )
+
+    assert result["intention"]["route"] == "speech"
+    assert result["action_requests"] == []
 
 
 @pytest.mark.asyncio
@@ -153,7 +165,6 @@ async def test_generic_action_decision_preserves_coding_continuation() -> None:
 
     result = await _plan(
         _decision(
-            route="speech",
             action_requests=[{
                 "bid_handle": "b1",
                 "action_handle": "a1",

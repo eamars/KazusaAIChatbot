@@ -11,7 +11,8 @@ def test_action_prompt_owns_semantic_selection_only() -> None:
     prompt = ACTION_PLANNING_PROMPT.casefold()
 
     assert "bid_handle" in prompt
-    assert "do not rewrite bid" in prompt
+    assert "rewrite bid content" in prompt
+    assert "protocol code derives route" in prompt
     assert "semantic_goal" in prompt
     assert "decision" in prompt
     assert "task_willingness" not in prompt

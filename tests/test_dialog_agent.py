@@ -39,15 +39,17 @@ def _stub_dialog_event_logging(monkeypatch):
             recorder_name,
             AsyncMock(),
         )
-    compliance_llm = MagicMock()
-    compliance_llm.ainvoke = AsyncMock(
-        return_value=AIMessage(content='{"aligned": true, "issues": []}')
-    )
-    monkeypatch.setattr(
-        dialog_module,
-        "_dialog_compliance_llm",
-        compliance_llm,
-    )
+    for llm_name in (
+        "_dialog_semantic_fidelity_llm",
+        "_dialog_surface_integrity_llm",
+    ):
+        compliance_llm = MagicMock()
+        compliance_llm.ainvoke = AsyncMock(
+            return_value=AIMessage(
+                content='{"aligned": true, "issues": []}',
+            )
+        )
+        monkeypatch.setattr(dialog_module, llm_name, compliance_llm)
 
 
 def _text_surface_output() -> dict[str, object]:
@@ -151,7 +153,12 @@ def test_v2_prompt_describes_surface_renderer_boundary() -> None:
     prompt = dialog_module._V2_DIALOG_GENERATOR_PROMPT
 
     assert "text_surface_output_v2" in prompt
-    assert "Do not re-evaluate permission" in prompt
+    assert "natural" in prompt
+    assert "character-specific" in prompt
+    assert "chat-ready" in prompt
+    assert "first-person" in prompt
+    assert "Action description" in prompt
+    assert "valid visible roleplay" in prompt
     assert "final_dialog" in prompt
     assert "action_directives" not in prompt
 

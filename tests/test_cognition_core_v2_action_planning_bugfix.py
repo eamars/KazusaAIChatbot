@@ -6,7 +6,11 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from langchain_core.messages import HumanMessage
 
+from kazusa_ai_chatbot.cognition_core_v2.action_authorization import (
+    invoke_semantic_authorizer,
+)
 from kazusa_ai_chatbot.cognition_core_v2.action_selection import (
     _validate_action_plan_decision,
     plan_actions,
@@ -195,9 +199,7 @@ async def test_invalid_action_plan_receives_one_bounded_replacement() -> None:
     """The same semantic owner can replace one contract-invalid object."""
 
     responses = [
-        {
-            "action_requests": [],
-        },
+        {"action_requests": "invalid"},
         _planner_response(),
     ]
     captured_messages: list[list[object]] = []
@@ -236,14 +238,14 @@ async def test_invalid_action_plan_receives_one_bounded_replacement() -> None:
     assert len(captured_messages) == 2
     repair_payload = json.loads(str(captured_messages[1][-1].content))
     assert repair_payload["contract_error"] == (
-        "action plan fields are not exact"
+        "action requests must be an array"
     )
     assert "invalid_response" in repair_payload
 
 
 @pytest.mark.asyncio
-async def test_action_plan_stops_after_one_failed_replacement() -> None:
-    """A second invalid object fails closed without an unbounded retry loop."""
+async def test_action_plan_contains_one_failed_replacement() -> None:
+    """A second invalid object yields speech without an unbounded retry loop."""
 
     calls = 0
 
@@ -257,28 +259,32 @@ async def test_action_plan_stops_after_one_failed_replacement() -> None:
             del messages, config
             nonlocal calls
             calls += 1
-            return SimpleNamespace(content=json.dumps({"route": "speech"}))
+            return SimpleNamespace(content=json.dumps({
+                "action_requests": "invalid",
+            }))
 
-    with pytest.raises(ValueError, match="action plan is invalid"):
-        await plan_actions(
-            primary_bid=_bid("ordinary_response"),
-            supporting_bids=[],
-            episode={
-                "episode_id": "episode-1",
-                "trigger_source": "user_message",
-                "output_mode": "visible_reply",
-            },
-            evidence=[],
-            available_actions=[],
-            available_resolvers=[],
-            resolver_context="resolver_status=idle",
-            services=SimpleNamespace(
-                llm=_LLM(),
-                action_selection_config=object(),
-            ),
-        )
+    result = await plan_actions(
+        primary_bid=_bid("ordinary_response"),
+        supporting_bids=[],
+        episode={
+            "episode_id": "episode-1",
+            "trigger_source": "user_message",
+            "output_mode": "visible_reply",
+        },
+        evidence=[],
+        available_actions=[],
+        available_resolvers=[],
+        resolver_context="resolver_status=idle",
+        services=SimpleNamespace(
+            llm=_LLM(),
+            action_selection_config=object(),
+        ),
+    )
 
     assert calls == 2
+    assert result["intention"]["route"] == "speech"
+    assert result["action_requests"] == []
+    assert result["resolver_requests"] == []
 
 
 @pytest.mark.asyncio
@@ -347,60 +353,47 @@ async def test_contextual_action_binds_ref_without_prompt_exposure() -> None:
     assert "coding_run:private-run-ref" not in captured_prompt
 
 
-@pytest.mark.parametrize(
-    "response, error_match",
-    [
-        (
-            _planner_response(
-                actions=[{
-                    "bid_handle": "b1",
-                    "action_handle": "a1",
-                    "decision": "",
-                    "semantic_goal": f"goal {index}",
-                    "reason": "grounded reason",
-                } for index in range(4)],
-            ),
-            "three",
-        ),
-        (
-            _planner_response(
-                actions=[{
-                    "bid_handle": "b1",
-                    "action_handle": "a1",
-                    "decision": "",
-                    "semantic_goal": "act",
-                    "reason": "grounded reason",
-                }],
-                resolvers=[{
-                    "bid_handle": "b1",
-                    "resolver_handle": "r1",
-                    "semantic_goal": "resolve",
-                    "reason": "grounded reason",
-                }],
-            ),
-            "mutually exclusive",
-        ),
-        (
-            _planner_response(
-                actions=[{
-                    "bid_handle": "b2",
-                    "action_handle": "a1",
-                    "decision": "",
-                    "semantic_goal": "act",
-                    "reason": "grounded reason",
-                }],
-            ),
-            "bid handle",
-        ),
-    ],
-)
-def test_action_plan_rejects_capacity_mixing_and_unknown_bids(
-    response: dict[str, object],
-    error_match: str,
-) -> None:
-    """Structural validation prevents overflow, mixing, and invented motives."""
+def test_action_plan_caps_rows_and_drops_unknown_bids() -> None:
+    """Normalization preserves valid capacity and drops invented provenance."""
 
-    with pytest.raises(ValueError, match=error_match):
+    response = _planner_response(actions=[{
+        "bid_handle": "b1" if index < 4 else "b2",
+        "action_handle": "a1",
+        "decision": "",
+        "semantic_goal": f"goal {index}",
+        "reason": "grounded reason",
+    } for index in range(1, 5)])
+
+    decision = _validate_action_plan_decision(
+        response,
+        bid_handles={"b1": _bid("ordinary_response")},
+        action_handles={"a1": _action("background_work_request")},
+        resolver_handles={"r1": _resolver("local_context_recall")},
+    )
+
+    assert len(decision["action_requests"]) == 3
+
+
+def test_action_plan_rejects_mixed_action_and_resolver_semantics() -> None:
+    """Normalization still rejects a semantically ambiguous mixed route."""
+
+    response = _planner_response(
+        actions=[{
+            "bid_handle": "b1",
+            "action_handle": "a1",
+            "decision": "",
+            "semantic_goal": "act",
+            "reason": "grounded reason",
+        }],
+        resolvers=[{
+            "bid_handle": "b1",
+            "resolver_handle": "r1",
+            "semantic_goal": "resolve",
+            "reason": "grounded reason",
+        }],
+    )
+
+    with pytest.raises(ValueError, match="mutually exclusive"):
         _validate_action_plan_decision(
             response,
             bid_handles={"b1": _bid("ordinary_response")},
@@ -409,18 +402,19 @@ def test_action_plan_rejects_capacity_mixing_and_unknown_bids(
         )
 
 
-def test_action_plan_rejects_model_authored_route() -> None:
-    """Protocol route is absent from the semantic proposal schema."""
+def test_action_plan_ignores_model_authored_route() -> None:
+    """Protocol route remains derived after unknown fields are stripped."""
 
     response = _planner_response()
     response["route"] = "speech"
-    with pytest.raises(ValueError, match="fields are not exact"):
-        _validate_action_plan_decision(
-            response,
-            bid_handles={"b1": _bid("ordinary_response")},
-            action_handles={"a1": _action("background_work_request")},
-            resolver_handles={"r1": _resolver("local_context_recall")},
-        )
+    decision = _validate_action_plan_decision(
+        response,
+        bid_handles={"b1": _bid("ordinary_response")},
+        action_handles={"a1": _action("background_work_request")},
+        resolver_handles={"r1": _resolver("local_context_recall")},
+    )
+
+    assert "route" not in decision
 
 
 def test_action_plan_merges_semantic_goal_progress_delta() -> None:
@@ -453,57 +447,116 @@ def test_action_plan_merges_semantic_goal_progress_delta() -> None:
     assert progress["evidence_dependencies"] == ["character memory"]
 
 
-def test_action_plan_enforces_registry_decision_format() -> None:
-    """A scheduled action rejects prose appended to its typed decision."""
+def test_action_plan_drops_invalid_registry_decision_format() -> None:
+    """A scheduled action drops prose appended to its typed decision."""
 
     action = _action("future_speak")
     action.update({
         "decision_mode": "required_text",
         "decision_pattern": r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}",
     })
-    with pytest.raises(ValueError, match="full-match"):
-        _validate_action_plan_decision(
-            _planner_response(
-                actions=[{
-                    "bid_handle": "b1",
-                    "action_handle": "a1",
-                    "decision": "2026-07-15 08:00 | remind me",
-                    "semantic_goal": "schedule the accepted reminder",
-                    "reason": "the user requested a future reminder",
-                }],
-            ),
-            bid_handles={"b1": _bid("ordinary_response")},
-            action_handles={"a1": action},
-            resolver_handles={},
-        )
+    decision = _validate_action_plan_decision(
+        _planner_response(
+            actions=[{
+                "bid_handle": "b1",
+                "action_handle": "a1",
+                "decision": "2026-07-15 08:00 | remind me",
+                "semantic_goal": "schedule the accepted reminder",
+                "reason": "the user requested a future reminder",
+            }],
+        ),
+        bid_handles={"b1": _bid("ordinary_response")},
+        action_handles={"a1": action},
+        resolver_handles={},
+    )
+
+    assert decision["action_requests"] == []
 
 
-def test_closed_action_error_names_handle_and_allowed_decision() -> None:
-    """A bounded replacement receives the exact registry correction rule."""
+def test_closed_action_with_unknown_decision_is_dropped() -> None:
+    """A closed action cannot escape its registry decision vocabulary."""
 
     action = _action("trigger_future_cognition")
     action["decision_mode"] = "closed"
     action["allowed_decisions"] = ["schedule"]
     action["default_decision"] = "schedule"
 
-    with pytest.raises(
-        ValueError,
-        match=r"a1 decision must be one of \['schedule'\]",
-    ):
-        _validate_action_plan_decision(
-            _planner_response(
-                actions=[{
-                    "bid_handle": "b1",
-                    "action_handle": "a1",
-                    "decision": "think about the response later",
-                    "semantic_goal": "continue one grounded private task",
-                    "reason": "the admitted motive requires later cognition",
-                }],
-            ),
-            bid_handles={"b1": _bid("ordinary_response")},
-            action_handles={"a1": action},
-            resolver_handles={},
-        )
+    decision = _validate_action_plan_decision(
+        _planner_response(
+            actions=[{
+                "bid_handle": "b1",
+                "action_handle": "a1",
+                "decision": "think about the response later",
+                "semantic_goal": "continue one grounded private task",
+                "reason": "the admitted motive requires later cognition",
+            }],
+        ),
+        bid_handles={"b1": _bid("ordinary_response")},
+        action_handles={"a1": action},
+        resolver_handles={},
+    )
+
+    assert decision["action_requests"] == []
+
+
+def test_action_plan_strips_extra_resolver_fields() -> None:
+    """Harmless model metadata cannot block a grounded resolver proposal."""
+
+    response = _planner_response(resolvers=[{
+        "bid_handle": "b1",
+        "resolver_handle": "r1",
+        "semantic_goal": "recover the omitted local referent",
+        "reason": "the current phrase is incomplete",
+        "capability": "local_context_recall",
+        "priority": "now",
+    }])
+
+    decision = _validate_action_plan_decision(
+        response,
+        bid_handles={"b1": _bid("ordinary_response")},
+        action_handles={},
+        resolver_handles={"r1": _resolver("local_context_recall")},
+    )
+
+    assert decision["resolver_requests"] == [{
+        "bid_handle": "b1",
+        "resolver_handle": "r1",
+        "semantic_goal": "recover the omitted local referent",
+        "reason": "the current phrase is incomplete",
+    }]
+
+
+@pytest.mark.asyncio
+async def test_authorizer_denies_after_one_unusable_replacement() -> None:
+    """Schema failure cannot authorize work or crash the visible response."""
+
+    calls = 0
+
+    class _LLM:
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config: object,
+        ) -> SimpleNamespace:
+            del messages, config
+            nonlocal calls
+            calls += 1
+            return SimpleNamespace(content=json.dumps({"invalid": True}))
+
+    decisions = await invoke_semantic_authorizer(
+        services=SimpleNamespace(
+            llm=_LLM(),
+            action_selection_config=object(),
+        ),
+        messages=[HumanMessage(content="bounded candidates")],
+        candidate_handles=["c1", "c2"],
+        stage_name="test_authorization",
+        output_state_fields=["authorized_requests"],
+    )
+
+    assert calls == 2
+    assert decisions == {"c1": False, "c2": False}
 
 
 def test_speak_and_internal_apply_are_absent_from_planner_affordances() -> None:

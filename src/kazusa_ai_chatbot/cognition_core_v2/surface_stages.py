@@ -15,23 +15,19 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 
 
-STYLE_SYSTEM_PROMPT = '''Choose bounded speech-safe style guidance from the
-expression policy, semantic affect, semantic relationship, and interaction
-style context. Use character_voice_context only for character wording and
-cadence. Its physical or visual traits must never become narrated action,
-stage direction, camera direction, scene direction, or performance cues in
-text. Return guidance only for lexical register and wording, sentence length
-and shape, rhythm, hesitation, and punctuation.
-style_guidance must never suggest any detail, topic, example, image, action,
-claim, inference, or content beat to add, even optionally. It must not select
-or alter semantic content.
-Treat the visible episode, selected intention, primary bid, supporting bids,
-and permitted action results as grounding constraints.
-Do not write final dialogue. Write newly generated free text in Simplified Chinese while
+STYLE_SYSTEM_PROMPT = '''Choose context-appropriate speech style from the
+expression policy, semantic affect, semantic relationship, interaction style,
+and character_voice_context. Decide only lexical register, sentence shape,
+rhythm, hesitation, and punctuation. Express the selected intention and bids
+without changing their meaning or adding a content beat. Convert voice traits
+into wording guidance for chat-ready character text rather than camera, scene,
+or performance instructions.
+
+Treat character-owned reflection and internal observation as context rather
+than live user speech. Operational metadata is not wording. Write new free
+text in Simplified Chinese while
 preserving quoted user text, proper nouns, code, URLs, and schema or enum
-tokens when needed. Treat character-owned reflection or internal observation
-as evidence, never as live user speech. Do not copy source-packet headings,
-timestamps, transport summaries, schema keys, or operational metadata.
+tokens. Return style guidance rather than final dialog.
 
 # Output Format
 Return exactly one JSON object with exactly style_guidance. Its value must be
@@ -59,58 +55,38 @@ async def run_style_stage(
     return _bounded_text(parsed["style_guidance"], "style guidance", 1000)
 
 
-CONTENT_PLAN_SYSTEM_PROMPT = '''Plan speech-safe visible content from the
-selected semantic intention, primary bid, supporting bids, permitted details,
-visible episode, semantic affect, semantic relationship, and permitted action
-results. Treat the expression policy and interaction style context as
-constraints. Preserve the current user's requested response operation,
-including whether the response should answer, infer, explain, ask, accept,
-refuse, or negotiate. Preserve every actor, action, target or beneficiary,
-semantic claim, condition, required content beat, present or future time scope,
-topic, and visible limit. Preserve source descriptors, attributes, qualifiers,
-quantities, polarity, and comparative degree. Non-conflicting elaboration is
-allowed, but it must not transform, replace, or compound a supplied attribute
-into a different claim. Preserve explicit entity and target specificity.
-Typed role fields on a visible percept are authoritative. For user dialog,
-speaker_role=current_user owns first-person pronouns, addressee_role=self is
-the active character, and implicit_imperative_subject_role=self owns an
-unstated command subject. Never reverse those roles even when an upstream bid
-does.
-A rhetorical question cannot substitute for a requested answer, inference,
-guess, explanation, acceptance, refusal, or negotiation. It may appear only as
-an additional character-voice beat after the requested operation is complete.
-Never generalize, euphemize, narrow, broaden, or replace a supplied referent.
-Acceptance, refusal, permission, and consent must remain bounded to the exact
-source-requested act and scope. Indefinite or unrestricted permission must not
-substitute for a specific permission.
-Possessive, controlling, exclusive, jealous, tsundere, or other expressive or
-relational style may shape the wording of source-grounded current meaning.
-Style alone cannot authorize a new semantic claim, literal future rule or
-exclusivity condition, obligation, prohibition, commitment, or expectation.
-When source meaning is limited to the current occurrence, output
-must remain silent about future claims, promises, conditions, expectations,
-threats, habits, or rules, including contrastive or teasing additions.
-Preserve explicit future content when the source actually supplies or requires
-it. Do not substitute a different operation, reverse a semantic role, invent
-a condition or future rule, or introduce an unrelated topic. Record these
-invariants as explicit content requirements for the final renderer.
-permitted_action_results is the only authority that the character brain
-executed an action in this cognition chain. A result with status executed may
-support a completed-effect claim bounded to its exact action_kind,
-semantic_result, and target_roles. A result with status scheduled or pending
-may support only an acknowledgement of that actual lifecycle state, never
-completion. Failed and unavailable results authorize no success claim. The
-visible episode may still ground externally reported or observed events, but a
-request or upstream bid without a matching executed result remains only a
-topic for the character's verbal stance, such as acceptance, refusal,
-negotiation, teasing, bounded permission, or spoken instruction. Keep every
-visible plan literal speech rather than narrated enactment. Do not write final
-dialogue. Write newly generated free text in
-Simplified Chinese while preserving quoted user text, proper nouns,
-code, URLs, and schema or enum tokens when needed. Treat character-owned
-reflection or internal observation as evidence, never as live user speech. Do
-not copy source-packet headings, timestamps, transport summaries, schema keys,
-or operational metadata.
+CONTENT_PLAN_SYSTEM_PROMPT = '''Plan the visible content that best expresses
+the selected character judgment in this current scene. Use the selected
+intention, primary and supporting bids, visible episode, semantic affect,
+semantic relationship, expression policy, interaction style, and permitted
+action results.
+
+# Planning Procedure
+1. Answer or engage with the current input in the way chosen by cognition.
+Keep the response appropriate to the character's relationship, emotion, and
+scene pressure rather than mechanically copying earlier dialog.
+2. Choose vivid, character-specific content. Coherent imaginative detail and
+playful development are welcome when they do not contradict the current input
+or an explicit active constraint and do not reverse actor, target,
+beneficiary, or subject roles.
+3. Treat typed visible-percept roles as authoritative. For user dialog,
+current_user owns first-person pronouns; self is the active character and
+direct addressee; self is also an implicit imperative subject.
+4. permitted_action_results is the exact character-brain capability ledger.
+Only executed supports its bounded completed effect; other statuses support no
+completed effect. A request or bid supports a verbal or roleplayed stance, not
+capability execution.
+5. In-character action description is valid visible roleplay in plain,
+bracketed, first-person, or third-person form when it fits the current scene.
+
+Return a concise plan plus one to eight semantic requirements that protect
+the chosen meaning, real active boundaries, role direction, and action truth.
+Treat character-owned reflection and internal observation as context rather
+than live user speech. Operational metadata is not prose. Write new free text
+in Simplified Chinese while
+preserving quoted user text, proper nouns, code, URLs, and schema or enum
+tokens. Keep machine role tokens in structured input only; use natural Chinese
+participant descriptions in free text. Do not write final dialog.
 
 # Output Format
 Return exactly one JSON object with exactly content_plan and
@@ -148,31 +124,27 @@ async def run_content_plan_stage(
     return content_plan, content_requirements
 
 
-PREFERENCE_SYSTEM_PROMPT = '''Choose preference-sensitive boundaries and an
-addressee plan from the selected intention, visible episode, projected bids,
-expression policy, semantic affect, semantic relationship, permitted action
-results, and interaction style context. Treat all supplied fields as semantic
-surface input rather than state authority.
-Treat each permitted action result status as exact authority for actions
-executed by the character brain. Executed may support its supplied completed
-effect; scheduled and pending may support only their actual lifecycle state;
-failed and unavailable authorize no success claim. The visible episode may
-still ground external reported or observed events. Never infer character-brain
-execution from a user request, bid, or style cue.
-Do not write final dialogue. Write newly generated free text in Simplified
-Chinese while preserving quoted user text, proper nouns, code, URLs, and
-schema or enum tokens when needed. Treat character-owned reflection or
-internal observation as evidence, never as live user speech. Do not copy
-source-packet headings, timestamps, transport summaries, schema keys, or
-operational metadata.
+PREFERENCE_SYSTEM_PROMPT = '''Identify which real visible boundary or
+addressee constraint exists, if any, in the selected character judgment and
+current scene. Use the selected intention, visible episode, projected bids,
+expression policy, semantic affect, semantic relationship, interaction style,
+and permitted action results as context.
 
-visible_boundaries must contain only expression or visibility constraints and
-permitted-detail limits; never restate user facts as boundaries. addressee_plan
-must contain only intended semantic addressee handling.
+visible_boundaries contains only active expression limits or permitted-detail
+limits. addressee_plan contains only actual semantic addressee handling.
+Return an empty list when none exists instead of inventing resistance or an
+addressee rule. Treat action-result status exactly: only executed supports its
+bounded completed effect; other statuses retain their stated meaning.
+Character-owned reflection is context, not live user speech; operational
+metadata is not dialog content.
+
+Write new free text in Simplified Chinese while preserving quoted user text,
+proper nouns, code, URLs, and schema or enum tokens. Return planning fields
+rather than final dialog.
 
 # Output Format
 Return exactly one JSON object with exactly visible_boundaries and
-addressee_plan. Each value must be a duplicate-free list containing one to
+addressee_plan. Each value must be a duplicate-free list containing zero to
 eight non-empty strings of at most 500 characters each.'''
 
 
@@ -198,8 +170,16 @@ async def run_preference_stage(
     }:
         raise ValueError("preference stage fields are not exact")
     return (
-        _bounded_text_list(parsed["visible_boundaries"], "visible boundaries"),
-        _bounded_text_list(parsed["addressee_plan"], "addressee plan"),
+        _bounded_text_list(
+            parsed["visible_boundaries"],
+            "visible boundaries",
+            minimum=0,
+        ),
+        _bounded_text_list(
+            parsed["addressee_plan"],
+            "addressee plan",
+            minimum=0,
+        ),
     )
 
 
@@ -270,10 +250,15 @@ def _bounded_text(value: Any, label: str, maximum: int) -> str:
     return value
 
 
-def _bounded_text_list(value: Any, label: str) -> list[str]:
-    """Validate one bounded duplicate-free stage-owned text list."""
+def _bounded_text_list(
+    value: Any,
+    label: str,
+    *,
+    minimum: int = 1,
+) -> list[str]:
+    """Validate one duplicate-free text list against its stage cardinality."""
 
-    if not isinstance(value, list) or not 1 <= len(value) <= 8:
+    if not isinstance(value, list) or not minimum <= len(value) <= 8:
         raise ValueError(f"{label} is invalid")
     if len(value) != len(set(value)):
         raise ValueError(f"{label} contains duplicates")

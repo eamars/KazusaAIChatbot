@@ -15,11 +15,15 @@ from tests.cognition_core_v2_test_helpers import canonical_episode
 def _aligned_dialog_compliance(monkeypatch) -> None:
     """Keep mention tests focused on delivery-neutral authored text."""
 
-    monkeypatch.setattr(
-        dialog_module,
-        "_dialog_compliance_llm",
-        _CapturingLLM({"aligned": True, "issues": []}),
-    )
+    for llm_name in (
+        "_dialog_semantic_fidelity_llm",
+        "_dialog_surface_integrity_llm",
+    ):
+        monkeypatch.setattr(
+            dialog_module,
+            llm_name,
+            _CapturingLLM({"aligned": True, "issues": []}),
+        )
 
 
 class _CapturingLLM:

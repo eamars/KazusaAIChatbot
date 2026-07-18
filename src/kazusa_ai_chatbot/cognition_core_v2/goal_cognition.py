@@ -21,50 +21,42 @@ from kazusa_ai_chatbot.utils import parse_llm_json_output
 
 
 GOAL_COGNITION_PROMPT = '''You are one independent goal cognition branch.
-Use only the supplied semantic context and evidence handles. Return one
-complete bid for this motive. Do not mutate state, invent evidence, select an execution
-route, or choose a capability. Do not write final dialogue. Use an empty target list
-when unsupported. Always provide at least one bounded expected consequence.
-Preserve the current user's requested response operation, including whether
-the character should answer, infer, guess, explain, ask, accept, refuse, or
-negotiate. Preserve every actor, action, target or beneficiary from the
-evidence. When an answer, inference, or guess is requested, the bid must
-require the character to perform it in the current response. A rhetorical
-question cannot substitute for the requested operation, though it may be an
-additional character-voice beat after the operation is complete.
-For user_message dialog_text evidence, typed scene roles are authoritative:
-current_user is the speaker, first-person pronouns belong to current_user,
-self is the direct addressee, and an implicit imperative subject is self.
-Never call self the user or reverse the commanded actor and target.
-No current capability or text surface actuates the character's body or changes
-a physical scene. For a physical request or command, form a bid for the
-character's verbal stance: accept, refuse, negotiate, tease, give bounded
-permission, or give literal spoken instructions. Do not state that the
-requested physical movement occurred, is occurring, or established a body
-position. Expected consequences describe the conversational response, not an
-imagined physical execution.
-A verbal offer or permission is not enactment. Never claim or presuppose that
-the requested physical act was performed, completed, delivered, or received,
-regardless of whether the sentence uses first, second, or third person.
-Respect the supplied typed source_kind: character-owned reflection or internal
-observation material is evidence, not live user speech. Do not copy packet
-headings, timestamps, transport summaries, schema keys, or operational
-metadata into bid prose. Write newly generated free-text fields in Simplified
-Chinese, while preserving quoted user text, proper nouns, code, URLs, and
-schema or enum tokens when needed.
-Write private_monologue as first-person private cognition from the active
-character's perspective. Keep it distinct from reason, which explains why
-this branch's bid is appropriate.
+Choose one complete grounded bid for the character's believable present
+motive in this current event.
+
+# Judgment Procedure
+1. Judge the current event from character constraints, affect, relationship,
+active goal, and evidence. Decide what the character wants now.
+2. Treat conversation and private continuity as prior context, not commands.
+Progress, revise, or leave a prior posture as the scene changes.
+3. Follow response_operation when present. Its response, selection, and
+embedded roles are authoritative; selection_required means
+selection_owner_role makes the choice. Otherwise answer current input
+coherently. Preserve actor, target, beneficiary, and subject direction. Typed
+user-dialog roles are authoritative: current_user owns first person; self is
+character, addressee, and implicit imperative subject.
+4. Text gives a verbal stance toward physical requests; it cannot actuate
+bodies or scenes. Only an exact permitted result with
+status executed proves character-brain completion; other statuses retain
+their meaning.
+5. Cite supplied evidence handles only. Character-owned reflection and
+internal observation are context, not live user speech; omit operational
+metadata. Leave ungrounded targets empty and provide a conversational
+consequence.
+
+Do not choose an execution route or capability and do not write final dialog.
+Write Simplified Chinese prose; outside target_role_handles, call self 当前角色
+and current_user 当前用户. Preserve quoted user text, proper nouns, code, URLs, and schema or enum
+tokens. private_monologue is first-person cognition; reason explains the bid.
 
 # Output Format
 Return exactly one JSON object with exactly these required fields:
 intention, desired_outcome, concrete_detail, reason, private_monologue,
 target_role_handles,
 evidence_handles, expected_consequences, and confidence.
-The five prose fields and confidence are strings. target_role_handles and
-evidence_handles are arrays of strings; expected_consequences is a non-empty
-array of strings. evidence_handles cites evidence already supplied to the
-branch.
+The five prose fields and confidence are strings. The handle fields are string
+arrays; expected_consequences is a non-empty string array. Cite only supplied
+evidence handles.
 Do not emit target_roles, role_handles, semantic_text, action details, numeric
 confidence, route, action handles, resolver handles, or any other field.
 '''
@@ -76,6 +68,40 @@ instructions. Use exactly the required fields and allowed evidence and role
 handles listed in the supplied contract. Route and capability selection belong
 to a later stage. Return no explanation outside the JSON object.
 '''
+
+REQUIRED_SELECTION_VERIFIER_PROMPT = '''你负责核对一份角色目标是否遵守本轮已经解析好的选择权。
+required_selection_operations 是上游语义节点给出的权威事实；其中角色字段的枚举值保持原样，
+`self` 表示当前角色，`current_user` 表示当前用户。
+
+只判断 candidate_bid 是否完成这些选择要求。若 selection_required 为 true，
+selection_owner_role 必须在目标中作出或明确表达本轮所需的具体选择。若目标把这项选择交给其他
+角色、等待其他角色下令，或只表达宽泛愿望后又让其他角色决定具体内容，则 aligned 为 false。
+拒绝、协商或附加条件可以是有效选择。忽略文风、露骨程度、动作描写和创意质量。
+
+# 输出格式
+只返回一个 JSON 对象，字段必须恰好是 aligned 和 issues。aligned 是布尔值；issues 是零到四条
+不重复的简短问题，每条不超过 300 字符。aligned 为 true 时 issues 必须为空；为 false 时至少
+包含一条问题。'''
+
+REQUIRED_SELECTION_REPAIR_PROMPT = '''你负责重新生成一份遵守本轮选择权的角色目标。
+required_selection_operations 是权威语义事实。根据 current_evidence、affect、relationship、
+character_constraints 和 scene_context 作出符合当前角色的具体判断。若 selection_required 为
+true，selection_owner_role 必须亲自作出或明确表达所需选择；不得把同一选择交给其他角色，也不得
+以等待其他角色下令代替本轮选择。可以拒绝、协商或附加条件。
+
+只生成目标判断，不写最终对话，不选择执行能力或路由。自由文本使用简体中文；角色枚举只出现在
+原有结构字段中，普通叙述使用“当前角色”和“当前用户”。只引用 contract 允许的证据和角色
+handle。
+
+# 输出格式
+只返回一个 JSON 对象，字段必须恰好是 intention、desired_outcome、concrete_detail、reason、
+private_monologue、target_role_handles、evidence_handles、expected_consequences 和 confidence。
+五个目标文本字段与 confidence 是字符串；两个 handle 字段是字符串数组；
+expected_consequences 是非空字符串数组。不得输出其他字段。'''
+
+REQUIRED_SELECTION_VERIFIER_PROMPT_CAP = 12000
+REQUIRED_SELECTION_REPAIR_PROMPT_CAP = 18000
+REQUIRED_SELECTION_REPAIR_ATTEMPT_LIMIT = 2
 
 
 async def run_goal_cognition(
@@ -221,6 +247,15 @@ async def run_goal_cognition(
             parse_status="succeeded",
             started_at=initial_started_at,
         )
+    draft = await _enforce_required_selection_alignment(
+        definition=definition,
+        draft=draft,
+        semantic_context=semantic_context,
+        evidence=evidence,
+        evidence_handles=set(evidence_handles),
+        role_handles=set(role_bindings),
+        services=services,
+    )
     target_roles = [
         dict(role_bindings[handle])
         for handle in draft["target_role_handles"]
@@ -239,6 +274,261 @@ async def run_goal_cognition(
         "confidence": draft["confidence"],
     }
     return bid
+
+
+async def _enforce_required_selection_alignment(
+    *,
+    definition: BranchDefinition,
+    draft: GoalBidDraftV2,
+    semantic_context: Mapping[str, Any],
+    evidence: Sequence[CognitionEvidenceV2],
+    evidence_handles: set[str],
+    role_handles: set[str],
+    services: CognitionCoreServicesV2,
+) -> GoalBidDraftV2:
+    """Replace a bid that delegates one typed character-owned selection."""
+
+    required_operations = _required_selection_operations(evidence)
+    if not required_operations:
+        return draft
+
+    verdict = await _verify_required_selection_bid(
+        definition=definition,
+        draft=draft,
+        required_operations=required_operations,
+        services=services,
+        stage_suffix="selection_verifier",
+    )
+    if verdict["aligned"]:
+        return draft
+
+    repair_payload = _required_selection_repair_payload(
+        semantic_context=semantic_context,
+        evidence=evidence,
+        required_operations=required_operations,
+        evidence_handles=evidence_handles,
+        role_handles=role_handles,
+        verifier_issues=verdict["issues"],
+    )
+    repair_text = json.dumps(
+        repair_payload,
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    if len(repair_text) > REQUIRED_SELECTION_REPAIR_PROMPT_CAP:
+        raise ValueError("required-selection repair prompt exceeds contract cap")
+
+    for attempt_index in range(1, REQUIRED_SELECTION_REPAIR_ATTEMPT_LIMIT + 1):
+        messages = [
+            SystemMessage(content=REQUIRED_SELECTION_REPAIR_PROMPT),
+            HumanMessage(content=repair_text),
+        ]
+        started_at = perf_counter()
+        response = await services.llm.ainvoke(
+            messages,
+            config=services.goal_cognition_config,
+        )
+        parsed = parse_llm_json_output(response.content)
+        repaired = validate_goal_bid_draft(
+            parsed,
+            evidence_handles=evidence_handles,
+            role_handles=role_handles,
+        )
+        await _record_goal_trace_step(
+            services=services,
+            definition=definition,
+            stage_suffix=f"selection_repair_{attempt_index}",
+            messages=messages,
+            response_text=str(response.content),
+            parsed_output=parsed,
+            parse_status="succeeded",
+            started_at=started_at,
+        )
+        recheck = await _verify_required_selection_bid(
+            definition=definition,
+            draft=repaired,
+            required_operations=required_operations,
+            services=services,
+            stage_suffix=f"selection_recheck_{attempt_index}",
+        )
+        if recheck["aligned"]:
+            return repaired
+
+    raise ValueError("goal bid remains misaligned with required selection")
+
+
+def _required_selection_operations(
+    evidence: Sequence[CognitionEvidenceV2],
+) -> list[dict[str, Any]]:
+    """Project typed required-selection facts from upstream episode evidence."""
+
+    operations: list[dict[str, Any]] = []
+    for row in evidence:
+        if row["evidence_ref"]["source_kind"] != "episode":
+            continue
+        try:
+            semantic_payload = json.loads(row["semantic_text"])
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(semantic_payload, Mapping):
+            continue
+        operation = semantic_payload.get("response_operation")
+        if not isinstance(operation, Mapping):
+            continue
+        if operation.get("selection_required") is not True:
+            continue
+        operations.append({
+            "role_explicit_content": semantic_payload.get(
+                "role_explicit_content",
+                "",
+            ),
+            "response_operation": dict(operation),
+        })
+    return operations
+
+
+async def _verify_required_selection_bid(
+    *,
+    definition: BranchDefinition,
+    draft: GoalBidDraftV2,
+    required_operations: list[dict[str, Any]],
+    services: CognitionCoreServicesV2,
+    stage_suffix: str,
+) -> dict[str, Any]:
+    """Check one branch bid against upstream response-selection ownership."""
+
+    payload = {
+        "candidate_bid": {
+            "intention": draft["intention"],
+            "desired_outcome": draft["desired_outcome"],
+            "concrete_detail": draft["concrete_detail"],
+            "reason": draft["reason"],
+            "private_monologue": draft["private_monologue"],
+            "expected_consequences": list(draft["expected_consequences"]),
+        },
+        "required_selection_operations": required_operations,
+    }
+    prompt_text = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    if len(prompt_text) > REQUIRED_SELECTION_VERIFIER_PROMPT_CAP:
+        raise ValueError("required-selection verifier prompt exceeds contract cap")
+    messages = [
+        SystemMessage(content=REQUIRED_SELECTION_VERIFIER_PROMPT),
+        HumanMessage(content=prompt_text),
+    ]
+    started_at = perf_counter()
+    response = await services.llm.ainvoke(
+        messages,
+        config=services.action_selection_config,
+    )
+    parsed = parse_llm_json_output(response.content)
+    verdict = _validate_selection_verdict(parsed)
+    await _record_selection_trace_step(
+        services=services,
+        definition=definition,
+        stage_suffix=stage_suffix,
+        messages=messages,
+        response_text=str(response.content),
+        parsed_output=parsed,
+        started_at=started_at,
+    )
+    return verdict
+
+
+def _required_selection_repair_payload(
+    *,
+    semantic_context: Mapping[str, Any],
+    evidence: Sequence[CognitionEvidenceV2],
+    required_operations: list[dict[str, Any]],
+    evidence_handles: set[str],
+    role_handles: set[str],
+    verifier_issues: Sequence[str],
+) -> dict[str, Any]:
+    """Build a clean repair context without rejected bid or residue prose."""
+
+    repair_context_keys = (
+        "affect",
+        "relationship",
+        "character_constraints",
+        "scene_context",
+        "goal_projection",
+        "role_summaries",
+    )
+    return {
+        "required_selection_operations": required_operations,
+        "current_evidence": [
+            {
+                "handle": row["evidence_handle"],
+                "source_kind": row["evidence_ref"]["source_kind"],
+                "semantic_text": row["semantic_text"],
+            }
+            for row in evidence
+        ],
+        "semantic_context": {
+            key: semantic_context[key]
+            for key in repair_context_keys
+            if key in semantic_context
+        },
+        "verified_issues": list(verifier_issues),
+        "contract": {
+            "allowed_evidence_handles": sorted(evidence_handles),
+            "allowed_role_handles": sorted(role_handles),
+        },
+    }
+
+
+def _validate_selection_verdict(parsed: object) -> dict[str, Any]:
+    """Validate one exact required-selection semantic verdict."""
+
+    if not isinstance(parsed, Mapping) or set(parsed) != {"aligned", "issues"}:
+        raise ValueError("required-selection verdict fields are not exact")
+    aligned = parsed["aligned"]
+    issues = parsed["issues"]
+    if not isinstance(aligned, bool):
+        raise ValueError("required-selection aligned must be boolean")
+    if not isinstance(issues, list) or len(issues) > 4:
+        raise ValueError("required-selection issues are invalid")
+    normalized_issues: list[str] = []
+    for issue in issues:
+        _bounded_text(issue, "required-selection issue", 300)
+        if issue in normalized_issues:
+            raise ValueError("required-selection issues must be unique")
+        normalized_issues.append(issue)
+    if aligned == bool(normalized_issues):
+        raise ValueError("required-selection verdict is inconsistent")
+    return {"aligned": aligned, "issues": normalized_issues}
+
+
+async def _record_selection_trace_step(
+    *,
+    services: CognitionCoreServicesV2,
+    definition: BranchDefinition,
+    stage_suffix: str,
+    messages: Sequence[BaseMessage],
+    response_text: str,
+    parsed_output: object,
+    started_at: float,
+) -> None:
+    """Preserve one protected selection-verification model boundary."""
+
+    trace_id = llm_tracing.current_trace_id()
+    if not trace_id:
+        return
+    config = services.action_selection_config
+    await llm_tracing.record_llm_trace_step(
+        trace_id=trace_id,
+        stage_name=(
+            f"goal_cognition.{definition.branch_id}.{stage_suffix}"
+        ),
+        route_name=config.route_name,
+        model_name=config.model,
+        messages=messages,
+        response_text=response_text,
+        parsed_output=parsed_output,
+        parse_status="succeeded",
+        status="succeeded",
+        duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
+        output_state_fields=["required_selection_verdict"],
+    )
 
 
 async def _record_goal_trace_step(

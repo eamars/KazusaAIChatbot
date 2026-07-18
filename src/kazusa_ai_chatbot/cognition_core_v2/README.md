@@ -42,15 +42,44 @@ surface, resolver, or dialog work.
 
 Current-event scene text, public conversation continuity, and private residue
 continuity are separate inputs. Private continuity reaches goal-cognition
-branches only. Branch bids distinguish analytic `reason` from first-person
-`private_monologue`; public output exposes that distinction as
-`selected_bid_reason` and `private_monologue`.
+branches only and remains non-binding prior context: each branch decides
+whether the current event, affect, relationship, and active goal call for
+progressing, revising, or leaving that posture. Branch bids distinguish
+analytic `reason` from first-person `private_monologue`; public output exposes
+that distinction as `selected_bid_reason` and `private_monologue`.
+
+For user dialog, the canonical percept may carry bounded
+`role_explicit_content` and structured `response_operation` values authored by
+the existing upstream decontextualizer LLM. The operation identifies the
+response owner, any required selection owner, and embedded actor and target.
+The raw sentence and deterministic speaker/addressee frame remain intact. V2
+consumes this semantic projection unchanged as current episode meaning so
+nested role and response ownership are resolved once before goal cognition
+instead of independently by every downstream local-model stage.
 
 Goal-bid output uses an exact route-to-capability-field matrix. A malformed bid
 receives at most one LLM-owned schema repair while deterministic validation
 remains strict. A still-failed required branch raises an execution error rather
 than becoming an empty workspace and character silence. Initial and repaired
 goal outputs are eligible for the protected turn trace.
+
+When upstream episode evidence carries a typed required selection, a focused
+goal-level check verifies that the owning role makes or explicitly expresses
+that choice before action planning. A rejected bid is regenerated from typed
+operations, current evidence, affect, relationship, character constraints,
+and scene context without the rejected bid or private continuity prose. The
+replacement is rechecked by the same owner. Ordinary turns add no selection
+check.
+
+Action planning treats local-model output as a bounded proposal rather than an
+execution precondition. It canonicalizes the known envelope, keeps usable
+rows, drops invalid rows individually, ignores unknown fields, and caps each
+request list at three. Mutually exclusive action and resolver requests remain
+a semantic contract error. If one complete replacement is still unusable, the
+turn continues with an empty action plan; if action authorization cannot
+produce a usable replacement, every candidate is denied. Neither containment
+path authorizes work, changes the visible speech route, or reduces the
+registry-driven three-request capacity.
 
 The shared surface input receives semantic intention, bounded affect and
 relationship projections, complete-bid projections, permitted action results,
@@ -66,23 +95,29 @@ evidence; it has no downstream image or dialog model. Raw episode traces
 retain those directives for audit, while every model-facing consolidation
 projection excludes their fragments.
 
-Content planning and dialog preserve supplied descriptors, attributes,
-qualifiers, quantities, polarity, and comparative degree. Non-conflicting
-elaboration may add context without transforming or compounding an attribute
-into a different claim. They preserve explicit entity and target specificity;
-elaboration cannot generalize, euphemize, narrow, broaden, or replace a
-supplied referent. Acceptance, refusal, permission, and consent remain bounded
-to the exact source-requested act and scope; indefinite or unrestricted
-permission cannot substitute for a specific permission. When source meaning
-covers only the current occurrence, the planned and rendered output remains
-silent about future claims, promises, conditions, expectations, threats,
-habits, rules, and contrastive or teasing additions. Explicit future content
-is preserved when the source supplies or requires it. Dialog owns literal
-spoken or typed wording. Its existing semantic verifier receives only the
-exact text-surface output, candidate dialog, and current model-visible percept
-rows within the shared 24,000-character surface-prompt bound. A negative
-verdict may trigger one grounded repair. The protected turn trace records the
-initial dialog, verifier verdict, and repair output as distinct stages.
+Content planning expresses the selected character judgment using the current
+scene, affect, relationship, and interaction style. Coherent imaginative
+detail is allowed when it remains compatible with current input, active
+constraints, and actor/target/subject roles. Preference planning emits only
+real visible boundaries and addressee constraints, so both lists may be empty.
+Dialog owns natural character-specific chat-ready wording. Two focused
+hard-error checks run in parallel on the existing dialog-model route within
+the shared 24,000-character surface-prompt bound. Semantic fidelity receives
+current model-visible percept rows, including any upstream response/selection
+ownership, the candidate role frame, and candidate dialog; it rejects internal
+contradiction, direct current-input conflict, and role reversal. Surface
+integrity receives permitted action results and candidate dialog; it rejects
+only false system, tool, platform, or other character-brain execution claims.
+Action description in plain, bracketed, first-person, or third-person form is
+valid visible roleplay and is outside the fatal taxonomy.
+Generated content, addressee, intent, and style proposals stay outside
+hard-error authority. Source percepts and generated character speech carry
+separate typed pronoun frames before role direction is compared. Novelty and
+coherent drift are not failures by themselves. Deterministic code merges only
+the verdict shapes, bounding each owner to four issues and the merged result to
+eight, and a negative result may trigger one grounded repair. The
+protected turn trace records both checks, the merged verdict, and repair output
+as distinct evidence.
 
 ## Document Control
 
@@ -118,8 +153,10 @@ typed output validation run in one inspectable call.
 ## Failure Behavior
 
 Malformed input, invalid state, unsupported routes, unresolved required
-dependencies, and invalid model output raise the package validation or
-execution error. Callers commit only validated replacement state.
+dependencies, and invalid required cognition output raise the package
+validation or execution error. Optional action proposal/authorization schema
+failure is contained as empty or denied work so a valid speech response can
+continue. Callers commit only validated replacement state.
 
 ## Testing Contract
 

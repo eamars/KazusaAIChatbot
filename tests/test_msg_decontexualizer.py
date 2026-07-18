@@ -8,7 +8,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
+from kazusa_ai_chatbot.cognition_episode import (
+    build_accepted_task_result_ready_cognitive_episode,
+    build_text_chat_cognitive_episode,
+)
 from kazusa_ai_chatbot.nodes import (
     persona_supervisor2_msg_decontexualizer as decontextualizer_module,
 )
@@ -133,6 +136,119 @@ def _multimedia_state() -> dict:
         target_broadcast=True,
     )
     return state
+
+
+@pytest.mark.asyncio
+async def test_decontextualizer_attaches_role_explicit_meaning_to_episode():
+    """One upstream semantic owner should ground nested participant roles."""
+
+    state = _multimedia_state()
+    user_input = "Tell me what you want me to do next."
+    state["user_input"] = user_input
+    state["channel_topic"] = ""
+    state["indirect_speech_context"] = ""
+    state["prompt_message_context"]["body_text"] = user_input
+    state["message_envelope"]["body_text"] = user_input
+    state["message_envelope"]["raw_wire_text"] = user_input
+    state["cognitive_episode"]["percepts"][0]["content"] = user_input
+    role_explicit_content = (
+        "当前用户要求当前角色说出当前角色希望当前用户下一步做什么。"
+    )
+    response_operation = {
+        "operation": (
+            "当前角色选择并说出一个希望当前用户下一步执行的动作"
+        ),
+        "response_owner_role": "self",
+        "selection_owner_role": "self",
+        "selection_required": True,
+        "embedded_actor_role": "current_user",
+        "embedded_target_role": "self",
+    }
+    llm_response = MagicMock()
+    llm_response.content = json.dumps({
+        "output": user_input,
+        "role_explicit_content": role_explicit_content,
+        "response_operation": response_operation,
+        "reasoning": "The direct roles are explicit in a separate projection.",
+        "is_modified": False,
+        "referents": [],
+    })
+
+    with patch(
+        "kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer."
+        "_msg_decontexualizer_llm",
+    ) as mock_llm:
+        mock_llm.ainvoke = AsyncMock(return_value=llm_response)
+        result = await call_msg_decontexualizer(state)
+
+    dialog_percept = result["cognitive_episode"]["percepts"][0]
+    assert dialog_percept["content"] == user_input
+    assert dialog_percept["metadata"]["role_explicit_content"] == (
+        role_explicit_content
+    )
+    assert dialog_percept["metadata"]["response_operation"] == (
+        response_operation
+    )
+
+
+@pytest.mark.asyncio
+async def test_decontextualizer_leaves_accepted_task_episode_source_owned():
+    """Dialog-role metadata must not attach to accepted-task percepts."""
+
+    state = _multimedia_state()
+    state["user_input"] = "Accepted task result is failed."
+    state["channel_topic"] = ""
+    state["indirect_speech_context"] = ""
+    state["cognitive_episode"] = (
+        build_accepted_task_result_ready_cognitive_episode(
+            episode_id="accepted-task-result-task-1",
+            percept_id="accepted-task-result-percept-task-1",
+            storage_timestamp_utc=state["storage_timestamp_utc"],
+            local_time_context=state["local_time_context"],
+            accepted_task_id="task-1",
+            accepted_task_summary="Run one task.",
+            artifact_text="",
+            failure_summary="Accepted task result is failed.",
+            result_summary="",
+            platform=state["platform"],
+            platform_channel_id=state["platform_channel_id"],
+            channel_type=state["channel_type"],
+            platform_message_id=state["platform_message_id"],
+            requester_platform_user_id=state["platform_user_id"],
+            requester_global_user_id=state["global_user_id"],
+            requester_display_name=state["user_name"],
+            source_platform_bot_id=state["platform_bot_id"],
+            source_character_name=state["character_profile"]["name"],
+        )
+    )
+    llm_response = MagicMock()
+    llm_response.content = json.dumps({
+        "output": state["user_input"],
+        "role_explicit_content": (
+            "self reports an accepted task result to current_user."
+        ),
+        "response_operation": {
+            "operation": "self reports the accepted task result",
+            "response_owner_role": "self",
+            "selection_owner_role": "none",
+            "selection_required": False,
+            "embedded_actor_role": "self",
+            "embedded_target_role": "current_user",
+        },
+        "reasoning": "The result already identifies its roles.",
+        "is_modified": False,
+        "referents": [],
+    })
+
+    with patch(
+        "kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer."
+        "_msg_decontexualizer_llm",
+    ) as mock_llm:
+        mock_llm.ainvoke = AsyncMock(return_value=llm_response)
+        result = await call_msg_decontexualizer(state)
+
+    assert "cognitive_episode" not in result
+    assert result["decontexualized_input"] == state["user_input"]
 
 
 def test_select_media_for_turn_keeps_opening_and_newest_unique_images() -> None:
@@ -655,6 +771,9 @@ def test_decontexualizer_prompt_explains_reply_ellipsis_decision_owner() -> None
     assert '要不要 / 该不该 / 值不值得' in system_prompt
     assert '第三方向当前用户发出邀请、通知、请求或建议' in system_prompt
     assert '附件描述、回复摘录和相邻历史可提供动作对象' in system_prompt
+    assert '自由文本统一使用中文称谓' in system_prompt
+    assert '不写 `self` 或 `current_user`' in system_prompt
+    assert '英文角色枚举只出现在四个角色字段中' in system_prompt
 
 
 @pytest.mark.asyncio

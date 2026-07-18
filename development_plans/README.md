@@ -62,6 +62,7 @@ long_term/todo.md
 | [dialog_visible_speech_and_semantic_fidelity_bugfix_plan.md](active/bugfix/dialog_visible_speech_and_semantic_fidelity_bugfix_plan.md) | Medium bigbang dialog literal-speech, character-voice isolation, current-turn semantic fidelity, and verifier-grounding bugfix | in progress |
 | [cognition_core_v2_compositional_action_planning_bugfix_plan.md](active/bugfix/cognition_core_v2_compositional_action_planning_bugfix_plan.md) | Large bigbang Cognition V2 semantic action-planning, production-capacity, resolver-lifecycle, operational-failure, and visual-default bugfix | in progress |
 | [cognition_chain_responsibility_allocation_bugfix_plan.md](active/bugfix/cognition_chain_responsibility_allocation_bugfix_plan.md) | Large bigbang constrained-relevance and exact action-lifecycle ownership bugfix | in progress |
+| [cognition_core_v2_live_character_judgment_rebalance_plan.md](active/bugfix/cognition_core_v2_live_character_judgment_rebalance_plan.md) | Large bigbang live-character judgment, prompt-minimality, hard-error taxonomy, and frozen 20+20 quality rebalance | in progress |
 | [rag2_public_output_contract_leak_bugfix_plan.md](active/bugfix/rag2_public_output_contract_leak_bugfix_plan.md) | Large RAG2 prompt/evidence contract bugfix plan | draft |
 
 ## Reference Documents

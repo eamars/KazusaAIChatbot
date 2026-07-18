@@ -81,7 +81,7 @@ def test_style_context_is_owned_by_the_surface_stage() -> None:
     style_prompt = STYLE_SYSTEM_PROMPT.casefold()
 
     assert "style guidance" in style_prompt
-    assert "do not write final dialogue" in style_prompt
+    assert "rather than final dialog" in style_prompt
     assert "cognition state" not in style_prompt
 
 

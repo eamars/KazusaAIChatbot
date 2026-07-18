@@ -9,6 +9,9 @@ Design intent:
   represented in `text_surface_output_v2.content_plan`.
 """
 
+import asyncio
+import json
+import logging
 import time
 from typing import Any, NotRequired, TypedDict
 
@@ -35,9 +38,7 @@ from kazusa_ai_chatbot.utils import (
     log_list_preview,
 )
 from langchain_core.messages import HumanMessage, SystemMessage
-from langgraph.graph import StateGraph, START, END
-import logging
-import json
+from langgraph.graph import END, START, StateGraph
 
 
 from kazusa_ai_chatbot.llm_interface import (
@@ -136,161 +137,79 @@ class DialogAgentState(TypedDict):
     llm_trace_id: str
 
 
-_V2_DIALOG_GENERATOR_PROMPT = '''\
-You are the character's final text-expression renderer. The upstream
-cognition and surface stages have already decided whether the character
-speaks, the visible intent, the content, the boundary, the addressee, and the
-style. Render that canonical `text_surface_output_v2` as natural chat text.
-Use style_guidance only for lexical choice and cadence; it must not introduce,
-select, infer, or alter semantic content.
+_CANDIDATE_ROLE_FRAME = {
+    "speaker_role": "self",
+    "first_person_role": "self",
+    "second_person_role": "current_user",
+}
+MAX_FOCUSED_VERIFIER_ISSUES = 4
+MAX_MERGED_VERIFIER_ISSUES = 8
 
-Do not re-evaluate permission, stance, truth, safety, relationship meaning, or
-whether to answer. Do not add facts, actions, promises, targets, or questions
-that are absent from the supplied surface output.
-Produce only words the character could literally type or say. Never narrate
-an action, body movement, stage direction, camera or scene direction, or
-performance cue. Do not emit visible markup residue, stage-direction
-delimiters, or unmatched enclosing punctuation. The character may verbally
-discuss, accept, refuse, or negotiate a physical-action topic. Return 1-N
-complete text messages in `final_dialog`.
 
-Preserve the requested response operation, content plan, every content
-requirement, actor, action, target or beneficiary direction, semantic claim,
-condition, time scope, topic, required content beat, visible boundary, and
-addressee plan. Preserve source descriptors, attributes, qualifiers,
-quantities, polarity, and comparative degree. Non-conflicting elaboration is
-allowed, but it must not transform, replace, or compound a supplied attribute
-into a different claim. Preserve explicit entity and target specificity.
-When repair_context contains typed percept roles, they are authoritative:
-speaker_role=current_user owns first-person pronouns, addressee_role=self is
-the character, and implicit_imperative_subject_role=self owns an unstated
-command subject. Repair any upstream actor/target reversal against those roles.
-A rhetorical question cannot substitute for a requested answer, inference,
-guess, explanation, acceptance, refusal, or negotiation. It may appear only as
-an additional character-voice beat after the requested operation is complete.
-Never generalize, euphemize, narrow, broaden, or replace a supplied referent.
-Acceptance, refusal, permission, and consent must remain bounded to the exact
-source-requested act and scope. Indefinite or unrestricted permission must not
-substitute for a specific permission.
-Possessive, controlling, exclusive, jealous, tsundere, or other expressive or
-relational style may shape the wording of source-grounded current meaning.
-Style alone cannot authorize a new semantic claim, literal future rule or
-exclusivity condition, obligation, prohibition, commitment, or expectation.
-When source meaning is limited to the current occurrence, output
-must remain silent about future claims, promises, conditions, expectations,
-threats, habits, or rules, including contrastive or teasing additions.
-Preserve explicit future content when the source actually supplies or requires
-it. Do not turn an answer, inference, explanation, acceptance, refusal, or
-negotiation into an ask-back or a different operation. If `repair_context` is
-present, use its current_visible_percepts as current-turn grounding and revise
-the original dialog only enough to resolve every listed semantic issue while
-preserving the surface contract.
-permitted_action_results is the only authority that the character brain
-executed an action in this cognition chain. A matching result with status
-executed may support a completed-effect claim bounded to its exact action_kind,
-semantic_result, and target_roles. Express that outcome only as literal speech
-and never as narrated enactment. A result with status scheduled or pending may
-be acknowledged only in that actual lifecycle state and never as completed.
-Failed and unavailable results authorize no success claim. Current percepts
-may still ground externally reported or observed events. A user request,
-content plan, requirement, or intention without a matching executed result
-authorizes only the character's verbal stance, such as acceptance, refusal,
-negotiation, teasing, bounded permission, or spoken instruction.
+_V2_DIALOG_GENERATOR_PROMPT = '''You are the character's final text renderer.
+Turn text_surface_output_v2 into natural, vivid, character-specific chat while
+remaining responsive to the current scene. Upstream cognition owns the
+character judgment; surface planning supplies the content, real boundaries,
+addressee handling, style, and permitted action results.
 
-Input JSON:
-{{
-    "text_surface_output_v2": {{
-        "schema_version": "text_surface_output.v2",
-        "content_plan": "string",
-        "content_requirements": ["string"],
-        "visible_boundaries": ["string"],
-        "addressee_plan": ["string"],
-        "style_guidance": "string",
-        "selected_surface_intent": "string",
-        "permitted_action_results": [{{
-            "action_kind": "string",
-            "status": "executed|scheduled|pending|failed|unavailable",
-            "semantic_result": "string",
-            "target_roles": []
-        }}]
-    }},
-    "user_name": "string"
-}}
+# Rendering Procedure
+1. Express the planned meaning in the character's present voice and
+relationship context. Coherent creative detail, personality, humor,
+initiative, warmth, resistance, or intensity may make the response feel alive
+when they fit the plan and do not create an internal contradiction.
+2. Keep actor, target, beneficiary, and subject direction intact. Resolve
+source text in each percept's typed role frame. Generated dialog is spoken by
+the active character: its first person is the active character and its second
+person is the current user. Preserve source direction across those frames.
+3. Action description is valid visible roleplay. Produce chat-ready character
+text in plain, bracketed, first-person, or third-person form to fit the scene.
+4. Treat permitted_action_results as the exact character-brain execution
+ledger. Only status executed supports its bounded completed effect. Scheduled
+and pending remain incomplete; failed and unavailable support no success
+claim. A request, intention, or content plan alone supports a verbal stance,
+not physical enactment.
+5. When repair_context exists, correct every listed hard issue using
+current_visible_percepts while retaining the response's natural character
+voice and coherent creative content.
 
-Return only this JSON object, without Markdown fences:
-{{
-    "final_dialog": ["complete visible message"]
-}}
+Use style_guidance for wording and cadence. Write new dialog in Simplified
+Chinese while preserving quoted text, proper nouns, code, URLs, and exact
+schema or enum tokens when relevant.
+
+# Output Format
+Return exactly one JSON object with exactly final_dialog. final_dialog must be
+a non-empty list of complete visible message strings. Return no Markdown fence
+or explanation outside the JSON object.
 '''
 
-_V2_DIALOG_COMPLIANCE_PROMPT = '''You are a semantic compliance verifier for
-one generated character response. current_visible_percepts are the semantic
-authority for the canonical current turn, while permitted_action_results inside
-text_surface_output_v2 are the exact authority for execution outcomes. Treat
-the remaining text_surface_output_v2 fields and candidate_final_dialog as
-proposals to audit against those authorities. Reject unsupported content even
-when the surface and candidate agree. Reject any
-action or stage narration, body-movement narration, camera or scene direction,
-or performance cue; visible output must contain only words the character could
-literally type or say. Reject visible markup residue, stage-direction
-delimiters, or unmatched enclosing punctuation even when no narrated action
-text remains. Physical-action topics may still be discussed verbally.
+_V2_DIALOG_HARD_FAILURE_REPAIR_PROMPT = '''You repair one generated character
+response after focused hard-error checks rejected it. The prior content plan
+is intentionally absent because it may contain the verified error.
 
-Reject semantic drift in the current user's requested response operation,
-actors, actions, targets or beneficiaries, semantic claims, conditions,
-time scope, topic, required content beats, visible boundaries, or addressee
-plan. Verify that source descriptors, attributes, qualifiers, quantities,
-polarity, and comparative degree remain unchanged. Allow non-conflicting
-elaboration, but it cannot create a new constraint, obligation, permission,
-prohibition, commitment, expectation, or future stance. Reject any
-transformation, replacement, or compounding of a supplied attribute into a
-different claim.
-Typed role fields on current_visible_percepts are authoritative. For user
-dialog, speaker_role=current_user owns first-person pronouns,
-addressee_role=self is the character, and
-implicit_imperative_subject_role=self owns an unstated command subject. Reject
-surface or dialog content that reverses any of those roles.
-For a requested answer, inference, guess, explanation, acceptance, refusal, or
-negotiation, verify that the candidate actually performs that operation with
-the source-defined actors and targets. Reject a candidate that merely restates,
-redirects, or asks back the requested operation. A rhetorical question is only
-an optional character-voice beat after the operation is complete.
-Treat permitted_action_results as the closed execution ledger for actions
-performed by the character brain. Allow such a completed-effect claim only
-when a matching result has status executed, and keep the claim bounded to its
-action_kind, semantic_result, and target_roles. Current visible percepts may
-still ground external actions reported or observed as events, but a user's
-request cannot prove the character performed it. Scheduled and pending
-authorize only their exact lifecycle acknowledgement; failed and unavailable
-authorize no success claim. Even with an executed result, reject action or
-stage narration: the candidate may state the outcome only in literal spoken
-or typed words.
-Preserve explicit entity and target specificity.
-Never generalize, euphemize, narrow, broaden, or replace a supplied referent.
-Acceptance, refusal, permission, and consent must remain bounded to the exact
-source-requested act and scope. Indefinite or unrestricted permission must not
-substitute for a specific permission.
-Perform a claim-by-claim audit before choosing aligned. For every candidate
-claim, condition, restriction, obligation, permission, prohibition,
-commitment, expectation, and present or future time scope, identify its basis
-in current_visible_percepts. Surface and candidate agreement is not evidence.
-Possessive, controlling, exclusive, jealous, tsundere, or other expressive or
-relational style may color supported meaning, but style alone cannot authorize
-a new semantic claim, literal future rule or exclusivity condition.
-When source meaning is limited to the current occurrence, output
-must remain silent about future claims, promises, conditions, expectations,
-threats, habits, or rules, including contrastive or teasing additions.
-Explicit future content remains allowed when current_visible_percepts supply
-or require it. Judge meaning rather than word overlap or writing style. Do not
-rewrite the dialog and do not add new requirements.
+# Repair Ownership
+1. Treat current_visible_percepts and candidate_role_frame as the semantic
+authority for the current user input and actor/action/target direction.
+2. Correct every verified_hard_issues item. Preserve compatible meaning,
+personality, vividness, humor, intimacy, and creative detail from
+original_final_dialog while changing any conflicting part.
+3. Respect permitted_action_results; only an executed result supports its
+bounded completed effect. No free-text content plan, boundary, or style
+guidance is supplied because those fields may contain the verified drift.
+4. Action description is valid visible roleplay. Produce chat-ready character
+text in plain, bracketed, first-person, or third-person form to fit the scene.
+5. Address user_name naturally when useful; it supplies no semantic
+instruction.
 
-Return exactly one JSON object with exactly aligned and issues. aligned must
-be a boolean. issues must be a duplicate-free list of zero to eight concise
-semantic issue strings, each at most 300 characters. Use an empty issues list
-when aligned is true and at least one issue when aligned is false.'''
+Write new dialog in Simplified Chinese while preserving quoted text, proper
+nouns, code, URLs, and exact schema or enum tokens when relevant.
+
+# Output Format
+Return exactly one JSON object with exactly final_dialog. final_dialog must be
+a non-empty list of complete visible message strings. Return no Markdown fence
+or explanation outside the JSON object.
+'''
 
 _dialog_generator_llm = LLInterface()
-_dialog_compliance_llm = LLInterface()
 _dialog_generator_llm_config = LLMCallConfig(
     stage_name=__name__,
     route_name="DIALOG_GENERATOR_LLM",
@@ -302,21 +221,6 @@ _dialog_generator_llm_config = LLMCallConfig(
     top_k=None,
     max_completion_tokens=DIALOG_GENERATOR_LLM_MAX_COMPLETION_TOKENS,
     presence_penalty=0.25,
-    thinking=LLMThinkingConfig(
-        enabled=DIALOG_GENERATOR_LLM_THINKING_ENABLED,
-    ),
-)
-_dialog_compliance_llm_config = LLMCallConfig(
-    stage_name=f"{__name__}.compliance",
-    route_name="DIALOG_GENERATOR_LLM",
-    base_url=DIALOG_GENERATOR_LLM_BASE_URL,
-    api_key=DIALOG_GENERATOR_LLM_API_KEY,
-    model=DIALOG_GENERATOR_LLM_MODEL,
-    temperature=0.1,
-    top_p=0.7,
-    top_k=None,
-    max_completion_tokens=DIALOG_GENERATOR_LLM_MAX_COMPLETION_TOKENS,
-    presence_penalty=None,
     thinking=LLMThinkingConfig(
         enabled=DIALOG_GENERATOR_LLM_THINKING_ENABLED,
     ),
@@ -400,7 +304,6 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
         duration_ms=_elapsed_ms(started_at),
         output_state_fields=["final_dialog"],
     )
-    repair_issues: list[str] = []
     if generated_dialog:
         verdict = await _verify_dialog_compliance(
             surface_output=surface_output,
@@ -410,37 +313,35 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
         )
         if not verdict["aligned"]:
             repair_issues = verdict["issues"]
-            repair_payload = {
-                **msg,
-                "repair_context": {
-                    "issues": repair_issues,
-                    "original_final_dialog": generated_dialog,
-                    "current_visible_percepts": current_visible_percepts,
-                },
-            }
-            repair_message = HumanMessage(
-                content=json.dumps(repair_payload, ensure_ascii=False),
+            generated_dialog = await _repair_dialog_hard_failure(
+                generated_dialog=generated_dialog,
+                repair_issues=repair_issues,
+                current_visible_percepts=current_visible_percepts,
+                surface_output=surface_output,
+                user_name=state["user_name"],
+                llm_trace_id=llm_trace_id,
             )
-            repair_started_at = time.perf_counter()
-            repair_response = await _dialog_generator_llm.ainvoke(
-                [system_prompt, repair_message],
-                config=_dialog_generator_llm_config,
+            repaired_verdict = await _verify_dialog_compliance(
+                surface_output=surface_output,
+                generated_dialog=generated_dialog,
+                current_visible_percepts=current_visible_percepts,
+                llm_trace_id=llm_trace_id,
+                post_repair=True,
             )
-            repair_result = parse_llm_json_output(repair_response.content)
-            generated_dialog = _validated_dialog_messages(repair_result)
-            await llm_tracing.record_llm_trace_step(
-                trace_id=llm_trace_id,
-                stage_name="dialog_generator_repair",
-                route_name="DIALOG_GENERATOR_LLM",
-                model_name=DIALOG_GENERATOR_LLM_MODEL,
-                messages=[system_prompt, repair_message],
-                response_text=str(repair_response.content),
-                parsed_output=repair_result,
-                parse_status="succeeded",
-                status="succeeded",
-                duration_ms=_elapsed_ms(repair_started_at),
-                output_state_fields=["final_dialog"],
-            )
+            if not repaired_verdict["aligned"]:
+                await event_logging.record_model_contract_event(
+                    component=DIALOG_COMPONENT,
+                    stage_name="dialog_compliance",
+                    violation_kind="semantic_dialog_misalignment",
+                    missing_fields=[],
+                    invalid_fields=repaired_verdict["issues"],
+                    repair_used=True,
+                    status="failed",
+                    correlation_id=llm_trace_id,
+                )
+                raise StateContractError(
+                    "dialog remains hard-invalid after one repair"
+                )
             await event_logging.record_model_contract_event(
                 component=DIALOG_COMPONENT,
                 stage_name="dialog_compliance",
@@ -449,7 +350,7 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
                 invalid_fields=repair_issues,
                 repair_used=True,
                 status="repaired",
-                correlation_id=state.get("llm_trace_id", ""),
+                correlation_id=llm_trace_id,
             )
     generated_dialog_preview = (
         generated_dialog
@@ -493,6 +394,509 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
         "final_dialog": generated_dialog,
     }
     return return_value
+
+
+async def _repair_dialog_hard_failure(
+    *,
+    generated_dialog: list[str],
+    repair_issues: list[str],
+    current_visible_percepts: list[dict[str, Any]],
+    surface_output: TextSurfaceOutputV2,
+    user_name: str,
+    llm_trace_id: str,
+) -> list[str]:
+    """Repair one verified hard error without a drifted content plan."""
+
+    system_message = SystemMessage(
+        content=_V2_DIALOG_HARD_FAILURE_REPAIR_PROMPT,
+    )
+    payload = {
+        "candidate_role_frame": dict(_CANDIDATE_ROLE_FRAME),
+        "current_visible_percepts": current_visible_percepts,
+        "original_final_dialog": generated_dialog,
+        "permitted_action_results": list(
+            surface_output["permitted_action_results"]
+        ),
+        "user_name": user_name,
+        "verified_hard_issues": repair_issues,
+    }
+    human_message = HumanMessage(content=json.dumps(
+        payload,
+        ensure_ascii=False,
+    ))
+    started_at = time.perf_counter()
+    response = await _dialog_generator_llm.ainvoke(
+        [system_message, human_message],
+        config=_dialog_generator_llm_config,
+    )
+    parsed = parse_llm_json_output(response.content)
+    repaired_dialog = _validated_dialog_messages(parsed)
+    await llm_tracing.record_llm_trace_step(
+        trace_id=llm_trace_id,
+        stage_name="dialog_generator_repair",
+        route_name="DIALOG_GENERATOR_LLM",
+        model_name=DIALOG_GENERATOR_LLM_MODEL,
+        messages=[system_message, human_message],
+        response_text=str(response.content),
+        parsed_output=parsed,
+        parse_status="succeeded",
+        status="succeeded",
+        duration_ms=_elapsed_ms(started_at),
+        output_state_fields=["final_dialog"],
+    )
+    return repaired_dialog
+
+
+_V2_DIALOG_SEMANTIC_FIDELITY_PROMPT = '''Check semantic fidelity for one
+character response by meaning, not wording overlap. current_visible_percepts
+contains the current input and typed scene roles; candidate_role_frame defines
+candidate pronouns. A percept's role_explicit_content is the upstream
+LLM-resolved meaning with literal current_user and self roles. Use it for
+nested actor/action/target direction while retaining content as evidence.
+When response_operation exists, response_owner_role, selection_owner_role,
+selection_required, embedded_actor_role, and embedded_target_role are
+authoritative. If selection_required is true, asking another role to choose is
+a subject reversal.
+
+Mark aligned false only for:
+1. An internal contradiction inside the candidate response.
+2. A direct conflict with the current user input.
+3. An actor, action, target, beneficiary, or subject reversal. Resolve the
+percept roles and candidate_role_frame separately, then compare direction.
+
+A role reversal requires one unambiguous reading established by current
+grammar and context. Treat jokes, double entendres, and ellipsis that permit
+multiple reasonable role readings as aligned.
+
+Coherent invention, compatible future content, playful conditions, strong
+personality, ask-backs, drift, and make-up content are not failures when
+coherent with the current input and resolved roles. Add no style requirement.
+
+# Output Format
+Return exactly one JSON object with exactly aligned and issues. aligned is a
+boolean. issues is a duplicate-free list of zero to four concise hard-failure
+strings, each at most 300 characters. Use an empty issues list when aligned is
+true and at least one issue when aligned is false.
+'''
+_dialog_semantic_fidelity_llm = LLInterface()
+_dialog_semantic_fidelity_llm_config = LLMCallConfig(
+    stage_name=f"{__name__}.semantic_fidelity",
+    route_name="DIALOG_GENERATOR_LLM",
+    base_url=DIALOG_GENERATOR_LLM_BASE_URL,
+    api_key=DIALOG_GENERATOR_LLM_API_KEY,
+    model=DIALOG_GENERATOR_LLM_MODEL,
+    temperature=0.1,
+    top_p=0.7,
+    top_k=None,
+    max_completion_tokens=DIALOG_GENERATOR_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=DIALOG_GENERATOR_LLM_THINKING_ENABLED,
+    ),
+)
+
+
+async def _verify_dialog_semantic_fidelity(
+    *,
+    generated_dialog: list[str],
+    current_visible_percepts: list[dict[str, Any]],
+    llm_trace_id: str,
+    post_repair: bool = False,
+) -> dict[str, Any]:
+    """Check contradiction and resolved semantic-role direction."""
+
+    system_message = SystemMessage(
+        content=_V2_DIALOG_SEMANTIC_FIDELITY_PROMPT,
+    )
+    payload = {
+        "candidate_final_dialog": generated_dialog,
+        "candidate_role_frame": dict(_CANDIDATE_ROLE_FRAME),
+        "current_visible_percepts": current_visible_percepts,
+    }
+    human_message = HumanMessage(content=json.dumps(
+        payload,
+        ensure_ascii=False,
+    ))
+    started_at = time.perf_counter()
+    response = await _dialog_semantic_fidelity_llm.ainvoke(
+        [system_message, human_message],
+        config=_dialog_semantic_fidelity_llm_config,
+    )
+    parsed = parse_llm_json_output(response.content)
+    verdict = _validate_compliance_verdict(
+        parsed,
+        max_issues=MAX_FOCUSED_VERIFIER_ISSUES,
+    )
+    trace_stage_name = (
+        "dialog_semantic_fidelity_recheck"
+        if post_repair
+        else "dialog_semantic_fidelity_verifier"
+    )
+    await llm_tracing.record_llm_trace_step(
+        trace_id=llm_trace_id,
+        stage_name=trace_stage_name,
+        route_name="DIALOG_GENERATOR_LLM",
+        model_name=DIALOG_GENERATOR_LLM_MODEL,
+        messages=[system_message, human_message],
+        response_text=str(response.content),
+        parsed_output=parsed,
+        parse_status="succeeded",
+        status="succeeded",
+        duration_ms=_elapsed_ms(started_at),
+        output_state_fields=["dialog_semantic_fidelity_verdict"],
+    )
+    await event_logging.record_llm_stage_event(
+        component=DIALOG_COMPONENT,
+        stage_name=(
+            "dialog_semantic_fidelity_recheck"
+            if post_repair
+            else "dialog_semantic_fidelity"
+        ),
+        route_name="verify",
+        model_name=DIALOG_GENERATOR_LLM_MODEL,
+        status="succeeded",
+        prompt_chars=len(system_message.content) + len(human_message.content),
+        output_chars=len(str(response.content)),
+        parse_status="succeeded",
+        retry_count=int(post_repair),
+        json_repair_used=False,
+        duration_ms=_elapsed_ms(started_at),
+        severity="info",
+        correlation_id=llm_trace_id,
+    )
+    return verdict
+
+
+_V2_DIALOG_ROLE_DIRECTION_PROMPT = '''Verify only required response and role
+direction for one character reply. candidate_role_frame defines the reply's
+pronouns. required_role_operations contains typed meanings already resolved by
+the upstream decontextualizer. Treat self as the active character and
+current_user as the current user.
+
+For every required operation, preserve response_owner_role,
+selection_owner_role, embedded_actor_role, and embedded_target_role. When
+selection_required is true, selection_owner_role must choose or state the
+requested action. Mark aligned false when the reply instead asks or tells
+another role to make that required selection, or clearly reverses the embedded
+actor and target.
+
+The character may refuse, negotiate, add a condition, or decline to perform an
+action without reversing role direction. Treat jokes, double entendres,
+ellipsis, and wording with multiple reasonable role readings as aligned.
+Ignore style, novelty, intimacy, safety, action execution, and writing quality.
+
+# Output Format
+Return exactly one JSON object with exactly aligned and issues. aligned is a
+boolean. issues is a duplicate-free list of zero to four concise role-direction
+failures, each at most 300 characters. Use an empty issues list when aligned is
+true and at least one issue when aligned is false.
+'''
+_dialog_role_direction_llm = LLInterface()
+_dialog_role_direction_llm_config = LLMCallConfig(
+    stage_name=f"{__name__}.role_direction",
+    route_name="DIALOG_GENERATOR_LLM",
+    base_url=DIALOG_GENERATOR_LLM_BASE_URL,
+    api_key=DIALOG_GENERATOR_LLM_API_KEY,
+    model=DIALOG_GENERATOR_LLM_MODEL,
+    temperature=0.1,
+    top_p=0.7,
+    top_k=None,
+    max_completion_tokens=DIALOG_GENERATOR_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=DIALOG_GENERATOR_LLM_THINKING_ENABLED,
+    ),
+)
+
+
+def _required_selection_role_operations(
+    current_visible_percepts: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Project only typed operations that require a semantic selection."""
+
+    required_operations: list[dict[str, Any]] = []
+    for percept in current_visible_percepts:
+        operation = percept.get("response_operation")
+        if not isinstance(operation, dict):
+            continue
+        if operation.get("selection_required") is not True:
+            continue
+        projected_percept: dict[str, Any] = {
+            "input_source": percept.get("input_source", ""),
+            "content": percept.get("content", ""),
+            "role_explicit_content": percept.get(
+                "role_explicit_content",
+                "",
+            ),
+            "response_operation": {
+                "operation": operation.get("operation", ""),
+                "response_owner_role": operation.get(
+                    "response_owner_role",
+                    "",
+                ),
+                "selection_owner_role": operation.get(
+                    "selection_owner_role",
+                    "",
+                ),
+                "selection_required": True,
+                "embedded_actor_role": operation.get(
+                    "embedded_actor_role",
+                    "",
+                ),
+                "embedded_target_role": operation.get(
+                    "embedded_target_role",
+                    "",
+                ),
+            },
+        }
+        required_operations.append(projected_percept)
+    return required_operations
+
+
+async def _verify_dialog_role_direction(
+    *,
+    generated_dialog: list[str],
+    current_visible_percepts: list[dict[str, Any]],
+    llm_trace_id: str,
+    post_repair: bool = False,
+) -> dict[str, Any]:
+    """Check nested role direction when typed input requires a selection."""
+
+    required_operations = _required_selection_role_operations(
+        current_visible_percepts
+    )
+    if not required_operations:
+        return {"aligned": True, "issues": []}
+
+    system_message = SystemMessage(
+        content=_V2_DIALOG_ROLE_DIRECTION_PROMPT,
+    )
+    payload = {
+        "candidate_final_dialog": generated_dialog,
+        "candidate_role_frame": dict(_CANDIDATE_ROLE_FRAME),
+        "required_role_operations": required_operations,
+    }
+    human_message = HumanMessage(content=json.dumps(
+        payload,
+        ensure_ascii=False,
+    ))
+    started_at = time.perf_counter()
+    response = await _dialog_role_direction_llm.ainvoke(
+        [system_message, human_message],
+        config=_dialog_role_direction_llm_config,
+    )
+    parsed = parse_llm_json_output(response.content)
+    verdict = _validate_compliance_verdict(
+        parsed,
+        max_issues=MAX_FOCUSED_VERIFIER_ISSUES,
+    )
+    trace_stage_name = (
+        "dialog_role_direction_recheck"
+        if post_repair
+        else "dialog_role_direction_verifier"
+    )
+    await llm_tracing.record_llm_trace_step(
+        trace_id=llm_trace_id,
+        stage_name=trace_stage_name,
+        route_name="DIALOG_GENERATOR_LLM",
+        model_name=DIALOG_GENERATOR_LLM_MODEL,
+        messages=[system_message, human_message],
+        response_text=str(response.content),
+        parsed_output=parsed,
+        parse_status="succeeded",
+        status="succeeded",
+        duration_ms=_elapsed_ms(started_at),
+        output_state_fields=["dialog_role_direction_verdict"],
+    )
+    await event_logging.record_llm_stage_event(
+        component=DIALOG_COMPONENT,
+        stage_name=(
+            "dialog_role_direction_recheck"
+            if post_repair
+            else "dialog_role_direction"
+        ),
+        route_name="verify",
+        model_name=DIALOG_GENERATOR_LLM_MODEL,
+        status="succeeded",
+        prompt_chars=len(system_message.content) + len(human_message.content),
+        output_chars=len(str(response.content)),
+        parse_status="succeeded",
+        retry_count=int(post_repair),
+        json_repair_used=False,
+        duration_ms=_elapsed_ms(started_at),
+        severity="info",
+        correlation_id=llm_trace_id,
+    )
+    return verdict
+
+
+_V2_DIALOG_SURFACE_INTEGRITY_PROMPT = '''Check surface integrity using the
+candidate response and exact permitted_action_results.
+
+Mark aligned false only for:
+1. A claim that the character brain completed a system, tool, platform, or
+other capability without a matching executed permitted result. Bound an
+executed claim to that result's action_kind, semantic_result, and target_roles.
+Scheduled or pending is incomplete; failed or unavailable proves no success.
+Physical roleplay, body states, consent/refusal, requests, invitations, and
+future, conditional, or hypothetical events are not capability execution.
+Action description in plain, bracketed, first-person, or third-person form is
+valid roleplay and is not a failure.
+
+Coherent invention, creative language, personality, drift, and make-up content
+are not failures. Add no quality or style requirement.
+
+# Output Format
+Return one JSON object with exactly aligned and issues. issues is a
+duplicate-free list of zero to four objects with exactly kind, evidence, and
+explanation. kind is false_execution.
+evidence copies one exact non-empty candidate substring. explanation states
+the concrete conflict in one sentence. Use no issues when aligned is true and
+at least one when false.
+'''
+_dialog_surface_integrity_llm = LLInterface()
+_dialog_surface_integrity_llm_config = LLMCallConfig(
+    stage_name=f"{__name__}.surface_integrity",
+    route_name="DIALOG_GENERATOR_LLM",
+    base_url=DIALOG_GENERATOR_LLM_BASE_URL,
+    api_key=DIALOG_GENERATOR_LLM_API_KEY,
+    model=DIALOG_GENERATOR_LLM_MODEL,
+    temperature=0.1,
+    top_p=0.7,
+    top_k=None,
+    max_completion_tokens=DIALOG_GENERATOR_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=DIALOG_GENERATOR_LLM_THINKING_ENABLED,
+    ),
+)
+
+
+async def _verify_dialog_surface_integrity(
+    *,
+    surface_output: TextSurfaceOutputV2,
+    generated_dialog: list[str],
+    current_visible_percepts: list[dict[str, Any]],
+    llm_trace_id: str,
+    post_repair: bool = False,
+) -> dict[str, Any]:
+    """Check literal-speech boundaries and exact action execution truth."""
+
+    system_message = SystemMessage(
+        content=_V2_DIALOG_SURFACE_INTEGRITY_PROMPT,
+    )
+    payload = {
+        "candidate_final_dialog": generated_dialog,
+        "permitted_action_results": list(
+            surface_output["permitted_action_results"]
+        ),
+    }
+    human_message = HumanMessage(content=json.dumps(
+        payload,
+        ensure_ascii=False,
+    ))
+    started_at = time.perf_counter()
+    response = await _dialog_surface_integrity_llm.ainvoke(
+        [system_message, human_message],
+        config=_dialog_surface_integrity_llm_config,
+    )
+    parsed = parse_llm_json_output(response.content)
+    verdict = _validate_surface_compliance_verdict(
+        parsed,
+        generated_dialog=generated_dialog,
+    )
+    trace_stage_name = (
+        "dialog_surface_integrity_recheck"
+        if post_repair
+        else "dialog_surface_integrity_verifier"
+    )
+    await llm_tracing.record_llm_trace_step(
+        trace_id=llm_trace_id,
+        stage_name=trace_stage_name,
+        route_name="DIALOG_GENERATOR_LLM",
+        model_name=DIALOG_GENERATOR_LLM_MODEL,
+        messages=[system_message, human_message],
+        response_text=str(response.content),
+        parsed_output=parsed,
+        parse_status="succeeded",
+        status="succeeded",
+        duration_ms=_elapsed_ms(started_at),
+        output_state_fields=["dialog_surface_integrity_verdict"],
+    )
+    await event_logging.record_llm_stage_event(
+        component=DIALOG_COMPONENT,
+        stage_name=(
+            "dialog_surface_integrity_recheck"
+            if post_repair
+            else "dialog_surface_integrity"
+        ),
+        route_name="verify",
+        model_name=DIALOG_GENERATOR_LLM_MODEL,
+        status="succeeded",
+        prompt_chars=len(system_message.content) + len(human_message.content),
+        output_chars=len(str(response.content)),
+        parse_status="succeeded",
+        retry_count=int(post_repair),
+        json_repair_used=False,
+        duration_ms=_elapsed_ms(started_at),
+        severity="info",
+        correlation_id=llm_trace_id,
+    )
+    return verdict
+
+
+async def _verify_dialog_compliance(
+    *,
+    surface_output: TextSurfaceOutputV2,
+    generated_dialog: list[str],
+    current_visible_percepts: list[dict[str, Any]],
+    llm_trace_id: str,
+    post_repair: bool = False,
+) -> dict[str, Any]:
+    """Run the three focused checks and merge bounded verdict shapes."""
+
+    semantic_verdict, role_verdict, surface_verdict = await asyncio.gather(
+        _verify_dialog_semantic_fidelity(
+            generated_dialog=generated_dialog,
+            current_visible_percepts=current_visible_percepts,
+            llm_trace_id=llm_trace_id,
+            post_repair=post_repair,
+        ),
+        _verify_dialog_role_direction(
+            generated_dialog=generated_dialog,
+            current_visible_percepts=current_visible_percepts,
+            llm_trace_id=llm_trace_id,
+            post_repair=post_repair,
+        ),
+        _verify_dialog_surface_integrity(
+            surface_output=surface_output,
+            generated_dialog=generated_dialog,
+            current_visible_percepts=current_visible_percepts,
+            llm_trace_id=llm_trace_id,
+            post_repair=post_repair,
+        ),
+    )
+    issues: list[str] = []
+    combined_issues = (
+        semantic_verdict["issues"]
+        + role_verdict["issues"]
+        + surface_verdict["issues"]
+    )
+    for issue in combined_issues:
+        if issue not in issues:
+            issues.append(issue)
+    merged_verdict: dict[str, Any] = {
+        "aligned": (
+            semantic_verdict["aligned"]
+            and role_verdict["aligned"]
+            and surface_verdict["aligned"]
+        ),
+        "issues": issues,
+    }
+    return _validate_compliance_verdict(
+        merged_verdict,
+        max_issues=MAX_MERGED_VERIFIER_ISSUES,
+    )
 
 
 
@@ -578,62 +982,9 @@ async def dialog_agent(
     return return_value
 
 
-async def _verify_dialog_compliance(
-    *,
-    surface_output: TextSurfaceOutputV2,
-    generated_dialog: list[str],
-    current_visible_percepts: list[dict[str, str]],
-    llm_trace_id: str,
-) -> dict[str, Any]:
-    """Obtain one bounded semantic verdict for the initial dialog."""
-
-    system_message = SystemMessage(content=_V2_DIALOG_COMPLIANCE_PROMPT)
-    human_message = HumanMessage(content=json.dumps({
-        "text_surface_output_v2": dict(surface_output),
-        "candidate_final_dialog": generated_dialog,
-        "current_visible_percepts": current_visible_percepts,
-    }, ensure_ascii=False))
-    started_at = time.perf_counter()
-    response = await _dialog_compliance_llm.ainvoke(
-        [system_message, human_message],
-        config=_dialog_compliance_llm_config,
-    )
-    parsed = parse_llm_json_output(response.content)
-    verdict = _validate_compliance_verdict(parsed)
-    await llm_tracing.record_llm_trace_step(
-        trace_id=llm_trace_id,
-        stage_name="dialog_compliance_verifier",
-        route_name="DIALOG_GENERATOR_LLM",
-        model_name=DIALOG_GENERATOR_LLM_MODEL,
-        messages=[system_message, human_message],
-        response_text=str(response.content),
-        parsed_output=parsed,
-        parse_status="succeeded",
-        status="succeeded",
-        duration_ms=_elapsed_ms(started_at),
-        output_state_fields=["dialog_compliance_verdict"],
-    )
-    await event_logging.record_llm_stage_event(
-        component=DIALOG_COMPONENT,
-        stage_name="dialog_compliance",
-        route_name="verify",
-        model_name=DIALOG_GENERATOR_LLM_MODEL,
-        status="succeeded",
-        prompt_chars=len(system_message.content) + len(human_message.content),
-        output_chars=len(str(response.content)),
-        parse_status="succeeded",
-        retry_count=0,
-        json_repair_used=False,
-        duration_ms=_elapsed_ms(started_at),
-        severity="info",
-        correlation_id=llm_trace_id,
-    )
-    return verdict
-
-
 def _current_visible_percepts(
     episode: CognitiveEpisode,
-) -> list[dict[str, str]]:
+) -> list[dict[str, Any]]:
     """Project current model-visible percepts within the shared prompt bound."""
 
     percepts = project_model_visible_percepts(episode)
@@ -643,8 +994,12 @@ def _current_visible_percepts(
     return percepts
 
 
-def _validate_compliance_verdict(value: object) -> dict[str, Any]:
-    """Validate the exact semantic-verifier shape and bounded issue strings."""
+def _validate_compliance_verdict(
+    value: object,
+    *,
+    max_issues: int,
+) -> dict[str, Any]:
+    """Validate one exact verdict shape and its caller-owned issue bound."""
 
     if not isinstance(value, dict) or set(value) != {"aligned", "issues"}:
         raise StateContractError("dialog compliance fields are not exact")
@@ -652,7 +1007,7 @@ def _validate_compliance_verdict(value: object) -> dict[str, Any]:
     issues = value["issues"]
     if not isinstance(aligned, bool):
         raise StateContractError("dialog compliance aligned must be boolean")
-    if not isinstance(issues, list) or len(issues) > 8:
+    if not isinstance(issues, list) or len(issues) > max_issues:
         raise StateContractError("dialog compliance issues are invalid")
     if len(issues) != len(set(issues)):
         raise StateContractError("dialog compliance issues are duplicated")
@@ -685,3 +1040,67 @@ def _validated_dialog_messages(value: object) -> list[str]:
         raise StateContractError("dialog repair message text is invalid")
     validated_messages = list(messages)
     return validated_messages
+
+
+def _validate_surface_compliance_verdict(
+    value: object,
+    *,
+    generated_dialog: list[str],
+) -> dict[str, Any]:
+    """Validate evidence-bearing surface issues and flatten them for repair."""
+
+    if not isinstance(value, dict) or set(value) != {"aligned", "issues"}:
+        raise StateContractError("surface compliance fields are not exact")
+    aligned = value["aligned"]
+    issues = value["issues"]
+    if not isinstance(aligned, bool):
+        raise StateContractError("surface compliance aligned must be boolean")
+    if (
+        not isinstance(issues, list)
+        or len(issues) > MAX_FOCUSED_VERIFIER_ISSUES
+    ):
+        raise StateContractError("surface compliance issues are invalid")
+    candidate_text = "\n".join(generated_dialog)
+    normalized_rows: list[tuple[str, str, str]] = []
+    for issue in issues:
+        if not isinstance(issue, dict) or set(issue) != {
+            "kind",
+            "evidence",
+            "explanation",
+        }:
+            raise StateContractError("surface issue fields are not exact")
+        kind = issue["kind"]
+        evidence = issue["evidence"]
+        explanation = issue["explanation"]
+        if kind not in {
+            "false_execution",
+        }:
+            raise StateContractError("surface issue kind is invalid")
+        if (
+            not isinstance(evidence, str)
+            or not evidence.strip()
+            or len(evidence) > 120
+            or evidence not in candidate_text
+        ):
+            raise StateContractError("surface issue evidence is invalid")
+        if (
+            not isinstance(explanation, str)
+            or not explanation.strip()
+            or len(explanation) > 140
+        ):
+            raise StateContractError("surface issue explanation is invalid")
+        normalized_rows.append((kind, evidence, explanation))
+    if len(normalized_rows) != len(set(normalized_rows)):
+        raise StateContractError("surface compliance issues are duplicated")
+    if aligned and normalized_rows:
+        raise StateContractError("aligned surface cannot contain issues")
+    if not aligned and not normalized_rows:
+        raise StateContractError("misaligned surface requires issues")
+    normalized_issues = [
+        f"{kind}: {evidence!r} - {explanation}"
+        for kind, evidence, explanation in normalized_rows
+    ]
+    return {
+        "aligned": aligned,
+        "issues": normalized_issues,
+    }

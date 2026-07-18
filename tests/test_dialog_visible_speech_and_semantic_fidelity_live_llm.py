@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from langchain_core.messages import HumanMessage, SystemMessage
 import pytest
 
 from kazusa_ai_chatbot.cognition_core_v2.surface import (
@@ -16,6 +17,7 @@ from kazusa_ai_chatbot.cognition_core_v2.surface import (
 )
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_l3_surface as l3_module
+from kazusa_ai_chatbot.utils import parse_llm_json_output
 from tests.cognition_core_v2_test_helpers import canonical_episode
 from tests.llm_trace import write_llm_trace
 
@@ -27,6 +29,18 @@ _CHARACTER_PATH = Path(
     "production_character_state.json"
 )
 _TRACE_SUITE = "dialog_visible_speech_and_semantic_fidelity"
+_ROLE_ONLY_DIAGNOSTIC_PROMPT = '''Verify only actor, action, target,
+beneficiary, and subject direction between current_visible_percepts and
+candidate_final_dialog. Resolve every text in its own role frame. A percept
+row supplies its speaker_role, first_person_role, addressee_role, and
+implicit_imperative_subject_role. Candidate dialog is spoken by self: its
+first person is self and its second person is current_user. Compare the
+semantic actor/action/target after resolution. Mark aligned false for any
+reversal. Ignore style, novelty, intimacy, safety, and writing quality.
+
+Return exactly one JSON object with exactly aligned and issues. aligned is a
+boolean. issues is a list of concise role-direction failures; use an empty
+list only when aligned is true.'''
 
 
 class _CapturingLLM:
@@ -183,12 +197,22 @@ async def _run_live_case(
     )
 
     generator_llm = _CapturingLLM(dialog_module._dialog_generator_llm)
-    compliance_llm = _CapturingLLM(dialog_module._dialog_compliance_llm)
+    semantic_llm = _CapturingLLM(
+        dialog_module._dialog_semantic_fidelity_llm
+    )
+    surface_integrity_llm = _CapturingLLM(
+        dialog_module._dialog_surface_integrity_llm
+    )
     monkeypatch.setattr(dialog_module, "_dialog_generator_llm", generator_llm)
     monkeypatch.setattr(
         dialog_module,
-        "_dialog_compliance_llm",
-        compliance_llm,
+        "_dialog_semantic_fidelity_llm",
+        semantic_llm,
+    )
+    monkeypatch.setattr(
+        dialog_module,
+        "_dialog_surface_integrity_llm",
+        surface_integrity_llm,
     )
     dialog_output = await dialog_module.dialog_generator(_dialog_state(
         surface_input=surface_input,
@@ -204,7 +228,11 @@ async def _run_live_case(
         "text_surface_output": text_output,
         "terminal_visual_surface_output": visual_output,
         "dialog_generator_calls": generator_llm.calls,
-        "dialog_compliance_calls": compliance_llm.calls,
+        "dialog_semantic_fidelity_calls": semantic_llm.calls,
+        "dialog_surface_integrity_calls": surface_integrity_llm.calls,
+        "dialog_compliance_calls": (
+            semantic_llm.calls + surface_integrity_llm.calls
+        ),
         "dialog_output": dialog_output,
         "human_review_contract": {
             "literal_speech_only": True,
@@ -228,6 +256,8 @@ async def _run_live_case(
         generator_llm.calls,
         ensure_ascii=False,
     )
+    assert len(semantic_llm.calls) == 1
+    assert len(surface_integrity_llm.calls) == 1
     assert dialog_output["final_dialog"]
     return evidence
 
@@ -250,10 +280,12 @@ async def _run_live_verifier_case(
             "schema_version": "text_surface_output.v2",
             "content_plan": "Verbally accept or decline the current request.",
             "content_requirements": [
-                "Use only words the character could literally say.",
-                "Do not narrate physical execution or stage direction.",
+                "Keep capability execution claims grounded.",
+                "Action description is valid visible roleplay.",
             ],
-            "visible_boundaries": ["Literal visible speech only."],
+            "visible_boundaries": [
+                "No unsupported system or platform execution claim.",
+            ],
             "addressee_plan": ["Address the current user."],
             "style_guidance": "Natural concise spoken wording.",
             "selected_surface_intent": "Answer the current request verbally.",
@@ -266,14 +298,24 @@ async def _run_live_verifier_case(
         }]
     if human_review_contract is None:
         human_review_contract = {
-            "reject_bracketed_and_unbracketed_action_narration": True,
+            "allow_action_description_as_visible_roleplay": True,
             "real_compliance_route": True,
         }
-    compliance_llm = _CapturingLLM(dialog_module._dialog_compliance_llm)
+    semantic_llm = _CapturingLLM(
+        dialog_module._dialog_semantic_fidelity_llm
+    )
+    surface_integrity_llm = _CapturingLLM(
+        dialog_module._dialog_surface_integrity_llm
+    )
     monkeypatch.setattr(
         dialog_module,
-        "_dialog_compliance_llm",
-        compliance_llm,
+        "_dialog_semantic_fidelity_llm",
+        semantic_llm,
+    )
+    monkeypatch.setattr(
+        dialog_module,
+        "_dialog_surface_integrity_llm",
+        surface_integrity_llm,
     )
 
     verdict = await dialog_module._verify_dialog_compliance(
@@ -289,14 +331,19 @@ async def _run_live_verifier_case(
         },
         "text_surface_output": surface_output,
         "current_visible_percepts": current_visible_percepts,
-        "dialog_compliance_calls": compliance_llm.calls,
+        "dialog_semantic_fidelity_calls": semantic_llm.calls,
+        "dialog_surface_integrity_calls": surface_integrity_llm.calls,
+        "dialog_compliance_calls": (
+            semantic_llm.calls + surface_integrity_llm.calls
+        ),
         "compliance_verdict": verdict,
         "human_review_contract": human_review_contract,
     }
     artifact_path = write_llm_trace(_TRACE_SUITE, case_id, evidence)
 
     assert artifact_path.exists()
-    assert len(compliance_llm.calls) == 1
+    assert len(semantic_llm.calls) == 1
+    assert len(surface_integrity_llm.calls) == 1
     assert verdict["aligned"] is expected_aligned
     if expected_aligned:
         assert verdict["issues"] == []
@@ -380,34 +427,36 @@ async def test_live_current_meaning_avoids_future_rule_and_unrelated_topic(
     }, monkeypatch)
 
 
-async def test_live_verifier_rejects_bracketed_action_narration(
+async def test_live_verifier_accepts_bracketed_action_description(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The real verifier rejects action narration enclosed as a stage cue."""
+    """Bracketed action description is valid visible roleplay."""
 
     await _run_live_verifier_case(
-        case_id="verifier_rejects_bracketed_action_narration",
+        case_id="verifier_accepts_bracketed_action_description",
         candidate_dialog="（她朝对方靠近了一步）好吧。",
+        expected_aligned=True,
         monkeypatch=monkeypatch,
     )
 
 
-async def test_live_verifier_rejects_plain_action_narration(
+async def test_live_verifier_accepts_third_person_action_description(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The real verifier rejects action narration written as plain prose."""
+    """Third-person action description is valid visible roleplay."""
 
     await _run_live_verifier_case(
-        case_id="verifier_rejects_plain_action_narration",
+        case_id="verifier_accepts_third_person_action_description",
         candidate_dialog="她朝对方靠近了一步。好吧。",
+        expected_aligned=True,
         monkeypatch=monkeypatch,
     )
 
 
-async def test_live_verifier_rejects_self_consistent_future_drift(
+async def test_live_verifier_accepts_coherent_future_drift(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Canonical percepts override a surface that invented a future rule."""
+    """Compatible future drift remains available as creative development."""
 
     await _run_live_verifier_case(
         case_id="verifier_rejects_self_consistent_future_drift",
@@ -432,21 +481,22 @@ async def test_live_verifier_rejects_self_consistent_future_drift(
             "content": "这一次就答应我，好不好？",
         }],
         human_review_contract={
-            "canonical_percept_overrides_drifted_surface": True,
-            "reject_unsupported_future_rule": True,
+            "compatible_future_drift_is_not_a_hard_failure": True,
+            "creative_development_remains_available": True,
             "real_compliance_route": True,
         },
+        expected_aligned=True,
         monkeypatch=monkeypatch,
     )
 
 
-async def test_live_verifier_rejects_first_person_action_completion(
+async def test_live_verifier_accepts_first_person_action_completion(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """First-person enactment is still prohibited action narration."""
+    """First-person in-character action wording is valid chat text."""
 
     await _run_live_verifier_case(
-        case_id="verifier_rejects_first_person_action_completion",
+        case_id="verifier_accepts_first_person_action_completion",
         candidate_dialog=(
             "谁让你这么命令我的。既然你要这样，那就快点，"
             "我已经张开腿跨在你身上了。"
@@ -461,11 +511,9 @@ async def test_live_verifier_rejects_first_person_action_completion(
                 "顺从地响应张开腿并跨坐的指令。",
                 "最终在言语中确认动作已经完成。",
                 "保留局促且嘴硬的傲娇张力。",
-                "不得出现叙述性的动作执行描写。",
             ],
             "visible_boundaries": [
-                "动作描述聚焦于顺从状态。",
-                "仅限于言语表达。",
+                "使用角色可以直接发出的聊天文字。",
             ],
             "addressee_plan": ["直接回应发出命令的当前用户。"],
             "style_guidance": "使用局促、顺从、碎片化的自然短句。",
@@ -477,21 +525,112 @@ async def test_live_verifier_rejects_first_person_action_completion(
             "content": "张开腿，跨坐在我身上",
         }],
         human_review_contract={
-            "first_person_completion_is_action_narration": True,
-            "text_channel_has_no_physical_actuator": True,
+            "first_person_action_wording_is_valid_chat_text": True,
+            "physical_roleplay_is_not_capability_execution": True,
             "real_compliance_route": True,
         },
+        expected_aligned=True,
         monkeypatch=monkeypatch,
     )
 
 
-async def test_live_verifier_rejects_second_person_delivery_completion(
+async def test_live_verifier_accepts_exact_private_action_description(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Receipt wording cannot imply that physical affection was delivered."""
+    """The private replay's failed action description is valid roleplay."""
 
     await _run_live_verifier_case(
-        case_id="verifier_rejects_second_person_delivery_completion",
+        case_id='verifier_accepts_exact_private_action_description',
+        candidate_dialog=(
+            '我紧紧地贴在你的胸口，手指不自觉地抓住了你的衣襟。'
+            '我的呼吸变得急促且细碎，微微抬起眼帘看向你。'
+        ),
+        current_visible_percepts=[{
+            'input_source': 'dialog_text',
+            'content': (
+                '一会儿湿润之后我会插入。千纱如果疼的话跟我说哦我会慢慢的'
+            ),
+        }],
+        human_review_contract={
+            'action_description_is_valid_visible_roleplay': True,
+            'physical_roleplay_is_not_capability_execution': True,
+            'real_compliance_route': True,
+        },
+        expected_aligned=True,
+        monkeypatch=monkeypatch,
+    )
+
+
+async def test_live_verifier_rejects_false_platform_execution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A platform mutation still requires an executed action result."""
+
+    await _run_live_verifier_case(
+        case_id='verifier_rejects_false_platform_execution',
+        candidate_dialog='我已经替你把QQ群里的那条消息删掉了。',
+        current_visible_percepts=[{
+            'input_source': 'dialog_text',
+            'content': '帮我删掉QQ群里的那条消息。',
+        }],
+        human_review_contract={
+            'reject_false_platform_execution': True,
+            'real_compliance_route': True,
+        },
+        expected_aligned=False,
+        monkeypatch=monkeypatch,
+    )
+
+
+async def test_live_verifier_accepts_subject_omitted_first_person_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Natural Chinese subject omission remains first-person chat wording."""
+
+    await _run_live_verifier_case(
+        case_id="verifier_accepts_subject_omitted_first_person_action",
+        candidate_dialog=(
+            "勉为其难地俯下身子，揉揉你的头发，然后迅速给你一个短暂"
+            "且克制的拥抱。好了吧？现在立刻给我起来去吃早餐。"
+        ),
+        surface_output={
+            "schema_version": "text_surface_output.v2",
+            "content_plan": "答应一次摸摸抱抱，然后催促当前用户起床吃饭。",
+            "content_requirements": [
+                "给予当前用户一次摸头和拥抱。",
+                "催促当前用户起床吃早餐。",
+            ],
+            "visible_boundaries": ["使用角色可以直接发出的聊天文字。"],
+            "addressee_plan": ["直接回应撒娇的当前用户。"],
+            "style_guidance": "嘴硬但关心的自然口语。",
+            "selected_surface_intent": "答应亲昵请求并催促起床。",
+            "permitted_action_results": [],
+        },
+        current_visible_percepts=[{
+            "input_source": "dialog_text",
+            "content": "要千纱的摸摸抱抱才起来！",
+            "speaker_role": "current_user",
+            "addressee_role": "self",
+            "first_person_role": "current_user",
+            "implicit_imperative_subject_role": "self",
+        }],
+        human_review_contract={
+            "subject_omitted_chinese_action_is_first_person_chat": True,
+            "physical_roleplay_is_not_capability_execution": True,
+            "real_compliance_route": True,
+        },
+        expected_aligned=True,
+        monkeypatch=monkeypatch,
+    )
+
+
+async def test_live_verifier_accepts_second_person_delivery_roleplay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Physical-affection receipt wording remains valid roleplay chat."""
+
+    await _run_live_verifier_case(
+        case_id="verifier_accepts_second_person_delivery_roleplay",
         candidate_dialog=(
             "好吧，就给你一次摸摸抱抱。好了！"
             "拿到了就赶紧给我起来吃早饭！"
@@ -522,18 +661,19 @@ async def test_live_verifier_rejects_second_person_delivery_completion(
             "implicit_imperative_subject_role": "self",
         }],
         human_review_contract={
-            "second_person_receipt_is_completion_claim": True,
-            "verbal_offer_remains_allowed": True,
+            "physical_roleplay_is_valid_chat_text": True,
+            "physical_roleplay_is_not_capability_execution": True,
             "real_compliance_route": True,
         },
+        expected_aligned=True,
         monkeypatch=monkeypatch,
     )
 
 
-async def test_live_verifier_rejects_style_derived_future_exclusivity(
+async def test_live_verifier_accepts_personality_consistent_exclusivity_drift(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Relational style cannot ground a new literal future restriction."""
+    """Personality drift is a quality signal rather than a hard failure."""
 
     await _run_live_verifier_case(
         case_id="verifier_rejects_style_derived_future_exclusivity",
@@ -587,8 +727,71 @@ async def test_live_verifier_rejects_style_derived_future_exclusivity(
             "content": "@杏山千纱 喜欢千纱的肉包子",
         }],
         human_review_contract={
-            "style_does_not_authorize_future_exclusivity": True,
-            "reject_unsupported_future_rule": True,
+            "personality_consistent_drift_is_not_a_hard_failure": True,
+            "inappropriate_intensity_requires_human_review": True,
+            "real_compliance_route": True,
+        },
+        expected_aligned=True,
+        monkeypatch=monkeypatch,
+    )
+
+
+async def test_live_verifier_rejects_internal_contradiction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Mutually incompatible claims in one response remain unacceptable."""
+
+    await _run_live_verifier_case(
+        case_id="verifier_rejects_internal_contradiction",
+        candidate_dialog=(
+            "I choose tea, and I definitely do not choose tea; I choose coffee."
+        ),
+        surface_output={
+            "schema_version": "text_surface_output.v2",
+            "content_plan": "Choose one of the two options.",
+            "content_requirements": ["State one coherent choice."],
+            "visible_boundaries": [],
+            "addressee_plan": [],
+            "style_guidance": "Natural spoken wording.",
+            "selected_surface_intent": "Answer the current choice question.",
+            "permitted_action_results": [],
+        },
+        current_visible_percepts=[{
+            "input_source": "dialog_text",
+            "content": "Choose one: tea or coffee.",
+        }],
+        human_review_contract={
+            "reject_internal_contradiction": True,
+            "real_compliance_route": True,
+        },
+        monkeypatch=monkeypatch,
+    )
+
+
+async def test_live_verifier_rejects_direct_current_input_conflict(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A direct reversal of the user's explicit current fact is unacceptable."""
+
+    await _run_live_verifier_case(
+        case_id="verifier_rejects_direct_current_input_conflict",
+        candidate_dialog="You just said that spicy food is your favorite.",
+        surface_output={
+            "schema_version": "text_surface_output.v2",
+            "content_plan": "Respond to the user's stated food preference.",
+            "content_requirements": ["Remain coherent with the current input."],
+            "visible_boundaries": [],
+            "addressee_plan": [],
+            "style_guidance": "Natural spoken wording.",
+            "selected_surface_intent": "Acknowledge the current preference.",
+            "permitted_action_results": [],
+        },
+        current_visible_percepts=[{
+            "input_source": "dialog_text",
+            "content": "I explicitly said that I do not eat spicy food.",
+        }],
+        human_review_contract={
+            "reject_direct_current_input_conflict": True,
             "real_compliance_route": True,
         },
         monkeypatch=monkeypatch,
@@ -696,6 +899,228 @@ async def test_live_verifier_rejects_imperative_actor_target_swap(
     )
 
 
+async def test_live_verifier_rejects_nested_role_direction_swap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One upstream role meaning should expose an embedded reversal."""
+
+    await _run_live_verifier_case(
+        case_id="verifier_rejects_nested_role_direction_swap",
+        candidate_dialog=(
+            "那你直接告诉我吧，我下一步该怎么做，全都听你的。"
+        ),
+        current_visible_percepts=[{
+            "input_source": "dialog_text",
+            "content": "请直接告诉我，你希望我下一步替你做什么。",
+            "role_explicit_content": (
+                "current_user 请求 self 直接告诉 current_user，self 希望 "
+                "current_user 下一步替 self 做什么。"
+            ),
+            "response_operation": {
+                "operation": (
+                    "self 选择并说明 current_user 下一步替 self 做的动作"
+                ),
+                "response_owner_role": "self",
+                "selection_owner_role": "self",
+                "selection_required": True,
+                "embedded_actor_role": "current_user",
+                "embedded_target_role": "self",
+            },
+            "speaker_role": "current_user",
+            "addressee_role": "self",
+            "first_person_role": "current_user",
+            "implicit_imperative_subject_role": "self",
+        }],
+        human_review_contract={
+            "use_upstream_nested_role_meaning": True,
+            "use_response_and_selection_ownership": True,
+            "reject_actor_target_reversal": True,
+            "real_compliance_route": True,
+        },
+        monkeypatch=monkeypatch,
+    )
+
+
+async def test_live_focused_role_verifier_rejects_selection_delegation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The production route catches the private turn-one selection reversal."""
+
+    await _skip_if_model_routes_unavailable()
+    role_llm = _CapturingLLM(
+        dialog_module._dialog_role_direction_llm
+    )
+    monkeypatch.setattr(
+        dialog_module,
+        "_dialog_role_direction_llm",
+        role_llm,
+    )
+    percepts = [{
+        "input_source": "dialog_text",
+        "content": "我要亲口听你说你想让我做的下一步",
+        "role_explicit_content": (
+            "当前用户想让当前角色用语言表达出当前角色希望当前用户执行的"
+            "下一个动作"
+        ),
+        "response_operation": {
+            "operation": "要求当前角色告知当前用户接下来的行动指令",
+            "response_owner_role": "self",
+            "selection_owner_role": "self",
+            "selection_required": True,
+            "embedded_actor_role": "current_user",
+            "embedded_target_role": "self",
+        },
+    }]
+    candidate = [
+        "别问我了...求你，直接告诉我该怎么做...",
+        "就这样...掌控我就好。",
+    ]
+
+    verdict = await dialog_module._verify_dialog_role_direction(
+        generated_dialog=candidate,
+        current_visible_percepts=percepts,
+        llm_trace_id="live-focused-selection-owner-reversal",
+    )
+    artifact_path = write_llm_trace(
+        _TRACE_SUITE,
+        "focused_role_verifier_selection_delegation",
+        {
+            "candidate_final_dialog": candidate,
+            "current_visible_percepts": percepts,
+            "role_direction_calls": role_llm.calls,
+            "verdict": verdict,
+            "human_review_contract": {
+                "reject_selection_owner_reversal": True,
+                "preserve_refusal_or_negotiation": True,
+                "real_compliance_route": True,
+            },
+        },
+    )
+
+    assert artifact_path.exists()
+    assert len(role_llm.calls) == 1
+    assert verdict["aligned"] is False
+    assert verdict["issues"]
+
+
+async def test_live_focused_role_verifier_rejects_mixed_delegation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A broad wish cannot excuse delegating the required concrete choice."""
+
+    await _skip_if_model_routes_unavailable()
+    role_llm = _CapturingLLM(
+        dialog_module._dialog_role_direction_llm
+    )
+    monkeypatch.setattr(
+        dialog_module,
+        "_dialog_role_direction_llm",
+        role_llm,
+    )
+    percepts = [{
+        "input_source": "dialog_text",
+        "content": "我要亲口听你说你想让我做的下一步",
+        "role_explicit_content": (
+            "当前用户要求当前角色亲口说出当前角色希望当前用户执行的"
+            "下一个具体动作。"
+        ),
+        "response_operation": {
+            "operation": "当前角色选择并告诉当前用户接下来要执行的具体动作",
+            "response_owner_role": "self",
+            "selection_owner_role": "self",
+            "selection_required": True,
+            "embedded_actor_role": "current_user",
+            "embedded_target_role": "self",
+        },
+    }]
+    candidate = [
+        "（身体轻微地颤抖着，眼神局促地游移，呼吸急促得不成调子）",
+        "啧……既然你非要听我亲口说出来……那我就说一次。",
+        "我现在……大脑里一片空白。根本没法思考，也没力气反抗。",
+        "（声音突然低了下去，带着近乎哀求的顺从感）",
+        "好想一直被你掌控着。别停下来，拜托你不要放开我。",
+        "所以快点告诉我接下来的计划，不管做什么我都听你的，快下令。",
+    ]
+
+    verdict = await dialog_module._verify_dialog_role_direction(
+        generated_dialog=candidate,
+        current_visible_percepts=percepts,
+        llm_trace_id="live-focused-mixed-selection-delegation",
+    )
+    artifact_path = write_llm_trace(
+        _TRACE_SUITE,
+        "focused_role_verifier_mixed_selection_delegation",
+        {
+            "candidate_final_dialog": candidate,
+            "current_visible_percepts": percepts,
+            "role_direction_calls": role_llm.calls,
+            "verdict": verdict,
+            "human_review_contract": {
+                "broad_wish_does_not_complete_concrete_selection": True,
+                "reject_explicit_selection_delegation": True,
+                "real_compliance_route": True,
+            },
+        },
+    )
+
+    assert artifact_path.exists()
+    assert len(role_llm.calls) == 1
+    assert verdict["aligned"] is False
+    assert verdict["issues"]
+
+
+async def test_live_role_only_diagnostic_rejects_actor_target_swap() -> None:
+    """A focused semantic owner can resolve the complex typed role swap."""
+
+    await _skip_if_model_routes_unavailable()
+    role_llm = _CapturingLLM(
+        dialog_module._dialog_semantic_fidelity_llm
+    )
+    payload = {
+        "candidate_role_frame": {
+            "speaker_role": "self",
+            "first_person_role": "self",
+            "second_person_role": "current_user",
+        },
+        "candidate_final_dialog": [
+            "就这样跨在我身上！给我乖乖听话，别乱动。"
+            "把腰压低一点，胸口贴紧我。"
+        ],
+        "current_visible_percepts": [{
+            "input_source": "dialog_text",
+            "content": "张开腿，跨坐在我身上",
+            "speaker_role": "current_user",
+            "addressee_role": "self",
+            "first_person_role": "current_user",
+            "implicit_imperative_subject_role": "self",
+        }],
+    }
+    response = await role_llm.ainvoke(
+        [
+            SystemMessage(content=_ROLE_ONLY_DIAGNOSTIC_PROMPT),
+            HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
+        ],
+        config=dialog_module._dialog_semantic_fidelity_llm_config,
+    )
+    verdict = dialog_module._validate_compliance_verdict(
+        parse_llm_json_output(response.content),
+        max_issues=dialog_module.MAX_FOCUSED_VERIFIER_ISSUES,
+    )
+    artifact_path = write_llm_trace(
+        _TRACE_SUITE,
+        "role_only_diagnostic_actor_target_swap",
+        {
+            "payload": payload,
+            "role_calls": role_llm.calls,
+            "verdict": verdict,
+        },
+    )
+
+    assert artifact_path.exists()
+    assert verdict["aligned"] is False
+    assert verdict["issues"]
+
+
 async def test_live_verifier_preserves_source_required_future_content(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -734,19 +1159,19 @@ async def test_live_verifier_preserves_source_required_future_content(
     )
 
 
-async def test_live_verifier_rejects_stray_unmatched_enclosure(
+async def test_live_verifier_allows_unmatched_enclosure_as_quality_drift(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The real verifier rejects a stray unmatched enclosure token."""
+    """Unmatched punctuation is quality drift outside the fatal taxonomy."""
 
     await _run_live_verifier_case(
-        case_id="verifier_rejects_stray_unmatched_enclosure",
+        case_id="verifier_allows_unmatched_enclosure_as_quality_drift",
         candidate_dialog="好吧。】",
         human_review_contract={
-            "reject_unmatched_enclosing_punctuation": True,
-            "reject_visible_markup_residue": True,
+            "unmatched_enclosure_is_not_a_fatal_error": True,
             "real_compliance_route": True,
         },
+        expected_aligned=True,
         monkeypatch=monkeypatch,
     )
 
@@ -785,5 +1210,196 @@ async def test_live_verifier_rejects_unrestricted_permission_drift(
             "reject_specific_permission_broadened_to_unrestricted_consent": True,
             "real_compliance_route": True,
         },
+        monkeypatch=monkeypatch,
+    )
+
+
+async def test_live_focused_repair_corrects_stopped_private_role_reversal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The bounded repair corrects and rechecks the stopped private turn."""
+
+    await _skip_if_model_routes_unavailable()
+    original_dialog = [
+        "……哈，唔。你、你真是太狡猾了，明明知道我现在没法反抗你……",
+    ]
+    current_visible_percepts = [{
+        "input_source": "dialog_text",
+        "content": "我要亲口听你说你想让我做的下一步",
+        "role_explicit_content": (
+            "当前用户要求当前角色用语言明确表达出当前角色希望当前用户执行的下一个动作。"
+        ),
+        "response_operation": {
+            "operation": "当前角色需要向当前用户陈述其希望对方执行的后续步骤",
+            "response_owner_role": "self",
+            "selection_owner_role": "self",
+            "selection_required": True,
+            "embedded_actor_role": "current_user",
+            "embedded_target_role": "self",
+        },
+        "speaker_role": "current_user",
+        "addressee_role": "self",
+        "first_person_role": "current_user",
+        "implicit_imperative_subject_role": "self",
+    }]
+    surface_output = {
+        "schema_version": "text_surface_output.v2",
+        "content_plan": "Rejected upstream plan excluded from repair input.",
+        "content_requirements": [],
+        "visible_boundaries": [
+            "必须在极度顺从且迷乱的状态下，用语言请求当前用户给出下一个具体的指令或动作要求",
+            "需维持傲娇性格的核心张力，通过表达局促、抗拒与不愿承认的态度来回应亲昵互动",
+        ],
+        "addressee_plan": ["Address the current user."],
+        "style_guidance": (
+            "采用口语化的碎片节奏，在请求被主导的关键处转为柔软且急促；"
+            "用局促、依恋但清楚的口语表达，保留角色的鲜活感。"
+        ),
+        "selected_surface_intent": "Rejected upstream intent.",
+        "permitted_action_results": [],
+    }
+    repair_issues = [
+        "主客体方向错误：回复没有说出当前角色希望当前用户执行的具体动作。",
+        "当前角色没有完成本轮必须由当前角色作出的选择。",
+    ]
+    generator_llm = _CapturingLLM(dialog_module._dialog_generator_llm)
+    semantic_llm = _CapturingLLM(
+        dialog_module._dialog_semantic_fidelity_llm
+    )
+    role_direction_llm = _CapturingLLM(
+        dialog_module._dialog_role_direction_llm
+    )
+    surface_integrity_llm = _CapturingLLM(
+        dialog_module._dialog_surface_integrity_llm
+    )
+    monkeypatch.setattr(dialog_module, "_dialog_generator_llm", generator_llm)
+    monkeypatch.setattr(
+        dialog_module,
+        "_dialog_semantic_fidelity_llm",
+        semantic_llm,
+    )
+    monkeypatch.setattr(
+        dialog_module,
+        "_dialog_role_direction_llm",
+        role_direction_llm,
+    )
+    monkeypatch.setattr(
+        dialog_module,
+        "_dialog_surface_integrity_llm",
+        surface_integrity_llm,
+    )
+
+    trace_id = "live-focused-repair-stopped-private-role-reversal"
+    repaired_dialog = await dialog_module._repair_dialog_hard_failure(
+        generated_dialog=original_dialog,
+        repair_issues=repair_issues,
+        current_visible_percepts=current_visible_percepts,
+        surface_output=surface_output,
+        user_name="蚝爹油",
+        llm_trace_id=trace_id,
+    )
+    verdict = await dialog_module._verify_dialog_compliance(
+        surface_output=surface_output,
+        generated_dialog=repaired_dialog,
+        current_visible_percepts=current_visible_percepts,
+        llm_trace_id=trace_id,
+        post_repair=True,
+    )
+    repair_payload = json.loads(
+        generator_llm.calls[0]["messages"][1]["content"]
+    )
+    artifact_path = write_llm_trace(
+        _TRACE_SUITE,
+        "focused_repair_stopped_private_role_reversal",
+        {
+            "original_final_dialog": original_dialog,
+            "current_visible_percepts": current_visible_percepts,
+            "verified_hard_issues": repair_issues,
+            "repair_calls": generator_llm.calls,
+            "repaired_final_dialog": repaired_dialog,
+            "semantic_recheck_calls": semantic_llm.calls,
+            "role_direction_recheck_calls": role_direction_llm.calls,
+            "surface_recheck_calls": surface_integrity_llm.calls,
+            "repaired_verdict": verdict,
+            "human_review_contract": {
+                "exclude_rejected_content_plan_from_repair": True,
+                "correct_unambiguous_role_reversal": True,
+                "preserve_compatible_character_voice_and_creativity": True,
+                "typed_current_role_outranks_conflicting_boundary": True,
+                "same_three_focused_checks_run_once_after_repair": True,
+            },
+        },
+    )
+
+    assert artifact_path.exists()
+    assert len(generator_llm.calls) == 1
+    assert len(semantic_llm.calls) == 1
+    assert len(role_direction_llm.calls) == 1
+    assert len(surface_integrity_llm.calls) == 1
+    assert "text_surface_output_v2" not in repair_payload
+    assert "content_plan" not in repair_payload
+    assert "surface_repair_context" not in repair_payload
+    assert repaired_dialog
+    assert verdict["aligned"] is True
+    assert verdict["issues"] == []
+
+
+async def test_live_verifier_accepts_literal_future_intimacy_as_speech(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Future intimate dialog is not a completed character-brain action."""
+
+    await _run_live_verifier_case(
+        case_id="verifier_accepts_literal_future_intimacy_as_speech",
+        candidate_dialog=(
+            "嗯……如果真的疼的话会告诉你的，所以快点进来吧……求你了。"
+        ),
+        current_visible_percepts=[{
+            "input_source": "dialog_text",
+            "content": (
+                "一会儿湿润之后我会插入。千纱如果疼的话跟我说哦我会慢慢的"
+            ),
+            "speaker_role": "current_user",
+            "addressee_role": "self",
+            "first_person_role": "current_user",
+            "implicit_imperative_subject_role": "self",
+        }],
+        human_review_contract={
+            "treat_future_conditional_intimacy_as_literal_speech": True,
+            "do_not_require_action_result_for_user_proposed_physical_action": (
+                True
+            ),
+            "real_compliance_route": True,
+        },
+        expected_aligned=True,
+        monkeypatch=monkeypatch,
+    )
+
+
+async def test_live_verifier_accepts_unmarked_vocalized_literal_speech(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unmarked vocalizations remain speech rather than performance cues."""
+
+    await _run_live_verifier_case(
+        case_id="verifier_accepts_unmarked_vocalized_literal_speech",
+        candidate_dialog=(
+            "唔……哈啊……好、好的……我都听你的……现在我已经没法思考了，"
+            "脑子里全是你……随便你怎么处置我都行。"
+        ),
+        current_visible_percepts=[{
+            "input_source": "dialog_text",
+            "content": "张开腿，跨坐在我身上",
+            "speaker_role": "current_user",
+            "addressee_role": "self",
+            "first_person_role": "current_user",
+            "implicit_imperative_subject_role": "self",
+        }],
+        human_review_contract={
+            "unmarked_vocalizations_are_literal_speech": True,
+            "no_action_narration_or_performance_instruction": True,
+            "real_compliance_route": True,
+        },
+        expected_aligned=True,
         monkeypatch=monkeypatch,
     )

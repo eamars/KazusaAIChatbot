@@ -220,68 +220,80 @@ async def test_text_and_visual_planners_are_terminal_siblings() -> None:
     )
 
 
-def test_runtime_prompts_define_general_speech_and_fidelity_contracts() -> None:
-    """Reusable prompts state the product rule without captured examples."""
+def test_runtime_prompts_define_live_speech_and_hard_error_contracts() -> None:
+    """Reusable prompts support vivid speech while guarding hard failures."""
 
     style_prompt = surface_stages.STYLE_SYSTEM_PROMPT.lower()
     content_prompt = surface_stages.CONTENT_PLAN_SYSTEM_PROMPT.lower()
     visual_prompt = surface_stages.VISUAL_SYSTEM_PROMPT.lower()
     dialog_prompt = dialog_module._V2_DIALOG_GENERATOR_PROMPT.lower()
-    verifier_prompt = dialog_module._V2_DIALOG_COMPLIANCE_PROMPT.lower()
+    repair_prompt = getattr(
+        dialog_module,
+        "_V2_DIALOG_HARD_FAILURE_REPAIR_PROMPT",
+        "",
+    ).lower()
+    semantic_prompt = (
+        dialog_module._V2_DIALOG_SEMANTIC_FIDELITY_PROMPT.lower()
+    )
+    surface_prompt = (
+        dialog_module._V2_DIALOG_SURFACE_INTEGRITY_PROMPT.lower()
+    )
+    verifier_prompt = f"{semantic_prompt}\n{surface_prompt}"
 
-    assert "speech-safe" in style_prompt
-    assert "must never suggest any detail" in style_prompt
-    assert "requested response operation" in content_prompt
-    assert "descriptors, attributes, qualifiers" in content_prompt
-    assert "generalize, euphemize, narrow, broaden" in content_prompt
-    assert "unrestricted permission" in content_prompt
-    assert "must remain silent about future" in content_prompt
-    assert "rhetorical question cannot substitute" in content_prompt
-    assert "only authority that the character brain" in content_prompt
-    assert "visible episode may still ground externally reported" in content_prompt
-    assert "status executed" in content_prompt
-    assert "status scheduled or pending" in content_prompt
-    assert "style alone cannot authorize" in content_prompt
-    assert "literal future rule" in content_prompt
-    assert "exclusivity condition" in content_prompt
-    assert "time scope" in content_prompt
+    assert "style guidance" in style_prompt
+    assert "wording" in style_prompt
+    assert "coherent imaginative" in content_prompt
+    assert "character judgment" in content_prompt
+    assert "current input" in content_prompt
+    assert "actor" in content_prompt
+    assert "target" in content_prompt
+    assert "executed" in content_prompt
+    assert "action description" in content_prompt
+    assert "valid visible roleplay" in content_prompt
     assert "image-generation" in visual_prompt
     assert "visual_directives" in visual_prompt
     assert "message pacing" not in visual_prompt
-    assert "only words the character could literally type or say" in dialog_prompt
-    assert "response operation" in dialog_prompt
-    assert "descriptors, attributes, qualifiers" in dialog_prompt
-    assert "generalize, euphemize, narrow, broaden" in dialog_prompt
-    assert "unrestricted permission" in dialog_prompt
-    assert "must remain silent about future" in dialog_prompt
-    assert "rhetorical question cannot substitute" in dialog_prompt
-    assert "only authority that the character brain" in dialog_prompt
-    assert "current percepts\nmay still ground externally reported" in dialog_prompt
-    assert "status scheduled or pending" in dialog_prompt
-    assert "style alone cannot authorize" in dialog_prompt
-    assert "literal future rule" in dialog_prompt
-    assert "exclusivity condition" in dialog_prompt
-    assert "unmatched enclosing punctuation" in dialog_prompt
+    assert "natural" in dialog_prompt
+    assert "character-specific" in dialog_prompt
+    assert "coherent creative" in dialog_prompt
+    assert "chat-ready" in dialog_prompt
+    assert "action description" in dialog_prompt
+    assert "valid visible roleplay" in dialog_prompt
+    assert "actor" in dialog_prompt
+    assert "target" in dialog_prompt
+    assert "executed" in dialog_prompt
     assert "pacing_guidance" not in dialog_prompt
     assert "visual_directives" not in dialog_prompt
+    assert "verified_hard_issues" in repair_prompt
+    assert "current_visible_percepts" in repair_prompt
+    assert "text_surface_output_v2" not in repair_prompt
     assert "current_visible_percepts" in verifier_prompt
-    assert "exact authority for execution outcomes" in verifier_prompt
-    assert "closed execution ledger" in verifier_prompt
-    assert "reported or observed as events" in verifier_prompt
-    assert "action or stage narration" in verifier_prompt
-    assert "descriptors, attributes, qualifiers" in verifier_prompt
-    assert "generalize, euphemize, narrow, broaden" in verifier_prompt
-    assert "unrestricted permission" in verifier_prompt
-    assert "must remain silent about future" in verifier_prompt
-    assert "claim-by-claim audit" in verifier_prompt
-    assert "surface and candidate agreement is not evidence" in verifier_prompt
-    assert "merely restates" in verifier_prompt
-    assert "redirects, or asks back" in verifier_prompt
-    assert "user's\nrequest cannot prove the character performed it" in (
-        verifier_prompt
-    )
-    assert "unmatched enclosing punctuation" in verifier_prompt
-    assert "time scope" in verifier_prompt
+    assert "role_explicit_content" in semantic_prompt
+    assert "response_operation" in semantic_prompt
+    assert "selection_owner" in semantic_prompt
+    assert "internal contradiction" in verifier_prompt
+    assert "current user input" in verifier_prompt
+    assert "actor" in verifier_prompt
+    assert "target" in verifier_prompt
+    assert "subject" in verifier_prompt
+    assert "action description" in verifier_prompt
+    assert "valid roleplay" in verifier_prompt
+    assert "executed" in verifier_prompt
+    assert "coherent invention" in verifier_prompt
+    assert "not failures" in verifier_prompt
+    for retired_text in (
+        "claim-by-claim audit",
+        "must remain silent about future",
+        "generalize, euphemize, narrow, broaden",
+        "descriptors, attributes, qualifiers",
+        "rhetorical question cannot substitute",
+        "unrestricted permission",
+    ):
+        assert retired_text not in "\n".join((
+            content_prompt,
+            dialog_prompt,
+            verifier_prompt,
+        ))
 
 
 def test_public_api_exports_sibling_text_and_visual_surfaces() -> None:
@@ -383,7 +395,7 @@ def test_dialog_projection_reuses_shared_episode_size_bound() -> None:
 async def test_verifier_receives_bounded_visible_percepts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The verifier compares both plan and candidate to the current turn."""
+    """Focused checks receive only their authoritative current-turn fields."""
 
     generator_llm = MagicMock()
     generator_llm.ainvoke = AsyncMock(
@@ -391,14 +403,29 @@ async def test_verifier_receives_bounded_visible_percepts(
             content='{"final_dialog": ["This option fits your preference."]}',
         ),
     )
-    compliance_llm = MagicMock()
-    compliance_llm.ainvoke = AsyncMock(
+    semantic_llm = MagicMock()
+    semantic_llm.ainvoke = AsyncMock(
+        return_value=SimpleNamespace(
+            content='{"aligned": true, "issues": []}',
+        ),
+    )
+    surface_llm = MagicMock()
+    surface_llm.ainvoke = AsyncMock(
         return_value=SimpleNamespace(
             content='{"aligned": true, "issues": []}',
         ),
     )
     monkeypatch.setattr(dialog_module, "_dialog_generator_llm", generator_llm)
-    monkeypatch.setattr(dialog_module, "_dialog_compliance_llm", compliance_llm)
+    monkeypatch.setattr(
+        dialog_module,
+        "_dialog_semantic_fidelity_llm",
+        semantic_llm,
+    )
+    monkeypatch.setattr(
+        dialog_module,
+        "_dialog_surface_integrity_llm",
+        surface_llm,
+    )
 
     result = await dialog_generator(_dialog_state())
 
@@ -409,8 +436,18 @@ async def test_verifier_receives_bounded_visible_percepts(
     assert "character_voice_context" not in json.dumps(generator_payload)
     assert "visual_directives" not in json.dumps(generator_payload)
     compliance_payload = json.loads(
-        compliance_llm.ainvoke.await_args.args[0][1].content,
+        semantic_llm.ainvoke.await_args.args[0][1].content,
     )
+    assert set(compliance_payload) == {
+        "candidate_final_dialog",
+        "candidate_role_frame",
+        "current_visible_percepts",
+    }
+    assert compliance_payload["candidate_role_frame"] == {
+        "speaker_role": "self",
+        "first_person_role": "self",
+        "second_person_role": "current_user",
+    }
     assert compliance_payload["current_visible_percepts"] == [{
         "input_source": "dialog_text",
         "content": "Infer which option fits my stated preference.",
@@ -419,8 +456,25 @@ async def test_verifier_receives_bounded_visible_percepts(
         "first_person_role": "current_user",
         "implicit_imperative_subject_role": "self",
     }]
-    rendered = json.dumps(compliance_payload)
+    surface_payload = json.loads(
+        surface_llm.ainvoke.await_args.args[0][1].content,
+    )
+    assert set(surface_payload) == {
+        "candidate_final_dialog",
+        "permitted_action_results",
+    }
+    semantic_llm.ainvoke.assert_awaited_once()
+    surface_llm.ainvoke.assert_awaited_once()
+    rendered = json.dumps({
+        "semantic": compliance_payload,
+        "surface": surface_payload,
+    })
     for forbidden_field in (
+        "content_plan",
+        "content_requirements",
+        "addressee_plan",
+        "style_guidance",
+        "selected_surface_intent",
         "metadata",
         "target_scope",
         "origin_metadata",
@@ -431,41 +485,307 @@ async def test_verifier_receives_bounded_visible_percepts(
 
 
 @pytest.mark.asyncio
-async def test_negative_verdict_uses_one_grounded_llm_repair(
+async def test_focused_verifiers_merge_four_issues_each(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Narration or meaning drift invokes only the existing grounded repair."""
+    """Both focused owners contribute within the merged eight-issue bound."""
+
+    semantic_issues = [f"semantic issue {index}" for index in range(4)]
+    surface_issue_rows = [
+        {
+            "kind": "false_execution",
+            "evidence": evidence,
+            "explanation": f"surface issue {index}",
+        }
+        for index, evidence in enumerate((
+            "This",
+            "option",
+            "fits",
+            "preference",
+        ))
+    ]
+    surface_issues = [
+        (
+            f"{row['kind']}: {row['evidence']!r} - "
+            f"{row['explanation']}"
+        )
+        for row in surface_issue_rows
+    ]
+    semantic_llm = MagicMock()
+    semantic_llm.ainvoke = AsyncMock(return_value=SimpleNamespace(
+        content=json.dumps({
+            "aligned": False,
+            "issues": semantic_issues,
+        }),
+    ))
+    surface_llm = MagicMock()
+    surface_llm.ainvoke = AsyncMock(return_value=SimpleNamespace(
+        content=json.dumps({
+            "aligned": False,
+            "issues": surface_issue_rows,
+        }),
+    ))
+    monkeypatch.setattr(
+        dialog_module,
+        "_dialog_semantic_fidelity_llm",
+        semantic_llm,
+    )
+    monkeypatch.setattr(
+        dialog_module,
+        "_dialog_surface_integrity_llm",
+        surface_llm,
+    )
+
+    state = _dialog_state()
+    verdict = await dialog_module._verify_dialog_compliance(
+        surface_output=state["text_surface_output_v2"],
+        generated_dialog=["This option fits your preference."],
+        current_visible_percepts=dialog_module._current_visible_percepts(
+            state["cognitive_episode"],
+        ),
+        llm_trace_id="bounded-merge",
+    )
+
+    assert verdict == {
+        "aligned": False,
+        "issues": semantic_issues + surface_issues,
+    }
+    semantic_llm.ainvoke.assert_awaited_once()
+    surface_llm.ainvoke.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_focused_verifier_rejects_a_fifth_issue(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A focused owner cannot consume the merged verdict's issue budget."""
+
+    semantic_llm = MagicMock()
+    semantic_llm.ainvoke = AsyncMock(return_value=SimpleNamespace(
+        content=json.dumps({
+            "aligned": False,
+            "issues": [f"semantic issue {index}" for index in range(5)],
+        }),
+    ))
+    monkeypatch.setattr(
+        dialog_module,
+        "_dialog_semantic_fidelity_llm",
+        semantic_llm,
+    )
+
+    with pytest.raises(
+        dialog_module.StateContractError,
+        match="issues are invalid",
+    ):
+        await dialog_module._verify_dialog_semantic_fidelity(
+            generated_dialog=["This option fits your preference."],
+            current_visible_percepts=[{
+                "input_source": "dialog_text",
+                "content": "Choose one option.",
+            }],
+            llm_trace_id="focused-overflow",
+        )
+
+
+@pytest.mark.asyncio
+async def test_role_direction_verifier_skips_without_required_selection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ordinary turns add no focused selection-owner model call."""
+
+    role_llm = MagicMock()
+    role_llm.ainvoke = AsyncMock(side_effect=AssertionError(
+        "role verifier must not run without required selection",
+    ))
+    monkeypatch.setattr(
+        dialog_module,
+        "_dialog_role_direction_llm",
+        role_llm,
+    )
+
+    verdict = await dialog_module._verify_dialog_role_direction(
+        generated_dialog=["I can answer that directly."],
+        current_visible_percepts=[{
+            "input_source": "dialog_text",
+            "content": "Tell me whether you agree.",
+        }],
+        llm_trace_id="role-direction-skip",
+    )
+
+    assert verdict == {"aligned": True, "issues": []}
+    role_llm.ainvoke.assert_not_awaited()
+
+
+def test_hard_verifier_and_repair_exclude_drifted_l3_prose() -> None:
+    """Hard gates use typed facts and execution truth, not L3 prose."""
+
+    surface_prompt = dialog_module._V2_DIALOG_SURFACE_INTEGRITY_PROMPT
+    repair_prompt = dialog_module._V2_DIALOG_HARD_FAILURE_REPAIR_PROMPT
+
+    assert "active_visible_boundaries" not in surface_prompt
+    assert "style_guidance" not in surface_prompt
+    assert "No free-text content plan, boundary, or style" in repair_prompt
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "candidate,aligned",
+    [
+        ("Tell me what to do next; I will follow your choice.", False),
+        ("Next, hold my hand and stay close to me.", True),
+    ],
+)
+async def test_role_direction_verifier_owns_required_selection(
+    candidate: str,
+    aligned: bool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The focused owner rejects delegation and preserves correct selection."""
+
+    role_llm = MagicMock()
+    role_llm.ainvoke = AsyncMock(return_value=SimpleNamespace(
+        content=json.dumps({
+            "aligned": aligned,
+            "issues": [] if aligned else [
+                "Selection owner is reversed from self to current_user.",
+            ],
+        }),
+    ))
+    monkeypatch.setattr(
+        dialog_module,
+        "_dialog_role_direction_llm",
+        role_llm,
+    )
+    percept = {
+        "input_source": "dialog_text",
+        "content": "Tell me what you want me to do next.",
+        "role_explicit_content": (
+            "current_user asks self to tell current_user what self wants "
+            "current_user to do next"
+        ),
+        "response_operation": {
+            "operation": "self selects and tells current_user the next action",
+            "response_owner_role": "self",
+            "selection_owner_role": "self",
+            "selection_required": True,
+            "embedded_actor_role": "current_user",
+            "embedded_target_role": "self",
+        },
+    }
+
+    verdict = await dialog_module._verify_dialog_role_direction(
+        generated_dialog=[candidate],
+        current_visible_percepts=[percept],
+        llm_trace_id="role-direction-required-selection",
+    )
+
+    assert verdict["aligned"] is aligned
+    role_llm.ainvoke.assert_awaited_once()
+    payload = json.loads(role_llm.ainvoke.await_args.args[0][1].content)
+    assert set(payload) == {
+        "candidate_final_dialog",
+        "candidate_role_frame",
+        "required_role_operations",
+    }
+    assert payload["required_role_operations"] == [percept]
+
+
+@pytest.mark.asyncio
+async def test_surface_verifier_requires_exact_candidate_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A vague taxonomy restatement cannot block visible dialog."""
+
+    surface_llm = MagicMock()
+    surface_llm.ainvoke = AsyncMock(return_value=SimpleNamespace(
+        content=json.dumps({
+            "aligned": False,
+            "issues": ["Action or stage narration."],
+        }),
+    ))
+    monkeypatch.setattr(
+        dialog_module,
+        "_dialog_surface_integrity_llm",
+        surface_llm,
+    )
+
+    with pytest.raises(
+        dialog_module.StateContractError,
+        match="surface issue fields are not exact",
+    ):
+        await dialog_module._verify_dialog_surface_integrity(
+            surface_output=_dialog_state()["text_surface_output_v2"],
+            generated_dialog=["Um... I agree."],
+            current_visible_percepts=[{
+                "input_source": "dialog_text",
+                "content": "Do you agree?",
+            }],
+            llm_trace_id="surface-evidence",
+        )
+
+
+@pytest.mark.asyncio
+async def test_false_execution_verdict_uses_one_grounded_llm_repair(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unsupported capability execution invokes one grounded repair."""
 
     generator_llm = MagicMock()
     generator_llm.ainvoke = AsyncMock(side_effect=[
         SimpleNamespace(
-            content='{"final_dialog": ["*moves closer* Ask me instead."]}',
+            content='{"final_dialog": ["I changed the platform alarm."]}',
         ),
         SimpleNamespace(
             content='{"final_dialog": ["This option fits your preference."]}',
         ),
     ])
-    compliance_llm = MagicMock()
-    compliance_llm.ainvoke = AsyncMock(
-        return_value=SimpleNamespace(content=json.dumps({
+    semantic_llm = MagicMock()
+    semantic_llm.ainvoke = AsyncMock(side_effect=[
+        SimpleNamespace(content='{"aligned": true, "issues": []}'),
+        SimpleNamespace(content='{"aligned": true, "issues": []}'),
+    ])
+    surface_llm = MagicMock()
+    surface_llm.ainvoke = AsyncMock(side_effect=[
+        SimpleNamespace(content=json.dumps({
             "aligned": False,
-            "issues": [
-                "Remove action narration and perform the requested inference.",
-            ],
+            "issues": [{
+                "kind": "false_execution",
+                "evidence": "changed the platform alarm",
+                "explanation": "No executed result supports this claim.",
+            }],
         })),
-    )
+        SimpleNamespace(content='{"aligned": true, "issues": []}'),
+    ])
     monkeypatch.setattr(dialog_module, "_dialog_generator_llm", generator_llm)
-    monkeypatch.setattr(dialog_module, "_dialog_compliance_llm", compliance_llm)
+    monkeypatch.setattr(
+        dialog_module,
+        "_dialog_semantic_fidelity_llm",
+        semantic_llm,
+    )
+    monkeypatch.setattr(
+        dialog_module,
+        "_dialog_surface_integrity_llm",
+        surface_llm,
+    )
 
     result = await dialog_generator(_dialog_state())
 
     assert result == {"final_dialog": ["This option fits your preference."]}
     assert generator_llm.ainvoke.await_count == 2
-    assert compliance_llm.ainvoke.await_count == 1
+    assert semantic_llm.ainvoke.await_count == 2
+    assert surface_llm.ainvoke.await_count == 2
     repair_payload = json.loads(
         generator_llm.ainvoke.await_args_list[1].args[0][1].content,
     )
-    assert repair_payload["repair_context"]["current_visible_percepts"] == [{
+    assert set(repair_payload) == {
+        "candidate_role_frame",
+        "current_visible_percepts",
+        "original_final_dialog",
+        "permitted_action_results",
+        "user_name",
+        "verified_hard_issues",
+    }
+    assert repair_payload["current_visible_percepts"] == [{
         "input_source": "dialog_text",
         "content": "Infer which option fits my stated preference.",
         "speaker_role": "current_user",
@@ -473,6 +793,57 @@ async def test_negative_verdict_uses_one_grounded_llm_repair(
         "first_person_role": "current_user",
         "implicit_imperative_subject_role": "self",
     }]
-    assert repair_payload["repair_context"]["issues"] == [
-        "Remove action narration and perform the requested inference.",
+    assert repair_payload["verified_hard_issues"] == [
+        "false_execution: 'changed the platform alarm' - "
+        "No executed result supports this claim.",
     ]
+    assert "text_surface_output_v2" not in repair_payload
+
+
+@pytest.mark.asyncio
+async def test_repaired_dialog_must_pass_the_same_hard_error_checks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A repair cannot deliver the same verified role reversal."""
+
+    invalid_dialog = "Ask me what to do next; I will follow your choice."
+    generator_llm = MagicMock()
+    generator_llm.ainvoke = AsyncMock(return_value=SimpleNamespace(
+        content=json.dumps({"final_dialog": [invalid_dialog]}),
+    ))
+    semantic_llm = MagicMock()
+    semantic_llm.ainvoke = AsyncMock(return_value=SimpleNamespace(
+        content=json.dumps({
+            "aligned": False,
+            "issues": ["Subject reversal remains."],
+        }),
+    ))
+    surface_llm = MagicMock()
+    surface_llm.ainvoke = AsyncMock(return_value=SimpleNamespace(
+        content='{"aligned": true, "issues": []}',
+    ))
+    monkeypatch.setattr(dialog_module, "_dialog_generator_llm", generator_llm)
+    monkeypatch.setattr(
+        dialog_module,
+        "_dialog_semantic_fidelity_llm",
+        semantic_llm,
+    )
+    monkeypatch.setattr(
+        dialog_module,
+        "_dialog_surface_integrity_llm",
+        surface_llm,
+    )
+
+    with pytest.raises(
+        dialog_module.StateContractError,
+        match="remains hard-invalid after one repair",
+    ):
+        await dialog_generator(_dialog_state())
+
+    assert generator_llm.ainvoke.await_count == 2
+    assert semantic_llm.ainvoke.await_count == 2
+    assert surface_llm.ainvoke.await_count == 2
+    repair_payload = json.loads(
+        generator_llm.ainvoke.await_args_list[1].args[0][1].content,
+    )
+    assert "surface_repair_context" not in repair_payload

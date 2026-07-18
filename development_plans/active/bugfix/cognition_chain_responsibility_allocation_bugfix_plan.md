@@ -119,19 +119,127 @@ and relevance behavior remain unchanged.
 The complete private replay then exposed a separate visible-content boundary
 failure. The general dialog compliance model currently owns current-turn
 meaning, actor direction, scope, future commitments, execution grounding, and
-action-narration detection in one prompt. It accepted real-time embodied
-enactment and bodily narration in literal speech. When it does request repair,
-the repaired output is delivered without any second verification. This is a
-task-allocation defect rather than evidence that deterministic user-text
-classification is needed.
+surface formatting in one prompt. The user subsequently approved action
+description as visible roleplay in plain, bracketed, first-person, or
+third-person form. A fresh private turn still failed because the surface model
+twice classified plain first-person physical description as
+`non_speech_surface`, including after repair.
 
-The system correction assigns real-time enactment, bodily-performance
-narration, and unsupported execution claims to one focused semantic verifier.
-It runs alongside the general semantic-fidelity verifier. Their issue sets are
-combined for at most one grounded renderer repair, and repaired output must
-pass both owners before delivery. Deterministic code only validates verdict
-shape, combines exact issue lists, and blocks an unverified repair; it does not
-classify user or dialog text.
+The system correction removes action-description and punctuation quality from
+the fatal surface taxonomy. The focused surface verifier now judges only false
+system, tool, platform, or other character-brain capability execution against
+the exact permitted-action ledger. It runs alongside semantic fidelity and
+the conditional role-direction verifier. Their issue sets are combined for at
+most one grounded renderer repair, and repaired output must pass every active
+owner before delivery.
+Deterministic code only validates verdict shape, combines exact issue lists,
+and blocks an unverified repair; it does not classify user or dialog text.
+
+### Resolver recurrence ownership defect found by the frozen live sequence
+
+Fresh group replay run `2624f73fdc4eb0143c9d` completed turn 10 in 290.856
+seconds after three `local_context_recall` executions for the same unresolved
+theme. The first execution returned eight projected evidence rows, including
+relevant relationship and physical-contact context. Two later executions
+returned bounded blocked packets after malformed local-model output, but the
+capability adapter labelled both observations `succeeded` with zero rows. The
+planner then rephrased the objective, bypassing the exact-objective duplicate
+check and consuming the full three-cycle recurrence budget.
+
+The failure crosses three ownership boundaries:
+
+- the planner proposes resolver work but also decides, without a focused
+  check, whether earlier evidence has already satisfied the proposed need;
+- the local-context adapter projects a blocked packet as a successful
+  observation, losing execution truth before recurrence sees it;
+- deterministic retry protection recognizes exact objective reuse and timeout
+  only, so a failed same-capability attempt can be retried under new prose.
+
+The system correction keeps resolver need semantic while separating it from
+proposal generation. A focused resolver-authorization stage runs only when
+resolver requests are proposed. It receives each request, its admitted bid,
+cited current evidence, and bounded resolver context, and decides whether the
+evidence need remains unresolved and materially useful. It may preserve up to
+three distinct requests and may authorize a genuinely narrower follow-up even
+after an earlier successful observation. Deterministic code classifies a
+blocked capability packet as failed and prevents another same-capability
+attempt after timeout or failure. It does not compare user text or infer
+semantic equivalence from keywords.
+
+### Selection-owner verification defect found by the private live sequence
+
+Fresh private replay run `d218612f9305bd3b4906` stopped at turn 1 with an
+unambiguous selection-owner reversal. The typed decontextualizer correctly
+stated that `self` must tell `current_user` which next action `self` wants
+`current_user` to perform, with `selection_required=true` and
+`selection_owner_role=self`. Goal cognition instead handed control back to the
+user, and the general semantic-fidelity verifier accepted dialog asking the
+user to command the character.
+
+The role contract was present and correct; the failure came from assigning
+internal contradiction, direct-input conflict, general actor direction, and
+nested selection ownership to one weak-model verifier. The system correction
+adds a focused role-direction verifier only when a typed response operation
+requires an explicit selection. It receives the candidate role frame plus the
+bounded role-explicit content and response-operation fields, and judges only
+response owner, selection owner, embedded actor, and embedded target. Refusal
+or negotiation remains valid character judgment; delegating a required
+selection to another role is rejected. The same focused owner rechecks the one
+bounded repair. Deterministic code only activates the stage from the typed
+`selection_required` flag and merges verdicts.
+
+Fresh retry run `c04a380ebf8290ee3549` proved a second ownership defect. The
+focused role verifier and general semantic verifier both rejected the initial
+reversal, but drifted free-text `active_visible_boundaries` and
+`style_guidance` instructed the repair model to ask the user for a command,
+opposite to the typed current selection owner. The repair repeated the
+reversal and the turn failed. A direct live retry with prompt precedence alone
+still followed the drifted prose; another retry repaired the role correctly
+but the surface checker then treated that prose as a fatal boundary and
+crashed while formatting its explanation.
+
+The hard-error policy does not define conformity to generated L3 prose as a
+fatal error. Free-text L3 boundaries and style continue to shape ordinary
+generation, while hard verification owns current-input conflict, internal
+contradiction, role reversal, and false capability
+execution. The one bounded repair receives typed current percepts, verified
+hard issues, original dialog, and the exact permitted-action ledger, with no
+L3 content, boundary, or style prose. All three focused owners recheck it.
+
+The next private retry exposed that a final dialog verifier is too late to be
+the only selection-owner defense. The typed operation was correct, but goal
+cognition used strong submissive private continuity to create a bid whose
+purpose was to return the required choice to the user. One live generation
+passed the stochastic final checks; a diagnostic rerun rejected and repaired
+the same downstream dialog. The system correction therefore verifies a typed
+required selection immediately after goal cognition. A rejected goal is
+regenerated from the typed operation, current evidence, affect, relationship,
+character constraints, and scene context without the rejected bid or private
+continuity prose, then rechecked by the same focused owner. Turns without a
+typed required selection add no call. Final dialog verification remains the
+independent last boundary.
+
+### Action-plan schema containment defect found by private turn 14
+
+The first private turn-14 execution for `我来舔干净千纱身上的` returned an
+operational error. Protected trace
+`llmtrace_b15e1365395a429b8b7bcf89b643580d` showed that a second-cycle action
+planner output and its one repair both violated the exact resolver-request
+shape. Deterministic validation raised before semantic authorization could
+reject or contain the proposal, so optional action planning crashed an
+otherwise valid speech turn.
+
+The production action router already tolerates malformed individual model
+rows. V2 now applies the same responsibility boundary without a compatibility
+shim: deterministic code canonicalizes the known proposal envelope, ignores
+unknown fields, retains valid rows, drops invalid rows individually, and caps
+each request list at three. Mixed action/resolver output remains a semantic
+contract error and receives the one existing whole-object replacement. If that
+replacement is still unusable, planning returns an empty proposal and speech
+continues. If focused action authorization cannot produce a usable replacement,
+all candidates are denied. Neither path can authorize execution or reduce the
+valid three-request capacity. The final private run completed the same turn
+with a normal response and a succeeded protected trace.
 
 ## Ownership Boundary
 
@@ -168,11 +276,11 @@ typed intake facts
 - `database-data-pull` and `llm-trace-debug` when database or protected trace
   evidence is retrieved
 
-The parent agent owns this plan, failing tests, documentation, verification,
-frozen replay control, remediation, and sign-off. Exactly one production-code
-subagent implements production files after focused tests fail. Exactly one
-separate review-only subagent reviews the verified implementation before
-closeout.
+The parent agent owns this plan, production implementation, failing tests,
+documentation, verification, frozen replay control, remediation, review, and
+sign-off. The completed historical implementation-subagent contribution is
+preserved in the evidence record; all remaining work is parent-only under the
+user's updated instruction.
 
 ## Must Do
 
@@ -244,40 +352,93 @@ closeout.
     effect.
 25. Trace initial and repair authorization boundaries. Permit at most one
     bounded same-owner repair for a malformed authorization object.
-26. Keep resolver choice semantic in the planner and keep all action-spec
+26. Keep resolver proposal semantic in the planner and keep all action-spec
     permission, validation, execution, and persistence owners unchanged.
+26a. Canonicalize optional planner proposals row by row. Preserve usable rows,
+    contain an unusable replacement as an empty plan, and contain an unusable
+    authorization replacement as deny-all without authorizing work or removing
+    valid three-request capacity.
 
-### E. Verification and proof
+### E. Separate resolver proposal, authorization, and retry ownership
 
-27. Add deterministic regression tests for every constrained action space,
+27. Add one focused semantic resolver-authorization call only when the planner
+    proposes resolver requests. Require one exact decision for every proposed
+    request and retain only authorized requests.
+28. Give the resolver authorizer the proposed request, cited admitted bid,
+    current evidence, and bounded resolver context. It judges whether the need
+    remains unresolved and materially useful; it does not rewrite the request
+    or final dialog.
+29. Preserve up to three distinct resolver requests, multiple resolver
+    capabilities, and semantically narrower follow-up requests after useful
+    evidence. Empty resolver proposals add no model call.
+30. Project a blocked local-context packet as a failed resolver observation and
+    failed RAG event. Prevent a renamed same-capability retry after a timeout or
+    failed observation while preserving follow-up after success.
+
+### F. Separate nested role-direction verification
+
+31. Add one focused semantic role-direction check only when a current visible
+    percept carries `response_operation.selection_required=true`.
+32. Supply only the candidate role frame and bounded current role fields:
+    role-explicit content, response owner, selection owner, embedded actor, and
+    embedded target. Exclude style, history, residue, and upstream content-plan
+    prose.
+33. Treat a clear delegation of the required selection to another role as an
+    unacceptable reversal while preserving refusal, negotiation, jokes,
+    ellipsis, and genuinely ambiguous readings.
+34. Merge its exact verdict with the existing semantic-fidelity and surface
+    verdicts, and run the same focused owner once after the bounded repair.
+34a. Verify typed required-selection ownership at the goal boundary as well.
+    Regenerate a rejected bid from clean typed/current context and recheck it;
+    ordinary turns add no call.
+    Turns without a typed required selection add no model call.
+
+### G. Verification and proof
+
+35. Keep free-text L3 boundaries and style as ordinary generation guidance,
+    outside the fatal surface taxonomy and hard-error repair payload. Repair
+    from typed current percepts, verified hard issues, original dialog, and
+    exact permitted-action results, then run every focused recheck.
+36. Add deterministic regression tests for every constrained action space,
     unavailable disposition, single-call bound, and exact lifecycle status.
-28. Add red gates for route-free planning, output-mode route derivation,
+37. Add red gates for route-free planning, output-mode route derivation,
     semantic authorization approval/rejection, no-call behavior for empty
     action proposals, and retained three-action capacity.
-29. Run focused deterministic tests, then affected non-live regression tests.
-30. Run live LLM cases one at a time and inspect each result before the next:
+38. Add red gates for resolver authorization no-call behavior, initial useful
+    authorization, redundant-request rejection, retained three-request
+    capacity, blocked-packet failure projection, and failed retry suppression.
+39. Add red gates for required-selection activation, no-call behavior without
+    that typed flag, selection-owner reversal rejection, correct-role
+    preservation, and post-repair recheck.
+40. Add a red gate proving drifted L3 prose cannot enter hard-error repair or
+    become a fatal boundary issue, while typed current-role correction and all
+    focused rechecks succeed.
+41. Run focused deterministic tests, then affected non-live regression tests.
+42. Run live LLM cases one at a time and inspect each result before the next:
     typed direct admission/linkage, recipient withdrawal, already-resolved,
     unavailable retained media, unexecuted physical request, and scheduled or
     pending work acknowledgement.
-31. Re-run the frozen twenty-turn QQ group replay and frozen twenty-turn QQ
+43. Re-run the frozen twenty-turn QQ group replay and frozen twenty-turn QQ
     private replay using the same baseline/V2 comparison format and preserved
     per-turn inputs.
-32. Review V2 quality against Kazusa's personality, semantic role fidelity,
-    continuity, vividness, action-narration prohibition, and conflict-free
-    creativity. Baseline similarity is evidence, not the quality objective.
-33. Run anti-cheat inspection: no replay-string branches, user-ID branches,
+44. Review V2 quality against Kazusa's personality, semantic role fidelity,
+    continuity, vividness, surface-format integrity, and conflict-free
+    creativity. Plain first-person in-character action wording is accepted.
+    Baseline similarity is evidence, not the quality objective.
+43. Run anti-cheat inspection: no replay-string branches, user-ID branches,
     test-only production paths, hardcoded semantic keyword filters, hidden
     baseline output reuse, or prompt-only output patching.
-34. Run the independent review subagent, remediate findings, repeat affected
-    gates, update docs and plan evidence, and commit the verified change.
-35. Give every prepared frozen replay a unique run id, delete exact prior turn
+44. Perform the final code review in the parent agent, remediate findings,
+    repeat affected gates, update docs and plan evidence, and commit the
+    verified change.
+45. Give every prepared frozen replay a unique run id, delete exact prior turn
     artifacts at preparation, validate predecessor run ids, and align generated
     test-database assistant rows to the captured causal clock before the next
     historical turn.
-36. Split real-time embodied enactment and unsupported execution-claim review
-    from general semantic dialog compliance. Run both semantic owners for the
-    initial candidate and again after the single bounded repair.
-37. Continue a real-sequence corpus after content drift so all content failure
+46. Split stage-format and unsupported execution-claim review from general
+    semantic dialog compliance. Run both semantic owners for the initial
+    candidate and again after the single bounded repair.
+47. Continue a real-sequence corpus after content drift so all content failure
     families are recorded. Stop and fix immediately only for crashes, terminal
     contract failures, or failure-caused silence.
 
@@ -311,8 +472,8 @@ closeout.
 7. Only an executed result authorizes a visible completed-effect claim.
 8. Existing production action selection, routing, resolver, delayed-work,
    approval, and visual-default capacities pass their regression suites.
-9. Focused live gates pass one at a time without technical failure, false
-   action completion, or prohibited action narration.
+9. Focused live gates pass one at a time without technical failure or false
+   capability execution; action descriptions remain valid visible roleplay.
 10. The planner emits no route field; deterministic route derivation preserves
     visible speech, action-only, resolver, deferral, and silence capacities.
 11. Every proposed executable action receives one focused semantic
@@ -328,6 +489,25 @@ closeout.
     earlier generated reply can appear temporally after a later source turn.
 16. Initial and repaired dialog both pass focused enactment/execution review
     and general semantic compliance before visible delivery.
+17. Resolver authorization adds no call when no resolver request is proposed,
+    rejects a semantically redundant request after sufficient current
+    evidence, and preserves up to three genuinely distinct evidence needs.
+18. Blocked local-context packets are failed observations, and a failed or
+    timed-out capability cannot be retried under a renamed objective.
+19. A typed required selection invokes one focused role-direction decision;
+    delegating that selection to the wrong role is rejected, the corrected
+    repair is rechecked, and turns without the structural gate add no call.
+20. Drifted free-text L3 content, boundary, and style prose cannot enter the
+    hard-error repair or define a fatal verifier issue; typed current meaning
+    and exact permitted-action results remain enforced.
+21. A typed character-owned required selection is verified before downstream
+    action and dialog planning. A rejected goal is regenerated from typed
+    current evidence and bounded character context without the rejected bid or
+    private-continuity prose, then rechecked by the same focused owner.
+22. Optional action proposal and authorization schema failure cannot crash an
+    otherwise valid speech turn or authorize work. Valid proposal rows remain
+    usable up to the existing three-request cap; unusable proposal replacement
+    yields no work, and unusable authorization replacement denies all work.
 
 ## Execution Checklist
 
@@ -340,12 +520,15 @@ closeout.
 - [x] Focused deterministic tests pass.
 - [x] Affected non-live regression tests pass.
 - [x] Route-free planning and focused action authorization implemented.
-- [ ] Focused live LLM gates pass one at a time.
-- [ ] Frozen QQ group twenty-turn proof completed.
-- [ ] Frozen QQ private twenty-turn proof completed.
-- [ ] Anti-cheat inspection completed.
-- [ ] Independent review completed and findings remediated.
-- [ ] Documentation, plan evidence, and commit completed.
+- [x] Focused live LLM gates passed one at a time in the preserved prior proof.
+- [x] Prior frozen QQ group twenty-turn proof evidence preserved.
+- [x] Prior frozen QQ private twenty-turn proof evidence preserved.
+- [x] Anti-cheat inspection completed.
+- [x] Parent-agent review completed and findings remediated.
+- [x] Documentation, plan evidence, and scoped commit completed; hash is
+  recorded in the handoff.
+- [ ] Fresh post-gate frozen 20+20 replay; held at the user-requested pre-E2E
+  stop point.
 
 ## Execution Evidence
 
@@ -381,3 +564,52 @@ closeout.
 - User-directed run policy recorded on 2026-07-17: fatal runtime failure or
   failure-caused silence stops for immediate repair; content drift is logged
   while the sequence continues for systematic coverage.
+- Fresh group proof run `2624f73fdc4eb0143c9d` reached turn 10. The protected
+  trace contained five goal calls, four action-planning calls, and three
+  `local_context_recall` executions; the turn completed in 290.856 seconds.
+  The first recall projected eight rows. The following two local resolver
+  calls returned blocked packets after invalid JSON, but both were projected
+  as successful zero-row observations. This is the red live evidence for
+  separating resolver proposal and authorization and for preserving failed
+  capability truth through recurrence.
+- Fresh group proof run `d11c86fb13fee650ce2d` completed 20/20 turns with one
+  run id, zero operational errors, zero missing dialog or traces, and zero
+  failed stages. Turn 10 completed in 61.160 seconds with no resolver proposal,
+  compared with 290.856 seconds and three recalls in the failed run. Across the
+  corpus there was one useful authorized recall and no repeated recall.
+- Fresh private proof run `d218612f9305bd3b4906` stopped at turn 1 under the
+  unacceptable-error policy. Decontextualization correctly emitted
+  `selection_required=true`, `selection_owner_role=self`,
+  `embedded_actor_role=current_user`, and `embedded_target_role=self`; goal
+  cognition reversed that selection and the general semantic verifier returned
+  aligned. This is the red live evidence for a focused typed role-direction
+  owner.
+- Fresh private retry run `c04a380ebf8290ee3549` stopped at turn 1 after the
+  focused role and general semantic verifiers correctly rejected the initial
+  selection reversal. Drifted `active_visible_boundaries` and
+  `style_guidance` supplied the opposite role instruction to repair, which
+  repeated the reversal and failed recheck. This is the red live evidence for
+  removing drift-prone L3 prose from hard-error ownership.
+- Exact production-language repair gate passed after that ownership change.
+  It repaired the stopped input to a concrete self-selected next action,
+  including `我想让你现在就吻过来`, and semantic, role-direction, and surface
+  rechecks all returned aligned. Artifact:
+  `test_artifacts/llm_traces/dialog_visible_speech_and_semantic_fidelity__`
+  `focused_repair_stopped_private_role_reversal__20260717T191510073599Z.json`.
+- The goal-level required-selection owner and optional action-plan containment
+  were exercised through the production boundary in preserved group run
+  `a5c433fa6e2ac7935ec0` and private run `91a05cf7c3118c9cc7cb`.
+  Both completed 20/20. The readable turn-level evidence is
+  `test_artifacts/cognition_core_v2/`
+  `live_character_judgment_40_turn_review.md`; corpus-level quality judgment
+  remains open for user review.
+- Final focused deterministic/adjacent gate: 115 passed and four live cases
+  deselected. The final full non-live gate passed 3,250, skipped two, and
+  deselected 735 live/external tests in 234.20 seconds. The only warning was
+  the existing Starlette/httpx deprecation warning.
+- Compilation of the affected cognition, resolver, node, and focused test
+  modules passed. `git diff --check` and the prompt anti-cheat contract checks
+  passed.
+- The fresh 20+20 replay was intentionally not started after these pre-E2E
+  gates. Port 8012 is clear, the guarded replay database remains restored from
+  the prior proof cleanup, and no replay service or test worker is running.

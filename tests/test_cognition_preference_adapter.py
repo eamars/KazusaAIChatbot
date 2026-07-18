@@ -13,8 +13,9 @@ def test_preference_stage_owns_visible_boundaries_only() -> None:
 
     prompt = PREFERENCE_SYSTEM_PROMPT.casefold()
 
-    assert "preference-sensitive boundaries" in prompt
-    assert "do not write final dialogue" in prompt
+    assert "real visible boundary" in prompt
+    assert "return an empty list when none exists" in prompt
+    assert "rather than final dialog" in prompt
 
 
 def test_preference_stage_has_no_keyword_based_user_input_adapter() -> None:

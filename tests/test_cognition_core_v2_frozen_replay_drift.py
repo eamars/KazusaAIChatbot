@@ -433,19 +433,38 @@ async def test_dialog_semantic_verdict_triggers_one_bounded_repair(
             "final_dialog": ["Choose it, and I will give you the reward."],
         })),
     ])
-    compliance_llm = MagicMock()
-    compliance_llm.ainvoke = AsyncMock(
-        return_value=AIMessage(content=json.dumps({
+    semantic_llm = MagicMock()
+    semantic_llm.ainvoke = AsyncMock(side_effect=[
+        AIMessage(content=json.dumps({
             "aligned": False,
             "issues": ["Actor and beneficiary are reversed."],
-        }))
-    )
+        })),
+        AIMessage(content=json.dumps({
+            "aligned": True,
+            "issues": [],
+        })),
+    ])
+    surface_llm = MagicMock()
+    surface_llm.ainvoke = AsyncMock(side_effect=[
+        AIMessage(content=json.dumps({
+            "aligned": True,
+            "issues": [],
+        })),
+        AIMessage(content=json.dumps({
+            "aligned": True,
+            "issues": [],
+        })),
+    ])
     monkeypatch.setattr(dialog_module, "_dialog_generator_llm", generator_llm)
     monkeypatch.setattr(
         dialog_module,
-        "_dialog_compliance_llm",
-        compliance_llm,
-        raising=False,
+        "_dialog_semantic_fidelity_llm",
+        semantic_llm,
+    )
+    monkeypatch.setattr(
+        dialog_module,
+        "_dialog_surface_integrity_llm",
+        surface_llm,
     )
 
     result = await dialog_generator({
@@ -471,15 +490,51 @@ async def test_dialog_semantic_verdict_triggers_one_bounded_repair(
         "Choose it, and I will give you the reward."
     ]
     assert generator_llm.ainvoke.await_count == 2
-    compliance_llm.ainvoke.assert_awaited_once()
-    assert [
+    assert semantic_llm.ainvoke.await_count == 2
+    assert surface_llm.ainvoke.await_count == 2
+    verifier_payloads = {}
+    verifier_calls = (
+        semantic_llm.ainvoke.await_args_list
+        + surface_llm.ainvoke.await_args_list
+    )
+    for call in verifier_calls:
+        messages = call.args[0]
+        verifier_payloads[messages[0].content] = json.loads(
+            messages[1].content
+        )
+    semantic_payload = next(
+        payload
+        for prompt, payload in verifier_payloads.items()
+        if "semantic fidelity" in prompt
+    )
+    surface_payload = next(
+        payload
+        for prompt, payload in verifier_payloads.items()
+        if "surface integrity" in prompt
+    )
+    assert set(semantic_payload) == {
+        "candidate_final_dialog",
+        "candidate_role_frame",
+        "current_visible_percepts",
+    }
+    assert set(surface_payload) == {
+        "candidate_final_dialog",
+        "permitted_action_results",
+    }
+    trace_stage_names = [
         call.kwargs["stage_name"]
         for call in trace_recorder.await_args_list
-    ] == [
-        "dialog_generator",
-        "dialog_compliance_verifier",
-        "dialog_generator_repair",
     ]
+    assert trace_stage_names[0] == "dialog_generator"
+    assert set(trace_stage_names[1:3]) == {
+        "dialog_semantic_fidelity_verifier",
+        "dialog_surface_integrity_verifier",
+    }
+    assert trace_stage_names[3] == "dialog_generator_repair"
+    assert set(trace_stage_names[4:]) == {
+        "dialog_semantic_fidelity_recheck",
+        "dialog_surface_integrity_recheck",
+    }
 
 
 def test_consolidation_dedup_uses_canonical_v2_memory_candidates() -> None:

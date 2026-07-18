@@ -405,6 +405,109 @@ async def test_goal_bid_schema_repair_stops_after_one_retry() -> None:
     assert llm.call_count == 2
 
 
+@pytest.mark.asyncio
+async def test_goal_bid_repairs_required_selection_delegation() -> None:
+    """Typed selection ownership is repaired before a bid reaches surface."""
+
+    delegated = {
+        "intention": "请求当前用户继续下令",
+        "desired_outcome": "让当前用户决定下一步",
+        "concrete_detail": "当前角色等待当前用户给出具体动作要求",
+        "reason": "先前状态偏向顺从",
+        "private_monologue": "我只想等他命令我。",
+        "target_role_handles": [],
+        "evidence_handles": ["e1"],
+        "expected_consequences": ["当前用户接管选择"],
+        "confidence": "high",
+    }
+    repaired = {
+        "intention": "告诉当前用户希望他继续抱紧当前角色",
+        "desired_outcome": "由当前角色完成本轮具体选择",
+        "concrete_detail": "当前角色选择让当前用户继续抱紧当前角色",
+        "reason": "当前输入要求当前角色亲自表达愿望",
+        "private_monologue": "我想让他继续抱紧我。",
+        "target_role_handles": [],
+        "evidence_handles": ["e1"],
+        "expected_consequences": ["当前用户得到明确的下一步动作"],
+        "confidence": "high",
+    }
+    responses = [
+        delegated,
+        {
+            "aligned": False,
+            "issues": ["目标把本轮选择交给了当前用户。"],
+        },
+        repaired,
+        {"aligned": True, "issues": []},
+    ]
+
+    class _LLM:
+        def __init__(self) -> None:
+            self.messages: list[list[object]] = []
+
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config: object,
+        ) -> SimpleNamespace:
+            del config
+            self.messages.append(messages)
+            return SimpleNamespace(content=json.dumps(
+                responses[len(self.messages) - 1],
+                ensure_ascii=False,
+            ))
+
+    llm = _LLM()
+    semantic_text = json.dumps({
+        "role_explicit_content": (
+            "当前用户要求当前角色说出当前角色希望当前用户执行的下一步动作。"
+        ),
+        "response_operation": {
+            "operation": "当前角色选择并告诉当前用户下一步动作",
+            "response_owner_role": "self",
+            "selection_owner_role": "self",
+            "selection_required": True,
+            "embedded_actor_role": "current_user",
+            "embedded_target_role": "self",
+        },
+    }, ensure_ascii=False)
+    bid = await run_goal_cognition(
+        DEFAULT_BRANCH_DEFINITIONS["ordinary_response"],
+        {"scope": "user", "kind": "goal", "entity_id": "g1"},
+        {
+            "_role_bindings": {},
+            "role_summaries": {},
+            "affect": [{"emotion": "love_attachment"}],
+            "private_continuity_context": "这段旧残留推动当前角色交出选择权。",
+        },
+        [{
+            "evidence_handle": "e1",
+            "evidence_ref": {
+                "source_kind": "episode",
+                "source_id": "episode-1",
+                "occurred_at": "2026-07-15T00:00:00Z",
+                "semantic_summary": semantic_text,
+            },
+            "semantic_text": semantic_text,
+            "visible_to": ["q:event_agency"],
+        }],
+        SimpleNamespace(
+            llm=llm,
+            goal_cognition_config=object(),
+            action_selection_config=object(),
+        ),
+    )
+
+    assert len(llm.messages) == 4
+    assert bid["intention"] == repaired["intention"]
+    assert bid["concrete_detail"] == repaired["concrete_detail"]
+    repair_payload = json.loads(str(llm.messages[2][-1].content))
+    repair_text = json.dumps(repair_payload, ensure_ascii=False)
+    assert "candidate_bid" not in repair_payload
+    assert "private_continuity_context" not in repair_text
+
+
 def test_required_branch_failure_cannot_collapse_to_silence() -> None:
     """A required cognition failure remains an execution failure."""
 

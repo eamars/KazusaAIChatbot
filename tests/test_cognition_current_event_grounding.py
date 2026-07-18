@@ -144,6 +144,57 @@ def test_current_event_is_canonical_episode_evidence() -> None:
         assert secret not in evidence["semantic_text"]
 
 
+def test_role_explicit_current_event_is_forwarded_without_reinterpretation() -> None:
+    """Cognition should consume the upstream role meaning as current evidence."""
+
+    role_explicit_content = (
+        "当前用户要求当前角色说出当前角色希望当前用户下一步做什么。"
+    )
+    response_operation = {
+        "operation": "当前角色为当前用户选择一个动作",
+        "response_owner_role": "self",
+        "selection_owner_role": "self",
+        "selection_required": True,
+        "embedded_actor_role": "current_user",
+        "embedded_target_role": "self",
+    }
+    episode = _episode()
+    episode["percepts"][0]["metadata"]["role_explicit_content"] = (
+        role_explicit_content
+    )
+    episode["percepts"][0]["metadata"]["response_operation"] = (
+        response_operation
+    )
+    payload = build_cognition_input_from_global_state(
+        {
+            "cognitive_episode": episode,
+            "global_user_id": "secret-global-user-id",
+            "user_input": CURRENT_EVENT_TEXT,
+            "decontexualized_input": CURRENT_EVENT_TEXT,
+            "user_multimedia_input": [],
+            "rag_result": {"memory_evidence": []},
+        },
+        mutable_state=build_acquaintance_user_state(
+            global_user_id="secret-global-user-id",
+            updated_at=V2_TIMESTAMP,
+        ),
+        character_state=build_character_production_state(
+            updated_at=V2_TIMESTAMP,
+        ),
+    )
+
+    expected_meaning = json.dumps(
+        {
+            "response_operation": response_operation,
+            "role_explicit_content": role_explicit_content,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    assert payload["evidence"][0]["semantic_text"] == expected_meaning
+    assert payload["scene_context"]["semantic_scene"] == expected_meaning
+
+
 @pytest.mark.asyncio
 async def test_appraisal_prompt_excludes_current_event_provenance_ids() -> None:
     """Operational provenance is bound to handles outside model payloads."""
