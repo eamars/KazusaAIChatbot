@@ -63,6 +63,7 @@ long_term/todo.md
 | [cognition_core_v2_compositional_action_planning_bugfix_plan.md](active/bugfix/cognition_core_v2_compositional_action_planning_bugfix_plan.md) | Large bigbang Cognition V2 semantic action-planning, production-capacity, resolver-lifecycle, operational-failure, and visual-default bugfix | in progress |
 | [cognition_chain_responsibility_allocation_bugfix_plan.md](active/bugfix/cognition_chain_responsibility_allocation_bugfix_plan.md) | Large bigbang constrained-relevance and exact action-lifecycle ownership bugfix | in progress |
 | [cognition_core_v2_live_character_judgment_rebalance_plan.md](active/bugfix/cognition_core_v2_live_character_judgment_rebalance_plan.md) | Large bigbang live-character judgment, prompt-minimality, hard-error taxonomy, and frozen 20+20 quality rebalance | in progress |
+| [runtime_prompt_chinese_and_dialog_surface_guidance_plan.md](active/bugfix/runtime_prompt_chinese_and_dialog_surface_guidance_plan.md) | Large branch-wide Chinese runtime-prompt and organic dialog-surface guidance correction | in progress |
 | [rag2_public_output_contract_leak_bugfix_plan.md](active/bugfix/rag2_public_output_contract_leak_bugfix_plan.md) | Large RAG2 prompt/evidence contract bugfix plan | draft |
 
 ## Reference Documents

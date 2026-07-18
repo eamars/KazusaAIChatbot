@@ -23,6 +23,16 @@
   stopping or tuning mid-run; the readable review exposes monologue, dialog,
   state, baseline, prior V2, and current V2 behavior.
 
+## Supersession Notice
+
+The explicit permission and form enumeration for action narration in this plan
+are superseded by
+`runtime_prompt_chinese_and_dialog_surface_guidance_plan.md`. Text planning and
+dialog now organically favor words the character would send without asking for
+staging forms. Action narration remains pass-through model variation and stays
+outside verifier, repair, and deterministic filtering. The remaining live
+character judgment and hard-error requirements in this plan remain active.
+
 ## Context
 
 The exact frozen group corpus shows that the earlier V2 run was more caring,

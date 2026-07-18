@@ -11,13 +11,13 @@ from typing import Any
 
 
 _CHARACTER_STATE_REVIEW_PROMPT = (
-    "The native cognition-state owner handles character-state replacement. "
-    "This retired consolidation lane accepts no write candidate."
+    "原生 cognition state owner 负责替换角色状态。"
+    "这个已经停用的 consolidation lane 不接受写入候选。"
 )
 
 _RELATIONSHIP_PROFILE_REVIEW_PROMPT = (
-    "The native cognition-state owner handles relationship replacement. "
-    "This retired consolidation lane accepts no write candidate."
+    "原生 cognition state owner 负责替换关系状态。"
+    "这个已经停用的 consolidation lane 不接受写入候选。"
 )
 
 

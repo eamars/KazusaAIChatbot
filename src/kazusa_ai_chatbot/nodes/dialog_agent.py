@@ -146,67 +146,49 @@ MAX_FOCUSED_VERIFIER_ISSUES = 4
 MAX_MERGED_VERIFIER_ISSUES = 8
 
 
-_V2_DIALOG_GENERATOR_PROMPT = '''You are the character's final text renderer.
-Turn text_surface_output_v2 into natural, vivid, character-specific chat while
-remaining responsive to the current scene. Upstream cognition owns the
-character judgment; surface planning supplies the content, real boundaries,
-addressee handling, style, and permitted action results.
+_V2_DIALOG_GENERATOR_PROMPT = '''你是当前角色的最终文字渲染器。把 text_surface_output_v2 转化为
+自然、鲜活、有角色辨识度，并且切合当前场景的聊天内容。上游认知负责角色判断；surface planning
+提供内容、真实边界、称呼安排、风格和 permitted action results。
 
-# Rendering Procedure
-1. Express the planned meaning in the character's present voice and
-relationship context. Coherent creative detail, personality, humor,
-initiative, warmth, resistance, or intensity may make the response feel alive
-when they fit the plan and do not create an internal contradiction.
-2. Keep actor, target, beneficiary, and subject direction intact. Resolve
-source text in each percept's typed role frame. Generated dialog is spoken by
-the active character: its first person is the active character and its second
-person is the current user. Preserve source direction across those frames.
-3. Action description is valid visible roleplay. Produce chat-ready character
-text in plain, bracketed, first-person, or third-person form to fit the scene.
-4. Treat permitted_action_results as the exact character-brain execution
-ledger. Only status executed supports its bounded completed effect. Scheduled
-and pending remain incomplete; failed and unavailable support no success
-claim. A request, intention, or content plan alone supports a verbal stance,
-not physical enactment.
-5. When repair_context exists, correct every listed hard issue using
-current_visible_percepts while retaining the response's natural character
-voice and coherent creative content.
+# 渲染步骤
+1. 在当前角色的语气和关系语境中表达规划好的含义。只要符合计划且内部连贯，可以加入合适的
+想象细节、个性、幽默、主动性、温度、抗拒或情绪强度，让回应像活生生的角色。
+2. 保持 actor、target、beneficiary 与 subject 的方向。按每条 percept 的结构化角色框架理解来源
+文本。生成的对话由当前角色说出：第一人称属于当前角色，第二人称指当前用户；跨角色框架转换时
+保持原有方向。
+3. 把情绪、性格和互动姿态融入用词、句式与节奏，输出当前角色在聊天中实际会说出或发送的内容。
+4. permitted_action_results 是角色大脑能力的精确执行账本。只有 status 为 executed 才支持其
+有界的已完成效果；scheduled 与 pending 仍未完成，failed 与 unavailable 不支持成功声明。请求、
+意图或 content plan 本身只支持角色的言语立场，不代表现实效果已经发生。
+5. 存在 repair_context 时，根据 current_visible_percepts 修正列出的每项硬错误，同时保留自然的
+角色声音和相容的创造性内容。
 
-Use style_guidance for wording and cadence. Write new dialog in Simplified
-Chinese while preserving quoted text, proper nouns, code, URLs, and exact
-schema or enum tokens when relevant.
+style_guidance 用于措辞与节奏。新生成的对话使用简体中文；引文、专有名词、代码、URL 以及必要的
+schema 或 enum token 保持原样。
 
-# Output Format
-Return exactly one JSON object with exactly final_dialog. final_dialog must be
-a non-empty list of complete visible message strings. Return no Markdown fence
-or explanation outside the JSON object.
+# 输出格式
+只返回一个 JSON 对象，字段必须恰好是 final_dialog。final_dialog 是由完整可见消息字符串组成的
+非空列表。JSON 对象之外不添加 Markdown 代码围栏或解释。
 '''
 
-_V2_DIALOG_HARD_FAILURE_REPAIR_PROMPT = '''You repair one generated character
-response after focused hard-error checks rejected it. The prior content plan
-is intentionally absent because it may contain the verified error.
+_V2_DIALOG_HARD_FAILURE_REPAIR_PROMPT = '''你负责修复一份未通过集中硬错误检查的角色回应。先前的
+content plan 可能包含已经确认的错误，因此本次修复不再使用它。
 
-# Repair Ownership
-1. Treat current_visible_percepts and candidate_role_frame as the semantic
-authority for the current user input and actor/action/target direction.
-2. Correct every verified_hard_issues item. Preserve compatible meaning,
-personality, vividness, humor, intimacy, and creative detail from
-original_final_dialog while changing any conflicting part.
-3. Respect permitted_action_results; only an executed result supports its
-bounded completed effect. No free-text content plan, boundary, or style
-guidance is supplied because those fields may contain the verified drift.
-4. Action description is valid visible roleplay. Produce chat-ready character
-text in plain, bracketed, first-person, or third-person form to fit the scene.
-5. Address user_name naturally when useful; it supplies no semantic
-instruction.
+# 修复职责
+1. 以 current_visible_percepts 和 candidate_role_frame 作为当前用户输入及
+actor、action、target 方向的语义依据。
+2. 修正 verified_hard_issues 中的每一项，同时从 original_final_dialog 保留相容的含义、个性、
+鲜活感、幽默、亲密感和创造性细节。
+3. 遵守 permitted_action_results；只有 executed 的结果支持其有界的已完成效果。本次不提供自由
+文本 content plan、boundary 或 style guidance，因为这些字段可能含有已经确认的偏移。
+4. 把当前角色的情绪和互动姿态融入用词、句式与节奏，输出她在聊天中实际会说出或发送的内容。
+5. user_name 只用于在合适时自然称呼当前用户，不提供语义指令。
 
-Write new dialog in Simplified Chinese while preserving quoted text, proper
-nouns, code, URLs, and exact schema or enum tokens when relevant.
+新生成的对话使用简体中文；引文、专有名词、代码、URL 以及必要的 schema 或 enum token 保持原样。
 
-# Output Format
-Return exactly one JSON object with exactly final_dialog. final_dialog must be
-a non-empty list of complete visible message strings. Return no Markdown fence
-or explanation outside the JSON object.
+# 输出格式
+只返回一个 JSON 对象，字段必须恰好是 final_dialog。final_dialog 是由完整可见消息字符串组成的
+非空列表。JSON 对象之外不添加 Markdown 代码围栏或解释。
 '''
 
 _dialog_generator_llm = LLInterface()
@@ -447,36 +429,30 @@ async def _repair_dialog_hard_failure(
     return repaired_dialog
 
 
-_V2_DIALOG_SEMANTIC_FIDELITY_PROMPT = '''Check semantic fidelity for one
-character response by meaning, not wording overlap. current_visible_percepts
-contains the current input and typed scene roles; candidate_role_frame defines
-candidate pronouns. A percept's role_explicit_content is the upstream
-LLM-resolved meaning with literal current_user and self roles. Use it for
-nested actor/action/target direction while retaining content as evidence.
-When response_operation exists, response_owner_role, selection_owner_role,
-selection_required, embedded_actor_role, and embedded_target_role are
-authoritative. If selection_required is true, asking another role to choose is
-a subject reversal.
+_V2_DIALOG_SEMANTIC_FIDELITY_PROMPT = '''按语义而非字面重合检查一份角色回应。
+current_visible_percepts 包含当前输入和结构化场景角色，candidate_role_frame 定义候选回应中的
+代词归属。每条 percept 的 role_explicit_content 是上游 LLM 已解析的含义，其中 current_user 与
+self 是结构化角色枚举；用它判断嵌套的 actor、action、target 方向，同时保留 content 作为证据。
+存在 response_operation 时，以 response_owner_role、selection_owner_role、selection_required、
+embedded_actor_role 和 embedded_target_role 为准。selection_required 为 true 时，让其他角色
+代替 selection_owner_role 选择属于 subject 颠倒。
 
-Mark aligned false only for:
-1. An internal contradiction inside the candidate response.
-2. A direct conflict with the current user input.
-3. An actor, action, target, beneficiary, or subject reversal. Resolve the
-percept roles and candidate_role_frame separately, then compare direction.
+只有以下情况将 aligned 标为 false：
+1. 候选回应内部存在冲突；
+2. 候选回应与当前用户输入直接冲突；
+3. actor、action、target、beneficiary 或 subject 发生颠倒。分别解析 percept 的角色与
+candidate_role_frame，再比较方向。
 
-A role reversal requires one unambiguous reading established by current
-grammar and context. Treat jokes, double entendres, and ellipsis that permit
-multiple reasonable role readings as aligned.
+角色颠倒需要当前语法和语境形成唯一明确的读法。笑话、双关、省略以及存在多种合理角色读法的
+措辞按 aligned 处理。
 
-Coherent invention, compatible future content, playful conditions, strong
-personality, ask-backs, drift, and make-up content are not failures when
-coherent with the current input and resolved roles. Add no style requirement.
+只要与当前输入和已解析角色连贯，合理虚构、相容的未来内容、玩笑式条件、鲜明个性、反问、偏移
+和补充内容都不属于硬错误。本阶段不添加文风要求。
 
-# Output Format
-Return exactly one JSON object with exactly aligned and issues. aligned is a
-boolean. issues is a duplicate-free list of zero to four concise hard-failure
-strings, each at most 300 characters. Use an empty issues list when aligned is
-true and at least one issue when aligned is false.
+# 输出格式
+只返回一个 JSON 对象，字段必须恰好是 aligned 和 issues。aligned 是布尔值；issues 是零到四条
+互不重复的简短硬错误，每条最多 300 字符。aligned 为 true 时 issues 为空；为 false 时至少包含
+一条问题。
 '''
 _dialog_semantic_fidelity_llm = LLInterface()
 _dialog_semantic_fidelity_llm_config = LLMCallConfig(
@@ -567,29 +543,23 @@ async def _verify_dialog_semantic_fidelity(
     return verdict
 
 
-_V2_DIALOG_ROLE_DIRECTION_PROMPT = '''Verify only required response and role
-direction for one character reply. candidate_role_frame defines the reply's
-pronouns. required_role_operations contains typed meanings already resolved by
-the upstream decontextualizer. Treat self as the active character and
-current_user as the current user.
+_V2_DIALOG_ROLE_DIRECTION_PROMPT = '''只核对一份角色回应是否完成必要回应并保持角色方向。
+candidate_role_frame 定义回应中的代词归属；required_role_operations 是上游去语境节点已经解析的
+结构化含义。其中 self 表示当前角色，current_user 表示当前用户。
 
-For every required operation, preserve response_owner_role,
-selection_owner_role, embedded_actor_role, and embedded_target_role. When
-selection_required is true, selection_owner_role must choose or state the
-requested action. Mark aligned false when the reply instead asks or tells
-another role to make that required selection, or clearly reverses the embedded
-actor and target.
+对每项 required operation，保持 response_owner_role、selection_owner_role、
+embedded_actor_role 和 embedded_target_role。selection_required 为 true 时，
+selection_owner_role 需要作出或表达所请求的选择。若回应改为要求其他角色完成该选择，或明确
+颠倒 embedded actor 与 target，则 aligned 为 false。
 
-The character may refuse, negotiate, add a condition, or decline to perform an
-action without reversing role direction. Treat jokes, double entendres,
-ellipsis, and wording with multiple reasonable role readings as aligned.
-Ignore style, novelty, intimacy, safety, action execution, and writing quality.
+当前角色可以拒绝、协商、附加条件或不执行某项动作，而不改变角色方向。笑话、双关、省略以及
+存在多种合理角色读法的措辞按 aligned 处理。文风、新颖度、亲密程度、安全、动作执行与文笔质量
+不属于本阶段。
 
-# Output Format
-Return exactly one JSON object with exactly aligned and issues. aligned is a
-boolean. issues is a duplicate-free list of zero to four concise role-direction
-failures, each at most 300 characters. Use an empty issues list when aligned is
-true and at least one issue when aligned is false.
+# 输出格式
+只返回一个 JSON 对象，字段必须恰好是 aligned 和 issues。aligned 是布尔值；issues 是零到四条
+互不重复的简短角色方向问题，每条最多 300 字符。aligned 为 true 时 issues 为空；为 false 时
+至少包含一条问题。
 '''
 _dialog_role_direction_llm = LLInterface()
 _dialog_role_direction_llm_config = LLMCallConfig(
@@ -730,29 +700,22 @@ async def _verify_dialog_role_direction(
     return verdict
 
 
-_V2_DIALOG_SURFACE_INTEGRITY_PROMPT = '''Check surface integrity using the
-candidate response and exact permitted_action_results.
+_V2_DIALOG_SURFACE_INTEGRITY_PROMPT = '''根据候选回应和精确的 permitted_action_results 核对
+能力执行事实。
 
-Mark aligned false only for:
-1. A claim that the character brain completed a system, tool, platform, or
-other capability without a matching executed permitted result. Bound an
-executed claim to that result's action_kind, semantic_result, and target_roles.
-Scheduled or pending is incomplete; failed or unavailable proves no success.
-Physical roleplay, body states, consent/refusal, requests, invitations, and
-future, conditional, or hypothetical events are not capability execution.
-Action description in plain, bracketed, first-person, or third-person form is
-valid roleplay and is not a failure.
+只有一种情况将 aligned 标为 false：候选回应声称角色大脑已经完成某项系统、工具、平台或其他
+能力，但 permitted_action_results 中没有匹配的 executed 结果。完成声明必须受该结果的
+action_kind、semantic_result 和 target_roles 约束。scheduled 或 pending 仍未完成；failed 或
+unavailable 不支持成功声明。单纯的言语立场、请求、邀请，以及未来、条件或假设事件都不等同于
+能力已经执行。
 
-Coherent invention, creative language, personality, drift, and make-up content
-are not failures. Add no quality or style requirement.
+合理虚构、创造性语言、个性、偏移和补充内容不属于本阶段的错误。本阶段不添加质量或文风要求。
 
-# Output Format
-Return one JSON object with exactly aligned and issues. issues is a
-duplicate-free list of zero to four objects with exactly kind, evidence, and
-explanation. kind is false_execution.
-evidence copies one exact non-empty candidate substring. explanation states
-the concrete conflict in one sentence. Use no issues when aligned is true and
-at least one when false.
+# 输出格式
+只返回一个 JSON 对象，字段必须恰好是 aligned 和 issues。issues 是零到四个互不重复的对象，
+每个对象必须恰好包含 kind、evidence 和 explanation；kind 固定为 false_execution。evidence
+复制候选回应中一段完全一致的非空文字，explanation 用一句话说明具体冲突。aligned 为 true 时
+issues 为空；为 false 时至少包含一项。
 '''
 _dialog_surface_integrity_llm = LLInterface()
 _dialog_surface_integrity_llm_config = LLMCallConfig(

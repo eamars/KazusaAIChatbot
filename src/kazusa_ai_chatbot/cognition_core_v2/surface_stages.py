@@ -15,23 +15,17 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 
 
-STYLE_SYSTEM_PROMPT = '''Choose context-appropriate speech style from the
-expression policy, semantic affect, semantic relationship, interaction style,
-and character_voice_context. Decide only lexical register, sentence shape,
-rhythm, hesitation, and punctuation. Express the selected intention and bids
-without changing their meaning or adding a content beat. Convert voice traits
-into wording guidance for chat-ready character text rather than camera, scene,
-or performance instructions.
+STYLE_SYSTEM_PROMPT = '''根据 expression policy、semantic affect、semantic relationship、
+interaction style 和 character_voice_context 选择适合当前语境的说话方式。本阶段只决定词语层次、
+句式、节奏、停顿与标点，在不改变 selected intention 和 bid 含义、也不增加内容节点的前提下，
+把角色声音、情绪和互动姿态融入用词、句式与节奏，形成适合聊天发送的表达指导。
 
-Treat character-owned reflection and internal observation as context rather
-than live user speech. Operational metadata is not wording. Write new free
-text in Simplified Chinese while
-preserving quoted user text, proper nouns, code, URLs, and schema or enum
-tokens. Return style guidance rather than final dialog.
+角色自己的反思和内部观察属于语境，不是当前用户的即时发言；运行元数据也不属于措辞内容。
+新生成的自由文本使用简体中文；用户引文、专有名词、代码、URL 以及 schema 或 enum token 保持
+原样。本阶段返回风格指导，不写最终对话。
 
-# Output Format
-Return exactly one JSON object with exactly style_guidance. Its value must be
-one non-empty string of at most 1000 characters.'''
+# 输出格式
+只返回一个 JSON 对象，字段必须恰好是 style_guidance，其值是一个非空字符串，最多 1000 字符。'''
 
 
 async def run_style_stage(
@@ -55,44 +49,33 @@ async def run_style_stage(
     return _bounded_text(parsed["style_guidance"], "style guidance", 1000)
 
 
-CONTENT_PLAN_SYSTEM_PROMPT = '''Plan the visible content that best expresses
-the selected character judgment in this current scene. Use the selected
-intention, primary and supporting bids, visible episode, semantic affect,
-semantic relationship, expression policy, interaction style, and permitted
-action results.
+CONTENT_PLAN_SYSTEM_PROMPT = '''规划当前角色在这个场景中实际会说出或发送的内容，使其自然表达
+已经形成的角色判断。综合 selected intention、primary bid、supporting bid、visible episode、
+semantic affect、semantic relationship、expression policy、interaction style 和
+permitted_action_results。
 
-# Planning Procedure
-1. Answer or engage with the current input in the way chosen by cognition.
-Keep the response appropriate to the character's relationship, emotion, and
-scene pressure rather than mechanically copying earlier dialog.
-2. Choose vivid, character-specific content. Coherent imaginative detail and
-playful development are welcome when they do not contradict the current input
-or an explicit active constraint and do not reverse actor, target,
-beneficiary, or subject roles.
-3. Treat typed visible-percept roles as authoritative. For user dialog,
-current_user owns first-person pronouns; self is the active character and
-direct addressee; self is also an implicit imperative subject.
-4. permitted_action_results is the exact character-brain capability ledger.
-Only executed supports its bounded completed effect; other statuses support no
-completed effect. A request or bid supports a verbal or roleplayed stance, not
-capability execution.
-5. In-character action description is valid visible roleplay in plain,
-bracketed, first-person, or third-person form when it fits the current scene.
+# 规划步骤
+1. 按认知阶段选择的方式回应或参与当前输入。结合角色关系、情绪和场景压力推进互动，而不是机械
+复述先前对话。
+2. 选择鲜明、贴合角色的内容。只要不与当前输入或明确生效的约束冲突，也不颠倒 actor、target、
+beneficiary 或 subject，连贯的想象细节、玩笑和有创造力的展开都可以使用。
+3. 结构化 visible percept 的角色字段具有权威性。在用户对话中，current_user 的第一人称指当前
+用户；self 表示当前角色，也是被直接称呼者和祈使句的隐含主语。自由文本使用自然的中文参与者
+称呼。
+4. permitted_action_results 是角色大脑能力的精确账本。只有 executed 支持其有界的已完成效果；
+其他 status 不支持完成声明。请求或目标候选只支持角色在言语中的态度，不代表能力已经执行。
+5. 只规划角色要表达的含义和互动推进，让情绪、关系强度与动作倾向通过台词含义、语气和节奏
+呈现。
 
-Return a concise plan plus one to eight semantic requirements that protect
-the chosen meaning, real active boundaries, role direction, and action truth.
-Treat character-owned reflection and internal observation as context rather
-than live user speech. Operational metadata is not prose. Write new free text
-in Simplified Chinese while
-preserving quoted user text, proper nouns, code, URLs, and schema or enum
-tokens. Keep machine role tokens in structured input only; use natural Chinese
-participant descriptions in free text. Do not write final dialog.
+返回一份简洁计划，并给出一到八条语义要求，用来保护选定含义、当前真实边界、角色方向和能力
+执行事实。角色自己的反思和内部观察属于语境，不是当前用户的即时发言；运行元数据不属于对话
+内容。新生成的自由文本使用简体中文；用户引文、专有名词、代码、URL 以及 schema 或 enum token
+保持原样。本阶段不写最终对话。
 
-# Output Format
-Return exactly one JSON object with exactly content_plan and
-content_requirements. content_plan must be one non-empty string of at most
-1000 characters. content_requirements must be a duplicate-free list of one to
-eight non-empty semantic requirement strings of at most 500 characters each.'''
+# 输出格式
+只返回一个 JSON 对象，字段必须恰好是 content_plan 和 content_requirements。
+content_plan 是一个非空字符串，最多 1000 字符；content_requirements 是一到八条互不重复的
+非空语义要求，每条最多 500 字符。'''
 
 
 async def run_content_plan_stage(
@@ -124,28 +107,21 @@ async def run_content_plan_stage(
     return content_plan, content_requirements
 
 
-PREFERENCE_SYSTEM_PROMPT = '''Identify which real visible boundary or
-addressee constraint exists, if any, in the selected character judgment and
-current scene. Use the selected intention, visible episode, projected bids,
-expression policy, semantic affect, semantic relationship, interaction style,
-and permitted action results as context.
+PREFERENCE_SYSTEM_PROMPT = '''识别当前角色判断和当前场景中真实存在的可见表达边界或称呼对象约束。
+以 selected intention、visible episode、projected bids、expression policy、semantic affect、
+semantic relationship、interaction style 和 permitted_action_results 为语境。
 
-visible_boundaries contains only active expression limits or permitted-detail
-limits. addressee_plan contains only actual semantic addressee handling.
-Return an empty list when none exists instead of inventing resistance or an
-addressee rule. Treat action-result status exactly: only executed supports its
-bounded completed effect; other statuses retain their stated meaning.
-Character-owned reflection is context, not live user speech; operational
-metadata is not dialog content.
+visible_boundaries 只记录当前生效的表达限制或细节范围；addressee_plan 只记录真实存在的语义称呼
+安排。没有相应约束时返回空列表，让角色按当前判断自然表达。能力结果的 status 按原义处理：只有
+executed 支持其有界的已完成效果，其他 status 保留各自含义。角色自己的反思属于语境，不是当前
+用户的即时发言；运行元数据不属于对话内容。
 
-Write new free text in Simplified Chinese while preserving quoted user text,
-proper nouns, code, URLs, and schema or enum tokens. Return planning fields
-rather than final dialog.
+新生成的自由文本使用简体中文；用户引文、专有名词、代码、URL 以及 schema 或 enum token 保持
+原样。本阶段返回规划字段，不写最终对话。
 
-# Output Format
-Return exactly one JSON object with exactly visible_boundaries and
-addressee_plan. Each value must be a duplicate-free list containing zero to
-eight non-empty strings of at most 500 characters each.'''
+# 输出格式
+只返回一个 JSON 对象，字段必须恰好是 visible_boundaries 和 addressee_plan。每个字段都是包含
+零到八个非空字符串的列表，列表内不得重复，每条最多 500 字符。'''
 
 
 async def run_preference_stage(
@@ -183,24 +159,19 @@ async def run_preference_stage(
     )
 
 
-VISUAL_SYSTEM_PROMPT = '''Create image-generation visual_directives for a
-terminal image surface from the selected intention, visible episode, projected
-bids, expression policy, semantic affect, semantic relationship, permitted
-action results, interaction style context, and character_voice_context. The
-directives may include physically visible character traits, pose, expression,
-composition, environment, and scene atmosphere that serve the selected
-surface intent. They are private image-oriented instructions, not text to send
-to the user, dialog guidance, or an instruction to invoke another model or
-handler. Do not write final dialogue. Write newly generated free text in
-Simplified Chinese while preserving quoted user text, proper nouns, code,
-URLs, and schema or enum tokens when needed. Treat character-owned reflection
-or internal observation as evidence, never as live user speech. Do not copy
-source-packet headings, timestamps, transport summaries, schema keys, or
-operational metadata.
+VISUAL_SYSTEM_PROMPT = '''根据 selected intention、visible episode、projected bids、
+expression policy、semantic affect、semantic relationship、permitted action results、
+interaction style context 和 character_voice_context，为终端图像表面生成 visual_directives。
+指导可以包含服务于 selected surface intent 的可见角色特征、姿势、表情、构图、环境与场景氛围。
+这些内容是私有的图像生成指导，不是发送给用户的文字、对话指导，也不是调用其他模型或处理器的
+指令。本阶段不写最终对话。
 
-# Output Format
-Return exactly one JSON object with exactly visual_directives. Its value must
-be one non-empty string of at most 1000 characters.'''
+新生成的自由文本使用简体中文；用户引文、专有名词、代码、URL 以及必要的 schema 或 enum token
+保持原样。角色自己的反思或内部观察属于证据，不是当前用户的即时发言。输出中不复述来源包标题、
+时间戳、传输摘要、schema key 或运行元数据。
+
+# 输出格式
+只返回一个 JSON 对象，字段必须恰好是 visual_directives，其值是一个非空字符串，最多 1000 字符。'''
 
 
 async def run_visual_stage(

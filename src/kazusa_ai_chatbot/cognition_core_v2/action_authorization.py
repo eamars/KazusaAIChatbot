@@ -30,34 +30,23 @@ ACTION_AUTHORIZATION_TEXT_CAP = 400
 logger = logging.getLogger(__name__)
 
 
-ACTION_AUTHORIZATION_PROMPT = '''You are the focused semantic authorization
-boundary for proposed executable character-brain actions. The planner has
-already proposed candidates. For every candidate, decide only whether the
-capability's declared real effect is grounded and authorized by its cited
-current evidence.
+ACTION_AUTHORIZATION_PROMPT = '''你负责核准角色大脑提出的可执行动作。规划阶段已经给出候选项；
+对每个候选项，只判断它声明的真实效果是否得到所引用当前证据的支持与授权。
 
-Current evidence is authoritative. Admitted-bid prose and the proposed goal
-are context, not proof. Reject a candidate when the evidence merely discusses,
-imagines, roleplays, or requests an effect that the supplied capability cannot
-actually perform. Reject durable or out-of-turn work unless the current
-evidence requests or accepts that durable effect. Reject coding work unless
-the current evidence requests actual code, repository, or software-engineering
-work. No supplied capability implicitly actuates the character's body or a
-physical scene, and delayed work cannot be used to generate, store, or later
-present an action-performance description.
+当前证据具有最高依据。已经接纳的目标描述和候选目标只提供语境，不能代替证据。若证据只是在
+讨论、想象、角色扮演或请求某种效果，而所给能力无法真实完成该效果，则拒绝候选项。持久化或
+跨轮工作需要当前证据明确请求或接受其持久效果；编码工作需要当前证据明确请求代码、代码库或
+软件工程工作。所给能力不会隐含驱动角色身体或现实场景，延迟工作也不承担生成、保存或稍后展示
+动作表演描述的职责。
 
-Authorize a candidate when the cited current evidence grounds the exact real
-effect declared by the capability, including explicitly accepted delayed work,
-scheduled speech, memory lifecycle, future cognition from an eligible private
-source, or an action bound to trusted runtime context. Judge capability fit,
-not writing quality, character willingness, final wording, or whether another
-candidate would be preferable.
+当引用的当前证据确实支持能力声明的具体真实效果时，可以核准候选项。这包括被明确接受的延迟
+工作、定时发言、记忆生命周期操作、来自合格私聊来源的后续认知，或绑定可信运行上下文的动作。
+判断能力与证据是否匹配即可；文笔、角色意愿、最终措辞以及其他候选项是否更合适不属于本阶段。
 
-# Output Format
-Return exactly one JSON object with exactly one field named decisions.
-decisions must be one JSON object whose keys are exactly the supplied candidate
-handles and whose values are booleans. true authorizes that candidate and false
-rejects it. Do not omit or invent candidates. Return JSON only.
+# 输出格式
+只返回一个 JSON 对象，且字段必须恰好是 decisions。decisions 是一个 JSON 对象，键必须恰好
+覆盖提供的 candidate handle，值必须是布尔值；true 表示核准，false 表示拒绝。候选项不得遗漏
+或增添，只输出 JSON。
 '''
 
 
@@ -292,14 +281,13 @@ def _authorization_repair_message(
         half_cap = ACTION_AUTHORIZATION_OUTPUT_CAP // 2
         bounded_response = (
             bounded_response[:half_cap]
-            + "\n... bounded rejected output ...\n"
+            + "\n... 已截断的不合格输出 ...\n"
             + bounded_response[-half_cap:]
         )
     payload = {
         "repair_instruction": (
-            "Return one complete replacement authorization object. Preserve "
-            "semantic judgments while mapping every supplied candidate "
-            "handle to one boolean and emitting JSON only."
+            "返回一个完整的替代核准对象。保留原有语义判断，为每个提供的 "
+            "candidate handle 填写一个布尔值，并且只输出 JSON。"
         ),
         "candidate_handles_in_order": candidate_handles,
         "contract_error": contract_error[:ACTION_AUTHORIZATION_TEXT_CAP],

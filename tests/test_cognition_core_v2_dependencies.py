@@ -335,7 +335,7 @@ async def test_goal_bid_gets_one_bounded_schema_repair(
 
     assert bid["branch_id"] == "ordinary_response"
     assert len(llm.messages) == 2
-    assert "repair" in str(llm.messages[1][0].content).casefold()
+    assert "修复" in str(llm.messages[1][0].content)
     assert "requested_route" not in GOAL_COGNITION_PROMPT
     assert "action_handle" not in GOAL_COGNITION_PROMPT
     assert "resolver_handle" not in GOAL_COGNITION_PROMPT

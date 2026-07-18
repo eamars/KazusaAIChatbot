@@ -43,19 +43,19 @@ class _SurfaceLLM:
         human = str(getattr(messages[1], "content", ""))
         payload = json.loads(human)["surface"]
         self.calls.append((system, payload))
-        if "exactly style_guidance" in system:
+        if "style_guidance" in system and "content_plan" not in system:
             result = {"style_guidance": "speech-safe cadence"}
-        elif "exactly content_plan" in system:
+        elif "content_plan" in system and "content_requirements" in system:
             result = {
                 "content_plan": "Perform the requested response operation.",
                 "content_requirements": ["Preserve current-turn meaning."],
             }
-        elif "exactly visible_boundaries" in system:
+        elif "visible_boundaries" in system and "addressee_plan" in system:
             result = {
                 "visible_boundaries": ["Use visible speech only."],
                 "addressee_plan": ["Address the current user."],
             }
-        elif "exactly visual_directives" in system:
+        elif "visual_directives" in system:
             result = {
                 "visual_directives": "A still-frame emotional composition.",
             }
@@ -188,7 +188,7 @@ async def test_text_and_visual_planners_are_terminal_siblings() -> None:
     }
     assert len(llm.calls) == 3
     for system, payload in llm.calls:
-        if "exactly style_guidance" in system:
+        if "style_guidance" in system and "content_plan" not in system:
             assert payload["character_voice_context"] == (
                 "A physical mannerism accompanies emotion."
             )
@@ -214,7 +214,7 @@ async def test_text_and_visual_planners_are_terminal_siblings() -> None:
         "selected_surface_intent": "answer by inference",
     }
     visual_system, visual_payload = llm.calls[-1]
-    assert "exactly visual_directives" in visual_system
+    assert "visual_directives" in visual_system
     assert visual_payload["character_voice_context"] == (
         "A physical mannerism accompanies emotion."
     )
@@ -240,25 +240,25 @@ def test_runtime_prompts_define_live_speech_and_hard_error_contracts() -> None:
     )
     verifier_prompt = f"{semantic_prompt}\n{surface_prompt}"
 
-    assert "style guidance" in style_prompt
-    assert "wording" in style_prompt
-    assert "coherent imaginative" in content_prompt
-    assert "character judgment" in content_prompt
-    assert "current input" in content_prompt
+    assert "表达指导" in style_prompt
+    assert "用词" in style_prompt
+    assert "想象细节" in content_prompt
+    assert "角色判断" in content_prompt
+    assert "当前输入" in content_prompt
     assert "actor" in content_prompt
     assert "target" in content_prompt
     assert "executed" in content_prompt
-    assert "action description" in content_prompt
-    assert "valid visible roleplay" in content_prompt
-    assert "image-generation" in visual_prompt
+    assert "action description" not in content_prompt
+    assert "动作描写" not in content_prompt
+    assert "终端图像" in visual_prompt
     assert "visual_directives" in visual_prompt
     assert "message pacing" not in visual_prompt
-    assert "natural" in dialog_prompt
-    assert "character-specific" in dialog_prompt
-    assert "coherent creative" in dialog_prompt
-    assert "chat-ready" in dialog_prompt
-    assert "action description" in dialog_prompt
-    assert "valid visible roleplay" in dialog_prompt
+    assert "自然" in dialog_prompt
+    assert "角色辨识度" in dialog_prompt
+    assert "创造" in dialog_prompt
+    assert "实际会说出或发送" in dialog_prompt
+    assert "action description" not in dialog_prompt
+    assert "动作描写" not in dialog_prompt
     assert "actor" in dialog_prompt
     assert "target" in dialog_prompt
     assert "executed" in dialog_prompt
@@ -271,16 +271,17 @@ def test_runtime_prompts_define_live_speech_and_hard_error_contracts() -> None:
     assert "role_explicit_content" in semantic_prompt
     assert "response_operation" in semantic_prompt
     assert "selection_owner" in semantic_prompt
-    assert "internal contradiction" in verifier_prompt
-    assert "current user input" in verifier_prompt
+    assert "内部存在冲突" in verifier_prompt
+    assert "当前用户输入" in verifier_prompt
     assert "actor" in verifier_prompt
     assert "target" in verifier_prompt
     assert "subject" in verifier_prompt
-    assert "action description" in verifier_prompt
-    assert "valid roleplay" in verifier_prompt
+    assert "action description" not in verifier_prompt
+    assert "动作描写" not in verifier_prompt
     assert "executed" in verifier_prompt
-    assert "coherent invention" in verifier_prompt
-    assert "not failures" in verifier_prompt
+    assert "合理虚构" in verifier_prompt
+    assert "不属于" in verifier_prompt
+    assert "false_execution" in surface_prompt
     for retired_text in (
         "claim-by-claim audit",
         "must remain silent about future",
@@ -624,7 +625,8 @@ def test_hard_verifier_and_repair_exclude_drifted_l3_prose() -> None:
 
     assert "active_visible_boundaries" not in surface_prompt
     assert "style_guidance" not in surface_prompt
-    assert "No free-text content plan, boundary, or style" in repair_prompt
+    assert "不提供自由" in repair_prompt
+    assert "content plan、boundary 或 style guidance" in repair_prompt
 
 
 @pytest.mark.asyncio

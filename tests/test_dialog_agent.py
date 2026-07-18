@@ -153,12 +153,12 @@ def test_v2_prompt_describes_surface_renderer_boundary() -> None:
     prompt = dialog_module._V2_DIALOG_GENERATOR_PROMPT
 
     assert "text_surface_output_v2" in prompt
-    assert "natural" in prompt
-    assert "character-specific" in prompt
-    assert "chat-ready" in prompt
-    assert "first-person" in prompt
-    assert "Action description" in prompt
-    assert "valid visible roleplay" in prompt
+    assert "自然" in prompt
+    assert "角色辨识度" in prompt
+    assert "实际会说出或发送" in prompt
+    assert "第一人称" in prompt
+    assert "action description" not in prompt.casefold()
+    assert "动作描写" not in prompt
     assert "final_dialog" in prompt
     assert "action_directives" not in prompt
 

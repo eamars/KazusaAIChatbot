@@ -16,6 +16,16 @@
 - Acceptance criteria: zero visible action descriptions in the frozen 20-turn
   proof; turns 14-16 preserve task direction and meaning; anti-cheat gates pass.
 
+## Supersession Notice
+
+The action-narration prohibition, rejection, repair, and zero-occurrence
+requirements in this plan are superseded by
+`runtime_prompt_chinese_and_dialog_surface_guidance_plan.md`. Text planning and
+dialog now organically favor words the character would send, while action
+narration remains pass-through model variation. This plan's contradiction,
+current-input fidelity, role-direction, false-execution, terminal-visual, and
+one-repair protections remain active.
+
 ## Context
 
 The post-fix frozen replay produced action or stage narration in 14 of 20

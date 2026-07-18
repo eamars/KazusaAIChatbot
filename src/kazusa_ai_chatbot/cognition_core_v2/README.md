@@ -108,8 +108,11 @@ ownership, the candidate role frame, and candidate dialog; it rejects internal
 contradiction, direct current-input conflict, and role reversal. Surface
 integrity receives permitted action results and candidate dialog; it rejects
 only false system, tool, platform, or other character-brain execution claims.
-Action description in plain, bracketed, first-person, or third-person form is
-valid visible roleplay and is outside the fatal taxonomy.
+Text planning owns expressed meaning and interaction progress without
+supplying staging forms. Dialog expresses emotion, character, and interaction
+posture through sendable wording and cadence. Action narration is outside the
+fatal taxonomy and remains unchanged when the model produces it; the runtime
+prompts neither request it nor create a rejection or repair rule for it.
 Generated content, addressee, intent, and style proposals stay outside
 hard-error authority. Source percepts and generated character speech carry
 separate typed pronoun frames before role direction is compared. Novelty and

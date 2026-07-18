@@ -57,7 +57,7 @@ class _ScriptedLLM:
         system = str(getattr(messages[0], "content", ""))
         human = str(getattr(messages[-1], "content", "{}"))
         payload = json.loads(human)
-        if "scoped semantic question" in system:
+        if "selected_evidence_handles" in system:
             question = payload["question"]
             roles = question["permitted_role_handles"]
             result = {
@@ -68,7 +68,7 @@ class _ScriptedLLM:
                 "deltas": [],
                 "explanation": "the evidence is accepted without a new delta",
             }
-        elif "independent goal cognition branch" in system:
+        elif "private_monologue" in system:
             result = {
                 "intention": "acknowledge the grounded episode",
                 "desired_outcome": "maintain a coherent exchange",
@@ -80,33 +80,33 @@ class _ScriptedLLM:
                 "expected_consequences": ["preserve continuity"],
                 "confidence": "high",
             }
-        elif "Collapse complete goal bids" in system:
+        elif "primary_bid_handle" in system:
             handles = sorted(payload["bids"])
             result = {
                 "primary_bid_handle": handles[0],
                 "supporting_bid_handles": handles[1:],
                 "suppressed_bid_handles": [],
             }
-        elif "semantic capability-proposal" in system.casefold():
+        elif "action_requests" in system:
             result = {
                 "action_requests": [],
                 "resolver_requests": [],
                 "resolver_pending_resolution": None,
                 "resolver_goal_progress": None,
             }
-        elif "exactly style_guidance" in system:
+        elif "style_guidance" in system:
             result = {"style_guidance": "bounded style guidance"}
-        elif "exactly content_plan" in system:
+        elif "content_plan" in system:
             result = {
                 "content_plan": "bounded content-plan guidance",
                 "content_requirements": ["preserve actor direction"],
             }
-        elif "exactly visible_boundaries" in system:
+        elif "visible_boundaries" in system:
             result = {
                 "visible_boundaries": ["bounded visible boundary"],
                 "addressee_plan": ["bounded addressee plan"],
             }
-        elif "exactly visual_directives" in system:
+        elif "visual_directives" in system:
             result = {"visual_directives": "bounded visual directives"}
         else:
             raise AssertionError("unexpected V2 model stage")
@@ -340,7 +340,7 @@ async def test_private_output_mode_produces_private_silence() -> None:
     }
     assert output["admitted_bid"]["branch_id"] == "ordinary_response"
     assert any(
-        "semantic capability-proposal" in call.casefold()
+        "action_requests" in call
         for call in llm.calls
     )
 

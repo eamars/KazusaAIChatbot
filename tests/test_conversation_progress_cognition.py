@@ -131,10 +131,10 @@ def test_content_plan_owns_visible_conversation_progression() -> None:
 
     prompt = CONTENT_PLAN_SYSTEM_PROMPT.casefold()
 
-    assert "visible content" in prompt
-    assert "selected character judgment" in prompt
-    assert "current scene" in prompt
-    assert "do not write final dialog" in prompt
+    assert "实际会说出或发送的内容" in prompt
+    assert "角色判断" in prompt
+    assert "这个场景" in prompt
+    assert "不写最终对话" in prompt
 
 
 def test_connector_projects_allowlisted_bounded_conversation_progress() -> None:

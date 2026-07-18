@@ -40,26 +40,22 @@ _QUESTION_PROPOSITION_KINDS = {
 
 _QUESTION_DESCRIPTIONS = {
     "event_agency": (
-        "Assess responsibility and intentionality using only the authorized "
-        "event evidence and role handles."
+        "只使用已经授权的事件证据与角色 handle，判断责任和意图。"
     ),
     "relationship_social": (
-        "Assess social meaning and relationship threat without changing "
-        "relationship ownership."
+        "判断社交含义与关系威胁，同时保持关系归属不变。"
     ),
     "moral_identity": (
-        "Assess norm meaning and repair relevance for authorized event handles."
+        "判断已授权 event handle 的规范含义与修复相关性。"
     ),
     "goal_threat_outcome": (
-        "Assess goal release, supersession, completion, and resolution meaning "
-        "for existing handles."
+        "判断现有 handle 的目标释放、取代、完成与解决含义。"
     ),
     "epistemic_comparison_memory": (
-        "Assess comparison, memory cues, and epistemic meaning for existing "
-        "handles."
+        "判断现有 handle 的比较含义、记忆线索与认知含义。"
     ),
     "existential_drive": (
-        "Assess meaning relevance and drive pressure without inventing a goal."
+        "判断意义相关性与驱动力压力，不增添新的目标。"
     ),
 }
 

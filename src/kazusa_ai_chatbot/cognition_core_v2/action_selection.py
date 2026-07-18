@@ -52,81 +52,58 @@ MODEL_TEXT_CAP = 500
 logger = logging.getLogger(__name__)
 
 
-ACTION_PLANNING_PROMPT = '''You are the semantic capability-proposal boundary
-for one active character. Propose concrete executable action requests or
-resolver requests that advance the admitted motives. The primary bid owns the
-visible intention. Supporting bids may contribute compatible private actions
-or evidence needs. Do not select or restate a route, rewrite bid content,
-generate final dialogue, execute a capability, authorize execution, or invent
-an unavailable capability. Protocol code derives route after semantic action
-authorization.
+ACTION_PLANNING_PROMPT = '''你负责为当前角色提出语义能力请求。根据已经接纳的目标，提出能够推进
+目标的具体可执行 action request 或 resolver request。primary bid 决定可见意图；supporting bid
+可以提供相容的私有动作或证据需求。本阶段不选择或复述 route，不改写目标候选，不生成最终对话，
+不执行或核准能力，也不虚构未提供的能力。协议代码会在语义授权完成后派生 route。
 
-Produce one semantic proposal object. Action requests and resolver requests
-are mutually exclusive. Either array may contain up to three requests.
-Immediate visible speech is not a capability request and never appears in this
-output. When evidence or a persisted clarification or approval step is needed,
-select resolver requests only; resolver recurrence owns the later visible
-answer or question.
-Select a private action only when its cited admitted bid requires that
-capability's durable or out-of-turn effect as part of the desired outcome.
-The bid cannot broaden capability eligibility. Current evidence must itself
-support the selected capability's declared real effect; generic words such as
-task, action, request, analysis, or work do not establish capability fit.
-In particular, accepted coding capability requires current evidence that asks
-for actual code, repository, or software-engineering work. A drifted bid cannot
-convert physical chat or ordinary conversation into coding work.
-Never create an action request for the planner's own reasoning, memory recall,
-reply preparation, response rehearsal, wording, or thought that completes in
-the current cognition turn. Use a resolver for genuinely missing evidence and
-use speech without a private action when the admitted response can finish now.
-No supplied action capability actuates the character's body or a physical
-scene. Never select an action to execute a physical request or to generate,
-store, or later present a physical-action description. For a physical chat
-request, use speech for the character's verbal stance unless a distinct
-supplied capability genuinely provides another explicit non-physical effect.
-Respect episode.output_mode. Silence permits no requests. A normal
-visible_reply may combine its protocol-owned visible response with up to three
-grounded private action requests. A scheduled_action_request permits executable
-actions only.
+输出一个语义提案对象。action_requests 与 resolver_requests 互斥，各自最多包含三项。即时可见
+发言不是能力请求，不放入本输出。需要补充证据、持久化澄清或批准步骤时，只选择 resolver；后续
+可见答案或问题由 resolver 的再次认知负责。
 
-Each request must cite one supplied bid handle and one supplied capability
-handle. For an action request, follow the affordance's decision_mode:
-- optional: use the affordance's default_decision or an empty string;
-- required_text: provide one concrete bounded semantic decision;
-- closed: copy one value from allowed_decisions.
-When decision_pattern is non-empty, decision must full-match it exactly, with
-no prefix, suffix, explanation, or final message text.
-semantic_goal states the concrete semantic objective, not execution parameters
-or final wording. reason explains why the request advances its cited bid.
-Do not emit context_ref. Selecting an action_handle binds its deterministic
-context_ref after validation.
+只有当引用的已接纳目标确实需要某项能力的持久化或跨轮效果来实现 desired_outcome 时，才提出
+私有动作。目标候选不能扩大能力适用范围；当前证据本身必须支持所选能力声明的真实效果。task、
+action、request、analysis 或 work 等泛化词不能证明能力匹配。编码能力要求当前证据明确请求实际
+代码、代码库或软件工程工作；偏移的目标候选不能把身体互动或普通聊天变成编码任务。
 
-Treat character-owned reflection or internal observation as evidence, not live
-user speech. Do not copy packet headings, timestamps, schema keys, transport
-summaries, or operational metadata into generated prose. Write generated
-free-text fields in Simplified Chinese while preserving quoted user text,
-proper nouns, code, URLs, capability names, and schema or enum tokens.
+规划者本轮的推理、记忆回想、回复准备、措辞排练或本轮即可完成的思考不构成 action request。
+真正缺少证据时使用 resolver；已接纳回应现在即可完成时，直接发言而不附加私有动作。所给 action
+能力不会驱动角色身体或现实场景，也不负责执行身体请求或生成、保存、稍后展示身体动作表演描述。
+面对身体互动请求，通常由发言表达当前角色立场；只有另一个明确提供的能力确实具有不同且清晰的
+非身体效果时，才选择该能力。
 
-resolver_pending_resolution is null unless the resolver context contains an
-active pending item and the current evidence supports a decision. When present,
-return exactly decision and reason; deterministic code binds the active item.
-resolver_goal_progress is null when no goal progress is needed. When present,
-return a partial semantic update containing only fields that changed. Protocol
-code binds schema_version and original_goal and deterministic code preserves omitted
-known checklist fields from current_resolver_goal_progress.
+遵守 episode.output_mode。silence 不允许请求；普通 visible_reply 可以在协议拥有的可见回应之外
+组合最多三项有依据的私有 action request；scheduled_action_request 只允许可执行动作。
 
-# Output Format
-Return exactly one JSON object with exactly these fields:
-- action_requests: array of zero to three objects, each with exactly
-  bid_handle, action_handle, decision, semantic_goal, and reason
-- resolver_requests: array of zero to three objects, each with exactly
-  bid_handle, resolver_handle, semantic_goal, and reason
-- resolver_pending_resolution: null or an object with exactly decision and
-  reason
-- resolver_goal_progress: null or a partial semantic update object
-When resolver_requests is non-empty, action_requests must be empty. When
-action_requests is non-empty, resolver_requests must be empty.
-Do not emit any other field.
+每项请求必须引用一个提供的 bid handle 和一个提供的 capability handle。action request 按
+affordance.decision_mode 填写 decision：
+- optional：使用 default_decision 或空字符串；
+- required_text：给出一个具体、有界的语义决定；
+- closed：复制 allowed_decisions 中的一个值。
+decision_pattern 非空时，decision 必须完整匹配，不添加前后缀、解释或最终消息文本。
+semantic_goal 描述具体语义目标，不写执行参数或最终措辞；reason 解释该请求如何推进所引用目标。
+不输出 context_ref；选择 action_handle 后，确定性的 context_ref 会在验证后绑定。
+
+角色自己的反思或内部观察属于证据，不是当前用户的即时发言。生成的文字不复述来源包标题、
+时间戳、schema key、传输摘要或运行元数据。新生成的自由文本使用简体中文；用户引文、专有名词、
+代码、URL、capability name 以及 schema 或 enum token 保持原样。
+
+只有 resolver 上下文存在活跃 pending item 且当前证据支持决定时，
+resolver_pending_resolution 才不是 null；此时恰好返回 decision 和 reason，活跃项由确定性代码绑定。
+不需要目标进度时 resolver_goal_progress 为 null；需要时只返回发生变化的局部语义更新。协议代码
+绑定 schema_version 和 original_goal，确定性代码从 current_resolver_goal_progress 保留省略的
+已知 checklist 字段。
+
+# 输出格式
+只返回一个 JSON 对象，字段必须恰好是：
+- action_requests：零到三个对象，每个对象必须恰好包含 bid_handle、action_handle、decision、
+  semantic_goal 和 reason；
+- resolver_requests：零到三个对象，每个对象必须恰好包含 bid_handle、resolver_handle、
+  semantic_goal 和 reason；
+- resolver_pending_resolution：null，或恰好包含 decision 和 reason 的对象；
+- resolver_goal_progress：null，或一个局部语义更新对象。
+resolver_requests 非空时 action_requests 必须为空；action_requests 非空时 resolver_requests 必须
+为空。不输出其他字段。
 '''
 
 
@@ -388,9 +365,8 @@ def _action_planning_repair_message(
     bounded_response = _bounded_repair_output(response_text)
     repair_payload = {
         "repair_instruction": (
-            "Return a complete replacement object for the original action "
-            "plan. Preserve only grounded semantic choices, satisfy every "
-            "exact field and request rule, and emit JSON only."
+            "返回一个完整对象替代原 action plan。只保留有依据的语义选择，"
+            "满足所有精确字段和请求规则，并且只输出 JSON。"
         ),
         "contract_error": contract_error[:MODEL_TEXT_CAP],
         "invalid_response": bounded_response,
@@ -408,7 +384,7 @@ def _bounded_repair_output(response_text: str) -> str:
     half_cap = ACTION_PLANNING_REPAIR_OUTPUT_CAP // 2
     return_value = (
         response_text[:half_cap]
-        + "\n... bounded rejected output ...\n"
+        + "\n... 已截断的不合格输出 ...\n"
         + response_text[-half_cap:]
     )
     return return_value

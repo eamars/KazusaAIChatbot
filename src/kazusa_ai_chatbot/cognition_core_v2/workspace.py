@@ -19,11 +19,10 @@ from kazusa_ai_chatbot.cognition_core_v2.branch_activation import (
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 
 
-COLLAPSE_PROMPT = '''Collapse complete goal bids into a prompt-local partition.
-Return only JSON with primary_bid_handle, supporting_bid_handles, and
-suppressed_bid_handles. Do not rewrite bid content, copy content, or invent
-detail.
-Every supplied bid handle must occur exactly once across the three partitions.
+COLLAPSE_PROMPT = '''把完整的目标候选划分为本次 prompt 内的主目标、支持目标和抑制目标。
+只返回包含 primary_bid_handle、supporting_bid_handles 和
+suppressed_bid_handles 的 JSON。保持候选内容原样，不复制内容，也不增添细节。
+每个提供的 bid handle 必须在三个分区中恰好出现一次。
 '''
 
 

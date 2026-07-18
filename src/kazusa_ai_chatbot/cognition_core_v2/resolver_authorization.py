@@ -23,30 +23,21 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
 RESOLVER_AUTHORIZATION_PROMPT_CAP = 24000
 
 
-RESOLVER_AUTHORIZATION_PROMPT = '''You are the focused semantic authorization
-boundary for proposed resolver evidence work. The planner has already proposed
-candidates. For every candidate, decide only whether its evidence need remains
-unresolved, materially advances its cited admitted bid, and fits the supplied
-resolver capability.
+RESOLVER_AUTHORIZATION_PROMPT = '''你负责核准规划阶段提出的证据解析工作。对每个候选项，只判断
+它需要的证据是否仍未解决、是否能实质推进所引用的已接纳目标，以及是否符合所给 resolver 能力。
 
-Current evidence and prior resolver context are authoritative. Authorize a
-candidate when relevant evidence is genuinely missing and the capability can
-retrieve or resolve it. Reject a candidate when current evidence already
-satisfies the proposed need, when the proposal repeats an earlier need using
-different wording, or when the prior resolver context shows that the same need
-cannot usefully proceed. A previous successful observation does not by itself
-block a distinct or materially narrower follow-up whose required evidence is
-still absent.
+当前证据和已有 resolver 上下文具有最高依据。当相关证据确实缺失且所给能力能够检索或解决时，
+可以核准候选项。若当前证据已经满足该需求、候选项只是换一种说法重复先前需求，或已有 resolver
+上下文表明同一需求无法继续产生有效进展，则拒绝候选项。先前一次成功观察本身不妨碍不同的、或
+实质上更窄且所需证据仍缺失的后续请求。
 
-Judge unresolved evidence need and capability fit only. Do not rewrite a
-request, choose final dialogue, judge character willingness or writing quality,
-or invent another capability.
+本阶段只判断未解决的证据需求与能力匹配，不改写请求、不选择最终对话，也不判断角色意愿、文笔
+或虚构其他能力。
 
-# Output Format
-Return exactly one JSON object with exactly one field named decisions.
-decisions must be one JSON object whose keys are exactly the supplied candidate
-handles and whose values are booleans. true authorizes that candidate and false
-rejects it. Do not omit or invent candidates. Return JSON only.
+# 输出格式
+只返回一个 JSON 对象，且字段必须恰好是 decisions。decisions 是一个 JSON 对象，键必须恰好
+覆盖提供的 candidate handle，值必须是布尔值；true 表示核准，false 表示拒绝。候选项不得遗漏
+或增添，只输出 JSON。
 '''
 
 

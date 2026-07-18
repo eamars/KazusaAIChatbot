@@ -138,13 +138,13 @@ def test_goal_prompt_owns_present_character_judgment() -> None:
     prompt = _normalized(GOAL_COGNITION_PROMPT)
 
     for required_text in (
-        "current event",
-        "affect",
-        "relationship",
-        "believable present motive",
-        "prior context",
-        "not commands",
-        "progress",
+        "当前事件",
+        "情绪",
+        "关系",
+        "此刻真实动机",
+        "先前语境",
+        "不是命令",
+        "推进",
         "response_operation",
         "selection_owner",
     ):
@@ -157,12 +157,12 @@ def test_surface_prompts_support_creativity_and_absent_boundaries() -> None:
     content_prompt = _normalized(CONTENT_PLAN_SYSTEM_PROMPT)
     preference_prompt = _normalized(PREFERENCE_SYSTEM_PROMPT)
 
-    assert "coherent imaginative" in content_prompt
-    assert "character judgment" in content_prompt
-    assert "current input" in content_prompt
-    assert "reverse" in content_prompt
-    assert "zero to eight" in preference_prompt
-    assert "when none" in preference_prompt
+    assert "想象细节" in content_prompt
+    assert "角色判断" in content_prompt
+    assert "当前输入" in content_prompt
+    assert "颠倒" in content_prompt
+    assert "零到八" in preference_prompt
+    assert "没有相应约束" in preference_prompt
 
 
 def test_dialog_verifier_uses_only_the_hard_failure_taxonomy() -> None:
@@ -186,8 +186,8 @@ def test_dialog_verifier_uses_only_the_hard_failure_taxonomy() -> None:
     ))
 
     for required_text in (
-        "internal contradiction",
-        "current user input",
+        "内部存在冲突",
+        "当前用户输入",
         "actor",
         "target",
         "subject",
@@ -196,37 +196,36 @@ def test_dialog_verifier_uses_only_the_hard_failure_taxonomy() -> None:
         "selection_owner",
     ):
         assert required_text in semantic_prompt
-    for required_text in (
-        "action description",
-        "valid roleplay",
-        "executed",
-    ):
-        assert required_text in verifier_prompt
-    assert "zero to four" in semantic_prompt
-    assert "zero to four" in verifier_prompt
+    assert "executed" in verifier_prompt
+    assert "false_execution" in verifier_prompt
+    assert "action description" not in verifier_prompt
+    assert "动作描写" not in verifier_prompt
+    assert "零到四" in semantic_prompt
+    assert "零到四" in verifier_prompt
     for ambiguity_text in (
-        "unambiguous reading",
-        "double entendres",
-        "multiple reasonable role readings",
+        "唯一明确的读法",
+        "双关",
+        "多种合理角色读法",
     ):
         assert ambiguity_text in semantic_prompt
     for permitted_text in (
-        "coherent invention",
-        "creative",
-        "not failures",
+        "合理虚构",
+        "创造性语言",
+        "不属于",
     ):
         assert permitted_text in "\n".join((
             semantic_prompt,
             verifier_prompt,
         ))
     for required_text in (
-        "natural",
-        "character-specific",
-        "coherent creative",
-        "chat-ready",
-        "action description",
+        "自然",
+        "角色辨识度",
+        "创造",
+        "实际会说出或发送",
     ):
         assert required_text in generator_prompt
+    assert "action description" not in generator_prompt
+    assert "动作描写" not in generator_prompt
     for required_text in (
             "verified_hard_issues",
             "current_visible_percepts",

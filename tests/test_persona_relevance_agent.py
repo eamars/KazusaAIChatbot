@@ -300,9 +300,7 @@ def test_settled_render_keeps_latest_fragment_and_respects_cap() -> None:
     assert "turn-id-raw-1" not in rendered
     assert "2026-07-16T00:00:10Z" not in rendered
     assert "Correction: use the latest request." in rendered
-    assert "terminal action named by the supplied\n  output contract" in (
-        messages[0].content
-    )
+    assert "输出 contract 中适用的终止" in messages[0].content
     assert "non-response disposition" not in messages[0].content
     assert "more_time_available" not in rendered
     assert "observation_complete" not in rendered
@@ -333,13 +331,13 @@ def test_settled_prompt_renders_only_currently_available_actions() -> None:
     assert '"semantic_disposition":"proceed|wait"' in (
         waiting_messages[0].content
     )
-    assert "assembled_turn.author_relation is current_human" in (
+    assert "assembled_turn.author_relation 为 current_human" in (
         waiting_messages[0].content
     )
-    assert "A statement that group members could react to is insufficient" in (
+    assert "群成员可能愿意回应的一般陈述不足以构成邀请" in (
         waiting_messages[0].content
     )
-    assert "never swap their roles" in (
+    assert "每个输出字段都保持这一归属" in (
         waiting_messages[0].content
     )
     assert '"semantic_disposition":"proceed"' in (
@@ -378,11 +376,11 @@ def test_settled_prompt_defines_native_reply_anchor_semantics() -> None:
     messages = build_settled_relevance_messages(_base_state())
     system_prompt = messages[0].content
 
-    assert "anchor the answer to effective_latest_fragment" in system_prompt
-    assert "specific character-directed message" in system_prompt
-    assert "for private input or a" in system_prompt
-    assert "whole-group invitation" in system_prompt
-    assert "semantic decision is not proceed" in system_prompt
+    assert "把回答锚定到\n  effective_latest_fragment" in system_prompt
+    assert "具体的角色定向消息" in system_prompt
+    assert "私聊输入" in system_prompt
+    assert "邀请全群" in system_prompt
+    assert "语义决定不是 proceed" in system_prompt
 
 
 def test_settled_history_projects_production_participant_relations() -> None:

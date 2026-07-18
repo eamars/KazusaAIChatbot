@@ -202,9 +202,13 @@ are excluded from every model-facing consolidation projection, source view,
 and router input.
 
 `dialog_agent.py` authors natural, vivid chat-ready words for the character.
-Character-consistent invention, ask-backs, playful development, action
-description in plain, bracketed, first-person, or third-person form, and other
+Character-consistent invention, ask-backs, playful development, and other
 coherent drift remain available when they fit the current input and scene.
+Text planning describes what the character wants to express and advances the
+interaction without supplying staging forms; dialog carries emotion,
+personality, and interaction posture through wording, sentence shape, and
+cadence. Action narration remains an ungated model variation: the prompts do
+not request it, and generated instances are neither rejected nor rewritten.
 Two bounded
 hard-error checks run in parallel on the existing dialog-model route. Semantic
 fidelity receives only current percepts, the candidate role frame, and

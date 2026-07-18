@@ -28,40 +28,29 @@ from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 
 
-SEMANTIC_APPRAISAL_PROMPT = '''You assess one scoped semantic question from
-bounded evidence.
-Use only the permitted prompt-local handles and semantic descriptions. Do not select
-actions, write dialogue, emit emotion ids, change lifecycle status, or invent
-facts. Return semantic propositions and allowlisted numeric deltas only when
-the supplied evidence supports them.
-Respect each typed source_kind. Character-owned reflection or internal
-observation material is evidence, not live user speech. Do not copy source
-packet headings, timestamps, transport summaries, schema keys, or operational
-metadata into generated prose. Write newly generated free-text fields in
-Simplified Chinese, while preserving quoted user text, proper nouns, code,
-URLs, and schema or enum tokens when needed.
+SEMANTIC_APPRAISAL_PROMPT = '''你根据有界证据回答一个范围明确的语义问题。
+只使用本次 prompt 允许的 handle 和语义描述。动作选择、对话生成、emotion id、生命周期状态与
+事实补充不属于本阶段。只有在所给证据支持时，才返回语义命题和允许路径上的数值变化。
 
-# Output Format
-Return exactly one JSON object with question_id, selected_evidence_handles,
-selected_role_handles, propositions, deltas, and explanation. Every
-proposition and delta must cite supplied evidence handles. Unknown or
-unsupported meaning must be omitted rather than guessed.
+遵守每条证据的 source_kind。角色自己的反思或内部观察属于证据，不是当前用户的即时发言。
+生成的文字不复述来源包标题、时间戳、传输摘要、schema key 或运行元数据。新生成的自由文本使用
+简体中文；引用的用户原文、专有名词、代码、URL 以及必要的 schema 或 enum token 保持原样。
 
-Each proposition object must contain exactly proposition_kind,
-subject_handle, evidence_handles, role_assignments, and semantic_value. It may
-also contain object_handle. Each role assignment must contain exactly role and
-entity_handle. Each delta object must contain exactly target_path, delta,
-evidence_handles, and reason. Use the supplied role handles and delta paths
-literally. Do not emit kind, handle, semantic_text, role_handles, path, or any
-other proposition or delta field.
-semantic_value is one concise descriptive clause: target 120 characters and
-never exceed 200 characters. Do not repeat the standards, constraints, or
-evidence explanation inside it. It is never a number; only the delta field
-carries a numeric value. Keep each delta reason at most 300 characters and
-the explanation at most 1000 characters.
-The role field must be one of actor, experiencer, target, object,
-affected_goal, or affected_relationship. Entity handles such as r1, ce1, ct1,
-and ck1 belong in entity_handle, never in the role field.
+# 输出格式
+只返回一个 JSON 对象，字段必须恰好是 question_id、selected_evidence_handles、
+selected_role_handles、propositions、deltas 和 explanation。每条 proposition 与 delta 都必须
+引用提供的 evidence handle；未知或缺少支持的含义直接省略。
+
+每个 proposition 对象必须恰好包含 proposition_kind、subject_handle、evidence_handles、
+role_assignments 和 semantic_value，并可选包含 object_handle。每条 role assignment 必须恰好
+包含 role 和 entity_handle。每个 delta 对象必须恰好包含 target_path、delta、
+evidence_handles 和 reason。所给 role handle 与 delta path 按原值使用；不输出 kind、handle、
+semantic_text、role_handles、path 或其他 proposition、delta 字段。
+
+semantic_value 是一句简洁描述，目标长度 120 字符且上限 200 字符，其中不重复标准、约束或证据
+解释，也不使用数值；数值只放在 delta 字段。每条 delta reason 不超过 300 字符，explanation
+不超过 1000 字符。role 必须取 actor、experiencer、target、object、affected_goal 或
+affected_relationship。r1、ce1、ct1、ck1 等实体 handle 放在 entity_handle，不能放在 role。
 '''
 
 
@@ -93,9 +82,9 @@ async def appraise_semantic_question(
                 question_proposition_kinds(question["question_kind"])
             ),
             "output_schema": {
-                "propositions": "list of grounded proposition objects",
-                "deltas": "list of allowlisted signed integer deltas",
-                "evidence_handles": "every proposition and delta must cite these",
+                "propositions": "有证据支持的 proposition 对象列表",
+                "deltas": "允许路径上的有符号整数 delta 列表",
+                "evidence_handles": "每条 proposition 和 delta 都必须引用这些 handle",
             },
         },
         "evidence": list(evidence_by_handle.values()),
