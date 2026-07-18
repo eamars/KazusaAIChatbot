@@ -301,11 +301,14 @@ async def test_graph_failure_records_runtime_error_and_failed_pipeline(
     await service_module._process_queued_chat_item(item)
 
     response = item.future.result()
-    assert response.messages == [
-        "Character is busy right now, please try again later."
-    ]
+    assert response.messages == [service_module.OPERATIONAL_FAILURE_NOTICE]
     assert response.content_type == "operational_error"
     assert response.delivery_tracking_id == ""
+    assert response.operational_error is not None
+    assert response.operational_error.error_code == "internal_invariant"
+    assert response.operational_error.status == "failed"
+    assert response.operational_error.exhausted is False
+    assert response.operational_error.attempt_count == 1
     save_conversation.assert_not_awaited()
     finalize_trace.assert_awaited_once()
     assert finalize_trace.await_args.kwargs["final_dialog_count"] == 0

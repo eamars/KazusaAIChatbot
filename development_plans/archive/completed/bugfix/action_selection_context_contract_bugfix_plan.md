@@ -330,7 +330,7 @@ and non-mapping action-selection contexts are forbidden.
 
 - `src/kazusa_ai_chatbot/nodes/README.md`
   - Update the L2d/coding-run context description.
-- `development_plans/active/bugfix/action_selection_context_contract_bugfix_plan.md`
+- `development_plans/archive/completed/bugfix/action_selection_context_contract_bugfix_plan.md`
   - Record execution progress and evidence.
 - `development_plans/README.md`
   - Track lifecycle status.
@@ -652,3 +652,8 @@ Status: completed.
   execution was kept parent-led to avoid interfering with the user's parallel
   agent work. No blocking findings remained after adding the `CoreStageState`
   channel, direct-test fixture context, and annotation cleanup.
+
+## Lifecycle Closure
+
+Archived as completed with the Stage 2 plan family on 2026-07-18. Its required
+action-selection context remains part of the accepted Stage 2 baseline.

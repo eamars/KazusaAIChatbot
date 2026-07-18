@@ -4,12 +4,13 @@
 
 - Parent plan: `cognition_core_v2_stage_2_integration_plan.md`
 - Contract: `cognition_core_v2_stage_2_contract_spec.md`
-- Status: mandatory frozen companion to the parent plan
+- Status: completed.
+- Record role: frozen companion to the completed parent plan.
 
 ### 2026-07-17 Checkpoint I corrective packet
 
 The active
-`development_plans/active/bugfix/cognition_core_v2_compositional_action_planning_bugfix_plan.md`
+`development_plans/archive/completed/bugfix/cognition_core_v2_compositional_action_planning_bugfix_plan.md`
 is a mandatory Checkpoint I remediation packet. Its production-capacity,
 compositional planner, full resolver lifecycle, operational-error containment,
 disabled visual-default, focused live-LLM, frozen 20+20, restoration, and
@@ -913,3 +914,9 @@ Stage 2 evidence proves:
 
 Statements about the external deployed service or production database require a
 separate operator/user confirmation. Stage 2 agents do not inspect those systems.
+
+## Lifecycle Closure
+
+This execution manifest closed with the Stage 2 parent on 2026-07-18. Its
+production-state boundary remains binding: Stage 3 uses an isolated fresh test
+database, while Stage 4 owns production migration and cutover.

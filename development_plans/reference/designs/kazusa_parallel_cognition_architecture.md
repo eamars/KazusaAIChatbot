@@ -7,7 +7,7 @@
 - Scope: conceptual architecture for the canonical `cognition_core_v2`
 - Execution authority: none
 - Active implementation authority:
-  `development_plans/active/short_term/cognition_core_v2_stage_2_integration_plan.md`
+  `development_plans/archive/completed/short_term/cognition_core_v2_stage_2_integration_plan.md`
   and its mandatory contract specification and execution manifest
 - Change rule: this reference explains ownership and flow. Exact types,
   formulas, ranges, paths, commands, and checkpoints come only from the active

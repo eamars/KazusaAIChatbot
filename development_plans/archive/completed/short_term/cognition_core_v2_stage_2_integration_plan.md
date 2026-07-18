@@ -8,12 +8,12 @@
   integrates the V2 surface contract, and removes V1 and affinity from the
   candidate runtime.
 - Plan class: high_risk_migration.
-- Status: in_progress.
+- Status: completed.
 
 ### 2026-07-17 Checkpoint I corrective supersession
 
 The approved
-`development_plans/active/bugfix/cognition_core_v2_compositional_action_planning_bugfix_plan.md`
+`development_plans/archive/completed/bugfix/cognition_core_v2_compositional_action_planning_bugfix_plan.md`
 supersedes this plan's route-only action-selection design during Checkpoint I.
 Goal bids no longer choose routes or capabilities. One fixed-shape semantic
 action planner owns the visible route and up to three action requests or three
@@ -499,8 +499,8 @@ also requires the independent review record.
     `4ed2538b6a0b46a4820cb6a01901226d87bfb9ec`; independent verdict
     `APPROVED` with no remaining closure blockers; the takeover production-owner
     role is closed.
-- [ ] User decision about Stage 3 and future cutover planning recorded.
-- [ ] Documentation, registry, Execution Evidence, and completed-plan archive updated.
+- [x] User decision about Stage 3 and future cutover planning recorded.
+- [x] Documentation, registry, Execution Evidence, and completed-plan archive updated.
 
 ## Verification
 
@@ -666,5 +666,21 @@ During approved execution, record:
   four required Gate I artifacts exist under
   `test_artifacts/cognition_core_v2/stage_2/`; the tracked execution manifest
   preserves the exact trace paths, SHA-256 values, qualitative judgments,
-  measurements, and limitations. Stage 3/cutover direction and completed-plan
-  archival remain open for the user decision.
+  measurements, and limitations.
+
+## Lifecycle Closure
+
+- Closure date: 2026-07-18.
+- User decision: Stage 2 is accepted and closed; Stage 3 expands to native
+  whole-system reasoning on a fresh database, and Stage 4 owns production-data
+  migration.
+- Final quality evidence:
+  `test_artifacts/cognition_core_v2/fresh_40_turn_signoff/`
+  `cognition_v2_fresh_40_turn_monologue_dialog_review.md`.
+- Final technical RCA and review evidence:
+  `test_artifacts/cognition_core_v2/fresh_40_turn_signoff/`
+  `private_turn_05_group_turn_15_system_rca.md` and
+  `private_turn_05_group_turn_15_fix_review.md`.
+- Residual handoff: resolver recurrence latency and complete character-profile
+  startup validation move to Stage 3; production database conversion remains
+  exclusively Stage 4 scope.

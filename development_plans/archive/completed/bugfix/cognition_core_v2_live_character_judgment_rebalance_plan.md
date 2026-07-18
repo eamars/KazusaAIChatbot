@@ -6,7 +6,7 @@
   character judgment while retaining hard reliability, contradiction, role,
   action-truth, and literal-speech protections.
 - Plan class: large.
-- Status: in_progress.
+- Status: completed.
 - Mandatory skills: `development-plan`, `local-llm-architecture`, `py-style`,
   `test-style-and-execution`, `character-test`, `debug-llm`,
   `no-prepost-user-input`, and `cjk-safety` when applicable.
@@ -561,7 +561,7 @@ not increase. Verification records actual after counts and turn latency.
   - Sign-off: parent + `live_character_rebalance_review` conditional gate /
     2026-07-17 after complete plan reread and evidence-backed resolution of
     every review condition.
-- [ ] G. Fresh frozen 20+20 replay, review, and restoration finished.
+- [x] G. Fresh frozen 20+20 replay, review, and restoration finished.
   - Verify: unique run ids, 40 raw turn artifacts, policy classification,
     readable comparison, stopped service, clear port, restored digest.
   - Evidence: group replay run `aab80eb106b8179a9727` completed 20/20 from
@@ -618,7 +618,7 @@ not increase. Verification records actual after counts and turn latency.
     is running.
   - Handoff: lifecycle closeout.
   - Sign-off: parent/date after plan reread.
-- [ ] H. Plan and parent Checkpoint I closeout complete.
+- [x] H. Plan and parent Checkpoint I closeout complete.
   - Verify: no unresolved gates, registry lifecycle accurate, clean scoped diff,
     and final commit recorded.
   - Evidence: final status and commit.
@@ -778,3 +778,13 @@ This plan is complete when:
 - Fresh post-gate 20+20 proof: pending by explicit user stop instruction.
   Prior guarded cleanup restored the replay database; port 8012 is clear and
   no replay service or test worker is running.
+
+## Lifecycle Closure
+
+The later user-authorized fresh run superseded the pre-E2E stop record. The
+group and private sequences completed 20/20 each, the readable monologue/dialog
+report is under `test_artifacts/cognition_core_v2/fresh_40_turn_signoff/`, and
+the user accepted Stage 2 quality on 2026-07-18. The effective policy permits
+coherent creativity and action narration variability while preserving hard
+guards for crashes, internal contradiction, current-input conflict, unique
+role reversal, and false capability-execution claims.

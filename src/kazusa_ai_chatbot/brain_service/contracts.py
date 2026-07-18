@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -81,6 +81,20 @@ class AttachmentOut(BaseModel):
     size_bytes: int | None = None
 
 
+class OperationalErrorOut(BaseModel):
+    """Machine-readable metadata for a user-visible operational response."""
+
+    error_code: str
+    status: Literal["failed", "exhausted"]
+    retryable: bool
+    exhausted: bool
+    attempt_count: int = Field(ge=1)
+    correlation_id: str
+    trace_id: str
+    branch_id: str = ""
+    stage: str = ""
+
+
 class ChatResponse(BaseModel):
     messages: list[str] = Field(default_factory=list)
     content_type: str = "text"
@@ -90,6 +104,7 @@ class ChatResponse(BaseModel):
     scheduled_followups: int = 0
     delivery_tracking_id: str = ""
     cognition_graph: dict[str, Any] | None = None
+    operational_error: OperationalErrorOut | None = None
 
 
 class OpsLatestCognitionGraphResponse(BaseModel):

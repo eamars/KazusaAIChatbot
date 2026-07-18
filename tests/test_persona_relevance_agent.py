@@ -11,6 +11,7 @@ import kazusa_ai_chatbot.relevance.persona_relevance_agent as relevance_module
 from kazusa_ai_chatbot.relevance.persona_relevance_agent import (
     SETTLED_RELEVANCE_MAX_COMPLETION_TOKENS,
     SETTLED_RELEVANCE_MAX_INPUT_CHARS,
+    SettledRelevanceContractError,
     build_group_attention_context,
     build_settled_relevance_messages,
     relevance_agent,
@@ -110,27 +111,16 @@ async def test_relevance_agent_returns_ignore_action() -> None:
 
 
 @pytest.mark.asyncio
-async def test_relevance_agent_maps_authoritative_proceed_in_one_call() -> None:
-    """Typed participation uses one constrained semantic disposition call."""
-
-    proceeded = _llm_response(json.dumps({
-        "semantic_disposition": "proceed",
-        "reason_to_respond": "typed character target is direct evidence",
-        "use_reply_feature": True,
-        "channel_topic": "greeting",
-        "indirect_speech_context": "",
-    }))
+async def test_relevance_agent_uses_sole_authoritative_proceed() -> None:
+    """A sole evidence-derived disposition bypasses semantic reproduction."""
 
     with patch.object(relevance_module, "_relevance_agent_llm") as mock_llm:
-        mock_llm.ainvoke = AsyncMock(return_value=proceeded)
         result = await relevance_agent(_base_state())
 
     assert result["response_action"] == "proceed"
     assert result["should_respond"] is True
-    mock_llm.ainvoke.assert_awaited_once()
-    messages = mock_llm.ainvoke.await_args.args[0]
-    assert '"semantic_disposition"' in messages[0].content
-    assert '"response_action":' not in messages[0].content
+    assert result["use_reply_feature"] is False
+    mock_llm.ainvoke.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -165,24 +155,65 @@ async def test_relevance_agent_maps_available_already_resolved_in_one_call() -> 
 
 @pytest.mark.asyncio
 async def test_relevance_agent_rejects_unavailable_resolved_disposition() -> None:
-    """The model cannot invent a resolved disposition without fresh evidence."""
+    """One invalid disposition may be repaired by the same semantic owner."""
 
-    response = _llm_response(json.dumps({
-        "semantic_disposition": "already_resolved",
+    invalid_response = _llm_response(json.dumps({
+        "semantic_disposition": "recipient_withdrawn",
         "reason_to_respond": "unsupported resolution",
         "use_reply_feature": False,
         "channel_topic": "",
         "indirect_speech_context": "",
     }))
-    with patch.object(relevance_module, "_relevance_agent_llm") as mock_llm:
-        mock_llm.ainvoke = AsyncMock(return_value=response)
-        result = await relevance_agent(_base_state())
+    repaired_response = _llm_response(json.dumps({
+        "semantic_disposition": "already_resolved",
+        "reason_to_respond": "fresh history already resolved it",
+        "use_reply_feature": False,
+        "channel_topic": "",
+        "indirect_speech_context": "",
+    }))
+    state = _base_state()
+    state["llm_trace_id"] = "trace-1"
+    state["fresh_history"] = [{
+        "speaker_relation": "character",
+        "body_text": "The character answered this request.",
+        "target_summary": "current_author",
+        "reply_summary": "current_author",
+        "turn_temporal_relation": "after_active_turn",
+    }]
+    with (
+        patch.object(relevance_module, "_relevance_agent_llm") as mock_llm,
+        patch.object(
+            relevance_module.llm_tracing,
+            "record_llm_trace_step",
+            new_callable=AsyncMock,
+        ) as record_trace,
+    ):
+        mock_llm.ainvoke = AsyncMock(
+            side_effect=[invalid_response, repaired_response],
+        )
+        result = await relevance_agent(state)
 
+    assert mock_llm.ainvoke.await_count == 2
     assert result["response_action"] == "ignore"
-    assert result["reason_to_respond"] == (
-        "invalid authoritative settled output"
+    assert result["should_respond"] is False
+    repair_messages = mock_llm.ainvoke.await_args_list[1].args[0]
+    repair_payload = json.loads(str(repair_messages[1].content))
+    assert repair_payload["validation_reason"] == (
+        "authoritative semantic_disposition is unavailable"
     )
-    mock_llm.ainvoke.assert_awaited_once()
+    assert "recipient_withdrawn" in repair_payload["rejected_output"]
+    assert repair_payload["settled_evidence"]["conversation_scope"] == (
+        "group"
+    )
+    assert [
+        call.kwargs["stage_name"]
+        for call in record_trace.await_args_list
+    ] == [
+        "persona_relevance_agent.initial",
+        "persona_relevance_agent.repair",
+    ]
+    assert record_trace.await_args_list[0].kwargs["status"] == "failed"
+    assert record_trace.await_args_list[1].kwargs["status"] == "succeeded"
 
 
 @pytest.mark.asyncio
@@ -214,36 +245,53 @@ async def test_relevance_agent_maps_recipient_withdrawal_in_one_call() -> None:
 
 @pytest.mark.asyncio
 async def test_relevance_agent_rejects_single_fragment_withdrawal() -> None:
-    """One direct fragment cannot invent a later recipient withdrawal."""
+    """One direct fragment leaves proceed as the sole structural disposition."""
 
-    response = _llm_response(json.dumps({
-        "semantic_disposition": "recipient_withdrawn",
-        "reason_to_respond": "unsupported withdrawal",
-        "use_reply_feature": False,
-        "channel_topic": "",
-        "indirect_speech_context": "",
-    }))
     with patch.object(relevance_module, "_relevance_agent_llm") as mock_llm:
-        mock_llm.ainvoke = AsyncMock(return_value=response)
         result = await relevance_agent(_base_state())
 
-    assert result["response_action"] == "ignore"
-    assert result["reason_to_respond"] == (
-        "invalid authoritative settled output"
-    )
+    assert result["response_action"] == "proceed"
+    mock_llm.ainvoke.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_relevance_agent_malformed_json_fails_closed() -> None:
-    """Malformed settled output invokes no repair model and ignores."""
+    """Malformed authoritative output raises for the settlement coordinator."""
 
     response = _llm_response("not json")
-    with patch.object(relevance_module, "_relevance_agent_llm") as mock_llm:
+    state = _base_state()
+    state["llm_trace_id"] = "trace-1"
+    state["fresh_history"] = [{
+        "speaker_relation": "character",
+        "body_text": "The character answered this request.",
+        "target_summary": "current_author",
+        "reply_summary": "current_author",
+        "turn_temporal_relation": "after_active_turn",
+    }]
+    with (
+        patch.object(relevance_module, "_relevance_agent_llm") as mock_llm,
+        patch.object(
+            relevance_module.llm_tracing,
+            "record_llm_trace_step",
+            new_callable=AsyncMock,
+        ) as record_trace,
+    ):
         mock_llm.ainvoke = AsyncMock(return_value=response)
-        result = await relevance_agent(_base_state())
+        with pytest.raises(SettledRelevanceContractError):
+            await relevance_agent(state)
 
-    assert result["response_action"] == "ignore"
-    assert result["should_respond"] is False
+    assert mock_llm.ainvoke.await_count == 2
+    assert [
+        call.kwargs["stage_name"]
+        for call in record_trace.await_args_list
+    ] == [
+        "persona_relevance_agent.initial",
+        "persona_relevance_agent.repair",
+    ]
+    assert all(
+        call.kwargs["status"] == "failed"
+        for call in record_trace.await_args_list
+    )
 
 
 def test_settled_decision_requires_complete_phase_action() -> None:

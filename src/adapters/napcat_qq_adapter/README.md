@@ -55,6 +55,14 @@ placeholders such as `@mentioned-user-1` and platform-qualified labels such as
 binds itself when its callback server starts and clears the binding on close
 only when it still owns the active binding.
 
+## Operational Response Contract
+
+When `/chat` returns `content_type="operational_error"`, the adapter logs the
+structured `operational_error` metadata and sends only the first system notice.
+It omits native reply rendering, inline mentions, normal delivery receipts, and
+delayed follow-up sends so infrastructure failure text is never treated as
+Kazusa dialog.
+
 ## Unknown Face Omission Contract
 
 Unknown, missing, empty, non-numeric, or unusable QQ face ids are omitted from

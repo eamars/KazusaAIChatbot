@@ -2,19 +2,21 @@
 
 ## Summary
 
-- Status: in_progress.
+- Status: completed.
 - Change class: large.
 - Cutover: bigbang.
 - Approval: the user explicitly instructed implementation on 2026-07-17.
 - Parent plan:
-  `development_plans/active/short_term/cognition_core_v2_stage_2_integration_plan.md`.
+  `development_plans/archive/completed/short_term/cognition_core_v2_stage_2_integration_plan.md`.
 - Related plan:
-  `development_plans/active/bugfix/cognition_core_v2_compositional_action_planning_bugfix_plan.md`.
+  `development_plans/archive/completed/bugfix/cognition_core_v2_compositional_action_planning_bugfix_plan.md`.
 - Frozen proof corpora: the existing twenty-turn QQ group `638473184`
   replay and twenty-turn QQ private-user `673225019` replay, captured at each
   original input boundary.
 
-This bugfix replaces two prompt-repair loops with typed ownership contracts.
+This bugfix replaces direct-address prompt-recheck loops with typed ownership
+contracts. A separate one-shot schema repair remains available only when a
+multi-option authoritative settled result violates its exact output shape.
 Protocol facts constrain the relevance action space before the local LLM is
 called, while the LLM retains semantic linkage, withdrawal, resolution, and
 character-participation judgment. Executed, scheduled, pending, failed, and
@@ -315,8 +317,12 @@ user's updated instruction.
 12. For ordinary group traffic, preserve the current `ignore|proceed|wait`
     semantic judgment.
 13. Remove the direct-address ignore recheck and its second model call.
-14. Reject model outputs that choose an unavailable disposition; fail closed
-    through the existing relevance error path.
+14. Select a sole evidence-derived disposition deterministically. For several
+    available dispositions, reject unavailable or malformed output and permit
+    one bounded same-owner schema repair at the hard deadline. A structurally
+    invalid first assessment uses the coordinator's one-time wait; repeated
+    hard-deadline invalidity becomes an operational failure rather than a
+    semantic ignore.
 
 ### C. Exact action lifecycle projection
 
@@ -462,8 +468,9 @@ user's updated instruction.
 1. Authoritative direct/private/broadcast input cannot be discarded at
    frontline, and exact linkage still uses no more than one LLM call.
 2. Ordinary group traffic retains semantic discard capacity.
-3. Authoritative settled relevance uses one call and only a disposition made
-   available by typed context.
+3. Authoritative settled relevance uses no model call for a sole disposition;
+   multi-option settlement uses one semantic call and at most one bounded
+   schema repair. Only a disposition made available by typed context can pass.
 4. Recipient withdrawal can yield silence through semantic judgment.
 5. Fresh-history resolution and retained-media unavailability are available
    only when their structural prerequisites exist.
@@ -527,8 +534,9 @@ user's updated instruction.
 - [x] Parent-agent review completed and findings remediated.
 - [x] Documentation, plan evidence, and scoped commit completed; hash is
   recorded in the handoff.
-- [ ] Fresh post-gate frozen 20+20 replay; held at the user-requested pre-E2E
-  stop point.
+- [x] Fresh post-gate frozen 20+20 replay; completed after the user released
+  the pre-E2E hold, with the resulting corpus carried into final Stage 2
+  review.
 
 ## Execution Evidence
 
@@ -613,3 +621,11 @@ user's updated instruction.
 - The fresh 20+20 replay was intentionally not started after these pre-E2E
   gates. Port 8012 is clear, the guarded replay database remains restored from
   the prior proof cleanup, and no replay service or test worker is running.
+
+## Lifecycle Closure
+
+The later user-authorized sequential 20+20 run superseded the recorded
+pre-E2E hold. All 40 turns completed, traces were consolidated into
+`test_artifacts/cognition_core_v2/fresh_40_turn_signoff/`
+`cognition_v2_fresh_40_turn_monologue_dialog_review.md`, and the user accepted
+the Stage 2 quality on 2026-07-18.

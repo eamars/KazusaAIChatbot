@@ -444,9 +444,43 @@ def _raise_for_failed_required_branches(
     )
     if required_failures:
         failed_names = ", ".join(required_failures)
-        raise CognitionExecutionError(
-            f"required cognition branch failed: {failed_names}"
+        primary_failure = execution.failure_records.get(required_failures[0])
+        error = CognitionExecutionError(
+            f"required cognition branch failed: {failed_names}",
+            error_code=(
+                primary_failure.error_code
+                if primary_failure is not None
+                else "internal_invariant"
+            ),
+            branch_id=(
+                primary_failure.branch_id
+                if primary_failure is not None
+                else required_failures[0]
+            ),
+            stage=(
+                primary_failure.stage
+                if primary_failure is not None
+                else "cognition_branch"
+            ),
+            attempt_count=(
+                primary_failure.attempt_count
+                if primary_failure is not None
+                else 1
+            ),
+            safe_checkpoint=(
+                primary_failure.safe_checkpoint
+                if primary_failure is not None
+                else "unknown"
+            ),
+            retryable=(
+                primary_failure.retryable
+                if primary_failure is not None
+                else False
+            ),
         )
+        if primary_failure is not None and primary_failure.exception is not None:
+            raise error from primary_failure.exception
+        raise error
 
 
 def _resolver_progress(

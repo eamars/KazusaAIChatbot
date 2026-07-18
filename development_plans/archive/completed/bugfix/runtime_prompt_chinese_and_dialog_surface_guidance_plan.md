@@ -7,7 +7,7 @@
   text-dialog ownership boundary that discourages action narration without
   rejecting, repairing, filtering, or failing it.
 - Plan class: large.
-- Status: in_progress.
+- Status: completed.
 - Mandatory skills: `development-plan`, `local-llm-architecture`, `py-style`,
   `cjk-safety`, `test-style-and-execution`, `debug-llm`, and
   `no-prepost-user-input`.
@@ -336,5 +336,11 @@ approval.
   and no frozen 20+20 replay was run, matching the user's verification scope.
 - The root agent performed the complete implementation and final review. An
   independent subagent review was unavailable under the active no-subagent
-  instruction. Plan status remains `in_progress` pending user review and
-  sign-off.
+  instruction. The later sequential 40-turn run exercised the resulting
+  prompt policy, and the user accepted the Stage 2 quality on 2026-07-18.
+
+## Lifecycle Closure
+
+Archived as completed on 2026-07-18. This plan is the effective Stage 2 prompt
+policy for Chinese ordinary instructions, organic action-narration
+discouragement, and pass-through local-model variability.

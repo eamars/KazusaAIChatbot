@@ -81,6 +81,16 @@ Fresh-history rows expose only `character|current_author|other_participant`
 speaker relations plus semantic target, reply, and turn-temporal summaries.
 The first settled assessment renders `ignore|proceed|wait`; the hard-deadline
 assessment renders only `ignore|proceed`.
+For authoritative participation, deterministic code derives the available
+semantic dispositions from typed target, reply, history, media, and observation
+facts. When only one disposition remains, it is projected directly with
+conservative optional metadata because no semantic choice exists. When several
+dispositions remain, the LLM chooses among those values. One structurally
+invalid hard-deadline result may receive one bounded same-owner repair; a second
+invalid result raises a typed operational failure. During the first assessment,
+an invalid authoritative result reaches the coordinator's existing one-time
+`wait` boundary and is reassessed at the hard deadline instead of becoming a
+synthetic semantic `ignore`.
 The settled agent also treats `use_reply_feature` as a semantic request for a
 native visual anchor. It requests an anchor only for a proceeding group turn
 where anchoring the effective latest fragment materially clarifies a specific
@@ -100,7 +110,9 @@ telemetry.
 `brain_service.turn_settlement` owns the deterministic pending-turn lifecycle,
 FIFO relevance work, prompt-safe candidate/prelude slots, enqueue-time deadline
 handling, the pre-deadline ingress barrier, stale-version checks, and the atomic
-cognition claim. Explicit-third-party and unresolved-reply discards are not
+cognition claim. It also closes a current failed assessment without inventing
+an `ignore` decision, while a stale failed lease leaves the newer turn version
+scheduled. Explicit-third-party and unresolved-reply discards are not
 eligible preludes, and bot continuity is available only in the bounded active
 scene. `kazusa_ai_chatbot.service` owns persistence and single-owner
 request/future resolution. The `nodes` package owns persona orchestration,

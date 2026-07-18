@@ -6,7 +6,7 @@
   action/stage narration, and preserve the current turn's requested response
   operation, actors, meaning, and time scope.
 - Plan class: large.
-- Status: in_progress.
+- Status: superseded.
 - Mandatory skills: `development-plan`, `local-llm-architecture`,
   `no-prepost-user-input`, `py-style`, `test-style-and-execution`,
   `character-test`, `debug-llm`, and `cjk-safety`.
@@ -659,3 +659,18 @@ and reruns the affected gates.
   actionable low findings after the factual-plan audit. The reviewer confirmed
   the generic act/scope contract, unrelated live near-miss, unchanged dialog
   call topology, anti-cheat boundary, and terminal visual ownership.
+
+## Supersession Record
+
+- Superseded date: 2026-07-18.
+- Superseding records:
+  `runtime_prompt_chinese_and_dialog_surface_guidance_plan.md` and
+  `cognition_core_v2_live_character_judgment_rebalance_plan.md` in the
+  completed bugfix archive.
+- Reason: this plan's zero-action-narration replay criterion and stronger
+  verifier language were replaced by the user's later policy. The effective
+  system organically discourages action description, keeps it outside verifier
+  and repair ownership, and allows local-model variation to pass when the hard
+  semantic guards remain satisfied.
+- Historical unchecked replay/archive boxes remain as evidence that the
+  original policy was overtaken rather than completed as written.

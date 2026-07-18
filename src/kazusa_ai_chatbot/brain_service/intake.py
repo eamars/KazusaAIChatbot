@@ -252,6 +252,7 @@ async def save_user_message_from_item(
         "attachments": attachment_docs,
         "reply_context": reply_context,
         "timestamp": item.storage_timestamp_utc,
+        "llm_trace_id": item.llm_trace_id,
     }
     channel_name = usable_channel_label(
         channel_type=req.channel_type,

@@ -2,12 +2,12 @@
 
 ## Summary
 
-- Status: in_progress.
+- Status: completed.
 - Change class: large.
 - Cutover: bigbang.
 - Approval: the user explicitly instructed planning and immediate execution on
   2026-07-17.
-- Parent plan: `development_plans/active/short_term/cognition_core_v2_stage_2_integration_plan.md`.
+- Parent plan: `development_plans/archive/completed/short_term/cognition_core_v2_stage_2_integration_plan.md`.
 - System RCA: `test_artifacts/cognition_core_v2/action_selection_failure_rca/cognition_v2_route_selector_system_rca_and_proposal.md`.
 - Production-usage evidence: `test_artifacts/cognition_core_v2/action_planning_capacity_evidence/production_action_planning_capacity_review.md`.
 - Frozen proof corpora: QQ group `638473184` and QQ private user
@@ -597,6 +597,9 @@ continuity remain empty for that failed turn.
 - `src/kazusa_ai_chatbot/cognition_resolver/loop.py` only as required to expose
   the full established recurrence to V2 without parallel semantic ownership.
 - `src/kazusa_ai_chatbot/service.py`
+- `src/kazusa_ai_chatbot/brain_service/turn_settlement.py` only to close a
+  current failed settled-assessment lease without inventing a semantic ignore,
+  while preserving a stale newer version for reassessment.
 - `src/kazusa_ai_chatbot/config.py`
 - `src/kazusa_ai_chatbot/relevance/frontline_relevance_agent.py`
 - `src/kazusa_ai_chatbot/relevance/persona_relevance_agent.py`
@@ -697,20 +700,20 @@ requires explicit user direction.
 - [x] Executable plan drafted and execution authorized.
 - [x] Stage 2 authoritative documents amended.
 - [x] Focused failing tests written and intended failures recorded.
-- [ ] Production implementation completed by one subagent.
-- [ ] Focused and integration tests pass.
-- [ ] Open coding-run contexts are loaded and contextual continuation actions
+- [x] Production implementation completed by one subagent.
+- [x] Focused and integration tests pass.
+- [x] Open coding-run contexts are loaded and contextual continuation actions
   remain distinguishable when more than one run is active.
-- [ ] Focused real-LLM action-planner gates pass one at a time.
-- [ ] Group frozen turns 1-20 rerun and reviewed.
-- [ ] Private R18 turns 1-20 rerun and reviewed.
-- [ ] Test database restored and verified after both scenarios.
-- [ ] Typed direct-address discard recheck and consolidation appraisal
+- [x] Focused real-LLM action-planner gates pass one at a time.
+- [x] Group frozen turns 1-20 rerun and reviewed.
+- [x] Private R18 turns 1-20 rerun and reviewed.
+- [x] Test database restored and verified after both scenarios.
+- [x] Typed direct-address discard recheck and consolidation appraisal
   projection pass deterministic and production-shaped live verification.
-- [ ] Full non-live regression passes.
-- [ ] Independent review completed.
-- [ ] In-scope findings remediated and verification repeated.
-- [ ] Plan and Stage 2 Checkpoint I closed.
+- [x] Full non-live regression passes.
+- [x] Independent review completed.
+- [x] In-scope findings remediated and verification repeated.
+- [x] Plan and Stage 2 Checkpoint I closed.
 
 ## Verification
 
@@ -1009,3 +1012,23 @@ review findings, remediation, and final sign-off here during execution.
   `_build_consolidator_state` omitted the field required by
   `memory_units._json_payload`. The plan now restores that canonical projection
   and adds a regression gate.
+- 2026-07-18: parent review of the Private-turn-5 and Group-turn-15 RCA fix
+  found that terminal settled-relevance failures completed response futures but
+  left matching coordinator turns in `ASSESSING`. The remediation adds an
+  explicit operational close that preserves stale newer versions, makes the
+  bounded authoritative repair consume its exact validator error and rejected
+  output, and records initial/repair trace stages separately. Focused tests
+  cover retry success, retry exhaustion, first-assessment wait, terminal
+  operational completion, stale-lease preservation, QQ system-notice delivery,
+  and branch-failure cause propagation.
+
+## Lifecycle Closure
+
+- Closure date: 2026-07-18.
+- Final targeted review passed 14 focused checks and 208 broader affected
+  checks after the Private-turn-5 and Group-turn-15 remediation review.
+- The accepted failsafe preserves response-future completion, closes matching
+  settled-turn leases, preserves stale newer versions, and keeps the user-
+  visible busy response available only after bounded retry exhaustion.
+- Group-turn-15's four resolver cycles and 275,769 ms elapsed time are a Stage
+  3 efficiency case rather than an unresolved Stage 2 correctness blocker.

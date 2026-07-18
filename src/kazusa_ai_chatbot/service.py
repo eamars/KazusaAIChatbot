@@ -171,11 +171,16 @@ from kazusa_ai_chatbot.brain_service.contracts import (
     OpsRuntimeStatusResponse,
     OpsSelfCognitionStatsResponse,
     OpsStatsResponse,
+    OperationalErrorOut,
     ReplyTargetIn as ReplyTargetIn,
     RuntimeAdapterRegistrationRequest,
     RuntimeAdapterRegistrationResponse,
 )
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    CognitionExecutionError,
+)
 from kazusa_ai_chatbot.relevance import (
+    SettledRelevanceContractError,
     build_group_attention_context,
     frontline_relevance_agent,
     relevance_agent,
@@ -217,6 +222,15 @@ logger = logging.getLogger(__name__)
 MILLISECONDS_PER_SECOND = 1000
 SERVICE_COMPONENT = "brain_service"
 CONVERSATION_HISTORY_COLLECTION = "conversation_history"
+COGNITION_SAFE_RETRY_LIMIT = 1
+OPERATIONAL_RETRY_NOTICE = (
+    "The character could not complete this turn because its response path "
+    "exhausted a safe internal retry. Please try again."
+)
+OPERATIONAL_FAILURE_NOTICE = (
+    "The character could not complete this turn because of an internal "
+    "response-path error. Please try again."
+)
 
 
 def _service_event_scope(req: ChatRequest) -> event_logging.EventScopeInput:
@@ -324,6 +338,124 @@ def _runtime_error_fields(exc: BaseException) -> tuple[str, str, str, str]:
         top_frame_module,
     )
     return return_value
+
+
+def _operational_failure_metadata(
+    exc: BaseException,
+) -> tuple[str, str, int, bool, str]:
+    """Project one internal failure into bounded response metadata.
+
+    Args:
+        exc: Failure raised at the graph or settled-relevance boundary.
+
+    Returns:
+        Error code, stage, owner attempt count, retryability, and branch id.
+    """
+
+    if isinstance(exc, (CognitionExecutionError, SettledRelevanceContractError)):
+        error_code = str(getattr(exc, "error_code", "internal_invariant"))
+        stage = str(getattr(exc, "stage", ""))
+        failure_attempt_count = int(getattr(exc, "attempt_count", 1))
+        retryable = bool(getattr(exc, "retryable", False))
+        branch_id = str(getattr(exc, "branch_id", ""))
+    elif isinstance(exc, (TimeoutError, ConnectionError)):
+        error_code = "provider_transient"
+        stage = "service.graph"
+        failure_attempt_count = 1
+        retryable = True
+        branch_id = ""
+    elif isinstance(exc, ValueError):
+        error_code = "model_contract_invalid"
+        stage = "service.graph"
+        failure_attempt_count = 1
+        retryable = False
+        branch_id = ""
+    else:
+        error_code = "internal_invariant"
+        stage = "service.graph"
+        failure_attempt_count = 1
+        retryable = False
+        branch_id = ""
+    return_value = (
+        error_code,
+        stage,
+        max(1, failure_attempt_count),
+        retryable,
+        branch_id,
+    )
+    return return_value
+
+
+def _operational_error_response(
+    *,
+    correlation_id: str,
+    trace_id: str,
+    exception: BaseException,
+    attempt_count: int,
+) -> ChatResponse:
+    """Build a transparent structured operational response.
+
+    Args:
+        correlation_id: Sanitized request correlation identifier.
+        trace_id: Protected trace identifier for operator diagnosis.
+        exception: Failure being projected to the service contract.
+        attempt_count: Service-level attempts consumed by this request.
+
+    Returns:
+        Operational response carrying no delivery-tracking identifier.
+    """
+
+    (
+        error_code,
+        stage,
+        failure_attempt_count,
+        retryable,
+        branch_id,
+    ) = _operational_failure_metadata(exception)
+    exhausted = error_code.endswith("_exhausted") or (
+        retryable and attempt_count > COGNITION_SAFE_RETRY_LIMIT
+    )
+    notice = OPERATIONAL_RETRY_NOTICE if exhausted else OPERATIONAL_FAILURE_NOTICE
+    operational_error = OperationalErrorOut(
+        error_code=error_code,
+        status="exhausted" if exhausted else "failed",
+        retryable=retryable,
+        exhausted=exhausted,
+        attempt_count=max(1, attempt_count, failure_attempt_count),
+        correlation_id=correlation_id,
+        trace_id=trace_id,
+        branch_id=branch_id,
+        stage=stage,
+    )
+    return_value = ChatResponse(
+        messages=[notice],
+        content_type="operational_error",
+        delivery_tracking_id="",
+        operational_error=operational_error,
+    )
+    return return_value
+
+
+def _can_retry_cognition_failure(
+    exception: BaseException,
+    attempt_count: int,
+) -> bool:
+    """Allow one pure cognition retry from the pre-commit checkpoint.
+
+    Args:
+        exception: Graph failure classified by the cognition owner.
+        attempt_count: Number of service graph attempts already consumed.
+
+    Returns:
+        Whether one clean graph invocation is still safe and permitted.
+    """
+
+    return (
+        isinstance(exception, CognitionExecutionError)
+        and exception.retryable
+        and exception.safe_checkpoint == "pre_state_commit"
+        and attempt_count <= COGNITION_SAFE_RETRY_LIMIT
+    )
 
 
 def _register_runtime_adapter_payload(
@@ -1476,6 +1608,43 @@ def _response_owner_item(lease: AssessmentLease) -> QueuedChatItem | None:
     return None
 
 
+async def _complete_settled_operational_failure(
+    lease: AssessmentLease,
+    response_owner: QueuedChatItem,
+    exception: BaseException,
+) -> None:
+    """Complete a settled turn with a structured operational response.
+
+    Args:
+        lease: Failed settled-assessment lease.
+        response_owner: Queue item that owns the logical turn response.
+        exception: Classified operational failure from settlement.
+
+    Returns:
+        None.
+    """
+
+    closed = await _turn_settlement_coordinator.complete_failed_assessment(
+        lease,
+    )
+    if not closed:
+        return
+    response = _operational_error_response(
+        correlation_id=_chat_correlation_id(response_owner.request),
+        trace_id=response_owner.llm_trace_id,
+        exception=exception,
+        attempt_count=max(1, int(getattr(exception, "attempt_count", 1))),
+    )
+    await _complete_settled_fragments(lease, response)
+    if response_owner.llm_trace_id:
+        await llm_tracing.finalize_llm_trace_run(
+            trace_id=response_owner.llm_trace_id,
+            status="failed",
+            final_dialog_count=0,
+            delivery_tracking_id="",
+        )
+
+
 async def _frontline_intake_item(item: QueuedChatItem) -> None:
     """Run persistence and frontline admission for one queued item."""
 
@@ -1586,31 +1755,48 @@ async def _process_settlement_lease(
             lease,
             decision,
         )
+    except SettledRelevanceContractError as exc:
+        logger.exception(f"Settled relevance contract failed: {exc}")
+        if lease.observation_status == "more_time_available":
+            wait_decision = {
+                "response_action": "wait",
+                "reason_to_respond": "settled relevance needs one reassessment",
+                "use_reply_feature": False,
+                "channel_topic": "",
+                "indirect_speech_context": "",
+            }
+            try:
+                wait_outcome = (
+                    await _turn_settlement_coordinator.apply_settled_decision(
+                        lease,
+                        wait_decision,
+                    )
+                )
+            except Exception as wait_exc:
+                logger.exception(
+                    f"Settled relevance wait recovery failed: {wait_exc}"
+                )
+                await _complete_settled_operational_failure(
+                    lease,
+                    response_owner,
+                    wait_exc,
+                )
+                return
+            if wait_outcome.stale or wait_outcome.response_action == "wait":
+                return
+        await _complete_settled_operational_failure(
+            lease,
+            response_owner,
+            exc,
+        )
+        return
     except Exception as exc:
         logger.exception(f"Settled relevance failed: {exc}")
-        failure_decision = {
-            "response_action": "ignore",
-            "reason_to_respond": "settled relevance failed closed",
-            "use_reply_feature": False,
-            "channel_topic": "",
-            "indirect_speech_context": "",
-        }
-        failure_outcome = (
-            await _turn_settlement_coordinator.apply_settled_decision(
-                lease,
-                failure_decision,
-            )
+        await _complete_settled_operational_failure(
+            lease,
+            response_owner,
+            exc,
         )
-        if failure_outcome.stale:
-            return
-        await _complete_settled_fragments(lease, ChatResponse())
-        if response_owner.llm_trace_id:
-            await llm_tracing.finalize_llm_trace_run(
-                trace_id=response_owner.llm_trace_id,
-                status="failed",
-                final_dialog_count=0,
-                delivery_tracking_id="",
-            )
         return
 
     if outcome.stale or outcome.response_action == "wait":
@@ -3458,55 +3644,77 @@ async def _process_queued_chat_item(
             "promoted_reflection_context": promoted_reflection_context,
         }
 
-        try:
-            result = await _graph.ainvoke(initial_state)
-        except Exception as exc:
-            logger.exception(f"Graph invocation failed: {exc}")
-            fallback_text = (
-                f"{character_name} is busy right now, please try again later."
-            )
-            response = ChatResponse(
-                messages=[fallback_text],
-                content_type="operational_error",
-                delivery_tracking_id="",
-            )
-            _chat_input_queue.complete(item, response)
-            (
-                error_class,
-                error_preview,
-                stack_fingerprint,
-                top_frame_module,
-            ) = _runtime_error_fields(exc)
-            await event_logging.record_runtime_error_event(
-                component=SERVICE_COMPONENT,
-                error_class=error_class,
-                error_preview=error_preview,
-                stack_fingerprint=stack_fingerprint,
-                top_frame_module=top_frame_module,
-                recovered=True,
-                status="failed",
-                correlation_id=correlation_id,
-            )
-            await event_logging.record_pipeline_turn_event(
-                component=SERVICE_COMPONENT,
-                correlation_id=correlation_id,
-                status="failed",
-                queue_wait_ms=_queue_wait_ms(item),
-                stages_reached=stages_reached,
-                final_outcome="graph_error",
-                scheduled_followups=0,
-                debug_modes=debug_mode_names,
-                scope=scope,
-                duration_ms=_elapsed_ms(turn_started_at),
-                severity="error",
-            )
-            await llm_tracing.finalize_llm_trace_run(
-                trace_id=llm_trace_id,
-                status="failed",
-                final_dialog_count=0,
-                delivery_tracking_id="",
-            )
-            return
+        original_initial_state = deepcopy(initial_state)
+        cognition_attempt_count = 0
+        while True:
+            cognition_attempt_count += 1
+            try:
+                result = await _graph.ainvoke(
+                    deepcopy(original_initial_state),
+                )
+                break
+            except Exception as exc:
+                if _can_retry_cognition_failure(
+                    exc,
+                    cognition_attempt_count,
+                ):
+                    stages_reached.append("cognition_safe_retry")
+                    logger.warning(
+                        "Retrying pure cognition after a typed pre-commit "
+                        f"failure: code={getattr(exc, 'error_code', '')} "
+                        f"attempt={cognition_attempt_count}"
+                    )
+                    continue
+                logger.exception(f"Graph invocation failed: {exc}")
+                response = _operational_error_response(
+                    correlation_id=correlation_id,
+                    trace_id=llm_trace_id,
+                    exception=exc,
+                    attempt_count=cognition_attempt_count,
+                )
+                failure_code = (
+                    response.operational_error.error_code
+                    if response.operational_error is not None
+                    else "internal_invariant"
+                )
+                stages_reached.append(f"cognition_failure:{failure_code}")
+                _chat_input_queue.complete(item, response)
+                (
+                    error_class,
+                    error_preview,
+                    stack_fingerprint,
+                    top_frame_module,
+                ) = _runtime_error_fields(exc)
+                await event_logging.record_runtime_error_event(
+                    component=SERVICE_COMPONENT,
+                    error_class=error_class,
+                    error_preview=error_preview,
+                    stack_fingerprint=stack_fingerprint,
+                    top_frame_module=top_frame_module,
+                    recovered=True,
+                    status="failed",
+                    correlation_id=correlation_id,
+                )
+                await event_logging.record_pipeline_turn_event(
+                    component=SERVICE_COMPONENT,
+                    correlation_id=correlation_id,
+                    status="failed",
+                    queue_wait_ms=_queue_wait_ms(item),
+                    stages_reached=stages_reached,
+                    final_outcome="graph_error",
+                    scheduled_followups=0,
+                    debug_modes=debug_mode_names,
+                    scope=scope,
+                    duration_ms=_elapsed_ms(turn_started_at),
+                    severity="error",
+                )
+                await llm_tracing.finalize_llm_trace_run(
+                    trace_id=llm_trace_id,
+                    status="failed",
+                    final_dialog_count=0,
+                    delivery_tracking_id="",
+                )
+                return
 
         stages_reached.append("graph")
         final_dialog = result["final_dialog"]

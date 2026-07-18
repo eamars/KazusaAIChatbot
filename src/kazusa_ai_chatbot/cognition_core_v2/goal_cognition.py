@@ -15,6 +15,7 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     BranchDefinition,
     CognitionCoreServicesV2,
     CognitionEvidenceV2,
+    CognitionExecutionError,
     GoalBidDraftV2,
 )
 from kazusa_ai_chatbot.utils import parse_llm_json_output
@@ -288,23 +289,25 @@ async def _enforce_required_selection_alignment(
     if verdict["aligned"]:
         return draft
 
-    repair_payload = _required_selection_repair_payload(
-        semantic_context=semantic_context,
-        evidence=evidence,
-        required_operations=required_operations,
-        evidence_handles=evidence_handles,
-        role_handles=role_handles,
-        verifier_issues=verdict["issues"],
-    )
-    repair_text = json.dumps(
-        repair_payload,
-        ensure_ascii=False,
-        sort_keys=True,
-    )
-    if len(repair_text) > REQUIRED_SELECTION_REPAIR_PROMPT_CAP:
-        raise ValueError("required-selection repair prompt exceeds contract cap")
-
+    latest_verifier_issues = verdict["issues"]
     for attempt_index in range(1, REQUIRED_SELECTION_REPAIR_ATTEMPT_LIMIT + 1):
+        repair_payload = _required_selection_repair_payload(
+            semantic_context=semantic_context,
+            evidence=evidence,
+            required_operations=required_operations,
+            evidence_handles=evidence_handles,
+            role_handles=role_handles,
+            verifier_issues=latest_verifier_issues,
+        )
+        repair_text = json.dumps(
+            repair_payload,
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        if len(repair_text) > REQUIRED_SELECTION_REPAIR_PROMPT_CAP:
+            raise ValueError(
+                "required-selection repair prompt exceeds contract cap"
+            )
         messages = [
             SystemMessage(content=REQUIRED_SELECTION_REPAIR_PROMPT),
             HumanMessage(content=repair_text),
@@ -339,8 +342,17 @@ async def _enforce_required_selection_alignment(
         )
         if recheck["aligned"]:
             return repaired
+        latest_verifier_issues = recheck["issues"]
 
-    raise ValueError("goal bid remains misaligned with required selection")
+    raise CognitionExecutionError(
+        "goal bid remains misaligned with required selection",
+        error_code="required_selection_alignment_exhausted",
+        branch_id=definition.branch_id,
+        stage="goal_cognition.required_selection_alignment",
+        attempt_count=REQUIRED_SELECTION_REPAIR_ATTEMPT_LIMIT,
+        safe_checkpoint="pre_state_commit",
+        retryable=True,
+    )
 
 
 def _required_selection_operations(

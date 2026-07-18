@@ -25,6 +25,7 @@ from kazusa_ai_chatbot.cognition_core_v2.facade import (
     _raise_for_failed_required_branches,
 )
 from kazusa_ai_chatbot.cognition_core_v2.parallel_executor import (
+    BranchFailure,
     ParallelExecutionResult,
     execute_dependency_graph,
 )
@@ -431,6 +432,11 @@ async def test_goal_bid_repairs_required_selection_delegation() -> None:
         "expected_consequences": ["当前用户得到明确的下一步动作"],
         "confidence": "high",
     }
+    repaired_second = {
+        **repaired,
+        "intention": "明确告诉当前用户由当前角色作出选择",
+        "concrete_detail": "当前角色明确选择一个可执行的下一步动作",
+    }
     responses = [
         delegated,
         {
@@ -438,6 +444,11 @@ async def test_goal_bid_repairs_required_selection_delegation() -> None:
             "issues": ["目标把本轮选择交给了当前用户。"],
         },
         repaired,
+        {
+            "aligned": False,
+            "issues": ["目标仍然没有给出本轮具体选择。"],
+        },
+        repaired_second,
         {"aligned": True, "issues": []},
     ]
 
@@ -499,24 +510,56 @@ async def test_goal_bid_repairs_required_selection_delegation() -> None:
         ),
     )
 
-    assert len(llm.messages) == 4
-    assert bid["intention"] == repaired["intention"]
-    assert bid["concrete_detail"] == repaired["concrete_detail"]
+    assert len(llm.messages) == 6
+    assert bid["intention"] == repaired_second["intention"]
+    assert bid["concrete_detail"] == repaired_second["concrete_detail"]
     repair_payload = json.loads(str(llm.messages[2][-1].content))
     repair_text = json.dumps(repair_payload, ensure_ascii=False)
     assert "candidate_bid" not in repair_payload
     assert "private_continuity_context" not in repair_text
+    second_repair_payload = json.loads(str(llm.messages[4][-1].content))
+    assert second_repair_payload["verified_issues"] == [
+        "目标仍然没有给出本轮具体选择。"
+    ]
 
 
 def test_required_branch_failure_cannot_collapse_to_silence() -> None:
     """A required cognition failure remains an execution failure."""
 
+    original_error = ValueError("goal bid remains misaligned")
     execution = ParallelExecutionResult(
         failed_branch_ids={"ordinary_response"},
+        failure_records={
+            "ordinary_response": BranchFailure(
+                branch_id="ordinary_response",
+                error_code="required_selection_alignment_exhausted",
+                stage="goal_cognition.required_selection_alignment",
+                attempt_count=2,
+                safe_checkpoint="pre_state_commit",
+                retryable=True,
+                exception_class="ValueError",
+                exception=original_error,
+            ),
+        },
     )
 
-    with pytest.raises(CognitionExecutionError, match="required cognition"):
+    with pytest.raises(
+        CognitionExecutionError,
+        match="required cognition",
+    ) as raised:
         _raise_for_failed_required_branches(
             execution,
             [DEFAULT_BRANCH_DEFINITIONS["ordinary_response"]],
         )
+
+    assert raised.value.error_code == (
+        "required_selection_alignment_exhausted"
+    )
+    assert raised.value.branch_id == "ordinary_response"
+    assert raised.value.stage == (
+        "goal_cognition.required_selection_alignment"
+    )
+    assert raised.value.attempt_count == 2
+    assert raised.value.safe_checkpoint == "pre_state_commit"
+    assert raised.value.retryable is True
+    assert raised.value.__cause__ is original_error

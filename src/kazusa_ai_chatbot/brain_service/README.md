@@ -177,6 +177,13 @@ character-level
 `ignore/proceed/wait` judgment; deterministic code applies the validated action
 and never rewrites a valid semantic choice.
 
+An invalid authoritative first assessment consumes the existing one-time wait
+boundary and is reassessed at the hard deadline. A sole hard-deadline
+disposition is deterministic. Repeated invalid multi-option settlement becomes
+a typed operational failure: the coordinator closes the current lease without
+recording a semantic `ignore`, completes the response owner with an operational
+response, and leaves stale newer turn versions intact.
+
 The model-facing intake projection carries typed private/group scope, runtime
 character identity, semantic target/reply labels, and only eligible
 same-author/same-channel candidates. A present reply with unresolved author is
@@ -353,6 +360,7 @@ Purpose:
 | `delivery_mentions` | brain then adapter | Optional platform-neutral inline mention render candidates. The brain emits these only for authored `@display_name` text with matching scoped user identity; adapters decide native rendering, channel feasibility, and no-op fallback. |
 | `scheduled_followups` | brain | Count of scheduled future-cognition follow-ups accepted during the turn. |
 | `delivery_tracking_id` | brain | Brain-generated identifier for the ordered assistant response sequence. Empty means no receipt should be posted. |
+| `operational_error` | brain | Nullable machine-readable failure metadata. Present only for a non-character `content_type="operational_error"` response; includes error code, status, attempt count, retryability, correlation/trace references, and bounded branch/stage identifiers. |
 
 Adapter responsibilities:
 
@@ -404,6 +412,11 @@ Brain service responsibilities:
   has necessarily completed.
 - The brain service generates a non-empty `delivery_tracking_id` only when it
   returns user-visible messages and will persist an assistant conversation row.
+- A typed cognition failure marked retryable at `pre_state_commit` receives at
+  most one clean graph retry from the original prepared turn state. Exhaustion
+  returns a structured operational response with an empty delivery identifier.
+- Operational response text is a system notice. It creates no assistant
+  conversation row, progress record, consolidation input, or delivery receipt.
 - The brain service may run post-turn consolidation for selected surface
   outputs, action results, or private finalization even when `messages` is
   empty.
@@ -654,10 +667,12 @@ The database package owns:
 
 Invalid `/chat` payloads fail at the FastAPI/Pydantic boundary.
 
-Brain service failures during graph execution should return an operational
-fallback response or an empty response depending on where the failure occurs.
-Adapters should log service failures and avoid sending partially trusted
-content.
+Brain service failures during graph execution return a structured operational
+response when the response owner is known. Safe pre-commit cognition failures
+receive one bounded retry; all other failures fail once. Operational notices
+carry no delivery-tracking identifier and are excluded from character history.
+Adapters log the structured failure and render only the system notice, without
+native reply metadata, delivery receipts, or normal-chat follow-ups.
 
 Receipt failure behavior:
 

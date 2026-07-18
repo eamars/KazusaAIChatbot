@@ -6,7 +6,7 @@
 - Change class: large.
 - Cutover: bigbang.
 - Approval: the user explicitly instructed execution on 2026-07-16.
-- Parent plan: `development_plans/active/short_term/cognition_core_v2_stage_2_integration_plan.md`.
+- Parent plan: `development_plans/archive/completed/short_term/cognition_core_v2_stage_2_integration_plan.md`.
 - RCA evidence: `test_artifacts/cognition_core_v2/frozen_affinity_rca/qq_638473184_state_drift_rca_and_proposal.md`.
 - Proof corpus: the frozen 20-turn QQ 638473184 / user 673225019 replay captured at each original input boundary.
 

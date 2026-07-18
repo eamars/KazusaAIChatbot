@@ -54,6 +54,38 @@ class CognitionContractError(ValueError):
 class CognitionExecutionError(CognitionContractError):
     """Raised when collapse or route execution cannot produce a valid result."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        error_code: str = "internal_invariant",
+        branch_id: str = "",
+        stage: str = "",
+        attempt_count: int = 1,
+        safe_checkpoint: str = "unknown",
+        retryable: bool = False,
+    ) -> None:
+        """Attach bounded failure metadata to one cognition execution error.
+
+        Args:
+            message: Human-readable internal error detail.
+            error_code: Stable machine-readable failure class.
+            branch_id: Cognition branch that failed, when applicable.
+            stage: Runtime stage that detected the failure.
+            attempt_count: Attempts already consumed inside the failing owner.
+            safe_checkpoint: Latest checkpoint reached before the failure.
+            retryable: Whether deterministic policy may repeat from that
+                checkpoint.
+        """
+
+        super().__init__(message)
+        self.error_code = error_code
+        self.branch_id = branch_id
+        self.stage = stage
+        self.attempt_count = attempt_count
+        self.safe_checkpoint = safe_checkpoint
+        self.retryable = retryable
+
 
 class CognitionContextLimitError(CognitionContractError):
     """Raised when required model context remains over its frozen cap."""

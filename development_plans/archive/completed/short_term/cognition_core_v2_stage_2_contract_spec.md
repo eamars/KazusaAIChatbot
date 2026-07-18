@@ -3,13 +3,14 @@
 ## Document Control
 
 - Parent plan: `cognition_core_v2_stage_2_integration_plan.md`
-- Status: mandatory frozen companion to the parent plan
+- Status: completed.
+- Record role: frozen companion to the completed parent plan.
 
 ### 2026-07-17 Checkpoint I corrective contract supersession
 
 For action selection, resolver recurrence, operational graph failure, and the
 visual default, the approved
-`development_plans/active/bugfix/cognition_core_v2_compositional_action_planning_bugfix_plan.md`
+`development_plans/archive/completed/bugfix/cognition_core_v2_compositional_action_planning_bugfix_plan.md`
 supersedes the route-only sections below. `RouteDecisionV2`, goal-owned route
 and capability fields, and the same-route supporting-bid restriction are
 deleted in the big-bang update. The canonical replacement is one fixed-shape
@@ -1479,3 +1480,8 @@ error_type: NotRequired[str]
 Numeric fields remain in the protected run record and are semantically
 projected before any authorized LLM-facing or operator-facing use. The run has
 zero LLM calls.
+
+## Lifecycle Closure
+
+This frozen contract companion closed with the Stage 2 parent on 2026-07-18.
+Later evolution belongs to the active Stage 3 system-adoption plan.

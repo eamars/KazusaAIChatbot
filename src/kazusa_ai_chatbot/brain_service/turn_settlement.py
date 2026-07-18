@@ -479,6 +479,50 @@ class TurnSettlementCoordinator:
             self._state_condition.notify_all()
             return return_value
 
+    async def complete_failed_assessment(
+        self,
+        lease: AssessmentLease,
+    ) -> bool:
+        """Close a current failed assessment without inventing a semantic action.
+
+        Args:
+            lease: Versioned assessment lease whose operational failure has
+                already been classified by the service boundary.
+
+        Returns:
+            True when this lease closed the current pending turn. False when
+            the lease was stale or the turn had already completed.
+        """
+
+        async with self._state_condition:
+            pending_turn = self._pending_turns.get(lease.turn_id)
+            if pending_turn is None or pending_turn.status == "DONE":
+                return_value = False
+                return return_value
+
+            if pending_turn.version != lease.version:
+                pending_turn.status = "SETTLING"
+                pending_turn.eligible_at_monotonic = (
+                    pending_turn.hard_deadline_monotonic
+                )
+                self._schedule_ready_locked(pending_turn)
+                self._state_condition.notify_all()
+                return_value = False
+                return return_value
+
+            if pending_turn.status != "ASSESSING":
+                raise ValueError(
+                    "failed settled assessment must own an assessing turn"
+                )
+
+            pending_turn.status = "DONE"
+            pending_turn.accepts_fragments = False
+            self._pending_turns.pop(pending_turn.turn_id, None)
+            self._ingress_blocked_turns.discard(pending_turn.turn_id)
+            self._state_condition.notify_all()
+            return_value = True
+            return return_value
+
     async def claim_for_cognition(self, turn_id: str, version: int) -> bool:
         """Atomically claim a matching settled proceed for cognition."""
 
