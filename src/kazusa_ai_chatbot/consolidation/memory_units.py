@@ -561,11 +561,11 @@ _EXTRACTOR_PROMPT = '''\
 
 # 证据读取与身份
 1. 先读 `timestamp`，它是本轮 consolidation 的本地时间。
-2. 读 `consolidation_origin.trigger_source`。`user_message` 表示本轮由用户消息触发；`internal_thought` 表示本轮由 `{character_name}` 的内部思考触发。
+2. 读 `consolidation_origin.trigger_source`。它只能是 `user_message`、`internal_thought`、`self_cognition`、`scheduled_tick` 或 `tool_result`。`user_message` 表示本轮由用户消息触发；`internal_thought` 表示由已发出的后续行动接力触发；`self_cognition` 表示由有观察依据的空闲认知触发；`scheduled_tick` 表示由已认领的到期计划触发；`tool_result` 表示由已完成的工具结果触发。
 3. 再读 `chat_history_recent`。每行格式为 `[时间] 说话人: 内容`；用行首说话人判断每条消息是谁说的；消息里的“我”必须按原说话人理解。
 4. 读 `decontextualized_input`、`final_dialog`、`logical_stance`、`character_intent`，确认本轮发生了什么，以及 `{character_name}` 是否真的接受了某个后续行为。
-5. 当 trigger_source 是 `user_message` 时，`decontextualized_input` 是用户本轮表达；当 trigger_source 是 `internal_thought` 时，它是内部触发文本，不是用户原话。
-6. `final_dialog` 在 `user_message` 中是可见回复，在 `internal_thought` 中是私有 finalization。
+5. 当 trigger_source 是 `user_message` 时，`decontextualized_input` 是用户本轮表达；当 trigger_source 是 `internal_thought`、`self_cognition` 或 `scheduled_tick` 时，它是有依据的内部触发文本，不是用户原话；当 trigger_source 是 `tool_result` 时，它是工具结果及原始目标的去上下文化摘要。
+6. `final_dialog` 在 `user_message` 和允许交付的 `tool_result` 中是可见回复，在 `internal_thought`、`self_cognition` 和 `scheduled_tick` 中是私有或 preview finalization。
 7. `new_facts_evidence` 和 `future_promises_evidence` 是上游证据提示，不是必须照抄的输出。
 8. `internal_monologue`、`emotional_appraisal`、`interaction_subtext`、`subjective_appraisal_evidence` 只用于理解 `{character_name}` 如何看待已确认事实，不可单独当作用户事实。
 9. 对照 `rag_user_memory_unit_candidates`。只有本轮带来新事实、更清楚的细节或新的未来互动含义时，才生成 memory_unit。
@@ -633,7 +633,7 @@ human payload 是以下 JSON：
     "user_name": "当前用户显示名",
     "consolidation_origin": {{
         "episode_id": "string",
-        "trigger_source": "user_message | internal_thought",
+        "trigger_source": "user_message | internal_thought | self_cognition | scheduled_tick | tool_result",
         "input_sources": ["..."],
         "output_mode": "string"
     }},

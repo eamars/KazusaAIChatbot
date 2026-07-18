@@ -13,7 +13,6 @@ from kazusa_ai_chatbot.cognition_core_v2 import (
 )
 from kazusa_ai_chatbot.cognition_core_v2.facade import (
     _episode_updated_at,
-    _validate_output_mode,
 )
 from kazusa_ai_chatbot.cognition_core_v2.output_projection import (
     build_state_update,
@@ -309,25 +308,9 @@ def test_canonical_episode_timestamp_drives_native_state_time() -> None:
     """The core uses only canonical storage_timestamp_utc and emits UTC-Z."""
 
     episode = canonical_episode()
-    episode["storage_timestamp_utc"] = "2026-07-14T00:01:02+00:00"
+    episode["created_at"] = "2026-07-14T00:01:02+00:00"
 
     assert _episode_updated_at(episode) == "2026-07-14T00:01:02Z"
-
-
-def test_canonical_output_mode_restricts_visible_and_executable_routes() -> None:
-    """Every frozen episode mode retains its route-authorization boundary."""
-
-    scheduled = canonical_episode(output_mode="scheduled_action_request")
-    _validate_output_mode(scheduled, "action")
-    with pytest.raises(CognitionContractError):
-        _validate_output_mode(scheduled, "speech")
-
-    visible = canonical_episode(output_mode="visible_reply")
-    _validate_output_mode(visible, "action")
-
-    preview = canonical_episode(output_mode="preview")
-    with pytest.raises(CognitionContractError):
-        _validate_output_mode(preview, "speech")
 
 
 def test_text_surface_rejects_private_state_and_branch_fields() -> None:

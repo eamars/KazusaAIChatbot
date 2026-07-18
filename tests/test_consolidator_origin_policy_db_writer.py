@@ -30,7 +30,7 @@ def _origin(
     """Build identifier-only origin metadata for one writer case."""
 
     if input_sources is None:
-        input_sources = ["dialog_text"]
+        input_sources = ["dialog", "system_event"]
     turn_clock = build_turn_clock("2026-04-27 00:00:00")
     return {
         "episode_id": "episode-1",
@@ -164,7 +164,7 @@ async def test_denied_origin_has_no_durable_effects(monkeypatch) -> None:
     mocks = _patch_writer_dependencies(monkeypatch)
     state = _state(
         origin=_origin(
-            trigger_source="reflection_signal",
+            trigger_source="scheduled_tick",
             input_sources=["reflection_artifact"],
             output_mode="think_only",
         ),
@@ -253,7 +253,7 @@ async def test_group_style_write_has_no_user_relationship_side_effect(
     state = _state(
         origin=_origin(
             trigger_source="internal_thought",
-            input_sources=["internal_monologue"],
+            input_sources=["internal_thought", "system_event"],
             output_mode="preview",
         ),
     )

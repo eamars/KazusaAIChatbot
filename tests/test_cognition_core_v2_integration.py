@@ -322,18 +322,18 @@ async def test_v2_facade_projects_persistent_goal_to_entity_ref() -> None:
 
 
 @pytest.mark.asyncio
-async def test_private_output_mode_produces_private_silence() -> None:
-    """The semantic planner respects the episode's private output mode."""
+async def test_canonical_private_source_has_no_legacy_output_mode() -> None:
+    """Private delivery policy stays outside the canonical episode envelope."""
 
     llm = _ScriptedLLM()
     payload = _input(trigger_source="internal_thought")
-    payload["episode"]["output_mode"] = "think_only"
 
     output = await run_cognition(payload, _core_services(llm))
 
+    assert "output_mode" not in payload["episode"]
     assert output["intention"] == {
         "selected_branch_id": "ordinary_response",
-        "route": "silence",
+        "route": "speech",
         "intention": "acknowledge the grounded episode",
         "target_roles": [],
         "reason": "the episode supplies bounded evidence",
@@ -522,5 +522,5 @@ async def test_test_database_accepted_task_result_smoke(
     await _run_db_user_smoke(
         live_db,
         request,
-        trigger_source="accepted_task_result_ready",
+        trigger_source="tool_result",
     )

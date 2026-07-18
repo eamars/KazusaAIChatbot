@@ -348,7 +348,7 @@ async def mark_accepted_task_running(
     return task
 
 
-async def mark_accepted_task_result_ready(
+async def mark_tool_result_ready(
     *,
     accepted_task_id: str,
     artifact_text: str,

@@ -9,9 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 from langchain_core.messages import AIMessage
 import pytest
 
-from kazusa_ai_chatbot.cognition_episode import (
-    build_text_chat_cognitive_episode,
-)
+from tests.cognition_core_v2_test_helpers import canonical_user_message_episode
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     validate_text_surface_output,
 )
@@ -260,7 +258,7 @@ def test_progress_recorder_preserves_obligation_roles_and_source() -> None:
 def _episode(user_input: str = "Current request") -> dict[str, object]:
     """Build a canonical text episode for connector tests."""
 
-    return build_text_chat_cognitive_episode(
+    return canonical_user_message_episode(
         episode_id="episode-1",
         percept_id="percept-1",
         storage_timestamp_utc=STORAGE_TIMESTAMP,

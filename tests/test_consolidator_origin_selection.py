@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_episode import CognitiveEpisode
+from kazusa_ai_chatbot.cognition_episode import (
+    CognitiveEpisodeV1,
+    build_self_cognition_episode,
+)
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     build_acquaintance_user_state,
 )
@@ -15,48 +18,43 @@ from kazusa_ai_chatbot.consolidation.origin import (
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
 
 
-def _self_cognition_episode() -> CognitiveEpisode:
-    """Build an internal-thought episode accepted by consolidation.
+def _self_cognition_episode() -> CognitiveEpisodeV1:
+    """Build a canonical self-cognition episode accepted by consolidation.
 
     Returns:
-        Valid internal-thought preview episode for origin-selection tests.
+        Valid private self-cognition episode for origin-selection tests.
     """
     turn_clock = build_turn_clock("2026-05-10 21:00:00")
-    episode: CognitiveEpisode = {
-        "episode_id": "self-cognition-episode-1",
-        "trigger_source": "internal_thought",
-        "input_sources": ["internal_monologue"],
-        "output_mode": "preview",
-        "percepts": [
-            {
-                "percept_id": "self-cognition-percept-1",
-                "input_source": "internal_monologue",
-                "content": "The missed promise still feels unresolved.",
-                "visibility": "model_visible",
-                "metadata": {"source": "self_cognition_source_packet"},
-            }
-        ],
-        "target_scope": {
-            "platform": "qq",
-            "platform_channel_id": "channel-1",
-            "channel_type": "private",
-            "current_platform_user_id": "platform-user-1",
-            "current_global_user_id": "global-user-1",
-            "current_display_name": "Test User",
-            "target_addressed_user_ids": ["global-user-1"],
-            "target_broadcast": False,
+    return build_self_cognition_episode(
+        case={
+            "case_id": "self-cognition-episode-1",
+            "source_case_kind": "internal_context",
+            "target_scope": {
+                "platform": "qq",
+                "platform_channel_id": "channel-1",
+                "channel_type": "private",
+                "current_platform_user_id": "platform-user-1",
+                "current_global_user_id": "global-user-1",
+                "current_display_name": "Test User",
+                "target_addressed_user_ids": ["global-user-1"],
+                "target_broadcast": False,
+            },
+            "privacy_scope": "private",
         },
-        "origin_metadata": {
-            "platform": "qq",
-            "platform_message_id": "self_cognition:case-1",
-            "active_turn_platform_message_ids": [],
-            "active_turn_conversation_row_ids": [],
-            "debug_modes": {"no_visual_directives": True},
-        },
-        "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
-        "local_time_context": turn_clock["local_time_context"],
-    }
-    return episode
+        percepts=[{
+            "schema_version": "percept.v1",
+            "percept_kind": "self_cognition_context",
+            "source_kind": "self_cognition",
+            "source_id": "self-cognition-episode-1",
+            "content": {
+                "semantic_text": "The missed promise still feels unresolved.",
+            },
+            "observed_at": turn_clock["storage_timestamp_utc"],
+        }],
+        evidence_refs=[],
+        local_time_context=turn_clock["local_time_context"],
+        created_at=turn_clock["storage_timestamp_utc"],
+    )
 
 
 def _self_cognition_global_state() -> dict:

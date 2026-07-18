@@ -294,7 +294,7 @@ async def test_recover_stale_delivery_in_progress_restores_retryable_state(
         executor_ref="background_work_job:job-001",
         updated_at="2026-05-16T09:00:01+00:00",
     )
-    await lifecycle.mark_accepted_task_result_ready(
+    await lifecycle.mark_tool_result_ready(
         accepted_task_id=created["task"]["accepted_task_id"],
         artifact_text="Drink water.",
         result_summary="Reminder text is ready.",

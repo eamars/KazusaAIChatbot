@@ -11,7 +11,7 @@ import httpx
 import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
+from tests.cognition_core_v2_test_helpers import canonical_user_message_episode
 from kazusa_ai_chatbot.config import (
     COGNITION_LLM_API_KEY,
     COGNITION_LLM_BASE_URL,
@@ -705,7 +705,7 @@ def _image_episode(
         Cognitive episode using the existing production builder.
     """
 
-    episode = build_text_chat_cognitive_episode(
+    episode = canonical_user_message_episode(
         episode_id=f"episode-{case_id}",
         percept_id=f"percept-{case_id}",
         storage_timestamp_utc=_TURN_CLOCK["storage_timestamp_utc"],
@@ -746,7 +746,7 @@ def _text_episode(
         Cognitive episode without descriptor-mediated image observations.
     """
 
-    episode = build_text_chat_cognitive_episode(
+    episode = canonical_user_message_episode(
         episode_id=f"episode-direct-{case_id}",
         percept_id=f"percept-direct-{case_id}",
         storage_timestamp_utc=_TURN_CLOCK["storage_timestamp_utc"],

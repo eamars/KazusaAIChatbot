@@ -165,26 +165,14 @@ def test_group_review_target_plan_does_not_create_synthetic_user() -> None:
     assert "self_cognition" not in serialized_plan
 
 
-def test_reflection_signal_target_plan_adds_internal_promotion_lane() -> None:
-    """Reflection origins should expose only internal shared promotion target."""
+def test_reflection_run_target_plan_adds_internal_promotion_lane() -> None:
+    """Promoted reflection runs expose only internal shared promotion target."""
 
     state = _base_state()
     state["global_user_id"] = ""
     state["user_profile"] = {}
-    state["cognitive_episode"] = {
-        "episode_id": "reflection-case-1",
-        "trigger_source": "reflection_signal",
-        "input_sources": ["reflection_artifact"],
-        "output_mode": "visible_reply",
-        "target_scope": {
-            "platform": "qq",
-            "platform_channel_id": "private-1",
-            "channel_type": "private",
-            "current_global_user_id": "",
-            "current_display_name": "reflection",
-            "target_broadcast": False,
-        },
-    }
+    state.pop("cognitive_episode")
+    state["origin_kind"] = "reflection_run"
 
     plan = build_consolidation_target_plan(state)
     targets_by_kind = _targets_by_kind(plan)

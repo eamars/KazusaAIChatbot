@@ -8,9 +8,7 @@ from typing import Any
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_episode import (
-    build_text_chat_cognitive_episode,
-)
+from tests.cognition_core_v2_test_helpers import canonical_user_message_episode
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionCoreServicesV2,
 )
@@ -76,7 +74,7 @@ class _CapturingAppraisalLLM:
 def _episode() -> dict[str, Any]:
     """Build a current message with sensitive operational provenance."""
 
-    return build_text_chat_cognitive_episode(
+    return canonical_user_message_episode(
         episode_id="episode:secret-channel-id:secret-message-id",
         percept_id="percept:secret-message-id",
         storage_timestamp_utc=STORAGE_TIMESTAMP_UTC,
@@ -159,10 +157,10 @@ def test_role_explicit_current_event_is_forwarded_without_reinterpretation() -> 
         "embedded_target_role": "self",
     }
     episode = _episode()
-    episode["percepts"][0]["metadata"]["role_explicit_content"] = (
+    episode["percepts"][0]["content"]["role_explicit_content"] = (
         role_explicit_content
     )
-    episode["percepts"][0]["metadata"]["response_operation"] = (
+    episode["percepts"][0]["content"]["response_operation"] = (
         response_operation
     )
     payload = build_cognition_input_from_global_state(

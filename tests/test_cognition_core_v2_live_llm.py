@@ -905,7 +905,7 @@ async def test_accepted_task_result_full_pipeline_live_llm_db(
         live_db,
         request,
         message="The accepted task completed and its bounded result is ready.",
-        trigger_source="accepted_task_result_ready",
+        trigger_source="tool_result",
     )
 
 

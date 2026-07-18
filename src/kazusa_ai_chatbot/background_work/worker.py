@@ -10,7 +10,7 @@ from uuid import uuid4
 from kazusa_ai_chatbot.accepted_task import (
     mark_accepted_task_delivered,
     mark_accepted_task_failure_ready,
-    mark_accepted_task_result_ready,
+    mark_tool_result_ready,
     mark_accepted_task_running,
 )
 from kazusa_ai_chatbot.background_work.providers import dispatch_background_work
@@ -146,7 +146,7 @@ async def run_background_work_worker_tick(
                         coding_run_context = sanitize_coding_run_context(
                             metadata_context
                         )
-                    await mark_accepted_task_result_ready(
+                    await mark_tool_result_ready(
                         accepted_task_id=accepted_task_id,
                         artifact_text=worker_result["artifact_text"],
                         result_summary=worker_result["result_summary"],

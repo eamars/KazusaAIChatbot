@@ -3,11 +3,12 @@
 from typing import Any
 
 from kazusa_ai_chatbot.cognition_episode import (
-    CognitiveEpisode,
-    InputSource,
-    OutputMode,
+    CognitiveEpisodeV1,
+    MAX_COGNITIVE_EPISODE_MEDIA_PERCEPTS,
     TriggerSource,
-    validate_cognitive_episode,
+    build_text_chat_media_description_rows,
+    build_user_message_episode,
+    validate_cognitive_episode_v1,
 )
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     build_acquaintance_user_state,
@@ -17,38 +18,157 @@ from kazusa_ai_chatbot.cognition_core_v2.state_models import (
 NOW = "2026-07-14T00:00:00Z"
 
 
+def canonical_user_message_episode(
+    *,
+    episode_id: str,
+    percept_id: str,
+    storage_timestamp_utc: str,
+    local_time_context: dict[str, Any],
+    user_input: str,
+    platform: str,
+    platform_channel_id: str,
+    channel_type: str,
+    platform_message_id: str,
+    platform_user_id: str,
+    global_user_id: str,
+    user_name: str,
+    active_turn_platform_message_ids: list[str] | None = None,
+    active_turn_conversation_row_ids: list[str] | None = None,
+    debug_modes: dict[str, bool] | None = None,
+    output_mode: str | None = None,
+    target_addressed_user_ids: list[str] | None = None,
+    target_broadcast: bool = False,
+    media_description_rows: list[dict[str, Any]] | None = None,
+) -> CognitiveEpisodeV1:
+    """Build a canonical user-message episode for shared test fixtures."""
+
+    del output_mode
+    media_percepts: list[dict[str, Any]] = []
+    for index, row in enumerate(
+        build_text_chat_media_description_rows(media_description_rows or [])[
+            :MAX_COGNITIVE_EPISODE_MEDIA_PERCEPTS
+        ],
+        start=1,
+    ):
+        content_type = row["content_type"]
+        source_kind = (
+            "image_observation"
+            if content_type.startswith("image/")
+            else "audio_observation"
+        )
+        media_percepts.append({
+            "schema_version": "percept.v1",
+            "percept_kind": source_kind,
+            "source_kind": source_kind,
+            "source_id": f"{episode_id}:media:{index}",
+            "content": {
+                "content_type": content_type,
+                "description": row["description"],
+                "observation": dict(row.get("image_observation", {})),
+            },
+            "observed_at": storage_timestamp_utc,
+        })
+    dialog_percept = {
+        "schema_version": "percept.v1",
+        "percept_kind": "dialog",
+        "source_kind": "dialog",
+        "source_id": percept_id,
+        "content": {
+            "semantic_text": user_input,
+            "text": user_input,
+        },
+        "observed_at": storage_timestamp_utc,
+    }
+    origin = {
+        "schema_version": "user_message_origin.v1",
+        "owner": "tests.cognition_core_v2",
+        "platform": platform,
+        "platform_message_id": platform_message_id,
+        "active_turn_platform_message_ids": list(
+            active_turn_platform_message_ids or []
+        ),
+        "active_turn_conversation_row_ids": list(
+            active_turn_conversation_row_ids or []
+        ),
+        "debug_modes": dict(debug_modes or {}),
+        "privacy_scope": "private",
+        "delivery_permission_ref": "",
+    }
+    target_scope = {
+        "platform": platform,
+        "platform_channel_id": platform_channel_id,
+        "channel_type": channel_type,
+        "current_platform_user_id": platform_user_id,
+        "current_global_user_id": global_user_id,
+        "current_display_name": user_name,
+        "target_addressed_user_ids": list(target_addressed_user_ids or []),
+        "target_broadcast": target_broadcast,
+    }
+    return build_user_message_episode(
+        episode_id=episode_id,
+        origin=origin,
+        target_scope=target_scope,
+        dialog_percept=dialog_percept,
+        media_percepts=media_percepts,
+        evidence_refs=[],
+        local_time_context=local_time_context,
+        created_at=storage_timestamp_utc,
+        debug_controls=dict(debug_modes or {}),
+    )
+
+
 def canonical_episode(
     *,
     episode_id: str = "v2-test-episode",
     trigger_source: TriggerSource = "user_message",
-    output_mode: OutputMode = "visible_reply",
     content: str = "a grounded current episode",
     current_global_user_id: str = "v2-test-user",
     metadata: dict[str, Any] | None = None,
-) -> CognitiveEpisode:
-    """Build one exact episode across the supported deterministic sources."""
+) -> CognitiveEpisodeV1:
+    """Build one exact episode across the five native deterministic sources."""
 
-    source_by_trigger: dict[TriggerSource, InputSource] = {
-        "user_message": "dialog_text",
-        "reflection_signal": "reflection_artifact",
-        "internal_thought": "internal_monologue",
-        "scheduled_recall": "retrieved_memory",
-        "system_probe": "internal_monologue",
-        "accepted_task_result_ready": "accepted_task_result",
+    source_kind_by_trigger: dict[TriggerSource, str] = {
+        "user_message": "dialog",
+        "internal_thought": "internal_thought",
+        "self_cognition": "self_cognition",
+        "scheduled_tick": "scheduled_tick",
+        "tool_result": "tool_result",
     }
-    input_source = source_by_trigger[trigger_source]
-    episode: CognitiveEpisode = {
+    source_kind = source_kind_by_trigger[trigger_source]
+    percept_kind = "dialog" if trigger_source == "user_message" else source_kind
+    percept_content: dict[str, Any] = {
+        "semantic_text": content,
+        "text": content,
+    }
+    if metadata:
+        percept_content.update(metadata)
+    percepts = [{
+        "schema_version": "percept.v1",
+        "percept_kind": percept_kind,
+        "source_kind": source_kind,
+        "source_id": f"percept:{episode_id}",
+        "content": percept_content,
+        "observed_at": NOW,
+    }]
+    if trigger_source == "user_message":
+        percepts.append({
+            "schema_version": "percept.v1",
+            "percept_kind": "local_time_context",
+            "source_kind": "system_event",
+            "source_id": None,
+            "content": {
+                "local_time_context": {
+                    "current_local_datetime": "2026-07-14 12:00",
+                    "current_local_weekday": "Tuesday",
+                },
+            },
+            "observed_at": NOW,
+        })
+    episode: CognitiveEpisodeV1 = {
+        "schema_version": "cognitive_episode.v1",
         "episode_id": episode_id,
         "trigger_source": trigger_source,
-        "input_sources": [input_source],
-        "output_mode": output_mode,
-        "percepts": [{
-            "percept_id": f"percept:{episode_id}",
-            "input_source": input_source,
-            "content": content,
-            "visibility": "model_visible",
-            "metadata": dict(metadata or {}),
-        }],
+        "percepts": percepts,
         "target_scope": {
             "platform": "debug",
             "platform_channel_id": "channel-test",
@@ -60,20 +180,23 @@ def canonical_episode(
             "target_broadcast": False,
         },
         "origin_metadata": {
+            "schema_version": f"{trigger_source}_origin.v1",
+            "owner": "tests.cognition_core_v2",
             "platform": "debug",
             "platform_message_id": "message-test",
             "active_turn_platform_message_ids": ["message-test"],
             "active_turn_conversation_row_ids": [],
             "debug_modes": {},
+            "privacy_scope": "private",
+            "delivery_permission_ref": "",
+            "created_at": NOW,
         },
-        "storage_timestamp_utc": NOW,
-        "local_time_context": {
-            "current_local_datetime": "2026-07-14 12:00",
-            "current_local_weekday": "Tuesday",
-        },
+        "evidence_refs": [],
+        "created_at": NOW,
+        "privacy_scope": "private",
+        "continuation_depth": 0,
     }
-    validate_cognitive_episode(episode)
-    return episode
+    return validate_cognitive_episode_v1(episode)
 
 
 def canonical_cognition_output(

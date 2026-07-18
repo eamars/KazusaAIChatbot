@@ -8,10 +8,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_episode import (
-    build_text_chat_cognitive_episode,
-    validate_cognitive_episode,
-)
 from kazusa_ai_chatbot.cognition_resolver import capabilities as capabilities_module
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     RESOLVER_CAPABILITY_REQUEST_VERSION,
@@ -48,6 +44,7 @@ from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import (
     empty_user_memory_context,
 )
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
+from tests.cognition_core_v2_test_helpers import canonical_episode
 
 
 def _resolver_request(
@@ -66,24 +63,10 @@ def _resolver_request(
 
 def _resolver_state() -> dict:
     turn_clock = build_turn_clock("2026-05-30 09:00:00")
-    episode = build_text_chat_cognitive_episode(
+    episode = canonical_episode(
         episode_id="resolver-capability-episode",
-        percept_id="resolver-capability-percept",
-        storage_timestamp_utc=turn_clock["storage_timestamp_utc"],
-        local_time_context=turn_clock["local_time_context"],
-        user_input="Need an evidence-backed answer.",
-        platform="debug",
-        platform_channel_id="channel-123",
-        channel_type="private",
-        platform_message_id="message-123",
-        platform_user_id="platform-user-123",
-        global_user_id="global-user-123",
-        user_name="Test User",
-        active_turn_platform_message_ids=["message-123"],
-        active_turn_conversation_row_ids=["row-123"],
-        debug_modes={},
-        target_addressed_user_ids=["character-123"],
-        target_broadcast=False,
+        content="Need an evidence-backed answer.",
+        current_global_user_id="global-user-123",
     )
     return {
         "decontexualized_input": "Original user request about trust.",
@@ -129,18 +112,11 @@ def _internal_thought_resolver_state() -> dict:
     """Return resolver state for a private internal-thought cognition source."""
 
     state = _resolver_state()
-    episode = dict(state["cognitive_episode"])
-    episode["trigger_source"] = "internal_thought"
-    episode["input_sources"] = ["internal_monologue"]
-    episode["output_mode"] = "think_only"
-    episode["percepts"] = [{
-        "percept_id": "resolver-internal-thought",
-        "input_source": "internal_monologue",
-        "content": "整理一个内部目标。",
-        "visibility": "internal_only",
-        "metadata": {},
-    }]
-    validate_cognitive_episode(episode)
+    episode = canonical_episode(
+        episode_id="resolver-internal-thought-episode",
+        trigger_source="internal_thought",
+        content="整理一个内部目标。",
+    )
     state["cognitive_episode"] = episode
     state["channel_type"] = "group"
     return_value = state
@@ -2410,18 +2386,11 @@ async def test_self_goal_resolution_allows_internal_thought_source() -> None:
     """Internal thought may produce a private self-resolution observation."""
 
     state = _resolver_state()
-    episode = dict(state["cognitive_episode"])
-    episode["trigger_source"] = "internal_thought"
-    episode["input_sources"] = ["internal_monologue"]
-    episode["output_mode"] = "think_only"
-    episode["percepts"] = [{
-        "percept_id": "resolver-internal-thought",
-        "input_source": "internal_monologue",
-        "content": "整理一个内部目标。",
-        "visibility": "internal_only",
-        "metadata": {},
-    }]
-    validate_cognitive_episode(episode)
+    episode = canonical_episode(
+        episode_id="resolver-internal-thought-episode",
+        trigger_source="internal_thought",
+        content="整理一个内部目标。",
+    )
     state["cognitive_episode"] = episode
 
     observation = await capabilities_module.execute_resolver_capability_request(

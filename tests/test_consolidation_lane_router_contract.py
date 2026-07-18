@@ -106,20 +106,8 @@ def _reflection_target_plan_without_user() -> dict[str, Any]:
     state = _base_state()
     state["global_user_id"] = ""
     state["user_profile"] = {}
-    state["cognitive_episode"] = {
-        "episode_id": "episode-router-reflection-1",
-        "trigger_source": "reflection_signal",
-        "input_sources": ["reflection_artifact"],
-        "output_mode": "visible_reply",
-        "target_scope": {
-            "platform": "qq",
-            "platform_channel_id": "private-1",
-            "channel_type": "private",
-            "current_global_user_id": "",
-            "current_display_name": "reflection",
-            "target_broadcast": False,
-        },
-    }
+    state.pop("cognitive_episode")
+    state["origin_kind"] = "reflection_run"
     return build_consolidation_target_plan(state)
 
 

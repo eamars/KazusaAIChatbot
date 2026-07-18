@@ -9,12 +9,18 @@ from datetime import timezone
 from typing import Any
 
 from kazusa_ai_chatbot import llm_tracing
+from kazusa_ai_chatbot.action_spec.models import (
+    ActionAvailabilityContextV1,
+    RuntimeCapabilitySnapshotV1,
+)
 from kazusa_ai_chatbot.action_spec.registry import (
     ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
     APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     SPEAK_CAPABILITY,
+    build_episode_affordances,
     build_initial_action_capabilities,
+    build_runtime_capability_snapshot,
     project_prompt_affordances,
 )
 from kazusa_ai_chatbot.action_spec.evaluator import ActionSpecEvaluator
@@ -25,6 +31,8 @@ from kazusa_ai_chatbot.config import (
     BOUNDARY_CORE_LLM_MAX_COMPLETION_TOKENS,
     BOUNDARY_CORE_LLM_MODEL,
     BOUNDARY_CORE_LLM_THINKING_ENABLED,
+    BACKGROUND_WORK_WORKER_ENABLED,
+    CALENDAR_SCHEDULER_ENABLED,
     COGNITION_LLM_API_KEY,
     COGNITION_LLM_BASE_URL,
     COGNITION_LLM_MAX_COMPLETION_TOKENS,
@@ -35,7 +43,7 @@ from kazusa_ai_chatbot.cognition_episode import (
     CognitiveEpisodeValidationError,
     project_dialog_response_operation,
     project_dialog_role_explicit_content,
-    validate_cognitive_episode,
+    validate_cognitive_episode_v1,
 )
 from kazusa_ai_chatbot.cognition_core_v2 import run_cognition
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
@@ -138,10 +146,10 @@ def build_cognition_input_from_global_state(
     if not isinstance(episode, dict):
         raise CognitionExecutionError("canonical cognitive episode is required")
     try:
-        validate_cognitive_episode(episode)
+        validate_cognitive_episode_v1(episode)
     except CognitiveEpisodeValidationError as exc:
         raise CognitionExecutionError(str(exc)) from exc
-    timestamp = _v2_timestamp(episode["storage_timestamp_utc"])
+    timestamp = _v2_timestamp(episode["created_at"])
     selected_character_state = character_state
     if selected_character_state is None:
         selected_character_state = state.get("character_cognition_state")
@@ -193,14 +201,14 @@ def build_cognition_input_from_global_state(
         row["evidence_handle"] = f"e{index}"
     scope = selected_mutable_state["state_scope"]
     channel_scope = _scene_channel_scope(
-        episode["target_scope"]["channel_type"],
+        episode["target_scope"].get("channel_type"),
         episode.get("trigger_source"),
     )
     character_role = "active character"
     current_user_role = "current conversation participant"
     if (
         episode["trigger_source"] == "user_message"
-        and "dialog_text" in episode["input_sources"]
+        and _episode_has_source_kind(episode, "dialog")
     ):
         character_role = (
             "the active character; direct addressee of dialog_text and "
@@ -450,6 +458,14 @@ def _available_action_affordances(
         "entity_id": str(state.get("global_user_id", "")),
     }
     capabilities = build_initial_action_capabilities()
+    availability_rows = {
+        row["capability_kind"]: row
+        for row in build_episode_affordances(
+            capabilities,
+            _action_availability_context(state),
+            _build_action_availability_snapshot(state),
+        )
+    }
     prompt_affordances = {
         row["capability"]: row
         for row in project_prompt_affordances(capabilities)
@@ -461,6 +477,8 @@ def _available_action_affordances(
             SPEAK_CAPABILITY,
             APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
         }:
+            continue
+        if capability_kind not in availability_rows:
             continue
         prompt_affordance = prompt_affordances[capability_kind]
         availability_context = prompt_affordance["availability_context"]
@@ -510,6 +528,108 @@ def _available_action_affordances(
     return affordances
 
 
+def build_action_availability_snapshot(
+    state: Mapping[str, Any],
+) -> RuntimeCapabilitySnapshotV1:
+    """Build the current deterministic capability snapshot for one state."""
+
+    return _build_action_availability_snapshot(state)
+
+
+def _build_action_availability_snapshot(
+    state: Mapping[str, Any],
+) -> RuntimeCapabilitySnapshotV1:
+    """Collect configured owner status without performing runtime effects."""
+
+    runtime = state.get("action_availability_runtime")
+    runtime_mapping = runtime if isinstance(runtime, Mapping) else {}
+    worker_status = {
+        "memory_lifecycle": "healthy",
+        "memory_lifecycle_specialist": "healthy",
+        "l3_text": "healthy",
+        "accepted_task": (
+            "healthy" if BACKGROUND_WORK_WORKER_ENABLED else "unavailable"
+        ),
+        "background_work": (
+            "healthy" if BACKGROUND_WORK_WORKER_ENABLED else "unavailable"
+        ),
+        "orchestrator": (
+            "healthy" if CALENDAR_SCHEDULER_ENABLED else "unavailable"
+        ),
+    }
+    raw_worker_status = runtime_mapping.get("worker_status")
+    if isinstance(raw_worker_status, Mapping):
+        worker_status.update({
+            str(key): str(value)
+            for key, value in raw_worker_status.items()
+        })
+    scheduler_status = (
+        "healthy" if CALENDAR_SCHEDULER_ENABLED else "unavailable"
+    )
+    raw_scheduler_status = runtime_mapping.get("scheduler_status")
+    if isinstance(raw_scheduler_status, str):
+        scheduler_status = raw_scheduler_status
+    raw_target_status = runtime_mapping.get("adapter_target_status")
+    adapter_target_status = (
+        dict(raw_target_status)
+        if isinstance(raw_target_status, Mapping)
+        else {}
+    )
+    return build_runtime_capability_snapshot(
+        route_health=_string_mapping(runtime_mapping.get("route_health")),
+        repository_access=_string_mapping(
+            runtime_mapping.get("repository_access"),
+        ),
+        worker_status=worker_status,
+        scheduler_status=scheduler_status,
+        adapter_target_status=adapter_target_status,
+        coding_workspace_status=str(
+            runtime_mapping.get("coding_workspace_status", "healthy")
+        ),
+        permissions=_bool_mapping(runtime_mapping.get("permissions")),
+    )
+
+
+def _action_availability_context(
+    state: Mapping[str, Any],
+) -> ActionAvailabilityContextV1:
+    """Project trusted episode facts into registry availability probes."""
+
+    context: ActionAvailabilityContextV1 = {}
+    episode = state.get("cognitive_episode")
+    if isinstance(episode, Mapping):
+        source_kind = episode.get("trigger_source")
+        if isinstance(source_kind, str):
+            context["source_kind"] = source_kind
+        target_scope = episode.get("target_scope")
+        if isinstance(target_scope, Mapping):
+            context["target_scope"] = dict(target_scope)
+    return context
+
+
+def _string_mapping(value: object) -> dict[str, str]:
+    """Return bounded string mapping data from trusted runtime state."""
+
+    if not isinstance(value, Mapping):
+        return {}
+    return {
+        str(key): str(item)
+        for key, item in value.items()
+    }
+
+
+def _bool_mapping(value: object) -> dict[str, bool]:
+    """Return boolean permission overrides from trusted runtime state."""
+
+    if not isinstance(value, Mapping):
+        return {}
+    return {
+        str(key): item
+        for key, item in value.items()
+        if isinstance(item, bool)
+    }
+
+
 def _available_action_contexts(state: GlobalPersonaState) -> set[str]:
     """Return trusted runtime facts used by registry availability metadata."""
 
@@ -519,7 +639,7 @@ def _available_action_contexts(state: GlobalPersonaState) -> set[str]:
     episode = state.get("cognitive_episode")
     if isinstance(episode, Mapping) and episode.get("trigger_source") in {
         "internal_thought",
-        "scheduled_recall",
+        "scheduled_tick",
     }:
         contexts.add("private_cognition_source")
     return contexts
@@ -643,9 +763,10 @@ def _episode_evidence(
 
     trigger_source = str(episode.get("trigger_source", "user_message"))
     source_kind = {
-        "accepted_task_result_ready": "accepted_task_result",
-        "scheduled_recall": "scheduler_event",
-        "reflection_signal": "promoted_reflection",
+        "tool_result": "tool_result",
+        "scheduled_tick": "scheduler_event",
+        "self_cognition": "episode",
+        "internal_thought": "episode",
     }.get(trigger_source, "episode")
     source_id = f"episode:{episode_id}"
     semantic_text = fallback_text
@@ -659,10 +780,20 @@ def _episode_evidence(
         for percept in percepts:
             if not isinstance(percept, Mapping):
                 continue
-            if percept.get("visibility") != "model_visible":
+            if percept.get("visibility") not in {None, "model_visible"}:
                 continue
-            content = _text(percept.get("content"))
+            raw_content = percept.get("content")
+            content = _text(raw_content)
+            if isinstance(raw_content, Mapping):
+                content = _text(
+                    raw_content.get("semantic_summary")
+                    or raw_content.get("text")
+                    or raw_content.get("objective")
+                    or raw_content.get("artifact_text")
+                )
             metadata = percept.get("metadata")
+            if not isinstance(metadata, Mapping) and isinstance(raw_content, Mapping):
+                metadata = raw_content
             cognition_source = (
                 metadata.get("cognition_source")
                 if isinstance(metadata, Mapping)
@@ -683,22 +814,24 @@ def _episode_evidence(
                 ):
                     source_id = typed_source_id
                     semantic_text = typed_summary
-            if source_kind == "accepted_task_result" and isinstance(
+            if source_kind == "tool_result" and isinstance(
                 metadata,
                 Mapping,
             ):
-                if not isinstance(cognition_source, Mapping):
-                    source_id = (
-                        _text(metadata.get("accepted_task_id")) or source_id
-                    )
-                    semantic_text = _accepted_task_result_text(
+                    if not isinstance(cognition_source, Mapping):
+                        source_id = (
+                            _text(metadata.get("task_id"))
+                            or _text(percept.get("source_id"))
+                            or source_id
+                        )
+                    semantic_text = _tool_result_text(
                         metadata,
                         content,
                         fallback_text,
                     )
             elif content and not isinstance(cognition_source, Mapping):
                 semantic_text = dialog_semantic_projection or content
-                source_id = _text(percept.get("percept_id")) or source_id
+                source_id = _text(percept.get("source_id")) or source_id
             break
     semantic_text = semantic_text[:1000]
     semantic_summary = semantic_text[:500]
@@ -715,15 +848,15 @@ def _episode_evidence(
     }]
 
 
-def _accepted_task_result_text(
+def _tool_result_text(
     metadata: Mapping[str, Any],
     content: str,
     fallback_text: str,
 ) -> str:
-    """Build bounded semantic evidence from an accepted-task outcome."""
+    """Build bounded semantic evidence from a completed tool outcome."""
 
     parts = [
-        _text(metadata.get("accepted_task_summary")),
+        _text(metadata.get("semantic_summary")),
         _text(metadata.get("result_summary")),
         _text(metadata.get("failure_summary")),
         content,
@@ -1009,34 +1142,51 @@ def _scope_caller(episode: Mapping[str, Any] | object) -> str:
     trigger = episode.get("trigger_source") if isinstance(episode, Mapping) else None
     return {
         "user_message": "persona_user_message",
-        "accepted_task_result_ready": "accepted_task_result_ready",
-        "background_result": "background_result",
-        "group_message": "group_sender",
-        "reflection_signal": "reflection",
-        "reflection_dry_run": "reflection_dry_run",
-        "internal_thought": "internal_thought_cognition",
-        "scheduled_recall": "recall",
-        "system_probe": "system_probe",
-        "resolver_recurrence": "resolver_recurrence",
+        "tool_result": "tool_result",
+        "self_cognition": "self_cognition",
+        "scheduled_tick": "scheduled_tick",
+        "internal_thought": "internal_thought",
     }.get(str(trigger), "persona_user_message")
 
 
 def _is_self_cognition_episode(episode: Mapping[str, Any]) -> bool:
     """Identify the canonical self-cognition packet without parsing its prose."""
 
+    if episode.get("trigger_source") in {
+        "self_cognition",
+        "scheduled_tick",
+        "internal_thought",
+    }:
+        return True
     percepts = episode.get("percepts")
     if not isinstance(percepts, list):
         return False
     for percept in percepts:
         if not isinstance(percept, Mapping):
             continue
-        metadata = percept.get("metadata")
+        metadata = percept.get("metadata") or percept.get("content")
         if (
             isinstance(metadata, Mapping)
             and metadata.get("source") == "self_cognition_source_packet"
         ):
             return True
     return False
+
+
+def _episode_has_source_kind(
+    episode: Mapping[str, Any],
+    source_kind: str,
+) -> bool:
+    """Return whether a canonical episode carries one source-kind percept."""
+
+    percepts = episode.get("percepts")
+    if not isinstance(percepts, list):
+        return False
+    return any(
+        isinstance(percept, Mapping)
+        and percept.get("source_kind") == source_kind
+        for percept in percepts
+    )
 
 
 def _scene_channel_scope(
@@ -1046,9 +1196,9 @@ def _scene_channel_scope(
     """Select the semantic scene scope from the typed episode source."""
 
     if trigger_source in {
-        "reflection_signal",
         "internal_thought",
-        "system_probe",
+        "self_cognition",
+        "scheduled_tick",
     }:
         return "internal"
     if channel_type in {"dm", "private"}:

@@ -8,9 +8,9 @@ from datetime import datetime
 from typing import Any, Literal, Mapping, NotRequired, TypedDict
 
 from kazusa_ai_chatbot.cognition_episode import (
-    CognitiveEpisode,
+    CognitiveEpisodeV1,
     CognitiveEpisodeValidationError,
-    validate_cognitive_episode,
+    validate_cognitive_episode_v1,
 )
 from kazusa_ai_chatbot.llm_interface import LLMCallConfig, LLMInvoker
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
@@ -118,7 +118,7 @@ EVIDENCE_SOURCE_QUESTION_IDS = {
         "q:goal_threat_outcome",
         "q:epistemic_comparison_memory",
     ),
-    "accepted_task_result": (
+    "tool_result": (
         "q:event_agency",
         "q:relationship_social",
         "q:moral_identity",
@@ -471,7 +471,7 @@ class CognitionCoreInputV2(TypedDict):
     """Public V2 cognition input contract."""
 
     schema_version: Literal["cognition_core_input.v2"]
-    episode: CognitiveEpisode
+    episode: CognitiveEpisodeV1
     state_scope: Literal["user", "character"]
     mutable_state: dict[str, Any]
     character_constraints: CharacterConstraintSnapshotV2
@@ -538,7 +538,7 @@ class TextSurfaceInputV2(TypedDict):
     """Public V2 text-surface input contract."""
 
     schema_version: Literal["text_surface_input.v2"]
-    episode: CognitiveEpisode
+    episode: CognitiveEpisodeV1
     intention: SelectedIntentionV2
     primary_bid: NotRequired[SurfaceBidProjectionV2]
     supporting_bids: list[SurfaceBidProjectionV2]
@@ -1445,7 +1445,7 @@ def _validate_direct_fact(value: Any) -> None:
     if value["producer"] not in {
         "action_result",
         "resolver_observation",
-        "accepted_task_result",
+        "tool_result",
         "scheduler_event",
         "promoted_source_metadata",
     }:
@@ -1502,24 +1502,25 @@ def _validate_scene_context(value: Any) -> None:
     )
 
 
-def _validate_canonical_episode(value: Any) -> CognitiveEpisode:
+def _validate_canonical_episode(value: Any) -> CognitiveEpisodeV1:
     """Validate the frozen episode contract and translate its public error."""
 
     required = {
+        "schema_version",
         "episode_id",
         "trigger_source",
-        "input_sources",
-        "output_mode",
-        "percepts",
-        "target_scope",
         "origin_metadata",
-        "storage_timestamp_utc",
-        "local_time_context",
+        "target_scope",
+        "percepts",
+        "evidence_refs",
+        "created_at",
+        "privacy_scope",
+        "continuation_depth",
     }
     if not isinstance(value, Mapping) or set(value) != required:
         raise CognitionContractError("cognitive episode fields are not exact")
     try:
-        validate_cognitive_episode(value)
+        validate_cognitive_episode_v1(value)
     except CognitiveEpisodeValidationError as exc:
         raise CognitionContractError(str(exc)) from exc
     return dict(value)  # type: ignore[return-value]
@@ -1530,7 +1531,7 @@ def _validate_relationship_context(
     *,
     scope: str,
     state: Mapping[str, Any],
-    episode: CognitiveEpisode,
+    episode: CognitiveEpisodeV1,
 ) -> None:
     """Delegate optional relationship validation to the native state owner."""
 

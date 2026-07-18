@@ -5,10 +5,7 @@ from copy import deepcopy
 import pytest
 
 from kazusa_ai_chatbot import service as service_module
-from kazusa_ai_chatbot.cognition_episode import (
-    build_text_chat_cognitive_episode,
-    validate_cognitive_episode,
-)
+from kazusa_ai_chatbot.cognition_episode import validate_cognitive_episode_v1
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     build_acquaintance_user_state,
     build_character_production_state,
@@ -19,6 +16,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
 from kazusa_ai_chatbot.time_boundary import (
     local_time_context_from_storage_utc,
 )
+from tests.cognition_core_v2_test_helpers import canonical_user_message_episode
 
 
 STORAGE_TIMESTAMP_UTC = "2026-05-01T00:00:00+00:00"
@@ -27,12 +25,11 @@ V2_TIMESTAMP = "2026-05-01T00:00:00Z"
 
 def _episode(
     *,
-    output_mode: str = "visible_reply",
     debug_modes: dict[str, bool] | None = None,
 ) -> dict:
     """Build one canonical adapter-neutral text episode."""
 
-    return build_text_chat_cognitive_episode(
+    return canonical_user_message_episode(
         episode_id="user_message:debug:channel-1:message-1",
         percept_id="user_message:debug:channel-1:message-1:dialog_text:0",
         storage_timestamp_utc=STORAGE_TIMESTAMP_UTC,
@@ -50,7 +47,6 @@ def _episode(
         active_turn_platform_message_ids=["message-1"],
         active_turn_conversation_row_ids=["row-1"],
         debug_modes=dict(debug_modes or {}),
-        output_mode=output_mode,
         target_addressed_user_ids=["character-1"],
         target_broadcast=False,
     )
@@ -59,7 +55,7 @@ def _episode(
 def test_text_chat_episode_remains_adapter_neutral_and_typed() -> None:
     """The adapter passes one typed episode into the V2 persona boundary."""
 
-    episode = build_text_chat_cognitive_episode(
+    episode = canonical_user_message_episode(
         episode_id="episode-1",
         percept_id="percept-1",
         storage_timestamp_utc=STORAGE_TIMESTAMP_UTC,
@@ -79,10 +75,13 @@ def test_text_chat_episode_remains_adapter_neutral_and_typed() -> None:
         debug_modes={},
     )
 
-    validate_cognitive_episode(episode)
+    validate_cognitive_episode_v1(episode)
     assert episode["trigger_source"] == "user_message"
-    assert episode["input_sources"] == ["dialog_text"]
-    assert episode["percepts"][0]["content"] == "hello"
+    assert [percept["source_kind"] for percept in episode["percepts"]] == [
+        "dialog",
+        "system_event",
+    ]
+    assert episode["percepts"][0]["content"]["semantic_text"] == "hello"
 
 
 @pytest.mark.parametrize(
@@ -115,29 +114,27 @@ def test_service_episode_ids_retain_stable_fallback_order(
 
 
 @pytest.mark.parametrize(
-    ("output_mode", "debug_modes"),
+    "debug_modes",
     [
-        ("visible_reply", {}),
-        ("think_only", {"think_only": True}),
-        ("silent", {"listen_only": True}),
+        {},
+        {"think_only": True},
+        {"listen_only": True},
     ],
 )
-def test_text_episode_preserves_output_mode_and_origin_flags(
-    output_mode: str,
+def test_text_episode_preserves_debug_controls_and_origin_flags(
     debug_modes: dict[str, bool],
 ) -> None:
-    """The service-owned mode decision reaches canonical episode metadata."""
+    """Service-owned debug controls reach canonical episode metadata."""
 
-    episode = _episode(output_mode=output_mode, debug_modes=debug_modes)
+    episode = _episode(debug_modes=debug_modes)
 
-    assert episode["output_mode"] == output_mode
-    assert episode["origin_metadata"] == {
-        "platform": "debug",
-        "platform_message_id": "message-1",
-        "active_turn_platform_message_ids": ["message-1"],
-        "active_turn_conversation_row_ids": ["row-1"],
-        "debug_modes": debug_modes,
-    }
+    origin_metadata = episode["origin_metadata"]
+    assert origin_metadata["platform"] == "debug"
+    assert origin_metadata["platform_message_id"] == "message-1"
+    assert origin_metadata["active_turn_platform_message_ids"] == ["message-1"]
+    assert origin_metadata["active_turn_conversation_row_ids"] == ["row-1"]
+    assert origin_metadata["debug_modes"] == debug_modes
+    assert origin_metadata["debug_controls"] == debug_modes
     assert episode["target_scope"] == {
         "platform": "debug",
         "platform_channel_id": "channel-1",

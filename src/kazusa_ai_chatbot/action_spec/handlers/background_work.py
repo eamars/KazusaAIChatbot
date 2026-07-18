@@ -16,6 +16,7 @@ from kazusa_ai_chatbot.action_spec.models import (
     validate_action_spec,
 )
 from kazusa_ai_chatbot.action_spec.registry import (
+    ACCEPTED_TASK_REQUEST_CAPABILITY,
     ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
     BACKGROUND_WORK_REQUEST_CAPABILITY,
     FUTURE_SPEAK_CAPABILITY,
@@ -171,6 +172,55 @@ def validate_future_speak_action(
     return validated
 
 
+def validate_accepted_task_request_action(
+    action_spec: dict[str, Any],
+) -> dict[str, Any]:
+    """Validate one private durable accepted-task request."""
+
+    validated = validate_action_spec(action_spec)
+    if validated["kind"] != ACCEPTED_TASK_REQUEST_CAPABILITY:
+        raise ActionValidationError("kind: expected accepted_task_request")
+    if validated["visibility"] != "private":
+        raise ActionValidationError("visibility: expected private")
+    if validated["urgency"] != "background":
+        raise ActionValidationError("urgency: expected background")
+
+    target = validated["target"]
+    if target["owner"] != "accepted_task":
+        raise ActionValidationError("owner: expected accepted_task")
+    if target["target_kind"] != "current_user":
+        raise ActionValidationError("target_kind: expected current_user")
+    if target["target_id"] is not None:
+        raise ActionValidationError("target_id: expected null")
+    scope = target["scope"]
+    for field_name in _REQUIRED_DELIVERY_TARGET_SCOPE_FIELDS:
+        _require_non_empty_scope(scope, field_name)
+    _require_user_message_source(scope)
+
+    params = validated["params"]
+    forbidden_params = sorted(
+        field_name
+        for field_name in params
+        if field_name in _FORBIDDEN_WORKER_LOCAL_PARAMS
+    )
+    if forbidden_params:
+        raise ActionValidationError(
+            "params: worker-local fields are not allowed: "
+            f"{', '.join(forbidden_params)}"
+        )
+    if params.get("requested_delivery") != BACKGROUND_WORK_REQUESTED_DELIVERY:
+        raise ActionValidationError("requested_delivery: unsupported value")
+    _require_non_empty_param(params, "task_brief")
+    max_output_chars = params.get("max_output_chars")
+    if not isinstance(max_output_chars, int):
+        raise ActionValidationError("max_output_chars: expected integer")
+    if max_output_chars < 1:
+        raise ActionValidationError("max_output_chars: expected positive integer")
+    if max_output_chars > BACKGROUND_WORK_OUTPUT_CHAR_LIMIT:
+        raise ActionValidationError("max_output_chars: exceeds configured limit")
+    return validated
+
+
 def validate_accepted_coding_task_action(
     action_spec: dict[str, Any],
 ) -> dict[str, Any]:
@@ -268,6 +318,33 @@ async def enqueue_background_work_action(
         enqueue_background_work_func=enqueue_background_work_func,
     )
     return result
+
+
+async def enqueue_accepted_task_request_action(
+    action_spec: dict[str, Any],
+    *,
+    storage_timestamp_utc: str,
+    action_attempt_id: str,
+    enqueue_background_work_func: BackgroundWorkEnqueueFunc | None = None,
+) -> BackgroundWorkQueueResult:
+    """Persist one explicit accepted-task request."""
+
+    validated = validate_accepted_task_request_action(action_spec)
+    params = validated["params"]
+    task_brief = _param_text(params, "task_brief")
+    return await _create_or_queue_accepted_task(
+        validated,
+        storage_timestamp_utc=storage_timestamp_utc,
+        action_attempt_id=action_attempt_id,
+        action_kind=ACCEPTED_TASK_REQUEST_CAPABILITY,
+        accepted_task_seed=task_brief,
+        accepted_task_detail=task_brief,
+        accepted_task_summary=task_brief,
+        requested_worker="",
+        worker_payload={},
+        enqueue_background_work_func=enqueue_background_work_func,
+        task_brief=task_brief,
+    )
 
 
 async def enqueue_accepted_coding_task_action(

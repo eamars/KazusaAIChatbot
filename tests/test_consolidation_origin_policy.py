@@ -37,14 +37,14 @@ def _origin(
         Consolidation origin metadata with no percept or prompt content.
     """
     if input_sources is None:
-        input_sources = ["dialog_text"]
+        input_sources = ["dialog", "system_event"]
     active_input_sources = list(input_sources)
     origin: ConsolidationOriginMetadata = {
         "episode_id": "episode-1",
         "trigger_source": trigger_source,
         "input_sources": active_input_sources,
         "output_mode": output_mode,
-        "timestamp": "2026-05-10T09:00:00+12:00",
+        "storage_timestamp_utc": "2026-05-10T09:00:00+12:00",
         "platform": "qq",
         "platform_channel_id": "channel-1",
         "channel_type": "group",
@@ -77,7 +77,7 @@ def _assert_all_decisions(
 
 
 def test_user_message_dialog_text_allows_all_write_categories() -> None:
-    """Current text-chat origins should preserve all existing writer effects."""
+    """Canonical text-chat origins preserve all existing writer effects."""
     policy = build_consolidation_write_policy(origin=_origin())
 
     _assert_all_decisions(
@@ -90,9 +90,14 @@ def test_user_message_dialog_text_allows_all_write_categories() -> None:
 def test_user_message_multimodal_inputs_allow_all_write_categories() -> None:
     """Image/audio observations remain user-message chat inputs."""
     supported_inputs = [
-        ["dialog_text", "image_observation"],
-        ["dialog_text", "audio_observation"],
-        ["dialog_text", "image_observation", "audio_observation"],
+        ["dialog", "image_observation", "system_event"],
+        ["dialog", "audio_observation", "system_event"],
+        [
+            "dialog",
+            "image_observation",
+            "audio_observation",
+            "system_event",
+        ],
     ]
 
     for input_sources in supported_inputs:
@@ -107,12 +112,12 @@ def test_user_message_multimodal_inputs_allow_all_write_categories() -> None:
         )
 
 
-def test_reflection_signal_origin_denies_all_write_categories() -> None:
-    """Reflection origins should be denied until writes are explicitly enabled."""
+def test_scheduled_tick_wrong_profile_denies_all_write_categories() -> None:
+    """A scheduled source with the wrong percept profile fails closed."""
     policy = build_consolidation_write_policy(
         origin=_origin(
-            trigger_source="reflection_signal",
-            input_sources=["reflection_artifact"],
+            trigger_source="scheduled_tick",
+            input_sources=["reflection_run", "system_event"],
             output_mode="think_only",
         ),
     )
@@ -125,7 +130,7 @@ def test_internal_thought_origin_denies_all_write_categories() -> None:
     policy = build_consolidation_write_policy(
         origin=_origin(
             trigger_source="internal_thought",
-            input_sources=["internal_monologue"],
+            input_sources=["internal_thought", "system_event"],
             output_mode="think_only",
         ),
     )
@@ -138,7 +143,7 @@ def test_internal_thought_preview_origin_allows_all_write_categories() -> None:
     policy = build_consolidation_write_policy(
         origin=_origin(
             trigger_source="internal_thought",
-            input_sources=["internal_monologue"],
+            input_sources=["internal_thought", "system_event"],
             output_mode="preview",
         ),
     )
@@ -151,11 +156,15 @@ def test_internal_thought_preview_origin_allows_all_write_categories() -> None:
 
 
 def test_internal_thought_preview_rejects_extra_input_sources() -> None:
-    """Self-cognition consolidation supports only the internal monologue lane."""
+    """Self-cognition consolidation rejects extra source profiles."""
     policy = build_consolidation_write_policy(
         origin=_origin(
             trigger_source="internal_thought",
-            input_sources=["internal_monologue", "retrieved_memory"],
+            input_sources=[
+                "internal_thought",
+                "system_event",
+                "rag_memory_evidence",
+            ],
             output_mode="preview",
         ),
     )
@@ -166,10 +175,41 @@ def test_internal_thought_preview_rejects_extra_input_sources() -> None:
 def test_unsupported_input_denies_all_write_categories() -> None:
     """User-message origins with unsupported inputs should be denied."""
     policy = build_consolidation_write_policy(
-        origin=_origin(input_sources=["dialog_text", "retrieved_memory"]),
+        origin=_origin(
+            input_sources=["dialog", "system_event", "rag_memory_evidence"],
+        ),
     )
 
     _assert_all_decisions(policy, allowed=False, reason="origin_not_enabled")
+
+
+def test_private_canonical_sources_allow_all_write_categories() -> None:
+    """Native private source episodes enter the same consolidation lanes."""
+
+    cases = [
+        ("self_cognition", ["self_cognition", "system_event"]),
+        ("scheduled_tick", ["scheduled_event", "system_event"]),
+        ("tool_result", ["tool_result", "system_event"]),
+    ]
+
+    for trigger_source, input_sources in cases:
+        policy = build_consolidation_write_policy(
+            origin=_origin(
+                trigger_source=trigger_source,
+                input_sources=input_sources,
+                output_mode=(
+                    "preview"
+                    if trigger_source != "tool_result"
+                    else "visible_reply"
+                ),
+            ),
+        )
+        reason = {
+            "self_cognition": "self_cognition_same_path",
+            "scheduled_tick": "scheduled_tick_source",
+            "tool_result": "tool_result_source",
+        }[trigger_source]
+        _assert_all_decisions(policy, allowed=True, reason=reason)
 
 
 def test_preview_output_denies_all_write_categories() -> None:

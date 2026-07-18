@@ -133,6 +133,42 @@ def _consolidation_state() -> dict:
     return return_value
 
 
+def _settled_visible_trace() -> dict:
+    """Return a minimal canonical settled trace for consumer tests."""
+
+    return {
+        "schema_version": "episode_trace.v2",
+        "episode_id": "episode-001",
+        "trigger_source": "user_message",
+        "terminal_status": "completed_visible",
+        "cognition_refs": [],
+        "action_specs": [],
+        "action_results": [],
+        "surface_outputs": [{
+            "schema_version": "surface_output.v1",
+            "surface_kind": "text",
+            "visibility": "user_visible",
+            "action_attempt_id": None,
+            "fragments": ["ok"],
+            "artifact_refs": [],
+            "delivery_intent": "deliver_now",
+            "created_at": _CONSOLIDATION_TURN_CLOCK[
+                "storage_timestamp_utc"
+            ],
+        }],
+        "attempt_diagnostics": [],
+        "delivery_correlation": {
+            "schema_version": "delivery_correlation.v1",
+            "delivery_intent": "deliver_now",
+            "tracking_id": "delivery-001",
+            "receipt_status": "pending",
+            "receipt_ref": "",
+        },
+        "created_at": _CONSOLIDATION_TURN_CLOCK["storage_timestamp_utc"],
+        "settled_at": _CONSOLIDATION_TURN_CLOCK["storage_timestamp_utc"],
+    }
+
+
 def _boundary_profile() -> dict:
     """Return a complete character boundary-profile fixture.
 
@@ -259,14 +295,24 @@ def _post_turn_lifecycle_state() -> dict:
         }
     ]
     state["episode_trace"] = {
-        "schema_version": "episode_trace.v1",
+        "schema_version": "episode_trace.v2",
         "episode_id": "episode-001",
         "trigger_source": "user_message",
+        "terminal_status": "completed_visible",
         "cognition_refs": [],
         "action_specs": [],
         "action_results": [],
         "surface_outputs": state["surface_outputs"],
+        "attempt_diagnostics": [],
+        "delivery_correlation": {
+            "schema_version": "delivery_correlation.v1",
+            "delivery_intent": "deliver_now",
+            "tracking_id": "delivery-001",
+            "receipt_status": "pending",
+            "receipt_ref": "",
+        },
         "created_at": state["storage_timestamp_utc"],
+        "settled_at": state["storage_timestamp_utc"],
     }
     return state
 
@@ -335,6 +381,11 @@ def _patch_chat_dependencies(
     )
     monkeypatch.setattr(
         service_module,
+        "build_promoted_reflection_context",
+        AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        service_module,
         "_hydrate_reply_context",
         AsyncMock(return_value={}),
     )
@@ -392,6 +443,11 @@ def _patch_chat_dependencies(
         service_module,
         "save_conversation",
         AsyncMock(return_value="conversation-row-1"),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "upsert_post_turn_lifecycle_record",
+        AsyncMock(),
     )
     if patch_post_turn_lifecycle:
         monkeypatch.setattr(
@@ -1079,7 +1135,7 @@ async def test_post_turn_lifecycle_iterates_after_productive_passes() -> None:
         APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
         APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     ]
-    assert updated["episode_trace"]["action_results"] == updated["action_results"]
+    assert updated["episode_trace"]["action_results"] == []
     assert [
         action_spec["params"]["unit_id"]
         for action_spec in updated["action_specs"]
@@ -1581,6 +1637,7 @@ async def test_progress_background_passes_character_boundary_profile(monkeypatch
     """Progress recorder receives the character boundary profile from the snapshot."""
 
     state = _consolidation_state()
+    state["episode_trace"] = _settled_visible_trace()
     boundary_profile = _boundary_profile()
     state["character_profile"]["boundary_profile"] = boundary_profile
     record_turn_progress = AsyncMock(return_value={
@@ -1609,6 +1666,7 @@ async def test_progress_background_requires_character_boundary_profile(monkeypat
     """Missing character boundary configuration is a state-shape bug."""
 
     state = _consolidation_state()
+    state["episode_trace"] = _settled_visible_trace()
     record_turn_progress = AsyncMock()
     monkeypatch.setattr(
         service_module,

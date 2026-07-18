@@ -41,6 +41,7 @@ from kazusa_ai_chatbot.db.schemas import (
     CalendarRunDoc,
     CalendarScheduleDoc,
     CharacterProfileDoc,
+    CharacterProfileSeedV1,
     CharacterReflectionRunDoc,
     ConversationEpisodeEntryDoc,
     ConversationEpisodeStateDoc,
@@ -49,6 +50,8 @@ from kazusa_ai_chatbot.db.schemas import (
     GlobalCharacterGrowthTraitDoc,
     InternalMonologueResidueDoc,
     InternalMonologueResidueSourceRefDoc,
+    InternalActionLatchClaimV1,
+    InternalActionLatchV1,
     InteractionStyleImageDoc,
     InteractionStyleOverlayDoc,
     InteractionStyleScopeType,
@@ -62,6 +65,7 @@ from kazusa_ai_chatbot.db.schemas import (
     ScheduledEventDoc,
     SelfCognitionActionAttemptDoc,
     SelfCognitionGroupReviewWindowDoc,
+    PostTurnLifecycleRecordV1,
     UserMemoryContextDoc,
     UserMemoryContextEntry,
     UserMemoryUnitDoc,
@@ -167,6 +171,7 @@ from kazusa_ai_chatbot.db.user_memory_units import (
 from kazusa_ai_chatbot.db.character import (
     RUNTIME_CHARACTER_STATE_FIELDS,
     compose_character_profile,
+    ensure_character_profile_seed,
     get_character_cognition_state,
     get_character_profile,
     get_character_runtime_state,
@@ -175,6 +180,19 @@ from kazusa_ai_chatbot.db.character import (
     save_character_profile,
     split_character_profile_runtime_state,
     upsert_character_self_image,
+)
+from kazusa_ai_chatbot.db.internal_action_latches import (
+    claim_due_internal_action_latch,
+    consume_internal_action_latch,
+    ensure_internal_action_latch_indexes,
+    expire_due_internal_action_latches,
+    fail_internal_action_latch,
+    issue_internal_action_latch,
+    release_internal_action_latch,
+)
+from kazusa_ai_chatbot.db.post_turn_lifecycle import (
+    ensure_post_turn_lifecycle_record_indexes,
+    upsert_post_turn_lifecycle_record,
 )
 
 from kazusa_ai_chatbot.db.self_cognition import (
@@ -244,13 +262,16 @@ __all__ = [
     "get_text_embedding", "get_text_embeddings_batch",
     # Schemas
     "AttachmentDoc", "CalendarRunDoc", "CalendarScheduleDoc",
-    "CharacterProfileDoc", "CharacterReflectionRunDoc",
+    "CharacterProfileDoc", "CharacterProfileSeedV1",
+    "CharacterReflectionRunDoc",
     "ConversationEpisodeEntryDoc", "ConversationEpisodeStateDoc",
     "ConversationMessageDoc", "GlobalCharacterGrowthRunDoc",
     "GlobalCharacterGrowthTraitDoc", "InteractionStyleImageDoc",
     "InternalMonologueResidueDoc", "InternalMonologueResidueSourceRefDoc",
+    "InternalActionLatchClaimV1", "InternalActionLatchV1",
     "InteractionStyleOverlayDoc", "InteractionStyleScopeType",
     "InteractionStyleStatus", "MemoryDoc", "MentionDoc",
+    "PostTurnLifecycleRecordV1",
     "PlatformAccountDoc", "RAGCache2PersistentEntryDoc",
     "ReflectionMessageRefDoc", "ReflectionScopeDoc",
     "ScheduledEventDoc", "SelfCognitionActionAttemptDoc",
@@ -312,12 +333,20 @@ __all__ = [
     # Character
     "RUNTIME_CHARACTER_STATE_FIELDS",
     "compose_character_profile",
+    "ensure_character_profile_seed",
     "get_character_cognition_state",
     "get_character_profile", "get_character_runtime_state",
     "get_character_state", "save_character_profile",
     "replace_character_cognition_state",
     "split_character_profile_runtime_state",
     "upsert_character_self_image",
+    # Internal action latches and post-turn lifecycle
+    "claim_due_internal_action_latch", "consume_internal_action_latch",
+    "ensure_internal_action_latch_indexes", "expire_due_internal_action_latches",
+    "fail_internal_action_latch", "issue_internal_action_latch",
+    "release_internal_action_latch",
+    "ensure_post_turn_lifecycle_record_indexes",
+    "upsert_post_turn_lifecycle_record",
     # Memory
     "enable_memory_vector_index", "get_active_promises", "save_memory", "search_memory",
     # Self-cognition action attempts

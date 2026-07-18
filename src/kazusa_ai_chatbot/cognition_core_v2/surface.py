@@ -157,7 +157,7 @@ def _project_episode(episode: Mapping[str, Any]) -> dict[str, Any]:
     """Project visible typed percepts and configured-local time for L3."""
 
     visible_percepts = project_model_visible_percepts(episode)
-    local_time = episode["local_time_context"]
+    local_time = _canonical_local_time_context(episode)
     return {
         "visible_percepts": visible_percepts,
         "local_time_context": {
@@ -165,3 +165,22 @@ def _project_episode(episode: Mapping[str, Any]) -> dict[str, Any]:
             "current_local_weekday": local_time["current_local_weekday"],
         },
     }
+
+
+def _canonical_local_time_context(
+    episode: Mapping[str, Any],
+) -> Mapping[str, Any]:
+    """Extract the canonical local-time percept for surface prompts."""
+
+    for percept in episode["percepts"]:
+        if not isinstance(percept, Mapping):
+            continue
+        if percept.get("percept_kind") != "local_time_context":
+            continue
+        content = percept.get("content")
+        if not isinstance(content, Mapping):
+            continue
+        local_time = content.get("local_time_context")
+        if isinstance(local_time, Mapping):
+            return local_time
+    raise ValueError("canonical episode is missing local_time_context")

@@ -60,9 +60,8 @@ SYNTHETIC_USER_IDS = frozenset(
     (
         "self_cognition",
         "internal_thought",
-        "reflection_signal",
         "group_chat_review",
-        "scheduled_future_cognition",
+        "scheduled_tick",
         "orchestrator",
         "system",
         "internal",

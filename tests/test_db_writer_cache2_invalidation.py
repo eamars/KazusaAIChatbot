@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
+from kazusa_ai_chatbot.cognition_episode import build_user_message_episode
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     build_acquaintance_user_state,
     build_character_production_state,
@@ -30,24 +30,39 @@ def _consolidation_origin() -> dict:
     Returns:
         Valid user-message consolidation origin metadata.
     """
-    episode = build_text_chat_cognitive_episode(
+    episode = build_user_message_episode(
         episode_id="episode-1",
-        percept_id="percept-1",
-        storage_timestamp_utc=STORAGE_TIMESTAMP_UTC,
+        origin={
+            "platform": "qq",
+            "platform_message_id": "msg-1",
+            "active_turn_platform_message_ids": ["msg-1"],
+            "active_turn_conversation_row_ids": ["conversation-row-1"],
+        },
+        target_scope={
+            "platform": "qq",
+            "platform_channel_id": "chan-1",
+            "channel_type": "group",
+            "current_platform_user_id": "platform-user-1",
+            "current_global_user_id": "user-1",
+            "current_display_name": "User",
+            "target_addressed_user_ids": ["user-1"],
+            "target_broadcast": False,
+        },
+        dialog_percept={
+            "schema_version": "percept.v1",
+            "percept_kind": "dialog",
+            "source_kind": "dialog",
+            "source_id": "msg-1",
+            "content": {"semantic_text": "remember tea"},
+            "observed_at": STORAGE_TIMESTAMP_UTC,
+        },
+        media_percepts=[],
+        evidence_refs=[],
         local_time_context=local_time_context_from_storage_utc(
             STORAGE_TIMESTAMP_UTC,
         ),
-        user_input="remember tea",
-        platform="qq",
-        platform_channel_id="chan-1",
-        channel_type="group",
-        platform_message_id="msg-1",
-        platform_user_id="platform-user-1",
-        global_user_id="user-1",
-        user_name="User",
-        active_turn_platform_message_ids=["msg-1"],
-        active_turn_conversation_row_ids=["conversation-row-1"],
-        debug_modes={},
+        created_at=STORAGE_TIMESTAMP_UTC,
+        debug_controls={},
     )
     origin = build_user_message_consolidation_origin(episode=episode)
     assert origin["storage_timestamp_utc"] == STORAGE_TIMESTAMP_UTC

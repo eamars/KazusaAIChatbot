@@ -9,9 +9,7 @@ from time import perf_counter
 import httpx
 import pytest
 
-from kazusa_ai_chatbot.cognition_episode import (
-    build_text_chat_cognitive_episode,
-)
+from tests.cognition_core_v2_test_helpers import canonical_user_message_episode
 from kazusa_ai_chatbot.config import MSG_DECONTEXTUALIZER_LLM_BASE_URL
 from kazusa_ai_chatbot.nodes import persona_supervisor2_msg_decontexualizer as decontext
 from tests.llm_trace import write_llm_trace
@@ -211,7 +209,7 @@ async def test_live_decontextualizer_resolves_nested_direct_roles(
     del ensure_live_llm
     user_input = '请直接告诉我，你希望我下一步替你做什么。'
     state = _base_state(user_input)
-    state["cognitive_episode"] = build_text_chat_cognitive_episode(
+    state["cognitive_episode"] = canonical_user_message_episode(
         episode_id="nested-role-live-episode",
         percept_id="nested-role-live-percept",
         storage_timestamp_utc="2026-07-17T12:00:00+00:00",

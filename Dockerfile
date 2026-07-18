@@ -12,6 +12,7 @@ RUN pip install --no-cache-dir .
 
 COPY docs ./docs
 COPY personalities ./personalities
+ENV CHARACTER_PROFILE_PATH=/app/personalities/kazusa.json
 
 EXPOSE 8000
 

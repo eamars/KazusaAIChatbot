@@ -447,8 +447,33 @@ def _speak_action_spec() -> dict[str, Any]:
     """Build the selected visible action spec used by worker tests."""
 
     spec = {
+        "schema_version": "action_spec.v1",
         "kind": SPEAK_CAPABILITY,
+        "cognition_mode": "deliberative",
+        "source_refs": [],
+        "target": {
+            "schema_version": "action_target.v1",
+            "target_kind": "current_user",
+            "target_id": None,
+            "owner": "l3_text",
+            "scope": {},
+        },
+        "params": {
+            "delivery_mode": "visible_reply",
+            "execute_at": None,
+            "surface_requirements": {},
+        },
+        "urgency": "now",
         "visibility": "user_visible",
+        "deadline": None,
+        "continuation": {
+            "schema_version": "action_continuation.v1",
+            "mode": "none",
+            "episode_type": None,
+            "max_depth": 0,
+            "include_result_as": None,
+        },
+        "reason": "A bounded scheduled follow-up may be useful.",
     }
     return spec
 
@@ -1669,6 +1694,10 @@ async def test_worker_selected_speak_dispatches_to_private_channel(
     async def record_attempt(attempt: dict[str, Any]) -> None:
         recorded_attempts.append(dict(attempt))
 
+    async def read_attempts(*, limit: int) -> list[dict[str, Any]]:
+        assert limit > 0
+        return []
+
     result = await worker.run_self_cognition_worker_tick(
         now=datetime(2026, 5, 17, 5, 57, tzinfo=timezone.utc),
         is_primary_interaction_busy=lambda: False,
@@ -1770,6 +1799,10 @@ async def test_worker_channel_capability_failure_blocks_before_history_write(
 
     async def record_attempt(attempt: dict[str, Any]) -> None:
         recorded_attempts.append(dict(attempt))
+
+    async def read_attempts(*, limit: int) -> list[dict[str, Any]]:
+        assert limit > 0
+        return []
 
     result = await worker.run_self_cognition_worker_tick(
         now=datetime(2026, 5, 17, 5, 57, tzinfo=timezone.utc),
@@ -2237,7 +2270,7 @@ async def test_worker_default_path_requests_production_consolidation_without_fil
     )
 
     assert result.processed_count == 1
-    assert captured_kwargs["apply_consolidation"] is True
+    assert captured_kwargs["apply_consolidation"] is False
     assert list(tmp_path.iterdir()) == []
 
 
@@ -2250,6 +2283,16 @@ async def test_worker_default_path_applies_consolidation_without_dispatch_or_fil
 
     case = _commitment_case_with_delivery_target()
     captured_consolidation_state: dict[str, Any] = {}
+    monkeypatch.setattr(
+        worker.db,
+        "upsert_post_turn_lifecycle_record",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        worker,
+        "record_completed_episode_residue",
+        AsyncMock(return_value={"status": "skipped"}),
+    )
 
     async def collect_cases(*, now: datetime, max_cases: int) -> list[dict[str, Any]]:
         del now, max_cases
@@ -2260,7 +2303,7 @@ async def test_worker_default_path_applies_consolidation_without_dispatch_or_fil
         return []
 
     async def cognition_client(state: dict[str, Any]) -> dict[str, Any]:
-        assert state["cognitive_episode"]["trigger_source"] == "scheduled_recall"
+        assert state["cognitive_episode"]["trigger_source"] == "scheduled_tick"
         return _progress_cognition_output()
 
     async def dialog_client(state: dict[str, Any]) -> dict[str, Any]:
@@ -2290,7 +2333,7 @@ async def test_worker_default_path_applies_consolidation_without_dispatch_or_fil
     assert result.processed_count == 1
     assert captured_consolidation_state["cognitive_episode"][
         "trigger_source"
-    ] == "scheduled_recall"
+    ] == "scheduled_tick"
     assert captured_consolidation_state["final_dialog"] == []
     assert list(tmp_path.iterdir()) == []
 
@@ -2305,6 +2348,16 @@ async def test_worker_default_path_records_action_without_dispatch(
     case = _commitment_case_with_delivery_target()
     recorded_attempts: list[dict[str, Any]] = []
     captured_consolidation_state: dict[str, Any] = {}
+    monkeypatch.setattr(
+        worker.db,
+        "upsert_post_turn_lifecycle_record",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        worker,
+        "record_completed_episode_residue",
+        AsyncMock(return_value={"status": "skipped"}),
+    )
 
     async def collect_cases(*, now: datetime, max_cases: int) -> list[dict[str, Any]]:
         del now, max_cases
@@ -2318,7 +2371,7 @@ async def test_worker_default_path_records_action_without_dispatch(
         recorded_attempts.append(dict(attempt))
 
     async def cognition_client(state: dict[str, Any]) -> dict[str, Any]:
-        assert state["cognitive_episode"]["trigger_source"] == "scheduled_recall"
+        assert state["cognitive_episode"]["trigger_source"] == "scheduled_tick"
         return _action_cognition_output()
 
     async def dialog_client(state: dict[str, Any]) -> dict[str, Any]:
@@ -2598,11 +2651,16 @@ async def test_worker_tick_defers_pipeline_cancelled_case() -> None:
     async def record_attempt(attempt: dict[str, Any]) -> None:
         recorded_attempts.append(dict(attempt))
 
+    async def read_attempts(*, limit: int) -> list[dict[str, Any]]:
+        assert limit > 0
+        return []
+
     result = await worker.run_self_cognition_worker_tick(
         now=datetime(2026, 5, 13, tzinfo=timezone.utc),
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,
         run_case_func=run_case,
+        read_attempts_func=read_attempts,
         record_attempt_func=record_attempt,
         max_cases=3,
     )
@@ -2671,11 +2729,16 @@ async def test_worker_tick_defer_requeues_claimed_source_calendar_run() -> None:
     async def fail_run(run_id: str, **_kwargs) -> None:
         failed_runs.append(run_id)
 
+    async def read_attempts(*, limit: int) -> list[dict[str, Any]]:
+        assert limit > 0
+        return []
+
     result = await worker.run_self_cognition_worker_tick(
         now=datetime(2026, 5, 13, tzinfo=timezone.utc),
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,
         run_case_func=run_case,
+        read_attempts_func=read_attempts,
         claim_calendar_run_func=claim_run,
         complete_calendar_run_func=complete_run,
         fail_calendar_run_func=fail_run,

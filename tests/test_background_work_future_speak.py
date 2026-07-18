@@ -256,7 +256,7 @@ async def test_worker_tick_dispatches_requested_future_speak_worker(
     )
     monkeypatch.setattr(
         worker_module,
-        "mark_accepted_task_result_ready",
+        "mark_tool_result_ready",
         mark_result_ready_mock,
     )
     monkeypatch.setattr(

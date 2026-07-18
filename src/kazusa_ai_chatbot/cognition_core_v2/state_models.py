@@ -119,7 +119,7 @@ EVIDENCE_SOURCE_KINDS = (
     "episode",
     "action_result",
     "resolver_observation",
-    "accepted_task_result",
+    "tool_result",
     "scheduler_event",
     "promoted_memory",
     "promoted_reflection",
@@ -440,16 +440,14 @@ def resolve_state_scope(
 
     user_required_callers = {
         "persona_user_message",
-        "accepted_task_result_ready",
+        "tool_result",
         "background_result",
         "group_sender",
     }
-    user_optional_callers = {"self_cognition", "scheduler", "recall"}
+    user_optional_callers = {"self_cognition", "scheduled_tick"}
     character_callers = {
         "reflection",
-        "reflection_dry_run",
-        "internal_thought_cognition",
-        "system_probe",
+        "internal_thought",
     }
     if caller in user_required_callers:
         if not target_user_id:

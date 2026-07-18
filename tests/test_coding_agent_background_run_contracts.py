@@ -220,7 +220,7 @@ def test_coding_approval_rejects_non_user_or_mismatched_evidence() -> None:
 
     action_spec = _materialized_coding_action("approve_and_verify")
     action_spec["params"]["approval_evidence"]["source_trigger_source"] = (
-        "accepted_task_result_ready"
+        "tool_result"
     )
     non_user_result = ActionSpecEvaluator().evaluate(action_spec)
 
@@ -928,7 +928,7 @@ async def test_worker_tick_dispatches_requested_coding_worker(
     mark_result_ready = AsyncMock()
     monkeypatch.setattr(
         worker_module,
-        "mark_accepted_task_result_ready",
+        "mark_tool_result_ready",
         mark_result_ready,
     )
     monkeypatch.setattr(

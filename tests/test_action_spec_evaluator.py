@@ -7,8 +7,12 @@ import json
 import pytest
 
 from kazusa_ai_chatbot.action_spec.evaluator import ActionSpecEvaluator
+from kazusa_ai_chatbot.action_spec.execution import (
+    execute_action_specs_for_trace,
+)
 from kazusa_ai_chatbot.action_spec.registry import (
     ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
+    ACCEPTED_TASK_REQUEST_CAPABILITY,
     ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
     APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     BACKGROUND_WORK_REQUEST_CAPABILITY,
@@ -16,6 +20,7 @@ from kazusa_ai_chatbot.action_spec.registry import (
     MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     SPEAK_CAPABILITY,
     TRIGGER_FUTURE_COGNITION_CAPABILITY,
+    build_runtime_capability_snapshot,
     build_initial_action_capabilities,
     project_prompt_affordances,
 )
@@ -197,6 +202,7 @@ def test_initial_registry_contains_only_approved_runtime_capabilities() -> None:
     capabilities = build_initial_action_capabilities()
 
     assert set(capabilities) == {
+        ACCEPTED_TASK_REQUEST_CAPABILITY,
         ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
         ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
         BACKGROUND_WORK_REQUEST_CAPABILITY,
@@ -564,6 +570,25 @@ def test_background_work_request_rejects_worker_local_params() -> None:
 
     assert result["ok"] is False
     assert any("worker-local" in error for error in result["errors"])
+
+
+@pytest.mark.asyncio
+async def test_action_execution_rechecks_runtime_availability_before_effects() -> None:
+    """An outage becomes a typed rejection before its handler runs."""
+
+    results = await execute_action_specs_for_trace(
+        [_background_work_action_spec()],
+        storage_timestamp_utc="2026-05-07T00:00:00+00:00",
+        availability_snapshot_factory=(
+            lambda _context: build_runtime_capability_snapshot(
+                route_health={"background_work": "down"},
+            )
+        ),
+    )
+
+    assert len(results) == 1
+    assert results[0]["status"] == "rejected"
+    assert "route_unavailable" in results[0]["result_summary"]
 
 
 @pytest.mark.parametrize(

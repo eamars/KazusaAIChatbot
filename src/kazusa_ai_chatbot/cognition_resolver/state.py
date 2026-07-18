@@ -176,16 +176,22 @@ def ensure_initial_resolver_inputs(
                     for percept in percepts:
                         if not isinstance(percept, dict):
                             continue
-                        input_source = percept.get("input_source")
-                        visibility = percept.get("visibility")
+                        source_kind = percept.get("source_kind")
                         content = percept.get("content")
-                        if input_source != "image_observation":
+                        if source_kind != "image_observation":
                             continue
-                        if visibility != "model_visible":
+                        if not isinstance(content, dict):
                             continue
-                        if not isinstance(content, str) or not content.strip():
+                        if content.get("visibility", "model_visible") != (
+                            "model_visible"
+                        ):
                             continue
-                        image_summary = content.strip()
+                        image_summary = content.get("description")
+                        if not isinstance(image_summary, str):
+                            continue
+                        image_summary = image_summary.strip()
+                        if not image_summary:
+                            continue
                         decontexualized_input = (
                             f'当前输入包含图片观察：{image_summary}'
                         )

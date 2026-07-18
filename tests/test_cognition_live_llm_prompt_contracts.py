@@ -6,7 +6,10 @@ import logging
 import httpx
 import pytest
 
-from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
+from kazusa_ai_chatbot.cognition_episode import (
+    project_text_chat_compatibility_fields,
+)
+from tests.cognition_core_v2_test_helpers import canonical_user_message_episode
 from kazusa_ai_chatbot.time_boundary import (
     build_turn_clock_from_storage_utc,
     storage_utc_now_iso,
@@ -103,7 +106,7 @@ def _text_chat_episode(
     """Build a valid text-chat episode for direct live node calls."""
 
     turn_clock = build_turn_clock_from_storage_utc(storage_timestamp_utc)
-    episode = build_text_chat_cognitive_episode(
+    episode = canonical_user_message_episode(
         episode_id="live-prompt-contracts-episode",
         percept_id="live-prompt-contracts-percept",
         storage_timestamp_utc=turn_clock["storage_timestamp_utc"],
@@ -190,7 +193,9 @@ def _make_state(
     state = {
         "character_profile": _build_character_profile(),
         "storage_timestamp_utc": storage_timestamp_utc,
-        "local_time_context": cognitive_episode["local_time_context"],
+        "local_time_context": project_text_chat_compatibility_fields(
+            cognitive_episode,
+        )["local_time_context"],
         "cognitive_episode": cognitive_episode,
         "user_input": user_input,
         "global_user_id": global_user_id,

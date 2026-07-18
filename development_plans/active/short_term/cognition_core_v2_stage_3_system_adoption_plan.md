@@ -6,7 +6,7 @@
   Core V2 episode, action, surface, trace, and persistence contracts when the
   service starts against an empty database.
 - Plan class: high_risk_migration.
-- Status: draft.
+- Status: in_progress.
 - Mandatory skills: `development-plan`, `py-style`,
   `test-style-and-execution`, `local-llm-architecture`,
   `no-prepost-user-input`, `cjk-safety`, `debug-llm`, `character-test`, and
@@ -27,8 +27,8 @@
   [cognition_core_v2_stage_3_change_radius.md](cognition_core_v2_stage_3_change_radius.md).
   Their contracts, exact inventory, budgets, and commands are part of this
   plan and carry the same approval boundary.
-- Planning authority: this turn is documentation-only. The user explicitly
-  withholds Stage 3 implementation authority.
+- Execution authority: the user explicitly authorized Stage 3 implementation
+  on 2026-07-19.
 
 ## Context
 
@@ -436,14 +436,14 @@ required order is:
 
 ## Progress Checklist
 
-- [ ] A — baseline and focused contracts established.
+- [x] A — baseline and focused contracts established.
   - Files/steps: execution companion A1-A6; focused Stage 3 tests only.
   - Verify: exact A commands in the execution companion fail for the expected missing
     contract, and DB guards pass without starting the service.
   - Evidence: changed-file baseline, occurrence inventory, call/latency
     baseline, DB fingerprints, expected test failures.
   - Handoff: start Checkpoint B and the production-code subagent.
-  - Sign-off: `<parent/date>` after evidence is recorded.
+  - Sign-off: `parent/2026-07-19`.
 - [ ] B — profile bootstrap and native database base complete.
   - Files/steps: execution companion B1-B8.
   - Verify: profile/config/bootstrap focused tests and cold-start bootstrap.
@@ -503,6 +503,11 @@ required order is:
     user quality decision, lifecycle update.
   - Handoff: archive Stage 3 only after all findings and user gates close.
   - Sign-off: `<parent/reviewer/user/date>`.
+
+Current execution evidence and external gate status are recorded in
+`test_artifacts/cognition_core_v2/stage_3/checkpoint_i_verification_summary.md`.
+Deterministic implementation gates are green. Fresh-database, real-LLM,
+40-case quality, in-app Browser, and final user sign-off remain open.
 
 ## Verification
 
@@ -625,15 +630,29 @@ amendment and approval.
   change-radius, and Stage 4 inventory blockers were incorporated. Its final
   re-review then identified boundary-enum, post-turn-record, action-roster,
   source-owner, and latch-API gaps; those are corrected in this revision. Per
-  the user's instruction, further agent review has stopped. The plan remains
-  draft pending user disposition.
-- Focused test baseline: pending implementation authority.
-- Fresh-database guard and bootstrap: pending.
-- Deterministic tests: pending.
-- Live database and restart: pending.
-- Sequential real-LLM review: pending.
-- Call/context/latency ledger: pending.
-- Control-console/browser review: pending.
-- Native schema manifest and Stage 4 handoff: pending.
-- Independent code review: pending.
+  the user's instruction, further agent review has stopped. The user authorized
+  execution on 2026-07-19; implementation is now in progress.
+- Focused test baseline: Checkpoint A recorded 15 expected contract failures and
+  5 fresh-database guard passes in
+  `test_artifacts/cognition_core_v2/stage_3/checkpoint_a_focused_tests_baseline.txt`.
+- Checkpoint A occurrence inventory and pre-service environment guard evidence
+  are recorded under `test_artifacts/cognition_core_v2/stage_3/`.
+- Checkpoint A call/latency baseline is recorded in
+  `test_artifacts/cognition_core_v2/stage_3/checkpoint_a_call_latency_baseline.md`.
+- Fresh-database bootstrap contracts and safe report/native-manifest generation:
+  verified; guarded live cold-start/restart remains pending.
+- Deterministic tests and static gates: current evidence is recorded in
+  `test_artifacts/cognition_core_v2/stage_3/checkpoint_i_verification_summary.md`.
+- Live database and restart: pending because the dedicated Stage 3 endpoint
+  and fingerprint guards are not configured.
+- Sequential real-LLM review: eight required cases were invoked individually
+  and guarded-skipped; real quality review remains pending.
+- Call/context/latency ledger: harness implementation is verified; the
+  40-case ledger remains pending until the guarded run executes.
+- Control-console/browser review: API and external Playwright E2E are green;
+  in-app Browser acceptance remains pending because no session is available.
+- Native schema manifest and Stage 4 handoff: schema-manifest generation is
+  verified; final handoff remains pending until H/I/J close.
+- Independent code review: completed by `Hilbert`; remediation and affected
+  reruns are recorded in the Stage 3 verification summary.
 - User sign-off: pending.

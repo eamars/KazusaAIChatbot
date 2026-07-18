@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Literal, TypedDict
 
 from kazusa_ai_chatbot.cognition_core_v2.contracts import RoleRefV2
@@ -177,6 +178,57 @@ class CapabilitySpecV1(TypedDict):
     rate_limit_policy: PolicyRefV1
     audit_policy: PolicyRefV1
     prompt_projection_policy: PolicyRefV1
+
+
+class AvailabilityProbeResultV1(TypedDict):
+    """Deterministic availability result for one capability probe."""
+
+    status: Literal["available", "degraded", "unavailable"]
+    reason_code: str
+    checked_at: str
+    expires_at: str
+
+
+class RuntimeCapabilitySnapshotV1(TypedDict):
+    """Side-effect-free runtime capability health snapshot."""
+
+    checked_at: str
+    expires_at: str
+    route_health: Mapping[str, str]
+    repository_access: Mapping[str, Literal["read_write", "read_only", "down"]]
+    worker_status: Mapping[str, str]
+    scheduler_status: str
+    adapter_target_status: Mapping[str, str]
+    coding_workspace_status: str
+    permissions: Mapping[str, bool]
+
+
+class ActionAvailabilityContextV1(TypedDict, total=False):
+    """Episode-local target and work-kind facts used by availability probes."""
+
+    source_kind: str
+    target_scope: Mapping[str, object]
+    requested_work_kind: str
+    permission_ref: str
+
+
+class AffordanceSpecV1(TypedDict):
+    """Prompt-safe current capability affordance."""
+
+    schema_version: Literal["affordance_spec.v1"]
+    capability_kind: str
+    owner: str
+    surface: str
+    availability: Literal["available", "unavailable", "degraded"]
+    visibility: Literal["private", "preview", "user_visible"]
+    latency_tier: Literal["live", "background", "scheduled"]
+    cost_tier: Literal["none", "low", "medium", "high"]
+    risk_tier: Literal["low", "medium", "high"]
+    allowed_cognition_modes: list[Literal["deliberative", "reflex"]]
+    allowed_continuation_modes: list[str]
+    permission_policy: PolicyRefV1
+    params_summary: dict[str, str]
+    prompt_affordance: str
 
 
 class ActionSpecV1(TypedDict):

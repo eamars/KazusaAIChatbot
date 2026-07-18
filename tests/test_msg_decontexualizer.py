@@ -9,8 +9,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from kazusa_ai_chatbot.cognition_episode import (
-    build_accepted_task_result_ready_cognitive_episode,
-    build_text_chat_cognitive_episode,
+    build_tool_result_episode,
+    build_user_message_episode,
 )
 from kazusa_ai_chatbot.nodes import (
     persona_supervisor2_msg_decontexualizer as decontextualizer_module,
@@ -118,22 +118,38 @@ def _multimedia_state() -> dict:
         "reply_context": {},
         "debug_modes": {},
     }
-    state["cognitive_episode"] = build_text_chat_cognitive_episode(
+    state["cognitive_episode"] = build_user_message_episode(
         episode_id="episode-msg_123",
-        percept_id="percept-msg_123-dialog",
-        storage_timestamp_utc=state["storage_timestamp_utc"],
+        origin={
+            "platform": state["platform"],
+            "platform_message_id": state["platform_message_id"],
+        },
+        target_scope={
+            "platform": state["platform"],
+            "platform_channel_id": state["platform_channel_id"],
+            "channel_type": state["channel_type"],
+            "current_platform_user_id": state["platform_user_id"],
+            "current_global_user_id": state["global_user_id"],
+            "current_display_name": state["user_name"],
+            "target_addressed_user_ids": [],
+            "target_broadcast": True,
+        },
+        dialog_percept={
+            "schema_version": "percept.v1",
+            "percept_kind": "dialog",
+            "source_kind": "dialog",
+            "source_id": "percept-msg_123-dialog",
+            "content": {
+                "semantic_text": state["user_input"],
+                "text": state["user_input"],
+            },
+            "observed_at": state["storage_timestamp_utc"],
+        },
+        media_percepts=[],
+        evidence_refs=[],
         local_time_context=local_time_context,
-        user_input=state["user_input"],
-        platform=state["platform"],
-        platform_channel_id=state["platform_channel_id"],
-        channel_type=state["channel_type"],
-        platform_message_id=state["platform_message_id"],
-        platform_user_id=state["platform_user_id"],
-        global_user_id=state["global_user_id"],
-        user_name=state["user_name"],
-        debug_modes=state["debug_modes"],
-        target_addressed_user_ids=[],
-        target_broadcast=True,
+        created_at=state["storage_timestamp_utc"],
+        debug_controls=state["debug_modes"],
     )
     return state
 
@@ -150,7 +166,12 @@ async def test_decontextualizer_attaches_role_explicit_meaning_to_episode():
     state["prompt_message_context"]["body_text"] = user_input
     state["message_envelope"]["body_text"] = user_input
     state["message_envelope"]["raw_wire_text"] = user_input
-    state["cognitive_episode"]["percepts"][0]["content"] = user_input
+    state["cognitive_episode"]["percepts"][0]["content"]["semantic_text"] = (
+        user_input
+    )
+    state["cognitive_episode"]["percepts"][0]["content"]["text"] = (
+        user_input
+    )
     role_explicit_content = (
         "当前用户要求当前角色说出当前角色希望当前用户下一步做什么。"
     )
@@ -182,11 +203,11 @@ async def test_decontextualizer_attaches_role_explicit_meaning_to_episode():
         result = await call_msg_decontexualizer(state)
 
     dialog_percept = result["cognitive_episode"]["percepts"][0]
-    assert dialog_percept["content"] == user_input
-    assert dialog_percept["metadata"]["role_explicit_content"] == (
+    assert dialog_percept["content"]["semantic_text"] == user_input
+    assert dialog_percept["content"]["role_explicit_content"] == (
         role_explicit_content
     )
-    assert dialog_percept["metadata"]["response_operation"] == (
+    assert dialog_percept["content"]["response_operation"] == (
         response_operation
     )
 
@@ -199,27 +220,33 @@ async def test_decontextualizer_leaves_accepted_task_episode_source_owned():
     state["user_input"] = "Accepted task result is failed."
     state["channel_topic"] = ""
     state["indirect_speech_context"] = ""
-    state["cognitive_episode"] = (
-        build_accepted_task_result_ready_cognitive_episode(
-            episode_id="accepted-task-result-task-1",
-            percept_id="accepted-task-result-percept-task-1",
-            storage_timestamp_utc=state["storage_timestamp_utc"],
-            local_time_context=state["local_time_context"],
-            accepted_task_id="task-1",
-            accepted_task_summary="Run one task.",
-            artifact_text="",
-            failure_summary="Accepted task result is failed.",
-            result_summary="",
-            platform=state["platform"],
-            platform_channel_id=state["platform_channel_id"],
-            channel_type=state["channel_type"],
-            platform_message_id=state["platform_message_id"],
-            requester_platform_user_id=state["platform_user_id"],
-            requester_global_user_id=state["global_user_id"],
-            requester_display_name=state["user_name"],
-            source_platform_bot_id=state["platform_bot_id"],
-            source_character_name=state["character_profile"]["name"],
-        )
+    state["cognitive_episode"] = build_tool_result_episode(
+        result={
+            "schema_version": "tool_result_ready.v1",
+            "task_id": "task-1",
+            "task_kind": "accepted_task",
+            "semantic_summary": "Accepted task result is failed.",
+            "artifact_text": "",
+            "failure_text": "Accepted task result is failed.",
+            "completed_at": state["storage_timestamp_utc"],
+            "target_scope": {
+                "platform": state["platform"],
+                "platform_channel_id": state["platform_channel_id"],
+                "channel_type": state["channel_type"],
+                "current_platform_user_id": state["platform_user_id"],
+                "current_global_user_id": state["global_user_id"],
+                "current_display_name": state["user_name"],
+                "target_addressed_user_ids": [state["global_user_id"]],
+                "target_broadcast": False,
+            },
+            "evidence_refs": [],
+            "result_ref": "task-1",
+            "source_platform_bot_id": state["platform_bot_id"],
+            "source_character_name": state["character_profile"]["name"],
+        },
+        evidence_refs=[],
+        local_time_context=state["local_time_context"],
+        created_at=state["storage_timestamp_utc"],
     )
     llm_response = MagicMock()
     llm_response.content = json.dumps({

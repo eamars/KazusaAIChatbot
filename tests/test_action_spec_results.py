@@ -16,12 +16,13 @@ from kazusa_ai_chatbot.action_spec.registry import (
 )
 from kazusa_ai_chatbot.action_spec.results import (
     build_action_result,
-    build_episode_trace,
     build_private_surface_output,
     build_text_surface_output,
     has_consolidatable_output,
     project_episode_trace_for_consolidation,
 )
+from kazusa_ai_chatbot.brain_service.post_turn import settle_episode_trace
+from kazusa_ai_chatbot.cognition_episode import build_user_message_episode
 from kazusa_ai_chatbot.db import DatabaseOperationError
 
 
@@ -273,6 +274,7 @@ def test_background_work_job_ref_projects_prompt_safe_job_ref() -> None:
         "handler_owner": "background_work",
         "errors": [],
     }
+
     job_ref = {
         "schema_version": "evidence_ref.v1",
         "evidence_kind": "system_event",
@@ -290,10 +292,7 @@ def test_background_work_job_ref_projects_prompt_safe_job_ref() -> None:
         result_refs=[job_ref],
     )
 
-    trace = build_episode_trace(
-        episode_id="episode-001",
-        trigger_source="user_message",
-        created_at="2026-05-16T00:00:00+00:00",
+    trace = _settled_trace(
         action_specs=[action_spec],
         action_results=[result],
         surface_outputs=[],
@@ -306,6 +305,79 @@ def test_background_work_job_ref_projects_prompt_safe_job_ref() -> None:
     assert "params" not in serialized
     assert "source_channel_id" not in serialized
     assert "adapter" not in serialized.lower()
+
+
+def _settled_trace(
+    *,
+    action_specs: list[dict],
+    action_results: list[dict],
+    surface_outputs: list[dict],
+) -> dict:
+    """Settle one trace through the sole public trace owner."""
+
+    episode = build_user_message_episode(
+        episode_id="episode-001",
+        origin={
+            "platform": "debug",
+            "platform_message_id": "message-001",
+        },
+        target_scope={
+            "platform": "debug",
+            "platform_channel_id": "debug-private-1",
+            "channel_type": "private",
+            "current_platform_user_id": "debug-user-001",
+            "current_global_user_id": "global-user-001",
+            "current_display_name": "Test User",
+            "target_addressed_user_ids": ["global-user-001"],
+            "target_broadcast": False,
+        },
+        dialog_percept={
+            "schema_version": "percept.v1",
+            "percept_kind": "dialog",
+            "source_kind": "dialog",
+            "source_id": "message-001",
+            "content": {"semantic_text": "hello"},
+            "observed_at": "2026-05-16T00:00:00+00:00",
+        },
+        media_percepts=[],
+        evidence_refs=[],
+        local_time_context={
+            "current_local_datetime": "2026-05-16 12:00",
+            "current_local_weekday": "Saturday",
+        },
+        created_at="2026-05-16T00:00:00+00:00",
+        debug_controls={},
+    )
+    visible_surface = any(
+        output.get("visibility") == "user_visible"
+        and output.get("delivery_intent") == "deliver_now"
+        for output in surface_outputs
+    )
+    terminal_status = (
+        "completed_visible"
+        if visible_surface
+        else "completed_private"
+        if surface_outputs
+        else "completed_action"
+    )
+    delivery_correlation = {
+        "schema_version": "delivery_correlation.v1",
+        "delivery_intent": "deliver_now" if surface_outputs else "do_not_deliver",
+        "tracking_id": "delivery-001" if surface_outputs else "",
+        "receipt_status": "delivered" if surface_outputs else "not_applicable",
+        "receipt_ref": "receipt-001" if surface_outputs else "",
+    }
+    return settle_episode_trace(
+        episode=episode,
+        cognition_output=None,
+        action_specs=action_specs,
+        action_results=action_results,
+        surface_outputs=surface_outputs,
+        terminal_status=terminal_status,
+        attempt_diagnostics=[],
+        delivery_correlation=delivery_correlation,
+        settled_at="2026-05-16T00:00:01+00:00",
+    )
 
 
 def test_episode_trace_projection_omits_handler_ids_and_raw_params() -> None:
@@ -324,10 +396,7 @@ def test_episode_trace_projection_omits_handler_ids_and_raw_params() -> None:
         created_at="2026-05-16T00:00:00+00:00",
         action_attempt_id=action_result["action_attempt_id"],
     )
-    trace = build_episode_trace(
-        episode_id="episode-001",
-        trigger_source="user_message",
-        created_at="2026-05-16T00:00:00+00:00",
+    trace = _settled_trace(
         action_specs=[action_spec],
         action_results=[action_result],
         surface_outputs=[surface_output],
@@ -353,15 +422,37 @@ def test_private_surface_and_action_results_are_consolidatable() -> None:
         created_at="2026-05-16T00:00:00+00:00",
     )
 
+    private_trace = _settled_trace(
+        action_specs=[],
+        action_results=[],
+        surface_outputs=[private_surface],
+    )
+    action_trace = _settled_trace(
+        action_specs=[],
+        action_results=[{
+            "schema_version": "action_result.v1",
+            "action_attempt_id": "action_attempt:private-001",
+            "action_kind": "speak",
+            "handler_owner": "l3_text",
+            "status": "validated",
+            "visibility": "private",
+            "result_summary": "validated",
+            "result_refs": [],
+            "continuation": {
+                "schema_version": "action_continuation.v1",
+                "mode": "none",
+                "episode_type": None,
+                "max_depth": 0,
+                "include_result_as": None,
+            },
+            "completed_at": None,
+        }],
+        surface_outputs=[],
+    )
+
     assert has_consolidatable_output({"final_dialog": []}) is False
-    assert has_consolidatable_output({
-        "final_dialog": [],
-        "surface_outputs": [private_surface],
-    }) is True
-    assert has_consolidatable_output({
-        "final_dialog": [],
-        "action_results": [{"status": "validated"}],
-    }) is True
+    assert has_consolidatable_output(private_trace) is True
+    assert has_consolidatable_output(action_trace) is True
 
 
 @pytest.mark.asyncio

@@ -177,7 +177,27 @@ def test_connector_projects_full_registry_capacity() -> None:
     assert all(row["context_ref"] == "" for row in actions)
 
 
-@pytest.mark.parametrize("trigger_source", ["internal_thought", "scheduled_recall"])
+def test_connector_omits_capabilities_with_unavailable_runtime_routes() -> None:
+    """Cognition receives only capabilities admitted by deterministic probes."""
+
+    state = _global_state()
+    state["action_availability_runtime"] = {
+        "route_health": {"background_work": "down"},
+    }
+
+    actions = connector._available_action_affordances(state)
+
+    assert all(
+        row["action_kind"] != "background_work_request"
+        for row in actions
+    )
+    assert any(
+        row["action_kind"] == "accepted_task_status_check"
+        for row in actions
+    )
+
+
+@pytest.mark.parametrize("trigger_source", ["internal_thought", "scheduled_tick"])
 def test_connector_projects_future_cognition_for_private_sources(
     trigger_source: str,
 ) -> None:
@@ -187,7 +207,6 @@ def test_connector_projects_future_cognition_for_private_sources(
     state["cognitive_episode"] = canonical_episode(
         episode_id=f"private-{trigger_source}",
         trigger_source=trigger_source,
-        output_mode="think_only",
         content="Continue one grounded private cognition objective.",
     )
 
@@ -323,7 +342,7 @@ def test_connector_preserves_accepted_task_source_ownership() -> None:
     state = _global_state()
     state["cognitive_episode"] = canonical_episode(
         episode_id="accepted-task-episode",
-        trigger_source="accepted_task_result_ready",
+        trigger_source="tool_result",
         current_global_user_id="user-1",
         content="The requested report is ready.",
         metadata={
@@ -333,6 +352,7 @@ def test_connector_preserves_accepted_task_source_ownership() -> None:
             "failure_summary": "",
         },
     )
+    state["cognitive_episode"]["percepts"][0]["source_id"] = "task-1"
     payload = build_cognition_input_from_global_state(
         state,
         mutable_state=build_acquaintance_user_state(
@@ -342,7 +362,7 @@ def test_connector_preserves_accepted_task_source_ownership() -> None:
     )
 
     evidence = payload["evidence"][0]
-    assert evidence["evidence_ref"]["source_kind"] == "accepted_task_result"
+    assert evidence["evidence_ref"]["source_kind"] == "tool_result"
     assert evidence["evidence_ref"]["source_id"] == "task-1"
     assert evidence["visible_to"] == [
         "q:event_agency",

@@ -1341,7 +1341,7 @@ def _install_in_memory_persistence(
     monkeypatch.setattr(
         accepted_lifecycle,
         "repository_mark_result_ready",
-        store.mark_accepted_task_result_ready,
+        store.mark_tool_result_ready,
     )
     monkeypatch.setattr(
         accepted_lifecycle,

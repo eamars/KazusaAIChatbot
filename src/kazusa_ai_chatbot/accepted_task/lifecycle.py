@@ -28,7 +28,7 @@ from kazusa_ai_chatbot.db.accepted_tasks import (
     mark_accepted_task_enqueue_failed as repository_mark_enqueue_failed,
     mark_accepted_task_failure_ready as repository_mark_failure_ready,
     mark_accepted_task_pending as repository_mark_pending,
-    mark_accepted_task_result_ready as repository_mark_result_ready,
+    mark_tool_result_ready as repository_mark_result_ready,
     mark_accepted_task_running as repository_mark_running,
     recover_stale_delivery_in_progress_tasks as repository_recover_delivery,
     recover_stale_enqueueing_tasks as repository_recover_stale_enqueueing,
@@ -193,7 +193,7 @@ async def mark_accepted_task_running(
     return task
 
 
-async def mark_accepted_task_result_ready(
+async def mark_tool_result_ready(
     *,
     accepted_task_id: str,
     artifact_text: str,

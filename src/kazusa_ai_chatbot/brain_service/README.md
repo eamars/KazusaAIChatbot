@@ -589,7 +589,7 @@ materialized into an internal `background_work_request`, queued durably before
 selected L3 text runs, and projected back to L3 as semantic accepted-task state.
 Status checks use `accepted_task_status_check` and never enqueue a worker job.
 Completed accepted-task-backed jobs later return as
-`accepted_task_result_ready` cognitive episodes. Background-work workers must
+`tool_result` cognitive episodes. Background-work workers must
 not call adapters, dispatcher delivery, or cognition directly.
 
 Delivery receipt adapters may still need bounded `not_found` retry behavior

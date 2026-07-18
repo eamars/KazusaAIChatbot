@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal, NotRequired, TypedDict
 
-from kazusa_ai_chatbot.cognition_episode import CognitiveEpisode
+from kazusa_ai_chatbot.cognition_episode import CognitiveEpisodeV1
 from kazusa_ai_chatbot.conversation_progress import ConversationProgressPromptDoc
 from kazusa_ai_chatbot.db.schemas import ConversationEpisodeStateDoc
 from kazusa_ai_chatbot.message_envelope import MessageEnvelope, PromptMessageContext
@@ -91,7 +91,7 @@ class IMProcessState(TypedDict):
     user_input: str  # Body text plus current attachment descriptions.
     message_envelope: MessageEnvelope
     prompt_message_context: PromptMessageContext
-    cognitive_episode: NotRequired[CognitiveEpisode]
+    cognitive_episode: NotRequired[CognitiveEpisodeV1]
     user_multimedia_input: list[MultiMediaDoc]
     additional_media_present: NotRequired[bool]
     media_prepared: NotRequired[bool]
@@ -139,6 +139,7 @@ class IMProcessState(TypedDict):
     promoted_reflection_context: NotRequired[dict]
     internal_monologue_residue_context: NotRequired[str]
     past_dialog_cognition_context: NotRequired[str]
+    action_availability_runtime: NotRequired[dict[str, Any]]
 
     # Debug modes (optional, passed from ChatRequest)
     debug_modes: DebugModes

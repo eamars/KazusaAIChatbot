@@ -16,9 +16,7 @@ from kazusa_ai_chatbot.cognition_core_v2 import (
     run_cognition,
     run_text_surface_planning,
 )
-from kazusa_ai_chatbot.cognition_episode import (
-    build_text_chat_cognitive_episode,
-)
+from tests.cognition_core_v2_test_helpers import canonical_user_message_episode
 from kazusa_ai_chatbot.config import (
     COGNITION_LLM_API_KEY,
     COGNITION_LLM_BASE_URL,
@@ -564,7 +562,7 @@ def _mixed_language_art_case() -> dict:
 def _attach_cognitive_episode(state: dict[str, Any]) -> None:
     """Attach the canonical text-chat episode consumed by V2 cognition."""
 
-    state["cognitive_episode"] = build_text_chat_cognitive_episode(
+    state["cognitive_episode"] = canonical_user_message_episode(
         episode_id=f"conversation-progression:{state['platform_message_id']}",
         percept_id=(
             f"conversation-progression:{state['platform_message_id']}:dialog"

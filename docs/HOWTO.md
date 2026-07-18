@@ -82,6 +82,7 @@ EMBEDDING_API_KEY=lm-studio
 EMBEDDING_MODEL=your-embedding-model
 
 # Character and service behavior
+CHARACTER_PROFILE_PATH=C:\workspace\kazusa_ai_chatbot\personalities\kazusa.json
 CHARACTER_GLOBAL_USER_ID=00000000-0000-4000-8000-000000000001
 AUDIT_LOG_TTL_DAYS=90
 DEBUG_LOG_TTL_DAYS=14
@@ -328,8 +329,9 @@ project commands, installs packages, processes attachments, or sends adapter
 text directly. `future_speak` is the
 deterministic delayed-message worker: it schedules a future cognition slot and
 stores only a semantic objective, not prewritten user-facing text. Completed
-accepted tasks re-enter the brain as `accepted_task_result_ready` cognition,
-then use the existing dialog and delivery boundary for any visible result.
+accepted tasks re-enter the brain as the canonical `tool_result` cognition
+source, then use the existing dialog and delivery boundary for any visible
+result.
 
 New worker types reuse the same lifecycle only after a reviewed capability and
 worker contract exists. The stable entry is accepted-task state plus an
@@ -422,14 +424,18 @@ be used.
 
 ## Character Profile
 
-The brain refuses to start until a character profile exists in MongoDB.
-Load a character profile before starting the console or direct service:
+Load a character profile before service startup.
+
+Normal startup reads and validates the absolute `CHARACTER_PROFILE_PATH`, then
+atomically inserts or verifies the native character singleton. It does not
+require a manual pre-start database seed:
 
 ```bash
-python -m scripts.load_character_profile personalities/kazusa.json
+CHARACTER_PROFILE_PATH=C:\workspace\kazusa_ai_chatbot\personalities\kazusa.json
 ```
 
-To overwrite an existing profile:
+The maintenance loader remains available for an explicitly requested profile
+operation. Its overwrite policy is separate from normal startup:
 
 ```bash
 python -m scripts.load_character_profile personalities/kazusa.json --force
@@ -450,6 +456,15 @@ At minimum, a working profile should include:
 - `personality_brief`
 - `boundary_profile`
 - `linguistic_texture_profile`
+
+Stage 3 fresh-database verification uses the disposable database
+`_test_kazusa_stage3_fresh` behind a dedicated endpoint fingerprint guard. The
+runtime has five canonical cognition sources: `user_message`,
+`internal_thought`, `self_cognition`, `scheduled_tick`, and `tool_result`.
+Each episode settles exactly one `episode_trace.v2`; post-turn action work is
+recorded in `post_turn_lifecycle_records`, and action-triggered internal thought
+uses the durable `internal_action_latches` collection.
+The native cognition input contract is `cognitive_episode.v1`.
 
 ## Run The Brain Service
 
@@ -865,4 +880,5 @@ is ignored by git.
 - `Dockerfile` installs from `pyproject.toml`; `docker-compose.yml` remains a
   service-oriented deployment template that expects all required environment
   variables to be supplied.
-- The required provisioning script is `src/scripts/load_character_profile.py`.
+- The maintenance profile script is `src/scripts/load_character_profile.py`;
+  normal service startup owns profile validation and seed verification.

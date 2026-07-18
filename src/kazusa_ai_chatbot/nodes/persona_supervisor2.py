@@ -14,7 +14,6 @@ from kazusa_ai_chatbot.action_spec.registry import (
 )
 from kazusa_ai_chatbot.action_spec.results import (
     action_attempt_id_from_eval_result,
-    build_episode_trace,
     build_private_surface_output,
     build_text_surface_output,
     build_visual_surface_output,
@@ -49,6 +48,7 @@ from kazusa_ai_chatbot.cognition_resolver.state import (
 )
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
+    build_action_availability_snapshot,
     call_cognition_subgraph,
     commit_cognition_output,
 )
@@ -314,6 +314,9 @@ async def _action_results_for_state(
         remaining_specs,
         storage_timestamp_utc=state["storage_timestamp_utc"],
         executed_action_attempt_ids=executed_action_attempt_ids,
+        availability_snapshot_factory=(
+            lambda _context: build_action_availability_snapshot(state)
+        ),
     )
     return_value = [*pre_surface_results, *action_results]
     return return_value
@@ -348,6 +351,9 @@ async def stage_2a_background_work_enqueue(
     action_results = await execute_action_specs_for_trace(
         background_specs,
         storage_timestamp_utc=state["storage_timestamp_utc"],
+        availability_snapshot_factory=(
+            lambda _context: build_action_availability_snapshot(state)
+        ),
     )
     return_value = {
         "pre_surface_action_results": action_results,
@@ -410,27 +416,17 @@ def _pre_surface_action_results_for_state(
     return results
 
 
-def _episode_trace_update(
+def _episode_component_update(
     state: GlobalPersonaState,
     *,
     action_results: list[dict],
     surface_outputs: list[dict],
 ) -> dict:
-    """Build trace fields for the current persona episode."""
+    """Return action and surface components for the settlement owner."""
 
-    episode = state["cognitive_episode"]
-    trace = build_episode_trace(
-        episode_id=episode["episode_id"],
-        trigger_source=episode["trigger_source"],
-        created_at=state["storage_timestamp_utc"],
-        action_specs=_selected_action_specs(state),
-        action_results=action_results,
-        surface_outputs=surface_outputs,
-    )
     trace_update = {
         "action_results": action_results,
         "surface_outputs": surface_outputs,
-        "episode_trace": trace,
     }
     return trace_update
 
@@ -483,7 +479,7 @@ async def call_action_subgraph(state: GlobalPersonaState) -> dict:
         "target_broadcast": result["target_broadcast"],
     }
     return_value.update(surface_update)
-    return_value.update(_episode_trace_update(
+    return_value.update(_episode_component_update(
         surface_state,
         action_results=action_results,
         surface_outputs=surface_outputs,
@@ -514,7 +510,7 @@ async def stage_3_no_response(state: GlobalPersonaState) -> dict:
                 created_at=state["storage_timestamp_utc"],
             )
         ]
-    return_value.update(_episode_trace_update(
+    return_value.update(_episode_component_update(
         state,
         action_results=action_results,
         surface_outputs=surface_outputs,

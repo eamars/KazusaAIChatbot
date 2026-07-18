@@ -12,7 +12,7 @@ import pytest
 
 from kazusa_ai_chatbot import chat_input_queue as queue_module
 from kazusa_ai_chatbot import service as service_module
-from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
+from tests.cognition_core_v2_test_helpers import canonical_user_message_episode
 from kazusa_ai_chatbot.consolidation.origin import (
     build_user_message_consolidation_origin,
 )
@@ -147,7 +147,7 @@ def _minimal_relevance_state() -> dict[str, object]:
         "reply_context": {},
         "debug_modes": {},
     }
-    state["cognitive_episode"] = build_text_chat_cognitive_episode(
+    state["cognitive_episode"] = canonical_user_message_episode(
         **_episode_kwargs(),
         media_description_rows=[{
             "content_type": "image/png",
@@ -333,7 +333,7 @@ async def test_quoted_image_description_enters_prompt_and_cognition_context(
 
 def test_multimodal_consolidation_origin_is_metadata_only() -> None:
     """Image-observation turns should consolidate without percept content."""
-    episode = build_text_chat_cognitive_episode(
+    episode = canonical_user_message_episode(
         **_episode_kwargs(),
         media_description_rows=[{
             "content_type": "image/png",

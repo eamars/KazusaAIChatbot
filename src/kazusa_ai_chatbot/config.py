@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import os
+from pathlib import Path
 from urllib.parse import urlparse
 
 from dotenv import load_dotenv
@@ -236,6 +237,22 @@ DEFAULT_LLM_MAX_COMPLETION_TOKENS = _positive_int_from_env(
 # MongoDB
 MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
 MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "roleplay_bot")
+CHARACTER_PROFILE_PATH = os.getenv("CHARACTER_PROFILE_PATH", "").strip()
+
+
+def require_character_profile_path() -> Path:
+    """Return the configured absolute character-profile seed path."""
+
+    if not CHARACTER_PROFILE_PATH:
+        raise ValueError("CHARACTER_PROFILE_PATH must be configured")
+    profile_path = Path(CHARACTER_PROFILE_PATH)
+    if not profile_path.is_absolute():
+        raise ValueError("CHARACTER_PROFILE_PATH must be absolute")
+    if not profile_path.is_file():
+        raise ValueError(
+            f"CHARACTER_PROFILE_PATH must point to a file: {profile_path}"
+        )
+    return profile_path
 
 # Route-specific chat LLMs. These are intentionally required: a missing route
 # variable means the deployment configuration is incomplete.

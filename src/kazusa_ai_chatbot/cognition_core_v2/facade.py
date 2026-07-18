@@ -261,7 +261,6 @@ async def run_cognition(
     if final_execution is not None:
         bids.extend(final_execution.results.values())
     bids = [bid for bid in bids if isinstance(bid, Mapping)]
-    output_mode = payload["episode"]["output_mode"]
     generated_bids = list(bids)
     try:
         collapse = await collapse_bids(bids, services) if bids else _empty_collapse()
@@ -292,7 +291,6 @@ async def run_cognition(
         action_plan["resolver_pending_resolution"],
         payload.get("pending_resolver_resume"),
     )
-    _validate_output_mode(payload["episode"], intention["route"])
     stage_status["workspace_collapse"] = "completed"
     stage_status["action_planning"] = "completed"
 
@@ -302,7 +300,6 @@ async def run_cognition(
     expression_policy = default_expression_policy(
         intention["route"],
         affect,
-        output_mode=payload["episode"]["output_mode"],
         selected_branch_id=intention.get("selected_branch_id"),
         activations=final_state["affect_activations"],
     )
@@ -796,12 +793,12 @@ def _fact_without_producer(fact: Mapping[str, Any]) -> dict[str, Any]:
 def _episode_updated_at(episode: Mapping[str, Any]) -> str:
     """Project the canonical episode storage timestamp into native UTC-Z."""
 
-    value = episode["storage_timestamp_utc"]
+    value = episode["created_at"]
     try:
         parsed = parse_storage_utc_datetime(value)
     except (TypeError, ValueError) as exc:
         raise CognitionContractError(
-            "episode storage_timestamp_utc is invalid"
+            "episode created_at is invalid"
         ) from exc
     return parsed.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -838,27 +835,6 @@ async def _collect_appraisals(
         else:
             results.append(result)
     return results, warnings
-
-
-def _validate_output_mode(episode: Mapping[str, Any], route: str) -> None:
-    """Enforce expression policy before the state update can be committed."""
-
-    output_mode = episode["output_mode"]
-    if output_mode == "silence" and route != "silence":
-        raise CognitionExecutionError(
-            "visible route conflicts with silence output_mode"
-        )
-    if output_mode in {"think_only", "preview"} and route == "speech":
-        raise CognitionExecutionError(
-            "speech route conflicts with private output_mode"
-        )
-    if output_mode == "scheduled_action_request" and route not in {
-        "action",
-        "silence",
-    }:
-        raise CognitionExecutionError(
-            "non-action route conflicts with scheduled_action_request output_mode"
-        )
 
 
 def _elapsed_ms(started_at: float) -> int:

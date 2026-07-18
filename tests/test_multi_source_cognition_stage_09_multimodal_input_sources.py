@@ -10,10 +10,8 @@ from unittest.mock import AsyncMock
 import pytest
 
 from kazusa_ai_chatbot.cognition_episode import (
-    CognitiveEpisodeValidationError,
     MAX_COGNITIVE_EPISODE_MEDIA_DESCRIPTION_CHARS,
     MAX_COGNITIVE_EPISODE_MEDIA_PERCEPTS,
-    build_text_chat_cognitive_episode,
     build_text_chat_media_description_rows,
     replace_text_chat_media_percepts,
 )
@@ -32,6 +30,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
     build_cognition_input_from_global_state,
 )
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
+from tests.cognition_core_v2_test_helpers import canonical_user_message_episode
 from kazusa_ai_chatbot.rag.cognitive_episode_adapter import (
     RAGEpisodeAdapterError,
     build_text_chat_rag_request,
@@ -89,7 +88,7 @@ def _rag_request_kwargs(episode: dict[str, object]) -> dict[str, object]:
 
 
 def _descriptor_state() -> dict[str, object]:
-    episode = build_text_chat_cognitive_episode(**_builder_kwargs())
+    episode = canonical_user_message_episode(**_builder_kwargs())
     return {
         "storage_timestamp_utc": TURN_CLOCK["storage_timestamp_utc"],
         "local_time_context": TURN_CLOCK["local_time_context"],
@@ -119,6 +118,22 @@ def _descriptor_state() -> dict[str, object]:
     }
 
 
+def _media_percepts(episode: dict[str, object]) -> list[dict[str, object]]:
+    """Return only bounded media percepts from a canonical episode."""
+
+    percepts = episode["percepts"]
+    assert isinstance(percepts, list)
+    return [
+        percept
+        for percept in percepts
+        if isinstance(percept, dict)
+        and percept.get("source_kind") in {
+            "image_observation",
+            "audio_observation",
+        }
+    ]
+
+
 def test_episode_admits_bounded_image_and_audio_descriptions() -> None:
     """Retain semantic media descriptions while excluding transport data."""
 
@@ -134,15 +149,16 @@ def test_episode_admits_bounded_image_and_audio_descriptions() -> None:
             "url": "https://example.invalid/audio.ogg",
         },
     ])
-    episode = build_text_chat_cognitive_episode(
+    episode = canonical_user_message_episode(
         **_builder_kwargs(),
         media_description_rows=media_rows,
     )
 
-    assert episode["input_sources"] == [
-        "dialog_text",
+    assert [percept["source_kind"] for percept in episode["percepts"]] == [
+        "dialog",
         "image_observation",
         "audio_observation",
+        "system_event",
     ]
     rendered = str(episode)
     assert "raw-image-bytes" not in rendered
@@ -152,15 +168,18 @@ def test_episode_admits_bounded_image_and_audio_descriptions() -> None:
 def test_text_only_builder_is_stable_with_explicit_empty_media() -> None:
     """Adding the media boundary preserves the text-only episode shape."""
 
-    implicit = build_text_chat_cognitive_episode(**_builder_kwargs())
-    explicit = build_text_chat_cognitive_episode(
+    implicit = canonical_user_message_episode(**_builder_kwargs())
+    explicit = canonical_user_message_episode(
         **_builder_kwargs(),
         media_description_rows=[],
     )
 
     assert implicit == explicit
-    assert implicit["input_sources"] == ["dialog_text"]
-    assert len(implicit["percepts"]) == 1
+    assert [percept["source_kind"] for percept in implicit["percepts"]] == [
+        "dialog",
+        "system_event",
+    ]
+    assert len(implicit["percepts"]) == 2
 
 
 def test_media_builder_drops_invalid_rows_and_enforces_caps() -> None:
@@ -177,25 +196,25 @@ def test_media_builder_drops_invalid_rows_and_enforces_caps() -> None:
         {"content_type": "audio/mpeg", "description": "second audio"},
         {"content_type": "image/gif", "description": "over cap"},
     ])
-    episode = build_text_chat_cognitive_episode(
+    episode = canonical_user_message_episode(
         **_builder_kwargs(),
         media_description_rows=rows,
     )
-    media_percepts = episode["percepts"][1:]
+    media_percepts = _media_percepts(episode)
 
     assert len(media_percepts) == MAX_COGNITIVE_EPISODE_MEDIA_PERCEPTS
-    assert len(media_percepts[0]["content"]) == (
+    assert len(media_percepts[0]["content"]["description"]) == (
         MAX_COGNITIVE_EPISODE_MEDIA_DESCRIPTION_CHARS
     )
-    assert media_percepts[0]["content"].endswith("...")
-    assert media_percepts[-1]["content"] == "second audio"
+    assert media_percepts[0]["content"]["description"].endswith("...")
+    assert media_percepts[-1]["content"]["description"] == "second audio"
     assert "over cap" not in json.dumps(episode)
 
 
 def test_media_refresh_is_non_mutating_and_bounded() -> None:
     """Replace media percepts without mutating the accepted episode."""
 
-    original = build_text_chat_cognitive_episode(
+    original = canonical_user_message_episode(
         **_builder_kwargs(),
         media_description_rows=[{
             "content_type": "image/png",
@@ -215,17 +234,23 @@ def test_media_refresh_is_non_mutating_and_bounded() -> None:
     )
 
     assert original == snapshot
-    assert len(refreshed["percepts"][1:]) == MAX_COGNITIVE_EPISODE_MEDIA_PERCEPTS
-    assert refreshed["input_sources"] == [
-        "dialog_text",
+    assert len(_media_percepts(refreshed)) == (
+        MAX_COGNITIVE_EPISODE_MEDIA_PERCEPTS
+    )
+    assert [percept["source_kind"] for percept in refreshed["percepts"]] == [
+        "dialog",
         "audio_observation",
+        "audio_observation",
+        "audio_observation",
+        "audio_observation",
+        "system_event",
     ]
 
 
 def test_connector_projects_media_as_separate_typed_evidence() -> None:
     """Keep media provenance separate from the current episode evidence."""
 
-    episode = build_text_chat_cognitive_episode(
+    episode = canonical_user_message_episode(
         **_builder_kwargs(),
         media_description_rows=[{
             "content_type": "image/png",
@@ -284,7 +309,7 @@ def test_rag_accepts_multimodal_episode_but_projects_dialog_only(
 ) -> None:
     """RAG keeps query ownership and excludes separate media evidence."""
 
-    episode = build_text_chat_cognitive_episode(
+    episode = canonical_user_message_episode(
         **_builder_kwargs(),
         media_description_rows=media_rows,
     )
@@ -307,7 +332,7 @@ def test_rag_accepts_multimodal_episode_but_projects_dialog_only(
 def test_rag_rejects_invalid_multimodal_source_profiles() -> None:
     """The adapter fails closed for reordered or media-only episodes."""
 
-    episode = build_text_chat_cognitive_episode(
+    episode = canonical_user_message_episode(
         **_builder_kwargs(),
         media_description_rows=[{
             "content_type": "image/png",
@@ -315,7 +340,11 @@ def test_rag_rejects_invalid_multimodal_source_profiles() -> None:
         }],
     )
     reordered = deepcopy(episode)
-    reordered["input_sources"] = ["image_observation", "dialog_text"]
+    reordered["percepts"] = [
+        reordered["percepts"][1],
+        reordered["percepts"][0],
+        *reordered["percepts"][2:],
+    ]
 
     with pytest.raises(RAGEpisodeAdapterError):
         build_text_chat_rag_request(
@@ -323,9 +352,11 @@ def test_rag_rejects_invalid_multimodal_source_profiles() -> None:
         )
 
     media_only = deepcopy(episode)
-    media_only["input_sources"] = ["image_observation"]
-    media_only["percepts"] = [media_only["percepts"][1]]
-    with pytest.raises(CognitiveEpisodeValidationError):
+    media_only["percepts"] = [
+        media_only["percepts"][1],
+        media_only["percepts"][2],
+    ]
+    with pytest.raises(RAGEpisodeAdapterError):
         build_text_chat_rag_request(
             **_rag_request_kwargs(media_only),  # type: ignore[arg-type]
         )
@@ -378,12 +409,12 @@ async def test_descriptor_uses_adapter_description_without_llm(
     result = await decontextualizer_module.multimedia_descriptor_agent(state)
 
     vision_llm.ainvoke.assert_not_awaited()
-    assert result["cognitive_episode"]["input_sources"] == [
-        "dialog_text",
-        expected_source,
-    ]
-    assert result["cognitive_episode"]["percepts"][1]["content"] == (
-        description
-    )
+    assert [
+        percept["source_kind"]
+        for percept in result["cognitive_episode"]["percepts"]
+    ] == ["dialog", expected_source, "system_event"]
+    assert result["cognitive_episode"]["percepts"][1]["content"][
+        "description"
+    ] == description
     assert "raw-audio" not in json.dumps(result["cognitive_episode"])
     update_descriptions.assert_awaited_once()

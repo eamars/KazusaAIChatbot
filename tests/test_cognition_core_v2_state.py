@@ -61,14 +61,14 @@ def test_character_state_has_the_contract_defaults() -> None:
     ("caller", "target_user_id", "expected_scope"),
     [
         ("persona_user_message", "user-a", ("user", "user-a")),
-        ("accepted_task_result_ready", "user-a", ("user", "user-a")),
+        ("tool_result", "user-a", ("user", "user-a")),
         ("background_result", "user-a", ("user", "user-a")),
         ("group_sender", "user-a", ("user", "user-a")),
         ("self_cognition", "user-a", ("user", "user-a")),
         ("self_cognition", None, ("character", "global")),
         ("reflection", None, ("character", "global")),
-        ("scheduler", "user-a", ("user", "user-a")),
-        ("scheduler", None, ("character", "global")),
+        ("scheduled_tick", "user-a", ("user", "user-a")),
+        ("scheduled_tick", None, ("character", "global")),
     ],
 )
 def test_state_scope_matrix(
@@ -95,7 +95,7 @@ def test_state_scope_matrix_rejects_missing_required_owner() -> None:
 
     for caller in (
         "persona_user_message",
-        "accepted_task_result_ready",
+        "tool_result",
         "background_result",
         "group_sender",
     ):

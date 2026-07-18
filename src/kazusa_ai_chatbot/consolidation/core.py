@@ -15,7 +15,7 @@ from kazusa_ai_chatbot.consolidation.metadata import (
 )
 from kazusa_ai_chatbot.consolidation.origin import (
     ConsolidationOriginError,
-    build_reflection_consolidation_origin,
+    build_tool_result_consolidation_origin,
     build_self_cognition_consolidation_origin,
     build_user_message_consolidation_origin,
 )
@@ -57,10 +57,14 @@ def _build_consolidation_origin(
     trigger_source = episode["trigger_source"]
     if trigger_source == "user_message":
         origin = build_user_message_consolidation_origin(episode=episode)
-    elif trigger_source == "internal_thought":
+    elif trigger_source in {
+        "internal_thought",
+        "self_cognition",
+        "scheduled_tick",
+    }:
         origin = build_self_cognition_consolidation_origin(episode=episode)
-    elif trigger_source == "reflection_signal":
-        origin = build_reflection_consolidation_origin(episode=episode)
+    elif trigger_source == "tool_result":
+        origin = build_tool_result_consolidation_origin(episode=episode)
     else:
         raise ConsolidationOriginError(
             f"consolidation origin does not support trigger_source={trigger_source}"

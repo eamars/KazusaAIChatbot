@@ -85,6 +85,9 @@ ARTIFACT_ACTION_CANDIDATE = "self_cognition_action_candidate.json"
 ARTIFACT_DISPATCH_RESULT = "self_cognition_dispatch_result.json"
 ARTIFACT_CONSOLIDATION_OUTCOME = "self_cognition_consolidation_outcome.json"
 ARTIFACT_LOOP_TRACE = "self_cognition_loop_trace.md"
+RUNTIME_COGNITIVE_EPISODE = "cognitive_episode"
+RUNTIME_CONSOLIDATION_STATE = "consolidation_state"
+RUNTIME_EPISODE_TRACE = "episode_trace"
 TRACKING_ARTIFACT_NAMES = frozenset(
     (
         ARTIFACT_TRIGGER_RECORD,

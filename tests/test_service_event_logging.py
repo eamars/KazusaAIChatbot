@@ -181,6 +181,11 @@ async def test_process_queued_item_suppresses_routine_success_events(
         "_save_assistant_message",
         AsyncMock(),
     )
+    monkeypatch.setattr(
+        service_module,
+        "upsert_post_turn_lifecycle_record",
+        AsyncMock(),
+    )
 
     class _Graph:
         """Return a visible response without invoking any LLM."""
@@ -440,6 +445,11 @@ async def test_lifespan_records_process_and_resource_events(monkeypatch) -> None
     monkeypatch.setattr(service_module, "db_bootstrap", AsyncMock())
     monkeypatch.setattr(
         service_module,
+        "ensure_character_profile_seed",
+        AsyncMock(return_value="verified"),
+    )
+    monkeypatch.setattr(
+        service_module,
         "_hydrate_media_descriptor_cache",
         AsyncMock(return_value=0),
     )
@@ -447,6 +457,11 @@ async def test_lifespan_records_process_and_resource_events(monkeypatch) -> None
         service_module,
         "get_character_profile",
         AsyncMock(return_value={"name": "Character"}),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "get_character_cognition_state",
+        AsyncMock(return_value={}),
     )
     monkeypatch.setattr(
         service_module,

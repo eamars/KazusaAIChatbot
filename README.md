@@ -324,7 +324,7 @@ flowchart TD
         GG["global_character_growth<br/>promoted trait drift"]
         CONS["consolidation<br/>target plan -> source views -> lane router -> lane review -> write-intent validation -> persistence"]
         DISP["dispatcher [deterministic]<br/>registered adapter callback delivery for trusted sends"]
-        PRO["proactive_output<br/>permissioned preview/outbox contract, no production send path"]
+        TR["EpisodeTraceV2 + post-turn lifecycle<br/>immutable terminal evidence and idempotent audit"]
         CAL --> SC
         CAL --> REF
         REF --> ME
@@ -343,8 +343,8 @@ flowchart TD
     R5 -->|terminal semantic action requests| A0
     A0 --> P2
     P2A --> AT
-    BW1 -->|accepted_task_result_ready| P1
-    BW3 -->|accepted_task_result_ready| P1
+    BW1 -->|tool_result| P1
+    BW3 -->|tool_result| P1
     BW2 --> CAL
     CAL -->|future or due source case| SC
     SC -->|shared cognition path| P0
@@ -408,8 +408,8 @@ lifecycle persistence. A route-only background-work router chooses the worker
 after the live turn. Worker-local classification stays inside the selected
 worker: the text-artifact worker has its own task router/generator, and the
 coding-agent worker has its own read-versus-write supervisor before returning
-bounded answers or proposal artifacts. Completed accepted tasks return as
-`accepted_task_result_ready` cognition rather than being sent directly by
+bounded answers or proposal artifacts. Completed accepted tasks return as the
+canonical `tool_result` cognition source rather than being sent directly by
 workers. Legacy background-artifact and legacy background-work rows remain
 compatibility data, not the new model-facing runtime contract.
 
@@ -637,7 +637,7 @@ cognition, and calendar scheduling remain in the platform-neutral core.
 | Reflection cycle         | Background reflection runs, promotion gates, prompt-safe reflection context             | [Reflection Cycle ICD](src/kazusa_ai_chatbot/reflection_cycle/README.md)               |
 | Memory evolution         | Curated shared memory lifecycle, lineage, seed reset, promoted memory writes            | [Memory Evolution ICD](src/kazusa_ai_chatbot/memory_evolution/README.md)               |
 | Global character growth  | Slow promoted-trait drift from approved reflection memory                               | [Global Character Growth ICD](src/kazusa_ai_chatbot/global_character_growth/README.md) |
-| Proactive output         | Permissioned preview/outbox contracts for future autonomous contact paths               | [Proactive Output ICD](src/kazusa_ai_chatbot/proactive_output/README.md)               |
+| Episode trace and lifecycle | Immutable `episode_trace.v2` settlement and idempotent post-turn audit records       | [Brain Service ICD](src/kazusa_ai_chatbot/brain_service/README.md)                    |
 
 Other project documents:
 
@@ -664,10 +664,12 @@ pip install -U pip
 pip install -e ".[dev]"
 ```
 
-Load a character profile before starting the brain:
+Configure an absolute character profile path before starting the brain. Fresh
+startup validates the profile and atomically inserts or verifies the character
+singleton; the maintenance loader is optional:
 
 ```powershell
-python -m scripts.load_character_profile personalities/kazusa.json
+CHARACTER_PROFILE_PATH=C:\workspace\kazusa_ai_chatbot\personalities\kazusa.json
 ```
 
 Normal local operation starts the buildless Python/FastAPI control console,
@@ -727,7 +729,8 @@ src/
     reflection_cycle/          Background reflection and promotion
     memory_evolution/          Shared memory lifecycle and seed reset
     global_character_growth/   Slow promoted character-growth traits
-    proactive_output/          Permissioned proactive preview contracts
+    character_profile.py       Static profile validation for native startup
+    db/internal_action_latches.py  Durable internal-thought continuation latches
   scripts/                     Operator and maintenance CLIs
 docs/
   HOWTO.md                     Setup, runtime commands, environment, tests

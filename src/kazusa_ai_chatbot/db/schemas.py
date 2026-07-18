@@ -371,6 +371,71 @@ class CharacterProfileDoc(TypedDict, total=False):
     cognition_state: dict   # Validated cognition_state.v2 character state
 
 
+class CharacterProfileSeedV1(TypedDict, total=False):
+    """Static character fields accepted by the native profile bootstrap."""
+
+    name: str
+    description: str
+    gender: str
+    age: int
+    birthday: str
+    tone: str
+    speech_patterns: str
+    backstory: str
+    personality_brief: dict
+    boundary_profile: BoundaryProfileDoc
+    linguistic_texture_profile: LinguisticTextureProfileDoc
+
+
+class InternalActionLatchV1(TypedDict, total=False):
+    """Durable one-shot continuation request emitted by settled cognition."""
+
+    schema_version: Literal["internal_action_latch.v1"]
+    latch_id: str
+    idempotency_key: str
+    source_episode_id: str
+    source_action_attempt_id: str
+    continuation_objective: str
+    evidence_refs: list[dict]
+    target_scope: dict
+    privacy_scope: str
+    continuation_depth: int
+    status: Literal["pending", "claimed", "consumed", "expired", "failed"]
+    not_before: str
+    expires_at: str
+    claimed_by: str
+    claim_token: str
+    claim_expires_at: str
+    attempt_count: int
+    max_attempts: Literal[3]
+    last_error_code: str
+    consumed_episode_id: str
+    created_at: str
+    updated_at: str
+    purge_after: str
+
+
+class InternalActionLatchClaimV1(TypedDict, total=False):
+    """Claim result returned to the internal-thought producer."""
+
+    latch: InternalActionLatchV1
+    claim_token: str
+
+
+class PostTurnLifecycleRecordV1(TypedDict, total=False):
+    """Durable post-turn action/consolidation lifecycle projection."""
+
+    schema_version: Literal["post_turn_lifecycle_record.v1"]
+    lifecycle_record_id: str
+    source_episode_id: str
+    delivery_tracking_id: str
+    action_projections: list[dict]
+    status: Literal["skipped", "completed", "partial", "failed"]
+    error_codes: list[str]
+    created_at: str
+    purge_after: str
+
+
 class MemoryDoc(TypedDict, total=False):
     """Evolving shared-memory unit in the ``memory`` collection."""
     memory_unit_id: str             # Stable id for this memory unit

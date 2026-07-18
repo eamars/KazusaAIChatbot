@@ -1029,11 +1029,9 @@ def test_runner_apply_consolidation_uses_empty_dialog_without_render() -> None:
     )
 
     assert captured_consolidation_state["cognitive_episode"]["trigger_source"] == (
-        "scheduled_recall"
+        "scheduled_tick"
     )
-    assert captured_consolidation_state["cognitive_episode"]["output_mode"] == (
-        "preview"
-    )
+    assert "output_mode" not in captured_consolidation_state["cognitive_episode"]
     assert captured_consolidation_state["final_dialog"] == []
     assert "The user expected a follow-up" in (
         captured_consolidation_state["decontexualized_input"]
@@ -1053,8 +1051,8 @@ def test_runner_apply_consolidation_uses_empty_dialog_without_render() -> None:
         },
         "scheduled_event_count": 0,
         "cache_evicted_count": 2,
-        "origin_trigger_source": "scheduled_recall",
-        "origin_episode_id": "self_cognition:tracking:commitment_past_due:promise-001",
+        "origin_trigger_source": "scheduled_tick",
+        "origin_episode_id": "scheduled-tick:2026-05-10T00:30:00+00:00",
     }
     serialized = json.dumps(outcome, ensure_ascii=False)
     assert "Reminder was expected" not in serialized
@@ -1243,9 +1241,10 @@ def test_runner_executes_private_lifecycle_action_for_consolidation(
         storage_timestamp_utc: str,
         executed_action_attempt_ids: set[str] | None = None,
         record_attempt_func: Any = None,
+        availability_snapshot_factory: Any = None,
     ) -> list[dict[str, Any]]:
         del storage_timestamp_utc, executed_action_attempt_ids
-        del record_attempt_func
+        del record_attempt_func, availability_snapshot_factory
         captured_specs.extend(action_specs)
         action_results = [
             {
@@ -1298,10 +1297,7 @@ def test_runner_executes_private_lifecycle_action_for_consolidation(
 
     assert captured_specs[0]["kind"] == APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY
     assert cognition_output["action_results"][0]["status"] == "executed"
-    assert cognition_output["episode_trace"]["action_results"][0][
-        "action_kind"
-    ] == APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY
-    assert captured_consolidation_state["episode_trace"]["action_results"][0][
+    assert captured_consolidation_state["action_results"][0][
         "status"
     ] == "executed"
 
@@ -1350,9 +1346,10 @@ def test_runner_routes_lifecycle_intent_through_specialist_before_execution(
         storage_timestamp_utc: str,
         executed_action_attempt_ids: set[str] | None = None,
         record_attempt_func: Any = None,
+        availability_snapshot_factory: Any = None,
     ) -> list[dict[str, Any]]:
         del storage_timestamp_utc, executed_action_attempt_ids
-        del record_attempt_func
+        del record_attempt_func, availability_snapshot_factory
         captured_specs.extend(action_specs)
         action_results = [
             {
@@ -1406,9 +1403,6 @@ def test_runner_routes_lifecycle_intent_through_specialist_before_execution(
     assert cognition_output["memory_lifecycle_context"]["decision"] == (
         "lifecycle_change"
     )
-    assert cognition_output["episode_trace"]["action_specs"][0][
-        "kind"
-    ] == APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY
 
 
 def test_runner_does_not_execute_private_actions_by_default(
@@ -1903,7 +1897,6 @@ def test_cognition_state_keeps_source_packet_inside_internal_percept(
     cognition_input = _read_json(paths[models.ARTIFACT_COGNITION_INPUT])
     rendered_text = cognition_input["rendered_text"]
     percept_content = captured["cognitive_episode"]["percepts"][0]["content"]
-    percept_payload = json.loads(percept_content)
 
     assert captured["prompt_message_context"]["body_text"] == (
         models.SELF_COGNITION_INPUT_TEXT
@@ -1911,7 +1904,7 @@ def test_cognition_state_keeps_source_packet_inside_internal_percept(
     assert captured["decontexualized_input"] == models.SELF_COGNITION_INPUT_TEXT
     assert rendered_text not in captured["prompt_message_context"]["body_text"]
     assert rendered_text not in captured["decontexualized_input"]
-    assert percept_payload["residue"]["internal_monologue"] == rendered_text
+    assert percept_content["semantic_text"] == rendered_text
 
 
 def test_cognition_state_disables_visual_and_does_not_suppress_memory(
@@ -1931,11 +1924,9 @@ def test_cognition_state_disables_visual_and_does_not_suppress_memory(
     )
 
     state_debug_modes = captured["debug_modes"]
-    episode_debug_modes = captured["cognitive_episode"]["origin_metadata"][
-        "debug_modes"
-    ]
 
     assert state_debug_modes == {"no_visual_directives": True}
-    assert episode_debug_modes == {"no_visual_directives": True}
+    assert "debug_modes" not in captured["cognitive_episode"][
+        "origin_metadata"
+    ]
     assert "no_remember" not in state_debug_modes
-    assert "no_remember" not in episode_debug_modes

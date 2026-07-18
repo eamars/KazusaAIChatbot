@@ -150,7 +150,7 @@ L2d semantic capability
   -> accepted-task lifecycle and duplicate rejection
   -> internal background_work_request or deterministic requested_worker handoff
   -> worker-owned execution
-  -> accepted_task_result_ready or durable scheduled follow-up
+  -> tool_result or durable scheduled follow-up
 ```
 
 L2d must not select worker-local task types, tool arguments, filesystem paths,

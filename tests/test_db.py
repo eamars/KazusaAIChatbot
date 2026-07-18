@@ -56,6 +56,8 @@ def _isolate_bootstrap_dependencies(monkeypatch) -> None:
         "ensure_event_log_indexes",
         "ensure_llm_trace_indexes",
         "ensure_internal_monologue_residue_indexes",
+        "ensure_internal_action_latch_indexes",
+        "ensure_post_turn_lifecycle_record_indexes",
         "purge_stale_media_descriptor_entries",
         "prune_media_descriptor_entries",
     ):
@@ -1063,10 +1065,10 @@ async def test_db_bootstrap_creates_calendar_collections_and_indexes(
 
 
 @pytest.mark.asyncio
-async def test_db_bootstrap_drops_legacy_background_artifact_collection(
+async def test_db_bootstrap_preserves_legacy_background_artifact_collection(
     monkeypatch,
 ) -> None:
-    """Bootstrap should decommission removed background artifact storage."""
+    """Fresh bootstrap should not destroy unexpected legacy collections."""
 
     db = _BootstrapDb()
     db.collections["background_artifact_jobs"] = _BootstrapCollection()
@@ -1100,8 +1102,8 @@ async def test_db_bootstrap_drops_legacy_background_artifact_collection(
     )
     await db_bootstrap_module.db_bootstrap()
 
-    assert "background_artifact_jobs" not in db.collections
-    assert "background_artifact_jobs" in db.dropped_collections
+    assert "background_artifact_jobs" in db.collections
+    assert "background_artifact_jobs" not in db.dropped_collections
 
 
 def test_db_facade_exports_calendar_schema_docs() -> None:

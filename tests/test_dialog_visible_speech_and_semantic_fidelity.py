@@ -14,6 +14,7 @@ from kazusa_ai_chatbot.cognition_core_v2 import contracts as surface_contracts
 from kazusa_ai_chatbot.cognition_core_v2 import surface as surface_module
 from kazusa_ai_chatbot.cognition_core_v2 import surface_stages
 from kazusa_ai_chatbot.action_spec import results as action_results
+from kazusa_ai_chatbot.brain_service.post_turn import settle_episode_trace
 from kazusa_ai_chatbot.consolidation.source_policy import (
     build_consolidation_source_views,
 )
@@ -347,13 +348,25 @@ def test_terminal_visual_trace_has_no_consolidation_consumer() -> None:
         fragments=["A still-frame emotional composition."],
         created_at=created_at,
     )
-    trace = action_results.build_episode_trace(
-        episode_id="episode-terminal-visual",
-        trigger_source="user_message",
-        created_at=created_at,
+    trace = settle_episode_trace(
+        episode=canonical_episode(
+            episode_id="episode-terminal-visual",
+            content="Visible literal speech.",
+        ),
+        cognition_output=None,
         action_specs=[],
         action_results=[],
         surface_outputs=[text_output, visual_output],
+        terminal_status="completed_visible",
+        attempt_diagnostics=[],
+        delivery_correlation={
+            "schema_version": "delivery_correlation.v1",
+            "delivery_intent": "deliver_now",
+            "tracking_id": "delivery-terminal-visual",
+            "receipt_status": "delivered",
+            "receipt_ref": "receipt-terminal-visual",
+        },
+        settled_at=created_at,
     )
 
     projection = action_results.project_episode_trace_for_consolidation(trace)

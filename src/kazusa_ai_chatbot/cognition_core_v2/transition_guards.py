@@ -15,7 +15,7 @@ from kazusa_ai_chatbot.cognition_core_v2.state_models import (
 
 
 USER_FACT_PRODUCERS = frozenset(
-    {"action_result", "resolver_observation", "accepted_task_result"}
+    {"action_result", "resolver_observation", "tool_result"}
 )
 SCHEDULER_PRODUCER = "scheduler_event"
 PROMOTED_SOURCE_PRODUCER = "promoted_source_metadata"
@@ -39,7 +39,7 @@ TERMINAL_ENTITY_STATUSES = frozenset({"resolved", "replaced"})
 _EVIDENCE_BY_PRODUCER = {
     "action_result": "action_result",
     "resolver_observation": "resolver_observation",
-    "accepted_task_result": "accepted_task_result",
+    "tool_result": "tool_result",
     "scheduler_event": "scheduler_event",
     "promoted_source_metadata": {
         "promoted_memory",

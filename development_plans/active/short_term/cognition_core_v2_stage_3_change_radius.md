@@ -7,9 +7,9 @@
 - Execution companion:
   [cognition_core_v2_stage_3_execution_manifest.md](cognition_core_v2_stage_3_execution_manifest.md).
 - Plan class: high_risk_migration.
-- Status: draft.
-- Authority: the parent plan governs; this file grants no implementation or
-  production-data authority.
+- Status: in_progress.
+- Authority: the parent plan governs; user-authorized implementation is active;
+  this file grants no production-data authority.
 - Change-control rule: amend this file and obtain plan approval before
   changing an unlisted production or test path.
 
@@ -87,6 +87,8 @@ src/kazusa_ai_chatbot/cognition_core_v2/facade.py
 src/kazusa_ai_chatbot/cognition_core_v2/diagnostics.py
 src/kazusa_ai_chatbot/cognition_core_v2/state_models.py
 src/kazusa_ai_chatbot/cognition_core_v2/validation_cli.py
+src/kazusa_ai_chatbot/cognition_core_v2/surface.py
+src/kazusa_ai_chatbot/cognition_core_v2/transition_guards.py
 src/kazusa_ai_chatbot/cognition_resolver/contracts.py
 src/kazusa_ai_chatbot/cognition_resolver/loop.py
 src/kazusa_ai_chatbot/cognition_resolver/capabilities.py
@@ -114,6 +116,11 @@ src/kazusa_ai_chatbot/state.py
 
 Only contract projection/ownership changes are allowed in the V2 and dialog
 files; Stage 2 emotion/personality tuning is preserved.
+
+Review reconciliation: the V2 surface/transition contract modules and the
+accepted-task prompt contract test are direct Stage 3 consumers identified by
+the independent implementation review; they are included here without adding
+new runtime capability or product scope.
 
 ### Modify — Evidence, Persistence, Progress
 
@@ -222,6 +229,7 @@ tests/test_action_spec_future_cognition.py
 tests/test_action_spec_models.py
 tests/test_action_spec_results.py
 tests/test_accepted_task_lifecycle.py
+tests/test_accepted_task_prompt_contract.py
 tests/test_background_work_future_speak.py
 tests/test_background_work_delivery.py
 tests/test_coding_agent_background_run_contracts.py

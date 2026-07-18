@@ -246,8 +246,8 @@ trigger/source combinations include:
 | Trigger | Primary input source | Typical output modes |
 | --- | --- | --- |
 | `user_message` | `dialog_text` with optional media observations | `visible_reply`, `think_only`, `silent` |
-| `accepted_task_result_ready` | `accepted_task_result` | `visible_reply`, `think_only`, `silent` |
-| `reflection_signal` | `reflection_artifact` | `think_only`, `preview`, `silent` |
+| `tool_result` | `tool_result` | `visible_reply`, `think_only`, `silent` |
+| `self_cognition` | `self_cognition_case` | `think_only`, `silent` |
 | `internal_thought` | `internal_monologue` | `think_only`, `preview`, `silent` |
 | scheduled or system cognition | typed scheduled/internal percept | contract-allowed non-live modes |
 

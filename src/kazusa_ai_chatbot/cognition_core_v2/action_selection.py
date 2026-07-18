@@ -14,7 +14,6 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from kazusa_ai_chatbot import llm_tracing
 from kazusa_ai_chatbot.cognition_core_v2.action_authorization import (
     authorize_action_requests,
-    derive_action_route,
 )
 from kazusa_ai_chatbot.cognition_core_v2.resolver_authorization import (
     authorize_resolver_requests,
@@ -71,9 +70,6 @@ action、request、analysis 或 work 等泛化词不能证明能力匹配。编�
 能力不会驱动角色身体或现实场景，也不负责执行身体请求或生成、保存、稍后展示身体动作表演描述。
 面对身体互动请求，通常由发言表达当前角色立场；只有另一个明确提供的能力确实具有不同且清晰的
 非身体效果时，才选择该能力。
-
-遵守 episode.output_mode。silence 不允许请求；普通 visible_reply 可以在协议拥有的可见回应之外
-组合最多三项有依据的私有 action request；scheduled_action_request 只允许可执行动作。
 
 每项请求必须引用一个提供的 bid handle 和一个提供的 capability handle。action request 按
 affordance.decision_mode 填写 decision：
@@ -182,9 +178,6 @@ async def plan_actions(
         },
         "episode": {
             "trigger_source": episode.get("trigger_source", ""),
-            "input_sources": episode.get("input_sources", []),
-            "output_mode": episode.get("output_mode", ""),
-            "local_time_context": episode.get("local_time_context", {}),
         },
         "evidence": [
             {
@@ -256,8 +249,7 @@ async def plan_actions(
         bid_handles,
         resolver_handles,
     )
-    route = derive_action_route(
-        episode=episode,
+    route = _derive_canonical_action_route(
         primary_bid=primary_bid,
         action_requests=action_requests,
         resolver_requests=resolver_requests,
@@ -279,6 +271,25 @@ async def plan_actions(
         "resolver_goal_progress": decision["resolver_goal_progress"],
     }
     return return_value
+
+
+def _derive_canonical_action_route(
+    *,
+    primary_bid: ActionBidV2 | None,
+    action_requests: Sequence[Mapping[str, Any]],
+    resolver_requests: Sequence[Mapping[str, Any]],
+) -> str:
+    """Derive route from canonical request sets and the admitted bid."""
+
+    if action_requests and resolver_requests:
+        raise CognitionExecutionError(
+            "action and resolver requests are mutually exclusive"
+        )
+    if resolver_requests:
+        return "evidence"
+    if action_requests:
+        return "action"
+    return "speech" if primary_bid is not None else "silence"
 
 
 async def _invoke_action_planner(

@@ -18,7 +18,7 @@ from typing import Any, NotRequired, TypedDict
 from kazusa_ai_chatbot import event_logging
 from kazusa_ai_chatbot import llm_tracing
 from kazusa_ai_chatbot.cognition_episode import (
-    CognitiveEpisode,
+    CognitiveEpisodeV1,
     project_model_visible_percepts,
 )
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
@@ -91,15 +91,12 @@ def _dialog_usage_mode(global_state: GlobalPersonaState) -> str:
     cognitive_episode = global_state.get("cognitive_episode")
     if isinstance(cognitive_episode, dict):
         trigger_source = cognitive_episode.get("trigger_source")
-        output_mode = cognitive_episode.get("output_mode")
-        if trigger_source == "internal_thought":
-            usage_mode = f"internal_thought_{output_mode or 'unknown'}"
-            return usage_mode
-        if trigger_source == "reflection_signal":
-            usage_mode = f"reflection_{output_mode or 'unknown'}"
-            return usage_mode
-        if output_mode == "think_only":
-            usage_mode = "debug_think_only"
+        if trigger_source in {
+            "internal_thought",
+            "self_cognition",
+            "scheduled_tick",
+        }:
+            usage_mode = f"{trigger_source}_private"
             return usage_mode
 
     if global_state["should_respond"] is False:
@@ -115,7 +112,7 @@ class DialogAgentState(TypedDict):
     # A: Core instructions
     internal_monologue: str
     text_surface_output_v2: TextSurfaceOutputV2
-    cognitive_episode: CognitiveEpisode
+    cognitive_episode: CognitiveEpisodeV1
 
     # B: Social context
     chat_history_wide: list[dict]
@@ -946,7 +943,7 @@ async def dialog_agent(
 
 
 def _current_visible_percepts(
-    episode: CognitiveEpisode,
+    episode: CognitiveEpisodeV1,
 ) -> list[dict[str, Any]]:
     """Project current model-visible percepts within the shared prompt bound."""
 

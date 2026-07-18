@@ -7,9 +7,9 @@
 - Exact inventory companion:
   [cognition_core_v2_stage_3_change_radius.md](cognition_core_v2_stage_3_change_radius.md).
 - Plan class: high_risk_migration.
-- Status: draft.
-- Authority: the parent plan governs; this file grants no implementation or
-  production-data authority.
+- Status: in_progress.
+- Authority: the parent plan governs; user-authorized implementation is active;
+  this file grants no production-data authority.
 - Reread rule: reread the parent and this complete manifest after compaction
   and after each signed checkpoint.
 
@@ -986,7 +986,29 @@ row counts, or an executable transform derived without production discovery.
 ## Execution Evidence
 
 - Independent plan review: 2026-07-18 review and re-review findings incorporated;
-  further agent review stopped by user instruction; user disposition pending.
-- Checkpoint A baseline: pending implementation authority.
-- Checkpoints B-J: pending.
+  further agent review stopped by user instruction; user authorized execution
+  on 2026-07-19.
+- Checkpoint A baseline: complete on 2026-07-19. Evidence includes the exact
+  occurrence inventories, pre-service environment guard results, focused
+  expected-failure output, and call/latency baseline under
+  `test_artifacts/cognition_core_v2/stage_3/`.
+- Deterministic implementation verification through the current cutover is
+  recorded in
+  `test_artifacts/cognition_core_v2/stage_3/checkpoint_i_verification_summary.md`.
+  The current record includes 100 focused contract passes, 69
+  availability/profile/latch/lifecycle passes, 79 canonical-source passes,
+  157 affected-runtime passes, 121 DB/config/script passes with 7 live cases
+  deselected, 56 cognition-loop passes with 4 intentional deselections, 5
+  health/ops passes, 27 console API passes, 8 documentation passes, 5
+  architecture-doc passes, and 8 fresh-harness passes. Console external E2E,
+  collection, compile, diff, and static scans are green.
+- Checkpoint H remains externally pending: the dedicated Stage 3 MongoDB
+  endpoint/fingerprint variables are absent, so the guarded live DB test and
+  all eight focused real-LLM cases skip without importing the service. The
+  frozen 40-case sequence has not started.
+- In-app Browser acceptance is externally pending because no Browser session
+  is available; the external console E2E passes.
+- Independent review completed under reviewer identity `Hilbert`. The review
+  findings were remediated or dispositioned, and the affected deterministic
+  gates were rerun. Final user quality/sign-off remains pending.
 - Checkpoint J independent review/user sign-off: pending.

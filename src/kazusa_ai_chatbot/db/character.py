@@ -2,15 +2,21 @@
 
 from __future__ import annotations
 
-from pymongo.errors import PyMongoError
+from pymongo.errors import DuplicateKeyError, PyMongoError
 
+from kazusa_ai_chatbot.character_profile import (
+    validate_character_profile_seed,
+)
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     build_character_production_state,
     validate_cognition_state,
 )
 from kazusa_ai_chatbot.db._client import get_db
 from kazusa_ai_chatbot.db.errors import DatabaseOperationError
-from kazusa_ai_chatbot.db.schemas import CharacterProfileDoc
+from kazusa_ai_chatbot.db.schemas import (
+    CharacterProfileDoc,
+    CharacterProfileSeedV1,
+)
 from kazusa_ai_chatbot.time_boundary import storage_utc_now_iso
 
 
@@ -90,6 +96,55 @@ async def get_character_profile() -> CharacterProfileDoc | dict:
     return doc
 
 
+async def ensure_character_profile_seed(
+    seed: CharacterProfileSeedV1,
+) -> str:
+    """Atomically insert or verify the native static profile seed.
+
+    Runtime cognition state is created only with the initial singleton insert
+    and is preserved on every subsequent verification.
+    """
+
+    validated_seed = validate_character_profile_seed(seed)
+    db = await get_db()
+    existing = await db.character_state.find_one({"_id": "global"})
+    if existing is None:
+        updated_at = storage_utc_now_iso().replace("+00:00", "Z")
+        document = {
+            "_id": "global",
+            **validated_seed,
+            "cognition_state": build_character_production_state(
+                updated_at=updated_at,
+            ),
+            "updated_at": updated_at,
+        }
+        try:
+            await db.character_state.insert_one(document)
+        except DuplicateKeyError as exc:
+            existing = await db.character_state.find_one({"_id": "global"})
+            if existing is None:
+                raise DatabaseOperationError(
+                    f"character profile seed insert raced without a readable "
+                    f"singleton: {exc}"
+                ) from exc
+        else:
+            return "inserted"
+
+    existing_name = existing.get("name")
+    if existing_name != validated_seed["name"]:
+        raise ValueError(
+            "character profile seed name conflicts with the singleton "
+            f"({existing_name!r} != {validated_seed['name']!r})"
+        )
+    existing_cognition_state = existing.get("cognition_state")
+    if existing_cognition_state is None:
+        raise DatabaseOperationError(
+            "character profile singleton is missing cognition_state"
+        )
+    validate_cognition_state(existing_cognition_state)
+    return "verified"
+
+
 async def get_character_runtime_state() -> dict:
     """Retrieve only runtime fields from the singleton character document.
 
@@ -136,8 +191,8 @@ async def get_character_cognition_state() -> dict:
         {"cognition_state": 1},
     )
     if document is None or document.get("cognition_state") is None:
-        return build_character_production_state(
-            updated_at=storage_utc_now_iso(),
+        raise DatabaseOperationError(
+            "global character state document is missing cognition_state"
         )
     return validate_cognition_state(document["cognition_state"])
 

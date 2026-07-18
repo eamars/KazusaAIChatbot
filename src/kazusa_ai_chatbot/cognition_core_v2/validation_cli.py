@@ -9,7 +9,12 @@ from pathlib import Path
 import statistics
 import time
 
-from kazusa_ai_chatbot.cognition_episode import CognitiveEpisode
+from kazusa_ai_chatbot.cognition_episode import (
+    CognitiveEpisodeV1,
+    EvidenceRefV1,
+    PerceptV1,
+    build_self_cognition_episode,
+)
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     EVIDENCE_SOURCE_QUESTION_IDS,
     validate_cognition_core_input,
@@ -149,19 +154,7 @@ def _build_benchmark_payload(case: dict[str, str]) -> dict[str, object]:
     semantic_text = (
         f"{case['origin_summary']}: {case['decontextualized_input']}"
     )
-    episode: CognitiveEpisode = {
-        "episode_id": f"benchmark-{case['case_id']}",
-        "trigger_source": "system_probe",
-        "input_sources": ["internal_monologue"],
-        "output_mode": "preview",
-        "percepts": [{
-            "percept_id": f"benchmark-percept-{case['case_id']}",
-            "input_source": "internal_monologue",
-            "content": semantic_text,
-            "visibility": "model_visible",
-            "metadata": {"source": "validation_benchmark"},
-        }],
-        "target_scope": {
+    target_scope = {
             "platform": "validation_cli",
             "platform_channel_id": "benchmark",
             "channel_type": "internal",
@@ -170,19 +163,35 @@ def _build_benchmark_payload(case: dict[str, str]) -> dict[str, object]:
             "current_display_name": "Benchmark User",
             "target_addressed_user_ids": [],
             "target_broadcast": False,
-        },
-        "origin_metadata": {
-            "platform": "validation_cli",
-            "platform_message_id": f"benchmark-{case['case_id']}",
-            "active_turn_platform_message_ids": [],
-            "active_turn_conversation_row_ids": [],
-            "debug_modes": {"think_only": True},
-        },
-        "storage_timestamp_utc": occurred_at,
-        "local_time_context": local_time_context_from_storage_utc(
-            occurred_at
-        ),
+        }
+    percept: PerceptV1 = {
+        "schema_version": "percept.v1",
+        "percept_kind": "cognition_observation",
+        "source_kind": "self_cognition",
+        "source_id": f"benchmark-percept-{case['case_id']}",
+        "content": {"semantic_text": semantic_text},
+        "observed_at": occurred_at,
     }
+    evidence_ref: EvidenceRefV1 = {
+        "schema_version": "evidence_ref.v1",
+        "evidence_kind": "benchmark_input",
+        "evidence_id": f"episode:benchmark-{case['case_id']}",
+        "owner": "validation_cli",
+        "excerpt": semantic_text[:500],
+        "observed_at": occurred_at,
+    }
+    episode: CognitiveEpisodeV1 = build_self_cognition_episode(
+        case={
+            "case_id": f"benchmark-{case['case_id']}",
+            "source_case_kind": "validation_benchmark",
+            "target_scope": target_scope,
+            "privacy_scope": "private",
+        },
+        percepts=[percept],
+        evidence_refs=[evidence_ref],
+        local_time_context=local_time_context_from_storage_utc(occurred_at),
+        created_at=occurred_at,
+    )
     return {
         "schema_version": "cognition_core_input.v2",
         "episode": episode,

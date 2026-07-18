@@ -12,6 +12,7 @@ from kazusa_ai_chatbot.action_spec.models import (
     validate_action_spec,
 )
 from kazusa_ai_chatbot.action_spec.registry import (
+    ACCEPTED_TASK_REQUEST_CAPABILITY,
     ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
     ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
     BACKGROUND_WORK_REQUEST_CAPABILITY,
@@ -29,7 +30,6 @@ logger = logging.getLogger(__name__)
 
 ACTION_SPEC_CAP = 3
 OPEN_GOAL_DELIVERABLE_STATUSES = ("pending", "partial", "blocked")
-ACCEPTED_TASK_REQUEST_CAPABILITY = "accepted_task_request"
 ALLOWED_ACTION_CAPABILITIES = frozenset((
     MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     SPEAK_CAPABILITY,
@@ -144,7 +144,7 @@ def _materialize_action_request(
                 "L2d dropped accepted-task request from non-user source"
             )
             return None
-        action_spec = _build_background_work_action_spec(request, state)
+        action_spec = _build_accepted_task_request_action_spec(request, state)
     elif capability == BACKGROUND_WORK_REQUEST_CAPABILITY:
         if not _can_create_delayed_task_from_source(state):
             logger.warning(
@@ -393,6 +393,35 @@ def _build_future_speak_action_spec(
     return action_spec
 
 
+def _build_accepted_task_request_action_spec(
+    request: ActionRequestV1,
+    state: CognitionState,
+) -> dict[str, object]:
+    """Build the explicit accepted-task request capability envelope."""
+
+    task_brief = _deterministic_work_seed(request, state)
+    return _build_action_spec(
+        kind=ACCEPTED_TASK_REQUEST_CAPABILITY,
+        source_refs=[_current_episode_source_ref()],
+        target={
+            "schema_version": "action_target.v1",
+            "target_kind": "current_user",
+            "target_id": None,
+            "owner": "accepted_task",
+            "scope": _background_work_target_scope(state),
+        },
+        params={
+            "task_brief": task_brief,
+            "requested_delivery": "send_result_when_done",
+            "max_output_chars": BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
+        },
+        urgency="background",
+        visibility="private",
+        deadline=None,
+        reason=request["reason"],
+    )
+
+
 def _build_accepted_coding_task_action_spec(
     request: ActionRequestV1,
     state: CognitionState,
@@ -466,9 +495,12 @@ def _approval_evidence_from_state(
     for percept in percepts:
         if not isinstance(percept, Mapping):
             continue
-        if _mapping_text(percept, "input_source") != "dialog_text":
+        if _mapping_text(percept, "source_kind") != "dialog":
             continue
-        quote = _mapping_text(percept, "content")[:500]
+        content = percept.get("content")
+        if not isinstance(content, Mapping):
+            continue
+        quote = _mapping_text(content, "semantic_text")[:500]
         break
     if not quote:
         return None
@@ -484,7 +516,7 @@ def _approval_evidence_from_state(
         "current_global_user_id",
     )
     source_message_id = _mapping_text(origin_metadata, "platform_message_id")
-    storage_timestamp_utc = _mapping_text(episode, "storage_timestamp_utc")
+    storage_timestamp_utc = _mapping_text(episode, "created_at")
     if not requester_global_user_id or not source_message_id:
         return None
     if not storage_timestamp_utc:
@@ -790,14 +822,14 @@ def _character_name_for_scope(state: CognitionState) -> str:
 def _is_scheduled_future_cognition_source(state: CognitionState) -> bool:
     """Return whether this cycle was itself started by a future-cognition slot."""
 
-    if _trigger_source_for_scope(state) == "scheduled_future_cognition":
+    if _trigger_source_for_scope(state) == "scheduled_tick":
         return True
     conversation_progress = state.get("conversation_progress")
     if not isinstance(conversation_progress, dict):
         return False
 
     source = conversation_progress.get("source")
-    is_scheduled_source = source == "scheduled_future_cognition"
+    is_scheduled_source = source == "scheduled_tick"
     return is_scheduled_source
 
 

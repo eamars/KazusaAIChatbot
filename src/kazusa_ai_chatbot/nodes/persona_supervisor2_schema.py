@@ -3,10 +3,10 @@ from typing import Annotated, Literal, NotRequired, TypedDict
 from kazusa_ai_chatbot.action_spec.models import ActionSpecV1
 from kazusa_ai_chatbot.action_spec.results import (
     ActionResultV1,
-    EpisodeTraceV1,
+    EpisodeTraceV2,
     SurfaceOutputV1,
 )
-from kazusa_ai_chatbot.cognition_episode import CognitiveEpisode
+from kazusa_ai_chatbot.cognition_episode import CognitiveEpisodeV1
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     TextSurfaceOutputV2,
     VisualSurfaceOutputV2,
@@ -60,7 +60,7 @@ class GlobalPersonaState(TypedDict):
     llm_trace_id: NotRequired[str]
     user_input: str
     prompt_message_context: PromptMessageContext
-    cognitive_episode: NotRequired[CognitiveEpisode]
+    cognitive_episode: NotRequired[CognitiveEpisodeV1]
     user_multimedia_input: list[MultiMediaDoc]
     platform: str
     platform_channel_id: str
@@ -85,6 +85,7 @@ class GlobalPersonaState(TypedDict):
     promoted_reflection_context: NotRequired[dict]
     internal_monologue_residue_context: NotRequired[str]
     past_dialog_cognition_context: NotRequired[str]
+    action_availability_runtime: NotRequired[dict[str, object]]
 
     # Debug
     debug_modes: DebugModes
@@ -118,7 +119,7 @@ class GlobalPersonaState(TypedDict):
     pre_surface_action_results: NotRequired[list[ActionResultV1]]
     action_results: NotRequired[list[ActionResultV1]]
     surface_outputs: NotRequired[list[SurfaceOutputV1]]
-    episode_trace: NotRequired[EpisodeTraceV1]
+    episode_trace: NotRequired[EpisodeTraceV2]
     memory_lifecycle_context: NotRequired[dict]
 
     # Semantic cognition projections for downstream consolidation and audit.
@@ -151,7 +152,7 @@ class CognitionState(TypedDict):
     llm_trace_id: NotRequired[str]
     user_input: str
     prompt_message_context: PromptMessageContext
-    cognitive_episode: NotRequired[CognitiveEpisode]
+    cognitive_episode: NotRequired[CognitiveEpisodeV1]
     platform: str
     platform_channel_id: str
     channel_type: str
@@ -168,6 +169,7 @@ class CognitionState(TypedDict):
     promoted_reflection_context: NotRequired[dict]
     internal_monologue_residue_context: NotRequired[str]
     past_dialog_cognition_context: NotRequired[str]
+    action_availability_runtime: NotRequired[dict[str, object]]
     interaction_style_context: NotRequired[dict]
     group_engagement_action_context: NotRequired[dict]
     action_selection_context: NotRequired[dict]
@@ -218,7 +220,7 @@ class CognitionState(TypedDict):
     pre_surface_action_results: NotRequired[list[ActionResultV1]]
     action_results: NotRequired[list[ActionResultV1]]
     surface_outputs: NotRequired[list[SurfaceOutputV1]]
-    episode_trace: NotRequired[EpisodeTraceV1]
+    episode_trace: NotRequired[EpisodeTraceV2]
     memory_lifecycle_context: NotRequired[dict]
     target_addressed_user_ids: NotRequired[list[str]]
     target_broadcast: NotRequired[bool]

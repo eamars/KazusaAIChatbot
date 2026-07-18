@@ -10,7 +10,7 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from kazusa_ai_chatbot.cognition_resolver import capabilities as capabilities_module
-from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
+from tests.cognition_core_v2_test_helpers import canonical_user_message_episode
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2 as supervisor_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_dispatch as dispatch_module
@@ -46,7 +46,7 @@ def _minimal_episode() -> dict[str, object]:
     """Build a text-chat episode accepted by RAG request construction."""
 
     turn_clock = build_turn_clock("2026-04-27 00:00:00")
-    episode = build_text_chat_cognitive_episode(
+    episode = canonical_user_message_episode(
         episode_id="episode-event-log",
         percept_id="percept-event-log",
         storage_timestamp_utc=turn_clock["storage_timestamp_utc"],

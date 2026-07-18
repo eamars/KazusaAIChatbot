@@ -142,7 +142,7 @@ async def test_accepted_code_task_materializes_queue_and_l3_acknowledgement(
     assert captured_queue_requests[0]["task_brief"] == CODE_TASK
     assert captured_queue_requests[0]["accepted_task_id"] == "accepted-task-001"
 
-def test_completed_coding_task_delivers_as_accepted_task_result_ready() -> None:
+def test_completed_coding_task_delivers_as_tool_result() -> None:
     """Completed accepted-task-backed coding work should use final delivery path."""
 
     from kazusa_ai_chatbot.background_work.result_source import (
@@ -152,13 +152,14 @@ def test_completed_coding_task_delivers_as_accepted_task_result_ready() -> None:
     episode = build_result_ready_episode_from_job(_completed_coding_job())
     percept = episode["percepts"][0]
 
-    assert episode["trigger_source"] == "accepted_task_result_ready"
-    assert episode["input_sources"] == ["accepted_task_result"]
-    assert percept["input_source"] == "accepted_task_result"
-    assert percept["content"] == CODE_TASK_RESULT
-    assert percept["metadata"]["accepted_task_id"] == "accepted-task-001"
-    assert percept["metadata"]["accepted_task_summary"] == CODE_TASK
-    assert "coding_agent" not in repr(percept["metadata"])
+    assert episode["trigger_source"] == "tool_result"
+    assert percept["source_kind"] == "tool_result"
+    assert percept["content"]["artifact_text"] == CODE_TASK_RESULT
+    assert percept["content"]["semantic_summary"] == (
+        "Completed accepted coding work."
+    )
+    assert percept["source_id"] == "accepted-task-001"
+    assert "coding_agent" not in repr(percept)
     assert "workspace_root" not in repr(episode)
     assert "local_root" not in repr(episode)
     assert "cache_key" not in repr(episode)
@@ -207,9 +208,11 @@ async def test_gate01_writing_task_runs_from_user_input_to_final_delivery(
     )
     assert trace["accepted_task"]["state"] == "delivered"
     assert trace["result_episode"]["trigger_source"] == (
-        "accepted_task_result_ready"
+        "tool_result"
     )
-    assert trace["result_episode"]["percepts"][0]["content"] == CODE_TASK_RESULT
+    assert trace["result_episode"]["percepts"][0]["content"][
+        "artifact_text"
+    ] == CODE_TASK_RESULT
     assert trace["final_dialog"] == [CODE_TASK_RESULT]
     serialized_delivery = repr({
         "result_episode": trace["result_episode"],
@@ -253,9 +256,9 @@ async def test_project_summary_question_runs_from_input_to_final_delivery(
         "code_reading"
     )
     assert trace["accepted_task"]["state"] == "delivered"
-    assert trace["result_episode"]["percepts"][0]["content"] == (
-        PROJECT_SUMMARY_RESULT
-    )
+    assert trace["result_episode"]["percepts"][0]["content"][
+        "artifact_text"
+    ] == PROJECT_SUMMARY_RESULT
     assert trace["final_dialog"] == [PROJECT_SUMMARY_RESULT]
     serialized_delivery = repr({
         "result_episode": trace["result_episode"],
@@ -313,7 +316,7 @@ async def _run_full_coding_handoff_case(
     monkeypatch.setattr(
         accepted_lifecycle,
         "repository_mark_result_ready",
-        store.mark_accepted_task_result_ready,
+        store.mark_tool_result_ready,
     )
     monkeypatch.setattr(
         accepted_lifecycle,
@@ -479,9 +482,12 @@ async def _run_full_coding_handoff_case(
     assert store.accepted_task["state"] == "result_ready"
 
     async def deliver_result_episode(episode: dict[str, Any]) -> dict[str, str]:
+        result_content = episode["percepts"][0]["content"]
+        if not isinstance(result_content, dict):
+            raise AssertionError("tool-result percept content must be an object")
         final_response = await persona_supervisor2(
             _persona_state_for_input(
-                user_input=episode["percepts"][0]["content"],
+                user_input=result_content["artifact_text"],
                 platform_message_id=f"{case_id}-result-message",
                 cognitive_episode=episode,
             ),
@@ -509,8 +515,10 @@ async def _run_full_coding_handoff_case(
         "recovered_count": 0,
     }
     result_episode = final_delivery["episode"]
-    assert result_episode["trigger_source"] == "accepted_task_result_ready"
-    assert result_episode["percepts"][0]["content"] == coding_result_text
+    assert result_episode["trigger_source"] == "tool_result"
+    assert result_episode["percepts"][0]["content"]["artifact_text"] == (
+        coding_result_text
+    )
     assert final_delivery["dialog"] == [coding_result_text]
     assert store.background_job is not None
     assert store.background_job["status"] == "delivered"
@@ -743,7 +751,7 @@ class _InMemoryAcceptedCodeWorkStore:
         })
         return dict(task)
 
-    async def mark_accepted_task_result_ready(
+    async def mark_tool_result_ready(
         self,
         *,
         accepted_task_id: str,
@@ -1106,7 +1114,7 @@ async def _fake_decontextualizer(state: dict[str, Any]) -> dict[str, str]:
     episode = state.get("cognitive_episode")
     if isinstance(episode, dict):
         trigger_source = episode.get("trigger_source")
-        if trigger_source == "accepted_task_result_ready":
+        if trigger_source == "tool_result":
             result = {
                 "decontexualized_input": "Accepted task result is ready."
             }
@@ -1139,7 +1147,7 @@ async def _fake_cognition_subgraph(
     trigger_source = ""
     if isinstance(episode, dict):
         trigger_source = str(episode.get("trigger_source", ""))
-    if trigger_source == "accepted_task_result_ready":
+    if trigger_source == "tool_result":
         action_requests = []
     else:
         action_requests = [
@@ -1161,12 +1169,12 @@ async def _fake_cognition_subgraph(
     output["action_requests"] = action_requests
     output["intention"]["intention"] = (
         "deliver the accepted coding result"
-        if trigger_source == "accepted_task_result_ready"
+        if trigger_source == "tool_result"
         else "accept and acknowledge the delayed coding task"
     )
     output["intention"]["reason"] = (
         "The accepted coding task is complete."
-        if trigger_source == "accepted_task_result_ready"
+        if trigger_source == "tool_result"
         else "The user asked for delayed coding work."
     )
     action_specs = _materialize_v2_action_requests(output, state)
@@ -1182,7 +1190,7 @@ async def _fake_l3_text_surface_handler(state: dict[str, Any]) -> dict[str, Any]
     """Return one exact V2 surface output for the selected speech route."""
 
     episode = state["cognitive_episode"]
-    result_ready = episode["trigger_source"] == "accepted_task_result_ready"
+    result_ready = episode["trigger_source"] == "tool_result"
     content_plan = (
         "Deliver the completed accepted coding result."
         if result_ready
@@ -1216,7 +1224,7 @@ async def _fake_dialog_agent(state: dict[str, Any]) -> dict[str, Any]:
     trigger_source = ""
     if isinstance(episode, dict):
         trigger_source = str(episode.get("trigger_source", ""))
-    if trigger_source == "accepted_task_result_ready":
+    if trigger_source == "tool_result":
         final_dialog = [str(state.get("user_input", ""))]
     else:
         final_dialog = [
@@ -1317,21 +1325,20 @@ def _user_message_episode(
 ) -> dict[str, Any]:
     """Build a source episode for the initial user code question."""
 
-    episode = {
-        "episode_id": "phase3-e2e-user-message",
-        "trigger_source": "user_message",
-        "input_sources": ["dialog_text"],
-        "output_mode": "visible_reply",
-        "percepts": [
-            {
-                "percept_id": "phase3-e2e-user-message:dialog:0",
-                "input_source": "dialog_text",
-                "content": user_input,
-                "visibility": "model_visible",
-                "metadata": {},
-            }
-        ],
-        "target_scope": {
+    from kazusa_ai_chatbot.cognition_episode import build_user_message_episode
+
+    episode = build_user_message_episode(
+        episode_id="phase3-e2e-user-message",
+        origin={
+            "platform": "debug",
+            "platform_message_id": platform_message_id,
+            "active_turn_platform_message_ids": [platform_message_id],
+            "active_turn_conversation_row_ids": [],
+            "debug_modes": {},
+            "privacy_scope": "conversation",
+            "delivery_permission_ref": "debug:debug-channel-001",
+        },
+        target_scope={
             "platform": "debug",
             "platform_channel_id": "debug-channel-001",
             "channel_type": "private",
@@ -1341,16 +1348,28 @@ def _user_message_episode(
             "target_addressed_user_ids": ["character-001"],
             "target_broadcast": False,
         },
-        "origin_metadata": {
-            "platform": "debug",
-            "platform_message_id": platform_message_id,
-            "active_turn_platform_message_ids": [platform_message_id],
-            "active_turn_conversation_row_ids": [],
-            "debug_modes": {},
+        dialog_percept={
+            "schema_version": "percept.v1",
+            "percept_kind": "dialog",
+            "source_kind": "dialog",
+            "source_id": platform_message_id,
+            "content": {
+                "semantic_text": user_input,
+                "speaker_role": "current_user",
+                "addressee_role": "self",
+            },
+            "observed_at": storage_timestamp_utc,
         },
-        "storage_timestamp_utc": storage_timestamp_utc,
-        "local_time_context": local_time_context,
-    }
+        media_percepts=[],
+        evidence_refs=[],
+        local_time_context=local_time_context,
+        created_at=storage_timestamp_utc,
+        debug_controls={
+            "think_only": False,
+            "no_remember": False,
+            "no_visual_directives": False,
+        },
+    )
     return episode
 
 

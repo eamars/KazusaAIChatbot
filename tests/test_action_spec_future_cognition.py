@@ -291,7 +291,7 @@ def test_future_cognition_rejects_invalid_episode_type() -> None:
     )
 
     action_spec = _future_cognition_action_spec()
-    action_spec["params"]["episode_type"] = "reflection_signal"
+    action_spec["params"]["episode_type"] = "scheduled_tick"
 
     with pytest.raises(ActionValidationError, match="episode_type"):
         build_future_cognition_calendar_documents(
