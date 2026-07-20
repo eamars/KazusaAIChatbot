@@ -12,6 +12,7 @@ from kazusa_ai_chatbot.cognition_core_v2.action_authorization import (
     invoke_semantic_authorizer,
 )
 from kazusa_ai_chatbot.cognition_core_v2.action_selection import (
+    ACTION_PLANNING_PROMPT,
     _validate_action_plan_decision,
     plan_actions,
 )
@@ -95,14 +96,22 @@ def _planner_response(
     *,
     actions: list[dict[str, str]] | None = None,
     resolvers: list[dict[str, str]] | None = None,
+    goal_resolution: str | None = None,
 ) -> dict[str, object]:
     """Build the exact fixed-shape model response."""
 
+    if goal_resolution is None:
+        goal_resolution = (
+            "requires_required_evidence"
+            if resolvers
+            else "answerable_now"
+        )
     return {
         "action_requests": actions or [],
         "resolver_requests": resolvers or [],
         "resolver_pending_resolution": None,
         "resolver_goal_progress": None,
+        "goal_resolution": goal_resolution,
     }
 
 
@@ -192,6 +201,71 @@ async def test_speech_composes_with_three_private_actions() -> None:
         for row in result["action_requests"]
     )
     assert "speak" not in json.dumps(captured["action_handles"])
+
+
+@pytest.mark.asyncio
+async def test_answerable_now_drops_optional_resolver_request() -> None:
+    """A sufficient answer must not enter optional retrieval recurrence."""
+
+    response = _planner_response(
+        resolvers=[{
+            "bid_handle": "b1",
+            "resolver_handle": "r1",
+            "semantic_goal": "retrieve an optional relationship example",
+            "reason": "the model considered extra context despite a sufficient answer",
+        }],
+        goal_resolution="answerable_now",
+    )
+
+    class _LLM:
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config: object,
+        ) -> SimpleNamespace:
+            del messages, config
+            return SimpleNamespace(content=json.dumps(response))
+
+    result = await plan_actions(
+        primary_bid=_bid("ordinary_response"),
+        supporting_bids=[],
+        episode={
+            "episode_id": "episode-answerable-now",
+            "trigger_source": "user_message",
+        },
+        evidence=[{
+            "evidence_handle": "e1",
+            "evidence_ref": {
+                "source_kind": "episode",
+                "source_id": "episode-answerable-now",
+                "occurred_at": "2026-07-17T00:00:00Z",
+                "semantic_summary": "the user asked a general question",
+            },
+            "semantic_text": "the user asked a general question",
+            "visible_to": ["q:relationship_social"],
+        }],
+        available_actions=[],
+        available_resolvers=[_resolver("local_context_recall")],
+        resolver_context="resolver_status=idle",
+        services=SimpleNamespace(
+            llm=_LLM(),
+            action_selection_config=object(),
+        ),
+    )
+
+    assert result["goal_resolution"] == "answerable_now"
+    assert result["resolver_requests"] == []
+    assert result["intention"]["route"] == "speech"
+
+
+def test_action_planning_prompt_separates_missing_user_input() -> None:
+    """The LLM contract distinguishes missing user input from evidence."""
+
+    assert "resolver_context" in ACTION_PLANNING_PROMPT
+    assert "requires_user_input" in ACTION_PLANNING_PROMPT
+    assert "resolver_requests=[]" in ACTION_PLANNING_PROMPT
+    assert "requires_required_evidence" in ACTION_PLANNING_PROMPT
 
 
 @pytest.mark.asyncio

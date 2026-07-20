@@ -149,7 +149,7 @@ def ensure_initial_resolver_inputs(
     initialized = dict(state)
     rag_result = initialized.get("rag_result")
     if rag_result is None:
-        current_user_id = _require_state_text(initialized, "global_user_id")
+        current_user_id = _initial_rag_current_user_id(initialized)
         character_user_id = _require_character_user_id(initialized)
         initialized["rag_result"] = build_empty_rag_result(
             current_user_id=current_user_id,
@@ -208,6 +208,49 @@ def ensure_initial_resolver_inputs(
     initialized["resolver_state"] = resolver_state
     initialized["resolver_context"] = project_resolver_context(resolver_state)
     return_value = initialized
+    return return_value
+
+
+def _initial_rag_current_user_id(state: dict) -> str:
+    """Return the bootstrap owner without inventing a group target."""
+
+    current_user_id = state.get("global_user_id")
+    if isinstance(current_user_id, str) and current_user_id.strip():
+        return_value = current_user_id
+        return return_value
+    if not _is_targetless_group_self_cognition(state):
+        _require_non_empty_text(current_user_id, "global_user_id")
+    character_profile = state.get("character_profile")
+    if not isinstance(character_profile, dict):
+        raise ResolverValidationError("character_profile: expected object")
+    character_user_id = character_profile.get("global_user_id")
+    _require_non_empty_text(
+        character_user_id,
+        "character_profile.global_user_id",
+    )
+    return_value = character_user_id
+    return return_value
+
+
+def _is_targetless_group_self_cognition(state: dict) -> bool:
+    """Return whether empty participant identity is a valid source contract."""
+
+    episode = state.get("cognitive_episode")
+    if not isinstance(episode, Mapping):
+        return_value = False
+        return return_value
+    if episode.get("trigger_source") != "self_cognition":
+        return_value = False
+        return return_value
+    target_scope = episode.get("target_scope")
+    if not isinstance(target_scope, Mapping):
+        return_value = False
+        return return_value
+    return_value = (
+        target_scope.get("channel_type") == "group"
+        and not target_scope.get("current_global_user_id")
+        and not target_scope.get("current_platform_user_id")
+    )
     return return_value
 
 

@@ -65,6 +65,15 @@ PendingResolutionApplyFunc = Callable[
 
 MAX_CYCLE_OBSERVATION_ID = "resolver_obs_max_cycles"
 DUPLICATE_REQUEST_OBSERVATION_ID = "resolver_obs_duplicate_request"
+ANSWERABLE_NOW_TERMINAL_REASON = (
+    "goal answerable now; optional resolver request suppressed"
+)
+USER_INPUT_BLOCKER_TERMINAL_REASON = (
+    "blocked user-input resolver request converted to clarification surface"
+)
+USER_INPUT_BLOCKER_PRIVATE_TERMINAL_REASON = (
+    "blocked user-input resolver request kept private for non-user source"
+)
 BLOCKED_PENDING_CAPABILITIES = frozenset((
     "human_clarification",
     "approval_preparation",
@@ -99,6 +108,16 @@ async def call_cognition_resolver_loop(
         cognition_state = _merge_state(current_state, cognition_output)
         cognition_state = _sync_goal_progress_from_cognition(cognition_state)
         resolver_state = _resolver_state(cognition_state)
+        if _suppress_optional_resolver_request(cognition_state):
+            final_state = await _finalize_without_capability(
+                cognition_state,
+                resolver_state=resolver_state,
+                status_before=status_before,
+                apply_pending_resolution_func=apply_pending_resolution_func,
+                terminal_reason=ANSWERABLE_NOW_TERMINAL_REASON,
+            )
+            return_value = final_state
+            return return_value
         selected_request = _select_immediate_request(cognition_state)
 
         if selected_request is None:
@@ -137,6 +156,18 @@ async def call_cognition_resolver_loop(
                 status_before=status_before,
                 call_cognition_subgraph_func=call_cognition_subgraph_func,
                 upsert_pending_resume_func=upsert_pending_resume_func,
+                apply_pending_resolution_func=apply_pending_resolution_func,
+            )
+            return_value = final_state
+            return return_value
+
+        if _is_user_input_blocker_observation(observation):
+            final_state = await _run_user_input_blocker_final_cognition(
+                cognition_state,
+                selected_request=selected_request,
+                observation=observation,
+                status_before=status_before,
+                call_cognition_subgraph_func=call_cognition_subgraph_func,
                 apply_pending_resolution_func=apply_pending_resolution_func,
             )
             return_value = final_state
@@ -199,6 +230,7 @@ async def _finalize_without_capability(
     resolver_state: ResolverCycleStateV1,
     status_before: str,
     apply_pending_resolution_func: PendingResolutionApplyFunc,
+    terminal_reason: str = "no resolver capability request",
 ) -> GlobalPersonaState:
     """Attach terminal trace/state when cognition does not need a capability."""
 
@@ -211,7 +243,7 @@ async def _finalize_without_capability(
     updated_resolver_state = dict(resolver_state)
     updated_resolver_state["status"] = "terminal"
     updated_resolver_state["held_action_specs"] = action_specs
-    updated_resolver_state["terminal_reason"] = "no resolver capability request"
+    updated_resolver_state["terminal_reason"] = terminal_reason
     trace = _build_cycle_trace(
         cognition_state,
         resolver_state=updated_resolver_state,
@@ -219,7 +251,7 @@ async def _finalize_without_capability(
         status_before=status_before,
         selected_capability_kind="",
         observation_ids=[],
-        terminal_reason="no resolver capability request",
+        terminal_reason=terminal_reason,
     )
     updated_resolver_state = append_cycle_trace(updated_resolver_state, trace)
     return_value = _with_resolver_state(cognition_state, updated_resolver_state)
@@ -251,7 +283,14 @@ async def _run_max_cycle_final_cognition(
     final_resolver_state = _resolver_state(cognition_state)
     final_resolver_state = dict(final_resolver_state)
     final_terminal_reason = "maximum resolver cycles reached"
-    final_selected_request = _select_immediate_request(cognition_state)
+    answerable_now = _suppress_optional_resolver_request(cognition_state)
+    final_selected_request = (
+        None
+        if answerable_now
+        else _select_immediate_request(cognition_state)
+    )
+    if answerable_now:
+        final_terminal_reason = ANSWERABLE_NOW_TERMINAL_REASON
     if final_selected_request is not None:
         cognition_state["resolver_capability_requests"] = []
         if cognition_state.get("action_specs"):
@@ -338,7 +377,14 @@ async def _run_duplicate_request_final_cognition(
     final_terminal_reason = (
         "duplicate resolver capability request final cognition completed"
     )
-    final_repeated_request = _select_immediate_request(cognition_state)
+    answerable_now = _suppress_optional_resolver_request(cognition_state)
+    final_repeated_request = (
+        None
+        if answerable_now
+        else _select_immediate_request(cognition_state)
+    )
+    if answerable_now:
+        final_terminal_reason = ANSWERABLE_NOW_TERMINAL_REASON
     if final_repeated_request is not None:
         cognition_state["resolver_capability_requests"] = []
         if cognition_state.get("action_specs"):
@@ -486,6 +532,114 @@ async def _run_blocked_pending_final_cognition(
     return return_value
 
 
+async def _run_user_input_blocker_final_cognition(
+    state: GlobalPersonaState,
+    *,
+    selected_request: ResolverCapabilityRequestV1,
+    observation: ResolverObservationV1,
+    status_before: str,
+    call_cognition_subgraph_func: CognitionSubgraphFunc,
+    apply_pending_resolution_func: PendingResolutionApplyFunc,
+) -> GlobalPersonaState:
+    """Run one final cognition pass after a typed user-input blocker."""
+
+    resolver_state = _resolver_state(state)
+    resolver_state = append_observation(resolver_state, observation)
+    updated_resolver_state = dict(resolver_state)
+    updated_resolver_state["status"] = "blocked"
+    updated_resolver_state["terminal_reason"] = (
+        "blocked user-input observation appended"
+    )
+    trace = _build_cycle_trace(
+        state,
+        resolver_state=updated_resolver_state,
+        cycle_index=updated_resolver_state["cycle_index"],
+        status_before=status_before,
+        selected_capability_kind=selected_request["capability_kind"],
+        observation_ids=[observation["observation_id"]],
+        terminal_reason="blocked user-input observation appended",
+    )
+    updated_resolver_state = append_cycle_trace(updated_resolver_state, trace)
+    cognition_input = _with_resolver_state(state, updated_resolver_state)
+    if "rag_result" in observation:
+        cognition_input["rag_result"] = observation["rag_result"]
+        await _attach_past_dialog_cognition_from_rag_result(
+            cognition_input,
+            observation["rag_result"],
+        )
+
+    cognition_output = await call_cognition_subgraph_func(cognition_input)
+    cognition_state = _merge_state(cognition_input, cognition_output)
+    cognition_state = _sync_goal_progress_from_cognition(cognition_state)
+    await _apply_pending_resolution_if_present(
+        cognition_state,
+        apply_pending_resolution_func=apply_pending_resolution_func,
+    )
+    final_resolver_state = dict(_resolver_state(cognition_state))
+    final_terminal_reason = "blocked user-input final cognition completed"
+    answerable_now = _suppress_optional_resolver_request(cognition_state)
+    final_request = (
+        None
+        if answerable_now
+        else _select_immediate_request(cognition_state)
+    )
+    if answerable_now:
+        final_terminal_reason = ANSWERABLE_NOW_TERMINAL_REASON
+    else:
+        cognition_state["resolver_capability_requests"] = []
+        if final_request is not None and _is_repeated_user_input_blocked_request(
+            final_request,
+            observation,
+        ):
+            if _should_surface_terminal_blocker(cognition_state):
+                logger.warning(
+                    "Resolver converted repeated user-input blocker request "
+                    "to a visible clarification surface"
+                )
+                cognition_state["action_specs"] = [
+                    _user_input_blocker_speak_action_spec(observation),
+                ]
+                final_terminal_reason = USER_INPUT_BLOCKER_TERMINAL_REASON
+            else:
+                logger.warning(
+                    "Resolver kept repeated user-input blocker request private "
+                    "for non-user source"
+                )
+                final_terminal_reason = (
+                    USER_INPUT_BLOCKER_PRIVATE_TERMINAL_REASON
+                )
+        if (
+            not cognition_state.get("action_specs")
+            and _should_surface_terminal_blocker(cognition_state)
+        ):
+            logger.warning(
+                "Resolver converted silent user-input blocker cognition to "
+                "a visible clarification surface"
+            )
+            cognition_state["action_specs"] = [
+                _user_input_blocker_speak_action_spec(observation),
+            ]
+            final_terminal_reason = USER_INPUT_BLOCKER_TERMINAL_REASON
+
+    final_resolver_state["held_action_specs"] = list(
+        cognition_state.get("action_specs", []),
+    )
+    final_resolver_state["status"] = "blocked"
+    final_resolver_state["terminal_reason"] = final_terminal_reason
+    final_trace = _build_cycle_trace(
+        cognition_state,
+        resolver_state=final_resolver_state,
+        cycle_index=final_resolver_state["cycle_index"],
+        status_before="blocked",
+        selected_capability_kind="",
+        observation_ids=[],
+        terminal_reason=final_terminal_reason,
+    )
+    final_resolver_state = append_cycle_trace(final_resolver_state, final_trace)
+    return_value = _with_resolver_state(cognition_state, final_resolver_state)
+    return return_value
+
+
 def _pending_resume_speak_action_spec(
     pending_resume: ResolverPendingResumeV1,
     observation: ResolverObservationV1,
@@ -543,6 +697,60 @@ def _pending_resume_speak_action_spec(
         "reason": (
             "Resolver created a pending row and must surface its prompt-safe "
             "question or approval summary."
+        ),
+    }
+    validated_spec = validate_action_spec(action_spec)
+    return_value = dict(validated_spec)
+    return return_value
+
+
+def _user_input_blocker_speak_action_spec(
+    observation: ResolverObservationV1,
+) -> dict[str, Any]:
+    """Build a prompt-safe clarification action from a typed blocker."""
+
+    action_spec = {
+        "schema_version": ACTION_SPEC_VERSION,
+        "kind": SPEAK_CAPABILITY,
+        "cognition_mode": "deliberative",
+        "source_refs": [
+            {
+                "schema_version": ACTION_SOURCE_REF_VERSION,
+                "ref_kind": "system_event",
+                "ref_id": observation["observation_id"],
+                "owner": "cognition_resolver",
+                "relationship": "basis",
+                "evidence_refs": [],
+            },
+        ],
+        "target": {
+            "schema_version": ACTION_TARGET_VERSION,
+            "target_kind": "current_channel",
+            "target_id": None,
+            "owner": "l3_text",
+            "scope": {"surface": "text"},
+        },
+        "params": {
+            "delivery_mode": "visible_reply",
+            "execute_at": None,
+            "surface_requirements": {
+                "decision": "ask_clarification",
+                "detail": observation["prompt_safe_summary"],
+            },
+        },
+        "urgency": "now",
+        "visibility": "user_visible",
+        "deadline": None,
+        "continuation": {
+            "schema_version": ACTION_CONTINUATION_VERSION,
+            "mode": "none",
+            "episode_type": None,
+            "max_depth": 0,
+            "include_result_as": None,
+        },
+        "reason": (
+            "Resolver requires user input before the blocked capability can "
+            "act and must surface a prompt-safe clarification."
         ),
     }
     validated_spec = validate_action_spec(action_spec)
@@ -711,6 +919,19 @@ def _sync_goal_progress_from_cognition(
     return return_value
 
 
+def _suppress_optional_resolver_request(
+    state: GlobalPersonaState,
+) -> bool:
+    """Apply the validated answerability decision to the loop boundary."""
+
+    if state.get("goal_resolution") != "answerable_now":
+        return_value = False
+        return return_value
+    state["resolver_capability_requests"] = []
+    return_value = True
+    return return_value
+
+
 async def _execute_with_timeout(
     request: ResolverCapabilityRequestV1,
     state: GlobalPersonaState,
@@ -753,6 +974,31 @@ def _is_blocked_pending_observation(observation: ResolverObservationV1) -> bool:
         observation["status"] == "blocked"
         and observation["capability_kind"] in BLOCKED_PENDING_CAPABILITIES
     )
+    return return_value
+
+
+def _is_user_input_blocker_observation(
+    observation: ResolverObservationV1,
+) -> bool:
+    """Return whether an observation carries a typed user-input blocker."""
+
+    return_value = (
+        observation["status"] == "blocked"
+        and observation.get("blocker_kind") == "requires_user_input"
+    )
+    return return_value
+
+
+def _is_repeated_user_input_blocked_request(
+    request: ResolverCapabilityRequestV1 | None,
+    observation: ResolverObservationV1,
+) -> bool:
+    """Return whether final cognition repeats the blocked capability kind."""
+
+    if request is None:
+        return_value = False
+        return return_value
+    return_value = request["capability_kind"] == observation["capability_kind"]
     return return_value
 
 

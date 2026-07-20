@@ -34,6 +34,7 @@ class _ResolverPlannerLLM:
                 "semantic_goal": "obtain grounded local context",
                 "reason": "the admitted motive has an evidence gap",
             }],
+            "goal_resolution": "requires_required_evidence",
             "resolver_pending_resolution": None,
             "resolver_goal_progress": None,
         }))

@@ -17,6 +17,7 @@ from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     build_acquaintance_user_state,
 )
 from kazusa_ai_chatbot.nodes import persona_supervisor2 as persona_module
+from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition as cognition_module
 from kazusa_ai_chatbot.cognition_resolver.loop import (
     _terminal_blocker_speak_action_spec,
 )
@@ -61,6 +62,7 @@ def _cognition_output(route: str) -> dict[str, object]:
         "affect_projection": [],
         "action_requests": [],
         "resolver_requests": [],
+        "goal_resolution": "answerable_now",
         "resolver_pending_resolution": None,
         "resolver_goal_progress": None,
         "resolver_progress": {
@@ -136,6 +138,42 @@ def _persona_state() -> dict[str, object]:
             content="hello",
         ),
     }
+
+
+def test_targetless_group_affordances_use_a_semantic_group_role() -> None:
+    """Group review affordances must not expose an empty user role."""
+
+    state = {
+        "global_user_id": "",
+        "rag_result": {
+            "user_image": {
+                "user_memory_context": {
+                    "active_commitments": [],
+                },
+            },
+        },
+        "cognitive_episode": {
+            "trigger_source": "self_cognition",
+            "target_scope": {
+                "channel_type": "group",
+                "current_global_user_id": "",
+                "current_platform_user_id": "",
+            },
+        },
+    }
+
+    affordances = cognition_module._available_action_affordances(state)
+
+    assert affordances
+    assert all(
+        role == {
+            "role": "target",
+            "entity_kind": "group",
+            "entity_id": "current group scene",
+        }
+        for affordance in affordances
+        for role in affordance["target_roles"]
+    )
 
 
 def _resolver_update(route: str) -> dict[str, object]:
@@ -323,7 +361,7 @@ async def test_persona_stage_uses_canonical_resolver_loop(
 async def test_call_action_subgraph_preserves_dialog_and_trace(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The V2 surface path preserves dialog fragments in its episode trace."""
+    """The V2 surface path emits components for downstream trace settlement."""
 
     state = _persona_state()
     state.update(_resolver_update("speech"))
@@ -354,7 +392,7 @@ async def test_call_action_subgraph_preserves_dialog_and_trace(
     assert result["final_dialog"] == ["Hello.", "How are you?"]
     assert result["target_addressed_user_ids"] == ["user-1"]
     assert result["target_broadcast"] is False
-    assert result["episode_trace"]["surface_outputs"][0]["fragments"] == [
+    assert result["surface_outputs"][0]["fragments"] == [
         "Hello.",
         "How are you?",
     ]
@@ -364,7 +402,7 @@ async def test_call_action_subgraph_preserves_dialog_and_trace(
     dialog_state = dialog.await_args.args[0]
     assert "text_surface_output_v2" in dialog_state
     assert "visual_surface_output_v2" not in dialog_state
-    assert result["episode_trace"]["surface_outputs"][1]["fragments"] == [
+    assert result["surface_outputs"][1]["fragments"] == [
         "terminal visual scene"
     ]
     surface.assert_awaited_once()
@@ -403,7 +441,7 @@ async def test_call_action_subgraph_preserves_empty_dialog(
 
 @pytest.mark.asyncio
 async def test_stage_3_no_response_records_private_v2_trace() -> None:
-    """A V2 silence result still leaves bounded consolidation evidence."""
+    """A V2 silence result emits a private surface for trace settlement."""
 
     state = _persona_state()
     state.update(_resolver_update("silence"))
@@ -412,7 +450,6 @@ async def test_stage_3_no_response_records_private_v2_trace() -> None:
 
     assert result["final_dialog"] == []
     assert result["surface_outputs"][0]["surface_kind"] == "private"
-    assert result["episode_trace"]["trigger_source"] == "user_message"
 
 
 def _patch_persona_graph_stages(

@@ -12,7 +12,7 @@ def test_stage3_harness_uses_the_fixed_disposable_database_name() -> None:
 
     module = importlib.import_module("tests.stage3_fresh_database")
 
-    assert module.STAGE3_TEST_DATABASE_NAME == "_test_kazusa_stage3_fresh"
+    assert module.STAGE3_TEST_DATABASE_NAME == "_test_kazusa_core_v2"
 
 
 def test_stage3_harness_exposes_pre_service_guard() -> None:
@@ -31,7 +31,7 @@ def test_stage3_environment_rejects_missing_guard_inputs() -> None:
     try:
         module.validate_stage3_environment({})
     except ValueError as exc:
-        assert "STAGE3_TEST_MONGODB_URI" in str(exc)
+        assert "MONGODB_URI" in str(exc)
     else:
         raise AssertionError("missing Stage 3 inputs were accepted")
 
@@ -53,26 +53,44 @@ def test_stage3_endpoint_identity_ignores_credentials_and_host_order() -> None:
     )
 
 
-def test_stage3_environment_rejects_production_endpoint_match() -> None:
-    """The disposable endpoint must differ from the production fingerprint."""
+def test_stage3_environment_accepts_same_endpoint_with_reserved_database(
+    tmp_path: Path,
+) -> None:
+    """The exact reserved database name is the primary isolation guard."""
 
     module = importlib.import_module("tests.stage3_fresh_database")
-    uri = "mongodb://localhost:27017/_test_kazusa_stage3_fresh"
-    identity = module.build_stage3_endpoint_identity(uri)
-    fingerprint = module.stage3_endpoint_fingerprint(identity)
+    uri = "mongodb://localhost:27017"
+    profile_path = tmp_path / "kazusa.json"
+    profile_path.write_text("{}", encoding="utf-8")
     environment = {
-        "STAGE3_TEST_MONGODB_URI": uri,
-        "STAGE3_TEST_MONGODB_DB_NAME": "_test_kazusa_stage3_fresh",
-        "STAGE3_TEST_MONGODB_ENDPOINT_FINGERPRINT": fingerprint,
-        "PRODUCTION_MONGODB_ENDPOINT_FINGERPRINT": fingerprint,
+        "MONGODB_URI": uri,
+        "MONGODB_DB_NAME": "_test_kazusa_core_v2",
+        "CHARACTER_PROFILE_PATH": str(profile_path),
     }
 
+    result = module.validate_stage3_environment(environment)
+
+    assert result["mongodb_uri"] == uri
+    assert result["database_name"] == "_test_kazusa_core_v2"
+    assert result["database_guard"] == "exact_reserved_name"
+
+
+def test_stage3_environment_rejects_uri_database_mismatch(tmp_path: Path) -> None:
+    """An embedded URI database must agree with the exact guarded name."""
+
+    module = importlib.import_module("tests.stage3_fresh_database")
+    profile_path = tmp_path / "kazusa.json"
+    profile_path.write_text("{}", encoding="utf-8")
     try:
-        module.validate_stage3_environment(environment)
+        module.validate_stage3_environment({
+            "MONGODB_URI": "mongodb://localhost:27017/roleplay_bot",
+            "MONGODB_DB_NAME": "_test_kazusa_core_v2",
+            "CHARACTER_PROFILE_PATH": str(profile_path),
+        })
     except ValueError as exc:
-        assert "fingerprints match" in str(exc)
+        assert "disagrees" in str(exc)
     else:
-        raise AssertionError("production endpoint fingerprint was accepted")
+        raise AssertionError("URI database mismatch was accepted")
 
 
 def test_stage3_case_fixture_contains_only_sanitized_technical_inputs() -> None:
@@ -94,6 +112,29 @@ def test_stage3_case_fixture_contains_only_sanitized_technical_inputs() -> None:
     for case in cases:
         assert isinstance(case, dict)
         assert "expected_dialog" not in case
+
+
+def test_stage3_group_addressing_uses_typed_bot_mention() -> None:
+    """Group live fixtures must use the typed intake addressing contract."""
+
+    module = importlib.import_module(
+        "tests.test_stage3_fresh_database_e2e_live_llm"
+    )
+
+    mentions = module._stage3_typed_mentions(
+        channel_type="group",
+        addressed_to_character=True,
+    )
+
+    assert mentions == [{
+        "platform_user_id": "stage3-bot",
+        "entity_kind": "bot",
+        "raw_text": "@stage3-character",
+    }]
+    assert module._stage3_typed_mentions(
+        channel_type="private",
+        addressed_to_character=True,
+    ) == []
 
 
 def test_stage3_live_evidence_redacts_protected_payload_fields() -> None:

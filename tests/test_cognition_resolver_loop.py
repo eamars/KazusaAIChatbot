@@ -224,6 +224,7 @@ def _cognition_result(
     internal_monologue: str,
     action_specs: list[dict] | None = None,
     resolver_requests: list[dict] | None = None,
+    goal_resolution: str = "requires_required_evidence",
 ) -> dict:
     return {
         "internal_monologue": internal_monologue,
@@ -238,6 +239,7 @@ def _cognition_result(
         "relational_dynamic": "trusted",
         "action_specs": action_specs or [],
         "resolver_capability_requests": resolver_requests or [],
+        "goal_resolution": goal_resolution,
     }
 
 
@@ -505,6 +507,96 @@ async def test_loop_runs_cognition_capability_then_cognition_again() -> None:
     assert resolver_state["cycle_traces"][1]["terminal_reason"] == (
         "no resolver capability request"
     )
+
+
+@pytest.mark.asyncio
+async def test_answerable_now_terminates_without_executing_optional_resolver() -> None:
+    """Goal sufficiency ends recurrence even if planning proposed extra recall."""
+
+    request = _resolver_request(
+        objective='检索一个并非回答所必需的关系例子。',
+    )
+    cognition_inputs: list[dict] = []
+    capability_inputs: list[dict] = []
+
+    async def call_cognition(state: dict) -> dict:
+        cognition_inputs.append(dict(state))
+        return _cognition_result(
+            internal_monologue='当前问题已有足够依据，可以直接回答。',
+            resolver_requests=[request],
+            goal_resolution="answerable_now",
+            action_specs=[_speak_action_spec('当前输入已经足够完成回答。')],
+        )
+
+    async def execute_capability(
+        capability_request: dict,
+        _state: dict,
+    ) -> dict:
+        capability_inputs.append(capability_request)
+        raise AssertionError("optional resolver must not execute")
+
+    result = await call_cognition_resolver_loop(
+        _resolver_state(),
+        call_cognition_subgraph_func=call_cognition,
+        execute_capability_func=execute_capability,
+        max_cycles=3,
+        capability_timeout_seconds=1.0,
+    )
+
+    assert len(cognition_inputs) == 1
+    assert capability_inputs == []
+    assert result["resolver_capability_requests"] == []
+    assert result["resolver_state"]["status"] == "terminal"
+    assert result["resolver_state"]["terminal_reason"] == (
+        "goal answerable now; optional resolver request suppressed"
+    )
+
+
+@pytest.mark.asyncio
+async def test_answerable_now_is_independent_of_unresolved_conversation_source() -> None:
+    """Source coverage false must not override an answerable goal decision."""
+
+    state = _resolver_state()
+    state["rag_result"] = {
+        "conversation_evidence": [{
+            "resolved": False,
+            "missing_context": ["conversation_evidence"],
+        }],
+    }
+    request = _resolver_request(
+        objective="retrieve optional conversation evidence",
+    )
+    cognition_inputs: list[dict] = []
+    capability_inputs: list[dict] = []
+
+    async def call_cognition(current_state: dict) -> dict:
+        cognition_inputs.append(dict(current_state))
+        return _cognition_result(
+            internal_monologue="The current bid and input are sufficient.",
+            resolver_requests=[request],
+            goal_resolution="answerable_now",
+            action_specs=[_speak_action_spec("Answer from the current goal.")],
+        )
+
+    async def execute_capability(
+        capability_request: dict,
+        _state: dict,
+    ) -> dict:
+        capability_inputs.append(capability_request)
+        raise AssertionError("unresolved optional source must not execute")
+
+    result = await call_cognition_resolver_loop(
+        state,
+        call_cognition_subgraph_func=call_cognition,
+        execute_capability_func=execute_capability,
+        max_cycles=3,
+        capability_timeout_seconds=1.0,
+    )
+
+    assert len(cognition_inputs) == 1
+    assert capability_inputs == []
+    assert result["resolver_capability_requests"] == []
+    assert result["resolver_state"]["status"] == "terminal"
 
 
 @pytest.mark.asyncio
@@ -1765,6 +1857,9 @@ async def test_hil_follow_up_can_continue_original_goal_after_answer() -> None:
         max_cycles=3,
     )
     follow_up_state["platform_message_id"] = "message-follow-up-123"
+    follow_up_state["reply_context"] = {
+        "reply_to_message_id": "message-123",
+    }
 
     async def list_pending_rows(*, limit: int = 1000) -> list[dict]:
         del limit
@@ -1898,6 +1993,9 @@ async def test_pending_helpers_load_and_close_matching_pending_rows() -> None:
     follow_up_state = dict(state)
     follow_up_state["platform_message_id"] = "follow-up-message-id"
     follow_up_state["storage_timestamp_utc"] = "2026-05-29T21:05:00+00:00"
+    follow_up_state["reply_context"] = {
+        "reply_to_message_id": "message-123",
+    }
 
     loaded = await load_matching_pending_resume(
         follow_up_state,
@@ -2022,6 +2120,39 @@ async def test_pending_loader_ignores_same_source_message_rows() -> None:
 
 
 @pytest.mark.asyncio
+async def test_pending_loader_ignores_unrelated_same_scope_messages() -> None:
+    """A new same-scope message must not inherit an unrelated pending goal."""
+
+    state = _resolver_state()
+    observation = {
+        "schema_version": RESOLVER_OBSERVATION_VERSION,
+        "observation_id": "resolver_obs_unrelated_hil",
+        "capability_kind": "human_clarification",
+        "request_objective": "确认原始计划所需的用户信息。",
+        "request_reason": "原始计划缺少用户输入。",
+        "status": "blocked",
+        "prompt_safe_summary": "Human clarification required: 确认原始计划所需的用户信息。",
+        "evidence_refs": [],
+        "created_at_utc": "2026-05-29T21:00:00+00:00",
+    }
+    pending_record = build_pending_resume_record(state, observation)
+    unrelated_state = dict(state)
+    unrelated_state["platform_message_id"] = "unrelated-message-456"
+    unrelated_state["decontexualized_input"] = "我今天心情变好了，谢谢你陪我说话。"
+
+    async def list_rows(*, limit: int = 1000) -> list[dict]:
+        del limit
+        return [pending_record]
+
+    loaded = await load_matching_pending_resume(
+        unrelated_state,
+        list_action_attempts_func=list_rows,
+    )
+
+    assert loaded is None
+
+
+@pytest.mark.asyncio
 async def test_pending_resume_load_restores_original_goal_progress() -> None:
     """HIL follow-up turns should inherit the first-turn deliverable checklist."""
 
@@ -2044,6 +2175,9 @@ async def test_pending_resume_load_restores_original_goal_progress() -> None:
     follow_up_state = _resolver_state()
     follow_up_state["platform_message_id"] = "message-456"
     follow_up_state["decontexualized_input"] = "就在奥克兰 CBD。"
+    follow_up_state["reply_context"] = {
+        "reply_to_message_id": "message-123",
+    }
     follow_up_state = ensure_initial_resolver_inputs(
         follow_up_state,
         max_cycles=3,
@@ -2136,6 +2270,154 @@ async def test_rag_capability_uses_objective_and_preserves_original_request(
     assert observation["rag_result"]["answer"] == "找到一条关系记忆。"
     assert "memory_evidence" in observation["rag_result"]
     assert "user_image" in observation["rag_result"]
+
+
+@pytest.mark.asyncio
+async def test_unresolved_referent_recall_is_blocked_for_user_input(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing structured referent is exposed as a user-input blocker."""
+
+    state = _resolver_state()
+    state["referents"] = [{
+        "phrase": "unresolved object",
+        "referent_role": "object",
+        "status": "unresolved",
+    }]
+    record_rag_stage_event = AsyncMock()
+    monkeypatch.setattr(
+        capabilities_module.event_logging,
+        "record_rag_stage_event",
+        record_rag_stage_event,
+    )
+
+    observation = await capabilities_module.execute_resolver_capability_request(
+        _resolver_request(),
+        state,
+    )
+
+    assert observation["status"] == "blocked"
+    assert observation["blocker_kind"] == "requires_user_input"
+    assert "requires user input" in observation["prompt_safe_summary"]
+    assert "unresolved object" in observation["prompt_safe_summary"]
+    record_rag_stage_event.assert_awaited_once()
+    assert record_rag_stage_event.await_args.kwargs["status"] == "skipped"
+
+
+@pytest.mark.asyncio
+async def test_user_input_blocker_converges_after_one_final_cognition() -> None:
+    """A blocked local recall cannot cause repeated resolver cognition."""
+
+    request = _resolver_request(
+        objective="retrieve the missing referent context",
+    )
+    cognition_inputs: list[dict] = []
+    capability_inputs: list[dict] = []
+
+    async def call_cognition(state: dict) -> dict:
+        cognition_inputs.append(dict(state))
+        return _cognition_result(
+            internal_monologue="The referent is still missing.",
+            resolver_requests=[request],
+        )
+
+    async def execute_capability(
+        capability_request: dict,
+        _state: dict,
+    ) -> dict:
+        capability_inputs.append(capability_request)
+        return {
+            "schema_version": RESOLVER_OBSERVATION_VERSION,
+            "observation_id": "resolver_obs_missing_referent",
+            "capability_kind": capability_request["capability_kind"],
+            "request_objective": capability_request["objective"],
+            "request_reason": capability_request["reason"],
+            "status": "blocked",
+            "blocker_kind": "requires_user_input",
+            "prompt_safe_summary": (
+                "Local context recall requires user input: missing referent."
+            ),
+            "evidence_refs": [],
+            "created_at_utc": "2026-05-29T21:00:00+00:00",
+        }
+
+    result = await call_cognition_resolver_loop(
+        _resolver_state(),
+        call_cognition_subgraph_func=call_cognition,
+        execute_capability_func=execute_capability,
+        max_cycles=3,
+        capability_timeout_seconds=1.0,
+    )
+
+    assert len(cognition_inputs) == 2
+    assert len(capability_inputs) == 1
+    assert result["resolver_capability_requests"] == []
+    assert result["action_specs"][0]["params"]["surface_requirements"] == {
+        "decision": "ask_clarification",
+        "detail": "Local context recall requires user input: missing referent.",
+    }
+    assert result["resolver_state"]["status"] == "blocked"
+    assert result["resolver_state"]["terminal_reason"] == (
+        "blocked user-input resolver request converted to clarification surface"
+    )
+
+
+@pytest.mark.asyncio
+async def test_user_input_blocker_without_final_action_surfaces_clarification() -> None:
+    """A silent final cognition pass cannot suppress a needed clarification."""
+
+    request = _resolver_request(
+        objective="retrieve the missing referent context",
+    )
+    cognition_inputs: list[dict] = []
+
+    async def call_cognition(state: dict) -> dict:
+        cognition_inputs.append(dict(state))
+        if len(cognition_inputs) == 1:
+            return _cognition_result(
+                internal_monologue="The referent is still missing.",
+                resolver_requests=[request],
+            )
+        return _cognition_result(
+            internal_monologue="The final pass selected no visible action.",
+        )
+
+    async def execute_capability(
+        capability_request: dict,
+        _state: dict,
+    ) -> dict:
+        return {
+            "schema_version": RESOLVER_OBSERVATION_VERSION,
+            "observation_id": "resolver_obs_missing_referent_no_action",
+            "capability_kind": capability_request["capability_kind"],
+            "request_objective": capability_request["objective"],
+            "request_reason": capability_request["reason"],
+            "status": "blocked",
+            "blocker_kind": "requires_user_input",
+            "prompt_safe_summary": (
+                "Local context recall requires user input: missing referent."
+            ),
+            "evidence_refs": [],
+            "created_at_utc": "2026-05-29T21:00:00+00:00",
+        }
+
+    result = await call_cognition_resolver_loop(
+        _resolver_state(),
+        call_cognition_subgraph_func=call_cognition,
+        execute_capability_func=execute_capability,
+        max_cycles=3,
+        capability_timeout_seconds=1.0,
+    )
+
+    assert len(cognition_inputs) == 2
+    assert result["resolver_capability_requests"] == []
+    assert result["action_specs"][0]["params"]["surface_requirements"] == {
+        "decision": "ask_clarification",
+        "detail": "Local context recall requires user input: missing referent.",
+    }
+    assert result["resolver_state"]["terminal_reason"] == (
+        "blocked user-input resolver request converted to clarification surface"
+    )
 
 
 @pytest.mark.asyncio

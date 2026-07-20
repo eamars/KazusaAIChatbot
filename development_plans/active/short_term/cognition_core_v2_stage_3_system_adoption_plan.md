@@ -29,6 +29,9 @@
   plan and carry the same approval boundary.
 - Execution authority: the user explicitly authorized Stage 3 implementation
   on 2026-07-19.
+- Database-isolation amendment: the user explicitly authorized database-level
+  isolation on the configured MongoDB URI, using the exact reserved database
+  `_test_kazusa_core_v2`, because a separate endpoint is unavailable.
 
 ## Context
 
@@ -97,12 +100,13 @@ change requires a plan amendment and approval.
   PEP 8 and project `py-style`; required internal values fail fast rather than
   receiving invented defaults.
 - Never read `.env` without explicit user instruction.
-- Stage 3 may connect only to the dedicated disposable endpoint supplied as
-  `STAGE3_TEST_MONGODB_URI`. It must never fall back to `MONGODB_URI`, inspect
-  production rows, or write/drop a production database.
-- The test database name is exactly `_test_kazusa_stage3_fresh`; the guarded
-  endpoint fingerprint must differ from the configured production endpoint
-  fingerprint before the service process starts.
+- Stage 3 uses the configured `MONGODB_URI` and exact database name
+  `_test_kazusa_core_v2` as its database-level isolation boundary. It
+  never inspects production rows or writes/drops any database other than that
+  exact reserved name.
+- The URI database path must be empty or exactly `_test_kazusa_core_v2`.
+  The harness injects the exact name into each child process, and the DB
+  package guard rejects every other name before opening a client.
 - LLMs own semantic appraisal, character judgment, action preference, and
   final wording. Deterministic code owns schemas, availability probes,
   permissions, limits, persistence, retry safety, scheduling, and delivery.
@@ -260,16 +264,154 @@ residue exists. Reflection remains an offline producer of promoted evidence.
 | Consolidation | consumes settled trace only | aligns persistence with what actually happened |
 | Dialog | Stage 2 Chinese organic prompt remains; upstream passes semantic intent/content, not action-description guidance | protects vivid character output without mechanical tuning |
 | Visual directives | disabled by default and terminal | preserves future local text-to-image boundary |
-| Database safety | dedicated URI and endpoint fingerprint with exact disposable database name | database-name checks alone do not isolate a production server |
+| Database safety | same configured URI with exact reserved database name, URI-path consistency, child-process guard, and exact-name cleanup | user-authorized database-level isolation where a second endpoint is unavailable |
+| Goal answerability | Cognition Core emits a validated `goal_resolution` for the accepted user goal: `answerable_now`, `requires_required_evidence`, `requires_user_input`, or `blocked` | separates user-goal sufficiency from source-specific evidence coverage |
+| Evidence status | RAG `resolved` fields retain source-coverage meaning; resolver observations expose capability/evidence outcomes without converting missing optional evidence into goal failure | preserves RAG ownership and prevents unnecessary resolver cycles |
+| Resolver termination | `answerable_now` settles the current episode without optional retrieval; required-evidence and user-input states retain resolver/clarification paths; deterministic code enforces the typed decision and cycle/no-progress limits | addresses the private-18 loop and reduces P95 without semantic keyword routing |
+| Latency acceptance | User-approved fixed-sequence ordinary-response foreground p95 ceiling of 120 seconds; individual blocking LLM calls remain bounded at 120 seconds; the maximum case remains separately reported | accepts justified complex-tail latency without raising LLM or resolver budgets |
+| Remediation boundary | modify the existing Cognition Core/action/resolver contracts and prompts within the approved Stage 3 change radius; add no LLM stage, cap increase, compatibility vocabulary, or deterministic answerability classifier | keeps the fix contract-first and bounded |
 | Stage 4 boundary | Stage 3 freezes native targets; Stage 4 discovers real production sources and performs migration | prevents unverified production assumptions |
+
+### Approved Decision Record — 2026-07-19
+
+The user approved implementation of the answerability-separation mitigation after
+reviewing the Stage 3 traces and failure-mode analysis. The accepted decision is:
+
+1. A source-specific RAG result such as `conversation_evidence.resolved=false`
+   records evidence coverage only. It does not decide whether the accepted user
+   goal can be answered.
+2. Cognition Core remains the semantic owner of the accepted user goal and must
+   emit the typed `goal_resolution` decision. The resolver remains the execution
+   owner for explicitly requested capabilities and typed observations.
+3. A general answer that is sufficient with the current user input, character
+   judgment, monologue, and available context may settle as `answerable_now`
+   even when optional retrieval is empty or unrelated.
+4. A goal that genuinely depends on a missing required fact keeps the
+   `requires_required_evidence` path. A goal that requires the user to supply
+   information keeps the `requires_user_input` path. Technical inability remains
+   `blocked`.
+5. Deterministic code validates and enforces this LLM-owned decision, prevents
+   repeated no-progress capability requests, and preserves the existing maximum
+   of three resolver cycles. It does not infer answerability from keywords or
+   rewrite the LLM decision after the fact.
+6. Verification must include focused failing-then-passing contract tests, the
+   affected deterministic suites, one-at-a-time real-LLM coverage of the
+   previously divergent private-18 shape and a required-evidence shape, and a
+   refreshed sequential Stage 3 latency/call/quality/trace ledger. The existing
+   40-case p95 gate remains binding; this decision does not approve Stage 3
+   signoff by itself.
+
+### Follow-up Decision Record — 2026-07-19
+
+The first post-remediation live checks add one bounded prompt-contract
+refinement:
+
+1. `private_18` reached a complete direct answer with eight LLM calls and no
+   resolver stage, demonstrating the `answerable_now` separation behavior.
+2. `private_08` correctly asked for the missing referent, but repeated the
+   failed resolver request before surfacing that clarification. When resolver
+   context reports that a required referent or user-provided detail is
+   missing, the action-planning prompt must direct the LLM-owned decision to
+   `requires_user_input` and omit another resolver request.
+3. This refinement remains inside the existing Cognition Core prompt and
+   contract boundary. Deterministic code continues to validate and bound the
+   decision; it does not classify the user text or rewrite the LLM decision.
+4. The two live cases must be rerun one at a time, followed by the binding
+   sequential latency/call/quality/trace ledger. The existing 40-case p95 gate
+   remains binding.
+
+### Follow-up Decision Record — capability observation refinement — 2026-07-19
+
+The required-evidence trace identified a projection defect: local context
+recall logs an unresolved referent and skips retrieval, but the typed
+observation is currently shaped like an empty successful recall. The local
+context capability will therefore emit a bounded `blocked` observation with a
+prompt-safe user-input-required summary when its structured referent precondition
+is missing. This improves the semantic context presented to Cognition Core;
+deterministic code still does not assign or rewrite `goal_resolution`, and the
+LLM remains the owner of choosing `requires_user_input`.
+
+### Follow-up Decision Record — direct-answer triage wording — 2026-07-19
+
+The updated live probes preserve semantic safety but still show resolver
+over-selection: a general relationship question used one resolver pass in a
+13-call run, and the unresolved-referent clarification used 19 calls. The
+action-planning prompt will state the triage boundary more directly: a general
+question, opinion, analysis, or advice request that can be answered from the
+accepted bid, current input, monologue, and available context defaults to
+`answerable_now`; resolver availability, an empty/failed optional source, or
+missing unrelated evidence is not sufficient reason to request retrieval.
+Only a fact explicitly necessary to complete the answer, or information that
+the user must provide, selects `requires_required_evidence` or
+`requires_user_input`. The decision remains LLM-owned and deterministic code
+continues to validate/enforce only the typed result and recurrence bounds.
+
+### Follow-up Decision Record — independent review remediation — 2026-07-19
+
+The independent implementation review identified four remaining remediation
+items and one accepted configuration disposition:
+
+1. The unresolved-referent local-context capability will emit a typed
+   user-input blocker boundary in its observation. After that observation,
+   the resolver may run one final Cognition Core pass so the LLM can produce
+   the clarification surface. If that pass repeats the blocked capability or
+   emits neither a clarification action nor another resolver request,
+   deterministic loop control will clear the request and settle a prompt-safe
+   clarification surface for a user-message episode. Non-user sources remain
+   private. This bounds the required-user-input path without assigning or
+   rewriting `goal_resolution` from user text.
+2. A deterministic contract test will exercise an answerable goal alongside
+   a `conversation_evidence` result whose source-specific `resolved` value is
+   false, proving that source coverage does not force an optional resolver
+   request.
+3. MongoDB connection diagnostics will log only a sanitized endpoint
+   description; credentials, query options, and the raw URI remain out of
+   logs.
+4. The change-radius companion will explicitly include the direct contract
+   fixture files touched by this remediation.
+5. The Stage 3 harness intentionally reads the user's configured `.env`
+   through `load_dotenv` when no explicit mapping is supplied. The exact
+   reserved database name, URI-path consistency check, child-process guard,
+   and endpoint fingerprint remain the isolation controls; the assistant does
+   not inspect or copy `.env` contents.
+
+The 40-case p95 gate, broader non-live regression failures, Browser session
+acceptance, and final user sign-off remain open gates. This record authorizes
+only the bounded remediation above and does not approve Stage 3 completion.
+
+### Follow-up Decision Record — live trace finalization polling — 2026-07-19
+
+The sequential live refresh exposed a harness timing false negative: `group_17`
+and `group_18` both produced a visible response and a clean skipped lifecycle,
+but their trace records were still `running` when the fixed 15-second poll
+expired. The service completed post-turn work immediately afterward. The live
+harness will therefore use a 60-second terminal-trace poll window. This changes
+only test observation tolerance; it adds no runtime stage, LLM call, resolver
+cycle, or latency-budget allowance. The 40-case p95 gate and all other signoff
+gates remain binding.
+
+### User Decision Record — latency ceiling — 2026-07-20
+
+The user approved expanding the fixed Stage 3 ordinary-response foreground p95
+acceptance ceiling to 120 seconds. This changes the acceptance threshold only;
+it adds no LLM stage and raises no LLM, prompt, output, repair, retry, or
+resolver-cycle cap.
+
+The refreshed 40-case sequence recorded a 103,807 ms (103.8-second) nearest-rank
+p95, which passes the revised 120,000 ms ceiling. Its 125,418 ms (125.4-second)
+maximum remains a separately reported tail metric and is not treated as a p95
+criterion. The individual blocking LLM-call limit remains 120 seconds. Broader
+regression reconciliation, Browser acceptance, character-quality review, and
+final user sign-off remain open.
 
 ## Data Migration
 
 Stage 3 performs no data migration. Its database operation is a cold bootstrap
-against an endpoint/database that passes the isolation guard. The test harness
-asserts the database is absent before the first service start, records native
-collections/indexes after exercised behavior, restarts against the same data,
-and drops only that guarded database during cleanup.
+against the exact reserved database selected from the configured MongoDB URI.
+The test harness inspects only that database, asserts it has no persistent
+collections before the first service start, records native collections/indexes
+after exercised behavior, restarts against the same URI/database session, and
+drops only that exact database during explicit cleanup.
 
 The resulting `Stage3NativeSchemaManifestV1` is a Stage 4 input. It records
 collection/index/schema ownership and representative sanitized shapes generated
@@ -303,7 +445,7 @@ Completion thresholds on the fixed fresh-database proof are:
 - zero fatal technical failures;
 - zero unacceptable within-message/user-input/subject conflicts in the final
   user sign-off set;
-- ordinary response-path p95 at or below 60 seconds;
+- ordinary response-path p95 at or below the approved 120-second ceiling;
 - no episode exceeds the existing configured resolver maximum of three cycles;
 - no `KazusaLiveBot is busy right now, please try again later.`-class collapse;
   safe-checkpoint retry/fallback must produce a typed terminal outcome;
@@ -444,50 +586,50 @@ required order is:
     baseline, DB fingerprints, expected test failures.
   - Handoff: start Checkpoint B and the production-code subagent.
   - Sign-off: `parent/2026-07-19`.
-- [ ] B — profile bootstrap and native database base complete.
+- [x] B — profile bootstrap and native database base complete.
   - Files/steps: execution companion B1-B8.
   - Verify: profile/config/bootstrap focused tests and cold-start bootstrap.
   - Evidence: seed validation, idempotence, mismatch rejection, native indexes.
   - Handoff: reread plan; start C.
-  - Sign-off: `<parent/date>`.
-- [ ] C — canonical source contracts complete.
+  - Sign-off: `parent/2026-07-19`.
+- [x] C — canonical source contracts complete.
   - Files/steps: execution companion C1-C8.
   - Verify: episode/RAG/origin/source-policy tests and retired-label greps.
   - Evidence: five source packets and zero unapproved runtime source labels.
   - Handoff: reread plan; start D.
-  - Sign-off: `<parent/date>`.
-- [ ] D — capability availability/action path complete.
+  - Sign-off: `parent/2026-07-19`.
+- [x] D — capability availability/action path complete.
   - Files/steps: execution companion D1-D8.
   - Verify: registry/evaluator/handler/resolver focused tests.
   - Evidence: availability matrix, race recheck, typed unavailable outcomes.
   - Handoff: reread plan; start E.
-  - Sign-off: `<parent/date>`.
-- [ ] E — trace settlement and persistence complete.
+  - Sign-off: `parent/2026-07-19`.
+- [x] E — trace settlement and persistence complete.
   - Files/steps: execution companion E1-E9.
   - Verify: trace/consolidation/progress/delivery tests.
   - Evidence: one settled trace for every outcome row.
   - Handoff: reread plan; start F.
-  - Sign-off: `<parent/date>`.
-- [ ] F — all background/runtime producers adopted and scaffolds deleted.
+  - Sign-off: `parent/2026-07-19`.
+- [x] F — all background/runtime producers adopted and scaffolds deleted.
   - Files/steps: execution companion F1-F9.
   - Verify: self-cognition/calendar/task/background/reflection tests plus
     zero-reference/delete greps.
   - Evidence: source-to-owner matrix exercised; deletion inventory clean.
   - Handoff: reread plan; start G.
-  - Sign-off: `<parent/date>`.
+  - Sign-off: `parent/2026-07-19`.
 - [ ] G — operations, console, scripts, and documentation aligned.
   - Files/steps: execution companion G1-G8.
   - Verify: ops/trace/script tests and control-console browser checks.
   - Evidence: screenshots/contract captures, redaction proof, doc-link check.
   - Handoff: reread plan; start H.
   - Sign-off: `<parent/date>`.
-- [ ] H — fresh-database E2E and real-LLM proof complete.
+- [x] H — fresh-database E2E and real-LLM proof complete.
   - Files/steps: execution companion H1-H11.
   - Verify: cold start, five sources, restart, final sequential quality set.
   - Evidence: `Stage3FreshDatabaseEvidenceV1`, monologue/dialog/action/trace
     review, call/latency ledger, native schema manifest.
   - Handoff: reread plan; start I.
-  - Sign-off: `<parent/date>`.
+  - Sign-off: `parent/2026-07-19`.
 - [ ] I — full deterministic regression and Stage 4 handoff complete.
   - Files/steps: execution companion I1-I6.
   - Verify: all exact I commands, `git diff --check`, link and placeholder
@@ -506,8 +648,10 @@ required order is:
 
 Current execution evidence and external gate status are recorded in
 `test_artifacts/cognition_core_v2/stage_3/checkpoint_i_verification_summary.md`.
-Deterministic implementation gates are green. Fresh-database, real-LLM,
-40-case quality, in-app Browser, and final user sign-off remain open.
+Checkpoints B-F and the technical H gates are complete. The revised 120-second
+p95 latency gate passes for the frozen sequence; repository-wide contract
+reconciliation is still open, in-app Browser acceptance is environment-pending,
+and final character-quality/user sign-off remains open.
 
 ## Verification
 
@@ -557,8 +701,8 @@ The reviewer checks:
   unrelated changes;
 - five-source ownership, no prompt-selected triggers, one action authority,
   one trace settlement owner, and correct LLM/deterministic boundaries;
-- fresh-DB endpoint isolation, seed idempotence, runtime state ownership,
-  restart continuity, and absence of production access;
+- fresh-DB database-name isolation, seed idempotence, runtime state ownership,
+  restart continuity, and absence of production-row access;
 - call/context/latency budgets, bounded safe-checkpoint recovery, anti-cheat
   traces, visual terminal behavior, and dialog upstream contract;
 - exact deletion/reference evidence and Stage 4 handoff completeness.
@@ -609,8 +753,10 @@ amendment and approval.
   greps and source-specific tests prevent mixed vocabularies.
 - Static profile data can overwrite learned state if ownership is blurred.
   Strict seed schema and insert-only bootstrap prevent it.
-- Database-name guards can still target a production server. Required isolated
-  URI plus endpoint fingerprint separation prevents service startup.
+- A second MongoDB endpoint is unavailable in the current environment. The
+  exact reserved database name, URI/database consistency, child-process guard,
+  session fingerprint continuity, and exact-name cleanup are the approved
+  database-level isolation controls.
 - Capability health can change between planning and execution. Deterministic
   pre-projection and execution-time recheck provide truthful selection.
 - Parallel/background paths can double-settle or lose traces. One settlement
@@ -639,16 +785,73 @@ amendment and approval.
   are recorded under `test_artifacts/cognition_core_v2/stage_3/`.
 - Checkpoint A call/latency baseline is recorded in
   `test_artifacts/cognition_core_v2/stage_3/checkpoint_a_call_latency_baseline.md`.
+- Database-isolation amendment: user authorization is recorded above; the
+  harness and DB guard now use the ordinary URI plus the exact reserved name.
 - Fresh-database bootstrap contracts and safe report/native-manifest generation:
-  verified; guarded live cold-start/restart remains pending.
+  verified; the configured `_test_kazusa_core_v2` database is now the
+  database-level isolation target. The guarded output directory completed
+  cold start and all 20 sequential group cases against that exact database;
+  the previous populated database was not touched.
 - Deterministic tests and static gates: current evidence is recorded in
   `test_artifacts/cognition_core_v2/stage_3/checkpoint_i_verification_summary.md`.
-- Live database and restart: pending because the dedicated Stage 3 endpoint
-  and fingerprint guards are not configured.
-- Sequential real-LLM review: eight required cases were invoked individually
-  and guarded-skipped; real quality review remains pending.
-- Call/context/latency ledger: harness implementation is verified; the
-  40-case ledger remains pending until the guarded run executes.
+- Answerability remediation evidence: the focused contract/capability probe
+  passed, including typed blocker, one-final-cognition convergence, source
+  separation, and URI-redaction coverage. The clean follow-up sequence under
+  `test_artifacts/cognition_core_v2/stage_3/answerability_remediation_followup2/`
+  recorded `private_18` at 8 calls and 65.7 seconds with no resolver stage and
+  a complete direct answer; `private_08` at 11 calls and 91.6 seconds with one
+  blocked local-context attempt and a semantically correct raw-language
+  clarification. The first post-blocker retry exposed a silent final pass and
+  is preserved in the prior follow-up directory; the typed fallback then
+  corrected it. The direct-answer and required-user-input convergence
+  improvements are demonstrated; the full sequential p95 gate remained open
+  under the then-current baseline-relative threshold.
+  The deterministic source-separation regression supplies a
+  `conversation_evidence.resolved=false` row, preserves an LLM-owned
+  `answerable_now` decision, and passes with one cognition call and zero
+  capability executions. The latest affected deterministic rerun recorded
+  135 passes, one preexisting route-expectation failure, and seven deselected
+  tests.
+- Rejected-tail remediation evidence (2026-07-20): pending HIL/approval
+  resumes now require an exact typed reply to the pending source message, and
+  the action-planning prompt keeps direct character self-reports out of
+  optional local-context retrieval. Focused tests recorded 45 passes. Clean
+  guarded live evidence recorded `group_16` at 7 calls and 72.4 seconds with
+  no resolver stage, and `private_03` at 8 calls and 70.8 seconds with no
+  local-context resolver stage; each produced one settled trace and one
+  lifecycle record. The detailed evidence is under
+  `test_artifacts/cognition_core_v2/stage_3/answerability_remediation_rejected_clean/`.
+- Live database and restart: exact guarded cold start passed, followed by
+  all 40 frozen group/private sequence cases. Each clean result produced one
+  terminal visible trace, one lifecycle record, and a succeeded persisted
+  trace. The refreshed answerability sequence captured 313 LLM calls, a
+  75.6-second average foreground duration, a 103.8-second nearest-rank p95,
+  and a 125.4-second maximum. The user-approved 120-second p95 ceiling is
+  satisfied; the 125.4-second maximum remains a separately reported tail
+  metric. `group_17` and `group_18` required exact
+  failed-row cleanup after the harness's 15-second trace poll produced false
+  negatives; both passed after the poll window was widened to 60 seconds.
+- Frozen-sequence real-LLM review: all 40 cases executed individually and have
+  technical artifacts. Content is usable; recovered relevance/action warnings,
+  visible-surface drift, generated narrative details, and latency outliers
+  remain in the final technical/performance and user-quality gates.
+- Call/context/latency ledger: the full machine report, native schema
+  manifest, and 40-case review are recorded under
+  `test_artifacts/cognition_core_v2/stage_3/`, including
+  `fresh_40_turn_answerability_remediation_report.md` and
+  `answerability_remediation_40_case_review.md`. All eight separate source/edge focused
+  real-LLM commands completed one case at a time; the source comparison and
+  latency disposition are recorded in `focused_source_comparison.md`.
+  Technical completion carries the quality and latency residuals listed there.
+- Broader non-live collection note: the manifest-defined affected suites are
+  green. The final repository-wide non-live collection reported 3,229 passed,
+  2 skipped, 21 failures, and 744 deselected. The 21 failures are outside the
+  manifest's targeted affected-regression command set but within the broader
+  change-radius inventory; the exact list is recorded in
+  `test_artifacts/cognition_core_v2/stage_3/broad_non_live_regression_summary.md`.
+  They remain open for separate contract reconciliation. This result keeps
+  Checkpoint I open and is not converted into an unreviewed Stage 3
+  production change.
 - Control-console/browser review: API and external Playwright E2E are green;
   in-app Browser acceptance remains pending because no session is available.
 - Native schema manifest and Stage 4 handoff: schema-manifest generation is

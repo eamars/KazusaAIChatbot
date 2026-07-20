@@ -12,15 +12,15 @@ import time
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Literal, TypedDict
-
 from urllib.parse import parse_qs
 
+from dotenv import load_dotenv
 
-STAGE3_TEST_DATABASE_NAME = "_test_kazusa_stage3_fresh"
-STAGE3_URI_ENV = "STAGE3_TEST_MONGODB_URI"
-STAGE3_DATABASE_ENV = "STAGE3_TEST_MONGODB_DB_NAME"
-STAGE3_FINGERPRINT_ENV = "STAGE3_TEST_MONGODB_ENDPOINT_FINGERPRINT"
-PRODUCTION_FINGERPRINT_ENV = "PRODUCTION_MONGODB_ENDPOINT_FINGERPRINT"
+
+STAGE3_TEST_DATABASE_NAME = "_test_kazusa_core_v2"
+STAGE3_URI_ENV = "MONGODB_URI"
+STAGE3_DATABASE_ENV = "MONGODB_DB_NAME"
+STAGE3_DATABASE_GUARD_ENV = "STAGE3_DATABASE_GUARD"
 STAGE3_PROFILE_ENV = "CHARACTER_PROFILE_PATH"
 STAGE3_CASE_FIXTURE_SCHEMA = "stage3_fresh_database_cases.v1"
 STAGE3_SESSION_FILENAME = "stage3_run_session.json"
@@ -80,24 +80,20 @@ def validate_stage3_environment(
             process environment.
 
     Returns:
-        The guarded URI, exact database name, and computed endpoint
-        fingerprint for the test harness.
+        The configured URI, exact database name, and computed endpoint
+        fingerprint for the test harness evidence.
 
     Raises:
         ValueError: If any required guard input is missing or inconsistent.
     """
 
-    source = os.environ if environ is None else environ
+    if environ is None:
+        load_dotenv(override=False)
+        source = os.environ
+    else:
+        source = environ
     uri = _required_environment_value(source, STAGE3_URI_ENV)
     database_name = _required_environment_value(source, STAGE3_DATABASE_ENV)
-    expected_fingerprint = _required_environment_value(
-        source,
-        STAGE3_FINGERPRINT_ENV,
-    )
-    production_fingerprint = _required_environment_value(
-        source,
-        PRODUCTION_FINGERPRINT_ENV,
-    )
     if database_name != STAGE3_TEST_DATABASE_NAME:
         raise ValueError(
             f"{STAGE3_DATABASE_ENV} must be {STAGE3_TEST_DATABASE_NAME!r}"
@@ -105,13 +101,6 @@ def validate_stage3_environment(
 
     identity = build_stage3_endpoint_identity(uri)
     actual_fingerprint = stage3_endpoint_fingerprint(identity)
-    if actual_fingerprint != expected_fingerprint:
-        raise ValueError(
-            f"{STAGE3_FINGERPRINT_ENV} does not match the supplied URI"
-        )
-    if actual_fingerprint == production_fingerprint:
-        raise ValueError("Stage 3 and production endpoint fingerprints match")
-
     uri_database_name = _database_name_from_uri(uri)
     if uri_database_name and uri_database_name != database_name:
         raise ValueError("MongoDB URI database disagrees with the guarded name")
@@ -127,6 +116,7 @@ def validate_stage3_environment(
         "mongodb_uri": uri,
         "database_name": database_name,
         "endpoint_fingerprint": actual_fingerprint,
+        "database_guard": "exact_reserved_name",
         "character_profile_path": str(profile),
     }
     return return_value
@@ -578,12 +568,15 @@ def _run_case_command(args: argparse.Namespace) -> None:
     if mode == "cold_start":
         _assert_stage3_database_absent(guarded_environment)
     else:
+        _assert_stage3_session_matches(session_path, guarded_environment)
         _assert_stage3_database_present(guarded_environment)
     child_environment = dict(os.environ)
     child_environment.update({
         "PYTHON_DOTENV_DISABLED": "1",
+        "PYTEST_ADDOPTS": "",
         "MONGODB_URI": guarded_environment["mongodb_uri"],
         "MONGODB_DB_NAME": guarded_environment["database_name"],
+        STAGE3_DATABASE_GUARD_ENV: "1",
         STAGE3_PROFILE_ENV: guarded_environment["character_profile_path"],
         "STAGE3_CASE_ID": args.case_id,
         "STAGE3_RUN_MODE": mode,
@@ -599,6 +592,8 @@ def _run_case_command(args: argparse.Namespace) -> None:
             "test_live_fresh_database_case",
             "-q",
             "-s",
+            "-o",
+            "addopts=",
         ],
         cwd=Path.cwd(),
         env=child_environment,
@@ -664,6 +659,7 @@ def _cleanup_stage3_database(output_dir: Path) -> None:
     session_path = output_dir / STAGE3_SESSION_FILENAME
     if not session_path.is_file():
         raise RuntimeError("Stage 3 run session is missing")
+    _assert_stage3_session_matches(session_path, guarded_environment)
     _assert_stage3_database_present(guarded_environment)
     from pymongo import MongoClient
 
@@ -680,34 +676,51 @@ def _cleanup_stage3_database(output_dir: Path) -> None:
 def _assert_stage3_database_absent(guarded_environment: Mapping[str, str]) -> None:
     """Require the guarded database to be absent before the cold start."""
 
-    database_names = _stage3_database_names(guarded_environment["mongodb_uri"])
-    if guarded_environment["database_name"] in database_names:
+    if _stage3_database_has_collections(
+        guarded_environment["mongodb_uri"],
+        guarded_environment["database_name"],
+    ):
         raise RuntimeError("Stage 3 database already exists before cold start")
 
 
 def _assert_stage3_database_present(guarded_environment: Mapping[str, str]) -> None:
     """Require the guarded database to exist before a restart case."""
 
-    database_names = _stage3_database_names(guarded_environment["mongodb_uri"])
-    if guarded_environment["database_name"] not in database_names:
+    if not _stage3_database_has_collections(
+        guarded_environment["mongodb_uri"],
+        guarded_environment["database_name"],
+    ):
         raise RuntimeError("Stage 3 database is missing for restart")
 
 
-def _stage3_database_names(uri: str) -> list[str]:
-    """List Mongo databases after the endpoint guard has already passed."""
+def _assert_stage3_session_matches(
+    session_path: Path,
+    guarded_environment: Mapping[str, str],
+) -> None:
+    """Require restart/cleanup to use the same guarded database session."""
+
+    session = json.loads(session_path.read_text(encoding="utf-8"))
+    if not isinstance(session, Mapping):
+        raise RuntimeError("Stage 3 run session is invalid")
+    if session.get("database_name") != guarded_environment["database_name"]:
+        raise RuntimeError("Stage 3 session database name changed")
+    if session.get("database_endpoint_fingerprint") != (
+        guarded_environment["endpoint_fingerprint"]
+    ):
+        raise RuntimeError("Stage 3 session MongoDB endpoint changed")
+
+
+def _stage3_database_has_collections(uri: str, database_name: str) -> bool:
+    """Inspect only the exact guarded database for persistent collections."""
 
     from pymongo import MongoClient
 
     client = MongoClient(uri, serverSelectionTimeoutMS=5_000)
     try:
-        names = client.list_database_names()
+        collection_names = client[database_name].list_collection_names()
     finally:
         client.close()
-    return names
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+    return bool(collection_names)
 
 
 def build_stage3_endpoint_identity(
@@ -854,3 +867,7 @@ def _database_name_from_uri(uri: str) -> str:
         return ""
     database_name = path_and_query.partition("?")[0].strip()
     return database_name
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

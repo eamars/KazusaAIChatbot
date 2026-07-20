@@ -18,10 +18,8 @@ async def test_stage3_claimed_latch_recovers_without_duplicate_consumption() -> 
     """A restart-style lease recovery must leave one consumable latch."""
 
     required_guard_names = (
-        "STAGE3_TEST_MONGODB_URI",
-        "STAGE3_TEST_MONGODB_DB_NAME",
-        "STAGE3_TEST_MONGODB_ENDPOINT_FINGERPRINT",
-        "PRODUCTION_MONGODB_ENDPOINT_FINGERPRINT",
+        "MONGODB_URI",
+        "MONGODB_DB_NAME",
         "CHARACTER_PROFILE_PATH",
     )
     missing_guard_names = [
@@ -34,6 +32,7 @@ async def test_stage3_claimed_latch_recovers_without_duplicate_consumption() -> 
         )
     guarded_environment = validate_stage3_environment()
     os.environ["PYTHON_DOTENV_DISABLED"] = "1"
+    os.environ["STAGE3_DATABASE_GUARD"] = "1"
     os.environ["MONGODB_URI"] = guarded_environment["mongodb_uri"]
     os.environ["MONGODB_DB_NAME"] = guarded_environment["database_name"]
     os.environ["CHARACTER_PROFILE_PATH"] = (

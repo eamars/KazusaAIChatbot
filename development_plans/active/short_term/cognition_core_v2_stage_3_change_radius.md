@@ -215,8 +215,10 @@ latency, and retry fields under existing redaction/access rules.
 ### Modify — Primary Tests
 
 ```text
+tests/conftest.py
 tests/cognition_core_v2_test_helpers.py
 tests/live_llm_mongo.py
+tests/test_live_llm_mongo_isolation.py
 tests/test_cognitive_episode_contract.py
 tests/test_cognition_chain_connector_mapping.py
 tests/test_cognition_core_v2_alignment_gates.py
@@ -224,6 +226,7 @@ tests/test_cognition_core_v2_state.py
 tests/test_cognition_core_v2_integration.py
 tests/test_cognition_core_v2_live_llm.py
 tests/test_cognition_resolver_loop.py
+tests/test_action_selection_prompt_contract.py
 tests/test_action_spec_evaluator.py
 tests/test_action_spec_future_cognition.py
 tests/test_action_spec_models.py
@@ -304,11 +307,13 @@ tests/test_coding_agent_phase3_handoff_e2e.py
 tests/test_coding_agent_phase3_live_e2e.py
 tests/test_cognition_chain_connector_mapping.py
 tests/test_cognition_core_v2_contracts.py
+tests/test_cognition_core_v2_action_planning_bugfix.py
 tests/test_cognition_core_v2_frozen_replay_drift.py
 tests/test_cognition_current_event_grounding.py
 tests/test_cognition_interaction_style_context.py
 tests/test_cognition_live_llm_prompt_contracts.py
 tests/test_cognition_resolver_contracts.py
+tests/test_cognition_resolver_l2d_contract.py
 tests/test_cognition_resolver_loop.py
 tests/test_cognitive_episode_contract.py
 tests/test_consolidation_lane_bigbang_integration.py
@@ -352,6 +357,7 @@ tests/test_persona_supervisor2_rag_skip_shape.py
 tests/test_persona_supervisor2_rag2_integration.py
 tests/test_persona_supervisor2_schema.py
 tests/test_persona_supervisor2.py
+tests/test_persona_supervisor2_action_selection.py
 tests/test_rag_cognitive_episode_adapter.py
 tests/test_rag_dialog_event_logging.py
 tests/test_self_cognition_duplicate_response_live_llm.py

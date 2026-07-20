@@ -8,6 +8,7 @@ from kazusa_ai_chatbot.action_spec.results import (
 )
 from kazusa_ai_chatbot.cognition_episode import CognitiveEpisodeV1
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    GoalResolutionV2,
     TextSurfaceOutputV2,
     VisualSurfaceOutputV2,
 )
@@ -110,6 +111,7 @@ class GlobalPersonaState(TypedDict):
 
     # Cognition output
     internal_monologue: str
+    goal_resolution: NotRequired[GoalResolutionV2]
     cognition_core_output: NotRequired[dict]
     cognition_state_update: NotRequired[dict]
     cognition_state_committed: NotRequired[bool]

@@ -91,6 +91,7 @@ class _ScriptedLLM:
             result = {
                 "action_requests": [],
                 "resolver_requests": [],
+                "goal_resolution": "answerable_now",
                 "resolver_pending_resolution": None,
                 "resolver_goal_progress": None,
             }

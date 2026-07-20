@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import os
@@ -92,7 +93,7 @@ _configure_utf8_streams()
 
 
 def _prepare_stage3_runtime() -> dict[str, str]:
-    """Validate the dedicated endpoint before importing service modules."""
+    """Validate the reserved database before importing service modules."""
 
     os.environ["PYTHON_DOTENV_DISABLED"] = "1"
     try:
@@ -115,6 +116,7 @@ def _prepare_stage3_runtime() -> dict[str, str]:
     os.environ.update({
         "MONGODB_URI": guarded["mongodb_uri"],
         "MONGODB_DB_NAME": guarded["database_name"],
+        "STAGE3_DATABASE_GUARD": "1",
         "CHARACTER_PROFILE_PATH": guarded["character_profile_path"],
         "SELF_COGNITION_ENABLED": "false",
         "CALENDAR_SCHEDULER_ENABLED": "false",
@@ -135,6 +137,22 @@ def _storage_now() -> str:
     """Return a storage-compatible UTC timestamp."""
 
     return datetime.now(timezone.utc).isoformat()
+
+
+def _stage3_typed_mentions(
+    *,
+    channel_type: str,
+    addressed_to_character: bool,
+) -> list[dict[str, str]]:
+    """Build typed character addressing for a group fixture request."""
+
+    if channel_type != "group" or not addressed_to_character:
+        return []
+    return [{
+        "platform_user_id": "stage3-bot",
+        "entity_kind": "bot",
+        "raw_text": "@stage3-character",
+    }]
 
 
 def _json_safe(value: object) -> object:
@@ -438,6 +456,34 @@ async def _database_schema_evidence(db: Any) -> list[dict[str, object]]:
     return evidence
 
 
+async def _wait_for_trace_run_finalization(
+    db: Any,
+    *,
+    platform_message_id: str,
+    timeout_seconds: float = 60.0,
+) -> Mapping[str, object]:
+    """Wait for the service worker to persist the terminal trace status."""
+
+    deadline = time.perf_counter() + timeout_seconds
+    latest: Mapping[str, object] | None = None
+    while time.perf_counter() < deadline:
+        row = await db["llm_trace_runs"].find_one(
+            {"platform_message_id": platform_message_id},
+            {"_id": 0},
+        )
+        if isinstance(row, Mapping):
+            latest = row
+            if str(row.get("status", "")) != "running":
+                return row
+        await asyncio.sleep(0.1)
+    if latest is None:
+        raise AssertionError("live chat did not persist an LLM trace run")
+    raise AssertionError(
+        "live chat trace run did not reach terminal status: "
+        f"{latest.get('status', '')}"
+    )
+
+
 @contextmanager
 def _capture_llm_steps(calls: list[dict[str, object]]) -> Iterator[None]:
     """Capture actual LLM call inputs and outputs around one live case."""
@@ -532,6 +578,217 @@ class _Stage3DebugAdapter:
         )
 
 
+async def _prepare_stage3_group_review_reflection(
+    *,
+    case_id: str,
+    case: dict[str, Any],
+    character_profile: dict[str, Any],
+    service: Any,
+) -> dict[str, object]:
+    """Run production reflection promotion before a group-review case."""
+
+    from kazusa_ai_chatbot.db import create_user_profile
+    from kazusa_ai_chatbot.db._client import get_db
+    from kazusa_ai_chatbot import reflection_cycle
+    from kazusa_ai_chatbot.reflection_cycle import promotion as reflection_promotion
+    from kazusa_ai_chatbot.reflection_cycle import repository
+    from kazusa_ai_chatbot.reflection_cycle import worker as reflection_worker
+    from kazusa_ai_chatbot.reflection_cycle.activity_windows import (
+        build_group_activity_windows,
+    )
+    from kazusa_ai_chatbot.reflection_cycle.models import ReflectionScopeInput
+    from kazusa_ai_chatbot.self_cognition import sources
+
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    hour_start = (now - timedelta(hours=2)).replace(
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+    channel_scope = ReflectionScopeInput(
+        scope_ref=f"stage3_group_reflection_{case_id}_{uuid4().hex[:8]}",
+        platform="debug",
+        platform_channel_id=f"stage3-reflection-{case_id}",
+        channel_type="group",
+        assistant_message_count=1,
+        user_message_count=1,
+        total_message_count=2,
+        first_timestamp=(hour_start + timedelta(minutes=5)).isoformat(),
+        last_timestamp=(hour_start + timedelta(minutes=7)).isoformat(),
+        messages=[
+            {
+                "role": "user",
+                "body_text": (
+                    "The channel rule is to keep shared facts separate from "
+                    "private user details."
+                ),
+                "timestamp": (
+                    hour_start + timedelta(minutes=5)
+                ).isoformat(),
+                "display_name": "Stage 3 User",
+                "platform_message_id": f"{case_id}-user",
+                "platform_user_id": "stage3-reflection-user",
+                "global_user_id": "stage3-reflection-user",
+                "addressed_to_global_user_ids": [
+                    str(character_profile["global_user_id"]),
+                ],
+                "mentions": [],
+            },
+            {
+                "role": "assistant",
+                "body_text": (
+                    "I will keep shared channel facts separate from private "
+                    "user details as a standing rule for this channel."
+                ),
+                "timestamp": (
+                    hour_start + timedelta(minutes=7)
+                ).isoformat(),
+                "display_name": str(character_profile.get("name", "Character")),
+                "platform_message_id": f"{case_id}-assistant",
+                "platform_user_id": "stage3-bot",
+                "global_user_id": str(character_profile["global_user_id"]),
+                "addressed_to_global_user_ids": [],
+                "mentions": [],
+            },
+        ],
+    )
+
+    db = await get_db()
+    if await db.user_profiles.find_one(
+        {"global_user_id": "stage3-reflection-user"},
+        {"_id": 1},
+    ) is None:
+        await create_user_profile({
+            "global_user_id": "stage3-reflection-user",
+        })
+
+    hourly_result = await reflection_worker._run_hourly_reflection_for_scope(
+        now=now,
+        channel_scope=channel_scope,
+        dry_run=False,
+        is_primary_interaction_busy=lambda: False,
+    )
+    if hourly_result.succeeded_count != 1 or not hourly_result.run_ids:
+        raise AssertionError(
+            "Stage 3 reflection hourly worker did not succeed: "
+            f"{hourly_result}"
+        )
+    hourly_run_id = str(hourly_result.run_ids[0])
+    hourly_doc = await repository.reflection_run_by_id(hourly_run_id)
+    if hourly_doc is None:
+        raise AssertionError("Stage 3 reflection hourly run is missing")
+
+    character_local_date = str(hourly_doc["character_local_date"])
+
+    class _Stage3ExpectedDailyRuns:
+        """Provide exact phase readiness for the synthetic live scope."""
+
+        async def expected_hourly_runs_for_character_local_date(
+            self,
+            *,
+            character_local_date: str,
+        ) -> list[object]:
+            if character_local_date != character_local_date_value:
+                return []
+            return [reflection_worker.ExpectedDailyChannelHourlyRuns(
+                channel_scope=channel_scope,
+                expected_run_ids=[hourly_run_id],
+            )]
+
+    character_local_date_value = character_local_date
+    daily_result = await reflection_worker._run_daily_channel_reflection_cycle(
+        character_local_date=character_local_date,
+        dry_run=False,
+        is_primary_interaction_busy=lambda: False,
+        phase_run_provider=_Stage3ExpectedDailyRuns(),
+    )
+    if daily_result.succeeded_count != 1 or not daily_result.run_ids:
+        raise AssertionError(
+            "Stage 3 reflection daily worker did not succeed: "
+            f"{daily_result}"
+        )
+    daily_run_id = str(daily_result.run_ids[0])
+
+    global_run_id = repository.daily_global_promotion_run_id(
+        character_local_date=character_local_date,
+        prompt_version=reflection_promotion.GLOBAL_PROMOTION_PROMPT_VERSION,
+    )
+    await db["character_reflection_runs"].delete_one({
+        "run_id": global_run_id,
+    })
+    promotion_result = await reflection_cycle.run_global_reflection_promotion(
+        character_local_date=character_local_date,
+        dry_run=False,
+        enable_memory_writes=True,
+    )
+    context = await service.build_promoted_reflection_context()
+    if not context:
+        raise AssertionError(
+            "Stage 3 reflection promotion produced no active prompt context: "
+            f"{promotion_result}"
+        )
+
+    source_profile = dict(character_profile)
+    source_profile["platform_bot_id"] = "stage3-bot"
+    windows = build_group_activity_windows(
+        scope=channel_scope,
+        window_start=hour_start,
+        window_end=hour_start + timedelta(minutes=15),
+        now=now,
+        character_global_user_id=str(
+            character_profile["global_user_id"]
+        ),
+        platform_bot_id="stage3-bot",
+    )
+    group_cases = await sources.collect_group_review_cases(
+        now=now,
+        character_profile=source_profile,
+        windows=windows,
+        max_cases=1,
+        conversation_evidence_builder=lambda **kwargs: [],
+    )
+    if not group_cases:
+        raise AssertionError(
+            "Stage 3 reflection source collector produced no group case"
+        )
+    case.update(dict(group_cases[0]))
+    case["character_profile"] = character_profile
+    case["promoted_reflection_context"] = context
+    case["existing_attempts"] = []
+    case["budget"] = {
+        "rag_calls": 0,
+        "cognition_calls": 0,
+        "dialog_calls": 0,
+        "topic_limit": 1,
+    }
+    case["cognition_source"] = {
+        "source_kind": str(case["trigger_kind"]),
+        "source_id": str(case["case_id"]),
+    }
+    case["source_calendar_run_id"] = ""
+    case["source_calendar_skip_reason"] = ""
+    case["source_action_attempt_id"] = ""
+    case["stage3_reflection_preparation"] = {
+        "character_local_date": character_local_date,
+        "hourly_run_id_present": bool(hourly_run_id),
+        "daily_run_id_present": bool(daily_run_id),
+        "global_run_id_present": bool(global_run_id),
+        "hourly_status": "succeeded",
+        "daily_status": "succeeded",
+        "promotion_succeeded_count": promotion_result.succeeded_count,
+        "promotion_skipped_count": promotion_result.skipped_count,
+        "promotion_memory_mutation_count": len(
+            promotion_result.memory_mutations
+        ),
+        "promoted_lore_count": len(context.get("promoted_lore", [])),
+        "promoted_self_guidance_count": len(
+            context.get("promoted_self_guidance", [])
+        ),
+        "group_case_count": len(group_cases),
+    }
+    return dict(case["stage3_reflection_preparation"])
+
+
 async def _run_chat_case(
     *,
     case_id: str,
@@ -547,6 +804,7 @@ async def _run_chat_case(
     from kazusa_ai_chatbot.brain_service.contracts import ChatRequest
     from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
     from kazusa_ai_chatbot.db._client import get_db
+    from kazusa_ai_chatbot.time_boundary import build_turn_clock
 
     if case is None:
         case = _load_fixture_case("group_01")
@@ -558,10 +816,14 @@ async def _run_chat_case(
     user_id = str(target.get("global_user_id", "stage3-user"))
     input_text = str(case.get("input_text", "Stage 3 live input"))
     addressed = bool(target.get("addressed_to_character", True))
+    typed_mentions = _stage3_typed_mentions(
+        channel_type=channel_type,
+        addressed_to_character=addressed,
+    )
     request_envelope: dict[str, object] = {
         "body_text": input_text,
         "raw_wire_text": input_text,
-        "mentions": [],
+        "mentions": typed_mentions,
         "reply": None,
         "attachments": [],
         "addressed_to_global_user_ids": (
@@ -570,7 +832,14 @@ async def _run_chat_case(
         "broadcast": channel_type == "group" and not addressed,
     }
     if envelope is not None:
-        request_envelope.update(dict(envelope))
+        extra_envelope = dict(envelope)
+        extra_mentions = extra_envelope.pop("mentions", None)
+        if isinstance(extra_mentions, list):
+            request_envelope["mentions"] = [
+                *typed_mentions,
+                *extra_mentions,
+            ]
+        request_envelope.update(extra_envelope)
     request = ChatRequest.model_validate({
         "platform": "debug",
         "platform_channel_id": channel_id,
@@ -586,13 +855,15 @@ async def _run_chat_case(
         "channel_name": "Stage 3 Test Channel",
         "content_type": "mixed" if request_envelope["attachments"] else "text",
         "message_envelope": request_envelope,
-        "local_timestamp": _storage_now(),
+        "local_timestamp": build_turn_clock()["local_timestamp"],
         "debug_modes": {},
     })
 
     settlements: list[dict[str, object]] = []
+    runtime_graph_results: list[dict[str, object]] = []
     llm_calls: list[dict[str, object]] = []
     original_settle = post_turn.settle_episode_trace
+    original_runtime_settle = service._settle_runtime_episode_trace
 
     def capture_settlement(**kwargs: object) -> Mapping[str, object]:
         trace = original_settle(**kwargs)
@@ -604,6 +875,18 @@ async def _run_chat_case(
         return trace
 
     post_turn.settle_episode_trace = capture_settlement  # type: ignore[assignment]
+
+    async def capture_runtime_settlement(**kwargs: object) -> Mapping[str, object]:
+        """Capture the outer graph result at the runtime boundary."""
+
+        graph_result = kwargs.get("graph_result", {})
+        if isinstance(graph_result, Mapping):
+            runtime_graph_results.append(deepcopy(dict(graph_result)))
+        else:
+            runtime_graph_results.append({})
+        return await original_runtime_settle(**kwargs)
+
+    service._settle_runtime_episode_trace = capture_runtime_settlement
     started_at = time.perf_counter()
     try:
         with _capture_llm_steps(llm_calls):
@@ -612,12 +895,18 @@ async def _run_chat_case(
                     service._adapter_registry.register(_Stage3DebugAdapter())
                 response = await service._enqueue_chat_request(request)
                 db = await get_db()
+                trace_run = await _wait_for_trace_run_finalization(
+                    db,
+                    platform_message_id=request.platform_message_id,
+                )
                 schema_evidence = await _database_schema_evidence(db)
                 if len(settlements) != 1:
                     raise AssertionError(
                         f"expected exactly one settled trace, got {len(settlements)}"
                     )
                 settled = settlements[0]
+                if runtime_graph_results:
+                    settled["graph_result"] = runtime_graph_results[0]
                 trace = settled["trace"]
                 episode = settled["episode"]
                 if not isinstance(trace, Mapping):
@@ -631,10 +920,11 @@ async def _run_chat_case(
                 lifecycle = await db[
                     "post_turn_lifecycle_records"
                 ].find_one({"source_episode_id": episode_id}, {"_id": 0})
-                trace_run = await db["llm_trace_runs"].find_one(
-                    {"platform_message_id": request.platform_message_id},
-                    {"_id": 0},
-                )
+                if trace_run.get("status") != "succeeded":
+                    raise AssertionError(
+                        "live chat trace run did not succeed: "
+                        f"{trace_run.get('status', '')}"
+                    )
                 trace_id = str(trace_run.get("trace_id", "")) if trace_run else ""
                 trace_steps = await db["llm_trace_steps"].find(
                     {"trace_id": trace_id},
@@ -647,6 +937,7 @@ async def _run_chat_case(
                 response_payload = response.model_dump(mode="json")
     finally:
         post_turn.settle_episode_trace = original_settle
+        service._settle_runtime_episode_trace = original_runtime_settle
     duration_ms = round((time.perf_counter() - started_at) * 1000)
 
     if not isinstance(trace, Mapping):
@@ -718,6 +1009,7 @@ async def _run_self_cognition_case(
     )
     if not isinstance(profile, dict):
         raise ValueError("Stage 3 profile seed must be an object")
+    profile["global_user_id"] = CHARACTER_GLOBAL_USER_ID
     scope_type = "group" if trigger_kind == models.TRIGGER_GROUP_CHAT_REVIEW else "private"
     target_user_id = None if scope_type == "group" else "stage3-self-user"
     case: dict[str, Any] = {
@@ -838,12 +1130,36 @@ async def _run_self_cognition_case(
 
     if promoted_reflection:
         async with service.lifespan(service.app):
-            context = await service.build_promoted_reflection_context()
-            if not context:
-                pytest.skip(
-                    "Stage 3 guarded database has no promoted reflection context"
+            reflection_llm_calls: list[dict[str, object]] = []
+            try:
+                with _capture_llm_steps(reflection_llm_calls):
+                    reflection_preparation = (
+                        await _prepare_stage3_group_review_reflection(
+                            case_id=case_id,
+                            case=case,
+                            character_profile=profile,
+                            service=service,
+                        )
+                    )
+            except Exception as exc:
+                _write_evidence(
+                    f"{case_id}_failure",
+                    {
+                        "schema_version": (
+                            "stage3_live_case_failure_evidence.v1"
+                        ),
+                        "case_id": case_id,
+                        "technical_status": "failed",
+                        "error_type": type(exc).__name__,
+                        "error_message_digest": _text_digest(str(exc)),
+                        "reflection_llm_step_review": (
+                            _llm_step_review_metadata(reflection_llm_calls)
+                        ),
+                    },
                 )
-            case["promoted_reflection_context"] = context
+                raise
+            case["stage3_reflection_llm_steps"] = reflection_llm_calls
+            case["stage3_reflection_preparation"] = reflection_preparation
             latch_claim = await claim_latch_if_needed()
             return await _settle_runner_case(
                 service=service,
@@ -855,6 +1171,17 @@ async def _run_self_cognition_case(
                 character_global_user_id=CHARACTER_GLOBAL_USER_ID,
             )
     async with service.lifespan(service.app):
+        from kazusa_ai_chatbot.db import create_user_profile
+        from kazusa_ai_chatbot.db._client import get_db
+
+        db = await get_db()
+        if await db.user_profiles.find_one(
+            {"global_user_id": "stage3-self-user"},
+            {"_id": 1},
+        ) is None:
+            await create_user_profile({
+                "global_user_id": "stage3-self-user",
+            })
         latch_claim = await claim_latch_if_needed()
         return await _settle_runner_case(
             service=service,
@@ -1001,6 +1328,17 @@ async def _settle_runner_case(
             if latch_claim is not None
             else ""
         ),
+        "reflection_preparation": case.get(
+            "stage3_reflection_preparation",
+            {},
+        ),
+        "reflection_preparation_llm_step_review": (
+            _llm_step_review_metadata(
+                case.get("stage3_reflection_llm_steps", [])
+                if isinstance(case.get("stage3_reflection_llm_steps", []), list)
+                else []
+            )
+        ),
     }
     _write_evidence(case_id, artifact)
     return artifact
@@ -1034,9 +1372,15 @@ async def _run_tool_result_case(case_id: str) -> dict[str, object]:
         "requester_global_user_id": "stage3-tool-user",
         "requester_platform_user_id": "stage3-tool-user",
         "requester_display_name": "Stage 3 User",
-        "task_brief": "Complete a bounded background task.",
-        "result_summary": "The background task completed with a grounded result.",
-        "artifact_text": "The completed artifact contains the requested result.",
+            "task_brief": "Complete a bounded background task.",
+            "result_summary": (
+                "The requested result is complete: the bounded task finished "
+                "successfully and is ready for the requester."
+            ),
+            "artifact_text": (
+                "The completed artifact contains the requested result and is "
+                "ready for delivery."
+            ),
         "failure_summary": "",
         "completed_at": now,
         "created_at": now,
@@ -1060,6 +1404,16 @@ async def _run_tool_result_case(case_id: str) -> dict[str, object]:
     try:
         with _capture_llm_steps(llm_calls):
             async with service.lifespan(service.app):
+                from kazusa_ai_chatbot.db import create_user_profile
+
+                db = await get_db()
+                if await db.user_profiles.find_one(
+                    {"global_user_id": "stage3-tool-user"},
+                    {"_id": 1},
+                ) is None:
+                    await create_user_profile({
+                        "global_user_id": "stage3-tool-user",
+                    })
                 registry = service._adapter_registry
                 if not isinstance(registry, AdapterRegistry):
                     raise AssertionError("service adapter registry is unavailable")
@@ -1078,6 +1432,17 @@ async def _run_tool_result_case(case_id: str) -> dict[str, object]:
         post_turn.settle_episode_trace = original_settle
 
     if result.get("status") != "delivered":
+        _write_evidence(
+            f"{case_id}_failure",
+            {
+                "schema_version": "stage3_live_case_failure_evidence.v1",
+                "case_id": case_id,
+                "technical_status": "failed",
+                "result": result,
+                "llm_call_count": len(llm_calls),
+                "llm_step_review": _llm_step_review_metadata(llm_calls),
+            },
+        )
         raise AssertionError(f"tool-result delivery failed: {result}")
     if len(settlements) != 1:
         raise AssertionError("tool-result path did not settle exactly once")
@@ -1184,6 +1549,15 @@ async def test_live_media_reply_mentions_preserved() -> None:
 
     artifact = await _run_chat_case(
         case_id="focused_media_reply_mentions",
+        case={
+            "target_scope_fixture": {
+                "channel_type": "private",
+                "channel_id": "stage3-media-private",
+                "global_user_id": "stage3-media-user",
+                "addressed_to_character": True,
+            },
+            "input_text": "早上好，想和你聊聊这张图片。",
+        },
         envelope={
             "mentions": [{
                 "platform_user_id": "stage3-mentioned-user",
@@ -1223,12 +1597,15 @@ async def test_live_media_reply_mentions_preserved() -> None:
     ]
     if len(media_percepts) != 1:
         raise AssertionError("admitted image observation did not reach episode")
-    prompt_context = graph_result.get("prompt_message_context")
+    consolidation_state = graph_result.get("consolidation_state")
+    if not isinstance(consolidation_state, Mapping):
+        raise AssertionError("consolidation state is missing")
+    prompt_context = consolidation_state.get("prompt_message_context")
     if not isinstance(prompt_context, Mapping):
         raise AssertionError("prompt message context is missing")
     if not prompt_context.get("mentions"):
         raise AssertionError("mention projection did not reach cognition state")
-    reply_context = graph_result.get("reply_context")
+    reply_context = consolidation_state.get("reply_context")
     if not isinstance(reply_context, Mapping) or not reply_context.get(
         "reply_to_display_name"
     ):

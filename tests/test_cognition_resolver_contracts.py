@@ -289,6 +289,24 @@ def test_observation_validator_clips_prompt_safe_summary() -> None:
     assert set(validated["prompt_safe_summary"]) == {"x"}
 
 
+def test_observation_validator_projects_typed_user_input_blocker() -> None:
+    """Blocked observations may expose a bounded user-input reason."""
+
+    observation = _observation()
+    observation["status"] = "blocked"
+    observation["blocker_kind"] = "requires_user_input"
+
+    validated = validate_resolver_observation(observation)
+    projection = project_observations_for_cognition([validated])
+
+    assert validated["blocker_kind"] == "requires_user_input"
+    assert "blocker_kind=requires_user_input" in projection
+
+    observation["status"] = "succeeded"
+    with pytest.raises(ResolverValidationError, match="blocker_kind"):
+        validate_resolver_observation(observation)
+
+
 def test_observation_projection_hides_raw_ids() -> None:
     """Cognition projection should expose aliases and summaries, not raw ids."""
 
@@ -510,6 +528,27 @@ def test_ensure_initial_resolver_inputs_adds_first_cycle_context() -> None:
     assert "resolver_state: status=running" in initialized["resolver_context"]
     assert "resolver_goal_progress:" in initialized["resolver_context"]
     assert "resolver_observations:" not in initialized["resolver_context"]
+
+
+def test_targetless_group_self_cognition_bootstraps_without_user_owner() -> None:
+    """Group review should keep its semantic targetless contract at bootstrap."""
+
+    state = _minimal_global_state()
+    state["global_user_id"] = ""
+    state["cognitive_episode"] = {
+        "trigger_source": "self_cognition",
+        "target_scope": {
+            "channel_type": "group",
+            "current_global_user_id": "",
+            "current_platform_user_id": "",
+        },
+    }
+
+    initialized = ensure_initial_resolver_inputs(state, max_cycles=3)
+
+    assert initialized["global_user_id"] == ""
+    assert initialized["rag_result"]["answer"] == ""
+    assert initialized["rag_result"]["memory_evidence"] == []
 
 
 def test_initial_resolver_inputs_uses_image_observation_when_text_empty() -> None:

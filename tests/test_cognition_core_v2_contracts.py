@@ -134,6 +134,23 @@ async def test_v2_facade_returns_exact_one_scope_output() -> None:
     assert "admitted_bid" not in validated
 
 
+@pytest.mark.asyncio
+async def test_character_cognition_does_not_apply_elapsed_decay() -> None:
+    """Character elapsed evolution remains owned by sleep recovery."""
+
+    payload = _input()
+    payload["state_scope"] = "character"
+    payload["mutable_state"] = build_character_production_state(
+        updated_at="2026-07-13T00:00:00Z",
+    )
+
+    output = await run_cognition(payload, _services())
+
+    replacement = output["state_update"]["replacement_state"]
+    assert output["state_update"]["state_scope"] == "character"
+    assert replacement["updated_at"] == NOW
+
+
 def test_frozen_public_contract_fields_are_exact() -> None:
     """Prevent service, collapse, comparison, and diagnostic shape drift."""
 

@@ -82,6 +82,40 @@ def test_guard_rejects_non_test_database_before_client_creation(
     assert _FakeClient.created_uris == []
 
 
+def test_guard_allows_reserved_stage3_database_with_explicit_marker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Allow the exact Stage 3 database only with its explicit marker."""
+
+    monkeypatch.setenv("KAZUSA_TEST_DB_GUARD", "1")
+    monkeypatch.setenv("STAGE3_DATABASE_GUARD", "1")
+    monkeypatch.setattr(
+        client_module,
+        "MONGODB_DB_NAME",
+        client_module.STAGE3_TEST_DATABASE_NAME,
+    )
+
+    client_module._assert_guarded_database_name()
+
+
+def test_mongodb_log_descriptor_excludes_credentials_and_query_options() -> None:
+    """Connection diagnostics must not expose raw URI secrets."""
+
+    descriptor = client_module._sanitized_mongodb_endpoint_description(
+        "mongodb://stage-user:stage-secret@mongo.example:27017/"
+        "?tls=true&replicaSet=stage",
+        client_module.STAGE3_TEST_DATABASE_NAME,
+    )
+
+    assert descriptor == (
+        "mongodb://mongo.example:27017/_test_kazusa_core_v2"
+    )
+    assert "stage-user" not in descriptor
+    assert "stage-secret" not in descriptor
+    assert "tls=true" not in descriptor
+    assert "replicaSet" not in descriptor
+
+
 def test_checkpoint_b_helpers_enforce_the_exact_database_and_no_xdist(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

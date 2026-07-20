@@ -46,6 +46,7 @@ def _core_output() -> dict[str, object]:
         "affect_projection": [],
         "action_requests": [],
         "resolver_requests": [],
+        "goal_resolution": "answerable_now",
         "resolver_pending_resolution": None,
         "resolver_goal_progress": None,
         "resolver_progress": {

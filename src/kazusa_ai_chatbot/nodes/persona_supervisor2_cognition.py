@@ -378,6 +378,7 @@ def _project_output_to_global_state(
         "cognition_intention": output["intention"],
         "semantic_affect_projection": affect,
         "semantic_relationship_projection": output.get("relationship_projection"),
+        "goal_resolution": output["goal_resolution"],
         "resolver_capability_requests": [
             {
                 "schema_version": RESOLVER_CAPABILITY_REQUEST_VERSION,
@@ -452,11 +453,7 @@ def _available_action_affordances(
 ) -> list[ActionAffordanceV2]:
     """Project the deterministic capability registry into V2 affordances."""
 
-    current_user = {
-        "role": "target",
-        "entity_kind": "user",
-        "entity_id": str(state.get("global_user_id", "")),
-    }
+    current_user = _action_target_role(state)
     capabilities = build_initial_action_capabilities()
     availability_rows = {
         row["capability_kind"]: row
@@ -526,6 +523,36 @@ def _available_action_affordances(
             )
             affordances.extend(contextual_affordances)
     return affordances
+
+
+def _action_target_role(state: Mapping[str, Any]) -> dict[str, str]:
+    """Return a prompt-safe target role for user or targetless group scope."""
+
+    global_user_id = str(state.get("global_user_id", "") or "").strip()
+    if global_user_id:
+        return {
+            "role": "target",
+            "entity_kind": "user",
+            "entity_id": global_user_id,
+        }
+    episode = state.get("cognitive_episode")
+    target_scope = episode.get("target_scope") if isinstance(
+        episode,
+        Mapping,
+    ) else None
+    if isinstance(target_scope, Mapping) and target_scope.get(
+        "channel_type"
+    ) == "group":
+        return {
+            "role": "target",
+            "entity_kind": "group",
+            "entity_id": "current group scene",
+        }
+    return {
+        "role": "target",
+        "entity_kind": "user",
+        "entity_id": global_user_id,
+    }
 
 
 def build_action_availability_snapshot(

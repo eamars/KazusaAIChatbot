@@ -61,3 +61,13 @@ def test_action_prompt_assigns_goal_ledger_shape_to_protocol_code() -> None:
     assert "局部语义更新" in prompt
     assert "确定性代码" in prompt
     assert "保留省略" in prompt
+
+
+def test_action_prompt_keeps_character_self_report_out_of_optional_retrieval() -> None:
+    """A character's own current report is not a missing external fact."""
+
+    prompt = ACTION_PLANNING_PROMPT.casefold()
+
+    assert "角色自己的当前感受、经历、偏好或判断" in prompt
+    assert "不能证明角色自己的私密状态" in prompt
+    assert "直接自我报告" in prompt

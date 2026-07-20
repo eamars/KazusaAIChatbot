@@ -82,7 +82,7 @@ async def run_cognition(
     payload = validate_cognition_core_input(input_payload)
     previous_state = validate_cognition_state(payload["mutable_state"])
     updated_at = _episode_updated_at(payload["episode"])
-    elapsed_seconds = _elapsed_seconds(previous_state["updated_at"], updated_at)
+    elapsed_seconds = _cognition_elapsed_seconds(previous_state, updated_at)
     warnings: list[str] = []
     stage_status: dict[str, str] = {
         "input_validation": "completed",
@@ -318,6 +318,7 @@ async def run_cognition(
         "affect_projection": affect,
         "action_requests": action_requests,
         "resolver_requests": resolver_requests,
+        "goal_resolution": action_plan["goal_resolution"],
         "resolver_pending_resolution": pending_resolution,
         "resolver_goal_progress": action_plan["resolver_goal_progress"],
         "resolver_progress": _resolver_progress(resolver_requests),
@@ -814,6 +815,17 @@ def _elapsed_seconds(previous: str, current: str) -> int:
     if previous_dt.tzinfo is None or current_dt.tzinfo is None:
         return 0
     return max(0, int((current_dt - previous_dt).total_seconds()))
+
+
+def _cognition_elapsed_seconds(
+    state: Mapping[str, Any],
+    current: str,
+) -> int:
+    """Return elapsed evolution allowed for the cognition state scope."""
+
+    if state["state_scope"] == "character":
+        return 0
+    return _elapsed_seconds(state["updated_at"], current)
 
 
 async def _collect_appraisals(

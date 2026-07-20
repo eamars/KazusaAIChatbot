@@ -37,6 +37,7 @@ def _decision(
     return {
         "action_requests": action_requests or [],
         "resolver_requests": [],
+        "goal_resolution": "answerable_now",
         "resolver_pending_resolution": None,
         "resolver_goal_progress": None,
     }

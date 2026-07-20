@@ -419,14 +419,28 @@ async def _execute_local_context_recall(
         objective=request["objective"],
         reason=request["reason"],
     )
-    execution_status = _local_context_execution_status(rag_result)
+    referent_blocked = should_skip_rag_for_unresolved_referents(
+        state["referents"],
+    )
+    if referent_blocked:
+        referent_reason = unresolved_referent_reason(state["referents"])
+        execution_status = "blocked"
+        prompt_safe_summary = (
+            'Local context recall requires user input before it can act: '
+            f'{referent_reason}'
+        )
+    else:
+        execution_status = _local_context_execution_status(rag_result)
+        prompt_safe_summary = _rag_observation_summary(rag_result)
     observation = _observation_base(
         request,
         state,
         status=execution_status,
-        prompt_safe_summary=_rag_observation_summary(rag_result),
+        prompt_safe_summary=prompt_safe_summary,
     )
     observation["rag_result"] = rag_result
+    if referent_blocked:
+        observation["blocker_kind"] = "requires_user_input"
     return_value = validate_resolver_observation(observation)
     return return_value
 

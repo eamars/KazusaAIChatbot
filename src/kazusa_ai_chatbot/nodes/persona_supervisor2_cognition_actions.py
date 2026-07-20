@@ -20,6 +20,7 @@ from kazusa_ai_chatbot.action_spec.registry import (
     MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     SPEAK_CAPABILITY,
     TRIGGER_FUTURE_COGNITION_CAPABILITY,
+    is_capability_allowed_for_source,
 )
 from kazusa_ai_chatbot.config import (
     BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
@@ -837,7 +838,10 @@ def _can_create_delayed_task_from_source(state: CognitionState) -> bool:
     """Return whether this source may create a new accepted delayed task."""
 
     trigger_source = _trigger_source_for_scope(state)
-    can_create = trigger_source == "user_message"
+    can_create = is_capability_allowed_for_source(
+        ACCEPTED_TASK_REQUEST_CAPABILITY,
+        trigger_source,
+    )
     return can_create
 
 

@@ -40,6 +40,13 @@ CognitionCoreInputV2
 The loop carries the latest in-memory V2 output forward. It does not reload or
 write cognition state between cycles. The caller commits only the final output.
 
+`CognitionCoreOutputV2.goal_resolution` remains the semantic owner’s answerability
+decision. It answers whether the accepted user goal is sufficient to answer now;
+it does not mirror a source-specific RAG `resolved` field. When the decision is
+`answerable_now`, the deterministic loop suppresses any optional resolver request
+and settles the episode without capability execution. The other typed decisions
+retain their required-evidence, user-input, or blocked paths.
+
 ## Capability Boundary
 
 V2 requests contain only `capability`, `semantic_goal`, and

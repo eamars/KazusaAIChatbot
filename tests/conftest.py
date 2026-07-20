@@ -4,12 +4,28 @@ from __future__ import annotations
 
 import asyncio
 import os
+from pathlib import Path
+
 import pytest
 from dotenv import load_dotenv
 
+from tests.stage3_fresh_database import STAGE3_TEST_DATABASE_NAME
 
 load_dotenv(override=False)
-os.environ["MONGODB_DB_NAME"] = "_test_kazusa_live_llm"
+_DEFAULT_CHARACTER_PROFILE_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "personalities"
+    / "kazusa.json"
+)
+os.environ.setdefault(
+    "CHARACTER_PROFILE_PATH",
+    str(_DEFAULT_CHARACTER_PROFILE_PATH),
+)
+if os.environ.get("MONGODB_DB_NAME") == STAGE3_TEST_DATABASE_NAME:
+    os.environ["STAGE3_DATABASE_GUARD"] = "1"
+else:
+    os.environ["MONGODB_DB_NAME"] = "_test_kazusa_live_llm"
+    os.environ.pop("STAGE3_DATABASE_GUARD", None)
 os.environ["KAZUSA_TEST_DB_GUARD"] = "1"
 os.environ.setdefault("CHARACTER_GLOBAL_USER_ID", "character-global")
 

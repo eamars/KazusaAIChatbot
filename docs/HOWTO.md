@@ -457,8 +457,10 @@ At minimum, a working profile should include:
 - `boundary_profile`
 - `linguistic_texture_profile`
 
-Stage 3 fresh-database verification uses the disposable database
-`_test_kazusa_stage3_fresh` behind a dedicated endpoint fingerprint guard. The
+Stage 3 fresh-database verification uses the configured database
+`_test_kazusa_core_v2`
+on the ordinary MongoDB URI, with the exact database name and child-process
+guard providing isolation. The
 runtime has five canonical cognition sources: `user_message`,
 `internal_thought`, `self_cognition`, `scheduled_tick`, and `tool_result`.
 Each episode settles exactly one `episode_trace.v2`; post-turn action work is

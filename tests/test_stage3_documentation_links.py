@@ -49,7 +49,7 @@ def test_stage3_docs_describe_native_startup_and_runtime_ownership() -> None:
     combined = "\n".join(_read(path) for path in STAGE3_DOCUMENTS)
     required_terms = (
         "CHARACTER_PROFILE_PATH",
-        "_test_kazusa_stage3_fresh",
+        "_test_kazusa_core_v2",
         "cognitive_episode.v1",
         "episode_trace.v2",
         "internal_action_latches",

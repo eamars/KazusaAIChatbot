@@ -81,6 +81,16 @@ produce a usable replacement, every candidate is denied. Neither containment
 path authorizes work, changes the visible speech route, or reduces the
 registry-driven three-request capacity.
 
+The action-planning envelope also carries the required Cognition-Core-owned
+`goal_resolution`: `answerable_now`, `requires_required_evidence`,
+`requires_user_input`, or `blocked`. This is the semantic judgment of whether
+the accepted user goal can be answered now; it is distinct from any
+source-specific RAG `resolved` field. `answerable_now` suppresses optional
+resolver requests before resolver authorization and recurrence. Required
+evidence, user-input, and technical-blocked decisions retain their existing
+typed paths. Deterministic code validates and enforces the decision without
+reclassifying it from keywords or adding another LLM stage.
+
 The shared surface input receives semantic intention, bounded affect and
 relationship projections, complete-bid projections, permitted action results,
 interaction style, and bounded character voice. The three-call text planner

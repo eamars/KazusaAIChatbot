@@ -30,6 +30,12 @@ _QUEUE_ONLY_CAPABILITIES = frozenset({
     ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
     BACKGROUND_WORK_REQUEST_CAPABILITY,
 })
+_USER_MESSAGE_ONLY_CAPABILITIES = frozenset({
+    FUTURE_SPEAK_CAPABILITY,
+    ACCEPTED_TASK_REQUEST_CAPABILITY,
+    ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
+    BACKGROUND_WORK_REQUEST_CAPABILITY,
+})
 _AVAILABILITY_SNAPSHOT_TTL_SECONDS = 5
 
 
@@ -111,6 +117,17 @@ def project_prompt_affordances(
         elif capability_kind == BACKGROUND_WORK_REQUEST_CAPABILITY:
             projection.append(_background_work_projection())
     return projection
+
+
+def is_capability_allowed_for_source(
+    capability_kind: str,
+    source_kind: str,
+) -> bool:
+    """Return whether a capability can be created from this source event."""
+
+    if capability_kind not in _USER_MESSAGE_ONLY_CAPABILITIES:
+        return True
+    return source_kind == "user_message"
 
 
 def _probe_capability_availability(
@@ -278,6 +295,15 @@ def build_episode_affordances(
     affordances: list[AffordanceSpecV1] = []
     for capability_kind in sorted(capabilities):
         if capability_kind == APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY:
+            continue
+        source_kind = context.get("source_kind")
+        if (
+            isinstance(source_kind, str)
+            and not is_capability_allowed_for_source(
+                capability_kind,
+                source_kind,
+            )
+        ):
             continue
         capability = capabilities[capability_kind]
         probe = _probe_capability_availability(

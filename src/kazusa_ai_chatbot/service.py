@@ -2529,6 +2529,7 @@ async def _deliver_accepted_task_result_episode(
         debug_modes: DebugModes = {}
         if not COGNITION_VISUAL_DIRECTIVES_ENABLED:
             debug_modes["no_visual_directives"] = True
+        episode["origin_metadata"]["debug_modes"] = dict(debug_modes)
         initial_state: IMProcessState = {
             "storage_timestamp_utc": episode["created_at"],
             "local_time_context": _episode_local_time_context(episode),

@@ -35,6 +35,32 @@ def test_action_registry_contains_the_complete_native_roster() -> None:
     assert set(capabilities) == EXPECTED_CAPABILITIES
 
 
+def test_tool_result_affordances_exclude_new_delayed_task_creation() -> None:
+    """Completed results must not expose delayed-task creation affordances."""
+
+    registry_module = importlib.import_module(
+        "kazusa_ai_chatbot.action_spec.registry",
+    )
+    capabilities = registry_module.build_initial_action_capabilities()
+    snapshot = registry_module.build_runtime_capability_snapshot()
+    affordances = registry_module.build_episode_affordances(
+        capabilities,
+        {"source_kind": "tool_result"},
+        snapshot,
+    )
+
+    projected_capabilities = {
+        row["capability_kind"]
+        for row in affordances
+    }
+    assert projected_capabilities == {
+        "accepted_task_status_check",
+        "memory_lifecycle_update",
+        "speak",
+        "trigger_future_cognition",
+    }
+
+
 def test_trace_settlement_has_one_public_owner_signature() -> None:
     """Trace construction must move behind the post-turn public boundary."""
 

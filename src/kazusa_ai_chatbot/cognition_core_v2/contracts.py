@@ -100,6 +100,20 @@ SEMANTIC_QUESTION_KINDS = (
     "existential_drive",
 )
 
+GoalResolutionV2 = Literal[
+    "answerable_now",
+    "requires_required_evidence",
+    "requires_user_input",
+    "blocked",
+]
+
+GOAL_RESOLUTION_VALUES = frozenset({
+    "answerable_now",
+    "requires_required_evidence",
+    "requires_user_input",
+    "blocked",
+})
+
 EVIDENCE_SOURCE_QUESTION_IDS = {
     "episode": tuple(f"q:{kind}" for kind in SEMANTIC_QUESTION_KINDS),
     "promoted_memory": tuple(f"q:{kind}" for kind in SEMANTIC_QUESTION_KINDS),
@@ -499,6 +513,7 @@ class CognitionCoreOutputV2(TypedDict):
     relationship_projection: NotRequired[SemanticRelationshipProjectionV2]
     action_requests: list[SemanticActionRequestV2]
     resolver_requests: list[ResolverCapabilityRequestV2]
+    goal_resolution: GoalResolutionV2
     resolver_pending_resolution: dict[str, Any] | None
     resolver_goal_progress: dict[str, Any] | None
     resolver_progress: ResolverProgressV2
@@ -704,6 +719,7 @@ def validate_cognition_core_output(
             "affect_projection",
             "action_requests",
             "resolver_requests",
+            "goal_resolution",
             "resolver_pending_resolution",
             "resolver_goal_progress",
             "resolver_progress",
@@ -745,6 +761,7 @@ def validate_cognition_core_output(
         raise CognitionContractError("resolver_requests must be a list")
     for row in payload["resolver_requests"]:
         _validate_resolver_request(row)
+    _validate_goal_resolution(payload["goal_resolution"])
     _validate_resolver_lifecycle_output(
         payload["resolver_pending_resolution"],
         payload["resolver_goal_progress"],
@@ -1100,6 +1117,13 @@ def _validate_resolver_progress(value: Any) -> None:
     if value["status"] not in {"not_requested", "pending", "completed", "failed"}:
         raise CognitionContractError("resolver progress status is invalid")
     _require_text(value["semantic_summary"], "resolver progress.semantic_summary")
+
+
+def _validate_goal_resolution(value: Any) -> None:
+    """Validate Cognition Core's user-goal answerability decision."""
+
+    if not isinstance(value, str) or value not in GOAL_RESOLUTION_VALUES:
+        raise CognitionContractError("goal resolution is invalid")
 
 
 def _validate_diagnostics(value: Any) -> None:
