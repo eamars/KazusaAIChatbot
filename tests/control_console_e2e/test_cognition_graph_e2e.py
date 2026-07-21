@@ -36,6 +36,9 @@ def test_overview_cognition_graph_updates_from_latest_brain_run(
             assert page.locator(
                 "#overview-self-cognition-graph .graph-node"
             ).count() == 0
+            assert page.locator(
+                "#overview-self-cognition-card"
+            ).is_hidden()
 
             fake_brain.set_graph(graph_snapshot(status="running", run_id="run-live"))
             fake_brain.set_self_graph(
@@ -54,6 +57,12 @@ def test_overview_cognition_graph_updates_from_latest_brain_run(
             assert page.locator(
                 "#overview-self-cognition-graph .graph-node"
             ).count() == 6
+            assert page.locator(
+                "#overview-self-cognition-card"
+            ).is_visible()
+            assert page.locator(
+                "#overview-cognition-graph .graph-latest-event"
+            ).count() == 0
             page.locator(
                 "#overview-self-cognition-graph [data-node-id='l3.visual_directives']"
             ).click()

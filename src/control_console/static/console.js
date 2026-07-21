@@ -600,7 +600,6 @@ function cognitionGraphModel({graph, nodes, edges, lanes, maxColumn}) {
     stale,
     focusKind,
     freshness: cognitionGraphFreshnessLabel(ageMs, stale),
-    latestEvent: cognitionGraphLatestEvent(currentNode || selectedNode, edges, nodes),
   };
 }
 
@@ -692,25 +691,14 @@ function cognitionGraphAgeLabel(ageMs) {
   return `${hours}h`;
 }
 
-function cognitionGraphLatestEvent(node, edges, nodes) {
-  if (!node) return "No cognition node selected.";
-  const detail = node.detail || {};
-  const outgoing = edges
-    .filter((edge) => edge.source === node.id)
-    .map((edge) => nodes.find((candidate) => candidate.id === edge.target))
-    .filter(Boolean);
-  const nextRunning = outgoing.find((candidate) => candidate.status === "running");
-  const nextPending = outgoing.find((candidate) => candidate.status === "pending");
-  if (nextRunning) return `${node.label || node.id} advanced to ${nextRunning.label || nextRunning.id}.`;
-  if (nextPending) return `${node.label || node.id} is waiting for ${nextPending.label || nextPending.id}.`;
-  const firstValue = cognitionGraphFirstSemanticValue(detail);
-  if (firstValue !== null) {
-    return `${node.label || node.id}: ${cognitionGraphPreview(cognitionGraphValue(firstValue))}`;
-  }
-  return `${node.label || node.id} is ${String(node.status || "not reported").replaceAll("_", " ")}.`;
-}
-
 function renderOverviewSelfCognitionGraph(snapshot) {
+  const card = qs("#overview-self-cognition-card");
+  if (!card) return;
+  const hasReportedGraph = Boolean(
+    snapshot && snapshot.status && snapshot.status !== "not_reported",
+  );
+  card.hidden = !hasReportedGraph;
+  if (!hasReportedGraph) return;
   renderCognitionGraph({
     containerSelector: "#overview-self-cognition-graph",
     statusSelector: "#overview-self-cognition-status",
@@ -736,7 +724,6 @@ function cognitionGraphSummaryMarkup(model) {
         <span class="badge${model.stale ? " warn" : ""}" data-component="Badge">${escapeHtml(model.freshness)}</span>
         <span class="badge" data-component="Badge">${escapeHtml(currentLabel)}</span>
       </div>
-      <div class="graph-latest-event">${escapeHtml(model.latestEvent)}</div>
     </div>
   `;
 }
