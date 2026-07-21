@@ -12,6 +12,7 @@ from kazusa_ai_chatbot.cognition_episode import (
     build_tool_result_episode,
     build_user_message_episode,
 )
+from kazusa_ai_chatbot.cognition_core_v2.contracts import CognitionExecutionError
 from kazusa_ai_chatbot.nodes import (
     persona_supervisor2_msg_decontexualizer as decontextualizer_module,
 )
@@ -179,18 +180,18 @@ async def test_decontextualizer_attaches_role_explicit_meaning_to_episode():
         "operation": (
             "当前角色选择并说出一个希望当前用户下一步执行的动作"
         ),
-        "response_owner_role": "self",
-        "selection_owner_role": "self",
+        "response_owner_role": "当前角色",
+        "selection_owner_role": "当前角色",
         "selection_required": True,
-        "embedded_actor_role": "current_user",
-        "embedded_target_role": "self",
+        "embedded_actor_role": "当前用户",
+        "embedded_target_role": "当前角色",
     }
     llm_response = MagicMock()
     llm_response.content = json.dumps({
         "output": user_input,
         "role_explicit_content": role_explicit_content,
         "response_operation": response_operation,
-        "reasoning": "The direct roles are explicit in a separate projection.",
+        "reasoning": "直接角色已在独立投影中明确。",
         "is_modified": False,
         "referents": [],
     })
@@ -252,17 +253,17 @@ async def test_decontextualizer_leaves_accepted_task_episode_source_owned():
     llm_response.content = json.dumps({
         "output": state["user_input"],
         "role_explicit_content": (
-            "self reports an accepted task result to current_user."
+            "当前角色向当前用户说明已完成的任务结果。"
         ),
         "response_operation": {
-            "operation": "self reports the accepted task result",
-            "response_owner_role": "self",
-            "selection_owner_role": "none",
+            "operation": "当前角色向当前用户说明已完成的任务结果",
+            "response_owner_role": "当前角色",
+            "selection_owner_role": "无",
             "selection_required": False,
-            "embedded_actor_role": "self",
-            "embedded_target_role": "current_user",
+            "embedded_actor_role": "当前角色",
+            "embedded_target_role": "当前用户",
         },
-        "reasoning": "The result already identifies its roles.",
+        "reasoning": "结果已经明确标识了角色。",
         "is_modified": False,
         "referents": [],
     })
@@ -308,6 +309,47 @@ def _llm_response(content: str) -> MagicMock:
     response = MagicMock()
     response.content = content
     return response
+
+
+def _decontextualizer_payload(
+    *,
+    output: str,
+    reasoning: str,
+    is_modified: bool,
+    referents: list[dict[str, str]],
+    role_explicit_content: str = "当前用户向当前角色发送当前输入。",
+    response_operation: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Build a complete Chinese-context decontextualizer candidate."""
+
+    if response_operation is None:
+        response_operation = {
+            "operation": "当前角色回应当前用户的当前输入",
+            "response_owner_role": "当前角色",
+            "selection_owner_role": "无",
+            "selection_required": False,
+            "embedded_actor_role": "当前角色",
+            "embedded_target_role": "当前用户",
+        }
+    return {
+        "output": output,
+        "role_explicit_content": role_explicit_content,
+        "response_operation": response_operation,
+        "reasoning": reasoning,
+        "is_modified": is_modified,
+        "referents": referents,
+    }
+
+
+def _decontextualizer_response(**kwargs: object) -> MagicMock:
+    """Build one mock response with the complete decontextualizer contract."""
+
+    return _llm_response(
+        json.dumps(
+            _decontextualizer_payload(**kwargs),
+            ensure_ascii=False,
+        )
+    )
 
 
 def _qq_failure_history() -> list[dict]:
@@ -453,11 +495,11 @@ class _HistoryAwareDecontextualizerLLM:
         history_lines = input_payload['chat_history']
 
         if any('真的不喜欢' in line for line in history_lines):
-            content = {
-                'output': _RESOLVED_FAILURE_INPUT,
-                'reasoning': 'visible group exchange identifies speaker and target',
-                'is_modified': True,
-                'referents': [
+            content = _decontextualizer_payload(
+                output=_RESOLVED_FAILURE_INPUT,
+                reasoning='可见群聊交换明确了行动者和对象。',
+                is_modified=True,
+                referents=[
                     {
                         'phrase': '她',
                         'referent_role': 'subject',
@@ -469,14 +511,14 @@ class _HistoryAwareDecontextualizerLLM:
                         'status': 'resolved',
                     },
                 ],
-            }
+            )
         else:
-            content = {
-                'output': _FAILURE_INPUT,
-                'reasoning': 'filtered history lacks the group exchange',
-                'is_modified': False,
-                'referents': [],
-            }
+            content = _decontextualizer_payload(
+                output=_FAILURE_INPUT,
+                reasoning='筛选后的历史缺少群聊交换。',
+                is_modified=False,
+                referents=[],
+            )
 
         response = MagicMock()
         response.content = json.dumps(content, ensure_ascii=False)
@@ -647,10 +689,20 @@ async def test_decontexualizer_full_history_surfaces_group_referent_evidence():
 async def test_decontexualizer_returns_modified_input():
     """When LLM says is_modified=true, output should be the decontextualized text."""
     llm_response = MagicMock()
-    llm_response.content = (
-        '{"output": "之前提到的那个人在干啥？", "reasoning": "resolved pronoun", '
-        '"is_modified": true, '
-        '"referents": [{"phrase": "他", "referent_role": "subject", "status": "resolved"}]}'
+    llm_response.content = json.dumps(
+        _decontextualizer_payload(
+            output="之前提到的那个人在干啥？",
+            reasoning="指代已经解析。",
+            is_modified=True,
+            referents=[
+                {
+                    "phrase": "他",
+                    "referent_role": "subject",
+                    "status": "resolved",
+                },
+            ],
+        ),
+        ensure_ascii=False,
     )
 
     with patch("kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer._msg_decontexualizer_llm") as mock_llm:
@@ -668,10 +720,14 @@ async def test_decontexualizer_returns_modified_input():
 async def test_decontexualizer_returns_original_when_not_modified():
     """When LLM says is_modified=false, output should be the original user_input."""
     llm_response = MagicMock()
-    llm_response.content = (
-        '{"output": "他在干啥？", "reasoning": "already clear", '
-        '"is_modified": false, '
-        '"referents": []}'
+    llm_response.content = json.dumps(
+        _decontextualizer_payload(
+            output="他在干啥？",
+            reasoning="原句已经清楚。",
+            is_modified=False,
+            referents=[],
+        ),
+        ensure_ascii=False,
     )
 
     with patch("kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer._msg_decontexualizer_llm") as mock_llm:
@@ -697,28 +753,38 @@ async def test_decontexualizer_fallback_on_llm_error():
 
 @pytest.mark.asyncio
 async def test_decontexualizer_fallback_on_malformed_json():
-    """If LLM returns garbage, output falls back to original user_input."""
-    llm_response = MagicMock()
-    llm_response.content = "not json at all"
+    """A malformed first candidate receives one bounded same-context repair."""
+    repaired_response = _decontextualizer_response(
+        output="他在干啥？",
+        reasoning="原句已经清楚。",
+        is_modified=False,
+        referents=[],
+    )
 
     with patch("kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer._msg_decontexualizer_llm") as mock_llm:
-        mock_llm.ainvoke = AsyncMock(return_value=llm_response)
+        mock_llm.ainvoke = AsyncMock(
+            side_effect=[_llm_response("not json at all"), repaired_response]
+        )
 
         result = await call_msg_decontexualizer(_base_state())
 
-    # parse_llm_json_output returns {} for garbage → is_modified defaults to False
     assert result["decontexualized_input"] == "他在干啥？"
     assert result["referents"] == []
+    assert mock_llm.ainvoke.await_count == 2
 
 
 @pytest.mark.asyncio
 async def test_decontexualizer_forwards_reply_context_to_llm():
     """Reply metadata should be forwarded so reply-only follow-ups can be resolved."""
     llm_response = MagicMock()
-    llm_response.content = (
-        '{"output": "是的，我是想让 active character 具体评价我。", '
-        '"reasoning": "used reply excerpt", "is_modified": true, '
-        '"referents": []}'
+    llm_response.content = json.dumps(
+        _decontextualizer_payload(
+            output="是的，我是想让 active character 具体评价我。",
+            reasoning="使用了回复摘录。",
+            is_modified=True,
+            referents=[],
+        ),
+        ensure_ascii=False,
     )
 
     state = _base_state()
@@ -799,8 +865,9 @@ def test_decontexualizer_prompt_explains_reply_ellipsis_decision_owner() -> None
     assert '第三方向当前用户发出邀请、通知、请求或建议' in system_prompt
     assert '附件描述、回复摘录和相邻历史可提供动作对象' in system_prompt
     assert '自由文本统一使用中文称谓' in system_prompt
-    assert '不写 `self` 或 `current_user`' in system_prompt
-    assert '英文角色枚举只出现在四个角色字段中' in system_prompt
+    assert 'response_operation' in system_prompt
+    assert '当前角色 | 当前用户 | 其他参与者 | 无' in system_prompt
+    assert '四个角色字段只使用中文角色枚举' in system_prompt
 
 
 @pytest.mark.asyncio
@@ -808,9 +875,14 @@ async def test_decontexualizer_projects_group_name_into_channel_topic_text():
     """The LLM payload should receive scene text, not a new group-name field."""
 
     llm_response = MagicMock()
-    llm_response.content = (
-        '{"output": "他在干啥？", "reasoning": "read scene", '
-        '"is_modified": false, "referents": []}'
+    llm_response.content = json.dumps(
+        _decontextualizer_payload(
+            output="他在干啥？",
+            reasoning="读取了场景。",
+            is_modified=False,
+            referents=[],
+        ),
+        ensure_ascii=False,
     )
     state = _base_state()
     state['channel_type'] = 'group'
@@ -834,11 +906,20 @@ async def test_decontexualizer_projects_group_name_into_channel_topic_text():
 async def test_decontexualizer_forwards_scope_users_as_neutral_identity_table():
     """Scoped users should reach the prompt as identity rows, not retry hints."""
     llm_response = MagicMock()
-    llm_response.content = (
-        '{"output": "@杏山千纱 还不报警抓蚝爹油吗？", '
-        '"reasoning": "used visible mention and identity table", '
-        '"is_modified": true, '
-        '"referents": [{"phrase": "他", "referent_role": "object", "status": "resolved"}]}'
+    llm_response.content = json.dumps(
+        _decontextualizer_payload(
+            output="@杏山千纱 还不报警抓蚝爹油吗？",
+            reasoning="使用了可见提及和身份表。",
+            is_modified=True,
+            referents=[
+                {
+                    "phrase": "他",
+                    "referent_role": "object",
+                    "status": "resolved",
+                },
+            ],
+        ),
+        ensure_ascii=False,
     )
     scope_users = [
         {
@@ -883,10 +964,20 @@ async def test_decontexualizer_forwards_scope_users_as_neutral_identity_table():
 async def test_decontexualizer_parses_unresolved_reference_signal():
     """New ambiguity fields should flow through when the LLM marks unresolved."""
     llm_response = MagicMock()
-    llm_response.content = (
-        '{"output": "这些是什么意思？", "reasoning": "missing referent", '
-        '"is_modified": false, '
-        '"referents": [{"phrase": "这些", "referent_role": "object", "status": "unresolved"}]}'
+    llm_response.content = json.dumps(
+        _decontextualizer_payload(
+            output="这些是什么意思？",
+            reasoning="缺少指代对象。",
+            is_modified=False,
+            referents=[
+                {
+                    "phrase": "这些",
+                    "referent_role": "object",
+                    "status": "unresolved",
+                },
+            ],
+        ),
+        ensure_ascii=False,
     )
     state = _base_state()
     state["user_input"] = "这些是什么意思？"
@@ -908,20 +999,29 @@ async def test_decontexualizer_parses_unresolved_reference_signal():
 
 
 @pytest.mark.asyncio
-async def test_decontexualizer_missing_new_fields_warns_and_defaults(caplog):
-    """Missing ambiguity fields should warn and preserve old behavior."""
-    llm_response = MagicMock()
-    llm_response.content = '{"output": "他在干啥？", "reasoning": "legacy output", "is_modified": false}'
+async def test_decontexualizer_missing_new_fields_fails_closed(caplog):
+    """Missing contract fields are excluded after the bounded retry cap."""
+    invalid_response = _llm_response(
+        '{"output": "他在干啥？", "reasoning": "缺少 contract 字段", '
+        '"is_modified": false}'
+    )
 
     with patch("kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer._msg_decontexualizer_llm") as mock_llm:
-        mock_llm.ainvoke = AsyncMock(return_value=llm_response)
+        mock_llm.ainvoke = AsyncMock(
+            side_effect=[invalid_response, invalid_response]
+        )
         caplog.set_level(logging.WARNING)
 
-        result = await call_msg_decontexualizer(_base_state())
+        with pytest.raises(CognitionExecutionError) as error_info:
+            await call_msg_decontexualizer(_base_state())
 
-    assert result["referents"] == []
-    assert "Decontextualizer missing referent fields" in caplog.text
-    assert "他在干啥？" in caplog.text
+    assert error_info.value.error_code == (
+        "message_decontextualizer_contract_exhausted"
+    )
+    assert error_info.value.attempt_count == 2
+    assert error_info.value.safe_checkpoint == "pre_state_commit"
+    assert mock_llm.ainvoke.await_count == 2
+    assert "Decontextualizer output" not in caplog.text
 
 
 @pytest.mark.asyncio

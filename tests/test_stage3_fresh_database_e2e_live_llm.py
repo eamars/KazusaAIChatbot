@@ -794,6 +794,7 @@ async def _run_chat_case(
     case_id: str,
     case: Mapping[str, object] | None = None,
     envelope: Mapping[str, object] | None = None,
+    expected_terminal_statuses: Sequence[str] = ("completed_visible",),
 ) -> dict[str, object]:
     """Run one real user-message turn through the service queue."""
 
@@ -944,13 +945,18 @@ async def _run_chat_case(
         raise AssertionError("live service did not return a settled trace")
     if trace.get("trigger_source") != "user_message":
         raise AssertionError("live chat did not settle as user_message")
-    if trace.get("terminal_status") != "completed_visible":
+    terminal_status = str(trace.get("terminal_status", ""))
+    if terminal_status not in set(expected_terminal_statuses):
         raise AssertionError(
-            "Stage 3 final fixture requires a visible completed terminal status"
+            "Stage 3 live case returned an unexpected terminal status: "
+            f"{terminal_status}; expected one of "
+            f"{sorted(set(expected_terminal_statuses))}"
         )
     if lifecycle_rows != 1 or not isinstance(lifecycle, Mapping):
         raise AssertionError("live chat did not persist one lifecycle record")
-    if not response_payload.get("messages"):
+    if terminal_status == "completed_visible" and not response_payload.get(
+        "messages"
+    ):
         raise AssertionError("live chat returned no visible message")
 
     artifact = {
@@ -1004,6 +1010,8 @@ async def _run_self_cognition_case(
     from kazusa_ai_chatbot.self_cognition import models, runner
 
     now = _storage_now()
+    run_token = uuid4().hex[:10]
+    run_case_id = f"{case_id}:{run_token}"
     profile = json.loads(
         Path(os.environ["CHARACTER_PROFILE_PATH"]).read_text(encoding="utf-8")
     )
@@ -1014,7 +1022,7 @@ async def _run_self_cognition_case(
     target_user_id = None if scope_type == "group" else "stage3-self-user"
     case: dict[str, Any] = {
         "case_name": case_name,
-        "case_id": case_id,
+        "case_id": run_case_id,
         "idle_timestamp_utc": now,
         "last_evidence_timestamp_utc": now,
         "trigger_kind": trigger_kind,
@@ -1028,7 +1036,7 @@ async def _run_self_cognition_case(
         },
         "source_refs": [{
             "source_kind": "conversation_window",
-            "source_id": f"stage3-ref-{case_id}",
+            "source_id": f"stage3-ref-{run_case_id}",
             "summary": "A grounded Stage 3 source observation.",
         }],
         "semantic_due_state": "due_now",
@@ -1055,11 +1063,11 @@ async def _run_self_cognition_case(
             "dialog_calls": 0,
             "topic_limit": 1,
         },
-        "source_calendar_run_id": f"stage3-calendar-{case_id}",
+        "source_calendar_run_id": f"stage3-calendar-{run_case_id}",
         "source_calendar_skip_reason": "",
         "cognition_source": {
             "source_kind": trigger_kind,
-            "source_id": case_id,
+            "source_id": run_case_id,
         },
         "source_action_attempt_id": "",
         "delivery_target": {
@@ -1070,10 +1078,10 @@ async def _run_self_cognition_case(
             "target_global_user_id": target_user_id,
             "target_platform_user_id": target_user_id,
             "source_kind": "self_cognition_source_channel",
-            "source_ref": case_id,
+            "source_ref": run_case_id,
             "source_platform_channel_id": f"stage3-{scope_type}",
             "source_channel_type": scope_type,
-            "source_message_id": case_id,
+            "source_message_id": run_case_id,
             "source_global_user_id": target_user_id,
             "source_platform_bot_id": "stage3-bot",
             "source_character_name": str(profile.get("name", "Character")),
@@ -1085,8 +1093,8 @@ async def _run_self_cognition_case(
     }
     if trigger_kind == models.TRIGGER_SCHEDULED_FUTURE_COGNITION:
         case["calendar_run"] = {
-            "run_id": f"stage3-calendar-{case_id}",
-            "schedule_id": f"stage3-schedule-{case_id}",
+            "run_id": f"stage3-calendar-{run_case_id}",
+            "schedule_id": f"stage3-schedule-{run_case_id}",
             "due_at": now,
         }
     async def claim_latch_if_needed() -> Mapping[str, object] | None:
@@ -1100,8 +1108,12 @@ async def _run_self_cognition_case(
         )
 
         await issue_internal_action_latch(
-            source_episode_id=f"stage3-latch-source:{case_id}",
-            source_action_attempt_id=f"stage3-latch-attempt:{case_id}",
+            source_episode_id=(
+                f"stage3-latch-source:{case_id}:{run_token}"
+            ),
+            source_action_attempt_id=(
+                f"stage3-latch-attempt:{case_id}:{run_token}"
+            ),
             continuation_objective="Review the grounded continuation objective.",
             evidence_refs=[],
             target_scope={
@@ -1357,20 +1369,24 @@ async def _run_tool_result_case(case_id: str) -> dict[str, object]:
     from kazusa_ai_chatbot.db._client import get_db
 
     now = _storage_now()
+    run_token = uuid4().hex[:10]
+    run_case_id = f"{case_id}:{run_token}"
+    channel_id = f"stage3-tool-private-{run_token}"
+    tool_user_id = f"stage3-tool-user-{run_token}"
     job = {
         "schema_version": "background_work_job.v1",
-        "job_id": f"stage3-job-{case_id}",
-        "accepted_task_id": f"stage3-task-{case_id}",
+        "job_id": f"stage3-job-{run_case_id}",
+        "accepted_task_id": f"stage3-task-{run_case_id}",
         "status": "completed",
         "delivery_state": "ready",
         "source_platform": "debug",
-        "source_channel_id": "stage3-private",
+        "source_channel_id": channel_id,
         "source_channel_type": "private",
-        "source_message_id": case_id,
+        "source_message_id": run_case_id,
         "source_platform_bot_id": "stage3-bot",
         "source_character_name": "Stage 3 Character",
-        "requester_global_user_id": "stage3-tool-user",
-        "requester_platform_user_id": "stage3-tool-user",
+        "requester_global_user_id": tool_user_id,
+        "requester_platform_user_id": tool_user_id,
         "requester_display_name": "Stage 3 User",
             "task_brief": "Complete a bounded background task.",
             "result_summary": (
@@ -1408,11 +1424,11 @@ async def _run_tool_result_case(case_id: str) -> dict[str, object]:
 
                 db = await get_db()
                 if await db.user_profiles.find_one(
-                    {"global_user_id": "stage3-tool-user"},
+                    {"global_user_id": tool_user_id},
                     {"_id": 1},
                 ) is None:
                     await create_user_profile({
-                        "global_user_id": "stage3-tool-user",
+                        "global_user_id": tool_user_id,
                     })
                 registry = service._adapter_registry
                 if not isinstance(registry, AdapterRegistry):
@@ -1639,6 +1655,7 @@ async def test_live_action_affordance_routes() -> None:
                 "later follow-up."
             ),
         },
+        expected_terminal_statuses=("completed_action",),
     )
     settlement = artifact["settlement"]
     graph_result = settlement.get("graph_result", {})

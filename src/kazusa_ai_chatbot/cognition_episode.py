@@ -238,7 +238,17 @@ class TextChatCompatibilityProjection(TypedDict):
     user_name: str
 
 
-ResponseOperationRole = Literal["self", "current_user", "other", "none"]
+CURRENT_CHARACTER_ROLE = "当前角色"
+CURRENT_USER_ROLE = "当前用户"
+OTHER_PARTICIPANT_ROLE = "其他参与者"
+NO_ROLE = "无"
+
+ResponseOperationRole = Literal[
+    "当前角色",
+    "当前用户",
+    "其他参与者",
+    "无",
+]
 
 
 class DialogResponseOperation(TypedDict):
@@ -264,10 +274,10 @@ MAX_RESPONSE_OPERATION_CHARS = 500
 ROLE_EXPLICIT_CONTENT_METADATA_KEY = "role_explicit_content"
 RESPONSE_OPERATION_METADATA_KEY = "response_operation"
 _RESPONSE_OPERATION_ROLES = frozenset({
-    "self",
-    "current_user",
-    "other",
-    "none",
+    CURRENT_CHARACTER_ROLE,
+    CURRENT_USER_ROLE,
+    OTHER_PARTICIPANT_ROLE,
+    NO_ROLE,
 })
 _RESPONSE_OPERATION_FIELDS = frozenset(
     DialogResponseOperation.__annotations__
@@ -893,10 +903,10 @@ def _project_canonical_model_visible_percepts(
         }
         if percept["source_kind"] == "dialog":
             row.update({
-                "speaker_role": "current_user",
-                "addressee_role": "self",
-                "first_person_role": "current_user",
-                "implicit_imperative_subject_role": "self",
+                "speaker_role": CURRENT_USER_ROLE,
+                "addressee_role": CURRENT_CHARACTER_ROLE,
+                "first_person_role": CURRENT_USER_ROLE,
+                "implicit_imperative_subject_role": CURRENT_CHARACTER_ROLE,
             })
         rows.append(row)
     return rows
@@ -1062,7 +1072,7 @@ def validate_dialog_response_operation(
             raise CognitiveEpisodeValidationError(
                 f"response operation {field_name} is invalid"
             )
-    if selection_required and value["selection_owner_role"] == "none":
+    if selection_required and value["selection_owner_role"] == NO_ROLE:
         raise CognitiveEpisodeValidationError(
             "required response selection needs an owner"
         )

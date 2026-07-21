@@ -126,7 +126,7 @@ async def test_action_route_copies_only_available_typed_affordance() -> None:
         }],
     )
 
-    assert result["intention"]["route"] == "speech"
+    assert result["intention"]["route"] == "action"
     assert result["action_requests"] == [{
         "action_kind": "background_work_request",
         "decision": "",
@@ -194,7 +194,7 @@ async def test_generic_action_decision_preserves_coding_continuation() -> None:
         }],
     )
 
-    assert result["intention"]["route"] == "speech"
+    assert result["intention"]["route"] == "action"
     assert result["action_requests"][0]["decision"] == "status"
     assert result["action_requests"][0]["context_ref"] == "coding_run:run-1"
 

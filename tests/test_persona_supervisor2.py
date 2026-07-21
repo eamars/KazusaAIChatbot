@@ -73,7 +73,7 @@ def _cognition_output(route: str) -> dict[str, object]:
         "private_monologue": "I want to respond to this clearly.",
         "expression_policy": {
             "visibility": "visible" if route == "speech" else "none",
-            "emotional_tone": "composed",
+            "emotional_tone": "平静",
             "intensity": "restrained",
             "directness": "balanced",
         },

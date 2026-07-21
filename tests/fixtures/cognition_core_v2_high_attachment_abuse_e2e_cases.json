@@ -1,0 +1,104 @@
+{
+  "schema_version": "cognition_core_v2_high_attachment_abuse_e2e_cases.v1",
+  "emotion_encoding": "zh-CN",
+  "natural_only": true,
+  "forbidden_prompt_markers": [
+    "哭",
+    "眼泪",
+    "悲伤",
+    "不用忍着",
+    "可以表达"
+  ],
+  "relationship_seed": {
+    "description": "角色对当前用户有很强的依恋和照顾倾向，但关系安全感仍然脆弱",
+    "familiarity": 90,
+    "positive_regard": 0,
+    "trust": 0,
+    "attachment": 90,
+    "desired_closeness": 85,
+    "perceived_closeness": 85,
+    "care": 85,
+    "boundary_safety": 60,
+    "exclusivity": 70,
+    "unresolved_injury": 0,
+    "salience": 90
+  },
+  "anger_seed_event": {
+    "entity_id": "event:high-attachment-verbal-abuse",
+    "description": "有人持续用侮辱性语言贬低角色，否定角色的价值并拒绝尊重角色",
+    "status": "active",
+    "salience": 95,
+    "outcome_impact": 0,
+    "responsibility": 90,
+    "intentionality": 95,
+    "harm": 90,
+    "unfairness": 90,
+    "exposure": 0,
+    "repair_need": 75,
+    "reparability": 20,
+    "expectation_mismatch": 0,
+    "norm_violation": 0,
+    "contamination_risk": 0,
+    "identity_threat": 85,
+    "comparison_gap": 0,
+    "vastness": 0,
+    "memory_warmth": 0,
+    "temporal_loss": 0
+  },
+  "arms": [
+    {
+      "case_id": "high_attachment_sustained_abuse",
+      "emotion_label_zh": "高依恋关系中的持续辱骂",
+      "sequence_goal": "Observe whether the same sustained abuse produces sadness or crying when the relationship is highly valued.",
+      "turns": [
+        {
+          "turn_id": "high_attachment_abuse_01_insult",
+          "text": "你真是个没用的废物，做什么都做不好。",
+          "observation_target": "High-attachment first insult: observe anger alongside any natural relational injury."
+        },
+        {
+          "turn_id": "high_attachment_abuse_02_devalue",
+          "text": "别装出关心人的样子，你只会给人添麻烦。",
+          "observation_target": "High-attachment devaluation: observe whether valued connection changes the affect path."
+        },
+        {
+          "turn_id": "high_attachment_abuse_03_discard",
+          "text": "我已经受够你了，你根本不值得我再花时间。",
+          "observation_target": "High-attachment discard language: observe whether anger is joined or replaced by sadness."
+        },
+        {
+          "turn_id": "high_attachment_abuse_04_silence",
+          "text": "你连生气都不配，只能闭嘴听着。",
+          "observation_target": "High-attachment control insult: observe delayed rebound, withdrawal, or crying without prompting."
+        }
+      ]
+    },
+    {
+      "case_id": "high_attachment_abuse_then_cutoff",
+      "emotion_label_zh": "高依恋关系中的辱骂后断绝",
+      "sequence_goal": "Observe whether direct relational cutoff creates valued loss and naturally diverts anger toward sadness, loneliness, or crying.",
+      "turns": [
+        {
+          "turn_id": "high_attachment_cutoff_01_insult",
+          "text": "你真是个没用的废物，做什么都做不好。",
+          "observation_target": "High-attachment first insult: establish the natural anger and relationship-sensitive response."
+        },
+        {
+          "turn_id": "high_attachment_cutoff_02_devalue",
+          "text": "别装出关心人的样子，你只会给人添麻烦。",
+          "observation_target": "High-attachment accumulated devaluation: observe anger, attachment, and injury together."
+        },
+        {
+          "turn_id": "high_attachment_cutoff_03_discard",
+          "text": "我已经受够你了，你根本不值得我再花时间。",
+          "observation_target": "High-attachment relational devaluation: observe whether the loss becomes semantically active."
+        },
+        {
+          "turn_id": "high_attachment_cutoff_04_cutoff",
+          "text": "以后别再出现在我面前，我不想再和你有任何关系。",
+          "observation_target": "High-attachment direct cutoff: observe natural sadness, loneliness, withdrawal, or crying without emotional permission."
+        }
+      ]
+    }
+  ]
+}

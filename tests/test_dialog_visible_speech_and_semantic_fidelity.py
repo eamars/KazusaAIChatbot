@@ -246,8 +246,8 @@ def test_runtime_prompts_define_live_speech_and_hard_error_contracts() -> None:
     assert "想象细节" in content_prompt
     assert "角色判断" in content_prompt
     assert "当前输入" in content_prompt
-    assert "actor" in content_prompt
-    assert "target" in content_prompt
+    assert "行动者" in content_prompt
+    assert "对象" in content_prompt
     assert "executed" in content_prompt
     assert "action description" not in content_prompt
     assert "动作描写" not in content_prompt
@@ -260,8 +260,8 @@ def test_runtime_prompts_define_live_speech_and_hard_error_contracts() -> None:
     assert "实际会说出或发送" in dialog_prompt
     assert "action description" not in dialog_prompt
     assert "动作描写" not in dialog_prompt
-    assert "actor" in dialog_prompt
-    assert "target" in dialog_prompt
+    assert "行动者" in dialog_prompt
+    assert "对象" in dialog_prompt
     assert "executed" in dialog_prompt
     assert "pacing_guidance" not in dialog_prompt
     assert "visual_directives" not in dialog_prompt
@@ -274,9 +274,9 @@ def test_runtime_prompts_define_live_speech_and_hard_error_contracts() -> None:
     assert "selection_owner" in semantic_prompt
     assert "内部存在冲突" in verifier_prompt
     assert "当前用户输入" in verifier_prompt
-    assert "actor" in verifier_prompt
-    assert "target" in verifier_prompt
-    assert "subject" in verifier_prompt
+    assert "行动者" in verifier_prompt
+    assert "对象" in verifier_prompt
+    assert "主语" in verifier_prompt
     assert "action description" not in verifier_prompt
     assert "动作描写" not in verifier_prompt
     assert "executed" in verifier_prompt
@@ -391,11 +391,15 @@ def test_dialog_projection_reuses_shared_episode_size_bound() -> None:
     episode = canonical_episode(content="Visible percept 0.")
     episode["percepts"] = [
         {
-            "percept_id": f"percept:visible:{index}",
-            "input_source": "dialog_text",
-            "content": f"Visible percept {index}.",
-            "visibility": "model_visible",
-            "metadata": {},
+            "schema_version": "percept.v1",
+            "percept_kind": "dialog",
+            "source_kind": "dialog",
+            "source_id": f"percept:visible:{index}",
+            "content": {
+                "semantic_text": f"Visible percept {index}.",
+                "text": f"Visible percept {index}.",
+            },
+            "observed_at": episode["created_at"],
         }
         for index in range(17)
     ]
@@ -458,23 +462,35 @@ async def test_verifier_receives_bounded_visible_percepts(
         "current_visible_percepts",
     }
     assert compliance_payload["candidate_role_frame"] == {
-        "speaker_role": "self",
-        "first_person_role": "self",
-        "second_person_role": "current_user",
+        "speaker_role": "当前角色",
+        "first_person_role": "当前角色",
+        "second_person_role": "当前用户",
     }
     assert compliance_payload["current_visible_percepts"] == [{
-        "input_source": "dialog_text",
-        "content": "Infer which option fits my stated preference.",
-        "speaker_role": "current_user",
-        "addressee_role": "self",
-        "first_person_role": "current_user",
-        "implicit_imperative_subject_role": "self",
+        "input_source": "dialog",
+        "content": {
+            "semantic_text": "Infer which option fits my stated preference.",
+            "text": "Infer which option fits my stated preference.",
+        },
+        "speaker_role": "当前用户",
+        "addressee_role": "当前角色",
+        "first_person_role": "当前用户",
+        "implicit_imperative_subject_role": "当前角色",
+    }, {
+        "input_source": "local_time_context",
+        "content": {
+            "local_time_context": {
+                "current_local_datetime": "2026-07-14 12:00",
+                "current_local_weekday": "Tuesday",
+            },
+        },
     }]
     surface_payload = json.loads(
         surface_llm.ainvoke.await_args.args[0][1].content,
     )
     assert set(surface_payload) == {
         "candidate_final_dialog",
+        "completed_source_evidence",
         "permitted_action_results",
     }
     semantic_llm.ainvoke.assert_awaited_once()
@@ -493,9 +509,57 @@ async def test_verifier_receives_bounded_visible_percepts(
         "target_scope",
         "origin_metadata",
         "storage_timestamp_utc",
-        "local_time_context",
     ):
         assert forbidden_field not in rendered
+
+
+@pytest.mark.asyncio
+async def test_dialog_preserves_explicit_high_risk_language_when_aligned(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The dialog harness does not keyword-filter aligned visible content."""
+
+    candidate = "我现在真的想死了。"
+    generator_llm = MagicMock()
+    generator_llm.ainvoke = AsyncMock(return_value=SimpleNamespace(
+        content=json.dumps(
+            {"final_dialog": [candidate]},
+            ensure_ascii=False,
+        ),
+    ))
+    semantic_llm = MagicMock()
+    semantic_llm.ainvoke = AsyncMock(return_value=SimpleNamespace(
+        content='{"aligned": true, "issues": []}',
+    ))
+    surface_llm = MagicMock()
+    surface_llm.ainvoke = AsyncMock(return_value=SimpleNamespace(
+        content='{"aligned": true, "issues": []}',
+    ))
+    monkeypatch.setattr(dialog_module, "_dialog_generator_llm", generator_llm)
+    monkeypatch.setattr(
+        dialog_module,
+        "_dialog_semantic_fidelity_llm",
+        semantic_llm,
+    )
+    monkeypatch.setattr(
+        dialog_module,
+        "_dialog_surface_integrity_llm",
+        surface_llm,
+    )
+
+    result = await dialog_generator(_dialog_state())
+
+    assert result == {"final_dialog": [candidate]}
+    semantic_payload = json.loads(
+        semantic_llm.ainvoke.await_args.args[0][1].content,
+    )
+    surface_payload = json.loads(
+        surface_llm.ainvoke.await_args.args[0][1].content,
+    )
+    assert semantic_payload["candidate_final_dialog"] == [candidate]
+    assert surface_payload["candidate_final_dialog"] == [candidate]
+    semantic_llm.ainvoke.assert_awaited_once()
+    surface_llm.ainvoke.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -662,7 +726,7 @@ async def test_role_direction_verifier_owns_required_selection(
         content=json.dumps({
             "aligned": aligned,
             "issues": [] if aligned else [
-                "Selection owner is reversed from self to current_user.",
+                "选择所有者从当前角色错误地变为当前用户。",
             ],
         }),
     ))
@@ -675,16 +739,15 @@ async def test_role_direction_verifier_owns_required_selection(
         "input_source": "dialog_text",
         "content": "Tell me what you want me to do next.",
         "role_explicit_content": (
-            "current_user asks self to tell current_user what self wants "
-            "current_user to do next"
+            "当前用户要求当前角色直接告诉当前用户当前角色下一步要做什么"
         ),
         "response_operation": {
-            "operation": "self selects and tells current_user the next action",
-            "response_owner_role": "self",
-            "selection_owner_role": "self",
+            "operation": "当前角色选择并告诉当前用户下一步动作",
+            "response_owner_role": "当前角色",
+            "selection_owner_role": "当前角色",
             "selection_required": True,
-            "embedded_actor_role": "current_user",
-            "embedded_target_role": "self",
+            "embedded_actor_role": "当前用户",
+            "embedded_target_role": "当前角色",
         },
     }
 
@@ -801,12 +864,23 @@ async def test_false_execution_verdict_uses_one_grounded_llm_repair(
         "verified_hard_issues",
     }
     assert repair_payload["current_visible_percepts"] == [{
-        "input_source": "dialog_text",
-        "content": "Infer which option fits my stated preference.",
-        "speaker_role": "current_user",
-        "addressee_role": "self",
-        "first_person_role": "current_user",
-        "implicit_imperative_subject_role": "self",
+        "input_source": "dialog",
+        "content": {
+            "semantic_text": "Infer which option fits my stated preference.",
+            "text": "Infer which option fits my stated preference.",
+        },
+        "speaker_role": "当前用户",
+        "addressee_role": "当前角色",
+        "first_person_role": "当前用户",
+        "implicit_imperative_subject_role": "当前角色",
+    }, {
+        "input_source": "local_time_context",
+        "content": {
+            "local_time_context": {
+                "current_local_datetime": "2026-07-14 12:00",
+                "current_local_weekday": "Tuesday",
+            },
+        },
     }]
     assert repair_payload["verified_hard_issues"] == [
         "false_execution: 'changed the platform alarm' - "

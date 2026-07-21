@@ -104,7 +104,8 @@ semantic_goal 描述具体语义目标，不写执行参数或最终措辞；rea
 
 角色自己的反思或内部观察属于证据，不是当前用户的即时发言。生成的文字不复述来源包标题、
 时间戳、schema key、传输摘要或运行元数据。新生成的自由文本使用简体中文；用户引文、专有名词、
-代码、URL、capability name 以及 schema 或 enum token 保持原样。
+代码、URL、capability name 以及 schema 或 enum token 保持原样。内部角色句柄或英文角色称谓只作为
+结构化值或原文内容保留；中文自由文本使用配置名称、当前角色、当前用户或其他参与者。
 
 只有 resolver 上下文存在活跃 pending item 且当前证据支持决定时，
 resolver_pending_resolution 才不是 null；此时恰好返回 decision 和 reason，活跃项由确定性代码绑定。

@@ -271,9 +271,11 @@ async def test_relevance_keeps_image_descriptor_out_of_user_input() -> None:
         '"indirect_speech_context": ""}'
     )
 
+    state = _minimal_relevance_state()
+    state["conversation_scope"] = "group"
     with patch("kazusa_ai_chatbot.relevance.persona_relevance_agent._relevance_agent_llm") as llm:
         llm.ainvoke = AsyncMock(return_value=response)
-        result = await relevance_agent(_minimal_relevance_state())
+        result = await relevance_agent(state)
 
     _, human_message = llm.ainvoke.await_args.args[0]
     human_payload = json.loads(human_message.content)
@@ -322,11 +324,15 @@ async def test_quoted_image_description_enters_prompt_and_cognition_context(
         "description": "stored image shows a dessert counter",
         "summary_status": "available",
     }]
-    assert episode["input_sources"] == ["dialog_text", "image_observation"]
-    assert episode["percepts"][1]["metadata"]["observation_origin"] == (
+    assert [
+        percept["source_kind"] for percept in episode["percepts"]
+    ] == ["dialog", "image_observation", "system_event"]
+    assert episode["percepts"][1]["content"]["observation"][
+        "observation_origin"
+    ] == (
         "quoted_reply_attachment"
     )
-    assert episode["percepts"][1]["content"] == (
+    assert episode["percepts"][1]["content"]["description"] == (
         "stored image shows a dessert counter"
     )
 
@@ -344,6 +350,10 @@ def test_multimodal_consolidation_origin_is_metadata_only() -> None:
 
     metadata = build_user_message_consolidation_origin(episode=episode)
 
-    assert metadata["input_sources"] == ["dialog_text", "image_observation"]
+    assert metadata["input_sources"] == [
+        "dialog",
+        "image_observation",
+        "system_event",
+    ]
     assert "percepts" not in metadata
     assert "private image content should not persist here" not in str(metadata)

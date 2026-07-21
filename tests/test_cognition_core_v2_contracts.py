@@ -18,8 +18,10 @@ from kazusa_ai_chatbot.cognition_core_v2.output_projection import (
     build_state_update,
     default_expression_policy,
 )
+from kazusa_ai_chatbot.cognition_core_v2.surface_stages import run_style_stage
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionContractError,
+    CognitionExecutionError,
     CognitionDiagnosticsV2,
     CognitionCoreServicesV2,
     CollapsedIntentionV2,
@@ -70,6 +72,29 @@ class _FallbackSurfaceLLM:
         del messages
         del config
         return SimpleNamespace(content=json.dumps({"content": "legacy"}))
+
+
+class _RepairingStyleLLM:
+    """Return one invalid style object followed by a valid repair."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.messages: list[list[object]] = []
+
+    async def ainvoke(
+        self,
+        messages: list[object],
+        *,
+        config: object,
+    ) -> SimpleNamespace:
+        del config
+        self.calls += 1
+        self.messages.append(messages)
+        if self.calls == 1:
+            content = {"legacy": "invalid"}
+        else:
+            content = {"style_guidance": "修复后的中文措辞指导"}
+        return SimpleNamespace(content=json.dumps(content, ensure_ascii=False))
 
 
 def _services() -> CognitionCoreServicesV2:
@@ -222,7 +247,7 @@ def test_expression_policy_uses_frozen_affect_and_branch_rules() -> None:
     ]
     policy = default_expression_policy(
         "speech",
-        [{"intensity": "high"}],
+        [{"intensity": "高"}],
         selected_branch_id="autonomy_boundary",
         activations=activations,
     )
@@ -233,12 +258,12 @@ def test_expression_policy_uses_frozen_affect_and_branch_rules() -> None:
     assert "fear (" in policy["emotional_tone"]
     assert default_expression_policy(
         "speech",
-        [{"intensity": "low"}],
+        [{"intensity": "低"}],
         selected_branch_id="social_care",
     )["intensity"] == "restrained"
     assert default_expression_policy(
         "speech",
-        [{"intensity": "moderate"}],
+        [{"intensity": "中等"}],
     )["intensity"] == "moderate"
 
 
@@ -438,8 +463,43 @@ async def test_surface_stage_rejects_legacy_response_fallbacks() -> None:
         preference_config=make_llm_call_config("v2_preference"),
     )
 
-    with pytest.raises(ValueError, match="fields are not exact"):
+    with pytest.raises(CognitionExecutionError) as error_info:
         await run_text_surface_planning(input_payload, services)
+
+    assert error_info.value.error_code == "surface_style_contract_exhausted"
+    assert error_info.value.stage == "surface.style"
+    assert error_info.value.attempt_count == 2
+    assert error_info.value.safe_checkpoint == "pre_state_commit"
+
+
+@pytest.mark.asyncio
+async def test_surface_stage_repairs_invalid_candidate_with_same_context() -> None:
+    """A malformed candidate receives one bounded Chinese repair request."""
+
+    llm = _RepairingStyleLLM()
+    services = TextSurfaceServicesV2(
+        llm=llm,
+        style_config=make_llm_call_config("v2_style"),
+        content_plan_config=make_llm_call_config("v2_content"),
+        preference_config=make_llm_call_config("v2_preference"),
+    )
+
+    result = await run_style_stage(
+        {"surface": "当前角色回应当前用户的输入"},
+        services,
+    )
+
+    assert result == "修复后的中文措辞指导"
+    assert llm.calls == 2
+    repair_system = str(getattr(llm.messages[1][0], "content", ""))
+    repair_payload = json.loads(
+        str(getattr(llm.messages[1][1], "content", "{}"))
+    )
+    assert "完整替代对象" in repair_system
+    assert repair_payload["surface"] == {
+        "surface": "当前角色回应当前用户的输入",
+    }
+    assert "当前阶段" in repair_payload["contract_repair"]["reason"]
 
 
 @pytest.mark.asyncio

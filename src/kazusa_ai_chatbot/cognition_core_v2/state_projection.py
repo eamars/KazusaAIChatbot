@@ -42,27 +42,27 @@ def project_numeric_band(value: int, *, signed: bool = False) -> str:
         if not -100 <= value <= 100:
             raise ValueError("signed projection value is out of range")
         if value <= -61:
-            return "strongly negative"
+            return "强烈负向"
         if value <= -21:
-            return "negative"
+            return "负向"
         if value <= 20:
-            return "neutral or mixed"
+            return "中性或混合"
         if value <= 60:
-            return "positive"
-        return "strongly positive"
+            return "正向"
+        return "强烈正向"
     if not 0 <= value <= 100:
         raise ValueError("unsigned projection value is out of range")
     if value == 0:
-        return "none"
+        return "无"
     if value <= 20:
-        return "very low"
+        return "极低"
     if value <= 40:
-        return "low"
+        return "低"
     if value <= 60:
-        return "moderate"
+        return "中等"
     if value <= 80:
-        return "high"
-    return "very high"
+        return "高"
+    return "极高"
 
 
 def project_duration(started_at: str, now: str) -> str:
@@ -71,14 +71,14 @@ def project_duration(started_at: str, now: str) -> str:
     elapsed = _parse_utc(now) - _parse_utc(started_at)
     seconds = max(0.0, elapsed.total_seconds())
     if seconds < 10 * 60:
-        return "immediate"
+        return "即时"
     if seconds < 2 * 3600:
-        return "recent"
+        return "近期"
     if seconds < 24 * 3600:
-        return "earlier"
+        return "较早"
     if seconds < 7 * 24 * 3600:
-        return "within recent days"
-    return "older"
+        return "最近几天内"
+    return "较久以前"
 
 
 def project_relationship_context(
@@ -111,7 +111,7 @@ def project_relationship_context(
                 },
             )
     return {
-        "relationship_summary": "native V2 relationship context",
+        "relationship_summary": "当前关系背景",
         "axes": axes,
     }
 
@@ -121,10 +121,10 @@ def project_trend(previous: int, current: int) -> str:
 
     difference = current - previous
     if difference >= 4:
-        return "rising"
+        return "上升"
     if difference <= -4:
-        return "falling"
-    return "stable"
+        return "下降"
+    return "稳定"
 
 
 def project_state_for_prompt(
@@ -150,8 +150,8 @@ def project_state_for_prompt(
         "causal_candidates": [],
         "evidence": [],
         "roles": {
-            "self": "the active character",
-            "current_user": "the current conversation participant",
+            "当前角色": "当前角色",
+            "当前用户": "当前用户",
         },
         "character_constraints": _project_constraints(character_constraints),
     }
@@ -228,9 +228,9 @@ def project_state_for_prompt(
                 ),
             })
         for kind, prefix, description in (
-            ("event", "ce", "the current episode event"),
-            ("threat", "ct", "the possible current threat"),
-            ("knowledge_gap", "ck", "the possible current knowledge gap"),
+            ("event", "ce", "当前事件"),
+            ("threat", "ct", "可能的当前威胁"),
+            ("knowledge_gap", "ck", "可能的当前知识缺口"),
         ):
             handle = f"{prefix}{index}"
             handle_to_ref[handle] = {
@@ -243,7 +243,7 @@ def project_state_for_prompt(
                 "candidate_kind": kind,
                 "evidence_handle": evidence_handle,
                 "description": description,
-                "lifecycle": "candidate pending grounded appraisal",
+                "lifecycle": "候选，等待有依据的评估",
             })
     validate_prompt_projection(payload)
     return PromptProjectionV2(payload=payload, handle_to_ref=handle_to_ref)
@@ -307,13 +307,22 @@ def _project_roles(value: Any) -> list[str]:
 
     if not isinstance(value, list):
         return []
+    role_labels = {
+        "actor": "行动者",
+        "experiencer": "体验者",
+        "target": "对象",
+        "object": "客体",
+        "affected_goal": "受影响目标",
+        "affected_relationship": "受影响关系",
+    }
     labels: list[str] = []
     for role in value:
         if not isinstance(role, Mapping):
             continue
         role_name = role.get("role")
         if isinstance(role_name, str) and role_name.strip():
-            labels.append(f"{role_name.strip()} role is causally relevant")
+            role_label = role_labels.get(role_name.strip(), "语义")
+            labels.append(f"{role_label}角色在因果上具有相关性")
     return labels
 
 
@@ -328,6 +337,14 @@ def _project_relationship(relationship: Mapping[str, Any]) -> dict[str, Any]:
 def _project_constraints(constraints: Mapping[str, Any]) -> dict[str, Any]:
     """Project character constraints separately from mutable user state."""
 
+    standard_descriptions = {
+        "be truthful": "保持诚实",
+        "avoid causing needless harm": "避免造成不必要的伤害",
+        "respect personal boundaries": "尊重个人边界",
+        "honor accepted commitments": "履行已经接受的承诺",
+        "protect dignity and autonomy": "保护尊严与自主性",
+    }
+
     drives = {
         drive_id: {
             "importance": project_numeric_band(row["importance"]),
@@ -337,7 +354,10 @@ def _project_constraints(constraints: Mapping[str, Any]) -> dict[str, Any]:
     }
     standards = [
         {
-            "description": row["description"],
+            "description": standard_descriptions.get(
+                row["description"],
+                row["description"],
+            ),
             "importance": project_numeric_band(row["importance"]),
         }
         for row in constraints["standards"]
@@ -363,12 +383,12 @@ def _project_activation(
     return {
         "emotion": activation["emotion_id"],
         "phase": (
-            "the cause is still active"
+            "原因仍然存在"
             if activation["cause_status"] == "active"
-            else "the feeling is fading after resolution"
+            else "该感受在问题解决后逐渐减弱"
         ),
         "intensity": project_numeric_band(activation["score"]),
-        "trend": activation["trend"],
+        "trend": _trend_label(activation["trend"]),
         "cause_summary": _activation_cause_summary(activation, state),
     }
 
@@ -381,7 +401,7 @@ def _activation_cause_summary(
 
     root = activation.get("primary_root")
     if not isinstance(root, Mapping):
-        return "a grounded causal source remains in context"
+        return "有依据的原因仍在当前语境中"
     fields = {
         "goal": "goals",
         "threat": "threats",
@@ -399,10 +419,10 @@ def _activation_cause_summary(
                 if isinstance(description, str) and description.strip():
                     return description[:500]
     if root.get("kind") == "relationship":
-        return "the current relationship carries the activating social pressure"
+        return "当前关系带来激活情绪的社会压力"
     if root.get("kind") == "meaning":
-        return "purpose and agency remain persistently low"
-    return "a grounded causal source remains in context"
+        return "目标感和能动性持续偏低"
+    return "有依据的原因仍在当前语境中"
 
 
 def _kind_for_field(field_name: str) -> str:
@@ -420,17 +440,27 @@ def _lifecycle_label(status: str) -> str:
     """Translate deterministic status into a model-facing descriptor."""
 
     return {
-        "pursuing": "in progress",
-        "blocked": "blocked and needs resolution",
-        "satisfied": "completed",
-        "failed": "failed and needs recovery",
-        "abandoned": "released",
-        "active": "active and unresolved",
-        "resolved": "resolved",
-        "replaced": "superseded",
-        "open": "open and uncertain",
-        "reduced": "partly reduced but uncertain",
+        "pursuing": "进行中",
+        "blocked": "受阻，等待解决",
+        "satisfied": "已完成",
+        "failed": "失败，等待恢复",
+        "abandoned": "已放下",
+        "active": "活跃且未解决",
+        "resolved": "已解决",
+        "replaced": "已被替代",
+        "open": "开放且不确定",
+        "reduced": "部分减弱但仍不确定",
     }.get(status, status)
+
+
+def _trend_label(value: str) -> str:
+    """Translate a persisted activation trend for model-facing context."""
+
+    return {
+        "rising": "上升",
+        "stable": "稳定",
+        "falling": "下降",
+    }.get(value, value)
 
 
 def _parse_utc(value: str) -> datetime:

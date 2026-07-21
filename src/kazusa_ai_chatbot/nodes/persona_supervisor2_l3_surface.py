@@ -145,14 +145,14 @@ def _render_interaction_style_context(context: Mapping[str, Any]) -> str:
         raise ValueError("interaction style application order is required")
 
     scope_labels = {
-        "user_style": "Current participant style",
-        "group_channel_style": "Current group style",
+        "user_style": "当前用户风格",
+        "group_channel_style": "当前群聊风格",
     }
     field_labels = {
-        "speech_guidelines": "speech",
-        "social_guidelines": "social",
-        "pacing_guidelines": "pacing",
-        "engagement_guidelines": "engagement",
+        "speech_guidelines": "语言",
+        "social_guidelines": "社交",
+        "pacing_guidelines": "节奏",
+        "engagement_guidelines": "互动",
     }
     fragments: list[str] = []
     for scope_name in application_order:
@@ -176,7 +176,7 @@ def _render_interaction_style_context(context: Mapping[str, Any]) -> str:
                     fragments.append(candidate)
 
     if not fragments:
-        return "No learned interaction style guidance is available."
+        return "没有可用的已学习互动风格指引。"
     return " | ".join(fragments)
 
 
@@ -192,16 +192,41 @@ def _character_voice_context(state: Mapping[str, Any]) -> str:
         raise ValueError("character personality brief must be a mapping")
     if not isinstance(linguistic_texture, Mapping):
         raise ValueError("character linguistic texture must be a mapping")
-    fragments = [f"name: {_voice_value(profile['name'], 80)}"]
+    field_labels = {
+        "name": "姓名",
+        "logic": "逻辑",
+        "tempo": "节奏",
+        "defense": "防御",
+        "quirks": "特征",
+        "taboos": "禁忌",
+    }
+    fragments = [
+        f"{field_labels['name']}：{_voice_value(profile['name'], 80)}"
+    ]
     for field_name in ("logic", "tempo", "defense", "quirks", "taboos"):
         fragments.append(
-            f"{field_name}: {_voice_value(personality[field_name], 180)}"
+            f"{field_labels[field_name]}："
+            f"{_voice_value(personality[field_name], 180)}"
         )
+    texture_labels = {
+        "fragmentation": "碎片化",
+        "hesitation_density": "犹豫密度",
+        "counter_questioning": "反问倾向",
+        "softener_density": "缓和语密度",
+        "formalism_avoidance": "正式化回避",
+        "abstraction_reframing": "抽象重述",
+        "direct_assertion": "直接断言",
+        "emotional_leakage": "情绪泄露",
+        "rhythmic_bounce": "节奏回弹",
+        "self_deprecation": "自嘲",
+    }
     for field_name, descriptor in _LINGUISTIC_TEXTURE_DESCRIPTORS.items():
         score = linguistic_texture[field_name]
         if not isinstance(score, (int, float)) or isinstance(score, bool):
             raise ValueError("character linguistic texture score must be numeric")
-        fragments.append(f"{field_name}: {descriptor(float(score))}")
+        fragments.append(
+            f"{texture_labels[field_name]}：{descriptor(float(score))}"
+        )
     context = " | ".join(fragments)[:1500]
     return context
 
@@ -272,12 +297,12 @@ def _surface_bid_projection(bid: Mapping[str, Any]) -> dict[str, Any]:
     """Copy complete-bid semantic content without persistent ids or private refs."""
 
     return {
-        "motive": bid.get("reason", "grounded branch"),
+        "motive": bid.get("reason", "有依据的分支"),
         "intention": bid["intention"],
         "desired_outcome": bid["desired_outcome"],
         "permitted_detail": bid["concrete_detail"],
         "target_summaries": [
-            role.get("role", "target")
+            role.get("role", "对象")
             for role in bid.get("target_roles", [])
             if isinstance(role, Mapping)
         ],

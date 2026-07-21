@@ -1926,7 +1926,7 @@ def test_cognition_state_disables_visual_and_does_not_suppress_memory(
     state_debug_modes = captured["debug_modes"]
 
     assert state_debug_modes == {"no_visual_directives": True}
-    assert "debug_modes" not in captured["cognitive_episode"][
-        "origin_metadata"
-    ]
+    assert captured["cognitive_episode"]["origin_metadata"]["debug_modes"] == {
+        "no_visual_directives": True,
+    }
     assert "no_remember" not in state_debug_modes

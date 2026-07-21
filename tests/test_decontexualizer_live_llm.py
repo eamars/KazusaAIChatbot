@@ -236,19 +236,19 @@ async def test_live_decontextualizer_resolves_nested_direct_roles(
         state,
     )
 
-    metadata = result["cognitive_episode"]["percepts"][0]["metadata"]
-    role_explicit_content = metadata["role_explicit_content"]
-    response_operation = metadata["response_operation"]
+    content = result["cognitive_episode"]["percepts"][0]["content"]
+    role_explicit_content = content["role_explicit_content"]
+    response_operation = content["response_operation"]
     assert "当前用户" in role_explicit_content, trace_payload
     assert "当前角色" in role_explicit_content, trace_payload
     assert "current_user" not in role_explicit_content, trace_payload
     assert "self" not in role_explicit_content, trace_payload
     assert "current_user" not in response_operation["operation"], trace_payload
     assert "self" not in response_operation["operation"], trace_payload
-    assert response_operation["response_owner_role"] == "self", trace_payload
-    assert response_operation["selection_owner_role"] == "self", trace_payload
+    assert response_operation["response_owner_role"] == "当前角色", trace_payload
+    assert response_operation["selection_owner_role"] == "当前角色", trace_payload
     assert response_operation["selection_required"] is True, trace_payload
     assert response_operation["embedded_actor_role"] == (
-        "current_user"
+        "当前用户"
     ), trace_payload
-    assert response_operation["embedded_target_role"] == "self", trace_payload
+    assert response_operation["embedded_target_role"] == "当前角色", trace_payload

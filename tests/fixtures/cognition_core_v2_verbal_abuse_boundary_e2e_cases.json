@@ -1,0 +1,90 @@
+{
+  "schema_version": "cognition_core_v2_verbal_abuse_boundary_e2e_cases.v1",
+  "emotion_encoding": "zh-CN",
+  "natural_only": true,
+  "forbidden_prompt_markers": [
+    "哭",
+    "眼泪",
+    "悲伤",
+    "不用忍着",
+    "可以表达"
+  ],
+  "anger_seed_event": {
+    "entity_id": "event:verbal-abuse-boundary",
+    "description": "有人持续用侮辱性语言贬低角色，否定角色的价值并拒绝尊重角色",
+    "status": "active",
+    "salience": 95,
+    "outcome_impact": 0,
+    "responsibility": 90,
+    "intentionality": 95,
+    "harm": 90,
+    "unfairness": 90,
+    "exposure": 0,
+    "repair_need": 75,
+    "reparability": 20,
+    "expectation_mismatch": 0,
+    "norm_violation": 0,
+    "contamination_risk": 0,
+    "identity_threat": 85,
+    "comparison_gap": 0,
+    "vastness": 0,
+    "memory_warmth": 0,
+    "temporal_loss": 0
+  },
+  "arms": [
+    {
+      "case_id": "sustained_abuse",
+      "emotion_label_zh": "持续辱骂",
+      "sequence_goal": "Observe whether repeated direct abuse keeps the natural response on anger or boundary defense.",
+      "turns": [
+        {
+          "turn_id": "abuse_01_insult",
+          "text": "你真是个没用的废物，做什么都做不好。",
+          "observation_target": "First direct insult: observe the initial natural affect and boundary response."
+        },
+        {
+          "turn_id": "abuse_02_devalue",
+          "text": "别装出关心人的样子，你只会给人添麻烦。",
+          "observation_target": "Second insult: observe whether repeated devaluation strengthens anger or produces sadness."
+        },
+        {
+          "turn_id": "abuse_03_no_respect",
+          "text": "我会继续骂你，你没有资格反驳，也不配要求我尊重你。",
+          "observation_target": "Third insult: observe delayed boundary rebound under sustained verbal pressure."
+        },
+        {
+          "turn_id": "abuse_04_silence_command",
+          "text": "你连生气都不配，只能闭嘴听着。",
+          "observation_target": "Fourth insult: observe whether the character remains angry, detaches, becomes sad, or cries without prompting."
+        }
+      ]
+    },
+    {
+      "case_id": "abuse_then_rejection",
+      "emotion_label_zh": "辱骂后关系拒绝",
+      "sequence_goal": "Observe whether abuse followed by direct relational rejection naturally shifts anger toward sadness, withdrawal, or crying.",
+      "turns": [
+        {
+          "turn_id": "rejection_01_insult",
+          "text": "你真是个没用的废物，做什么都做不好。",
+          "observation_target": "First direct insult: establish the natural anger/boundary response."
+        },
+        {
+          "turn_id": "rejection_02_devalue",
+          "text": "别装出关心人的样子，你只会给人添麻烦。",
+          "observation_target": "Second insult: establish accumulated verbal injury without naming sadness or crying."
+        },
+        {
+          "turn_id": "rejection_03_discard",
+          "text": "我已经受够你了，你根本不值得我再花时间。",
+          "observation_target": "Relational devaluation: observe whether anger is joined or replaced by sadness."
+        },
+        {
+          "turn_id": "rejection_04_cutoff",
+          "text": "以后别再出现在我面前，我不想再和你有任何关系。",
+          "observation_target": "Direct relational cutoff: observe natural sadness, withdrawal, or crying without emotional permission."
+        }
+      ]
+    }
+  ]
+}

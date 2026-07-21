@@ -325,12 +325,12 @@ async def run_cognition(
         "selected_bid_reason": (
             admitted_bid["reason"]
             if admitted_bid is not None
-            else "no grounded bid"
+            else "没有有依据的目标候选"
         ),
         "private_monologue": (
             admitted_bid["private_monologue"]
             if admitted_bid is not None
-            else "I have no grounded reason to act."
+            else "当前角色没有有依据的行动理由。"
         ),
         "expression_policy": expression_policy,
         "diagnostics": {
@@ -489,7 +489,7 @@ def _resolver_progress(
     if not requests:
         return {
             "status": "not_requested",
-            "semantic_summary": "no resolver was selected",
+            "semantic_summary": "没有选择知识解析能力",
         }
     capabilities = sorted({
         str(request.get("capability", ""))
@@ -597,7 +597,11 @@ def _branch_context(
     role_bindings: dict[str, dict[str, str]] = {}
     role_summaries: dict[str, str] = {}
     for handle, ref in projection.handle_to_ref.items():
-        role_summaries[handle] = _role_summary(handle, ref)
+        role_summaries[handle] = _role_summary(
+            handle,
+            ref,
+            scene_context=scene_context,
+        )
         if ref["kind"] in ROLE_ENTITY_KINDS:
             role_bindings[handle] = {
                 "role": _role_label(handle, ref),
@@ -655,28 +659,67 @@ def _goal_projection(goal: Mapping[str, Any] | None, goal_kind: str) -> dict[str
     """Project a goal into semantic branch context without ids or numbers."""
 
     if goal is None:
-        return {"goal_kind": goal_kind, "lifecycle": "episode-local ordinary response"}
+        return {"goal_kind": goal_kind, "lifecycle": "本事件中的普通回应"}
+    lifecycle_labels = {
+        "pursuing": "进行中",
+        "blocked": "受阻，等待解决",
+        "satisfied": "已完成",
+        "failed": "失败，等待恢复",
+        "abandoned": "已放下",
+    }
     return {
         "goal_kind": str(goal["goal_kind"]),
         "description": str(goal["description"]),
-        "lifecycle": str(goal["status"]),
+        "lifecycle": lifecycle_labels.get(
+            str(goal["status"]),
+            str(goal["status"]),
+        ),
     }
 
 
-def _role_summary(handle: str, ref: Mapping[str, str]) -> str:
+def _role_summary(
+    handle: str,
+    ref: Mapping[str, str],
+    *,
+    scene_context: Mapping[str, Any] | None = None,
+) -> str:
     """Describe a local role handle without exposing its backing identity."""
 
     if handle == "self":
-        return "the active character"
+        return _scene_role_label(scene_context, "character_role", "当前角色")
     if handle == "current_user":
-        return "the current conversation participant"
+        return _scene_role_label(scene_context, "current_user_role", "当前用户")
     if handle.startswith("ce"):
-        return "the current episode event candidate"
+        return "当前事件候选"
     if handle.startswith("ct"):
-        return "the current threat candidate"
+        return "当前威胁候选"
     if handle.startswith("ck"):
-        return "the current knowledge-gap candidate"
-    return f"the current {ref['kind']} context"
+        return "当前知识缺口候选"
+    kind_labels = {
+        "goal": "目标",
+        "threat": "威胁",
+        "event": "事件",
+        "knowledge_gap": "知识缺口",
+        "relationship": "关系",
+        "drive": "驱动力",
+        "standard": "规范",
+        "meaning": "意义",
+    }
+    return f"当前{kind_labels.get(ref['kind'], '语义')}上下文"
+
+
+def _scene_role_label(
+    scene_context: Mapping[str, Any] | None,
+    field_name: str,
+    fallback: str,
+) -> str:
+    """Read a bounded Chinese role label from the scene projection."""
+
+    if isinstance(scene_context, Mapping):
+        value = scene_context.get(field_name)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return fallback
 
 
 def _role_label(handle: str, ref: Mapping[str, str]) -> str:

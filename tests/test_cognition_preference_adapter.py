@@ -21,7 +21,10 @@ def test_preference_stage_owns_visible_boundaries_only() -> None:
 def test_preference_stage_has_no_keyword_based_user_input_adapter() -> None:
     """The LLM owns preference meaning; code only bounds its typed result."""
 
-    source = inspect.getsource(surface_stages.run_preference_stage)
+    source = "\n".join((
+        inspect.getsource(surface_stages.run_preference_stage),
+        inspect.getsource(surface_stages._run_surface_stage),
+    ))
 
     assert "services.llm" in source
     assert ".ainvoke" in source

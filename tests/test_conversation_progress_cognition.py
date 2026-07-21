@@ -144,7 +144,7 @@ def test_connector_projects_allowlisted_bounded_conversation_progress() -> None:
     scene = scene_context["conversation_continuity"]
 
     assert "missing third contribution point" in scene
-    assert "avoid repeating: reassurance" in scene
+    assert "避免重复: reassurance" in scene
     assert len(scene) <= 500
     assert "SECRET_CHANNEL_ID" not in scene
     assert "SECRET_ROW_ID" not in scene

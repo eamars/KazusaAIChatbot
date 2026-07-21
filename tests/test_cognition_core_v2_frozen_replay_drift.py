@@ -490,25 +490,11 @@ async def test_dialog_semantic_verdict_triggers_one_bounded_repair(
     assert generator_llm.ainvoke.await_count == 2
     assert semantic_llm.ainvoke.await_count == 2
     assert surface_llm.ainvoke.await_count == 2
-    verifier_payloads = {}
-    verifier_calls = (
-        semantic_llm.ainvoke.await_args_list
-        + surface_llm.ainvoke.await_args_list
+    semantic_payload = json.loads(
+        semantic_llm.ainvoke.await_args_list[0].args[0][1].content
     )
-    for call in verifier_calls:
-        messages = call.args[0]
-        verifier_payloads[messages[0].content] = json.loads(
-            messages[1].content
-        )
-    semantic_payload = next(
-        payload
-        for prompt, payload in verifier_payloads.items()
-        if "semantic fidelity" in prompt
-    )
-    surface_payload = next(
-        payload
-        for prompt, payload in verifier_payloads.items()
-        if "surface integrity" in prompt
+    surface_payload = json.loads(
+        surface_llm.ainvoke.await_args_list[0].args[0][1].content
     )
     assert set(semantic_payload) == {
         "candidate_final_dialog",
@@ -517,6 +503,7 @@ async def test_dialog_semantic_verdict_triggers_one_bounded_repair(
     }
     assert set(surface_payload) == {
         "candidate_final_dialog",
+        "completed_source_evidence",
         "permitted_action_results",
     }
     trace_stage_names = [

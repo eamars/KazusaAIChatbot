@@ -214,7 +214,6 @@ def test_v2_input_rejects_scope_mismatch_before_any_model_call() -> None:
         "episode": canonical_episode(
             episode_id="alignment-direct-fact",
             trigger_source="internal_thought",
-            output_mode="think_only",
             current_global_user_id="user-d",
         ),
         "state_scope": "character",

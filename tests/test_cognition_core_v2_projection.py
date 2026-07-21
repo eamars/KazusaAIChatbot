@@ -34,16 +34,16 @@ def _constraints() -> dict[str, object]:
 @pytest.mark.parametrize(
     ("value", "expected"),
     [
-        (0, "none"),
-        (20, "very low"),
-        (21, "low"),
-        (40, "low"),
-        (41, "moderate"),
-        (60, "moderate"),
-        (61, "high"),
-        (80, "high"),
-        (81, "very high"),
-        (100, "very high"),
+        (0, "无"),
+        (20, "极低"),
+        (21, "低"),
+        (40, "低"),
+        (41, "中等"),
+        (60, "中等"),
+        (61, "高"),
+        (80, "高"),
+        (81, "极高"),
+        (100, "极高"),
     ],
 )
 def test_numeric_projection_uses_frozen_semantic_bands(
@@ -58,22 +58,22 @@ def test_numeric_projection_uses_frozen_semantic_bands(
 def test_signed_projection_and_trend_are_bounded() -> None:
     """Signed axes and direction use the explicit frozen boundaries."""
 
-    assert project_numeric_band(-61, signed=True) == "strongly negative"
-    assert project_numeric_band(-20, signed=True) == "neutral or mixed"
-    assert project_numeric_band(61, signed=True) == "strongly positive"
-    assert project_trend(40, 44) == "rising"
-    assert project_trend(44, 40) == "falling"
-    assert project_trend(40, 43) == "stable"
+    assert project_numeric_band(-61, signed=True) == "强烈负向"
+    assert project_numeric_band(-20, signed=True) == "中性或混合"
+    assert project_numeric_band(61, signed=True) == "强烈正向"
+    assert project_trend(40, 44) == "上升"
+    assert project_trend(44, 40) == "下降"
+    assert project_trend(40, 43) == "稳定"
 
 
 def test_duration_projection_uses_semantic_time_labels() -> None:
     """Timestamps become bounded duration descriptors before model entry."""
 
-    assert project_duration(NOW, "2026-07-14T00:09:59Z") == "immediate"
-    assert project_duration(NOW, "2026-07-14T01:00:00Z") == "recent"
-    assert project_duration(NOW, "2026-07-14T12:00:00Z") == "earlier"
-    assert project_duration(NOW, "2026-07-16T00:00:00Z") == "within recent days"
-    assert project_duration(NOW, "2026-07-22T00:00:00Z") == "older"
+    assert project_duration(NOW, "2026-07-14T00:09:59Z") == "即时"
+    assert project_duration(NOW, "2026-07-14T01:00:00Z") == "近期"
+    assert project_duration(NOW, "2026-07-14T12:00:00Z") == "较早"
+    assert project_duration(NOW, "2026-07-16T00:00:00Z") == "最近几天内"
+    assert project_duration(NOW, "2026-07-22T00:00:00Z") == "较久以前"
 
 
 def test_state_projection_separates_user_state_and_character_constraints() -> None:
@@ -90,9 +90,24 @@ def test_state_projection_separates_user_state_and_character_constraints() -> No
 
     assert projection.payload["character_constraints"]["drives"]["care"][
         "pressure"
-    ] == "very low"
+    ] == "极低"
     assert "owner_user_id" not in projection.payload
     assert "updated_at" not in projection.payload
+    assert projection.payload["roles"] == {
+        "当前角色": "当前角色",
+        "当前用户": "当前用户",
+    }
+    standard_text = [
+        row["description"]
+        for row in projection.payload["character_constraints"]["standards"]
+    ]
+    assert standard_text == [
+        "保持诚实",
+        "避免造成不必要的伤害",
+        "尊重个人边界",
+        "履行已经接受的承诺",
+        "保护尊严与自主性",
+    ]
     assert projection.handle_to_ref["r1"]["entity_id"] == (
         "relationship:user:user-projection"
     )

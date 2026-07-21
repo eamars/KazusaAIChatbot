@@ -204,19 +204,26 @@ def build_cognition_input_from_global_state(
         episode["target_scope"].get("channel_type"),
         episode.get("trigger_source"),
     )
-    character_role = "active character"
-    current_user_role = "current conversation participant"
+    character_profile = state.get("character_profile")
+    character_name = (
+        _text(character_profile.get("name"))
+        if isinstance(character_profile, Mapping)
+        else ""
+    )
+    user_name = _text(state.get("user_name"))
+    character_label = _named_role_label("当前角色", character_name)
+    current_user_label = _named_role_label("当前用户", user_name)
+    character_role = character_label
+    current_user_role = current_user_label
     if (
         episode["trigger_source"] == "user_message"
         and _episode_has_source_kind(episode, "dialog")
     ):
         character_role = (
-            "the active character; direct addressee of dialog_text and "
-            "implicit subject of a direct imperative"
+            f"{character_label}；dialog_text 的直接收件人，也是直接命令的隐含主语"
         )
         current_user_role = (
-            "the current message author; speaker of dialog_text and owner of "
-            "first-person pronouns in that evidence"
+            f"{current_user_label}；dialog_text 的发言者，也是该证据中第一人称代词的所属者"
         )
     payload: CognitionCoreInputV2 = {
         "schema_version": "cognition_core_input.v2",
@@ -395,20 +402,20 @@ def _project_output_to_global_state(
         "action_specs": _materialize_v2_action_requests(output, state),
         "internal_monologue": output["private_monologue"],
         "interaction_subtext": output["selected_bid_reason"],
-        "emotional_appraisal": dominant["emotion"] if dominant else "composed",
+        "emotional_appraisal": dominant["emotion"] if dominant else "平静",
         "character_intent": output["intention"]["intention"],
         "logical_stance": output["intention"]["reason"],
         "judgment_note": output["intention"]["reason"],
-        "social_distance": "bounded by semantic relationship context",
-        "emotional_intensity": dominant["intensity"] if dominant else "none",
-        "vibe_check": dominant["phase"] if dominant else "composed",
+        "social_distance": "受语义关系背景约束",
+        "emotional_intensity": dominant["intensity"] if dominant else "无",
+        "vibe_check": dominant["phase"] if dominant else "平静",
         "relational_dynamic": (
             output.get("relationship_projection", {}).get(
                 "relationship_summary",
-                "no relationship projection",
+                "没有关系投影",
             )
             if isinstance(output.get("relationship_projection"), Mapping)
-            else "no relationship projection"
+            else "没有关系投影"
         ),
         "should_respond": route != "silence",
         "rag_result": state.get("rag_result", {}),
@@ -1054,7 +1061,7 @@ def _semantic_episode_text(state: Mapping[str, Any]) -> str:
         ]
         if descriptions:
             return "; ".join(descriptions)
-    return "no grounded semantic episode"
+    return "没有有依据的语义事件"
 
 
 def _dialog_semantic_projection_text(
@@ -1083,31 +1090,45 @@ def _conversation_progress_text(value: object) -> str:
 
     if not isinstance(value, Mapping):
         return ""
+    scalar_labels = (
+        ("continuity", "连续性"),
+        ("current_thread", "当前话题线"),
+        ("user_goal", "用户目标"),
+        ("current_blocker", "当前阻碍"),
+        ("emotional_trajectory", "情绪轨迹"),
+        ("progression_guidance", "推进指引"),
+    )
+    list_labels = (
+        ("overused_moves", "避免重复"),
+        ("next_affordances", "下一步可行互动"),
+    )
+    loop_labels = (
+        ("open_loops", "未闭合事项"),
+        ("avoid_reopening", "避免重新打开"),
+    )
+    obligation_label = "互动义务"
+    obligation_fields = {
+        "actor": "行动者",
+        "action": "动作",
+        "beneficiary": "受益者",
+        "precondition": "前置条件",
+        "expected_outcome": "预期结果",
+        "status": "状态",
+        "source_kind": "来源类型",
+        "age_hint": "时间提示",
+    }
     fragments: list[str] = []
-    for field_name, label in (
-        ("continuity", "continuity"),
-        ("current_thread", "current thread"),
-        ("user_goal", "user goal"),
-        ("current_blocker", "current blocker"),
-        ("emotional_trajectory", "emotional trajectory"),
-        ("progression_guidance", "progression guidance"),
-    ):
+    for field_name, label in scalar_labels:
         text = _text(value.get(field_name))
         if text:
             fragments.append(f"{label}: {text}")
-    for field_name, label in (
-        ("overused_moves", "avoid repeating"),
-        ("next_affordances", "next affordances"),
-    ):
+    for field_name, label in list_labels:
         rows = value.get(field_name)
         if isinstance(rows, list):
             texts = [_text(row) for row in rows if _text(row)]
             if texts:
                 fragments.append(f"{label}: {', '.join(texts)}")
-    for field_name, label in (
-        ("open_loops", "open loops"),
-        ("avoid_reopening", "avoid reopening"),
-    ):
+    for field_name, label in loop_labels:
         rows = value.get(field_name)
         if not isinstance(rows, list):
             continue
@@ -1128,7 +1149,10 @@ def _conversation_progress_text(value: object) -> str:
             action = _text(obligation.get("action"))
             if not actor or not action:
                 continue
-            details = [f"actor={actor}", f"action={action}"]
+            details = [
+                f"{obligation_fields['actor']}={actor}",
+                f"{obligation_fields['action']}={action}",
+            ]
             for field_name in (
                 "beneficiary",
                 "precondition",
@@ -1139,11 +1163,13 @@ def _conversation_progress_text(value: object) -> str:
             ):
                 detail = _text(obligation.get(field_name))
                 if detail:
-                    details.append(f"{field_name}={detail}")
+                    details.append(
+                        f"{obligation_fields[field_name]}={detail}"
+                    )
             obligation_texts.append(", ".join(details))
         if obligation_texts:
             fragments.append(
-                f"interaction obligations: {' | '.join(obligation_texts)}"
+                f"{obligation_label}: {' | '.join(obligation_texts)}"
             )
     return "; ".join(fragments)
 
@@ -1159,6 +1185,14 @@ def _text(value: object) -> str:
     """Return bounded connector text."""
 
     return value.strip() if isinstance(value, str) else ""
+
+
+def _named_role_label(role_label: str, display_name: str) -> str:
+    """Render a Chinese role label with its configured display name."""
+
+    if display_name:
+        return f"{role_label}（{display_name}）"
+    return role_label
 
 
 def _scope_caller(episode: Mapping[str, Any] | object) -> str:

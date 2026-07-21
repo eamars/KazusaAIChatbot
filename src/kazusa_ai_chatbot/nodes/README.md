@@ -89,7 +89,7 @@ stage_0_msg_decontexualizer
 For a live user message, Stage 0 returns semantic surfaces from its existing
 LLM call. `decontexualized_input` remains a natural equivalent used by
 compatibility and retrieval paths. Optional `role_explicit_content` uses the
-literal handles `current_user` and `self` to preserve nested actor, target,
+Chinese role labels `当前用户` and `当前角色` to preserve nested actor, target,
 beneficiary, modality, and request direction. Optional structured
 `response_operation` records the response owner, whether an unsupplied answer
 or choice is required and who owns it, plus embedded actor and target roles.

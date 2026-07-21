@@ -476,11 +476,11 @@ async def test_goal_bid_repairs_required_selection_delegation() -> None:
         ),
         "response_operation": {
             "operation": "当前角色选择并告诉当前用户下一步动作",
-            "response_owner_role": "self",
-            "selection_owner_role": "self",
+            "response_owner_role": "当前角色",
+            "selection_owner_role": "当前角色",
             "selection_required": True,
-            "embedded_actor_role": "current_user",
-            "embedded_target_role": "self",
+            "embedded_actor_role": "当前用户",
+            "embedded_target_role": "当前角色",
         },
     }, ensure_ascii=False)
     bid = await run_goal_cognition(

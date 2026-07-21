@@ -49,8 +49,11 @@ semantic_text、role_handles、path 或其他 proposition、delta 字段。
 
 semantic_value 是一句简洁描述，目标长度 120 字符且上限 200 字符，其中不重复标准、约束或证据
 解释，也不使用数值；数值只放在 delta 字段。每条 delta reason 不超过 300 字符，explanation
-不超过 1000 字符。role 必须取 actor、experiencer、target、object、affected_goal 或
-affected_relationship。r1、ce1、ct1、ck1 等实体 handle 放在 entity_handle，不能放在 role。
+不超过 1000 字符。role 必须取以下固定 enum token：actor（行动者）、experiencer（体验者）、
+target（对象）、object（客体）、affected_goal（受影响目标）或 affected_relationship（受影响关系）。
+r1、ce1、ct1、ck1 等实体 handle 放在 entity_handle，不能放在 role。当前角色和当前用户的内部
+角色句柄只用于结构化字段；中文自由文本使用“当前角色”“当前用户”或配置的角色名、用户显示名，
+不要把内部角色句柄或英文角色称谓写入中文自由文本。固定 schema key 和 enum token 仍按原值输出。
 '''
 
 

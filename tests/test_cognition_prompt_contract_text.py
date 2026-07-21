@@ -213,8 +213,8 @@ def test_goal_prompt_owns_current_judgment_and_roles() -> None:
     assert "当前事件" in prompt
     assert "关系" in prompt
     assert "结构化用户对话角色具有权威性" in prompt
-    assert "actor" in prompt
-    assert "target" in prompt
+    assert "行动者" in prompt
+    assert "对象" in prompt
 
 
 def test_goal_prompt_treats_physical_requests_as_verbal_stance() -> None:

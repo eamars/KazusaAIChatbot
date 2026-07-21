@@ -150,11 +150,11 @@ def test_role_explicit_current_event_is_forwarded_without_reinterpretation() -> 
     )
     response_operation = {
         "operation": "当前角色为当前用户选择一个动作",
-        "response_owner_role": "self",
-        "selection_owner_role": "self",
+        "response_owner_role": "当前角色",
+        "selection_owner_role": "当前角色",
         "selection_required": True,
-        "embedded_actor_role": "current_user",
-        "embedded_target_role": "self",
+        "embedded_actor_role": "当前用户",
+        "embedded_target_role": "当前角色",
     }
     episode = _episode()
     episode["percepts"][0]["content"]["role_explicit_content"] = (
@@ -191,6 +191,8 @@ def test_role_explicit_current_event_is_forwarded_without_reinterpretation() -> 
     )
     assert payload["evidence"][0]["semantic_text"] == expected_meaning
     assert payload["scene_context"]["semantic_scene"] == expected_meaning
+    assert payload["scene_context"]["character_role"].startswith("当前角色")
+    assert payload["scene_context"]["current_user_role"].startswith("当前用户")
 
 
 @pytest.mark.asyncio

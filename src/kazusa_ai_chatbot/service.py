@@ -65,6 +65,8 @@ from kazusa_ai_chatbot.calendar_scheduler.worker import (
     stop_calendar_scheduler_worker,
 )
 from kazusa_ai_chatbot.cognition_episode import (
+    CURRENT_CHARACTER_ROLE,
+    CURRENT_USER_ROLE,
     CognitiveEpisodeV1,
     EvidenceRefV1,
     PerceptV1,
@@ -2815,8 +2817,8 @@ def _build_user_message_episode_for_turn(
         "source_id": platform_message_id or None,
         "content": {
             "semantic_text": user_input,
-            "speaker_role": "current_user",
-            "addressee_role": "self",
+            "speaker_role": CURRENT_USER_ROLE,
+            "addressee_role": CURRENT_CHARACTER_ROLE,
         },
         "observed_at": created_at,
     }

@@ -11,6 +11,7 @@ import httpx
 import pytest
 
 from kazusa_ai_chatbot.config import MSG_DECONTEXTUALIZER_LLM_BASE_URL
+from kazusa_ai_chatbot.cognition_core_v2.contracts import CognitionExecutionError
 from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer import (
     call_msg_decontexualizer,
 )
@@ -73,15 +74,46 @@ def _base_state() -> dict:
     return state
 
 
+def _decontextualizer_payload(
+    *,
+    output: str,
+    reasoning: str,
+    is_modified: bool,
+    referents: list[dict[str, str]],
+) -> str:
+    """Build a complete Chinese-context decontextualizer response."""
+
+    return json.dumps(
+        {
+            "output": output,
+            "role_explicit_content": "当前用户向当前角色发送当前输入。",
+            "response_operation": {
+                "operation": "当前角色回应当前用户的当前输入",
+                "response_owner_role": "当前角色",
+                "selection_owner_role": "无",
+                "selection_required": False,
+                "embedded_actor_role": "当前角色",
+                "embedded_target_role": "当前用户",
+            },
+            "reasoning": reasoning,
+            "is_modified": is_modified,
+            "referents": referents,
+        },
+        ensure_ascii=False,
+    )
+
+
 @pytest.mark.asyncio
 async def test_decontexualizer_prompt_requires_character_name_and_identity_safe_examples(
     monkeypatch,
 ) -> None:
     """Decontextualizer prompt renders character identity without payload duplication."""
 
-    llm_payload = (
-        '{"output": "是的", "reasoning": "identity contract check", '
-        '"is_modified": false, "referents": []}'
+    llm_payload = _decontextualizer_payload(
+        output="是的",
+        reasoning="检查角色身份契约。",
+        is_modified=False,
+        referents=[],
     )
     fake_llm = _CapturingLLM(llm_payload)
     monkeypatch.setattr(
@@ -116,9 +148,11 @@ async def test_decontextualizer_projects_chat_history_as_transcript_lines(
 ) -> None:
     """Decontextualizer should flatten only chat history before the LLM call."""
 
-    llm_payload = (
-        '{"output": "原句", "reasoning": "payload projection check", '
-        '"is_modified": false, "referents": []}'
+    llm_payload = _decontextualizer_payload(
+        output="原句",
+        reasoning="检查输入投影。",
+        is_modified=False,
+        referents=[],
     )
     fake_llm = _CapturingLLM(llm_payload)
     monkeypatch.setattr(
@@ -286,10 +320,17 @@ async def test_unresolved_reference_referent_flows() -> None:
     """Unresolved demonstratives should return an unresolved referent row."""
 
     llm_response = MagicMock()
-    llm_response.content = (
-        '{"output": "这些是什么意思？", "reasoning": "missing object", '
-        '"is_modified": false, '
-        '"referents": [{"phrase": "这些", "referent_role": "object", "status": "unresolved"}]}'
+    llm_response.content = _decontextualizer_payload(
+        output="这些是什么意思？",
+        reasoning="缺少对象。",
+        is_modified=False,
+        referents=[
+            {
+                "phrase": "这些",
+                "referent_role": "object",
+                "status": "unresolved",
+            },
+        ],
     )
 
     with patch(
@@ -308,10 +349,17 @@ async def test_reply_excerpt_resolved_referent_flows() -> None:
     """A concrete reply excerpt should return a resolved referent row."""
 
     llm_response = MagicMock()
-    llm_response.content = (
-        '{"output": "这些是什么意思？", "reasoning": "reply excerpt resolves object", '
-        '"is_modified": false, '
-        '"referents": [{"phrase": "这些", "referent_role": "object", "status": "resolved"}]}'
+    llm_response.content = _decontextualizer_payload(
+        output="这些是什么意思？",
+        reasoning="回复摘录解析了对象。",
+        is_modified=False,
+        referents=[
+            {
+                "phrase": "这些",
+                "referent_role": "object",
+                "status": "resolved",
+            },
+        ],
     )
     state = _base_state()
     state["reply_context"] = {
@@ -335,13 +383,22 @@ async def test_mixed_referents_are_preserved() -> None:
     """The E2 parser should preserve mixed resolved/unresolved referent rows."""
 
     llm_response = MagicMock()
-    llm_response.content = (
-        '{"output": "他上次说的那些关于X的话是什么意思？", '
-        '"reasoning": "one subject resolved and one object unresolved", '
-        '"is_modified": false, '
-        '"referents": ['
-        '{"phrase": "他", "referent_role": "subject", "status": "resolved"}, '
-        '{"phrase": "那些话", "referent_role": "object", "status": "unresolved"}]}'
+    llm_response.content = _decontextualizer_payload(
+        output="他上次说的那些关于X的话是什么意思？",
+        reasoning="一个主语已解析，另一个对象未解析。",
+        is_modified=False,
+        referents=[
+            {
+                "phrase": "他",
+                "referent_role": "subject",
+                "status": "resolved",
+            },
+            {
+                "phrase": "那些话",
+                "referent_role": "object",
+                "status": "unresolved",
+            },
+        ],
     )
     state = _base_state()
     state["user_input"] = "他上次说的那些关于X的话是什么意思？"
@@ -361,14 +418,21 @@ async def test_mixed_referents_are_preserved() -> None:
 
 
 @pytest.mark.asyncio
-async def test_malformed_referents_are_dropped_with_warning(caplog) -> None:
-    """Malformed referent rows should not be silently treated as valid."""
+async def test_malformed_referents_fail_closed_after_bounded_retry(caplog) -> None:
+    """Malformed referent rows are excluded after the bounded retry cap."""
 
     llm_response = MagicMock()
-    llm_response.content = (
-        '{"output": "这些是什么意思？", "reasoning": "malformed referent", '
-        '"is_modified": false, '
-        '"referents": [{"phrase": "这些", "referent_role": "thing", "status": "maybe"}]}'
+    llm_response.content = _decontextualizer_payload(
+        output="这些是什么意思？",
+        reasoning="指代行格式错误。",
+        is_modified=False,
+        referents=[
+            {
+                "phrase": "这些",
+                "referent_role": "thing",
+                "status": "maybe",
+            },
+        ],
     )
 
     with patch(
@@ -376,10 +440,15 @@ async def test_malformed_referents_are_dropped_with_warning(caplog) -> None:
     ) as mock_llm:
         mock_llm.ainvoke = AsyncMock(return_value=llm_response)
         caplog.set_level(logging.WARNING)
-        result = await call_msg_decontexualizer(_base_state())
+        with pytest.raises(CognitionExecutionError) as error_info:
+            await call_msg_decontexualizer(_base_state())
 
-    assert result["referents"] == []
-    assert "Decontextualizer dropped malformed referents" in caplog.text
+    assert error_info.value.error_code == (
+        "message_decontextualizer_contract_exhausted"
+    )
+    assert error_info.value.attempt_count == 2
+    assert mock_llm.ainvoke.await_count == 2
+    assert "Decontextualizer output" not in caplog.text
 
 
 @pytest.mark.live_llm

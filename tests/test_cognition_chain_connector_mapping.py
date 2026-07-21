@@ -57,7 +57,7 @@ def _core_output() -> dict[str, object]:
         "private_monologue": "I want to answer this clearly.",
         "expression_policy": {
             "visibility": "visible",
-            "emotional_tone": "composed",
+            "emotional_tone": "平静",
             "intensity": "restrained",
             "directness": "balanced",
         },
@@ -69,7 +69,10 @@ def _global_state() -> dict[str, object]:
     """Build the adapter-owned fields needed by the V2 mapper."""
 
     return {
-        "character_profile": {"global_user_id": "character-1"},
+        "character_profile": {
+            "global_user_id": "character-1",
+            "name": "千纱",
+        },
         "character_cognition_state": build_character_production_state(
             updated_at=NOW,
         ),
@@ -126,10 +129,12 @@ def test_persona_connector_maps_one_native_user_scope() -> None:
         "channel-test"
     )
     assert payload["resolver_context"].startswith("resolver_state:")
-    assert "speaker of dialog_text" in payload["scene_context"][
+    assert "dialog_text 的发言者" in payload["scene_context"][
         "current_user_role"
     ]
-    assert "implicit subject" in payload["scene_context"]["character_role"]
+    assert "千纱" in payload["scene_context"]["character_role"]
+    assert "User" in payload["scene_context"]["current_user_role"]
+    assert "隐含主语" in payload["scene_context"]["character_role"]
 
 
 def test_connector_projects_protocol_owned_resolver_goal_progress() -> None:

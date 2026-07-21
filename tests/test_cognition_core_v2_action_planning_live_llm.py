@@ -247,7 +247,7 @@ async def test_visible_acknowledgement_composes_with_background_work() -> None:
         actions=[_action("background_work_request")],
     )
 
-    assert result["intention"]["route"] == "speech"
+    assert result["intention"]["route"] == "action"
     assert [row["action_kind"] for row in result["action_requests"]] == [
         "background_work_request",
     ]
@@ -399,7 +399,7 @@ async def test_three_independent_private_actions_are_composable() -> None:
         ],
     )
 
-    assert result["intention"]["route"] == "speech"
+    assert result["intention"]["route"] == "action"
     assert {row["action_kind"] for row in result["action_requests"]} == {
         "memory_lifecycle_update",
         "future_speak",

@@ -174,10 +174,10 @@ def test_model_projection_contains_dialog_and_local_time_percepts() -> None:
                 "semantic_text": "hello from current text chat",
                 "text": "hello from current text chat",
             },
-            "speaker_role": "current_user",
-            "addressee_role": "self",
-            "first_person_role": "current_user",
-            "implicit_imperative_subject_role": "self",
+            "speaker_role": "当前用户",
+            "addressee_role": "当前角色",
+            "first_person_role": "当前用户",
+            "implicit_imperative_subject_role": "当前角色",
         },
         {
             "input_source": "local_time_context",
@@ -215,11 +215,11 @@ def test_dialog_semantic_projection_is_model_owned() -> None:
     role_content = "The current user asks the character to choose the next move."
     response_operation = {
         "operation": "Choose one next action for the current user.",
-        "response_owner_role": "self",
-        "selection_owner_role": "self",
+        "response_owner_role": "当前角色",
+        "selection_owner_role": "当前角色",
         "selection_required": True,
-        "embedded_actor_role": "current_user",
-        "embedded_target_role": "self",
+        "embedded_actor_role": "当前用户",
+        "embedded_target_role": "当前角色",
     }
 
     projected = cognition_episode_module.attach_dialog_semantic_projection(

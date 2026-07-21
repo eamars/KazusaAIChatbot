@@ -117,7 +117,7 @@ def _planner_response(
 
 @pytest.mark.asyncio
 async def test_speech_composes_with_three_private_actions() -> None:
-    """Visible speech is orthogonal to the production three-action capacity."""
+    """Three admitted actions take the action route without truncation."""
 
     captured: dict[str, object] = {}
     response = _planner_response(
@@ -186,7 +186,7 @@ async def test_speech_composes_with_three_private_actions() -> None:
         ),
     )
 
-    assert result["intention"]["route"] == "speech"
+    assert result["intention"]["route"] == "action"
     assert [row["action_kind"] for row in result["action_requests"]] == [
         "background_work_request",
         "trigger_future_cognition",

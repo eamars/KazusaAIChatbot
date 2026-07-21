@@ -51,7 +51,7 @@ def project_affect(
                 "emotion": activation["emotion_id"],
                 "phase": _phase_label(activation),
                 "intensity": project_numeric_band(activation["score"]),
-                "trend": activation["trend"],
+                "trend": _trend_label(activation["trend"]),
                 "cause_summary": _cause_summary(activation, state),
             }
         )
@@ -86,7 +86,7 @@ def project_relationship(
         if field_name in relationship
     }
     return {
-        "relationship_summary": "relationship context remains bounded and causal",
+        "relationship_summary": "当前关系背景保持有界且具有因果关联",
         "axis_summaries": axes,
     }
 
@@ -133,9 +133,9 @@ def default_expression_policy(
     else:
         visibility = "visible"
     intensity = "restrained"
-    if any(row.get("intensity") in {"high", "very high"} for row in affect):
+    if any(row.get("intensity") in {"高", "极高"} for row in affect):
         intensity = "strong"
-    elif any(row.get("intensity") == "moderate" for row in affect):
+    elif any(row.get("intensity") == "中等" for row in affect):
         intensity = "moderate"
     if selected_branch_id in _DIRECT_BRANCHES:
         directness = "direct"
@@ -165,15 +165,15 @@ def _emotional_tone(activations: Sequence[Mapping[str, Any]]) -> str:
         ),
     )[:2]
     if not ordered:
-        return "composed"
+        return "平静"
     parts = [
         (
             f"{row['emotion_id']} ({_phase_label(row)}, "
-            f"{row.get('trend', 'stable')})"
+            f"{_trend_label(str(row.get('trend', 'stable')))})"
         )
         for row in ordered
     ]
-    return " with ".join(parts)
+    return "，".join(parts)
 
 
 def _canonicalize_replacement_state(
@@ -214,10 +214,10 @@ def _phase_label(activation: Mapping[str, Any]) -> str:
     """Translate cause lifecycle into a semantic phase."""
 
     if activation.get("cause_status") == "resolved":
-        return "fading after resolution"
+        return "问题解决后逐渐减弱"
     if activation.get("phase") == "fading":
-        return "fading"
-    return "currently active"
+        return "逐渐减弱"
+    return "当前活跃"
 
 
 def _cause_summary(
@@ -250,13 +250,23 @@ def _cause_summary(
                 state.get("relationship"),
                 Mapping,
             ):
-                return "the current relationship carries the activating social pressure"
+                return "当前关系带来激活情绪的社会压力"
             if kind == "meaning" and isinstance(
                 state.get("meaning_state"),
                 Mapping,
             ):
-                return "purpose and agency remain persistently low"
-    return "the retained primary cause remains grounded in the current episode"
+                return "目标感和能动性持续偏低"
+    return "保留的主要原因仍然扎根于当前事件"
+
+
+def _trend_label(value: str) -> str:
+    """Translate a persisted activation trend for model-facing context."""
+
+    return {
+        "rising": "上升",
+        "stable": "稳定",
+        "falling": "下降",
+    }.get(value, value)
 
 
 def _changed_paths(

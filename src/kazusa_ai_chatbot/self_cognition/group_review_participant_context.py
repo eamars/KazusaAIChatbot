@@ -658,21 +658,21 @@ def _hydration_from_sources(
     else:
         relationship_context = project_relationship_context(relationship)
         axes = relationship_context["axes"]
-        positive_regard = axes.get("positive_regard", "neutral or mixed")
-        attachment = axes.get("attachment", "none")
-        if positive_regard in {"positive", "strongly positive"}:
-            relationship_band = "positive"
+        positive_regard = axes.get("positive_regard", "中性或混合")
+        attachment = axes.get("attachment", "无")
+        if positive_regard in {"正向", "强烈正向"}:
+            relationship_band = "正向"
             relationship_label = (
-                "strong connection"
-                if attachment in {"high", "very high"}
-                else "growing connection"
+                "强连接"
+                if attachment in {"高", "极高"}
+                else "增长中的连接"
             )
-        elif positive_regard in {"negative", "strongly negative"}:
-            relationship_band = "negative"
-            relationship_label = "strained relationship"
+        elif positive_regard in {"负向", "强烈负向"}:
+            relationship_band = "负向"
+            relationship_label = "紧张关系"
         else:
-            relationship_band = "neutral"
-            relationship_label = "acquaintance relationship"
+            relationship_band = "中性"
+            relationship_label = "熟人关系"
 
     raw_guidelines = engagement_context.get("engagement_guidelines")
     engagement_guidelines = _string_items(

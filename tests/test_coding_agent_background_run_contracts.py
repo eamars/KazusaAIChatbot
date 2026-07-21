@@ -996,6 +996,7 @@ def _cognition_state() -> dict[str, object]:
         "cognitive_episode": {
             "trigger_source": "user_message",
             "storage_timestamp_utc": "2026-07-09T01:00:00+00:00",
+            "created_at": "2026-07-09T01:00:00+00:00",
             "target_scope": {
                 "current_global_user_id": "global-user-001",
             },
@@ -1003,8 +1004,15 @@ def _cognition_state() -> dict[str, object]:
                 "platform_message_id": "message-001",
             },
             "percepts": [{
-                "input_source": "dialog_text",
-                "content": "Add slugify tests.",
+                "schema_version": "percept.v1",
+                "percept_kind": "dialog",
+                "source_kind": "dialog",
+                "source_id": "percept:message-001",
+                "content": {
+                    "semantic_text": "Add slugify tests.",
+                    "text": "Add slugify tests.",
+                },
+                "observed_at": "2026-07-09T01:00:00+00:00",
             }],
         },
         "action_selection_context": {

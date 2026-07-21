@@ -188,9 +188,9 @@ def test_dialog_verifier_uses_only_the_hard_failure_taxonomy() -> None:
     for required_text in (
         "内部存在冲突",
         "当前用户输入",
-        "actor",
-        "target",
-        "subject",
+        "行动者",
+        "对象",
+        "主语",
         "candidate_role_frame",
         "response_operation",
         "selection_owner",
@@ -474,11 +474,11 @@ async def test_live_goal_repairs_private_selection_delegation() -> None:
         ),
         response_operation={
             "operation": "当前角色选择并告诉当前用户接下来要执行的具体动作",
-            "response_owner_role": "self",
-            "selection_owner_role": "self",
+            "response_owner_role": "当前角色",
+            "selection_owner_role": "当前角色",
             "selection_required": True,
-            "embedded_actor_role": "current_user",
-            "embedded_target_role": "self",
+            "embedded_actor_role": "当前用户",
+            "embedded_target_role": "当前角色",
         },
     )
 

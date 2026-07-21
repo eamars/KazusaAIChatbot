@@ -29,14 +29,11 @@ _CHARACTER_PATH = Path(
     "production_character_state.json"
 )
 _TRACE_SUITE = "dialog_visible_speech_and_semantic_fidelity"
-_ROLE_ONLY_DIAGNOSTIC_PROMPT = '''Verify only actor, action, target,
-beneficiary, and subject direction between current_visible_percepts and
-candidate_final_dialog. Resolve every text in its own role frame. A percept
-row supplies its speaker_role, first_person_role, addressee_role, and
-implicit_imperative_subject_role. Candidate dialog is spoken by self: its
-first person is self and its second person is current_user. Compare the
-semantic actor/action/target after resolution. Mark aligned false for any
-reversal. Ignore style, novelty, intimacy, safety, and writing quality.
+_ROLE_ONLY_DIAGNOSTIC_PROMPT = '''只核对 current_visible_percepts 与
+candidate_final_dialog 之间的行动者、动作、目标、受益者和主语方向。按各自的角色框架解析每段文本。
+percept 行提供 speaker_role、first_person_role、addressee_role 和
+implicit_imperative_subject_role。candidate dialog 由当前角色说出：第一人称是当前角色，第二人称是当前用户。
+解析后比较行动者/动作/目标；任何反转都将 aligned 标为 false。忽略风格、新颖性、亲密度、安全性和写作质量。
 
 Return exactly one JSON object with exactly aligned and issues. aligned is a
 boolean. issues is a list of concise role-direction failures; use an empty
@@ -609,10 +606,10 @@ async def test_live_verifier_accepts_subject_omitted_first_person_action(
         current_visible_percepts=[{
             "input_source": "dialog_text",
             "content": "要千纱的摸摸抱抱才起来！",
-            "speaker_role": "current_user",
-            "addressee_role": "self",
-            "first_person_role": "current_user",
-            "implicit_imperative_subject_role": "self",
+            "speaker_role": "当前用户",
+            "addressee_role": "当前角色",
+            "first_person_role": "当前用户",
+            "implicit_imperative_subject_role": "当前角色",
         }],
         human_review_contract={
             "subject_omitted_chinese_action_is_first_person_chat": True,
@@ -655,10 +652,10 @@ async def test_live_verifier_accepts_second_person_delivery_roleplay(
         current_visible_percepts=[{
             "input_source": "dialog_text",
             "content": "要千纱的摸摸抱抱才起来！",
-            "speaker_role": "current_user",
-            "addressee_role": "self",
-            "first_person_role": "current_user",
-            "implicit_imperative_subject_role": "self",
+            "speaker_role": "当前用户",
+            "addressee_role": "当前角色",
+            "first_person_role": "当前用户",
+            "implicit_imperative_subject_role": "当前角色",
         }],
         human_review_contract={
             "physical_roleplay_is_valid_chat_text": True,
@@ -885,10 +882,10 @@ async def test_live_verifier_rejects_imperative_actor_target_swap(
         current_visible_percepts=[{
             "input_source": "dialog_text",
             "content": "张开腿，跨坐在我身上",
-            "speaker_role": "current_user",
-            "addressee_role": "self",
-            "first_person_role": "current_user",
-            "implicit_imperative_subject_role": "self",
+            "speaker_role": "当前用户",
+            "addressee_role": "当前角色",
+            "first_person_role": "当前用户",
+            "implicit_imperative_subject_role": "当前角色",
         }],
         human_review_contract={
             "typed_roles_override_drifted_surface": True,
@@ -913,23 +910,23 @@ async def test_live_verifier_rejects_nested_role_direction_swap(
             "input_source": "dialog_text",
             "content": "请直接告诉我，你希望我下一步替你做什么。",
             "role_explicit_content": (
-                "current_user 请求 self 直接告诉 current_user，self 希望 "
-                "current_user 下一步替 self 做什么。"
+                "当前用户请求当前角色直接告诉当前用户，当前角色希望 "
+                "当前用户下一步替当前角色做什么。"
             ),
             "response_operation": {
                 "operation": (
-                    "self 选择并说明 current_user 下一步替 self 做的动作"
+                    "当前角色选择并说明当前用户下一步替当前角色做的动作"
                 ),
-                "response_owner_role": "self",
-                "selection_owner_role": "self",
+                "response_owner_role": "当前角色",
+                "selection_owner_role": "当前角色",
                 "selection_required": True,
-                "embedded_actor_role": "current_user",
-                "embedded_target_role": "self",
+                "embedded_actor_role": "当前用户",
+                "embedded_target_role": "当前角色",
             },
-            "speaker_role": "current_user",
-            "addressee_role": "self",
-            "first_person_role": "current_user",
-            "implicit_imperative_subject_role": "self",
+            "speaker_role": "当前用户",
+            "addressee_role": "当前角色",
+            "first_person_role": "当前用户",
+            "implicit_imperative_subject_role": "当前角色",
         }],
         human_review_contract={
             "use_upstream_nested_role_meaning": True,
@@ -964,11 +961,11 @@ async def test_live_focused_role_verifier_rejects_selection_delegation(
         ),
         "response_operation": {
             "operation": "要求当前角色告知当前用户接下来的行动指令",
-            "response_owner_role": "self",
-            "selection_owner_role": "self",
+            "response_owner_role": "当前角色",
+            "selection_owner_role": "当前角色",
             "selection_required": True,
-            "embedded_actor_role": "current_user",
-            "embedded_target_role": "self",
+            "embedded_actor_role": "当前用户",
+            "embedded_target_role": "当前角色",
         },
     }]
     candidate = [
@@ -1026,11 +1023,11 @@ async def test_live_focused_role_verifier_rejects_mixed_delegation(
         ),
         "response_operation": {
             "operation": "当前角色选择并告诉当前用户接下来要执行的具体动作",
-            "response_owner_role": "self",
-            "selection_owner_role": "self",
+            "response_owner_role": "当前角色",
+            "selection_owner_role": "当前角色",
             "selection_required": True,
-            "embedded_actor_role": "current_user",
-            "embedded_target_role": "self",
+            "embedded_actor_role": "当前用户",
+            "embedded_target_role": "当前角色",
         },
     }]
     candidate = [
@@ -1078,9 +1075,9 @@ async def test_live_role_only_diagnostic_rejects_actor_target_swap() -> None:
     )
     payload = {
         "candidate_role_frame": {
-            "speaker_role": "self",
-            "first_person_role": "self",
-            "second_person_role": "current_user",
+            "speaker_role": "当前角色",
+            "first_person_role": "当前角色",
+            "second_person_role": "当前用户",
         },
         "candidate_final_dialog": [
             "就这样跨在我身上！给我乖乖听话，别乱动。"
@@ -1089,10 +1086,10 @@ async def test_live_role_only_diagnostic_rejects_actor_target_swap() -> None:
         "current_visible_percepts": [{
             "input_source": "dialog_text",
             "content": "张开腿，跨坐在我身上",
-            "speaker_role": "current_user",
-            "addressee_role": "self",
-            "first_person_role": "current_user",
-            "implicit_imperative_subject_role": "self",
+            "speaker_role": "当前用户",
+            "addressee_role": "当前角色",
+            "first_person_role": "当前用户",
+            "implicit_imperative_subject_role": "当前角色",
         }],
     }
     response = await role_llm.ainvoke(
@@ -1231,16 +1228,16 @@ async def test_live_focused_repair_corrects_stopped_private_role_reversal(
         ),
         "response_operation": {
             "operation": "当前角色需要向当前用户陈述其希望对方执行的后续步骤",
-            "response_owner_role": "self",
-            "selection_owner_role": "self",
+            "response_owner_role": "当前角色",
+            "selection_owner_role": "当前角色",
             "selection_required": True,
-            "embedded_actor_role": "current_user",
-            "embedded_target_role": "self",
+            "embedded_actor_role": "当前用户",
+            "embedded_target_role": "当前角色",
         },
-        "speaker_role": "current_user",
-        "addressee_role": "self",
-        "first_person_role": "current_user",
-        "implicit_imperative_subject_role": "self",
+            "speaker_role": "当前用户",
+            "addressee_role": "当前角色",
+            "first_person_role": "当前用户",
+            "implicit_imperative_subject_role": "当前角色",
     }]
     surface_output = {
         "schema_version": "text_surface_output.v2",
@@ -1359,10 +1356,10 @@ async def test_live_verifier_accepts_literal_future_intimacy_as_speech(
             "content": (
                 "一会儿湿润之后我会插入。千纱如果疼的话跟我说哦我会慢慢的"
             ),
-            "speaker_role": "current_user",
-            "addressee_role": "self",
-            "first_person_role": "current_user",
-            "implicit_imperative_subject_role": "self",
+            "speaker_role": "当前用户",
+            "addressee_role": "当前角色",
+            "first_person_role": "当前用户",
+            "implicit_imperative_subject_role": "当前角色",
         }],
         human_review_contract={
             "treat_future_conditional_intimacy_as_literal_speech": True,
@@ -1390,10 +1387,10 @@ async def test_live_verifier_accepts_unmarked_vocalized_literal_speech(
         current_visible_percepts=[{
             "input_source": "dialog_text",
             "content": "张开腿，跨坐在我身上",
-            "speaker_role": "current_user",
-            "addressee_role": "self",
-            "first_person_role": "current_user",
-            "implicit_imperative_subject_role": "self",
+            "speaker_role": "当前用户",
+            "addressee_role": "当前角色",
+            "first_person_role": "当前用户",
+            "implicit_imperative_subject_role": "当前角色",
         }],
         human_review_contract={
             "unmarked_vocalizations_are_literal_speech": True,

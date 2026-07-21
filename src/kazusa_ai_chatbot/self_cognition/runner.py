@@ -952,6 +952,9 @@ def _build_cognitive_episode(
             local_time_context=local_time_context,
             created_at=storage_timestamp_utc,
         )
+    episode["origin_metadata"]["debug_modes"] = {
+        "no_visual_directives": True,
+    }
     return episode
 
 

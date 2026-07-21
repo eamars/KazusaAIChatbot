@@ -110,6 +110,41 @@ decision raises no LLM, prompt, output, repair, retry, or resolver-cycle cap.
 All other technical, regression, Browser, quality, and user-signoff gates
 remain binding.
 
+### User Decision Record — emotion and bounded-error sign-off overlay — 2026-07-21
+
+The newly created Chinese emotion and abuse probes are retained as a mandatory
+Stage 3 user-quality sign-off overlay. They supplement the frozen 40-case
+source sequence and do not replace it.
+
+- Sadness-to-crying, four secondary-emotion, high-attachment-abuse,
+  verbal-abuse-boundary, mechanical abuse-to-sadness, and full dialog rendering
+  tests remain in the exact change-radius inventory.
+- Real-LLM selectors run one case at a time and are inspected from their raw
+  input, prompt-stage output, parsed output, state projection, visible dialog,
+  and settled trace. A green pytest result alone is insufficient.
+- The full `/chat` abuse-to-sadness rendering case is the positive mechanical
+  proof: a pre-established negative event outcome projected very-high sadness
+  and reached visible Chinese dialog without adding a `crying` emotion id.
+- The outcome-neutral natural abuse probe remains a required diagnostic case.
+  Its observed `+5` outcome delta is a semantic model/prompt quality failure;
+  deterministic code must not rewrite it into a negative outcome.
+- Contract-invalid candidates and failed repair attempts are excluded from
+  affect evidence. The producing stage owns bounded regeneration or complete
+  replacement; after its explicit cap the path fails closed with a typed
+  terminal result and settled trace.
+- A recoverable bound violation may use only a contract-defined deterministic
+  normalization followed by revalidation. An unsafe or still-invalid value
+  follows the same bounded regeneration/fail-closed path.
+- The first high-positive-regard attempt, the seeded negative-outcome
+  `perceived_closeness` attempt, and the fear action-planning repair rows remain
+  recorded as bounded-error evidence rather than being counted as emotion
+  outcomes.
+
+The agent-authored consolidation is
+`test_artifacts/cognition_core_v2/stage_3/emotion_boundary_bounded_error_signoff_review.md`.
+It records the exact selectors, observed Chinese outputs, raw evidence paths,
+and remaining residual risks.
+
 ### Capability observation refinement — 2026-07-19
 
 The required-evidence trace showed that local context recall logs an unresolved
@@ -731,6 +766,36 @@ work is `skipped`; all succeeded is `completed`; mixed terminal results are
 `partial`; no successful result after an attempted lifecycle action is
 `failed`. Error codes are typed/sanitized and contain no backend text.
 
+### LLM Contract Error Settlement
+
+The `AGENTS.md` LLM error-state rule is binding for every V2 semantic, action,
+surface, and verifier stage:
+
+- Parse every raw response through the canonical
+  `kazusa_ai_chatbot.utils.parse_llm_json_output(...)` entry point before
+  semantic evaluation. Stage-local parsers and semantic repairers are not
+  permitted.
+- Classify malformed structure, unknown keys, wrong types, unsupported enum or
+  handle values, missing fields, and conflicting fields as non-recoverable
+  contract errors. The producing stage owns one bounded regeneration or
+  complete replacement according to its existing cap; after the cap, fail
+  closed with a typed result and settled trace.
+- Classify a numeric bound violation as recoverable only when the owning
+  contract defines a safe deterministic normalization. Normalize, revalidate,
+  and record the original value and disposition. If normalization is unsafe or
+  the value remains invalid, use the same bounded regeneration/fail-closed path.
+- Keep every invalid candidate out of affect derivation, action authorization,
+  persistence, scheduling, dialog, and adapter delivery. A structurally valid
+  but semantically wrong value remains model-quality evidence and is not
+  deterministically rewritten.
+
+The retained emotion sign-off evidence includes the natural abuse signed-delta
+failure, the high-attachment relationship-bound failure, the seeded
+`perceived_closeness` bound failure, and the fear action-planning repair rows.
+Those artifacts are technical evidence only and are excluded from affect
+conclusions. The consolidated review is
+`test_artifacts/cognition_core_v2/stage_3/emotion_boundary_bounded_error_signoff_review.md`.
+
 Collection `post_turn_lifecycle_records` has unique indexes on
 `lifecycle_record_id` and `source_episode_id`, an index on
 `(delivery_tracking_id, created_at)`, and a TTL index on `purge_after`.
@@ -1093,6 +1158,36 @@ venv\Scripts\python -m pytest tests/test_stage3_fresh_database_e2e_live_llm.py::
 venv\Scripts\python -m pytest tests/test_stage3_fresh_database_e2e_live_llm.py::test_live_action_affordance_routes -q -s
 ```
 
+#### Emotion, abuse-boundary, and bounded-error sign-off overlay
+
+These selectors are retained in addition to the frozen source sequence. Run
+each selector separately, inspect its raw artifact, and record its disposition
+before starting the next selector:
+
+```powershell
+venv\Scripts\python -m pytest tests/test_cognition_core_v2_crying_sadness_e2e_live_llm.py::test_live_crying_on_sadness_natural_sequence -q -s -o addopts=
+venv\Scripts\python -m pytest tests/test_cognition_core_v2_crying_sadness_e2e_live_llm.py::test_live_crying_on_sadness_explicit_permission -q -s -o addopts=
+venv\Scripts\python -m pytest tests/test_cognition_core_v2_crying_sadness_e2e_live_llm.py::test_live_crying_sadness_anger_control -q -s -o addopts=
+venv\Scripts\python -m pytest tests/test_cognition_core_v2_secondary_crying_e2e_live_llm.py::test_live_secondary_crying_from_fear -q -s -o addopts=
+venv\Scripts\python -m pytest tests/test_cognition_core_v2_secondary_crying_e2e_live_llm.py::test_live_secondary_crying_from_shame -q -s -o addopts=
+venv\Scripts\python -m pytest tests/test_cognition_core_v2_secondary_crying_e2e_live_llm.py::test_live_secondary_crying_from_loneliness -q -s -o addopts=
+venv\Scripts\python -m pytest tests/test_cognition_core_v2_secondary_crying_e2e_live_llm.py::test_live_secondary_crying_from_anger -q -s -o addopts=
+venv\Scripts\python -m pytest tests/test_cognition_core_v2_high_attachment_abuse_e2e_live_llm.py::test_live_high_attachment_sustained_abuse_natural_only -q -s -o addopts=
+venv\Scripts\python -m pytest tests/test_cognition_core_v2_high_attachment_abuse_e2e_live_llm.py::test_live_high_attachment_abuse_then_cutoff_natural_only -q -s -o addopts=
+venv\Scripts\python -m pytest tests/test_cognition_core_v2_verbal_abuse_boundary_e2e_live_llm.py::test_live_sustained_verbal_abuse_natural_only -q -s -o addopts=
+venv\Scripts\python -m pytest tests/test_cognition_core_v2_verbal_abuse_boundary_e2e_live_llm.py::test_live_verbal_abuse_then_rejection_natural_only -q -s -o addopts=
+venv\Scripts\python -m pytest tests/test_cognition_core_v2_abuse_to_sadness_e2e_live_llm.py::test_live_abuse_to_sadness_through_valued_loss -q -s -o addopts=
+venv\Scripts\python -m pytest tests/test_cognition_core_v2_abuse_to_sadness_e2e_live_llm.py::test_live_abuse_to_sadness_downstream_from_negative_outcome -q -s -o addopts=
+venv\Scripts\python -m pytest tests/test_cognition_core_v2_abuse_to_sadness_dialog_e2e_live_llm.py::test_live_abuse_to_sadness_renders_visible_dialog -q -s -o addopts=
+venv\Scripts\python -m pytest tests/test_cognition_core_v2_abuse_to_sadness_mechanical.py -q -o addopts=
+```
+
+The overlay's readable input/output, monologue, affect, trace, and failure
+disposition is recorded in
+`test_artifacts/cognition_core_v2/stage_3/emotion_boundary_bounded_error_signoff_review.md`.
+The natural abuse and bounded-error failures remain diagnostic sign-off
+evidence; invalid candidates never count as affect evidence.
+
 The frozen 40-case fixture copies the sanitized inputs, order, and target-scope
 facts from the Stage 2 group/private proof artifacts; it does not copy Stage 2
 model outputs or database state. The harness creates the fresh native state and
@@ -1213,3 +1308,37 @@ row counts, or an executable transform derived without production discovery.
   findings were remediated or dispositioned, and the affected deterministic
   gates were rerun. Final user quality/sign-off remains pending.
 - Checkpoint J independent review/user sign-off: pending.
+
+## Latest Verification Addendum — 2026-07-21 Chinese-Only Semantic Contract
+
+- The model-facing semantic contract is now Chinese-only. The temporary
+  dual-language projection branch was removed from interaction-style,
+  conversation-progress, cognition, goal, action, and surface prompts.
+  Chinese context therefore uses Chinese role labels and Chinese explanatory
+  text consistently.
+- Exact machine-facing handles and fixed enum/schema tokens remain only where
+  typed validation or persistence requires them (for example `self`,
+  `current_user`, `actor`, `target`, `speech`, and `action`). These are
+  structural contract values, not natural-language labels emitted in the
+  Chinese semantic text.
+- The final representative real-LLM dialog run passed:
+  `test_artifacts/cognition_core_v2/crying_sadness_e2e/abuse_to_sadness_visible_dialog_82f0a133f1/`.
+  It produced visible Chinese dialog with a final sadness projection at
+  `极高` intensity and no forbidden English role terms in the inspected
+  cognition, semantic, surface, or response-message fields.
+- The retained emotion/boundary sign-off selectors were executed one at a
+  time and inspected: sadness-to-crying (3), secondary crying probes for fear,
+  shame, loneliness, and anger (4), high-attachment abuse (2), verbal-abuse
+  boundary (2), natural and seeded abuse-to-sadness (2), visible dialog (1),
+  and deterministic mechanical reachability (1): 15 selectors passed.
+- The latest non-live repository collection recorded `3,264 passed`, `2
+  skipped`, and `758 deselected`. Control-console gates recorded `25 passed`,
+  and the fresh-database console E2E recorded `1 passed`. Compile, diff, and
+  targeted Chinese-only contract scans passed.
+- The shame probe now clears isolated affect activations before derivation;
+  legal `completed_action` terminals with accepted action requests are
+  recognized by the abuse-boundary technical assertion. These are test and
+  evidence-contract corrections and do not add a crying tag or a verbal
+  permission path.
+- Checkpoints I/J and final user quality sign-off remain pending until the
+  remaining independent review/browser acceptance conditions are closed.

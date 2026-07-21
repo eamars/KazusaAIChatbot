@@ -114,7 +114,7 @@ async def test_private_style_load_uses_user_scope_without_group(
         "platform": "debug",
         "platform_channel_id": "private-channel-id",
     }
-    assert rendered == "Current participant style speech: Use compact warmth."
+    assert rendered == "当前用户风格 语言: Use compact warmth."
     assert "group" not in rendered.casefold()
 
 
@@ -134,10 +134,29 @@ def test_group_style_projection_is_ordered_bounded_and_allowlisted() -> None:
 
     rendered = surface_module._render_interaction_style_context(context)
 
-    assert rendered.index("Current participant") < rendered.index("Current group")
+    assert rendered.index("当前用户风格") < rendered.index("当前群聊风格")
     assert len(rendered) <= 500
     assert "secret" not in rendered
     assert "98" not in rendered
+
+
+def test_chinese_style_projection_uses_chinese_role_labels() -> None:
+    """Chinese guidance keeps the model-facing style vocabulary Chinese."""
+
+    context = {
+        "user_style": _overlay(speech=["使用简洁、温和的句子。"]),
+        "group_channel_style": _overlay(
+            engagement=["只在有依据时加入群聊话题。"]
+        ),
+        "application_order": ["user_style", "group_channel_style"],
+    }
+
+    rendered = surface_module._render_interaction_style_context(context)
+
+    assert "当前用户风格 语言" in rendered
+    assert "当前群聊风格 互动" in rendered
+    assert "当前用户风格" in rendered
+    assert "当前群聊风格" in rendered
 
 
 @pytest.mark.asyncio
@@ -179,7 +198,7 @@ async def test_surface_handler_passes_loaded_style_to_v2_planner(
     await surface_module.call_l3_text_surface_handler(_state())
 
     assert captured["interaction_style_context"] == (
-        "Current participant style speech: Prefer short direct sentences."
+        "当前用户风格 语言: Prefer short direct sentences."
     )
     assert "internal-user-id" not in captured["interaction_style_context"]
     voice = captured["character_voice_context"]
@@ -197,4 +216,4 @@ def test_empty_style_context_has_explicit_semantic_fallback() -> None:
         "application_order": ["user_style"],
     })
 
-    assert rendered == "No learned interaction style guidance is available."
+    assert rendered == "没有可用的已学习互动风格指引。"

@@ -31,14 +31,14 @@ class _PromptCaptureLLM:
         del config
         system = str(getattr(messages[0], "content", ""))
         self.prompts.append(str(getattr(messages[-1], "content", "")))
-        if "exactly style_guidance" in system:
+        if "style_guidance" in system and "content_plan" not in system:
             result = {"style_guidance": "bounded"}
-        elif "exactly content_plan" in system:
+        elif "content_plan" in system and "content_requirements" in system:
             result = {
                 "content_plan": "bounded",
                 "content_requirements": ["preserve the current addressee"],
             }
-        elif "exactly visible_boundaries" in system:
+        elif "visible_boundaries" in system and "addressee_plan" in system:
             result = {
                 "visible_boundaries": ["bounded"],
                 "addressee_plan": ["bounded"],
@@ -54,14 +54,14 @@ def _surface_payload() -> dict[str, object]:
     episode = canonical_episode(
         episode_id="history-policy",
         content="visible current-turn grounding",
-        metadata={"chat_history": "RAW_HISTORY_SENTINEL"},
     )
     episode["percepts"].append({
-        "percept_id": "private-history-percept",
-        "input_source": "dialog_text",
-        "content": "PRIVATE_HISTORY_SENTINEL",
-        "visibility": "internal_only",
-        "metadata": {"internal_monologue": "PRIVATE_MONOLOGUE_SENTINEL"},
+        "schema_version": "percept.v1",
+        "percept_kind": "history_summary",
+        "source_kind": "system_event",
+        "source_id": "history-summary:current-turn",
+        "content": {"semantic_summary": "bounded semantic history summary"},
+        "observed_at": episode["created_at"],
     })
     return {
         "schema_version": "text_surface_input.v2",
@@ -108,6 +108,7 @@ async def test_surface_episode_allows_only_semantic_history_summaries() -> None:
 
     rendered = "\n".join(llm.prompts)
     assert "visible current-turn grounding" in rendered
+    assert "bounded semantic history summary" in rendered
     assert "RAW_HISTORY_SENTINEL" not in rendered
     assert "PRIVATE_HISTORY_SENTINEL" not in rendered
     assert "PRIVATE_MONOLOGUE_SENTINEL" not in rendered

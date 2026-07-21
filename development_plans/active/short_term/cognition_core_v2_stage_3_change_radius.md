@@ -33,6 +33,18 @@ tests/test_stage3_background_reasoning_live_db.py
 tests/test_stage3_auxiliary_v2_contract.py
 tests/control_console_e2e/test_stage3_fresh_database_e2e.py
 tests/fixtures/stage3_fresh_database_cases.json
+tests/fixtures/cognition_core_v2_abuse_to_sadness_e2e_cases.json
+tests/fixtures/cognition_core_v2_crying_sadness_e2e_cases.json
+tests/fixtures/cognition_core_v2_high_attachment_abuse_e2e_cases.json
+tests/fixtures/cognition_core_v2_secondary_crying_e2e_cases.json
+tests/fixtures/cognition_core_v2_verbal_abuse_boundary_e2e_cases.json
+tests/test_cognition_core_v2_abuse_to_sadness_dialog_e2e_live_llm.py
+tests/test_cognition_core_v2_abuse_to_sadness_e2e_live_llm.py
+tests/test_cognition_core_v2_abuse_to_sadness_mechanical.py
+tests/test_cognition_core_v2_crying_sadness_e2e_live_llm.py
+tests/test_cognition_core_v2_high_attachment_abuse_e2e_live_llm.py
+tests/test_cognition_core_v2_secondary_crying_e2e_live_llm.py
+tests/test_cognition_core_v2_verbal_abuse_boundary_e2e_live_llm.py
 test_artifacts/cognition_core_v2/stage_3/
 ```
 
@@ -83,11 +95,15 @@ src/scripts/load_character_profile.py — shared validator; explicit maintenance
 src/kazusa_ai_chatbot/cognition_episode.py
 src/kazusa_ai_chatbot/cognition_core_v2/contracts.py
 src/kazusa_ai_chatbot/cognition_core_v2/action_selection.py
+src/kazusa_ai_chatbot/cognition_core_v2/goal_cognition.py
 src/kazusa_ai_chatbot/cognition_core_v2/facade.py
 src/kazusa_ai_chatbot/cognition_core_v2/diagnostics.py
 src/kazusa_ai_chatbot/cognition_core_v2/state_models.py
 src/kazusa_ai_chatbot/cognition_core_v2/validation_cli.py
 src/kazusa_ai_chatbot/cognition_core_v2/surface.py
+src/kazusa_ai_chatbot/cognition_core_v2/surface_stages.py
+src/kazusa_ai_chatbot/cognition_core_v2/state_projection.py
+src/kazusa_ai_chatbot/cognition_core_v2/state_reducers.py
 src/kazusa_ai_chatbot/cognition_core_v2/transition_guards.py
 src/kazusa_ai_chatbot/cognition_resolver/contracts.py
 src/kazusa_ai_chatbot/cognition_resolver/loop.py
@@ -222,6 +238,10 @@ tests/test_live_llm_mongo_isolation.py
 tests/test_cognitive_episode_contract.py
 tests/test_cognition_chain_connector_mapping.py
 tests/test_cognition_core_v2_alignment_gates.py
+tests/test_cognition_core_v2_action_planning_live_llm.py
+tests/test_cognition_core_v2_benchmark.py
+tests/test_cognition_core_v2_dependencies.py
+tests/test_cognition_core_v2_projection.py
 tests/test_cognition_core_v2_state.py
 tests/test_cognition_core_v2_integration.py
 tests/test_cognition_core_v2_live_llm.py
@@ -254,6 +274,8 @@ tests/test_consolidator_origin_selection.py
 tests/test_consolidator_source_aware_payloads.py
 tests/test_internal_monologue_residue_recorder.py
 tests/test_msg_decontexualizer.py
+tests/test_conversation_progress_history_policy.py
+tests/test_past_dialog_cognition_prompt_boundaries.py
 tests/test_service_background_consolidation.py
 tests/test_service_health.py
 tests/test_service_ops_status.py

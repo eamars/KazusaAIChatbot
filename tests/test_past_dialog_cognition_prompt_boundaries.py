@@ -31,14 +31,14 @@ class _PromptCaptureLLM:
         del config
         system = str(getattr(messages[0], "content", ""))
         self.prompts.append(str(getattr(messages[-1], "content", "")))
-        if "exactly style_guidance" in system:
+        if "style_guidance" in system and "content_plan" not in system:
             result = {"style_guidance": "bounded"}
-        elif "exactly content_plan" in system:
+        elif "content_plan" in system and "content_requirements" in system:
             result = {
                 "content_plan": "bounded",
                 "content_requirements": ["preserve the current addressee"],
             }
-        elif "exactly visible_boundaries" in system:
+        elif "visible_boundaries" in system and "addressee_plan" in system:
             result = {
                 "visible_boundaries": ["bounded"],
                 "addressee_plan": ["bounded"],
@@ -54,14 +54,14 @@ def _surface_payload() -> dict[str, object]:
     episode = canonical_episode(
         episode_id="past-dialog-boundary",
         content="visible current exchange",
-        metadata={"past_dialog": "RAW_PAST_DIALOG_SENTINEL"},
     )
     episode["percepts"].append({
-        "percept_id": "private-past-dialog-percept",
-        "input_source": "dialog_text",
-        "content": "PRIVATE_PAST_DIALOG_SENTINEL",
-        "visibility": "audit_only",
-        "metadata": {"private_memory": "PRIVATE_MEMORY_SENTINEL"},
+        "schema_version": "percept.v1",
+        "percept_kind": "history_summary",
+        "source_kind": "system_event",
+        "source_id": "history-summary:past-dialog",
+        "content": {"semantic_summary": "bounded past-dialog summary"},
+        "observed_at": episode["created_at"],
     })
     return {
         "schema_version": "text_surface_input.v2",
@@ -108,6 +108,7 @@ async def test_surface_contract_excludes_raw_dialog_history() -> None:
 
     rendered = "\n".join(llm.prompts)
     assert "visible current exchange" in rendered
+    assert "bounded past-dialog summary" in rendered
     assert "RAW_PAST_DIALOG_SENTINEL" not in rendered
     assert "PRIVATE_PAST_DIALOG_SENTINEL" not in rendered
     assert "PRIVATE_MEMORY_SENTINEL" not in rendered

@@ -135,9 +135,15 @@ change requires a plan amendment and approval.
   or increase to an existing retry cap is permitted. The new internal-action
   latch uses the fixed three-attempt lifecycle in the execution companion. Its
   budget is a hard boundary.
-- Failures use typed categories. Fatal technical failures receive bounded
-  retry/fallback according to the existing safe checkpoint; content drift is
-  recorded and the remaining planned cases continue.
+- Failures use typed categories. Every raw LLM response first uses the
+  canonical JSON parser. Non-recoverable structural or semantic-contract
+  errors receive bounded regeneration or complete replacement from the
+  producing stage; after its explicit cap the boundary fails closed with a
+  typed terminal result. Recoverable bound violations use only the contract's
+  deterministic normalization followed by revalidation. Invalid candidates
+  stay out of affect, action, persistence, scheduling, dialog, and delivery
+  paths. Transient failures retry only at the existing safe checkpoint; content
+  drift remains evidence and is never deterministically rewritten.
 - Compatibility aliases, dual trigger vocabularies, legacy fallbacks, and
   scaffold-to-native translation layers are prohibited.
 - Generated review artifacts contain sanitized prompts/outputs and identifiers
@@ -181,6 +187,9 @@ change requires a plan amendment and approval.
     source-code inventory without reading or changing production data.
 15. Run all verification and independent-review gates and record inspectable
     evidence before proposing Stage 3 completion.
+16. Retain the Chinese emotion, abuse-boundary, mechanical sadness, and
+    bounded-error real-LLM evidence overlay as a mandatory input to final Stage
+    3 user-quality sign-off.
 
 ## Deferred
 
@@ -404,6 +413,37 @@ criterion. The individual blocking LLM-call limit remains 120 seconds. Broader
 regression reconciliation, Browser acceptance, character-quality review, and
 final user sign-off remain open.
 
+### User Decision Record — emotion and bounded-error sign-off overlay — 2026-07-21
+
+The recently run Chinese emotion and abuse probes are retained as a mandatory
+Stage 3 user-quality sign-off overlay. They supplement the frozen 40-case
+source sequence and do not change the production call, output, retry, or
+resolver-cycle budgets.
+
+The overlay preserves the following evidence boundaries:
+
+- `sadness` can reach visible crying without a `crying` emotion id; fear and
+  shame also rendered crying after explicit emotional permission.
+- The tested loneliness and anger arms rendered vulnerability or exhaustion,
+  not crying. High-attachment and sustained-abuse natural arms remained on
+  anger, with relational cutoff changing visible stance toward cold separation.
+- A mechanically established negative abuse outcome reached very-high sadness
+  and visible Chinese grief/relationship-loss dialog through real `/chat`.
+- Outcome-neutral abuse inference emitted a signed `+5` despite loss language;
+  this is retained as a model/prompt quality failure and is never rewritten by
+  deterministic code into sadness.
+- Structural, unsupported, conflicting, or unsafe bound candidates are excluded
+  from affect evidence. The producing semantic stage owns bounded regeneration
+  or complete replacement; after its cap the boundary fails closed with a typed
+  terminal trace. Only contract-defined safe normalization may repair a bound
+  violation.
+
+The complete test inventory, one-at-a-time commands, raw evidence, and the
+positive/negative dispositions are recorded in
+`test_artifacts/cognition_core_v2/stage_3/emotion_boundary_bounded_error_signoff_review.md`.
+This decision keeps Stage 3 in progress pending the existing regression,
+independent-review, Browser, and final user-signoff gates.
+
 ## Data Migration
 
 Stage 3 performs no data migration. Its database operation is a cold bootstrap
@@ -452,6 +492,12 @@ Completion thresholds on the fixed fresh-database proof are:
 - background/source episodes complete or reach a typed terminal outcome within
   300 seconds, without blocking chat intake;
 - each projected LLM call stays within 50,000 characters and the 50k-token cap.
+
+The emotion/boundary sign-off overlay is test-only evidence. It adds no
+response-path production stage, output cap, retry cap, resolver-cycle cap, or
+runtime behavior. Its exact one-at-a-time selectors and disposition rules are
+in the execution companion's
+`emotion_boundary_bounded_error_signoff_review.md`.
 
 Quality drift and make-up content are recorded for user judgment and do not
 stop the run. Live cases run sequentially and are evaluated only after the
@@ -639,7 +685,8 @@ required order is:
   - Sign-off: `<parent/date>`.
 - [ ] J — independent code review and user sign-off complete.
   - Scope: plan/manifest alignment, full diff, architecture/style, DB safety,
-    budgets, tests, evidence, deletions, and Stage 4 separation.
+    budgets, tests, evidence, deletions, Stage 4 separation, and the
+    emotion/boundary/bounded-error sign-off overlay.
   - Verify: rerun every gate affected by review fixes.
   - Evidence: reviewer identity/findings, remediation, reruns, residual risks,
     user quality decision, lifecycle update.
@@ -737,8 +784,10 @@ amendment and approval.
    references to them are removed.
 10. Health, status, traces, console, scripts, and documentation expose the
     canonical contracts without protected-data leakage.
-11. Fresh-DB cold start, five-source exercise, persistence, restart, and final
-    sequential real-LLM review pass the technical and budget gates.
+11. Fresh-DB cold start, five-source exercise, persistence, restart, final
+    sequential real-LLM review, and the retained emotion/boundary/bounded-error
+    overlay pass the technical and budget gates or have an explicit user-
+    reviewed residual disposition.
 12. The final user review finds no fatal failures or unacceptable content
     conflicts; acceptable/encouraged drift remains available to character
     judgment.
@@ -858,4 +907,41 @@ amendment and approval.
   verified; final handoff remains pending until H/I/J close.
 - Independent code review: completed by `Hilbert`; remediation and affected
   reruns are recorded in the Stage 3 verification summary.
+- Emotion/boundary/bounded-error sign-off overlay: the readable consolidation at
+  `test_artifacts/cognition_core_v2/stage_3/emotion_boundary_bounded_error_signoff_review.md`
+  retains the individually run sadness-to-crying, fear/shame/loneliness/anger,
+  high-attachment abuse, verbal-abuse boundary, natural abuse-to-sadness,
+  deterministic mechanical, and full-dialog real-LLM evidence. It records
+  `sadness` visible-dialog proof, the natural `+5` semantic-sign failure, the
+  `model_contract_invalid` bound failures, the fear repair rows, and the anger
+  high-risk phrase as raw visible model output. No content keyword filter,
+  censorship rule, or safety rewrite is part of the harness; invalid
+  structural candidates are excluded only from affect conclusions.
 - User sign-off: pending.
+
+## Latest Verification Addendum — 2026-07-21 Chinese-Only Semantic Contract
+
+- The model-facing semantic contract is Chinese-only. The temporary
+  dual-language branch was removed, and interaction-style, conversation-
+  progress, cognition, goal, action, and surface projections now use Chinese
+  role labels and Chinese explanatory text in Chinese contexts.
+- Exact internal handles and fixed schema/enum tokens remain solely for the
+  typed machine contract where required. They are not alternate natural-
+  language labels in the semantic output.
+- The final representative real-LLM abuse-to-sadness dialog passed at
+  `test_artifacts/cognition_core_v2/crying_sadness_e2e/abuse_to_sadness_visible_dialog_82f0a133f1/`.
+  The visible output is Chinese, the final semantic projection contains
+  sadness at `极高` intensity, and the inspected model-facing fields contain
+  no forbidden English role terms.
+- Fifteen retained real-LLM/mechanical sign-off selectors passed individually:
+  sadness-to-crying, fear/shame/loneliness/anger secondary-crying probes,
+  high-attachment abuse, verbal-abuse boundaries, natural and seeded
+  abuse-to-sadness, visible dialog, and mechanical reachability.
+- Latest gates: `3,264 passed`, `2 skipped`, `758 deselected` for the non-live
+  collection; `25 passed` for control-console gates; `1 passed` for fresh
+  database console E2E; compile, diff, and targeted Chinese-only contract
+  scans passed.
+- Checkpoints I/J and final user quality sign-off remain pending. Historical
+  broader-suite failures recorded earlier in this document remain historical
+  evidence and are superseded for the latest verification count by the run
+  above; they are not silently deleted.

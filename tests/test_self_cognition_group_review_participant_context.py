@@ -160,8 +160,8 @@ async def test_direct_cue_selects_one_primary_social_beat(
     primary = result["primary_reply_target"]
     assert primary["display_name"] == "Bob"
     assert primary["reply_target_fit"] == "high"
-    assert primary["relationship_label"] == "strong connection"
-    assert primary["relationship_band"] == "positive"
+    assert primary["relationship_label"] == "强连接"
+    assert primary["relationship_band"] == "正向"
     assert primary["engagement_guidelines"] == [
         "Keep it brief and do not fan out.",
     ]

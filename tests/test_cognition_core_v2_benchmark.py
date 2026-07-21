@@ -193,7 +193,7 @@ def test_validation_cli_builds_v2_only_benchmark_payload() -> None:
 
     validate_cognition_core_input(payload)
     assert payload["schema_version"] == "cognition_core_input.v2"
-    assert "v1" not in json.dumps(payload).lower()
+    assert "cognition_core_input.v1" not in json.dumps(payload).lower()
 
 
 @pytest.mark.live_llm

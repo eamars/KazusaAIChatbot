@@ -24,19 +24,19 @@ class _LLM:
         del config
         system = str(getattr(messages[0], "content", ""))
         json.loads(str(getattr(messages[-1], "content", "{}")))
-        if "exactly style_guidance" in system:
+        if "style_guidance" in system and "content_plan" not in system:
             result = {"style_guidance": "style"}
-        elif "exactly content_plan" in system:
+        elif "content_plan" in system and "content_requirements" in system:
             result = {
                 "content_plan": "content plan",
                 "content_requirements": ["preserve the current addressee"],
             }
-        elif "exactly visible_boundaries" in system:
+        elif "visible_boundaries" in system and "addressee_plan" in system:
             result = {
                 "visible_boundaries": ["visible boundary"],
                 "addressee_plan": ["current participant"],
             }
-        elif "exactly visual_directives" in system:
+        elif "visual_directives" in system:
             result = {"visual_directives": "private image composition"}
         else:
             raise AssertionError("unexpected surface stage")

@@ -240,7 +240,7 @@ def canonical_cognition_output(
         "private_monologue": "I want to acknowledge this clearly.",
         "expression_policy": {
             "visibility": "visible" if route == "speech" else "none",
-            "emotional_tone": "composed",
+            "emotional_tone": "平静",
             "intensity": "restrained",
             "directness": "balanced",
         },

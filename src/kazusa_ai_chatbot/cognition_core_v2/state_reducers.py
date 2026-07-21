@@ -1093,7 +1093,7 @@ def create_deterministic_goals(
                 "relationship_connection",
                 relationship_root,
                 connection_value,
-                "restore or deepen the valued relationship connection",
+                "恢复或加深珍贵的关系连接",
                 relationship.get("evidence_refs", []),
                 [{
                     "role": "affected_relationship",
@@ -1106,7 +1106,7 @@ def create_deterministic_goals(
                 "autonomy_boundary",
                 relationship_root,
                 _drive_value(constraints, "autonomy", "importance"),
-                "protect the current relationship boundary",
+                "保护当前关系边界",
                 relationship.get("evidence_refs", []),
                 [{
                     "role": "affected_relationship",
@@ -1134,7 +1134,7 @@ def create_deterministic_goals(
                 "bond_protection",
                 threat_root,
                 max(relationship["attachment"], threat["expected_harm"]),
-                "protect the valued relationship from the active threat",
+                "保护珍贵关系免受当前威胁",
                 threat.get("evidence_refs", []),
                 threat_roles,
             )
@@ -1143,7 +1143,7 @@ def create_deterministic_goals(
                 "trust_verification",
                 threat_root,
                 max(relationship["attachment"], threat["uncertainty"]),
-                "verify the uncertain threat to the relationship",
+                "核实关系面临的不确定威胁",
                 threat.get("evidence_refs", []),
                 threat_roles,
             )
@@ -1160,7 +1160,7 @@ def create_deterministic_goals(
                     threat["expected_harm"],
                     _drive_value(constraints, "safety", "importance"),
                 ),
-                "reduce the active threat and preserve safety",
+                "降低当前威胁并维护安全",
                 threat.get("evidence_refs", []),
                 threat_roles,
             )
@@ -1176,7 +1176,7 @@ def create_deterministic_goals(
                     _drive_value(constraints, "care", "importance"),
                     threat["residual_pressure"],
                 ),
-                "care for the other experiencer under pressure",
+                "在压力下照顾其他体验者",
                 threat.get("evidence_refs", []),
                 threat_roles,
             )
@@ -1198,7 +1198,7 @@ def create_deterministic_goals(
                 "obstruction_resolution",
                 goal_root,
                 goal["importance"],
-                "remove the obstruction blocking an important goal",
+                "消除阻碍重要目标的障碍",
                 goal.get("evidence_refs", []),
                 goal_roles,
             )
@@ -1207,7 +1207,7 @@ def create_deterministic_goals(
                 "loss_recovery",
                 goal_root,
                 goal["importance"],
-                "recover from the failed important goal",
+                "从失败的重要目标中恢复",
                 goal.get("evidence_refs", []),
                 goal_roles,
             )
@@ -1226,7 +1226,7 @@ def create_deterministic_goals(
                     event["identity_threat"],
                     event["unfairness"],
                 ),
-                "protect autonomy and repair the violated boundary",
+                "保护自主性并修复被侵犯的边界",
                 event.get("evidence_refs", []),
                 event_roles,
             )
@@ -1242,7 +1242,7 @@ def create_deterministic_goals(
                     _drive_value(constraints, "integrity", "importance"),
                     event["repair_need"],
                 ),
-                "repair the self-caused moral injury",
+                "修复当前角色造成的道德伤害",
                 event.get("evidence_refs", []),
                 event_roles,
             )
@@ -1255,7 +1255,7 @@ def create_deterministic_goals(
                 "social_care",
                 event_root,
                 max(_drive_value(constraints, "care", "importance"), event["harm"]),
-                "care for the other experiencer under pressure",
+                "在压力下照顾其他体验者",
                 event.get("evidence_refs", []),
                 event_roles,
             )
@@ -1268,7 +1268,7 @@ def create_deterministic_goals(
                 "reciprocity",
                 event_root,
                 event["outcome_impact"],
-                "respond reciprocally to the other actor's positive outcome",
+                "回应其他行动者的正向结果",
                 event.get("evidence_refs", []),
                 event_roles,
             )
@@ -1277,7 +1277,7 @@ def create_deterministic_goals(
                 "loss_recovery",
                 event_root,
                 -event["outcome_impact"],
-                "recover from the current negative outcome",
+                "从当前负面结果中恢复",
                 event.get("evidence_refs", []),
                 event_roles,
             )
@@ -1296,7 +1296,7 @@ def create_deterministic_goals(
                     event["comparison_gap"],
                     _drive_value(constraints, "competence", "pressure"),
                 ),
-                "improve in response to the comparison gap",
+                "针对比较差距进行自我提升",
                 event.get("evidence_refs", []),
                 event_roles,
             )
@@ -1315,7 +1315,7 @@ def create_deterministic_goals(
                     gap["relevance"],
                     _drive_value(constraints, "exploration", "importance"),
                 ),
-                "explore the open learnable knowledge gap",
+                "探索仍开放且可学习的知识缺口",
                 gap.get("evidence_refs", []),
                 list(gap.get("role_refs", [])),
             )
@@ -1337,7 +1337,7 @@ def create_deterministic_goals(
                 100 - meaning["purpose_coherence"],
                 100 - meaning["agency"],
             ),
-            "reconstruct meaning while purpose and agency remain low",
+            "在目标感和能动性偏低时重建意义",
             episode_evidence_refs[:1],
             [],
         )
