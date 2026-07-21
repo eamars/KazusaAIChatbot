@@ -12,6 +12,11 @@ import httpx
 import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from kazusa_ai_chatbot.cognition_core_v2 import (
+    run_cognition,
+    run_text_surface_planning,
+)
+from tests.cognition_core_v2_test_helpers import canonical_user_message_episode
 from kazusa_ai_chatbot.config import (
     COGNITION_LLM_API_KEY,
     COGNITION_LLM_BASE_URL,
@@ -25,7 +30,14 @@ from kazusa_ai_chatbot.llm_interface import (
     LLMThinkingConfig,
 )
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
-from kazusa_ai_chatbot.cognition_chain_core.stages.l3 import call_content_plan_agent
+from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
+    build_cognition_core_services,
+    build_cognition_input_from_global_state,
+)
+from kazusa_ai_chatbot.nodes.persona_supervisor2_l3_surface import (
+    _build_text_surface_services,
+    build_text_surface_input_from_global_state,
+)
 from kazusa_ai_chatbot.time_boundary import (
     build_turn_clock_from_storage_utc,
     storage_utc_now_iso,
@@ -161,8 +173,8 @@ def _build_character_profile() -> dict:
 
     profile = load_personality(_PERSONALITY_PATH)
     profile.setdefault("mood", "Neutral")
-    profile.setdefault("global_vibe", "Focused")
-    profile.setdefault("reflection_summary", '用户正在长时间修改答辩 PPT，需要具体推进而不是重复安抚。')
+    profile.setdefault("vibe_check", "Focused")
+    profile.setdefault("character_reflection", '用户正在长时间修改答辩 PPT，需要具体推进而不是重复安抚。')
     return profile
 
 
@@ -346,10 +358,10 @@ def _base_state() -> dict:
         "user_name": "答辩人",
         "platform_user_id": "flow-user",
         "user_profile": {
-            "affinity": 700,
+            "relationship_state": 700,
             "active_commitments": [],
             "facts": [],
-            "last_relationship_insight": '用户信任千纱，但现在需要能推进 PPT 的具体判断。',
+            "semantic_relationship_projection": '用户信任千纱，但现在需要能推进 PPT 的具体判断。',
         },
         "platform_bot_id": "flow-bot",
         "chat_history_wide": history,
@@ -369,34 +381,61 @@ def _base_state() -> dict:
     }
 
 
-def _dialog_state_from_anchor(state: dict, content_plan: list[str]) -> dict:
-    """Attach fixed style/context directives around live content plan.
+def _attach_cognitive_episode(state: dict[str, Any]) -> None:
+    """Attach the canonical text-chat episode consumed by V2 cognition."""
 
-    Args:
-        state: Base global state for the live case.
-        content_plan: content plan returned by the live Content Plan
-            agent.
+    state["cognitive_episode"] = canonical_user_message_episode(
+        episode_id=f"conversation-flow:{state['platform_message_id']}",
+        percept_id=f"conversation-flow:{state['platform_message_id']}:dialog",
+        storage_timestamp_utc=state["storage_timestamp_utc"],
+        local_time_context=state["local_time_context"],
+        user_input=state["user_input"],
+        platform=state["platform"],
+        platform_channel_id=state["platform_channel_id"],
+        channel_type=state["channel_type"],
+        platform_message_id=state["platform_message_id"],
+        platform_user_id=state["platform_user_id"],
+        global_user_id=state["global_user_id"],
+        user_name=state["user_name"],
+        active_turn_platform_message_ids=[state["platform_message_id"]],
+        active_turn_conversation_row_ids=[],
+        debug_modes={},
+    )
 
-    Returns:
-        Global state ready for the dialog agent.
-    """
 
-    state["action_directives"] = {
-        "linguistic_directives": {
-            "rhetorical_strategy": '先轻轻压住焦虑，再直接给出第三条贡献的落点。',
-            "linguistic_style": '短句、具体、不要泛泛安抚；可以保留一点迟疑，但必须落到 PPT 内容。',
-            "accepted_user_preferences": [],
-            "content_plan": content_plan,
-            "forbidden_phrases": ['我会一直陪你', '慢慢来', '我在这里'],
-        },
-        "contextual_directives": {
-            "social_distance": '亲近但工作聚焦；用户需要具体推进，不需要再次确认陪伴。',
-            "emotional_intensity": '疲惫和卡顿感明显，但仍能接收短而具体的建议。',
-            "vibe_check": '深夜赶稿的焦虑和信任混在一起。',
-            "relational_dynamic": '用户把千纱当成能继续接住上下文的人，而不是只安抚的人。',
-        },
-    }
-    return state
+async def _run_v2_cognition_and_dialog(
+    state: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Run canonical V2 cognition, surface planning, and dialog rendering."""
+
+    _attach_cognitive_episode(state)
+    cognition_input = build_cognition_input_from_global_state(state)
+    cognition_output = await run_cognition(
+        cognition_input,
+        build_cognition_core_services(),
+    )
+    assert cognition_output["intention"]["route"] == "speech"
+    state["cognition_input"] = cognition_input
+    state["cognition_core_output"] = cognition_output
+    state["internal_monologue"] = cognition_output["private_monologue"]
+    state["should_respond"] = True
+    state["debug_modes"] = {}
+
+    surface_input = build_text_surface_input_from_global_state(
+        state,
+        interaction_style_context=(
+            "Keep the established character voice while advancing the current "
+            "grounded conversation thread."
+        ),
+    )
+    surface_output = await run_text_surface_planning(
+        surface_input,
+        _build_text_surface_services(),
+    )
+    state["text_surface_input_v2"] = surface_input
+    state["text_surface_output_v2"] = surface_output
+    dialog = await dialog_agent(state)
+    return state, dialog
 
 
 async def _judge_flow(state: dict, dialog: dict) -> dict[str, Any]:
@@ -415,7 +454,7 @@ async def _judge_flow(state: dict, dialog: dict) -> dict[str, Any]:
         "current_user_input": state["user_input"],
         "chat_history_recent": state["chat_history_recent"],
         "conversation_progress": state["conversation_progress"],
-        "content_plan": state["action_directives"]["linguistic_directives"]["content_plan"],
+        "content_plan": state["text_surface_output_v2"]["content_plan"],
         "final_dialog": dialog["final_dialog"],
     }
     response = await _llm_interface.ainvoke(
@@ -441,7 +480,7 @@ async def _judge_flow(state: dict, dialog: dict) -> dict[str, Any]:
     return judgment
 
 
-def _continuity_metrics(content_plan: list[str], final_dialog: list[str]) -> dict[str, Any]:
+def _continuity_metrics(content_plan: str, final_dialog: list[str]) -> dict[str, Any]:
     """Compute concrete A/B flags over the generated LLM output.
 
     Args:
@@ -453,7 +492,7 @@ def _continuity_metrics(content_plan: list[str], final_dialog: list[str]) -> dic
         Inspectable continuity metrics for before/after comparison.
     """
 
-    generated_text = "\n".join([*content_plan.values(), *final_dialog])
+    generated_text = "\n".join([content_plan, *final_dialog])
     generic_reassurance_hits = [
         phrase
         for phrase in ("陪你", "我在", "慢慢", "别急", "stay with")
@@ -495,7 +534,7 @@ def _release_case_state(case: dict[str, Any]) -> dict:
     """
 
     profile = _build_character_profile()
-    profile["reflection_summary"] = case["reflection_summary"]
+    profile["character_reflection"] = case["character_reflection"]
     storage_timestamp_utc = storage_utc_now_iso()
     turn_clock = build_turn_clock_from_storage_utc(storage_timestamp_utc)
     return {
@@ -512,10 +551,10 @@ def _release_case_state(case: dict[str, Any]) -> dict:
         "user_name": case.get("user_name", "User"),
         "platform_user_id": "flow-user",
         "user_profile": {
-            "affinity": 700,
+            "relationship_state": 700,
             "active_commitments": [],
             "facts": [],
-            "last_relationship_insight": case["relationship_insight"],
+            "semantic_relationship_projection": case["relationship_insight"],
         },
         "platform_bot_id": "flow-bot",
         "chat_history_wide": case["history"],
@@ -530,36 +569,6 @@ def _release_case_state(case: dict[str, Any]) -> dict:
         "character_intent": case.get("character_intent", "PROVIDE"),
         "conversation_progress": case["conversation_progress"],
     }
-
-
-def _release_dialog_state_from_anchor(state: dict, case: dict[str, Any], content_plan: list[str]) -> dict:
-    """Attach release-case style and context directives.
-
-    Args:
-        state: Base global state for the release case.
-        case: Release flow fixture.
-        content_plan: content plan returned by Content Plan.
-
-    Returns:
-        Global state ready for the Dialog Agent.
-    """
-
-    state["action_directives"] = {
-        "linguistic_directives": {
-            "rhetorical_strategy": case["rhetorical_strategy"],
-            "linguistic_style": case["linguistic_style"],
-            "accepted_user_preferences": [],
-            "content_plan": content_plan,
-            "forbidden_phrases": case["forbidden_phrases"],
-        },
-        "contextual_directives": {
-            "social_distance": case["social_distance"],
-            "emotional_intensity": case["emotional_intensity"],
-            "vibe_check": case["vibe_check"],
-            "relational_dynamic": case["relational_dynamic"],
-        },
-    }
-    return state
 
 
 async def _judge_release_flow(case: dict[str, Any], state: dict, dialog: dict) -> dict[str, Any]:
@@ -579,7 +588,7 @@ async def _judge_release_flow(case: dict[str, Any], state: dict, dialog: dict) -
         "flow_target": case["flow_target"],
         "current_user_input": state["user_input"],
         "conversation_progress": state["conversation_progress"],
-        "content_plan": state["action_directives"]["linguistic_directives"]["content_plan"],
+        "content_plan": state["text_surface_output_v2"]["content_plan"],
         "final_dialog": dialog["final_dialog"],
     }
     response = await _llm_interface.ainvoke(
@@ -618,13 +627,11 @@ async def _run_release_flow_case(case: dict[str, Any], ensure_live_llm) -> dict[
 
     del ensure_live_llm
 
-    state = _release_case_state(case)
-    anchor_result = await call_content_plan_agent(state)
-    content_plan = anchor_result["content_plan"]
-    assert content_plan, f"Content Plan returned no anchors: {anchor_result!r}"
-
-    state = _release_dialog_state_from_anchor(state, case, content_plan)
-    dialog = await dialog_agent(state)
+    state, dialog = await _run_v2_cognition_and_dialog(
+        _release_case_state(case),
+    )
+    content_plan = state["text_surface_output_v2"]["content_plan"]
+    assert content_plan, f"V2 surface returned no content plan: {state!r}"
     final_dialog = dialog["final_dialog"]
     assert isinstance(final_dialog, list), f"Unexpected dialog output: {dialog!r}"
     assert any(str(segment).strip() for segment in final_dialog), f"Blank final dialog: {dialog!r}"
@@ -687,7 +694,7 @@ def _emotional_cool_down_case() -> dict[str, Any]:
             "next_affordances": ['安心したことを受け止める。', '今日はここで閉じてよいと短く支える。'],
             "progression_guidance": "Close gently; do not restart troubleshooting.",
         },
-        "reflection_summary": 'ユーザーは不安から少し落ち着き、今日は会話を閉じたがっている。',
+        "character_reflection": 'ユーザーは不安から少し落ち着き、今日は会話を閉じたがっている。',
         "relationship_insight": 'Kazusa is trusted as a quiet support presence.',
         "channel_topic": 'emotional cooldown after stress',
         "internal_monologue": 'The user is cooling down. Do not solve new problems; support closure.',
@@ -740,7 +747,7 @@ def _practical_debugging_case() -> dict[str, Any]:
             ],
             "progression_guidance": "Move to token/session/header diagnostics; do not repeat cache advice.",
         },
-        "reflection_summary": "The user is debugging a 401 and needs the next diagnostic move.",
+        "character_reflection": "The user is debugging a 401 and needs the next diagnostic move.",
         "relationship_insight": "User expects concise technical continuity.",
         "channel_topic": "login debugging",
         "internal_monologue": "Continue the debug trail from known attempts.",
@@ -788,7 +795,7 @@ def _playful_social_case() -> dict[str, Any]:
             "next_affordances": ['用轻微嘴硬回应。', '保留一点被看穿的感觉。'],
             "progression_guidance": "Stay playful and socially warm; do not turn this into advice.",
         },
-        "reflection_summary": '用户正在和千纱玩笑式互动，不是在求助。',
+        "character_reflection": '用户正在和千纱玩笑式互动，不是在求助。',
         "relationship_insight": '用户喜欢千纱嘴硬但接得住玩笑。',
         "channel_topic": 'playful banter with Kazusa',
         "internal_monologue": 'This is teasing, not a task. Keep it warm and slightly guarded.',
@@ -837,7 +844,7 @@ def _rapid_topic_pivot_case() -> dict[str, Any]:
             "next_affordances": [],
             "progression_guidance": "",
         },
-        "reflection_summary": "The user has sharply switched from baking to urgent travel triage.",
+        "character_reflection": "The user has sharply switched from baking to urgent travel triage.",
         "relationship_insight": "User wants fast practical help in Spanish.",
         "channel_topic": "rapid topic pivot",
         "internal_monologue": "The current input is a sharp pivot. Ignore the cake thread.",
@@ -885,7 +892,7 @@ def _teasing_meta_bot_case() -> dict[str, Any]:
             "next_affordances": ['顺着开一个轻微玩笑。', '把关系感放在回答里。'],
             "progression_guidance": "Treat this as playful meta talk, not a capability question.",
         },
-        "reflection_summary": '用户在用 bot 话题调侃千纱。',
+        "character_reflection": '用户在用 bot 话题调侃千纱。',
         "relationship_insight": '用户希望千纱接住玩笑而不是进入说明模式。',
         "channel_topic": 'meta-bot teasing',
         "internal_monologue": 'This is playful meta discussion. Do not give a system explanation.',
@@ -935,7 +942,7 @@ def _group_reply_chain_case() -> dict[str, Any]:
             "next_affordances": ['承认这是回小周那句。', '在不确定时给出核对建议而不是编造营业信息。'],
             "progression_guidance": "Narrowly handle the reply-chain target; do not absorb unrelated group messages.",
         },
-        "reflection_summary": '群聊话题碎片化，用户明确指定了回复对象。',
+        "character_reflection": '群聊话题碎片化，用户明确指定了回复对象。',
         "relationship_insight": 'Kazusa should track reply-chain scope instead of把群聊全部合成一个任务。',
         "channel_topic": 'fragmented group reply chain',
         "internal_monologue": 'Handle only the ramen-shop reply target. Do not answer unrelated group topics.',
@@ -955,13 +962,9 @@ async def test_live_flow_baseline_thesis_contribution_case(ensure_live_llm) -> N
 
     del ensure_live_llm
 
-    state = _base_state()
-    anchor_result = await call_content_plan_agent(state)
-    content_plan = anchor_result["content_plan"]
-    assert content_plan, f"Content Plan returned no anchors: {anchor_result!r}"
-
-    state = _dialog_state_from_anchor(state, content_plan)
-    dialog = await dialog_agent(state)
+    state, dialog = await _run_v2_cognition_and_dialog(_base_state())
+    content_plan = state["text_surface_output_v2"]["content_plan"]
+    assert content_plan, f"V2 surface returned no content plan: {state!r}"
     final_dialog = dialog["final_dialog"]
     assert isinstance(final_dialog, list), f"Unexpected dialog output: {dialog!r}"
     assert any(str(segment).strip() for segment in final_dialog), f"Blank final dialog: {dialog!r}"

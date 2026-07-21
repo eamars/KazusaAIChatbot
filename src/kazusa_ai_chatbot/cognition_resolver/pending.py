@@ -133,6 +133,8 @@ async def load_matching_pending_resume(
             continue
         if _is_source_message_for_current_turn(pending_resume, state):
             continue
+        if not _is_reply_to_pending_source_message(pending_resume, state):
+            continue
         if _is_created_after_current_turn(pending_resume, current_timestamp_utc):
             continue
         if _is_expired(pending_resume, current_timestamp_utc):
@@ -443,6 +445,21 @@ def _is_source_message_for_current_turn(
     return_value = (
         pending_resume["source_message_id"]
         == _state_text(state, "platform_message_id")
+    )
+    return return_value
+
+
+def _is_reply_to_pending_source_message(
+    pending_resume: ResolverPendingResumeV1,
+    state: GlobalPersonaState,
+) -> bool:
+    """Return whether the current turn replies to the pending source message."""
+
+    reply_context = state["reply_context"]
+    reply_to_message_id = reply_context.get("reply_to_message_id")
+    return_value = (
+        isinstance(reply_to_message_id, str)
+        and reply_to_message_id == pending_resume["source_message_id"]
     )
     return return_value
 

@@ -29,8 +29,8 @@ _DB_CHARACTER_PROFILE = {
     "name": "杏山千纱 (Kyōyama Kazusa)",
     "global_user_id": _CHARACTER_GLOBAL_USER_ID,
     "mood": "Annoyed",
-    "global_vibe": "Slightly Tense",
-    "reflection_summary": "一个小蛋糕只代表暂时缓和，不代表事情完全过去。",
+    "vibe_check": "Slightly Tense",
+    "character_reflection": "一个小蛋糕只代表暂时缓和，不代表事情完全过去。",
 }
 
 _BLANK_USER_PROFILE = {
@@ -40,8 +40,8 @@ _BLANK_USER_PROFILE = {
         "platform_user_id": "3300869207",
         "display_name": "ㅤ",
     }],
-    "affinity": 498,
-    "last_relationship_insight": "对工具化敏感，需要被当作活生生的人对待",
+    "relationship_state": 498,
+    "semantic_relationship_projection": "对工具化敏感，需要被当作活生生的人对待",
 }
 
 

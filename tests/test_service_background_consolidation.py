@@ -117,7 +117,7 @@ def _consolidation_state() -> dict:
         "platform_message_id": "msg-1",
         "global_user_id": "global-user-1",
         "user_name": "Test User",
-        "user_profile": {"global_user_id": "global-user-1", "affinity": 500},
+        "user_profile": {"global_user_id": "global-user-1", "relationship_state": 500},
         "character_profile": {"name": "Character"},
         "action_directives": {"linguistic_directives": {"content_plan": {}}},
         "internal_monologue": "test",
@@ -131,6 +131,42 @@ def _consolidation_state() -> dict:
         "chat_history_recent": [],
     }
     return return_value
+
+
+def _settled_visible_trace() -> dict:
+    """Return a minimal canonical settled trace for consumer tests."""
+
+    return {
+        "schema_version": "episode_trace.v2",
+        "episode_id": "episode-001",
+        "trigger_source": "user_message",
+        "terminal_status": "completed_visible",
+        "cognition_refs": [],
+        "action_specs": [],
+        "action_results": [],
+        "surface_outputs": [{
+            "schema_version": "surface_output.v1",
+            "surface_kind": "text",
+            "visibility": "user_visible",
+            "action_attempt_id": None,
+            "fragments": ["ok"],
+            "artifact_refs": [],
+            "delivery_intent": "deliver_now",
+            "created_at": _CONSOLIDATION_TURN_CLOCK[
+                "storage_timestamp_utc"
+            ],
+        }],
+        "attempt_diagnostics": [],
+        "delivery_correlation": {
+            "schema_version": "delivery_correlation.v1",
+            "delivery_intent": "deliver_now",
+            "tracking_id": "delivery-001",
+            "receipt_status": "pending",
+            "receipt_ref": "",
+        },
+        "created_at": _CONSOLIDATION_TURN_CLOCK["storage_timestamp_utc"],
+        "settled_at": _CONSOLIDATION_TURN_CLOCK["storage_timestamp_utc"],
+    }
 
 
 def _boundary_profile() -> dict:
@@ -259,14 +295,24 @@ def _post_turn_lifecycle_state() -> dict:
         }
     ]
     state["episode_trace"] = {
-        "schema_version": "episode_trace.v1",
+        "schema_version": "episode_trace.v2",
         "episode_id": "episode-001",
         "trigger_source": "user_message",
+        "terminal_status": "completed_visible",
         "cognition_refs": [],
         "action_specs": [],
         "action_results": [],
         "surface_outputs": state["surface_outputs"],
+        "attempt_diagnostics": [],
+        "delivery_correlation": {
+            "schema_version": "delivery_correlation.v1",
+            "delivery_intent": "deliver_now",
+            "tracking_id": "delivery-001",
+            "receipt_status": "pending",
+            "receipt_ref": "",
+        },
         "created_at": state["storage_timestamp_utc"],
+        "settled_at": state["storage_timestamp_utc"],
     }
     return state
 
@@ -298,8 +344,8 @@ def _patch_chat_dependencies(
         "_runtime_character_state",
         {
             "mood": "old mood",
-            "global_vibe": "old vibe",
-            "reflection_summary": "old reflection",
+            "vibe_check": "old vibe",
+            "character_reflection": "old reflection",
         },
     )
     monkeypatch.setattr(
@@ -307,8 +353,8 @@ def _patch_chat_dependencies(
         "get_character_runtime_state",
         AsyncMock(return_value={
             "mood": "fresh mood",
-            "global_vibe": "fresh vibe",
-            "reflection_summary": "fresh reflection",
+            "vibe_check": "fresh vibe",
+            "character_reflection": "fresh reflection",
         }),
     )
     monkeypatch.setattr(
@@ -325,13 +371,18 @@ def _patch_chat_dependencies(
         service_module,
         "get_user_profile",
         AsyncMock(
-            return_value={"global_user_id": "global-user-1", "affinity": 500},
+            return_value={"global_user_id": "global-user-1", "relationship_state": 500},
         ),
     )
     monkeypatch.setattr(
         service_module,
         "get_conversation_history",
         AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "build_promoted_reflection_context",
+        AsyncMock(return_value={}),
     )
     monkeypatch.setattr(
         service_module,
@@ -392,6 +443,11 @@ def _patch_chat_dependencies(
         service_module,
         "save_conversation",
         AsyncMock(return_value="conversation-row-1"),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "upsert_post_turn_lifecycle_record",
+        AsyncMock(),
     )
     if patch_post_turn_lifecycle:
         monkeypatch.setattr(
@@ -1079,7 +1135,7 @@ async def test_post_turn_lifecycle_iterates_after_productive_passes() -> None:
         APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
         APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     ]
-    assert updated["episode_trace"]["action_results"] == updated["action_results"]
+    assert updated["episode_trace"]["action_results"] == []
     assert [
         action_spec["params"]["unit_id"]
         for action_spec in updated["action_specs"]
@@ -1526,22 +1582,27 @@ async def test_graph_failure_does_not_stop_queue_worker(monkeypatch):
     background_tasks = BackgroundTasks()
     response = await service_module.chat(_chat_request(), background_tasks)
 
-    assert response.messages == ["Character is busy right now, please try again later."]
+    assert response.messages == [service_module.OPERATIONAL_FAILURE_NOTICE]
+    assert response.content_type == "operational_error"
+    assert response.delivery_tracking_id == ""
+    assert response.operational_error is not None
+    assert response.operational_error.error_code == "internal_invariant"
+    assert response.operational_error.status == "failed"
     assert len(background_tasks.tasks) == 0
     await _reset_queue_state()
 
 
 @pytest.mark.asyncio
 async def test_background_consolidation_refreshes_cached_character_state(monkeypatch):
-    """Successful character-state writes should update the service cache."""
+    """Consolidation cannot author the cognition-owned character state cache."""
 
     monkeypatch.setattr(
         service_module,
         "_runtime_character_state",
         {
             "mood": "old mood",
-            "global_vibe": "old vibe",
-            "reflection_summary": "old reflection",
+            "vibe_check": "old vibe",
+            "character_reflection": "old reflection",
         },
     )
     monkeypatch.setattr(
@@ -1549,8 +1610,8 @@ async def test_background_consolidation_refreshes_cached_character_state(monkeyp
         "call_consolidation_subgraph",
         AsyncMock(return_value={
             "mood": "Curious",
-            "global_vibe": "Focused",
-            "reflection_summary": "The previous turn left her attentive.",
+            "vibe_check": "Focused",
+            "character_reflection": "The previous turn left her attentive.",
             "consolidation_metadata": {
                 "write_success": {
                     "character_state": True,
@@ -1564,12 +1625,11 @@ async def test_background_consolidation_refreshes_cached_character_state(monkeyp
         "local_time_context": _CONSOLIDATION_TURN_CLOCK["local_time_context"],
     })
 
-    assert service_module._runtime_character_state["mood"] == "Curious"
-    assert service_module._runtime_character_state["global_vibe"] == "Focused"
-    assert (
-        service_module._runtime_character_state["reflection_summary"]
-        == "The previous turn left her attentive."
-    )
+    assert service_module._runtime_character_state == {
+        "mood": "old mood",
+        "vibe_check": "old vibe",
+        "character_reflection": "old reflection",
+    }
 
 
 @pytest.mark.asyncio
@@ -1577,6 +1637,7 @@ async def test_progress_background_passes_character_boundary_profile(monkeypatch
     """Progress recorder receives the character boundary profile from the snapshot."""
 
     state = _consolidation_state()
+    state["episode_trace"] = _settled_visible_trace()
     boundary_profile = _boundary_profile()
     state["character_profile"]["boundary_profile"] = boundary_profile
     record_turn_progress = AsyncMock(return_value={
@@ -1605,6 +1666,7 @@ async def test_progress_background_requires_character_boundary_profile(monkeypat
     """Missing character boundary configuration is a state-shape bug."""
 
     state = _consolidation_state()
+    state["episode_trace"] = _settled_visible_trace()
     record_turn_progress = AsyncMock()
     monkeypatch.setattr(
         service_module,
@@ -1624,6 +1686,9 @@ async def test_build_graph_preserves_consolidation_state_from_supervisor(monkeyp
 
     async def _persona_supervisor(_state):
         return {
+            "cognition_core_output": {},
+            "cognition_state_update": {},
+            "cognition_state_committed": True,
             "final_dialog": ["好呀。"],
             "future_promises": [],
             "consolidation_state": {
@@ -1668,7 +1733,7 @@ async def test_build_graph_preserves_consolidation_state_from_supervisor(monkeyp
         "user_name": "蚝爹油",
         "user_input": "一分钟后发消息",
         "user_multimedia_input": [],
-        "user_profile": {"global_user_id": "global-user-1", "affinity": 500},
+        "user_profile": {"global_user_id": "global-user-1", "relationship_state": 500},
         "platform_bot_id": "bot-id",
         "character_name": "Character",
         "character_profile": {"name": "杏山千纱"},
@@ -1693,6 +1758,9 @@ async def test_build_graph_preserves_persona_no_response(monkeypatch):
 
     async def _persona_supervisor(_state):
         return {
+            "cognition_core_output": {},
+            "cognition_state_update": {},
+            "cognition_state_committed": True,
             "should_respond": False,
             "final_dialog": [],
             "target_addressed_user_ids": [],
@@ -1737,7 +1805,7 @@ async def test_build_graph_preserves_persona_no_response(monkeypatch):
         "user_name": "Test User",
         "user_input": "ignored message",
         "user_multimedia_input": [],
-        "user_profile": {"global_user_id": "global-user-1", "affinity": 500},
+        "user_profile": {"global_user_id": "global-user-1", "relationship_state": 500},
         "platform_bot_id": "bot-id",
         "character_name": "Character",
         "character_profile": {"name": "Character"},
@@ -1755,6 +1823,20 @@ async def test_build_graph_preserves_persona_no_response(monkeypatch):
     assert result["should_respond"] is False
     assert result["final_dialog"] == []
     assert result["consolidation_state"]["should_respond"] is False
+
+
+def test_brain_terminal_requires_v2_output_update_and_commit_marker() -> None:
+    """Terminal handling should fail closed before an incomplete V2 commit."""
+
+    from kazusa_ai_chatbot.brain_service.graph import validate_v2_terminal_state
+
+    with pytest.raises(ValueError, match="not committed"):
+        validate_v2_terminal_state({})  # type: ignore[arg-type]
+    assert validate_v2_terminal_state({
+        "cognition_core_output": {},
+        "cognition_state_update": {},
+        "cognition_state_committed": True,
+    }) == {}  # type: ignore[arg-type]
 
 
 @pytest.mark.asyncio
@@ -1786,7 +1868,7 @@ async def test_build_graph_skips_episode_state_loader_when_relevance_declines(mo
         "user_name": "Test User",
         "user_input": "third party chat",
         "user_multimedia_input": [],
-        "user_profile": {"global_user_id": "global-user-1", "affinity": 500},
+        "user_profile": {"global_user_id": "global-user-1", "relationship_state": 500},
         "platform_bot_id": "bot-id",
         "character_name": "Character",
         "character_profile": {"name": "Character"},
@@ -1818,8 +1900,8 @@ async def test_chat_listen_only_drops_before_graph(monkeypatch):
         "_runtime_character_state",
         {
             "mood": "old mood",
-            "global_vibe": "old vibe",
-            "reflection_summary": "old reflection",
+            "vibe_check": "old vibe",
+            "character_reflection": "old reflection",
         },
     )
     monkeypatch.setattr(
@@ -1827,8 +1909,8 @@ async def test_chat_listen_only_drops_before_graph(monkeypatch):
         "get_character_runtime_state",
         AsyncMock(return_value={
             "mood": "fresh mood",
-            "global_vibe": "fresh vibe",
-            "reflection_summary": "fresh reflection",
+            "vibe_check": "fresh vibe",
+            "character_reflection": "fresh reflection",
         }),
     )
     monkeypatch.setattr(
@@ -1845,7 +1927,7 @@ async def test_chat_listen_only_drops_before_graph(monkeypatch):
         service_module,
         "get_user_profile",
         AsyncMock(
-            return_value={"global_user_id": "global-user-1", "affinity": 500},
+            return_value={"global_user_id": "global-user-1", "relationship_state": 500},
         ),
     )
     monkeypatch.setattr(

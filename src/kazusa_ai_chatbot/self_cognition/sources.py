@@ -56,9 +56,6 @@ from kazusa_ai_chatbot.utils import text_or_empty
 _CHARACTER_PROFILE_FIELDS = frozenset(
     (
         "name",
-        "mood",
-        "global_vibe",
-        "reflection_summary",
         "personality_brief",
         "boundary_profile",
         "linguistic_texture_profile",
@@ -566,6 +563,7 @@ async def collect_commitment_due_cognition_cases(
                 "trigger_kind": models.TRIGGER_ACTIVE_COMMITMENT_DUE_CHECK,
                 "source_calendar_run_id": run_id,
                 "source_calendar_skip_reason": handler_result["reason"],
+                "cognition_source": handler_result["cognition_source"],
             })
             continue
         if handler_result.get("status") != "case_created":
@@ -740,12 +738,8 @@ def _build_group_review_case(
         },
         "character_profile": _project_character_profile(character_profile),
         "user_profile": {
-            "affinity": models.DEFAULT_SELF_COGNITION_AFFINITY,
             "display_name": "group audience",
-            "last_relationship_insight": "",
         },
-        "current_mood": text_or_empty(character_profile.get("mood")),
-        "global_vibe": text_or_empty(character_profile.get("global_vibe")),
     }
     channel_name = usable_channel_label(
         channel_type='group',
@@ -1421,11 +1415,17 @@ def _build_scheduled_future_cognition_case(
         },
         "character_profile": _project_character_profile(character_profile),
         "user_profile": case_user_profile,
-        "current_mood": text_or_empty(character_profile.get("mood")),
-        "global_vibe": text_or_empty(character_profile.get("global_vibe")),
         "platform_bot_id": source_platform_bot_id,
         "source_calendar_run_id": run_id,
         "source_action_attempt_id": source_action_attempt_id,
+        "cognition_source": {
+            "source_kind": "scheduler_event",
+            "source_id": run_id,
+            "occurred_at": due_at,
+            "semantic_summary": (
+                f"scheduled cognition became due: {continuation_objective}"
+            ),
+        },
     }
     return case
 
@@ -1613,8 +1613,6 @@ def _build_active_commitment_case(
         "visible_context": _visible_context(rows),
         "character_profile": _project_character_profile(character_profile),
         "user_profile": dict(user_profile),
-        "current_mood": text_or_empty(character_profile.get("mood")),
-        "global_vibe": text_or_empty(character_profile.get("global_vibe")),
     }
     return case
 

@@ -17,7 +17,7 @@ def test_desktop_visual_acceptance_for_cards_buttons_and_branding(
         page.locator("#login").click()
         page.wait_for_selector("#overview-grid .metric")
         assert page.locator("#login-form").is_hidden()
-        assert "Kazusa" not in page.locator("#brand-name").inner_text()
+        assert page.locator("#brand-name").inner_text().strip()
 
         pages = [
             "overview",
@@ -105,7 +105,7 @@ def test_desktop_visual_acceptance_for_cards_buttons_and_branding(
                 "checked_pages": pages,
                 "checked_invariants": [
                     "token field hidden after login",
-                    "database fallback brand does not say Kazusa",
+                    "database identity brand is non-empty",
                     "active page cards do not horizontally overflow",
                     "visible buttons do not clip labels",
                     "live-log copy button keeps fixed width",

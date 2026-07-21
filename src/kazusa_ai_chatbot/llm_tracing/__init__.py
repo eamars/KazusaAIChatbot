@@ -7,6 +7,7 @@ import hashlib
 import json
 import logging
 from collections.abc import Sequence
+from contextvars import ContextVar, Token
 from typing import Literal, TypedDict
 from uuid import uuid4
 
@@ -21,6 +22,10 @@ logger = logging.getLogger(__name__)
 
 LLM_TRACE_WRITE_TIMEOUT_SECONDS = 0.25
 TraceWriteStatus = Literal["recorded", "skipped", "failed"]
+_CURRENT_TRACE_ID: ContextVar[str] = ContextVar(
+    "kazusa_llm_trace_id",
+    default="",
+)
 
 
 class LLMTraceWriteResult(TypedDict):
@@ -37,6 +42,24 @@ def build_trace_id() -> str:
 
     trace_id = f"llmtrace_{uuid4().hex}"
     return trace_id
+
+
+def bind_trace_id(trace_id: str) -> Token[str]:
+    """Bind one trace id to the current async turn context."""
+
+    return _CURRENT_TRACE_ID.set(trace_id)
+
+
+def current_trace_id() -> str:
+    """Return the trace id bound to the current async turn context."""
+
+    return _CURRENT_TRACE_ID.get()
+
+
+def reset_trace_id(token: Token[str]) -> None:
+    """Restore the prior async trace context."""
+
+    _CURRENT_TRACE_ID.reset(token)
 
 
 def _write_result(

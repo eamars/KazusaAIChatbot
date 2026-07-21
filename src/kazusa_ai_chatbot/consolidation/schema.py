@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, TypedDict
+from typing import Annotated, NotRequired, TypedDict
 
 
 from kazusa_ai_chatbot.consolidation.origin import (
@@ -62,6 +62,12 @@ def content_plan_from_action_directives(
         return_value: dict[str, str] = {}
         return return_value
 
+    if action_directives.get("schema_version") == "text_surface_output.v2":
+        content_plan = action_directives.get("content_plan")
+        if isinstance(content_plan, str) and content_plan.strip():
+            return {"semantic_content": content_plan.strip()}
+        return {}
+
     linguistic_directives = action_directives.get("linguistic_directives")
     if not isinstance(linguistic_directives, dict):
         return_value = {}
@@ -97,11 +103,14 @@ class ConsolidatorState(TypedDict):
     platform_message_id: str
 
     # Character related
-    action_directives: dict
+    cognition_core_output: NotRequired[dict]
+    action_directives: NotRequired[dict]
+    text_surface_output_v2: NotRequired[dict]
     internal_monologue: str
     final_dialog: list
     episode_trace_projection: dict
     interaction_subtext: str
+    subjective_appraisals: list[str]
     emotional_appraisal: str
     character_intent: str
     logical_stance: str
@@ -120,16 +129,6 @@ class ConsolidatorState(TypedDict):
     metadata: Annotated[dict, _merge_dicts]
     consolidation_origin: ConsolidationOriginMetadata
     consolidation_target_plan: ConsolidationTargetPlan
-
-    # global state updater
-    mood: str
-    global_vibe: str
-    reflection_summary: str
-
-    # Relationship recorder
-    subjective_appraisals: list[str]
-    affinity_delta: int
-    last_relationship_insight: str
 
     # Consolidation memory rows
     new_facts: list[dict]

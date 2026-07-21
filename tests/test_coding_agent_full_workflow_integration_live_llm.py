@@ -19,15 +19,6 @@ from kazusa_ai_chatbot.action_spec.registry import (
     build_initial_action_capabilities,
     project_prompt_affordances,
 )
-from kazusa_ai_chatbot.cognition_chain_core.contracts import LLMStageBinding
-from kazusa_ai_chatbot.cognition_chain_core.stages import l2d
-from kazusa_ai_chatbot.cognition_chain_core.stages import l3
-from kazusa_ai_chatbot.cognition_chain_core.stages.l2d import (
-    select_semantic_actions,
-)
-from kazusa_ai_chatbot.cognition_chain_core.stages.l3 import (
-    call_content_plan_agent,
-)
 from kazusa_ai_chatbot.config import (
     CODING_AGENT_PM_LLM_BASE_URL,
     COGNITION_LLM_BASE_URL,
@@ -36,7 +27,10 @@ from kazusa_ai_chatbot.nodes import (
     persona_supervisor2_cognition_actions as action_connector,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
-    build_cognition_chain_services,
+    build_cognition_core_services,
+)
+from kazusa_ai_chatbot.nodes.persona_supervisor2_l3_surface import (
+    _build_text_surface_services,
 )
 from tests.llm_trace import write_llm_trace
 from tests.test_coding_agent_phase3_handoff_e2e import (
@@ -726,7 +720,7 @@ async def test_live_gate_14_result_ready_blocker_question_survives_delivery(
         }},
     })
     state = _result_ready_content_plan_state(episode)
-    services = build_cognition_chain_services()
+    services = _build_text_surface_services()
     capturing_llm = _CapturingLLM(services.llm)
     token = l3.set_content_plan_agent_llm(
         LLMStageBinding(capturing_llm, services.content_plan_config)
@@ -1239,7 +1233,7 @@ async def _run_live_background_turn(
     )
 
     state = _l2d_state(user_request, coding_run_contexts)
-    services = build_cognition_chain_services()
+    services = build_cognition_core_services()
     capturing_llm = _CapturingLLM(services.llm)
     token = l2d.set_action_selection_llm(
         LLMStageBinding(capturing_llm, services.action_selection_config)
@@ -1347,7 +1341,7 @@ def _install_in_memory_persistence(
     monkeypatch.setattr(
         accepted_lifecycle,
         "repository_mark_result_ready",
-        store.mark_accepted_task_result_ready,
+        store.mark_tool_result_ready,
     )
     monkeypatch.setattr(
         accepted_lifecycle,

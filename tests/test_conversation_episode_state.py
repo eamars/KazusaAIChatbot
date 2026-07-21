@@ -53,6 +53,7 @@ def test_build_episode_state_doc_caps_lists_and_increments_turn_count() -> None:
             "assistant_moves": [f"move {index}" for index in range(12)],
             "overused_moves": [f"overused {index}" for index in range(12)],
             "open_loops": [f"loop {index}" for index in range(12)],
+            "interaction_obligations": [],
             "progression_guidance": "answer the missing outline point",
         },
         last_user_input="what about the third point?",

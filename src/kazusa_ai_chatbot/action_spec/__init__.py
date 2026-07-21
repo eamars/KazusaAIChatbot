@@ -16,7 +16,6 @@ from kazusa_ai_chatbot.action_spec.registry import (
 )
 from kazusa_ai_chatbot.action_spec.results import (
     build_action_result,
-    build_episode_trace,
     build_private_surface_output,
     build_text_surface_output,
     has_consolidatable_output,
@@ -29,7 +28,6 @@ __all__ = [
     "ActionSpecEvaluator",
     "ActionValidationError",
     "build_action_result",
-    "build_episode_trace",
     "build_initial_action_capabilities",
     "build_private_surface_output",
     "build_text_surface_output",

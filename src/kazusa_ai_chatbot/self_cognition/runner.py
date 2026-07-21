@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import json
+import logging
 from collections.abc import Callable
 from typing import Any
 
@@ -16,10 +16,18 @@ from kazusa_ai_chatbot.action_spec.registry import (
     SPEAK_CAPABILITY,
     TRIGGER_FUTURE_COGNITION_CAPABILITY,
 )
-from kazusa_ai_chatbot.action_spec.results import build_episode_trace
+from kazusa_ai_chatbot.action_spec.results import (
+    build_private_surface_output,
+    build_text_surface_output,
+)
 from kazusa_ai_chatbot.cognition_episode import (
-    CognitiveEpisode,
-    validate_cognitive_episode,
+    CognitiveEpisodeV1,
+    EvidenceRefV1,
+    PerceptV1,
+    TargetScopeV1,
+    build_internal_thought_episode,
+    build_scheduled_tick_episode,
+    build_self_cognition_episode,
 )
 from kazusa_ai_chatbot.config import (
     CHARACTER_GLOBAL_USER_ID,
@@ -29,16 +37,19 @@ from kazusa_ai_chatbot.config import (
 from kazusa_ai_chatbot.cognition_resolver.capabilities import (
     execute_resolver_capability_request,
 )
-from kazusa_ai_chatbot.cognition_resolver.loop import call_cognition_resolver_loop
-from kazusa_ai_chatbot.cognition_resolver.pending import (
-    apply_pending_resolution,
-    upsert_pending_resume,
+from kazusa_ai_chatbot.cognition_resolver.loop import (
+    call_cognition_resolver_loop,
+)
+from kazusa_ai_chatbot.cognition_resolver.state import (
+    ensure_initial_resolver_inputs,
+)
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    validate_text_surface_output,
 )
 from kazusa_ai_chatbot.nodes.dialog_agent import (
     DIALOG_USAGE_MODE_SELF_COGNITION_ACTION_CANDIDATE,
     StateContractError,
     dialog_agent,
-    validate_dialog_action_directives,
 )
 from kazusa_ai_chatbot.consolidation.core import (
     call_consolidation_subgraph,
@@ -48,16 +59,15 @@ from kazusa_ai_chatbot.internal_monologue_residue import (
     record_completed_episode_residue,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
+    build_action_availability_snapshot,
     call_cognition_subgraph,
+    commit_cognition_output,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_l3_surface import (
     call_l3_text_surface_handler,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_memory_lifecycle import (
     call_memory_lifecycle_update_handler,
-)
-from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import (
-    empty_user_memory_context,
 )
 from kazusa_ai_chatbot.runtime_coordination import PipelineRunHandle
 from kazusa_ai_chatbot.self_cognition import models, projection, tracking
@@ -75,6 +85,7 @@ SELF_COGNITION_PRIVATE_ACTION_KINDS = frozenset(
         TRIGGER_FUTURE_COGNITION_CAPABILITY,
     )
 )
+logger = logging.getLogger(__name__)
 
 
 def build_self_cognition_case_artifacts(
@@ -191,6 +202,9 @@ async def build_self_cognition_case_artifacts_async(
         rendered_packet,
         residue_context=residue_context,
     )
+    artifact_payloads[models.RUNTIME_COGNITIVE_EPISODE] = dict(
+        cognition_state["cognitive_episode"]
+    )
     if pipeline_run_handle is not None:
         pipeline_run_handle.raise_if_cancelled("before_cognition")
     cognition_output = await _call_maybe_async(
@@ -208,8 +222,6 @@ async def build_self_cognition_case_artifacts_async(
         )
         if pipeline_run_handle is not None:
             pipeline_run_handle.raise_if_cancelled("after_private_actions")
-    artifact_payloads[models.ARTIFACT_COGNITION_OUTPUT] = cognition_output
-
     existing_attempts = _existing_attempts(case)
     selected_route = tracking.classify_route(case, cognition_output)
     action_attempt = None
@@ -255,17 +267,30 @@ async def build_self_cognition_case_artifacts_async(
                 action_candidate
             )
 
+    cognition_output = dict(cognition_output)
+    cognition_output["surface_outputs"] = _surface_outputs_for_case(
+        cognition_output=cognition_output,
+        dialog_output=dialog_output,
+        action_attempt=action_attempt,
+        created_at=cognition_state["cognitive_episode"]["created_at"],
+    )
+    artifact_payloads[models.ARTIFACT_COGNITION_OUTPUT] = cognition_output
+
+    consolidation_state, dialog_output, dialog_called = (
+        await _build_consolidation_ready_state(
+            cognition_state,
+            cognition_output,
+            rendered_packet,
+            dialog_output=dialog_output,
+        )
+    )
+    artifact_payloads[models.RUNTIME_CONSOLIDATION_STATE] = (
+        consolidation_state
+    )
+
     if apply_consolidation:
         if pipeline_run_handle is not None:
             pipeline_run_handle.raise_if_cancelled("before_consolidation")
-        consolidation_state, dialog_output, dialog_called = (
-            await _build_consolidation_ready_state(
-                cognition_state,
-                cognition_output,
-                rendered_packet,
-                dialog_output=dialog_output,
-            )
-        )
         if dialog_called:
             dialog_calls += models.DIALOG_RENDER_CALL_LIMIT
         active_consolidation_client = (
@@ -341,7 +366,7 @@ async def _load_residue_context_for_case(
 
 
 async def _default_cognition_client(state: dict[str, Any]) -> dict[str, Any]:
-    """Call the shared cognition graph through the resolver loop.
+    """Call the shared cognition graph through the canonical resolver loop.
 
     Args:
         state: Global persona state subset required by the cognition graph.
@@ -350,61 +375,35 @@ async def _default_cognition_client(state: dict[str, Any]) -> dict[str, Any]:
         Shared cognition output.
     """
 
-    cognition_result = await call_cognition_resolver_loop(
-        state,
-        call_cognition_subgraph_func=call_cognition_subgraph,
+    async def cognition_cycle(
+        current_state: dict[str, Any],
+    ) -> dict[str, Any]:
+        update = await call_cognition_subgraph(current_state, commit=False)
+        return_value = dict(update)
+        return return_value
+
+    initialized = ensure_initial_resolver_inputs(
+        state,  # type: ignore[arg-type]
+        max_cycles=COGNITION_RESOLVER_MAX_CYCLES,
+    )
+    resolved_state = await call_cognition_resolver_loop(
+        initialized,
+        call_cognition_subgraph_func=cognition_cycle,  # type: ignore[arg-type]
         execute_capability_func=execute_resolver_capability_request,
         max_cycles=COGNITION_RESOLVER_MAX_CYCLES,
         capability_timeout_seconds=(
             COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS
         ),
-        upsert_pending_resume_func=_non_persistent_pending_resume,
-        apply_pending_resolution_func=_non_persistent_pending_resolution,
     )
-    return cognition_result
-
-
-async def _non_persistent_pending_resume(
-    state: dict[str, Any],
-    observation: dict[str, Any],
-) -> dict[str, Any]:
-    """Build a pending-resume payload without writing a ledger row."""
-
-    pending_resume = await upsert_pending_resume(
-        state,
-        observation,
-        upsert_action_attempt_func=_discard_action_attempt_record,
-    )
-    return pending_resume
-
-
-async def _non_persistent_pending_resolution(
-    state: dict[str, Any],
-    resolution: dict[str, Any],
-) -> dict[str, Any] | None:
-    """Apply pending resolution against self-cognition's in-memory state only."""
-
-    updated_row = await apply_pending_resolution(
-        state,
-        resolution,
-        list_action_attempts_func=_empty_action_attempt_rows,
-        upsert_action_attempt_func=_discard_action_attempt_record,
-    )
-    return updated_row
-
-
-async def _discard_action_attempt_record(record: dict[str, Any]) -> None:
-    """Accept a pending row callback without durable persistence."""
-
-    del record
-
-
-async def _empty_action_attempt_rows(*, limit: int) -> list[dict[str, Any]]:
-    """Return no durable pending rows for internal self-cognition execution."""
-
-    del limit
-    rows: list[dict[str, Any]] = []
-    return rows
+    core_output = resolved_state.get("cognition_core_output")
+    if not isinstance(core_output, dict):
+        raise StateContractError(
+            "V2 self-cognition completed without cognition_core_output"
+        )
+    await commit_cognition_output(core_output)  # type: ignore[arg-type]
+    resolved_state["cognition_state_committed"] = True
+    return_value = dict(resolved_state)
+    return return_value
 
 
 async def _default_dialog_client(state: dict[str, Any]) -> dict[str, Any]:
@@ -434,6 +433,21 @@ async def _default_consolidation_client(state: dict[str, Any]) -> dict[str, Any]
 
     consolidation_result = await call_consolidation_subgraph(state)
     return consolidation_result
+
+
+async def run_self_cognition_consolidation_async(
+    state: dict[str, Any],
+    consolidation_client: SelfCognitionClient | None = None,
+) -> dict[str, Any]:
+    """Run consolidation for a worker-settled self-cognition state."""
+
+    active_client = consolidation_client or _default_consolidation_client
+    result = await _call_maybe_async(active_client, state)
+    if not isinstance(result, dict):
+        raise StateContractError(
+            "self-cognition consolidation result must be an object"
+        )
+    return result
 
 
 async def _call_maybe_async(
@@ -504,6 +518,55 @@ def _build_consolidation_state(
     return consolidation_state
 
 
+def _surface_outputs_for_case(
+    *,
+    cognition_output: dict[str, Any],
+    dialog_output: dict[str, Any] | None,
+    action_attempt: dict[str, Any] | None,
+    created_at: str,
+) -> list[dict[str, Any]]:
+    """Return canonical surface components for the worker settlement owner."""
+
+    if isinstance(dialog_output, dict):
+        raw_surface_outputs = dialog_output.get("surface_outputs")
+        if isinstance(raw_surface_outputs, list):
+            surface_outputs = [
+                dict(surface_output)
+                for surface_output in raw_surface_outputs
+                if (
+                    isinstance(surface_output, dict)
+                    and surface_output.get("schema_version")
+                    == "surface_output.v1"
+                )
+            ]
+            if surface_outputs:
+                return surface_outputs
+
+    fragments = _dialog_fragments(dialog_output or {})
+    action_attempt_id = None
+    if isinstance(action_attempt, dict):
+        raw_attempt_id = action_attempt.get("attempt_id")
+        if isinstance(raw_attempt_id, str) and raw_attempt_id:
+            action_attempt_id = raw_attempt_id
+    if fragments:
+        return [build_text_surface_output(
+            fragments=fragments,
+            created_at=created_at,
+            action_attempt_id=action_attempt_id,
+        )]
+
+    action_specs = cognition_output.get("action_specs")
+    if isinstance(action_specs, list) and action_specs:
+        return [build_private_surface_output(
+            summary="No visible text surface selected for this episode.",
+            created_at=created_at,
+        )]
+    return [build_private_surface_output(
+        summary="Self-cognition completed without a visible surface.",
+        created_at=created_at,
+    )]
+
+
 async def _with_private_action_results(
     cognition_state: dict[str, Any],
     cognition_output: dict[str, Any],
@@ -523,14 +586,14 @@ async def _with_private_action_results(
         private_specs,
         storage_timestamp_utc=cognition_state["storage_timestamp_utc"],
         record_attempt_func=upsert_action_attempt,
+        availability_snapshot_factory=(
+            lambda _context: build_action_availability_snapshot(
+                cognition_state,
+            )
+        ),
     )
     updated_output = dict(routed_output)
     updated_output["action_results"] = action_results
-    updated_output["episode_trace"] = _episode_trace_for_private_actions(
-        cognition_state,
-        updated_output,
-        action_results,
-    )
     return updated_output
 
 
@@ -599,25 +662,6 @@ def _action_specs(cognition_output: dict[str, Any]) -> list[dict[str, Any]]:
     return specs
 
 
-def _episode_trace_for_private_actions(
-    cognition_state: dict[str, Any],
-    cognition_output: dict[str, Any],
-    action_results: list[dict[str, Any]],
-) -> dict[str, Any]:
-    """Build episode trace evidence for private self-cognition actions."""
-
-    episode = cognition_state["cognitive_episode"]
-    trace = build_episode_trace(
-        episode_id=episode["episode_id"],
-        trigger_source=episode["trigger_source"],
-        created_at=cognition_state["storage_timestamp_utc"],
-        action_specs=_action_specs(cognition_output),
-        action_results=action_results,
-        surface_outputs=[],
-    )
-    return trace
-
-
 def _build_cognition_state(
     case: models.SelfCognitionCase,
     rendered_packet: str,
@@ -675,19 +719,11 @@ def _build_cognition_state(
         "should_respond": False,
         "decontexualized_input": models.SELF_COGNITION_INPUT_TEXT,
         "referents": [],
-        "rag_result": _rag_result(case),
         "internal_monologue": "",
-        "action_directives": {},
         "interaction_subtext": "",
         "emotional_appraisal": "",
         "character_intent": "",
         "logical_stance": "",
-        "mood": "",
-        "global_vibe": "",
-        "reflection_summary": "",
-        "subjective_appraisals": [],
-        "affinity_delta": 0,
-        "last_relationship_insight": "",
         "new_facts": [],
         "future_promises": [],
     }
@@ -764,7 +800,13 @@ def _validate_self_cognition_dialog_state(
             f"self-cognition dialog state missing action_specs.speak "
             f"for usage_mode={usage_mode}"
         )
-    validate_dialog_action_directives(dialog_state, usage_mode=usage_mode)
+    surface_output = dialog_state.get("text_surface_output_v2")
+    if not isinstance(surface_output, dict):
+        raise StateContractError(
+            f"self-cognition dialog state missing text_surface_output_v2 "
+            f"for usage_mode={usage_mode}"
+        )
+    validate_text_surface_output(surface_output)
 
 
 def _needs_text_surface_directives(state: dict[str, Any]) -> bool:
@@ -798,20 +840,7 @@ def _has_selected_speak_action(state: dict[str, Any]) -> bool:
 def _has_collected_text_directives(state: dict[str, Any]) -> bool:
     """Return whether dialog already has collected L3 text directives."""
 
-    action_directives = state.get("action_directives")
-    if not isinstance(action_directives, dict):
-        return_value = False
-        return return_value
-    linguistic_directives = action_directives.get("linguistic_directives")
-    if not isinstance(linguistic_directives, dict):
-        return_value = False
-        return return_value
-    contextual_directives = action_directives.get("contextual_directives")
-    if not isinstance(contextual_directives, dict):
-        return_value = False
-        return return_value
-    return_value = True
-    return return_value
+    return isinstance(state.get("text_surface_output_v2"), dict)
 
 
 def _dialog_text(dialog_output: dict[str, Any]) -> str:
@@ -844,60 +873,88 @@ def _build_cognitive_episode(
     *,
     storage_timestamp_utc: str,
     local_time_context: dict[str, str],
-) -> CognitiveEpisode:
-    """Represent the self-cognition source packet as an internal percept."""
+) -> CognitiveEpisodeV1:
+    """Build the canonical self-cognition or scheduled source episode."""
 
     target_scope = _target_scope(case)
     user_id = target_scope["user_id"] or ""
-    percept_content = json.dumps(
-        {
-            "residue": {
-                "residue_id": f"self_cognition:{_string_field(case, 'case_id')}",
-                "internal_monologue": rendered_packet,
-            },
-            "action_latch": {
-                "status": "local_tracking",
-                "outward_action": "allowed_to_be_considered",
-            },
-        },
-        ensure_ascii=False,
-        sort_keys=True,
+    trigger_kind = _string_field(case, "trigger_kind")
+    source_kind = (
+        "scheduled_tick"
+        if trigger_kind in {
+            models.TRIGGER_ACTIVE_COMMITMENT_DUE_CHECK,
+            models.TRIGGER_SCHEDULED_FUTURE_COGNITION,
+        }
+        else "self_cognition"
     )
-    episode: CognitiveEpisode = {
-        "episode_id": f"self_cognition:tracking:{_string_field(case, 'case_id')}",
-        "trigger_source": "internal_thought",
-        "input_sources": ["internal_monologue"],
-        "output_mode": "preview",
-        "percepts": [
-            {
-                "percept_id": "self_cognition:source_packet",
-                "input_source": "internal_monologue",
-                "content": percept_content,
-                "visibility": "model_visible",
-                "metadata": {"source": "self_cognition_source_packet"},
-            },
-        ],
-        "target_scope": {
-            "platform": target_scope["platform"],
-            "platform_channel_id": target_scope["platform_channel_id"],
-            "channel_type": target_scope["channel_type"],
-            "current_platform_user_id": user_id,
-            "current_global_user_id": user_id,
-            "current_display_name": _user_display_name(case, user_id),
-            "target_addressed_user_ids": [user_id] if user_id else [],
-            "target_broadcast": target_scope["channel_type"] == "group",
-        },
-        "origin_metadata": {
-            "platform": target_scope["platform"],
-            "platform_message_id": f"self_cognition:{_string_field(case, 'case_id')}",
-            "active_turn_platform_message_ids": [],
-            "active_turn_conversation_row_ids": [],
-            "debug_modes": {"no_visual_directives": True},
-        },
-        "storage_timestamp_utc": storage_timestamp_utc,
-        "local_time_context": local_time_context,
+    canonical_target_scope: TargetScopeV1 = {
+        "platform": target_scope["platform"],
+        "platform_channel_id": target_scope["platform_channel_id"],
+        "channel_type": target_scope["channel_type"],
+        "current_platform_user_id": user_id,
+        "current_global_user_id": user_id,
+        "current_display_name": _user_display_name(case, user_id),
+        "target_addressed_user_ids": [user_id] if user_id else [],
+        "target_broadcast": target_scope["channel_type"] == "group",
     }
-    validate_cognitive_episode(episode)
+    evidence_ref: EvidenceRefV1 = {
+        "schema_version": "evidence_ref.v1",
+        "evidence_kind": "system_event",
+        "evidence_id": _string_field(case, "case_id"),
+        "owner": "self_cognition.sources",
+        "excerpt": rendered_packet[:800],
+        "observed_at": storage_timestamp_utc,
+    }
+    builder_case = dict(case)
+    builder_case["target_scope"] = canonical_target_scope
+    percept: PerceptV1 = {
+        "schema_version": "percept.v1",
+        "percept_kind": "self_cognition_context",
+        "source_kind": "scheduled_event" if source_kind == "scheduled_tick" else source_kind,
+        "source_id": _string_field(case, "case_id"),
+        "content": {
+            "semantic_text": rendered_packet,
+            "trigger_kind": trigger_kind,
+        },
+        "observed_at": storage_timestamp_utc,
+    }
+    latch = case.get("internal_action_latch")
+    claim_token = _string_field(case, "claim_token")
+    if isinstance(latch, dict) and claim_token:
+        episode = build_internal_thought_episode(
+            latch=latch,
+            evidence_refs=[evidence_ref],
+            local_time_context=local_time_context,
+            created_at=storage_timestamp_utc,
+            claim_token=claim_token,
+        )
+    elif source_kind == "scheduled_tick":
+        calendar_run = case.get("calendar_run")
+        if not isinstance(calendar_run, dict):
+            calendar_run = {
+                "run_id": _string_field(case, "source_calendar_run_id"),
+                "schedule_id": "",
+                "due_at": storage_timestamp_utc,
+            }
+        episode = build_scheduled_tick_episode(
+            case=builder_case,
+            calendar_run=calendar_run,
+            percepts=[percept],
+            evidence_refs=[evidence_ref],
+            local_time_context=local_time_context,
+            created_at=storage_timestamp_utc,
+        )
+    else:
+        episode = build_self_cognition_episode(
+            case=builder_case,
+            percepts=[percept],
+            evidence_refs=[evidence_ref],
+            local_time_context=local_time_context,
+            created_at=storage_timestamp_utc,
+        )
+    episode["origin_metadata"]["debug_modes"] = {
+        "no_visual_directives": True,
+    }
     return episode
 
 
@@ -985,11 +1042,7 @@ def _budget(
 def _resolver_evidence_call_count(cognition_output: dict[str, Any]) -> int:
     """Count resolver-selected evidence observations recorded by cognition."""
 
-    resolver_state = cognition_output.get("resolver_state")
-    if not isinstance(resolver_state, dict):
-        return_value = 0
-        return return_value
-    observations = resolver_state.get("observations")
+    observations = cognition_output.get("resolver_observations")
     if not isinstance(observations, list):
         return_value = 0
         return return_value
@@ -1005,78 +1058,6 @@ def _resolver_evidence_call_count(cognition_output: dict[str, Any]) -> int:
     return return_value
 
 
-def _rag_result(case: models.SelfCognitionCase) -> dict[str, Any]:
-    """Return the baseline RAG projection before resolver-selected retrieval."""
-
-    source_ref_commitments = _active_commitments_from_source_refs(case)
-    memory_context = empty_user_memory_context()
-    memory_context["active_commitments"] = source_ref_commitments
-    return_value = {
-        "answer": "",
-        "user_image": {
-            "user_memory_context": memory_context,
-        },
-        "user_memory_unit_candidates": [],
-        "character_image": {},
-        "third_party_profiles": [],
-        "memory_evidence": [],
-        "recall_evidence": [],
-        "conversation_evidence": [],
-        "external_evidence": [],
-        "supervisor_trace": {
-            "loop_count": 0,
-            "unknown_slots": [],
-            "dispatched": [],
-        },
-    }
-    return return_value
-
-
-def _active_commitments_from_source_refs(
-    case: models.SelfCognitionCase,
-) -> list[dict[str, Any]]:
-    """Build deterministic active-commitment bindings from source refs."""
-
-    trigger_kind = _string_field(case, "trigger_kind")
-    if trigger_kind != models.TRIGGER_ACTIVE_COMMITMENT_DUE_CHECK:
-        return_value: list[dict[str, Any]] = []
-        return return_value
-
-    raw_refs = case.get("source_refs")
-    if not isinstance(raw_refs, list):
-        return_value: list[dict[str, Any]] = []
-        return return_value
-
-    due_state = _string_field(case, "semantic_due_state")
-    commitments: list[dict[str, Any]] = []
-    for raw_ref in raw_refs:
-        if not isinstance(raw_ref, dict):
-            continue
-        source_kind = _string_field(raw_ref, "source_kind")
-        if source_kind != "user_memory_unit":
-            continue
-        unit_id = _string_field(raw_ref, "source_id")
-        summary = _string_field(raw_ref, "summary")
-        if not unit_id or not summary:
-            continue
-        commitment = {
-            "unit_id": unit_id,
-            "fact": summary,
-            "summary": summary,
-            "status": "active",
-        }
-        due_at = _string_field(raw_ref, "due_at")
-        if due_at:
-            local_due_at = format_storage_utc_for_llm(due_at)
-            if local_due_at:
-                commitment["due_at"] = local_due_at
-        if due_state:
-            commitment["due_state"] = due_state
-        commitments.append(commitment)
-    return_value = commitments
-    return return_value
-
-
 def _character_profile(case: models.SelfCognitionCase) -> dict[str, Any]:
     """Return the supplied character profile or a self-cognition default."""
 
@@ -1087,9 +1068,6 @@ def _character_profile(case: models.SelfCognitionCase) -> dict[str, Any]:
 
     profile = {
         "name": "active character",
-        "mood": _string_field(case, "current_mood") or "neutral",
-        "global_vibe": _string_field(case, "global_vibe") or "neutral",
-        "reflection_summary": "",
         "personality_brief": {
             "mbti": "INFP",
             "logic": "relationship-aware and careful",
@@ -1140,11 +1118,7 @@ def _user_profile(case: models.SelfCognitionCase) -> dict[str, Any]:
         display_name = "group audience"
     else:
         display_name = target_scope["user_id"] or "self cognition target"
-    profile = {
-        "affinity": models.DEFAULT_SELF_COGNITION_AFFINITY,
-        "display_name": display_name,
-        "last_relationship_insight": "",
-    }
+    profile = {"display_name": display_name}
     return profile
 
 

@@ -1,343 +1,114 @@
-"""Tests for raw-history exposure policy."""
-
-from __future__ import annotations
+"""V2 conversation-history boundary tests."""
 
 import json
-from pathlib import Path
+from copy import deepcopy
+from types import SimpleNamespace
 
 import pytest
 
-from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
-from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
-from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
-from kazusa_ai_chatbot.cognition_chain_core.stages import l2c2 as l2c2_module
-from kazusa_ai_chatbot.cognition_chain_core.stages import l3 as l3_module
-from kazusa_ai_chatbot.conversation_history_prompt_projection import (
-    project_conversation_history_for_llm,
+from kazusa_ai_chatbot.cognition_core_v2 import run_text_surface_planning
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    CognitionContractError,
+    TextSurfaceServicesV2,
+    validate_text_surface_input,
 )
-from kazusa_ai_chatbot.time_boundary import build_turn_clock
-from llm_test_helpers import bind_test_llm
-
-_ROOT = Path(__file__).resolve().parents[1]
-_LAST_USER_MESSAGE_KEY = "last_user" "_message"
-_TONE_HISTORY_KEY = "tone" "_history"
+from llm_test_helpers import make_llm_call_config
+from tests.cognition_core_v2_test_helpers import canonical_episode
 
 
-class _FakeResponse:
-    """Small LLM response object for patched prompt tests."""
+class _PromptCaptureLLM:
+    """Capture public L3 prompts and return the exact surface-stage shape."""
 
-    def __init__(self, payload: dict):
-        self.content = json.dumps(payload)
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
 
-
-class _CapturingLLM:
-    """Capture messages sent to a patched LLM call."""
-
-    def __init__(self, payload: dict):
-        self.payload = payload
-        self.messages = []
-
-    async def ainvoke(self, messages, *, config=None):
-        self.messages = messages
-        return _FakeResponse(self.payload)
-
-
-def _history(count: int = 8) -> list[dict]:
-    """Build alternating user/assistant history fixtures.
-
-    Args:
-        count: Number of messages to return.
-
-    Returns:
-        Prompt-facing history list.
-    """
-
-    result = []
-    for index in range(count):
-        role = "user" if index % 2 == 0 else "assistant"
-        result.append({
-            "role": role,
-            "body_text": f"{role} message {index}",
-            "platform_user_id": "user-1" if role == "user" else "bot-1",
-            "global_user_id": "global-user-1" if role == "user" else "",
-            "addressed_to_global_user_ids": (
-                [CHARACTER_GLOBAL_USER_ID] if role == "user" else ["global-user-1"]
-            ),
-            "broadcast": False,
-        })
-    return result
+    async def ainvoke(
+        self,
+        messages: list[object],
+        *,
+        config: object,
+    ) -> SimpleNamespace:
+        del config
+        system = str(getattr(messages[0], "content", ""))
+        self.prompts.append(str(getattr(messages[-1], "content", "")))
+        if "style_guidance" in system and "content_plan" not in system:
+            result = {"style_guidance": "bounded"}
+        elif "content_plan" in system and "content_requirements" in system:
+            result = {
+                "content_plan": "bounded",
+                "content_requirements": ["preserve the current addressee"],
+            }
+        elif "visible_boundaries" in system and "addressee_plan" in system:
+            result = {
+                "visible_boundaries": ["bounded"],
+                "addressee_plan": ["bounded"],
+            }
+        else:
+            raise AssertionError("unexpected text-surface stage")
+        return SimpleNamespace(content=json.dumps(result))
 
 
-def _character_profile() -> dict:
-    """Return the minimal profile required by L3 and dialog prompts.
+def _surface_payload() -> dict[str, object]:
+    """Build one canonical public L3 packet with private history metadata."""
 
-    Args:
-        None.
-
-    Returns:
-        Character profile fixture.
-    """
-
+    episode = canonical_episode(
+        episode_id="history-policy",
+        content="visible current-turn grounding",
+    )
+    episode["percepts"].append({
+        "schema_version": "percept.v1",
+        "percept_kind": "history_summary",
+        "source_kind": "system_event",
+        "source_id": "history-summary:current-turn",
+        "content": {"semantic_summary": "bounded semantic history summary"},
+        "observed_at": episode["created_at"],
+    })
     return {
-        "name": "Kazusa",
-        "mood": "Neutral",
-        "global_vibe": "Calm",
-        "boundary_profile": {
-            "control_sensitivity": 0.2,
-            "control_intimacy_misread": 0.2,
-            "relational_override": 0.2,
-            "compliance_strategy": "comply",
-            "boundary_recovery": "rebound",
+        "schema_version": "text_surface_input.v2",
+        "episode": episode,
+        "intention": {
+            "route": "speech",
+            "intention": "acknowledge the current turn",
+            "target_roles": [],
+            "reason": "the current percept is visible",
         },
-        "personality_brief": {
-            "mbti": "INTJ",
-            "logic": "precise",
-            "tempo": "measured",
-            "defense": "guarded",
-            "quirks": "dry",
-            "taboos": "physical action narration",
+        "supporting_bids": [],
+        "expression_policy": {
+            "visibility": "visible",
+            "emotional_tone": "calm",
+            "intensity": "restrained",
+            "directness": "balanced",
         },
-        "linguistic_texture_profile": {
-            "fragmentation": 0.4,
-            "hesitation_density": 0.2,
-            "counter_questioning": 0.2,
-            "softener_density": 0.3,
-            "formalism_avoidance": 0.6,
-            "abstraction_reframing": 0.4,
-            "direct_assertion": 0.6,
-            "emotional_leakage": 0.3,
-            "rhythmic_bounce": 0.2,
-            "self_deprecation": 0.1,
-        },
+        "semantic_affect": [],
+        "permitted_action_results": [],
+        "interaction_style_context": "brief and natural",
+        "character_voice_context": "reserved, analytical, and warm",
     }
-
-
-def _minimal_text_chat_episode() -> dict:
-    """Build a valid text-chat cognitive episode for direct L3 tests."""
-    turn_clock = build_turn_clock("2026-04-27 00:00:00")
-    episode = build_text_chat_cognitive_episode(
-        episode_id="episode-history-policy",
-        percept_id="percept-history-policy",
-        storage_timestamp_utc=turn_clock["storage_timestamp_utc"],
-        local_time_context=turn_clock["local_time_context"],
-        user_input="please answer",
-        platform="qq",
-        platform_channel_id="chan-1",
-        channel_type="group",
-        platform_message_id="msg-1",
-        platform_user_id="platform-user-1",
-        global_user_id="global-user-1",
-        user_name="User",
-        active_turn_platform_message_ids=[],
-        active_turn_conversation_row_ids=[],
-        debug_modes={},
-        target_addressed_user_ids=[CHARACTER_GLOBAL_USER_ID],
-        target_broadcast=False,
-    )
-    return episode
-
-
-def _base_l3_state() -> dict:
-    """Build a reusable L3 state fixture.
-
-    Args:
-        None.
-
-    Returns:
-        Cognition-state subset for Contextual and Style agents.
-    """
-
-    return {
-        "cognitive_episode": _minimal_text_chat_episode(),
-        "character_profile": _character_profile(),
-        "user_profile": {"affinity": 700, "last_relationship_insight": "friendly task support"},
-        "chat_history_recent": _history(),
-        "decontexualized_input": "please answer",
-        "internal_monologue": "answer directly",
-        "logical_stance": "CONFIRM",
-        "character_intent": "PROVIDE",
-        "boundary_core_assessment": {
-            "boundary_issue": "none",
-            "boundary_summary": "none",
-            "behavior_primary": "comply",
-            "behavior_secondary": "none",
-            "acceptance": "allow",
-            "stance_bias": "confirm",
-            "identity_policy": "accept",
-            "pressure_policy": "absorb",
-            "trajectory": "stable",
-        },
-    }
-
-
-def _payload_chars(value: object) -> int:
-    """Return compact JSON character count for a prompt payload.
-
-    Args:
-        value: Prompt payload or message list.
-
-    Returns:
-        Serialized character count with CJK preserved.
-    """
-
-    return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")))
 
 
 @pytest.mark.asyncio
-async def test_contextual_agent_receives_at_most_four_history_messages(monkeypatch) -> None:
-    """Contextual Agent uses only the approved social surface window."""
+async def test_surface_episode_allows_only_semantic_history_summaries() -> None:
+    """Canonical validation precedes prompt-safe visible-percept projection."""
 
-    fake_llm = _CapturingLLM({
-        "social_distance": "friendly",
-        "emotional_intensity": "low",
-        "vibe_check": "calm",
-        "relational_dynamic": "cooperative",
-    })
-    monkeypatch.setattr(l2c2_module, "_contextual_agent_llm", bind_test_llm(fake_llm, "contextual_agent_llm"))
-
-    await l2c2_module.call_social_context_appraisal(_base_l3_state())
-
-    human_payload = json.loads(fake_llm.messages[1].content)
-    assert len(human_payload["chat_history"]) == 4
-    expected_lines = [
-        "unknown: user message 4",
-        "Kazusa: assistant message 5",
-        "unknown: user message 6",
-        "Kazusa: assistant message 7",
-    ]
-    assert human_payload["chat_history"] == expected_lines
-
-
-@pytest.mark.asyncio
-async def test_style_agent_receives_at_most_two_history_messages(monkeypatch) -> None:
-    """Style Agent uses only the approved wording buffer."""
-
-    fake_llm = _CapturingLLM({
-        "rhetorical_strategy": "brief direct help",
-        "linguistic_style": "short sentences",
-        "forbidden_phrases": [],
-    })
-    monkeypatch.setattr(l3_module, "_style_agent_llm", bind_test_llm(fake_llm, "style_agent_llm"))
-
-    await l3_module.call_style_agent(_base_l3_state())
-
-    human_payload = json.loads(fake_llm.messages[1].content)
-    assert len(human_payload["chat_history"]) == 2
-    expected_lines = [
-        "unknown: user message 6",
-        "Kazusa: assistant message 7",
-    ]
-    assert human_payload["chat_history"] == expected_lines
-
-
-@pytest.mark.asyncio
-async def test_dialog_generator_payload_excludes_raw_history_and_monologue(monkeypatch) -> None:
-    """Dialog Generator receives only current L3 directives and addressability."""
-
-    fake_llm = _CapturingLLM({"final_dialog": ["answer"]})
-    monkeypatch.setattr(dialog_module, "_dialog_generator_llm", fake_llm)
-
-    await dialog_module.dialog_generator({
-        "internal_monologue": "answer",
-        "action_directives": {
-            "linguistic_directives": {
-                "rhetorical_strategy": "direct",
-                "linguistic_style": "brief",
-                "accepted_user_preferences": [],
-                "content_plan": {
-                    "semantic_content": "answer",
-                    "rendering": "short",
-                },
-                "forbidden_phrases": [],
-            },
-            "contextual_directives": {
-                "social_distance": "friendly",
-                "emotional_intensity": "low",
-                "vibe_check": "calm",
-                "relational_dynamic": "cooperative",
-            },
-        },
-        "chat_history_wide": _history(),
-        "chat_history_recent": _history(),
-        "channel_type": "group",
-        "use_reply_feature": False,
-        "dialog_usage_mode": "live_visible_reply",
-        "platform_user_id": "user-1",
-        "platform_bot_id": "bot-1",
-        "global_user_id": "global-user-1",
-        "user_name": "User",
-        "user_profile": {"affinity": 700},
-        "character_profile": _character_profile(),
-        "messages": [],
-    })
-
-    human_payload = json.loads(fake_llm.messages[1].content)
-    assert set(human_payload) == {
-        "linguistic_directives",
-        "contextual_directives",
-        "user_name",
+    invalid_payload = deepcopy(_surface_payload())
+    invalid_payload["episode"] = {
+        "episode_summary": "retired semantic episode projection"
     }
-    assert "internal_monologue" not in human_payload
-    assert _TONE_HISTORY_KEY not in human_payload
-    assert "chat_history_wide" not in human_payload
-    assert "chat_history_recent" not in human_payload
+    with pytest.raises(CognitionContractError):
+        validate_text_surface_input(invalid_payload)
 
-
-def test_context_budget_workload_summary_records_payload_counts() -> None:
-    """Record affected LLM payload counts for the context budget."""
-
-    history = _history()
-    previous_payload = {
-        "contextual_history_messages": len(history),
-        "style_history_messages": len(history),
-        "dialog_generator_tone_messages": len(history),
-    }
-    contextual_history = project_conversation_history_for_llm(
-        history, character_name="Kazusa", max_rows=4,
+    llm = _PromptCaptureLLM()
+    services = TextSurfaceServicesV2(
+        llm=llm,
+        style_config=make_llm_call_config("history_style"),
+        content_plan_config=make_llm_call_config("history_content"),
+        preference_config=make_llm_call_config("history_preference"),
     )
-    style_history = project_conversation_history_for_llm(
-        history, character_name="Kazusa", max_rows=2,
-    )
-    bounded_payload = {
-        "contextual_history_messages": len(contextual_history),
-        "style_history_messages": len(style_history),
-        "dialog_generator_tone_messages": 0,
-        "dialog_generator_raw_history_messages": 0,
-        "dialog_generator_internal_monologue": False,
-        "content_plan_progress_cap_chars": 5000,
-        "content_plan_raw_history_messages": 0,
-        "recorder_response_path_calls": 0,
-        "recorder_runs_in_background": True,
-        "new_response_path_llm_calls": 0,
-    }
-    summary = {
-        "context_window_cap_tokens": 50000,
-        "previous_dynamic_payload_chars": {
-            "contextual_history": _payload_chars(history),
-            "style_history": _payload_chars(history),
-            "dialog_generator_tone" "_history": _payload_chars(history),
-        },
-        "bounded_dynamic_payload_chars": {
-            "contextual_history": _payload_chars(contextual_history),
-            "style_history": _payload_chars(style_history),
-            "dialog_generator_tone" "_history": 0,
-            "dialog_generator_raw_history": 0,
-            "dialog_generator_internal_monologue": 0,
-            "content_plan_conversation_progress_cap": 5000,
-            "recorder_response_path_payload": 0,
-        },
-        "previous_payload": previous_payload,
-        "bounded_payload": bounded_payload,
-    }
+    await run_text_surface_planning(_surface_payload(), services)
 
-    output_path = _ROOT / "test_artifacts" / "conversation_progress_context_budget_summary.json"
-    output_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
-
-    assert bounded_payload["new_response_path_llm_calls"] == 0
-    assert bounded_payload["contextual_history_messages"] <= 4
-    assert bounded_payload["style_history_messages"] <= 2
-    assert bounded_payload["dialog_generator_tone_messages"] == 0
-    assert bounded_payload["dialog_generator_raw_history_messages"] == 0
-    assert bounded_payload["dialog_generator_internal_monologue"] is False
-    assert bounded_payload["content_plan_raw_history_messages"] == 0
-    assert bounded_payload["recorder_response_path_calls"] == 0
+    rendered = "\n".join(llm.prompts)
+    assert "visible current-turn grounding" in rendered
+    assert "bounded semantic history summary" in rendered
+    assert "RAW_HISTORY_SENTINEL" not in rendered
+    assert "PRIVATE_HISTORY_SENTINEL" not in rendered
+    assert "PRIVATE_MONOLOGUE_SENTINEL" not in rendered

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import os
+from pathlib import Path
 from urllib.parse import urlparse
 
 from dotenv import load_dotenv
@@ -236,6 +237,22 @@ DEFAULT_LLM_MAX_COMPLETION_TOKENS = _positive_int_from_env(
 # MongoDB
 MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
 MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "roleplay_bot")
+CHARACTER_PROFILE_PATH = os.getenv("CHARACTER_PROFILE_PATH", "").strip()
+
+
+def require_character_profile_path() -> Path:
+    """Return the configured absolute character-profile seed path."""
+
+    if not CHARACTER_PROFILE_PATH:
+        raise ValueError("CHARACTER_PROFILE_PATH must be configured")
+    profile_path = Path(CHARACTER_PROFILE_PATH)
+    if not profile_path.is_absolute():
+        raise ValueError("CHARACTER_PROFILE_PATH must be absolute")
+    if not profile_path.is_file():
+        raise ValueError(
+            f"CHARACTER_PROFILE_PATH must point to a file: {profile_path}"
+        )
+    return profile_path
 
 # Route-specific chat LLMs. These are intentionally required: a missing route
 # variable means the deployment configuration is incomplete.
@@ -681,30 +698,6 @@ MCP_CALL_TIMEOUT: float = float(os.getenv("MCP_CALL_TIMEOUT", "30"))
 # Seconds to wait for server initialisation and tool-list discovery at startup.
 MCP_CONNECT_TIMEOUT: float = float(os.getenv("MCP_CONNECT_TIMEOUT", "10"))
 
-# Affinity system
-# Affinity scaling breakpoints (later should be read from character profile)
-AFFINITY_INCREMENT_BREAKPOINTS = [
-    (0, 1.5),      # At 0: 1.5x scaling (easy to gain)
-    (300, 1.5),   # At 300: 1.5x scaling (still easy)
-    (300, 1.0),   # At 300: 1.0x scaling (normal starts)
-    (700, 1.0),   # At 700: 1.0x scaling (normal ends)
-    (700, 0.6),   # At 700: 0.6x scaling (harder to gain)
-    (1000, 0.6)   # At 1000: 0.6x scaling (hardest to gain)
-]
-
-AFFINITY_DECREMENT_BREAKPOINTS = [
-    (0, 1.3),      # At 0: 1.3x scaling (easy to lose when very low)
-    (300, 1.3),   # At 300: 1.3x scaling (still easy to lose)
-    (300, 1.0),   # At 300: 1.0x scaling (normal starts)
-    (700, 1.0),   # At 700: 1.0x scaling (normal ends)
-    (700, 0.6),   # At 700: 0.6x scaling (harder to lose)
-    (1000, 0.6)   # At 1000: 0.6x scaling (hardest to lose)
-]
-AFFINITY_DEFAULT = 500
-AFFINITY_MIN = 0
-AFFINITY_MAX = 1000
-AFFINITY_RAW_DEAD_ZONE = int(os.getenv("AFFINITY_RAW_DEAD_ZONE", "1"))
-
 # Loop counts
 MAX_MEMORY_RETRIEVER_AGENT_RETRY = int(
     os.getenv("MAX_MEMORY_RETRIEVER_AGENT_RETRY", "2"),
@@ -752,7 +745,7 @@ CALENDAR_SCHEDULER_PER_TRIGGER_CAPACITY = _positive_int_from_env(
 # mode. Disable this to skip the L3 visual-agent LLM call globally.
 COGNITION_VISUAL_DIRECTIVES_ENABLED = os.getenv(
     "COGNITION_VISUAL_DIRECTIVES_ENABLED",
-    "true",
+    "false",
 ).lower() in ("1", "true", "yes")
 
 COGNITION_TASK_WILLINGNESS_BOUNDARY_ENABLED = _bool_from_env(

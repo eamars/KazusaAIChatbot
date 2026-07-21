@@ -9,6 +9,9 @@ from kazusa_ai_chatbot.conversation_history_prompt_projection import (
     project_conversation_history_for_llm,
 )
 from kazusa_ai_chatbot.time_boundary import format_storage_utc_fields_for_llm
+from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
+    project_relationship_context,
+)
 
 _TIME_FIELDS = (
     "timestamp",
@@ -115,9 +118,6 @@ _USER_PROFILE_FIELDS = (
     "user_name",
     "platform",
     "platform_user_id",
-    "affinity",
-    "last_relationship_insight",
-    "relationship_rank",
 )
 
 _TIME_CONTEXT_FIELDS = (
@@ -381,5 +381,12 @@ def _project_user_profile_for_llm(profile: dict[str, Any]) -> dict[str, Any]:
         for key in _USER_PROFILE_FIELDS
         if key in profile
     }
+    cognition_state = profile.get("cognition_state")
+    if isinstance(cognition_state, dict):
+        relationship = cognition_state.get("relationship")
+        if isinstance(relationship, dict):
+            projected["relationship_context"] = project_relationship_context(
+                relationship,
+            )
     projected = format_storage_utc_fields_for_llm(projected, _TIME_FIELDS)
     return projected

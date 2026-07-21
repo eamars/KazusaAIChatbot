@@ -17,12 +17,6 @@ from kazusa_ai_chatbot.config import (
     CONSOLIDATION_LLM_THINKING_ENABLED,
 )
 from kazusa_ai_chatbot.consolidation.persistence import db_writer
-from kazusa_ai_chatbot.consolidation.reflection import (
-    character_state_reviewer,
-    global_state_updater,
-    relationship_profile_reviewer,
-    relationship_recorder,
-)
 from kazusa_ai_chatbot.consolidation.character_self_guidance import (
     character_self_guidance_specialist,
 )
@@ -55,8 +49,6 @@ from kazusa_ai_chatbot.utils import parse_llm_json_output, text_or_empty
 logger = logging.getLogger(__name__)
 
 CONSOLIDATION_LANE_NAMES = (
-    "character_state",
-    "relationship_profile",
     "user_memory_units",
     "active_commitment",
     "character_self_guidance",
@@ -71,83 +63,54 @@ _FORBIDDEN_ROUTER_TASK_KEYS = frozenset(
 _MAX_ROUTER_TASKS = 4
 
 _LANE_DESCRIPTIONS = {
-    "character_state": "Update the active character's durable mood, vibe, or self-state.",
-    "relationship_profile": "Update the relationship profile for the current real user.",
-    "user_memory_units": "Store durable facts, patterns, shifts, or milestones about the current real user.",
-    "active_commitment": "Store an accepted promise or ongoing rule for the current user specifically.",
-    "character_self_guidance": "Store accepted general future behavior guidance owned by the character.",
-    "interaction_style_image": "Update user or group interaction-style image overlays.",
-    "shared_memory_promotion": "Admit promoted reflection evidence into shared memory only.",
+    "user_memory_units": "保存关于当前真实用户的持久事实、模式、变化或里程碑。",
+    "active_commitment": "保存当前角色已经接受、且专门面向当前用户的承诺或持续规则。",
+    "character_self_guidance": "保存由当前角色承担的通用未来行为指导。",
+    "interaction_style_image": "更新用户或群组的互动风格画像。",
+    "shared_memory_promotion": "只把已经提升的反思证据接纳进共享记忆。",
 }
 
 _ROUTER_PROMPT = '''\
-You route one completed episode into coarse consolidation lane tasks.
+你负责把一个已经完成的 episode 路由到粗粒度的 consolidation lane task。
 
-The human payload contains:
-- target_plan: deterministic information about eligible durable targets.
-- lane_roster: the only lane names available for this episode.
-- source_views: prompt-safe evidence rows with source_key values.
+HumanMessage 中包含：
+- target_plan：确定性代码给出的合格持久化目标；
+- lane_roster：本 episode 唯一可选的 lane name；
+- source_views：可安全用于 prompt、并带有 source_key 的证据行。
 
-Choose zero to four lane tasks from lane_roster. A task means the episode has
-a durable update that should be inspected by that lane's specialist. Return
-only lane names, short reasons, and source_keys from source_views. Persistence
-details, memory text, target identifiers, timestamps, and cache behavior are
-owned by later deterministic stages.
+从 lane_roster 中选择零到四项 lane task。一项 task 表示本 episode 存在值得由对应 specialist
+检查的持久更新。只返回 lane name、简短 reason 和来自 source_views 的 source_key。持久化细节、
+记忆正文、target id、时间戳与缓存行为由后续确定性阶段负责。
 
-# Decision Procedure
-1. Read the source_views and decide whether the episode contains a durable
-   memory update after the completed response.
-2. Identify the owner and scope of that update: current user, relationship,
-   active character, group/channel style, or approved reflection promotion.
-3. Select the matching lane from lane_roster. If no roster lane owns the
-   durable update, return an empty lane_tasks list.
-4. For accepted future behavior rules, include both the request source and the
-   final-dialog acceptance source when both source_keys are available.
-5. When the durable subject is a user fact or preference and the character
-   only acknowledges, remembers, respects, or accommodates it, route the
-   user-owned lane. Treat the character's accommodation as support for that
-   user memory rather than a separate character behavior rule.
-6. When the durable subject is feedback about the current relationship or a
-   local repair of the recent interaction, route the relationship-owned lane.
-   Acknowledging discomfort or promising to be more careful in that local
-   repair is evidence for relationship_profile unless the final dialog accepts
-   a standalone general future behavior rule.
-7. Keep the router coarse. The selected specialist will write or reject the
-   actual memory candidate.
+# 判断步骤
+1. 阅读 source_views，判断已完成回应之后是否形成持久记忆更新。
+2. 识别更新的归属与范围：当前用户、角色指导、群组或频道风格，或已经批准提升的反思。
+3. 从 lane_roster 选择匹配的 lane。若列表中没有 lane 拥有该持久更新，返回空 lane_tasks。
+4. 对已经接受的未来行为规则，如果请求来源和最终对话接受来源的 source_key 都可用，则同时引用。
+5. 当持久主题是用户事实或偏好，而当前角色只是确认、记住、尊重或配合它时，选择用户拥有的
+   lane；角色的配合是该用户记忆的支持，不另建角色行为规则。
+6. 路由保持粗粒度，实际记忆候选由所选 specialist 写入或拒绝。
 
-# Lane Ownership
-- relationship_profile: relationship feedback for the current real user,
-  including trust, comfort, disappointment, repair, tension, or how the recent
-  character behavior landed with the user.
-- user_memory_units: durable information about the current real user, such as
-  personal facts, preferences, habits, recent shifts, milestones, or updates to
-  recalled user memory.
-- active_commitment: accepted future behavior scoped to the current user, such
-  as a promise, reminder, address rule, or ongoing interaction rule for that
-  user.
-- character_self_guidance: accepted future behavior guidance where the future
-  behavior itself is owned by the active character generally across future
-  social situations.
-- character_state: accepted or evidenced character self-continuity, durable
-  mood, vibe, identity, trait, or self-description.
-- interaction_style_image: user-style or group/channel interaction norms when
-  the target plan and source role make that style target available.
-- shared_memory_promotion: approved reflection or shared-memory promotion
-  evidence with privacy review.
+# Lane 归属
+- user_memory_units：关于当前真实用户的持久信息，例如个人事实、偏好、习惯、近期变化、里程碑，
+  或对已回忆用户记忆的更新。
+- active_commitment：当前角色已经接受、且仅面向当前用户的未来行为，例如承诺、提醒、称呼规则
+  或持续互动规则。
+- character_self_guidance：由当前角色承担、并普遍适用于未来社交场景的已接受行为指导。
+- interaction_style_image：target plan 与来源角色允许时，记录用户风格或群组、频道互动规范。
+- shared_memory_promotion：经过隐私检查并获准提升的反思或共享记忆证据。
 
-# Skip Criteria
-Return an empty lane_tasks list for one-turn roleplay or temporary behavior,
-ordinary world lore in chat, third-party facts that are not about the current
-user, and proposed future behavior that the final dialog leaves unaccepted or
-only situational.
+# 跳过条件
+一轮角色扮演或临时行为、聊天中的普通世界知识、与当前用户无关的第三方事实，以及最终对话尚未
+接受或只在当前情境成立的未来行为，均返回空 lane_tasks。
 
-# Output Format
-Return only valid JSON:
+# 输出格式
+只返回有效 JSON：
 {
   "lane_tasks": [
     {
-      "lane": "one lane from the roster",
-      "reason": "short semantic reason",
+      "lane": "lane_roster 中的一个 lane",
+      "reason": "简短语义理由",
       "source_keys": ["source_key"]
     }
   ]
@@ -202,10 +165,6 @@ def build_lane_roster(
         roster.append(_roster_entry("shared_memory_promotion"))
         return roster
 
-    if "character_state" in write_lanes:
-        roster.append(_roster_entry("character_state"))
-    if "relationship_insight" in write_lanes or "affinity" in write_lanes:
-        roster.append(_roster_entry("relationship_profile"))
     if "user_memory_units" in write_lanes:
         roster.append(_roster_entry("user_memory_units"))
         roster.append(_roster_entry("active_commitment"))
@@ -573,12 +532,6 @@ def _target_alias_and_write_lane(
 ) -> tuple[str, str]:
     """Map consolidation lane names to existing target-plan write lanes."""
 
-    if lane == "character_state":
-        return_value = (CHARACTER_TARGET_ALIAS, "character_state")
-        return return_value
-    if lane == "relationship_profile":
-        return_value = (USER_TARGET_ALIAS, "relationship_insight")
-        return return_value
     if lane in {"user_memory_units", "active_commitment"}:
         return_value = (USER_TARGET_ALIAS, "user_memory_units")
         return return_value
@@ -608,12 +561,6 @@ def _target_alias_and_write_lane(
 def _ensure_writer_defaults(working_state: dict[str, Any]) -> None:
     """Populate writer state defaults produced by omitted lane specialists."""
 
-    working_state.setdefault("mood", "")
-    working_state.setdefault("global_vibe", "")
-    working_state.setdefault("reflection_summary", "")
-    working_state.setdefault("subjective_appraisals", [])
-    working_state.setdefault("affinity_delta", 0)
-    working_state.setdefault("last_relationship_insight", "")
     working_state.setdefault("new_facts", [])
     working_state.setdefault("future_promises", [])
     working_state.setdefault("character_self_guidance", {})
@@ -628,60 +575,18 @@ async def _run_lane_specialists(
     """Run existing lane-local specialists before persistence."""
 
     accepted_lane_set = set(accepted_lanes)
-    if "character_state" in accepted_lane_set:
-        character_candidate = await global_state_updater(working_state)
-        character_patch = await character_state_reviewer(
-            working_state,
-            character_candidate,
-        )
-        if _character_state_patch_has_content(character_patch):
-            working_state.update(character_patch)
-        else:
-            _disable_accepted_lane(
-                working_state,
-                accepted_lanes,
-                "character_state",
-            )
-    if "relationship_profile" in accepted_lane_set:
-        relationship_candidate = await relationship_recorder(working_state)
-        relationship_patch = await relationship_profile_reviewer(
-            working_state,
-            relationship_candidate,
-        )
-        if _relationship_profile_patch_has_content(relationship_patch):
-            working_state.update(relationship_patch)
-        else:
-            _disable_accepted_lane(
-                working_state,
-                accepted_lanes,
-                "relationship_profile",
-            )
     if "character_self_guidance" in accepted_lane_set:
         self_guidance_patch = await character_self_guidance_specialist(
             working_state
         )
         working_state.update(self_guidance_patch)
-
-
-def _character_state_patch_has_content(patch: Mapping[str, Any]) -> bool:
-    """Return whether a reviewed character-state patch can be persisted."""
-
-    return_value = any(
-        text_or_empty(patch.get(field_name))
-        for field_name in ("mood", "global_vibe", "reflection_summary")
-    )
-    return return_value
-
-
-def _relationship_profile_patch_has_content(patch: Mapping[str, Any]) -> bool:
-    """Return whether a reviewed relationship patch can be persisted."""
-
-    raw_appraisals = patch.get("subjective_appraisals")
-    has_appraisals = isinstance(raw_appraisals, list) and bool(raw_appraisals)
-    has_delta = patch.get("affinity_delta", 0) not in (0, None, "")
-    has_insight = bool(text_or_empty(patch.get("last_relationship_insight")))
-    return_value = has_appraisals or has_delta or has_insight
-    return return_value
+        reviewed_guidance = working_state.get("character_self_guidance")
+        if not isinstance(reviewed_guidance, dict) or not reviewed_guidance:
+            _disable_accepted_lane(
+                working_state,
+                accepted_lanes,
+                "character_self_guidance",
+            )
 
 
 def _disable_accepted_lane(

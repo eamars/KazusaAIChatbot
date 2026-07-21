@@ -699,6 +699,21 @@ class NapCatWSAdapter:
             return
 
         replies = brain_data.get("messages", [])
+        content_type = str(brain_data.get("content_type") or "text")
+        operational_error = brain_data.get("operational_error")
+        is_operational_response = content_type == "operational_error"
+        if is_operational_response:
+            if isinstance(operational_error, dict):
+                logger.error(
+                    "Brain returned a structured QQ operational response: "
+                    f"error_code={operational_error.get('error_code')} "
+                    f"status={operational_error.get('status')} "
+                    f"attempt_count={operational_error.get('attempt_count')}"
+                )
+            else:
+                logger.error(
+                    "Brain returned an operational response without metadata"
+                )
         logger.info(f"Brain output: messages={log_list_preview(replies)}")
         logger.debug(
             f'Brain output metadata: use_reply_feature={brain_data.get("use_reply_feature")} '
@@ -716,7 +731,7 @@ class NapCatWSAdapter:
             return
 
         reply_to_msg_id = None
-        if brain_data.get("use_reply_feature"):
+        if not is_operational_response and brain_data.get("use_reply_feature"):
             reply_to_msg_id = str(data["message_id"])
         raw_delivery_mentions = brain_data.get("delivery_mentions")
         delivery_mentions = (
@@ -724,6 +739,8 @@ class NapCatWSAdapter:
             if isinstance(raw_delivery_mentions, list)
             else None
         )
+        if is_operational_response:
+            delivery_mentions = None
         msg_params = self._normal_chat_send_msg_params(
             channel_id=channel_id,
             channel_type=channel_type,
@@ -761,15 +778,16 @@ class NapCatWSAdapter:
         if isinstance(response_data, dict):
             platform_message_id = str(response_data.get("message_id") or "")
         delivery_tracking_id = str(brain_data.get("delivery_tracking_id") or "")
-        await self._post_delivery_receipt(
-            channel_id=channel_id,
-            delivery_tracking_id=delivery_tracking_id,
-            logical_message_index=0,
-            platform_message_id=platform_message_id,
-        )
+        if not is_operational_response:
+            await self._post_delivery_receipt(
+                channel_id=channel_id,
+                delivery_tracking_id=delivery_tracking_id,
+                logical_message_index=0,
+                platform_message_id=platform_message_id,
+            )
 
         followup_messages = replies[1:]
-        if followup_messages:
+        if followup_messages and not is_operational_response:
             followup_task = asyncio.create_task(
                 self._send_normal_chat_followups(
                     messages=followup_messages,

@@ -244,8 +244,8 @@ def _patch_common_dependencies(monkeypatch, graph) -> None:
         "_runtime_character_state",
         {
             "mood": "old mood",
-            "global_vibe": "old vibe",
-            "reflection_summary": "old reflection",
+            "vibe_check": "old vibe",
+            "character_reflection": "old reflection",
         },
     )
     monkeypatch.setattr(
@@ -253,8 +253,8 @@ def _patch_common_dependencies(monkeypatch, graph) -> None:
         "get_character_runtime_state",
         AsyncMock(return_value={
             "mood": "fresh mood",
-            "global_vibe": "fresh vibe",
-            "reflection_summary": "fresh reflection",
+            "vibe_check": "fresh vibe",
+            "character_reflection": "fresh reflection",
         }),
     )
     monkeypatch.setattr(
@@ -270,7 +270,7 @@ def _patch_common_dependencies(monkeypatch, graph) -> None:
     monkeypatch.setattr(
         service_module,
         "get_user_profile",
-        AsyncMock(return_value={"affinity": 500}),
+        AsyncMock(return_value={"relationship_state": 500}),
     )
     monkeypatch.setattr(
         service_module,
@@ -944,6 +944,157 @@ async def test_assembled_response_is_delivered_only_to_response_owner() -> None:
 
 
 @pytest.mark.asyncio
+async def test_first_settled_contract_failure_uses_bounded_wait(
+    monkeypatch,
+) -> None:
+    """A malformed first authoritative assessment should reach hard deadline."""
+
+    item = _item(1, direct_address=True)
+    fragment = PersistedChatFragment(
+        arrival_sequence=item.sequence,
+        scope=("qq", "chan-1", "group"),
+        author_platform_user_id="user-1",
+        author_global_user_id="global-user-1",
+        platform_message_id="1",
+        conversation_row_id="row-1",
+        storage_timestamp_utc=item.storage_timestamp_utc,
+        enqueue_monotonic=item.enqueue_monotonic,
+        body_text=item.request.message_envelope.body_text,
+        queue_item=item,
+    )
+    lease = AssessmentLease(
+        turn_id="turn-1",
+        version=1,
+        observation_status="more_time_available",
+        leader_sequence=1,
+        response_owner_sequence=1,
+        fragments=(fragment,),
+    )
+    contract_error = service_module.SettledRelevanceContractError(
+        "authoritative settled output failed its contract",
+        validation_reason="output fields are not exact",
+    )
+    wait_outcome = SimpleNamespace(
+        stale=False,
+        response_action="wait",
+    )
+    coordinator = SimpleNamespace(
+        evaluate_settled=AsyncMock(side_effect=contract_error),
+        apply_settled_decision=AsyncMock(return_value=wait_outcome),
+        complete_failed_assessment=AsyncMock(),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_turn_settlement_coordinator",
+        coordinator,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_prepare_settled_media",
+        AsyncMock(return_value=([], False)),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "get_conversation_history",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_settled_state_from_lease",
+        lambda _lease, *, history: {"fresh_history": history},
+    )
+
+    await service_module._process_settlement_lease(lease, item)
+
+    coordinator.apply_settled_decision.assert_awaited_once()
+    applied_decision = coordinator.apply_settled_decision.await_args.args[1]
+    assert applied_decision["response_action"] == "wait"
+    coordinator.complete_failed_assessment.assert_not_awaited()
+    assert item.future.done() is False
+
+
+@pytest.mark.asyncio
+async def test_final_settled_contract_failure_returns_operational_error(
+    monkeypatch,
+) -> None:
+    """A repeated hard-deadline schema failure must close without silence."""
+
+    item = _item(1, direct_address=True)
+    item.llm_trace_id = "trace-1"
+    fragment = PersistedChatFragment(
+        arrival_sequence=item.sequence,
+        scope=("qq", "chan-1", "group"),
+        author_platform_user_id="user-1",
+        author_global_user_id="global-user-1",
+        platform_message_id="1",
+        conversation_row_id="row-1",
+        storage_timestamp_utc=item.storage_timestamp_utc,
+        enqueue_monotonic=item.enqueue_monotonic,
+        body_text=item.request.message_envelope.body_text,
+        queue_item=item,
+    )
+    lease = AssessmentLease(
+        turn_id="turn-1",
+        version=1,
+        observation_status="observation_complete",
+        leader_sequence=1,
+        response_owner_sequence=1,
+        fragments=(fragment,),
+    )
+    contract_error = service_module.SettledRelevanceContractError(
+        "authoritative settled output repair failed",
+        validation_reason="output fields are not exact",
+        attempt_count=2,
+    )
+    coordinator = SimpleNamespace(
+        evaluate_settled=AsyncMock(side_effect=contract_error),
+        apply_settled_decision=AsyncMock(),
+        complete_failed_assessment=AsyncMock(return_value=True),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_turn_settlement_coordinator",
+        coordinator,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_prepare_settled_media",
+        AsyncMock(return_value=([], False)),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "get_conversation_history",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_settled_state_from_lease",
+        lambda _lease, *, history: {"fresh_history": history},
+    )
+    finalize_trace = AsyncMock()
+    monkeypatch.setattr(
+        service_module.llm_tracing,
+        "finalize_llm_trace_run",
+        finalize_trace,
+    )
+
+    await service_module._process_settlement_lease(lease, item)
+
+    response = await item.future
+    coordinator.complete_failed_assessment.assert_awaited_once_with(lease)
+    coordinator.apply_settled_decision.assert_not_awaited()
+    assert response.messages == [service_module.OPERATIONAL_FAILURE_NOTICE]
+    assert response.content_type == "operational_error"
+    assert response.delivery_tracking_id == ""
+    assert response.operational_error is not None
+    assert response.operational_error.error_code == "model_contract_invalid"
+    assert response.operational_error.attempt_count == 2
+    finalize_trace.assert_awaited_once()
+    assert finalize_trace.await_args.kwargs["status"] == "failed"
+    assert finalize_trace.await_args.kwargs["final_dialog_count"] == 0
+
+
+@pytest.mark.asyncio
 async def test_native_reply_is_suppressed_for_obsolete_response_owner(
     monkeypatch,
 ) -> None:
@@ -1081,6 +1232,153 @@ async def test_native_reply_reaches_single_fragment_response(
     response = await item.future
     assert response.messages == ["direct answer"]
     assert response.use_reply_feature is True
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
+async def test_precommit_cognition_failure_retries_once_then_succeeds(
+    monkeypatch,
+) -> None:
+    """A typed pre-commit failure should retry from the original turn state."""
+
+    await _reset_queue_state()
+
+    class _Graph:
+        """Fail once at the safe checkpoint, then return normal dialog."""
+
+        def __init__(self) -> None:
+            self.call_count = 0
+
+        async def ainvoke(self, _state):
+            self.call_count += 1
+            if self.call_count == 1:
+                raise service_module.CognitionExecutionError(
+                    "selection alignment exhausted",
+                    error_code="required_selection_alignment_exhausted",
+                    branch_id="ordinary_response",
+                    stage="goal_cognition.required_selection_alignment",
+                    attempt_count=2,
+                    safe_checkpoint="pre_state_commit",
+                    retryable=True,
+                )
+            return {
+                "should_respond": True,
+                "use_reply_feature": False,
+                "final_dialog": ["recovered response"],
+                "future_promises": [],
+                "consolidation_state": None,
+            }
+
+    graph = _Graph()
+    save_assistant_message = AsyncMock()
+    monkeypatch.setattr(
+        service_module,
+        "_save_assistant_message",
+        save_assistant_message,
+    )
+    _patch_common_dependencies(monkeypatch, graph)
+    item = _item(1, direct_address=True)
+    item.conversation_row_id = "row-1"
+
+    await service_module._process_queued_chat_item(
+        item,
+        settled_decision={
+            "response_action": "proceed",
+            "reason_to_respond": "direct character request",
+            "use_reply_feature": False,
+            "channel_topic": "",
+            "indirect_speech_context": "",
+        },
+        skip_user_persist=True,
+        settlement_turn_id="turn-1",
+        settlement_version=1,
+        settlement_claimed=True,
+        prepared_media=[],
+        media_prepared=True,
+    )
+
+    response = await item.future
+    assert graph.call_count == 2
+    assert response.messages == ["recovered response"]
+    assert response.operational_error is None
+    save_assistant_message.assert_awaited_once()
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
+async def test_precommit_cognition_retry_exhaustion_returns_operational_error(
+    monkeypatch,
+) -> None:
+    """Two typed failures should yield one structured non-character fallback."""
+
+    await _reset_queue_state()
+
+    class _Graph:
+        """Exhaust the one permitted safe cognition retry."""
+
+        def __init__(self) -> None:
+            self.call_count = 0
+
+        async def ainvoke(self, _state):
+            self.call_count += 1
+            raise service_module.CognitionExecutionError(
+                "selection alignment exhausted",
+                error_code="required_selection_alignment_exhausted",
+                branch_id="ordinary_response",
+                stage="goal_cognition.required_selection_alignment",
+                attempt_count=2,
+                safe_checkpoint="pre_state_commit",
+                retryable=True,
+            )
+
+    graph = _Graph()
+    save_assistant_message = AsyncMock()
+    monkeypatch.setattr(
+        service_module,
+        "_save_assistant_message",
+        save_assistant_message,
+    )
+    _patch_common_dependencies(monkeypatch, graph)
+    finalize_trace = AsyncMock()
+    monkeypatch.setattr(
+        service_module.llm_tracing,
+        "finalize_llm_trace_run",
+        finalize_trace,
+    )
+    item = _item(1, direct_address=True)
+    item.conversation_row_id = "row-1"
+
+    await service_module._process_queued_chat_item(
+        item,
+        settled_decision={
+            "response_action": "proceed",
+            "reason_to_respond": "direct character request",
+            "use_reply_feature": False,
+            "channel_topic": "",
+            "indirect_speech_context": "",
+        },
+        skip_user_persist=True,
+        settlement_turn_id="turn-1",
+        settlement_version=1,
+        settlement_claimed=True,
+        prepared_media=[],
+        media_prepared=True,
+    )
+
+    response = await item.future
+    assert graph.call_count == 2
+    assert response.messages == [service_module.OPERATIONAL_RETRY_NOTICE]
+    assert response.content_type == "operational_error"
+    assert response.delivery_tracking_id == ""
+    assert response.operational_error is not None
+    assert response.operational_error.error_code == (
+        "required_selection_alignment_exhausted"
+    )
+    assert response.operational_error.status == "exhausted"
+    assert response.operational_error.attempt_count == 2
+    save_assistant_message.assert_not_awaited()
+    finalize_trace.assert_awaited_once()
+    assert finalize_trace.await_args.kwargs["final_dialog_count"] == 0
     await _reset_queue_state()
 
 
@@ -1651,7 +1949,7 @@ async def test_dropped_queue_item_releases_foreground_handle(monkeypatch) -> Non
     monkeypatch.setattr(
         service_module,
         "_resolve_queued_user",
-        AsyncMock(return_value=("global-user-1", {"affinity": 500})),
+        AsyncMock(return_value=("global-user-1", {"relationship_state": 500})),
     )
     monkeypatch.setattr(
         service_module,
@@ -2161,9 +2459,9 @@ async def test_worker_derives_graph_input_from_message_envelope(monkeypatch) -> 
         == "static brief"
     )
     assert captured_state["character_profile"]["mood"] == "fresh mood"
-    assert captured_state["character_profile"]["global_vibe"] == "fresh vibe"
+    assert captured_state["character_profile"]["vibe_check"] == "fresh vibe"
     assert (
-        captured_state["character_profile"]["reflection_summary"]
+        captured_state["character_profile"]["character_reflection"]
         == "fresh reflection"
     )
     assert captured_state["character_profile"]["global_user_id"] == (

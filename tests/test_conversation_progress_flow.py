@@ -150,6 +150,7 @@ def test_build_episode_state_doc_caps_phase2_fields() -> None:
             "assistant_moves": [long_text for _ in range(12)],
             "overused_moves": [long_text for _ in range(12)],
             "open_loops": [long_text for _ in range(12)],
+            "interaction_obligations": [],
             "resolved_threads": [long_text for _ in range(12)],
             "avoid_reopening": [long_text for _ in range(12)],
             "emotional_trajectory": long_text,

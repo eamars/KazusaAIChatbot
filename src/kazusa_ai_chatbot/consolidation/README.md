@@ -38,7 +38,7 @@ silently share the user-profile write path.
 ## Purpose
 
 Consolidation turns a completed live or background episode into durable state:
-relationship insights, user memory units, affinity changes, interaction-style
+relationship insights, user memory units, relationship_state changes, interaction-style
 images, character state, character self-image, accepted character
 self-guidance, group-channel style state, shared-memory promotion admission,
 and audit/internal artifacts.
@@ -46,6 +46,14 @@ and audit/internal artifacts.
 The consolidation package does not decide what the character should say. It
 only processes already produced cognition, dialog, action results, and
 prompt-safe episode traces after the live response decision has been made.
+
+User-memory deduplication, extractor prompt context, and surfaced merge
+candidates consume the canonical RAG `user_memory_unit_candidates` list. The
+consolidation path does not read a legacy `rag_result.user_image` envelope or
+maintain a parallel memory-context vocabulary.
+Once `rag_result` reaches consolidation, `user_memory_unit_candidates` is a
+required list, including when empty. Missing or malformed candidates fail at
+this boundary rather than silently projecting an empty memory context.
 
 The package must preserve these system boundaries:
 
@@ -178,7 +186,7 @@ flowchart TD
     N --> O["Persistence helpers<br/>write only validated lane outputs"]
 
     O --> W1[("user_memory_units<br/>facts, patterns, milestones, active commitments")]
-    O --> W2[("user_profiles<br/>relationship insight, affinity")]
+    O --> W2[("user_profiles<br/>relationship insight, relationship_state")]
     O --> W3[("character runtime state<br/>mood, vibe, self-state")]
     O --> W4[("memory collection<br/>character self-guidance / promoted shared memory")]
     O --> W5[("interaction style images<br/>user or group/channel")]
@@ -222,7 +230,7 @@ flowchart TD
     M --> RP["relationship_profile lane"]
     RP --> RP1["relationship_recorder LLM<br/>relationship specialist"]
     RP1 --> RP2["relationship_profile_reviewer LLM"]
-    RP2 --> RP3["db_writer<br/>relationship insight + affinity"]
+    RP2 --> RP3["db_writer<br/>relationship insight + relationship_state"]
 
     M --> UM["user_memory_units lane"]
     UM --> UM1["db_writer"]
@@ -298,7 +306,7 @@ that may be written.
 
 | Target kind | Durable meaning | Allowed lanes |
 | --- | --- | --- |
-| `user` | Real validated user profile | `relationship_insight`, `user_memory_units`, `active_commitment`, `affinity`, `user_style_image` |
+| `user` | Real validated user profile | `relationship_insight`, `user_memory_units`, `active_commitment`, `relationship_state`, `user_style_image` |
 | `group_channel` | Platform group/channel image | `group_channel_style_image` |
 | `character` | Active character state/self-image and accepted self-guidance | `character_state`, `character_self_image`, `character_self_guidance` |
 | `internal` | Audit/local artifact and approved promotion admission | `audit`, `shared_memory_promotion` |
@@ -346,8 +354,8 @@ memory writes must fail closed.
 Group-channel lanes persist through `consolidation.group_channel` helpers and
 must not call:
 
-- `update_affinity(...)`
-- `update_last_relationship_insight(...)`
+- `update_relationship_state(...)`
+- `update_semantic_relationship_projection(...)`
 - `update_user_memory_units_from_state(...)`
 
 Character lanes may update character state and character self-image through
@@ -372,7 +380,7 @@ entrypoint for synthetic-user lifecycle diagnostics.
 Default mode is read-only. It reports sanitized counts for:
 
 - synthetic `self_cognition` user profiles;
-- user profiles missing required affinity fields;
+- user profiles missing required relationship_state fields;
 - synthetic scheduled events;
 - synthetic user-memory units;
 - future-cognition attempts missing a real user;

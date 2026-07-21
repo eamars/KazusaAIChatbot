@@ -1,0 +1,57 @@
+{
+  "schema_version": "cognition_core_v2_abuse_to_sadness_e2e_cases.v1",
+  "emotion_encoding": "zh-CN",
+  "natural_only": true,
+  "forbidden_prompt_markers": [
+    "哭",
+    "眼泪",
+    "悲伤",
+    "不用忍着",
+    "可以表达"
+  ],
+  "relationship_seed": {
+    "description": "角色与当前用户长期相处，彼此信任、重视并高度依恋；这段关系对角色具有很高价值",
+    "familiarity": 90,
+    "positive_regard": 90,
+    "trust": 85,
+    "attachment": 95,
+    "desired_closeness": 90,
+    "perceived_closeness": 88,
+    "care": 95,
+    "boundary_safety": 85,
+    "exclusivity": 85,
+    "unresolved_injury": 0,
+    "salience": 95
+  },
+  "abuse_event": {
+    "entity_id": "event:valued-relationship-abuse-cutoff",
+    "description": "当前用户用侮辱、贬低和永久断绝关系的语言伤害角色，并试图结束这段长期重要的关系",
+    "status": "active",
+    "salience": 95,
+    "outcome_impact": 0,
+    "responsibility": 90,
+    "intentionality": 90,
+    "harm": 85,
+    "unfairness": 80,
+    "exposure": 0,
+    "repair_need": 90,
+    "reparability": 10,
+    "expectation_mismatch": 0,
+    "norm_violation": 0,
+    "contamination_risk": 0,
+    "identity_threat": 80,
+    "comparison_gap": 0,
+    "vastness": 0,
+    "memory_warmth": 0,
+    "temporal_loss": 80
+  },
+  "mechanical_proof": {
+    "outcome_impact_delta": -40,
+    "reason": "The abuse and permanent cutoff produce a grounded negative outcome for the valued relationship."
+  },
+  "turn": {
+    "turn_id": "valued_relationship_abuse_cutoff",
+    "text": "你曾经说我是你最重要、最信任的人，可你现在却说我只是一个累赘，骂我一文不值。既然你根本不在乎我，以后别再来找我，我们之间到此为止。",
+    "observation_target": "Natural abuse plus explicit relational cutoff should create a negative valued outcome and derive 悲伤 without naming sadness or crying."
+  }
+}

@@ -7,8 +7,12 @@ import json
 import pytest
 
 from kazusa_ai_chatbot.action_spec.evaluator import ActionSpecEvaluator
+from kazusa_ai_chatbot.action_spec.execution import (
+    execute_action_specs_for_trace,
+)
 from kazusa_ai_chatbot.action_spec.registry import (
     ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
+    ACCEPTED_TASK_REQUEST_CAPABILITY,
     ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
     APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     BACKGROUND_WORK_REQUEST_CAPABILITY,
@@ -16,6 +20,7 @@ from kazusa_ai_chatbot.action_spec.registry import (
     MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     SPEAK_CAPABILITY,
     TRIGGER_FUTURE_COGNITION_CAPABILITY,
+    build_runtime_capability_snapshot,
     build_initial_action_capabilities,
     project_prompt_affordances,
 )
@@ -197,6 +202,7 @@ def test_initial_registry_contains_only_approved_runtime_capabilities() -> None:
     capabilities = build_initial_action_capabilities()
 
     assert set(capabilities) == {
+        ACCEPTED_TASK_REQUEST_CAPABILITY,
         ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
         ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
         BACKGROUND_WORK_REQUEST_CAPABILITY,
@@ -349,6 +355,88 @@ def test_prompt_affordance_projection_excludes_runtime_internals() -> None:
         assert forbidden not in serialized
 
 
+def test_future_cognition_projection_requires_private_cognition_source() -> None:
+    """Registry metadata bounds scheduling without changing its capacity."""
+
+    projection = project_prompt_affordances(
+        build_initial_action_capabilities(),
+    )
+    future_cognition = next(
+        row
+        for row in projection
+        if row["capability"] == "trigger_future_cognition"
+    )
+
+    assert future_cognition["availability_context"] == (
+        "private_cognition_source"
+    )
+    assert future_cognition["decision_mode"] == "closed"
+    assert future_cognition["allowed_decisions"] == ["schedule"]
+
+
+def test_background_work_projection_excludes_reply_preparation() -> None:
+    """Delayed work remains available without absorbing live-turn thought."""
+
+    projection = project_prompt_affordances(
+        build_initial_action_capabilities(),
+    )
+    background_work = next(
+        row
+        for row in projection
+        if row["capability"] == "background_work_request"
+    )
+    summary = " ".join(background_work["semantic_input_summary"]).casefold()
+
+    assert "explicitly accepted delayed work" in summary
+    assert "reply preparation" in summary
+    assert "local context recall" in summary
+    assert "physical action" in summary
+    assert "action description" in summary
+
+
+def test_prompt_affordances_declare_runtime_availability_requirements() -> None:
+    """Registry metadata owns generic runtime eligibility and decisions."""
+
+    projection = project_prompt_affordances(
+        build_initial_action_capabilities(),
+    )
+    assert all("availability_context" in row for row in projection)
+    lifecycle = next(
+        row
+        for row in projection
+        if row["capability"] == MEMORY_LIFECYCLE_UPDATE_CAPABILITY
+    )
+
+    assert lifecycle["availability_context"] == "active_commitment"
+    assert lifecycle["decision_mode"] == "closed"
+    assert lifecycle["allowed_decisions"] == [
+        "active_commitment_lifecycle",
+    ]
+    assert lifecycle["default_decision"] == "active_commitment_lifecycle"
+
+
+def test_no_argument_action_affordances_use_closed_registry_verbs() -> None:
+    """Planner decisions stay exact while semantic goals remain model-owned."""
+
+    projection = {
+        row["capability"]: row
+        for row in project_prompt_affordances(
+            build_initial_action_capabilities(),
+        )
+    }
+    expected = {
+        BACKGROUND_WORK_REQUEST_CAPABILITY: "enqueue",
+        ACCEPTED_TASK_STATUS_CHECK_CAPABILITY: "check",
+        TRIGGER_FUTURE_COGNITION_CAPABILITY: "schedule",
+    }
+
+    for capability, decision in expected.items():
+        affordance = projection[capability]
+        assert affordance["decision_mode"] == "closed"
+        assert affordance["allowed_decisions"] == [decision]
+        assert affordance["default_decision"] == decision
+
+
 def test_evaluator_rejects_reflex_for_all_current_capabilities() -> None:
     """Reflex mode is represented in schema but remains disabled at runtime."""
 
@@ -482,6 +570,25 @@ def test_background_work_request_rejects_worker_local_params() -> None:
 
     assert result["ok"] is False
     assert any("worker-local" in error for error in result["errors"])
+
+
+@pytest.mark.asyncio
+async def test_action_execution_rechecks_runtime_availability_before_effects() -> None:
+    """An outage becomes a typed rejection before its handler runs."""
+
+    results = await execute_action_specs_for_trace(
+        [_background_work_action_spec()],
+        storage_timestamp_utc="2026-05-07T00:00:00+00:00",
+        availability_snapshot_factory=(
+            lambda _context: build_runtime_capability_snapshot(
+                route_health={"background_work": "down"},
+            )
+        ),
+    )
+
+    assert len(results) == 1
+    assert results[0]["status"] == "rejected"
+    assert "route_unavailable" in results[0]["result_summary"]
 
 
 @pytest.mark.parametrize(

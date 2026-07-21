@@ -185,7 +185,7 @@ def _incident_dialog_state() -> dict:
         'platform_bot_id': '3768713357',
         'global_user_id': '256e8a10-c406-47e9-ac8f-efd270d18160',
         'user_name': '蚝爹油',
-        'user_profile': {'affinity': 501},
+        'user_profile': {'relationship_state': 501},
         'dialog_usage_mode': 'live_generator_contract',
         'debug_modes': {},
         'should_respond': True,

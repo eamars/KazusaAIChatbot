@@ -1,4 +1,4 @@
-"""Deterministic tests for daily affect settling."""
+"""Deterministic tests for daily sleep recovery."""
 
 from __future__ import annotations
 
@@ -6,9 +6,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+    build_character_production_state,
+)
 from kazusa_ai_chatbot.reflection_cycle import affect_settling
 from kazusa_ai_chatbot.reflection_cycle.models import (
-    REFLECTION_STATUS_SKIPPED,
     REFLECTION_STATUS_SUCCEEDED,
 )
 
@@ -55,46 +57,41 @@ def test_affect_settling_worker_due_allows_after_grace_catch_up():
     assert settling_date == "2026-05-05"
 
 
-def test_affect_settling_prompt_excludes_operational_metadata():
-    payload = affect_settling.build_affect_settling_payload(
-        settling_local_date="2026-05-05",
-        character_state={
-            "mood": "刺々しいけど、眠気で角が少し丸い",
-            "global_vibe": "still annoyed, quieter around the edges",
-            "reflection_summary": "She remembers the argument, not just anger.",
-            "updated_at": "state-token-1",
-        },
-        daily_docs=[
-            {
-                "run_id": "daily-run-1",
-                "source_run_ids": ["hourly-run-hidden"],
-                "output": {
-                    "day_summary": "The day ended tense.",
-                    "conversation_quality_patterns": ["pressure lingered"],
-                    "synthesis_limitations": [],
-                },
-            }
-        ],
-        sleep_window_docs=[],
+def test_sleep_recovery_changes_transient_state_only():
+    state = build_character_production_state(
+        updated_at="2026-07-14T00:00:00Z",
+    )
+    state["drives"]["connection"]["pressure"] = 60
+    state["meaning_state"]["salience"] = 60
+    before = state.copy()
+
+    recovered, artifact = affect_settling.sleep_recovery(
+        state,
+        local_date_key="2026-07-14",
+        elapsed_sleep_seconds=7200,
+        started_at="2026-07-14T08:00:00Z",
+        completed_at="2026-07-14T08:00:01Z",
     )
 
-    prompt = affect_settling.build_affect_settling_prompt(payload)
-    prompt_text = f"{prompt.system_prompt}\n{prompt.human_prompt}"
-
-    assert "刺々しいけど、眠気で角が少し丸い" in prompt_text
-    assert "still annoyed, quieter around the edges" in prompt_text
-    assert "state-token-1" not in prompt_text
-    assert "updated_at" not in prompt_text
-    assert "daily-run-1" not in prompt_text
-    assert "hourly-run-hidden" not in prompt_text
+    assert recovered["drives"]["connection"]["pressure"] == 32
+    assert recovered["drives"]["connection"]["importance"] == 70
+    assert recovered["meaning_state"]["salience"] == 60
+    assert state == before
+    assert artifact["status"] == "completed"
+    assert artifact["local_date_key"] == "2026-07-14"
+    assert artifact["state_scope"] == "character"
+    assert artifact["elapsed_sleep_seconds"] == 7200
+    assert isinstance(artifact["semantic_recovery_summary"], str)
+    assert recovered["updated_at"] == "2026-07-14T08:00:01Z"
 
 
 @pytest.mark.asyncio
-async def test_run_daily_affect_settling_persists_stale_state_skip(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_daily_sleep_recovery_persists_once_without_llm(monkeypatch):
+    state = build_character_production_state(
+        updated_at="2026-07-14T00:00:00Z",
+    )
     persisted_docs: list[dict] = []
-    refresh = AsyncMock()
+    replace_state = AsyncMock()
     monkeypatch.setattr(
         affect_settling.repository,
         "reflection_run_by_id",
@@ -102,40 +99,18 @@ async def test_run_daily_affect_settling_persists_stale_state_skip(
     )
     monkeypatch.setattr(
         affect_settling.db,
-        "get_character_runtime_state",
-        AsyncMock(return_value={
-            "mood": "angry",
-            "global_vibe": "hostile",
-            "reflection_summary": "A fight still feels fresh.",
-            "updated_at": "state-token-1",
-        }),
-    )
-    monkeypatch.setattr(
-        affect_settling,
-        "load_affect_settling_source_documents",
-        AsyncMock(return_value=([], [])),
-    )
-    monkeypatch.setattr(
-        affect_settling,
-        "run_affect_settling_proposal_llm",
-        AsyncMock(return_value={
-            "mood": "irritated but less explosive after sleep",
-            "global_vibe": "guarded, not actively hostile",
-            "reflection_summary": "Sleep softened the immediate heat.",
-        }),
-    )
-    monkeypatch.setattr(
-        affect_settling,
-        "run_affect_settling_review_llm",
-        AsyncMock(return_value={
-            "write_decision": "accept",
-            "review_reason": "The change is gradual and grounded.",
-        }),
+        "get_character_cognition_state",
+        AsyncMock(return_value=state),
     )
     monkeypatch.setattr(
         affect_settling.db,
-        "compare_and_upsert_character_state",
-        AsyncMock(return_value=False),
+        "replace_character_cognition_state",
+        replace_state,
+    )
+    monkeypatch.setattr(
+        affect_settling.db,
+        "get_character_runtime_state",
+        AsyncMock(side_effect=AssertionError("legacy runtime state read")),
     )
 
     async def _persist(document: dict) -> None:
@@ -144,174 +119,43 @@ async def test_run_daily_affect_settling_persists_stale_state_skip(
     monkeypatch.setattr(affect_settling.repository, "upsert_run", _persist)
 
     result = await affect_settling.run_daily_affect_settling(
-        settling_local_date="2026-05-05",
+        settling_local_date="2026-07-14",
         dry_run=False,
         enable_character_state_write=True,
-        character_state_refresh_callback=refresh,
+    )
+
+    assert result.succeeded_count == 1
+    replace_state.assert_awaited_once()
+    assert persisted_docs[-1]["status"] == REFLECTION_STATUS_SUCCEEDED
+    output = persisted_docs[-1]["output"]["sleep_recovery"]
+    assert output["local_date_key"] == "2026-07-14"
+    assert output["elapsed_sleep_seconds"] == 10 * 60 * 60
+    assert not hasattr(affect_settling, "run_affect_settling_proposal_llm")
+    assert not hasattr(affect_settling, "run_affect_settling_review_llm")
+
+
+@pytest.mark.asyncio
+async def test_completed_local_date_reentry_does_not_mutate_state(monkeypatch):
+    replace_state = AsyncMock()
+    monkeypatch.setattr(
+        affect_settling.repository,
+        "reflection_run_by_id",
+        AsyncMock(return_value={
+            "status": REFLECTION_STATUS_SUCCEEDED,
+            "output": {"sleep_recovery": {"status": "completed"}},
+        }),
+    )
+    monkeypatch.setattr(
+        affect_settling.db,
+        "replace_character_cognition_state",
+        replace_state,
+    )
+
+    result = await affect_settling.run_daily_affect_settling(
+        settling_local_date="2026-07-14",
+        dry_run=False,
+        enable_character_state_write=True,
     )
 
     assert result.skipped_count == 1
-    assert result.failed_count == 0
-    assert persisted_docs[-1]["status"] == REFLECTION_STATUS_SKIPPED
-    assert persisted_docs[-1]["output"]["skip_reason"] == "stale_character_state"
-    assert persisted_docs[-1]["output"]["retryable"] is False
-    refresh.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_run_daily_affect_settling_writes_free_form_llm_fields(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    persisted_docs: list[dict] = []
-    refresh = AsyncMock()
-    expected_mood = "less sharp; still proud enough to stay distant"
-    expected_global_vibe = "quietly annoyed, no longer looking for a fight"
-    expected_summary = "The anger survives, but sleep made it less immediate."
-    compare_write = AsyncMock(return_value=True)
-    monkeypatch.setattr(
-        affect_settling.repository,
-        "reflection_run_by_id",
-        AsyncMock(return_value=None),
-    )
-    monkeypatch.setattr(
-        affect_settling.db,
-        "get_character_runtime_state",
-        AsyncMock(return_value={
-            "mood": "furious",
-            "global_vibe": "sharp and rejecting",
-            "reflection_summary": "She is still hurt.",
-            "updated_at": "state-token-1",
-        }),
-    )
-    monkeypatch.setattr(
-        affect_settling,
-        "load_affect_settling_source_documents",
-        AsyncMock(return_value=([], [])),
-    )
-    monkeypatch.setattr(
-        affect_settling,
-        "run_affect_settling_proposal_llm",
-        AsyncMock(return_value={
-            "mood": expected_mood,
-            "global_vibe": expected_global_vibe,
-            "reflection_summary": expected_summary,
-        }),
-    )
-    monkeypatch.setattr(
-        affect_settling,
-        "run_affect_settling_review_llm",
-        AsyncMock(return_value={
-            "write_decision": "accept",
-            "review_reason": "No deterministic vocabulary rewrite was needed.",
-        }),
-    )
-    monkeypatch.setattr(
-        affect_settling.db,
-        "compare_and_upsert_character_state",
-        compare_write,
-    )
-
-    async def _persist(document: dict) -> None:
-        persisted_docs.append(document)
-
-    monkeypatch.setattr(affect_settling.repository, "upsert_run", _persist)
-
-    result = await affect_settling.run_daily_affect_settling(
-        settling_local_date="2026-05-05",
-        dry_run=False,
-        enable_character_state_write=True,
-        character_state_refresh_callback=refresh,
-    )
-
-    assert result.succeeded_count == 1
-    assert persisted_docs[-1]["status"] == REFLECTION_STATUS_SUCCEEDED
-    compare_write.assert_awaited_once()
-    compare_kwargs = compare_write.await_args.kwargs
-    assert compare_kwargs["expected_updated_at"] == "state-token-1"
-    assert compare_kwargs["mood"] == expected_mood
-    assert compare_kwargs["global_vibe"] == expected_global_vibe
-    assert compare_kwargs["reflection_summary"] == expected_summary
-    refresh.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_run_daily_affect_settling_keeps_success_when_refresh_fails(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    persisted_docs: list[dict] = []
-    expected_mood = "less sharp after rest"
-    expected_global_vibe = "guarded, but no longer actively hostile"
-    expected_summary = "Sleep softened the immediate anger."
-    compare_write = AsyncMock(return_value=True)
-    runtime_error_event = AsyncMock()
-    monkeypatch.setattr(
-        affect_settling.repository,
-        "reflection_run_by_id",
-        AsyncMock(return_value=None),
-    )
-    monkeypatch.setattr(
-        affect_settling.db,
-        "get_character_runtime_state",
-        AsyncMock(return_value={
-            "mood": "furious",
-            "global_vibe": "sharp and rejecting",
-            "reflection_summary": "She is still hurt.",
-            "updated_at": "state-token-1",
-        }),
-    )
-    monkeypatch.setattr(
-        affect_settling,
-        "load_affect_settling_source_documents",
-        AsyncMock(return_value=([], [])),
-    )
-    monkeypatch.setattr(
-        affect_settling,
-        "run_affect_settling_proposal_llm",
-        AsyncMock(return_value={
-            "mood": expected_mood,
-            "global_vibe": expected_global_vibe,
-            "reflection_summary": expected_summary,
-        }),
-    )
-    monkeypatch.setattr(
-        affect_settling,
-        "run_affect_settling_review_llm",
-        AsyncMock(return_value={
-            "write_decision": "accept",
-            "review_reason": "The change remains gradual.",
-        }),
-    )
-    monkeypatch.setattr(
-        affect_settling.db,
-        "compare_and_upsert_character_state",
-        compare_write,
-    )
-    monkeypatch.setattr(
-        affect_settling.event_logging,
-        "record_runtime_error_event",
-        runtime_error_event,
-    )
-
-    async def _persist(document: dict) -> None:
-        persisted_docs.append(document)
-
-    async def _refresh() -> None:
-        raise RuntimeError("refresh unavailable")
-
-    monkeypatch.setattr(affect_settling.repository, "upsert_run", _persist)
-
-    result = await affect_settling.run_daily_affect_settling(
-        settling_local_date="2026-05-05",
-        dry_run=False,
-        enable_character_state_write=True,
-        character_state_refresh_callback=_refresh,
-    )
-
-    assert result.succeeded_count == 1
-    assert result.failed_count == 0
-    assert persisted_docs[-1]["status"] == REFLECTION_STATUS_SUCCEEDED
-    compare_write.assert_awaited_once()
-    runtime_error_event.assert_awaited_once()
-    error_kwargs = runtime_error_event.await_args.kwargs
-    assert error_kwargs["component"] == "reflection_cycle.affect_settling"
-    assert error_kwargs["recovered"] is True
+    replace_state.assert_not_awaited()

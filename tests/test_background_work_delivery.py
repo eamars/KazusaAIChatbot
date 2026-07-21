@@ -9,10 +9,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_chain_core.prompt_selection import (
-    build_cognition_prompt_source_payload,
-    select_cognition_prompt_variant,
-)
+from kazusa_ai_chatbot.action_spec.results import build_text_surface_output
+
 
 
 def _completed_job() -> dict:
@@ -84,8 +82,8 @@ def test_result_source_builder_requires_accepted_task_identity() -> None:
         result_source.build_result_ready_episode_from_job(_completed_job())
 
 
-def test_accepted_task_result_source_builder_creates_prompt_safe_episode() -> None:
-    """Accepted-task jobs should produce accepted-task result-ready cognition."""
+def test_tool_result_source_builder_creates_prompt_safe_episode() -> None:
+    """Accepted-task jobs should produce canonical tool-result cognition."""
 
     result_source = importlib.import_module(
         "kazusa_ai_chatbot.background_work.result_source"
@@ -96,22 +94,22 @@ def test_accepted_task_result_source_builder_creates_prompt_safe_episode() -> No
     )
     serialized = json.dumps(episode, ensure_ascii=False).lower()
 
-    assert episode["trigger_source"] == "accepted_task_result_ready"
-    assert episode["input_sources"] == ["accepted_task_result"]
-    assert episode["output_mode"] == "visible_reply"
-    metadata = episode["percepts"][0]["metadata"]
-    assert metadata["accepted_task_id"] == "task-001"
-    assert metadata["accepted_task_summary"] == (
-        "Generate a Fibonacci function snippet."
+    assert episode["trigger_source"] == "tool_result"
+    assert episode["percepts"][0]["source_kind"] == "tool_result"
+    assert episode["origin_metadata"]["task_id"] == "task-001"
+    assert episode["origin_metadata"]["task_kind"] == "accepted_task"
+    assert episode["percepts"][0]["content"]["semantic_summary"] == (
+        "Generated a compact Fibonacci snippet."
     )
-    assert "accepted_task_result_ready" in serialized
-    assert "accepted_task_result" in serialized
+    assert "tool_result" in serialized
+    retired_result_source = "accepted_" + "task_result_ready"
+    assert retired_result_source not in serialized
     for forbidden in ("worker_metadata", "worker", "job_ref", "queue_state"):
         assert forbidden not in serialized
 
 
-def test_accepted_task_result_payload_uses_semantic_metadata() -> None:
-    """Prompt payload should expose accepted-task result fields only."""
+def test_tool_result_payload_uses_semantic_metadata() -> None:
+    """Result source should expose a typed tool-result cognition outcome."""
 
     result_source = importlib.import_module(
         "kazusa_ai_chatbot.background_work.result_source"
@@ -119,26 +117,17 @@ def test_accepted_task_result_payload_uses_semantic_metadata() -> None:
     episode = result_source.build_result_ready_episode_from_job(
         _accepted_task_completed_job()
     )
-    selection = select_cognition_prompt_variant(
-        episode=episode,
-        stage="l2d_action_selection",
-    )
-
-    payload = build_cognition_prompt_source_payload(
-        episode=episode,
-        selection=selection,
-    )
-
-    result_payload = payload["accepted_task_result"]
-    metadata = result_payload["metadata"]
-    assert metadata == {
-        "accepted_task_summary": "Generate a Fibonacci function snippet.",
-        "failure_summary": "",
-        "result_summary": "Generated a compact Fibonacci snippet.",
-        "source_character_name": "Test Character",
+    metadata = episode["percepts"][0]["content"]
+    assert metadata["cognition_source"] == {
+        "source_kind": "tool_result",
+        "source_id": "task-001",
+        "occurred_at": "2026-06-06T00:01:00+00:00",
+        "semantic_summary": "Generated a compact Fibonacci snippet.",
     }
-    serialized_payload = json.dumps(payload, ensure_ascii=False).lower()
-    assert "accepted_task_result" in serialized_payload
+    serialized_payload = json.dumps(episode, ensure_ascii=False).lower()
+    assert "tool_result" in serialized_payload
+    retired_result_source = "accepted_" + "task_result_ready"
+    assert retired_result_source not in serialized_payload
     for forbidden in ("worker_metadata", "worker", "job_ref", "queue_state"):
         assert forbidden not in serialized_payload
 
@@ -163,6 +152,10 @@ async def test_service_result_ready_delivery_uses_dispatcher_boundary(
     })
     persona_supervisor2 = AsyncMock(return_value={
         "final_dialog": ["@Test User Here is the requested result."],
+        "surface_outputs": [build_text_surface_output(
+            fragments=["@Test User Here is the requested result."],
+            created_at=episode["created_at"],
+        )],
         "consolidation_state": {
             "final_dialog": ["@Test User Here is the requested result."],
         },
@@ -215,6 +208,11 @@ async def test_service_result_ready_delivery_uses_dispatcher_boundary(
         "_run_accepted_task_result_post_turn",
         post_turn,
     )
+    monkeypatch.setattr(
+        service_module,
+        "upsert_post_turn_lifecycle_record",
+        AsyncMock(),
+    )
 
     result = await service_module._deliver_accepted_task_result_episode(
         episode,
@@ -228,9 +226,9 @@ async def test_service_result_ready_delivery_uses_dispatcher_boundary(
     }
     persona_state = persona_supervisor2.await_args.args[0]
     assert persona_state["cognitive_episode"] == episode
-    assert persona_state["reason_to_respond"] == "accepted_task_result_ready"
+    assert persona_state["reason_to_respond"] == "tool_result"
     assert persona_state["user_input"].startswith(
-        "Accepted task result is completed."
+        "Tool result is completed."
     )
     send_args = handle_send_message.await_args.args[0]
     assert send_args["text"] == "@Test User Here is the requested result."
@@ -293,7 +291,7 @@ async def test_accepted_task_result_post_turn_skips_consolidation(
     lifecycle.assert_awaited_once()
     progress.assert_awaited_once()
     consolidation.assert_not_awaited()
-    residue.assert_awaited_once()
+    residue.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -378,7 +376,7 @@ async def test_delivery_tick_syncs_accepted_task_delivery_state(
     ] == "conversation-001"
     mark_task_failed.assert_not_awaited()
     delivered_episode = deliver_episode.await_args.args[0]
-    assert delivered_episode["trigger_source"] == "accepted_task_result_ready"
+    assert delivered_episode["trigger_source"] == "tool_result"
 
 
 @pytest.mark.asyncio

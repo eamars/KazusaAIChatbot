@@ -1,25 +1,26 @@
-"""Load a character personality profile from a JSON file into MongoDB.
+"""Validate and seed a character personality profile into MongoDB.
 
 Usage:
     python -m scripts.load_character_profile personalities/kazusa.json
     python -m scripts.load_character_profile personalities/kazusa.json --force
 
-The first invocation is mandatory before starting the brain service.
-Subsequent runs will skip the upload unless --force is provided.
+The service performs the same seed-or-verify operation during native startup.
+``--force`` explicitly replaces static profile fields while preserving runtime
+state.
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import logging
-import sys
 from pathlib import Path
 
+from kazusa_ai_chatbot.character_profile import load_character_profile_seed
 from kazusa_ai_chatbot.db import (
     close_db,
     db_bootstrap,
+    ensure_character_profile_seed,
     get_character_profile,
     save_character_profile,
 )
@@ -28,25 +29,24 @@ logger = logging.getLogger(__name__)
 
 
 async def main(path: Path, force: bool) -> None:
-    if not path.exists():
-        logger.error(f'File not found: {path}')
-        sys.exit(1)
-
-    with open(path, "r", encoding="utf-8") as f:
-        profile = json.load(f)
-
-    if not isinstance(profile, dict) or not profile.get("name"):
-        logger.error("Invalid profile — must be a JSON object with at least a 'name' field")
-        sys.exit(1)
-
     await db_bootstrap()
+    seed = load_character_profile_seed(path.resolve())
+    seed_result = await ensure_character_profile_seed(seed)
 
     existing = await get_character_profile()
     if existing.get("name") and not force:
-        logger.info(f'Character profile \'{existing.get("name", "(unknown)")}\' already exists in the database. Use --force to overwrite.')
+        logger.info(
+            f"Character profile '{existing['name']}' {seed_result}; "
+            "static fields were preserved."
+        )
+    elif force:
+        await save_character_profile(dict(seed))
+        logger.info(
+            f"Character profile '{seed['name']}' static fields overwritten; "
+            "runtime state preserved."
+        )
     else:
-        await save_character_profile(profile)
-        logger.info(f'Character profile \'{profile["name"]}\' saved to database.')
+        logger.info(f"Character profile '{seed['name']}' inserted.")
 
     await close_db()
 

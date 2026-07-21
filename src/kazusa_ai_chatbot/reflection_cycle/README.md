@@ -132,8 +132,7 @@ Run kinds:
 - `daily_global_promotion`: stores the global daily promotion prompt output and
   promotion decisions.
 - `daily_affect_settling`: stores one daily sleep/wake affect-settling audit
-  row for persistent `character_state` mood, global vibe, and reflection
-  summary updates.
+  row for the deterministic native character cognition recovery pass.
 
 `daily_global_promotion` uses a synthetic system scope:
 `scope_ref="daily_global"`, `platform="system"`,
@@ -267,14 +266,8 @@ Gates use `CHARACTER_TIME_ZONE`. Stage 1a hourly slots remain UTC, while daily
 grouping uses the character-local date of each hourly slot.
 
 The only env-backed affect-settling setting is
-`AFFECT_SETTLING_WAKE_PREP_MINUTES`. Other affect-settling policy values are
-named constants in `kazusa_ai_chatbot.reflection_cycle.affect_settling`, not
-deployment settings:
-
-- `AFFECT_SETTLING_PROMPT_MAX_CHARS=12000`
-- `AFFECT_SETTLING_REVIEW_PROMPT_MAX_CHARS=8000`
-- `AFFECT_SETTLING_AFTER_PROMOTION_GRACE_MINUTES=15`
-- `AFFECT_SETTLING_WAKE_DEFER_GRACE_MINUTES=15`
+`AFFECT_SETTLING_WAKE_PREP_MINUTES`. The remaining timing policy is held as
+named constants in `kazusa_ai_chatbot.reflection_cycle.affect_settling`.
 
 The calendar scheduler snapshots monitor-eligible channels as of
 `period_start_utc`, materializes deterministic `reflection_phase_slot`
@@ -369,13 +362,11 @@ sleep-ending local date as `settling_local_date`, can catch up after the due
 time if the service missed the narrow wake window, and runs at most once per
 reflection phase period.
 
-The affect prompt consumes current `character_state` text plus sanitized
-previous-day `daily_channel` cards and sleep-window `hourly_slot` cards.
-Prompt-facing payloads exclude run ids, scheduler ids, leases, freshness
-tokens, raw DB timestamps, and source message refs. The proposal LLM owns the
-free-form semantic transition; the reviewer LLM accepts or rejects that exact
-proposal. Deterministic code validates only required strings, reviewer decision
-shape, stale-write freshness, status idempotency, and persistence.
+Daily affect settling applies deterministic V2 sleep recovery to the native
+character cognition state. It performs no proposal or reviewer LLM calls and
+changes only transient drive pressure, causal salience, threat residual
+pressure, and affect activation scores, with the local-date run row providing
+idempotency and auditability.
 
 After a successful affect write, the service-provided
 `character_state_refresh_callback` refreshes the process-local runtime

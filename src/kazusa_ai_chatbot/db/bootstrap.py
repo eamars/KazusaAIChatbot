@@ -31,6 +31,14 @@ from kazusa_ai_chatbot.db.internal_monologue_residue import (
     INTERNAL_MONOLOGUE_RESIDUE_COLLECTION,
     ensure_internal_monologue_residue_indexes,
 )
+from kazusa_ai_chatbot.db.internal_action_latches import (
+    INTERNAL_ACTION_LATCHES_COLLECTION,
+    ensure_internal_action_latch_indexes,
+)
+from kazusa_ai_chatbot.db.post_turn_lifecycle import (
+    POST_TURN_LIFECYCLE_RECORDS_COLLECTION,
+    ensure_post_turn_lifecycle_record_indexes,
+)
 from kazusa_ai_chatbot.db.global_character_growth import (
     GLOBAL_CHARACTER_GROWTH_RUNS_COLLECTION,
     GLOBAL_CHARACTER_GROWTH_TRAITS_COLLECTION,
@@ -58,17 +66,11 @@ from kazusa_ai_chatbot.db.self_cognition import (
     SELF_COGNITION_ACTION_ATTEMPTS_COLLECTION,
     SELF_COGNITION_GROUP_REVIEW_WINDOWS_COLLECTION,
 )
-from kazusa_ai_chatbot.time_boundary import storage_utc_now_iso
 
 logger = logging.getLogger(__name__)
 
 CALENDAR_SCHEDULES_COLLECTION = "calendar_schedules"
 CALENDAR_RUNS_COLLECTION = "calendar_runs"
-
-
-def _now_iso() -> str:
-    return_value = storage_utc_now_iso()
-    return return_value
 
 
 async def db_bootstrap() -> None:
@@ -78,16 +80,6 @@ async def db_bootstrap() -> None:
     """
     db = await get_db()
     existing = set(await db.list_collection_names())
-
-    for legacy in (
-        "rag_cache_index",
-        "rag_metadata_index",
-        "background_artifact_jobs",
-    ):
-        if legacy in existing:
-            await db.drop_collection(legacy)
-            logger.info(f'Dropped legacy collection \'{legacy}\'')
-            existing.discard(legacy)
 
     required_collections = [
         "conversation_history",
@@ -113,6 +105,8 @@ async def db_bootstrap() -> None:
         ACCEPTED_TASKS_COLLECTION,
         BACKGROUND_WORK_JOBS_COLLECTION,
         INTERNAL_MONOLOGUE_RESIDUE_COLLECTION,
+        INTERNAL_ACTION_LATCHES_COLLECTION,
+        POST_TURN_LIFECYCLE_RECORDS_COLLECTION,
     ]
     for name in required_collections:
         if name not in existing:
@@ -120,18 +114,6 @@ async def db_bootstrap() -> None:
             logger.info(f'Created collection \'{name}\'')
         else:
             logger.debug(f'Collection \'{name}\' already exists')
-
-    # ── Seed singleton character_state ─────────────────────────────
-    existing_state = await db.character_state.find_one({"_id": "global"})
-    if existing_state is None:
-        await db.character_state.insert_one({
-            "_id": "global",
-            "mood": "neutral",
-            "global_vibe": "",
-            "reflection_summary": "",
-            "updated_at": _now_iso(),
-        })
-        logger.info("Seeded default character_state document")
 
     # ── Standard regular indexes (idempotent) ──────────────────────
     await db.conversation_history.create_index(
@@ -244,6 +226,8 @@ async def db_bootstrap() -> None:
     )
     await ensure_accepted_task_indexes()
     await ensure_background_work_job_indexes()
+    await ensure_internal_action_latch_indexes()
+    await ensure_post_turn_lifecycle_record_indexes()
     await db.conversation_episode_state.create_index(
         [("platform", 1), ("platform_channel_id", 1), ("global_user_id", 1)],
         unique=True,

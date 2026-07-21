@@ -3,14 +3,25 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Callable
+import re
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import datetime
-from typing import Any, TypeAlias
+from typing import TYPE_CHECKING, Any, Literal, TypeAlias
 
 from kazusa_ai_chatbot.action_spec.registry import (
     APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
 )
-from kazusa_ai_chatbot.action_spec.results import build_episode_trace
+from kazusa_ai_chatbot.action_spec.models import ActionSpecV1
+from kazusa_ai_chatbot.action_spec.results import (
+    ActionResultV1,
+    DeliveryCorrelationV1,
+    EpisodeAttemptDiagnosticV1,
+    EpisodeTerminalStatusV1,
+    EpisodeTraceV2,
+    SurfaceOutputV1,
+    build_text_surface_output,
+    validate_episode_trace_v2,
+)
 from kazusa_ai_chatbot.conversation_progress import (
     ConversationProgressRecordInput,
     ConversationProgressScope,
@@ -19,7 +30,12 @@ from kazusa_ai_chatbot.brain_service.outbound import (
     record_assistant_outbound_message,
     utc_timestamp,
 )
+from kazusa_ai_chatbot.db.schemas import PostTurnLifecycleRecordV1
+from kazusa_ai_chatbot.logging_retention import expiry_from_storage_iso
 from kazusa_ai_chatbot.utils import log_preview
+
+if TYPE_CHECKING:
+    from kazusa_ai_chatbot.cognition_episode import CognitiveEpisodeV1
 
 
 EnsureCharacterIdentity = Callable[..., Awaitable[str]]
@@ -37,9 +53,328 @@ ExecuteActionSpecsForTrace: TypeAlias = Callable[
     ...,
     Awaitable[list[dict[str, Any]]],
 ]
+IssueInternalActionLatches: TypeAlias = Callable[..., Awaitable[None]]
 
 POST_SURFACE_ACTIVE_COMMITMENT_REVIEW_LIMIT = 500
 POST_SURFACE_LIFECYCLE_MAX_PASSES = 5
+
+
+def settle_episode_trace(
+    *,
+    episode: CognitiveEpisodeV1,
+    cognition_output: dict[str, object] | None,
+    action_specs: Sequence[ActionSpecV1],
+    action_results: Sequence[ActionResultV1],
+    surface_outputs: Sequence[SurfaceOutputV1],
+    terminal_status: EpisodeTerminalStatusV1,
+    attempt_diagnostics: Sequence[EpisodeAttemptDiagnosticV1],
+    delivery_correlation: DeliveryCorrelationV1,
+    settled_at: str,
+) -> EpisodeTraceV2:
+    """Settle the sole immutable EpisodeTraceV2 for one episode."""
+
+    episode_id = episode.get("episode_id")
+    trigger_source = episode.get("trigger_source")
+    created_at = episode.get("created_at")
+    if not isinstance(episode_id, str) or not episode_id:
+        raise ValueError("episode trace episode_id is required")
+    if not isinstance(trigger_source, str) or not trigger_source:
+        raise ValueError("episode trace trigger_source is required")
+    if not isinstance(created_at, str) or not created_at:
+        raise ValueError("episode trace created_at is required")
+    if terminal_status not in {
+        "completed_visible",
+        "completed_private",
+        "completed_action",
+        "scheduled",
+        "failed",
+        "cancelled",
+    }:
+        raise ValueError("episode trace terminal status is invalid")
+    receipt_status = delivery_correlation.get("receipt_status")
+    if receipt_status not in {
+        "not_applicable",
+        "pending",
+        "delivered",
+        "failed",
+        "unknown",
+    }:
+        raise ValueError("episode trace delivery receipt status is invalid")
+    tracking_id = delivery_correlation.get("tracking_id", "")
+    if receipt_status == "pending" and not tracking_id:
+        raise ValueError("pending delivery requires a tracking id")
+
+    normalized_cognition_refs: list[dict[str, object]] = []
+    if cognition_output is not None:
+        raw_refs = cognition_output.get("cognition_refs")
+        if isinstance(raw_refs, list):
+            normalized_cognition_refs = [
+                dict(ref) for ref in raw_refs if isinstance(ref, dict)
+            ]
+        if not normalized_cognition_refs:
+            diagnostics = cognition_output.get("diagnostics")
+            run_id = (
+                diagnostics.get("run_id")
+                if isinstance(diagnostics, dict)
+                else None
+            )
+            if isinstance(run_id, str) and run_id:
+                normalized_cognition_refs = [{
+                    "schema_version": "evidence_ref.v1",
+                    "evidence_kind": "cognition_output",
+                    "evidence_id": run_id,
+                    "owner": "cognition_core_v2",
+                    "observed_at": settled_at,
+                }]
+    attempt_ids: set[str] = set()
+    normalized_results: list[ActionResultV1] = []
+    for result in action_results:
+        action_attempt_id = result.get("action_attempt_id")
+        if not isinstance(action_attempt_id, str) or not action_attempt_id:
+            raise ValueError("episode trace action attempt id is required")
+        if action_attempt_id in attempt_ids:
+            raise ValueError("episode trace contains duplicate action attempts")
+        attempt_ids.add(action_attempt_id)
+        normalized_results.append(dict(result))
+
+    trace: EpisodeTraceV2 = {
+        "schema_version": "episode_trace.v2",
+        "episode_id": episode_id,
+        "trigger_source": trigger_source,
+        "terminal_status": terminal_status,
+        "cognition_refs": normalized_cognition_refs,
+        "action_specs": [dict(spec) for spec in action_specs],
+        "action_results": normalized_results,
+        "surface_outputs": [dict(output) for output in surface_outputs],
+        "attempt_diagnostics": [
+            dict(diagnostic) for diagnostic in attempt_diagnostics
+        ],
+        "delivery_correlation": dict(delivery_correlation),
+        "created_at": created_at,
+        "settled_at": settled_at,
+    }
+    return validate_episode_trace_v2(trace)
+
+
+async def settle_runtime_episode_trace(
+    *,
+    episode: CognitiveEpisodeV1,
+    graph_result: Mapping[str, object],
+    response_dialog: Sequence[str],
+    delivery_tracking_id: str,
+    settled_at: str,
+    issue_internal_action_latches_func: IssueInternalActionLatches | None = None,
+) -> dict[str, object]:
+    """Normalize one runtime outcome and settle its sole episode trace.
+
+    The service and background workers provide runtime-owned outcome facts to
+    this boundary.  This function owns the normalization, terminal-status
+    selection, delivery correlation fallback, and the one call to the pure
+    trace constructor.
+    """
+
+    action_specs = _dict_rows(graph_result.get("action_specs"))
+    action_results = _dict_rows(graph_result.get("action_results"))
+    surface_outputs = _dict_rows(graph_result.get("surface_outputs"))
+    if not surface_outputs and response_dialog:
+        surface_outputs = [build_text_surface_output(
+            fragments=[str(fragment) for fragment in response_dialog],
+            created_at=settled_at,
+        )]
+
+    raw_cognition_output = graph_result.get("cognition_core_output")
+    if not isinstance(raw_cognition_output, Mapping):
+        raw_cognition_output = graph_result.get("cognition_output")
+    cognition_output = (
+        dict(raw_cognition_output)
+        if isinstance(raw_cognition_output, Mapping)
+        else None
+    )
+
+    terminal_status = _runtime_terminal_status(
+        graph_result=graph_result,
+        response_dialog=response_dialog,
+        action_results=action_results,
+        cognition_output=cognition_output,
+    )
+    delivery_correlation = _runtime_delivery_correlation(
+        graph_result=graph_result,
+        response_dialog=response_dialog,
+        delivery_tracking_id=delivery_tracking_id,
+    )
+    trace = settle_episode_trace(
+        episode=episode,
+        cognition_output=cognition_output,
+        action_specs=action_specs,
+        action_results=action_results,
+        surface_outputs=surface_outputs,
+        terminal_status=terminal_status,
+        attempt_diagnostics=_dict_rows(
+            graph_result.get("attempt_diagnostics"),
+        ),
+        delivery_correlation=delivery_correlation,
+        settled_at=settled_at,
+    )
+    if issue_internal_action_latches_func is not None:
+        await issue_internal_action_latches_func(
+            episode=episode,
+            trace=trace,
+            now=settled_at,
+        )
+    return dict(trace)
+
+
+def _dict_rows(value: object) -> list[dict[str, Any]]:
+    """Copy dictionary rows from an optional runtime component list."""
+
+    if not isinstance(value, list):
+        return []
+    return [dict(row) for row in value if isinstance(row, Mapping)]
+
+
+def _runtime_terminal_status(
+    *,
+    graph_result: Mapping[str, object],
+    response_dialog: Sequence[str],
+    action_results: Sequence[Mapping[str, object]],
+    cognition_output: Mapping[str, object] | None,
+) -> EpisodeTerminalStatusV1:
+    """Choose a terminal status from settled runtime facts."""
+
+    requested_status = graph_result.get("terminal_status")
+    if requested_status in {
+        "completed_visible",
+        "completed_private",
+        "completed_action",
+        "scheduled",
+        "failed",
+        "cancelled",
+    }:
+        return requested_status
+    if response_dialog:
+        return "completed_visible"
+    statuses = {str(row.get("status") or "") for row in action_results}
+    if statuses and statuses <= {"failed", "rejected", "cancelled"}:
+        return "failed"
+    if "scheduled" in statuses or "pending" in statuses:
+        return "scheduled"
+    route = ""
+    if isinstance(cognition_output, Mapping):
+        intention = cognition_output.get("intention")
+        if isinstance(intention, Mapping):
+            route = str(intention.get("route") or "")
+    if route == "action" or action_results:
+        return "completed_action"
+    return "completed_private"
+
+
+def _runtime_delivery_correlation(
+    *,
+    graph_result: Mapping[str, object],
+    response_dialog: Sequence[str],
+    delivery_tracking_id: str,
+) -> DeliveryCorrelationV1:
+    """Use a settled delivery projection or build the runtime fallback."""
+
+    supplied = graph_result.get("delivery_correlation")
+    if isinstance(supplied, Mapping):
+        return dict(supplied)
+    return {
+        "schema_version": "delivery_correlation.v1",
+        "delivery_intent": "deliver_now" if response_dialog else "do_not_deliver",
+        "tracking_id": delivery_tracking_id,
+        "receipt_status": "pending" if delivery_tracking_id else "not_applicable",
+        "receipt_ref": "",
+    }
+
+
+def build_post_turn_lifecycle_record(
+    *,
+    source_episode_id: str,
+    delivery_tracking_id: str,
+    action_specs: Sequence[ActionSpecV1],
+    action_results: Sequence[ActionResultV1],
+    error_codes: Sequence[str],
+    created_at: str,
+) -> PostTurnLifecycleRecordV1:
+    """Build the prompt-safe post-turn lifecycle audit projection."""
+
+    projections: list[dict[str, object]] = []
+    for result in action_results:
+        action_kind = str(result.get("action_kind", ""))
+        matching_spec = next(
+            (
+                spec
+                for spec in action_specs
+                if spec.get("kind") == action_kind
+            ),
+            None,
+        )
+        semantic_decision = ""
+        if matching_spec is not None:
+            semantic_decision = str(matching_spec.get("reason", ""))
+        projections.append({
+            "schema_version": "consolidation_action_projection.v1",
+            "action_kind": action_kind,
+            "status": str(result.get("status", "")),
+            "visibility": str(result.get("visibility", "private")),
+            "semantic_decision": semantic_decision,
+            "result_summary": str(result.get("result_summary", "")),
+            "evidence_refs": list(result.get("result_refs", [])),
+        })
+
+    if not action_results:
+        status: Literal["skipped", "completed", "partial", "failed"] = "skipped"
+    else:
+        successful = sum(
+            result.get("status") in {"executed", "scheduled", "pending"}
+            for result in action_results
+        )
+        if successful == len(action_results):
+            status = "completed"
+        elif successful:
+            status = "partial"
+        else:
+            status = "failed"
+
+    sanitized_errors = [
+        _sanitize_error_code(error_code)
+        for error_code in error_codes
+        if _sanitize_error_code(error_code)
+    ]
+    record: PostTurnLifecycleRecordV1 = {
+        "schema_version": "post_turn_lifecycle_record.v1",
+        "lifecycle_record_id": f"post-turn:{source_episode_id}",
+        "source_episode_id": source_episode_id,
+        "delivery_tracking_id": delivery_tracking_id,
+        "action_projections": projections,
+        "status": status,
+        "error_codes": sanitized_errors,
+        "created_at": created_at,
+        "purge_after": _audit_expiry(created_at),
+    }
+    return record
+
+
+def _sanitize_error_code(value: object) -> str:
+    """Keep error codes typed and free of backend detail."""
+
+    if not isinstance(value, str):
+        return_value = ""
+        return return_value
+    sanitized = re.sub(r"[^a-zA-Z0-9_.-]", "_", value.strip())
+    return sanitized[:80]
+
+
+def _audit_expiry(created_at: str) -> str:
+    """Return the configured audit expiry for lifecycle records."""
+
+    from kazusa_ai_chatbot.config import AUDIT_LOG_TTL_DAYS
+
+    return expiry_from_storage_iso(
+        created_at,
+        ttl_days=AUDIT_LOG_TTL_DAYS,
+    ).isoformat()
 
 
 async def save_assistant_message(
@@ -131,7 +466,8 @@ async def run_post_turn_memory_lifecycle_background(
 
     Returns:
         The original state object when review is structurally skipped, or a
-        shallow copied state with lifecycle specs/results and rebuilt trace.
+        shallow copied state with lifecycle specs/results for the independent
+        post-turn lifecycle record.
     """
 
     if no_remember:
@@ -180,7 +516,7 @@ async def run_post_turn_memory_lifecycle_background(
         if not executed_results:
             return current_state
 
-        current_state = _append_lifecycle_trace(
+        current_state = _append_lifecycle_components(
             current_state,
             lifecycle_specs=lifecycle_specs,
             action_results=action_results,
@@ -286,41 +622,21 @@ def _executed_lifecycle_results(
     return executed_results
 
 
-def _append_lifecycle_trace(
+def _append_lifecycle_components(
     state: dict,
     *,
     lifecycle_specs: list[dict[str, Any]],
     action_results: list[dict[str, Any]],
 ) -> dict:
-    """Append lifecycle evidence and rebuild the episode trace."""
+    """Return lifecycle components without mutating the settled trace."""
 
     updated_state = dict(state)
     prior_specs = _dict_list(updated_state.get("action_specs"))
     prior_results = _dict_list(updated_state.get("action_results"))
-    surface_outputs = _dict_list(updated_state.get("surface_outputs"))
     updated_specs = prior_specs + lifecycle_specs
     updated_results = prior_results + action_results
-    episode = updated_state["cognitive_episode"]
-    existing_trace = updated_state.get("episode_trace")
-    cognition_refs: list[dict[str, object]] | None = None
-    if isinstance(existing_trace, dict):
-        raw_cognition_refs = existing_trace.get("cognition_refs")
-        if isinstance(raw_cognition_refs, list):
-            cognition_refs = [
-                ref for ref in raw_cognition_refs if isinstance(ref, dict)
-            ]
-    trace = build_episode_trace(
-        episode_id=episode["episode_id"],
-        trigger_source=episode["trigger_source"],
-        created_at=updated_state["storage_timestamp_utc"],
-        action_specs=updated_specs,
-        action_results=updated_results,
-        surface_outputs=surface_outputs,
-        cognition_refs=cognition_refs,
-    )
     updated_state["action_specs"] = updated_specs
     updated_state["action_results"] = updated_results
-    updated_state["episode_trace"] = trace
     return updated_state
 
 
@@ -358,8 +674,17 @@ async def run_consolidation_background(
         None.
     """
 
+    trace = _validated_episode_trace(state, logger=logger)
+    if trace is None:
+        return
+    settled_state = dict(state)
+    settled_state["episode_trace"] = trace
+    settled_state["action_specs"] = trace["action_specs"]
+    settled_state["action_results"] = trace["action_results"]
+    settled_state["surface_outputs"] = trace["surface_outputs"]
+
     try:
-        result = await call_consolidation_subgraph_func(state)
+        result = await call_consolidation_subgraph_func(settled_state)
     except Exception as exc:
         logger.exception(f"Background consolidation failed: {exc}")
         return
@@ -389,9 +714,30 @@ async def run_conversation_progress_record_background(
         None.
     """
 
-    linguistic_directives = state["action_directives"]["linguistic_directives"]
+    trace = _validated_episode_trace(state, logger=logger)
+    if trace is None:
+        return
+    final_dialog = _visible_trace_dialog(trace)
+    if not final_dialog:
+        logger.debug(
+            "Conversation progress skipped: settled trace has no visible text"
+        )
+        return
+
     character_profile = state["character_profile"]
     boundary_profile = character_profile["boundary_profile"]
+    surface_output = state.get("text_surface_output_v2")
+    if isinstance(surface_output, dict):
+        content_plan = {
+            "semantic_content": surface_output["content_plan"],
+            "surface_intent": surface_output["selected_surface_intent"],
+            "style_guidance": surface_output["style_guidance"],
+        }
+    else:
+        content_plan = {
+            "semantic_content": state["character_intent"],
+            "surface_intent": state["logical_stance"],
+        }
     scope = ConversationProgressScope(
         platform=state["platform"],
         platform_channel_id=state["platform_channel_id"],
@@ -404,10 +750,10 @@ async def run_conversation_progress_record_background(
         "prior_episode_state": state.get("conversation_episode_state"),
         "decontexualized_input": state["decontexualized_input"],
         "chat_history_recent": state["chat_history_recent"],
-        "content_plan": linguistic_directives["content_plan"],
+        "content_plan": content_plan,
         "logical_stance": state["logical_stance"],
         "character_intent": state["character_intent"],
-        "final_dialog": state["final_dialog"],
+        "final_dialog": final_dialog,
         "boundary_profile": boundary_profile,
     }
     record_preview = {
@@ -445,6 +791,45 @@ async def run_conversation_progress_record_background(
         f'continuity={result["continuity"]} status={result["status"]} '
         f'cache_updated={result["cache_updated"]}'
     )
+
+
+def _validated_episode_trace(
+    state: Mapping[str, object],
+    *,
+    logger: logging.Logger,
+) -> EpisodeTraceV2 | None:
+    """Return the immutable trace required by post-turn consumers."""
+
+    try:
+        return validate_episode_trace_v2(state.get("episode_trace"))
+    except (TypeError, ValueError) as exc:
+        logger.warning(
+            f"Post-turn consumer skipped: settled episode trace is invalid "
+            f"reason={exc.__class__.__name__}"
+        )
+        return None
+
+
+def _visible_trace_dialog(trace: EpisodeTraceV2) -> list[str]:
+    """Project delivered text fragments from the settled trace only."""
+
+    fragments: list[str] = []
+    for raw_output in trace["surface_outputs"]:
+        if not isinstance(raw_output, Mapping):
+            continue
+        if raw_output.get("surface_kind") != "text":
+            continue
+        if raw_output.get("visibility") != "user_visible":
+            continue
+        if raw_output.get("delivery_intent") != "deliver_now":
+            continue
+        raw_fragments = raw_output.get("fragments")
+        if isinstance(raw_fragments, list):
+            fragments.extend(
+                fragment for fragment in raw_fragments
+                if isinstance(fragment, str) and fragment
+            )
+    return fragments
 
 
 async def run_internal_monologue_residue_record_background(

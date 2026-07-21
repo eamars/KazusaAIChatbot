@@ -9,12 +9,6 @@ import httpx
 import pytest
 
 from kazusa_ai_chatbot.config import COGNITION_LLM_BASE_URL
-from kazusa_ai_chatbot.cognition_chain_core.stages.l2 import (
-    call_judgment_core_agent,
-)
-from kazusa_ai_chatbot.cognition_chain_core.stages.l3 import (
-    call_content_plan_agent,
-)
 from tests.llm_trace import write_llm_trace
 
 
@@ -66,7 +60,7 @@ async def test_live_judgment_core_prefers_referents(
     del ensure_live_llm
     state = {
         "character_profile": {"name": "Kazusa"},
-        "user_profile": {"affinity": 500},
+        "user_profile": {"relationship_state": 500},
         "internal_monologue": "I could answer if I knew what the object was.",
         "logical_stance": "CONFIRM",
         "character_intent": "PROVIDE",

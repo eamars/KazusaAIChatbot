@@ -4,13 +4,22 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal, TypedDict
 
 from kazusa_ai_chatbot.calendar_scheduler import models
 
 
 ACTIVE_COMMITMENT_TYPE = "active_commitment"
 ACTIVE_STATUS = "active"
+
+
+class SchedulerCognitionSourceV2(TypedDict):
+    """Typed scheduler outcome admitted to a later cognition episode."""
+
+    source_kind: Literal["scheduler_event"]
+    source_id: str
+    occurred_at: str
+    semantic_summary: str
 
 
 async def reconcile_active_commitment_calendar_schedule(
@@ -72,30 +81,37 @@ async def handle_commitment_due_cognition_run(
     unit_id = payload["unit_id"]
     stored_unit = await memory_unit_reader(unit_id)
     if stored_unit is None:
-        result = _skip(unit_id, "active_commitment_not_found")
+        result = _skip(run, unit_id, "active_commitment_not_found")
         return result
     if stored_unit["status"] != ACTIVE_STATUS:
-        result = _skip(unit_id, "active_commitment_not_active")
+        result = _skip(run, unit_id, "active_commitment_not_active")
         return result
     if stored_unit["unit_type"] != ACTIVE_COMMITMENT_TYPE:
-        result = _skip(unit_id, "active_commitment_wrong_type")
+        result = _skip(run, unit_id, "active_commitment_wrong_type")
         return result
     if stored_unit["global_user_id"] != payload["global_user_id"]:
-        result = _skip(unit_id, "active_commitment_wrong_user")
+        result = _skip(run, unit_id, "active_commitment_wrong_user")
         return result
     if stored_unit["due_at"] != payload["due_at"]:
-        result = _skip(unit_id, "stale_active_commitment_due_at")
+        result = _skip(run, unit_id, "stale_active_commitment_due_at")
         return result
 
     case = await active_commitment_case_builder(stored_unit)
     if not isinstance(case, dict):
-        result = _skip(unit_id, "active_commitment_case_unavailable")
+        result = _skip(run, unit_id, "active_commitment_case_unavailable")
         return result
     case_name = case.get("case_name")
     if not isinstance(case_name, str) or not case_name.strip():
-        result = _skip(unit_id, "active_commitment_case_unavailable")
+        result = _skip(run, unit_id, "active_commitment_case_unavailable")
         return result
-    result = {"status": "case_created", **case}
+    result = {
+        "status": "case_created",
+        **case,
+        "cognition_source": _scheduler_cognition_source(
+            run,
+            semantic_summary="scheduled commitment became due",
+        ),
+    }
     return result
 
 
@@ -120,12 +136,43 @@ def _is_schedulable_active_commitment(unit: dict[str, Any]) -> bool:
     return schedulable
 
 
-def _skip(unit_id: str, reason: str) -> dict[str, Any]:
+def _skip(run: dict[str, Any], unit_id: str, reason: str) -> dict[str, Any]:
     """Build the sanitized skip result used by due commitment handlers."""
 
     result = {
         "status": "skipped",
         "reason": reason,
         "unit_id": unit_id,
+        "cognition_source": _scheduler_cognition_source(
+            run,
+            semantic_summary=f"scheduled commitment was skipped: {reason}",
+        ),
     }
     return result
+
+
+def _scheduler_cognition_source(
+    run: dict[str, Any],
+    *,
+    semantic_summary: str,
+) -> SchedulerCognitionSourceV2:
+    """Project a scheduler-owned result without granting state authority."""
+
+    payload = run.get("payload")
+    if not isinstance(payload, dict):
+        payload = {}
+    occurred_at = str(
+        run.get("due_at")
+        or payload.get("due_at")
+        or run.get("created_at")
+        or ""
+    )
+    if not occurred_at:
+        raise ValueError("scheduler cognition source requires an occurrence time")
+    source = SchedulerCognitionSourceV2(
+        source_kind="scheduler_event",
+        source_id=str(run["run_id"]),
+        occurred_at=occurred_at,
+        semantic_summary=semantic_summary,
+    )
+    return source

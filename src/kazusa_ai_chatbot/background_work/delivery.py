@@ -16,7 +16,7 @@ from kazusa_ai_chatbot.accepted_task import (
 from kazusa_ai_chatbot.background_work.result_source import (
     build_result_ready_episode_from_job,
 )
-from kazusa_ai_chatbot.cognition_episode import CognitiveEpisode
+from kazusa_ai_chatbot.cognition_episode import CognitiveEpisodeV1
 from kazusa_ai_chatbot.config import (
     BACKGROUND_WORK_WORKER_CLAIM_LIMIT,
     BACKGROUND_WORK_WORKER_LEASE_SECONDS,
@@ -31,7 +31,7 @@ from kazusa_ai_chatbot.db.background_work_jobs import (
 from kazusa_ai_chatbot.time_boundary import storage_utc_now, storage_utc_now_iso
 
 BackgroundWorkCognitionDeliveryFunc = Callable[
-    [CognitiveEpisode],
+    [CognitiveEpisodeV1],
     Awaitable[dict[str, Any]],
 ]
 

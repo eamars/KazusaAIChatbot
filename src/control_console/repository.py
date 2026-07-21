@@ -1946,31 +1946,47 @@ def _project_background_result_ready_episode(
         (item for item in percepts if isinstance(item, dict)),
         {},
     )
-    metadata = percept.get("metadata")
-    if not isinstance(metadata, dict):
-        metadata = {}
+    content = percept.get("content")
+    if not isinstance(content, dict):
+        content = {}
+    origin_metadata = episode.get("origin_metadata")
+    if not isinstance(origin_metadata, dict):
+        origin_metadata = {}
+    artifact_text = str(content.get("artifact_text", ""))
+    semantic_summary = str(content.get("semantic_summary", ""))
+    failure_text = str(content.get("failure_text", ""))
+    visible_content = artifact_text or semantic_summary or failure_text
+    metadata = {
+        "result_summary": semantic_summary,
+        "failure_summary": failure_text,
+        "source_character_name": str(
+            origin_metadata.get("source_character_name", "")
+        ),
+    }
     row = {
         "episode_id": episode.get("episode_id", ""),
         "trigger_source": episode.get("trigger_source", ""),
-        "output_mode": episode.get("output_mode", ""),
         "target_scope": {
             "platform": target_scope.get("platform", ""),
             "platform_channel_id": target_scope.get("platform_channel_id", ""),
             "channel_type": target_scope.get("channel_type", ""),
             "current_display_name": target_scope.get("current_display_name", ""),
         },
-        "input_source": percept.get("input_source", ""),
-        "content": percept.get("content", ""),
-        "metadata": _project_accepted_task_result_metadata(metadata),
+        "source_kind": percept.get(
+            "source_kind",
+            episode.get("trigger_source", ""),
+        ),
+        "content": visible_content,
+        "metadata": _project_tool_result_metadata(metadata),
     }
     projected_row = redact_mapping(row)
     return projected_row
 
 
-def _project_accepted_task_result_metadata(
+def _project_tool_result_metadata(
     metadata: dict[str, Any],
 ) -> dict[str, Any]:
-    """Project prompt-visible scalar accepted-task result metadata."""
+    """Project prompt-visible scalar tool-result metadata."""
 
     row = {
         "accepted_task_summary": metadata.get("accepted_task_summary", ""),

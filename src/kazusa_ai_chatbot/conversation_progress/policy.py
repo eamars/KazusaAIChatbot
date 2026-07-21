@@ -16,11 +16,13 @@ USER_STATE_UPDATES_LIMIT = 8
 ASSISTANT_MOVES_LIMIT = 8
 OVERUSED_MOVES_LIMIT = 5
 OPEN_LOOPS_LIMIT = 5
+INTERACTION_OBLIGATIONS_LIMIT = 6
 RESOLVED_THREADS_LIMIT = 5
 AVOID_REOPENING_LIMIT = 5
 NEXT_AFFORDANCES_LIMIT = 4
 
 MAX_ENTRY_CHARS = 160
+MAX_OBLIGATION_CHARS = 180
 MAX_MOVE_CHARS = 120
 MAX_LABEL_CHARS = 80
 MAX_THREAD_CHARS = 180
@@ -29,6 +31,12 @@ MAX_PROGRESS_PROMPT_CHARS = 5000
 
 VALID_CONTINUITY = {"same_episode", "related_shift", "sharp_transition"}
 VALID_STATUS = {"active", "suspended", "closed"}
+VALID_OBLIGATION_STATUSES = {"active", "resolved", "superseded"}
+VALID_OBLIGATION_SOURCES = {
+    "user_input",
+    "assistant_response",
+    "mutual_exchange",
+}
 
 
 def empty_progress_prompt_doc() -> ConversationProgressPromptDoc:
@@ -53,6 +61,7 @@ def empty_progress_prompt_doc() -> ConversationProgressPromptDoc:
         "assistant_moves": [],
         "overused_moves": [],
         "open_loops": [],
+        "interaction_obligations": [],
         "resolved_threads": [],
         "avoid_reopening": [],
         "emotional_trajectory": "",
@@ -130,6 +139,22 @@ def enforce_progress_prompt_budget(payload: ConversationProgressPromptDoc) -> Co
         return result
 
     result["avoid_reopening"] = []
+    if prompt_payload_chars(result) <= MAX_PROGRESS_PROMPT_CHARS:
+        return result
+
+    result["interaction_obligations"] = result[
+        "interaction_obligations"
+    ][:4]
+    if prompt_payload_chars(result) <= MAX_PROGRESS_PROMPT_CHARS:
+        return result
+
+    result["interaction_obligations"] = result[
+        "interaction_obligations"
+    ][:2]
+    if prompt_payload_chars(result) <= MAX_PROGRESS_PROMPT_CHARS:
+        return result
+
+    result["interaction_obligations"] = []
     return result
 
 

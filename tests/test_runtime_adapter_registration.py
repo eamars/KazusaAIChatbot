@@ -1734,6 +1734,70 @@ async def test_napcat_handle_event_posts_delivery_receipt_after_send():
 
 
 @pytest.mark.asyncio
+async def test_napcat_operational_response_is_sent_without_normal_receipt():
+    """QQ should deliver an operational notice without normal-chat follow-up."""
+
+    adapter = NapCatWSAdapter(
+        ws_url="ws://napcat.local/ws",
+        ws_token="token",
+        brain_url="http://127.0.0.1:8000",
+        brain_response_timeout=30,
+        runtime_host="127.0.0.1",
+        runtime_port=8011,
+        runtime_public_url="http://127.0.0.1:8011",
+        channel_ids=["905393941"],
+        debug_modes={},
+    )
+    adapter.bot_id = "3768713357"
+    adapter.bot_name = "Kazusa"
+    adapter.brain_client.post = AsyncMock(return_value=_DummyResponse({
+        "messages": ["operational notice"],
+        "content_type": "operational_error",
+        "operational_error": {
+            "error_code": "required_selection_alignment_exhausted",
+            "status": "exhausted",
+            "retryable": True,
+            "exhausted": True,
+            "attempt_count": 2,
+            "correlation_id": "chat:qq:correlation:message",
+            "trace_id": "trace-1",
+            "branch_id": "ordinary_response",
+            "stage": "goal_cognition.required_selection_alignment",
+        },
+        "delivery_tracking_id": "",
+    }))
+    ws = _FakeNapCatWebSocket({
+        "message_id": 1602974844,
+        "user_id": 2787858400,
+        "sender": {"nickname": "User A"},
+        "raw_message": " hi",
+    })
+
+    await adapter.handle_event(
+        {
+            "post_type": "message",
+            "message_type": "group",
+            "message_id": 1602974844,
+            "group_id": 905393941,
+            "user_id": 2787858400,
+            "sender": {"nickname": "User A"},
+            "message": [{"type": "text", "data": {"text": " hi"}}],
+        },
+        ws,
+    )
+
+    send_payloads = [
+        payload
+        for payload in ws.sent_payloads
+        if payload["action"] == "send_msg"
+    ]
+    assert len(send_payloads) == 1
+    assert adapter.brain_client.post.await_count == 1
+    assert send_payloads[0]["params"]["message"] == "operational notice"
+    await adapter.close()
+
+
+@pytest.mark.asyncio
 async def test_napcat_delivery_receipt_retries_once_on_not_found(monkeypatch):
     """A not-found receipt should retry and stop after an updated response."""
 

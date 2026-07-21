@@ -12,6 +12,7 @@ from kazusa_ai_chatbot.event_logging.models import (
 from kazusa_ai_chatbot.event_logging.recording import (
     EVENT_LOG_WRITE_TIMEOUT_SECONDS,
     record_database_operation_event,
+    record_cognition_v2_event,
     record_dialog_quality_event,
     record_dispatcher_event,
     record_llm_stage_event,
@@ -43,6 +44,7 @@ __all__ = [
     "build_runtime_status",
     "build_self_cognition_stats",
     "record_database_operation_event",
+    "record_cognition_v2_event",
     "record_dialog_quality_event",
     "record_dispatcher_event",
     "record_llm_stage_event",

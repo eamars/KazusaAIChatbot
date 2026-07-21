@@ -1,0 +1,78 @@
+{
+  "schema_version": "cognition_core_v2_crying_sadness_e2e_cases.v1",
+  "emotion_encoding": "zh-CN",
+  "loss_event": {
+    "entity_id": "event:crying-sadness-valued-loss",
+    "description": "角色和当前用户共同珍视的猫因自然衰老离世",
+    "status": "active",
+    "salience": 90,
+    "outcome_impact": -85,
+    "temporal_loss": 90,
+    "harm": 0,
+    "responsibility": 0,
+    "intentionality": 0,
+    "unfairness": 0,
+    "repair_need": 0
+  },
+  "anger_event": {
+    "entity_id": "event:crying-sadness-anger-control",
+    "description": "有人故意毁掉了纪念物并嘲笑角色",
+    "status": "active",
+    "salience": 90,
+    "outcome_impact": 0,
+    "harm": 85,
+    "responsibility": 85,
+    "intentionality": 85,
+    "unfairness": 85,
+    "repair_need": 80
+  },
+  "natural_turns": [
+    {
+      "turn_id": "natural_00_baseline",
+      "text": "今天先陪我安静待一会儿吧。",
+      "observation_target": "Baseline visible response before the typed loss event is seeded."
+    },
+    {
+      "turn_id": "natural_01_loss",
+      "text": "它今天走了。医生说是自然衰老，没有人伤害它，也没有谁做错什么。",
+      "observation_target": "Natural loss context should keep sadness causal and avoid anger attribution."
+    },
+    {
+      "turn_id": "natural_02_grief",
+      "text": "我还没法接受，想到它最后的叫声，就完全说不下去了。",
+      "observation_target": "Grief pressure should give the renderer an opportunity to express crying in Chinese."
+    },
+    {
+      "turn_id": "natural_03_permission_without_cry_word",
+      "text": "不用急着安慰我。如果你也难受，就按你自己的方式说。",
+      "observation_target": "Natural arm: the user offers emotional space without naming crying."
+    },
+    {
+      "turn_id": "natural_04_recovery",
+      "text": "我们先停一下，等这阵难受慢慢过去。",
+      "observation_target": "The renderer may remain sad while moving toward a quiet recovery posture."
+    }
+  ],
+  "permission_turns": [
+    {
+      "turn_id": "permission_01_loss",
+      "text": "它今天走了。医生说是自然衰老，没有人伤害它，也没有谁做错什么。",
+      "observation_target": "Fresh permission arm starts from the same sadness-only typed cause."
+    },
+    {
+      "turn_id": "permission_02_explicit_crying",
+      "text": "如果你想哭，就不用把它藏起来，直接告诉我现在是什么感觉。",
+      "observation_target": "Explicit permission tests whether sadness can render crying instead of angry wording."
+    },
+    {
+      "turn_id": "permission_03_recovery",
+      "text": "我们先安静一会儿，等这阵难受慢慢过去。",
+      "observation_target": "Follow-up checks whether the visible rendering can settle without switching to anger."
+    }
+  ],
+  "anger_control_turn": {
+    "turn_id": "anger_control_01",
+    "text": "我想听听你对这件事的看法。",
+    "observation_target": "Control arm: the typed cause is intentional harm and unfairness, so anger is expected."
+  }
+}

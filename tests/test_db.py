@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+import pytest
+
 import asyncio
 import logging
 import re
 from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
 
 import kazusa_ai_chatbot.db as db_module
 import kazusa_ai_chatbot.db._client as db_client_module
@@ -21,12 +21,10 @@ import kazusa_ai_chatbot.db.self_cognition as db_self_cognition_module
 import kazusa_ai_chatbot.db.script_operations as db_script_operations_module
 import kazusa_ai_chatbot.db.users as db_users_module
 from kazusa_ai_chatbot.db import (
-    AFFINITY_DEFAULT,
     RUNTIME_CHARACTER_STATE_FIELDS,
     build_memory_doc,
     close_db,
     compose_character_profile,
-    get_affinity,
     get_character_profile,
     get_character_runtime_state,
     get_character_state,
@@ -37,16 +35,37 @@ from kazusa_ai_chatbot.db import (
     save_memory,
     search_memory,
     split_character_profile_runtime_state,
-    compare_and_upsert_character_state,
-    update_affinity,
-    update_last_relationship_insight,
-    upsert_character_state,
 )
 from kazusa_ai_chatbot.db._client import get_db
 
 # Mark for tests that require a running MongoDB instance.
 # Run with:  pytest -m live_db -v
 live_db = pytest.mark.live_db
+
+
+@pytest.fixture(autouse=True)
+def _isolate_bootstrap_dependencies(monkeypatch) -> None:
+    """Keep mocked bootstrap tests from opening process-global DB clients."""
+
+    for function_name in (
+        "ensure_accepted_task_indexes",
+        "ensure_background_work_job_indexes",
+        "ensure_reflection_run_indexes",
+        "ensure_interaction_style_image_indexes",
+        "ensure_global_character_growth_indexes",
+        "ensure_event_log_indexes",
+        "ensure_llm_trace_indexes",
+        "ensure_internal_monologue_residue_indexes",
+        "ensure_internal_action_latch_indexes",
+        "ensure_post_turn_lifecycle_record_indexes",
+        "purge_stale_media_descriptor_entries",
+        "prune_media_descriptor_entries",
+    ):
+        monkeypatch.setattr(
+            db_bootstrap_module,
+            function_name,
+            AsyncMock(),
+        )
 
 
 def _mock_db():
@@ -64,6 +83,7 @@ class _BootstrapCollection:
         self.indexes: list[dict] = []
         self.find_one = AsyncMock(return_value={"_id": "global"})
         self.insert_one = AsyncMock()
+        self.update_one = AsyncMock()
 
     async def create_index(self, keys, **kwargs) -> None:
         """Record one requested index."""
@@ -312,79 +332,6 @@ async def test_get_character_state_not_found():
     assert result == {}
 
 
-@pytest.mark.asyncio
-async def test_upsert_character_state():
-    db = _mock_db()
-    db.character_state.find_one = AsyncMock(return_value={
-        "_id": "global",
-        "mood": "old",
-        "global_vibe": "old_vibe",
-        "reflection_summary": "old_summary",
-    })
-    db.character_state.update_one = AsyncMock()
-
-    with _patched_get_db(db):
-        await upsert_character_state("happy", "relaxed", "feeling good", "t2")
-
-    call_args = db.character_state.update_one.call_args
-    set_payload = call_args[0][1]["$set"]
-    assert set_payload["mood"] == "happy"
-    assert set_payload["global_vibe"] == "relaxed"
-    assert set_payload["reflection_summary"] == "feeling good"
-
-
-@pytest.mark.asyncio
-async def test_compare_and_upsert_character_state_matches_updated_at():
-    db = _mock_db()
-    db.character_state.update_one = AsyncMock(
-        return_value=MagicMock(matched_count=1),
-    )
-
-    with _patched_get_db(db):
-        result = await compare_and_upsert_character_state(
-            expected_updated_at="t1",
-            mood="less sharp, still guarded",
-            global_vibe="tired but not hostile",
-            reflection_summary="Sleep made the irritation feel smaller.",
-            updated_at_utc="t2",
-        )
-
-    assert result is True
-    db.character_state.update_one.assert_awaited_once_with(
-        {"_id": "global", "updated_at": "t1"},
-        {
-            "$set": {
-                "mood": "less sharp, still guarded",
-                "global_vibe": "tired but not hostile",
-                "reflection_summary": (
-                    "Sleep made the irritation feel smaller."
-                ),
-                "updated_at": "t2",
-            }
-        },
-        upsert=False,
-    )
-
-
-@pytest.mark.asyncio
-async def test_compare_and_upsert_character_state_returns_false_when_stale():
-    db = _mock_db()
-    db.character_state.update_one = AsyncMock(
-        return_value=MagicMock(matched_count=0),
-    )
-
-    with _patched_get_db(db):
-        result = await compare_and_upsert_character_state(
-            expected_updated_at="t1",
-            mood="less sharp, still guarded",
-            global_vibe="tired but not hostile",
-            reflection_summary="Sleep made the irritation feel smaller.",
-            updated_at_utc="t2",
-        )
-
-    assert result is False
-
-
 # ── User profile ────────────────────────────────────────────────────
 
 
@@ -395,15 +342,14 @@ async def test_get_user_profile_found():
         "_id": "abc",
         "global_user_id": "u1",
         "facts": ["fact1"],
-        "affinity": 600,
-        "last_relationship_insight": "friendly",
+        "semantic_relationship_projection": "friendly",
     })
 
     with _patched_get_db(db):
         result = await get_user_profile("u1")
 
     assert result["global_user_id"] == "u1"
-    assert result["affinity"] == 600
+    assert result["semantic_relationship_projection"] == "friendly"
     assert "_id" not in result
 
 
@@ -416,24 +362,6 @@ async def test_get_user_profile_not_found():
         result = await get_user_profile("unknown")
 
     assert result == {}
-
-
-# ── Relationship insight ────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_update_last_relationship_insight():
-    db = _mock_db()
-    db.user_profiles.update_one = AsyncMock()
-
-    with _patched_get_db(db):
-        await update_last_relationship_insight("u1", "very friendly")
-
-    db.user_profiles.update_one.assert_called_once_with(
-        {"global_user_id": "u1"},
-        {"$set": {"last_relationship_insight": "very friendly"}},
-        upsert=True,
-    )
 
 
 # ── Save conversation ──────────────────────────────────────────────
@@ -1137,10 +1065,10 @@ async def test_db_bootstrap_creates_calendar_collections_and_indexes(
 
 
 @pytest.mark.asyncio
-async def test_db_bootstrap_drops_legacy_background_artifact_collection(
+async def test_db_bootstrap_preserves_legacy_background_artifact_collection(
     monkeypatch,
 ) -> None:
-    """Bootstrap should decommission removed background artifact storage."""
+    """Fresh bootstrap should not destroy unexpected legacy collections."""
 
     db = _BootstrapDb()
     db.collections["background_artifact_jobs"] = _BootstrapCollection()
@@ -1174,8 +1102,8 @@ async def test_db_bootstrap_drops_legacy_background_artifact_collection(
     )
     await db_bootstrap_module.db_bootstrap()
 
-    assert "background_artifact_jobs" not in db.collections
-    assert "background_artifact_jobs" in db.dropped_collections
+    assert "background_artifact_jobs" in db.collections
+    assert "background_artifact_jobs" not in db.dropped_collections
 
 
 def test_db_facade_exports_calendar_schema_docs() -> None:
@@ -1526,31 +1454,6 @@ async def test_global_character_growth_index_bootstrap(monkeypatch) -> None:
     }
 
 
-# ── Character state edge cases ─────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_upsert_character_state_preserves_on_empty_string():
-    """When mood/global_vibe/reflection_summary is empty string, preserve existing value."""
-    db = _mock_db()
-    db.character_state.find_one = AsyncMock(return_value={
-        "_id": "global",
-        "mood": "old_mood",
-        "global_vibe": "old_vibe",
-        "reflection_summary": "old_summary",
-    })
-    db.character_state.update_one = AsyncMock()
-
-    with _patched_get_db(db):
-        await upsert_character_state("", "", "", "t2")
-
-    call_args = db.character_state.update_one.call_args
-    set_payload = call_args[0][1]["$set"]
-    assert set_payload["mood"] == "old_mood"
-    assert set_payload["global_vibe"] == "old_vibe"
-    assert set_payload["reflection_summary"] == "old_summary"
-
-
 # ── Character profile ─────────────────────────────────────────────
 
 
@@ -1610,13 +1513,13 @@ async def test_get_character_state_returns_same_as_profile():
         "_id": "global",
         "mood": "happy",
         "name": "Kazusa",
-        "global_vibe": "warm",
+        "vibe_check": "warm",
     })
 
     with _patched_get_db(db):
         result = await get_character_state()
 
-    assert result == {"mood": "happy", "name": "Kazusa", "global_vibe": "warm"}
+    assert result == {"mood": "happy", "name": "Kazusa", "vibe_check": "warm"}
     assert "_id" not in result
 
 
@@ -1627,9 +1530,10 @@ def test_split_character_profile_runtime_state_separates_runtime_fields():
         "name": "Kazusa",
         "personality_brief": "sharp but kind",
         "mood": "focused",
-        "global_vibe": "warm",
-        "reflection_summary": "recent chat was calm",
+        "vibe_check": "warm",
+        "character_reflection": "recent chat was calm",
         "self_image": {"core": "steady"},
+        "cognition_state": {"schema_version": "cognition_state.v2"},
         "updated_at": "t1",
     }
 
@@ -1638,12 +1542,13 @@ def test_split_character_profile_runtime_state_separates_runtime_fields():
     assert static_profile == {
         "name": "Kazusa",
         "personality_brief": "sharp but kind",
+        "mood": "focused",
+        "vibe_check": "warm",
+        "character_reflection": "recent chat was calm",
     }
     assert runtime_state == {
-        "mood": "focused",
-        "global_vibe": "warm",
-        "reflection_summary": "recent chat was calm",
         "self_image": {"core": "steady"},
+        "cognition_state": {"schema_version": "cognition_state.v2"},
         "updated_at": "t1",
     }
 
@@ -1656,8 +1561,8 @@ def test_compose_character_profile_merges_static_runtime_and_identity():
     }
     runtime_state = {
         "mood": "focused",
-        "global_vibe": "warm",
-        "reflection_summary": "recent chat was calm",
+        "vibe_check": "warm",
+        "character_reflection": "recent chat was calm",
     }
 
     result = compose_character_profile(
@@ -1670,8 +1575,8 @@ def test_compose_character_profile_merges_static_runtime_and_identity():
         "name": "Kazusa",
         "personality_brief": "sharp but kind",
         "mood": "focused",
-        "global_vibe": "warm",
-        "reflection_summary": "recent chat was calm",
+        "vibe_check": "warm",
+        "character_reflection": "recent chat was calm",
         "global_user_id": "character-global-id",
     }
 
@@ -1683,8 +1588,8 @@ async def test_get_character_runtime_state_uses_runtime_projection():
     db.character_state.find_one = AsyncMock(return_value={
         "_id": "global",
         "mood": "calm",
-        "global_vibe": "warm",
-        "reflection_summary": "recent chat was calm",
+        "vibe_check": "warm",
+        "character_reflection": "recent chat was calm",
         "self_image": {"core": "steady"},
         "updated_at": "t1",
     })
@@ -1701,8 +1606,8 @@ async def test_get_character_runtime_state_uses_runtime_projection():
     )
     assert result == {
         "mood": "calm",
-        "global_vibe": "warm",
-        "reflection_summary": "recent chat was calm",
+        "vibe_check": "warm",
+        "character_reflection": "recent chat was calm",
         "self_image": {"core": "steady"},
         "updated_at": "t1",
     }
@@ -2026,82 +1931,6 @@ async def test_live_character_state_empty(live_test_db):
     """No character state initially."""
     state = await get_character_state()
     assert state == {}
-
-
-@live_db
-@pytest.mark.asyncio
-async def test_live_upsert_and_get_character_state(live_test_db):
-    """Store character state and retrieve it."""
-    await upsert_character_state("happy", "warm vibe", "Met an old friend today", "2026-01-01T00:00:00Z")
-
-    state = await get_character_state()
-    assert state["mood"] == "happy"
-    assert state["global_vibe"] == "warm vibe"
-    assert state["reflection_summary"] == "Met an old friend today"
-    assert state["updated_at"] == "2026-01-01T00:00:00Z"
-    assert "_id" not in state
-
-
-@live_db
-@pytest.mark.asyncio
-async def test_live_character_state_update_overwrites_mood(live_test_db):
-    """Updating character state replaces mood and global_vibe."""
-    await upsert_character_state("happy", "warm", "reflection 1", "t1")
-    await upsert_character_state("sad", "guarded", "reflection 2", "t2")
-
-    state = await get_character_state()
-    assert state["mood"] == "sad"
-    assert state["global_vibe"] == "guarded"
-    assert state["reflection_summary"] == "reflection 2"
-
-
-# ── Affinity (mocked) ────────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_get_affinity_default_for_unknown_user():
-    db = _mock_db()
-    db.user_profiles.find_one = AsyncMock(return_value=None)
-
-    with _patched_get_db(db):
-        result = await get_affinity("unknown_user")
-
-    assert result == AFFINITY_DEFAULT
-
-
-@pytest.mark.asyncio
-async def test_get_affinity_returns_stored_value():
-    db = _mock_db()
-    db.user_profiles.find_one = AsyncMock(return_value={"user_id": "u1", "affinity": 750})
-
-    with _patched_get_db(db):
-        result = await get_affinity("u1")
-
-    assert result == 750
-
-
-@pytest.mark.asyncio
-async def test_update_affinity_clamps_to_max():
-    db = _mock_db()
-    db.user_profiles.find_one = AsyncMock(return_value={"user_id": "u1", "affinity": 995})
-    db.user_profiles.update_one = AsyncMock()
-
-    with _patched_get_db(db):
-        result = await update_affinity("u1", 10)
-
-    assert result == 1000
-
-
-@pytest.mark.asyncio
-async def test_update_affinity_clamps_to_min():
-    db = _mock_db()
-    db.user_profiles.find_one = AsyncMock(return_value={"user_id": "u1", "affinity": 5})
-    db.user_profiles.update_one = AsyncMock()
-
-    with _patched_get_db(db):
-        result = await update_affinity("u1", -20)
-
-    assert result == 0
 
 
 @pytest.mark.asyncio
@@ -2464,48 +2293,6 @@ async def test_conversation_vector_prefilter_support_rechecks_cached_false(
 
 # NOTE: test_search_lore_mocked removed due to async mock complexity
 # The search_lore functionality is tested in the RAG integration tests
-
-
-# ── Affinity (live) ──────────────────────────────────────────────────
-
-
-@live_db
-@pytest.mark.asyncio
-async def test_live_affinity_default_for_new_user(live_test_db):
-    """New users start at AFFINITY_DEFAULT (200)."""
-    score = await get_affinity("new_user")
-    assert score == AFFINITY_DEFAULT
-
-
-@live_db
-@pytest.mark.asyncio
-async def test_live_update_affinity_positive(live_test_db):
-    """Positive delta increases affinity from default."""
-    new_val = await update_affinity("user_aff", 10)
-    assert new_val == AFFINITY_DEFAULT + 10
-    assert await get_affinity("user_aff") == AFFINITY_DEFAULT + 10
-
-
-@live_db
-@pytest.mark.asyncio
-async def test_live_update_affinity_negative(live_test_db):
-    """Negative delta decreases affinity."""
-    await update_affinity("user_aff", 10)  # 510
-    new_val = await update_affinity("user_aff", -20)  # 490
-    assert new_val == 490
-
-
-@live_db
-@pytest.mark.asyncio
-async def test_live_affinity_clamps_at_bounds(live_test_db):
-    """Affinity cannot exceed 0–1000."""
-    # Clamp at 0
-    await update_affinity("user_low", -600)  # AFFINITY_DEFAULT - 600 → 0
-    assert await get_affinity("user_low") == 0
-
-    # Clamp at 1000
-    await update_affinity("user_high", 600)  # AFFINITY_DEFAULT + 600 → 1000
-    assert await get_affinity("user_high") == 1000
 
 
 @live_db

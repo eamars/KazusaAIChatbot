@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 from openai import OpenAIError
 
-from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
+from tests.cognition_core_v2_test_helpers import canonical_user_message_episode
 from kazusa_ai_chatbot.cognition_resolver import capabilities
 from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import (
     empty_user_memory_context,
@@ -19,7 +19,7 @@ def _minimal_persona_state() -> dict[str, Any]:
     """Build the smallest persona state accepted by the prewarm boundary."""
 
     turn_clock = build_turn_clock("2026-06-08 09:00:00")
-    episode = build_text_chat_cognitive_episode(
+    episode = canonical_user_message_episode(
         episode_id="prewarm-episode-1",
         percept_id="prewarm-percept-1",
         storage_timestamp_utc=turn_clock["storage_timestamp_utc"],
@@ -43,7 +43,7 @@ def _minimal_persona_state() -> dict[str, Any]:
             "name": "Kazusa",
             "global_user_id": "character-1",
         },
-        "user_profile": {"affinity": 500},
+        "user_profile": {"relationship_state": 500},
         "prompt_message_context": {
             "body_text": "Need a memory-backed stance.",
             "mentions": [],

@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from collections.abc import Mapping, Sequence
 from typing import Any
+from urllib.parse import urlsplit
 
 from motor.motor_asyncio import AsyncIOMotorClient
 from openai import AsyncOpenAI
@@ -190,6 +192,49 @@ async def get_text_embeddings_batch(texts: list[str]) -> list[list[float]]:
 _client: AsyncIOMotorClient | None = None
 _db = None
 _db_loop: asyncio.AbstractEventLoop | None = None
+TEST_DATABASE_NAME = "_test_kazusa_live_llm"
+STAGE3_TEST_DATABASE_NAME = "_test_kazusa_core_v2"
+STAGE3_DATABASE_GUARD_ENV = "STAGE3_DATABASE_GUARD"
+
+
+class DatabaseTestGuardError(RuntimeError):
+    """Raised when guarded tests would connect to a non-test database."""
+
+
+def _sanitized_mongodb_endpoint_description(
+    uri: str,
+    database_name: str,
+) -> str:
+    """Return a log-safe MongoDB endpoint description."""
+
+    try:
+        parsed_uri = urlsplit(uri)
+        hostname = parsed_uri.hostname or "<unknown-host>"
+        if ":" in hostname and not hostname.startswith("["):
+            hostname = f"[{hostname}]"
+        if parsed_uri.port is not None:
+            hostname = f"{hostname}:{parsed_uri.port}"
+        scheme = parsed_uri.scheme or "mongodb"
+    except ValueError:
+        scheme = "mongodb"
+        hostname = "<invalid-endpoint>"
+    return f"{scheme}://{hostname}/{database_name}"
+
+
+def _assert_guarded_database_name() -> None:
+    """Reject non-isolated database configuration while the test guard is on."""
+
+    if os.getenv("KAZUSA_TEST_DB_GUARD") != "1":
+        return
+    allowed_database_names = {TEST_DATABASE_NAME}
+    if os.getenv(STAGE3_DATABASE_GUARD_ENV) == "1":
+        allowed_database_names.add(STAGE3_TEST_DATABASE_NAME)
+    if MONGODB_DB_NAME not in allowed_database_names:
+        raise DatabaseTestGuardError(
+            f"guarded DB access requires one of "
+            f"{sorted(allowed_database_names)!r}; "
+            f"received {MONGODB_DB_NAME!r}"
+        )
 
 
 async def get_db():
@@ -213,14 +258,21 @@ async def get_db():
         _db_loop = None
 
     if _db is None:
+        _assert_guarded_database_name()
         _client = AsyncIOMotorClient(MONGODB_URI)
         _db = _client[MONGODB_DB_NAME]
         _db_loop = current_loop
+        endpoint_description = _sanitized_mongodb_endpoint_description(
+            MONGODB_URI,
+            MONGODB_DB_NAME,
+        )
         try:
             await _client.admin.command("ping")
-            logger.info(f'Connected to MongoDB at {MONGODB_URI}')
+            logger.info(f"Connected to MongoDB at {endpoint_description}")
         except ConnectionFailure as exc:
-            logger.error(f"Failed to connect to MongoDB at {MONGODB_URI}: {exc}")
+            logger.error(
+                f"Failed to connect to MongoDB at {endpoint_description}: {exc}"
+            )
             raise
     return _db
 

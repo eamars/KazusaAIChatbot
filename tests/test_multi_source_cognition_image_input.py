@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -10,11 +12,7 @@ import pytest
 
 from kazusa_ai_chatbot import chat_input_queue as queue_module
 from kazusa_ai_chatbot import service as service_module
-from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
-from kazusa_ai_chatbot.cognition_chain_core.prompt_selection import (
-    build_cognition_prompt_source_payload,
-    select_cognition_prompt_variant,
-)
+from tests.cognition_core_v2_test_helpers import canonical_user_message_episode
 from kazusa_ai_chatbot.consolidation.origin import (
     build_user_message_consolidation_origin,
 )
@@ -115,7 +113,7 @@ def _minimal_relevance_state() -> dict[str, object]:
             "description": "image shows a desk setup",
             "image_observation": _image_observation(),
         }],
-        "user_profile": {"affinity": 500, "last_relationship_insight": ""},
+        "user_profile": {"relationship_state": 500, "semantic_relationship_projection": ""},
         "platform_bot_id": "bot-1",
         "message_envelope": {
             "body_text": "Does this support my plan?",
@@ -138,7 +136,7 @@ def _minimal_relevance_state() -> dict[str, object]:
             "name": "Character",
             "global_user_id": "character-1",
             "mood": "neutral",
-            "global_vibe": "calm",
+            "vibe_check": "calm",
         },
         "platform_channel_id": "debug-private-1",
         "channel_type": "private",
@@ -149,7 +147,7 @@ def _minimal_relevance_state() -> dict[str, object]:
         "reply_context": {},
         "debug_modes": {},
     }
-    state["cognitive_episode"] = build_text_chat_cognitive_episode(
+    state["cognitive_episode"] = canonical_user_message_episode(
         **_episode_kwargs(),
         media_description_rows=[{
             "content_type": "image/png",
@@ -217,12 +215,12 @@ def _patch_service_dependencies(
     monkeypatch.setattr(
         service_module,
         "_runtime_character_state",
-        {"mood": "calm", "global_vibe": "steady"},
+        {"mood": "calm", "vibe_check": "steady"},
     )
     monkeypatch.setattr(
         service_module,
         "get_character_runtime_state",
-        AsyncMock(return_value={"mood": "calm", "global_vibe": "steady"}),
+        AsyncMock(return_value={"mood": "calm", "vibe_check": "steady"}),
     )
     monkeypatch.setattr(
         service_module,
@@ -237,7 +235,7 @@ def _patch_service_dependencies(
     monkeypatch.setattr(
         service_module,
         "get_user_profile",
-        AsyncMock(return_value={"affinity": 500}),
+        AsyncMock(return_value={"relationship_state": 500}),
     )
     monkeypatch.setattr(
         service_module,
@@ -273,9 +271,11 @@ async def test_relevance_keeps_image_descriptor_out_of_user_input() -> None:
         '"indirect_speech_context": ""}'
     )
 
+    state = _minimal_relevance_state()
+    state["conversation_scope"] = "group"
     with patch("kazusa_ai_chatbot.relevance.persona_relevance_agent._relevance_agent_llm") as llm:
         llm.ainvoke = AsyncMock(return_value=response)
-        result = await relevance_agent(_minimal_relevance_state())
+        result = await relevance_agent(state)
 
     _, human_message = llm.ainvoke.await_args.args[0]
     human_payload = json.loads(human_message.content)
@@ -289,40 +289,6 @@ async def test_relevance_keeps_image_descriptor_out_of_user_input() -> None:
         "media_kind": "image/png",
         "description": "image shows a desk setup",
     }]
-
-
-def test_source_payload_projects_structured_image_observations() -> None:
-    """Cognition prompt payload should expose typed visual facts."""
-    episode = build_text_chat_cognitive_episode(
-        **_episode_kwargs(),
-        media_description_rows=[{
-            "content_type": "image/png",
-            "description": "A desk setup with handwritten study notes.",
-            "image_observation": _image_observation(),
-        }],
-    )
-    selection = select_cognition_prompt_variant(
-        episode=episode,
-        stage="l1_subconscious",
-    )
-
-    source_payload = build_cognition_prompt_source_payload(
-        episode=episode,
-        selection=selection,
-    )
-
-    assert source_payload == {
-        "media_observations": {
-            "image_observations": [
-                {
-                    key: value
-                    for key, value in _image_observation().items()
-                    if key != "source_message_id"
-                }
-            ],
-            "audio_observations": [],
-        },
-    }
 
 
 @pytest.mark.asyncio
@@ -358,18 +324,22 @@ async def test_quoted_image_description_enters_prompt_and_cognition_context(
         "description": "stored image shows a dessert counter",
         "summary_status": "available",
     }]
-    assert episode["input_sources"] == ["dialog_text", "image_observation"]
-    assert episode["percepts"][1]["metadata"]["observation_origin"] == (
+    assert [
+        percept["source_kind"] for percept in episode["percepts"]
+    ] == ["dialog", "image_observation", "system_event"]
+    assert episode["percepts"][1]["content"]["observation"][
+        "observation_origin"
+    ] == (
         "quoted_reply_attachment"
     )
-    assert episode["percepts"][1]["content"] == (
+    assert episode["percepts"][1]["content"]["description"] == (
         "stored image shows a dessert counter"
     )
 
 
 def test_multimodal_consolidation_origin_is_metadata_only() -> None:
     """Image-observation turns should consolidate without percept content."""
-    episode = build_text_chat_cognitive_episode(
+    episode = canonical_user_message_episode(
         **_episode_kwargs(),
         media_description_rows=[{
             "content_type": "image/png",
@@ -380,6 +350,10 @@ def test_multimodal_consolidation_origin_is_metadata_only() -> None:
 
     metadata = build_user_message_consolidation_origin(episode=episode)
 
-    assert metadata["input_sources"] == ["dialog_text", "image_observation"]
+    assert metadata["input_sources"] == [
+        "dialog",
+        "image_observation",
+        "system_event",
+    ]
     assert "percepts" not in metadata
     assert "private image content should not persist here" not in str(metadata)

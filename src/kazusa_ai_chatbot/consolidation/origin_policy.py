@@ -9,12 +9,8 @@ from kazusa_ai_chatbot.consolidation.origin import (
 )
 
 WritePolicyKey = Literal[
-    "character_state",
-    "relationship_insight",
     "user_memory_units",
-    "affinity",
     "group_channel_style_image",
-    "character_image",
     "character_self_guidance",
     "cache_invalidation",
 ]
@@ -30,25 +26,49 @@ class WritePolicyDecision(TypedDict):
 class ConsolidationWritePolicy(TypedDict):
     """Write-policy decisions for every consolidation persistence category."""
 
-    character_state: WritePolicyDecision
-    relationship_insight: WritePolicyDecision
     user_memory_units: WritePolicyDecision
-    affinity: WritePolicyDecision
     group_channel_style_image: WritePolicyDecision
-    character_image: WritePolicyDecision
     character_self_guidance: WritePolicyDecision
     cache_invalidation: WritePolicyDecision
 
 
-_SUPPORTED_USER_MESSAGE_INPUT_SOURCE_PROFILES = {
-    ("dialog_text",),
-    ("dialog_text", "image_observation"),
-    ("dialog_text", "audio_observation"),
-    ("dialog_text", "image_observation", "audio_observation"),
+_SUPPORTED_SOURCE_PROFILES = {
+    "user_message": frozenset({
+        ("dialog", "system_event"),
+        ("dialog", "image_observation", "system_event"),
+        ("dialog", "audio_observation", "system_event"),
+        (
+            "dialog",
+            "image_observation",
+            "audio_observation",
+            "system_event",
+        ),
+    }),
+    "internal_thought": frozenset({
+        ("internal_thought", "system_event"),
+    }),
+    "self_cognition": frozenset({
+        ("self_cognition", "system_event"),
+    }),
+    "scheduled_tick": frozenset({
+        ("scheduled_event", "system_event"),
+    }),
+    "tool_result": frozenset({
+        ("tool_result", "system_event"),
+    }),
 }
-_TEXT_CHAT_OUTPUT_MODES = frozenset(("visible_reply", "think_only", "silent"))
+_EXPECTED_OUTPUT_MODES = {
+    "user_message": frozenset({"visible_reply"}),
+    "internal_thought": frozenset({"preview"}),
+    "self_cognition": frozenset({"preview"}),
+    "scheduled_tick": frozenset({"preview"}),
+    "tool_result": frozenset({"visible_reply"}),
+}
 _ALLOWED_REASON = "user_message_chat_input"
 _INTERNAL_THOUGHT_ALLOWED_REASON = "internal_thought_same_path"
+_SELF_COGNITION_ALLOWED_REASON = "self_cognition_same_path"
+_SCHEDULED_TICK_ALLOWED_REASON = "scheduled_tick_source"
+_TOOL_RESULT_ALLOWED_REASON = "tool_result_source"
 _DENIED_REASON = "origin_not_enabled"
 
 
@@ -66,36 +86,31 @@ def build_consolidation_write_policy(
         Policy decisions for every current durable write and side-effect
         category.
     """
-    user_message_origin_is_allowed = (
-        origin["trigger_source"] == "user_message"
-        and (
-            tuple(origin["input_sources"])
-            in _SUPPORTED_USER_MESSAGE_INPUT_SOURCE_PROFILES
-        )
-        and origin["output_mode"] in _TEXT_CHAT_OUTPUT_MODES
+    trigger_source = origin["trigger_source"]
+    source_profiles = _SUPPORTED_SOURCE_PROFILES.get(trigger_source, frozenset())
+    expected_output_modes = _EXPECTED_OUTPUT_MODES.get(
+        trigger_source,
+        frozenset(),
     )
-    internal_thought_origin_is_allowed = (
-        origin["trigger_source"] == "internal_thought"
-        and tuple(origin["input_sources"]) == ("internal_monologue",)
-        and origin["output_mode"] == "preview"
+    allowed = (
+        tuple(origin["input_sources"]) in source_profiles
+        and origin["output_mode"] in expected_output_modes
     )
-    if user_message_origin_is_allowed:
-        allowed = True
-        reason = _ALLOWED_REASON
-    elif internal_thought_origin_is_allowed:
-        allowed = True
-        reason = _INTERNAL_THOUGHT_ALLOWED_REASON
+    allowed_reasons = {
+        "user_message": _ALLOWED_REASON,
+        "internal_thought": _INTERNAL_THOUGHT_ALLOWED_REASON,
+        "self_cognition": _SELF_COGNITION_ALLOWED_REASON,
+        "scheduled_tick": _SCHEDULED_TICK_ALLOWED_REASON,
+        "tool_result": _TOOL_RESULT_ALLOWED_REASON,
+    }
+    if allowed:
+        reason = allowed_reasons[trigger_source]
     else:
-        allowed = False
         reason = _DENIED_REASON
 
     policy: ConsolidationWritePolicy = {
-        "character_state": {"allowed": allowed, "reason": reason},
-        "relationship_insight": {"allowed": allowed, "reason": reason},
         "user_memory_units": {"allowed": allowed, "reason": reason},
-        "affinity": {"allowed": allowed, "reason": reason},
         "group_channel_style_image": {"allowed": allowed, "reason": reason},
-        "character_image": {"allowed": allowed, "reason": reason},
         "character_self_guidance": {"allowed": allowed, "reason": reason},
         "cache_invalidation": {"allowed": allowed, "reason": reason},
     }

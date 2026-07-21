@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
+import pytest
+
+from tests.cognition_core_v2_test_helpers import canonical_user_message_episode
 from kazusa_ai_chatbot.cognition_resolver import capabilities
 from kazusa_ai_chatbot.nodes import persona_supervisor2 as supervisor_module
-from kazusa_ai_chatbot.cognition_chain_core.stages import l3 as l3_module
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
 from llm_test_helpers import bind_test_llm
 
@@ -60,7 +61,7 @@ def _clarification_state() -> dict:
         "platform_bot_id": "bot-1",
         "global_user_id": "user-1",
         "user_name": "User",
-        "user_profile": {"affinity": 500},
+        "user_profile": {"relationship_state": 500},
         "timestamp": "2026-04-27T00:00:00+12:00",
         "channel_topic": "test",
         "chat_history_recent": [],
@@ -77,7 +78,7 @@ def _minimal_text_chat_episode() -> dict:
         Valid user-message cognitive episode.
     """
     turn_clock = build_turn_clock("2026-04-27 00:00:00")
-    episode = build_text_chat_cognitive_episode(
+    episode = canonical_user_message_episode(
         episode_id="episode-rag-skip",
         percept_id="percept-rag-skip",
         storage_timestamp_utc=turn_clock["storage_timestamp_utc"],
@@ -151,37 +152,3 @@ async def test_skip_branch_does_not_call_adapter(monkeypatch) -> None:
 
     assert rag_result["answer"] == ""
     assert rag_result["supervisor_trace"]["loop_count"] == 0
-
-
-@pytest.mark.asyncio
-async def test_content_plan_accepts_skipped_rag_result_shape(monkeypatch) -> None:
-    """Content-plan agent should not raise on skipped-RAG projection shape."""
-    monkeypatch.setattr(
-        l3_module,
-        "_content_plan_agent_llm",
-        bind_test_llm(_StaticAsyncLLM(), "content_plan_agent"),
-    )
-    rag_result = await supervisor_module.run_rag_evidence_for_persona_state(
-        _clarification_state(),
-        agent_name="resolver_rag_evidence",
-    )
-
-    result = await l3_module.call_content_plan_agent({
-        "character_profile": {"name": "Kazusa"},
-        "decontexualized_input": "这些是什么意思？",
-        "referents": [
-            {"phrase": "这些", "referent_role": "object", "status": "unresolved"},
-        ],
-        "rag_result": rag_result,
-        "internal_monologue": "I need to ask what these refers to.",
-        "logical_stance": "TENTATIVE",
-        "character_intent": "CLARIFY",
-        "conversation_progress": None,
-        "cognitive_episode": _minimal_text_chat_episode(),
-        "user_input": "clean body",
-        "prompt_message_context": {},
-        "reply_context": {},
-        "user_name": "User",
-    })
-
-    assert result["content_plan"]["semantic_content"] == "你说的这些具体是指什么？"

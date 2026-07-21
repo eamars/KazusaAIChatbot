@@ -33,23 +33,6 @@ _USER_MEMORY_SOURCE_KINDS = frozenset(
         RAG_RECALL_EVIDENCE_SOURCE_KIND,
     )
 )
-_RELATIONSHIP_SOURCE_KINDS = frozenset(
-    (
-        USER_MESSAGE_SOURCE_KIND,
-        ASSISTANT_ACCEPTANCE_SOURCE_KIND,
-        INTERNAL_THOUGHT_SOURCE_KIND,
-        RAG_CONVERSATION_EVIDENCE_SOURCE_KIND,
-        RAG_RECALL_EVIDENCE_SOURCE_KIND,
-    )
-)
-_CHARACTER_STATE_SOURCE_KINDS = frozenset(
-    (
-        ASSISTANT_ACCEPTANCE_SOURCE_KIND,
-        INTERNAL_THOUGHT_SOURCE_KIND,
-        EPISODE_TRACE_SOURCE_KIND,
-        REFLECTION_RUN_SOURCE_KIND,
-    )
-)
 _STYLE_SOURCE_KINDS = frozenset(
     (
         USER_MESSAGE_SOURCE_KIND,
@@ -184,16 +167,6 @@ def validate_lane_source_policy(
         return _accepted_if(
             REFLECTION_RUN_SOURCE_KIND in source_kinds
             and _privacy_review_passed(privacy_review),
-            "source_class_not_allowed",
-        )
-    if lane == "relationship_profile":
-        return _accepted_if(
-            bool(source_kinds & _RELATIONSHIP_SOURCE_KINDS),
-            "source_class_not_allowed",
-        )
-    if lane == "character_state":
-        return _accepted_if(
-            bool(source_kinds & _CHARACTER_STATE_SOURCE_KINDS),
             "source_class_not_allowed",
         )
     if lane == "interaction_style_image":

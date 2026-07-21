@@ -41,8 +41,29 @@ ALLOWED_RESOLVER_CAPABILITIES = frozenset((
     "approval_preparation",
     "self_goal_resolution",
 ))
+RESOLVER_CAPABILITY_SEMANTICS = {
+    "approval_preparation": (
+        "Prepare one minimal approval question before an allowed side effect."
+    ),
+    "human_clarification": (
+        "Ask the user for one missing piece of information they control."
+    ),
+    "local_context_recall": (
+        "Retrieve local or private character, relationship, memory, prior "
+        "conversation, commitment, profile, or session-media context."
+    ),
+    "public_answer_research": (
+        "Investigate public, current, external, or source-checkable evidence "
+        "needed before a grounded visible answer."
+    ),
+    "self_goal_resolution": (
+        "Resolve or prioritize one internal self-cognition goal for an "
+        "eligible private source."
+    ),
+}
 ALLOWED_RESOLVER_PRIORITIES = frozenset(("now", "background"))
 ALLOWED_OBSERVATION_STATUSES = frozenset(("succeeded", "blocked", "failed"))
+ALLOWED_OBSERVATION_BLOCKER_KINDS = frozenset(("requires_user_input",))
 ALLOWED_RESOLVER_STATES = frozenset((
     "running",
     "terminal",
@@ -97,6 +118,9 @@ class ResolverCapabilityRequestV1(TypedDict):
     priority: Literal["now", "background"]
 
 
+ResolverObservationBlockerV1 = Literal["requires_user_input"]
+
+
 class ResolverObservationV1(TypedDict):
     """Prompt-safe result returned by one deterministic capability handler."""
 
@@ -110,6 +134,7 @@ class ResolverObservationV1(TypedDict):
     rag_result: NotRequired[dict]
     knowledge_projection: NotRequired[dict[str, object]]
     pending_resume_id: NotRequired[str]
+    blocker_kind: NotRequired[ResolverObservationBlockerV1]
     evidence_refs: list[EvidenceRefV1]
     created_at_utc: str
 
@@ -261,6 +286,17 @@ def validate_resolver_observation(value: object) -> ResolverObservationV1:
     pending_resume_id = data.get("pending_resume_id")
     if pending_resume_id is not None and not isinstance(pending_resume_id, str):
         raise ResolverValidationError("pending_resume_id: expected string")
+    blocker_kind = None
+    if "blocker_kind" in data:
+        blocker_kind = _require_enum(
+            data,
+            "blocker_kind",
+            ALLOWED_OBSERVATION_BLOCKER_KINDS,
+        )
+        if status != "blocked":
+            raise ResolverValidationError(
+                "blocker_kind: expected blocked observation status",
+            )
 
     normalized: ResolverObservationV1 = {
         "schema_version": RESOLVER_OBSERVATION_VERSION,
@@ -290,6 +326,8 @@ def validate_resolver_observation(value: object) -> ResolverObservationV1:
         )
     if pending_resume_id is not None:
         normalized["pending_resume_id"] = pending_resume_id
+    if blocker_kind is not None:
+        normalized["blocker_kind"] = blocker_kind
     return_value = normalized
     return return_value
 
@@ -547,6 +585,7 @@ def project_observations_for_cognition(
         capability_kind = validated["capability_kind"]
         status = validated["status"]
         summary = validated["prompt_safe_summary"]
+        blocker_kind = validated.get("blocker_kind")
         knowledge_context = _project_knowledge_projection(validated)
         if knowledge_context:
             line_parts = [
@@ -558,6 +597,8 @@ def project_observations_for_cognition(
                 f"summary={_prompt_safe_projection_text(summary)}",
                 knowledge_context,
             ]
+            if blocker_kind is not None:
+                line_parts.append(f"blocker_kind={blocker_kind}")
             line = "; ".join(line_parts)
             lines.append(line)
             continue
@@ -570,6 +611,8 @@ def project_observations_for_cognition(
             ),
             f"summary={_prompt_safe_projection_text(summary)}",
         ]
+        if blocker_kind is not None:
+            line_parts.append(f"blocker_kind={blocker_kind}")
         rag_summary = _project_rag_result_summary(validated)
         if rag_summary:
             line_parts.append(

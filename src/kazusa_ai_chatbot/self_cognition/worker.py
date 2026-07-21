@@ -8,9 +8,12 @@ import logging
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
+from kazusa_ai_chatbot.action_spec.results import (
+    has_consolidatable_output,
+)
 from kazusa_ai_chatbot.calendar_scheduler import models as calendar_models
 from kazusa_ai_chatbot.calendar_scheduler import repository as calendar_repository
 from kazusa_ai_chatbot.config import (
@@ -20,6 +23,13 @@ from kazusa_ai_chatbot.config import (
     SELF_COGNITION_WORKER_INTERVAL_SECONDS,
 )
 from kazusa_ai_chatbot import db, event_logging
+from kazusa_ai_chatbot.brain_service.post_turn import (
+    build_post_turn_lifecycle_record,
+    settle_runtime_episode_trace,
+)
+from kazusa_ai_chatbot.internal_monologue_residue import (
+    record_completed_episode_residue,
+)
 from kazusa_ai_chatbot.dispatcher.adapter_iface import AdapterRegistry
 from kazusa_ai_chatbot.nodes.dialog_agent import StateContractError
 from kazusa_ai_chatbot.runtime_coordination import (
@@ -32,9 +42,12 @@ from kazusa_ai_chatbot.self_cognition.delivery import (
     SelfCognitionDeliveryResult,
     deliver_selected_speak,
 )
-from kazusa_ai_chatbot.self_cognition import models, runner
+from kazusa_ai_chatbot.self_cognition import models, runner, tracking
 from kazusa_ai_chatbot.self_cognition import sources as source_collectors
-from kazusa_ai_chatbot.time_boundary import storage_utc_now
+from kazusa_ai_chatbot.time_boundary import (
+    storage_utc_now,
+    storage_utc_now_iso,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -211,6 +224,27 @@ async def run_self_cognition_worker_tick(
         max_cases=max_cases,
         collect_cases_func=collect_cases_func,
     )
+    if collect_cases_func is None:
+        try:
+            internal_latch_claim = await db.claim_due_internal_action_latch(
+                worker_id=_CALENDAR_LEASE_OWNER,
+                now=now.isoformat(),
+            )
+        except Exception as exc:
+            logger.warning(
+                "Internal-action latch claim failed; continuing source tick: %s",
+                exc,
+            )
+            internal_latch_claim = None
+        if internal_latch_claim is not None:
+            cases = [
+                _case_from_internal_action_latch(
+                    internal_latch_claim,
+                    character_profile=active_profile,
+                    now=now,
+                ),
+                *cases,
+            ]
     if not cases:
         result = SelfCognitionWorkerResult(
             skipped_count=1,
@@ -296,6 +330,11 @@ async def run_self_cognition_worker_tick(
             if _target_binding_failed(case):
                 result.skipped_count += 1
                 await _record_target_binding_failed_event(case)
+                await _fail_internal_action_latch_for_case(
+                    case,
+                    now=now,
+                    error_code="target_binding_failed",
+                )
                 await _skip_source_calendar_run(
                     case,
                     now=now,
@@ -340,7 +379,7 @@ async def run_self_cognition_worker_tick(
                 artifact_payloads = (
                     await runner.build_self_cognition_case_artifacts_async(
                         case_for_run,
-                        apply_consolidation=True,
+                        apply_consolidation=False,
                         execute_private_actions=True,
                         pipeline_run_handle=active_pipeline_handle,
                     )
@@ -351,6 +390,10 @@ async def run_self_cognition_worker_tick(
                     case_for_run,
                     pipeline_run_handle=active_pipeline_handle,
                 )
+            _validate_worker_v2_cognition_result(
+                artifact_payloads,
+                required=run_case_func is None,
+            )
             if active_pipeline_handle is not None:
                 active_pipeline_handle.raise_if_cancelled(
                     "before_action_outputs",
@@ -361,6 +404,12 @@ async def run_self_cognition_worker_tick(
                 now=now,
                 record_attempt_func=active_record_attempt,
                 adapter_registry=adapter_registry,
+                pipeline_run_handle=active_pipeline_handle,
+            )
+            await _settle_and_finish_self_cognition_episode(
+                artifact_payloads=artifact_payloads,
+                dispatch_status=dispatch_status,
+                settled_at=storage_utc_now_iso(),
                 pipeline_run_handle=active_pipeline_handle,
             )
             await _record_self_cognition_event_from_artifacts(
@@ -377,6 +426,10 @@ async def run_self_cognition_worker_tick(
                 now=now,
                 complete_calendar_run_func=active_complete_calendar_run,
             )
+            await _consume_internal_action_latch_for_case(
+                case_for_run,
+                now=now,
+            )
         except PipelineCancelled as exc:
             result.deferred = True
             result.defer_reason = exc.cancellation.reason
@@ -384,6 +437,11 @@ async def run_self_cognition_worker_tick(
                 case_for_run,
                 now=now,
                 defer_calendar_run_func=active_defer_calendar_run,
+                reason=exc.cancellation.reason,
+            )
+            await _release_internal_action_latch_for_case(
+                case_for_run,
+                now=now,
                 reason=exc.cancellation.reason,
             )
             break
@@ -397,6 +455,11 @@ async def run_self_cognition_worker_tick(
                 now=now,
                 fail_calendar_run_func=active_fail_calendar_run,
                 error=str(exc),
+            )
+            await _fail_internal_action_latch_for_case(
+                case_for_run,
+                now=now,
+                error_code="state_contract",
             )
             await event_logging.record_runtime_error_event(
                 component="self_cognition.worker",
@@ -418,6 +481,11 @@ async def run_self_cognition_worker_tick(
                 fail_calendar_run_func=active_fail_calendar_run,
                 error=str(exc),
             )
+            await _release_internal_action_latch_for_case(
+                case_for_run,
+                now=now,
+                reason=type(exc).__name__,
+            )
             await event_logging.record_runtime_error_event(
                 component="self_cognition.worker",
                 error_class=type(exc).__name__,
@@ -436,6 +504,288 @@ async def run_self_cognition_worker_tick(
 
     await _record_worker_tick_event(result)
     return result
+
+
+def _validate_worker_v2_cognition_result(
+    artifact_payloads: dict[str, Any],
+    *,
+    required: bool,
+) -> None:
+    """Enforce character-scoped commit completion before worker delivery."""
+
+    output = artifact_payloads.get(models.ARTIFACT_COGNITION_OUTPUT)
+    if not isinstance(output, dict):
+        if required and models.ARTIFACT_COGNITION_INPUT in artifact_payloads:
+            raise StateContractError("self-cognition V2 output is missing")
+        return
+    core_output = output.get("cognition_core_output")
+    if not isinstance(core_output, dict):
+        if required:
+            raise StateContractError("self-cognition V2 core output is missing")
+        return
+    state_update = core_output.get("state_update")
+    if not isinstance(state_update, dict):
+        raise StateContractError("self-cognition V2 state update is missing")
+    if state_update.get("state_scope") != "character":
+        raise StateContractError(
+            "self-cognition V2 state update must use character scope"
+        )
+    if output.get("cognition_state_committed") is not True:
+        raise StateContractError(
+            "self-cognition V2 state was not committed before delivery"
+        )
+
+
+async def _settle_and_finish_self_cognition_episode(
+    *,
+    artifact_payloads: dict[str, Any],
+    dispatch_status: str,
+    settled_at: str,
+    pipeline_run_handle: PipelineRunHandle | None,
+) -> dict[str, Any] | None:
+    """Settle one self-cognition episode before its persistence consumers run."""
+
+    episode = artifact_payloads.get(models.RUNTIME_COGNITIVE_EPISODE)
+    if not isinstance(episode, dict):
+        return None
+    if pipeline_run_handle is not None:
+        pipeline_run_handle.raise_if_cancelled("before_episode_settlement")
+
+    cognition_output = artifact_payloads.get(
+        models.ARTIFACT_COGNITION_OUTPUT,
+    )
+    if not isinstance(cognition_output, dict):
+        cognition_output = {}
+    action_specs = _dict_rows(cognition_output.get("action_specs"))
+    action_results = _dict_rows(cognition_output.get("action_results"))
+    surface_outputs = _dict_rows(cognition_output.get("surface_outputs"))
+    action_attempt = artifact_payloads.get(models.ARTIFACT_ACTION_ATTEMPT)
+    if isinstance(action_attempt, dict):
+        action_results = _append_delivery_action_result(
+            action_specs=action_specs,
+            action_results=action_results,
+            action_attempt=action_attempt,
+            dispatch_status=dispatch_status,
+            settled_at=settled_at,
+        )
+
+    visible_surface = _has_visible_surface(surface_outputs)
+    delivery_result = artifact_payloads.get(models.ARTIFACT_DISPATCH_RESULT)
+    delivery_correlation = _delivery_correlation(
+        visible_surface=visible_surface,
+        delivery_result=delivery_result,
+    )
+    terminal_status = _terminal_status(
+        visible_surface=visible_surface,
+        action_results=action_results,
+        dispatch_status=dispatch_status,
+    )
+    trace = await settle_runtime_episode_trace(
+        episode=episode,
+        graph_result={
+            "cognition_output": cognition_output,
+            "action_specs": action_specs,
+            "action_results": action_results,
+            "surface_outputs": surface_outputs,
+            "terminal_status": terminal_status,
+            "delivery_correlation": delivery_correlation,
+        },
+        response_dialog=[],
+        delivery_tracking_id=str(
+            delivery_correlation.get("tracking_id") or ""
+        ),
+        settled_at=settled_at,
+    )
+    artifact_payloads[models.RUNTIME_EPISODE_TRACE] = trace
+
+    consolidation_state = artifact_payloads.get(
+        models.RUNTIME_CONSOLIDATION_STATE,
+    )
+    if not isinstance(consolidation_state, dict):
+        consolidation_state = {}
+    consolidation_state = dict(consolidation_state)
+    consolidation_state["episode_trace"] = trace
+    consolidation_state["action_specs"] = action_specs
+    consolidation_state["action_results"] = action_results
+    consolidation_state["surface_outputs"] = surface_outputs
+    artifact_payloads[models.RUNTIME_CONSOLIDATION_STATE] = consolidation_state
+
+    if has_consolidatable_output(trace):
+        if pipeline_run_handle is not None:
+            pipeline_run_handle.raise_if_cancelled("before_consolidation")
+        consolidation_result = (
+            await runner.run_self_cognition_consolidation_async(
+                consolidation_state,
+            )
+        )
+        artifact_payloads[models.ARTIFACT_CONSOLIDATION_OUTCOME] = (
+            tracking.build_consolidation_outcome_record(
+                consolidation_state,
+                consolidation_result,
+            )
+        )
+        await record_completed_episode_residue(
+            completed_state=consolidation_state,
+            current_timestamp_utc=str(episode["created_at"]),
+        )
+
+    delivery_tracking_id = str(
+        delivery_correlation.get("tracking_id") or ""
+    )
+    lifecycle_record = build_post_turn_lifecycle_record(
+        source_episode_id=str(episode["episode_id"]),
+        delivery_tracking_id=delivery_tracking_id,
+        action_specs=action_specs,
+        action_results=action_results,
+        error_codes=_lifecycle_error_codes(delivery_result),
+        created_at=str(episode["created_at"]),
+    )
+    await db.upsert_post_turn_lifecycle_record(lifecycle_record)
+    return trace
+
+
+def _dict_rows(value: object) -> list[dict[str, Any]]:
+    """Copy dictionary rows from an optional runtime component list."""
+
+    if not isinstance(value, list):
+        return []
+    return [dict(row) for row in value if isinstance(row, dict)]
+
+
+def _has_visible_surface(surface_outputs: list[dict[str, Any]]) -> bool:
+    """Return whether a component list contains a deliver-now visible surface."""
+
+    return any(
+        output.get("visibility") == "user_visible"
+        and output.get("delivery_intent") == "deliver_now"
+        for output in surface_outputs
+    )
+
+
+def _delivery_correlation(
+    *,
+    visible_surface: bool,
+    delivery_result: object,
+) -> dict[str, Any]:
+    """Build immutable delivery correlation from the dispatcher result."""
+
+    if not visible_surface:
+        return {
+            "schema_version": "delivery_correlation.v1",
+            "delivery_intent": "do_not_deliver",
+            "tracking_id": "",
+            "receipt_status": "not_applicable",
+            "receipt_ref": "",
+        }
+    result = delivery_result if isinstance(delivery_result, dict) else {}
+    tracking_id = result.get("delivery_tracking_id")
+    tracking_id = tracking_id if isinstance(tracking_id, str) else ""
+    status = result.get("status")
+    if status == "sent" and tracking_id:
+        receipt_status = "pending"
+    elif status == "delivery_failed":
+        receipt_status = "failed"
+    else:
+        receipt_status = "unknown"
+    failure_reason = result.get("failure_reason")
+    receipt_ref = failure_reason if isinstance(failure_reason, str) else ""
+    return {
+        "schema_version": "delivery_correlation.v1",
+        "delivery_intent": "deliver_now",
+        "tracking_id": tracking_id,
+        "receipt_status": receipt_status,
+        "receipt_ref": receipt_ref,
+    }
+
+
+def _terminal_status(
+    *,
+    visible_surface: bool,
+    action_results: list[dict[str, Any]],
+    dispatch_status: str,
+) -> str:
+    """Choose a trace terminal status from settled deterministic outcomes."""
+
+    if visible_surface:
+        if dispatch_status in {"delivery_failed", "not_requested"}:
+            return "failed"
+        return "completed_visible"
+    statuses = {
+        str(result.get("status") or "")
+        for result in action_results
+    }
+    if statuses and statuses <= {"failed", "rejected", "cancelled"}:
+        return "failed"
+    if "scheduled" in statuses or "pending" in statuses:
+        return "scheduled"
+    if action_results:
+        return "completed_action"
+    return "completed_private"
+
+
+def _append_delivery_action_result(
+    *,
+    action_specs: list[dict[str, Any]],
+    action_results: list[dict[str, Any]],
+    action_attempt: dict[str, Any],
+    dispatch_status: str,
+    settled_at: str,
+) -> list[dict[str, Any]]:
+    """Append the worker-owned visible speak outcome when it is absent."""
+
+    attempt_id = action_attempt.get("attempt_id")
+    if not isinstance(attempt_id, str) or not attempt_id:
+        return action_results
+    if any(result.get("action_attempt_id") == attempt_id for result in action_results):
+        return action_results
+    speak_spec = next(
+        (
+            spec
+            for spec in action_specs
+            if spec.get("kind") == "speak"
+        ),
+        None,
+    )
+    if speak_spec is None:
+        return action_results
+    continuation = speak_spec.get("continuation")
+    if not isinstance(continuation, dict):
+        continuation = {
+            "schema_version": "action_continuation.v1",
+            "mode": "none",
+            "episode_type": None,
+            "max_depth": 0,
+            "include_result_as": None,
+        }
+    status = "executed" if dispatch_status == "sent" else "failed"
+    result = {
+        "schema_version": "action_result.v1",
+        "action_attempt_id": attempt_id,
+        "action_kind": "speak",
+        "handler_owner": "self_cognition.worker",
+        "status": status,
+        "visibility": str(speak_spec.get("visibility") or "user_visible"),
+        "result_summary": (
+            "Self-cognition speech delivered."
+            if status == "executed"
+            else "Self-cognition speech delivery failed."
+        ),
+        "result_refs": [],
+        "continuation": continuation,
+        "completed_at": settled_at if status == "executed" else None,
+    }
+    return [*action_results, result]
+
+
+def _lifecycle_error_codes(delivery_result: object) -> list[str]:
+    """Project dispatcher failure metadata into lifecycle error codes."""
+
+    if not isinstance(delivery_result, dict):
+        return []
+    failure_reason = delivery_result.get("failure_reason")
+    if isinstance(failure_reason, str) and failure_reason:
+        return [failure_reason]
+    return []
 
 
 async def _self_cognition_worker_loop(
@@ -591,6 +941,202 @@ async def _collect_cases(
     return cases
 
 
+def _case_from_internal_action_latch(
+    claim: dict[str, Any],
+    *,
+    character_profile: dict[str, Any],
+    now: datetime,
+) -> models.SelfCognitionCase:
+    """Build the worker case envelope for one claimed internal latch."""
+
+    latch = claim["latch"]
+    raw_scope = latch.get("target_scope")
+    scope = raw_scope if isinstance(raw_scope, dict) else {}
+    platform = str(scope.get("platform") or "")
+    channel_id = str(scope.get("platform_channel_id") or "")
+    channel_type = str(scope.get("channel_type") or "private")
+    user_id = str(
+        scope.get("current_global_user_id")
+        or scope.get("user_id")
+        or ""
+    )
+    platform_user_id = str(
+        scope.get("current_platform_user_id")
+        or scope.get("platform_user_id")
+        or user_id
+    )
+    display_name = str(
+        scope.get("current_display_name")
+        or scope.get("display_name")
+        or user_id
+    )
+    character_name = str(character_profile.get("name") or "Character")
+    source_bot_id = str(scope.get("source_platform_bot_id") or "")
+    delivery_target = {
+        "schema_version": "self_cognition_delivery_target.v1",
+        "platform": platform,
+        "platform_channel_id": channel_id,
+        "channel_type": "private" if channel_type == "private" else "group",
+        "target_global_user_id": user_id or None,
+        "target_platform_user_id": platform_user_id or None,
+        "source_kind": (
+            "target_private_channel"
+            if channel_type == "private"
+            else "self_cognition_source_channel"
+        ),
+        "source_ref": str(latch.get("source_episode_id") or ""),
+        "source_platform_channel_id": channel_id,
+        "source_channel_type": (
+            "private" if channel_type == "private" else "group"
+        ),
+        "source_message_id": str(latch.get("source_episode_id") or ""),
+        "source_global_user_id": user_id or None,
+        "source_platform_bot_id": source_bot_id,
+        "source_character_name": character_name,
+        "guild_id": None,
+        "bot_permission_role": "self_cognition",
+        "fallback_reason": "",
+    }
+    evidence_refs = latch.get("evidence_refs")
+    source_refs = [
+        {
+            "source_kind": "internal_thought",
+            "source_id": str(latch.get("source_episode_id") or ""),
+            "summary": str(latch.get("continuation_objective") or ""),
+        }
+    ]
+    if isinstance(evidence_refs, list):
+        source_refs.extend(
+            {
+                "source_kind": "internal_thought_evidence",
+                "source_id": str(ref.get("evidence_id") or ""),
+                "summary": str(ref.get("excerpt") or ""),
+            }
+            for ref in evidence_refs
+            if isinstance(ref, dict)
+        )
+    case: models.SelfCognitionCase = {
+        "case_name": models.CASE_PRIVATE_NO_ACTION,
+        "case_id": f"internal-thought:{latch.get('latch_id', '')}",
+        "idle_timestamp_utc": now.isoformat(),
+        "trigger_kind": "internal_thought",
+        "target_scope": {
+            "platform": platform,
+            "platform_channel_id": channel_id,
+            "channel_type": channel_type,
+            "user_id": user_id or None,
+            "platform_user_id": platform_user_id or None,
+            "display_name": display_name,
+        },
+        "source_refs": source_refs,
+        "actionability": "private",
+        "visible_context": [],
+        "delivery_mention_users": [],
+        "existing_attempts": [],
+        "character_profile": character_profile,
+        "user_profile": {},
+        "platform_bot_id": source_bot_id,
+        "channel_topic": "",
+        "promoted_reflection_context": {},
+        "budget": {
+            "rag_calls": 0,
+            "cognition_calls": 1,
+            "dialog_calls": 1,
+            "topic_limit": 0,
+        },
+        "source_calendar_run_id": "",
+        "source_calendar_skip_reason": "",
+        "cognition_source": {
+            "source_kind": "internal_thought",
+            "source_id": str(latch.get("latch_id") or ""),
+        },
+        "source_action_attempt_id": str(
+            latch.get("source_action_attempt_id") or ""
+        ),
+        "delivery_target": delivery_target,
+        "target_binding_status": (
+            "bound" if platform and channel_id else "failed"
+        ),
+        "internal_action_latch": latch,
+        "claim_token": str(claim.get("claim_token") or ""),
+    }
+    return case
+
+
+def _internal_latch_claim_parts(
+    case: models.SelfCognitionCase,
+) -> tuple[dict[str, Any], str] | None:
+    """Return latch and claim token when this case owns a latch claim."""
+
+    latch = case.get("internal_action_latch")
+    claim_token = case.get("claim_token")
+    if not isinstance(latch, dict) or not isinstance(claim_token, str):
+        return None
+    if not claim_token:
+        return None
+    return latch, claim_token
+
+
+async def _consume_internal_action_latch_for_case(
+    case: models.SelfCognitionCase,
+    *,
+    now: datetime,
+) -> None:
+    """Consume a claimed internal latch after its episode settles."""
+
+    parts = _internal_latch_claim_parts(case)
+    if parts is None:
+        return
+    latch, claim_token = parts
+    await db.consume_internal_action_latch(
+        latch_id=str(latch["latch_id"]),
+        claim_token=claim_token,
+        consumed_episode_id=str(case.get("case_id") or ""),
+        now=now.isoformat(),
+    )
+
+
+async def _release_internal_action_latch_for_case(
+    case: models.SelfCognitionCase,
+    *,
+    now: datetime,
+    reason: str,
+) -> None:
+    """Release a retryable technical latch failure."""
+
+    parts = _internal_latch_claim_parts(case)
+    if parts is None:
+        return
+    latch, claim_token = parts
+    await db.release_internal_action_latch(
+        latch_id=str(latch["latch_id"]),
+        claim_token=claim_token,
+        retry_at=(now + timedelta(seconds=60)).isoformat(),
+        error_code=reason[:80] or "technical_failure",
+        now=now.isoformat(),
+    )
+
+
+async def _fail_internal_action_latch_for_case(
+    case: models.SelfCognitionCase,
+    *,
+    now: datetime,
+    error_code: str,
+) -> None:
+    """Mark a claimed latch as a typed terminal failure."""
+
+    parts = _internal_latch_claim_parts(case)
+    if parts is None:
+        return
+    latch, claim_token = parts
+    await db.fail_internal_action_latch(
+        latch_id=str(latch["latch_id"]),
+        claim_token=claim_token,
+        error_code=error_code[:80],
+        now=now.isoformat(),
+    )
+
+
 async def _handle_case_action_outputs(
     *,
     case: models.SelfCognitionCase,
@@ -604,6 +1150,9 @@ async def _handle_case_action_outputs(
 
     action_attempt = artifact_payloads.get(models.ARTIFACT_ACTION_ATTEMPT)
     if not isinstance(action_attempt, dict):
+        artifact_payloads[models.ARTIFACT_DISPATCH_RESULT] = {
+            "status": "not_requested",
+        }
         return_value = "not_requested"
         return return_value
 
@@ -615,6 +1164,9 @@ async def _handle_case_action_outputs(
             )
         attempt_state = _attempt_state(action_attempt, now=now)
         await _call_maybe_async(record_attempt_func, attempt_state)
+        artifact_payloads[models.ARTIFACT_DISPATCH_RESULT] = {
+            "status": "duplicate_suppressed",
+        }
         return_value = "duplicate_suppressed"
         return return_value
     if attempt_status == models.ACTION_ATTEMPT_STATUS_HELD:
@@ -624,6 +1176,9 @@ async def _handle_case_action_outputs(
             )
         attempt_state = _attempt_state(action_attempt, now=now)
         await _call_maybe_async(record_attempt_func, attempt_state)
+        artifact_payloads[models.ARTIFACT_DISPATCH_RESULT] = {
+            "status": "held",
+        }
         return_value = "held"
         return return_value
 
@@ -653,6 +1208,9 @@ async def _handle_case_action_outputs(
             now=now,
         )
         await _call_maybe_async(record_attempt_func, attempt_state)
+        artifact_payloads[models.ARTIFACT_DISPATCH_RESULT] = dict(
+            delivery_result
+        )
         return_value = delivery_result["status"]
         return return_value
     if (
@@ -666,6 +1224,9 @@ async def _handle_case_action_outputs(
             )
         attempt_state = _attempt_state(action_attempt, now=now)
         await _call_maybe_async(record_attempt_func, attempt_state)
+        artifact_payloads[models.ARTIFACT_DISPATCH_RESULT] = {
+            "status": "not_requested",
+        }
         return_value = "not_requested"
         return return_value
 
@@ -688,6 +1249,7 @@ async def _handle_case_action_outputs(
         now=now,
     )
     await _call_maybe_async(record_attempt_func, attempt_state)
+    artifact_payloads[models.ARTIFACT_DISPATCH_RESULT] = dict(delivery_result)
     return_value = delivery_result["status"]
     return return_value
 

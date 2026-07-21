@@ -6,7 +6,7 @@ Submodule map:
 * ``schemas``      — TypedDict document shapes
 * ``bootstrap``    — startup: collections, indices, seeded documents
 * ``conversation`` — ``conversation_history`` operations
-* ``users``        — ``user_profiles`` operations (identity, profile, affinity)
+* ``users``        — ``user_profiles`` operations (identity, profile, V2 state)
 * ``character``    — ``character_state`` operations
 * ``memory``       — ``memory`` operations
 * ``interaction_style_images`` — L3-only interaction style overlays
@@ -17,11 +17,9 @@ from __future__ import annotations
 from importlib import import_module
 from typing import Any
 
-# ── Re-export config constants that old callers imported from here ──
-from kazusa_ai_chatbot.config import AFFINITY_DEFAULT, AFFINITY_MAX, AFFINITY_MIN
-
 # ── Client + embedding ─────────────────────────────────────────────
 from kazusa_ai_chatbot.db._client import (
+    DatabaseTestGuardError,
     close_db,
     enable_vector_index,
     get_document_text_embedding,
@@ -43,6 +41,7 @@ from kazusa_ai_chatbot.db.schemas import (
     CalendarRunDoc,
     CalendarScheduleDoc,
     CharacterProfileDoc,
+    CharacterProfileSeedV1,
     CharacterReflectionRunDoc,
     ConversationEpisodeEntryDoc,
     ConversationEpisodeStateDoc,
@@ -51,6 +50,8 @@ from kazusa_ai_chatbot.db.schemas import (
     GlobalCharacterGrowthTraitDoc,
     InternalMonologueResidueDoc,
     InternalMonologueResidueSourceRefDoc,
+    InternalActionLatchClaimV1,
+    InternalActionLatchV1,
     InteractionStyleImageDoc,
     InteractionStyleOverlayDoc,
     InteractionStyleScopeType,
@@ -64,6 +65,7 @@ from kazusa_ai_chatbot.db.schemas import (
     ScheduledEventDoc,
     SelfCognitionActionAttemptDoc,
     SelfCognitionGroupReviewWindowDoc,
+    PostTurnLifecycleRecordV1,
     UserMemoryContextDoc,
     UserMemoryContextEntry,
     UserMemoryUnitDoc,
@@ -134,22 +136,21 @@ from kazusa_ai_chatbot.db.internal_monologue_residue import (
     list_internal_monologue_residue_rows,
 )
 
-# ── Users (identity + profile + affinity) ─────────────────────────
+# ── Users (identity + profile + cognition state) ──────────────────
 from kazusa_ai_chatbot.db.users import (
     add_suspected_alias,
     backfill_character_conversation_identity,
     create_user_profile,
     ensure_character_identity,
     find_user_profile_by_identifier,
-    get_affinity,
+    get_user_cognition_state,
     get_user_profile,
     link_platform_account,
-    list_users_by_affinity,
+    list_users_by_relationship,
     list_users_by_display_name,
     resolve_global_user_id,
+    replace_user_cognition_state,
     search_users_by_display_name,
-    update_affinity,
-    update_last_relationship_insight,
 )
 
 from kazusa_ai_chatbot.db.user_memory_units import (
@@ -169,15 +170,29 @@ from kazusa_ai_chatbot.db.user_memory_units import (
 # ── Character state ───────────────────────────────────────────────
 from kazusa_ai_chatbot.db.character import (
     RUNTIME_CHARACTER_STATE_FIELDS,
-    compare_and_upsert_character_state,
     compose_character_profile,
+    ensure_character_profile_seed,
+    get_character_cognition_state,
     get_character_profile,
     get_character_runtime_state,
     get_character_state,
+    replace_character_cognition_state,
     save_character_profile,
     split_character_profile_runtime_state,
     upsert_character_self_image,
-    upsert_character_state,
+)
+from kazusa_ai_chatbot.db.internal_action_latches import (
+    claim_due_internal_action_latch,
+    consume_internal_action_latch,
+    ensure_internal_action_latch_indexes,
+    expire_due_internal_action_latches,
+    fail_internal_action_latch,
+    issue_internal_action_latch,
+    release_internal_action_latch,
+)
+from kazusa_ai_chatbot.db.post_turn_lifecycle import (
+    ensure_post_turn_lifecycle_record_indexes,
+    upsert_post_turn_lifecycle_record,
 )
 
 from kazusa_ai_chatbot.db.self_cognition import (
@@ -237,10 +252,9 @@ def __getattr__(name: str) -> Any:
 
 
 __all__ = [
-    # Config
-    "AFFINITY_DEFAULT", "AFFINITY_MAX", "AFFINITY_MIN",
     # Client
     "check_database_connection", "close_db", "DatabaseBackendError",
+    "DatabaseTestGuardError",
     "DatabaseOperationError",
     "enable_vector_index",
     "get_document_text_embedding", "get_document_text_embeddings_batch",
@@ -248,13 +262,16 @@ __all__ = [
     "get_text_embedding", "get_text_embeddings_batch",
     # Schemas
     "AttachmentDoc", "CalendarRunDoc", "CalendarScheduleDoc",
-    "CharacterProfileDoc", "CharacterReflectionRunDoc",
+    "CharacterProfileDoc", "CharacterProfileSeedV1",
+    "CharacterReflectionRunDoc",
     "ConversationEpisodeEntryDoc", "ConversationEpisodeStateDoc",
     "ConversationMessageDoc", "GlobalCharacterGrowthRunDoc",
     "GlobalCharacterGrowthTraitDoc", "InteractionStyleImageDoc",
     "InternalMonologueResidueDoc", "InternalMonologueResidueSourceRefDoc",
+    "InternalActionLatchClaimV1", "InternalActionLatchV1",
     "InteractionStyleOverlayDoc", "InteractionStyleScopeType",
     "InteractionStyleStatus", "MemoryDoc", "MentionDoc",
+    "PostTurnLifecycleRecordV1",
     "PlatformAccountDoc", "RAGCache2PersistentEntryDoc",
     "ReflectionMessageRefDoc", "ReflectionScopeDoc",
     "ScheduledEventDoc", "SelfCognitionActionAttemptDoc",
@@ -298,11 +315,12 @@ __all__ = [
     "create_user_profile",
     "ensure_character_identity",
     "find_user_profile_by_identifier",
-    "get_affinity",
+    "get_user_cognition_state",
     "get_user_profile", "link_platform_account",
-    "list_users_by_affinity", "list_users_by_display_name",
-    "resolve_global_user_id", "search_users_by_display_name", "update_affinity",
-    "update_last_relationship_insight",
+    "list_users_by_relationship",
+    "list_users_by_display_name",
+    "resolve_global_user_id", "replace_user_cognition_state",
+    "search_users_by_display_name",
     "build_user_memory_unit_doc", "get_user_memory_unit_by_unit_id",
     "insert_user_memory_units",
     "query_active_commitment_memory_units",
@@ -313,12 +331,22 @@ __all__ = [
     "update_user_memory_unit_semantics", "update_user_memory_unit_window",
     "validate_user_memory_unit_semantics",
     # Character
-    "RUNTIME_CHARACTER_STATE_FIELDS", "compare_and_upsert_character_state",
+    "RUNTIME_CHARACTER_STATE_FIELDS",
     "compose_character_profile",
+    "ensure_character_profile_seed",
+    "get_character_cognition_state",
     "get_character_profile", "get_character_runtime_state",
     "get_character_state", "save_character_profile",
+    "replace_character_cognition_state",
     "split_character_profile_runtime_state",
-    "upsert_character_self_image", "upsert_character_state",
+    "upsert_character_self_image",
+    # Internal action latches and post-turn lifecycle
+    "claim_due_internal_action_latch", "consume_internal_action_latch",
+    "ensure_internal_action_latch_indexes", "expire_due_internal_action_latches",
+    "fail_internal_action_latch", "issue_internal_action_latch",
+    "release_internal_action_latch",
+    "ensure_post_turn_lifecycle_record_indexes",
+    "upsert_post_turn_lifecycle_record",
     # Memory
     "enable_memory_vector_index", "get_active_promises", "save_memory", "search_memory",
     # Self-cognition action attempts

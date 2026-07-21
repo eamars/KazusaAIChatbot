@@ -565,15 +565,44 @@ class SurfaceOutputV1(TypedDict):
     created_at: str
 
 
-class EpisodeTraceV1(TypedDict):
-    schema_version: Literal["episode_trace.v1"]
+class EpisodeAttemptDiagnosticV1(TypedDict):
+    stage: str
+    error_code: str
+    attempt_count: int
+    safe_checkpoint: str
+    retryable: bool
+    final_status: str
+
+
+class DeliveryCorrelationV1(TypedDict):
+    delivery_intent: Literal["deliver_now", "deliver_later", "do_not_deliver"]
+    delivery_tracking_id: str
+    receipt_status: Literal[
+        "not_applicable", "pending", "delivered", "failed", "unknown"
+    ]
+    receipt_ref: str
+
+
+class EpisodeTraceV2(TypedDict):
+    schema_version: Literal["episode_trace.v2"]
     episode_id: str
     trigger_source: str
+    terminal_status: Literal[
+        "completed_visible",
+        "completed_private",
+        "completed_action",
+        "scheduled",
+        "failed",
+        "cancelled",
+    ]
     cognition_refs: list[EvidenceRefV1]
     action_specs: list[ActionSpecV1]
     action_results: list[ActionResultV1]
     surface_outputs: list[SurfaceOutputV1]
+    attempt_diagnostics: list[EpisodeAttemptDiagnosticV1]
+    delivery_correlation: DeliveryCorrelationV1
     created_at: str
+    settled_at: str
 
 
 class ConsolidationActionProjectionV1(TypedDict):
@@ -586,28 +615,45 @@ class ConsolidationActionProjectionV1(TypedDict):
     evidence_refs: list[EvidenceRefV1]
 ```
 
-`EpisodeTraceV1` is the consolidation input contract. It may include completed,
-scheduled, pending, rejected, or failed actions. The consolidator receives
+`EpisodeTraceV2` is the immutable consolidation input contract. It settles once
+after primary cognition/actions/surfaces and delivery tracking assignment. A
+later adapter receipt remains separately persisted and does not mutate the
+trace. The trace may include completed, scheduled, pending, rejected, or failed
+actions. The consolidator receives
 prompt-safe projections of the trace; it does not receive raw handler IDs,
 credentials, raw adapter IDs, raw collection names, or arbitrary action params.
 
-### Initial Action Kinds
+### Committed Runtime Action Kinds
 
 ```text
 speak
 memory_lifecycle_update
+apply_memory_lifecycle_update
 trigger_future_cognition
+future_speak
+accepted_task_request
+accepted_coding_task_request
+accepted_task_status_check
+background_work_request
 ```
+
+This roster is complete for the Stage 3 native runtime. The registry is the
+declarative schema/permission/prompt/handler authority for all nine kinds.
+`apply_memory_lifecycle_update` is internal-only. Task, coding, status,
+background, and future-speech requests retain their typed lifecycle/queue/
+scheduler owners; registering them does not permit the cognition model to
+execute their effects directly. A tenth kind requires an approved plan and an
+authoritative-reference amendment before runtime implementation.
 
 `send_message` is not cognition-visible vocabulary. Text output remains the
 semantic `speak` action, with L3 text/dialog and the live service boundary
 owning wording and adapter delivery for the current turn.
 
-The initial runtime slice does not include web research, notes, image
-generation, motor actions, or arbitrary external tools. It does include the
-semantic capability to request a future cognition episode through
-`trigger_future_cognition`; handlers materialize that request into scheduler or
-orchestrator-owned work without calling cognition directly.
+The runtime roster does not expose web research, notes, image generation,
+motor actions, or arbitrary external tools as direct cognition actions.
+Supported accepted/background task requests may route bounded work to their
+registered owners, and `trigger_future_cognition` materializes scheduler-owned
+work without calling cognition directly.
 
 ## Contract 4: Affordance Registry
 
@@ -881,10 +927,10 @@ class CapabilitySpecV1(TypedDict):
   and L3 surfaces can all use the extension pattern without sharing one
   execution module.
 
-## Initial Registry Commitments
+## Stage 3 Registry Commitments
 
-These initial entries are authoritative for the first action-spec execution
-slice once that plan is approved.
+These entries are authoritative for the Stage 3 native execution slice once
+that plan is approved.
 
 ### Trigger Sources
 
@@ -917,15 +963,47 @@ memory_lifecycle_update:
   continuation: none
 
 trigger_future_cognition:
-  owner: orchestrator
+  owner: calendar_orchestrator
   cognition_mode: deliberative
   continuation: scheduled_followup
+
+apply_memory_lifecycle_update:
+  owner: memory_lifecycle_executor
+  cognition_mode: deliberative
+  visibility: internal_only
+  continuation: none
+
+future_speak:
+  owner: background_work
+  cognition_mode: deliberative
+  continuation: background_followup
+
+accepted_task_request:
+  owner: accepted_task_lifecycle
+  cognition_mode: deliberative
+  continuation: background_followup
+
+accepted_coding_task_request:
+  owner: accepted_task_coding
+  cognition_mode: deliberative
+  continuation: background_followup
+
+accepted_task_status_check:
+  owner: accepted_task_repository
+  cognition_mode: deliberative
+  continuation: none
+
+background_work_request:
+  owner: background_work
+  cognition_mode: deliberative
+  continuation: background_followup
 ```
 
-`speak`, `memory_lifecycle_update`, and `trigger_future_cognition` are the
-initial L2d-facing semantic capabilities. `send_message` is not a
-cognition-visible capability; delayed contact is expressed as future cognition
-so the character re-decides at execution time.
+All entries except internal-only `apply_memory_lifecycle_update` may be
+L2d-facing when the episode's `AffordanceSpecV1` marks them available or
+degraded. `send_message` is not a cognition-visible capability; delayed contact
+is expressed as future cognition so the character re-decides at execution
+time.
 
 ### Deferred Action Capabilities
 
@@ -953,7 +1031,7 @@ L2d semantic action request
 -> ActionSpecEvaluator
 -> execution owner / L3 surface handler
 -> ActionResultV1 + SurfaceOutputV1
--> EpisodeTraceV1
+-> EpisodeTraceV2
 ```
 
 For `speak`:
@@ -1061,7 +1139,7 @@ evidence, rate-limit state, and audit trail.
 The consolidator must not remain tied to a single `final_dialog` string. A turn
 can produce no visible reply, a text reply, an image prompt, a private memory
 update, a scheduled cognition request, or several independent actions. The
-durable memory/state update path therefore consumes an `EpisodeTraceV1`.
+durable memory/state update path therefore consumes an `EpisodeTraceV2`.
 
 Required consolidation inputs:
 
@@ -1078,9 +1156,9 @@ Rules:
 
 - `final_dialog` is represented as a text `SurfaceOutputV1`, not as the
   consolidation gate.
-- The live service may initially use `final_dialog or surface_outputs or
-  action_results or private_finalization` as the consolidatable-output gate, but
-  long-term code should converge on `EpisodeTraceV1`.
+- The live service uses the settled `EpisodeTraceV2` as the
+  consolidatable-output gate; graph-state fallbacks are outside the canonical
+  boundary.
 - The consolidator receives prompt-safe action projections, not raw action
   params, handler IDs, adapter IDs, credentials, or collection internals.
 - The consolidator may persist memory, relationship state, progress, mood, and
@@ -1108,26 +1186,27 @@ Plans may be approved once:
 - blockers recorded in the plan are resolved;
 - independent plan review finds no approval blocker.
 
-## Relationship To Current Action-Spec Plan
+## Relationship To The Stage 3 Adoption Plan
 
-The active plan
-`development_plans/active/short_term/modality_neutral_action_spec_effector_expansion_plan.md`
-implements the first runtime slice of contracts 1, 2, 3, 4, 6, and 7:
+The active draft
+`development_plans/active/short_term/cognition_core_v2_stage_3_system_adoption_plan.md`
+and its mandatory companions define the next native runtime slice of contracts
+1, 2, 3, 4, 6, and 7:
 
 - contract 1: self-cognition and future cognition requests enter as typed
   trigger-source episodes;
 - contract 2: L2d action requests, L3 surface outputs, action results, and
   episode-trace consolidation projections;
 - contract 3: `ActionSpecV1`;
-- contract 4: prompt-safe affordance projection for initial action
-  capabilities;
+- contract 4: prompt-safe runtime affordance projection for the complete
+  nine-kind Stage 3 action roster;
 - contract 6: `user_memory_units.active_commitment` lifecycle update through
   memory owner;
 - contract 7: capability spec plus handler and audit pattern.
 
-That plan remains executable only while its stages keep this reference as the
-authoritative contract source and update downstream architecture documents when
-the contract surface changes.
+That plan becomes executable only after approval and a separate implementation
+command. Its stages keep this reference authoritative and update downstream
+architecture documents when the contract surface changes.
 
 ## Independent Reference Review Resolution
 

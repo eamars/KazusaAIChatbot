@@ -484,9 +484,12 @@ async def test_background_lookup_uses_result_ready_episode_projection() -> None:
     def build_result_ready_episode_from_job(job: dict[str, Any]):
         assert job["job_id"] == "job-1"
         return {
-            "episode_id": "accepted_task_result_ready:task-1",
-            "trigger_source": "accepted_task_result_ready",
-            "output_mode": "visible_reply",
+            "schema_version": "cognitive_episode.v1",
+            "episode_id": "tool_result:task-1",
+            "trigger_source": "tool_result",
+            "origin_metadata": {
+                "source_character_name": "Stage 3 Character",
+            },
             "target_scope": {
                 "platform": "qq",
                 "platform_channel_id": "private-1",
@@ -495,15 +498,11 @@ async def test_background_lookup_uses_result_ready_episode_projection() -> None:
             },
             "percepts": [
                 {
-                    "input_source": "accepted_task_result",
-                    "content": "model-visible artifact",
-                    "metadata": {
-                        "accepted_task_id": "task-1",
-                        "accepted_task_summary": (
-                            "summarize the benchmark notes"
-                        ),
-                        "failure_summary": "",
-                        "result_summary": "summary ready",
+                    "source_kind": "tool_result",
+                    "content": {
+                        "semantic_summary": "summary ready",
+                        "artifact_text": "model-visible artifact",
+                        "failure_text": "",
                     },
                 },
             ],
@@ -542,11 +541,12 @@ async def test_background_lookup_uses_result_ready_episode_projection() -> None:
         "background_work.result_source.build_result_ready_episode_from_job"
     )
     assert prompt_panel["items"][0]["episode_id"] == (
-        "accepted_task_result_ready:task-1"
+        "tool_result:task-1"
     )
+    assert prompt_panel["items"][0]["source_kind"] == "tool_result"
     assert prompt_panel["items"][0]["content"] == "model-visible artifact"
-    assert prompt_panel["items"][0]["metadata"]["accepted_task_summary"] == (
-        "summarize the benchmark notes"
+    assert prompt_panel["items"][0]["metadata"]["result_summary"] == (
+        "summary ready"
     )
     assert panels["job_queue"]["prompt_view"] is False
     assert panels["job_queue"]["items"][0]["job_id"] == "job-2"

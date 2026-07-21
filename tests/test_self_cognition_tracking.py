@@ -119,10 +119,9 @@ async def test_default_self_cognition_client_uses_resolver_loop(
         "internal_monologue": "resolver completed",
         "action_specs": [],
         "resolver_capability_requests": [],
+        "cognition_core_output": {"state_update": {"scope": "character"}},
     }
-
-    async def direct_cognition(_state: dict[str, Any]) -> dict[str, Any]:
-        raise AssertionError("self-cognition bypassed the resolver loop")
+    committed_outputs: list[dict[str, Any]] = []
 
     async def resolver_loop(
         state: dict[str, Any],
@@ -130,30 +129,44 @@ async def test_default_self_cognition_client_uses_resolver_loop(
     ) -> dict[str, Any]:
         captured["state"] = state
         captured["kwargs"] = kwargs
-        return expected_result
+        return {
+            **state,
+            **expected_result,
+            "resolver_observations": [],
+        }
 
-    monkeypatch.setattr(runner, "call_cognition_subgraph", direct_cognition)
     monkeypatch.setattr(
         runner,
         "call_cognition_resolver_loop",
         resolver_loop,
-        raising=False,
+    )
+    monkeypatch.setattr(
+        runner,
+        "ensure_initial_resolver_inputs",
+        lambda state, *, max_cycles: state,
+    )
+    async def commit_cognition_output(output: dict[str, Any]) -> None:
+        committed_outputs.append(output)
+
+    monkeypatch.setattr(
+        runner,
+        "commit_cognition_output",
+        commit_cognition_output,
     )
     state = {"cognitive_episode": {"trigger_source": "internal_thought"}}
 
     result = await runner._default_cognition_client(state)
 
-    assert result == expected_result
-    assert captured["state"] is state
-    assert captured["kwargs"]["call_cognition_subgraph_func"] is (
-        direct_cognition
-    )
+    assert result["internal_monologue"] == expected_result["internal_monologue"]
+    assert result["resolver_observations"] == []
+    assert result["cognition_state_committed"] is True
+    assert committed_outputs == [expected_result["cognition_core_output"]]
+    assert captured["state"]["cognitive_episode"] == state["cognitive_episode"]
+    assert callable(captured["kwargs"]["call_cognition_subgraph_func"])
     assert callable(captured["kwargs"]["execute_capability_func"])
-    assert captured["kwargs"]["upsert_pending_resume_func"] is (
-        runner._non_persistent_pending_resume
-    )
-    assert captured["kwargs"]["apply_pending_resolution_func"] is (
-        runner._non_persistent_pending_resolution
+    assert captured["kwargs"]["max_cycles"] == runner.COGNITION_RESOLVER_MAX_CYCLES
+    assert captured["kwargs"]["capability_timeout_seconds"] == (
+        runner.COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS
     )
 
 
@@ -279,23 +292,15 @@ def _action_cognition_output(text: str) -> dict[str, Any]:
         "logical_stance": "CONFIRM",
         "character_intent": "PROVIDE",
         "internal_monologue": "The scheduled follow-up should be visible.",
-        "action_directives": {
-            "contextual_directives": {
-                "social_distance": "friendly",
-                "emotional_intensity": "low",
-                "vibe_check": "focused",
-                "relational_dynamic": "scheduled follow-up",
-            },
-            "linguistic_directives": {
-                "rhetorical_strategy": "answer the scheduled follow-up",
-                "linguistic_style": "brief",
-                "accepted_user_preferences": [],
-                "content_plan": {
-                    "semantic_content": text,
-                    "rendering": "One ordinary text message; concise.",
-                },
-                "forbidden_phrases": [],
-            },
+        "text_surface_output_v2": {
+            "schema_version": "text_surface_output.v2",
+            "content_plan": text,
+            "content_requirements": ["Preserve the scheduled follow-up purpose."],
+            "visible_boundaries": [],
+            "addressee_plan": ["current user"],
+            "style_guidance": "brief and direct",
+            "selected_surface_intent": "answer the scheduled follow-up",
+            "permitted_action_results": [],
         },
         "action_specs": [_speak_action_spec()],
     }
@@ -306,13 +311,7 @@ def _progress_cognition_output() -> dict[str, Any]:
     output = {
         "logical_stance": "maintain awareness without outward contact",
         "character_intent": "keep progress internally visible",
-        "action_directives": {
-            "linguistic_directives": {
-                "content_plan": {
-                    "semantic_content": "Track the commitment quietly.",
-                },
-            },
-        },
+        "self_cognition_route": models.ROUTE_PROGRESS_MAINTENANCE,
     }
     return output
 
@@ -332,7 +331,6 @@ def _silent_cognition_output() -> dict[str, Any]:
         "logical_stance": "no outward contact is warranted",
         "character_intent": "stay silent",
         "self_cognition_route": models.ROUTE_AUDIT_ONLY,
-        "action_directives": {"linguistic_directives": {"content_plan": {}}},
     }
     return output
 
@@ -474,32 +472,19 @@ def _memory_lifecycle_route_action_spec() -> dict[str, Any]:
     return spec
 
 
-def _surface_action_directives() -> dict[str, Any]:
-    directives = {
-        "contextual_directives": {
-            "social_distance": "friendly",
-            "emotional_intensity": "low",
-            "vibe_check": "focused",
-            "relational_dynamic": "scheduled follow-up",
-        },
-        "linguistic_directives": {
-            "rhetorical_strategy": "answer the scheduled follow-up",
-            "linguistic_style": "brief",
-            "accepted_user_preferences": [],
-            "content_plan": {
-                "semantic_content": "Continue the GPU model topic.",
-                "rendering": "One ordinary text message; concise.",
-            },
-            "forbidden_phrases": [],
-        },
-        "visual_directives": {
-            "facial_expression": [],
-            "body_language": [],
-            "gaze_direction": [],
-            "visual_vibe": [],
-        },
+def _surface_output(content_plan: str = "Continue the GPU model topic.") -> dict[str, Any]:
+    """Build the canonical V2 surface result used by dialog tests."""
+
+    return {
+        "schema_version": "text_surface_output.v2",
+        "content_plan": content_plan,
+        "content_requirements": ["Preserve the scheduled follow-up purpose."],
+        "visible_boundaries": [],
+        "addressee_plan": ["current user"],
+        "style_guidance": "brief",
+        "selected_surface_intent": "answer the scheduled follow-up",
+        "permitted_action_results": [],
     }
-    return directives
 
 
 def _speak_cognition_output_with_partial_directives() -> dict[str, Any]:
@@ -512,13 +497,6 @@ def _speak_cognition_output_with_partial_directives() -> dict[str, Any]:
         "emotional_intensity": "low",
         "vibe_check": "focused",
         "relational_dynamic": "scheduled follow-up",
-        "action_directives": {
-            "linguistic_directives": {
-                "content_plan": {
-                    "semantic_content": "Continue the GPU model topic.",
-                },
-            },
-        },
         "action_specs": [_speak_action_spec()],
     }
     return output
@@ -853,14 +831,15 @@ def test_classify_route_does_not_use_content_plan_without_speak_action() -> None
         {
             "logical_stance": "CONFIRM",
             "character_intent": "PROVIDE",
-            "action_directives": {
-                "linguistic_directives": {
-                    "content_plan": {
-                        "semantic_content": (
-                            "Check whether the user has started work."
-                        ),
-                    },
-                },
+            "text_surface_output_v2": {
+                "schema_version": "text_surface_output.v2",
+                "content_plan": "Check whether the user has started work.",
+                "content_requirements": ["Ask whether the user has started work."],
+                "visible_boundaries": [],
+                "addressee_plan": [],
+                "style_guidance": "brief",
+                "selected_surface_intent": "observe",
+                "permitted_action_results": [],
             },
             "action_specs": [],
         },
@@ -1032,7 +1011,7 @@ def test_runner_apply_consolidation_uses_empty_dialog_without_render() -> None:
                     "character_state": True,
                     "relationship_insight": True,
                     "user_memory_units": False,
-                    "affinity": True,
+                    "relationship_state": True,
                     "character_image": False,
                     "cache_invalidation": True,
                 },
@@ -1050,11 +1029,9 @@ def test_runner_apply_consolidation_uses_empty_dialog_without_render() -> None:
     )
 
     assert captured_consolidation_state["cognitive_episode"]["trigger_source"] == (
-        "internal_thought"
+        "scheduled_tick"
     )
-    assert captured_consolidation_state["cognitive_episode"]["output_mode"] == (
-        "preview"
-    )
+    assert "output_mode" not in captured_consolidation_state["cognitive_episode"]
     assert captured_consolidation_state["final_dialog"] == []
     assert "The user expected a follow-up" in (
         captured_consolidation_state["decontexualized_input"]
@@ -1068,14 +1045,14 @@ def test_runner_apply_consolidation_uses_empty_dialog_without_render() -> None:
             "character_state": True,
             "relationship_insight": True,
             "user_memory_units": False,
-            "affinity": True,
+            "relationship_state": True,
             "character_image": False,
             "cache_invalidation": True,
         },
         "scheduled_event_count": 0,
         "cache_evicted_count": 2,
-        "origin_trigger_source": "internal_thought",
-        "origin_episode_id": "self_cognition:tracking:commitment_past_due:promise-001",
+        "origin_trigger_source": "scheduled_tick",
+        "origin_episode_id": "scheduled-tick:2026-05-10T00:30:00+00:00",
     }
     serialized = json.dumps(outcome, ensure_ascii=False)
     assert "Reminder was expected" not in serialized
@@ -1245,7 +1222,6 @@ def test_runner_rejects_explicit_visible_route_without_speak() -> None:
                 "logical_stance": "CONFIRM",
                 "character_intent": "PROVIDE",
                 "self_cognition_route": models.ROUTE_ACTION_CANDIDATE,
-                "action_directives": _surface_action_directives(),
                 "action_specs": [],
             },
             dialog_client=dialog_client,
@@ -1265,9 +1241,10 @@ def test_runner_executes_private_lifecycle_action_for_consolidation(
         storage_timestamp_utc: str,
         executed_action_attempt_ids: set[str] | None = None,
         record_attempt_func: Any = None,
+        availability_snapshot_factory: Any = None,
     ) -> list[dict[str, Any]]:
         del storage_timestamp_utc, executed_action_attempt_ids
-        del record_attempt_func
+        del record_attempt_func, availability_snapshot_factory
         captured_specs.extend(action_specs)
         action_results = [
             {
@@ -1310,7 +1287,6 @@ def test_runner_executes_private_lifecycle_action_for_consolidation(
             "character_intent": "DISMISS",
             "internal_monologue": "Close the stale commitment privately.",
             "judgment_note": "The commitment should be abandoned.",
-            "action_directives": {"linguistic_directives": {"content_plan": {}}},
             "action_specs": [_memory_lifecycle_action_spec()],
         },
         consolidation_client=consolidation_client,
@@ -1321,10 +1297,7 @@ def test_runner_executes_private_lifecycle_action_for_consolidation(
 
     assert captured_specs[0]["kind"] == APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY
     assert cognition_output["action_results"][0]["status"] == "executed"
-    assert cognition_output["episode_trace"]["action_results"][0][
-        "action_kind"
-    ] == APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY
-    assert captured_consolidation_state["episode_trace"]["action_results"][0][
+    assert captured_consolidation_state["action_results"][0][
         "status"
     ] == "executed"
 
@@ -1373,9 +1346,10 @@ def test_runner_routes_lifecycle_intent_through_specialist_before_execution(
         storage_timestamp_utc: str,
         executed_action_attempt_ids: set[str] | None = None,
         record_attempt_func: Any = None,
+        availability_snapshot_factory: Any = None,
     ) -> list[dict[str, Any]]:
         del storage_timestamp_utc, executed_action_attempt_ids
-        del record_attempt_func
+        del record_attempt_func, availability_snapshot_factory
         captured_specs.extend(action_specs)
         action_results = [
             {
@@ -1412,7 +1386,6 @@ def test_runner_routes_lifecycle_intent_through_specialist_before_execution(
             "character_intent": "DISMISS",
             "internal_monologue": "Review the stale commitment privately.",
             "judgment_note": "The commitment may need lifecycle review.",
-            "action_directives": {"linguistic_directives": {"content_plan": {}}},
             "action_specs": [_memory_lifecycle_route_action_spec()],
         },
         apply_consolidation=False,
@@ -1430,9 +1403,6 @@ def test_runner_routes_lifecycle_intent_through_specialist_before_execution(
     assert cognition_output["memory_lifecycle_context"]["decision"] == (
         "lifecycle_change"
     )
-    assert cognition_output["episode_trace"]["action_specs"][0][
-        "kind"
-    ] == APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY
 
 
 def test_runner_does_not_execute_private_actions_by_default(
@@ -1474,7 +1444,6 @@ def test_runner_does_not_execute_private_actions_by_default(
             "character_intent": "DISMISS",
             "internal_monologue": "Close the stale commitment privately.",
             "judgment_note": "The commitment should be abandoned.",
-            "action_directives": {"linguistic_directives": {"content_plan": {}}},
             "action_specs": [_memory_lifecycle_action_spec()],
         },
         consolidation_client=consolidation_client,
@@ -1548,7 +1517,7 @@ def test_contact_decision_without_candidate_marker_uses_dialog_candidate(
     async def l3_text_surface_handler(state: dict[str, Any]) -> dict[str, Any]:
         l3_states.append(state)
         assert state["action_specs"][0]["kind"] == SPEAK_CAPABILITY
-        result = {"action_directives": _surface_action_directives()}
+        result = {"text_surface_output_v2": _surface_output()}
         return result
 
     async def fake_dialog_client(state: dict[str, Any]) -> dict[str, Any]:
@@ -1589,16 +1558,16 @@ def test_selected_speak_self_cognition_runs_l3_before_dialog(
     case = _scheduled_future_cognition_case()
     l3_states: list[dict[str, Any]] = []
     dialog_states: list[dict[str, Any]] = []
-    action_directives = _surface_action_directives()
+    surface_output = _surface_output()
 
     async def l3_text_surface_handler(state: dict[str, Any]) -> dict[str, Any]:
         l3_states.append(state)
-        result = {"action_directives": action_directives}
+        result = {"text_surface_output_v2": surface_output}
         return result
 
     async def dialog_client(state: dict[str, Any]) -> dict[str, Any]:
         dialog_states.append(state)
-        assert state["action_directives"] == action_directives
+        assert state["text_surface_output_v2"] == surface_output
         result = {
             "final_dialog": ["Continuing the GPU model topic now."],
         }
@@ -1891,20 +1860,13 @@ def test_scheduled_future_cognition_starts_without_preloaded_rag(
     case = _scheduled_future_cognition_case()
 
     def cognition_client(state: dict[str, Any]) -> dict[str, Any]:
-        assert state["rag_result"]["answer"] == ""
-        assert "user_image" in state["rag_result"]
-        assert "character_image" in state["rag_result"]
-        assert state["rag_result"]["user_image"]["user_memory_context"][
-            "active_commitments"
-        ] == []
+        assert "rag_result" not in state
         output = _silent_cognition_output()
-        output["resolver_state"] = {
-            "observations": [
-                {
-                    "capability_kind": "local_context_recall",
-                }
-            ]
-        }
+        output["resolver_observations"] = [
+            {
+                "capability_kind": "local_context_recall",
+            }
+        ]
         return output
 
     paths = _build_tracking_records(
@@ -1935,7 +1897,6 @@ def test_cognition_state_keeps_source_packet_inside_internal_percept(
     cognition_input = _read_json(paths[models.ARTIFACT_COGNITION_INPUT])
     rendered_text = cognition_input["rendered_text"]
     percept_content = captured["cognitive_episode"]["percepts"][0]["content"]
-    percept_payload = json.loads(percept_content)
 
     assert captured["prompt_message_context"]["body_text"] == (
         models.SELF_COGNITION_INPUT_TEXT
@@ -1943,7 +1904,7 @@ def test_cognition_state_keeps_source_packet_inside_internal_percept(
     assert captured["decontexualized_input"] == models.SELF_COGNITION_INPUT_TEXT
     assert rendered_text not in captured["prompt_message_context"]["body_text"]
     assert rendered_text not in captured["decontexualized_input"]
-    assert percept_payload["residue"]["internal_monologue"] == rendered_text
+    assert percept_content["semantic_text"] == rendered_text
 
 
 def test_cognition_state_disables_visual_and_does_not_suppress_memory(
@@ -1963,11 +1924,9 @@ def test_cognition_state_disables_visual_and_does_not_suppress_memory(
     )
 
     state_debug_modes = captured["debug_modes"]
-    episode_debug_modes = captured["cognitive_episode"]["origin_metadata"][
-        "debug_modes"
-    ]
 
     assert state_debug_modes == {"no_visual_directives": True}
-    assert episode_debug_modes == {"no_visual_directives": True}
+    assert captured["cognitive_episode"]["origin_metadata"]["debug_modes"] == {
+        "no_visual_directives": True,
+    }
     assert "no_remember" not in state_debug_modes
-    assert "no_remember" not in episode_debug_modes

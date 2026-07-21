@@ -1,6 +1,7 @@
 """Persona graph orchestration for decontextualization, RAG, cognition, and dialog."""
 
 import logging
+from collections.abc import Mapping
 
 from langgraph.graph import END, START, StateGraph
 
@@ -13,28 +14,44 @@ from kazusa_ai_chatbot.action_spec.registry import (
 )
 from kazusa_ai_chatbot.action_spec.results import (
     action_attempt_id_from_eval_result,
-    build_episode_trace,
     build_private_surface_output,
     build_text_surface_output,
+    build_visual_surface_output,
+)
+from kazusa_ai_chatbot.accepted_task import (
+    load_open_coding_run_contexts_for_scope,
 )
 from kazusa_ai_chatbot.config import (
     CHAT_HISTORY_RECENT_LIMIT,
     COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS,
     COGNITION_RESOLVER_MAX_CYCLES,
 )
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    CognitionExecutionError,
+    validate_cognition_core_output,
+    validate_visual_surface_output,
+)
 from kazusa_ai_chatbot.cognition_resolver.capabilities import (
     execute_resolver_capability_request,
     run_rag_evidence_for_persona_state as _run_rag_evidence_for_persona_state,
 )
-from kazusa_ai_chatbot.cognition_resolver.loop import call_cognition_resolver_loop
+from kazusa_ai_chatbot.cognition_resolver.loop import (
+    call_cognition_resolver_loop,
+)
 from kazusa_ai_chatbot.cognition_resolver.pending import (
     apply_pending_resolution,
     load_matching_pending_resume_into_state,
     upsert_pending_resume,
 )
-from kazusa_ai_chatbot.cognition_resolver.state import ensure_initial_resolver_inputs
+from kazusa_ai_chatbot.cognition_resolver.state import (
+    ensure_initial_resolver_inputs,
+)
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import call_cognition_subgraph
+from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
+    build_action_availability_snapshot,
+    call_cognition_subgraph,
+    commit_cognition_output,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_l3_surface import (
     call_l3_text_surface_handler,
 )
@@ -257,34 +274,24 @@ def _selected_action_specs(state: GlobalPersonaState) -> list[dict]:
 
 
 def _cognition_selects_text_surface(state: GlobalPersonaState) -> bool:
-    """Return whether L2d selected the text surface handler."""
+    """Return whether the validated V2 intention selects text speech."""
 
-    return_value = (
-        _first_valid_action_attempt_id(state, SPEAK_CAPABILITY) is not None
-    )
+    evaluator = ActionSpecEvaluator()
+    for action_spec in _selected_action_specs(state):
+        if action_spec.get("kind") != SPEAK_CAPABILITY:
+            continue
+        if evaluator.evaluate(action_spec)["ok"]:
+            return_value = True
+            return return_value
+
+    cognition_output = state.get("cognition_core_output")
+    if not isinstance(cognition_output, Mapping):
+        raise CognitionExecutionError(
+            "validated V2 cognition output is required for surface routing"
+        )
+    validated_output = validate_cognition_core_output(cognition_output)
+    return_value = validated_output["intention"]["route"] == "speech"
     return return_value
-
-
-def _empty_action_directives() -> dict:
-    """Return a consolidation-safe directive shell for private-only episodes."""
-
-    directives = {
-        "contextual_directives": {},
-        "linguistic_directives": {
-            "rhetorical_strategy": "",
-            "linguistic_style": "",
-            "accepted_user_preferences": [],
-            "content_plan": {},
-            "forbidden_phrases": [],
-        },
-        "visual_directives": {
-            "facial_expression": [],
-            "body_language": [],
-            "gaze_direction": [],
-            "visual_vibe": [],
-        },
-    }
-    return directives
 
 
 async def _action_results_for_state(
@@ -307,6 +314,9 @@ async def _action_results_for_state(
         remaining_specs,
         storage_timestamp_utc=state["storage_timestamp_utc"],
         executed_action_attempt_ids=executed_action_attempt_ids,
+        availability_snapshot_factory=(
+            lambda _context: build_action_availability_snapshot(state)
+        ),
     )
     return_value = [*pre_surface_results, *action_results]
     return return_value
@@ -341,6 +351,9 @@ async def stage_2a_background_work_enqueue(
     action_results = await execute_action_specs_for_trace(
         background_specs,
         storage_timestamp_utc=state["storage_timestamp_utc"],
+        availability_snapshot_factory=(
+            lambda _context: build_action_availability_snapshot(state)
+        ),
     )
     return_value = {
         "pre_surface_action_results": action_results,
@@ -403,27 +416,17 @@ def _pre_surface_action_results_for_state(
     return results
 
 
-def _episode_trace_update(
+def _episode_component_update(
     state: GlobalPersonaState,
     *,
     action_results: list[dict],
     surface_outputs: list[dict],
 ) -> dict:
-    """Build trace fields for the current persona episode."""
+    """Return action and surface components for the settlement owner."""
 
-    episode = state["cognitive_episode"]
-    trace = build_episode_trace(
-        episode_id=episode["episode_id"],
-        trigger_source=episode["trigger_source"],
-        created_at=state["storage_timestamp_utc"],
-        action_specs=_selected_action_specs(state),
-        action_results=action_results,
-        surface_outputs=surface_outputs,
-    )
     trace_update = {
         "action_results": action_results,
         "surface_outputs": surface_outputs,
-        "episode_trace": trace,
     }
     return trace_update
 
@@ -440,7 +443,9 @@ async def call_action_subgraph(state: GlobalPersonaState) -> dict:
 
     surface_update = await call_l3_text_surface_handler(state)
     surface_state = dict(state)
-    surface_state.update(surface_update)
+    surface_state["text_surface_output_v2"] = surface_update[
+        "text_surface_output_v2"
+    ]
     speak_attempt_id = _first_valid_action_attempt_id(
         surface_state,
         SPEAK_CAPABILITY,
@@ -460,13 +465,21 @@ async def call_action_subgraph(state: GlobalPersonaState) -> dict:
             action_attempt_id=speak_attempt_id,
         )
     ]
+    if "visual_surface_output_v2" in surface_update:
+        visual_output = validate_visual_surface_output(
+            surface_update["visual_surface_output_v2"]
+        )
+        surface_outputs.append(build_visual_surface_output(
+            fragments=[visual_output["visual_directives"]],
+            created_at=state["storage_timestamp_utc"],
+        ))
     return_value = {
         "final_dialog": final_dialog,
         "target_addressed_user_ids": result["target_addressed_user_ids"],
         "target_broadcast": result["target_broadcast"],
     }
     return_value.update(surface_update)
-    return_value.update(_episode_trace_update(
+    return_value.update(_episode_component_update(
         surface_state,
         action_results=action_results,
         surface_outputs=surface_outputs,
@@ -485,7 +498,6 @@ async def stage_3_no_response(state: GlobalPersonaState) -> dict:
     return_value = {
         "should_respond": False,
         "final_dialog": [],
-        "action_directives": _empty_action_directives(),
         "target_addressed_user_ids": [],
         "target_broadcast": False,
     }
@@ -498,7 +510,7 @@ async def stage_3_no_response(state: GlobalPersonaState) -> dict:
                 created_at=state["storage_timestamp_utc"],
             )
         ]
-    return_value.update(_episode_trace_update(
+    return_value.update(_episode_component_update(
         state,
         action_results=action_results,
         surface_outputs=surface_outputs,
@@ -524,16 +536,27 @@ async def run_rag_evidence_for_persona_state(
 
 
 async def stage_1_goal_resolver(state: GlobalPersonaState) -> dict:
-    """Run the cognition-preserving resolver loop after decontextualization."""
+    """Run full resolver recurrence and commit only its final V2 state."""
 
+    async def cognition_cycle(
+        current_state: GlobalPersonaState,
+    ) -> GlobalPersonaState:
+        update = await call_cognition_subgraph(
+            current_state,
+            commit=False,
+        )
+        return_value = update
+        return return_value
+
+    action_context_state = await _load_live_action_selection_context(state)
     initialized = ensure_initial_resolver_inputs(
-        state,
+        action_context_state,
         max_cycles=COGNITION_RESOLVER_MAX_CYCLES,
     )
     initialized = await load_matching_pending_resume_into_state(initialized)
     resolved_state = await call_cognition_resolver_loop(
         initialized,
-        call_cognition_subgraph_func=call_cognition_subgraph,
+        call_cognition_subgraph_func=cognition_cycle,
         execute_capability_func=execute_resolver_capability_request,
         max_cycles=COGNITION_RESOLVER_MAX_CYCLES,
         capability_timeout_seconds=(
@@ -542,8 +565,37 @@ async def stage_1_goal_resolver(state: GlobalPersonaState) -> dict:
         upsert_pending_resume_func=upsert_pending_resume,
         apply_pending_resolution_func=apply_pending_resolution,
     )
-    return_value = resolved_state
+    core_output = resolved_state.get("cognition_core_output")
+    if not isinstance(core_output, Mapping):
+        raise ValueError("V2 resolver completed without cognition_core_output")
+    await commit_cognition_output(core_output)  # type: ignore[arg-type]
+    resolved_state["cognition_state_committed"] = True
+    return_value = dict(resolved_state)
     return return_value
+
+
+async def _load_live_action_selection_context(
+    state: GlobalPersonaState,
+) -> GlobalPersonaState:
+    """Load trusted prompt-safe coding-run contexts for one live user turn."""
+
+    updated_state = dict(state)
+    updated_state["action_selection_context"] = {"coding_runs": []}
+    episode = state.get("cognitive_episode")
+    if not isinstance(episode, Mapping):
+        return updated_state  # type: ignore[return-value]
+    if episode.get("trigger_source") != "user_message":
+        return updated_state  # type: ignore[return-value]
+    contexts = await load_open_coding_run_contexts_for_scope(
+        source_platform=state["platform"],
+        source_channel_id=state["platform_channel_id"],
+        requester_global_user_id=state["global_user_id"],
+        limit=3,
+    )
+    updated_state["action_selection_context"] = {
+        "coding_runs": [dict(context) for context in contexts],
+    }
+    return updated_state  # type: ignore[return-value]
 
 
 def _route_after_cognition(state: GlobalPersonaState) -> str:
@@ -719,6 +771,12 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         "target_broadcast": bool(results["target_broadcast"]),
         "scope_users": results.get("scope_users", []),
         "future_promises": [],
+        "cognition_core_output": results.get("cognition_core_output"),
+        "cognition_state_update": results.get("cognition_state_update"),
+        "cognition_state_committed": results.get(
+            "cognition_state_committed",
+            False,
+        ),
         "consolidation_state": consolidation_state,
         "surface_outputs": results.get("surface_outputs", []),
         "action_results": results.get("action_results", []),

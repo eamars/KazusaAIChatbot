@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import pytest
+
 from pathlib import Path
 
 from kazusa_ai_chatbot.internal_monologue_residue import recorder
-from kazusa_ai_chatbot.cognition_chain_core.stages import l1 as l1_module
-from kazusa_ai_chatbot.cognition_chain_core.stages import l2 as l2_module
 
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -41,35 +41,6 @@ def test_recorder_system_prompt_is_chinese_first_person_and_not_appended() -> No
     assert '侧线/未定对象' in prompt
     assert '来源优先级' in prompt
     assert prompt.count('# 输出格式') == 1
-
-
-def test_l2a_is_the_only_raw_residue_prompt_consumer() -> None:
-    """Only L2a should receive the prompt-facing residue string."""
-
-    l2a_prompt = l2_module._COGNITION_CONSCIOUSNESS_PROMPT
-    l1_prompt = l1_module._COGNITION_SUBCONSCIOUS_PROMPT
-
-    assert 'internal_monologue_residue_context' in l2a_prompt
-    assert '私念残留' in l2a_prompt
-    assert '当前输入' in l2a_prompt
-    assert '优先' in l2a_prompt
-    assert 'internal_monologue_residue_context' not in l1_prompt
-    assert 'reflection_summary' not in l1_prompt
-    assert '情绪余波' not in l1_prompt
-
-
-def test_root_readmes_document_residue_architecture() -> None:
-    """Both root READMEs document the new production residue lane."""
-
-    english_readme = (_ROOT / 'README.md').read_text(encoding='utf-8')
-    chinese_readme = (_ROOT / 'README_CN.md').read_text(encoding='utf-8')
-
-    assert 'internal monologue residue' in english_readme
-    assert 'L2a' in english_readme
-    assert 'reflection_summary' in english_readme
-    assert '私念残留' in chinese_readme or '内心独白残留' in chinese_readme
-    assert 'L2a' in chinese_readme
-    assert 'reflection_summary' in chinese_readme
 
 
 def test_internal_monologue_residue_experiments_are_removed() -> None:

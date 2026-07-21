@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 from openai import OpenAIError
@@ -29,6 +29,11 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     ResolverValidationError,
     validate_resolver_capability_request,
     validate_resolver_observation,
+)
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    CognitionEvidenceV2,
+    DirectFactV2,
+    EVIDENCE_SOURCE_QUESTION_IDS,
 )
 from kazusa_ai_chatbot.db.errors import DatabaseBackendError
 from kazusa_ai_chatbot.local_context_resolver import (
@@ -81,6 +86,45 @@ SHARED_MEMORY_SUMMARY_FIELDS = (
 logger = logging.getLogger(__name__)
 
 RecordRagEventFunc = Callable[..., Awaitable[None]]
+
+
+def project_resolver_observation_for_cognition(
+    observation: Mapping[str, object],
+    *,
+    occurred_at: str,
+) -> tuple[CognitionEvidenceV2, list[DirectFactV2]]:
+    """Project one resolver result into typed evidence without state authority."""
+
+    observation_id = text_or_empty(observation.get("observation_id")).strip()
+    summary = text_or_empty(
+        observation.get("semantic_summary")
+        or observation.get("prompt_safe_summary")
+    ).strip()
+    capability = text_or_empty(
+        observation.get("capability")
+        or observation.get("capability_kind")
+    ).strip()
+    if not observation_id:
+        raise ResolverValidationError("resolver observation id is required")
+    if not summary:
+        raise ResolverValidationError("resolver observation summary is required")
+    semantic_text = f"{capability}: {summary}" if capability else summary
+    evidence = CognitionEvidenceV2(
+        evidence_handle="e1",
+        evidence_ref={
+            "source_kind": "resolver_observation",
+            "source_id": observation_id,
+            "occurred_at": occurred_at,
+            "semantic_summary": summary[:500],
+        },
+        semantic_text=semantic_text[:1000],
+        visible_to=list(
+            EVIDENCE_SOURCE_QUESTION_IDS["resolver_observation"]
+        ),
+    )
+    direct_facts: list[DirectFactV2] = []
+    return_value = (evidence, direct_facts)
+    return return_value
 
 
 async def run_rag_evidence_for_persona_state(
@@ -177,12 +221,13 @@ async def run_rag_evidence_for_persona_state(
         if safety_recovery_incidents
         else ""
     )
+    execution_status = _local_context_execution_status(rag_result)
     await _record_rag_event(
         record_rag_stage_event_func,
         component=component,
         correlation_id=correlation_id,
         agent_name=agent_name,
-        status="succeeded",
+        status=execution_status,
         slot_count=_local_context_evidence_node_count(packet),
         retrieval_count=retrieval_count,
         latency_ms=_elapsed_ms(started_at),
@@ -374,13 +419,28 @@ async def _execute_local_context_recall(
         objective=request["objective"],
         reason=request["reason"],
     )
+    referent_blocked = should_skip_rag_for_unresolved_referents(
+        state["referents"],
+    )
+    if referent_blocked:
+        referent_reason = unresolved_referent_reason(state["referents"])
+        execution_status = "blocked"
+        prompt_safe_summary = (
+            'Local context recall requires user input before it can act: '
+            f'{referent_reason}'
+        )
+    else:
+        execution_status = _local_context_execution_status(rag_result)
+        prompt_safe_summary = _rag_observation_summary(rag_result)
     observation = _observation_base(
         request,
         state,
-        status="succeeded",
-        prompt_safe_summary=_rag_observation_summary(rag_result),
+        status=execution_status,
+        prompt_safe_summary=prompt_safe_summary,
     )
     observation["rag_result"] = rag_result
+    if referent_blocked:
+        observation["blocker_kind"] = "requires_user_input"
     return_value = validate_resolver_observation(observation)
     return return_value
 
@@ -732,6 +792,13 @@ def _rag_observation_summary(rag_result: dict[str, Any]) -> str:
 
     answer = str(rag_result.get("answer", "")).strip()
     retrieval_count = _retrieval_count(rag_result)
+    execution_status = _local_context_execution_status(rag_result)
+    if execution_status == "failed":
+        summary = (
+            "Local context evidence failed with no projected rows; continue "
+            "without treating it as source-backed truth."
+        )
+        return summary
     no_confirmed_fact_markers = (
         "没有找到已确认事实",
         "没有找到相关证据",
@@ -762,6 +829,22 @@ def _rag_observation_summary(rag_result: dict[str, Any]) -> str:
         f"Local context evidence succeeded with {retrieval_count} projected rows."
     )
     return summary
+
+
+def _local_context_execution_status(
+    rag_result: dict[str, Any],
+) -> Literal["succeeded", "failed"]:
+    """Derive capability truth from projected evidence and resolver status."""
+
+    supervisor_trace = rag_result.get("supervisor_trace")
+    blocked_node_count = 0
+    if isinstance(supervisor_trace, Mapping):
+        raw_blocked_count = supervisor_trace.get("blocked_node_count", 0)
+        if isinstance(raw_blocked_count, int):
+            blocked_node_count = raw_blocked_count
+    if _retrieval_count(rag_result) == 0 and blocked_node_count > 0:
+        return "failed"
+    return "succeeded"
 
 
 def _retrieval_count(rag_result: dict[str, Any]) -> int:

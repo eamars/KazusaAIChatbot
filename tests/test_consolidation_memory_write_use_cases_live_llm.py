@@ -312,7 +312,7 @@ CASES: dict[str, MemoryWriteCase] = {
             allowed_lanes=("shared_memory_promotion",),
             forbidden_lanes=("user_memory_units", "active_commitment"),
             assistant_final_dialog="",
-            origin_kind="reflection_signal",
+            origin_kind="scheduled_tick",
             global_user_id="",
             include_user_profile=False,
             rag_payload={
@@ -364,7 +364,7 @@ CASES: dict[str, MemoryWriteCase] = {
             allowed_lanes=("interaction_style_image",),
             forbidden_lanes=("user_memory_units", "relationship_profile"),
             assistant_final_dialog="",
-            origin_kind="reflection_signal",
+            origin_kind="scheduled_tick",
             rag_payload={
                 "user_style_signal": {
                     "source_reflection_run_ids": ["reflection-style-1"],
@@ -441,7 +441,7 @@ def _origin(case: MemoryWriteCase) -> ConsolidationOriginMetadata:
         ["internal_monologue"]
         if trigger_source == "internal_thought"
         else ["reflection_artifact"]
-        if trigger_source == "reflection_signal"
+        if trigger_source == "scheduled_tick"
         else ["dialog_text"]
     )
     origin: ConsolidationOriginMetadata = {
@@ -479,7 +479,7 @@ def _case_state(case: MemoryWriteCase) -> dict[str, Any]:
         user_profile = {
             "global_user_id": case.global_user_id,
             "display_name": "Live Memory User",
-            "affinity": 500,
+            "relationship_state": 500,
         }
     rag_payload = dict(case.rag_payload or {})
     rag_result = {

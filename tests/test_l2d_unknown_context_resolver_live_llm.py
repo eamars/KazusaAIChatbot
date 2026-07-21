@@ -26,17 +26,11 @@ import httpx
 import pytest
 
 from kazusa_ai_chatbot.config import COGNITION_LLM_BASE_URL
-from kazusa_ai_chatbot.cognition_chain_core.contracts import LLMStageBinding
-from kazusa_ai_chatbot.cognition_chain_core.stages import l2d as l2d
-from kazusa_ai_chatbot.cognition_chain_core.stages.l2d import (
-    build_action_selection_payload_text,
-    select_semantic_actions,
-)
 from kazusa_ai_chatbot.nodes import (
     persona_supervisor2_cognition_actions as action_connector,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
-    build_cognition_chain_services,
+    build_cognition_core_services,
 )
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 from tests.llm_trace import write_llm_trace
@@ -164,7 +158,7 @@ async def _run_l2d_and_trace(
 
     prompt_payload = build_action_selection_payload_text(frozen_state)
 
-    services = build_cognition_chain_services()
+    services = build_cognition_core_services()
     capturing_llm = _CapturingLLM(services.llm)
     monkeypatch.setattr(
         l2d,

@@ -3,10 +3,15 @@ from typing import Annotated, Literal, NotRequired, TypedDict
 from kazusa_ai_chatbot.action_spec.models import ActionSpecV1
 from kazusa_ai_chatbot.action_spec.results import (
     ActionResultV1,
-    EpisodeTraceV1,
+    EpisodeTraceV2,
     SurfaceOutputV1,
 )
-from kazusa_ai_chatbot.cognition_episode import CognitiveEpisode
+from kazusa_ai_chatbot.cognition_episode import CognitiveEpisodeV1
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    GoalResolutionV2,
+    TextSurfaceOutputV2,
+    VisualSurfaceOutputV2,
+)
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     ResolverCapabilityRequestV1,
     ResolverCycleStateV1,
@@ -56,7 +61,7 @@ class GlobalPersonaState(TypedDict):
     llm_trace_id: NotRequired[str]
     user_input: str
     prompt_message_context: PromptMessageContext
-    cognitive_episode: NotRequired[CognitiveEpisode]
+    cognitive_episode: NotRequired[CognitiveEpisodeV1]
     user_multimedia_input: list[MultiMediaDoc]
     platform: str
     platform_channel_id: str
@@ -81,6 +86,7 @@ class GlobalPersonaState(TypedDict):
     promoted_reflection_context: NotRequired[dict]
     internal_monologue_residue_context: NotRequired[str]
     past_dialog_cognition_context: NotRequired[str]
+    action_availability_runtime: NotRequired[dict[str, object]]
 
     # Debug
     debug_modes: DebugModes
@@ -98,34 +104,36 @@ class GlobalPersonaState(TypedDict):
     rag_result: dict
 
     # Cognition resolver output and recurrence context
-    resolver_state: NotRequired[ResolverCycleStateV1]
-    resolver_context: NotRequired[str]
-    resolver_capability_requests: NotRequired[list[ResolverCapabilityRequestV1]]
-    resolver_cycle_trace: NotRequired[ResolverCycleTraceV1]
-    resolver_goal_progress: NotRequired[ResolverGoalProgressV1]
-    pending_resolver_resume: NotRequired[ResolverPendingResumeV1]
-    resolver_pending_resolution: NotRequired[ResolverPendingResolutionV1]
+    resolver_observations: NotRequired[list[dict]]
+    cognition_resolver_requests: NotRequired[list[dict]]
+    cognition_resolver_progress: NotRequired[dict]
+    cognition_resolver_diagnostics: NotRequired[dict]
 
     # Cognition output
     internal_monologue: str
-    action_directives: dict
+    goal_resolution: NotRequired[GoalResolutionV2]
+    cognition_core_output: NotRequired[dict]
+    cognition_state_update: NotRequired[dict]
+    cognition_state_committed: NotRequired[bool]
+    text_surface_output_v2: NotRequired[TextSurfaceOutputV2]
+    visual_surface_output_v2: NotRequired[VisualSurfaceOutputV2]
     action_specs: NotRequired[list[ActionSpecV1]]
     pre_surface_action_results: NotRequired[list[ActionResultV1]]
     action_results: NotRequired[list[ActionResultV1]]
     surface_outputs: NotRequired[list[SurfaceOutputV1]]
-    episode_trace: NotRequired[EpisodeTraceV1]
+    episode_trace: NotRequired[EpisodeTraceV2]
     memory_lifecycle_context: NotRequired[dict]
 
-    # Cognition output for consolidation
-    interaction_subtext: str
-    emotional_appraisal: str
-    character_intent: str
-    logical_stance: str
-    judgment_note: str
-    social_distance: str
-    emotional_intensity: str
-    vibe_check: str
-    relational_dynamic: str
+    # Semantic cognition projections for downstream consolidation and audit.
+    interaction_subtext: NotRequired[str]
+    emotional_appraisal: NotRequired[str]
+    character_intent: NotRequired[str]
+    logical_stance: NotRequired[str]
+    judgment_note: NotRequired[str]
+    social_distance: NotRequired[str]
+    emotional_intensity: NotRequired[str]
+    vibe_check: NotRequired[str]
+    relational_dynamic: NotRequired[str]
 
     # Dialog output
     final_dialog: [str]  # -> Will be used for dialog end point (e.g,. Discord)
@@ -133,20 +141,9 @@ class GlobalPersonaState(TypedDict):
     target_broadcast: NotRequired[bool]
     # Other outputs from here
 
-    # Consolidation output
-    # global state updater
-    mood: str
-    global_vibe: str
-    reflection_summary: str
-
-    # Relationship recorder
-    subjective_appraisals: [str]
-    affinity_delta: int
-    last_relationship_insight: str
-
     # Consolidation memory rows
-    new_facts: [str]
-    future_promises: [str]
+    new_facts: NotRequired[list[str]]
+    future_promises: NotRequired[list[str]]
 
 
 class CognitionState(TypedDict):
@@ -157,7 +154,7 @@ class CognitionState(TypedDict):
     llm_trace_id: NotRequired[str]
     user_input: str
     prompt_message_context: PromptMessageContext
-    cognitive_episode: NotRequired[CognitiveEpisode]
+    cognitive_episode: NotRequired[CognitiveEpisodeV1]
     platform: str
     platform_channel_id: str
     channel_type: str
@@ -174,6 +171,7 @@ class CognitionState(TypedDict):
     promoted_reflection_context: NotRequired[dict]
     internal_monologue_residue_context: NotRequired[str]
     past_dialog_cognition_context: NotRequired[str]
+    action_availability_runtime: NotRequired[dict[str, object]]
     interaction_style_context: NotRequired[dict]
     group_engagement_action_context: NotRequired[dict]
     action_selection_context: NotRequired[dict]
@@ -224,7 +222,7 @@ class CognitionState(TypedDict):
     pre_surface_action_results: NotRequired[list[ActionResultV1]]
     action_results: NotRequired[list[ActionResultV1]]
     surface_outputs: NotRequired[list[SurfaceOutputV1]]
-    episode_trace: NotRequired[EpisodeTraceV1]
+    episode_trace: NotRequired[EpisodeTraceV2]
     memory_lifecycle_context: NotRequired[dict]
     target_addressed_user_ids: NotRequired[list[str]]
     target_broadcast: NotRequired[bool]

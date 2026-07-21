@@ -11,7 +11,7 @@ import httpx
 import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
+from tests.cognition_core_v2_test_helpers import canonical_user_message_episode
 from kazusa_ai_chatbot.config import (
     COGNITION_LLM_API_KEY,
     COGNITION_LLM_BASE_URL,
@@ -29,30 +29,9 @@ from kazusa_ai_chatbot.llm_interface import (
     LLMCallConfig,
     LLMThinkingConfig,
 )
-from kazusa_ai_chatbot.cognition_chain_core.stages.l1 import (
-    _COGNITION_SUBCONSCIOUS_PROMPT,
-    call_cognition_subconscious,
-    get_mbti_natural_response,
-)
-from kazusa_ai_chatbot.cognition_chain_core.stages.l2 import (
-    _COGNITION_CONSCIOUSNESS_PROMPT,
-    _cognition_rag_result as _l2_cognition_rag_result,
-    _current_user_rag_bundle,
-    call_cognition_consciousness,
-)
-from kazusa_ai_chatbot.cognition_chain_core.stages.l3 import (
-    _CONTENT_PLAN_AGENT_PROMPT,
-    _cognition_rag_result as _l3_cognition_rag_result,
-    call_content_plan_agent,
-)
-from kazusa_ai_chatbot.cognition_chain_core.prompt_selection import (
-    build_cognition_prompt_source_payload,
-    select_cognition_prompt_variant,
-)
 from kazusa_ai_chatbot.nodes.referent_resolution import normalize_referents
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
 from kazusa_ai_chatbot.utils import (
-    build_affinity_block,
     load_personality,
     parse_llm_json_output,
 )
@@ -704,8 +683,8 @@ def _character_profile() -> dict[str, Any]:
 
     profile = load_personality(_PERSONALITY_PATH)
     profile["mood"] = "Neutral"
-    profile["global_vibe"] = "Calm"
-    profile["reflection_summary"] = "No strong emotional residue from the previous turn."
+    profile["vibe_check"] = "Calm"
+    profile["character_reflection"] = "No strong emotional residue from the previous turn."
     return profile
 
 
@@ -726,7 +705,7 @@ def _image_episode(
         Cognitive episode using the existing production builder.
     """
 
-    episode = build_text_chat_cognitive_episode(
+    episode = canonical_user_message_episode(
         episode_id=f"episode-{case_id}",
         percept_id=f"percept-{case_id}",
         storage_timestamp_utc=_TURN_CLOCK["storage_timestamp_utc"],
@@ -767,7 +746,7 @@ def _text_episode(
         Cognitive episode without descriptor-mediated image observations.
     """
 
-    episode = build_text_chat_cognitive_episode(
+    episode = canonical_user_message_episode(
         episode_id=f"episode-direct-{case_id}",
         percept_id=f"percept-direct-{case_id}",
         storage_timestamp_utc=_TURN_CLOCK["storage_timestamp_utc"],
@@ -813,9 +792,8 @@ def _base_layer_state(
         "user_name": "Image Quality User",
         "platform_user_id": "platform-user-image-quality",
         "user_profile": {
-            "affinity": 680,
             "facts": [],
-            "last_relationship_insight": "The user is asking a neutral visual question.",
+            "semantic_relationship_projection": "The user is asking a neutral visual question.",
         },
         "platform_bot_id": "platform-bot-image-quality",
         "chat_history_wide": [],
@@ -953,9 +931,9 @@ async def _run_direct_image_layer_copy(
         character_name=character_profile["name"],
         character_mbti=mbti,
         character_mood=character_profile["mood"],
-        character_global_vibe=character_profile["global_vibe"],
-        character_reflection_summary=character_profile["reflection_summary"],
-        user_last_relationship_insight=state["user_profile"]["last_relationship_insight"],
+        character_vibe_check=character_profile["vibe_check"],
+        character_character_reflection=character_profile["character_reflection"],
+        user_semantic_relationship_projection=state["user_profile"]["semantic_relationship_projection"],
         mbti_natural_response=get_mbti_natural_response(mbti),
     )
     l1_payload = {
@@ -980,17 +958,12 @@ async def _run_direct_image_layer_copy(
         episode=state["cognitive_episode"],
         stage="l2a_conscious_framing",
     )
-    affinity_block = build_affinity_block(state["user_profile"]["affinity"])
     user_memory_context = _current_user_rag_bundle(state)["user_memory_context"]
     l2_payload = {
         "character_mood": character_profile["mood"],
-        "global_vibe": character_profile["global_vibe"],
+        "vibe_check": character_profile["vibe_check"],
         "user_memory_context": user_memory_context,
-        "last_relationship_insight": state["user_profile"]["last_relationship_insight"],
-        "affinity_context": {
-            "level": affinity_block["level"],
-            "instruction": affinity_block["instruction"],
-        },
+        "semantic_relationship_projection": state["user_profile"]["semantic_relationship_projection"],
         "decontextualized_input": state["decontexualized_input"],
         "active_commitments": user_memory_context["active_commitments"],
         "rag_result": _l2_cognition_rag_result(state["rag_result"]),

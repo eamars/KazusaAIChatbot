@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -93,6 +95,7 @@ async def test_accepted_coding_task_execution_enqueues_requested_worker(
     assert results[0]["accepted_task_state"] == "scheduled"
     assert len(queued_requests) == 1
     queued = queued_requests[0]
+    assert queued["task_brief"] == "Add slugify tests."
     assert queued["requested_worker"] == "coding_agent"
     assert queued["worker_payload"] == {
         "schema_version": "coding_agent_worker_payload.v2",
@@ -177,38 +180,6 @@ def test_accepted_coding_task_rejects_worker_local_params() -> None:
     assert any("worker-local fields" in error for error in result["errors"])
 
 
-def test_l2d_stage_preserves_coding_followup_fields() -> None:
-    """The stage wrapper must not drop coding run refs after core parsing."""
-
-    from kazusa_ai_chatbot.cognition_chain_core.stages import l2d
-
-    parsed = {
-        "semantic_action_requests": [
-            {
-                "capability": ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
-                "decision": "approve_and_verify",
-                "detail": "Run focused pytest.",
-                "reason": "The user approved the run.",
-                "coding_run_ref": "coding_run:run-001",
-                "execution_request": "pytest tests/test_slug_tools.py",
-            }
-        ]
-    }
-
-    requests = l2d._normalize_action_requests(parsed, {"max_action_requests": 1})
-
-    assert requests == [
-        {
-            "capability": ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
-            "reason": "The user approved the run.",
-            "decision": "approve_and_verify",
-            "detail": "Run focused pytest.",
-            "coding_run_ref": "coding_run:run-001",
-            "execution_request": "pytest tests/test_slug_tools.py",
-        }
-    ]
-
-
 def test_coding_followup_uniquely_binds_current_prompt_safe_run_ref() -> None:
     """A ref-less continuation binds the only eligible current run."""
 
@@ -249,7 +220,7 @@ def test_coding_approval_rejects_non_user_or_mismatched_evidence() -> None:
 
     action_spec = _materialized_coding_action("approve_and_verify")
     action_spec["params"]["approval_evidence"]["source_trigger_source"] = (
-        "accepted_task_result_ready"
+        "tool_result"
     )
     non_user_result = ActionSpecEvaluator().evaluate(action_spec)
 
@@ -957,7 +928,7 @@ async def test_worker_tick_dispatches_requested_coding_worker(
     mark_result_ready = AsyncMock()
     monkeypatch.setattr(
         worker_module,
-        "mark_accepted_task_result_ready",
+        "mark_tool_result_ready",
         mark_result_ready,
     )
     monkeypatch.setattr(
@@ -1025,6 +996,7 @@ def _cognition_state() -> dict[str, object]:
         "cognitive_episode": {
             "trigger_source": "user_message",
             "storage_timestamp_utc": "2026-07-09T01:00:00+00:00",
+            "created_at": "2026-07-09T01:00:00+00:00",
             "target_scope": {
                 "current_global_user_id": "global-user-001",
             },
@@ -1032,8 +1004,15 @@ def _cognition_state() -> dict[str, object]:
                 "platform_message_id": "message-001",
             },
             "percepts": [{
-                "input_source": "dialog_text",
-                "content": "Add slugify tests.",
+                "schema_version": "percept.v1",
+                "percept_kind": "dialog",
+                "source_kind": "dialog",
+                "source_id": "percept:message-001",
+                "content": {
+                    "semantic_text": "Add slugify tests.",
+                    "text": "Add slugify tests.",
+                },
+                "observed_at": "2026-07-09T01:00:00+00:00",
             }],
         },
         "action_selection_context": {

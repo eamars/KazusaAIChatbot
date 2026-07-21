@@ -6,7 +6,11 @@ from copy import deepcopy
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
+from kazusa_ai_chatbot.cognition_episode import (
+    CognitiveEpisodeV1,
+    build_internal_thought_episode,
+    build_user_message_episode,
+)
 from kazusa_ai_chatbot.rag.cognitive_episode_adapter import (
     RAGEpisodeAdapterError,
     build_text_chat_rag_request,
@@ -14,54 +18,87 @@ from kazusa_ai_chatbot.rag.cognitive_episode_adapter import (
 from kazusa_ai_chatbot.time_boundary import build_turn_clock_from_storage_utc
 
 
-def _valid_episode() -> dict:
-    """Build a valid text-chat cognitive episode for adapter tests.
+def _valid_episode() -> CognitiveEpisodeV1:
+    """Build a valid canonical text-chat cognitive episode for adapter tests.
 
     Returns:
         Valid user-message cognitive episode.
     """
     storage_timestamp_utc = "2026-04-26T12:00:00+00:00"
     turn_clock = build_turn_clock_from_storage_utc(storage_timestamp_utc)
-    episode = build_text_chat_cognitive_episode(
+    episode = build_user_message_episode(
         episode_id="episode-1",
-        percept_id="percept-1",
-        storage_timestamp_utc=storage_timestamp_utc,
+        origin={
+            "platform": "qq",
+            "platform_message_id": "msg-1",
+            "active_turn_platform_message_ids": ["msg-1", "msg-2"],
+            "active_turn_conversation_row_ids": ["row-1", "row-2"],
+        },
+        target_scope={
+            "platform": "qq",
+            "platform_channel_id": "chan-1",
+            "channel_type": "group",
+            "current_platform_user_id": "platform-user-1",
+            "current_global_user_id": "user-1",
+            "current_display_name": "User",
+            "target_addressed_user_ids": ["character-1"],
+            "target_broadcast": False,
+        },
+        dialog_percept={
+            "schema_version": "percept.v1",
+            "percept_kind": "dialog",
+            "source_kind": "dialog",
+            "source_id": "msg-1",
+            "content": {"semantic_text": "Need current evidence."},
+            "observed_at": storage_timestamp_utc,
+        },
+        media_percepts=[],
+        evidence_refs=[],
         local_time_context=turn_clock["local_time_context"],
-        user_input="Need current evidence.",
-        platform="qq",
-        platform_channel_id="chan-1",
-        channel_type="group",
-        platform_message_id="msg-1",
-        platform_user_id="platform-user-1",
-        global_user_id="user-1",
-        user_name="User",
-        active_turn_platform_message_ids=["msg-1", "msg-2"],
-        active_turn_conversation_row_ids=["row-1", "row-2"],
-        debug_modes={},
-        target_addressed_user_ids=["character-1"],
-        target_broadcast=False,
+        created_at=storage_timestamp_utc,
+        debug_controls={},
     )
     return episode
 
 
-def _internal_thought_episode() -> dict:
+def _internal_thought_episode() -> CognitiveEpisodeV1:
     """Build a valid internal-thought cognitive episode for adapter tests.
 
     Returns:
         Valid internal-thought cognitive episode.
     """
-    episode = deepcopy(_valid_episode())
-    episode["trigger_source"] = "internal_thought"
-    episode["input_sources"] = ["internal_monologue"]
-    episode["output_mode"] = "think_only"
-    episode["percepts"] = [{
-        "percept_id": "percept-internal-thought",
-        "input_source": "internal_monologue",
-        "content": "需要回看群聊前文再判断这个内部想法。",
-        "visibility": "internal_only",
-        "metadata": {"source": "runtime_internal_thought"},
-    }]
-    return episode
+    return build_internal_thought_episode(
+        latch={
+            "latch_id": "latch-1",
+            "source_episode_id": "source-episode-1",
+            "source_action_attempt_id": "action-attempt-1",
+            "continuation_objective": "需要回看群聊前文再判断这个内部想法。",
+            "target_scope": {
+                "platform": "qq",
+                "platform_channel_id": "chan-1",
+                "channel_type": "group",
+                "current_platform_user_id": "user-1",
+                "current_global_user_id": "user-1",
+                "current_display_name": "User",
+                "target_addressed_user_ids": ["user-1"],
+                "target_broadcast": False,
+            },
+            "privacy_scope": "private",
+            "continuation_depth": 1,
+            "status": "claimed",
+            "claim_token": "claim-token-1",
+            "attempt_count": 1,
+            "max_attempts": 3,
+            "expires_at": "2026-04-27T12:00:00+00:00",
+            "claim_expires_at": "2026-04-26T13:00:00+00:00",
+        },
+        evidence_refs=[],
+        local_time_context=build_turn_clock_from_storage_utc(
+            "2026-04-26T12:00:00+00:00",
+        )["local_time_context"],
+        created_at="2026-04-26T12:00:00+00:00",
+        claim_token="claim-token-1",
+    )
 
 
 def _request_kwargs() -> dict:
@@ -77,7 +114,7 @@ def _request_kwargs() -> dict:
             "global_user_id": "character-1",
             "name": "Kazusa",
         },
-        "user_profile": {"affinity": 500},
+        "user_profile": {"relationship_state": 500},
         "prompt_message_context": {
             "body_text": "Need current evidence.",
             "mentions": [],
@@ -122,7 +159,7 @@ def test_valid_text_chat_episode_builds_exact_rag_request_shape() -> None:
             "active_turn_conversation_row_ids": ["row-1", "row-2"],
             "global_user_id": "user-1",
             "user_name": "User",
-            "user_profile": {"affinity": 500},
+            "user_profile": {"relationship_state": 500},
             "current_timestamp_utc": "2026-04-26T12:00:00+00:00",
             "local_time_context": {
                 "current_local_datetime": "2026-04-27 00:00",
@@ -204,14 +241,8 @@ def test_internal_thought_episode_builds_rag_request_shape() -> None:
     assert request["context"]["channel_type"] == "group"
     assert request["context"]["global_user_id"] == "user-1"
     assert request["context"]["user_name"] == "User"
-    assert request["context"]["active_turn_platform_message_ids"] == [
-        "msg-1",
-        "msg-2",
-    ]
-    assert request["context"]["active_turn_conversation_row_ids"] == [
-        "row-1",
-        "row-2",
-    ]
+    assert request["context"]["active_turn_platform_message_ids"] == []
+    assert request["context"]["active_turn_conversation_row_ids"] == []
     assert request["context"]["prompt_message_context"] == (
         kwargs["prompt_message_context"]
     )
@@ -220,27 +251,20 @@ def test_internal_thought_episode_builds_rag_request_shape() -> None:
     assert "input_sources" not in request["context"]
 
 
-def test_non_user_message_trigger_is_rejected() -> None:
+def test_unregistered_trigger_source_is_rejected() -> None:
     kwargs = _request_kwargs()
     episode = deepcopy(kwargs["episode"])
-    episode["trigger_source"] = "reflection_signal"
+    episode["trigger_source"] = "unregistered_source"
     kwargs["episode"] = episode
 
-    with pytest.raises(RAGEpisodeAdapterError):
+    with pytest.raises(ValueError):
         build_text_chat_rag_request(**kwargs)
 
 
 def test_internal_thought_without_internal_monologue_source_is_rejected() -> None:
     kwargs = _request_kwargs()
     episode = _internal_thought_episode()
-    episode["input_sources"] = ["retrieved_memory"]
-    episode["percepts"] = [{
-        "percept_id": "percept-memory",
-        "input_source": "retrieved_memory",
-        "content": "memory observed",
-        "visibility": "model_visible",
-        "metadata": {},
-    }]
+    episode["percepts"][0]["source_kind"] = "retrieved_memory"
     kwargs["episode"] = episode
 
     with pytest.raises(RAGEpisodeAdapterError):
@@ -250,14 +274,14 @@ def test_internal_thought_without_internal_monologue_source_is_rejected() -> Non
 def test_unapproved_user_message_source_set_is_rejected() -> None:
     kwargs = _request_kwargs()
     episode = deepcopy(kwargs["episode"])
-    episode["input_sources"] = ["dialog_text", "retrieved_memory"]
     episode["percepts"].append(
         {
-            "percept_id": "percept-2",
-            "input_source": "retrieved_memory",
-            "content": "memory observed",
-            "visibility": "model_visible",
-            "metadata": {},
+            "schema_version": "percept.v1",
+            "percept_kind": "retrieved_memory",
+            "source_kind": "retrieved_memory",
+            "source_id": "memory-1",
+            "content": {"semantic_text": "memory observed"},
+            "observed_at": episode["created_at"],
         }
     )
     kwargs["episode"] = episode

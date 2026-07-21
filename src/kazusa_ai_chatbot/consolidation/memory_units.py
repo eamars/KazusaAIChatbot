@@ -68,11 +68,14 @@ logger = logging.getLogger(__name__)
 
 def _json_payload(state: ConsolidatorState) -> dict:
     rag_result = state["rag_result"]
-    user_image = rag_result["user_image"]
-    rag_user_memory_context = user_image["user_memory_context"]
-    projected_memory_context = project_tool_result_for_llm(rag_user_memory_context)
-    if not isinstance(projected_memory_context, dict):
-        projected_memory_context = {}
+    if not isinstance(rag_result, dict):
+        raise TypeError("consolidation rag_result must be a mapping")
+    rag_candidates = rag_result["user_memory_unit_candidates"]
+    if not isinstance(rag_candidates, list):
+        raise TypeError("user_memory_unit_candidates must be a list")
+    projected_memory_candidates = project_tool_result_for_llm(rag_candidates)
+    if not isinstance(projected_memory_candidates, list):
+        raise TypeError("projected memory candidates must be a list")
 
     local_datetime = state["local_time_context"]["current_local_datetime"]
     return_value = {
@@ -93,7 +96,7 @@ def _json_payload(state: ConsolidatorState) -> dict:
             state["chat_history_recent"],
             character_name=state.get("character_name", ""),
         ),
-        "rag_user_memory_context": projected_memory_context,
+        "rag_user_memory_unit_candidates": projected_memory_candidates,
         "new_facts_evidence": project_tool_result_for_llm(
             state["new_facts"]
         ),
@@ -118,10 +121,11 @@ def _rag_surfaced_memory_units(state: ConsolidatorState) -> list[dict]:
     """
 
     rag_result = state["rag_result"]
+    if not isinstance(rag_result, dict):
+        raise TypeError("consolidation rag_result must be a mapping")
     surfaced_units = rag_result["user_memory_unit_candidates"]
     if not isinstance(surfaced_units, list):
-        return_value = []
-        return return_value
+        raise TypeError("user_memory_unit_candidates must be a list")
     valid_units = [unit for unit in surfaced_units if isinstance(unit, dict)]
     return valid_units
 
@@ -557,14 +561,14 @@ _EXTRACTOR_PROMPT = '''\
 
 # 证据读取与身份
 1. 先读 `timestamp`，它是本轮 consolidation 的本地时间。
-2. 读 `consolidation_origin.trigger_source`。`user_message` 表示本轮由用户消息触发；`internal_thought` 表示本轮由 `{character_name}` 的内部思考触发。
+2. 读 `consolidation_origin.trigger_source`。它只能是 `user_message`、`internal_thought`、`self_cognition`、`scheduled_tick` 或 `tool_result`。`user_message` 表示本轮由用户消息触发；`internal_thought` 表示由已发出的后续行动接力触发；`self_cognition` 表示由有观察依据的空闲认知触发；`scheduled_tick` 表示由已认领的到期计划触发；`tool_result` 表示由已完成的工具结果触发。
 3. 再读 `chat_history_recent`。每行格式为 `[时间] 说话人: 内容`；用行首说话人判断每条消息是谁说的；消息里的“我”必须按原说话人理解。
 4. 读 `decontextualized_input`、`final_dialog`、`logical_stance`、`character_intent`，确认本轮发生了什么，以及 `{character_name}` 是否真的接受了某个后续行为。
-5. 当 trigger_source 是 `user_message` 时，`decontextualized_input` 是用户本轮表达；当 trigger_source 是 `internal_thought` 时，它是内部触发文本，不是用户原话。
-6. `final_dialog` 在 `user_message` 中是可见回复，在 `internal_thought` 中是私有 finalization。
+5. 当 trigger_source 是 `user_message` 时，`decontextualized_input` 是用户本轮表达；当 trigger_source 是 `internal_thought`、`self_cognition` 或 `scheduled_tick` 时，它是有依据的内部触发文本，不是用户原话；当 trigger_source 是 `tool_result` 时，它是工具结果及原始目标的去上下文化摘要。
+6. `final_dialog` 在 `user_message` 和允许交付的 `tool_result` 中是可见回复，在 `internal_thought`、`self_cognition` 和 `scheduled_tick` 中是私有或 preview finalization。
 7. `new_facts_evidence` 和 `future_promises_evidence` 是上游证据提示，不是必须照抄的输出。
 8. `internal_monologue`、`emotional_appraisal`、`interaction_subtext`、`subjective_appraisal_evidence` 只用于理解 `{character_name}` 如何看待已确认事实，不可单独当作用户事实。
-9. 对照 `rag_user_memory_context`。只有本轮带来新事实、更清楚的细节或新的未来互动含义时，才生成 memory_unit。
+9. 对照 `rag_user_memory_unit_candidates`。只有本轮带来新事实、更清楚的细节或新的未来互动含义时，才生成 memory_unit。
 
 # 候选记忆准入
 - 只保存具体事件、决定、偏好、承诺、可复用行为模式或重要转折。
@@ -629,7 +633,7 @@ human payload 是以下 JSON：
     "user_name": "当前用户显示名",
     "consolidation_origin": {{
         "episode_id": "string",
-        "trigger_source": "user_message | internal_thought",
+        "trigger_source": "user_message | internal_thought | self_cognition | scheduled_tick | tool_result",
         "input_sources": ["..."],
         "output_mode": "string"
     }},
@@ -641,13 +645,9 @@ human payload 是以下 JSON：
     "logical_stance": "CONFIRM | REFUSE | TENTATIVE | DIVERGE | CHALLENGE",
     "character_intent": "本轮意图标签",
     "chat_history_recent": ["[YYYY-MM-DD HH:MM] 用户显示名或 {character_name}: 消息文本"],
-    "rag_user_memory_context": {{
-        "stable_patterns": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "可选本地 YYYY-MM-DD HH:MM"}}],
-        "recent_shifts": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "可选本地 YYYY-MM-DD HH:MM"}}],
-        "objective_facts": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "可选本地 YYYY-MM-DD HH:MM"}}],
-        "milestones": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "可选本地 YYYY-MM-DD HH:MM"}}],
-        "active_commitments": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "可选本地 YYYY-MM-DD HH:MM"}}]
-    }},
+    "rag_user_memory_unit_candidates": [
+        {{"unit_id": "...", "unit_type": "...", "dedup_key": "...", "fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "可选本地 YYYY-MM-DD HH:MM"}}
+    ],
     "new_facts_evidence": [{{"fact": "lane specialist output"}}],
     "future_promises_evidence": [{{"action": "future promise or scheduled action", "due_time": "可选本地 YYYY-MM-DD HH:MM"}}],
     "subjective_appraisal_evidence": ["relationship/appraisal evidence text"]

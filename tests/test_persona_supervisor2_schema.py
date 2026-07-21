@@ -7,7 +7,7 @@ import typing
 from kazusa_ai_chatbot.consolidation.schema import (
     normalize_subjective_appraisals,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState, CognitionState
+from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
 
 
 class TestGlobalPersonaState:
@@ -43,54 +43,25 @@ class TestGlobalPersonaState:
         assert "rag_result" in hints
         # Cognition
         assert "internal_monologue" in hints
-        assert "action_directives" in hints
+        assert "cognition_core_output" in hints
+        assert "text_surface_output_v2" in hints
         assert "action_specs" in hints
         # Dialog
         assert "final_dialog" in hints
         assert "target_addressed_user_ids" in hints
         assert "target_broadcast" in hints
-        # Consolidation
-        assert "mood" in hints
-        assert "global_vibe" in hints
-        assert "reflection_summary" in hints
-        assert "affinity_delta" in hints
+        # Native consolidation boundary
+        assert "action_results" in hints
+        assert "episode_trace" in hints
+        assert "memory_lifecycle_context" in hints
 
     def test_has_consolidation_fields(self):
         hints = typing.get_type_hints(GlobalPersonaState)
-        assert "subjective_appraisals" in hints
-        assert "last_relationship_insight" in hints
         assert "new_facts" in hints
         assert "future_promises" in hints
 
     def test_has_cognitive_episode_field(self):
         hints = typing.get_type_hints(GlobalPersonaState)
-        assert "cognitive_episode" in hints, "Missing field: cognitive_episode"
-
-
-class TestCognitionState:
-    def test_has_core_cognition_fields(self):
-        hints = typing.get_type_hints(CognitionState)
-        required = [
-            "character_profile",
-            "user_input",
-            "prompt_message_context",
-            "chat_history_recent",
-            "reply_context",
-            "indirect_speech_context",
-            "decontexualized_input",
-            "referents",
-            "rag_result",
-            "internal_monologue",
-            "action_directives",
-            "action_specs",
-            "target_addressed_user_ids",
-            "target_broadcast",
-        ]
-        for field in required:
-            assert field in hints, f"Missing cognition field: {field}"
-
-    def test_has_cognitive_episode_field(self):
-        hints = typing.get_type_hints(CognitionState)
         assert "cognitive_episode" in hints, "Missing field: cognitive_episode"
 
 

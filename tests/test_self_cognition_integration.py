@@ -434,17 +434,11 @@ def _progress_cognition_output() -> dict[str, Any]:
     output = {
         "logical_stance": "OBSERVE",
         "character_intent": "WAIT",
-        "mood": "subdued",
-        "affinity_delta": -1,
-        "action_directives": {
-            "linguistic_directives": {
-                "content_plan": {
-                    "semantic_content": (
-                        "[AUDIT_ONLY] The missed promise should be remembered."
-                    ),
-                },
-            },
+        "self_cognition_route": models.ROUTE_PROGRESS_MAINTENANCE,
+        "cognition_core_output": {
+            "state_update": {"state_scope": "character"},
         },
+        "cognition_state_committed": True,
     }
     return output
 
@@ -453,31 +447,50 @@ def _speak_action_spec() -> dict[str, Any]:
     """Build the selected visible action spec used by worker tests."""
 
     spec = {
+        "schema_version": "action_spec.v1",
         "kind": SPEAK_CAPABILITY,
+        "cognition_mode": "deliberative",
+        "source_refs": [],
+        "target": {
+            "schema_version": "action_target.v1",
+            "target_kind": "current_user",
+            "target_id": None,
+            "owner": "l3_text",
+            "scope": {},
+        },
+        "params": {
+            "delivery_mode": "visible_reply",
+            "execute_at": None,
+            "surface_requirements": {},
+        },
+        "urgency": "now",
         "visibility": "user_visible",
+        "deadline": None,
+        "continuation": {
+            "schema_version": "action_continuation.v1",
+            "mode": "none",
+            "episode_type": None,
+            "max_depth": 0,
+            "include_result_as": None,
+        },
+        "reason": "A bounded scheduled follow-up may be useful.",
     }
     return spec
 
 
-def _visible_action_directives() -> dict[str, Any]:
-    """Build complete text directives for deterministic dialog rendering."""
+def _text_surface_output(content_plan: str = "Checking in now.") -> dict[str, Any]:
+    """Build the canonical V2 surface result used by worker tests."""
 
-    directives = {
-        "contextual_directives": {
-            "social_distance": "friendly",
-            "emotional_intensity": "low",
-            "vibe_check": "focused",
-            "relational_dynamic": "scheduled follow-up",
-        },
-        "linguistic_directives": {
-            "rhetorical_strategy": "answer the scheduled follow-up",
-            "linguistic_style": "brief",
-            "accepted_user_preferences": [],
-            "content_plan": {"semantic_content": "Checking in now."},
-            "forbidden_phrases": [],
-        },
+    return {
+        "schema_version": "text_surface_output.v2",
+        "content_plan": content_plan,
+        "content_requirements": ["Preserve the scheduled follow-up purpose."],
+        "visible_boundaries": [],
+        "addressee_plan": ["current user"],
+        "style_guidance": "brief",
+        "selected_surface_intent": "answer the scheduled follow-up",
+        "permitted_action_results": [],
     }
-    return directives
 
 
 def _action_cognition_output() -> dict[str, Any]:
@@ -486,10 +499,12 @@ def _action_cognition_output() -> dict[str, Any]:
     output = {
         "logical_stance": "CONFIRM",
         "character_intent": "PROVIDE",
-        "mood": "hurt",
-        "affinity_delta": -1,
-        "action_directives": _visible_action_directives(),
+        "text_surface_output_v2": _text_surface_output(),
         "action_specs": [_speak_action_spec()],
+        "cognition_core_output": {
+            "state_update": {"state_scope": "character"},
+        },
+        "cognition_state_committed": True,
     }
     return output
 
@@ -503,7 +518,7 @@ def _consolidation_result() -> dict[str, Any]:
                 "character_state": True,
                 "relationship_insight": True,
                 "user_memory_units": False,
-                "affinity": True,
+                "relationship_state": True,
                 "character_image": False,
                 "cache_invalidation": True,
             },
@@ -511,6 +526,25 @@ def _consolidation_result() -> dict[str, Any]:
         },
     }
     return result
+
+
+def test_worker_v2_result_requires_character_scope_and_completed_commit() -> None:
+    """Worker delivery must follow a committed character-scoped V2 result."""
+
+    payloads = {
+        models.ARTIFACT_COGNITION_OUTPUT: {
+            "cognition_core_output": {
+                "state_update": {"state_scope": "user"},
+            },
+            "cognition_state_committed": True,
+        },
+    }
+
+    with pytest.raises(StateContractError, match="character scope"):
+        worker._validate_worker_v2_cognition_result(
+            payloads,
+            required=True,
+        )
 
 
 def _case_runner_with_candidate(
@@ -726,7 +760,7 @@ async def test_collect_scheduled_future_cognition_cases_preserves_source_scope()
         return None
 
     async def user_profile(global_user_id: str) -> dict[str, Any]:
-        return {"global_user_id": global_user_id, "affinity": 500}
+        return {"global_user_id": global_user_id, "relationship_state": 500}
 
     cases = await sources.collect_scheduled_future_cognition_cases(
         now=now,
@@ -928,7 +962,7 @@ async def test_collect_commitment_due_cognition_cases_projects_calendar_runs() -
 
     async def get_profile(global_user_id: str) -> dict[str, Any]:
         assert global_user_id == "673225019"
-        return {"affinity": 600, "display_name": "User"}
+        return {"relationship_state": 600, "display_name": "User"}
 
     async def no_private_channel(**kwargs: Any) -> None:
         del kwargs
@@ -1001,6 +1035,15 @@ async def test_collect_commitment_due_cognition_cases_projects_stale_run_skip(
             "trigger_kind": models.TRIGGER_ACTIVE_COMMITMENT_DUE_CHECK,
             "source_calendar_run_id": "calendar_run_commitment_123",
             "source_calendar_skip_reason": "stale_active_commitment_due_at",
+            "cognition_source": {
+                "source_kind": "scheduler_event",
+                "source_id": "calendar_run_commitment_123",
+                "occurred_at": "2026-05-13T00:00:00+00:00",
+                "semantic_summary": (
+                    "scheduled commitment was skipped: "
+                    "stale_active_commitment_due_at"
+                ),
+            },
         }
     ]
 
@@ -1051,6 +1094,15 @@ async def test_collect_commitment_due_cognition_cases_skips_unbuildable_case(
             "source_calendar_skip_reason": (
                 "active_commitment_case_unavailable"
             ),
+            "cognition_source": {
+                "source_kind": "scheduler_event",
+                "source_id": "calendar_run_commitment_123",
+                "occurred_at": "2026-05-13T00:00:00+00:00",
+                "semantic_summary": (
+                    "scheduled commitment was skipped: "
+                    "active_commitment_case_unavailable"
+                ),
+            },
         }
     ]
 
@@ -1642,6 +1694,10 @@ async def test_worker_selected_speak_dispatches_to_private_channel(
     async def record_attempt(attempt: dict[str, Any]) -> None:
         recorded_attempts.append(dict(attempt))
 
+    async def read_attempts(*, limit: int) -> list[dict[str, Any]]:
+        assert limit > 0
+        return []
+
     result = await worker.run_self_cognition_worker_tick(
         now=datetime(2026, 5, 17, 5, 57, tzinfo=timezone.utc),
         is_primary_interaction_busy=lambda: False,
@@ -1743,6 +1799,10 @@ async def test_worker_channel_capability_failure_blocks_before_history_write(
 
     async def record_attempt(attempt: dict[str, Any]) -> None:
         recorded_attempts.append(dict(attempt))
+
+    async def read_attempts(*, limit: int) -> list[dict[str, Any]]:
+        assert limit > 0
+        return []
 
     result = await worker.run_self_cognition_worker_tick(
         now=datetime(2026, 5, 17, 5, 57, tzinfo=timezone.utc),
@@ -2210,7 +2270,7 @@ async def test_worker_default_path_requests_production_consolidation_without_fil
     )
 
     assert result.processed_count == 1
-    assert captured_kwargs["apply_consolidation"] is True
+    assert captured_kwargs["apply_consolidation"] is False
     assert list(tmp_path.iterdir()) == []
 
 
@@ -2223,6 +2283,16 @@ async def test_worker_default_path_applies_consolidation_without_dispatch_or_fil
 
     case = _commitment_case_with_delivery_target()
     captured_consolidation_state: dict[str, Any] = {}
+    monkeypatch.setattr(
+        worker.db,
+        "upsert_post_turn_lifecycle_record",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        worker,
+        "record_completed_episode_residue",
+        AsyncMock(return_value={"status": "skipped"}),
+    )
 
     async def collect_cases(*, now: datetime, max_cases: int) -> list[dict[str, Any]]:
         del now, max_cases
@@ -2233,7 +2303,7 @@ async def test_worker_default_path_applies_consolidation_without_dispatch_or_fil
         return []
 
     async def cognition_client(state: dict[str, Any]) -> dict[str, Any]:
-        assert state["cognitive_episode"]["trigger_source"] == "internal_thought"
+        assert state["cognitive_episode"]["trigger_source"] == "scheduled_tick"
         return _progress_cognition_output()
 
     async def dialog_client(state: dict[str, Any]) -> dict[str, Any]:
@@ -2263,7 +2333,7 @@ async def test_worker_default_path_applies_consolidation_without_dispatch_or_fil
     assert result.processed_count == 1
     assert captured_consolidation_state["cognitive_episode"][
         "trigger_source"
-    ] == "internal_thought"
+    ] == "scheduled_tick"
     assert captured_consolidation_state["final_dialog"] == []
     assert list(tmp_path.iterdir()) == []
 
@@ -2278,6 +2348,16 @@ async def test_worker_default_path_records_action_without_dispatch(
     case = _commitment_case_with_delivery_target()
     recorded_attempts: list[dict[str, Any]] = []
     captured_consolidation_state: dict[str, Any] = {}
+    monkeypatch.setattr(
+        worker.db,
+        "upsert_post_turn_lifecycle_record",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        worker,
+        "record_completed_episode_residue",
+        AsyncMock(return_value={"status": "skipped"}),
+    )
 
     async def collect_cases(*, now: datetime, max_cases: int) -> list[dict[str, Any]]:
         del now, max_cases
@@ -2291,7 +2371,7 @@ async def test_worker_default_path_records_action_without_dispatch(
         recorded_attempts.append(dict(attempt))
 
     async def cognition_client(state: dict[str, Any]) -> dict[str, Any]:
-        assert state["cognitive_episode"]["trigger_source"] == "internal_thought"
+        assert state["cognitive_episode"]["trigger_source"] == "scheduled_tick"
         return _action_cognition_output()
 
     async def dialog_client(state: dict[str, Any]) -> dict[str, Any]:
@@ -2571,11 +2651,16 @@ async def test_worker_tick_defers_pipeline_cancelled_case() -> None:
     async def record_attempt(attempt: dict[str, Any]) -> None:
         recorded_attempts.append(dict(attempt))
 
+    async def read_attempts(*, limit: int) -> list[dict[str, Any]]:
+        assert limit > 0
+        return []
+
     result = await worker.run_self_cognition_worker_tick(
         now=datetime(2026, 5, 13, tzinfo=timezone.utc),
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,
         run_case_func=run_case,
+        read_attempts_func=read_attempts,
         record_attempt_func=record_attempt,
         max_cases=3,
     )
@@ -2644,11 +2729,16 @@ async def test_worker_tick_defer_requeues_claimed_source_calendar_run() -> None:
     async def fail_run(run_id: str, **_kwargs) -> None:
         failed_runs.append(run_id)
 
+    async def read_attempts(*, limit: int) -> list[dict[str, Any]]:
+        assert limit > 0
+        return []
+
     result = await worker.run_self_cognition_worker_tick(
         now=datetime(2026, 5, 13, tzinfo=timezone.utc),
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,
         run_case_func=run_case,
+        read_attempts_func=read_attempts,
         claim_calendar_run_func=claim_run,
         complete_calendar_run_func=complete_run,
         fail_calendar_run_func=fail_run,
@@ -2782,7 +2872,7 @@ async def test_active_commitment_source_builds_due_case_from_memory_unit() -> No
 
     async def get_profile(global_user_id: str):
         assert global_user_id == "673225019"
-        return {"affinity": 600, "display_name": "User"}
+        return {"relationship_state": 600, "display_name": "User"}
 
     async def no_private_channel(**kwargs: Any) -> None:
         del kwargs

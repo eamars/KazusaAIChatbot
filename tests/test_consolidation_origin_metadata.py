@@ -1,4 +1,4 @@
-"""Tests for projecting cognitive episode origins into consolidation state."""
+"""Tests for projecting canonical episode origins into consolidation state."""
 
 from __future__ import annotations
 
@@ -7,160 +7,147 @@ from copy import deepcopy
 import pytest
 
 from kazusa_ai_chatbot.cognition_episode import (
-    CognitiveEpisode,
-    OutputMode,
-    build_text_chat_cognitive_episode,
+    build_self_cognition_episode,
+    build_tool_result_episode,
+    build_user_message_episode,
+)
+from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+    build_acquaintance_user_state,
 )
 from kazusa_ai_chatbot.consolidation import core as consolidator_module
 from kazusa_ai_chatbot.consolidation.origin import (
     ConsolidationOriginError,
-    build_reflection_consolidation_origin,
     build_self_cognition_consolidation_origin,
+    build_tool_result_consolidation_origin,
     build_user_message_consolidation_origin,
+    project_consolidation_origin_prompt_block,
 )
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
 
 
-def _text_chat_episode(
-    output_mode: OutputMode = "visible_reply",
-) -> CognitiveEpisode:
-    """Build a valid text-chat cognitive episode for origin tests.
+def _target_scope(*, group: bool = True) -> dict[str, object]:
+    """Return one valid adapter-neutral target scope."""
 
-    Args:
-        output_mode: Output mode to store on the episode.
-
-    Returns:
-        Valid current text-chat cognitive episode.
-    """
-    turn_clock = build_turn_clock("2026-05-10 09:00:00")
-    episode = build_text_chat_cognitive_episode(
-        episode_id="episode-1",
-        percept_id="percept-1",
-        storage_timestamp_utc=turn_clock["storage_timestamp_utc"],
-        local_time_context=turn_clock["local_time_context"],
-        user_input="Please remember this.",
-        platform="qq",
-        platform_channel_id="channel-1",
-        channel_type="group",
-        platform_message_id="message-1",
-        platform_user_id="platform-user-1",
-        global_user_id="global-user-1",
-        user_name="Test User",
-        active_turn_platform_message_ids=["message-1", "message-2"],
-        active_turn_conversation_row_ids=["conversation-row-1", "conversation-row-2"],
-        debug_modes={"think_only": False},
-        output_mode=output_mode,
-        target_addressed_user_ids=["character-user-1"],
-        target_broadcast=False,
-    )
-    return episode
-
-
-def _self_cognition_episode(
-    output_mode: OutputMode = "preview",
-) -> CognitiveEpisode:
-    """Build a valid internal-thought episode for origin tests.
-
-    Args:
-        output_mode: Output mode to store on the episode.
-
-    Returns:
-        Valid self-cognition cognitive episode.
-    """
-    turn_clock = build_turn_clock("2026-05-10 21:00:00")
-    episode: CognitiveEpisode = {
-        "episode_id": "self-cognition-episode-1",
-        "trigger_source": "internal_thought",
-        "input_sources": ["internal_monologue"],
-        "output_mode": output_mode,
-        "percepts": [
-            {
-                "percept_id": "self-cognition-percept-1",
-                "input_source": "internal_monologue",
-                "content": "The missed promise still feels unresolved.",
-                "visibility": "model_visible",
-                "metadata": {"source": "self_cognition_source_packet"},
-            }
-        ],
-        "target_scope": {
-            "platform": "qq",
-            "platform_channel_id": "channel-1",
-            "channel_type": "private",
-            "current_platform_user_id": "platform-user-1",
-            "current_global_user_id": "global-user-1",
-            "current_display_name": "Test User",
-            "target_addressed_user_ids": ["global-user-1"],
-            "target_broadcast": False,
-        },
-        "origin_metadata": {
-            "platform": "qq",
-            "platform_message_id": "self_cognition:case-1",
-            "active_turn_platform_message_ids": [],
-            "active_turn_conversation_row_ids": [],
-            "debug_modes": {"no_visual_directives": True},
-        },
-        "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
-        "local_time_context": turn_clock["local_time_context"],
+    return {
+        "platform": "qq",
+        "platform_channel_id": "channel-1",
+        "channel_type": "group" if group else "private",
+        "current_platform_user_id": "platform-user-1",
+        "current_global_user_id": "global-user-1",
+        "current_display_name": "Test User",
+        "target_addressed_user_ids": ["global-user-1"],
+        "target_broadcast": False,
     }
-    return episode
 
 
-def _reflection_episode(
-    output_mode: OutputMode = "preview",
-) -> CognitiveEpisode:
-    """Build a valid reflection-signal episode for origin tests."""
+def _local_time_context() -> dict[str, str]:
+    """Return the configured-local context used by episode builders."""
+
+    return {
+        "current_local_datetime": "2026-05-10 17:00",
+        "current_local_weekday": "Sunday",
+    }
+
+
+def _text_chat_episode():
+    """Build a valid canonical user-message episode."""
+
+    turn_clock = build_turn_clock("2026-05-10 09:00:00")
+    return build_user_message_episode(
+        episode_id="episode-1",
+        origin={
+            "platform": "qq",
+            "platform_message_id": "message-1",
+            "active_turn_platform_message_ids": ["message-1", "message-2"],
+            "active_turn_conversation_row_ids": [
+                "conversation-row-1",
+                "conversation-row-2",
+            ],
+        },
+        target_scope=_target_scope(),
+        dialog_percept={
+            "schema_version": "percept.v1",
+            "percept_kind": "dialog",
+            "source_kind": "dialog",
+            "source_id": "message-1",
+            "content": {"semantic_text": "Please remember this."},
+            "observed_at": turn_clock["storage_timestamp_utc"],
+        },
+        media_percepts=[],
+        evidence_refs=[],
+        local_time_context=turn_clock["local_time_context"],
+        created_at=turn_clock["storage_timestamp_utc"],
+        debug_controls={"think_only": False},
+    )
+
+
+def _self_cognition_episode():
+    """Build a valid canonical self-cognition episode."""
+
+    turn_clock = build_turn_clock("2026-05-10 21:00:00")
+    return build_self_cognition_episode(
+        case={
+            "case_id": "case-1",
+            "source_case_kind": "internal_monologue",
+            "target_scope": _target_scope(group=False),
+            "privacy_scope": "private",
+        },
+        percepts=[{
+            "schema_version": "percept.v1",
+            "percept_kind": "internal_context",
+            "source_kind": "internal_thought",
+            "source_id": "case-1",
+            "content": {
+                "summary": "The missed promise still feels unresolved.",
+            },
+            "observed_at": turn_clock["storage_timestamp_utc"],
+        }],
+        evidence_refs=[],
+        local_time_context=turn_clock["local_time_context"],
+        created_at=turn_clock["storage_timestamp_utc"],
+    )
+
+
+def _tool_result_episode():
+    """Build a valid canonical completed-tool-result episode."""
 
     turn_clock = build_turn_clock("2026-05-10 22:00:00")
-    episode: CognitiveEpisode = {
-        "episode_id": "reflection-episode-1",
-        "trigger_source": "reflection_signal",
-        "input_sources": ["reflection_artifact"],
-        "output_mode": output_mode,
-        "percepts": [
-            {
-                "percept_id": "reflection-percept-1",
-                "input_source": "reflection_artifact",
-                "content": "Promoted reflection context.",
-                "visibility": "model_visible",
-                "metadata": {"source": "reflection_cycle"},
-            }
-        ],
-        "target_scope": {
-            "platform": "qq",
-            "platform_channel_id": "channel-1",
-            "channel_type": "private",
-            "current_platform_user_id": "",
-            "current_global_user_id": "",
-            "current_display_name": "",
-            "target_addressed_user_ids": [],
-            "target_broadcast": False,
+    return build_tool_result_episode(
+        result={
+            "schema_version": "tool_result_ready.v1",
+            "task_id": "task-1",
+            "task_kind": "background_work",
+            "semantic_summary": "The requested work completed.",
+            "artifact_text": "result text",
+            "failure_text": "",
+            "completed_at": turn_clock["storage_timestamp_utc"],
+            "target_scope": _target_scope(group=False),
+            "evidence_refs": [],
+            "coding_run_context": {},
+            "result_ref": "result-1",
         },
-        "origin_metadata": {
-            "platform": "qq",
-            "platform_message_id": "reflection:case-1",
-            "active_turn_platform_message_ids": [],
-            "active_turn_conversation_row_ids": [],
-            "debug_modes": {"no_visual_directives": True},
-        },
-        "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
-        "local_time_context": turn_clock["local_time_context"],
-    }
-    return episode
+        evidence_refs=[],
+        local_time_context=turn_clock["local_time_context"],
+        created_at=turn_clock["storage_timestamp_utc"],
+    )
 
 
 def _global_state() -> dict:
-    """Build a minimal state for direct consolidation subgraph calls.
+    """Build the minimum state consumed by direct consolidation calls."""
 
-    Returns:
-        Global persona state fields consumed by `call_consolidation_subgraph`.
-    """
     turn_clock = build_turn_clock("2026-05-10 09:00:00")
-    state = {
+    return {
         "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
         "local_time_context": turn_clock["local_time_context"],
         "global_user_id": "global-user-1",
         "user_name": "Test User",
-        "user_profile": {"global_user_id": "global-user-1", "affinity": 500},
+        "user_profile": {
+            "global_user_id": "global-user-1",
+            "cognition_state": build_acquaintance_user_state(
+                global_user_id="global-user-1",
+                updated_at="2026-07-03T00:00:00Z",
+            ),
+        },
         "platform": "qq",
         "platform_channel_id": "channel-1",
         "channel_type": "group",
@@ -176,6 +163,7 @@ def _global_state() -> dict:
         "logical_stance": "CONFIRM",
         "character_profile": {"name": "Kazusa"},
         "rag_result": {
+            "user_memory_unit_candidates": [],
             "user_image": {
                 "user_memory_context": {
                     "stable_patterns": [],
@@ -184,26 +172,26 @@ def _global_state() -> dict:
                     "active_commitments": [],
                     "milestones": [],
                 }
-            }
+            },
         },
         "decontexualized_input": "Please remember this.",
         "chat_history_recent": [],
         "cognitive_episode": _text_chat_episode(),
     }
-    return state
 
 
-def test_build_user_message_consolidation_origin_returns_exact_metadata() -> None:
+def test_user_message_origin_projects_exact_identifier_metadata() -> None:
+    """User-message origin contains identifiers and source kinds only."""
+
     episode = _text_chat_episode()
-
     metadata = build_user_message_consolidation_origin(episode=episode)
 
-    expected_metadata = {
+    assert metadata == {
         "episode_id": "episode-1",
         "trigger_source": "user_message",
-        "input_sources": ["dialog_text"],
+        "input_sources": ["dialog", "system_event"],
         "output_mode": "visible_reply",
-        "storage_timestamp_utc": episode["storage_timestamp_utc"],
+        "storage_timestamp_utc": episode["created_at"],
         "platform": "qq",
         "platform_channel_id": "channel-1",
         "channel_type": "group",
@@ -217,274 +205,126 @@ def test_build_user_message_consolidation_origin_returns_exact_metadata() -> Non
         "current_global_user_id": "global-user-1",
         "current_display_name": "Test User",
     }
-    assert metadata == expected_metadata
 
 
-def test_origin_metadata_copies_list_fields() -> None:
+def test_origin_metadata_copies_list_fields_and_excludes_content() -> None:
+    """Origin projections remain stable when the episode is later mutated."""
+
     episode = _text_chat_episode()
-
     metadata = build_user_message_consolidation_origin(episode=episode)
-    episode["input_sources"].append("image_observation")
-    episode["origin_metadata"]["active_turn_platform_message_ids"].append("message-3")
-    episode["origin_metadata"]["active_turn_conversation_row_ids"].append(
-        "conversation-row-3"
+    episode["percepts"].append({
+        "schema_version": "percept.v1",
+        "percept_kind": "extra",
+        "source_kind": "extra",
+        "source_id": "extra",
+        "content": {"text": "secret"},
+        "observed_at": episode["created_at"],
+    })
+    episode["origin_metadata"]["active_turn_platform_message_ids"].append(
+        "message-3"
     )
 
-    assert metadata["input_sources"] == ["dialog_text"]
+    assert metadata["input_sources"] == ["dialog", "system_event"]
     assert metadata["active_turn_platform_message_ids"] == [
         "message-1",
         "message-2",
     ]
-    assert metadata["active_turn_conversation_row_ids"] == [
-        "conversation-row-1",
-        "conversation-row-2",
-    ]
+    assert "secret" not in str(metadata)
 
 
-def test_origin_metadata_excludes_content_and_prompt_fields() -> None:
-    episode = _text_chat_episode()
+def test_self_cognition_origin_supports_canonical_self_source() -> None:
+    """Self-cognition origin maps the canonical private source."""
 
-    metadata = build_user_message_consolidation_origin(episode=episode)
-
-    forbidden_keys = {
-        "percepts",
-        "content",
-        "user_input",
-        "decontexualized_input",
-        "prompt_payload",
-        "attachments",
-        "rag_result",
-        "facts",
-        "promises",
-        "debug_modes",
-    }
-    assert forbidden_keys.isdisjoint(set(metadata))
-    assert "Please remember this." not in str(metadata)
-
-
-def test_origin_rejects_non_user_message_trigger() -> None:
-    episode = deepcopy(_text_chat_episode())
-    episode["trigger_source"] = "reflection_signal"
-
-    with pytest.raises(ConsolidationOriginError):
-        build_user_message_consolidation_origin(episode=episode)
-
-
-def test_origin_rejects_non_dialog_text_sources() -> None:
-    episode = deepcopy(_text_chat_episode())
-    episode["input_sources"] = ["dialog_text", "retrieved_memory"]
-    episode["percepts"].append(
-        {
-            "percept_id": "percept-2",
-            "input_source": "retrieved_memory",
-            "content": "retrieved memory",
-            "visibility": "model_visible",
-            "metadata": {},
-        }
-    )
-
-    with pytest.raises(ConsolidationOriginError):
-        build_user_message_consolidation_origin(episode=episode)
-
-
-def test_origin_rejects_unsupported_output_mode() -> None:
-    episode = _text_chat_episode(output_mode="preview")
-
-    with pytest.raises(ConsolidationOriginError):
-        build_user_message_consolidation_origin(episode=episode)
-
-
-def test_build_self_cognition_consolidation_origin_returns_exact_metadata() -> None:
     episode = _self_cognition_episode()
-
     metadata = build_self_cognition_consolidation_origin(episode=episode)
 
-    expected_metadata = {
-        "episode_id": "self-cognition-episode-1",
-        "trigger_source": "internal_thought",
-        "input_sources": ["internal_monologue"],
-        "output_mode": "preview",
-        "storage_timestamp_utc": episode["storage_timestamp_utc"],
-        "platform": "qq",
-        "platform_channel_id": "channel-1",
-        "channel_type": "private",
-        "platform_message_id": "self_cognition:case-1",
-        "active_turn_platform_message_ids": [],
-        "active_turn_conversation_row_ids": [],
-        "current_platform_user_id": "platform-user-1",
-        "current_global_user_id": "global-user-1",
-        "current_display_name": "Test User",
+    assert metadata["episode_id"] == "self-cognition:case-1"
+    assert metadata["trigger_source"] == "self_cognition"
+    assert metadata["input_sources"] == ["internal_thought", "system_event"]
+    assert metadata["output_mode"] == "preview"
+    assert metadata["current_global_user_id"] == "global-user-1"
+
+
+def test_tool_result_origin_supports_completed_result_source() -> None:
+    """Completed tool results enter consolidation with bounded identity."""
+
+    episode = _tool_result_episode()
+    metadata = build_tool_result_consolidation_origin(episode=episode)
+
+    assert metadata["episode_id"] == "tool-result:task-1"
+    assert metadata["trigger_source"] == "tool_result"
+    assert metadata["input_sources"] == ["tool_result", "system_event"]
+    assert metadata["output_mode"] == "visible_reply"
+
+
+def test_origin_prompt_block_is_compact() -> None:
+    """Model-facing consolidation origin excludes storage identifiers."""
+
+    origin = build_user_message_consolidation_origin(
+        episode=_text_chat_episode(),
+    )
+
+    assert project_consolidation_origin_prompt_block(origin) == {
+        "episode_id": "episode-1",
+        "trigger_source": "user_message",
+        "input_sources": ["dialog", "system_event"],
+        "output_mode": "visible_reply",
     }
-    assert metadata == expected_metadata
 
 
-def test_self_cognition_origin_metadata_copies_list_fields() -> None:
-    episode = _self_cognition_episode()
+def test_origin_builders_reject_wrong_source() -> None:
+    """Each consolidation origin owner admits only its source family."""
 
-    metadata = build_self_cognition_consolidation_origin(episode=episode)
-    episode["input_sources"].append("retrieved_memory")
-    episode["origin_metadata"]["active_turn_platform_message_ids"].append(
-        "message-1"
-    )
-    episode["origin_metadata"]["active_turn_conversation_row_ids"].append(
-        "conversation-row-1"
-    )
-
-    assert metadata["input_sources"] == ["internal_monologue"]
-    assert metadata["active_turn_platform_message_ids"] == []
-    assert metadata["active_turn_conversation_row_ids"] == []
-
-
-def test_self_cognition_origin_excludes_content_and_prompt_fields() -> None:
-    episode = _self_cognition_episode()
-
-    metadata = build_self_cognition_consolidation_origin(episode=episode)
-
-    forbidden_keys = {
-        "percepts",
-        "content",
-        "user_input",
-        "decontexualized_input",
-        "prompt_payload",
-        "attachments",
-        "rag_result",
-        "facts",
-        "promises",
-        "debug_modes",
-    }
-    assert forbidden_keys.isdisjoint(set(metadata))
-    assert "The missed promise still feels unresolved." not in str(metadata)
-
-
-def test_self_cognition_origin_rejects_non_internal_thought_trigger() -> None:
-    episode = deepcopy(_self_cognition_episode())
-    episode["trigger_source"] = "reflection_signal"
-
+    user_episode = deepcopy(_text_chat_episode())
+    user_episode["trigger_source"] = "tool_result"
     with pytest.raises(ConsolidationOriginError):
-        build_self_cognition_consolidation_origin(episode=episode)
+        build_user_message_consolidation_origin(episode=user_episode)
 
-
-def test_self_cognition_origin_rejects_non_internal_monologue_sources() -> None:
-    episode = deepcopy(_self_cognition_episode())
-    episode["input_sources"] = ["internal_monologue", "retrieved_memory"]
-    episode["percepts"].append(
-        {
-            "percept_id": "self-cognition-percept-2",
-            "input_source": "retrieved_memory",
-            "content": "retrieved memory",
-            "visibility": "model_visible",
-            "metadata": {},
-        }
-    )
-
+    self_episode = deepcopy(_self_cognition_episode())
+    self_episode["trigger_source"] = "user_message"
     with pytest.raises(ConsolidationOriginError):
-        build_self_cognition_consolidation_origin(episode=episode)
+        build_self_cognition_consolidation_origin(episode=self_episode)
 
-
-def test_self_cognition_origin_rejects_non_preview_output_mode() -> None:
-    episode = _self_cognition_episode(output_mode="think_only")
-
+    tool_episode = deepcopy(_tool_result_episode())
+    tool_episode["trigger_source"] = "self_cognition"
     with pytest.raises(ConsolidationOriginError):
-        build_self_cognition_consolidation_origin(episode=episode)
-
-
-def test_build_reflection_consolidation_origin_returns_exact_metadata() -> None:
-    episode = _reflection_episode()
-
-    metadata = build_reflection_consolidation_origin(episode=episode)
-
-    expected_metadata = {
-        "episode_id": "reflection-episode-1",
-        "trigger_source": "reflection_signal",
-        "input_sources": ["reflection_artifact"],
-        "output_mode": "preview",
-        "storage_timestamp_utc": episode["storage_timestamp_utc"],
-        "platform": "qq",
-        "platform_channel_id": "channel-1",
-        "channel_type": "private",
-        "platform_message_id": "reflection:case-1",
-        "active_turn_platform_message_ids": [],
-        "active_turn_conversation_row_ids": [],
-        "current_platform_user_id": "",
-        "current_global_user_id": "",
-        "current_display_name": "",
-    }
-    assert metadata == expected_metadata
-
-
-def test_reflection_origin_rejects_non_reflection_trigger() -> None:
-    episode = deepcopy(_reflection_episode())
-    episode["trigger_source"] = "internal_thought"
-
-    with pytest.raises(ConsolidationOriginError):
-        build_reflection_consolidation_origin(episode=episode)
-
-
-def test_reflection_origin_rejects_non_reflection_sources() -> None:
-    episode = deepcopy(_reflection_episode())
-    episode["input_sources"] = ["reflection_artifact", "retrieved_memory"]
-    episode["percepts"].append(
-        {
-            "percept_id": "reflection-percept-2",
-            "input_source": "retrieved_memory",
-            "content": "retrieved memory",
-            "visibility": "model_visible",
-            "metadata": {},
-        }
-    )
-
-    with pytest.raises(ConsolidationOriginError):
-        build_reflection_consolidation_origin(episode=episode)
-
-
-def test_reflection_origin_rejects_visible_reply_output_mode() -> None:
-    episode = _reflection_episode(output_mode="visible_reply")
-
-    with pytest.raises(ConsolidationOriginError):
-        build_reflection_consolidation_origin(episode=episode)
+        build_tool_result_consolidation_origin(episode=tool_episode)
 
 
 @pytest.mark.asyncio
 async def test_call_consolidation_subgraph_threads_origin_to_all_nodes(
     monkeypatch,
 ) -> None:
+    """The lane pipeline receives the canonical origin and target plan."""
+
     state = _global_state()
     expected_origin = build_user_message_consolidation_origin(
         episode=state["cognitive_episode"],
     )
     seen_pipeline_state = {}
 
-    async def _lane_pipeline(node_state: dict) -> dict:
-        """Capture origin metadata seen by the lane pipeline.
+    async def lane_pipeline(node_state: dict) -> dict:
+        """Capture origin metadata seen by the patched lane pipeline."""
 
-        Args:
-            node_state: Consolidator state passed into the patched pipeline.
-
-        Returns:
-            Deterministic lane-pipeline packet.
-        """
         seen_pipeline_state.update(node_state)
         pipeline_state = {
             **node_state,
             "mood": "calm",
-            "global_vibe": "steady",
-            "reflection_summary": "summary",
+            "vibe_check": "steady",
+            "character_reflection": "summary",
             "subjective_appraisals": [],
-            "affinity_delta": 0,
-            "last_relationship_insight": "",
+            "relationship_delta": 0,
+            "semantic_relationship_projection": "",
             "new_facts": [{"fact": "User likes tea"}],
             "future_promises": [],
             "metadata": {"write_success": {}},
         }
-        return {
-            "router_tasks": [],
-            "state": pipeline_state,
-        }
+        return {"router_tasks": [], "state": pipeline_state}
 
     monkeypatch.setattr(
         consolidator_module,
         "run_consolidation_lane_pipeline",
-        _lane_pipeline,
+        lane_pipeline,
     )
 
     await consolidator_module.call_consolidation_subgraph(state)
@@ -494,75 +334,27 @@ async def test_call_consolidation_subgraph_threads_origin_to_all_nodes(
 
 
 @pytest.mark.asyncio
-async def test_call_consolidation_subgraph_accepts_reflection_signal_origin(
-    monkeypatch,
-) -> None:
-    state = _global_state()
-    state["cognitive_episode"] = _reflection_episode()
-    state["global_user_id"] = ""
-    state["user_name"] = ""
-    state["user_profile"] = {}
-    state["decontexualized_input"] = ""
-    state["final_dialog"] = []
-    expected_origin = build_reflection_consolidation_origin(
-        episode=state["cognitive_episode"],
-    )
-    seen_pipeline_state = {}
-
-    async def _lane_pipeline(node_state: dict) -> dict:
-        """Capture reflection origin metadata passed to the lane pipeline."""
-
-        seen_pipeline_state.update(node_state)
-        pipeline_state = {
-            **node_state,
-            "mood": "",
-            "global_vibe": "",
-            "reflection_summary": "",
-            "subjective_appraisals": [],
-            "affinity_delta": 0,
-            "last_relationship_insight": "",
-            "new_facts": [],
-            "future_promises": [],
-            "metadata": {"write_success": {}},
-        }
-        return {
-            "router_tasks": [],
-            "state": pipeline_state,
-        }
-
-    monkeypatch.setattr(
-        consolidator_module,
-        "run_consolidation_lane_pipeline",
-        _lane_pipeline,
-    )
-
-    await consolidator_module.call_consolidation_subgraph(state)
-
-    assert seen_pipeline_state["consolidation_origin"] == expected_origin
-    assert seen_pipeline_state["consolidation_target_plan"]["origin_kind"] == (
-        "reflection_signal"
-    )
-
-
-@pytest.mark.asyncio
 async def test_unsupported_origin_fails_before_state_graph_construction(
     monkeypatch,
 ) -> None:
+    """An unregistered Stage 3 source cannot enter consolidation."""
+
     state = _global_state()
     episode = deepcopy(state["cognitive_episode"])
-    episode["trigger_source"] = "scheduled_recall"
+    episode["trigger_source"] = "unregistered_source"
     state["cognitive_episode"] = episode
     pipeline_calls = []
 
-    async def _lane_pipeline(node_state: dict) -> dict:
+    async def lane_pipeline(node_state: dict) -> dict:
         """Record unexpected lane-pipeline attempts."""
+
         pipeline_calls.append(node_state)
         raise AssertionError("lane pipeline must not run")
 
     monkeypatch.setattr(
         consolidator_module,
         "run_consolidation_lane_pipeline",
-        _lane_pipeline,
+        lane_pipeline,
     )
 
     with pytest.raises(ConsolidationOriginError):
@@ -572,47 +364,41 @@ async def test_unsupported_origin_fails_before_state_graph_construction(
 
 
 @pytest.mark.asyncio
-async def test_call_consolidation_subgraph_does_not_return_origin_metadata(
+async def test_call_consolidation_subgraph_returns_sanitized_result(
     monkeypatch,
 ) -> None:
-    async def _lane_pipeline(node_state: dict) -> dict:
-        """Return durable metadata without exposing origin metadata."""
+    """Consolidation returns durable outputs without origin internals."""
+
+    async def lane_pipeline(node_state: dict) -> dict:
+        """Return a minimal pipeline result for the public-call test."""
+
         assert node_state["consolidation_origin"]["episode_id"] == "episode-1"
         pipeline_state = {
             **node_state,
             "mood": "calm",
-            "global_vibe": "steady",
-            "reflection_summary": "summary",
+            "vibe_check": "steady",
+            "character_reflection": "summary",
             "subjective_appraisals": [],
-            "affinity_delta": 0,
-            "last_relationship_insight": "",
+            "relationship_delta": 0,
+            "semantic_relationship_projection": "",
             "new_facts": [],
             "future_promises": [],
             "metadata": {"write_success": {"character_state": True}},
         }
-        return {
-            "router_tasks": [],
-            "state": pipeline_state,
-        }
+        return {"router_tasks": [], "state": pipeline_state}
 
     monkeypatch.setattr(
         consolidator_module,
         "run_consolidation_lane_pipeline",
-        _lane_pipeline,
+        lane_pipeline,
     )
 
-    result = await consolidator_module.call_consolidation_subgraph(_global_state())
+    result = await consolidator_module.call_consolidation_subgraph(
+        _global_state(),
+    )
 
     assert set(result) == {
-        "mood",
-        "global_vibe",
-        "reflection_summary",
-        "subjective_appraisals",
-        "affinity_delta",
-        "last_relationship_insight",
         "new_facts",
         "future_promises",
         "consolidation_metadata",
     }
-    assert "consolidation_origin" not in result
-    assert "consolidation_origin" not in result["consolidation_metadata"]

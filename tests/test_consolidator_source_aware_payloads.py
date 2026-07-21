@@ -8,16 +8,17 @@ from typing import Any
 
 import pytest
 
-from kazusa_ai_chatbot.consolidation import (
-    memory_units as memory_units_module,
+from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+    build_acquaintance_user_state,
 )
 from kazusa_ai_chatbot.consolidation import (
-    reflection as reflection_module,
+    memory_units as memory_units_module,
 )
 from kazusa_ai_chatbot.consolidation.origin import (
     ConsolidationOriginMetadata,
 )
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
+from tests.cognition_core_v2_test_helpers import canonical_cognition_output
 
 
 class _CaptureLLM:
@@ -80,29 +81,37 @@ def _state() -> dict[str, Any]:
         State fields consumed by source-aware prompt handlers.
     """
     turn_clock = build_turn_clock("2026-05-10 21:00:00")
-    user_memory_context = {
-        "stable_patterns": [],
-        "recent_shifts": [],
-        "objective_facts": [],
-        "active_commitments": [],
-        "milestones": [],
-    }
     state: dict[str, Any] = {
         "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
         "local_time_context": turn_clock["local_time_context"],
         "global_user_id": "global-user-1",
         "user_name": "Test User",
-        "user_profile": {"affinity": 500},
+        "user_profile": {
+            "global_user_id": "global-user-1",
+            "cognition_state": build_acquaintance_user_state(
+                global_user_id="global-user-1",
+                updated_at=turn_clock["storage_timestamp_utc"].replace(
+                    "+00:00",
+                    "Z",
+                ),
+            ),
+        },
         "platform": "qq",
         "platform_channel_id": "channel-1",
         "channel_type": "private",
         "platform_message_id": "self_cognition:case-1",
-        "action_directives": {
-            "linguistic_directives": {
-                "content_plan": {
-                    "semantic_content": "Revisit the missed promise.",
-                },
-            },
+        "cognition_core_output": canonical_cognition_output(
+            owner_user_id="global-user-1",
+        ),
+        "text_surface_output_v2": {
+            "schema_version": "text_surface_output.v2",
+            "content_plan": "Revisit the missed promise.",
+            "content_requirements": ["Clarify the unresolved promise."],
+            "visible_boundaries": [],
+            "addressee_plan": ["current user"],
+            "style_guidance": "brief and grounded",
+            "selected_surface_intent": "clarify the unresolved promise",
+            "permitted_action_results": [],
         },
         "internal_monologue": "The missed promise still feels unresolved.",
         "final_dialog": ["Private finalization for consolidation only."],
@@ -116,7 +125,6 @@ def _state() -> dict[str, Any]:
         },
         "rag_result": {
             "answer": "",
-            "user_image": {"user_memory_context": user_memory_context},
             "user_memory_unit_candidates": [],
             "memory_evidence": [],
             "recall_evidence": [],
@@ -191,43 +199,6 @@ def _assert_source_aware_prompt(prompt: str) -> None:
     """
     assert "consolidation_origin" in prompt
     assert "internal_thought" in prompt
-
-
-@pytest.mark.asyncio
-async def test_reflection_payloads_include_internal_thought_origin(
-    monkeypatch,
-) -> None:
-    """Global and relationship reflection stages should expose source identity."""
-    global_llm = _CaptureLLM(
-        {
-            "mood": "hurt",
-            "global_vibe": "uneasy",
-            "reflection_summary": "summary",
-        }
-    )
-    relationship_llm = _CaptureLLM(
-        {
-            "skip": False,
-            "subjective_appraisals": ["The silence felt disappointing."],
-            "affinity_delta": -1,
-            "last_relationship_insight": "unreliable",
-        }
-    )
-    monkeypatch.setattr(reflection_module, "_global_state_updater_llm", global_llm)
-    monkeypatch.setattr(
-        reflection_module,
-        "_relationship_recorder_llm",
-        relationship_llm,
-    )
-
-    state = _state()
-    await reflection_module.global_state_updater(state)
-    await reflection_module.relationship_recorder(state)
-
-    _assert_internal_origin_payload(_human_payload(global_llm))
-    _assert_internal_origin_payload(_human_payload(relationship_llm))
-    _assert_source_aware_prompt(_system_prompt(global_llm))
-    _assert_source_aware_prompt(_system_prompt(relationship_llm))
 
 
 @pytest.mark.asyncio

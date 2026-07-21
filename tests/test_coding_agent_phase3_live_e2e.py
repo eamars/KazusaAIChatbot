@@ -219,8 +219,8 @@ def _live_persona_state_for_input(
     )
     character_profile = load_personality(PERSONALITY_PATH)
     character_profile.setdefault("mood", "neutral")
-    character_profile.setdefault("global_vibe", "calm")
-    character_profile.setdefault("reflection_summary", "")
+    character_profile.setdefault("vibe_check", "calm")
+    character_profile.setdefault("character_reflection", "")
     character_profile.setdefault("global_user_id", CHARACTER_GLOBAL_USER_ID)
     state["character_profile"] = character_profile
     state["character_name"] = character_profile.get("name", "Kazusa")
@@ -258,7 +258,7 @@ def _install_in_memory_persistence(
     monkeypatch.setattr(
         accepted_lifecycle,
         "repository_mark_result_ready",
-        store.mark_accepted_task_result_ready,
+        store.mark_tool_result_ready,
     )
     monkeypatch.setattr(
         accepted_lifecycle,
@@ -383,7 +383,7 @@ def _assert_delivery_completed(
     }, f"Live delivery did not complete successfully; trace={trace_path}"
     assert trace["accepted_task_after_delivery"]["state"] == "delivered"
     assert trace["background_job_after_delivery"]["status"] == "delivered"
-    assert trace["result_episode"]["trigger_source"] == "accepted_task_result_ready"
+    assert trace["result_episode"]["trigger_source"] == "tool_result"
     assert trace["final_dialog"], f"Live final dialog was empty; trace={trace_path}"
 
 

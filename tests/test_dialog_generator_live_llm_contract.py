@@ -14,23 +14,11 @@ from kazusa_ai_chatbot.config import (
 )
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
 from kazusa_ai_chatbot.nodes.dialog_agent import (
-    _DIALOG_GENERATOR_PROMPT,
-    get_abstraction_reframing_description,
-    get_counter_questioning_description,
-    get_direct_assertion_description,
-    get_emotional_leakage_description,
-    get_formalism_avoidance_description,
-    get_fragmentation_description,
-    get_hesitation_density_description,
-    get_rhythmic_bounce_description,
-    get_self_deprecation_description,
-    get_softener_density_description,
+    _V2_DIALOG_GENERATOR_PROMPT,
 )
-from kazusa_ai_chatbot.utils import (
-    build_affinity_block,
-    parse_llm_json_output,
-)
+from kazusa_ai_chatbot.utils import parse_llm_json_output
 from tests.llm_trace import write_llm_trace
+from tests.cognition_core_v2_test_helpers import canonical_episode
 
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm]
@@ -61,8 +49,8 @@ def _character_profile() -> dict:
     profile = {
         'name': 'Kazusa',
         'mood': 'Neutral',
-        'global_vibe': 'Calm',
-        'reflection_summary': '刚才只是普通聊天，情绪轻快。',
+        'vibe_check': 'Calm',
+        'character_reflection': '刚才只是普通聊天，情绪轻快。',
         'personality_brief': {
             'logic': '先判断事实和边界，再给出克制回应。',
             'tempo': '短句为主，必要时分行。',
@@ -89,63 +77,25 @@ def _character_profile() -> dict:
 def _render_system_prompt(character_profile: dict) -> SystemMessage:
     """Render the exact dialog-generator system prompt for a profile."""
 
-    ltp = character_profile['linguistic_texture_profile']
-    prompt = _DIALOG_GENERATOR_PROMPT.format(
-        character_name=character_profile['name'],
-        character_logic=character_profile['personality_brief']['logic'],
-        character_tempo=character_profile['personality_brief']['tempo'],
-        character_defense=character_profile['personality_brief']['defense'],
-        character_quirks=character_profile['personality_brief']['quirks'],
-        character_taboos=character_profile['personality_brief']['taboos'],
-        ltp_hesitation_density=get_hesitation_density_description(
-            ltp['hesitation_density']
-        ),
-        ltp_fragmentation=get_fragmentation_description(ltp['fragmentation']),
-        ltp_emotional_leakage=get_emotional_leakage_description(
-            ltp['emotional_leakage']
-        ),
-        ltp_rhythmic_bounce=get_rhythmic_bounce_description(
-            ltp['rhythmic_bounce']
-        ),
-        ltp_direct_assertion=get_direct_assertion_description(
-            ltp['direct_assertion']
-        ),
-        ltp_softener_density=get_softener_density_description(
-            ltp['softener_density']
-        ),
-        ltp_counter_questioning=get_counter_questioning_description(
-            ltp['counter_questioning']
-        ),
-        ltp_formalism_avoidance=get_formalism_avoidance_description(
-            ltp['formalism_avoidance']
-        ),
-        ltp_abstraction_reframing=get_abstraction_reframing_description(
-            ltp['abstraction_reframing']
-        ),
-        ltp_self_deprecation=get_self_deprecation_description(
-            ltp['self_deprecation']
-        ),
-    )
-    return SystemMessage(content=prompt)
+    del character_profile
+    return SystemMessage(content=_V2_DIALOG_GENERATOR_PROMPT)
 
 
 def _dialog_payload(character_profile: dict, case: dict) -> tuple[HumanMessage, list]:
     """Build the same human payload shape used by dialog_generator."""
 
-    affinity_block = build_affinity_block(case.get('affinity', 500))
     msg = {
-        'linguistic_directives': {
-            'rhetorical_strategy': case['rhetorical_strategy'],
-            'linguistic_style': case['linguistic_style'],
-            'accepted_user_preferences': [],
-            'content_plan': case['content_plan'],
-            'forbidden_phrases': [],
-        },
-        'contextual_directives': {
-            'social_distance': affinity_block['level'],
-            'emotional_intensity': case['emotional_intensity'],
-            'vibe_check': case['vibe_check'],
-            'relational_dynamic': case['relational_dynamic'],
+        'text_surface_output_v2': {
+            'schema_version': 'text_surface_output.v2',
+            'content_plan': case['content_plan']['semantic_content'],
+            'content_requirements': [case['content_plan']['visible_goal']],
+            'visible_boundaries': [],
+            'addressee_plan': ['current user'],
+            'style_guidance': (
+                f"{case['rhetorical_strategy']} {case['linguistic_style']} "
+                f"{case['content_plan']['rendering']}"
+            ),
+            'selected_surface_intent': case['content_plan']['visible_goal'],
         },
         'user_name': '测试用户',
     }
@@ -245,32 +195,26 @@ async def test_live_dialog_generator_node_accepts_deepseek_output() -> None:
     character_profile = _character_profile()
     state = {
         'internal_monologue': '这是普通整理建议，按事实回答就好。',
-        'action_directives': {
-            'contextual_directives': {
-                'social_distance': 'Neutral',
-                'emotional_intensity': '低',
-                'vibe_check': '事务协作',
-                'relational_dynamic': '普通协作关系',
-            },
-            'linguistic_directives': {
-                'rhetorical_strategy': '给出明确但不说教的建议。',
-                'linguistic_style': '务实、短句、略带吐槽。',
-                'accepted_user_preferences': [],
-                'content_plan': {
-                    'visible_goal': '认可用户先按用途分类。',
-                    'semantic_content': '先把充电、视频输出、用途待确认分开会比较省事。',
-                    'rendering': '25-45字。',
-                },
-                'forbidden_phrases': [],
-            },
-            'visual_directives': {},
+        'text_surface_output_v2': {
+            'schema_version': 'text_surface_output.v2',
+            'content_plan': '先把充电、视频输出、用途待确认分开会比较省事。',
+            'content_requirements': ['保持建议对象和分类动作不变。'],
+            'visible_boundaries': [],
+            'addressee_plan': ['测试用户'],
+            'style_guidance': '务实、短句、略带吐槽，但不说教。25-45字。',
+            'selected_surface_intent': '认可用户先按用途分类。',
         },
+        'cognitive_episode': canonical_episode(
+            episode_id='dialog-generator-live-contract',
+            content='请按用途给出整理建议。',
+        ),
         'chat_history_wide': [],
         'chat_history_recent': [],
         'platform_user_id': 'live-dialog-user',
         'platform_bot_id': 'live-dialog-bot',
+        'global_user_id': 'live-dialog-user',
         'user_name': '测试用户',
-        'user_profile': {'affinity': 500},
+        'user_profile': {},
         'character_profile': character_profile,
         'dialog_usage_mode': 'live_visible_reply',
     }

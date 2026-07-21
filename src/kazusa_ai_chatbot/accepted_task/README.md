@@ -51,7 +51,7 @@ L2d selected action
   -> deterministic action-spec materialization
   -> accepted-task lifecycle row
   -> optional internal background_work_request or requested-worker handoff
-  -> accepted_task_result_ready cognition episode
+  -> tool_result cognition episode
 ```
 
 The prompt-visible accepted-task fields are semantic only:
@@ -109,7 +109,7 @@ resolve to the same active task.
 
 ## Result Delivery
 
-Accepted-task-backed worker rows emit `accepted_task_result_ready` cognition
+Accepted-task-backed worker rows emit `tool_result` cognition
 episodes when complete.
 
 Dispatcher delivery synchronizes the accepted-task row to delivered or a
@@ -137,7 +137,7 @@ Tests for this boundary should verify:
 - materialization into validated requested-worker payloads for first-class
   deterministic worker handoffs;
 - status-check behavior that does not enqueue new work;
-- `accepted_task_result_ready` handoff into cognition;
+- `tool_result` handoff into cognition;
 - prompt projection that excludes queue, worker, lease, adapter, and database
   internals.
 

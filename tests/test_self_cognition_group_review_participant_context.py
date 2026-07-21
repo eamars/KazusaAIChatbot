@@ -6,6 +6,9 @@ from typing import Any
 
 import pytest
 
+from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+    build_acquaintance_user_state,
+)
 from kazusa_ai_chatbot.self_cognition import (
     group_review_participant_context as context_module,
 )
@@ -43,6 +46,19 @@ class RecordingConversationAgent:
         return result
 
 
+def _native_profile(global_user_id: str, display_name: str) -> dict[str, Any]:
+    """Build a profile fixture with the canonical V2 relationship state."""
+
+    return {
+        "global_user_id": global_user_id,
+        "display_name": display_name,
+        "cognition_state": build_acquaintance_user_state(
+            global_user_id=global_user_id,
+            updated_at="2026-05-18T04:00:00Z",
+        ),
+    }
+
+
 @pytest.mark.asyncio
 async def test_direct_cue_selects_one_primary_social_beat(
     monkeypatch: pytest.MonkeyPatch,
@@ -57,9 +73,17 @@ async def test_direct_cue_selects_one_primary_social_beat(
         profile = {
             "global_user_id": global_user_id,
             "display_name": "Profile Bob",
-            "affinity": 700,
-            "last_relationship_insight": "Bob tests boundaries playfully.",
+            "cognition_state": build_acquaintance_user_state(
+                global_user_id=global_user_id,
+                updated_at="2026-05-18T04:00:00Z",
+            ),
         }
+        profile["cognition_state"]["relationship"].update(
+            {
+                "positive_regard": 70,
+                "attachment": 70,
+            },
+        )
         return profile
 
     async def build_user_engagement_relevance_context(
@@ -136,11 +160,8 @@ async def test_direct_cue_selects_one_primary_social_beat(
     primary = result["primary_reply_target"]
     assert primary["display_name"] == "Bob"
     assert primary["reply_target_fit"] == "high"
-    assert primary["relationship_label"] == "Warm"
-    assert primary["relationship_band"] == "positive"
-    assert primary["last_relationship_insight"] == (
-        "Bob tests boundaries playfully."
-    )
+    assert primary["relationship_label"] == "强连接"
+    assert primary["relationship_band"] == "正向"
     assert primary["engagement_guidelines"] == [
         "Keep it brief and do not fan out.",
     ]
@@ -212,7 +233,7 @@ async def test_missing_global_user_id_degrades_to_visible_only(
     assert primary["display_name"] == "Display Only"
     assert primary["relationship_label"] == "unknown"
     assert primary["relationship_band"] == "unknown"
-    assert primary["last_relationship_insight"] == ""
+    assert "semantic_relationship_projection" not in primary
     assert primary["engagement_guidelines"] == []
     assert primary["nearby_conversation_evidence"] == []
     assert primary["visible_samples"] == ["A visible-only comment."]
@@ -226,13 +247,7 @@ async def test_group_pile_on_collapses_high_fit_participants(
     """Multiple direct cues should become one shared-flow focus."""
 
     async def get_user_profile(global_user_id: str) -> dict[str, Any]:
-        profile = {
-            "global_user_id": global_user_id,
-            "display_name": global_user_id,
-            "affinity": 500,
-            "last_relationship_insight": "",
-        }
-        return profile
+        return _native_profile(global_user_id, global_user_id)
 
     async def build_user_engagement_relevance_context(
         global_user_id: str,
@@ -294,13 +309,7 @@ async def test_caps_visible_samples_and_conversation_evidence(
     """Prompt-facing participant context should cap samples and evidence."""
 
     async def get_user_profile(global_user_id: str) -> dict[str, Any]:
-        profile = {
-            "global_user_id": global_user_id,
-            "display_name": "Topic Author",
-            "affinity": 500,
-            "last_relationship_insight": "stable",
-        }
-        return profile
+        return _native_profile(global_user_id, "Topic Author")
 
     async def build_user_engagement_relevance_context(
         global_user_id: str,

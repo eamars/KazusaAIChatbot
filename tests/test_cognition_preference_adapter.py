@@ -1,182 +1,32 @@
-from __future__ import annotations
+"""V2 preference surface ownership tests."""
 
-import json
-from types import SimpleNamespace
+import inspect
 
-import pytest
-
-from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
-from kazusa_ai_chatbot.cognition_chain_core.stages.l3 import call_preference_adapter
-from kazusa_ai_chatbot.time_boundary import build_turn_clock
-from llm_test_helpers import bind_test_llm
+from kazusa_ai_chatbot.cognition_core_v2 import surface_stages
+from kazusa_ai_chatbot.cognition_core_v2.surface_stages import (
+    PREFERENCE_SYSTEM_PROMPT,
+)
 
 
-class _FakePreferenceAdapterLlm:
-    """Small async fake for the preference adapter LLM."""
+def test_preference_stage_owns_visible_boundaries_only() -> None:
+    """Preferences shape rendering without rewriting cognition."""
 
-    def __init__(self, content: str) -> None:
-        self._content = content
+    prompt = PREFERENCE_SYSTEM_PROMPT.casefold()
 
-    async def ainvoke(self, _messages: list, *, config=None) -> SimpleNamespace:
-        return SimpleNamespace(content=self._content)
-
-
-class _CapturingPreferenceAdapterLlm:
-    """Async fake that captures the preference adapter prompt payload."""
-
-    def __init__(self, content: str) -> None:
-        """Create the fake with a fixed response."""
-
-        self._content = content
-        self.payload: dict | None = None
-
-    async def ainvoke(self, messages: list, *, config=None) -> SimpleNamespace:
-        """Capture the human JSON payload and return the configured content."""
-
-        self.payload = json.loads(messages[1].content)
-        return_value = SimpleNamespace(content=self._content)
-        return return_value
+    assert "真实存在的可见表达边界" in prompt
+    assert "没有相应约束时返回空列表" in prompt
+    assert "不写最终对话" in prompt
 
 
-def _minimal_text_chat_episode() -> dict:
-    """Build a valid text-chat cognitive episode for direct L3 tests."""
-    turn_clock = build_turn_clock("2026-04-27 00:00:00")
-    episode = build_text_chat_cognitive_episode(
-        episode_id="episode-preference",
-        percept_id="percept-preference",
-        storage_timestamp_utc=turn_clock["storage_timestamp_utc"],
-        local_time_context=turn_clock["local_time_context"],
-        user_input="please keep replies short",
-        platform="qq",
-        platform_channel_id="chan-1",
-        channel_type="group",
-        platform_message_id="msg-1",
-        platform_user_id="platform-user-1",
-        global_user_id="user-1",
-        user_name="User",
-        active_turn_platform_message_ids=[],
-        active_turn_conversation_row_ids=[],
-        debug_modes={},
-        target_addressed_user_ids=["character-1"],
-        target_broadcast=False,
-    )
-    return episode
+def test_preference_stage_has_no_keyword_based_user_input_adapter() -> None:
+    """The LLM owns preference meaning; code only bounds its typed result."""
 
+    source = "\n".join((
+        inspect.getsource(surface_stages.run_preference_stage),
+        inspect.getsource(surface_stages._run_surface_stage),
+    ))
 
-def _preference_state() -> dict:
-    """Build the minimal state consumed by ``call_preference_adapter``."""
-
-    return {
-        "cognitive_episode": _minimal_text_chat_episode(),
-        "decontexualized_input": "please keep replies short",
-        "rag_result": {
-            "user_image": {
-                "user_memory_context": {
-                    "stable_patterns": [],
-                    "recent_shifts": [],
-                    "objective_facts": [],
-                    "milestones": [],
-                    "active_commitments": [],
-                },
-            },
-            "user_memory_unit_candidates": [],
-        },
-        "user_profile": {},
-        "character_profile": {
-            "name": "Kazusa",
-            "personality_brief": {"taboos": []},
-        },
-        "internal_monologue": "The request is harmless.",
-        "logical_stance": "CONFIRM",
-        "character_intent": "PROVIDE",
-        "linguistic_style": "concise",
-        "content_plan": {},
-    }
-
-
-@pytest.mark.asyncio
-async def test_preference_adapter_accepts_string_preferences(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Preference adapter preserves native string preference items."""
-
-    monkeypatch.setattr(
-        "kazusa_ai_chatbot.cognition_chain_core.stages.l3._preference_adapter_llm",
-        bind_test_llm(
-            _FakePreferenceAdapterLlm(
-                '{"accepted_user_preferences":[" concise replies ", "soft tone"]}',
-            ),
-            "preference_adapter",
-        ),
-    )
-
-    result = await call_preference_adapter(_preference_state())
-
-    assert result["accepted_user_preferences"] == ["concise replies", "soft tone"]
-
-
-@pytest.mark.asyncio
-async def test_preference_adapter_does_not_stringify_container_items(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Preference adapter must not turn dict/list preference items into repr text."""
-
-    monkeypatch.setattr(
-        "kazusa_ai_chatbot.cognition_chain_core.stages.l3._preference_adapter_llm",
-        bind_test_llm(
-            _FakePreferenceAdapterLlm(
-                '{"accepted_user_preferences":[{"text":"do not stringify"},["bad"]," keep me "]}',
-            ),
-            "preference_adapter",
-        ),
-    )
-
-    result = await call_preference_adapter(_preference_state())
-
-    assert result["accepted_user_preferences"] == ["keep me"]
-
-
-@pytest.mark.asyncio
-async def test_preference_adapter_preserves_commitment_over_style_overlay(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Accepted commitments remain higher authority than style guidance."""
-
-    fake_llm = _CapturingPreferenceAdapterLlm(
-        '{"accepted_user_preferences":["讨论工作时尽量使用更短的句子。"]}'
-    )
-    monkeypatch.setattr(
-        "kazusa_ai_chatbot.cognition_chain_core.stages.l3._preference_adapter_llm",
-        bind_test_llm(fake_llm, "preference_adapter"),
-    )
-    state = _preference_state()
-    active_commitment = {
-        "fact": "用户和角色已约定讨论工作时使用更短的句子。",
-        "subjective_appraisal": "角色认为这是清楚且可执行的表达约定。",
-        "relationship_signal": "讨论工作时优先短句。",
-        "updated_at": "2026-05-06 10:00",
-    }
-    user_image = state["rag_result"]["user_image"]
-    user_memory_context = user_image["user_memory_context"]
-    user_memory_context["active_commitments"] = [active_commitment]
-    state["interaction_style_context"] = {
-        "user_style": {
-            "speech_guidelines": ["可使用更长、更流动的表达。"],
-            "social_guidelines": [],
-            "pacing_guidelines": [],
-            "engagement_guidelines": [],
-            "confidence": "medium",
-        },
-        "application_order": ["user_style"],
-    }
-
-    result = await call_preference_adapter(state)
-
-    assert result["accepted_user_preferences"] == [
-        "讨论工作时尽量使用更短的句子。"
-    ]
-    assert "更长" not in "".join(result["accepted_user_preferences"])
-    assert fake_llm.payload["active_commitments"] == [active_commitment]
-    assert fake_llm.payload["interaction_style_context"] == state[
-        "interaction_style_context"
-    ]
+    assert "services.llm" in source
+    assert ".ainvoke" in source
+    assert "user_input" not in source
+    assert "keyword" not in source

@@ -85,6 +85,9 @@ ARTIFACT_ACTION_CANDIDATE = "self_cognition_action_candidate.json"
 ARTIFACT_DISPATCH_RESULT = "self_cognition_dispatch_result.json"
 ARTIFACT_CONSOLIDATION_OUTCOME = "self_cognition_consolidation_outcome.json"
 ARTIFACT_LOOP_TRACE = "self_cognition_loop_trace.md"
+RUNTIME_COGNITIVE_EPISODE = "cognitive_episode"
+RUNTIME_CONSOLIDATION_STATE = "consolidation_state"
+RUNTIME_EPISODE_TRACE = "episode_trace"
 TRACKING_ARTIFACT_NAMES = frozenset(
     (
         ARTIFACT_TRIGGER_RECORD,
@@ -108,7 +111,6 @@ RAG_SUPERVISOR_INVOCATION_LIMIT = 1
 COGNITION_CALL_LIMIT = 1
 DIALOG_RENDER_CALL_LIMIT = 1
 TOPIC_LIMIT = 1
-DEFAULT_SELF_COGNITION_AFFINITY = 500
 STABLE_ID_DIGEST_PREFIX_LENGTH = 24
 SOURCE_VISIBLE_CONTEXT_LIMIT = 6
 DEFAULT_SELF_COGNITION_ASSISTANT_GLOBAL_USER_ID = (
@@ -218,8 +220,6 @@ class SelfCognitionCase(TypedDict, total=False):
     delivery_mention_users: list[dict[str, str]]
     conversation_progress: dict[str, Any]
     group_activity_window: dict[str, Any]
-    current_mood: str
-    global_vibe: str
     reflection_modifier: dict[str, Any]
     existing_attempts: list[dict[str, Any]]
     character_profile: dict[str, Any]
@@ -230,6 +230,7 @@ class SelfCognitionCase(TypedDict, total=False):
     budget: SelfCognitionBudget
     source_calendar_run_id: str
     source_calendar_skip_reason: str
+    cognition_source: dict[str, str]
     source_action_attempt_id: str
     delivery_target: SelfCognitionDeliveryTarget
     target_binding_status: Literal["bound", "failed"]
@@ -252,6 +253,4 @@ class SourcePacket(TypedDict):
     visible_context: list[dict[str, Any]]
     conversation_progress: NotRequired[dict[str, Any]]
     group_activity_window: NotRequired[dict[str, Any]]
-    current_mood: NotRequired[str]
-    global_vibe: NotRequired[str]
     reflection_modifier: NotRequired[dict[str, Any]]

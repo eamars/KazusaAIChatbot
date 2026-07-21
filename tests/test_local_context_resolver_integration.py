@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
+from tests.cognition_core_v2_test_helpers import canonical_user_message_episode
 from kazusa_ai_chatbot.cognition_resolver import capabilities
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     RESOLVER_CAPABILITY_REQUEST_VERSION,
@@ -20,6 +20,9 @@ from kazusa_ai_chatbot.local_context_resolver import (
     LOCAL_CONTEXT_RESOLVER_CONTEXT_VERSION,
     LOCAL_CONTEXT_RESOLVER_OPTIONS_VERSION,
     LOCAL_CONTEXT_RESOLVER_REQUEST_VERSION,
+)
+from kazusa_ai_chatbot.local_context_resolver import (
+    service as local_context_service,
 )
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
 
@@ -43,7 +46,7 @@ def _persona_state() -> dict[str, Any]:
     """Build a production-like persona state for resolver integration tests."""
 
     turn_clock = build_turn_clock("2026-07-04 09:30:00")
-    episode = build_text_chat_cognitive_episode(
+    episode = canonical_user_message_episode(
         episode_id="local-context-cutover-episode",
         percept_id="local-context-cutover-percept",
         storage_timestamp_utc=turn_clock["storage_timestamp_utc"],
@@ -77,7 +80,7 @@ def _persona_state() -> dict[str, Any]:
         "platform_bot_id": "bot-123",
         "global_user_id": "global-user-123",
         "user_name": "Test User",
-        "user_profile": {"affinity": 500},
+        "user_profile": {"relationship_state": 500},
         "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
         "local_time_context": turn_clock["local_time_context"],
         "prompt_message_context": {
@@ -276,6 +279,49 @@ async def test_local_context_recall_uses_rag3_public_io(
     assert event_kwargs["agent_name"] == "resolver_local_context_recall"
     assert event_kwargs["status"] == "succeeded"
     assert event_kwargs["retrieval_count"] == 2
+
+
+async def test_local_context_blocked_packet_is_failed_observation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A bounded resolver failure must retain failed execution truth."""
+
+    async def resolve_local_context(
+        request: dict[str, Any],
+        _context: dict[str, Any],
+        _options: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Return the production bounded failure packet."""
+
+        return local_context_service._blocked_packet_from_reason(
+            objective=request["objective"],
+            reason="planner output was invalid after bounded repair",
+            failure_stage="local_resolution",
+        )
+
+    record_rag_stage_event = AsyncMock()
+    monkeypatch.setattr(
+        capabilities,
+        "resolve_local_context",
+        resolve_local_context,
+    )
+    monkeypatch.setattr(
+        capabilities.event_logging,
+        "record_rag_stage_event",
+        record_rag_stage_event,
+    )
+
+    observation = await capabilities.execute_resolver_capability_request(
+        _resolver_request(),
+        _persona_state(),
+    )
+
+    assert observation["status"] == "failed"
+    assert observation["evidence_refs"] == []
+    assert "failed" in observation["prompt_safe_summary"].lower()
+    event_kwargs = record_rag_stage_event.await_args.kwargs
+    assert event_kwargs["status"] == "failed"
+    assert event_kwargs["retrieval_count"] == 0
 
 
 async def test_first_cycle_prewarm_uses_memory_worker_without_rag3_resolver(

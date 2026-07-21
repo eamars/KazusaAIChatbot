@@ -7,6 +7,8 @@ labels. These complement the unit-level tests in ``test_time_boundary.py``.
 
 from __future__ import annotations
 
+import pytest
+
 import json
 import re
 from typing import Any
@@ -650,60 +652,6 @@ def test_message_row_text_uses_local_timestamp() -> None:
 # ---------------------------------------------------------------------------
 # Cognition prompt helper projection
 # ---------------------------------------------------------------------------
-
-
-def test_cognition_helpers_project_rag_and_history_times() -> None:
-    """Cognition L2/L3 helper payloads should not expose stored UTC values."""
-    from kazusa_ai_chatbot.cognition_chain_core.stages import l2
-    from kazusa_ai_chatbot.cognition_chain_core.stages import l3
-
-    rag_result = {
-        "user_image": {
-            "user_memory_context": {
-                "active_commitments": [
-                    {
-                        "fact": "Tester asked for a reminder.",
-                        "updated_at": "2026-05-02T20:00:00+00:00",
-                    },
-                ],
-                "stable_patterns": [],
-                "recent_shifts": [],
-                "objective_facts": [],
-                "milestones": [],
-            },
-            "updated_at": "2026-05-02T20:01:00+00:00",
-        },
-        "known_facts": [
-            {
-                "raw_result": {
-                    "timestamp": "2026-05-02T20:02:00+00:00",
-                },
-            },
-        ],
-        "user_memory_unit_candidates": [
-            {"timestamp": "2026-05-02T20:03:00+00:00"},
-        ],
-    }
-    state = {"rag_result": rag_result}
-    chat_history = [
-        {
-            "role": "user",
-            "content": "hello",
-            "timestamp": "2026-05-02T20:04:00+00:00",
-        },
-    ]
-
-    _assert_no_utc_leak(l2._current_user_rag_bundle(state), "$.l2.user_bundle")
-    _assert_no_utc_leak(l2._cognition_rag_result(rag_result), "$.l2.rag")
-    _assert_no_utc_leak(l3._current_user_rag_bundle(state), "$.l3.user_bundle")
-    _assert_no_utc_leak(l3._cognition_rag_result(rag_result), "$.l3.rag")
-    from kazusa_ai_chatbot.conversation_history_prompt_projection import (
-        project_conversation_history_for_llm,
-    )
-    _assert_no_utc_leak(
-        project_conversation_history_for_llm(chat_history),
-        "$.l2c2.social_context_history",
-    )
 
 
 # ---------------------------------------------------------------------------

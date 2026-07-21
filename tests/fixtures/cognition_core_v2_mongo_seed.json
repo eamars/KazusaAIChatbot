@@ -1,0 +1,242 @@
+{
+  "schema_version": "cognition_core_v2_mongo_seed.v1",
+  "emotion_seed_phases": ["begin", "sustain", "fade", "negative"],
+  "seed_documents": [
+    {
+      "collection": "character_state",
+      "selector": {"_id": "global"},
+      "permitted_stored_sibling_fields": [
+        "boundary_profile",
+        "global_user_id",
+        "linguistic_texture_profile",
+        "name",
+        "personality_brief"
+      ],
+      "document": {
+        "_id": "global",
+        "cognition_state": {
+          "schema_version": "cognition_state.v2",
+          "state_scope": "character",
+          "updated_at": "2026-07-14T00:00:00Z",
+          "drives": {
+            "autonomy": {"importance": 75, "pressure": 20},
+            "connection": {"importance": 70, "pressure": 20},
+            "safety": {"importance": 65, "pressure": 15},
+            "competence": {"importance": 70, "pressure": 20},
+            "care": {"importance": 80, "pressure": 20},
+            "integrity": {"importance": 80, "pressure": 15},
+            "exploration": {"importance": 65, "pressure": 20},
+            "meaning": {"importance": 70, "pressure": 15}
+          },
+          "standards": [
+            {
+              "standard_id": "honesty",
+              "description": "be truthful",
+              "importance": 80
+            },
+            {
+              "standard_id": "avoid_harm",
+              "description": "avoid causing needless harm",
+              "importance": 85
+            },
+            {
+              "standard_id": "respect_boundaries",
+              "description": "respect personal boundaries",
+              "importance": 85
+            },
+            {
+              "standard_id": "follow_through",
+              "description": "honor accepted commitments",
+              "importance": 80
+            },
+            {
+              "standard_id": "self_respect",
+              "description": "protect dignity and autonomy",
+              "importance": 75
+            }
+          ],
+          "meaning_state": {
+            "purpose_coherence": 70,
+            "agency": 70,
+            "identity_continuity": 80,
+            "salience": 0
+          },
+          "goals": [],
+          "threats": [],
+          "active_events": [],
+          "knowledge_gaps": [],
+          "affect_activations": []
+        }
+      }
+    },
+    {
+      "collection": "user_profiles",
+      "selector": {"global_user_id": "seed-s2-acquaintance"},
+      "document": {
+        "global_user_id": "seed-s2-acquaintance",
+        "cognition_state": {
+          "schema_version": "cognition_state.v2",
+          "state_scope": "user",
+          "owner_user_id": "seed-s2-acquaintance",
+          "updated_at": "2026-07-14T00:00:00Z",
+          "relationship": {
+            "relationship_id": "relationship:user:seed-s2-acquaintance",
+            "other_user_id": "seed-s2-acquaintance",
+            "familiarity": 10,
+            "positive_regard": 0,
+            "trust": 0,
+            "attachment": 0,
+            "desired_closeness": 10,
+            "perceived_closeness": 10,
+            "care": 0,
+            "boundary_safety": 0,
+            "exclusivity": 0,
+            "unresolved_injury": 0,
+            "salience": 0,
+            "updated_at": "2026-07-14T00:00:00Z",
+            "evidence_refs": []
+          },
+          "goals": [],
+          "threats": [],
+          "active_events": [],
+          "knowledge_gaps": [],
+          "affect_activations": []
+        }
+      }
+    },
+    {
+      "collection": "user_profiles",
+      "selector": {"global_user_id": "seed-s2-established"},
+      "document": {
+        "global_user_id": "seed-s2-established",
+        "cognition_state": {
+          "schema_version": "cognition_state.v2",
+          "state_scope": "user",
+          "owner_user_id": "seed-s2-established",
+          "updated_at": "2026-07-14T00:00:00Z",
+          "relationship": {
+            "relationship_id": "relationship:user:seed-s2-established",
+            "other_user_id": "seed-s2-established",
+            "familiarity": 70,
+            "positive_regard": 60,
+            "trust": 60,
+            "attachment": 70,
+            "desired_closeness": 70,
+            "perceived_closeness": 60,
+            "care": 70,
+            "boundary_safety": 50,
+            "exclusivity": 60,
+            "unresolved_injury": 0,
+            "salience": 60,
+            "updated_at": "2026-07-14T00:00:00Z",
+            "evidence_refs": []
+          },
+          "goals": [],
+          "threats": [],
+          "active_events": [],
+          "knowledge_gaps": [],
+          "affect_activations": []
+        }
+      }
+    },
+    {
+      "collection": "conversation_history",
+      "selector": {"_id": "seed-s2-jealousy"},
+      "document": {
+        "_id": "seed-s2-jealousy",
+        "seed_id": "seed-s2-jealousy",
+        "owner_scope": "seed-s2-established",
+        "emotion_id": "jealousy",
+        "body_text": "synthetic jealousy episode evidence",
+        "source_metadata": {
+          "fixture": "cognition_core_v2_stage_2",
+          "synthetic": true
+        }
+      }
+    },
+    {
+      "collection": "conversation_history",
+      "selector": {"_id": "seed-s2-guilt"},
+      "document": {
+        "_id": "seed-s2-guilt",
+        "seed_id": "seed-s2-guilt",
+        "owner_scope": "seed-s2-established",
+        "emotion_id": "guilt",
+        "body_text": "synthetic guilt episode evidence",
+        "source_metadata": {
+          "fixture": "cognition_core_v2_stage_2",
+          "synthetic": true
+        }
+      }
+    },
+    {
+      "collection": "conversation_history",
+      "selector": {"_id": "seed-s2-relief"},
+      "document": {
+        "_id": "seed-s2-relief",
+        "seed_id": "seed-s2-relief",
+        "owner_scope": "seed-s2-established",
+        "emotion_id": "relief",
+        "body_text": "synthetic relief episode evidence",
+        "source_metadata": {
+          "fixture": "cognition_core_v2_stage_2",
+          "synthetic": true
+        }
+      }
+    },
+    {
+      "collection": "memory",
+      "selector": {"_id": "seed-s2-nostalgia"},
+      "document": {
+        "_id": "seed-s2-nostalgia",
+        "seed_id": "seed-s2-nostalgia",
+        "owner_scope": "seed-s2-established",
+        "memory_text": "synthetic autobiographical continuity evidence",
+        "source_metadata": {
+          "fixture": "cognition_core_v2_stage_2",
+          "synthetic": true
+        }
+      }
+    },
+    {
+      "collection": "memory",
+      "selector": {"_id": "seed-s2-promoted-reflection"},
+      "document": {
+        "_id": "seed-s2-promoted-reflection",
+        "seed_id": "seed-s2-promoted-reflection",
+        "owner_scope": "seed-s2-established",
+        "memory_text": "synthetic promoted reflection evidence",
+        "source_metadata": {
+          "fixture": "cognition_core_v2_stage_2",
+          "synthetic": true
+        }
+      }
+    },
+    {
+      "collection": "accepted_tasks",
+      "selector": {"_id": "seed-s2-task-result"},
+      "document": {
+        "_id": "seed-s2-task-result",
+        "seed_id": "seed-s2-task-result",
+        "owner_scope": "seed-s2-established",
+        "status": "completed",
+        "result_text": "synthetic accepted task result",
+        "source_metadata": {
+          "fixture": "cognition_core_v2_stage_2",
+          "synthetic": true
+        }
+      }
+    },
+    {
+      "fixture_only": true,
+      "seed_id": "seed-s2-action-result",
+      "owner_scope": "seed-s2-established",
+      "action_kind": "synthetic_action",
+      "result_text": "synthetic action result",
+      "source_metadata": {
+        "fixture": "cognition_core_v2_stage_2",
+        "synthetic": true
+      }
+    }
+  ]
+}

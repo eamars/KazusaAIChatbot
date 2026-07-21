@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Literal, TypedDict
+
+from kazusa_ai_chatbot.cognition_core_v2.contracts import RoleRefV2
 
 ACTION_SPEC_VERSION = "action_spec.v1"
 ACTION_SOURCE_REF_VERSION = "action_source_ref.v1"
@@ -177,6 +180,57 @@ class CapabilitySpecV1(TypedDict):
     prompt_projection_policy: PolicyRefV1
 
 
+class AvailabilityProbeResultV1(TypedDict):
+    """Deterministic availability result for one capability probe."""
+
+    status: Literal["available", "degraded", "unavailable"]
+    reason_code: str
+    checked_at: str
+    expires_at: str
+
+
+class RuntimeCapabilitySnapshotV1(TypedDict):
+    """Side-effect-free runtime capability health snapshot."""
+
+    checked_at: str
+    expires_at: str
+    route_health: Mapping[str, str]
+    repository_access: Mapping[str, Literal["read_write", "read_only", "down"]]
+    worker_status: Mapping[str, str]
+    scheduler_status: str
+    adapter_target_status: Mapping[str, str]
+    coding_workspace_status: str
+    permissions: Mapping[str, bool]
+
+
+class ActionAvailabilityContextV1(TypedDict, total=False):
+    """Episode-local target and work-kind facts used by availability probes."""
+
+    source_kind: str
+    target_scope: Mapping[str, object]
+    requested_work_kind: str
+    permission_ref: str
+
+
+class AffordanceSpecV1(TypedDict):
+    """Prompt-safe current capability affordance."""
+
+    schema_version: Literal["affordance_spec.v1"]
+    capability_kind: str
+    owner: str
+    surface: str
+    availability: Literal["available", "unavailable", "degraded"]
+    visibility: Literal["private", "preview", "user_visible"]
+    latency_tier: Literal["live", "background", "scheduled"]
+    cost_tier: Literal["none", "low", "medium", "high"]
+    risk_tier: Literal["low", "medium", "high"]
+    allowed_cognition_modes: list[Literal["deliberative", "reflex"]]
+    allowed_continuation_modes: list[str]
+    permission_policy: PolicyRefV1
+    params_summary: dict[str, str]
+    prompt_affordance: str
+
+
 class ActionSpecV1(TypedDict):
     """Materialized modality-neutral action residue from semantic requests."""
 
@@ -202,6 +256,18 @@ class ActionEvalResult(TypedDict):
     idempotency_key: str | None
     handler_owner: str | None
     errors: list[str]
+
+
+class SemanticActionRequestV2(TypedDict):
+    """Planner-selected V2 request before action-spec materialization."""
+
+    action_kind: str
+    decision: str
+    context_ref: str
+    semantic_goal: str
+    reason: str
+    target_roles: list[RoleRefV2]
+    evidence_handles: list[str]
 
 
 class SpeakParamsV1(TypedDict):
@@ -356,6 +422,61 @@ def validate_action_spec(value: object) -> ActionSpecV1:
     _require_non_empty_string(data, "reason")
     return_value = data
     return return_value
+
+
+def validate_semantic_action_request_v2(
+    value: object,
+    *,
+    available_action_kinds: set[str],
+) -> SemanticActionRequestV2:
+    """Validate a V2 route request without selecting an executable handler."""
+
+    if not isinstance(value, dict) or set(value) != {
+        "action_kind",
+        "decision",
+        "context_ref",
+        "semantic_goal",
+        "reason",
+        "target_roles",
+        "evidence_handles",
+    }:
+        raise ActionValidationError("V2 action request fields are not exact")
+    action_kind = value["action_kind"]
+    decision = value["decision"]
+    context_ref = value["context_ref"]
+    semantic_goal = value["semantic_goal"]
+    reason = value["reason"]
+    target_roles = value["target_roles"]
+    evidence_handles = value["evidence_handles"]
+    if action_kind not in available_action_kinds:
+        raise ActionValidationError("V2 action kind is unavailable")
+    if not isinstance(semantic_goal, str) or not semantic_goal.strip():
+        raise ActionValidationError("V2 semantic goal is invalid")
+    if not isinstance(decision, str):
+        raise ActionValidationError("V2 action decision is invalid")
+    if not isinstance(context_ref, str) or len(context_ref) > 200:
+        raise ActionValidationError("V2 action context ref is invalid")
+    if not isinstance(reason, str) or not reason.strip():
+        raise ActionValidationError("V2 action reason is invalid")
+    if not isinstance(target_roles, list) or not isinstance(evidence_handles, list):
+        raise ActionValidationError("V2 action request lists are invalid")
+    for role in target_roles:
+        if not isinstance(role, dict) or set(role) != {
+            "role",
+            "entity_kind",
+            "entity_id",
+        }:
+            raise ActionValidationError("V2 target role is invalid")
+        if any(
+            not isinstance(role[field_name], str) or not role[field_name].strip()
+            for field_name in ("role", "entity_kind", "entity_id")
+        ):
+            raise ActionValidationError("V2 target role text is invalid")
+    if any(not isinstance(handle, str) or not handle for handle in evidence_handles):
+        raise ActionValidationError("V2 evidence handles are invalid")
+    if len(evidence_handles) != len(set(evidence_handles)):
+        raise ActionValidationError("V2 evidence handles are duplicated")
+    return dict(value)  # type: ignore[return-value]
 
 
 def _require_mapping(value: object, label: str) -> dict:

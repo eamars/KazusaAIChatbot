@@ -89,7 +89,7 @@ them through a deterministic `requested_worker` handoff whose action-spec
 handler already validated the fields.
 
 Result handoff is also fixed. Text or artifact-producing workers complete the
-job and allow `accepted_task_result_ready` cognition to decide whether and how
+job and allow `tool_result` cognition to decide whether and how
 to speak. Scheduled-contact workers such as `future_speak` may set
 `worker_metadata.skip_result_delivery=true` only when they create another
 durable follow-up path, for example a calendar `future_cognition` run. Workers

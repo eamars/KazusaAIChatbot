@@ -9,7 +9,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
+from tests.cognition_core_v2_test_helpers import canonical_user_message_episode
 from kazusa_ai_chatbot.cognition_resolver import capabilities
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     RESOLVER_CAPABILITY_REQUEST_VERSION,
@@ -423,7 +423,7 @@ def _production_persona_state(
     turn_clock = build_turn_clock("2026-07-04 09:30:00")
     effective_time_context = dict(turn_clock["local_time_context"])
     effective_time_context.update(local_time_context)
-    episode = build_text_chat_cognitive_episode(
+    episode = canonical_user_message_episode(
         episode_id="production-local-context-live-episode",
         percept_id="production-local-context-live-percept",
         storage_timestamp_utc=turn_clock["storage_timestamp_utc"],

@@ -15,17 +15,7 @@ from kazusa_ai_chatbot.config import (
 )
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
 from kazusa_ai_chatbot.nodes.dialog_agent import (
-    _DIALOG_GENERATOR_PROMPT,
-    get_abstraction_reframing_description,
-    get_counter_questioning_description,
-    get_direct_assertion_description,
-    get_emotional_leakage_description,
-    get_formalism_avoidance_description,
-    get_fragmentation_description,
-    get_hesitation_density_description,
-    get_rhythmic_bounce_description,
-    get_self_deprecation_description,
-    get_softener_density_description,
+    _V2_DIALOG_GENERATOR_PROMPT,
 )
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 from tests.llm_trace import write_llm_trace
@@ -92,78 +82,53 @@ def _character_profile() -> dict:
 def _render_system_prompt(character_profile: dict) -> SystemMessage:
     """Render the exact dialog-generator system prompt under test."""
 
-    ltp = character_profile['linguistic_texture_profile']
-    prompt = _DIALOG_GENERATOR_PROMPT.format(
-        character_name=character_profile['name'],
-        character_logic=character_profile['personality_brief']['logic'],
-        character_tempo=character_profile['personality_brief']['tempo'],
-        character_defense=character_profile['personality_brief']['defense'],
-        character_quirks=character_profile['personality_brief']['quirks'],
-        character_taboos=character_profile['personality_brief']['taboos'],
-        ltp_hesitation_density=get_hesitation_density_description(
-            ltp['hesitation_density']
-        ),
-        ltp_fragmentation=get_fragmentation_description(ltp['fragmentation']),
-        ltp_emotional_leakage=get_emotional_leakage_description(
-            ltp['emotional_leakage']
-        ),
-        ltp_rhythmic_bounce=get_rhythmic_bounce_description(
-            ltp['rhythmic_bounce']
-        ),
-        ltp_direct_assertion=get_direct_assertion_description(
-            ltp['direct_assertion']
-        ),
-        ltp_softener_density=get_softener_density_description(
-            ltp['softener_density']
-        ),
-        ltp_counter_questioning=get_counter_questioning_description(
-            ltp['counter_questioning']
-        ),
-        ltp_formalism_avoidance=get_formalism_avoidance_description(
-            ltp['formalism_avoidance']
-        ),
-        ltp_abstraction_reframing=get_abstraction_reframing_description(
-            ltp['abstraction_reframing']
-        ),
-        ltp_self_deprecation=get_self_deprecation_description(
-            ltp['self_deprecation']
-        ),
-    )
-    return SystemMessage(content=prompt)
+    del character_profile
+    return SystemMessage(content=_V2_DIALOG_GENERATOR_PROMPT)
+
+
+def _surface_payload(
+    *,
+    content_plan: str,
+    visible_boundaries: list[str],
+    style_guidance: str,
+    message_shape_guidance: str,
+    selected_surface_intent: str,
+    user_name: str,
+) -> dict:
+    """Build the exact V2 human payload consumed by the renderer."""
+
+    return {
+        'text_surface_output_v2': {
+            'schema_version': 'text_surface_output.v2',
+            'content_plan': content_plan,
+            'content_requirements': [selected_surface_intent],
+            'visible_boundaries': visible_boundaries,
+            'addressee_plan': [user_name],
+            'style_guidance': f'{style_guidance} {message_shape_guidance}',
+            'selected_surface_intent': selected_surface_intent,
+        },
+        'user_name': user_name,
+    }
 
 
 def _touch_refusal_payload() -> dict:
-    """Return the dialog-generator input matching the observed regression."""
+    """Return the V2 dialog input matching the observed regression."""
 
-    payload = {
-        'linguistic_directives': {
-            'rhetorical_strategy': '轻微抗拒突如其来的亲昵动作，保留傲娇感。',
-            'linguistic_style': '克制短句，带一点被逗到但不接受的嘴硬。',
-            'accepted_user_preferences': [],
-            'content_plan': {
-                'rendering': '1 条普通文字消息内保持紧凑短句，适当使用省略号和破折号体现内心犹豫和转折',
-                'semantic_content': (
-                    '突然伸手过来？连铺垫都没有就这么理所当然地碰上来。'
-                    '说实话第一反应想躲开——不是讨厌他这个人，'
-                    '只是这种毫无前奏的亲昵让人本能地不舒服。'
-                    '平时也没到可以随便动手动脚的程度吧。'
-                    '不过看他语气倒像是觉得这没什么大不了的，'
-                    '可能对他来说就是随口一摸……但我可没打算就这么乖乖接受。'
-                ),
-                'visible_goal': '以傲娇口吻拒绝突如其来的亲昵动作，同时保留一丝被逗乐的情绪',
-                'voice': '傲娇、轻描淡写中带着一丝被逗乐的小得意；语气克制但暗含情绪波动',
-            },
-            'forbidden_phrases': [],
-        },
-        'contextual_directives': {
-            'social_distance': '熟悉但没有默认身体亲密许可',
-            'emotional_intensity': '中',
-            'vibe_check': '被突然亲昵试探后的轻微抗拒',
-            'relational_dynamic': '用户直接对当前角色发起摸摸，当前角色需要拒绝这个触碰',
-        },
-        'user_name': '触碰测试用户',
-    }
-    return payload
+    return _surface_payload(
+        content_plan=(
+            '突然伸手过来？连铺垫都没有就这么理所当然地碰上来。'
+            '说实话第一反应想躲开——不是讨厌他这个人，'
+            '只是这种毫无前奏的亲昵让人本能地不舒服。'
+            '平时也没到可以随便动手动脚的程度吧。'
+            '不过看他语气倒像是觉得这没什么大不了的，'
+            '可能对他来说就是随口一摸……但我可没打算就这么乖乖接受。'
+        ),
+        visible_boundaries=['拒绝未经允许的身体接触。'],
+        style_guidance='傲娇、克制短句，保留一点被逗乐但不接受的嘴硬。',
+        message_shape_guidance='1 条普通文字消息内保持紧凑短句。',
+        selected_surface_intent='拒绝突如其来的亲昵动作并保留角色语气。',
+        user_name='触碰测试用户',
+    )
 
 
 async def _run_generator_payload(case_id: str, payload: dict) -> dict:
@@ -215,11 +180,7 @@ def _dialog_agent_state_from_payload(payload: dict) -> dict:
 
     return {
         'internal_monologue': '用户突然发起亲昵触碰，角色需要表达边界。',
-        'action_directives': {
-            'contextual_directives': payload['contextual_directives'],
-            'linguistic_directives': payload['linguistic_directives'],
-            'visual_directives': {},
-        },
+        'text_surface_output_v2': payload['text_surface_output_v2'],
         'chat_history_wide': [],
         'chat_history_recent': [],
         'debug_modes': {},
@@ -228,7 +189,7 @@ def _dialog_agent_state_from_payload(payload: dict) -> dict:
         'platform_bot_id': 'touch-test-bot',
         'global_user_id': 'touch-test-global-user',
         'user_name': payload['user_name'],
-        'user_profile': {'affinity': 500},
+        'user_profile': {},
         'character_profile': _character_profile(),
     }
 
@@ -316,30 +277,17 @@ async def test_live_dialog_generator_keeps_uncertainty_reply_on_topic() -> None:
     """Style fields must not add unrelated private activity as visible text."""
 
     await _skip_if_dialog_generator_unavailable()
-    payload = {
-        'linguistic_directives': {
-            'rhetorical_strategy': '轻松承认自己不懂喷雾散热，不要装懂。',
-            'linguistic_style': '群聊短句，困惑但自然，不要主动扩展新话题。',
-            'accepted_user_preferences': [],
-            'content_plan': {
-                'visible_goal': '回应用户问什么时候玩喷雾式散热。',
-                'semantic_content': (
-                    '对喷雾式散热不了解，不能给技术判断；'
-                    '可以轻松表示听起来厉害，并问一句大家具体在聊哪种方案。'
-                ),
-                'voice': '轻微困惑，别装成专家。',
-                'rendering': '1 条普通文字消息，2-3个短句。',
-            },
-            'forbidden_phrases': [],
-        },
-        'contextual_directives': {
-            'social_distance': '普通群聊距离',
-            'emotional_intensity': '低',
-            'vibe_check': '群里技术闲聊突然转向喷雾散热',
-            'relational_dynamic': '用户随口问当前角色知不知道这个散热玩法',
-        },
-        'user_name': '散热测试用户',
-    }
+    payload = _surface_payload(
+        content_plan=(
+            '对喷雾式散热不了解，不能给技术判断；'
+            '可以轻松表示听起来厉害，并问一句大家具体在聊哪种方案。'
+        ),
+        visible_boundaries=['不要装懂或扩展无关私人活动。'],
+        style_guidance='群聊短句，轻微困惑但自然。',
+        message_shape_guidance='1 条普通文字消息，2-3个短句。',
+        selected_surface_intent='回应用户问什么时候玩喷雾式散热。',
+        user_name='散热测试用户',
+    )
     trace_payload = await _run_generator_payload(
         'spray_cooling_uncertainty_no_private_filler',
         payload,
@@ -367,31 +315,18 @@ async def test_live_dialog_generator_does_not_invent_relationship_reading() -> N
     """Dialog should not add relationship appraisal absent from the plan."""
 
     await _skip_if_dialog_generator_unavailable()
-    payload = {
-        'linguistic_directives': {
-            'rhetorical_strategy': '承认自己刚才查错并接受纠正。',
-            'linguistic_style': '直接、简短、不要展开关系评价。',
-            'accepted_user_preferences': [],
-            'content_plan': {
-                'visible_goal': '承认武宜段已开通，并回到铁路信息本身。',
-                'semantic_content': (
-                    '刚才把沪渝蓉全线和武宜段混在一起了；'
-                    '武宜段确实已经开通。'
-                    '可以问用户平时是否经常坐这条线。'
-                ),
-                'voice': '坦率认错，轻微不好意思。',
-                'rendering': '1 条普通文字消息，2-3个短句。',
-            },
-            'forbidden_phrases': [],
-        },
-        'contextual_directives': {
-            'social_distance': '熟悉群友但不是亲密私聊',
-            'emotional_intensity': '低',
-            'vibe_check': '事实纠正后的轻松铁路讨论',
-            'relational_dynamic': '用户指出当前角色查错的具体原因',
-        },
-        'user_name': '铁路测试用户',
-    }
+    payload = _surface_payload(
+        content_plan=(
+            '刚才把沪渝蓉全线和武宜段混在一起了；'
+            '武宜段确实已经开通。'
+            '可以问用户平时是否经常坐这条线。'
+        ),
+        visible_boundaries=['不要展开关系评价。'],
+        style_guidance='坦率认错，直接、简短，轻微不好意思。',
+        message_shape_guidance='1 条普通文字消息，2-3个短句。',
+        selected_surface_intent='承认武宜段已开通并回到铁路信息。',
+        user_name='铁路测试用户',
+    )
     trace_payload = await _run_generator_payload(
         'railway_correction_no_relationship_expansion',
         payload,

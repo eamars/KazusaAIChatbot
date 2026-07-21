@@ -11,14 +11,6 @@ from kazusa_ai_chatbot.config import (
     BOUNDARY_CORE_LLM_BASE_URL,
     COGNITION_LLM_BASE_URL,
 )
-from kazusa_ai_chatbot.cognition_chain_core.stages.l1 import (
-    call_cognition_subconscious,
-)
-from kazusa_ai_chatbot.cognition_chain_core.stages.l2 import (
-    call_boundary_core_agent,
-    call_cognition_consciousness,
-    call_judgment_core_agent,
-)
 from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import (
     empty_user_memory_context,
 )
@@ -66,8 +58,8 @@ _DB_CHARACTER_PROFILE = {
     "name": "杏山千纱 (Kyōyama Kazusa)",
     "global_user_id": _CHARACTER_GLOBAL_USER_ID,
     "mood": "Annoyed",
-    "global_vibe": "Slightly Tense",
-    "reflection_summary": (
+    "vibe_check": "Slightly Tense",
+    "character_reflection": (
         "哼，一个小蛋糕就想蒙混过关？我收下不代表事情过去了，"
         "我会盯着他，看他下次还敢不敢回避问题。"
     ),
@@ -108,8 +100,8 @@ _BLANK_USER_PROFILE = {
         "platform_user_id": "3300869207",
         "display_name": "ㅤ",
     }],
-    "affinity": 498,
-    "last_relationship_insight": "对工具化敏感，需要被当作活生生的人对待",
+    "relationship_state": 498,
+    "semantic_relationship_projection": "对工具化敏感，需要被当作活生生的人对待",
 }
 
 _OWNER_USER_PROFILE = {
@@ -119,8 +111,8 @@ _OWNER_USER_PROFILE = {
         "platform_user_id": "673225019",
         "display_name": "蚝爹油",
     }],
-    "affinity": 994,
-    "last_relationship_insight": "你习惯用零食糊弄矛盾，这让我很无奈。",
+    "relationship_state": 994,
+    "semantic_relationship_projection": "你习惯用零食糊弄矛盾，这让我很无奈。",
 }
 
 
@@ -378,7 +370,7 @@ async def _run_l2_probe(
         },
         "db_boundary_profile": _DB_CHARACTER_PROFILE["boundary_profile"],
         "db_runtime_mood": _DB_CHARACTER_PROFILE["mood"],
-        "db_runtime_vibe": _DB_CHARACTER_PROFILE["global_vibe"],
+        "db_runtime_vibe": _DB_CHARACTER_PROFILE["vibe_check"],
         "l1": l1,
         "l2a": l2a,
         "l2b": l2b,

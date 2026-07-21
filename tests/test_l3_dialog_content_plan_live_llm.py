@@ -17,11 +17,9 @@ from kazusa_ai_chatbot.config import (
     DIALOG_GENERATOR_LLM_MODEL,
 )
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
-from kazusa_ai_chatbot.cognition_chain_core.contracts import LLMStageBinding
-from kazusa_ai_chatbot.cognition_chain_core.stages import l3 as l3_module
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
-    build_cognition_chain_services,
+from kazusa_ai_chatbot.nodes.persona_supervisor2_l3_surface import (
+    _build_text_surface_services,
 )
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
 from tests.llm_trace import write_llm_trace
@@ -118,8 +116,8 @@ def _character_profile() -> dict:
     profile = {
         'name': 'Kazusa',
         'mood': 'Neutral',
-        'global_vibe': 'Calm',
-        'reflection_summary': '普通聊天，没有额外情绪余波。',
+        'vibe_check': 'Calm',
+        'character_reflection': '普通聊天，没有额外情绪余波。',
         'personality_brief': {
             'logic': '先判断事实、边界和用户意图，再给出克制回应。',
             'tempo': '短句为主，技术内容允许更完整。',
@@ -241,7 +239,7 @@ def _l3_state(case: dict) -> dict:
 async def _run_l3_case(case: dict) -> dict:
     """Run one live L3 content-plan case and write a trace."""
 
-    services = build_cognition_chain_services()
+    services = _build_text_surface_services()
     calls: list[dict] = []
     token = l3_module.set_content_plan_agent_llm(
         LLMStageBinding(
@@ -313,8 +311,8 @@ def _dialog_state(case: dict) -> dict:
         'global_user_id': 'fa874545-02e6-4127-a24e-30819f941d83',
         'user_name': 'Jigsaw',
         'user_profile': {
-            'affinity': 500,
-            'last_relationship_insight': '熟悉但仍会互相调侃的群友',
+            'relationship_state': 500,
+            'semantic_relationship_projection': '熟悉但仍会互相调侃的群友',
         },
     }
     return state

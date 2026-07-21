@@ -6,27 +6,16 @@ import logging
 import httpx
 import pytest
 
-from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
+from kazusa_ai_chatbot.cognition_episode import (
+    project_text_chat_compatibility_fields,
+)
+from tests.cognition_core_v2_test_helpers import canonical_user_message_episode
 from kazusa_ai_chatbot.time_boundary import (
     build_turn_clock_from_storage_utc,
     storage_utc_now_iso,
 )
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
 from kazusa_ai_chatbot.config import COGNITION_LLM_BASE_URL
-from kazusa_ai_chatbot.cognition_chain_core.stages.l1 import call_cognition_subconscious
-from kazusa_ai_chatbot.cognition_chain_core.stages.l2 import (
-    call_boundary_core_agent,
-    call_cognition_consciousness,
-    call_judgment_core_agent,
-)
-from kazusa_ai_chatbot.cognition_chain_core.stages.l3 import (
-    call_surface_directive_collector,
-    call_content_plan_agent,
-    call_preference_adapter,
-    call_style_agent,
-    call_visual_agent,
-)
-from kazusa_ai_chatbot.cognition_chain_core.stages.l2c2 import call_social_context_appraisal
 from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer import call_msg_decontexualizer
 from kazusa_ai_chatbot.utils import load_personality
 from tests.llm_trace import write_llm_trace
@@ -102,8 +91,8 @@ def _user_memory_context(objective_facts: str, recent_shift: str) -> dict:
 def _build_character_profile() -> dict:
     profile = load_personality(_PERSONALITY_PATH)
     profile.setdefault("mood", "Neutral")
-    profile.setdefault("global_vibe", "Calm")
-    profile.setdefault("reflection_summary", "刚才只是普通的一轮对话，没有留下特别强烈的情绪余波。")
+    profile.setdefault("vibe_check", "Calm")
+    profile.setdefault("character_reflection", "刚才只是普通的一轮对话，没有留下特别强烈的情绪余波。")
     return profile
 
 
@@ -117,7 +106,7 @@ def _text_chat_episode(
     """Build a valid text-chat episode for direct live node calls."""
 
     turn_clock = build_turn_clock_from_storage_utc(storage_timestamp_utc)
-    episode = build_text_chat_cognitive_episode(
+    episode = canonical_user_message_episode(
         episode_id="live-prompt-contracts-episode",
         percept_id="live-prompt-contracts-percept",
         storage_timestamp_utc=turn_clock["storage_timestamp_utc"],
@@ -173,8 +162,8 @@ def _make_state(
     memory_evidence_text: str = "最近聊天主要围绕日常和轻度社交互动。",
     external_evidence_text: str = "",
     indirect_speech_context: str = "",
-    affinity: int = 680,
-    last_relationship_insight: str = "对方目前让人放松，可以正常交流。",
+    relationship_state: int = 680,
+    semantic_relationship_projection: str = "对方目前让人放松，可以正常交流。",
     user_name: str = "LivePromptUser",
     global_user_id: str = "live-prompt-user",
 ) -> dict:
@@ -204,17 +193,19 @@ def _make_state(
     state = {
         "character_profile": _build_character_profile(),
         "storage_timestamp_utc": storage_timestamp_utc,
-        "local_time_context": cognitive_episode["local_time_context"],
+        "local_time_context": project_text_chat_compatibility_fields(
+            cognitive_episode,
+        )["local_time_context"],
         "cognitive_episode": cognitive_episode,
         "user_input": user_input,
         "global_user_id": global_user_id,
         "user_name": user_name,
         "platform_user_id": "live-user",
         "user_profile": {
-            "affinity": affinity,
+            "relationship_state": relationship_state,
             "active_commitments": [],
             "facts": [],
-            "last_relationship_insight": last_relationship_insight,
+            "semantic_relationship_projection": semantic_relationship_projection,
         },
         "platform_bot_id": "live-bot",
         "chat_history_wide": list(chat_history_recent),
@@ -921,7 +912,7 @@ async def test_live_CONTENT_PLAN_answers_from_direct_conversation_evidence(ensur
         ],
         channel_topic="用户确认刚刚提到的旧线缆内容",
         memory_evidence_text="",
-        last_relationship_insight="可以一起进行毫无意义的日常消磨。",
+        semantic_relationship_projection="可以一起进行毫无意义的日常消磨。",
     )
     state.update(
         {
@@ -1081,7 +1072,7 @@ async def test_live_boundary_core_ignores_low_pressure_fact_recall_context(ensur
         ],
         channel_topic="用户确认刚刚提到的旧线缆内容",
         memory_evidence_text="",
-        last_relationship_insight="可以一起进行毫无意义的日常消磨。",
+        semantic_relationship_projection="可以一起进行毫无意义的日常消磨。",
     )
     state.update(
         {
@@ -1127,7 +1118,7 @@ _STACK_CASES = [
             channel_topic="照片闲聊",
             objective_facts="",
             memory_evidence_text="最近聊天主要围绕图片内容和日常观察。",
-            last_relationship_insight="对方只是轻松聊天，没有明显压迫感。",
+            semantic_relationship_projection="对方只是轻松聊天，没有明显压迫感。",
         ),
         id="stack-photo-request-chinese",
     ),
@@ -1143,8 +1134,8 @@ _STACK_CASES = [
             channel_topic="边界施压",
             objective_facts="用户没有获得任何可强制改变称呼方式的许可。",
             memory_evidence_text="最近聊天出现了轻微的称呼施压。",
-            affinity=520,
-            last_relationship_insight="对方最近有点试探边界，需要保持分寸。",
+            relationship_state=520,
+            semantic_relationship_projection="对方最近有点试探边界，需要保持分寸。",
         ),
         id="stack-boundary-command-repeated-fillers",
     ),
@@ -1248,8 +1239,8 @@ _DIALOG_CASES = [
             channel_topic="边界施压",
             objective_facts="用户没有获得任何可强制改变称呼方式的许可。",
             memory_evidence_text="最近聊天出现了轻微的称呼施压。",
-            affinity=520,
-            last_relationship_insight="对方最近有点试探边界，需要保持分寸。",
+            relationship_state=520,
+            semantic_relationship_projection="对方最近有点试探边界，需要保持分寸。",
         ),
         id="dialog-boundary-command-repeated-fillers",
     ),

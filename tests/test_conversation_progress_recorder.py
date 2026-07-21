@@ -45,6 +45,7 @@ _VALID_RECORDER_OUTPUT = {
     "assistant_moves": ["clarified referent"],
     "overused_moves": [],
     "open_loops": [],
+    "interaction_obligations": [],
     "resolved_threads": ["referent clarified"],
     "avoid_reopening": [],
     "emotional_trajectory": "settled",

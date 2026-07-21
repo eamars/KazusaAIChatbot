@@ -1,1136 +1,316 @@
-"""Deterministic prompt-text contract checks for cognition stages."""
+"""Deterministic prompt-text contracts for the canonical V2 stages."""
 
 from __future__ import annotations
 
+import importlib
 import json
-import re
-from types import SimpleNamespace
-from unittest.mock import AsyncMock
 
-import pytest
-from langchain_core.messages import AIMessage
+from kazusa_ai_chatbot.cognition_core_v2.action_authorization import (
+    ACTION_AUTHORIZATION_PROMPT,
+    _authorization_repair_message,
+)
+from kazusa_ai_chatbot.cognition_core_v2.action_selection import (
+    ACTION_PLANNING_PROMPT,
+    _action_planning_repair_message,
+)
+from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
+    GOAL_COGNITION_PROMPT,
+    GOAL_COGNITION_REPAIR_PROMPT,
+    REQUIRED_SELECTION_REPAIR_PROMPT,
+    REQUIRED_SELECTION_VERIFIER_PROMPT,
+)
+from kazusa_ai_chatbot.cognition_core_v2.resolver_authorization import (
+    RESOLVER_AUTHORIZATION_PROMPT,
+)
+from kazusa_ai_chatbot.cognition_core_v2.semantic_appraisal import (
+    SEMANTIC_APPRAISAL_PROMPT,
+)
+from kazusa_ai_chatbot.cognition_core_v2.semantic_source_planner import (
+    _QUESTION_DESCRIPTIONS,
+)
+from kazusa_ai_chatbot.cognition_core_v2.surface_stages import (
+    CONTENT_PLAN_SYSTEM_PROMPT,
+    PREFERENCE_SYSTEM_PROMPT,
+    STYLE_SYSTEM_PROMPT,
+    VISUAL_SYSTEM_PROMPT,
+)
+from kazusa_ai_chatbot.cognition_core_v2.workspace import COLLAPSE_PROMPT
+from kazusa_ai_chatbot.consolidation import lane_router
+from kazusa_ai_chatbot.consolidation import reflection
+from kazusa_ai_chatbot.nodes import dialog_agent
 
-from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
-from kazusa_ai_chatbot.cognition_chain_core.stages import l1 as l1_module
-from kazusa_ai_chatbot.cognition_chain_core.stages import l2 as l2_module
-from kazusa_ai_chatbot.cognition_chain_core.stages import l2c2 as l2c2_module
-from kazusa_ai_chatbot.cognition_chain_core.stages import l3 as l3_module
-from kazusa_ai_chatbot.cognition_chain_core.action_selection_prompt import (
-    ACTION_ROUTER_PROMPT,
-)
-from kazusa_ai_chatbot.time_boundary import build_turn_clock_from_storage_utc
-from llm_test_helpers import bind_test_llm
 
-
-_AFFECTED_PROMPTS = (
-    (
-        'L1 subconscious',
-        '_COGNITION_SUBCONSCIOUS_PROMPT',
-        l1_module._COGNITION_SUBCONSCIOUS_PROMPT,
-    ),
-    (
-        'L2a consciousness',
-        '_COGNITION_CONSCIOUSNESS_PROMPT',
-        l2_module._COGNITION_CONSCIOUSNESS_PROMPT,
-    ),
-    (
-        'L2b boundary',
-        '_BOUNDARY_CORE_PROMPT',
-        l2_module._BOUNDARY_CORE_PROMPT,
-    ),
-    (
-        'L2c1 judgment',
-        '_JUDGEMENT_CORE_PROMPT',
-        l2_module._JUDGEMENT_CORE_PROMPT,
-    ),
-    (
-        'L2c2 social context',
-        '_CONTEXTUAL_AGENT_PROMPT',
-        l2c2_module._CONTEXTUAL_AGENT_PROMPT,
-    ),
-    (
-        'L2d action selection',
-        'ACTION_ROUTER_PROMPT',
-        ACTION_ROUTER_PROMPT,
-    ),
+frontline_relevance_agent = importlib.import_module(
+    "kazusa_ai_chatbot.relevance.frontline_relevance_agent"
 )
-_SELF_COGNITION_SOURCE_TERMS = (
-    '自我认知',
-    '内部自我认知',
-    '内部想法',
-    '内部思考',
-    'internal_thought',
-    'internal_monologue',
-)
-_SELF_COGNITION_OWNERSHIP_TERMS = (
-    '我自己的观察资料',
-    '我的内部观察资料',
-    '我刚看到或回顾的观察资料',
-    '内部观察资料',
-)
-_REFLECTION_SOURCE_TERMS = (
-    '反思资料',
-    'reflection_artifact',
-    'reflection_signal',
-)
-_REFLECTION_OWNERSHIP_TERMS = (
-    '我自己的反思资料',
-    '我的反思资料',
-    '我的反思',
-)
-_EXTERNAL_SPEECH_TERMS = (
-    '外部用户发言',
-    '外部用户说话',
-    '当前用户发言',
-    '用户当前发言',
-    '当前外部频道',
-    '当前外部说话内容',
-    '外部说话内容',
-    '当前外部文本',
-    '外部文本消息',
-)
-_NEGATION_TERMS = (
-    '不是',
-    '不得',
-    '不能',
-    '不要',
-    '禁止',
-)
-_FORBIDDEN_RECLASSIFICATION_TERMS = (
-    '用户输入',
-    '用户提供',
-    '用户发言',
-    '用户说话',
-    '当前群成员发言',
-    '任何人正在对角色说话',
-    '正在对角色说话',
-)
-_METADATA_COPY_VERBS = (
-    '不要复制',
-    '不得复制',
-    '禁止复制',
-    '不要照抄',
-    '不得照抄',
-    '禁止照抄',
-    '不要搬运',
-    '不得搬运',
-)
-_METADATA_SOURCE_CATEGORIES = (
-    (
-        '来源包标题',
-        '源包标题',
-        'source-packet heading',
-        'source packet heading',
-        '标题',
-        '字段名',
-    ),
-    ('JSON', 'json'),
-    ('时间戳', 'timestamp'),
-    (
-        '语义标签键',
-        '语义标签字段',
-        'semantic-label key',
-        'semantic label key',
-        'semantic_labels',
-    ),
-    ('传输摘要', 'transport summary'),
-    ('模型可见元数据', '模型面对元数据', 'model-facing metadata'),
-)
-_GENERATED_FIELD_TERMS = (
-    '生成字段',
-    '自由文本字段',
-    'internal_monologue',
-    'judgment_note',
-    'detail',
-    'reason',
-)
-_FORBIDDEN_SELF_COGNITION_WORDING = (
-    '自检',
-    '需要接上',
-    '数据身份：',
-    '进入注意的原因：',
-    '阅读方式',
-)
-_FORBIDDEN_THIRD_PERSON_SELF_REFERENCE_PHRASES = (
-    '角色自己的反思资料',
-    '角色自己的内部观察资料',
-    '角色自己的观察资料',
-    '角色刚看到',
-    '角色是否',
-    '有人把话题交给角色',
-    '角色与被观察现场',
-    '角色与现场',
-    '角色判断描述',
-    '角色如何理解',
-    '角色已经沉淀',
-    '触及角色的',
-    '夺取角色',
-    '提到角色',
-    '对角色说话',
-    '命令角色发言',
-    '角色想做什么',
-    '角色决定把话',
-    '角色需要等待',
-    '角色愿意把',
-    '角色的主要动机',
+persona_relevance_agent = importlib.import_module(
+    "kazusa_ai_chatbot.relevance.persona_relevance_agent"
 )
 
 
-def _contains_any(text: str, terms: tuple[str, ...]) -> bool:
-    return any(term in text for term in terms)
+def _branch_modified_prompt_fragments() -> tuple[str, ...]:
+    """Return every branch-modified ordinary-instruction prompt fragment."""
 
-
-def _assert_contains_any(
-    prompt_name: str,
-    prompt_text: str,
-    terms: tuple[str, ...],
-    contract: str,
-) -> None:
-    if _contains_any(prompt_text, terms):
-        return
-
-    pytest.fail(
-        f'{prompt_name} must contain {contract}; accepted terms={terms!r}',
+    frontline_fragments = (
+        frontline_relevance_agent._FRONTLINE_SYSTEM_PROMPT_COMMON,
+        frontline_relevance_agent._FRONTLINE_GROUP_ACTION_CONTRACT,
+        frontline_relevance_agent._FRONTLINE_PRIVATE_ACTION_CONTRACT,
+        frontline_relevance_agent._FRONTLINE_AUTHORITATIVE_GROUP_ACTION_CONTRACT,
+        frontline_relevance_agent._FRONTLINE_OPEN_OUTPUT_CONTRACT,
+        frontline_relevance_agent._FRONTLINE_NO_OPEN_OUTPUT_CONTRACT,
+        frontline_relevance_agent._FRONTLINE_WITH_PRELUDES_CONTRACT,
+        frontline_relevance_agent._FRONTLINE_NO_PRELUDES_CONTRACT,
+        frontline_relevance_agent._FRONTLINE_AUTHORITATIVE_OPEN_OUTPUT_CONTRACT,
+        frontline_relevance_agent._FRONTLINE_AUTHORITATIVE_START_OUTPUT_CONTRACT,
+    )
+    settled_fragments = (
+        persona_relevance_agent._SETTLED_SYSTEM_PROMPT_COMMON,
+        persona_relevance_agent._SETTLED_WAIT_ACTION_CONTRACT,
+        persona_relevance_agent._SETTLED_FINAL_ACTION_CONTRACT,
+        persona_relevance_agent._SETTLED_AUTHORITATIVE_ACTION_CONTRACT,
+        *persona_relevance_agent._AUTHORITATIVE_DISPOSITION_GUIDANCE.values(),
+    )
+    return (
+        ACTION_AUTHORIZATION_PROMPT,
+        ACTION_PLANNING_PROMPT,
+        GOAL_COGNITION_PROMPT,
+        GOAL_COGNITION_REPAIR_PROMPT,
+        REQUIRED_SELECTION_VERIFIER_PROMPT,
+        REQUIRED_SELECTION_REPAIR_PROMPT,
+        RESOLVER_AUTHORIZATION_PROMPT,
+        SEMANTIC_APPRAISAL_PROMPT,
+        STYLE_SYSTEM_PROMPT,
+        CONTENT_PLAN_SYSTEM_PROMPT,
+        PREFERENCE_SYSTEM_PROMPT,
+        VISUAL_SYSTEM_PROMPT,
+        COLLAPSE_PROMPT,
+        lane_router._ROUTER_PROMPT,
+        reflection._CHARACTER_STATE_REVIEW_PROMPT,
+        reflection._RELATIONSHIP_PROFILE_REVIEW_PROMPT,
+        dialog_agent._V2_DIALOG_GENERATOR_PROMPT,
+        dialog_agent._V2_DIALOG_HARD_FAILURE_REPAIR_PROMPT,
+        dialog_agent._V2_DIALOG_SEMANTIC_FIDELITY_PROMPT,
+        dialog_agent._V2_DIALOG_ROLE_DIRECTION_PROMPT,
+        dialog_agent._V2_DIALOG_SURFACE_INTEGRITY_PROMPT,
+        *frontline_fragments,
+        *settled_fragments,
     )
 
 
-def _assert_self_cognition_reclassification_rule(
-    prompt_name: str,
-    prompt_text: str,
-) -> None:
-    _assert_source_reclassification_rule(
-        prompt_name=prompt_name,
-        prompt_text=prompt_text,
-        source_terms=_SELF_COGNITION_SOURCE_TERMS,
-        source_label='self-cognition or internal-thought material',
+def test_branch_modified_runtime_prompts_use_chinese_instructions() -> None:
+    """Keep ordinary runtime instructions in the cognition carrier language."""
+
+    retired_english_instruction_markers = (
+        "You are ",
+        "Return exactly ",
+        "Output Format",
+        "Decision Procedure",
+        "Rendering Procedure",
+        "Do not ",
+        "Never ",
     )
+    for prompt in _branch_modified_prompt_fragments():
+        assert any("\u4e00" <= character <= "\u9fff" for character in prompt)
+        for marker in retired_english_instruction_markers:
+            assert marker not in prompt
 
-
-def _assert_reflection_reclassification_rule(
-    prompt_name: str,
-    prompt_text: str,
-) -> None:
-    _assert_source_reclassification_rule(
-        prompt_name=prompt_name,
-        prompt_text=prompt_text,
-        source_terms=_REFLECTION_SOURCE_TERMS,
-        source_label='reflection material',
-    )
-
-
-def _assert_source_reclassification_rule(
-    *,
-    prompt_name: str,
-    prompt_text: str,
-    source_terms: tuple[str, ...],
-    source_label: str,
-) -> None:
-    compact_text = re.sub(r'\s+', '', prompt_text)
-    source_pattern = '|'.join(re.escape(term) for term in source_terms)
-    role_pattern = '|'.join(
-        re.escape(term) for term in _FORBIDDEN_RECLASSIFICATION_TERMS
-    )
-    negation_pattern = '|'.join(re.escape(term) for term in _NEGATION_TERMS)
-    rule_pattern = re.compile(
-        rf'({source_pattern}).{{0,80}}({negation_pattern}).{{0,80}}'
-        rf'({role_pattern})'
-        rf'|({negation_pattern}).{{0,80}}({source_pattern}).{{0,80}}'
-        rf'({role_pattern})'
-        rf'|({source_pattern}).{{0,80}}({role_pattern}).{{0,80}}'
-        rf'({negation_pattern})'
-    )
-
-    if rule_pattern.search(compact_text):
-        return
-
-    pytest.fail(
-        f'{prompt_name} must explicitly forbid treating {source_label} as '
-        'user input, user-provided content, or '
-        'live user speech.',
-    )
-
-
-def test_affected_prompts_require_simplified_chinese_generated_free_text() -> None:
-    """Generated free-text policy must remain visible in every stage prompt."""
-    for _, prompt_name, prompt_text in _AFFECTED_PROMPTS:
-        assert '简体中文' in prompt_text, prompt_name
-        _assert_contains_any(
-            prompt_name,
-            prompt_text,
-            ('新生成', '新生成的', '由你新生成'),
-            'a generated-text marker',
-        )
-        _assert_contains_any(
-            prompt_name,
-            prompt_text,
-            ('自由文本字段', '内部自由文本字段'),
-            'a free-text field marker',
-        )
-
-
-def test_affected_prompts_distinguish_external_speech_from_internal_observation() -> None:
-    """Prompts must distinguish user speech from character-owned observations."""
-    for _, prompt_name, prompt_text in _AFFECTED_PROMPTS:
-        _assert_contains_any(
-            prompt_name,
-            prompt_text,
-            _EXTERNAL_SPEECH_TERMS,
-            'external user speech wording',
-        )
-        _assert_contains_any(
-            prompt_name,
-            prompt_text,
-            _SELF_COGNITION_SOURCE_TERMS,
-            'self-cognition or internal-thought source wording',
-        )
-        _assert_contains_any(
-            prompt_name,
-            prompt_text,
-            _SELF_COGNITION_OWNERSHIP_TERMS,
-            'character-owned observation wording',
-        )
-
-
-def test_affected_prompts_distinguish_reflection_from_external_speech() -> None:
-    """Prompts must distinguish reflection artifacts from live user speech."""
-    for _, prompt_name, prompt_text in _AFFECTED_PROMPTS:
-        _assert_contains_any(
-            prompt_name,
-            prompt_text,
-            _REFLECTION_SOURCE_TERMS,
-            'reflection source wording',
-        )
-        _assert_contains_any(
-            prompt_name,
-            prompt_text,
-            _REFLECTION_OWNERSHIP_TERMS,
-            'character-owned reflection wording',
-        )
-        _assert_reflection_reclassification_rule(prompt_name, prompt_text)
-
-
-def test_affected_prompts_forbid_reclassifying_internal_thought_as_user_speech() -> None:
-    """Internal self-cognition material must not become live user speech."""
-    for _, prompt_name, prompt_text in _AFFECTED_PROMPTS:
-        _assert_self_cognition_reclassification_rule(prompt_name, prompt_text)
-
-
-def test_affected_prompts_forbid_copying_source_packet_metadata() -> None:
-    """Generated fields must summarize decisions instead of packet structure."""
-    for _, prompt_name, prompt_text in _AFFECTED_PROMPTS:
-        _assert_contains_any(
-            prompt_name,
-            prompt_text,
-            _METADATA_COPY_VERBS,
-            'a metadata-copy prohibition',
-        )
-        for category_terms in _METADATA_SOURCE_CATEGORIES:
-            _assert_contains_any(
-                prompt_name,
-                prompt_text,
-                category_terms,
-                'all source-packet metadata categories',
-            )
-        _assert_contains_any(
-            prompt_name,
-            prompt_text,
-            _GENERATED_FIELD_TERMS,
-                'generated-field targets for the metadata-copy prohibition',
-        )
-
-
-@pytest.mark.asyncio
-async def test_l1_subconscious_payload_passes_character_state_in_human_json(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """L1 runtime state belongs in Human JSON, not formatted system text."""
-
-    turn_clock = build_turn_clock_from_storage_utc(
-        '2026-05-25T09:30:00+00:00',
-    )
-    episode = build_text_chat_cognitive_episode(
-        episode_id='prompt-contract-l1-episode',
-        percept_id='prompt-contract-l1-percept',
-        storage_timestamp_utc=turn_clock['storage_timestamp_utc'],
-        local_time_context=turn_clock['local_time_context'],
-        user_input='Is it safe to remove this prompt section?',
-        platform='debug',
-        platform_channel_id='debug-private-1',
-        channel_type='private',
-        platform_message_id='message-1',
-        platform_user_id='user-1',
-        global_user_id='global-user-1',
-        user_name='Ran',
-        active_turn_platform_message_ids=['message-1'],
-        active_turn_conversation_row_ids=[],
-        debug_modes={},
-        target_addressed_user_ids=['character-1'],
-        target_broadcast=False,
-    )
-    fake_llm = SimpleNamespace(
-        ainvoke=AsyncMock(
-            return_value=AIMessage(
-                content=(
-                    '{"emotional_appraisal":"先稳住",'
-                    '"interaction_subtext":"在问风险"}'
-                ),
-            ),
+    repair_messages = (
+        _authorization_repair_message(
+            response_text="invalid",
+            contract_error="invalid",
+            candidate_handles=["c1"],
+        ),
+        _action_planning_repair_message(
+            response_text="invalid",
+            contract_error="invalid",
         ),
     )
-    monkeypatch.setattr(l1_module, '_subconscious_llm', bind_test_llm(fake_llm, "subconscious_llm"))
-    state = {
-        'character_profile': {
-            'name': 'Kazusa',
-            'mood': 'guarded',
-            'global_vibe': 'quiet review',
-            'personality_brief': {'mbti': 'INTJ'},
-        },
-        'user_profile': {
-            'last_relationship_insight': 'The user expects precise tradeoffs.',
-        },
-        'cognitive_episode': episode,
-        'user_input': 'Is it safe to remove this prompt section?',
-        'indirect_speech_context': '',
-    }
+    for message in repair_messages:
+        repair_instruction = json.loads(str(message.content))["repair_instruction"]
+        assert any(
+            "\u4e00" <= character <= "\u9fff"
+            for character in repair_instruction
+        )
 
-    result = await l1_module.call_cognition_subconscious(state)
+    for question in _QUESTION_DESCRIPTIONS.values():
+        assert any("\u4e00" <= character <= "\u9fff" for character in question)
+        assert "Assess " not in question
 
-    messages = fake_llm.ainvoke.await_args.args[0]
-    system_prompt = messages[0].content
-    payload = json.loads(messages[1].content)
-    assert result['emotional_appraisal'] == '先稳住'
-    assert '# 输入格式' not in system_prompt
-    assert payload['character_state'] == {
-        'mood': 'guarded',
-        'global_vibe': 'quiet review',
-        'last_relationship_insight': 'The user expects precise tradeoffs.',
-    }
+    bounded_authorization = json.loads(str(_authorization_repair_message(
+        response_text="x" * 4000,
+        contract_error="invalid",
+        candidate_handles=["c1"],
+    ).content))
+    assert "已截断" in bounded_authorization["invalid_response"]
 
 
-def test_l2d_prompt_defines_speak_and_scene_grounded_detail() -> None:
-    """L2d must keep visible-surface action semantics and detail grounded in
-    the current scene.  The new prompt uses generic affordance terms instead
-    of hardcoded capability names."""
-    prompt_text = ACTION_ROUTER_PROMPT
+def test_text_prompts_organically_favor_spoken_or_typed_dialog() -> None:
+    """Keep staging out of upstream guidance without adding a rejection gate."""
 
-    _assert_contains_any(
-        'ACTION_ROUTER_PROMPT',
-        prompt_text,
-        ('可见表面动作', '可见动作', 'action_affordances'),
-        'visible-surface action concept (replaces hardcoded `speak`)',
-    )
-    _assert_contains_any(
-        'ACTION_ROUTER_PROMPT',
-        prompt_text,
-        ('当前场景', '当前可见回复目标', '当前可见行动目标'),
-        '`detail` as the current scene action target',
-    )
-    _assert_contains_any(
-        'ACTION_ROUTER_PROMPT',
-        prompt_text,
-        ('不要生成最终发言文本', '不是最终发言文本', '不得生成最终对话文本'),
-        '`detail` not as final dialog text',
-    )
-    _assert_contains_any(
-        'ACTION_ROUTER_PROMPT',
-        prompt_text,
-        ('包标题', '时间戳', '传输摘要', '模型可见元数据'),
-        '`detail` not as packet metadata',
-    )
+    planning_and_rendering = "\n".join((
+        STYLE_SYSTEM_PROMPT,
+        CONTENT_PLAN_SYSTEM_PROMPT,
+        dialog_agent._V2_DIALOG_GENERATOR_PROMPT,
+        dialog_agent._V2_DIALOG_HARD_FAILURE_REPAIR_PROMPT,
+    ))
+    verifier_prompts = "\n".join((
+        dialog_agent._V2_DIALOG_SEMANTIC_FIDELITY_PROMPT,
+        dialog_agent._V2_DIALOG_ROLE_DIRECTION_PROMPT,
+        dialog_agent._V2_DIALOG_SURFACE_INTEGRITY_PROMPT,
+    ))
 
-
-def test_task_willingness_prompts_avoid_operational_gate_language() -> None:
-    """Enabled willingness prompts must stay character-native, not tool-native."""
-
-    for prompt_name, prompt_text in (
-        (
-            '_BOUNDARY_CORE_TASK_WILLINGNESS_PROMPT',
-            l2_module._BOUNDARY_CORE_TASK_WILLINGNESS_PROMPT,
-        ),
-        (
-            '_JUDGEMENT_CORE_TASK_WILLINGNESS_PROMPT',
-            l2_module._JUDGEMENT_CORE_TASK_WILLINGNESS_PROMPT,
-        ),
+    assert "实际会说出或发送" in planning_and_rendering
+    assert "用词、句式与节奏" in planning_and_rendering
+    for retired_guidance in (
+        "action description",
+        "动作描写",
+        "bracketed",
+        "方括号",
     ):
-        for required_text in (
-            '任务承接意愿',
-            '关系',
-            '当前心情',
-            '当前场景',
-            '简单、低压力、低承诺',
-        ):
-            assert required_text in prompt_text, prompt_name
-
-        for forbidden_text in (
-            'resource heavy',
-            'tool cost',
-            'complex_task_resolution',
-            'affinity threshold',
-            'effort_score',
-            'complexity_score',
-            'mood_gate',
-            'vibe_gate',
-            'willingness_score',
-            'COGNITION_TASK_WILLINGNESS_BOUNDARY_ENABLED',
-        ):
-            assert forbidden_text not in prompt_text, prompt_name
+        assert retired_guidance not in planning_and_rendering.casefold()
+        assert retired_guidance not in verifier_prompts.casefold()
+    assert "false_execution" in dialog_agent._V2_DIALOG_SURFACE_INTEGRITY_PROMPT
 
 
-@pytest.mark.asyncio
-async def test_l2b_task_willingness_payload_is_enabled_only(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """L2b receives mood/vibe descriptors only under the opt-in prompt."""
-
-    disabled_fake = SimpleNamespace(
-        ainvoke=AsyncMock(
-            return_value=AIMessage(content=json.dumps(
-                _boundary_core_response(),
-                ensure_ascii=False,
-            )),
-        ),
-    )
-    monkeypatch.setattr(
-        l2_module,
-        '_boundary_core_llm',
-        bind_test_llm(disabled_fake, 'boundary_core_llm'),
-    )
-
-    disabled_state = _task_willingness_l2_state(enabled=False)
-    await l2_module.call_boundary_core_agent(disabled_state)
-    disabled_messages = disabled_fake.ainvoke.await_args.args[0]
-    disabled_payload = json.loads(disabled_messages[1].content)
-
-    assert '任务承接意愿' not in disabled_messages[0].content
-    for field_name in (
-        'character_mood',
-        'global_vibe',
-        'vibe_check',
-        'visual_vibe',
-    ):
-        assert field_name not in disabled_payload
-
-    enabled_fake = SimpleNamespace(
-        ainvoke=AsyncMock(
-            return_value=AIMessage(content=json.dumps(
-                _boundary_core_response(),
-                ensure_ascii=False,
-            )),
-        ),
-    )
-    monkeypatch.setattr(
-        l2_module,
-        '_boundary_core_llm',
-        bind_test_llm(enabled_fake, 'boundary_core_llm'),
-    )
-
-    enabled_state = _task_willingness_l2_state(enabled=True)
-    await l2_module.call_boundary_core_agent(enabled_state)
-    enabled_messages = enabled_fake.ainvoke.await_args.args[0]
-    enabled_payload = json.loads(enabled_messages[1].content)
-
-    assert '任务承接意愿' in enabled_messages[0].content
-    assert enabled_payload['character_mood'] == 'guarded and tired'
-    assert enabled_payload['global_vibe'] == 'tense after-school quiet'
-    assert enabled_payload['vibe_check'] == 'strained but still conversational'
-    assert enabled_payload['visual_vibe'] == ['low energy', 'closed posture']
-    assert 'task_willingness_boundary_enabled' not in enabled_messages[1].content
-
-
-@pytest.mark.asyncio
-async def test_l2c_task_willingness_payload_is_enabled_only(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """L2c gets the same semantic descriptors only in enabled mode."""
-
-    disabled_fake = SimpleNamespace(
-        ainvoke=AsyncMock(
-            return_value=AIMessage(content=json.dumps(
-                _judgment_core_response(),
-                ensure_ascii=False,
-            )),
-        ),
-    )
-    monkeypatch.setattr(
-        l2_module,
-        '_judgement_core_llm',
-        bind_test_llm(disabled_fake, 'judgement_core_llm'),
-    )
-
-    disabled_state = _task_willingness_l2_state(enabled=False)
-    await l2_module.call_judgment_core_agent(disabled_state)
-    disabled_messages = disabled_fake.ainvoke.await_args.args[0]
-    disabled_payload = json.loads(disabled_messages[1].content)
-
-    assert '任务承接意愿' not in disabled_messages[0].content
-    for field_name in (
-        'character_mood',
-        'global_vibe',
-        'vibe_check',
-        'visual_vibe',
-    ):
-        assert field_name not in disabled_payload
-
-    enabled_fake = SimpleNamespace(
-        ainvoke=AsyncMock(
-            return_value=AIMessage(content=json.dumps(
-                _judgment_core_response(),
-                ensure_ascii=False,
-            )),
-        ),
-    )
-    monkeypatch.setattr(
-        l2_module,
-        '_judgement_core_llm',
-        bind_test_llm(enabled_fake, 'judgement_core_llm'),
-    )
-
-    enabled_state = _task_willingness_l2_state(enabled=True)
-    await l2_module.call_judgment_core_agent(enabled_state)
-    enabled_messages = enabled_fake.ainvoke.await_args.args[0]
-    enabled_payload = json.loads(enabled_messages[1].content)
-
-    assert '任务承接意愿' in enabled_messages[0].content
-    assert enabled_payload['character_mood'] == 'guarded and tired'
-    assert enabled_payload['global_vibe'] == 'tense after-school quiet'
-    assert enabled_payload['vibe_check'] == 'strained but still conversational'
-    assert enabled_payload['visual_vibe'] == ['low energy', 'closed posture']
-    assert 'task_willingness_boundary_enabled' not in enabled_messages[1].content
-
-
-def test_l2d_prompt_preserves_resolver_terminal_boundaries() -> None:
-    """L2d should keep resolver selection inside source and terminal limits.
-
-    The new prompt uses generic affordance references instead of hardcoded
-    capability names.  Assertions are grouped by the behavioral contract they
-    guard so that failures point to the rule that regressed.
-    """
-    prompt_text = ACTION_ROUTER_PROMPT
-
-    # -- affordance-driven capability selection (replaces hardcoded names) --
-    for required_text in (
-        'capabilities.resolver_affordances',
-        'capabilities.action_affordances',
-        'resolver_capability_requests[].capability_kind',
-    ):
-        assert required_text in prompt_text
-
-    # -- source identification and trigger boundaries --
-    _assert_contains_any(
-        'ACTION_ROUTER_PROMPT',
-        prompt_text,
-        ('触发来源', 'trigger_source'),
-        'trigger-source awareness',
-    )
-    assert 'user_message' in prompt_text
-
-    # -- blocked / pending resume handling --
-    assert 'blocked' in prompt_text
-    assert 'pending_resolver_resume' in prompt_text
-    _assert_contains_any(
-        'ACTION_ROUTER_PROMPT',
-        prompt_text,
-        ('不要再次请求同一', '不要再次请求同一个 blocked'),
-        'blocked capability dedup rule',
-    )
-    assert '不要重复请求同类检索' in prompt_text
-    assert '更窄、不同、未尝试的证据目标' in prompt_text
-
-    # -- approval and fabrication guardrails --
-    assert 'approval preview 必须能力扎根' in prompt_text
-    assert '不得编造上下文没有提供的工具、权限、外部执行机制或验证机制' in prompt_text
-    _assert_contains_any(
-        'ACTION_ROUTER_PROMPT',
-        prompt_text,
-        ('不得编造监控', '不得编造'),
-        'no fabricated monitoring or execution capabilities',
-    )
-    _assert_contains_any(
-        'ACTION_ROUTER_PROMPT',
-        prompt_text,
-        ('不要直接选择 `speak` 跳过审批准备',
-         '跳过审批', '审批准备'),
-        'no skipping approval preparation',
-    )
-
-    # -- evidence quality and source boundaries --
-    assert '时效性、公开来源绑定或用户明确要求核实来源的事实' in prompt_text
-    assert '区分来源确认、角色推断和当前无法验证的部分' in prompt_text
-    assert '来源类别、证据轨道或比较对象' in prompt_text
-    assert '不得改写成跨来源一致、无冲突或已确认' in prompt_text
-    assert '当前外部断言' in prompt_text
-    assert 'observation' in prompt_text
-
-    # -- original goal continuity --
-    _assert_contains_any(
-        'ACTION_ROUTER_PROMPT',
-        prompt_text,
-        ('继续处理原始用户目标', '继续推进', 'original_goal'),
-        'original goal continuity',
-    )
-    _assert_contains_any(
-        'ACTION_ROUTER_PROMPT',
-        prompt_text,
-        ('不要只确认"收到"就结束', '不要只确认收到', '不要只确认'),
-        'must not just acknowledge receipt',
-    )
-    assert '回答原始目标的可见回复目标' in prompt_text
-    assert '而不是把用户补充信息当作新的独立闲聊' in prompt_text
-    assert '主要交付部分' in prompt_text
-    assert '不要只回答其中一个子问题后把必要交付推迟到下一轮' in prompt_text
-    _assert_contains_any(
-        'ACTION_ROUTER_PROMPT',
-        prompt_text,
-        ('给出完整的最佳努力结果、证据限制和必要步骤',
-         '最佳努力'),
-        'best-effort result with evidence limitations',
-    )
-    assert '非必需偏好或排序口径' in prompt_text
-
-    # -- resolver continuation principles --
-    assert '解析器续轮原则' in prompt_text
-    _assert_contains_any(
-        'ACTION_ROUTER_PROMPT',
-        prompt_text,
-        ('返回一个 `speak` action_request', '可见表面动作'),
-        'fallback to visible surface action',
-    )
-    assert '最小缺口' in prompt_text
-    assert '缺少可选范围、标准或排序口径不等于缺少必须由用户提供的信息' in prompt_text
-
-    # -- evidence-before-speak rules (generic, not hardcoded capability names) --
-    _assert_contains_any(
-        'ACTION_ROUTER_PROMPT',
-        prompt_text,
-        ('不要为了给一般判断背书而启动', '证据能力'),
-        'no evidence capability for backing general judgment',
-    )
-    assert 'web_evidence' not in prompt_text
-    assert 'rag_evidence' not in prompt_text
-    assert '可行动标准和最后核实步骤' in prompt_text
-    assert '只给阻塞说明、可行动标准和最后核实步骤' in prompt_text
-    assert '不要继续换同义词重复搜索' in prompt_text
-    assert '已有证据和一般判断完成的分析、决策、方案或排查任务' in prompt_text
-    assert '分析、决策、方案设计、风险清单或下一步行动' in prompt_text
-
-    # -- internal goal convergence --
-    _assert_contains_any(
-        'ACTION_ROUTER_PROMPT',
-        prompt_text,
-        ('需要先收束目标、整理优先级、拆解私有后续判断或形成下一步内部目标',
-         '内部目标收束'),
-        'internal goal convergence concept',
-    )
-    assert '私有目标收束已经完成' in prompt_text
-    assert '没有新的具体私有动作就返回空数组' in prompt_text
-
-    # -- resolver_goal_progress structure --
-    assert 'resolver_goal_progress' in prompt_text
-    assert '语义进度表' in prompt_text
-    assert '不得替换原始目标' in prompt_text
-    _assert_contains_any(
-        'ACTION_ROUTER_PROMPT',
-        prompt_text,
-        ('`pending`、`partial`、`satisfied`、`blocked`',
-         'pending、partial、satisfied、blocked'),
-        'deliverable status enum vocabulary',
-    )
-    _assert_contains_any(
-        'ACTION_ROUTER_PROMPT',
-        prompt_text,
-        ('`resolver_goal_progress.final_response_requirements` 是 L3/dialog 的交付清单',
-         'final_response_requirements', '交付清单'),
-        'final response requirements as deliverable checklist',
-    )
-    assert '"final_response_requirements"' in prompt_text
-
-
-def test_l3_content_plan_scope_preserves_complete_plan_deliverables() -> None:
-    """Content plan should leave enough room for multi-part answers."""
-
-    prompt_text = l3_module._CONTENT_PLAN_AGENT_PROMPT
+def test_semantic_appraisal_prompt_limits_model_authority() -> None:
+    """Keep state, lifecycle, and persistence outside appraisal authority."""
 
     for required_text in (
-        '你决定本轮可见台词需要承载的内容',
-        '`semantic_content` 只承载用户可见台词需要说出的内容',
-        '可被下游台词生成器直接渲染',
-        '内容计划是内部计划，不是最终台词',
-        '不写完整台词',
-        '只写需要说出口的立场或回应点',
-        '具体要问的内容',
-        '固定格式块必须作为一个字符串原样进入 `semantic_content`',
-        '缩进、空行、符号和顺序不变',
-        '只能把它们整理成本轮内容计划',
-        '`selected_text_surface_intent` 是已选择文本输出时传下来的语义目标',
-        '已清洗的 resolver observation 摘要',
-        '可用于保留已查到的事实、风险和失败边界',
-        '合并交付范围',
-        '含原始目标、目标进度、deliverables、blockers 或 final_response_requirements',
-        '把这些转成可见回答骨架',
-        '当前输入可能只是补充约束，不能缩小原始目标',
-        '实时、易变或来源绑定的事实',
-        '无法确认的部分、可说的泛化范围、核实办法或行动骨架',
-        '不要补造具体当前对象、状态、时间或可用性',
-        '写出 resolved semantic content',
-        '写出 resolved semantic content',
-        '`visible_goal` 写交互目的',
-        '`voice` 写温度、分寸和情绪姿态',
-        '`rendering` 写出站消息序列的形状、长短和固定格式保护',
-        '不能改变立场、事实或答案',
-        '接梗',
-        '技术对比',
-        '保留所有已给数值、单位和结论',
-        '固定格式代码',
-        '直接包含 fenced code block',
-        '证据不足',
-        '当前来源未确认的部分',
-        '`semantic_content` 是下游可见内容的首要来源',
-        '必须已经写在计划值里',
+        "有界证据",
+        "允许的 handle",
+        "propositions",
+        "deltas",
     ):
-        assert required_text in prompt_text
-
-    assert '[DECISION]' not in prompt_text
-    assert '[ANSWER]' not in prompt_text
-    assert '[SCOPE]' not in prompt_text
-
-
-def test_l3_style_prompt_does_not_seed_literal_texture_examples() -> None:
-    """Style prompt should not turn texture guidance into phrase inventory."""
-
-    prompt_text = l3_module._STYLE_AGENT_PROMPT
-
+        assert required_text in SEMANTIC_APPRAISAL_PROMPT
     for forbidden_text in (
-        '**示例：**',
-        '非要我说出来',
-        '胸口好像',
-        '嗯，我,其实想说',
-        '固定感官化比喻',
-        '「',
-        '」',
+        "emotion_id",
+        "activation_id",
+        "replacement_state",
+        "persistence route",
     ):
-        assert forbidden_text not in prompt_text
+        assert forbidden_text not in SEMANTIC_APPRAISAL_PROMPT
 
+
+def test_goal_prompt_requires_complete_grounded_bid() -> None:
+    """Keep goal cognition handle-grounded and final-wording free."""
+
+    prompt = " ".join(GOAL_COGNITION_PROMPT.split())
     for required_text in (
-        '# 工作边界',
-        '# 核心转换',
-        '# 角色表达依据',
-        '## 性格底色怎样影响风格',
-        '## 声纹质感怎样影响风格',
-        '先处理说话视角风险，再应用角色表达依据',
-        '是否没有把声纹描述复制成台词',
-        '文本内容计划由独立阶段生成',
-        '是否没有让十个声纹维度全部堆进 `linguistic_style`',
+        "独立的目标认知分支",
+        "evidence handle",
+        "完整、有证据支持",
+        "不写最终对话",
     ):
-        assert required_text in prompt_text
+        assert required_text in prompt
 
 
-def test_l3_style_prompt_omits_input_schema_but_explains_fields() -> None:
-    """Style prompt should explain consumed fields without a JSON input block."""
+def test_goal_prompt_owns_current_judgment_and_roles() -> None:
+    """A bid chooses the present motive without reversing scene roles."""
 
-    prompt_text = l3_module._STYLE_AGENT_PROMPT
+    prompt = " ".join(GOAL_COGNITION_PROMPT.split())
 
-    style_prompt_end = prompt_text.index('# 输出格式')
-    style_prompt_body = prompt_text[:style_prompt_end]
-
-    assert '# 输入格式' not in prompt_text
-    for required_text in (
-        '# 本轮输入字段说明',
-        '`logical_stance` 是立场边界',
-        '`character_intent` 是行动意图',
-        '`internal_monologue` 是上游意识层',
-        '`character_mood` 是当前瞬间情绪',
-        '`global_vibe` 是当前环境氛围',
-        '`last_relationship_insight` 是与当前用户的关系动态',
-        '`media_observations` 是当前图片或音频的结构化观察',
-        '`interaction_style_context.user_style` 是用户互动风格建议',
-        '`group_channel_style` 只在群聊输入中出现',
-        '`chat_history` 是最多两条近期表面文本',
-        '`decontexualized_input`',
-        '`reflection_artifact`',
-        '`internal_thought_residue`',
-        '# 生成流程',
-        '# 输出前自检',
-    ):
-        assert required_text in style_prompt_body
+    assert "此刻真实动机" in prompt
+    assert "当前事件" in prompt
+    assert "关系" in prompt
+    assert "结构化用户对话角色具有权威性" in prompt
+    assert "行动者" in prompt
+    assert "对象" in prompt
 
 
-def test_l3_preference_prompt_stays_out_of_style_ownership() -> None:
-    """Preference adapter should not duplicate style-agent responsibility."""
+def test_goal_prompt_treats_physical_requests_as_verbal_stance() -> None:
+    """The character brain does not invent a physical actuator."""
 
-    prompt_text = l3_module._PREFERENCE_ADAPTER_PROMPT
+    prompt = GOAL_COGNITION_PROMPT
 
-    assert '# 输入格式' not in prompt_text
-    for required_text in (
-        '# 工作边界',
-        '`accepted_user_preferences` 只是下游表达的软约束',
-        '不决定一般风格、修辞策略、角色声纹、句长、情绪露出或社交包装',
-        '这些属于语言风格阶段和最终台词生成阶段',
-        '`linguistic_style` 是上游语言风格约束',
-        '只用于检查冲突，不要改写或扩展它',
-        '是否没有输出一般风格、角色声纹、修辞策略、内容计划、事实或承诺',
-        '# 输出前自检',
-        '# 输出格式',
-    ):
-        assert required_text in prompt_text
+    assert "言语立场" in prompt
+    assert "status 为 executed" in prompt
+    assert "证明角色大脑完成" in prompt
 
 
-def test_prompts_preserve_structured_output_enums() -> None:
-    """Prompt rewrites must keep downstream enum vocabularies visible."""
-    for enum_value in ('CONFIRM', 'REFUSE', 'TENTATIVE', 'DIVERGE', 'CHALLENGE'):
-        assert enum_value in l2_module._COGNITION_CONSCIOUSNESS_PROMPT
-        assert enum_value in l2_module._JUDGEMENT_CORE_PROMPT
+def test_collapse_and_action_prompts_preserve_bid_ownership() -> None:
+    """Prevent collapse and planning from rewriting admitted motives."""
 
-    for enum_value in (
-        'PROVIDE',
-        'BANTAR',
-        'REJECT',
-        'EVADE',
-        'CONFRONT',
-        'DISMISS',
-        'CLARIFY',
-    ):
-        assert enum_value in l2_module._COGNITION_CONSCIOUSNESS_PROMPT
-        assert enum_value in l2_module._JUDGEMENT_CORE_PROMPT
-
-    for enum_value in (
-        'none',
-        'identity_override',
-        'control_imposition',
-        'authority_claim',
-        'relational_distortion',
-        'mixed',
-        'allow',
-        'guarded',
-        'hesitant',
-        'reject',
-    ):
-        assert enum_value in l2_module._BOUNDARY_CORE_PROMPT
-
-    l2d_prompt = ACTION_ROUTER_PROMPT
-    for affordance_concept in (
-        'action_affordances',
-        'resolver_affordances',
-        'action_requests',
-    ):
-        assert affordance_concept in l2d_prompt
+    assert "本次 prompt 内" in COLLAPSE_PROMPT
+    assert "保持候选内容原样" in COLLAPSE_PROMPT
+    assert "语义能力请求" in ACTION_PLANNING_PROMPT
+    assert "不改写目标候选" in ACTION_PLANNING_PROMPT
+    assert "不能扩大能力适用范围" in ACTION_PLANNING_PROMPT
+    assert "泛化词" in ACTION_PLANNING_PROMPT
+    normalized_action_prompt = "".join(ACTION_PLANNING_PROMPT.split())
+    assert "task、action" in normalized_action_prompt
 
 
-def test_prompts_do_not_use_forbidden_self_cognition_wording() -> None:
-    """Source-aware prompts should avoid stale self-cognition framing terms."""
-    for _, prompt_name, prompt_text in _AFFECTED_PROMPTS:
-        for forbidden_wording in _FORBIDDEN_SELF_COGNITION_WORDING:
-            assert forbidden_wording not in prompt_text, (
-                f'{prompt_name} contains forbidden wording: '
-                f'{forbidden_wording}'
-            )
+def test_surface_prompts_leave_final_dialogue_to_dialog() -> None:
+    """Keep all four surface stages semantic and non-rendering."""
 
-
-def test_prompts_do_not_anchor_generated_self_text_to_third_person_role() -> None:
-    """Prompt free-text guidance should not invite third-person self wording."""
-    for _, prompt_name, prompt_text in _AFFECTED_PROMPTS:
-        for forbidden_phrase in _FORBIDDEN_THIRD_PERSON_SELF_REFERENCE_PHRASES:
-            assert forbidden_phrase not in prompt_text, (
-                f'{prompt_name} contains third-person self-reference anchor: '
-                f'{forbidden_phrase}'
-            )
-
-
-def test_reusable_prompts_do_not_hard_code_kazusa_display_names() -> None:
-    """Reusable runtime prompts must not contain concrete character names."""
-
-    for _, prompt_name, prompt_text in _AFFECTED_PROMPTS:
-        for forbidden_name in ('千纱', '杏山千纱', 'Kazusa'):
-            assert forbidden_name not in prompt_text, (
-                f'{prompt_name} contains concrete character name: '
-                f'{forbidden_name}'
-            )
-
-
-def test_l2_and_l2d_prompts_omit_dedicated_input_sections() -> None:
-    """Touched cognition prompts explain fields inside their task flow."""
-
-    for prompt_name, prompt_text in (
-        (
-            '_COGNITION_CONSCIOUSNESS_PROMPT',
-            l2_module._COGNITION_CONSCIOUSNESS_PROMPT,
-        ),
-        ('_BOUNDARY_CORE_PROMPT', l2_module._BOUNDARY_CORE_PROMPT),
-        ('_JUDGEMENT_CORE_PROMPT', l2_module._JUDGEMENT_CORE_PROMPT),
-        ('ACTION_ROUTER_PROMPT', ACTION_ROUTER_PROMPT),
-    ):
-        for forbidden_heading in ('# 输入格式', '# 输入读取说明'):
-            assert forbidden_heading not in prompt_text, prompt_name
-
-
-def test_l2_group_review_prompts_use_thread_reference_context() -> None:
-    """L2a/L2b/L2c1 must treat group-review thread warnings as evidence."""
-
-    for prompt_name, prompt_text in (
-        (
-            '_COGNITION_CONSCIOUSNESS_PROMPT',
-            l2_module._COGNITION_CONSCIOUSNESS_PROMPT,
-        ),
-        ('_BOUNDARY_CORE_PROMPT', l2_module._BOUNDARY_CORE_PROMPT),
-        ('_JUDGEMENT_CORE_PROMPT', l2_module._JUDGEMENT_CORE_PROMPT),
-    ):
-        for required_text in (
-            'thread_reference_context',
-            'participant_context',
-            '二人称',
-            '来源优先级',
-            'referent_status',
-            'ambiguous_or_side_thread',
-            '侧线/未定对象',
-            '私念残留',
-            '比较、描述或身体/状态归属',
-        ):
-            assert required_text in prompt_text, prompt_name
-
-
-def test_l2a_preserves_explicit_current_user_decision_ownership() -> None:
-    """L2a must not let first-person thought override explicit input ownership."""
-
-    prompt_text = l2_module._COGNITION_CONSCIOUSNESS_PROMPT
-
-    for required_text in (
-        'decontextualized_input',
-        '当前用户',
-        '动作主体',
-        '决策主体',
-        '被邀请者',
-        '被建议者',
-        '`current_event_grounding`',
-        '当前材料是外部文本消息',
-        'L1 的 `emotional_appraisal` 与 `interaction_subtext` 只说明我的即时感受',
-        '不能替换当前文本里的事实主体',
-        '外部文本消息里，如果当前可见文本或 `decontextualized_input` 显式标出说话人',
-        '先按来源事实复述当前真实现场和动作/决策主体',
-        '先按当前说话人、可见文本、直接称呼、提及和回复对象复述现场',
-        '第一人称只承载我的感受、判断、边界和准备提供的建议',
-    ):
-        assert required_text in prompt_text
-
-
-def test_l2d_prompt_uses_thread_reference_context_before_visible_action() -> None:
-    """L2d must not turn coarse group labels into an action target."""
-
-    prompt_text = ACTION_ROUTER_PROMPT
-
-    for required_text in (
-        'thread_reference_context',
-        'participant_context',
-        '二人称',
-        '二人称动作目标按来源优先级',
-        'thread_reference_context.referent_status',
-        'ambiguous_or_side_thread',
-        '侧线/未定对象',
-        '粗粒度',
-        'semantic_labels',
-        'source',
-        'current_input',
-        'work_seed',
-        '比较',
-        '描述',
-        '身体/状态',
-        '可见动作',
-    ):
-        assert required_text in prompt_text
-
-
-def _boundary_core_response() -> dict[str, str]:
-    """Build one valid L2b response fixture."""
-
-    return {
-        'boundary_issue': 'none',
-        'boundary_summary': '没有身份或控制越界。',
-        'behavior_primary': 'comply',
-        'behavior_secondary': 'none',
-        'acceptance': 'allow',
-        'stance_bias': 'confirm',
-        'identity_policy': 'accept',
-        'pressure_policy': 'absorb',
-        'trajectory': '普通请求可以正常处理。',
-    }
-
-
-def _judgment_core_response() -> dict[str, str]:
-    """Build one valid L2c response fixture."""
-
-    return {
-        'logical_stance': 'CONFIRM',
-        'character_intent': 'PROVIDE',
-        'judgment_note': '边界允许，正常回应即可。',
-    }
-
-
-def _task_willingness_l2_state(*, enabled: bool) -> dict[str, object]:
-    """Build a minimal state for L2 willingness prompt payload checks."""
-
-    turn_clock = build_turn_clock_from_storage_utc(
-        '2026-05-25T09:30:00+00:00',
+    surface_prompts = (
+        STYLE_SYSTEM_PROMPT,
+        CONTENT_PLAN_SYSTEM_PROMPT,
+        PREFERENCE_SYSTEM_PROMPT,
+        VISUAL_SYSTEM_PROMPT,
     )
-    episode = build_text_chat_cognitive_episode(
-        episode_id='task-willingness-episode',
-        percept_id='task-willingness-percept',
-        storage_timestamp_utc=turn_clock['storage_timestamp_utc'],
-        local_time_context=turn_clock['local_time_context'],
-        user_input='Can you handle this long plan for me later?',
-        platform='debug',
-        platform_channel_id='debug-private-1',
-        channel_type='private',
-        platform_message_id='message-task-1',
-        platform_user_id='user-task-1',
-        global_user_id='global-user-1',
-        user_name='Ran',
-        active_turn_platform_message_ids=['message-task-1'],
-        active_turn_conversation_row_ids=[],
-        debug_modes={},
-        target_addressed_user_ids=['character-1'],
-        target_broadcast=False,
-    )
-    boundary_assessment = _boundary_core_response()
-    state: dict[str, object] = {
-        'task_willingness_boundary_enabled': enabled,
-        'character_profile': {
-            'name': 'Kazusa',
-            'global_user_id': 'character-1',
-            'mood': 'guarded and tired',
-            'global_vibe': 'tense after-school quiet',
-            'boundary_profile': {
-                'self_integrity': 0.8,
-                'control_sensitivity': 0.7,
-                'compliance_strategy': 'resist',
-                'relational_override': 0.3,
-                'control_intimacy_misread': 0.2,
-                'boundary_recovery': 'rebound',
-                'authority_skepticism': 0.8,
-            },
-        },
-        'user_profile': {
-            'affinity': 240,
-            'last_relationship_insight': 'The relationship is still distant.',
-        },
-        'cognitive_episode': episode,
-        'user_input': 'Can you handle this long plan for me later?',
-        'prompt_message_context': {},
-        'reply_context': {},
-        'user_name': 'Ran',
-        'decontexualized_input': (
-            'The user asks the character to take on a sustained later task.'
-        ),
-        'reason_to_respond': 'direct request',
-        'channel_topic': 'quiet private chat',
-        'indirect_speech_context': '',
-        'interaction_subtext': 'the user is asking for sustained help',
-        'emotional_appraisal': 'tired and reluctant',
-        'referents': [],
-        'internal_monologue': (
-            '关系还不够近，而且现在有点累；不想直接接下长期任务。'
-        ),
-        'logical_stance': 'TENTATIVE',
-        'character_intent': 'BANTAR',
-        'boundary_core_assessment': boundary_assessment,
-        'vibe_check': 'strained but still conversational',
-        'visual_vibe': ['low energy', 'closed posture'],
-    }
-    return state
+    assert all("最终对话" in prompt for prompt in surface_prompts)
+
+
+def test_generated_semantic_prompts_preserve_language_policy() -> None:
+    """Model-authored semantic prose retains the project language contract."""
+
+    for prompt in (
+        SEMANTIC_APPRAISAL_PROMPT,
+        GOAL_COGNITION_PROMPT,
+        ACTION_PLANNING_PROMPT,
+        STYLE_SYSTEM_PROMPT,
+        CONTENT_PLAN_SYSTEM_PROMPT,
+        PREFERENCE_SYSTEM_PROMPT,
+        VISUAL_SYSTEM_PROMPT,
+    ):
+        normalized = " ".join(prompt.split())
+        assert "简体中文" in normalized
+        assert "用户" in normalized
+        assert "专有名词" in normalized
+        assert "schema 或 enum token" in normalized
+
+
+def test_semantic_prompts_preserve_typed_source_ownership() -> None:
+    """Internal evidence cannot be reclassified as current user speech."""
+
+    for prompt in (
+        SEMANTIC_APPRAISAL_PROMPT,
+        GOAL_COGNITION_PROMPT,
+        ACTION_PLANNING_PROMPT,
+        STYLE_SYSTEM_PROMPT,
+        CONTENT_PLAN_SYSTEM_PROMPT,
+        PREFERENCE_SYSTEM_PROMPT,
+        VISUAL_SYSTEM_PROMPT,
+    ):
+        normalized = " ".join(prompt.split())
+        compact = "".join(prompt.split())
+        assert "角色自己" in compact
+        assert "当前用户" in compact
+        assert "即时" in compact
+        assert "发言" in compact
+        assert "运行元数据" in normalized
+
+
+def test_v2_prompts_do_not_restore_operational_or_scalar_gates() -> None:
+    """Character judgment stays semantic and free of retired gate vocabulary."""
+
+    prompts = "\n".join((
+        SEMANTIC_APPRAISAL_PROMPT,
+        GOAL_COGNITION_PROMPT,
+        COLLAPSE_PROMPT,
+        ACTION_PLANNING_PROMPT,
+        STYLE_SYSTEM_PROMPT,
+        CONTENT_PLAN_SYSTEM_PROMPT,
+        PREFERENCE_SYSTEM_PROMPT,
+        VISUAL_SYSTEM_PROMPT,
+    )).casefold()
+    for forbidden in (
+        "relationship score threshold",
+        "mood gate",
+        "vibe gate",
+        "tool cost",
+        "willingness score",
+        "kazusa",
+    ):
+        assert forbidden not in prompts

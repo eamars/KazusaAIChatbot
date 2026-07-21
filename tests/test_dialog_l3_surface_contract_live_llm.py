@@ -143,8 +143,8 @@ def _character_profile() -> dict[str, Any]:
 
     profile = load_personality(_PERSONALITY_PATH)
     profile.setdefault('mood', 'Neutral')
-    profile.setdefault('global_vibe', 'Calm')
-    profile.setdefault('reflection_summary', '')
+    profile.setdefault('vibe_check', 'Calm')
+    profile.setdefault('character_reflection', '')
     return profile
 
 
@@ -206,8 +206,8 @@ def _base_state(case: dict[str, Any]) -> dict[str, Any]:
         ),
         'user_name': case.get('user_name', 'Jigsaw'),
         'user_profile': {
-            'affinity': case.get('affinity', 500),
-            'last_relationship_insight': case.get(
+            'relationship_state': case.get('relationship_state', 500),
+            'semantic_relationship_projection': case.get(
                 'relationship_insight',
                 '熟悉但仍会互相调侃的群友',
             ),
@@ -776,7 +776,7 @@ _CASES: dict[str, dict[str, Any]] = {
         },
         'chat_history': _chat_history(('user', '你是不是想歪了？')),
         'user_name': '蚝爹油',
-        'affinity': 700,
+        'relationship_state': 700,
         'must_include_any': [('想歪', '乱想'), ('看穿', '欺负', '狡猾', '戳中')],
         'must_not_include': [
             '盯着我看',

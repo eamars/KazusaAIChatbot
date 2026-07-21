@@ -235,7 +235,7 @@ async def test_collectors_return_failed_case_when_target_binding_fails() -> None
         raise AssertionError("invalid source must not use alternate lookup")
 
     async def user_profile(global_user_id: str) -> dict[str, Any]:
-        return {"global_user_id": global_user_id, "affinity": 500}
+        return {"global_user_id": global_user_id, "relationship_state": 500}
 
     cases = await sources.collect_scheduled_future_cognition_cases(
         now=now,

@@ -1,6 +1,7 @@
 # AGENTS.md
 
 ## Agent Rules
+
 - DO NOT send optional commentary.
 - DO NOT assume, always require explicit instructions.
 - Avoid describing action in negative statements (i.e,. I will NOT ...). Always state your action in positive statement only (i.e,. I will ...).
@@ -97,6 +98,42 @@ for preserving character judgment and topic fit; they are not the product goal.
   cognition directly; only promoted, gated context may be used.
 - Future autonomous contact must go through explicit permission, dispatcher or
   scheduler validation, adapter availability, and auditability.
+
+## LLM Error State Handling
+
+Bounded evaluators classify erratic model output by whether the contract can
+repair it deterministically without changing semantic ownership.
+
+- First pass every raw LLM response through the canonical
+  `kazusa_ai_chatbot.utils.parse_llm_json_output(...)` entry point before
+  evaluating semantic values; agents reuse this function instead of creating
+  stage-local JSON parsers or repairers. It strips transport formatting and
+  applies deterministic JSON cleanup, then delegates to
+  `kazusa_ai_chatbot.utils.parse_json_with_llm(...)` on `JSON_REPAIR_LLM` only
+  for residual syntax, wrapper, or object-shape repairs when the stage permits
+  the fallback. JSON repair preserves supported raw keys and values and does
+  not invent semantic values, correct domain decisions, or bypass the later
+  contract evaluator. A response that still cannot yield the required JSON
+  object is a structural contract error and follows the bounded regeneration
+  or fail-closed path.
+- For non-recoverable contract errors, such as malformed structure, invalid or
+  unknown keys, wrong types, unsupported enum or handle values, missing required
+  fields, or conflicting fields, the evaluator reports a typed contract error
+  to the owning LLM stage. That stage requests a bounded regeneration or
+  complete replacement using the same semantic context. The evaluator keeps
+  the invalid candidate out of action, persistence, scheduling, dialog, and
+  delivery paths.
+- For recoverable bound violations, the evaluator first applies the contract's
+  deterministic normalization, such as floor/ceil conversion or clamping to
+  the declared interval, and then validates the normalized result. If the
+  normalized value still violates the contract, or normalization cannot be
+  applied safely, the evaluator treats the candidate as non-recoverable and
+  triggers the bounded regeneration path.
+- Repair and regeneration remain owned by the producing semantic stage, use
+  the stage's explicit attempt cap, and record the original error, any
+  normalization or replacement, and the final disposition. After the cap, the
+  boundary fails closed with a typed result and preserves deterministic
+  permission, provenance, target, limit, and persistence checks.
 
 ## Python And Tests
 

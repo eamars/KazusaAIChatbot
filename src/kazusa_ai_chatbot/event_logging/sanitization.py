@@ -6,7 +6,10 @@ import hashlib
 import re
 from collections.abc import Mapping, Sequence
 
-from kazusa_ai_chatbot.event_logging.models import EventScopeInput
+from kazusa_ai_chatbot.event_logging.models import (
+    CognitionV2EventFields,
+    EventScopeInput,
+)
 from kazusa_ai_chatbot.event_logging.schemas import EventScopeRecord
 
 _CHANNEL_REF_SALT = "kazusa-event-log-scope-v1"
@@ -24,6 +27,24 @@ _DENIED_FIELD_NAMES = frozenset(
         "api_" + "key",
         "shared_" + "secret",
         "message_" + "envelope",
+        "replacement_state",
+        "mutable_state",
+        "cognition_state",
+        "raw_state",
+        "owner_key",
+        "source_id",
+        "entity_id",
+        "target_refs",
+        "evidence_handles",
+        "prompt_text",
+        "primary_bid",
+        "supporting_bids",
+        "competing_bids",
+        "private_bids",
+        "raw_intensity",
+        "raw_magnitude",
+        "activation_score",
+        "priority_score",
     }
 )
 
@@ -85,6 +106,42 @@ def build_scope_record(scope: EventScopeInput | None) -> EventScopeRecord:
         channel_type=channel_type,
     )
     return scope_record
+
+
+def sanitize_cognition_v2_event_fields(
+    value: Mapping[str, object],
+) -> CognitionV2EventFields:
+    """Project only bounded V2 diagnostics and redact every other field."""
+
+    state_scope = sanitize_short_text(value.get("state_scope", ""), limit=20)
+    if state_scope not in {"", "user", "character"}:
+        state_scope = ""
+    commit_status = sanitize_short_text(
+        value.get("state_commit_status", "not_started"),
+        limit=24,
+    )
+    if commit_status not in {"not_started", "committed", "failed", "skipped"}:
+        commit_status = "failed"
+    stage_status = sanitize_short_text(
+        value.get("stage_status", "failed"),
+        limit=20,
+    )
+    if stage_status not in {"started", "completed", "failed", "skipped"}:
+        stage_status = "failed"
+    fields = CognitionV2EventFields(
+        cognition_component=sanitize_short_text(
+            value.get("cognition_component", ""),
+            limit=120,
+        ),
+        selected_branch_id=sanitize_short_text(
+            value.get("selected_branch_id", ""),
+            limit=80,
+        ),
+        state_scope=state_scope,
+        state_commit_status=commit_status,
+        stage_status=stage_status,
+    )
+    return fields
 
 
 def unsafe_field_paths(value: object, *, prefix: str = "") -> list[str]:

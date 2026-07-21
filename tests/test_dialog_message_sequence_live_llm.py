@@ -189,8 +189,8 @@ def _base_dialog_state(case: dict) -> dict:
         'global_user_id': case['global_user_id'],
         'user_name': case['user_name'],
         'user_profile': {
-            'affinity': case['affinity'],
-            'last_relationship_insight': case['relationship_insight'],
+            'relationship_state': case['relationship_state'],
+            'semantic_relationship_projection': case['relationship_insight'],
         },
     }
     return state
@@ -308,7 +308,7 @@ def _base_case(case_id: str) -> dict:
         'platform_user_id': '411706805',
         'global_user_id': 'fa874545-02e6-4127-a24e-30819f941d83',
         'user_name': 'Jigsaw',
-        'affinity': 500,
+        'relationship_state': 500,
         'relationship_insight': '熟悉但仍会互相调侃的群友',
     }
     return case

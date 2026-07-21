@@ -125,25 +125,41 @@ def test_frontline_render_is_bounded_and_omits_raw_identity_and_time() -> None:
     assert payload["active_character_name"] == "Kazusa"
 
 
-def test_frontline_prompt_defines_group_participation_and_slot_boundaries() -> None:
-    """The local model receives the semantic rules behind the release gates."""
+def test_frontline_authoritative_prompt_limits_work_to_semantic_linkage() -> None:
+    """Typed participation removes the contradictory discard workload."""
 
     messages = build_frontline_messages(_frontline_state())
     system_prompt = messages[0].content
 
-    assert "explicit whole-group invitation" in system_prompt
-    assert "answerability" in system_prompt
-    assert "latest_bot_continuity is context, never an open slot" in (
+    assert "已经确认当前角色参与" in system_prompt
+    assert "当前含义明确延续恰好一个" in system_prompt
+    assert "slot 编号、列表顺序" in system_prompt
+    assert "conversation_scope 为 group" in system_prompt
+    assert "接收者撤回" in system_prompt
+    assert '"intake_action":"start|append"' in system_prompt
+    assert '"intake_action":"discard|start|append"' not in system_prompt
+    assert "群聊参与依据" not in system_prompt
+
+
+def test_frontline_ordinary_group_retains_participation_judgment() -> None:
+    """Untargeted group traffic keeps semantic discard and participation rules."""
+
+    state = _frontline_state()
+    state["current_message"]["semantic_target_labels"] = []
+    state["current_message"]["reply_target_label"] = "none"
+
+    system_prompt = build_frontline_messages(state)[0].content
+
+    assert "明确邀请全群" in system_prompt
+    assert "可回答性" in system_prompt
+    assert "latest_bot_continuity 只提供语境，不是 open slot" in (
         system_prompt
     )
-    assert "clearly continues exactly one" in system_prompt
-    assert 'elliptical reference such as "that one"' in system_prompt
-    assert "slot number, list order" in system_prompt.lower()
-    assert "only a direct character summon or explicitly" in system_prompt
-    assert "append is mandatory and start is invalid" in system_prompt
-    assert "target none and reply none, start is valid only" in system_prompt
-    assert "never treat this payload\nas private input" in system_prompt
-    assert "If open_turns is empty, append is invalid" in system_prompt
+    assert "类似“那个”的省略指代" in system_prompt
+    assert "只是直接召唤角色" in system_prompt
+    assert "除非当前消息转移或撤回" in system_prompt
+    assert "target 与 reply 都是 none 时" in system_prompt
+    assert '"intake_action":"discard|start|append"' in system_prompt
 
 
 def test_frontline_private_prompt_has_no_group_suppression_workload() -> None:
@@ -154,15 +170,17 @@ def test_frontline_private_prompt_has_no_group_suppression_workload() -> None:
     messages = build_frontline_messages(state)
     system_prompt = messages[0].content
 
-    assert "conversation_scope is private" in system_prompt
-    assert "always has a character participation basis" in system_prompt
-    assert "Group Participation" not in system_prompt
+    assert "conversation_scope 为 private" in system_prompt
+    assert "始终具有角色参与依据" in system_prompt
+    assert "群聊参与依据" not in system_prompt
 
 
 def test_frontline_prompt_hides_actions_for_absent_candidate_slots() -> None:
     """The local model sees only actions supported by supplied candidates."""
 
     state = _frontline_state()
+    state["current_message"]["semantic_target_labels"] = []
+    state["current_message"]["reply_target_label"] = "none"
     state["open_turns"] = []
     state["recent_preludes"] = []
     messages = build_frontline_messages(state)
@@ -170,8 +188,8 @@ def test_frontline_prompt_hides_actions_for_absent_candidate_slots() -> None:
 
     assert '"intake_action":"discard|start"' in system_prompt
     assert '"intake_action":"discard|start|append"' not in system_prompt
-    assert "The append action is unavailable" in system_prompt
-    assert "Return prelude_targets as [] exactly" in system_prompt
+    assert "本次调用不可选择 append" in system_prompt
+    assert "prelude_targets 必须恰好为 []" in system_prompt
 
 
 def test_frontline_worst_case_projection_remains_valid_json() -> None:
@@ -237,6 +255,119 @@ async def test_frontline_agent_uses_structural_parser_and_returns_decision(
 
 
 @pytest.mark.asyncio
+async def test_frontline_direct_without_candidates_starts_without_model_call(
+    monkeypatch,
+) -> None:
+    """Typed participation with no linkage candidates is admitted directly."""
+
+    invoke = AsyncMock()
+    monkeypatch.setattr(
+        frontline_module._frontline_relevance_agent_llm,
+        "ainvoke",
+        invoke,
+    )
+    state = _frontline_state()
+    state["open_turns"] = []
+    state["recent_preludes"] = []
+
+    result = await frontline_relevance_agent(state)
+
+    assert result == {
+        "intake_action": "start",
+        "append_target": "none",
+        "prelude_targets": [],
+        "reason": "authoritative character participation",
+    }
+    invoke.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_frontline_direct_open_turn_rejects_discard_without_retry(
+    monkeypatch,
+) -> None:
+    """Unavailable discard cannot override typed participation or add a call."""
+
+    discarded = MagicMock()
+    discarded.content = json.dumps({
+        "intake_action": "discard",
+        "append_target": "none",
+        "prelude_targets": [],
+        "reason": "invalid unavailable action",
+    })
+    invoke = AsyncMock(return_value=discarded)
+    monkeypatch.setattr(
+        frontline_module._frontline_relevance_agent_llm,
+        "ainvoke",
+        invoke,
+    )
+    state = _frontline_state()
+
+    result = await frontline_relevance_agent(state)
+
+    assert result == {
+        "intake_action": "start",
+        "append_target": "none",
+        "prelude_targets": [],
+        "reason": "invalid authoritative frontline output",
+    }
+    invoke.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_frontline_broadcast_without_candidates_starts_without_call(
+    monkeypatch,
+) -> None:
+    """Typed whole-group participation is admitted like typed direct input."""
+
+    invoke = AsyncMock()
+    monkeypatch.setattr(
+        frontline_module._frontline_relevance_agent_llm,
+        "ainvoke",
+        invoke,
+    )
+    state = _frontline_state()
+    state["current_message"]["semantic_target_labels"] = ["broadcast"]
+    state["current_message"]["reply_target_label"] = "none"
+    state["open_turns"] = []
+    state["recent_preludes"] = []
+
+    result = await frontline_relevance_agent(state)
+
+    assert result["intake_action"] == "start"
+    invoke.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_frontline_does_not_recheck_untargeted_discard(
+    monkeypatch,
+) -> None:
+    """An ordinary group discard keeps the single-call path."""
+
+    response = MagicMock()
+    response.content = json.dumps({
+        "intake_action": "discard",
+        "append_target": "none",
+        "prelude_targets": [],
+        "reason": "not addressed to the character",
+    })
+    invoke = AsyncMock(return_value=response)
+    monkeypatch.setattr(
+        frontline_module._frontline_relevance_agent_llm,
+        "ainvoke",
+        invoke,
+    )
+    state = _frontline_state()
+    state["current_message"]["semantic_target_labels"] = []
+    state["current_message"]["reply_target_label"] = "none"
+    state["open_turns"] = []
+
+    result = await frontline_relevance_agent(state)
+
+    assert result["intake_action"] == "discard"
+    invoke.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_frontline_agent_fails_closed_on_unsupplied_model_slot(
     monkeypatch,
 ) -> None:
@@ -252,6 +383,8 @@ async def test_frontline_agent_fails_closed_on_unsupplied_model_slot(
     llm = frontline_module._frontline_relevance_agent_llm
     monkeypatch.setattr(llm, "ainvoke", AsyncMock(return_value=response))
     state = _frontline_state()
+    state["current_message"]["semantic_target_labels"] = []
+    state["current_message"]["reply_target_label"] = "none"
     state["recent_preludes"] = []
 
     result = await frontline_relevance_agent(state)
@@ -280,6 +413,8 @@ async def test_frontline_agent_fails_closed_on_unsupplied_append_slot(
     llm = frontline_module._frontline_relevance_agent_llm
     monkeypatch.setattr(llm, "ainvoke", AsyncMock(return_value=response))
     state = _frontline_state()
+    state["current_message"]["semantic_target_labels"] = []
+    state["current_message"]["reply_target_label"] = "none"
     state["open_turns"] = []
 
     result = await frontline_relevance_agent(state)

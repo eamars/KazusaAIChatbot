@@ -14,9 +14,13 @@ import pytest
 from kazusa_ai_chatbot import event_logging
 import kazusa_ai_chatbot.event_logging.recording as recording_module
 import kazusa_ai_chatbot.event_logging.status as status_module
+from kazusa_ai_chatbot.event_logging.sanitization import (
+    sanitize_cognition_v2_event_fields,
+)
 
 
 _RECORDER_NAMES = [
+    "record_cognition_v2_event",
     "record_process_event",
     "record_worker_event",
     "record_llm_stage_event",
@@ -31,6 +35,68 @@ _RECORDER_NAMES = [
     "record_model_contract_event",
     "record_resource_health_event",
 ]
+
+
+def test_cognition_v2_sanitizer_redacts_state_ids_numbers_and_private_bids(
+) -> None:
+    """V2 diagnostics should retain only bounded semantic status fields."""
+
+    fields = sanitize_cognition_v2_event_fields({
+        "cognition_component": "goal_cognition",
+        "selected_branch_id": "social_care",
+        "state_scope": "user",
+        "state_commit_status": "committed",
+        "stage_status": "completed",
+        "replacement_state": {"forbidden": True},
+        "owner_key": "private-owner",
+        "raw_intensity": 83,
+        "prompt_text": "private prompt",
+        "primary_bid": {"forbidden": True},
+    })
+
+    assert fields == {
+        "cognition_component": "goal_cognition",
+        "selected_branch_id": "social_care",
+        "state_scope": "user",
+        "state_commit_status": "committed",
+        "stage_status": "completed",
+    }
+
+
+@pytest.mark.asyncio
+async def test_cognition_v2_recorder_persists_only_bounded_fields(
+    monkeypatch,
+) -> None:
+    """The V2 recorder should persist its registered bounded schema."""
+
+    captured: dict[str, object] = {}
+
+    async def write_event(document):
+        captured.update(document)
+        return str(document["event_id"])
+
+    monkeypatch.setattr(recording_module.repository, "write_event", write_event)
+
+    result = await event_logging.record_cognition_v2_event(
+        component="nodes.persona_supervisor2",
+        cognition_component="state_commit",
+        status="committed",
+        stage_status="completed",
+        selected_branch_id="social_care",
+        state_scope="user",
+        state_commit_status="committed",
+    )
+
+    assert result["accepted"] is True
+    assert captured["event_family"] == "cognition_v2"
+    assert captured["payload"] == {}
+    assert captured["cognition_v2"] == {
+        "cognition_component": "state_commit",
+        "selected_branch_id": "social_care",
+        "state_scope": "user",
+        "state_commit_status": "committed",
+        "stage_status": "completed",
+    }
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _STAGE7_TIME_BOUNDARY_DIRS = (

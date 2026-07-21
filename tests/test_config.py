@@ -86,46 +86,6 @@ def _configured_subprocess_env_without_dotenv() -> dict[str, str]:
     return env
 
 
-class TestAffinityConstants:
-    def test_affinity_default_within_bounds(self):
-        from kazusa_ai_chatbot.config import AFFINITY_DEFAULT, AFFINITY_MIN, AFFINITY_MAX
-        assert AFFINITY_MIN <= AFFINITY_DEFAULT <= AFFINITY_MAX
-
-    def test_affinity_min_less_than_max(self):
-        from kazusa_ai_chatbot.config import AFFINITY_MIN, AFFINITY_MAX
-        assert AFFINITY_MIN < AFFINITY_MAX
-
-    def test_affinity_min_is_zero(self):
-        from kazusa_ai_chatbot.config import AFFINITY_MIN
-        assert AFFINITY_MIN == 0
-
-    def test_affinity_max_is_1000(self):
-        from kazusa_ai_chatbot.config import AFFINITY_MAX
-        assert AFFINITY_MAX == 1000
-
-
-class TestBreakpoints:
-    def test_increment_breakpoints_sorted_by_threshold(self):
-        from kazusa_ai_chatbot.config import AFFINITY_INCREMENT_BREAKPOINTS
-        thresholds = [bp[0] for bp in AFFINITY_INCREMENT_BREAKPOINTS]
-        assert thresholds == sorted(thresholds)
-
-    def test_decrement_breakpoints_sorted_by_threshold(self):
-        from kazusa_ai_chatbot.config import AFFINITY_DECREMENT_BREAKPOINTS
-        thresholds = [bp[0] for bp in AFFINITY_DECREMENT_BREAKPOINTS]
-        assert thresholds == sorted(thresholds)
-
-    def test_increment_breakpoints_all_positive_scales(self):
-        from kazusa_ai_chatbot.config import AFFINITY_INCREMENT_BREAKPOINTS
-        for _, scale in AFFINITY_INCREMENT_BREAKPOINTS:
-            assert scale > 0
-
-    def test_decrement_breakpoints_all_positive_scales(self):
-        from kazusa_ai_chatbot.config import AFFINITY_DECREMENT_BREAKPOINTS
-        for _, scale in AFFINITY_DECREMENT_BREAKPOINTS:
-            assert scale > 0
-
-
 class TestRetryLimits:
     def test_retry_limits_are_positive(self):
         from kazusa_ai_chatbot.config import (
@@ -623,7 +583,7 @@ class TestRouteLlmConfig:
 
 
 class TestCognitionVisualDirectivesConfig:
-    def test_visual_directives_enabled_defaults_to_true(self, tmp_path):
+    def test_visual_directives_enabled_defaults_to_false(self, tmp_path):
         env = _configured_subprocess_env_without_dotenv()
         env.pop("COGNITION_VISUAL_DIRECTIVES_ENABLED", None)
 
@@ -644,7 +604,7 @@ class TestCognitionVisualDirectivesConfig:
         )
 
         assert result.returncode == 0
-        assert result.stdout.strip() == "True"
+        assert result.stdout.strip() == "False"
 
     def test_visual_directives_enabled_parses_false(self, tmp_path):
         env = _configured_subprocess_env_without_dotenv()
