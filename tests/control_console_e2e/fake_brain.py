@@ -20,6 +20,10 @@ class FakeBrainServer(AbstractContextManager["FakeBrainServer"]):
         self.base_url = f"http://127.0.0.1:{port}"
         self._lock = Lock()
         self._graph = graph_snapshot(status="not_reported", run_id="not-reported")
+        self._self_graph = graph_snapshot(
+            status="not_reported",
+            run_id="self-not-reported",
+        )
         self._chat_requests: list[dict[str, Any]] = []
         self._chat_status_code = 200
         self._chat_delay_seconds = 0.0
@@ -56,11 +60,24 @@ class FakeBrainServer(AbstractContextManager["FakeBrainServer"]):
         with self._lock:
             self._graph = graph
 
+    def set_self_graph(self, graph: dict[str, Any]) -> None:
+        """Replace the latest self-cognition graph returned by the fake brain."""
+
+        with self._lock:
+            self._self_graph = graph
+
     def latest_graph(self) -> dict[str, Any]:
         """Return a copy of the latest graph."""
 
         with self._lock:
             graph = dict(self._graph)
+        return graph
+
+    def latest_self_graph(self) -> dict[str, Any]:
+        """Return a copy of the latest self-cognition graph."""
+
+        with self._lock:
+            graph = dict(self._self_graph)
         return graph
 
     def chat_requests(self) -> list[dict[str, Any]]:
@@ -183,7 +200,10 @@ class FakeBrainServer(AbstractContextManager["FakeBrainServer"]):
     def _latest_graph_payload(self) -> dict[str, Any]:
         """Return latest cognition graph payload."""
 
-        return {"cognition_graph": self.latest_graph()}
+        return {
+            "cognition_graph": self.latest_graph(),
+            "self_cognition_graph": self.latest_self_graph(),
+        }
 
 
 def graph_snapshot(*, status: str, run_id: str) -> dict[str, Any]:
@@ -200,19 +220,25 @@ def graph_snapshot(*, status: str, run_id: str) -> dict[str, Any]:
     node_status = "running" if status == "running" else "completed"
     if status == "failed":
         node_status = "failed"
+    long_text = "input-start\n" + ("semantic-detail-" * 90) + "input-end <&> \"quoted\""
     return {
         "status": status,
         "run_id": run_id,
         "nodes": [
             {
                 "id": "input.message",
-                "label": "Input",
-                "stage": "Input",
+                "label": "Queued turn",
+                "stage": "L1",
                 "lane": "input",
                 "column": 1,
                 "branch": "source",
                 "status": "completed",
-                "detail": {"summary": "message envelope accepted"},
+                "detail": {
+                    "input": long_text,
+                    "reply_context": {
+                        "reply_excerpt": "earlier message context",
+                    },
+                },
             },
             {
                 "id": "l2.reasoning",
@@ -225,6 +251,8 @@ def graph_snapshot(*, status: str, run_id: str) -> dict[str, Any]:
                 "detail": {
                     "internal_monologue": "weigh intent, memory, and scene pressure",
                     "logical_stance": "respond only if grounded",
+                    "character_intent": "provide useful information",
+                    "judgment_note": "the current request is grounded",
                 },
             },
             {
@@ -235,7 +263,12 @@ def graph_snapshot(*, status: str, run_id: str) -> dict[str, Any]:
                 "column": 2,
                 "branch": "parallel",
                 "status": node_status,
-                "detail": {"summary": "parallel memory evidence lookup"},
+                "detail": {
+                    "retrieval_answer": "parallel memory evidence lookup",
+                    "memory_evidence": [
+                        {"fact": "the operator wants useful detail"},
+                    ],
+                },
             },
             {
                 "id": "decision.reply",
@@ -245,7 +278,40 @@ def graph_snapshot(*, status: str, run_id: str) -> dict[str, Any]:
                 "column": 3,
                 "branch": "join",
                 "status": node_status,
-                "detail": {"decision": "produce bounded reply"},
+                "detail": {
+                    "decision": "produce bounded reply",
+                    "reasoning": "the request has a concrete operator goal",
+                },
+            },
+            {
+                "id": "l3.visual_directives",
+                "label": "Visual directive",
+                "stage": "L3",
+                "lane": "surface",
+                "column": 4,
+                "branch": "visual",
+                "status": node_status,
+                "detail": {
+                    "facial_expression": ["focused"],
+                    "body_language": ["hands relaxed"],
+                    "gaze_direction": ["toward the screen"],
+                    "visual_vibe": ["attentive", "attentive"],
+                },
+            },
+            {
+                "id": "l3.surface",
+                "label": "Visible surface",
+                "stage": "L3",
+                "lane": "surface",
+                "column": 4,
+                "branch": "dialog",
+                "status": node_status,
+                "detail": {
+                    "messages": [
+                        "first visible line\nsecond visible line",
+                        "final visible message <&> \"safe\"",
+                    ],
+                },
             },
         ],
         "edges": [
@@ -253,6 +319,8 @@ def graph_snapshot(*, status: str, run_id: str) -> dict[str, Any]:
             {"source": "input.message", "target": "memory.lookup", "kind": "fork"},
             {"source": "l2.reasoning", "target": "decision.reply", "kind": "join"},
             {"source": "memory.lookup", "target": "decision.reply", "kind": "join"},
+            {"source": "decision.reply", "target": "l3.visual_directives", "kind": "fork"},
+            {"source": "decision.reply", "target": "l3.surface", "kind": "fork"},
         ],
     }
 

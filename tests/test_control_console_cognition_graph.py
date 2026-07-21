@@ -22,7 +22,7 @@ def test_cognition_graph_snapshot_projects_parallel_branches_and_redacts() -> No
                     "column": 1,
                     "status": "completed",
                     "detail": {
-                        "summary": "Normalized debug input.",
+                        "input": "Normalized debug input.",
                         "message_text": "must not leak",
                     },
                 },
@@ -35,7 +35,6 @@ def test_cognition_graph_snapshot_projects_parallel_branches_and_redacts() -> No
                     "branch": "l2a",
                     "status": "completed",
                     "detail": {
-                        "summary": "User wants bounded inspection.",
                         "internal_monologue": "Keep it short and grounded.",
                         "prompt": "must not leak",
                     },
@@ -49,7 +48,7 @@ def test_cognition_graph_snapshot_projects_parallel_branches_and_redacts() -> No
                     "branch": "l2b",
                     "status": "completed",
                     "detail": {
-                        "summary": "No memory write requested.",
+                        "retrieval_answer": "No memory write requested.",
                         "embedding": [0.1, 0.2],
                     },
                 },
@@ -60,7 +59,7 @@ def test_cognition_graph_snapshot_projects_parallel_branches_and_redacts() -> No
                     "lane": "surface",
                     "column": 3,
                     "status": "completed",
-                    "detail": {"summary": "Returned visible answer."},
+                    "detail": {"messages": ["Returned visible answer."]},
                 },
             ],
             "edges": [
@@ -83,10 +82,131 @@ def test_cognition_graph_snapshot_projects_parallel_branches_and_redacts() -> No
     assert {edge.kind for edge in graph.edges} == {"fork", "join"}
     graph_text = repr(graph.model_dump(mode="json"))
     detail_text = repr([node.detail for node in graph.nodes])
-    assert "User wants bounded inspection." in graph_text
+    assert "User wants bounded inspection." not in graph_text
+    assert "Normalized debug input." in graph_text
+    assert "Returned visible answer." in graph_text
     assert "must not leak" not in detail_text
     assert "embedding" not in detail_text
     assert "prompt" not in detail_text
+
+
+def test_cognition_graph_semantic_projection_preserves_full_approved_values() -> None:
+    """Approved semantic values keep order and full text past generic caps."""
+
+    from control_console.kazusa_client import project_cognition_graph_snapshot
+
+    long_text = "start\n" + ("evidence-" * 140) + "end <script>alert(1)</script>"
+    evidence_rows = [
+        {
+            "fact": f"fact-{index}",
+            "excerpt": long_text if index == 0 else "duplicate",
+            "title": "source title",
+            "prompt": "nested prompt must be excluded",
+            "embedding": [index],
+        }
+        for index in range(55)
+    ]
+    payload = {
+        "cognition_graph": {
+            "run_id": "semantic-run",
+            "status": "completed",
+            "nodes": [
+                {
+                    "id": "intake",
+                    "label": "Queued turn",
+                    "stage": "L1",
+                    "lane": "input",
+                    "column": 1,
+                    "status": "completed",
+                    "detail": {
+                        "input": long_text,
+                        "reply_context": {
+                            "reply_excerpt": "reply context",
+                            "raw_message": "nested raw message must be excluded",
+                        },
+                    },
+                },
+                {
+                    "id": "l2.memory",
+                    "label": "Memory and evidence",
+                    "stage": "L2",
+                    "lane": "memory",
+                    "column": 2,
+                    "status": "completed",
+                    "detail": {
+                        "retrieval_answer": long_text,
+                        "memory_evidence": evidence_rows,
+                        "supervisor_trace": ["trace must be excluded"],
+                    },
+                },
+                {
+                    "id": "l3.surface",
+                    "label": "Visible surface",
+                    "stage": "L3",
+                    "lane": "surface",
+                    "column": 3,
+                    "status": "completed",
+                    "detail": {"messages": [long_text, "duplicate"]},
+                },
+            ],
+            "edges": [],
+        },
+    }
+
+    graph = project_cognition_graph_snapshot(
+        source="debug_latest",
+        payload=payload,
+    )
+
+    intake_detail = graph.nodes[0].detail
+    memory_detail = graph.nodes[1].detail
+    assert intake_detail["input"] == long_text
+    assert intake_detail["reply_context"] == {"reply_excerpt": "reply context"}
+    assert memory_detail["retrieval_answer"] == long_text
+    assert len(memory_detail["memory_evidence"]) == 55
+    assert memory_detail["memory_evidence"][0]["excerpt"] == long_text
+    assert memory_detail["memory_evidence"][54]["fact"] == "fact-54"
+    assert "prompt" not in repr(memory_detail)
+    assert "embedding" not in repr(memory_detail)
+    assert "supervisor_trace" not in memory_detail
+    assert graph.nodes[2].detail["messages"] == [long_text, "duplicate"]
+
+
+def test_cognition_graph_projection_handles_malformed_detail_without_throwing() -> None:
+    """Malformed semantic detail should fail closed field by field."""
+
+    from control_console.kazusa_client import project_cognition_graph_snapshot
+
+    graph = project_cognition_graph_snapshot(
+        source="debug_latest",
+        payload={
+            "cognition_graph": {
+                "status": "completed",
+                "nodes": [
+                    {
+                        "id": "l2.memory",
+                        "label": "Memory",
+                        "stage": "L2",
+                        "lane": "memory",
+                        "column": 1,
+                        "status": "completed",
+                        "detail": {
+                            "retrieval_answer": 42,
+                            "memory_evidence": "not a list",
+                            "conversation_progress": {"goal": "preserve"},
+                        },
+                    },
+                ],
+                "edges": [],
+            },
+        },
+    )
+
+    assert graph.status == "completed"
+    detail = graph.nodes[0].detail
+    assert "retrieval_answer" not in detail
+    assert "memory_evidence" not in detail
+    assert detail["conversation_progress"] == {"goal": "preserve"}
 
 
 def test_cognition_graph_snapshot_reports_absent_telemetry_without_dummy_nodes() -> None:

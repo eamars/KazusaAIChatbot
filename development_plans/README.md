@@ -42,6 +42,7 @@ long_term/todo.md
 | [coding_agent_assessment_gap_phase_c_plan.md](archive/completed/short_term/coding_agent_assessment_gap_phase_c_plan.md) | High-risk coding-agent assessment gap plan for typed blockers, affordances, approval evidence, locks, and benchmark seam | completed |
 | [coding_agent_assessment_gap_phase_d_plan.md](active/short_term/coding_agent_assessment_gap_phase_d_plan.md) | High-risk coding-agent migration plan for a generic JSON action loop, persistent repository index, exploration-cap removal, and delete/rename | in progress |
 | [coding_agent_full_workflow_hardening_plan_2.md](active/short_term/coding_agent_full_workflow_hardening_plan_2.md) | Large coding-agent full workflow hardening plan | completed |
+| [cognition_graph_semantic_observability_plan.md](active/short_term/cognition_graph_semantic_observability_plan.md) | Large cognition graph semantic observability and shared inspector contract change | completed |
 
 ## Supporting Experiment Records
 

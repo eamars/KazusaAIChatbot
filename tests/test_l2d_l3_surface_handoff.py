@@ -21,6 +21,7 @@ from kazusa_ai_chatbot.nodes import persona_supervisor2 as persona_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_l3_surface as l3_surface_module
 from kazusa_ai_chatbot.nodes.persona_supervisor2 import persona_supervisor2
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
+from kazusa_ai_chatbot.utils import log_preview
 from llm_test_helpers import bind_test_llm
 
 RETIRED_L3_FIELD = "expression" + "_willingness"
@@ -1171,6 +1172,83 @@ async def test_l3_content_plan_logs_output(caplog) -> None:
     }
     assert "Content plan output: entries=2" in caplog.text
     assert "Answer directly." in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_l3_visual_agent_logs_complete_normalized_output(caplog) -> None:
+    """Enabled visual output should be visible in the brain process log."""
+
+    long_directive = "line one\n" + ("directive-" * 100) + "\u4e2d\u6587 <&> \"quoted\""
+    llm = _StaticContentPlanLLM({
+        "facial_expression": [long_directive],
+        "body_language": ["hands remain still"],
+        "gaze_direction": ["toward the user"],
+        "visual_vibe": ["quiet", "quiet"],
+    })
+    state = _cognition_state()
+    state["boundary_core_assessment"] = {}
+
+    with patch.object(
+        l3_module,
+        "_visual_agent_llm",
+        bind_test_llm(llm, "visual_agent"),
+    ):
+        caplog.set_level(logging.INFO, logger=l3_module.__name__)
+        result = await l3_module.call_visual_agent(state)
+
+    assert result["facial_expression"] == [long_directive]
+    assert result["visual_vibe"] == ["quiet", "quiet"]
+    assert "Visual directive output:" in caplog.text
+    assert log_preview(long_directive) in caplog.text
+    assert '"facial_expression"' in caplog.text
+    assert '"visual_vibe"' in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_l3_visual_agent_disabled_path_emits_no_output_log(caplog) -> None:
+    """Disabled visual output should retain the empty normalized shape."""
+
+    state = _cognition_state()
+    state["cognitive_episode"]["origin_metadata"]["debug_modes"] = {
+        "no_visual_directives": True,
+    }
+
+    caplog.set_level(logging.INFO, logger=l3_module.__name__)
+    result = await l3_module.call_visual_agent(state)
+
+    assert result == {
+        "facial_expression": [],
+        "body_language": [],
+        "gaze_direction": [],
+        "visual_vibe": [],
+    }
+    assert "Visual directive output:" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_l3_visual_agent_wrong_type_output_is_stage_error(caplog) -> None:
+    """Malformed enabled output is classified before visual logging/tracing."""
+
+    llm = _StaticContentPlanLLM({
+        "facial_expression": "not-a-list",
+        "body_language": [],
+        "gaze_direction": [],
+        "visual_vibe": [],
+    })
+    state = _cognition_state()
+    state["boundary_core_assessment"] = {}
+
+    with patch.object(
+        l3_module,
+        "_visual_agent_llm",
+        bind_test_llm(llm, "visual_agent"),
+    ):
+        caplog.set_level(logging.INFO, logger=l3_module.__name__)
+        with pytest.raises(l3_module.VisualAgentStageError) as exc_info:
+            await l3_module.call_visual_agent(state)
+
+    assert exc_info.value.__cause__ is not None
+    assert "Visual directive output:" not in caplog.text
 
 
 def test_background_work_no_handoff_result_uses_task_brief() -> None:

@@ -14,6 +14,7 @@ const state = {
   pageCapabilities: {},
   applicationIdentity: {},
   latestCognitionGraph: null,
+  latestSelfCognitionGraph: null,
   debugCognitionGraph: null,
   debugRequestInFlight: false,
   eventSource: null,
@@ -401,6 +402,7 @@ async function bootstrap(options = {}) {
   state.pageCapabilities = payload.page_capabilities || {};
   state.applicationIdentity = payload.application_identity || {};
   state.latestCognitionGraph = payload.latest_cognition_graph || payload.overview?.latest_cognition_graph || null;
+  state.latestSelfCognitionGraph = payload.latest_self_cognition_graph || payload.overview?.latest_self_cognition_graph || null;
   setAuthState(true);
   setText("#session-state", payload.operator ? payload.operator.operator_id : "signed in");
   renderBrand(payload.application_identity || {});
@@ -431,6 +433,7 @@ function lockSession() {
   state.brainRouteActionInFlight = false;
   state.pageCapabilities = {};
   state.latestCognitionGraph = null;
+  state.latestSelfCognitionGraph = null;
   state.debugCognitionGraph = null;
   if (state.eventSource) state.eventSource.close();
   closeLogStream();
@@ -482,6 +485,7 @@ function renderOverview(payload) {
   setHtml("#overview-audit-table", auditRows(payload.recent_audit_events));
   renderCapabilitySummary();
   renderOverviewCognitionGraph(state.latestCognitionGraph);
+  renderOverviewSelfCognitionGraph(state.latestSelfCognitionGraph);
 }
 
 function renderOverviewCognitionGraph(snapshot) {
@@ -691,7 +695,6 @@ function cognitionGraphAgeLabel(ageMs) {
 function cognitionGraphLatestEvent(node, edges, nodes) {
   if (!node) return "No cognition node selected.";
   const detail = node.detail || {};
-  const summary = detail.summary || detail.conclusion || detail.decision || detail.status || detail.blocker;
   const outgoing = edges
     .filter((edge) => edge.source === node.id)
     .map((edge) => nodes.find((candidate) => candidate.id === edge.target))
@@ -700,8 +703,20 @@ function cognitionGraphLatestEvent(node, edges, nodes) {
   const nextPending = outgoing.find((candidate) => candidate.status === "pending");
   if (nextRunning) return `${node.label || node.id} advanced to ${nextRunning.label || nextRunning.id}.`;
   if (nextPending) return `${node.label || node.id} is waiting for ${nextPending.label || nextPending.id}.`;
-  if (summary) return `${node.label || node.id}: ${cognitionGraphValue(summary)}`;
+  const firstValue = cognitionGraphFirstSemanticValue(detail);
+  if (firstValue !== null) {
+    return `${node.label || node.id}: ${cognitionGraphPreview(cognitionGraphValue(firstValue))}`;
+  }
   return `${node.label || node.id} is ${String(node.status || "not reported").replaceAll("_", " ")}.`;
+}
+
+function renderOverviewSelfCognitionGraph(snapshot) {
+  renderCognitionGraph({
+    containerSelector: "#overview-self-cognition-graph",
+    statusSelector: "#overview-self-cognition-status",
+    snapshot,
+    emptyMessage: "No latest self-cognition graph has been reported by the brain.",
+  });
 }
 
 function cognitionGraphSummaryMarkup(model) {
@@ -853,6 +868,9 @@ function cognitionGraphInspectorMarkup(model) {
       <strong>${escapeHtml(cognitionGraphValue(value))}</strong>
     </div>
   `).join("");
+  const detailMarkup = rows
+    ? `<div class="graph-inspector-rows">${rows}</div>`
+    : `<p class="graph-inspector-empty">No approved semantic detail was reported for this node.</p>`;
   const title = node ? `${node.stage || "stage"} · ${node.label || node.id}` : "No selected node";
   return `
     <aside class="graph-inspector" aria-label="Cognition node detail">
@@ -863,7 +881,7 @@ function cognitionGraphInspectorMarkup(model) {
         </div>
         <span class="${escapeHtml(cognitionGraphStatusBadgeClass(node?.status || "not_reported"))}" data-component="Badge">${escapeHtml(cognitionGraphStatusLabel(node?.status || "not_reported"))}</span>
       </div>
-      <div class="graph-inspector-rows">${rows}</div>
+      ${detailMarkup}
       <div class="graph-inspector-actions">
         ${showReturn ? `<button class="btn" type="button" data-graph-return-current>Return to current</button>` : ""}
       </div>
@@ -872,52 +890,117 @@ function cognitionGraphInspectorMarkup(model) {
 }
 
 function cognitionGraphInspectorRows(node) {
-  if (!node) return [["Status", "No cognition node selected."]];
+  if (!node) return [];
   const detail = node.detail || {};
   const rows = [];
-  const priorityKeys = [
-    "summary",
-    "conclusion",
-    "reasoning",
-    "internal_monologue",
-    "important_signal",
-    "decision",
-    "logical_stance",
-    "character_intent",
-    "judgment_note",
-    "status",
-    "blocker",
+  const fieldOrder = [
+    ["input", "Input"],
+    ["reply_context", "Reply context"],
+    ["decision", "Decision"],
+    ["reasoning", "Reasoning"],
+    ["internal_monologue", "Internal monologue"],
+    ["logical_stance", "Logical stance"],
+    ["character_intent", "Character intent"],
+    ["judgment_note", "Judgment note"],
+    ["retrieval_answer", "Retrieval answer"],
+    ["memory_evidence", "Memory evidence"],
+    ["conversation_evidence", "Conversation evidence"],
+    ["external_evidence", "External evidence"],
+    ["recall_evidence", "Recall evidence"],
+    ["media_evidence", "Media evidence"],
+    ["user_continuity", "User continuity"],
+    ["conversation_progress", "Conversation progress"],
+    ["active_commitments", "Active commitments"],
+    ["selected_actions", "Selected actions"],
+    ["action_results", "Action results"],
+    ["action_continuation", "Action continuation"],
+    ["facial_expression", "Facial expression"],
+    ["body_language", "Body language"],
+    ["gaze_direction", "Gaze direction"],
+    ["visual_vibe", "Visual vibe"],
+    ["messages", "Messages"],
+    ["empty_state", "State"],
   ];
-  priorityKeys.forEach((key) => {
-    if (detail[key] !== null && detail[key] !== undefined && detail[key] !== "") {
-      rows.push([key.replaceAll("_", " "), detail[key]]);
-    }
+  fieldOrder.forEach(([key, label]) => {
+    if (cognitionGraphValuePresent(detail[key])) rows.push([label, detail[key]]);
   });
-  const hasBoundedDetail = rows.length > 0;
-  if (!hasBoundedDetail) rows.push(["Detail", "This node reported no bounded detail."]);
-  rows.push(["stage", node.stage || "stage"]);
-  rows.push(["lane", node.lane || "cognition"]);
-  if (node.branch) rows.push(["branch", node.branch]);
-  return rows.slice(0, 7);
+  return rows;
 }
 
 function cognitionGraphNodeSummary(node) {
   const detail = node.detail || {};
-  const value = detail.summary
-    || detail.conclusion
-    || detail.reasoning
-    || detail.internal_monologue
-    || detail.important_signal
-    || detail.decision
-    || detail.status
-    || "No bounded detail reported.";
-  return cognitionGraphValue(value);
+  const value = cognitionGraphFirstSemanticValue(detail);
+  if (value === null) return "No approved semantic detail reported.";
+  return cognitionGraphPreview(cognitionGraphValue(value));
 }
 
 function cognitionGraphValue(value) {
-  if (Array.isArray(value)) return value.join(", ");
-  if (value && typeof value === "object") return JSON.stringify(value);
+  if (Array.isArray(value)) {
+    return value.map((item) => {
+      const rendered = cognitionGraphValue(item);
+      return rendered.split("\n").map((line, index) => (
+        `${index === 0 ? "• " : "  "}${line}`
+      )).join("\n");
+    }).join("\n");
+  }
+  if (value && typeof value === "object") {
+    return Object.entries(value).map(([key, nested]) => {
+      const rendered = cognitionGraphValue(nested);
+      const indented = rendered.split("\n").map((line, index) => (
+        `${index === 0 ? "" : "  "}${line}`
+      )).join("\n");
+      return `${key.replaceAll("_", " ")}: ${indented}`;
+    }).join("\n");
+  }
+  if (value === null || value === undefined) return "";
   return String(value);
+}
+
+function cognitionGraphValuePresent(value) {
+  if (value === null || value === undefined || value === "") return false;
+  if (Array.isArray(value) || (value && typeof value === "object")) {
+    return Object.keys(value).length > 0;
+  }
+  return true;
+}
+
+function cognitionGraphFirstSemanticValue(detail) {
+  const fieldOrder = [
+    "input",
+    "reply_context",
+    "decision",
+    "reasoning",
+    "internal_monologue",
+    "logical_stance",
+    "character_intent",
+    "judgment_note",
+    "retrieval_answer",
+    "memory_evidence",
+    "conversation_evidence",
+    "external_evidence",
+    "recall_evidence",
+    "media_evidence",
+    "user_continuity",
+    "conversation_progress",
+    "active_commitments",
+    "selected_actions",
+    "action_results",
+    "action_continuation",
+    "facial_expression",
+    "body_language",
+    "gaze_direction",
+    "visual_vibe",
+    "messages",
+    "empty_state",
+  ];
+  const key = fieldOrder.find((candidate) => cognitionGraphValuePresent(detail[candidate]));
+  return key ? detail[key] : null;
+}
+
+function cognitionGraphPreview(value, maxLength = 180) {
+  const compact = String(value || "").replace(/\s+/g, " ").trim();
+  if (compact.length <= maxLength) return compact;
+  return `${compact.slice(0, maxLength)}…`;
 }
 
 function renderCapabilitySummary() {
@@ -1850,7 +1933,7 @@ function pendingDebugCognitionGraph(messageText) {
         column: 1,
         branch: "debug",
         status: "completed",
-        detail: {summary: messageText || "message submitted"},
+        detail: {input: messageText || "message submitted"},
       },
       {
         id: "debug.cognition",
@@ -1860,7 +1943,7 @@ function pendingDebugCognitionGraph(messageText) {
         column: 2,
         branch: "live",
         status: "running",
-        detail: {summary: "waiting for debug cognition result"},
+        detail: {empty_state: "Waiting for the debug cognition result."},
       },
     ],
     edges: [
@@ -1883,7 +1966,7 @@ function failedDebugCognitionGraph(error) {
         column: 1,
         branch: "debug",
         status: "failed",
-        detail: {summary: error.message},
+        detail: {empty_state: error.message},
       },
     ],
     edges: [],
@@ -3000,6 +3083,7 @@ bind("#refresh-background", "click", () => runButtonAction(
 ));
 window.addEventListener("resize", () => {
   renderOverviewCognitionGraph(state.latestCognitionGraph);
+  renderOverviewSelfCognitionGraph(state.latestSelfCognitionGraph);
   renderDebugCognitionGraph(state.debugCognitionGraph);
 });
 resumeSession();

@@ -59,8 +59,24 @@ def test_debug_chat_sends_to_brain_and_updates_history_and_graph(
             assert "debug-run-1" in page.locator(
                 "#debug-cognition-graph .graph-run-summary"
             ).inner_text()
-            assert page.locator("#debug-cognition-graph .graph-stage-group").count() == 3
+            assert page.locator("#debug-cognition-graph .graph-stage-group").count() == 4
             assert page.locator("#debug-cognition-graph .graph-edge-layer").count() == 0
+            debug_graph = page.locator("#debug-cognition-graph")
+            debug_graph.locator(
+                "[data-graph-node][data-node-id='l3.visual_directives']"
+            ).click()
+            inspector = debug_graph.locator(
+                "[aria-label='Cognition node detail']"
+            )
+            inspector_text = inspector.inner_text()
+            assert "Visual directive" in inspector_text
+            assert "focused" in inspector_text
+            assert "toward the screen" in inspector_text
+            assert "summary" not in inspector_text.casefold()
+            assert "status" not in inspector_text.casefold()
+            assert "stage" not in inspector_text.casefold()
+            assert "lane" not in inspector_text.casefold()
+            assert "branch" not in inspector_text.casefold()
 
             requests = fake_brain.chat_requests()
             assert len(requests) == 3

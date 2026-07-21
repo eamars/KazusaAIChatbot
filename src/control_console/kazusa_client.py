@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime, timezone
 import time
 from typing import Any, Literal
@@ -19,18 +20,192 @@ from control_console.contracts import (
 from control_console.redaction import redact_mapping, redact_value
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
 
-COGNITION_GRAPH_DETAIL_KEYS = (
-    "summary",
-    "reasoning",
-    "internal_monologue",
-    "logical_stance",
-    "character_intent",
-    "judgment_note",
-    "decision",
-    "status",
+COGNITION_GRAPH_DETAIL_KEYS = frozenset(
+    {
+        "input",
+        "reply_context",
+        "decision",
+        "reasoning",
+        "internal_monologue",
+        "logical_stance",
+        "character_intent",
+        "judgment_note",
+        "retrieval_answer",
+        "memory_evidence",
+        "conversation_evidence",
+        "external_evidence",
+        "recall_evidence",
+        "media_evidence",
+        "user_continuity",
+        "conversation_progress",
+        "active_commitments",
+        "selected_actions",
+        "action_results",
+        "action_continuation",
+        "facial_expression",
+        "body_language",
+        "gaze_direction",
+        "visual_vibe",
+        "messages",
+        "empty_state",
+    }
 )
-COGNITION_GRAPH_RAW_KEYS = ("cognition_graph", "cognition_snapshot")
-CognitionGraphSource = Literal["overview_latest", "debug_latest", "historical"]
+COGNITION_GRAPH_SCALAR_DETAIL_KEYS = frozenset(
+    {
+        "input",
+        "decision",
+        "reasoning",
+        "internal_monologue",
+        "logical_stance",
+        "character_intent",
+        "judgment_note",
+        "retrieval_answer",
+        "empty_state",
+    }
+)
+COGNITION_GRAPH_TEXT_LIST_DETAIL_KEYS = frozenset(
+    {
+        "facial_expression",
+        "body_language",
+        "gaze_direction",
+        "visual_vibe",
+        "messages",
+    }
+)
+COGNITION_GRAPH_MAPPING_DETAIL_KEYS = frozenset(
+    {
+        "reply_context",
+        "user_continuity",
+        "conversation_progress",
+    }
+)
+COGNITION_GRAPH_ROW_DETAIL_KEYS = frozenset(
+    {
+        "memory_evidence",
+        "conversation_evidence",
+        "external_evidence",
+        "recall_evidence",
+        "media_evidence",
+        "active_commitments",
+        "selected_actions",
+        "action_results",
+        "action_continuation",
+    }
+)
+COGNITION_GRAPH_NESTED_DETAIL_KEYS = frozenset(
+    {
+        "summary",
+        "fact",
+        "excerpt",
+        "content",
+        "title",
+        "source",
+        "source_kind",
+        "relevance",
+        "recency",
+        "due_at",
+        "due_state",
+        "evidence_boundary_notes",
+        "visual_observation",
+        "description",
+        "confidence",
+        "role",
+        "display_name",
+        "media_kind",
+        "summary_status",
+        "reply_to_display_name",
+        "reply_excerpt",
+        "reply_attachments",
+        "continuity",
+        "current_thread",
+        "current_blocker",
+        "open_loops",
+        "resolved_threads",
+        "avoid_reopening",
+        "overused_moves",
+        "next_affordances",
+        "progression_guidance",
+        "current_goal",
+        "progress_note",
+        "goal",
+        "next_step",
+        "participant_context",
+        "thread_reference_context",
+        "group_scene_digest",
+        "stable_patterns",
+        "recent_shifts",
+        "objective_facts",
+        "milestones",
+        "active_commitments",
+        "kind",
+        "cognition_mode",
+        "urgency",
+        "visibility",
+        "deadline",
+        "reason",
+        "continuation",
+        "action_kind",
+        "status",
+        "result_summary",
+        "semantic_decision",
+        "completed_at",
+        "queue_state",
+        "work_kind",
+        "objective_summary",
+        "accepted_task_state",
+        "accepted_task_summary",
+        "wait_guidance",
+        "acknowledgement_constraint",
+        "mode",
+        "episode_type",
+        "max_depth",
+        "include_result_as",
+        "next_topic",
+        "condition",
+        "text",
+        "objective",
+        "consolidation_called",
+        "scheduled_event_count",
+        "cache_evicted_count",
+        "write_success",
+    }
+)
+COGNITION_GRAPH_FORBIDDEN_DETAIL_KEYS = frozenset(
+    {
+        "id",
+        "schema_version",
+        "source_refs",
+        "result_refs",
+        "evidence_refs",
+        "target",
+        "params",
+        "scope",
+        "job_ref",
+        "run_id",
+    }
+)
+COGNITION_GRAPH_FORBIDDEN_DETAIL_PARTS = (
+    "prompt",
+    "raw",
+    "embedding",
+    "message_envelope",
+    "handler",
+    "attempt",
+    "idempotency",
+    "operational",
+    "trace",
+)
+COGNITION_GRAPH_RAW_KEYS = (
+    "cognition_graph",
+    "cognition_snapshot",
+    "self_cognition_graph",
+)
+CognitionGraphSource = Literal[
+    "overview_latest",
+    "debug_latest",
+    "self_latest",
+    "historical",
+]
 
 
 class KazusaClient:
@@ -76,6 +251,19 @@ class KazusaClient:
         payload = response.json()
         graph = project_cognition_graph_snapshot(
             source="overview_latest",
+            payload=payload if isinstance(payload, dict) else {},
+        )
+        return graph
+
+    async def get_latest_self_cognition_graph(self) -> CognitionRunGraphSnapshot:
+        """Read and project the brain latest self-cognition graph endpoint."""
+
+        async with self._client() as client:
+            response = await client.get("/ops/latest-cognition-graph")
+        response.raise_for_status()
+        payload = response.json()
+        graph = project_cognition_graph_snapshot(
+            source="self_latest",
             payload=payload if isinstance(payload, dict) else {},
         )
         return graph
@@ -226,7 +414,7 @@ def project_cognition_graph_snapshot(
 ) -> CognitionRunGraphSnapshot:
     """Project safe cognition graph telemetry from a brain/debug payload."""
 
-    raw_graph = _first_graph_payload(payload)
+    raw_graph = _first_graph_payload(payload, source=source)
     inferred_run_id = run_id or _safe_optional_text(payload.get("delivery_tracking_id"))
     if raw_graph is None:
         inferred_graph = _project_known_cognition_fields(
@@ -244,7 +432,10 @@ def project_cognition_graph_snapshot(
         "nodes": _project_graph_nodes(raw_graph.get("nodes")),
         "edges": _project_graph_edges(raw_graph.get("edges")),
         "redaction": {
-            "detail": "sensitive keys and unbounded text redacted",
+            "detail": (
+                "approved cognition semantic fields preserve full text; "
+                "other fields remain excluded"
+            ),
             "excluded": [
                 "prompts",
                 "embeddings",
@@ -264,10 +455,19 @@ def project_cognition_graph_snapshot(
     return snapshot
 
 
-def _first_graph_payload(payload: dict[str, Any]) -> dict[str, Any] | None:
+def _first_graph_payload(
+    payload: dict[str, Any],
+    *,
+    source: CognitionGraphSource,
+) -> dict[str, Any] | None:
     """Return the first raw graph-like payload if one is present."""
 
-    for key in COGNITION_GRAPH_RAW_KEYS:
+    keys = (
+        ("self_cognition_graph",)
+        if source == "self_latest"
+        else COGNITION_GRAPH_RAW_KEYS[:2]
+    )
+    for key in keys:
         value = payload.get(key)
         if isinstance(value, dict):
             return value
@@ -327,18 +527,163 @@ def _project_graph_edges(raw_edges: Any) -> list[dict[str, Any]]:
 
 
 def _project_node_detail(raw_detail: Any) -> dict[str, Any]:
-    """Keep only small, redacted reasoning details for hover disclosure."""
+    """Project approved cognition semantics without generic truncation."""
 
-    if not isinstance(raw_detail, dict):
+    if not isinstance(raw_detail, Mapping):
         return {}
 
-    allowed_detail = {
-        key: raw_detail[key]
-        for key in COGNITION_GRAPH_DETAIL_KEYS
-        if key in raw_detail
-    }
-    redacted_detail = redact_mapping(allowed_detail)
-    return redacted_detail
+    projected: dict[str, Any] = {}
+    for raw_key, raw_value in raw_detail.items():
+        if not isinstance(raw_key, str):
+            continue
+        if raw_key not in COGNITION_GRAPH_DETAIL_KEYS:
+            continue
+        if _cognition_graph_key_is_forbidden(raw_key):
+            continue
+        projected_value = _project_cognition_graph_detail_value(
+            raw_key,
+            raw_value,
+        )
+        if projected_value in (None, "", [], {}):
+            continue
+        projected[raw_key] = projected_value
+    return projected
+
+
+def _cognition_graph_key_is_forbidden(key: str) -> bool:
+    """Return whether a nested graph key is sensitive or operational."""
+
+    normalized = key.casefold().replace("-", "_")
+    if normalized in COGNITION_GRAPH_FORBIDDEN_DETAIL_KEYS:
+        return True
+    if normalized.endswith("_id"):
+        return True
+    return any(
+        part in normalized
+        for part in COGNITION_GRAPH_FORBIDDEN_DETAIL_PARTS
+    )
+
+
+def _project_cognition_graph_detail_value(
+    field_name: str,
+    value: Any,
+) -> Any:
+    """Project one selected-detail field using its semantic shape."""
+
+    if field_name in COGNITION_GRAPH_SCALAR_DETAIL_KEYS:
+        return _project_cognition_graph_scalar(value)
+    if field_name in COGNITION_GRAPH_TEXT_LIST_DETAIL_KEYS:
+        return _project_cognition_graph_text_list(value)
+    if field_name in COGNITION_GRAPH_MAPPING_DETAIL_KEYS:
+        return _project_cognition_graph_mapping(value)
+    if field_name in COGNITION_GRAPH_ROW_DETAIL_KEYS:
+        return _project_cognition_graph_rows(value)
+    return None
+
+
+def _project_cognition_graph_scalar(value: Any) -> Any:
+    """Preserve an approved scalar without character truncation."""
+
+    if isinstance(value, str):
+        return value if value.strip() else None
+    return None
+
+
+def _project_cognition_graph_text_list(value: Any) -> list[str]:
+    """Preserve ordered complete text entries from an approved list."""
+
+    if not isinstance(value, list):
+        return []
+    return [
+        item
+        for item in value
+        if isinstance(item, str) and item.strip()
+    ]
+
+
+def _project_cognition_graph_mapping(value: Any) -> dict[str, Any]:
+    """Project an approved nested mapping recursively."""
+
+    if not isinstance(value, Mapping):
+        return {}
+    return _project_cognition_graph_nested(value)
+
+
+def _project_cognition_graph_rows(value: Any) -> list[Any]:
+    """Preserve ordered semantic rows without an item-count cap."""
+
+    if not isinstance(value, list):
+        return []
+    projected_rows: list[Any] = []
+    for item in value:
+        if isinstance(item, str):
+            if item.strip():
+                projected_rows.append(item)
+            continue
+        if not isinstance(item, Mapping):
+            continue
+        projected_item = _project_cognition_graph_nested(item)
+        if projected_item:
+            projected_rows.append(projected_item)
+    return projected_rows
+
+
+def _project_cognition_graph_nested(value: Any) -> Any:
+    """Project JSON-compatible semantic values with nested key filtering."""
+
+    if isinstance(value, str):
+        return value if value.strip() else None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value
+    if isinstance(value, Mapping):
+        projected: dict[str, Any] = {}
+        for raw_key, raw_value in value.items():
+            if not isinstance(raw_key, str):
+                continue
+            if raw_key not in COGNITION_GRAPH_NESTED_DETAIL_KEYS:
+                continue
+            if _cognition_graph_key_is_forbidden(raw_key):
+                continue
+            projected_value = _project_cognition_graph_nested(raw_value)
+            if projected_value in (None, "", [], {}):
+                continue
+            projected[raw_key] = projected_value
+        return projected
+    if isinstance(value, list):
+        projected_items: list[Any] = []
+        for item in value:
+            projected_item = _project_cognition_graph_nested(item)
+            if projected_item in (None, "", [], {}):
+                continue
+            projected_items.append(projected_item)
+        return projected_items
+    return None
+
+
+def _project_cognition_graph_message_fragments(
+    payload: Mapping[str, Any],
+) -> list[str]:
+    """Project actual visible message fragments from a legacy payload."""
+
+    for key in ("final_dialog", "visible_response", "messages"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return [value]
+        if isinstance(value, list):
+            fragments: list[str] = []
+            for item in value:
+                if isinstance(item, str) and item.strip():
+                    fragments.append(item)
+                    continue
+                if isinstance(item, Mapping):
+                    text = item.get("text")
+                    if isinstance(text, str) and text.strip():
+                        fragments.append(text)
+            if fragments:
+                return fragments
+    return []
 
 
 def _project_known_cognition_fields(
@@ -382,7 +727,9 @@ def _project_known_cognition_fields(
             "column": 3,
             "branch": "dialog",
             "status": "completed",
-            "detail": {"summary": "Visible response returned by brain."},
+            "detail": {
+                "messages": _project_cognition_graph_message_fragments(payload),
+            },
         })
     for source_node, target_node in zip(nodes, nodes[1:]):
         edges.append({

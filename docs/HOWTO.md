@@ -280,6 +280,24 @@ observation.
 disable visual directives by default with
 `origin_metadata.debug_modes.no_visual_directives=true`, so normal
 self-cognition worker runs do not invoke the L3 visual-directive LLM.
+
+The control-console cognition graph exposes the same selected-detail widget in
+Overview Latest, Debug cognition, and the dedicated latest self-cognition
+Overview panel. The
+selected fields are semantic rather than generic status rows: queued-turn
+`input` and useful `reply_context`; the response `decision` and `reasoning`; L2
+reasoning, retrieval/evidence, continuity/progress/commitments, and action
+decisions/results/continuations; the four actual L3 visual-directive lists; and
+the final visible `messages`. The separate `l3.visual_directives` node remains
+grey/dashed with the existing terminated rendering when the visual gate is
+disabled. An enabled empty result is shown as completed with an explicit empty
+state. Long approved text and ordered lists are available through the
+scrollable inspector; prompts, raw model output, embeddings, message
+envelopes, and operational identifiers remain excluded.
+
+The brain process log prints the complete normalized visual directive only
+after successful enabled validation. The protected LLM trace remains separate
+for model metadata and raw-output diagnostics.
 `CHARACTER_SLEEP_LOCAL_PERIOD` defaults to `02:00-12:00` in
 `CHARACTER_TIME_ZONE`. During that local period, active-commitment
 self-cognition and reflection-attached group self-cognition do not trigger.

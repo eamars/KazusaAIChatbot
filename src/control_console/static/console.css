@@ -274,10 +274,11 @@ body[data-auth-state="authenticated"] #login-form { display: none; }
 .graph-inspector-header div { display: grid; gap: 3px; min-width: 0; }
 .graph-inspector-header span:first-child { color: var(--muted); font-size: 12px; }
 .graph-inspector-header strong { overflow-wrap: anywhere; font-size: 14px; }
-.graph-inspector-rows { display: grid; border-top: 1px solid var(--line); }
+.graph-inspector-rows { display: grid; max-height: min(52vh, 560px); min-height: 0; overflow-y: auto; padding-right: 6px; border-top: 1px solid var(--line); }
 .graph-inspector-row { display: grid; gap: 4px; padding: 9px 0; border-bottom: 1px solid var(--line); }
 .graph-inspector-row span { color: var(--muted); font-size: 11px; text-transform: uppercase; }
-.graph-inspector-row strong { font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
+.graph-inspector-row strong { font-size: 13px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; font-weight: 500; }
+.graph-inspector-empty { margin: 0; border: 1px dashed var(--line-strong); border-radius: var(--radius-card); color: var(--muted); padding: 12px; font-size: 13px; line-height: 1.45; }
 .graph-inspector-actions { display: flex; justify-content: flex-end; min-height: 0; }
 .graph-empty { margin: 0; min-height: 168px; display: grid; place-items: center; border: 1px dashed var(--line-strong); border-radius: var(--radius-card); color: var(--muted); text-align: center; padding: 18px; font-size: 13px; }
 .dialog-backdrop { position: fixed; inset: 0; z-index: 20; display: grid; justify-items: end; background: color-mix(in srgb, var(--ink) 24%, transparent); padding: 14px; isolation: isolate; }

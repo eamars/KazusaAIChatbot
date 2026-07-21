@@ -185,7 +185,10 @@ def create_app(
     )
     stream_buffer = SSEEventBuffer(max_events=100)
     stream_shutdown_event = asyncio.Event()
-    latest_cognition_graph_state: dict[str, str | None] = {"run_id": None}
+    latest_cognition_graph_state: dict[str, str | None] = {
+        "run_id": None,
+        "self_run_id": None,
+    }
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -331,6 +334,9 @@ def create_app(
         latest_cognition_graph = not_reported_cognition_graph(
             source="overview_latest",
         )
+        latest_self_cognition_graph = not_reported_cognition_graph(
+            source="self_latest",
+        )
         if brain_http_available:
             try:
                 latest_cognition_graph = await (
@@ -341,7 +347,22 @@ def create_app(
                     source="overview_latest",
                     reason=f"brain latest cognition graph unavailable: {exc}",
                 )
+            try:
+                latest_self_cognition_graph = await (
+                    kazusa_client.get_latest_self_cognition_graph()
+                )
+            except (AttributeError, httpx.HTTPError) as exc:
+                latest_self_cognition_graph = not_reported_cognition_graph(
+                    source="self_latest",
+                    reason=(
+                        "brain latest self-cognition graph unavailable: "
+                        f"{exc}"
+                    ),
+                )
         latest_cognition_graph_state["run_id"] = latest_cognition_graph.run_id
+        latest_cognition_graph_state["self_run_id"] = (
+            latest_self_cognition_graph.run_id
+        )
         overview = {
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "service_count": len(states),
@@ -350,6 +371,9 @@ def create_app(
             "cache2": redact_mapping(cache2),
             "latest_cognition_graph": latest_cognition_graph.model_dump(
                 mode="json",
+            ),
+            "latest_self_cognition_graph": (
+                latest_self_cognition_graph.model_dump(mode="json")
             ),
         }
         recent_audit = [
@@ -370,6 +394,7 @@ def create_app(
             services=states,
             overview=overview,
             latest_cognition_graph=latest_cognition_graph,
+            latest_self_cognition_graph=latest_self_cognition_graph,
             recent_audit_events=recent_audit,
             event_counters={"audit": len(recent_audit), "services": len(states)},
             ui_capabilities={
@@ -1222,6 +1247,15 @@ async def _stream_console_events(
                     previous_run_id=latest_cognition_graph_state.get("run_id"),
                 )
             )
+            latest_cognition_graph_state["self_run_id"] = await (
+                _append_self_cognition_graph_invalidation_if_changed(
+                    kazusa_client=kazusa_client,
+                    stream_buffer=stream_buffer,
+                    previous_run_id=latest_cognition_graph_state.get(
+                        "self_run_id"
+                    ),
+                )
+            )
         stream_buffer.append(
             "control.heartbeat",
             {"generated_at": datetime.now(timezone.utc).isoformat()},
@@ -1402,6 +1436,34 @@ async def _append_cognition_graph_invalidation_if_changed(
         stream_buffer.append(
             "control.cognition_graph_invalidated",
             {
+                "run_id": latest_run_id,
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+    return latest_run_id
+
+
+async def _append_self_cognition_graph_invalidation_if_changed(
+    *,
+    kazusa_client: Any,
+    stream_buffer: SSEEventBuffer,
+    previous_run_id: str | None,
+) -> str | None:
+    """Append an invalidation when the latest self graph run changes."""
+
+    try:
+        latest_graph = await kazusa_client.get_latest_self_cognition_graph()
+    except (AttributeError, httpx.HTTPError):
+        return previous_run_id
+
+    latest_run_id = latest_graph.run_id
+    if not latest_run_id:
+        return previous_run_id
+    if latest_run_id != previous_run_id:
+        stream_buffer.append(
+            "control.cognition_graph_invalidated",
+            {
+                "source": "self_latest",
                 "run_id": latest_run_id,
                 "generated_at": datetime.now(timezone.utc).isoformat(),
             },

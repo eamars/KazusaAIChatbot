@@ -70,6 +70,12 @@ from kazusa_ai_chatbot.cognition_resolver.state import (
 logger = logging.getLogger(__name__)
 
 
+class VisualAgentStageError(RuntimeError):
+    """Identify failures raised while executing the enabled visual stage."""
+
+    stage_name = "l3_visual_agent"
+
+
 def _current_user_rag_bundle(state: dict[str, Any]) -> dict[str, Any]:
     """Return the projected current-user bundle from ``rag_result`` when present.
 
@@ -1323,39 +1329,47 @@ async def call_visual_agent(state: dict[str, Any]) -> dict[str, Any]:
         "visual_agent_llm",
     )
     started_at = time.perf_counter()
-    response = await llm.llm.ainvoke(
-        [
-            system_prompt,
-            human_message,
-        ],
-        config=llm.config,
-    )
-    result = parse_llm_json_output(response.content)
+    try:
+        response = await llm.llm.ainvoke(
+            [
+                system_prompt,
+                human_message,
+            ],
+            config=llm.config,
+        )
+        result = parse_llm_json_output(response.content)
 
-    # logger.debug(
-    #     "Visual agent: facial=%d body=%d gaze=%d vibe=%d",
-    #     len(result.get("facial_expression", []) or []),
-    #     len(result.get("body_language", []) or []),
-    #     len(result.get("gaze_direction", []) or []),
-    #     len(result.get("visual_vibe", []) or []),
-    # )
+        # logger.debug(
+        #     "Visual agent: facial=%d body=%d gaze=%d vibe=%d",
+        #     len(result.get("facial_expression", []) or []),
+        #     len(result.get("body_language", []) or []),
+        #     len(result.get("gaze_direction", []) or []),
+        #     len(result.get("visual_vibe", []) or []),
+        # )
 
-    # In case AI make some spelling mistakes
-    facial_expression = result.get("facial_expression", [])
-    body_language = result.get("body_language", [])
-    gaze_direction = result.get("gaze_direction", [])
-    visual_vibe = result.get("visual_vibe", [])
+        # In case AI make some spelling mistakes
+        facial_expression = result.get("facial_expression", [])
+        body_language = result.get("body_language", [])
+        gaze_direction = result.get("gaze_direction", [])
+        visual_vibe = result.get("visual_vibe", [])
 
-    return_value = {
-        "facial_expression": facial_expression,
-        "body_language": body_language,
-        "gaze_direction": gaze_direction,
-        "visual_vibe": visual_vibe,
-    }
-    validate_cognition_output_contract(
-        stage="l3_visual_agent",
-        payload=return_value,
-    )
+        return_value = {
+            "facial_expression": facial_expression,
+            "body_language": body_language,
+            "gaze_direction": gaze_direction,
+            "visual_vibe": visual_vibe,
+        }
+        validate_cognition_output_contract(
+            stage="l3_visual_agent",
+            payload=return_value,
+        )
+    except VisualAgentStageError:
+        raise
+    except Exception as exc:
+        raise VisualAgentStageError(
+            "l3_visual_agent failed during enabled execution"
+        ) from exc
+    logger.info(f"Visual directive output: {log_preview(return_value)}")
     await record_cognition_stage_trace(
         state=state,
         stage_name="l3_visual_agent",
