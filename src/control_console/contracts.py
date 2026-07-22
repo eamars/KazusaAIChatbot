@@ -154,6 +154,7 @@ class CognitionRunGraphNode(StrictModel):
         "completed",
         "skipped",
         "failed",
+        "partial",
         "not_reported",
     ] = "not_reported"
     detail: dict[str, Any] = Field(default_factory=dict)

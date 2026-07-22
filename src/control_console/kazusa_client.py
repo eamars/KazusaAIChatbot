@@ -67,6 +67,8 @@ COGNITION_GRAPH_DETAIL_KEYS = frozenset(
         "visual_vibe",
         "messages",
         "empty_state",
+        "failure",
+        "failure_code",
     }
 )
 COGNITION_GRAPH_SCALAR_DETAIL_KEYS = frozenset(
@@ -80,6 +82,11 @@ COGNITION_GRAPH_SCALAR_DETAIL_KEYS = frozenset(
         "judgment_note",
         "retrieval_answer",
         "empty_state",
+        "failure_code",
+        "failure_stage",
+        "safe_checkpoint",
+        "attempt_count",
+        "retryable",
         "selected_bid_reason",
         "goal_resolution",
         "phase",
@@ -112,6 +119,7 @@ COGNITION_GRAPH_MAPPING_DETAIL_KEYS = frozenset(
         "collapse",
         "selected_intention",
         "expression_policy",
+        "failure",
     }
 )
 COGNITION_GRAPH_ROW_DETAIL_KEYS = frozenset(
@@ -224,6 +232,10 @@ COGNITION_GRAPH_NESTED_DETAIL_KEYS = frozenset(
         "private_monologue",
         "expected_consequences",
         "failure_code",
+        "stage",
+        "failure_stage",
+        "safe_checkpoint",
+        "retryable",
         "primary_branch_index",
         "supporting_branch_indices",
         "suppressed_branch_indices",
@@ -508,7 +520,7 @@ def project_cognition_graph_snapshot(
         "run_id": _safe_optional_text(raw_graph.get("run_id")) or inferred_run_id,
         "generated_at": datetime.now(timezone.utc),
         "nodes": _project_graph_nodes(raw_graph.get("nodes")),
-        "edges": _project_graph_edges(raw_graph.get("edges")),
+        "edges": [],
         "redaction": {
             "detail": (
                 "approved cognition semantic fields preserve full text; "
@@ -522,6 +534,10 @@ def project_cognition_graph_snapshot(
             ],
         },
     }
+    normalized["edges"] = _project_graph_edges(
+        raw_graph.get("edges"),
+        node_ids={node["id"] for node in normalized["nodes"]},
+    )
     try:
         snapshot = CognitionRunGraphSnapshot.model_validate(normalized)
     except ValidationError:
@@ -580,7 +596,11 @@ def _project_graph_nodes(raw_nodes: Any) -> list[dict[str, Any]]:
     return nodes
 
 
-def _project_graph_edges(raw_edges: Any) -> list[dict[str, Any]]:
+def _project_graph_edges(
+    raw_edges: Any,
+    *,
+    node_ids: set[str] | None = None,
+) -> list[dict[str, Any]]:
     """Project bounded graph edges from external telemetry."""
 
     if not isinstance(raw_edges, list):
@@ -596,6 +616,11 @@ def _project_graph_edges(raw_edges: Any) -> list[dict[str, Any]]:
             "kind": str(raw_edge.get("kind", "sequence")),
             "label": str(raw_edge.get("label", "")),
         }
+        if node_ids is not None and (
+            projected_edge["source"] not in node_ids
+            or projected_edge["target"] not in node_ids
+        ):
+            continue
         try:
             edge = CognitionRunGraphEdge.model_validate(projected_edge)
         except ValidationError:

@@ -188,7 +188,10 @@ from kazusa_ai_chatbot.brain_service.contracts import (
     RuntimeAdapterRegistrationResponse,
 )
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    CognitionContextLimitError,
+    CognitionContractError,
     CognitionExecutionError,
+    validate_cognition_observability,
 )
 from kazusa_ai_chatbot.relevance import (
     SettledRelevanceContractError,
@@ -363,7 +366,13 @@ def _operational_failure_metadata(
         Error code, stage, owner attempt count, retryability, and branch id.
     """
 
-    if isinstance(exc, (CognitionExecutionError, SettledRelevanceContractError)):
+    if isinstance(exc, CognitionContextLimitError):
+        error_code = "context_limit"
+        stage = "cognition"
+        failure_attempt_count = 1
+        retryable = False
+        branch_id = ""
+    elif isinstance(exc, (CognitionExecutionError, SettledRelevanceContractError)):
         error_code = str(getattr(exc, "error_code", "internal_invariant"))
         stage = str(getattr(exc, "stage", ""))
         failure_attempt_count = int(getattr(exc, "attempt_count", 1))
@@ -374,6 +383,12 @@ def _operational_failure_metadata(
         stage = "service.graph"
         failure_attempt_count = 1
         retryable = True
+        branch_id = ""
+    elif isinstance(exc, CognitionContractError):
+        error_code = "model_contract_invalid"
+        stage = "service.graph"
+        failure_attempt_count = 1
+        retryable = False
         branch_id = ""
     elif isinstance(exc, ValueError):
         error_code = "model_contract_invalid"
@@ -3252,6 +3267,7 @@ def _build_response_cognition_graph(
     graph_status: str = "completed",
     visual_stage_failed: bool = False,
     visual_stage_reached: bool | None = None,
+    failure: BaseException | None = None,
 ) -> dict[str, Any]:
     """Build a bounded cognition graph snapshot for operator inspection."""
 
@@ -3392,9 +3408,21 @@ def _build_response_cognition_graph(
     cognition_output = state.get("cognition_core_output")
     if not isinstance(cognition_output, Mapping):
         cognition_output = graph_result.get("cognition_core_output")
-    native_nodes, native_edges = _graph_native_v2_nodes(cognition_output)
+    native_nodes, native_edges = _graph_native_v2_nodes(
+        cognition_output,
+        failure=failure,
+    )
     nodes.extend(native_nodes)
     edges.extend(native_edges)
+    if (
+        graph_status == "completed"
+        and any(
+            node["status"] in {"failed", "partial"}
+            for node in native_nodes
+            if node["id"] in {"v2.parallel", "v2.appraisal", "v2.failure"}
+        )
+    ):
+        graph_status = "partial"
     snapshot = {
         "run_id": run_id,
         "status": graph_status,
@@ -3810,6 +3838,7 @@ _GRAPH_V2_APPRAISAL_FIELDS = frozenset(
         "semantic_value",
         "delta",
         "reason",
+        "failure_code",
     }
 )
 _GRAPH_V2_BRANCH_FIELDS = frozenset(
@@ -3988,16 +4017,111 @@ def _graph_project_text_list(value: Any) -> list[str]:
     return [item for item in value if isinstance(item, str) and item.strip()]
 
 
+def _graph_v2_failure_node(
+    *,
+    failure_code: str,
+    stage: str,
+    attempt_count: int = 1,
+    safe_checkpoint: str = "unknown",
+    retryable: bool = False,
+    label: str = "Native V2 failure",
+) -> dict[str, Any]:
+    """Build bounded native failure detail without exception text or IDs."""
+
+    return {
+        "id": "v2.failure",
+        "label": label,
+        "stage": "V2",
+        "lane": "cognition",
+        "column": 3,
+        "branch": "failure",
+        "status": "failed",
+        "detail": {
+            "failure": {
+                "failure_code": failure_code,
+                "stage": stage,
+                "attempt_count": max(1, attempt_count),
+                "safe_checkpoint": safe_checkpoint,
+                "retryable": retryable,
+            },
+        },
+    }
+
+
 def _graph_native_v2_nodes(
     cognition_output: Any,
+    *,
+    failure: BaseException | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Project native V2 branch results into the operator graph."""
 
+    failure_nodes: list[dict[str, Any]] = []
+    failure_edges: list[dict[str, Any]] = []
+    if failure is not None:
+        (
+            failure_code,
+            failure_stage,
+            failure_attempt_count,
+            failure_retryable,
+            _,
+        ) = _operational_failure_metadata(failure)
+        failure_node = _graph_v2_failure_node(
+            failure_code=failure_code,
+            stage=failure_stage,
+            attempt_count=failure_attempt_count,
+            safe_checkpoint=str(
+                getattr(failure, "safe_checkpoint", "unknown")
+            ),
+            retryable=failure_retryable,
+        )
+        failure_nodes.append(failure_node)
+        failure_edges.append({
+            "source": "l1.relevance",
+            "target": "v2.failure",
+            "kind": "fork",
+            "label": "native V2 failure",
+        })
     if not isinstance(cognition_output, Mapping):
-        return [], []
+        return failure_nodes, failure_edges
     observability = cognition_output.get("cognition_observability")
     if not isinstance(observability, Mapping):
-        return [], []
+        if cognition_output.get("schema_version") == "cognition_core_output.v2":
+            if failure_nodes:
+                return failure_nodes, failure_edges
+            return [
+                _graph_v2_failure_node(
+                    failure_code="native_observability_missing",
+                    stage="cognition_observability",
+                    label="Native V2 telemetry missing",
+                ),
+            ], [
+                {
+                    "source": "l1.relevance",
+                    "target": "v2.failure",
+                    "kind": "fork",
+                    "label": "native V2 telemetry",
+                },
+            ]
+        return failure_nodes, failure_edges
+    try:
+        validate_cognition_observability(observability)
+    except CognitionContractError:
+        if failure_nodes:
+            return failure_nodes, failure_edges
+        return [
+            _graph_v2_failure_node(
+                failure_code="native_observability_invalid",
+                stage="cognition_observability",
+                label="Native V2 telemetry invalid",
+            ),
+        ], [
+            {
+                "source": "l1.relevance",
+                "target": "v2.failure",
+                "kind": "fork",
+                "label": "native V2 telemetry",
+            },
+        ]
 
     execution = _graph_project_mapping(
         observability.get("execution"),
@@ -4015,13 +4139,15 @@ def _graph_native_v2_nodes(
         observability.get("collapse"),
         _GRAPH_V2_COLLAPSE_FIELDS,
     )
-    nodes: list[dict[str, Any]] = []
-    edges: list[dict[str, Any]] = []
+    nodes: list[dict[str, Any]] = list(failure_nodes)
+    edges: list[dict[str, Any]] = list(failure_edges)
     failed_branch_count = execution.get("failed_branch_count", 0)
     completed_branch_count = execution.get("completed_branch_count", 0)
     parallel_status = (
         "failed"
         if failed_branch_count and not completed_branch_count
+        else "partial"
+        if failed_branch_count and completed_branch_count
         else "completed"
     )
     parallel_detail: dict[str, Any] = {}
@@ -4041,12 +4167,32 @@ def _graph_native_v2_nodes(
     })
 
     appraisal_detail: dict[str, Any] = {}
+    failed_appraisal_count = sum(
+        1
+        for row in appraisal_rows
+        if isinstance(row, Mapping) and row.get("status") == "failed"
+    )
+    completed_appraisal_count = sum(
+        1
+        for row in appraisal_rows
+        if isinstance(row, Mapping) and row.get("status") == "completed"
+    )
     if appraisal_rows:
         appraisal_detail["appraisal_results"] = appraisal_rows
-        appraisal_status = "completed"
+        appraisal_status = (
+            "failed"
+            if failed_appraisal_count and not completed_appraisal_count
+            else "partial"
+            if failed_appraisal_count
+            else "completed"
+        )
     else:
         appraisal_detail["empty_state"] = "No semantic appraisal was reported."
-        appraisal_status = "skipped"
+        appraisal_status = (
+            "not_reported"
+            if execution.get("selected_question_count", 0)
+            else "skipped"
+        )
     nodes.append({
         "id": "v2.appraisal",
         "label": "Appraisal results",
@@ -5052,6 +5198,7 @@ async def _process_queued_chat_item(
                         visual_stage_reached=(
                             True if visual_stage_failed else False
                         ),
+                        failure=exc,
                     )
                     _record_latest_cognition_graph(failure_graph)
                     response = response.model_copy(

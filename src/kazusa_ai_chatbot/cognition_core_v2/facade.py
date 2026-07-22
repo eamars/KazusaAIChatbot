@@ -25,6 +25,7 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionExecutionError,
     CognitionObservabilityV2,
     SemanticAppraisalResultV2,
+    classify_cognition_failure,
     validate_cognition_core_input,
     validate_cognition_core_output,
 )
@@ -169,7 +170,11 @@ async def run_cognition(
         preliminary_branch_task,
         _collect_appraisals(appraisal_tasks, questions),
     )
-    appraisal_results, appraisal_warnings = appraisal_collection
+    (
+        appraisal_results,
+        appraisal_failures,
+        appraisal_warnings,
+    ) = appraisal_collection
     warnings.extend(appraisal_warnings)
     _raise_for_failed_required_branches(
         preliminary_execution,
@@ -343,6 +348,7 @@ async def run_cognition(
     cognition_observability = _build_cognition_observability(
         questions=questions,
         appraisal_results=appraisal_results,
+        appraisal_failures=appraisal_failures,
         preliminary_branches=preliminary_branches,
         preliminary_execution=preliminary_execution,
         final_branches=new_branch_definitions,
@@ -785,6 +791,7 @@ def _build_cognition_observability(
     *,
     questions: Sequence[Mapping[str, Any]],
     appraisal_results: Sequence[Mapping[str, Any]],
+    appraisal_failures: Mapping[str, str],
     preliminary_branches: Sequence[BranchDefinition],
     preliminary_execution: ParallelExecutionResult,
     final_branches: Sequence[BranchDefinition],
@@ -807,7 +814,11 @@ def _build_cognition_observability(
         observation: dict[str, Any] = {
             "question_kind": question["question_kind"],
             "semantic_question": question["semantic_question"],
-            "status": "completed" if result is not None else "not_reported",
+            "status": (
+                "failed"
+                if question_id in appraisal_failures
+                else "completed" if result is not None else "not_reported"
+            ),
         }
         if result is not None:
             observation["explanation"] = result["explanation"]
@@ -825,6 +836,8 @@ def _build_cognition_observability(
                 }
                 for delta in result["deltas"]
             ]
+        if question_id in appraisal_failures:
+            observation["failure_code"] = appraisal_failures[question_id]
         appraisals.append(observation)
 
     primary_branch_id = collapse["primary_branch_id"]
@@ -1040,22 +1053,25 @@ def _cognition_elapsed_seconds(
 async def _collect_appraisals(
     tasks: Sequence[asyncio.Task[SemanticAppraisalResultV2]],
     questions: Sequence[Mapping[str, Any]],
-) -> tuple[list[SemanticAppraisalResultV2], list[str]]:
+) -> tuple[list[SemanticAppraisalResultV2], dict[str, str], list[str]]:
     """Collect independent appraisals while isolating failed question slots."""
 
     if not tasks:
-        return [], []
+        return [], {}, []
     collected = await asyncio.gather(*tasks, return_exceptions=True)
     results: list[SemanticAppraisalResultV2] = []
+    failures: dict[str, str] = {}
     warnings: list[str] = []
     for question, result in zip(questions, collected, strict=True):
         if isinstance(result, Exception):
             if isinstance(result, CognitionContextLimitError):
                 raise result
-            warnings.append(f"{question['question_id']} appraisal failed: {result}")
+            error_code = classify_cognition_failure(result)
+            failures[question["question_id"]] = error_code
+            warnings.append(f"semantic_appraisal_failed:{error_code}")
         else:
             results.append(result)
-    return results, warnings
+    return results, failures, warnings
 
 
 def _elapsed_ms(started_at: float) -> int:

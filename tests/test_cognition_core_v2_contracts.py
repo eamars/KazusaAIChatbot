@@ -40,7 +40,10 @@ from kazusa_ai_chatbot.cognition_core_v2.state_models import (
 )
 
 from llm_test_helpers import make_llm_call_config
-from tests.cognition_core_v2_test_helpers import canonical_episode
+from tests.cognition_core_v2_test_helpers import (
+    canonical_cognition_output,
+    canonical_episode,
+)
 
 
 NOW = "2026-07-14T00:00:00Z"
@@ -146,6 +149,77 @@ def _input() -> dict[str, object]:
     }
 
 
+def _observability() -> dict[str, object]:
+    """Build a complete native observability envelope for contract tests."""
+
+    return {
+        "execution": {
+            "selected_question_count": 1,
+            "dispatched_question_count": 1,
+            "selected_branch_count": 2,
+            "dispatched_branch_count": 2,
+            "completed_branch_count": 2,
+            "failed_branch_count": 0,
+            "maximum_concurrency": 2,
+            "overlap_ms": 4,
+            "dependency_wait_ms": 2,
+            "total_ms": 10,
+        },
+        "appraisals": [
+            {
+                "question_kind": "relationship_social",
+                "semantic_question": "the relationship question",
+                "status": "completed",
+                "explanation": "the evidence supports this result",
+            },
+        ],
+        "branches": [
+            {
+                "phase": "preliminary",
+                "branch_index": 1,
+                "goal_kind": "bond_protection",
+                "status": "completed",
+                "selection": "primary",
+                "intention": "protect the relationship",
+                "desired_outcome": "make the boundary clear",
+                "concrete_detail": "describe the impact",
+                "reason": "the event is grounded",
+                "private_monologue": "I should acknowledge the impact.",
+                "expected_consequences": ["the boundary is understood"],
+                "confidence": "high",
+            },
+            {
+                "phase": "preliminary",
+                "branch_index": 2,
+                "goal_kind": "autonomy_boundary",
+                "status": "completed",
+                "selection": "suppressed",
+                "intention": "end the attack",
+                "desired_outcome": "stop the escalation",
+                "concrete_detail": "answer firmly",
+                "reason": "the attack creates pressure",
+                "private_monologue": "I want to push back.",
+                "expected_consequences": ["the escalation may stop"],
+                "confidence": "medium",
+            },
+        ],
+        "collapse": {
+            "primary_branch_index": 1,
+            "supporting_branch_indices": [],
+            "suppressed_branch_indices": [2],
+            "selection_reason": "the first goal best fits the event",
+        },
+    }
+
+
+def _output_with_observability() -> dict[str, object]:
+    """Attach the native observability envelope to a valid output fixture."""
+
+    output = canonical_cognition_output()
+    output["cognition_observability"] = _observability()
+    return output
+
+
 @pytest.mark.asyncio
 async def test_v2_facade_returns_exact_one_scope_output() -> None:
     """The public facade returns one validated state update and no legacy shape."""
@@ -174,6 +248,79 @@ async def test_character_cognition_does_not_apply_elapsed_decay() -> None:
     replacement = output["state_update"]["replacement_state"]
     assert output["state_update"]["state_scope"] == "character"
     assert replacement["updated_at"] == NOW
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        ("execution.selected_question_count", 2),
+        ("execution.completed_branch_count", 3),
+        ("execution.failed_branch_count", 3),
+        ("execution.maximum_concurrency", 3),
+        ("execution.overlap_ms", 11),
+        ("execution.dependency_wait_ms", 11),
+    ],
+)
+def test_native_observability_rejects_inconsistent_execution_metrics(
+    path: str,
+    value: int,
+) -> None:
+    """Counter and timing relationships must not produce false telemetry."""
+
+    output = _output_with_observability()
+    execution = output["cognition_observability"]["execution"]
+    execution[path.split(".")[-1]] = value
+
+    with pytest.raises(CognitionContractError):
+        validate_cognition_core_output(output)
+
+
+def test_native_observability_rejects_failed_rows_without_typed_code() -> None:
+    """A failed semantic row must identify its bounded failure category."""
+
+    output = _output_with_observability()
+    appraisal = output["cognition_observability"]["appraisals"][0]
+    appraisal["status"] = "failed"
+
+    with pytest.raises(CognitionContractError):
+        validate_cognition_core_output(output)
+
+
+def test_native_observability_accepts_typed_failed_appraisal() -> None:
+    """A bounded appraisal failure remains visible without semantic output."""
+
+    output = _output_with_observability()
+    appraisal = output["cognition_observability"]["appraisals"][0]
+    appraisal["status"] = "failed"
+    appraisal["failure_code"] = "model_contract_invalid"
+    appraisal.pop("explanation")
+
+    validated = validate_cognition_core_output(output)
+
+    assert validated["cognition_observability"]["appraisals"][0][
+        "failure_code"
+    ] == "model_contract_invalid"
+
+
+def test_native_observability_rejects_failure_code_on_completed_rows() -> None:
+    """Failure metadata cannot be attached to a successful semantic result."""
+
+    output = _output_with_observability()
+    branch = output["cognition_observability"]["branches"][0]
+    branch["failure_code"] = "model_contract_invalid"
+
+    with pytest.raises(CognitionContractError):
+        validate_cognition_core_output(output)
+
+
+def test_native_observability_rejects_collapse_selection_mismatch() -> None:
+    """The selected partition must agree with every branch row."""
+
+    output = _output_with_observability()
+    output["cognition_observability"]["collapse"]["primary_branch_index"] = 2
+
+    with pytest.raises(CognitionContractError):
+        validate_cognition_core_output(output)
 
 
 def test_frozen_public_contract_fields_are_exact() -> None:

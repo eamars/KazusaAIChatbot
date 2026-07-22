@@ -13,6 +13,7 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     BranchDefinition,
     CognitionContextLimitError,
     CognitionExecutionError,
+    classify_cognition_failure,
 )
 from kazusa_ai_chatbot.cognition_core_v2.dependency_graph import DependencyGraph
 
@@ -57,25 +58,25 @@ class BranchFailure:
             safe_checkpoint = exception.safe_checkpoint
             retryable = exception.retryable
         elif isinstance(exception, CognitionContextLimitError):
-            error_code = "context_limit"
+            error_code = classify_cognition_failure(exception)
             stage = "cognition_branch"
             attempt_count = 1
             safe_checkpoint = "unknown"
             retryable = False
         elif isinstance(exception, (TimeoutError, ConnectionError)):
-            error_code = "provider_transient"
+            error_code = classify_cognition_failure(exception)
             stage = "cognition_branch"
             attempt_count = 1
             safe_checkpoint = "pre_state_commit"
             retryable = True
         elif isinstance(exception, ValueError):
-            error_code = "model_contract_invalid"
+            error_code = classify_cognition_failure(exception)
             stage = "cognition_branch"
             attempt_count = 1
             safe_checkpoint = "unknown"
             retryable = False
         else:
-            error_code = "internal_invariant"
+            error_code = classify_cognition_failure(exception)
             stage = "cognition_branch"
             attempt_count = 1
             safe_checkpoint = "unknown"

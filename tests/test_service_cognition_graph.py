@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    CognitionExecutionError,
+)
+
 
 def _response_state(*, visual_directives: dict[str, object]) -> dict[str, object]:
     """Build a response graph state with meaningful semantic artifacts."""
@@ -110,6 +114,7 @@ def _native_v2_cognition_output() -> dict[str, object]:
     """Build the safe native V2 semantic projection used by graph tests."""
 
     return {
+        'schema_version': 'cognition_core_output.v2',
         'intention': {
             'route': 'speech',
             'intention': '回应当前关系中的受伤感受',
@@ -128,8 +133,8 @@ def _native_v2_cognition_output() -> dict[str, object]:
         ],
         'cognition_observability': {
             'execution': {
-                'selected_question_count': 2,
-                'dispatched_question_count': 2,
+                'selected_question_count': 1,
+                'dispatched_question_count': 1,
                 'selected_branch_count': 2,
                 'dispatched_branch_count': 2,
                 'completed_branch_count': 2,
@@ -322,6 +327,132 @@ def test_response_graph_exposes_native_v2_parallel_results(monkeypatch) -> None:
         and edge['target'] == 'v2.collapse'
         and edge['kind'] == 'join'
         for edge in graph['edges']
+    )
+
+
+def test_response_graph_marks_mixed_native_branch_failure_as_partial() -> None:
+    """A completed and failed branch pair must remain visibly partial."""
+
+    from kazusa_ai_chatbot import service
+
+    state = _response_state(visual_directives={})
+    output = _native_v2_cognition_output()
+    output['cognition_observability']['execution']['completed_branch_count'] = 1
+    output['cognition_observability']['execution']['failed_branch_count'] = 1
+    output['cognition_observability']['branches'][1]['status'] = 'failed'
+    output['cognition_observability']['branches'][1]['selection'] = 'unselected'
+    output['cognition_observability']['branches'][1]['failure_code'] = (
+        'model_contract_invalid'
+    )
+    output['cognition_observability']['collapse'][
+        'suppressed_branch_indices'
+    ] = []
+    state['cognition_core_output'] = output
+
+    graph = service._build_response_cognition_graph(
+        graph_result=_response_graph_result(),
+        consolidation_state=state,
+        run_id='native-v2-partial-run',
+    )
+
+    assert graph['status'] == 'partial'
+    parallel = _node(graph, 'v2.parallel')
+    assert parallel['status'] == 'partial'
+    failed_branch = _node(graph, 'v2.branch.2')
+    assert failed_branch['status'] == 'failed'
+    assert failed_branch['detail']['failure_code'] == 'model_contract_invalid'
+
+
+def test_response_graph_marks_failed_appraisal_as_partial() -> None:
+    """An appraisal exception must not look like an empty successful stage."""
+
+    from kazusa_ai_chatbot import service
+
+    state = _response_state(visual_directives={})
+    output = _native_v2_cognition_output()
+    appraisal = output['cognition_observability']['appraisals'][0]
+    appraisal['status'] = 'failed'
+    appraisal['failure_code'] = 'provider_transient'
+    appraisal.pop('explanation')
+    state['cognition_core_output'] = output
+
+    graph = service._build_response_cognition_graph(
+        graph_result=_response_graph_result(),
+        consolidation_state=state,
+        run_id='native-v2-appraisal-failure-run',
+    )
+
+    appraisal_node = _node(graph, 'v2.appraisal')
+    assert graph['status'] == 'partial'
+    assert appraisal_node['status'] == 'failed'
+    assert appraisal_node['detail']['appraisal_results'][0]['failure_code'] == (
+        'provider_transient'
+    )
+
+
+def test_response_graph_projects_terminal_native_failure_metadata() -> None:
+    """Terminal V2 failures retain typed metadata without exception detail."""
+
+    from kazusa_ai_chatbot import service
+
+    failure = CognitionExecutionError(
+        'private failure detail must stay out of the graph',
+        error_code='model_contract_invalid',
+        stage='goal_cognition',
+        attempt_count=2,
+        safe_checkpoint='pre_state_commit',
+        retryable=False,
+    )
+    graph = service._build_response_cognition_graph(
+        graph_result=_response_graph_result(),
+        consolidation_state=_response_state(visual_directives={}),
+        run_id='native-v2-failure-run',
+        graph_status='failed',
+        failure=failure,
+    )
+
+    failure_node = _node(graph, 'v2.failure')
+    assert failure_node['status'] == 'failed'
+    assert failure_node['detail']['failure']['failure_code'] == (
+        'model_contract_invalid'
+    )
+    assert failure_node['detail']['failure']['stage'] == 'goal_cognition'
+    assert failure_node['detail']['failure']['attempt_count'] == 2
+    assert 'private failure detail' not in repr(graph)
+
+
+def test_response_graph_marks_missing_and_malformed_native_telemetry() -> None:
+    """Native V2 output cannot appear complete without valid telemetry."""
+
+    from kazusa_ai_chatbot import service
+
+    state = _response_state(visual_directives={})
+    state['cognition_core_output'] = {
+        'schema_version': 'cognition_core_output.v2',
+    }
+    missing_graph = service._build_response_cognition_graph(
+        graph_result=_response_graph_result(),
+        consolidation_state=state,
+        run_id='native-v2-missing-telemetry',
+    )
+    missing_node = _node(missing_graph, 'v2.failure')
+    assert missing_graph['status'] == 'partial'
+    assert missing_node['detail']['failure']['failure_code'] == (
+        'native_observability_missing'
+    )
+
+    state['cognition_core_output']['cognition_observability'] = {
+        'execution': {},
+    }
+    malformed_graph = service._build_response_cognition_graph(
+        graph_result=_response_graph_result(),
+        consolidation_state=state,
+        run_id='native-v2-malformed-telemetry',
+    )
+    malformed_node = _node(malformed_graph, 'v2.failure')
+    assert malformed_graph['status'] == 'partial'
+    assert malformed_node['detail']['failure']['failure_code'] == (
+        'native_observability_invalid'
     )
 
 

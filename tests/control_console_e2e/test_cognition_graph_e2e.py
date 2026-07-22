@@ -296,6 +296,105 @@ def test_native_v2_graph_renders_parallel_results_and_final_surface(
     assert summary.exists()
 
 
+def test_native_v2_failure_states_render_with_typed_evidence(
+    tmp_path: Path,
+    unused_tcp_port_factory,
+    e2e_console,
+    e2e_browser_page,
+    e2e_artifact_dir: Path,
+    e2e_summary_writer,
+) -> None:
+    """Verify partial branch failure remains visible in the browser surface."""
+
+    brain_port = unused_tcp_port_factory()
+    with FakeBrainServer(brain_port) as fake_brain:
+        registry_path = write_conflict_brain_registry(
+            path=tmp_path / "brain_conflict_registry.json",
+            fake_brain_base_url=fake_brain.base_url,
+            python_executable=sys.executable,
+        )
+        fake_brain.set_graph(
+            native_v2_graph_snapshot(
+                status="failed",
+                run_id="native-v2-failure-console-run",
+            )
+        )
+
+        with e2e_console(
+            brain_base_url=fake_brain.base_url,
+            service_registry_path=registry_path,
+            sse_interval_seconds=0.2,
+        ) as console:
+            page = e2e_browser_page(console.base_url)
+            page.set_viewport_size({"width": 1600, "height": 1000})
+            _login(page)
+
+            graph = page.locator("#overview-cognition-graph")
+            _assert_graph_status(page, "failed")
+            assert "partial" in graph.locator(
+                "[data-node-id='v2.parallel']"
+            ).inner_text()
+            assert "1" in graph.locator(
+                ".graph-parallel-metric"
+            ).all_inner_texts()[1]
+
+            graph.locator(
+                "[data-node-id='v2.branch.1']"
+            ).last.click()
+            failure_detail = graph.locator(".graph-inspector").inner_text()
+            assert "failed" in failure_detail
+            assert "model_contract_invalid" in failure_detail
+
+            failure_screenshot = e2e_artifact_dir / "native_v2_failure_branch.png"
+            page.screenshot(path=str(failure_screenshot), full_page=True)
+
+            graph.locator(
+                "[data-node-id='v2.failure']"
+            ).last.click()
+            terminal_failure_detail = graph.locator(
+                ".graph-inspector"
+            ).inner_text()
+            assert "Native V2 failure" in terminal_failure_detail
+            assert "goal_cognition" in terminal_failure_detail
+            assert "pre_state_commit" in terminal_failure_detail
+            terminal_screenshot = e2e_artifact_dir / "native_v2_terminal_failure.png"
+            page.screenshot(path=str(terminal_screenshot), full_page=True)
+
+            graph.locator(
+                "[data-node-id='v2.parallel']"
+            ).last.click()
+            parallel_detail = graph.locator(".graph-inspector").inner_text()
+            assert "failed" in parallel_detail
+            assert "1" in parallel_detail
+
+            parallel_screenshot = e2e_artifact_dir / "native_v2_failure_parallel.png"
+            page.screenshot(path=str(parallel_screenshot), full_page=True)
+            assert getattr(page, "kazusa_console_messages", []) == []
+
+            summary = e2e_summary_writer(
+                name="native_v2_failure_state_rendering",
+                conclusion="pass",
+                details={
+                    "console_url": console.base_url,
+                    "fake_brain": fake_brain.base_url,
+                    "checked_paths": [
+                        "outer failed status",
+                        "partial parallel status",
+                        "typed branch failure code",
+                        "parallel failure metrics",
+                        "browser console diagnostics",
+                    ],
+                    "screenshots": {
+                        "branch": str(failure_screenshot),
+                        "terminal": str(terminal_screenshot),
+                        "parallel": str(parallel_screenshot),
+                    },
+                },
+            )
+
+    assert summary.exists()
+
+
 def test_cognition_graph_option_a_state_treatment(
     tmp_path: Path,
     unused_tcp_port_factory,

@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Literal, Mapping, NotRequired, TypedDict
+from typing import Any, Literal, Mapping, NotRequired, Sequence, TypedDict
 
 from kazusa_ai_chatbot.cognition_episode import (
     CognitiveEpisodeV1,
@@ -89,6 +89,20 @@ class CognitionExecutionError(CognitionContractError):
 
 class CognitionContextLimitError(CognitionContractError):
     """Raised when required model context remains over its frozen cap."""
+
+
+def classify_cognition_failure(exception: BaseException) -> str:
+    """Return the bounded error category for one cognition-stage failure."""
+
+    if isinstance(exception, CognitionExecutionError):
+        return exception.error_code
+    if isinstance(exception, CognitionContextLimitError):
+        return "context_limit"
+    if isinstance(exception, (TimeoutError, ConnectionError)):
+        return "provider_transient"
+    if isinstance(exception, ValueError):
+        return "model_contract_invalid"
+    return "internal_invariant"
 
 
 SEMANTIC_QUESTION_KINDS = (
@@ -486,10 +500,11 @@ class CognitionAppraisalObservationV2(TypedDict):
 
     question_kind: str
     semantic_question: str
-    status: Literal["completed", "not_reported"]
+    status: Literal["completed", "failed", "not_reported"]
     explanation: NotRequired[str]
     propositions: NotRequired[list[dict[str, str]]]
     deltas: NotRequired[list[dict[str, int | str]]]
+    failure_code: NotRequired[str]
 
 
 class CognitionBranchObservationV2(TypedDict):
@@ -953,6 +968,15 @@ def validate_text_surface_output(
     return dict(payload)  # type: ignore[return-value]
 
 
+def validate_cognition_observability(
+    value: Mapping[str, Any],
+) -> CognitionObservabilityV2:
+    """Validate the native operator observability envelope independently."""
+
+    _validate_cognition_observability(value)
+    return dict(value)  # type: ignore[return-value]
+
+
 def validate_visual_surface_output(
     payload: Mapping[str, Any],
 ) -> VisualSurfaceOutputV2:
@@ -1243,6 +1267,7 @@ def _validate_cognition_observability(value: Any) -> None:
             "cognition observability fields are not exact"
         )
     _validate_cognition_execution_observation(value["execution"])
+    execution = value["execution"]
     appraisals = value["appraisals"]
     if not isinstance(appraisals, list):
         raise CognitionContractError("cognition observability appraisals invalid")
@@ -1259,9 +1284,50 @@ def _validate_cognition_observability(value: Any) -> None:
         raise CognitionContractError(
             "cognition observability branch indices are duplicated"
         )
+    if len(appraisals) != execution["selected_question_count"]:
+        raise CognitionContractError(
+            "cognition observability appraisal count is inconsistent"
+        )
+    if len(branches) != execution["selected_branch_count"]:
+        raise CognitionContractError(
+            "cognition observability branch count is inconsistent"
+        )
+    if (
+        execution["selected_question_count"]
+        != execution["dispatched_question_count"]
+    ):
+        raise CognitionContractError(
+            "cognition observability question counts are inconsistent"
+        )
+    if execution["dispatched_branch_count"] > execution["selected_branch_count"]:
+        raise CognitionContractError(
+            "cognition observability dispatched branch count is inconsistent"
+        )
+    if execution["completed_branch_count"] > execution["dispatched_branch_count"]:
+        raise CognitionContractError(
+            "cognition observability completed branch count is inconsistent"
+        )
+    if (
+        execution["completed_branch_count"]
+        + execution["failed_branch_count"]
+        > execution["selected_branch_count"]
+    ):
+        raise CognitionContractError(
+            "cognition observability terminal branch counts are inconsistent"
+        )
+    if execution["maximum_concurrency"] > execution["dispatched_branch_count"]:
+        raise CognitionContractError(
+            "cognition observability concurrency is inconsistent"
+        )
+    for field_name in ("overlap_ms", "dependency_wait_ms"):
+        if execution[field_name] > execution["total_ms"]:
+            raise CognitionContractError(
+                f"cognition observability {field_name} is inconsistent"
+            )
     _validate_cognition_collapse_observation(
         value["collapse"],
         branch_indices=set(branch_indices),
+        branches=branches,
     )
 
 
@@ -1300,7 +1366,7 @@ def _validate_cognition_appraisal_observation(value: Any) -> None:
     """Validate one question's semantic result without local handles."""
 
     required = {"question_kind", "semantic_question", "status"}
-    optional = {"explanation", "propositions", "deltas"}
+    optional = {"explanation", "propositions", "deltas", "failure_code"}
     if not isinstance(value, Mapping) or not required.issubset(value):
         raise CognitionContractError(
             "cognition appraisal observation fields are invalid"
@@ -1315,8 +1381,16 @@ def _validate_cognition_appraisal_observation(value: Any) -> None:
         "cognition appraisal semantic question",
         maximum=2000,
     )
-    if value["status"] not in {"completed", "not_reported"}:
+    if value["status"] not in {"completed", "failed", "not_reported"}:
         raise CognitionContractError("cognition appraisal observation status invalid")
+    if value["status"] == "failed" and "failure_code" not in value:
+        raise CognitionContractError(
+            "failed cognition appraisal requires a failure code"
+        )
+    if value["status"] != "failed" and "failure_code" in value:
+        raise CognitionContractError(
+            "non-failed cognition appraisal cannot carry a failure code"
+        )
     if value["status"] == "completed" and "explanation" not in value:
         raise CognitionContractError(
             "completed cognition appraisal requires an explanation"
@@ -1368,6 +1442,12 @@ def _validate_cognition_appraisal_observation(value: Any) -> None:
             ):
                 raise CognitionContractError("cognition appraisal delta is invalid")
             _require_text(delta["reason"], "cognition appraisal delta reason")
+    if "failure_code" in value:
+        _require_text(
+            value["failure_code"],
+            "cognition appraisal failure code",
+            maximum=200,
+        )
 
 
 def _validate_cognition_branch_observation(value: Any) -> None:
@@ -1442,6 +1522,10 @@ def _validate_cognition_branch_observation(value: Any) -> None:
             "cognition branch observation.expected_consequences",
         )
     if "failure_code" in value:
+        if value["status"] != "failed":
+            raise CognitionContractError(
+                "non-failed cognition branch cannot carry a failure code"
+            )
         _require_text(
             value["failure_code"],
             "cognition branch observation.failure_code",
@@ -1453,6 +1537,7 @@ def _validate_cognition_collapse_observation(
     value: Any,
     *,
     branch_indices: set[int],
+    branches: Sequence[Mapping[str, Any]],
 ) -> None:
     """Validate the deterministic branch partition shown to operators."""
 
@@ -1505,6 +1590,49 @@ def _validate_cognition_collapse_observation(
         raise CognitionContractError(
             "cognition collapse partitions overlap"
         )
+    selection_by_index = {
+        branch["branch_index"]: branch["selection"]
+        for branch in branches
+    }
+    if primary_index is None:
+        if any(
+            selection == "primary"
+            for selection in selection_by_index.values()
+        ):
+            raise CognitionContractError(
+                "cognition collapse is missing its primary selection"
+            )
+    elif selection_by_index[primary_index] != "primary":
+        raise CognitionContractError(
+            "cognition collapse primary selection does not match branches"
+        )
+    for index in value["supporting_branch_indices"]:
+        if selection_by_index[index] != "supporting":
+            raise CognitionContractError(
+                "cognition collapse supporting selection does not match branches"
+            )
+    for index in value["suppressed_branch_indices"]:
+        if selection_by_index[index] != "suppressed":
+            raise CognitionContractError(
+                "cognition collapse suppressed selection does not match branches"
+            )
+    for index, selection in selection_by_index.items():
+        if selection == "primary" and index != primary_index:
+            raise CognitionContractError(
+                "cognition branch primary selection is not collapsed"
+            )
+        if selection == "supporting" and index not in value[
+            "supporting_branch_indices"
+        ]:
+            raise CognitionContractError(
+                "cognition branch supporting selection is not collapsed"
+            )
+        if selection == "suppressed" and index not in value[
+            "suppressed_branch_indices"
+        ]:
+            raise CognitionContractError(
+                "cognition branch suppressed selection is not collapsed"
+            )
     _require_text(
         value["selection_reason"],
         "cognition collapse selection reason",

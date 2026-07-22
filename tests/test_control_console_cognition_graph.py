@@ -272,6 +272,77 @@ def test_cognition_graph_projection_preserves_native_v2_results_and_redacts_hand
     assert 'prompt' not in detail_text
 
 
+def test_cognition_graph_projection_preserves_native_failure_state() -> None:
+    """Console projection keeps partial status and typed failure evidence."""
+
+    from control_console.kazusa_client import project_cognition_graph_snapshot
+
+    graph = project_cognition_graph_snapshot(
+        source='debug_latest',
+        payload={
+            'cognition_graph': {
+                'run_id': 'native-v2-partial-run',
+                'status': 'partial',
+                'nodes': [
+                    {
+                        'id': 'v2.parallel',
+                        'label': '并行认知',
+                        'stage': 'V2',
+                        'lane': 'cognition',
+                        'column': 3,
+                        'status': 'partial',
+                        'detail': {
+                            'parallel_execution': {
+                                'completed_branch_count': 1,
+                                'failed_branch_count': 1,
+                            },
+                        },
+                    },
+                    {
+                        'id': 'v2.failure',
+                        'label': 'Native V2 failure',
+                        'stage': 'V2',
+                        'lane': 'cognition',
+                        'column': 3,
+                        'status': 'failed',
+                        'detail': {
+                            'failure': {
+                                'failure_code': 'model_contract_invalid',
+                                'stage': 'goal_cognition',
+                                'attempt_count': 2,
+                                'safe_checkpoint': 'pre_state_commit',
+                                'retryable': False,
+                            },
+                        },
+                    },
+                ],
+                'edges': [
+                    {
+                        'source': 'v2.parallel',
+                        'target': 'v2.failure',
+                        'kind': 'fork',
+                    },
+                    {
+                        'source': 'v2.parallel',
+                        'target': 'missing.node',
+                        'kind': 'fork',
+                    },
+                ],
+            },
+        },
+    )
+
+    assert graph.status == 'partial'
+    parallel = next(node for node in graph.nodes if node.id == 'v2.parallel')
+    assert parallel.status == 'partial'
+    failure = next(node for node in graph.nodes if node.id == 'v2.failure')
+    assert failure.status == 'failed'
+    assert failure.detail['failure']['failure_code'] == 'model_contract_invalid'
+    assert failure.detail['failure']['stage'] == 'goal_cognition'
+    assert len(graph.edges) == 1
+    assert graph.edges[0].target == 'v2.failure'
+
+
 def test_cognition_graph_projection_handles_malformed_detail_without_throwing() -> None:
     """Malformed semantic detail should fail closed field by field."""
 

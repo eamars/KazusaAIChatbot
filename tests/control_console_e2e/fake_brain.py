@@ -333,11 +333,14 @@ def native_v2_graph_snapshot(*, status: str, run_id: str) -> dict[str, Any]:
         return graph
     node_status = 'running' if status == 'running' else 'completed'
     if status == 'failed':
+        node_status = 'partial'
         branch_one_status = 'failed'
         branch_two_status = 'completed'
     else:
         branch_one_status = node_status
         branch_two_status = node_status
+    branch_one_selection = 'unselected' if status == 'failed' else 'primary'
+    branch_two_selection = 'primary' if status == 'failed' else 'suppressed'
     graph['nodes'].extend([
         {
             'id': 'v2.parallel',
@@ -363,12 +366,14 @@ def native_v2_graph_snapshot(*, status: str, run_id: str) -> dict[str, Any]:
                 'branch_results': [
                     {
                         'branch_index': 1,
-                        'selection': 'primary',
+                        'selection': branch_one_selection,
+                        'status': branch_one_status,
                         'intention': '保护重要关系中的边界',
                     },
                     {
                         'branch_index': 2,
-                        'selection': 'suppressed',
+                        'selection': branch_two_selection,
+                        'status': branch_two_status,
                         'intention': '立即反击',
                     },
                 ],
@@ -415,7 +420,7 @@ def native_v2_graph_snapshot(*, status: str, run_id: str) -> dict[str, Any]:
                 'branch_index': 1,
                 'goal_kind': 'bond_protection',
                 'status': 'failed' if status == 'failed' else 'completed',
-                'selection': 'primary',
+                'selection': branch_one_selection,
                 'intention': '保护重要关系中的边界',
                 'desired_outcome': '让伤害被看见',
                 'concrete_detail': '说明这句话造成的伤害',
@@ -423,6 +428,7 @@ def native_v2_graph_snapshot(*, status: str, run_id: str) -> dict[str, Any]:
                 'private_monologue': '我不想假装没受伤。',
                 'expected_consequences': ['边界变得清楚'],
                 'confidence': '高',
+                'failure_code': 'model_contract_invalid' if status == 'failed' else '',
             },
         },
         {
@@ -438,7 +444,7 @@ def native_v2_graph_snapshot(*, status: str, run_id: str) -> dict[str, Any]:
                 'branch_index': 2,
                 'goal_kind': 'autonomy_boundary',
                 'status': 'completed',
-                'selection': 'suppressed',
+                'selection': branch_two_selection,
                 'intention': '立即反击',
                 'desired_outcome': '结束当前攻击',
                 'concrete_detail': '用更强硬的话顶回去',
@@ -458,9 +464,9 @@ def native_v2_graph_snapshot(*, status: str, run_id: str) -> dict[str, Any]:
             'status': node_status,
             'detail': {
                 'collapse': {
-                    'primary_branch_index': 1,
+                    'primary_branch_index': 2 if status == 'failed' else 1,
                     'supporting_branch_indices': [],
-                    'suppressed_branch_indices': [2],
+                    'suppressed_branch_indices': [] if status == 'failed' else [2],
                     'selection_reason': '主目标保留了受伤事实，反击目标被压下。',
                 },
                 'selected_intention': {
@@ -505,6 +511,30 @@ def native_v2_graph_snapshot(*, status: str, run_id: str) -> dict[str, Any]:
         {'source': 'v2.collapse', 'target': 'v2.affect', 'kind': 'sequence'},
         {'source': 'v2.affect', 'target': 'l3.surface', 'kind': 'join'},
     ])
+    if status == 'failed':
+        graph['nodes'].append({
+            'id': 'v2.failure',
+            'label': 'Native V2 failure',
+            'stage': 'V2',
+            'lane': 'cognition',
+            'column': 3,
+            'branch': 'failure',
+            'status': 'failed',
+            'detail': {
+                'failure': {
+                    'failure_code': 'model_contract_invalid',
+                    'stage': 'goal_cognition',
+                    'attempt_count': 2,
+                    'safe_checkpoint': 'pre_state_commit',
+                    'retryable': False,
+                },
+            },
+        })
+        graph['edges'].append({
+            'source': 'l2.reasoning',
+            'target': 'v2.failure',
+            'kind': 'fork',
+        })
     return graph
 
 
