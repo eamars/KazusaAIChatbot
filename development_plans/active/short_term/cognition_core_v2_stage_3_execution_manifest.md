@@ -1322,6 +1322,30 @@ row counts, or an executable transform derived without production discovery.
 - Checkpoint J full Stage 3 completion: pending external Browser acceptance and
   the remaining lifecycle completion checks.
 
+## Latest Verification Addendum — 2026-07-23 Native V2 Failure-Mode Closure
+
+- Commit `70a5450f` contains the native V2 failure-mode implementation, tests,
+  console rendering guard, and the tracked report
+  `test_artifacts/cognition_core_v2/stage_3/native_v2_failure_mode_closure.md`.
+- The closure slice covers malformed and semantically invalid observability,
+  recoverable bounds, provider/context failures, appraisal failures, mixed and
+  required branch failures, collapse/action failures, missing native telemetry,
+  inconsistent metrics/partitions, orphan console edges, and visible browser
+  failure rendering. Native invalid telemetry is projected as a typed failed
+  state rather than a successful graph.
+- The owning stages retain semantic ownership: typed classification and bounded
+  repair/regeneration remain the contract path, while service/console code only
+  validates, projects, redacts, and delivers bounded evidence. Structurally
+  valid but semantically wrong model output remains quality evidence; no
+  censorship or semantic emotion rewrite is added.
+- Evidence: 55 focused deterministic passes, 5 non-DB cognition integration
+  passes with 4 intentional deselections, 4 system-Chrome cognition-graph E2E
+  passes, successful Python compilation, and successful diff validation. The
+  in-app Browser had no available session, so its acceptance gate remains open.
+- This addendum closes the failure-mode implementation subgate. The manifest
+  remains open for in-app Browser acceptance, remaining G/I/J lifecycle checks,
+  and reconciliation of the previously recorded broader-suite failures.
+
 ## Latest Verification Addendum — 2026-07-21 Chinese-Only Semantic Contract
 
 - The model-facing semantic contract is now Chinese-only. The temporary

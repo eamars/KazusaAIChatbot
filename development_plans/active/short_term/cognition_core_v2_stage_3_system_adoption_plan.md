@@ -958,3 +958,39 @@ amendment and approval.
   evidence and are superseded for the latest verification count by the run
   above; they are not silently deleted. External Browser acceptance and the
   remaining lifecycle completion checks are still pending.
+
+## Latest Verification Addendum — 2026-07-23 Native V2 Failure-Mode Closure
+
+- Commit `70a5450f` records the native Cognition Core V2 failure-mode
+  observability implementation, its deterministic/browser tests, and the
+  closure report at
+  `test_artifacts/cognition_core_v2/stage_3/native_v2_failure_mode_closure.md`.
+- The native contract now validates cross-field counts, timing bounds, branch
+  selection partitions, and typed failed rows. Service projection now preserves
+  `provider_transient`, `context_limit`, `model_contract_invalid`, and
+  `internal_invariant` classifications, distinguishes completed/partial/failed
+  native work, emits explicit `native_observability_missing` and
+  `native_observability_invalid` states, and projects bounded terminal
+  `v2.failure` evidence without exception text or semantic rewriting.
+- Console projection now removes orphan dependency edges and places the typed
+  failure code at the top of the inspector. The system-Chrome Playwright
+  overlay captures the mixed branch, terminal failure, and partial parallel
+  states with empty browser-console diagnostics. The in-app Browser remains
+  unavailable because no session was exposed.
+- Verification is green for the closure slice: 55 focused deterministic tests,
+  5 non-DB cognition integration tests with 4 intentional deselections, and 4
+  cognition-graph browser E2E tests. Modified Python compilation and
+  `git diff --check` also pass. The report maps malformed/invalid contracts,
+  recoverable bounds, provider/context failures, appraisal failures, mixed and
+  required branch failures, collapse/action failures, missing/malformed native
+  telemetry, metric/partition contradictions, orphan edges, browser rendering,
+  and semantically wrong but structurally valid model output.
+- This closes the failure-coverage implementation subgate. Stage 3 remains
+  `in_progress`: the in-app Browser acceptance gate, the remaining operations
+  and documentation checklist items, and Checkpoint I reconciliation of the
+  previously recorded 21 broader non-live failures remain open. Checkpoint J
+  artifact-quality sign-off remains complete; full Stage 3 completion and the
+  Stage 4 handoff remain pending those lifecycle gates.
+- The retained real-LLM emotion/boundary evidence remains unchanged. This
+  closure adds typed failure observability and test guardrails; it adds no
+  censorship, content filter, or semantic emotion rewrite.

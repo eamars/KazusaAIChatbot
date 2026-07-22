@@ -54,6 +54,7 @@ tests/test_cognition_core_v2_high_attachment_abuse_e2e_live_llm.py
 tests/test_cognition_core_v2_secondary_crying_e2e_live_llm.py
 tests/test_cognition_core_v2_verbal_abuse_boundary_e2e_live_llm.py
 test_artifacts/cognition_core_v2/stage_3/
+test_artifacts/cognition_core_v2/stage_3/native_v2_failure_mode_closure.md
 ```
 
 `tests/fixtures/stage3_fresh_database_cases.json` is tracked test input. It has
@@ -105,6 +106,7 @@ src/kazusa_ai_chatbot/cognition_core_v2/contracts.py
 src/kazusa_ai_chatbot/cognition_core_v2/action_selection.py
 src/kazusa_ai_chatbot/cognition_core_v2/goal_cognition.py
 src/kazusa_ai_chatbot/cognition_core_v2/facade.py
+src/kazusa_ai_chatbot/cognition_core_v2/parallel_executor.py
 src/kazusa_ai_chatbot/cognition_core_v2/diagnostics.py
 src/kazusa_ai_chatbot/cognition_core_v2/state_models.py
 src/kazusa_ai_chatbot/cognition_core_v2/validation_cli.py
@@ -253,6 +255,7 @@ tests/test_cognition_core_v2_projection.py
 tests/test_cognition_core_v2_state.py
 tests/test_cognition_core_v2_integration.py
 tests/test_cognition_core_v2_live_llm.py
+tests/test_service_cognition_graph.py
 tests/test_cognition_resolver_loop.py
 tests/test_action_selection_prompt_contract.py
 tests/test_action_spec_evaluator.py
