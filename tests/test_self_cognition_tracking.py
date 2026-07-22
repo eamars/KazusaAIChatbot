@@ -1016,6 +1016,94 @@ def test_build_self_cognition_case_artifacts_does_not_write_files(tmp_path) -> N
     )
 
 
+@pytest.mark.asyncio
+async def test_runner_attaches_episode_when_admitted_cognition_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Admitted cognition failures retain source metadata for telemetry."""
+
+    async def load_residue_context(_case: dict[str, Any]) -> str:
+        return ""
+
+    async def failing_cognition(_state: dict[str, Any]) -> dict[str, Any]:
+        raise RuntimeError("cognition backend unavailable")
+
+    monkeypatch.setattr(
+        runner,
+        "_load_residue_context_for_case",
+        load_residue_context,
+    )
+
+    with pytest.raises(RuntimeError) as error_info:
+        await runner.build_self_cognition_case_artifacts_async(
+            _commitment_case(),
+            cognition_client=failing_cognition,
+        )
+
+    cognitive_episode = getattr(
+        error_info.value,
+        "_kazusa_cognitive_episode",
+        None,
+    )
+    assert cognitive_episode["trigger_source"] == "internal_thought"
+    assert cognitive_episode["input_sources"] == ["internal_monologue"]
+
+
+@pytest.mark.asyncio
+async def test_runner_attaches_episode_when_admitted_cognition_is_cancelled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Admitted cancellation retains source metadata for partial telemetry."""
+
+    from kazusa_ai_chatbot.runtime_coordination import (
+        PipelineCancellation,
+        PipelineCancelled,
+        PipelineScope,
+    )
+
+    async def load_residue_context(_case: dict[str, Any]) -> str:
+        return ""
+
+    class CancelAfterCognition:
+        def raise_if_cancelled(self, checkpoint: str) -> None:
+            if checkpoint != "after_cognition":
+                return
+            raise PipelineCancelled(
+                PipelineCancellation(
+                    run_id="pipeline-run-cancelled",
+                    scope=PipelineScope(
+                        platform="qq",
+                        platform_channel_id="673225019",
+                        channel_type="private",
+                    ),
+                    requested_by="test",
+                    reason="foreground_replaced_run",
+                    checkpoint=checkpoint,
+                )
+            )
+
+    monkeypatch.setattr(
+        runner,
+        "_load_residue_context_for_case",
+        load_residue_context,
+    )
+
+    with pytest.raises(PipelineCancelled) as error_info:
+        await runner.build_self_cognition_case_artifacts_async(
+            _commitment_case(),
+            cognition_client=lambda _state: _progress_cognition_output(),
+            pipeline_run_handle=CancelAfterCognition(),
+        )
+
+    cognitive_episode = getattr(
+        error_info.value,
+        "_kazusa_cognitive_episode",
+        None,
+    )
+    assert cognitive_episode["trigger_source"] == "internal_thought"
+    assert cognitive_episode["input_sources"] == ["internal_monologue"]
+
+
 def test_runner_apply_consolidation_uses_empty_dialog_without_render() -> None:
     case = _commitment_case()
     captured_consolidation_state: dict[str, Any] = {}

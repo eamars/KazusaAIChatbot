@@ -197,15 +197,33 @@ COGNITION_GRAPH_FORBIDDEN_DETAIL_PARTS = (
 )
 COGNITION_GRAPH_RAW_KEYS = (
     "cognition_graph",
-    "cognition_snapshot",
-    "self_cognition_graph",
 )
 CognitionGraphSource = Literal[
     "overview_latest",
     "debug_latest",
-    "self_latest",
     "historical",
 ]
+COGNITION_TRIGGER_SOURCES = frozenset(
+    {
+        "user_message",
+        "reflection_signal",
+        "internal_thought",
+        "scheduled_recall",
+        "system_probe",
+        "accepted_task_result_ready",
+    }
+)
+COGNITION_INPUT_SOURCES = frozenset(
+    {
+        "dialog_text",
+        "image_observation",
+        "audio_observation",
+        "internal_monologue",
+        "reflection_artifact",
+        "retrieved_memory",
+        "accepted_task_result",
+    }
+)
 
 
 class KazusaClient:
@@ -251,19 +269,6 @@ class KazusaClient:
         payload = response.json()
         graph = project_cognition_graph_snapshot(
             source="overview_latest",
-            payload=payload if isinstance(payload, dict) else {},
-        )
-        return graph
-
-    async def get_latest_self_cognition_graph(self) -> CognitionRunGraphSnapshot:
-        """Read and project the brain latest self-cognition graph endpoint."""
-
-        async with self._client() as client:
-            response = await client.get("/ops/latest-cognition-graph")
-        response.raise_for_status()
-        payload = response.json()
-        graph = project_cognition_graph_snapshot(
-            source="self_latest",
             payload=payload if isinstance(payload, dict) else {},
         )
         return graph
@@ -389,6 +394,8 @@ def not_reported_cognition_graph(
     snapshot = CognitionRunGraphSnapshot(
         source=source,
         status="not_reported",
+        trigger_source="not_reported",
+        input_sources=[],
         run_id=run_id,
         generated_at=datetime.now(timezone.utc),
         nodes=[],
@@ -424,9 +431,17 @@ def project_cognition_graph_snapshot(
         )
         return inferred_graph
 
+    trigger_source, input_sources, metadata_reason = (
+        _project_graph_source_metadata(raw_graph)
+    )
+    graph_status = raw_graph.get("status", "partial")
+    if metadata_reason:
+        graph_status = "partial"
     normalized = {
         "source": source,
-        "status": raw_graph.get("status", "partial"),
+        "status": graph_status,
+        "trigger_source": trigger_source,
+        "input_sources": input_sources,
         "run_id": _safe_optional_text(raw_graph.get("run_id")) or inferred_run_id,
         "generated_at": datetime.now(timezone.utc),
         "nodes": _project_graph_nodes(raw_graph.get("nodes")),
@@ -444,6 +459,8 @@ def project_cognition_graph_snapshot(
             ],
         },
     }
+    if metadata_reason:
+        normalized["redaction"]["reason"] = metadata_reason
     try:
         snapshot = CognitionRunGraphSnapshot.model_validate(normalized)
     except ValidationError:
@@ -462,12 +479,7 @@ def _first_graph_payload(
 ) -> dict[str, Any] | None:
     """Return the first raw graph-like payload if one is present."""
 
-    keys = (
-        ("self_cognition_graph",)
-        if source == "self_latest"
-        else COGNITION_GRAPH_RAW_KEYS[:2]
-    )
-    for key in keys:
+    for key in COGNITION_GRAPH_RAW_KEYS:
         value = payload.get(key)
         if isinstance(value, dict):
             return value
@@ -739,13 +751,21 @@ def _project_known_cognition_fields(
             "label": "",
         })
 
+    trigger_source, input_sources, metadata_reason = (
+        _project_graph_source_metadata(payload)
+    )
     if not nodes:
-        snapshot = not_reported_cognition_graph(source=source, run_id=run_id)
+        snapshot = not_reported_cognition_graph(
+            source=source,
+            run_id=run_id,
+        )
         return snapshot
 
     snapshot = CognitionRunGraphSnapshot(
         source=source,
         status="partial",
+        trigger_source=trigger_source,
+        input_sources=input_sources,
         run_id=run_id,
         generated_at=datetime.now(timezone.utc),
         nodes=[
@@ -764,9 +784,56 @@ def _project_known_cognition_fields(
                 "raw messages",
                 "message envelopes",
             ],
+            **({"reason": metadata_reason} if metadata_reason else {}),
         },
     )
     return snapshot
+
+
+def _project_graph_source_metadata(
+    raw_graph: Mapping[str, Any],
+) -> tuple[str, list[str], str | None]:
+    """Project bounded trigger metadata without source inference."""
+
+    raw_trigger_source = raw_graph.get("trigger_source")
+    if raw_trigger_source is None:
+        trigger_source = "not_reported"
+        trigger_reason = "trigger_source_missing"
+    elif raw_trigger_source == "not_reported":
+        trigger_source = "not_reported"
+        trigger_reason = None
+    elif (
+        isinstance(raw_trigger_source, str)
+        and raw_trigger_source in COGNITION_TRIGGER_SOURCES
+    ):
+        trigger_source = raw_trigger_source
+        trigger_reason = None
+    else:
+        trigger_source = "not_reported"
+        trigger_reason = "trigger_source_invalid"
+
+    raw_input_sources = raw_graph.get("input_sources")
+    input_sources: list[str] = []
+    input_reason: str | None = None
+    if raw_input_sources is None:
+        input_reason = None
+    elif not isinstance(raw_input_sources, list):
+        input_reason = "input_sources_invalid"
+    else:
+        if len(raw_input_sources) > 8:
+            input_reason = "input_sources_bounded"
+        for raw_input_source in raw_input_sources[:8]:
+            if (
+                isinstance(raw_input_source, str)
+                and raw_input_source in COGNITION_INPUT_SOURCES
+            ):
+                if raw_input_source not in input_sources:
+                    input_sources.append(raw_input_source)
+            else:
+                input_reason = "input_sources_invalid"
+
+    reason = trigger_reason or input_reason
+    return trigger_source, input_sources, reason
 
 
 def _has_any(payload: dict[str, Any], keys: tuple[str, ...]) -> bool:

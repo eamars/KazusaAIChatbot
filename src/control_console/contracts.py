@@ -174,7 +174,6 @@ class CognitionRunGraphSnapshot(StrictModel):
     source: Literal[
         "overview_latest",
         "debug_latest",
-        "self_latest",
         "historical",
     ]
     status: Literal[
@@ -184,6 +183,12 @@ class CognitionRunGraphSnapshot(StrictModel):
         "failed",
         "partial",
     ] = "not_reported"
+    trigger_source: str = Field(
+        default="not_reported",
+        min_length=1,
+        max_length=80,
+    )
+    input_sources: list[str] = Field(default_factory=list, max_length=8)
     run_id: str | None = Field(default=None, max_length=120)
     generated_at: datetime
     nodes: list[CognitionRunGraphNode] = Field(default_factory=list, max_length=64)
@@ -368,7 +373,6 @@ class ControlConsoleOverviewResponse(StrictModel):
     recent_audit_events: list[ControlAuditEvent] = Field(default_factory=list)
     recent_process_errors: list[ProcessLogLine] = Field(default_factory=list)
     latest_cognition_graph: CognitionRunGraphSnapshot | None = None
-    latest_self_cognition_graph: CognitionRunGraphSnapshot | None = None
 
 
 class ConsoleDebugChatRequest(StrictModel):
@@ -437,7 +441,6 @@ class ControlConsoleBootstrapResponse(StrictModel):
     services: list[ServiceRuntimeState]
     overview: dict[str, Any]
     latest_cognition_graph: CognitionRunGraphSnapshot | None = None
-    latest_self_cognition_graph: CognitionRunGraphSnapshot | None = None
     recent_audit_events: list[dict[str, Any]]
     event_counters: dict[str, int]
     ui_capabilities: dict[str, bool]

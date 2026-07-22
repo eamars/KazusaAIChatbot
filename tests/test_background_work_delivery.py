@@ -210,6 +210,7 @@ async def test_service_result_ready_delivery_uses_dispatcher_boundary(
     )
     monkeypatch.setattr(service_module, "persona_supervisor2", persona_supervisor2)
     monkeypatch.setattr(service_module, "handle_send_message", handle_send_message)
+    service_module._clear_latest_cognition_graph()
     monkeypatch.setattr(
         service_module,
         "_run_accepted_task_result_post_turn",
@@ -246,6 +247,15 @@ async def test_service_result_ready_delivery_uses_dispatcher_boundary(
     assert dispatch_context.bot_permission_role == "accepted_task_result"
     assert dispatch_context.source_platform_bot_id == "bot-1"
     post_turn.assert_awaited_once()
+    latest = await service_module.ops_latest_cognition_graph()
+    assert latest.cognition_graph is not None
+    assert latest.cognition_graph["trigger_source"] == (
+        "accepted_task_result_ready"
+    )
+    assert latest.cognition_graph["input_sources"] == [
+        "accepted_task_result",
+    ]
+    assert "reason" not in latest.cognition_graph["redaction"]
 
 
 @pytest.mark.asyncio

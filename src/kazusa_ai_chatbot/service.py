@@ -17,7 +17,7 @@ import traceback
 from uuid import uuid4
 from collections.abc import Mapping
 from contextlib import asynccontextmanager, suppress
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 from fastapi import FastAPI, BackgroundTasks
 
@@ -64,6 +64,8 @@ from kazusa_ai_chatbot.calendar_scheduler.worker import (
 )
 from kazusa_ai_chatbot.cognition_episode import (
     CognitiveEpisode,
+    InputSource,
+    TriggerSource,
     build_reply_media_description_rows,
     build_text_chat_cognitive_episode,
     build_text_chat_media_description_rows,
@@ -634,7 +636,8 @@ _self_cognition_worker_handle: SelfCognitionWorkerHandle | None = None
 _background_work_worker_handle: BackgroundWorkRuntimeHandle | None = None
 _primary_interaction_active_count = 0
 _latest_cognition_graph: dict[str, Any] | None = None
-_latest_self_cognition_graph: dict[str, Any] | None = None
+_GRAPH_TRIGGER_SOURCES = frozenset(get_args(TriggerSource))
+_GRAPH_INPUT_SOURCES = frozenset(get_args(InputSource))
 
 
 async def _evaluate_frontline_for_service(state: Mapping[str, Any]):
@@ -1684,32 +1687,132 @@ async def _turn_settlement_worker() -> None:
 def _clear_latest_cognition_graph() -> None:
     """Clear the process-local latest cognition graph snapshot."""
 
-    global _latest_cognition_graph, _latest_self_cognition_graph
+    global _latest_cognition_graph
 
     _latest_cognition_graph = None
-    _latest_self_cognition_graph = None
 
 
-def _record_latest_cognition_graph(cognition_graph: dict[str, Any] | None) -> None:
-    """Store a bounded copy of the latest cognition graph snapshot."""
+def _publish_latest_cognition_graph(
+    cognition_graph: Mapping[str, Any] | None,
+    *,
+    cognitive_episode: Mapping[str, Any] | None,
+    run_id: str | None = None,
+    status: str = "partial",
+    reason: str = "",
+) -> None:
+    """Publish one source-bearing terminal graph to the latest store."""
 
     global _latest_cognition_graph
 
-    if cognition_graph is None:
-        return
-    _latest_cognition_graph = deepcopy(cognition_graph)
+    trigger_source, input_sources, metadata_reason = (
+        _graph_source_metadata(cognitive_episode)
+    )
+    safe_run_id = _safe_graph_text(run_id, max_chars=120) or None
+    if isinstance(cognition_graph, Mapping):
+        safe_run_id = (
+            _safe_graph_text(cognition_graph.get("run_id"), max_chars=120)
+            or safe_run_id
+        )
+
+    effective_reason = metadata_reason or reason
+    if metadata_reason in {
+        "trigger_source_missing",
+        "trigger_source_invalid",
+    }:
+        snapshot = _minimal_latest_cognition_graph(
+            run_id=safe_run_id,
+            status="partial",
+            trigger_source=trigger_source,
+            input_sources=input_sources,
+            reason=metadata_reason,
+        )
+    elif isinstance(cognition_graph, Mapping):
+        snapshot = deepcopy(dict(cognition_graph))
+        snapshot["trigger_source"] = trigger_source
+        snapshot["input_sources"] = input_sources
+        if effective_reason:
+            redaction = snapshot.get("redaction")
+            if not isinstance(redaction, dict):
+                redaction = {}
+            else:
+                redaction = dict(redaction)
+            redaction["reason"] = effective_reason
+            snapshot["redaction"] = redaction
+    else:
+        snapshot = _minimal_latest_cognition_graph(
+            run_id=safe_run_id,
+            status=status,
+            trigger_source=trigger_source,
+            input_sources=input_sources,
+            reason=reason or "cognition_graph_not_available",
+        )
+    _latest_cognition_graph = snapshot
 
 
-def _record_latest_self_cognition_graph(
-    cognition_graph: dict[str, Any] | None,
-) -> None:
-    """Store the latest self-cognition graph separately for operator views."""
+def _minimal_latest_cognition_graph(
+    *,
+    run_id: str | None,
+    status: str,
+    trigger_source: str,
+    input_sources: list[str],
+    reason: str,
+) -> dict[str, Any]:
+    """Build an empty bounded snapshot for admitted projection failures."""
 
-    global _latest_self_cognition_graph
+    safe_status = status if status in {"failed", "partial"} else "partial"
+    return {
+        "run_id": run_id,
+        "status": safe_status,
+        "trigger_source": trigger_source,
+        "input_sources": list(input_sources),
+        "nodes": [],
+        "edges": [],
+        "redaction": {
+            "reason": reason,
+            "detail": "no graph-safe stage state was available",
+            "excluded": [
+                "prompts",
+                "embeddings",
+                "raw messages",
+                "message envelopes",
+                "raw exceptions",
+            ],
+        },
+    }
 
-    if cognition_graph is None:
-        return
-    _latest_self_cognition_graph = deepcopy(cognition_graph)
+
+def _graph_source_metadata(
+    cognitive_episode: Mapping[str, Any] | None,
+) -> tuple[str, list[str], str | None]:
+    """Read validated episode source metadata with a fail-closed boundary."""
+
+    if not isinstance(cognitive_episode, Mapping):
+        return "not_reported", [], "trigger_source_missing"
+
+    raw_trigger_source = cognitive_episode.get("trigger_source")
+    if (
+        not isinstance(raw_trigger_source, str)
+        or raw_trigger_source not in _GRAPH_TRIGGER_SOURCES
+    ):
+        return "not_reported", [], "trigger_source_invalid"
+
+    raw_input_sources = cognitive_episode.get("input_sources")
+    if not isinstance(raw_input_sources, list):
+        return raw_trigger_source, [], "input_sources_invalid"
+
+    input_sources: list[str] = []
+    input_sources_invalid = len(raw_input_sources) > 8
+    for raw_input_source in raw_input_sources[:8]:
+        if (
+            isinstance(raw_input_source, str)
+            and raw_input_source in _GRAPH_INPUT_SOURCES
+        ):
+            if raw_input_source not in input_sources:
+                input_sources.append(raw_input_source)
+        else:
+            input_sources_invalid = True
+    reason = "input_sources_invalid" if input_sources_invalid else None
+    return raw_trigger_source, input_sources, reason
 
 
 def _latest_cognition_graph_response() -> OpsLatestCognitionGraphResponse:
@@ -1717,7 +1820,6 @@ def _latest_cognition_graph_response() -> OpsLatestCognitionGraphResponse:
 
     response = OpsLatestCognitionGraphResponse(
         cognition_graph=deepcopy(_latest_cognition_graph),
-        self_cognition_graph=deepcopy(_latest_self_cognition_graph),
     )
     return response
 
@@ -2226,7 +2328,85 @@ async def _deliver_accepted_task_result_episode(
         }
         progress_update = await load_conversation_episode_state(initial_state)
         initial_state.update(progress_update)
-        result = await persona_supervisor2(initial_state)
+        try:
+            result = await persona_supervisor2(initial_state)
+        except Exception as exc:
+            logger.exception(
+                f"Accepted task result cognition failed: {exc}"
+            )
+            failure_run_id = _safe_graph_text(
+                episode.get("episode_id"),
+                max_chars=120,
+            )
+            failure_graph: dict[str, Any] | None = None
+            try:
+                failure_graph = _build_response_cognition_graph(
+                    graph_result=initial_state,
+                    consolidation_state=initial_state,
+                    run_id=failure_run_id,
+                    graph_status="failed",
+                    visual_stage_failed=isinstance(
+                        exc,
+                        VisualAgentStageError,
+                    ),
+                    visual_stage_reached=(
+                        True
+                        if isinstance(exc, VisualAgentStageError)
+                        else False
+                    ),
+                    cognitive_episode=episode,
+                )
+            except Exception as graph_exc:
+                logger.exception(
+                    "Accepted task failure graph projection failed: "
+                    f"{graph_exc}"
+                )
+            _publish_latest_cognition_graph(
+                failure_graph,
+                cognitive_episode=episode,
+                run_id=failure_run_id,
+                status="failed",
+                reason="accepted_task_result_graph_projection_failed",
+            )
+            return {
+                "status": "failed",
+                "reason": "accepted task result cognition failed",
+            }
+
+        cognition_graph: dict[str, Any] | None = None
+        try:
+            cognition_graph = _build_response_cognition_graph(
+                graph_result=result,
+                consolidation_state=(
+                    result.get("consolidation_state")
+                    if isinstance(result.get("consolidation_state"), Mapping)
+                    else None
+                ),
+                run_id=_safe_graph_text(
+                    episode.get("episode_id"),
+                    max_chars=120,
+                ),
+                cognitive_episode=episode,
+            )
+        except Exception as graph_exc:
+            logger.exception(
+                "Accepted task result graph projection failed: "
+                f"{graph_exc}"
+            )
+        publication_status = "completed"
+        publication_reason = ""
+        if cognition_graph is None:
+            publication_status = "failed"
+            publication_reason = (
+                "accepted_task_result_graph_projection_failed"
+            )
+        _publish_latest_cognition_graph(
+            cognition_graph,
+            cognitive_episode=episode,
+            run_id=_safe_graph_text(episode.get("episode_id"), max_chars=120),
+            status=publication_status,
+            reason=publication_reason,
+        )
         final_dialog = [
             fragment
             for fragment in result.get("final_dialog", [])
@@ -2728,6 +2908,7 @@ def _build_response_cognition_graph(
     graph_status: str = "completed",
     visual_stage_failed: bool = False,
     visual_stage_reached: bool | None = None,
+    cognitive_episode: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a bounded cognition graph snapshot for operator inspection."""
 
@@ -2865,30 +3046,69 @@ def _build_response_cognition_graph(
         {"source": "l2.memory", "target": "l3.surface", "kind": "join"},
         {"source": "l2.actions", "target": "l3.surface", "kind": "join"},
     ]
+    trigger_source, input_sources, metadata_reason = _graph_source_metadata(
+        cognitive_episode,
+    )
+    redaction = {
+        "detail": "bounded graph-result and consolidation-state fields only",
+        "excluded": [
+            "prompts",
+            "embeddings",
+            "raw messages",
+            "message envelopes",
+            "unapproved raw fields",
+        ],
+    }
+    if metadata_reason:
+        redaction["reason"] = metadata_reason
     snapshot = {
         "run_id": run_id,
         "status": graph_status,
+        "trigger_source": trigger_source,
+        "input_sources": input_sources,
         "nodes": nodes,
         "edges": edges,
-        "redaction": {
-            "detail": "bounded graph-result and consolidation-state fields only",
-            "excluded": [
-                "prompts",
-                "embeddings",
-                "raw messages",
-                "message envelopes",
-                "unapproved raw fields",
-            ],
-        },
+        "redaction": redaction,
     }
     return snapshot
 
 
 async def _publish_self_cognition_latest_graph(
     artifact_payloads: dict[str, Any],
+    *,
+    cognitive_episode: Mapping[str, Any] | None = None,
+    status: str | None = None,
+    reason: str = "",
 ) -> None:
-    """Record a completed self-cognition run as the latest graph snapshot."""
+    """Record self-cognition completion or failure as latest telemetry."""
 
+    cognition_output = artifact_payloads.get(
+        self_cognition_models.ARTIFACT_COGNITION_OUTPUT,
+    )
+    if cognitive_episode is None:
+        if isinstance(cognition_output, Mapping):
+            output_episode = cognition_output.get("cognitive_episode")
+            if isinstance(output_episode, Mapping):
+                cognitive_episode = output_episode
+    if not isinstance(cognitive_episode, Mapping):
+        return
+    if not isinstance(cognition_output, Mapping):
+        run_record = artifact_payloads.get(
+            self_cognition_models.ARTIFACT_RUN_RECORD,
+        )
+        run_id = (
+            _safe_graph_text(run_record.get("run_id"), max_chars=120)
+            if isinstance(run_record, Mapping)
+            else None
+        )
+        _publish_latest_cognition_graph(
+            None,
+            cognitive_episode=cognitive_episode,
+            run_id=run_id,
+            status=status or "partial",
+            reason=reason or "self_cognition_cognition_output_unavailable",
+        )
+        return
     visual_stage_reached = artifact_payloads.get("visual_stage_reached")
     if not isinstance(visual_stage_reached, bool):
         visual_stage_reached = None
@@ -2898,10 +3118,32 @@ async def _publish_self_cognition_latest_graph(
             artifact_payloads.get("visual_stage_failed") is True
         ),
         visual_stage_reached=visual_stage_reached,
+        cognitive_episode=cognitive_episode,
     )
     if cognition_graph is None:
+        run_record = artifact_payloads.get(
+            self_cognition_models.ARTIFACT_RUN_RECORD,
+        )
+        run_id = (
+            _safe_graph_text(run_record.get("run_id"), max_chars=120)
+            if isinstance(run_record, Mapping)
+            else None
+        )
+        _publish_latest_cognition_graph(
+            None,
+            cognitive_episode=cognitive_episode,
+            run_id=run_id,
+            status=status or "partial",
+            reason=reason or "self_cognition_graph_projection_unavailable",
+        )
         return
-    _record_latest_self_cognition_graph(cognition_graph)
+    if status in {"failed", "partial"}:
+        cognition_graph["status"] = status
+    _publish_latest_cognition_graph(
+        cognition_graph,
+        cognitive_episode=cognitive_episode,
+        reason=reason,
+    )
 
 
 def _build_self_cognition_cognition_graph(
@@ -2909,6 +3151,7 @@ def _build_self_cognition_cognition_graph(
     *,
     visual_stage_failed: bool = False,
     visual_stage_reached: bool | None = None,
+    cognitive_episode: Mapping[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Build a bounded graph snapshot from self-cognition artifacts."""
 
@@ -3095,21 +3338,33 @@ def _build_self_cognition_cognition_graph(
         {"source": "l3.visual_directives", "target": "self.consolidation", "kind": "join"},
         {"source": "self.surface", "target": "self.consolidation", "kind": "join"},
     ]
+    if cognitive_episode is None:
+        output_episode = cognition_output.get("cognitive_episode")
+        if isinstance(output_episode, Mapping):
+            cognitive_episode = output_episode
+    trigger_source, input_sources, metadata_reason = _graph_source_metadata(
+        cognitive_episode,
+    )
+    redaction = {
+        "detail": "bounded self-cognition artifact fields only",
+        "excluded": [
+            "prompts",
+            "embeddings",
+            "raw messages",
+            "message envelopes",
+            "unapproved raw source fields",
+        ],
+    }
+    if metadata_reason:
+        redaction["reason"] = metadata_reason
     snapshot = {
         "run_id": _safe_graph_text(run_record.get("run_id"), max_chars=120),
         "status": run_status if run_status in {"completed", "failed"} else "partial",
+        "trigger_source": trigger_source,
+        "input_sources": input_sources,
         "nodes": nodes,
         "edges": edges,
-        "redaction": {
-            "detail": "bounded self-cognition artifact fields only",
-            "excluded": [
-                "prompts",
-                "embeddings",
-                "raw messages",
-                "message envelopes",
-                "unapproved raw source fields",
-            ],
-        },
+        "redaction": redaction,
     }
     return snapshot
 
@@ -4227,13 +4482,20 @@ async def _process_queued_chat_item(
                         if isinstance(exc, VisualAgentStageError)
                         else False
                     ),
+                    cognitive_episode=episode,
                 )
-                _record_latest_cognition_graph(failure_graph)
             except Exception as graph_exc:
                 logger.exception(
                     "Graph failure telemetry projection failed: "
                     f"{graph_exc}"
                 )
+            _publish_latest_cognition_graph(
+                failure_graph,
+                cognitive_episode=episode,
+                run_id=delivery_tracking_id,
+                status="failed",
+                reason="user_message_graph_projection_failed",
+            )
             try:
                 await _save_assistant_message(fallback_result)
                 response = ChatResponse(
@@ -4362,8 +4624,12 @@ async def _process_queued_chat_item(
             graph_result=result,
             consolidation_state=consolidation_state_dict,
             run_id=delivery_tracking_id or correlation_id,
+            cognitive_episode=episode,
         )
-        _record_latest_cognition_graph(cognition_graph)
+        _publish_latest_cognition_graph(
+            cognition_graph,
+            cognitive_episode=episode,
+        )
         response = ChatResponse(
             messages=response_dialog,
             content_type="text",

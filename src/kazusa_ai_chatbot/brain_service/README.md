@@ -245,13 +245,12 @@ Response model: `OpsLatestCognitionGraphResponse`.
 
 Purpose:
 
-- Return the latest bounded response cognition graph reported by live chat or
-  debug chat in `cognition_graph`.
-- Return the latest bounded self-cognition graph separately in
-  `self_cognition_graph`.
+- Return the latest bounded cognition graph from the most recently finalized
+  source that entered the shared cognition runtime in `cognition_graph`.
+- Carry bounded `trigger_source` and `input_sources` metadata on that graph.
 - Support the local control-console Overview graph without running cognition.
-- Return either graph field as `null` when that run type has not published
-  telemetry since service startup.
+- Return `cognition_graph: null` when no source has published telemetry since
+  service startup.
 
 The endpoint is process-local and read-only. It must not expose prompts,
 embeddings, raw messages, message envelopes, raw source packets, secrets, or

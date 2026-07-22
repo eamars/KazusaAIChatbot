@@ -89,16 +89,17 @@ summary is intentionally compact: configurable state, apply behavior, and
 field count only. Full field metadata is loaded on demand through the generic
 service config route.
 
-`GET /api/bootstrap` returns `latest_cognition_graph` and
-`latest_self_cognition_graph`, mirroring both under `overview`. When the brain
-HTTP endpoint is available, the console reads both values from the brain
-`GET /ops/latest-cognition-graph` endpoint; otherwise each returns
-`status: not_reported`. `POST /api/debug-chat` returns `cognition_graph` for
-the most recent debug turn. These fields use the same bounded cognition-run
-graph snapshot contract:
+`GET /api/bootstrap` returns one `latest_cognition_graph`, mirroring it under
+`overview`. When the brain HTTP endpoint is available, the console reads the
+source-neutral value from the brain `GET /ops/latest-cognition-graph` endpoint;
+otherwise it returns `status: not_reported`. `POST /api/debug-chat` returns
+`cognition_graph` for the most recent debug turn. These fields use the same
+bounded cognition-run graph snapshot contract:
 
-- `source`: `overview_latest`, `debug_latest`, `self_latest`, or future
-  `historical`.
+- `source`: `overview_latest`, `debug_latest`, or future `historical`.
+- `trigger_source`: the bounded source that admitted the cognition run, such as
+  `user_message`, `accepted_task_result_ready`, or `internal_thought`.
+- `input_sources`: the bounded typed inputs used by that run.
 - `status`: `not_reported`, `running`, `completed`, `failed`, or `partial`.
 - `nodes`: up to 64 stage nodes with lane, column, optional branch, status,
   and selected semantic detail. Layout metadata remains available for drawing;
@@ -116,8 +117,9 @@ unavailable or a response does not include graph telemetry, the console returns
 
 ### Cognition graph selected detail
 
-Overview Latest, Debug cognition, and the latest self-cognition snapshot use
-the same `renderCognitionGraph` inspector. Its selected detail order is:
+Overview Latest and Debug cognition use the same `renderCognitionGraph`
+inspector. Self-cognition runs enter the same Overview Latest snapshot rather
+than a separate widget. Its selected detail order is:
 
 `input`, `reply_context`; `decision`, `reasoning`; the four L2 reasoning fields;
 retrieval answer and evidence; continuity, progress, and commitments; selected
@@ -141,10 +143,9 @@ model metadata and raw-output capture; the two surfaces have separate
 disclosure purposes.
 
 The authenticated SSE stream emits `control.cognition_graph_invalidated` when
-the brain reports a different response or self-cognition latest run id. The
-browser responds by refetching bootstrap data, so self-cognition completion can
-update its dedicated Overview graph without the Overview page itself triggering
-cognition.
+the brain reports a different source-neutral latest run id. The browser
+responds by refetching bootstrap data, so self-cognition completion updates the
+same Overview graph without the Overview page itself triggering cognition.
 
 `GET /api/logs/stream` is a separate authenticated SSE stream for high-volume
 process-log traffic. It is intentionally not merged into the compact status

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 
 def _response_state(*, visual_directives: dict[str, object]) -> dict[str, object]:
     """Build a response graph state with meaningful semantic artifacts."""
@@ -134,6 +135,10 @@ def test_response_graph_contains_semantic_details_and_visual_directive(
         graph_result=_response_graph_result(),
         consolidation_state=_response_state(visual_directives=visual_directives),
         run_id="response-run",
+        cognitive_episode={
+            "trigger_source": "user_message",
+            "input_sources": ["dialog_text"],
+        },
     )
 
     intake = _node(graph, "intake")
@@ -177,6 +182,8 @@ def test_response_graph_contains_semantic_details_and_visual_directive(
     ]
     assert "summary" not in surface["detail"]
     assert "status" not in surface["detail"]
+    assert graph["trigger_source"] == "user_message"
+    assert graph["input_sources"] == ["dialog_text"]
 
 
 def test_response_graph_distinguishes_enabled_empty_and_disabled_visual(
@@ -346,6 +353,115 @@ def test_self_cognition_graph_uses_shared_semantic_vocabulary(monkeypatch) -> No
     ]
 
 
+@pytest.mark.asyncio
+async def test_latest_cognition_publication_uses_one_source_neutral_snapshot() -> None:
+    """Every admitted source replaces one canonical latest graph value."""
+
+    from kazusa_ai_chatbot import service
+
+    service._clear_latest_cognition_graph()
+    service._publish_latest_cognition_graph(
+        {
+            "run_id": "chat-run",
+            "status": "completed",
+            "nodes": [],
+            "edges": [],
+        },
+        cognitive_episode={
+            "trigger_source": "user_message",
+            "input_sources": ["dialog_text"],
+        },
+    )
+    service._publish_latest_cognition_graph(
+        {
+            "run_id": "self-run",
+            "status": "completed",
+            "nodes": [],
+            "edges": [],
+        },
+        cognitive_episode={
+            "trigger_source": "internal_thought",
+            "input_sources": ["internal_monologue"],
+        },
+    )
+
+    latest = await service.ops_latest_cognition_graph()
+
+    assert latest.cognition_graph is not None
+    assert latest.cognition_graph["run_id"] == "self-run"
+    assert latest.cognition_graph["trigger_source"] == "internal_thought"
+    assert latest.cognition_graph["input_sources"] == ["internal_monologue"]
+    assert "self_cognition_graph" not in latest.model_dump()
+
+
+@pytest.mark.asyncio
+async def test_self_cognition_failure_publishes_bounded_partial_snapshot() -> None:
+    """Self-cognition failures replace stale latest state without raw errors."""
+
+    from kazusa_ai_chatbot import service
+    from kazusa_ai_chatbot.self_cognition import models
+
+    service._clear_latest_cognition_graph()
+    await service._publish_self_cognition_latest_graph(
+        {
+            models.ARTIFACT_RUN_RECORD: {
+                "run_id": "self-failed-run",
+            },
+        },
+        cognitive_episode={
+            "trigger_source": "internal_thought",
+            "input_sources": ["internal_monologue"],
+        },
+        status="failed",
+        reason="self_cognition_case_failure",
+    )
+
+    latest = await service.ops_latest_cognition_graph()
+
+    assert latest.cognition_graph is not None
+    assert latest.cognition_graph["run_id"] == "self-failed-run"
+    assert latest.cognition_graph["status"] == "failed"
+    assert latest.cognition_graph["trigger_source"] == "internal_thought"
+    assert latest.cognition_graph["input_sources"] == [
+        "internal_monologue",
+    ]
+    assert latest.cognition_graph["nodes"] == []
+    assert "cognition backend unavailable" not in repr(
+        latest.cognition_graph
+    )
+
+
+def test_latest_cognition_publication_fails_closed_for_malformed_source() -> None:
+    """Malformed source metadata cannot relabel a run as a user message."""
+
+    from kazusa_ai_chatbot import service
+
+    service._clear_latest_cognition_graph()
+    service._publish_latest_cognition_graph(
+        {
+            "run_id": "malformed-source-run",
+            "status": "completed",
+            "nodes": [{"id": "must-be-removed"}],
+            "edges": [],
+        },
+        cognitive_episode={
+            "trigger_source": "<script>user_message</script>" * 40,
+            "input_sources": ["dialog_text", {"bad": "source"}],
+        },
+    )
+
+    latest_graph = service._latest_cognition_graph
+
+    assert latest_graph is not None
+    assert latest_graph["status"] == "partial"
+    assert latest_graph["trigger_source"] == "not_reported"
+    assert latest_graph["input_sources"] == []
+    assert latest_graph["nodes"] == []
+    assert "user_message" not in repr(latest_graph)
+    assert "<script>" not in repr(latest_graph)
+    assert latest_graph["redaction"]["reason"] == "trigger_source_invalid"
+
+
 def test_response_graph_records_visual_stage_failure(monkeypatch) -> None:
     """A recorded enabled visual-stage failure remains visible in telemetry."""
 
@@ -365,3 +481,42 @@ def test_response_graph_records_visual_stage_failure(monkeypatch) -> None:
     assert graph["status"] == "failed"
     assert visual["status"] == "failed"
     assert "failed" in visual["detail"]["empty_state"].lower()
+
+
+@pytest.mark.asyncio
+async def test_self_cognition_publisher_uses_canonical_latest_graph() -> None:
+    """Self-cognition metadata reaches the same latest storage seam."""
+
+    from kazusa_ai_chatbot import service
+    from kazusa_ai_chatbot.self_cognition import models
+
+    service._clear_latest_cognition_graph()
+    artifacts = {
+        models.ARTIFACT_RUN_RECORD: {
+            "run_id": "self-run-published",
+            "selected_route": "silent_no_write",
+            "status": "completed",
+        },
+        models.ARTIFACT_COGNITION_INPUT: {
+            "source_packet": {
+                "visible_context": [
+                    {"role": "user", "body_text": "self input"},
+                ],
+            },
+        },
+        models.ARTIFACT_COGNITION_OUTPUT: {
+            "cognitive_episode": {
+                "trigger_source": "internal_thought",
+                "input_sources": ["internal_monologue"],
+            },
+            "internal_monologue": "review the source",
+        },
+    }
+
+    await service._publish_self_cognition_latest_graph(artifacts)
+    latest = await service.ops_latest_cognition_graph()
+
+    assert latest.cognition_graph is not None
+    assert latest.cognition_graph["run_id"] == "self-run-published"
+    assert latest.cognition_graph["trigger_source"] == "internal_thought"
+    assert latest.cognition_graph["input_sources"] == ["internal_monologue"]

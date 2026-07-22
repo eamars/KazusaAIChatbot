@@ -1309,13 +1309,25 @@ async def test_worker_tick_marks_future_cognition_run_completed(
                 },
             },
             models.ARTIFACT_COGNITION_OUTPUT: {
+                "cognitive_episode": {
+                    "trigger_source": "internal_thought",
+                    "input_sources": ["internal_monologue"],
+                },
                 "internal_monologue": "bounded self-cognition reason",
                 "logical_stance": "inspect due promise",
                 "character_intent": "decide whether to act",
             },
         }
 
-    async def publish_latest_graph(artifact_payloads: dict[str, Any]) -> None:
+    async def publish_latest_graph(
+        artifact_payloads: dict[str, Any],
+        *,
+        cognitive_episode: dict[str, Any] | None = None,
+    ) -> None:
+        assert cognitive_episode == {
+            "trigger_source": "internal_thought",
+            "input_sources": ["internal_monologue"],
+        }
         published_artifacts.append(artifact_payloads)
 
     async def claim_run(run_id: str, **kwargs: Any) -> bool:
@@ -1564,6 +1576,80 @@ async def test_worker_tick_marks_state_contract_error_calendar_run_failed(
     assert failure["retryable"] is False
     assert "action_specs.speak" in failure["error"]
     record_runtime_error_event.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_worker_publishes_failed_graph_after_admitted_cognition_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Admitted self-cognition errors replace stale latest telemetry safely."""
+
+    case = _future_cognition_case()
+    published: list[dict[str, Any]] = []
+
+    async def collect_cases(**kwargs: Any) -> list[dict[str, Any]]:
+        del kwargs
+        return [case]
+
+    async def load_residue_context(_case: dict[str, Any]) -> str:
+        return ""
+
+    async def failing_cognition(_state: dict[str, Any]) -> dict[str, Any]:
+        raise RuntimeError("cognition backend unavailable")
+
+    async def publish_latest_graph(
+        _artifact_payloads: dict[str, Any],
+        *,
+        cognitive_episode: dict[str, Any] | None = None,
+        status: str | None = None,
+        reason: str = "",
+    ) -> None:
+        published.append({
+            "cognitive_episode": cognitive_episode,
+            "status": status,
+            "reason": reason,
+        })
+
+    async def claim_run(_run_id: str, **kwargs: Any) -> bool:
+        del kwargs
+        return True
+
+    async def fail_run(_run_id: str, **kwargs: Any) -> bool:
+        del kwargs
+        return True
+
+    monkeypatch.setattr(
+        worker.runner,
+        "_load_residue_context_for_case",
+        load_residue_context,
+    )
+    monkeypatch.setattr(
+        worker.runner,
+        "_default_cognition_client",
+        failing_cognition,
+    )
+
+    result = await worker.run_self_cognition_worker_tick(
+        now=datetime(2026, 5, 16, 10, 0, tzinfo=timezone.utc),
+        is_primary_interaction_busy=lambda: False,
+        collect_cases_func=collect_cases,
+        read_attempts_func=lambda **kwargs: [],
+        claim_calendar_run_func=claim_run,
+        fail_calendar_run_func=fail_run,
+        latest_cognition_graph_publisher=publish_latest_graph,
+        max_cases=3,
+    )
+
+    assert result.failed_count == 1
+    assert len(published) == 1
+    assert published[0]["status"] == "failed"
+    assert published[0]["reason"] == "self_cognition_case_failure"
+    assert published[0]["cognitive_episode"]["trigger_source"] == (
+        "internal_thought"
+    )
+    assert published[0]["cognitive_episode"]["input_sources"] == [
+        "internal_monologue",
+    ]
 
 
 @pytest.mark.asyncio

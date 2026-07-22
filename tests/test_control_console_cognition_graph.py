@@ -13,6 +13,8 @@ def test_cognition_graph_snapshot_projects_parallel_branches_and_redacts() -> No
         "cognition_graph": {
             "run_id": "run-123",
             "status": "completed",
+            "trigger_source": "internal_thought",
+            "input_sources": ["internal_monologue"],
             "nodes": [
                 {
                     "id": "intake",
@@ -78,6 +80,8 @@ def test_cognition_graph_snapshot_projects_parallel_branches_and_redacts() -> No
 
     assert graph.status == "completed"
     assert graph.run_id == "run-123"
+    assert graph.trigger_source == "internal_thought"
+    assert graph.input_sources == ["internal_monologue"]
     assert {node.branch for node in graph.nodes} >= {"l2a", "l2b"}
     assert {edge.kind for edge in graph.edges} == {"fork", "join"}
     graph_text = repr(graph.model_dump(mode="json"))
@@ -202,7 +206,9 @@ def test_cognition_graph_projection_handles_malformed_detail_without_throwing() 
         },
     )
 
-    assert graph.status == "completed"
+    assert graph.status == "partial"
+    assert graph.trigger_source == "not_reported"
+    assert graph.redaction["reason"] == "trigger_source_missing"
     detail = graph.nodes[0].detail
     assert "retrieval_answer" not in detail
     assert "memory_evidence" not in detail
@@ -270,8 +276,9 @@ def test_cognition_graph_projection_handles_invalid_and_inferred_payloads() -> N
         },
     )
 
-    assert invalid.status == "not_reported"
+    assert invalid.status == "partial"
     assert invalid.run_id == "bad-run"
+    assert invalid.redaction["reason"] == "trigger_source_missing"
     assert inferred.status == "partial"
     assert [node.id for node in inferred.nodes] == [
         "l2.reasoning",
@@ -279,6 +286,31 @@ def test_cognition_graph_projection_handles_invalid_and_inferred_payloads() -> N
         "l3.surface",
     ]
     assert [edge.kind for edge in inferred.edges] == ["sequence", "sequence"]
+
+
+def test_cognition_graph_projection_fails_closed_for_unknown_source_metadata() -> None:
+    """The console keeps malformed source metadata bounded and explicit."""
+
+    from control_console.kazusa_client import project_cognition_graph_snapshot
+
+    graph = project_cognition_graph_snapshot(
+        source="overview_latest",
+        payload={
+            "cognition_graph": {
+                "run_id": "source-check",
+                "status": "completed",
+                "trigger_source": "<script>unknown</script>" * 40,
+                "input_sources": ["dialog_text", {"bad": "source"}],
+                "nodes": [],
+                "edges": [],
+            },
+        },
+    )
+
+    assert graph.trigger_source == "not_reported"
+    assert graph.input_sources == ["dialog_text"]
+    assert graph.status == "partial"
+    assert "<script>" not in repr(graph.model_dump(mode="json"))
 
 
 def test_bootstrap_and_debug_unavailable_return_graph_contract(tmp_path) -> None:

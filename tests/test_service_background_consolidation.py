@@ -790,6 +790,8 @@ async def test_chat_response_tracks_deliverable_assistant_row(monkeypatch):
     graph = response.cognition_graph
     assert graph["run_id"] == response.delivery_tracking_id
     assert graph["status"] == "completed"
+    assert graph["trigger_source"] == "user_message"
+    assert graph["input_sources"] == ["dialog_text"]
     node_ids = {node["id"] for node in graph["nodes"]}
     assert {"l2.reasoning", "l2.memory", "l2.actions"} <= node_ids
     edge_kinds = {edge["kind"] for edge in graph["edges"]}

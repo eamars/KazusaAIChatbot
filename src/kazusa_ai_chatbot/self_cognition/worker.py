@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime
@@ -75,7 +75,7 @@ def start_self_cognition_worker(
     is_primary_interaction_busy: Callable[[], bool],
     character_profile_provider: Callable[[], dict[str, Any]],
     adapter_registry_provider: Callable[[], AdapterRegistry | None] | None = None,
-    latest_cognition_graph_publisher: Callable[[dict[str, Any]], Any] | None = None,
+    latest_cognition_graph_publisher: Callable[..., Any] | None = None,
     should_pause_for_affect_settling: Callable[..., Any] | None = None,
     pipeline_coordinator: PipelineCoordinator | None = None,
 ) -> SelfCognitionWorkerHandle:
@@ -144,7 +144,7 @@ async def run_self_cognition_worker_tick(
     skip_calendar_run_func: Callable[..., Any] | None = None,
     defer_calendar_run_func: Callable[..., Any] | None = None,
     adapter_registry_provider: Callable[[], AdapterRegistry | None] | None = None,
-    latest_cognition_graph_publisher: Callable[[dict[str, Any]], Any] | None = None,
+    latest_cognition_graph_publisher: Callable[..., Any] | None = None,
     should_pause_for_affect_settling: Callable[..., Any] | None = None,
     pipeline_coordinator: PipelineCoordinator | None = None,
     pipeline_run_handle: PipelineRunHandle | None = None,
@@ -326,6 +326,7 @@ async def run_self_cognition_worker_tick(
                 ),
             )
         case_for_run = case
+        artifact_payloads: dict[str, Any] = {}
         try:
             if active_pipeline_handle is not None:
                 active_pipeline_handle.raise_if_cancelled(
@@ -378,6 +379,13 @@ async def run_self_cognition_worker_tick(
                 complete_calendar_run_func=active_complete_calendar_run,
             )
         except PipelineCancelled as exc:
+            await _publish_latest_cognition_graph(
+                artifact_payloads,
+                publisher=latest_cognition_graph_publisher,
+                cognitive_episode=_cognitive_episode_from_exception(exc),
+                status="partial",
+                reason="self_cognition_pipeline_cancelled",
+            )
             result.deferred = True
             result.defer_reason = exc.cancellation.reason
             await _defer_source_calendar_run(
@@ -392,6 +400,13 @@ async def run_self_cognition_worker_tick(
                 f"Self-cognition case state contract failed: {exc}"
             )
             result.failed_count += 1
+            await _publish_latest_cognition_graph(
+                artifact_payloads,
+                publisher=latest_cognition_graph_publisher,
+                cognitive_episode=_cognitive_episode_from_exception(exc),
+                status="failed",
+                reason="self_cognition_state_contract_failure",
+            )
             await _fail_source_calendar_run(
                 case_for_run,
                 now=now,
@@ -412,6 +427,13 @@ async def run_self_cognition_worker_tick(
                 f"Self-cognition case processing failed: {exc}"
             )
             result.failed_count += 1
+            await _publish_latest_cognition_graph(
+                artifact_payloads,
+                publisher=latest_cognition_graph_publisher,
+                cognitive_episode=_cognitive_episode_from_exception(exc),
+                status="failed",
+                reason="self_cognition_case_failure",
+            )
             await _fail_source_calendar_run(
                 case_for_run,
                 now=now,
@@ -444,7 +466,7 @@ async def _self_cognition_worker_loop(
     is_primary_interaction_busy: Callable[[], bool],
     character_profile_provider: Callable[[], dict[str, Any]],
     adapter_registry_provider: Callable[[], AdapterRegistry | None] | None,
-    latest_cognition_graph_publisher: Callable[[dict[str, Any]], Any] | None,
+    latest_cognition_graph_publisher: Callable[..., Any] | None,
     should_pause_for_affect_settling: Callable[..., Any] | None = None,
     pipeline_coordinator: PipelineCoordinator | None = None,
 ) -> None:
@@ -1093,14 +1115,37 @@ async def _record_self_cognition_event_from_artifacts(
 async def _publish_latest_cognition_graph(
     artifact_payloads: dict[str, Any],
     *,
-    publisher: Callable[[dict[str, Any]], Any] | None,
+    publisher: Callable[..., Any] | None,
+    cognitive_episode: Mapping[str, Any] | None = None,
+    status: str | None = None,
+    reason: str = "",
 ) -> None:
     """Publish self-cognition telemetry without changing run outcome."""
 
     if publisher is None:
         return
     try:
-        await _call_maybe_async(publisher, artifact_payloads)
+        cognition_output = artifact_payloads.get(
+            models.ARTIFACT_COGNITION_OUTPUT,
+        )
+        if cognitive_episode is None:
+            cognitive_episode = (
+                cognition_output.get("cognitive_episode")
+                if isinstance(cognition_output, Mapping)
+                else None
+            )
+        publish_kwargs: dict[str, Any] = {
+            "cognitive_episode": cognitive_episode,
+        }
+        if status is not None:
+            publish_kwargs["status"] = status
+        if reason:
+            publish_kwargs["reason"] = reason
+        await _call_maybe_async(
+            publisher,
+            artifact_payloads,
+            **publish_kwargs,
+        )
     except Exception as exc:
         logger.exception(
             f"Self-cognition latest graph publication failed: {exc}"
@@ -1113,6 +1158,17 @@ async def _publish_latest_cognition_graph(
             top_frame_module=__name__,
             recovered=True,
         )
+
+
+def _cognitive_episode_from_exception(
+    exc: Exception,
+) -> Mapping[str, Any] | None:
+    """Read source state attached by the shared self-cognition runner."""
+
+    cognitive_episode = getattr(exc, "_kazusa_cognitive_episode", None)
+    if isinstance(cognitive_episode, Mapping):
+        return cognitive_episode
+    return None
 
 
 def _case_with_prior_attempts(

@@ -20,10 +20,6 @@ class FakeBrainServer(AbstractContextManager["FakeBrainServer"]):
         self.base_url = f"http://127.0.0.1:{port}"
         self._lock = Lock()
         self._graph = graph_snapshot(status="not_reported", run_id="not-reported")
-        self._self_graph = graph_snapshot(
-            status="not_reported",
-            run_id="self-not-reported",
-        )
         self._chat_requests: list[dict[str, Any]] = []
         self._chat_status_code = 200
         self._chat_delay_seconds = 0.0
@@ -60,24 +56,11 @@ class FakeBrainServer(AbstractContextManager["FakeBrainServer"]):
         with self._lock:
             self._graph = graph
 
-    def set_self_graph(self, graph: dict[str, Any]) -> None:
-        """Replace the latest self-cognition graph returned by the fake brain."""
-
-        with self._lock:
-            self._self_graph = graph
-
     def latest_graph(self) -> dict[str, Any]:
         """Return a copy of the latest graph."""
 
         with self._lock:
             graph = dict(self._graph)
-        return graph
-
-    def latest_self_graph(self) -> dict[str, Any]:
-        """Return a copy of the latest self-cognition graph."""
-
-        with self._lock:
-            graph = dict(self._self_graph)
         return graph
 
     def chat_requests(self) -> list[dict[str, Any]]:
@@ -202,17 +185,26 @@ class FakeBrainServer(AbstractContextManager["FakeBrainServer"]):
 
         return {
             "cognition_graph": self.latest_graph(),
-            "self_cognition_graph": self.latest_self_graph(),
         }
 
 
-def graph_snapshot(*, status: str, run_id: str) -> dict[str, Any]:
-    """Return a cognition graph snapshot with parallel branches."""
+def graph_snapshot(
+    *,
+    status: str,
+    run_id: str,
+    trigger_source: str = "user_message",
+    input_sources: list[str] | None = None,
+) -> dict[str, Any]:
+    """Return a source-bearing cognition graph snapshot with parallel branches."""
+
+    active_input_sources = input_sources or ["dialog_text"]
 
     if status == "not_reported":
         return {
             "status": "not_reported",
             "run_id": run_id,
+            "trigger_source": "not_reported",
+            "input_sources": [],
             "nodes": [],
             "edges": [],
         }
@@ -224,6 +216,8 @@ def graph_snapshot(*, status: str, run_id: str) -> dict[str, Any]:
     return {
         "status": status,
         "run_id": run_id,
+        "trigger_source": trigger_source,
+        "input_sources": active_input_sources,
         "nodes": [
             {
                 "id": "input.message",

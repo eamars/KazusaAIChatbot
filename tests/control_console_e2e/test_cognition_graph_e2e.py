@@ -40,9 +40,13 @@ def test_overview_cognition_graph_updates_from_latest_brain_run(
                 "#overview-self-cognition-card"
             ).is_hidden()
 
-            fake_brain.set_graph(graph_snapshot(status="running", run_id="run-live"))
-            fake_brain.set_self_graph(
-                graph_snapshot(status="completed", run_id="self-run-complete")
+            fake_brain.set_graph(
+                graph_snapshot(
+                    status="running",
+                    run_id="run-live",
+                    trigger_source="user_message",
+                    input_sources=["dialog_text"],
+                )
             )
             page.reload(wait_until="domcontentloaded")
             page.wait_for_selector("body[data-auth-state='authenticated']")
@@ -56,18 +60,24 @@ def test_overview_cognition_graph_updates_from_latest_brain_run(
             assert page.locator("#overview-cognition-graph .node-detail").count() == 0
             assert page.locator(
                 "#overview-self-cognition-graph .graph-node"
-            ).count() == 6
+            ).count() == 0
             assert page.locator(
                 "#overview-self-cognition-card"
-            ).is_visible()
+            ).is_hidden()
+            latest_payload = page.evaluate(
+                """async () => (await fetch('/api/bootstrap')).json()"""
+            )
+            assert latest_payload["latest_cognition_graph"]["trigger_source"] == (
+                "user_message"
+            )
             assert page.locator(
                 "#overview-cognition-graph .graph-latest-event"
             ).count() == 0
             page.locator(
-                "#overview-self-cognition-graph [data-node-id='l3.visual_directives']"
+                "#overview-cognition-graph [data-node-id='l3.visual_directives']"
             ).click()
             assert "focused" in page.locator(
-                "#overview-self-cognition-graph .graph-inspector"
+                "#overview-cognition-graph .graph-inspector"
             ).inner_text()
             assert page.locator(
                 "#overview-cognition-graph [data-node-id='l2.reasoning']"
@@ -118,7 +128,12 @@ def test_overview_cognition_graph_updates_from_latest_brain_run(
 
             page.locator("[data-page-link='services']").click()
             fake_brain.set_graph(
-                graph_snapshot(status="completed", run_id="run-complete")
+                graph_snapshot(
+                    status="completed",
+                    run_id="run-complete",
+                    trigger_source="accepted_task_result_ready",
+                    input_sources=["accepted_task_result"],
+                )
             )
             page.locator("[data-page-link='overview']").click()
             page.wait_for_function(
@@ -130,8 +145,22 @@ def test_overview_cognition_graph_updates_from_latest_brain_run(
             assert "Final node detail" in page.locator(
                 "#overview-cognition-graph .graph-inspector"
             ).inner_text()
+            latest_payload = page.evaluate(
+                """async () => (await fetch('/api/bootstrap')).json()"""
+            )
+            assert latest_payload["latest_cognition_graph"]["trigger_source"] == (
+                "accepted_task_result_ready"
+            )
+            assert "latest_self_cognition_graph" not in latest_payload
 
-            fake_brain.set_graph(graph_snapshot(status="failed", run_id="run-failed"))
+            fake_brain.set_graph(
+                graph_snapshot(
+                    status="failed",
+                    run_id="run-failed",
+                    trigger_source="internal_thought",
+                    input_sources=["internal_monologue"],
+                )
+            )
             page.wait_for_function(
                 "() => document.querySelector('#overview-cognition-status')?.textContent === 'failed'"
             )
@@ -144,7 +173,7 @@ def test_overview_cognition_graph_updates_from_latest_brain_run(
             })
             page.reload(wait_until="domcontentloaded")
             page.wait_for_selector("body[data-auth-state='authenticated']")
-            _assert_graph_status(page, "not reported")
+            _assert_graph_status(page, "partial")
 
             summary = e2e_summary_writer(
                 name="overview_cognition_graph_states",
@@ -157,7 +186,7 @@ def test_overview_cognition_graph_updates_from_latest_brain_run(
                         "running",
                         "completed",
                         "failed",
-                        "invalid_payload",
+                        "partial_missing_source",
                     ],
                     "checked_paths": [
                         "initial bootstrap",
@@ -318,6 +347,8 @@ def _option_a_state_graph() -> dict:
     return {
         "status": "running",
         "run_id": "option-a-state-treatment",
+        "trigger_source": "user_message",
+        "input_sources": ["dialog_text"],
         "nodes": [
             {
                 "id": "input.message",

@@ -94,7 +94,6 @@ class ChatResponse(BaseModel):
 
 class OpsLatestCognitionGraphResponse(BaseModel):
     cognition_graph: dict[str, Any] | None = None
-    self_cognition_graph: dict[str, Any] | None = None
 
 
 class DeliveryReceiptRequest(BaseModel):

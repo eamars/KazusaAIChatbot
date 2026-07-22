@@ -193,21 +193,41 @@ async def build_self_cognition_case_artifacts_async(
     )
     if pipeline_run_handle is not None:
         pipeline_run_handle.raise_if_cancelled("before_cognition")
-    cognition_output = await _call_maybe_async(
-        active_cognition_client,
-        cognition_state,
-    )
+    try:
+        cognition_output = await _call_maybe_async(
+            active_cognition_client,
+            cognition_state,
+        )
+    except Exception as exc:
+        _attach_cognitive_episode_to_exception(exc, cognition_state)
+        raise
     if pipeline_run_handle is not None:
-        pipeline_run_handle.raise_if_cancelled("after_cognition")
+        _raise_if_cancelled_with_episode(
+            pipeline_run_handle,
+            "after_cognition",
+            cognition_state,
+        )
     if execute_private_actions:
         if pipeline_run_handle is not None:
-            pipeline_run_handle.raise_if_cancelled("before_private_actions")
-        cognition_output = await _with_private_action_results(
-            cognition_state,
-            cognition_output,
-        )
+            _raise_if_cancelled_with_episode(
+                pipeline_run_handle,
+                "before_private_actions",
+                cognition_state,
+            )
+        try:
+            cognition_output = await _with_private_action_results(
+                cognition_state,
+                cognition_output,
+            )
+        except Exception as exc:
+            _attach_cognitive_episode_to_exception(exc, cognition_state)
+            raise
         if pipeline_run_handle is not None:
-            pipeline_run_handle.raise_if_cancelled("after_private_actions")
+            _raise_if_cancelled_with_episode(
+                pipeline_run_handle,
+                "after_private_actions",
+                cognition_state,
+            )
     artifact_payloads[models.ARTIFACT_COGNITION_OUTPUT] = cognition_output
 
     existing_attempts = _existing_attempts(case)
@@ -230,18 +250,32 @@ async def build_self_cognition_case_artifacts_async(
         )
         if action_attempt["status"] == models.ACTION_ATTEMPT_STATUS_CANDIDATE:
             if pipeline_run_handle is not None:
-                pipeline_run_handle.raise_if_cancelled("before_dialog")
-            dialog_state = await _build_dialog_state_with_text_surface(
-                cognition_state,
-                cognition_output,
-                usage_mode=DIALOG_USAGE_MODE_SELF_COGNITION_ACTION_CANDIDATE,
-            )
-            dialog_output = await _call_maybe_async(
-                active_dialog_client,
-                dialog_state,
-            )
+                _raise_if_cancelled_with_episode(
+                    pipeline_run_handle,
+                    "before_dialog",
+                    cognition_state,
+                )
+            try:
+                dialog_state = await _build_dialog_state_with_text_surface(
+                    cognition_state,
+                    cognition_output,
+                    usage_mode=(
+                        DIALOG_USAGE_MODE_SELF_COGNITION_ACTION_CANDIDATE
+                    ),
+                )
+                dialog_output = await _call_maybe_async(
+                    active_dialog_client,
+                    dialog_state,
+                )
+            except Exception as exc:
+                _attach_cognitive_episode_to_exception(exc, cognition_state)
+                raise
             if pipeline_run_handle is not None:
-                pipeline_run_handle.raise_if_cancelled("after_dialog")
+                _raise_if_cancelled_with_episode(
+                    pipeline_run_handle,
+                    "after_dialog",
+                    cognition_state,
+                )
             dialog_calls = models.DIALOG_RENDER_CALL_LIMIT
             action_text = _dialog_text(dialog_output)
             action_candidate = tracking.build_action_candidate(
@@ -257,30 +291,52 @@ async def build_self_cognition_case_artifacts_async(
 
     if apply_consolidation:
         if pipeline_run_handle is not None:
-            pipeline_run_handle.raise_if_cancelled("before_consolidation")
-        consolidation_state, dialog_output, dialog_called = (
-            await _build_consolidation_ready_state(
+            _raise_if_cancelled_with_episode(
+                pipeline_run_handle,
+                "before_consolidation",
                 cognition_state,
-                cognition_output,
-                rendered_packet,
-                dialog_output=dialog_output,
             )
-        )
+        try:
+            consolidation_state, dialog_output, dialog_called = (
+                await _build_consolidation_ready_state(
+                    cognition_state,
+                    cognition_output,
+                    rendered_packet,
+                    dialog_output=dialog_output,
+                )
+            )
+        except Exception as exc:
+            _attach_cognitive_episode_to_exception(exc, cognition_state)
+            raise
         if dialog_called:
             dialog_calls += models.DIALOG_RENDER_CALL_LIMIT
         active_consolidation_client = (
             consolidation_client or _default_consolidation_client
         )
-        consolidation_result = await _call_maybe_async(
-            active_consolidation_client,
-            consolidation_state,
-        )
+        try:
+            consolidation_result = await _call_maybe_async(
+                active_consolidation_client,
+                consolidation_state,
+            )
+        except Exception as exc:
+            _attach_cognitive_episode_to_exception(exc, cognition_state)
+            raise
         if pipeline_run_handle is not None:
-            pipeline_run_handle.raise_if_cancelled("after_consolidation")
-        await record_completed_episode_residue(
-            completed_state=consolidation_state,
-            current_timestamp_utc=consolidation_state["storage_timestamp_utc"],
-        )
+            _raise_if_cancelled_with_episode(
+                pipeline_run_handle,
+                "after_consolidation",
+                cognition_state,
+            )
+        try:
+            await record_completed_episode_residue(
+                completed_state=consolidation_state,
+                current_timestamp_utc=(
+                    consolidation_state["storage_timestamp_utc"]
+                ),
+            )
+        except Exception as exc:
+            _attach_cognitive_episode_to_exception(exc, cognition_state)
+            raise
         artifact_payloads[models.ARTIFACT_CONSOLIDATION_OUTCOME] = (
             tracking.build_consolidation_outcome_record(
                 consolidation_state,
@@ -692,6 +748,35 @@ def _build_cognition_state(
         "future_promises": [],
     }
     return state
+
+
+def _attach_cognitive_episode_to_exception(
+    exc: Exception,
+    cognition_state: dict[str, Any],
+) -> None:
+    """Attach bounded source state for admitted-run failure projection."""
+
+    cognitive_episode = cognition_state.get("cognitive_episode")
+    if not isinstance(cognitive_episode, dict):
+        return
+    try:
+        setattr(exc, "_kazusa_cognitive_episode", cognitive_episode)
+    except Exception:
+        return
+
+
+def _raise_if_cancelled_with_episode(
+    pipeline_run_handle: PipelineRunHandle,
+    checkpoint: str,
+    cognition_state: dict[str, Any],
+) -> None:
+    """Preserve source state when cancellation follows cognition admission."""
+
+    try:
+        pipeline_run_handle.raise_if_cancelled(checkpoint)
+    except Exception as exc:
+        _attach_cognitive_episode_to_exception(exc, cognition_state)
+        raise
 
 
 def _cognition_scene_topic(case: models.SelfCognitionCase) -> str:

@@ -282,8 +282,8 @@ disable visual directives by default with
 self-cognition worker runs do not invoke the L3 visual-directive LLM.
 
 The control-console cognition graph exposes the same selected-detail widget in
-Overview Latest, Debug cognition, and the dedicated latest self-cognition
-Overview panel. The
+Overview Latest and Debug cognition. Self-cognition runs enter the same
+source-neutral Overview Latest panel rather than a dedicated panel. The
 selected fields are semantic rather than generic status rows: queued-turn
 `input` and useful `reply_context`; the response `decision` and `reasoning`; L2
 reasoning, retrieval/evidence, continuity/progress/commitments, and action
