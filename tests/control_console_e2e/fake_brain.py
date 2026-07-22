@@ -325,6 +325,189 @@ def graph_snapshot(*, status: str, run_id: str) -> dict[str, Any]:
     }
 
 
+def native_v2_graph_snapshot(*, status: str, run_id: str) -> dict[str, Any]:
+    """Return a graph containing native V2 branch and affect semantics."""
+
+    graph = graph_snapshot(status=status, run_id=run_id)
+    if status == 'not_reported':
+        return graph
+    node_status = 'running' if status == 'running' else 'completed'
+    if status == 'failed':
+        branch_one_status = 'failed'
+        branch_two_status = 'completed'
+    else:
+        branch_one_status = node_status
+        branch_two_status = node_status
+    graph['nodes'].extend([
+        {
+            'id': 'v2.parallel',
+            'label': 'Parallel cognition',
+            'stage': 'V2',
+            'lane': 'cognition',
+            'column': 3,
+            'branch': 'parallel',
+            'status': node_status,
+            'detail': {
+                'parallel_execution': {
+                    'selected_question_count': 2,
+                    'dispatched_question_count': 2,
+                    'selected_branch_count': 2,
+                    'dispatched_branch_count': 2,
+                    'completed_branch_count': 1 if status == 'failed' else 2,
+                    'failed_branch_count': 1 if status == 'failed' else 0,
+                    'maximum_concurrency': 2,
+                    'overlap_ms': 42,
+                    'dependency_wait_ms': 0,
+                    'total_ms': 188,
+                },
+                'branch_results': [
+                    {
+                        'branch_index': 1,
+                        'selection': 'primary',
+                        'intention': '保护重要关系中的边界',
+                    },
+                    {
+                        'branch_index': 2,
+                        'selection': 'suppressed',
+                        'intention': '立即反击',
+                    },
+                ],
+            },
+        },
+        {
+            'id': 'v2.appraisal',
+            'label': 'Appraisal results',
+            'stage': 'V2',
+            'lane': 'cognition',
+            'column': 3,
+            'branch': 'appraisal',
+            'status': node_status,
+            'detail': {
+                'appraisal_results': [
+                    {
+                        'question_kind': 'relationship_social',
+                        'semantic_question': '这次行为怎样改变了关系中的安全感？',
+                        'status': 'completed',
+                        'explanation': '持续贬低削弱了关系安全感。',
+                        'propositions': [
+                            {
+                                'proposition_kind': 'relationship_shift',
+                                'semantic_value': '亲近关系中的信任受到伤害。',
+                            },
+                        ],
+                        'deltas': [
+                            {'delta': -20, 'reason': '关系安全感下降。'},
+                        ],
+                    },
+                ],
+            },
+        },
+        {
+            'id': 'v2.branch.1',
+            'label': 'Goal branch 1',
+            'stage': 'V2',
+            'lane': 'cognition',
+            'column': 4,
+            'branch': 'branch-1',
+            'status': branch_one_status,
+            'detail': {
+                'phase': 'preliminary',
+                'branch_index': 1,
+                'goal_kind': 'bond_protection',
+                'status': 'failed' if status == 'failed' else 'completed',
+                'selection': 'primary',
+                'intention': '保护重要关系中的边界',
+                'desired_outcome': '让伤害被看见',
+                'concrete_detail': '说明这句话造成的伤害',
+                'reason': '重要关系中的持续贬低需要回应。',
+                'private_monologue': '我不想假装没受伤。',
+                'expected_consequences': ['边界变得清楚'],
+                'confidence': '高',
+            },
+        },
+        {
+            'id': 'v2.branch.2',
+            'label': 'Goal branch 2',
+            'stage': 'V2',
+            'lane': 'cognition',
+            'column': 4,
+            'branch': 'branch-2',
+            'status': branch_two_status,
+            'detail': {
+                'phase': 'preliminary',
+                'branch_index': 2,
+                'goal_kind': 'autonomy_boundary',
+                'status': 'completed',
+                'selection': 'suppressed',
+                'intention': '立即反击',
+                'desired_outcome': '结束当前攻击',
+                'concrete_detail': '用更强硬的话顶回去',
+                'reason': '被冒犯会自然地产生反击冲动。',
+                'private_monologue': '我很想马上反击，但这会让关系更糟。',
+                'expected_consequences': ['冲突可能进一步升级'],
+                'confidence': '中',
+            },
+        },
+        {
+            'id': 'v2.collapse',
+            'label': 'Workspace collapse',
+            'stage': 'V2',
+            'lane': 'decision',
+            'column': 5,
+            'branch': 'collapse',
+            'status': node_status,
+            'detail': {
+                'collapse': {
+                    'primary_branch_index': 1,
+                    'supporting_branch_indices': [],
+                    'suppressed_branch_indices': [2],
+                    'selection_reason': '主目标保留了受伤事实，反击目标被压下。',
+                },
+                'selected_intention': {
+                    'route': 'speech',
+                    'intention': '回应当前关系中的受伤感受',
+                    'reason': '当前事件足以支持直接回应',
+                },
+                'selected_bid_reason': '她先承认这次伤害，再决定如何回应。',
+                'private_monologue': '我确实被这句话刺痛了，但我想先把感受说清楚。',
+                'goal_resolution': 'answerable_now',
+            },
+        },
+        {
+            'id': 'v2.affect',
+            'label': 'Affect projection',
+            'stage': 'V2',
+            'lane': 'cognition',
+            'column': 5,
+            'branch': 'affect',
+            'status': node_status,
+            'detail': {
+                'affect_projection': [
+                    {
+                        'emotion': '悲伤',
+                        'phase': '激活',
+                        'intensity': '高',
+                        'trend': '上升',
+                        'cause_summary': '关系伤害带来失落。',
+                    },
+                ],
+            },
+        },
+    ])
+    graph['edges'].extend([
+        {'source': 'l2.reasoning', 'target': 'v2.parallel', 'kind': 'fork'},
+        {'source': 'v2.parallel', 'target': 'v2.appraisal', 'kind': 'fork'},
+        {'source': 'v2.parallel', 'target': 'v2.branch.1', 'kind': 'fork'},
+        {'source': 'v2.parallel', 'target': 'v2.branch.2', 'kind': 'fork'},
+        {'source': 'v2.appraisal', 'target': 'v2.collapse', 'kind': 'join'},
+        {'source': 'v2.branch.1', 'target': 'v2.collapse', 'kind': 'join'},
+        {'source': 'v2.branch.2', 'target': 'v2.collapse', 'kind': 'join'},
+        {'source': 'v2.collapse', 'target': 'v2.affect', 'kind': 'sequence'},
+        {'source': 'v2.affect', 'target': 'l3.surface', 'kind': 'join'},
+    ])
+    return graph
+
+
 def write_conflict_brain_registry(
     *,
     path: Path,

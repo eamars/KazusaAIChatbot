@@ -481,6 +481,68 @@ class CognitionDiagnosticsV2(TypedDict):
     warnings: list[str]
 
 
+class CognitionAppraisalObservationV2(TypedDict):
+    """Safe semantic result from one parallel appraisal question."""
+
+    question_kind: str
+    semantic_question: str
+    status: Literal["completed", "not_reported"]
+    explanation: NotRequired[str]
+    propositions: NotRequired[list[dict[str, str]]]
+    deltas: NotRequired[list[dict[str, int | str]]]
+
+
+class CognitionBranchObservationV2(TypedDict):
+    """Safe semantic result from one preliminary or final goal branch."""
+
+    phase: Literal["preliminary", "final"]
+    branch_index: int
+    goal_kind: str
+    status: Literal["completed", "failed", "not_reported"]
+    selection: Literal["primary", "supporting", "suppressed", "unselected"]
+    intention: NotRequired[str]
+    desired_outcome: NotRequired[str]
+    concrete_detail: NotRequired[str]
+    reason: NotRequired[str]
+    private_monologue: NotRequired[str]
+    expected_consequences: NotRequired[list[str]]
+    confidence: NotRequired[str]
+    failure_code: NotRequired[str]
+
+
+class CognitionCollapseObservationV2(TypedDict):
+    """Safe branch partition produced by workspace collapse."""
+
+    primary_branch_index: int | None
+    supporting_branch_indices: list[int]
+    suppressed_branch_indices: list[int]
+    selection_reason: str
+
+
+class CognitionExecutionObservationV2(TypedDict):
+    """Bounded counts and timing for the parallel cognition execution."""
+
+    selected_question_count: int
+    dispatched_question_count: int
+    selected_branch_count: int
+    dispatched_branch_count: int
+    completed_branch_count: int
+    failed_branch_count: int
+    maximum_concurrency: int
+    overlap_ms: int
+    dependency_wait_ms: int
+    total_ms: int
+
+
+class CognitionObservabilityV2(TypedDict):
+    """Operator-safe semantic observability for one native V2 run."""
+
+    execution: CognitionExecutionObservationV2
+    appraisals: list[CognitionAppraisalObservationV2]
+    branches: list[CognitionBranchObservationV2]
+    collapse: CognitionCollapseObservationV2
+
+
 class CognitionCoreInputV2(TypedDict):
     """Public V2 cognition input contract."""
 
@@ -521,6 +583,7 @@ class CognitionCoreOutputV2(TypedDict):
     private_monologue: str
     expression_policy: ExpressionPolicyV2
     diagnostics: CognitionDiagnosticsV2
+    cognition_observability: NotRequired[CognitionObservabilityV2]
 
 
 class SurfaceBidProjectionV2(TypedDict):
@@ -732,6 +795,11 @@ def validate_cognition_core_output(
             {"relationship_projection"}
             if "relationship_projection" in payload
             else set()
+        )
+        | (
+            {"cognition_observability"}
+            if "cognition_observability" in payload
+            else set()
         ),
         "cognition core output",
     )
@@ -770,6 +838,8 @@ def validate_cognition_core_output(
     _validate_expression_policy(payload["expression_policy"])
     if "relationship_projection" in payload:
         _validate_relationship_projection(payload["relationship_projection"])
+    if "cognition_observability" in payload:
+        _validate_cognition_observability(payload["cognition_observability"])
     _validate_diagnostics(payload["diagnostics"])
     _require_text(
         payload["selected_bid_reason"],
@@ -1162,6 +1232,284 @@ def _validate_diagnostics(value: Any) -> None:
         ):
             raise CognitionContractError(f"diagnostics {field_name} is invalid")
     _validate_text_list(value["warnings"], "diagnostics.warnings", allow_empty=True)
+
+
+def _validate_cognition_observability(value: Any) -> None:
+    """Validate the operator-safe semantic execution projection."""
+
+    required = {"execution", "appraisals", "branches", "collapse"}
+    if not isinstance(value, Mapping) or set(value) != required:
+        raise CognitionContractError(
+            "cognition observability fields are not exact"
+        )
+    _validate_cognition_execution_observation(value["execution"])
+    appraisals = value["appraisals"]
+    if not isinstance(appraisals, list):
+        raise CognitionContractError("cognition observability appraisals invalid")
+    for row in appraisals:
+        _validate_cognition_appraisal_observation(row)
+    branches = value["branches"]
+    if not isinstance(branches, list):
+        raise CognitionContractError("cognition observability branches invalid")
+    branch_indices: list[int] = []
+    for row in branches:
+        _validate_cognition_branch_observation(row)
+        branch_indices.append(row["branch_index"])
+    if len(branch_indices) != len(set(branch_indices)):
+        raise CognitionContractError(
+            "cognition observability branch indices are duplicated"
+        )
+    _validate_cognition_collapse_observation(
+        value["collapse"],
+        branch_indices=set(branch_indices),
+    )
+
+
+def _validate_cognition_execution_observation(value: Any) -> None:
+    """Validate bounded counts and timing for one native V2 run."""
+
+    required = {
+        "selected_question_count",
+        "dispatched_question_count",
+        "selected_branch_count",
+        "dispatched_branch_count",
+        "completed_branch_count",
+        "failed_branch_count",
+        "maximum_concurrency",
+        "overlap_ms",
+        "dependency_wait_ms",
+        "total_ms",
+    }
+    if not isinstance(value, Mapping) or set(value) != required:
+        raise CognitionContractError(
+            "cognition execution observation fields are not exact"
+        )
+    for field_name in required:
+        field_value = value[field_name]
+        if (
+            isinstance(field_value, bool)
+            or not isinstance(field_value, int)
+            or field_value < 0
+        ):
+            raise CognitionContractError(
+                f"cognition execution observation {field_name} is invalid"
+            )
+
+
+def _validate_cognition_appraisal_observation(value: Any) -> None:
+    """Validate one question's semantic result without local handles."""
+
+    required = {"question_kind", "semantic_question", "status"}
+    optional = {"explanation", "propositions", "deltas"}
+    if not isinstance(value, Mapping) or not required.issubset(value):
+        raise CognitionContractError(
+            "cognition appraisal observation fields are invalid"
+        )
+    if set(value).difference(required | optional):
+        raise CognitionContractError(
+            "cognition appraisal observation has unknown fields"
+        )
+    _require_text(value["question_kind"], "cognition appraisal question kind")
+    _require_text(
+        value["semantic_question"],
+        "cognition appraisal semantic question",
+        maximum=2000,
+    )
+    if value["status"] not in {"completed", "not_reported"}:
+        raise CognitionContractError("cognition appraisal observation status invalid")
+    if value["status"] == "completed" and "explanation" not in value:
+        raise CognitionContractError(
+            "completed cognition appraisal requires an explanation"
+        )
+    if "explanation" in value:
+        _require_text(
+            value["explanation"],
+            "cognition appraisal explanation",
+            maximum=2000,
+        )
+    if "propositions" in value:
+        propositions = value["propositions"]
+        if not isinstance(propositions, list):
+            raise CognitionContractError(
+                "cognition appraisal propositions must be a list"
+            )
+        for proposition in propositions:
+            if not isinstance(proposition, Mapping) or set(proposition) != {
+                "proposition_kind",
+                "semantic_value",
+            }:
+                raise CognitionContractError(
+                    "cognition appraisal proposition fields are invalid"
+                )
+            _require_text(
+                proposition["proposition_kind"],
+                "cognition appraisal proposition kind",
+            )
+            _require_text(
+                proposition["semantic_value"],
+                "cognition appraisal proposition value",
+                maximum=1500,
+            )
+    if "deltas" in value:
+        deltas = value["deltas"]
+        if not isinstance(deltas, list):
+            raise CognitionContractError("cognition appraisal deltas must be a list")
+        for delta in deltas:
+            if not isinstance(delta, Mapping) or set(delta) != {
+                "delta",
+                "reason",
+            }:
+                raise CognitionContractError(
+                    "cognition appraisal delta fields are invalid"
+                )
+            if isinstance(delta["delta"], bool) or not isinstance(
+                delta["delta"],
+                int,
+            ):
+                raise CognitionContractError("cognition appraisal delta is invalid")
+            _require_text(delta["reason"], "cognition appraisal delta reason")
+
+
+def _validate_cognition_branch_observation(value: Any) -> None:
+    """Validate one branch result while excluding persistent handles."""
+
+    required = {
+        "phase",
+        "branch_index",
+        "goal_kind",
+        "status",
+        "selection",
+    }
+    optional = {
+        "intention",
+        "desired_outcome",
+        "concrete_detail",
+        "reason",
+        "private_monologue",
+        "expected_consequences",
+        "confidence",
+        "failure_code",
+    }
+    if not isinstance(value, Mapping) or not required.issubset(value):
+        raise CognitionContractError(
+            "cognition branch observation fields are invalid"
+        )
+    if set(value).difference(required | optional):
+        raise CognitionContractError(
+            "cognition branch observation has unknown fields"
+        )
+    if value["phase"] not in {"preliminary", "final"}:
+        raise CognitionContractError("cognition branch observation phase invalid")
+    branch_index = value["branch_index"]
+    if isinstance(branch_index, bool) or not isinstance(branch_index, int):
+        raise CognitionContractError("cognition branch observation index invalid")
+    if branch_index < 1:
+        raise CognitionContractError("cognition branch observation index is invalid")
+    _require_text(value["goal_kind"], "cognition branch observation goal kind")
+    if value["status"] not in {"completed", "failed", "not_reported"}:
+        raise CognitionContractError("cognition branch observation status invalid")
+    if value["selection"] not in {
+        "primary",
+        "supporting",
+        "suppressed",
+        "unselected",
+    }:
+        raise CognitionContractError("cognition branch observation selection invalid")
+    semantic_fields = (
+        "intention",
+        "desired_outcome",
+        "concrete_detail",
+        "reason",
+        "private_monologue",
+        "confidence",
+    )
+    if value["status"] == "completed" and any(
+        field_name not in value for field_name in semantic_fields
+    ):
+        raise CognitionContractError(
+            "completed cognition branch requires complete semantic fields"
+        )
+    for field_name in semantic_fields:
+        if field_name in value:
+            _require_text(
+                value[field_name],
+                f"cognition branch observation.{field_name}",
+                maximum=1500,
+            )
+    if "expected_consequences" in value:
+        _validate_text_list(
+            value["expected_consequences"],
+            "cognition branch observation.expected_consequences",
+        )
+    if "failure_code" in value:
+        _require_text(
+            value["failure_code"],
+            "cognition branch observation.failure_code",
+            maximum=200,
+        )
+
+
+def _validate_cognition_collapse_observation(
+    value: Any,
+    *,
+    branch_indices: set[int],
+) -> None:
+    """Validate the deterministic branch partition shown to operators."""
+
+    required = {
+        "primary_branch_index",
+        "supporting_branch_indices",
+        "suppressed_branch_indices",
+        "selection_reason",
+    }
+    if not isinstance(value, Mapping) or set(value) != required:
+        raise CognitionContractError(
+            "cognition collapse observation fields are not exact"
+        )
+    primary_index = value["primary_branch_index"]
+    if primary_index is not None:
+        if (
+            isinstance(primary_index, bool)
+            or not isinstance(primary_index, int)
+            or primary_index not in branch_indices
+        ):
+            raise CognitionContractError(
+                "cognition collapse primary branch index is invalid"
+            )
+    for field_name in ("supporting_branch_indices", "suppressed_branch_indices"):
+        indices = value[field_name]
+        if not isinstance(indices, list):
+            raise CognitionContractError(
+                f"cognition collapse {field_name} must be a list"
+            )
+        if any(
+            isinstance(index, bool)
+            or not isinstance(index, int)
+            or index not in branch_indices
+            for index in indices
+        ):
+            raise CognitionContractError(
+                f"cognition collapse {field_name} contain an invalid index"
+            )
+        if len(indices) != len(set(indices)):
+            raise CognitionContractError(
+                f"cognition collapse {field_name} are duplicated"
+            )
+    partitions = [
+        primary_index,
+        *value["supporting_branch_indices"],
+        *value["suppressed_branch_indices"],
+    ]
+    partitioned = [index for index in partitions if index is not None]
+    if len(partitioned) != len(set(partitioned)):
+        raise CognitionContractError(
+            "cognition collapse partitions overlap"
+        )
+    _require_text(
+        value["selection_reason"],
+        "cognition collapse selection reason",
+        maximum=1500,
+    )
 
 
 def _validate_action_affordance(value: Any) -> None:

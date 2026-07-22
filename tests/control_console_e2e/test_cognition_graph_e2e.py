@@ -4,7 +4,12 @@ from pathlib import Path
 import sys
 
 from browser_harness import DEFAULT_E2E_OPERATOR_TOKEN
-from fake_brain import FakeBrainServer, graph_snapshot, write_conflict_brain_registry
+from fake_brain import (
+    FakeBrainServer,
+    graph_snapshot,
+    native_v2_graph_snapshot,
+    write_conflict_brain_registry,
+)
 
 
 def test_overview_cognition_graph_updates_from_latest_brain_run(
@@ -52,7 +57,12 @@ def test_overview_cognition_graph_updates_from_latest_brain_run(
             assert "run-live" in page.locator(
                 "#overview-cognition-graph .graph-run-summary"
             ).inner_text()
-            assert page.locator("#overview-cognition-graph .graph-edge-layer").count() == 0
+            dependency_panel = page.locator(
+                "#overview-cognition-graph .graph-dependency-panel"
+            )
+            assert dependency_panel.count() == 1
+            assert "fork" in dependency_panel.inner_text()
+            assert "join" in dependency_panel.inner_text()
             assert page.locator("#overview-cognition-graph .node-detail").count() == 0
             assert page.locator(
                 "#overview-self-cognition-graph .graph-node"
@@ -170,6 +180,116 @@ def test_overview_cognition_graph_updates_from_latest_brain_run(
                         "stable inspector detail",
                         "graph stage no horizontal overflow",
                     ],
+                },
+            )
+
+    assert summary.exists()
+
+
+def test_native_v2_graph_renders_parallel_results_and_final_surface(
+    tmp_path: Path,
+    unused_tcp_port_factory,
+    e2e_console,
+    e2e_browser_page,
+    e2e_artifact_dir: Path,
+    e2e_summary_writer,
+) -> None:
+    """Verify every native V2 result is visible and selectable in the console."""
+
+    brain_port = unused_tcp_port_factory()
+    with FakeBrainServer(brain_port) as fake_brain:
+        registry_path = write_conflict_brain_registry(
+            path=tmp_path / "brain_conflict_registry.json",
+            fake_brain_base_url=fake_brain.base_url,
+            python_executable=sys.executable,
+        )
+        fake_brain.set_graph(
+            native_v2_graph_snapshot(
+                status="completed",
+                run_id="native-v2-console-run",
+            )
+        )
+
+        with e2e_console(
+            brain_base_url=fake_brain.base_url,
+            service_registry_path=registry_path,
+            sse_interval_seconds=0.2,
+        ) as console:
+            page = e2e_browser_page(console.base_url)
+            page.set_viewport_size({"width": 1600, "height": 1000})
+            _login(page)
+
+            graph = page.locator("#overview-cognition-graph")
+            screenshot_paths = {
+                "overview": e2e_artifact_dir / "native_v2_overview.png",
+            }
+            page.screenshot(
+                path=str(screenshot_paths["overview"]),
+                full_page=True,
+            )
+            assert "Parallel cognition results" in graph.inner_text()
+            assert "maximum concurrency" in graph.inner_text()
+            assert "2" in graph.locator(
+                ".graph-parallel-metric"
+            ).first.inner_text()
+            assert graph.locator(".graph-parallel-result").count() == 2
+            assert "fork" in graph.locator(
+                ".graph-dependency-panel"
+            ).inner_text()
+            assert "join" in graph.locator(
+                ".graph-dependency-panel"
+            ).inner_text()
+            dependency_text = graph.locator(
+                ".graph-dependency-panel"
+            ).inner_text()
+            assert "Parallel cognition" in dependency_text
+            assert "Goal branch 1" in dependency_text
+
+            for node_id, expected_text in (
+                ("v2.parallel", "maximum concurrency"),
+                ("v2.appraisal", '持续贬低削弱了关系安全感'),
+                ("v2.branch.1", "保护重要关系中的边界"),
+                ("v2.branch.2", "立即反击"),
+                ("v2.collapse", "主目标保留了受伤事实"),
+                ("v2.affect", "悲伤"),
+                ("l3.surface", "final visible message"),
+            ):
+                graph.locator(
+                    f"[data-node-id='{node_id}']"
+                ).last.click()
+                assert expected_text in graph.locator(
+                    ".graph-inspector"
+                ).inner_text()
+                screenshot_key = node_id.replace('.', '_')
+                screenshot_paths[screenshot_key] = (
+                    e2e_artifact_dir / f"native_v2_{screenshot_key}.png"
+                )
+                page.screenshot(
+                    path=str(screenshot_paths[screenshot_key]),
+                    full_page=True,
+                )
+
+            summary = e2e_summary_writer(
+                name="native_v2_parallel_result_rendering",
+                conclusion="pass",
+                details={
+                    "console_url": console.base_url,
+                    "fake_brain": fake_brain.base_url,
+                    "checked_paths": [
+                        "parallel execution metrics",
+                        "parallel execution inspector",
+                        "appraisal result inspector",
+                        "primary branch",
+                        "suppressed branch",
+                        "workspace collapse",
+                        "affect projection",
+                        "final visible dialog",
+                        "fork and join dependency list",
+                    ],
+                    "screenshots": {
+                        key: str(path)
+                        for key, path in screenshot_paths.items()
+                    },
                 },
             )
 

@@ -172,6 +172,106 @@ def test_cognition_graph_semantic_projection_preserves_full_approved_values() ->
     assert graph.nodes[2].detail["messages"] == [long_text, "duplicate"]
 
 
+def test_cognition_graph_projection_preserves_native_v2_results_and_redacts_handles() -> None:
+    """Native V2 branch results remain inspectable without protected handles."""
+
+    from control_console.kazusa_client import project_cognition_graph_snapshot
+
+    payload = {
+        'cognition_graph': {
+            'run_id': 'native-v2-run',
+            'status': 'completed',
+            'nodes': [
+                {
+                    'id': 'v2.parallel',
+                    'label': '并行认知',
+                    'stage': 'V2',
+                    'lane': 'cognition',
+                    'column': 3,
+                    'status': 'completed',
+                    'detail': {
+                        'parallel_execution': {
+                            'maximum_concurrency': 2,
+                            'completed_branch_count': 2,
+                            'prompt': '必须删除',
+                        },
+                        'branch_results': [
+                            {
+                                'branch_index': 1,
+                                'selection': 'primary',
+                                'intention': '保护关系边界',
+                                'private_monologue': '我不想假装没受伤。',
+                                'branch_id': '必须删除',
+                                'evidence_handles': ['e1'],
+                            },
+                        ],
+                    },
+                },
+                {
+                    'id': 'v2.branch.1',
+                    'label': '目标候选 1',
+                    'stage': 'V2',
+                    'lane': 'cognition',
+                    'column': 4,
+                    'status': 'completed',
+                    'detail': {
+                        'selection': 'primary',
+                        'intention': '保护关系边界',
+                        'desired_outcome': '让伤害被看见',
+                        'concrete_detail': '说明这句话造成的伤害',
+                        'reason': '重要关系中的持续贬低需要回应。',
+                        'private_monologue': '我不想假装没受伤。',
+                        'expected_consequences': ['边界变得清楚'],
+                        'confidence': '高',
+                        'branch_id': '必须删除',
+                    },
+                },
+                {
+                    'id': 'v2.affect',
+                    'label': '情绪投影',
+                    'stage': 'V2',
+                    'lane': 'cognition',
+                    'column': 5,
+                    'status': 'completed',
+                    'detail': {
+                        'affect_projection': [
+                            {
+                                'emotion': '悲伤',
+                                'phase': '激活',
+                                'intensity': '高',
+                                'trend': '上升',
+                                'cause_summary': '关系伤害带来失落。',
+                            },
+                        ],
+                    },
+                },
+            ],
+            'edges': [
+                {'source': 'v2.parallel', 'target': 'v2.branch.1', 'kind': 'fork'},
+                {'source': 'v2.branch.1', 'target': 'v2.affect', 'kind': 'join'},
+            ],
+        },
+    }
+
+    graph = project_cognition_graph_snapshot(
+        source='debug_latest',
+        payload=payload,
+    )
+
+    parallel = graph.nodes[0].detail
+    assert parallel['parallel_execution']['maximum_concurrency'] == 2
+    assert parallel['branch_results'][0]['intention'] == '保护关系边界'
+    branch = graph.nodes[1].detail
+    assert branch['desired_outcome'] == '让伤害被看见'
+    assert branch['expected_consequences'] == ['边界变得清楚']
+    affect = graph.nodes[2].detail['affect_projection'][0]
+    assert affect['emotion'] == '悲伤'
+    detail_text = repr([node.detail for node in graph.nodes])
+    assert 'branch_id' not in detail_text
+    assert 'evidence_handles' not in detail_text
+    assert 'prompt' not in detail_text
+
+
 def test_cognition_graph_projection_handles_malformed_detail_without_throwing() -> None:
     """Malformed semantic detail should fail closed field by field."""
 

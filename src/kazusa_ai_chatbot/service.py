@@ -3389,6 +3389,12 @@ def _build_response_cognition_graph(
         {"source": "l2.memory", "target": "l3.surface", "kind": "join"},
         {"source": "l2.actions", "target": "l3.surface", "kind": "join"},
     ]
+    cognition_output = state.get("cognition_core_output")
+    if not isinstance(cognition_output, Mapping):
+        cognition_output = graph_result.get("cognition_core_output")
+    native_nodes, native_edges = _graph_native_v2_nodes(cognition_output)
+    nodes.extend(native_nodes)
+    edges.extend(native_edges)
     snapshot = {
         "run_id": run_id,
         "status": graph_status,
@@ -3778,6 +3784,83 @@ _GRAPH_FUTURE_FIELDS = _GRAPH_CONTINUATION_FIELDS | frozenset(
         "objective_summary",
     }
 )
+_GRAPH_V2_EXECUTION_FIELDS = frozenset(
+    {
+        "selected_question_count",
+        "dispatched_question_count",
+        "selected_branch_count",
+        "dispatched_branch_count",
+        "completed_branch_count",
+        "failed_branch_count",
+        "maximum_concurrency",
+        "overlap_ms",
+        "dependency_wait_ms",
+        "total_ms",
+    }
+)
+_GRAPH_V2_APPRAISAL_FIELDS = frozenset(
+    {
+        "question_kind",
+        "semantic_question",
+        "status",
+        "explanation",
+        "propositions",
+        "deltas",
+        "proposition_kind",
+        "semantic_value",
+        "delta",
+        "reason",
+    }
+)
+_GRAPH_V2_BRANCH_FIELDS = frozenset(
+    {
+        "phase",
+        "branch_index",
+        "goal_kind",
+        "status",
+        "selection",
+        "intention",
+        "desired_outcome",
+        "concrete_detail",
+        "reason",
+        "private_monologue",
+        "expected_consequences",
+        "confidence",
+        "failure_code",
+    }
+)
+_GRAPH_V2_COLLAPSE_FIELDS = frozenset(
+    {
+        "primary_branch_index",
+        "supporting_branch_indices",
+        "suppressed_branch_indices",
+        "selection_reason",
+    }
+)
+_GRAPH_V2_SELECTED_INTENTION_FIELDS = frozenset(
+    {
+        "route",
+        "intention",
+        "reason",
+    }
+)
+_GRAPH_V2_EXPRESSION_FIELDS = frozenset(
+    {
+        "visibility",
+        "emotional_tone",
+        "intensity",
+        "directness",
+    }
+)
+_GRAPH_V2_AFFECT_FIELDS = frozenset(
+    {
+        "emotion",
+        "phase",
+        "intensity",
+        "trend",
+        "cause_summary",
+    }
+)
 _GRAPH_CONSOLIDATION_FIELDS = frozenset(
     {
         "consolidation_called",
@@ -3903,6 +3986,221 @@ def _graph_project_text_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
     return [item for item in value if isinstance(item, str) and item.strip()]
+
+
+def _graph_native_v2_nodes(
+    cognition_output: Any,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Project native V2 branch results into the operator graph."""
+
+    if not isinstance(cognition_output, Mapping):
+        return [], []
+    observability = cognition_output.get("cognition_observability")
+    if not isinstance(observability, Mapping):
+        return [], []
+
+    execution = _graph_project_mapping(
+        observability.get("execution"),
+        _GRAPH_V2_EXECUTION_FIELDS,
+    )
+    branch_rows = _graph_project_semantic_rows(
+        observability.get("branches"),
+        _GRAPH_V2_BRANCH_FIELDS,
+    )
+    appraisal_rows = _graph_project_semantic_rows(
+        observability.get("appraisals"),
+        _GRAPH_V2_APPRAISAL_FIELDS,
+    )
+    collapse = _graph_project_mapping(
+        observability.get("collapse"),
+        _GRAPH_V2_COLLAPSE_FIELDS,
+    )
+    nodes: list[dict[str, Any]] = []
+    edges: list[dict[str, Any]] = []
+    failed_branch_count = execution.get("failed_branch_count", 0)
+    completed_branch_count = execution.get("completed_branch_count", 0)
+    parallel_status = (
+        "failed"
+        if failed_branch_count and not completed_branch_count
+        else "completed"
+    )
+    parallel_detail: dict[str, Any] = {}
+    if execution:
+        parallel_detail["parallel_execution"] = execution
+    if branch_rows:
+        parallel_detail["branch_results"] = branch_rows
+    nodes.append({
+        "id": "v2.parallel",
+        "label": "Parallel cognition",
+        "stage": "V2",
+        "lane": "cognition",
+        "column": 3,
+        "branch": "parallel",
+        "status": parallel_status,
+        "detail": parallel_detail,
+    })
+
+    appraisal_detail: dict[str, Any] = {}
+    if appraisal_rows:
+        appraisal_detail["appraisal_results"] = appraisal_rows
+        appraisal_status = "completed"
+    else:
+        appraisal_detail["empty_state"] = "No semantic appraisal was reported."
+        appraisal_status = "skipped"
+    nodes.append({
+        "id": "v2.appraisal",
+        "label": "Appraisal results",
+        "stage": "V2",
+        "lane": "cognition",
+        "column": 3,
+        "branch": "appraisal",
+        "status": appraisal_status,
+        "detail": appraisal_detail,
+    })
+    branch_node_ids: list[str] = []
+    for index, branch_detail in enumerate(branch_rows, start=1):
+        branch_index = branch_detail.get("branch_index")
+        if not isinstance(branch_index, int) or isinstance(branch_index, bool):
+            branch_index = index
+        node_id = f"v2.branch.{branch_index}"
+        if node_id in branch_node_ids:
+            node_id = f"v2.branch.{index}"
+        branch_node_ids.append(node_id)
+        branch_status = branch_detail.get("status")
+        if branch_status not in {"completed", "failed", "not_reported"}:
+            branch_status = "not_reported"
+        nodes.append({
+            "id": node_id,
+            "label": f"Goal branch {branch_index}",
+            "stage": "V2",
+            "lane": "cognition",
+            "column": 4,
+            "branch": f"branch-{branch_index}",
+            "status": branch_status,
+            "detail": branch_detail,
+        })
+
+    collapse_detail: dict[str, Any] = {}
+    if collapse:
+        collapse_detail["collapse"] = collapse
+    selected_intention = _graph_project_mapping(
+        cognition_output.get("intention"),
+        _GRAPH_V2_SELECTED_INTENTION_FIELDS,
+    )
+    if selected_intention:
+        collapse_detail["selected_intention"] = selected_intention
+    selected_bid_reason = _graph_full_text(
+        cognition_output.get("selected_bid_reason")
+    )
+    if selected_bid_reason:
+        collapse_detail["selected_bid_reason"] = selected_bid_reason
+    private_monologue = _graph_full_text(
+        cognition_output.get("private_monologue")
+    )
+    if private_monologue:
+        collapse_detail["private_monologue"] = private_monologue
+    goal_resolution = _safe_graph_text(cognition_output.get("goal_resolution"))
+    if goal_resolution:
+        collapse_detail["goal_resolution"] = goal_resolution
+    expression_policy = _graph_project_mapping(
+        cognition_output.get("expression_policy"),
+        _GRAPH_V2_EXPRESSION_FIELDS,
+    )
+    if expression_policy:
+        collapse_detail["expression_policy"] = expression_policy
+    nodes.append({
+        "id": "v2.collapse",
+        "label": "Workspace collapse",
+        "stage": "V2",
+        "lane": "decision",
+        "column": 5,
+        "branch": "collapse",
+        "status": "completed" if collapse_detail else "not_reported",
+        "detail": collapse_detail,
+    })
+
+    affect_rows = _graph_project_semantic_rows(
+        cognition_output.get("affect_projection"),
+        _GRAPH_V2_AFFECT_FIELDS,
+    )
+    if affect_rows:
+        affect_detail = {"affect_projection": affect_rows}
+        affect_status = "completed"
+    else:
+        affect_detail = {"empty_state": "No affect projection was reported."}
+        affect_status = "skipped"
+    nodes.append({
+        "id": "v2.affect",
+        "label": "Affect projection",
+        "stage": "V2",
+        "lane": "cognition",
+        "column": 5,
+        "branch": "affect",
+        "status": affect_status,
+        "detail": affect_detail,
+    })
+
+    edges.extend([
+        {
+            "source": "l1.relevance",
+            "target": "v2.parallel",
+            "kind": "fork",
+            "label": "native V2",
+        },
+        {
+            "source": "v2.parallel",
+            "target": "v2.appraisal",
+            "kind": "fork",
+            "label": "appraisal",
+        },
+        {
+            "source": "v2.appraisal",
+            "target": "v2.collapse",
+            "kind": "join",
+            "label": "semantic result",
+        },
+        {
+            "source": "v2.collapse",
+            "target": "v2.affect",
+            "kind": "sequence",
+            "label": "state projection",
+        },
+        {
+            "source": "v2.affect",
+            "target": "l3.visual_directives",
+            "kind": "join",
+            "label": "expression",
+        },
+        {
+            "source": "v2.affect",
+            "target": "l3.surface",
+            "kind": "join",
+            "label": "surface",
+        },
+    ])
+    for node_id in branch_node_ids:
+        branch_node = next(
+            node for node in nodes if node["id"] == node_id
+        )
+        branch_detail = branch_node["detail"]
+        selection = (
+            branch_detail.get("selection")
+            if isinstance(branch_detail, Mapping)
+            else ""
+        )
+        edges.append({
+            "source": "v2.parallel",
+            "target": node_id,
+            "kind": "fork",
+            "label": "parallel branch",
+        })
+        edges.append({
+            "source": node_id,
+            "target": "v2.collapse",
+            "kind": "join",
+            "label": str(selection or "branch result"),
+        })
+    return nodes, edges
 
 
 def _graph_messages(value: Any) -> list[str]:

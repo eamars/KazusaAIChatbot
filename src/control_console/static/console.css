@@ -228,6 +228,28 @@ body[data-auth-state="authenticated"] #login-form { display: none; }
 .graph-run-title strong { overflow-wrap: anywhere; font-size: 14px; }
 .graph-run-title span, .graph-latest-event { color: var(--muted); font-size: 12px; line-height: 1.45; }
 .graph-latest-event { grid-column: 1 / -1; color: var(--ink); }
+.graph-parallel-summary, .graph-dependency-panel { display: grid; gap: 10px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--panel-soft); }
+.graph-parallel-header, .graph-dependency-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; min-width: 0; }
+.graph-parallel-header > div:first-child, .graph-dependency-header { display: grid; gap: 3px; }
+.graph-parallel-header span:first-child, .graph-dependency-header span { color: var(--muted); font-size: 11px; text-transform: uppercase; }
+.graph-parallel-header strong, .graph-dependency-header strong { font-size: 13px; overflow-wrap: anywhere; }
+.graph-parallel-metrics { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.graph-parallel-metric { display: grid; gap: 2px; min-width: 68px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.graph-parallel-metric span { color: var(--muted); font-size: 10px; text-transform: uppercase; }
+.graph-parallel-metric strong { font-size: 12px; }
+.graph-parallel-results { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr)); gap: 8px; }
+.graph-parallel-result { display: grid; gap: 6px; min-width: 0; padding: 9px 10px; border: 1px solid var(--line-strong); border-left: 3px solid var(--success); border-radius: 8px; background: var(--panel); color: var(--ink); text-align: left; }
+.graph-parallel-result.status-failed { border-left-color: var(--danger); }
+.graph-parallel-result.status-running { border-left-color: var(--warn); }
+.graph-parallel-result:hover, .graph-parallel-result:focus-visible { border-color: var(--nav-active-border); background: var(--nav-active-bg); outline: 0; }
+.graph-parallel-result-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; min-width: 0; }
+.graph-parallel-result-header strong { overflow-wrap: anywhere; font-size: 12px; }
+.graph-parallel-result > span:last-child { color: var(--muted); font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
+.graph-parallel-empty { margin: 0; color: var(--muted); font-size: 12px; }
+.graph-dependency-list { display: grid; max-height: 260px; overflow-y: auto; border-top: 1px solid var(--line); }
+.graph-dependency-row { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
+.graph-dependency-row strong { min-width: 0; overflow-wrap: anywhere; font-weight: 600; }
+.graph-dependency-row span { flex: 0 0 auto; color: var(--muted); text-align: right; }
 .graph-body { display: grid; grid-template-columns: minmax(min(560px, 100%), 1fr) minmax(min(280px, 100%), 320px); gap: 12px; align-items: start; min-width: 0; }
 .cognition-graph-stage { display: grid; min-height: 260px; padding: 14px; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--panel-soft); overflow: hidden; }
 .graph-stage-rail { display: grid; grid-template-columns: repeat(var(--graph-columns), minmax(0, 1fr)); gap: 12px; align-items: stretch; min-width: 0; }
@@ -321,6 +343,8 @@ code { font-family: var(--mono); }
   .config-state-grid { grid-template-columns: 1fr; }
   .graph-body { grid-template-columns: 1fr; }
   .graph-inspector { position: static; }
+  .graph-parallel-header, .graph-dependency-header { display: grid; }
+  .graph-parallel-metrics { justify-content: flex-start; }
 }
 
 @media (max-width: 640px) {

@@ -529,6 +529,8 @@ function renderCognitionGraph({containerSelector, statusSelector, snapshot, empt
   setHtml(container, `
     <div class="cognition-graph-shell" data-graph-source="${escapeHtml(model.source)}" data-graph-run-id="${escapeHtml(model.runId)}" data-graph-current-node-id="${escapeHtml(model.currentNode?.id || "")}" data-graph-selected-node-id="${escapeHtml(model.selectedNode?.id || "")}">
       ${cognitionGraphSummaryMarkup(model)}
+      ${cognitionGraphParallelSummaryMarkup(model)}
+      ${cognitionGraphDependencyMarkup(model)}
       <div class="graph-body">
         ${cognitionGraphStageMarkup(model)}
         ${cognitionGraphInspectorMarkup(model)}
@@ -728,6 +730,77 @@ function cognitionGraphSummaryMarkup(model) {
   `;
 }
 
+function cognitionGraphParallelSummaryMarkup(model) {
+  const executionNode = model.nodes.find((node) => node.id === "v2.parallel");
+  const branchNodes = model.nodes.filter((node) => node.id.startsWith("v2.branch."));
+  if (!executionNode && !branchNodes.length) return "";
+  const execution = executionNode?.detail?.parallel_execution || {};
+  const metrics = [
+    ["max concurrency", execution.maximum_concurrency],
+    ["completed", execution.completed_branch_count],
+    ["failed", execution.failed_branch_count],
+    ["overlap", execution.overlap_ms === undefined ? null : `${execution.overlap_ms} ms`],
+  ].filter(([, value]) => value !== null && value !== undefined && value !== "");
+  const metricMarkup = metrics.map(([label, value]) => (
+    `<span class="graph-parallel-metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value))}</strong></span>`
+  )).join("");
+  const branchMarkup = branchNodes.map((node) => {
+    const detail = node.detail || {};
+    const selection = detail.selection || "unselected";
+    const status = cognitionGraphStatusLabel(node.status || "not_reported");
+    const semantic = detail.intention || detail.desired_outcome || detail.reason || "No branch result reported.";
+    return `
+      <button class="graph-parallel-result status-${escapeHtml(node.status || "not_reported")}" type="button" data-graph-node data-node-id="${escapeHtml(node.id)}" aria-label="${escapeHtml(node.label || node.id)}">
+        <span class="graph-parallel-result-header">
+          <strong>${escapeHtml(node.label || node.id)}</strong>
+          <span class="badge" data-component="Badge">${escapeHtml(selection)} · ${escapeHtml(status)}</span>
+        </span>
+        <span>${escapeHtml(cognitionGraphPreview(cognitionGraphValue(semantic), 180))}</span>
+      </button>
+    `;
+  }).join("");
+  return `
+    <section class="graph-parallel-summary" aria-label="Parallel cognition results" data-component="Parallel cognition results">
+      <div class="graph-parallel-header">
+        <div>
+          <span>Native V2</span>
+          <strong>Parallel cognition results</strong>
+        </div>
+        <div class="graph-parallel-metrics">${metricMarkup}</div>
+      </div>
+      <div class="graph-parallel-results">
+        ${branchMarkup || `<p class="graph-parallel-empty">No branch result was reported.</p>`}
+      </div>
+    </section>
+  `;
+}
+
+function cognitionGraphDependencyMarkup(model) {
+  if (!model.edges.length) return "";
+  const labelById = new Map(model.nodes.map((node) => [node.id, node.label || node.id]));
+  const edges = [...model.edges].sort((left, right) => {
+    const leftNative = left.source?.startsWith("v2.") || left.target?.startsWith("v2.");
+    const rightNative = right.source?.startsWith("v2.") || right.target?.startsWith("v2.");
+    return Number(rightNative) - Number(leftNative);
+  });
+  const edgeMarkup = edges.map((edge) => {
+    const source = labelById.get(edge.source) || edge.source;
+    const target = labelById.get(edge.target) || edge.target;
+    const kind = String(edge.kind || "sequence").replaceAll("_", " ");
+    const label = edge.label ? ` · ${edge.label}` : "";
+    return `<div class="graph-dependency-row"><strong>${escapeHtml(source)} → ${escapeHtml(target)}</strong><span>${escapeHtml(`${kind}${label}`)}</span></div>`;
+  }).join("");
+  return `
+    <section class="graph-dependency-panel" aria-label="Cognition graph dependencies">
+      <div class="graph-dependency-header">
+        <span>Recorded relationships</span>
+        <strong>Fork / join dependencies</strong>
+      </div>
+      <div class="graph-dependency-list">${edgeMarkup}</div>
+    </section>
+  `;
+}
+
 function cognitionGraphStageMarkup(model) {
   const groups = cognitionGraphStageGroups(model);
   const columns = Math.max(1, groups.length);
@@ -885,7 +958,26 @@ function cognitionGraphInspectorRows(node) {
     ["reply_context", "Reply context"],
     ["decision", "Decision"],
     ["reasoning", "Reasoning"],
+    ["parallel_execution", "Parallel execution"],
+    ["appraisal_results", "Appraisal results"],
+    ["branch_results", "Branch results"],
+    ["phase", "Phase"],
+    ["goal_kind", "Goal kind"],
+    ["selection", "Selection"],
+    ["intention", "Intention"],
+    ["desired_outcome", "Desired outcome"],
+    ["concrete_detail", "Concrete detail"],
+    ["reason", "Reason"],
     ["internal_monologue", "Internal monologue"],
+    ["private_monologue", "Private monologue"],
+    ["expected_consequences", "Expected consequences"],
+    ["confidence", "Confidence"],
+    ["collapse", "Collapse"],
+    ["selected_intention", "Selected intention"],
+    ["selected_bid_reason", "Selected bid reason"],
+    ["affect_projection", "Affect projection"],
+    ["expression_policy", "Expression policy"],
+    ["goal_resolution", "Goal resolution"],
     ["logical_stance", "Logical stance"],
     ["character_intent", "Character intent"],
     ["judgment_note", "Judgment note"],
@@ -957,7 +1049,26 @@ function cognitionGraphFirstSemanticValue(detail) {
     "reply_context",
     "decision",
     "reasoning",
+    "parallel_execution",
+    "appraisal_results",
+    "branch_results",
+    "phase",
+    "goal_kind",
+    "selection",
+    "intention",
+    "desired_outcome",
+    "concrete_detail",
+    "reason",
     "internal_monologue",
+    "private_monologue",
+    "expected_consequences",
+    "confidence",
+    "collapse",
+    "selected_intention",
+    "selected_bid_reason",
+    "affect_projection",
+    "expression_policy",
+    "goal_resolution",
     "logical_stance",
     "character_intent",
     "judgment_note",

@@ -23,6 +23,7 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionContractError,
     CognitionContextLimitError,
     CognitionExecutionError,
+    CognitionObservabilityV2,
     SemanticAppraisalResultV2,
     validate_cognition_core_input,
     validate_cognition_core_output,
@@ -303,6 +304,53 @@ async def run_cognition(
         selected_branch_id=intention.get("selected_branch_id"),
         activations=final_state["affect_activations"],
     )
+    selected_bid_reason = (
+        admitted_bid["reason"]
+        if admitted_bid is not None
+        else "没有有依据的目标候选"
+    )
+    diagnostics = {
+        "run_id": str(payload["episode"].get("episode_id", "episode")),
+        "stage_status": stage_status,
+        "selected_question_count": len(questions),
+        "dispatched_question_count": len(appraisal_tasks),
+        "selected_branch_count": (
+            len(preliminary_branches) + len(new_branch_definitions)
+        ),
+        "dispatched_branch_count": (
+            len(preliminary_execution.started_at)
+            + (len(final_execution.started_at) if final_execution else 0)
+        ),
+        "completed_branch_count": (
+            len(preliminary_execution.results)
+            + (len(final_execution.results) if final_execution else 0)
+        ),
+        "failed_branch_count": (
+            len(preliminary_execution.failed_branch_ids)
+            + (len(final_execution.failed_branch_ids) if final_execution else 0)
+        ),
+        "overlap_ms": max(
+            preliminary_execution.overlap_ms,
+            final_execution.overlap_ms if final_execution else 0,
+        ),
+        "dependency_wait_ms": max(
+            preliminary_execution.dependency_wait_ms,
+            final_execution.dependency_wait_ms if final_execution else 0,
+        ),
+        "total_ms": _elapsed_ms(started_at),
+        "warnings": warnings,
+    }
+    cognition_observability = _build_cognition_observability(
+        questions=questions,
+        appraisal_results=appraisal_results,
+        preliminary_branches=preliminary_branches,
+        preliminary_execution=preliminary_execution,
+        final_branches=new_branch_definitions,
+        final_execution=final_execution,
+        collapse=collapse,
+        selected_bid_reason=selected_bid_reason,
+        diagnostics=diagnostics,
+    )
     output: dict[str, Any] = {
         "schema_version": "cognition_core_output.v2",
         "intention": intention,
@@ -322,48 +370,15 @@ async def run_cognition(
         "resolver_pending_resolution": pending_resolution,
         "resolver_goal_progress": action_plan["resolver_goal_progress"],
         "resolver_progress": _resolver_progress(resolver_requests),
-        "selected_bid_reason": (
-            admitted_bid["reason"]
-            if admitted_bid is not None
-            else "没有有依据的目标候选"
-        ),
+        "selected_bid_reason": selected_bid_reason,
         "private_monologue": (
             admitted_bid["private_monologue"]
             if admitted_bid is not None
             else "当前角色没有有依据的行动理由。"
         ),
         "expression_policy": expression_policy,
-        "diagnostics": {
-            "run_id": str(payload["episode"].get("episode_id", "episode")),
-            "stage_status": stage_status,
-            "selected_question_count": len(questions),
-            "dispatched_question_count": len(appraisal_tasks),
-            "selected_branch_count": (
-                len(preliminary_branches) + len(new_branch_definitions)
-            ),
-            "dispatched_branch_count": (
-                len(preliminary_execution.started_at)
-                + (len(final_execution.started_at) if final_execution else 0)
-            ),
-            "completed_branch_count": (
-                len(preliminary_execution.results)
-                + (len(final_execution.results) if final_execution else 0)
-            ),
-            "failed_branch_count": (
-                len(preliminary_execution.failed_branch_ids)
-                + (len(final_execution.failed_branch_ids) if final_execution else 0)
-            ),
-            "overlap_ms": max(
-                preliminary_execution.overlap_ms,
-                final_execution.overlap_ms if final_execution else 0,
-            ),
-            "dependency_wait_ms": max(
-                preliminary_execution.dependency_wait_ms,
-                final_execution.dependency_wait_ms if final_execution else 0,
-            ),
-            "total_ms": _elapsed_ms(started_at),
-            "warnings": warnings,
-        },
+        "diagnostics": diagnostics,
+        "cognition_observability": cognition_observability,
     }
     if admitted_bid is not None:
         output["admitted_bid"] = admitted_bid
@@ -757,10 +772,161 @@ def _empty_collapse() -> dict[str, Any]:
     """Return the deterministic no-bid collapse envelope."""
 
     return {
+        "primary_branch_id": "",
+        "supporting_branch_ids": [],
+        "suppressed_branch_ids": [],
         "primary_bid": None,
         "supporting_bids": [],
         "competing_bids": [],
     }
+
+
+def _build_cognition_observability(
+    *,
+    questions: Sequence[Mapping[str, Any]],
+    appraisal_results: Sequence[Mapping[str, Any]],
+    preliminary_branches: Sequence[BranchDefinition],
+    preliminary_execution: ParallelExecutionResult,
+    final_branches: Sequence[BranchDefinition],
+    final_execution: ParallelExecutionResult | None,
+    collapse: Mapping[str, Any],
+    selected_bid_reason: str,
+    diagnostics: Mapping[str, Any],
+) -> CognitionObservabilityV2:
+    """Build semantic branch evidence without exposing prompt-local handles."""
+
+    appraisal_by_question = {
+        result["question_id"]: result
+        for result in appraisal_results
+        if isinstance(result, Mapping)
+    }
+    appraisals: list[dict[str, Any]] = []
+    for question in questions:
+        question_id = question["question_id"]
+        result = appraisal_by_question.get(question_id)
+        observation: dict[str, Any] = {
+            "question_kind": question["question_kind"],
+            "semantic_question": question["semantic_question"],
+            "status": "completed" if result is not None else "not_reported",
+        }
+        if result is not None:
+            observation["explanation"] = result["explanation"]
+            observation["propositions"] = [
+                {
+                    "proposition_kind": proposition["proposition_kind"],
+                    "semantic_value": proposition["semantic_value"],
+                }
+                for proposition in result["propositions"]
+            ]
+            observation["deltas"] = [
+                {
+                    "delta": delta["delta"],
+                    "reason": delta["reason"],
+                }
+                for delta in result["deltas"]
+            ]
+        appraisals.append(observation)
+
+    primary_branch_id = collapse["primary_branch_id"]
+    supporting_branch_ids = set(collapse["supporting_branch_ids"])
+    suppressed_branch_ids = set(collapse["suppressed_branch_ids"])
+    branches: list[dict[str, Any]] = []
+    branch_index = 0
+    execution_groups = (
+        ("preliminary", preliminary_branches, preliminary_execution),
+        ("final", final_branches, final_execution),
+    )
+    for phase, definitions, execution in execution_groups:
+        if execution is None:
+            continue
+        for definition in definitions:
+            branch_index += 1
+            bid = execution.results.get(definition.branch_id)
+            if isinstance(bid, Mapping):
+                status = "completed"
+            elif definition.branch_id in execution.failed_branch_ids:
+                status = "failed"
+            else:
+                status = "not_reported"
+            if definition.branch_id == primary_branch_id:
+                selection = "primary"
+            elif definition.branch_id in supporting_branch_ids:
+                selection = "supporting"
+            elif definition.branch_id in suppressed_branch_ids:
+                selection = "suppressed"
+            else:
+                selection = "unselected"
+            observation = {
+                "phase": phase,
+                "branch_index": branch_index,
+                "goal_kind": definition.goal_kind,
+                "status": status,
+                "selection": selection,
+            }
+            if isinstance(bid, Mapping):
+                for field_name in (
+                    "intention",
+                    "desired_outcome",
+                    "concrete_detail",
+                    "reason",
+                    "private_monologue",
+                    "confidence",
+                ):
+                    observation[field_name] = bid[field_name]
+                observation["expected_consequences"] = bid[
+                    "expected_consequences"
+                ]
+            else:
+                failure = execution.failure_records.get(definition.branch_id)
+                if failure is not None:
+                    observation["failure_code"] = failure.error_code
+            branches.append(observation)
+
+    execution_observation = {
+        "selected_question_count": diagnostics["selected_question_count"],
+        "dispatched_question_count": diagnostics["dispatched_question_count"],
+        "selected_branch_count": diagnostics["selected_branch_count"],
+        "dispatched_branch_count": diagnostics["dispatched_branch_count"],
+        "completed_branch_count": diagnostics["completed_branch_count"],
+        "failed_branch_count": diagnostics["failed_branch_count"],
+        "maximum_concurrency": max(
+            preliminary_execution.maximum_concurrency,
+            final_execution.maximum_concurrency if final_execution else 0,
+        ),
+        "overlap_ms": diagnostics["overlap_ms"],
+        "dependency_wait_ms": diagnostics["dependency_wait_ms"],
+        "total_ms": diagnostics["total_ms"],
+    }
+    index_by_branch_id = {
+        definition.branch_id: index
+        for index, definition in enumerate(
+            [*preliminary_branches, *final_branches],
+            start=1,
+        )
+    }
+    primary_index = index_by_branch_id.get(primary_branch_id)
+    supporting_indices = [
+        index_by_branch_id[branch_id]
+        for branch_id in collapse["supporting_branch_ids"]
+        if branch_id in index_by_branch_id
+    ]
+    suppressed_indices = [
+        index_by_branch_id[branch_id]
+        for branch_id in collapse["suppressed_branch_ids"]
+        if branch_id in index_by_branch_id
+    ]
+    return_value: CognitionObservabilityV2 = {
+        "execution": execution_observation,
+        "appraisals": appraisals,
+        "branches": branches,
+        "collapse": {
+            "primary_branch_index": primary_index,
+            "supporting_branch_indices": supporting_indices,
+            "suppressed_branch_indices": suppressed_indices,
+            "selection_reason": selected_bid_reason,
+        },
+    }
+    return return_value
 
 
 def _semantic_relief_transitions(

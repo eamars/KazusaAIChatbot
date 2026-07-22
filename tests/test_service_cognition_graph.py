@@ -106,6 +106,96 @@ def _response_graph_result() -> dict[str, object]:
     }
 
 
+def _native_v2_cognition_output() -> dict[str, object]:
+    """Build the safe native V2 semantic projection used by graph tests."""
+
+    return {
+        'intention': {
+            'route': 'speech',
+            'intention': '回应当前关系中的受伤感受',
+            'reason': '当前事件足以支持直接回应',
+        },
+        'selected_bid_reason': '她先承认这次伤害，再决定如何回应。',
+        'private_monologue': '我确实被这句话刺痛了，但我想先把感受说清楚。',
+        'affect_projection': [
+            {
+                'emotion': '悲伤',
+                'phase': '激活',
+                'intensity': '高',
+                'trend': '上升',
+                'cause_summary': '重要关系中的持续贬低带来了失落感。',
+            },
+        ],
+        'cognition_observability': {
+            'execution': {
+                'selected_question_count': 2,
+                'dispatched_question_count': 2,
+                'selected_branch_count': 2,
+                'dispatched_branch_count': 2,
+                'completed_branch_count': 2,
+                'failed_branch_count': 0,
+                'maximum_concurrency': 2,
+                'overlap_ms': 42,
+                'dependency_wait_ms': 0,
+                'total_ms': 188,
+            },
+            'appraisals': [
+                {
+                    'question_kind': 'relationship_social',
+                    'semantic_question': '这次行为怎样改变了关系中的安全感？',
+                    'status': 'completed',
+                    'explanation': '持续贬低削弱了关系安全感。',
+                    'propositions': [
+                        {
+                            'proposition_kind': 'relationship_shift',
+                            'semantic_value': '亲近关系中的信任受到伤害。',
+                        },
+                    ],
+                    'deltas': [
+                        {'delta': -20, 'reason': '关系安全感下降。'},
+                    ],
+                },
+            ],
+            'branches': [
+                {
+                    'phase': 'preliminary',
+                    'branch_index': 1,
+                    'goal_kind': 'bond_protection',
+                    'status': 'completed',
+                    'selection': 'primary',
+                    'intention': '保护重要关系中的边界',
+                    'desired_outcome': '让对方停止贬低并理解伤害',
+                    'concrete_detail': '先明确说明这句话造成的伤害',
+                    'reason': '关系价值使这次伤害不能被轻轻带过。',
+                    'private_monologue': '我不想把这份受伤假装成没事。',
+                    'expected_consequences': ['对方知道边界已经被触碰'],
+                    'confidence': '高',
+                },
+                {
+                    'phase': 'preliminary',
+                    'branch_index': 2,
+                    'goal_kind': 'autonomy_boundary',
+                    'status': 'completed',
+                    'selection': 'suppressed',
+                    'intention': '立即反击',
+                    'desired_outcome': '结束当前攻击',
+                    'concrete_detail': '用更强硬的话顶回去',
+                    'reason': '被冒犯会自然地产生反击冲动。',
+                    'private_monologue': '我很想马上反击，但这会让关系更糟。',
+                    'expected_consequences': ['冲突可能进一步升级'],
+                    'confidence': '中',
+                },
+            ],
+            'collapse': {
+                'primary_branch_index': 1,
+                'supporting_branch_indices': [],
+                'suppressed_branch_indices': [2],
+                'selection_reason': '主目标保留了受伤事实，反击目标被压下。',
+            },
+        },
+    }
+
+
 def _node(graph: dict[str, object], node_id: str) -> dict[str, object]:
     """Return one graph node by id."""
 
@@ -177,6 +267,62 @@ def test_response_graph_contains_semantic_details_and_visual_directive(
     ]
     assert "summary" not in surface["detail"]
     assert "status" not in surface["detail"]
+
+
+def test_response_graph_exposes_native_v2_parallel_results(monkeypatch) -> None:
+    """Native V2 branches, collapse, affect, and monologue reach the graph."""
+
+    from kazusa_ai_chatbot import service
+
+    monkeypatch.setattr(service, 'COGNITION_VISUAL_DIRECTIVES_ENABLED', True)
+    state = _response_state(visual_directives={})
+    state['cognition_core_output'] = _native_v2_cognition_output()
+    graph = service._build_response_cognition_graph(
+        graph_result=_response_graph_result(),
+        consolidation_state=state,
+        run_id='native-v2-run',
+    )
+
+    node_ids = {node['id'] for node in graph['nodes']}
+    assert {
+        'v2.parallel',
+        'v2.appraisal',
+        'v2.branch.1',
+        'v2.branch.2',
+        'v2.collapse',
+        'v2.affect',
+    } <= node_ids
+    parallel = _node(graph, 'v2.parallel')
+    assert parallel['detail']['parallel_execution']['maximum_concurrency'] == 2
+    assert parallel['detail']['parallel_execution']['completed_branch_count'] == 2
+    appraisal = _node(graph, 'v2.appraisal')
+    assert appraisal['detail']['appraisal_results'][0]['explanation'] == (
+        '持续贬低削弱了关系安全感。'
+    )
+    primary = _node(graph, 'v2.branch.1')
+    assert primary['detail']['selection'] == 'primary'
+    assert primary['detail']['intention'] == '保护重要关系中的边界'
+    assert primary['detail']['private_monologue'] == (
+        '我不想把这份受伤假装成没事。'
+    )
+    suppressed = _node(graph, 'v2.branch.2')
+    assert suppressed['detail']['selection'] == 'suppressed'
+    collapse = _node(graph, 'v2.collapse')
+    assert collapse['detail']['selected_bid_reason'] == (
+        '她先承认这次伤害，再决定如何回应。'
+    )
+    affect = _node(graph, 'v2.affect')
+    assert affect['detail']['affect_projection'][0]['emotion'] == '悲伤'
+    detail_text = repr([node['detail'] for node in graph['nodes']])
+    assert 'branch_id' not in detail_text
+    assert 'evidence_handles' not in detail_text
+    assert 'prompt' not in detail_text
+    assert any(
+        edge['source'] == 'v2.branch.1'
+        and edge['target'] == 'v2.collapse'
+        and edge['kind'] == 'join'
+        for edge in graph['edges']
+    )
 
 
 def test_response_graph_distinguishes_enabled_empty_and_disabled_visual(
