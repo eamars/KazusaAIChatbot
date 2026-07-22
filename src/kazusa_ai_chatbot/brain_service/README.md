@@ -252,11 +252,13 @@ Response model: `OpsLatestCognitionGraphResponse`.
 
 Purpose:
 
-- Return the latest bounded cognition graph snapshot reported by live chat,
-  debug chat, or self-cognition.
+- Return the latest bounded response cognition graph reported by live chat or
+  debug chat in `cognition_graph`.
+- Return the latest bounded self-cognition graph separately in
+  `self_cognition_graph`.
 - Support the local control-console Overview graph without running cognition.
-- Return `cognition_graph: null` when no completed run has published telemetry
-  since service startup.
+- Return either graph field as `null` when that run type has not published
+  telemetry since service startup.
 
 The endpoint is process-local and read-only. It must not expose prompts,
 embeddings, raw messages, message envelopes, raw source packets, secrets, or

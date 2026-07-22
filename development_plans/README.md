@@ -46,6 +46,7 @@ long_term/todo.md
 | [cognition_core_v2_stage_3_execution_manifest.md](active/short_term/cognition_core_v2_stage_3_execution_manifest.md) | Mandatory Stage 3 contract, LLM budget, checkpoint, command, and verification companion | in progress |
 | [cognition_core_v2_stage_3_change_radius.md](active/short_term/cognition_core_v2_stage_3_change_radius.md) | Mandatory Stage 3 exact Create/Modify/Delete/Keep inventory and change-control boundary | in progress |
 | [cognition_core_v2_stage_4_production_database_migration_plan.md](active/short_term/cognition_core_v2_stage_4_production_database_migration_plan.md) | Non-executable production database discovery, backup, transformation, deployment, rollback, and cutover placeholder; blocked on completed Stage 3 and explicit production authority | draft |
+| [cognition_graph_semantic_observability_plan.md](active/short_term/cognition_graph_semantic_observability_plan.md) | Large cognition graph semantic observability and shared inspector contract change | completed |
 
 ## Supporting Experiment Records
 

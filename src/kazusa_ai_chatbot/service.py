@@ -397,6 +397,15 @@ def _operational_failure_metadata(
     return return_value
 
 
+def _is_visual_surface_failure(exception: BaseException) -> bool:
+    """Identify a failure raised by the V2 visual surface stage."""
+
+    return (
+        isinstance(exception, CognitionExecutionError)
+        and str(getattr(exception, "stage", "")) == "surface.visual"
+    )
+
+
 def _operational_error_response(
     *,
     correlation_id: str,
@@ -774,6 +783,7 @@ _self_cognition_worker_handle: SelfCognitionWorkerHandle | None = None
 _background_work_worker_handle: BackgroundWorkRuntimeHandle | None = None
 _primary_interaction_active_count = 0
 _latest_cognition_graph: dict[str, Any] | None = None
+_latest_self_cognition_graph: dict[str, Any] | None = None
 
 
 def _action_availability_runtime_for_target(
@@ -1923,9 +1933,10 @@ async def _turn_settlement_worker() -> None:
 def _clear_latest_cognition_graph() -> None:
     """Clear the process-local latest cognition graph snapshot."""
 
-    global _latest_cognition_graph
+    global _latest_cognition_graph, _latest_self_cognition_graph
 
     _latest_cognition_graph = None
+    _latest_self_cognition_graph = None
 
 
 def _record_latest_cognition_graph(cognition_graph: dict[str, Any] | None) -> None:
@@ -1938,11 +1949,24 @@ def _record_latest_cognition_graph(cognition_graph: dict[str, Any] | None) -> No
     _latest_cognition_graph = deepcopy(cognition_graph)
 
 
+def _record_latest_self_cognition_graph(
+    cognition_graph: dict[str, Any] | None,
+) -> None:
+    """Store the latest self-cognition graph separately for operator views."""
+
+    global _latest_self_cognition_graph
+
+    if cognition_graph is None:
+        return
+    _latest_self_cognition_graph = deepcopy(cognition_graph)
+
+
 def _latest_cognition_graph_response() -> OpsLatestCognitionGraphResponse:
     """Build the read-only latest cognition graph API response."""
 
     response = OpsLatestCognitionGraphResponse(
         cognition_graph=deepcopy(_latest_cognition_graph),
+        self_cognition_graph=deepcopy(_latest_self_cognition_graph),
     )
     return response
 
@@ -3225,20 +3249,40 @@ def _build_response_cognition_graph(
     graph_result: Mapping[str, Any],
     consolidation_state: Mapping[str, Any] | None,
     run_id: str,
+    graph_status: str = "completed",
+    visual_stage_failed: bool = False,
+    visual_stage_reached: bool | None = None,
 ) -> dict[str, Any]:
     """Build a bounded cognition graph snapshot for operator inspection."""
 
     state = consolidation_state or {}
     should_respond = graph_result.get("should_respond")
     final_dialog = graph_result.get("final_dialog")
-    final_dialog_count = len(final_dialog) if isinstance(final_dialog, list) else 0
     future_promises = graph_result.get("future_promises")
     future_promise_count = (
         len(future_promises) if isinstance(future_promises, list) else 0
     )
-    action_spec_count = _safe_sequence_count(state.get("action_specs"))
-    action_result_count = _safe_sequence_count(state.get("action_results"))
-    memory_status = "completed" if state.get("rag_result") else "skipped"
+    messages = _graph_messages(final_dialog)
+    selected_actions = _graph_action_specs(state.get("action_specs"))
+    action_results = _graph_action_results(state.get("action_results"))
+    action_continuation = _graph_action_continuation(
+        state,
+        future_promises=future_promises,
+    )
+    memory_detail = _graph_memory_detail(state)
+    reasoning_detail = _graph_reasoning_detail(state)
+    intake_detail = _graph_intake_detail(state)
+    action_detail: dict[str, Any] = {}
+    if selected_actions:
+        action_detail["selected_actions"] = selected_actions
+    if action_results:
+        action_detail["action_results"] = action_results
+    if action_continuation:
+        action_detail["action_continuation"] = action_continuation
+
+    memory_status = "completed" if memory_detail else "skipped"
+    action_spec_count = len(selected_actions)
+    action_result_count = len(action_results)
     action_status = (
         "completed"
         if action_spec_count or action_result_count or future_promise_count
@@ -3246,16 +3290,14 @@ def _build_response_cognition_graph(
     )
     reasoning_status = (
         "completed"
-        if any(
-            state.get(key)
-            for key in (
-                "internal_monologue",
-                "logical_stance",
-                "character_intent",
-                "judgment_note",
-            )
-        )
+        if reasoning_detail
         else "skipped"
+    )
+    visual_node = _graph_visual_node(
+        state,
+        should_respond=should_respond,
+        stage_failed=visual_stage_failed,
+        stage_reached=visual_stage_reached,
     )
 
     nodes = [
@@ -3267,10 +3309,7 @@ def _build_response_cognition_graph(
             "column": 1,
             "branch": "input",
             "status": "completed",
-            "detail": {
-                "summary": "Accepted by the brain input queue.",
-                "status": _safe_graph_text(state.get("platform", "")),
-            },
+            "detail": intake_detail,
         },
         {
             "id": "l1.relevance",
@@ -3282,7 +3321,9 @@ def _build_response_cognition_graph(
             "status": "completed",
             "detail": {
                 "decision": _safe_graph_text(should_respond),
-                "reasoning": _safe_graph_text(graph_result.get("reason_to_respond")),
+                "reasoning": _graph_full_text(
+                    graph_result.get("reason_to_respond"),
+                ),
             },
         },
         {
@@ -3293,14 +3334,7 @@ def _build_response_cognition_graph(
             "column": 3,
             "branch": "reasoning",
             "status": reasoning_status,
-            "detail": {
-                "internal_monologue": _safe_graph_text(
-                    state.get("internal_monologue"),
-                ),
-                "logical_stance": _safe_graph_text(state.get("logical_stance")),
-                "character_intent": _safe_graph_text(state.get("character_intent")),
-                "judgment_note": _safe_graph_text(state.get("judgment_note")),
-            },
+            "detail": reasoning_detail,
         },
         {
             "id": "l2.memory",
@@ -3310,10 +3344,7 @@ def _build_response_cognition_graph(
             "column": 3,
             "branch": "memory",
             "status": memory_status,
-            "detail": {
-                "summary": _memory_graph_summary(state.get("rag_result")),
-                "status": memory_status,
-            },
+            "detail": memory_detail,
         },
         {
             "id": "l2.actions",
@@ -3323,13 +3354,17 @@ def _build_response_cognition_graph(
             "column": 3,
             "branch": "action",
             "status": action_status,
-            "detail": {
-                "summary": (
-                    f"{action_spec_count} action spec(s), "
-                    f"{action_result_count} action result(s), "
-                    f"{future_promise_count} follow-up(s)."
-                ),
-            },
+            "detail": action_detail,
+        },
+        {
+            "id": "l3.visual_directives",
+            "label": "Visual directive",
+            "stage": "L3",
+            "lane": "surface",
+            "column": 4,
+            "branch": "visual",
+            "status": visual_node["status"],
+            "detail": visual_node["detail"],
         },
         {
             "id": "l3.surface",
@@ -3338,10 +3373,8 @@ def _build_response_cognition_graph(
             "lane": "surface",
             "column": 4,
             "branch": "dialog",
-            "status": "completed" if final_dialog_count else "skipped",
-            "detail": {
-                "summary": f"{final_dialog_count} visible message(s) returned.",
-            },
+            "status": "completed" if messages else "skipped",
+            "detail": {"messages": messages} if messages else {},
         },
     ]
     edges = [
@@ -3349,13 +3382,16 @@ def _build_response_cognition_graph(
         {"source": "l1.relevance", "target": "l2.reasoning", "kind": "fork"},
         {"source": "l1.relevance", "target": "l2.memory", "kind": "fork"},
         {"source": "l1.relevance", "target": "l2.actions", "kind": "fork"},
+        {"source": "l2.reasoning", "target": "l3.visual_directives", "kind": "join"},
+        {"source": "l2.memory", "target": "l3.visual_directives", "kind": "join"},
+        {"source": "l2.actions", "target": "l3.visual_directives", "kind": "join"},
         {"source": "l2.reasoning", "target": "l3.surface", "kind": "join"},
         {"source": "l2.memory", "target": "l3.surface", "kind": "join"},
         {"source": "l2.actions", "target": "l3.surface", "kind": "join"},
     ]
     snapshot = {
         "run_id": run_id,
-        "status": "completed",
+        "status": graph_status,
         "nodes": nodes,
         "edges": edges,
         "redaction": {
@@ -3365,7 +3401,7 @@ def _build_response_cognition_graph(
                 "embeddings",
                 "raw messages",
                 "message envelopes",
-                "raw user input",
+                "unapproved raw fields",
             ],
         },
     }
@@ -3377,20 +3413,37 @@ async def _publish_self_cognition_latest_graph(
 ) -> None:
     """Record a completed self-cognition run as the latest graph snapshot."""
 
-    cognition_graph = _build_self_cognition_cognition_graph(artifact_payloads)
+    visual_stage_reached = artifact_payloads.get("visual_stage_reached")
+    if not isinstance(visual_stage_reached, bool):
+        visual_stage_reached = None
+    cognition_graph = _build_self_cognition_cognition_graph(
+        artifact_payloads,
+        visual_stage_failed=(
+            artifact_payloads.get("visual_stage_failed") is True
+        ),
+        visual_stage_reached=visual_stage_reached,
+    )
     if cognition_graph is None:
         return
-    _record_latest_cognition_graph(cognition_graph)
+    _record_latest_self_cognition_graph(cognition_graph)
 
 
 def _build_self_cognition_cognition_graph(
     artifact_payloads: Mapping[str, Any],
+    *,
+    visual_stage_failed: bool = False,
+    visual_stage_reached: bool | None = None,
 ) -> dict[str, Any] | None:
     """Build a bounded graph snapshot from self-cognition artifacts."""
 
     run_record = artifact_payloads.get(self_cognition_models.ARTIFACT_RUN_RECORD)
     if not isinstance(run_record, Mapping):
         return None
+    cognition_input = artifact_payloads.get(
+        self_cognition_models.ARTIFACT_COGNITION_INPUT,
+    )
+    if not isinstance(cognition_input, Mapping):
+        cognition_input = {}
     cognition_output = artifact_payloads.get(
         self_cognition_models.ARTIFACT_COGNITION_OUTPUT,
     )
@@ -3412,12 +3465,66 @@ def _build_self_cognition_cognition_graph(
     if not isinstance(consolidation_outcome, Mapping):
         consolidation_outcome = {}
 
-    selected_route = _safe_graph_text(run_record.get("selected_route"))
-    output_mode = _safe_graph_text(run_record.get("output_mode"))
+    selected_route = _graph_full_text(run_record.get("selected_route"))
     run_status = _graph_status(run_record.get("status"))
-    has_dialog = bool(route_effect.get("visible_dialog"))
-    has_action = bool(action_attempt)
+    source_detail = _graph_self_source_detail(
+        cognition_input,
+        cognition_output,
+    )
+    reasoning_detail = _graph_reasoning_detail(cognition_output)
+    memory_state = dict(cognition_input)
+    memory_state.update(cognition_output)
+    memory_detail = _graph_memory_detail(memory_state)
+    memory_status = "completed" if memory_detail else "skipped"
+    selected_actions = _graph_action_specs(cognition_output.get("action_specs"))
+    action_results = _graph_action_results(cognition_output.get("action_results"))
+    if not action_results and action_attempt:
+        action_results = _graph_action_results([action_attempt])
+    action_continuation = _graph_action_continuation(
+        cognition_output,
+        future_promises=None,
+        route_effect=route_effect,
+    )
+    action_detail: dict[str, Any] = {}
+    if selected_actions:
+        action_detail["selected_actions"] = selected_actions
+    if action_results:
+        action_detail["action_results"] = action_results
+    if action_continuation:
+        action_detail["action_continuation"] = action_continuation
+    surface_messages = _graph_self_surface_messages(
+        artifact_payloads,
+        cognition_output,
+        route_effect,
+    )
+    visual_state = dict(cognition_input)
+    visual_state.update(cognition_output)
+    if not isinstance(visual_state.get("debug_modes"), Mapping):
+        visual_state["debug_modes"] = {"no_visual_directives": True}
+    visual_node = _graph_visual_node(
+        visual_state,
+        should_respond=True,
+        stage_failed=visual_stage_failed,
+        stage_reached=visual_stage_reached,
+    )
+    has_action = bool(action_detail)
+    has_dialog = bool(surface_messages)
     has_consolidation = bool(consolidation_outcome)
+    route_detail: dict[str, Any] = {}
+    if selected_route:
+        route_detail["decision"] = selected_route
+    effect_summary = _graph_full_text(route_effect.get("effect_summary"))
+    if effect_summary:
+        route_detail["reasoning"] = effect_summary
+    next_topic = route_effect.get("next_topic")
+    if isinstance(next_topic, Mapping):
+        projected_topic = _graph_project_mapping(
+            next_topic,
+            _GRAPH_CONTINUATION_FIELDS,
+        )
+        if projected_topic:
+            route_detail["action_continuation"] = projected_topic
+    consolidation_detail = _graph_consolidation_detail(consolidation_outcome)
     nodes = [
         {
             "id": "self.source",
@@ -3427,10 +3534,7 @@ def _build_self_cognition_cognition_graph(
             "column": 1,
             "branch": "source",
             "status": "completed",
-            "detail": {
-                "summary": "Accepted by the self-cognition worker.",
-                "status": _safe_graph_text(run_record.get("trigger_kind")),
-            },
+            "detail": source_detail,
         },
         {
             "id": "self.reasoning",
@@ -3440,17 +3544,17 @@ def _build_self_cognition_cognition_graph(
             "column": 2,
             "branch": "reasoning",
             "status": run_status,
-            "detail": {
-                "internal_monologue": _safe_graph_text(
-                    cognition_output.get("internal_monologue"),
-                ),
-                "logical_stance": _safe_graph_text(
-                    cognition_output.get("logical_stance"),
-                ),
-                "character_intent": _safe_graph_text(
-                    cognition_output.get("character_intent"),
-                ),
-            },
+            "detail": reasoning_detail,
+        },
+        {
+            "id": "l2.memory",
+            "label": "Memory and evidence",
+            "stage": "L2",
+            "lane": "memory",
+            "column": 2,
+            "branch": "memory",
+            "status": memory_status,
+            "detail": memory_detail,
         },
         {
             "id": "self.route",
@@ -3460,10 +3564,7 @@ def _build_self_cognition_cognition_graph(
             "column": 3,
             "branch": "route",
             "status": run_status,
-            "detail": {
-                "decision": selected_route,
-                "status": output_mode,
-            },
+            "detail": route_detail,
         },
         {
             "id": "self.action",
@@ -3473,11 +3574,17 @@ def _build_self_cognition_cognition_graph(
             "column": 4,
             "branch": "action",
             "status": "completed" if has_action else "skipped",
-            "detail": {
-                "summary": "Action candidate recorded."
-                if has_action
-                else "No action candidate recorded.",
-            },
+            "detail": action_detail,
+        },
+        {
+            "id": "l3.visual_directives",
+            "label": "Visual directive",
+            "stage": "L3",
+            "lane": "surface",
+            "column": 4,
+            "branch": "visual",
+            "status": visual_node["status"],
+            "detail": visual_node["detail"],
         },
         {
             "id": "self.surface",
@@ -3487,11 +3594,7 @@ def _build_self_cognition_cognition_graph(
             "column": 4,
             "branch": "dialog",
             "status": "completed" if has_dialog else "skipped",
-            "detail": {
-                "summary": "Visible self-cognition output selected."
-                if has_dialog
-                else "No visible output selected.",
-            },
+            "detail": {"messages": surface_messages} if has_dialog else {},
         },
         {
             "id": "self.consolidation",
@@ -3501,19 +3604,19 @@ def _build_self_cognition_cognition_graph(
             "column": 5,
             "branch": "memory",
             "status": "completed" if has_consolidation else "skipped",
-            "detail": {
-                "summary": "Completed episode consolidation reported."
-                if has_consolidation
-                else "No consolidation outcome reported.",
-            },
+            "detail": consolidation_detail,
         },
     ]
     edges = [
         {"source": "self.source", "target": "self.reasoning", "kind": "sequence"},
+        {"source": "self.source", "target": "l2.memory", "kind": "fork"},
         {"source": "self.reasoning", "target": "self.route", "kind": "sequence"},
+        {"source": "l2.memory", "target": "self.route", "kind": "join"},
         {"source": "self.route", "target": "self.action", "kind": "fork"},
+        {"source": "self.route", "target": "l3.visual_directives", "kind": "fork"},
         {"source": "self.route", "target": "self.surface", "kind": "fork"},
         {"source": "self.action", "target": "self.consolidation", "kind": "join"},
+        {"source": "l3.visual_directives", "target": "self.consolidation", "kind": "join"},
         {"source": "self.surface", "target": "self.consolidation", "kind": "join"},
     ]
     snapshot = {
@@ -3528,7 +3631,7 @@ def _build_self_cognition_cognition_graph(
                 "embeddings",
                 "raw messages",
                 "message envelopes",
-                "raw source packet",
+                "unapproved raw source fields",
             ],
         },
     }
@@ -3542,14 +3645,6 @@ def _graph_status(value: Any) -> str:
     if text in {"pending", "running", "completed", "skipped", "failed"}:
         return text
     return "completed" if text else "not_reported"
-
-
-def _safe_sequence_count(value: Any) -> int:
-    """Return a sequence count for graph metadata, or zero."""
-
-    if isinstance(value, list):
-        return len(value)
-    return 0
 
 
 def _safe_graph_text(value: Any, *, max_chars: int = 240) -> str:
@@ -3569,13 +3664,642 @@ def _safe_graph_text(value: Any, *, max_chars: int = 240) -> str:
     return text
 
 
-def _memory_graph_summary(value: Any) -> str:
-    """Summarize memory/RAG activity without exposing retrieved content."""
+_GRAPH_VISUAL_DIRECTIVE_FIELDS = (
+    "facial_expression",
+    "body_language",
+    "gaze_direction",
+    "visual_vibe",
+)
+_GRAPH_EVIDENCE_FIELDS = frozenset(
+    {
+        "summary",
+        "fact",
+        "excerpt",
+        "content",
+        "title",
+        "source",
+        "relevance",
+        "recency",
+        "due_at",
+        "due_state",
+        "evidence_boundary_notes",
+        "visual_observation",
+        "description",
+        "confidence",
+        "role",
+        "display_name",
+        "media_kind",
+        "summary_status",
+    }
+)
+_GRAPH_PROGRESS_FIELDS = frozenset(
+    {
+        "continuity",
+        "current_thread",
+        "current_blocker",
+        "open_loops",
+        "resolved_threads",
+        "avoid_reopening",
+        "overused_moves",
+        "next_affordances",
+        "progression_guidance",
+        "current_goal",
+        "progress_note",
+        "goal",
+        "next_step",
+        "participant_context",
+        "thread_reference_context",
+        "group_scene_digest",
+        "conversation_evidence",
+        "stable_patterns",
+        "active_commitments",
+        "summary",
+        "status",
+    }
+)
+_GRAPH_REPLY_FIELDS = frozenset(
+    {
+        "reply_to_display_name",
+        "reply_excerpt",
+        "reply_attachments",
+        "media_kind",
+        "description",
+        "summary_status",
+    }
+)
+_GRAPH_CONTINUATION_FIELDS = frozenset(
+    {
+        "mode",
+        "episode_type",
+        "max_depth",
+        "include_result_as",
+        "next_topic",
+        "reason",
+        "condition",
+        "due_at",
+        "due_state",
+        "title",
+        "text",
+        "summary",
+        "status",
+    }
+)
+_GRAPH_ACTION_FIELDS = frozenset(
+    {
+        "kind",
+        "cognition_mode",
+        "urgency",
+        "visibility",
+        "deadline",
+        "reason",
+        "continuation",
+        "action_kind",
+        "status",
+        "result_summary",
+        "semantic_decision",
+        "completed_at",
+        "queue_state",
+        "work_kind",
+        "objective_summary",
+        "accepted_task_state",
+        "accepted_task_summary",
+        "wait_guidance",
+        "acknowledgement_constraint",
+    }
+)
+_GRAPH_FUTURE_FIELDS = _GRAPH_CONTINUATION_FIELDS | frozenset(
+    {
+        "kind",
+        "action_kind",
+        "visibility",
+        "urgency",
+        "reason",
+        "objective",
+        "objective_summary",
+    }
+)
+_GRAPH_CONSOLIDATION_FIELDS = frozenset(
+    {
+        "consolidation_called",
+        "scheduled_event_count",
+        "cache_evicted_count",
+    }
+)
+_GRAPH_FORBIDDEN_KEY_PARTS = (
+    "prompt",
+    "raw",
+    "embedding",
+    "message_envelope",
+    "handler",
+    "attempt",
+    "idempotency",
+    "operational",
+)
+_GRAPH_FORBIDDEN_KEYS = frozenset(
+    {
+        "id",
+        "schema_version",
+        "source_refs",
+        "result_refs",
+        "evidence_refs",
+        "target",
+        "params",
+        "scope",
+        "job_ref",
+        "run_id",
+    }
+)
 
-    if not isinstance(value, Mapping) or not value:
-        return "No retrieved evidence reported."
-    keys = sorted(str(key) for key in value.keys())[:6]
-    return f"RAG data reported: {', '.join(keys)}."
+
+def _graph_full_text(value: Any) -> str:
+    """Return an unbounded non-empty graph detail string."""
+
+    if not isinstance(value, str) or not value.strip():
+        return ""
+    return value
+
+
+def _graph_key_is_forbidden(key: str) -> bool:
+    """Return whether a semantic projection key is operational or sensitive."""
+
+    normalized = key.casefold().replace("-", "_")
+    if normalized in _GRAPH_FORBIDDEN_KEYS:
+        return True
+    if normalized.endswith("_id"):
+        return True
+    return any(part in normalized for part in _GRAPH_FORBIDDEN_KEY_PARTS)
+
+
+def _graph_project_nested(
+    value: Any,
+    allowed_fields: frozenset[str],
+) -> Any:
+    """Project nested JSON-compatible semantic values without truncation."""
+
+    if isinstance(value, str):
+        return value if value.strip() else None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value
+    if isinstance(value, Mapping):
+        return _graph_project_mapping(value, allowed_fields)
+    if isinstance(value, list):
+        projected_items = []
+        for item in value:
+            projected_item = _graph_project_nested(item, allowed_fields)
+            if projected_item not in (None, "", [], {}):
+                projected_items.append(projected_item)
+        return projected_items
+    return None
+
+
+def _graph_project_mapping(
+    value: Any,
+    allowed_fields: frozenset[str],
+) -> dict[str, Any]:
+    """Project an allowlisted semantic mapping recursively."""
+
+    if not isinstance(value, Mapping):
+        return {}
+    projected: dict[str, Any] = {}
+    for raw_key, raw_value in value.items():
+        if not isinstance(raw_key, str):
+            continue
+        if raw_key not in allowed_fields or _graph_key_is_forbidden(raw_key):
+            continue
+        projected_value = _graph_project_nested(raw_value, allowed_fields)
+        if projected_value in (None, "", [], {}):
+            continue
+        projected[raw_key] = projected_value
+    return projected
+
+
+def _graph_project_semantic_rows(
+    value: Any,
+    allowed_fields: frozenset[str],
+) -> list[Any]:
+    """Project an ordered semantic list without an item-count cap."""
+
+    if not isinstance(value, list):
+        return []
+    rows: list[Any] = []
+    for item in value:
+        if isinstance(item, str):
+            if item.strip():
+                rows.append(item)
+            continue
+        if not isinstance(item, Mapping):
+            continue
+        projected_item = _graph_project_mapping(item, allowed_fields)
+        if projected_item:
+            rows.append(projected_item)
+    return rows
+
+
+def _graph_project_text_list(value: Any) -> list[str]:
+    """Project a list of complete strings in source order."""
+
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str) and item.strip()]
+
+
+def _graph_messages(value: Any) -> list[str]:
+    """Return complete visible message fragments in their original order."""
+
+    if isinstance(value, str):
+        text = _graph_full_text(value)
+        return [text] if text else []
+    return _graph_project_text_list(value)
+
+
+def _graph_intake_detail(state: Mapping[str, Any]) -> dict[str, Any]:
+    """Project the queued turn input and useful reply context."""
+
+    detail: dict[str, Any] = {}
+    input_text = _graph_full_text(state.get("user_input"))
+    if input_text:
+        detail["input"] = input_text
+    reply_context = _graph_project_mapping(
+        state.get("reply_context"),
+        _GRAPH_REPLY_FIELDS,
+    )
+    if reply_context:
+        detail["reply_context"] = reply_context
+    return detail
+
+
+def _graph_reasoning_detail(state: Mapping[str, Any]) -> dict[str, Any]:
+    """Project the four existing L2 reasoning artifacts without truncation."""
+
+    detail: dict[str, Any] = {}
+    for field in (
+        "internal_monologue",
+        "logical_stance",
+        "character_intent",
+        "judgment_note",
+    ):
+        text = _graph_full_text(state.get(field))
+        if text:
+            detail[field] = text
+    return detail
+
+
+def _graph_memory_detail(state: Mapping[str, Any]) -> dict[str, Any]:
+    """Project useful retrieval, continuity, progress, and commitment data."""
+
+    rag_result = state.get("rag_result")
+    if not isinstance(rag_result, Mapping):
+        rag_result = {}
+    detail: dict[str, Any] = {}
+    retrieval_answer = _graph_full_text(rag_result.get("answer"))
+    if retrieval_answer:
+        detail["retrieval_answer"] = retrieval_answer
+
+    for field in (
+        "memory_evidence",
+        "conversation_evidence",
+        "external_evidence",
+        "recall_evidence",
+        "media_evidence",
+    ):
+        rows = _graph_project_semantic_rows(
+            rag_result.get(field),
+            _GRAPH_EVIDENCE_FIELDS,
+        )
+        if rows:
+            detail[field] = rows
+
+    user_continuity = state.get("user_continuity")
+    if user_continuity is None:
+        user_image = rag_result.get("user_image")
+        if isinstance(user_image, Mapping):
+            user_continuity = user_image.get("user_memory_context")
+    projected_continuity = _graph_project_nested(
+        user_continuity,
+        _GRAPH_PROGRESS_FIELDS | _GRAPH_EVIDENCE_FIELDS,
+    )
+    if projected_continuity not in (None, "", [], {}):
+        detail["user_continuity"] = projected_continuity
+
+    conversation_progress = state.get("conversation_progress")
+    if conversation_progress is None:
+        conversation_progress = rag_result.get("conversation_progress")
+    if isinstance(conversation_progress, Mapping):
+        projected_progress = _graph_project_mapping(
+            conversation_progress,
+            _GRAPH_PROGRESS_FIELDS | _GRAPH_EVIDENCE_FIELDS,
+        )
+    else:
+        projected_progress = _graph_full_text(conversation_progress)
+    if projected_progress not in (None, "", [], {}):
+        detail["conversation_progress"] = projected_progress
+
+    active_commitments = state.get("active_commitments")
+    if active_commitments is None and isinstance(user_continuity, Mapping):
+        active_commitments = user_continuity.get("active_commitments")
+    commitments = _graph_project_semantic_rows(
+        active_commitments,
+        _GRAPH_EVIDENCE_FIELDS | _GRAPH_PROGRESS_FIELDS,
+    )
+    if commitments:
+        detail["active_commitments"] = commitments
+    return detail
+
+
+def _graph_action_specs(value: Any) -> list[dict[str, Any]]:
+    """Project selected action decisions without targets or raw parameters."""
+
+    if not isinstance(value, list):
+        return []
+    projected: list[dict[str, Any]] = []
+    for item in value:
+        row = _graph_project_mapping(item, _GRAPH_ACTION_FIELDS)
+        if row:
+            projected.append(row)
+    return projected
+
+
+def _graph_action_results(value: Any) -> list[dict[str, Any]]:
+    """Project semantic action outcomes without operational identifiers."""
+
+    if not isinstance(value, list):
+        return []
+    projected: list[dict[str, Any]] = []
+    for item in value:
+        row = _graph_project_mapping(item, _GRAPH_ACTION_FIELDS)
+        if row:
+            projected.append(row)
+    return projected
+
+
+def _graph_action_continuation(
+    state: Mapping[str, Any],
+    *,
+    future_promises: Any,
+    route_effect: Mapping[str, Any] | None = None,
+) -> list[Any]:
+    """Project follow-up action intent and future semantic commitments."""
+
+    continuation_rows: list[Any] = []
+    direct_continuation = state.get("action_continuation")
+    if isinstance(direct_continuation, Mapping):
+        projected = _graph_project_mapping(
+            direct_continuation,
+            _GRAPH_CONTINUATION_FIELDS,
+        )
+        if projected:
+            continuation_rows.append(projected)
+    elif isinstance(direct_continuation, list):
+        continuation_rows.extend(
+            _graph_project_semantic_rows(
+                direct_continuation,
+                _GRAPH_CONTINUATION_FIELDS,
+            )
+        )
+
+    action_specs = state.get("action_specs")
+    if isinstance(action_specs, list):
+        for action_spec in action_specs:
+            if not isinstance(action_spec, Mapping):
+                continue
+            continuation = _graph_project_mapping(
+                action_spec.get("continuation"),
+                _GRAPH_CONTINUATION_FIELDS,
+            )
+            if continuation:
+                continuation_rows.append(continuation)
+
+    if isinstance(future_promises, list):
+        continuation_rows.extend(
+            _graph_project_semantic_rows(
+                future_promises,
+                _GRAPH_FUTURE_FIELDS,
+            )
+        )
+    if isinstance(route_effect, Mapping):
+        next_topic = _graph_project_mapping(
+            route_effect.get("next_topic"),
+            _GRAPH_CONTINUATION_FIELDS,
+        )
+        if next_topic:
+            continuation_rows.append(next_topic)
+    return continuation_rows
+
+
+def _graph_visual_enabled(state: Mapping[str, Any]) -> bool:
+    """Apply the existing global and per-run visual-directive gate."""
+
+    if not COGNITION_VISUAL_DIRECTIVES_ENABLED:
+        return False
+    candidates: list[Any] = [state.get("debug_modes")]
+    episode = state.get("cognitive_episode")
+    if isinstance(episode, Mapping):
+        candidates.append(episode.get("origin_metadata"))
+    for candidate in candidates:
+        if not isinstance(candidate, Mapping):
+            continue
+        debug_modes = candidate.get("debug_modes", candidate)
+        if (
+            isinstance(debug_modes, Mapping)
+            and debug_modes.get("no_visual_directives") is True
+        ):
+            return False
+    return True
+
+
+def _graph_visual_raw(state: Mapping[str, Any]) -> Any:
+    """Return normalized visual directives from the existing L3 handoff."""
+
+    action_directives = state.get("action_directives")
+    if isinstance(action_directives, Mapping):
+        if "visual_directives" in action_directives:
+            return action_directives.get("visual_directives")
+    return state.get("visual_directives")
+
+
+def _graph_visual_node(
+    state: Mapping[str, Any],
+    *,
+    should_respond: Any,
+    stage_failed: bool = False,
+    stage_reached: bool | None = None,
+) -> dict[str, Any]:
+    """Build the visual node while preserving disabled and failure semantics."""
+
+    empty_fields = {
+        field: []
+        for field in _GRAPH_VISUAL_DIRECTIVE_FIELDS
+    }
+    if not _graph_visual_enabled(state):
+        return {
+            "status": "skipped",
+            "detail": {
+                **empty_fields,
+                "empty_state": (
+                    "Visual directives are disabled for this cognition run."
+                ),
+            },
+        }
+    if should_respond is False:
+        return {
+            "status": "skipped",
+            "detail": {
+                **empty_fields,
+                "empty_state": (
+                    "Visual directives were not reached because no response "
+                    "was selected."
+                ),
+            },
+        }
+    if stage_failed:
+        return {
+            "status": "failed",
+            "detail": {
+                **empty_fields,
+                "empty_state": (
+                    "Visual directive stage failed before a valid directive "
+                    "could be recorded."
+                ),
+            },
+        }
+    if stage_reached is False:
+        return {
+            "status": "pending",
+            "detail": {
+                **empty_fields,
+                "empty_state": (
+                    "Visual directive stage was not reached because cognition "
+                    "stopped upstream."
+                ),
+            },
+        }
+
+    raw_directives = _graph_visual_raw(state)
+    malformed = False
+    if isinstance(raw_directives, Mapping):
+        detail = {}
+        for field in _GRAPH_VISUAL_DIRECTIVE_FIELDS:
+            raw_value = raw_directives.get(field, [])
+            if raw_value is None:
+                detail[field] = []
+                continue
+            if not isinstance(raw_value, list):
+                malformed = True
+                detail[field] = []
+                continue
+            values = []
+            for item in raw_value:
+                if isinstance(item, str) and item.strip():
+                    values.append(item)
+                else:
+                    malformed = True
+            detail[field] = values
+    elif raw_directives is None:
+        detail = dict(empty_fields)
+    else:
+        malformed = True
+        detail = dict(empty_fields)
+
+    if malformed:
+        detail["empty_state"] = (
+            "Visual directive output contained invalid fields; valid values "
+            "are shown."
+        )
+        status = "failed"
+    elif not any(detail[field] for field in _GRAPH_VISUAL_DIRECTIVE_FIELDS):
+        detail["empty_state"] = (
+            "Visual directive agent was enabled, but it returned no directives."
+        )
+        status = "completed"
+    else:
+        status = "completed"
+    return {"status": status, "detail": detail}
+
+
+def _graph_self_source_detail(
+    cognition_input: Mapping[str, Any],
+    cognition_output: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Project self-cognition source text and useful reply context."""
+
+    detail: dict[str, Any] = {}
+    source_packet = cognition_input.get("source_packet")
+    input_parts: list[str] = []
+    if isinstance(source_packet, Mapping):
+        visible_context = source_packet.get("visible_context")
+        if isinstance(visible_context, list):
+            for row in visible_context:
+                if not isinstance(row, Mapping):
+                    continue
+                for field in ("body_text", "content", "text"):
+                    text = _graph_full_text(row.get(field))
+                    if text:
+                        input_parts.append(text)
+                        break
+        reply_context = _graph_project_mapping(
+            source_packet.get("reply_context"),
+            _GRAPH_REPLY_FIELDS,
+        )
+        if reply_context:
+            detail["reply_context"] = reply_context
+    if not input_parts:
+        fallback = _graph_full_text(cognition_output.get("user_input"))
+        if fallback:
+            input_parts.append(fallback)
+    if input_parts:
+        detail["input"] = "\n".join(input_parts)
+    return detail
+
+
+def _graph_self_surface_messages(
+    artifact_payloads: Mapping[str, Any],
+    cognition_output: Mapping[str, Any],
+    route_effect: Mapping[str, Any],
+) -> list[str]:
+    """Project the recorded self-cognition visible message surface."""
+
+    action_candidate = artifact_payloads.get(
+        self_cognition_models.ARTIFACT_ACTION_CANDIDATE,
+    )
+    if isinstance(action_candidate, Mapping):
+        candidate_text = _graph_full_text(action_candidate.get("text"))
+        if candidate_text:
+            return [candidate_text]
+        candidate_messages = _graph_messages(action_candidate.get("messages"))
+        if candidate_messages:
+            return candidate_messages
+    messages = _graph_messages(cognition_output.get("final_dialog"))
+    if messages:
+        return messages
+    return _graph_messages(route_effect.get("visible_dialog"))
+
+
+def _graph_consolidation_detail(
+    outcome: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Project semantic consolidation outcomes without internal identifiers."""
+
+    detail: dict[str, Any] = {}
+    projected = _graph_project_mapping(outcome, _GRAPH_CONSOLIDATION_FIELDS)
+    write_success = outcome.get("write_success")
+    if isinstance(write_success, Mapping):
+        results = {
+            key: value
+            for key, value in write_success.items()
+            if isinstance(key, str)
+            and not _graph_key_is_forbidden(key)
+            and isinstance(value, bool)
+        }
+        if results:
+            projected["write_success"] = results
+    if projected:
+        detail["reasoning"] = _graph_project_nested(
+            projected,
+            _GRAPH_CONSOLIDATION_FIELDS | frozenset({"write_success"}),
+        )
+    return detail
 
 
 async def _process_queued_chat_item(
@@ -4014,6 +4738,32 @@ async def _process_queued_chat_item(
                     exception=exc,
                     attempt_count=cognition_attempt_count,
                 )
+                failure_graph: dict[str, Any] | None = None
+                try:
+                    visual_stage_failed = _is_visual_surface_failure(exc)
+                    failure_graph = _build_response_cognition_graph(
+                        graph_result={
+                            **original_initial_state,
+                            "final_dialog": [],
+                            "terminal_status": "failed",
+                        },
+                        consolidation_state=original_initial_state,
+                        run_id=correlation_id,
+                        graph_status="failed",
+                        visual_stage_failed=visual_stage_failed,
+                        visual_stage_reached=(
+                            True if visual_stage_failed else False
+                        ),
+                    )
+                    _record_latest_cognition_graph(failure_graph)
+                    response = response.model_copy(
+                        update={"cognition_graph": failure_graph},
+                    )
+                except Exception as graph_exc:
+                    logger.exception(
+                        "Graph failure telemetry projection failed: "
+                        f"{graph_exc}"
+                    )
                 failure_code = (
                     response.operational_error.error_code
                     if response.operational_error is not None

@@ -305,7 +305,9 @@ def test_background_work_no_handoff_result_retains_semantic_task_brief() -> None
         _state(),
     )
 
+    assert result["action_kind"] == "background_work_request"
     assert result["status"] == "failed"
+    assert result["handler_owner"] == "background_work"
     assert result["task_summary"] == "Generate a Fibonacci function."
     assert result["acknowledgement_constraint"] == (
         "promise_forbidden_explain_failure"

@@ -33,19 +33,45 @@ def test_overview_cognition_graph_updates_from_latest_brain_run(
             page = e2e_browser_page(console.base_url)
             _login(page)
             _assert_graph_status(page, "not reported")
+            assert page.locator(
+                "#overview-self-cognition-graph .graph-node"
+            ).count() == 0
+            assert page.locator(
+                "#overview-self-cognition-card"
+            ).is_hidden()
 
             fake_brain.set_graph(graph_snapshot(status="running", run_id="run-live"))
+            fake_brain.set_self_graph(
+                graph_snapshot(status="completed", run_id="self-run-complete")
+            )
             page.reload(wait_until="domcontentloaded")
             page.wait_for_selector("body[data-auth-state='authenticated']")
             _assert_graph_status(page, "running")
-            assert page.locator("#overview-cognition-graph .graph-node").count() == 4
-            assert page.locator("#overview-cognition-graph .graph-stage-group").count() == 3
+            assert page.locator("#overview-cognition-graph .graph-node").count() == 6
+            assert page.locator("#overview-cognition-graph .graph-stage-group").count() == 4
             assert "run-live" in page.locator(
                 "#overview-cognition-graph .graph-run-summary"
             ).inner_text()
             assert page.locator("#overview-cognition-graph .graph-edge-layer").count() == 0
             assert page.locator("#overview-cognition-graph .node-detail").count() == 0
-            assert page.locator("[data-node-id='l2.reasoning']").get_attribute(
+            assert page.locator(
+                "#overview-self-cognition-graph .graph-node"
+            ).count() == 6
+            assert page.locator(
+                "#overview-self-cognition-card"
+            ).is_visible()
+            assert page.locator(
+                "#overview-cognition-graph .graph-latest-event"
+            ).count() == 0
+            page.locator(
+                "#overview-self-cognition-graph [data-node-id='l3.visual_directives']"
+            ).click()
+            assert "focused" in page.locator(
+                "#overview-self-cognition-graph .graph-inspector"
+            ).inner_text()
+            assert page.locator(
+                "#overview-cognition-graph [data-node-id='l2.reasoning']"
+            ).get_attribute(
                 "title"
             ) == "weigh intent, memory, and scene pressure"
             assert page.locator(
@@ -60,10 +86,35 @@ def test_overview_cognition_graph_updates_from_latest_brain_run(
                 }"""
             )
 
-            page.locator("[data-node-id='l2.reasoning']").click()
+            page.locator(
+                "#overview-cognition-graph [data-node-id='l2.reasoning']"
+            ).click()
             assert "weigh intent, memory, and scene pressure" in page.locator(
                 "#overview-cognition-graph .graph-inspector"
             ).inner_text()
+            reasoning_detail = page.locator("#overview-cognition-graph .graph-inspector")
+            assert "summary" not in reasoning_detail.inner_text().lower()
+            assert "stage" not in reasoning_detail.inner_text().lower()
+            assert "lane" not in reasoning_detail.inner_text().lower()
+            assert "branch" not in reasoning_detail.inner_text().lower()
+
+            page.locator(
+                "#overview-cognition-graph [data-node-id='l3.visual_directives']"
+            ).click()
+            visual_detail = page.locator("#overview-cognition-graph .graph-inspector")
+            assert "focused" in visual_detail.inner_text()
+            assert "attentive" in visual_detail.inner_text()
+
+            page.locator(
+                "#overview-cognition-graph [data-node-id='input.message']"
+            ).click()
+            input_detail = page.locator("#overview-cognition-graph .graph-inspector")
+            input_text = input_detail.inner_text()
+            assert "input-start" in input_text
+            assert "input-end" in input_text
+            assert page.locator(
+                "#overview-cognition-graph .graph-inspector-rows"
+            ).evaluate("element => element.scrollHeight >= element.clientHeight")
 
             page.locator("[data-page-link='services']").click()
             fake_brain.set_graph(
@@ -114,6 +165,7 @@ def test_overview_cognition_graph_updates_from_latest_brain_run(
                         "page switch",
                         "SSE invalidation",
                         "parallel branch nodes",
+                        "semantic visual and surface nodes",
                         "compact stage groups",
                         "stable inspector detail",
                         "graph stage no horizontal overflow",
@@ -275,7 +327,7 @@ def _option_a_state_graph() -> dict:
                 "column": 1,
                 "branch": "source",
                 "status": "completed",
-                "detail": {"summary": "Accepted by the brain input queue."},
+                "detail": {"input": "Accepted by the brain input queue."},
             },
             {
                 "id": "decision.reply",
@@ -310,7 +362,23 @@ def _option_a_state_graph() -> dict:
                 "column": 4,
                 "branch": "terminated",
                 "status": "skipped",
-                "detail": {"summary": "Early decision ended visible output."},
+                "detail": {"messages": []},
+            },
+            {
+                "id": "l3.visual_directives",
+                "label": "Visual directive",
+                "stage": "L3",
+                "lane": "surface",
+                "column": 4,
+                "branch": "visual",
+                "status": "skipped",
+                "detail": {
+                    "facial_expression": [],
+                    "body_language": [],
+                    "gaze_direction": [],
+                    "visual_vibe": [],
+                    "empty_state": "Visual directives disabled for this run.",
+                },
             },
             {
                 "id": "tool.failed",

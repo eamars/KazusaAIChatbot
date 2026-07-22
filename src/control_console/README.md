@@ -89,22 +89,24 @@ summary is intentionally compact: configurable state, apply behavior, and
 field count only. Full field metadata is loaded on demand through the generic
 service config route.
 
-`GET /api/bootstrap` also returns `latest_cognition_graph` and mirrors it
-under `overview.latest_cognition_graph`. When the brain HTTP endpoint is
-available, the console reads this value from the brain
-`GET /ops/latest-cognition-graph` endpoint; otherwise it returns
+`GET /api/bootstrap` returns `latest_cognition_graph` and
+`latest_self_cognition_graph`, mirroring both under `overview`. When the brain
+HTTP endpoint is available, the console reads both values from the brain
+`GET /ops/latest-cognition-graph` endpoint; otherwise each returns
 `status: not_reported`. `POST /api/debug-chat` returns `cognition_graph` for
 the most recent debug turn. These fields use the same bounded cognition-run
 graph snapshot contract:
 
-- `source`: `overview_latest`, `debug_latest`, or future `historical`.
+- `source`: `overview_latest`, `debug_latest`, `self_latest`, or future
+  `historical`.
 - `status`: `not_reported`, `running`, `completed`, `failed`, or `partial`.
 - `nodes`: up to 64 stage nodes with lane, column, optional branch, status,
-  and redacted hover/focus detail.
+  and selected semantic detail. Layout metadata remains available for drawing;
+  the selected inspector does not repeat it as detail rows.
 - `edges`: up to 96 directed links with `sequence`, `fork`, `join`, or
   `reference` kind.
 - `redaction`: an explicit policy summary for excluded prompts, embeddings,
-  raw messages, and message envelopes.
+  raw messages, message envelopes, and operational identifiers.
 
 The brain `/chat` response may include a bounded `cognition_graph` snapshot
 derived from the actual graph result and consolidation state. The console
@@ -112,10 +114,37 @@ projects that snapshot through this same redacted contract. If the brain is
 unavailable or a response does not include graph telemetry, the console returns
 `status: not_reported` rather than fabricating graph nodes.
 
+### Cognition graph selected detail
+
+Overview Latest, Debug cognition, and the latest self-cognition snapshot use
+the same `renderCognitionGraph` inspector. Its selected detail order is:
+
+`input`, `reply_context`; `decision`, `reasoning`; the four L2 reasoning fields;
+retrieval answer and evidence; continuity, progress, and commitments; selected
+actions, results, and continuation; the four visual-directive lists; and actual
+visible `messages`.
+
+The separate `l3.visual_directives` node carries
+`facial_expression`, `body_language`, `gaze_direction`, and `visual_vibe`.
+When the existing visual gate disables the stage, the node remains present with
+`status: skipped` and uses the existing grey/dashed terminated rendering. An
+enabled empty result remains a completed node with an explicit empty-state
+message. The selected panel preserves approved semantic text and list order in
+a scrollable region; generic console redaction remains in force for all other
+payloads. Prompts, raw model output, embeddings, message envelopes, target
+identifiers, handler metadata, and internal ids stay excluded.
+
+The human-readable brain process log records the normalized visual directive
+after enabled validation using the same complete JSON rendering convention as
+visible dialog output. Protected LLM traces remain the diagnostic source for
+model metadata and raw-output capture; the two surfaces have separate
+disclosure purposes.
+
 The authenticated SSE stream emits `control.cognition_graph_invalidated` when
-the brain reports a different latest cognition run id. The browser responds by
-refetching bootstrap data, so self-cognition completion can update the Overview
-graph without the Overview page itself triggering cognition.
+the brain reports a different response or self-cognition latest run id. The
+browser responds by refetching bootstrap data, so self-cognition completion can
+update its dedicated Overview graph without the Overview page itself triggering
+cognition.
 
 `GET /api/logs/stream` is a separate authenticated SSE stream for high-volume
 process-log traffic. It is intentionally not merged into the compact status

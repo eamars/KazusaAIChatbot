@@ -171,7 +171,12 @@ class CognitionRunGraphEdge(StrictModel):
 class CognitionRunGraphSnapshot(StrictModel):
     """Reusable graph projection for live or stored cognition runs."""
 
-    source: Literal["overview_latest", "debug_latest", "historical"]
+    source: Literal[
+        "overview_latest",
+        "debug_latest",
+        "self_latest",
+        "historical",
+    ]
     status: Literal[
         "not_reported",
         "running",
@@ -363,6 +368,7 @@ class ControlConsoleOverviewResponse(StrictModel):
     recent_audit_events: list[ControlAuditEvent] = Field(default_factory=list)
     recent_process_errors: list[ProcessLogLine] = Field(default_factory=list)
     latest_cognition_graph: CognitionRunGraphSnapshot | None = None
+    latest_self_cognition_graph: CognitionRunGraphSnapshot | None = None
 
 
 class ConsoleDebugChatRequest(StrictModel):
@@ -431,6 +437,7 @@ class ControlConsoleBootstrapResponse(StrictModel):
     services: list[ServiceRuntimeState]
     overview: dict[str, Any]
     latest_cognition_graph: CognitionRunGraphSnapshot | None = None
+    latest_self_cognition_graph: CognitionRunGraphSnapshot | None = None
     recent_audit_events: list[dict[str, Any]]
     event_counters: dict[str, int]
     ui_capabilities: dict[str, bool]
