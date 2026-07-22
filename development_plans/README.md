@@ -58,6 +58,7 @@ long_term/todo.md
 | [action_selection_context_contract_bugfix_plan.md](active/bugfix/action_selection_context_contract_bugfix_plan.md) | Large cognition-chain action-selection context contract bugfix plan | completed |
 | [relevance_native_reply_anchor_guard_bugfix_plan.md](archive/completed/bugfix/relevance_native_reply_anchor_guard_bugfix_plan.md) | Medium settled-relevance native reply semantics and delivery-target guard bugfix plan | completed |
 | [relevance_input_scope_robustness_bugfix_plan.md](archive/completed/bugfix/relevance_input_scope_robustness_bugfix_plan.md) | Medium relevance input-scope and production-projection robustness bugfix plan | completed |
+| [relevance_pre_active_answer_attribution_bugfix_plan.md](active/bugfix/relevance_pre_active_answer_attribution_bugfix_plan.md) | Large settled-relevance pre-active answer attribution bugfix plan | completed |
 | [rag2_public_output_contract_leak_bugfix_plan.md](active/bugfix/rag2_public_output_contract_leak_bugfix_plan.md) | Large RAG2 prompt/evidence contract bugfix plan | draft |
 
 ## Reference Documents

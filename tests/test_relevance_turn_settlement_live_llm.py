@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from importlib import import_module
+import json
 from time import perf_counter
 from typing import Any
 from unittest.mock import patch
@@ -264,6 +265,22 @@ async def _run_settled(
     messages = build_settled_relevance_messages(state, observation_status)
     prompt_chars = sum(len(message.content) for message in messages)
     assert prompt_chars <= SETTLED_RELEVANCE_MAX_INPUT_CHARS
+    rendered_payload = json.loads(messages[1].content)
+    rendered_history = rendered_payload["fresh_history"]
+    if isinstance(rendered_history, dict):
+        rendered_history_shape = {
+            "keys": list(rendered_history),
+            "counts": {
+                key: len(rows)
+                for key, rows in rendered_history.items()
+                if isinstance(rows, list)
+            },
+        }
+    else:
+        rendered_history_shape = {
+            "keys": [],
+            "counts": {},
+        }
     started_at = perf_counter()
     captured_llm = _CapturingLLM(
         settled_module._relevance_agent_llm,
@@ -290,6 +307,7 @@ async def _run_settled(
             "raw_response_text": captured_llm.raw_response_text,
             "output_chars": len(captured_llm.raw_response_text),
             "prompt_chars": prompt_chars,
+            "rendered_history_shape": rendered_history_shape,
             "duration_ms": duration_ms,
             "route": "RELEVANCE_AGENT_LLM",
             "model": settled_module.RELEVANCE_AGENT_LLM_MODEL,
@@ -485,6 +503,185 @@ async def test_live_multi_recipient_message_preserves_kazusa_relevance(
         ),
     )
     assert result["intake_action"] == "start"
+
+
+@pytest.mark.asyncio
+async def test_live_recreates_astrbot_request_no_response_gate(
+    ensure_relevance_live_llms,
+) -> None:
+    """Reproduce the historical Bilibili request relevance decision."""
+
+    del ensure_relevance_live_llms
+    message = (
+        '@杏山千纱 千纱老师，能帮 @3945160191 搜几个bilibili的部署astrbot的'
+        '视频么？'
+    )
+    frontline_state = _frontline_state(
+        message,
+        targets=["character", "other_participant"],
+        reply_target="none",
+        continuity="",
+    )
+    frontline_state["active_character_name"] = "杏山千纱"
+    frontline = await _run_frontline(
+        "H01_astrbot_request_frontline",
+        frontline_state,
+    )
+
+    history = [
+        {
+            "platform_user_id": "673225019",
+            "global_user_id": "256e8a10-c406-47e9-ac8f-efd270d18160",
+            "body_text": "我也要调戏你的bot",
+            "addressed_to_global_user_ids": [],
+            "reply_context": {},
+            "turn_temporal_relation": "before_active_turn",
+        },
+        {
+            "platform_user_id": "257629823",
+            "global_user_id": "4da92a18-c3f6-4d71-98d9-8ff1b4738e75",
+            "body_text": "立希网上搜一个关于astrbot的安装视频，给出链接发在群里",
+            "addressed_to_global_user_ids": [],
+            "reply_context": {},
+            "turn_temporal_relation": "before_active_turn",
+        },
+        {
+            "platform_user_id": "3945160191",
+            "global_user_id": "57658c8f-11eb-4f03-83ac-1090a80c4377",
+            "body_text": "@蚝爹油 被炮击概不负责……",
+            "addressed_to_global_user_ids": [
+                "256e8a10-c406-47e9-ac8f-efd270d18160",
+            ],
+            "reply_context": {
+                "reply_to_platform_user_id": "673225019",
+            },
+            "turn_temporal_relation": "before_active_turn",
+        },
+        {
+            "platform_user_id": "3844005728",
+            "global_user_id": "c47439d1-f352-460e-a428-916a54a1dcbc",
+            "body_text": "https://www.bilibili.com/video/BV13rXKBPEFb/",
+            "addressed_to_global_user_ids": [],
+            "reply_context": {
+                "reply_to_platform_user_id": "257629823",
+            },
+            "turn_temporal_relation": "before_active_turn",
+        },
+        {
+            "platform_user_id": "2910137276",
+            "global_user_id": "4fb1b7a8-da01-4109-a83d-659af3f6b319",
+            "body_text": "@3945160191 云网络也没问题啊",
+            "addressed_to_global_user_ids": [
+                "57658c8f-11eb-4f03-83ac-1090a80c4377",
+            ],
+            "reply_context": {
+                "reply_to_platform_user_id": "3945160191",
+            },
+            "turn_temporal_relation": "before_active_turn",
+        },
+        {
+            "platform_user_id": "3844005728",
+            "global_user_id": "c47439d1-f352-460e-a428-916a54a1dcbc",
+            "body_text": "https://www.bilibili.com/video/BV1D5Gi6QENr/",
+            "addressed_to_global_user_ids": [],
+            "reply_context": {
+                "reply_to_platform_user_id": "257629823",
+            },
+            "turn_temporal_relation": "before_active_turn",
+        },
+        {
+            "platform_user_id": "3844005728",
+            "global_user_id": "c47439d1-f352-460e-a428-916a54a1dcbc",
+            "body_text": (
+                '搜到两个视频，你自己挑吧。一个叫"再见了龙虾！AstrBot安装使用指南"，'
+                "还有一个是接微信号的教程。"
+            ),
+            "addressed_to_global_user_ids": [],
+            "reply_context": {},
+            "turn_temporal_relation": "before_active_turn",
+        },
+        {
+            "platform_user_id": "2910137276",
+            "global_user_id": "4fb1b7a8-da01-4109-a83d-659af3f6b319",
+            "body_text": "你单纯想搭建的话",
+            "addressed_to_global_user_ids": [],
+            "reply_context": {},
+            "turn_temporal_relation": "before_active_turn",
+        },
+        {
+            "platform_user_id": "2910137276",
+            "global_user_id": "4fb1b7a8-da01-4109-a83d-659af3f6b319",
+            "body_text": "买个WiFi棒子",
+            "addressed_to_global_user_ids": [],
+            "reply_context": {},
+            "turn_temporal_relation": "before_active_turn",
+        },
+        {
+            "platform_user_id": "2910137276",
+            "global_user_id": "4fb1b7a8-da01-4109-a83d-659af3f6b319",
+            "body_text": "我帮你刷成Linux然后跑这个都可以哈哈哈",
+            "addressed_to_global_user_ids": [],
+            "reply_context": {},
+            "turn_temporal_relation": "after_active_turn",
+        },
+    ]
+    settled_state = _settled_state(
+        [
+            {
+                "sequence": 1,
+                "body_text": message,
+                "semantic_target_labels": [
+                    "character",
+                    "other_participant",
+                ],
+                "reply_target_label": "none",
+            },
+        ],
+        history=history,
+        scene="A noisy QQ group conversation.",
+        relationship="The current human is a familiar group participant.",
+        group_attention="chaotic",
+    )
+    settled_state.update({
+        "active_character_name": "杏山千纱",
+        "current_author_global_user_id": (
+            "256e8a10-c406-47e9-ac8f-efd270d18160"
+        ),
+        "current_author_platform_user_id": "673225019",
+        "character_global_user_id": "00000000-0000-4000-8000-000000000001",
+        "platform_bot_id": "3768713357",
+        "character_mood": "心跳加速",
+        "bot_continuity": "",
+        "user_profile": {
+            "affinity": 1000,
+            "last_relationship_insight": "终于等到了回应，心脏快要跳出来了",
+        },
+    })
+    settled = await _run_settled(
+        "H01_astrbot_request_settled",
+        settled_state,
+        observation_status="observation_complete",
+    )
+
+    write_llm_trace(
+        _TRACE_SUITE,
+        "H01_astrbot_request_summary",
+        {
+            "input": {
+                "message": message,
+                "frontline_state": frontline_state,
+                "settled_state": settled_state,
+            },
+            "frontline_decision": frontline,
+            "settled_decision": settled,
+            "historical_settled_decision": "ignore",
+            "expected_proceed_match": settled["response_action"] == "proceed",
+            "trace_role": "post_fix_regression_gate",
+        },
+    )
+
+    assert frontline["intake_action"] == "start", frontline
+    assert settled["response_action"] == "proceed", settled
 
 
 @pytest.mark.asyncio

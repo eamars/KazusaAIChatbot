@@ -94,12 +94,23 @@ Decide only whether the active character has a grounded reason to speak now.
 - Group target none and reply none do not become relevant merely because the
   content is answerable, useful, emotional, or interesting. An unresolved
   reply alone is also insufficient.
-- Keep the assembled turn separate from fresh history. An intervening answer
-  with turn_relation after_active_turn may make a character reply redundant.
-  A during_active_turn row may resolve only a request already expressed in an
-  earlier fragment; it cannot answer meaning introduced by a later fragment.
-  A before_active_turn or unknown row cannot prove that the current request
-  was already answered.
+- Keep the assembled turn separate from fresh_history. fresh_history is an
+  object with exactly these temporal partitions:
+  before_active_turn_context, during_active_turn_evidence,
+  after_active_turn_evidence, and unknown_timing_context.
+- Rows in before_active_turn_context and unknown_timing_context are context
+  only; they cannot prove that the current request was answered.
+- Rows in after_active_turn_evidence are candidate evidence that the same
+  request to the same recipient may already have been answered. Judge whether
+  the candidate actually answers the current request; do not use its mere
+  presence as a deterministic suppression rule.
+- Compare a during row in during_active_turn_evidence with the assembled
+  fragment or fragments that precede it. If it answers the earlier request and
+  later assembled fragments only clarify, narrow, or repeat that same request,
+  it can resolve the current turn; do not require a second answer after the
+  clarification.
+- If a later assembled fragment introduces a distinct request or withdraws the
+  earlier request, a during row must not suppress that later meaning.
 - media_evidence_status partial_media_view means the descriptions omit some
   available media. If speaking depends on omitted media, ignore rather than
   infer from the subset.
@@ -111,6 +122,11 @@ Decide only whether the active character has a grounded reason to speak now.
   group, and it would materially clarify a specific character-directed message
   or speaker to anchor the answer to effective_latest_fragment amid surrounding
   group traffic.
+- In a busy or noisy group, when a proceeding turn is a clear
+  character-directed question and anchoring effective_latest_fragment
+  materially identifies that message among nearby traffic, set it true. Direct
+  naming alone does not make the anchor unnecessary; make this a semantic
+  judgment from the surrounding group evidence.
 - Set it false when response_action is not proceed, for private input or a
   whole-group invitation, and whenever a group answer is already unambiguous
   without a visual anchor.
@@ -434,38 +450,62 @@ def _project_media(state: SettledRelevanceState) -> dict[str, Any]:
     return return_value
 
 
-def _project_history(state: SettledRelevanceState) -> list[dict[str, Any]]:
-    """Project at most ten fresh history rows under their character cap."""
+def _project_history(
+    state: SettledRelevanceState,
+) -> dict[str, list[dict[str, Any]]]:
+    """Project bounded fresh history into four typed temporal partitions.
+
+    The returned object has exactly these keys: before_active_turn_context,
+    during_active_turn_evidence, after_active_turn_evidence, and
+    unknown_timing_context. Missing or invalid timing is normalized to
+    unknown_timing_context. Row ordering is preserved within each partition,
+    with the existing newest-ten-row and history-character bounds retained.
+    """
 
     history = state.get("fresh_history")
     if history is None:
         history = state.get("chat_history_recent")
     if history is None:
         history = state.get("chat_history_wide")
+    partition_keys = {
+        "before_active_turn": "before_active_turn_context",
+        "during_active_turn": "during_active_turn_evidence",
+        "after_active_turn": "after_active_turn_evidence",
+    }
+    projected_by_timing: dict[str, list[dict[str, Any]]] = {
+        "before_active_turn_context": [],
+        "during_active_turn_evidence": [],
+        "after_active_turn_evidence": [],
+        "unknown_timing_context": [],
+    }
     if not isinstance(history, Sequence) or isinstance(history, (str, bytes)):
-        return_value: list[dict[str, Any]] = []
-        return return_value
+        return projected_by_timing
 
-    projected: list[dict[str, Any]] = []
     remaining = _HISTORY_TOTAL_CHARS
     for item in list(history)[-10:]:
         if not isinstance(item, Mapping) or remaining <= 0:
             continue
+        timing_relation = item.get("turn_temporal_relation")
+        if not isinstance(timing_relation, str):
+            timing_relation = "unknown"
+        partition_key = partition_keys.get(
+            timing_relation,
+            "unknown_timing_context",
+        )
+        normalized_turn_relation = (
+            timing_relation if timing_relation in partition_keys else "unknown"
+        )
         body = item.get("body_text") or item.get("content", "")
         row = {
             "speaker_relation": _history_speaker_relation(item, state),
             "body_text": _clip_text(body, min(500, remaining)),
             "target_summary": _history_target_summary(item, state),
             "reply_summary": _history_reply_summary(item, state),
-            "turn_relation": _clip_text(
-                item.get("turn_temporal_relation"),
-                40,
-            ) or "unknown",
+            "turn_relation": normalized_turn_relation,
         }
-        projected.append(row)
+        projected_by_timing[partition_key].append(row)
         remaining -= len(json.dumps(row, ensure_ascii=False))
-    return_value = projected
-    return return_value
+    return projected_by_timing
 
 
 def _participant_relation(
@@ -660,7 +700,12 @@ def build_settled_relevance_messages(
         system_prompt
     )
     if len(human_content) > available_human_chars:
-        payload["fresh_history"] = []
+        payload["fresh_history"] = {
+            "before_active_turn_context": [],
+            "during_active_turn_evidence": [],
+            "after_active_turn_evidence": [],
+            "unknown_timing_context": [],
+        }
         payload["scene_and_relationship"]["engagement_guidelines"] = []
         human_content = json.dumps(
             payload,

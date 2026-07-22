@@ -185,18 +185,21 @@ not become later preludes. Latest bot dialog is continuity evidence only within
 the 180-second active scene and is never an append slot. Frontline renders a
 scope-specific prompt and exposes only candidate-supported actions; returned
 slot labels must exist in the exact capped projection shown to the model.
-Settled fresh history
-maps production identities to character, current-author, and other-participant
-relations before it reaches the model. Conversation row order also marks each
-external history row as before, after, or unknown relative to the active turn;
-when the bounded history window has evicted the active row, persisted server
-timestamps retain that relation, while missing or equal timestamps remain
-unknown. Rows between active fragments are `during_active_turn` and may resolve
-requests expressed in earlier fragments; after-turn rows may resolve the whole
-assembled request. The settled projection
-labels the assembled author as the current human and repeats only the bounded
-final fragment to make recipient correction salient without another model
-call. The first assessment may choose one bounded `wait`; the hard-deadline
+Settled fresh history maps production identities to character, current-author,
+and other-participant relations before it reaches the model. Conversation row
+order also marks each external history row as before, during, after, or unknown
+relative to the active turn; when the bounded history window has evicted the
+active row, persisted server timestamps retain that relation, while missing or
+equal timestamps remain unknown. The relevance projection groups the rows into
+the model-facing `fresh_history` keys
+`before_active_turn_context`, `during_active_turn_evidence`,
+`after_active_turn_evidence`, and `unknown_timing_context`, preserving
+chronological order within each list. Before/unknown rows are context only;
+after rows are candidate evidence for the same request and recipient; during
+rows may resolve an earlier fragment but cannot settle meaning introduced by a
+later fragment. The settled projection labels the assembled author as the
+current human and repeats only the bounded final fragment to make recipient
+correction salient without another model call. The first assessment may choose one bounded `wait`; the hard-deadline
 prompt offers only `ignore` or `proceed`.
 
 Private adjacency-only coalescing retains the existing immediate-ready timing

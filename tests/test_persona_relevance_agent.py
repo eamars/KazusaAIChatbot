@@ -220,6 +220,10 @@ def test_settled_prompt_defines_native_reply_anchor_semantics() -> None:
     assert "for private input or a" in system_prompt
     assert "whole-group invitation" in system_prompt
     assert "response_action is not proceed" in system_prompt
+    assert "busy or noisy group" in system_prompt
+    assert "naming alone does not make the anchor unnecessary" in (
+        system_prompt
+    )
 
 
 def test_settled_history_projects_production_participant_relations() -> None:
@@ -282,36 +286,84 @@ def test_settled_history_projects_production_participant_relations() -> None:
     messages = build_settled_relevance_messages(state)
     history = json.loads(messages[1].content)["fresh_history"]
 
-    assert history == [
-        {
-            "speaker_relation": "current_author",
-            "body_text": "My earlier question.",
-            "target_summary": "character",
-            "reply_summary": "none",
-            "turn_relation": "before_active_turn",
-        },
-        {
-            "speaker_relation": "character",
-            "body_text": "The character answered.",
-            "target_summary": "current_author",
-            "reply_summary": "current_author",
-            "turn_relation": "after_active_turn",
-        },
-        {
-            "speaker_relation": "other_participant",
-            "body_text": "Another participant answered too.",
-            "target_summary": "current_author",
-            "reply_summary": "character",
-            "turn_relation": "after_active_turn",
-        },
-        {
-            "speaker_relation": "other_participant",
-            "body_text": "An answer arrived between active fragments.",
-            "target_summary": "current_author",
-            "reply_summary": "none",
-            "turn_relation": "during_active_turn",
-        },
-    ]
+    assert history == {
+        "before_active_turn_context": [
+            {
+                "speaker_relation": "current_author",
+                "body_text": "My earlier question.",
+                "target_summary": "character",
+                "reply_summary": "none",
+                "turn_relation": "before_active_turn",
+            },
+        ],
+        "during_active_turn_evidence": [
+            {
+                "speaker_relation": "other_participant",
+                "body_text": "An answer arrived between active fragments.",
+                "target_summary": "current_author",
+                "reply_summary": "none",
+                "turn_relation": "during_active_turn",
+            },
+        ],
+        "after_active_turn_evidence": [
+            {
+                "speaker_relation": "character",
+                "body_text": "The character answered.",
+                "target_summary": "current_author",
+                "reply_summary": "current_author",
+                "turn_relation": "after_active_turn",
+            },
+            {
+                "speaker_relation": "other_participant",
+                "body_text": "Another participant answered too.",
+                "target_summary": "current_author",
+                "reply_summary": "character",
+                "turn_relation": "after_active_turn",
+            },
+        ],
+        "unknown_timing_context": [],
+    }
+
+
+def test_settled_history_partitions_unknown_temporal_relation() -> None:
+    """Unknown timing remains context and cannot become answer evidence."""
+
+    state = _base_state()
+    state["fresh_history"] = [{
+        "role": "user",
+        "body_text": "Timing is unavailable.",
+        "turn_temporal_relation": "invalid_relation",
+    }]
+
+    messages = build_settled_relevance_messages(state)
+    history = json.loads(messages[1].content)["fresh_history"]
+
+    assert history["before_active_turn_context"] == []
+    assert history["during_active_turn_evidence"] == []
+    assert history["after_active_turn_evidence"] == []
+    assert history["unknown_timing_context"][0]["body_text"] == (
+        "Timing is unavailable."
+    )
+
+
+def test_settled_prompt_defines_temporal_history_evidence() -> None:
+    """The prompt separates current-turn completion evidence by timing."""
+
+    messages = build_settled_relevance_messages(_base_state())
+    system_prompt = messages[0].content
+
+    assert "before_active_turn_context" in system_prompt
+    assert "during_active_turn_evidence" in system_prompt
+    assert "after_active_turn_evidence" in system_prompt
+    assert "unknown_timing_context" in system_prompt
+    assert "cannot prove that the current request was answered" in system_prompt
+    assert "during row" in system_prompt
+    assert "later assembled fragments only clarify, narrow, or repeat" in (
+        system_prompt
+    )
+    assert "do not require a second answer after the" in (
+        system_prompt
+    )
 
 
 def test_settled_worst_case_projection_remains_valid_json() -> None:
@@ -349,6 +401,12 @@ def test_settled_worst_case_projection_remains_valid_json() -> None:
         "fragment-29"
     )
     assert payload["assembled_turn"]["earlier_context_present"] is True
+    assert set(payload["fresh_history"]) == {
+        "before_active_turn_context",
+        "during_active_turn_evidence",
+        "after_active_turn_evidence",
+        "unknown_timing_context",
+    }
 
 
 def test_settled_route_has_exact_completion_and_thinking_budget() -> None:

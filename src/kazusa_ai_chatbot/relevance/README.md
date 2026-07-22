@@ -45,12 +45,15 @@ from a partial image subset.
 
 The assembled-turn projection states that its author is the current human and
 repeats the bounded final fragment as `effective_latest_fragment` so a weaker
-local model applies recipient corrections before older context. Fresh-history
-rows also carry
-`before_active_turn|during_active_turn|after_active_turn|unknown`; only an
-after-turn row, or a during-turn row that follows the relevant earlier
-fragment, can establish that another participant already answered the active
-request.
+local model applies recipient corrections before older context. The settled
+model-facing `fresh_history` projection is an object with four ordered row
+lists: `before_active_turn_context`, `during_active_turn_evidence`,
+`after_active_turn_evidence`, and `unknown_timing_context`. Rows retain
+speaker, target, reply, body, and temporal summaries. Before-turn and unknown
+rows are context only and cannot prove that the current request was answered.
+After-turn rows are candidate evidence for the same request and recipient. A
+during-turn row can resolve an earlier fragment, but cannot settle meaning
+introduced by a later fragment; the LLM makes the final redundancy judgment.
 
 ## Public Contract
 
@@ -78,7 +81,9 @@ implementation state remain private to the two agent modules.
 
 An unresolved present reply uses `unknown_participant`, distinct from `none`.
 Fresh-history rows expose only `character|current_author|other_participant`
-speaker relations plus semantic target, reply, and turn-temporal summaries.
+speaker relations plus semantic target, reply, and turn-temporal summaries;
+invalid or missing temporal relations are placed in
+`unknown_timing_context`.
 The first settled assessment renders `ignore|proceed|wait`; the hard-deadline
 assessment renders only `ignore|proceed`.
 The settled agent also treats `use_reply_feature` as a semantic request for a
