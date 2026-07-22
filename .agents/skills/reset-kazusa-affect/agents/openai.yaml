@@ -1,0 +1,4 @@
+interface:
+  display_name: "Reset Kazusa Affect"
+  short_description: "Contained Chinese affect reset with progress clearing"
+  default_prompt: "Use $reset-kazusa-affect to reset Kazusa's current affect while preserving history and durable state."
