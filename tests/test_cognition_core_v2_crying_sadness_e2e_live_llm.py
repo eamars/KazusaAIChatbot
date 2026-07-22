@@ -21,6 +21,10 @@ from tests.test_stage3_fresh_database_e2e_live_llm import (
     _prepare_stage3_runtime,
     _wait_for_trace_run_finalization,
 )
+from tests.cognition_core_v2_live_llm_role_guards import (
+    evaluate_response_operation_role_bindings,
+    validate_expected_role_bindings,
+)
 
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm, pytest.mark.live_db]
@@ -58,7 +62,7 @@ def _load_cases() -> dict[str, object]:
     if not isinstance(payload, dict):
         raise ValueError("crying-sadness fixture root must be an object")
     if payload.get("schema_version") != (
-        "cognition_core_v2_crying_sadness_e2e_cases.v1"
+        "cognition_core_v2_crying_sadness_e2e_cases.v3"
     ):
         raise ValueError("crying-sadness fixture schema version is invalid")
     if payload.get("emotion_encoding") != "zh-CN":
@@ -67,11 +71,11 @@ def _load_cases() -> dict[str, object]:
         "loss_event",
         "anger_event",
         "natural_turns",
-        "permission_turns",
+        "natural_release_turns",
     ):
         if key not in payload:
             raise ValueError(f"crying-sadness fixture is missing {key}")
-    turns = ["natural_turns", "permission_turns"]
+    turns = ["natural_turns", "natural_release_turns"]
     for key in turns:
         rows = payload[key]
         if not isinstance(rows, list) or not rows:
@@ -81,9 +85,25 @@ def _load_cases() -> dict[str, object]:
                 raise ValueError(f"crying-sadness {key} row is invalid")
             if not row.get("turn_id") or not row.get("text"):
                 raise ValueError(f"crying-sadness {key} row is incomplete")
+            visible_response_required = row.get(
+                "visible_response_required",
+                True,
+            )
+            if not isinstance(visible_response_required, bool):
+                raise ValueError(
+                    "crying-sadness visible_response_required is invalid"
+                )
+            validate_expected_role_bindings(
+                row.get("expected_role_bindings"),
+                context=f"crying-sadness {key}:{row.get('turn_id')}",
+            )
     anger_turn = payload.get("anger_control_turn")
     if not isinstance(anger_turn, dict) or not anger_turn.get("text"):
         raise ValueError("crying-sadness anger control turn is invalid")
+    validate_expected_role_bindings(
+        anger_turn.get("expected_role_bindings"),
+        context="crying-sadness anger_control_turn",
+    )
     return payload
 
 
@@ -347,7 +367,7 @@ def _capture_raw_llm_steps(
 def _projection_rows(
     graph_result: Mapping[str, object],
 ) -> list[Mapping[str, object]]:
-    """Extract the public semantic affect projection from one graph result."""
+    """Extract the affect projection without hiding bounded graph failure."""
 
     projection = graph_result.get("semantic_affect_projection")
     if not isinstance(projection, list):
@@ -355,6 +375,8 @@ def _projection_rows(
         if isinstance(core_output, Mapping):
             projection = core_output.get("affect_projection")
     if not isinstance(projection, list):
+        if graph_result.get("terminal_status") == "failed":
+            return []
         raise AssertionError("V2 graph result has no affect projection")
     rows = [row for row in projection if isinstance(row, Mapping)]
     if len(rows) != len(projection):
@@ -383,6 +405,7 @@ def _technical_assertions(
     seed_active: bool,
     expected_emotion: str,
     forbidden_emotion: str,
+    visible_response_required: bool = True,
 ) -> dict[str, bool]:
     """Project machine-checkable rendering and causal-boundary assertions."""
 
@@ -398,6 +421,9 @@ def _technical_assertions(
     action_results = graph_result.get("action_results")
     if not isinstance(action_results, list):
         action_results = []
+    terminal_failed = graph_result.get("terminal_status") == "failed"
+    operational_error = response_payload.get("operational_error")
+    terminal_status = trace.get("terminal_status")
     state_update = graph_result.get("cognition_state_update")
     scope = graph_result.get("cognition_scope")
     if not scope and isinstance(state_update, Mapping):
@@ -405,18 +431,42 @@ def _technical_assertions(
     return {
         "trace_run_succeeded": trace_run.get("status") == "succeeded",
         "visible_terminal_status": (
-            trace.get("terminal_status") == "completed_visible"
+            (
+                terminal_status == "completed_visible"
+                if visible_response_required
+                else terminal_status in {
+                    "completed_visible",
+                    "completed_private",
+                    "completed_action",
+                }
+            )
         ),
-        "visible_response_present": bool(messages),
+        "visible_response_present": (
+            bool(messages) if visible_response_required else True
+        ),
         "lifecycle_present": bool(lifecycle),
         "user_cognition_scope": scope == "user",
         "expected_affect_present": (
             not seed_active or expected_emotion in emotion_names
         ),
         "forbidden_affect_absent": forbidden_emotion not in emotion_names,
-        "chinese_visible_text": _contains_cjk(visible_text),
+        "chinese_visible_text": (
+            _contains_cjk(visible_text) if visible_response_required else True
+        ),
         "no_action_results": not action_results,
-        "final_dialog_present": bool(final_dialog),
+        "final_dialog_present": (
+            bool(final_dialog) if visible_response_required else True
+        ),
+        "bounded_failure_state": (
+            not terminal_failed
+            or (
+                trace.get("terminal_status") == "failed"
+                and response_payload.get("content_type") == "operational_error"
+                and isinstance(operational_error, Mapping)
+                and bool(operational_error.get("error_code"))
+                and not messages
+            )
+        ),
     }
 
 
@@ -458,7 +508,7 @@ async def _run_chat_sequence(
     output_dir = _OUTPUT_ROOT / f"{case_id}_{run_token}"
     manifest_path = output_dir / "run_manifest.json"
     manifest: dict[str, object] = {
-        "schema_version": "cognition_core_v2_crying_sadness_e2e_run.v1",
+        "schema_version": "cognition_core_v2_crying_sadness_e2e_run.v3",
         "case_id": case_id,
         "run_token": run_token,
         "emotion_encoding": "zh-CN",
@@ -586,6 +636,17 @@ async def _run_chat_sequence(
                     final_dialog = graph_result.get("final_dialog")
                     if not isinstance(final_dialog, list):
                         final_dialog = []
+                    turn_calls = raw_llm_calls[call_start:]
+                    role_ownership, role_ownership_details = (
+                        evaluate_response_operation_role_bindings(
+                            turn_calls,
+                            turn.get("expected_role_bindings"),
+                            context=(
+                                "crying-sadness turn "
+                                f"{case_id}:{turn_id}"
+                            ),
+                        )
+                    )
                     lifecycle_mapping = (
                         lifecycle if isinstance(lifecycle, Mapping) else {}
                     )
@@ -600,20 +661,27 @@ async def _run_chat_sequence(
                         seed_active=turn_index >= seed_at_turn,
                         expected_emotion=expected_emotion,
                         forbidden_emotion=forbidden_emotion,
+                        visible_response_required=bool(
+                            turn.get("visible_response_required", True)
+                        ),
                     )
-                    turn_calls = raw_llm_calls[call_start:]
+                    assertions["role_ownership"] = role_ownership
                     state_after_turn = await get_user_cognition_state(
                         global_user_id,
                     )
                     turn_path = output_dir / f"{turn_index:02d}_{turn_id}.json"
                     turn_artifact = {
                         "schema_version": (
-                            "cognition_core_v2_crying_sadness_e2e_turn.v1"
+                            "cognition_core_v2_crying_sadness_e2e_turn.v3"
                         ),
                         "case_id": case_id,
                         "run_token": run_token,
                         "turn_index": turn_index,
                         "turn_id": turn_id,
+                        "visible_response_required": turn.get(
+                            "visible_response_required",
+                            True,
+                        ),
                         "observation_target": turn.get(
                             "observation_target",
                             "",
@@ -654,6 +722,7 @@ async def _run_chat_sequence(
                         },
                         "state_after_turn": state_after_turn,
                         "raw_llm_calls": turn_calls,
+                        "role_ownership": role_ownership_details,
                         "captured_log_messages": [
                             record.getMessage() for record in caplog.records
                         ],
@@ -664,6 +733,10 @@ async def _run_chat_sequence(
                         "turn_index": turn_index,
                         "turn_id": turn_id,
                         "input_text": input_text,
+                        "visible_response_required": turn.get(
+                            "visible_response_required",
+                            True,
+                        ),
                         "artifact_path": str(turn_path),
                         "affect_emotions": [
                             str(row.get("emotion")) for row in projection
@@ -680,7 +753,23 @@ async def _run_chat_sequence(
                     manifest_turns.append(turn_summary)
                     _write_json(manifest_path, manifest)
                     print(f"wrote crying-sadness turn evidence: {turn_path}")
-                    _assert_technical_assertions(assertions)
+                    try:
+                        _assert_technical_assertions(assertions)
+                    except AssertionError as exc:
+                        manifest["status"] = "failed"
+                        manifest["failure_turn_id"] = turn_id
+                        manifest["failure_error"] = str(exc)
+                        manifest["failure_assertions"] = [
+                            name
+                            for name, passed in assertions.items()
+                            if not passed
+                        ]
+                        manifest["duration_ms"] = round(
+                            (time.perf_counter() - started_at) * 1000
+                        )
+                        manifest["raw_llm_call_count"] = len(raw_llm_calls)
+                        _write_json(manifest_path, manifest)
+                        raise
     finally:
         post_turn.settle_episode_trace = original_settle
         service._settle_runtime_episode_trace = original_runtime_settle
@@ -714,18 +803,18 @@ async def test_live_crying_on_sadness_natural_sequence(
     )
 
 
-async def test_live_crying_on_sadness_explicit_permission(
+async def test_live_crying_on_sadness_natural_release(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Exercise Chinese crying after the user explicitly permits it."""
+    """Exercise Chinese crying without a user instruction to cry."""
 
     payload = _load_cases()
     loss_event = payload["loss_event"]
     if not isinstance(loss_event, Mapping):
         raise ValueError("crying-sadness loss event is invalid")
     await _run_chat_sequence(
-        case_id="explicit_permission",
-        turns=_turn_rows(payload, "permission_turns"),
+        case_id="natural_release",
+        turns=_turn_rows(payload, "natural_release_turns"),
         event_spec=loss_event,
         seed_at_turn=0,
         expected_emotion="sadness",

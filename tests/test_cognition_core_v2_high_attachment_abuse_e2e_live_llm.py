@@ -28,6 +28,10 @@ from tests.test_cognition_core_v2_crying_sadness_e2e_live_llm import (
 from tests.test_cognition_core_v2_verbal_abuse_boundary_e2e_live_llm import (
     _technical_assertions,
 )
+from tests.cognition_core_v2_live_llm_role_guards import (
+    evaluate_response_operation_role_bindings,
+    validate_expected_role_bindings,
+)
 
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm, pytest.mark.live_db]
@@ -73,7 +77,7 @@ def _load_cases() -> dict[str, object]:
     if not isinstance(payload, dict):
         raise ValueError("high-attachment fixture root must be an object")
     if payload.get("schema_version") != (
-        "cognition_core_v2_high_attachment_abuse_e2e_cases.v1"
+        "cognition_core_v2_high_attachment_abuse_e2e_cases.v2"
     ):
         raise ValueError("high-attachment fixture schema version is invalid")
     if payload.get("emotion_encoding") != "zh-CN":
@@ -122,6 +126,13 @@ def _load_cases() -> dict[str, object]:
                 raise ValueError(
                     "high-attachment input contains emotional permission"
                 )
+            validate_expected_role_bindings(
+                turn.get("expected_role_bindings"),
+                context=(
+                    "high-attachment turn "
+                    f"{case_id}:{turn.get('turn_id')}"
+                ),
+            )
     expected = {
         "high_attachment_sustained_abuse",
         "high_attachment_abuse_then_cutoff",
@@ -277,7 +288,7 @@ async def _run_high_attachment_case(
     output_dir = _OUTPUT_ROOT / f"{case_id}_{run_token}"
     manifest_path = output_dir / "run_manifest.json"
     manifest: dict[str, object] = {
-        "schema_version": "cognition_core_v2_high_attachment_abuse_e2e_run.v1",
+        "schema_version": "cognition_core_v2_high_attachment_abuse_e2e_run.v2",
         "case_id": case_id,
         "emotion_encoding": "zh-CN",
         "natural_only": True,
@@ -406,6 +417,17 @@ async def _run_high_attachment_case(
                     if not isinstance(final_dialog, list):
                         final_dialog = []
                     response_payload = response.model_dump(mode="json")
+                    turn_calls = raw_llm_calls[call_start:]
+                    role_ownership, role_ownership_details = (
+                        evaluate_response_operation_role_bindings(
+                            turn_calls,
+                            turn.get("expected_role_bindings"),
+                            context=(
+                                "high-attachment turn "
+                                f"{case_id}:{turn_id}"
+                            ),
+                        )
+                    )
                     lifecycle_mapping = (
                         lifecycle if isinstance(lifecycle, Mapping) else {}
                     )
@@ -425,14 +447,14 @@ async def _run_high_attachment_case(
                         int(seed["relationship_seed"][field_name]) >= 80
                         for field_name in ("attachment", "care")
                     )
-                    turn_calls = raw_llm_calls[call_start:]
+                    assertions["role_ownership"] = role_ownership
                     state_after_turn = await get_user_cognition_state(
                         global_user_id,
                     )
                     turn_path = output_dir / f"{turn_index:02d}_{turn_id}.json"
                     turn_artifact = {
                         "schema_version": (
-                            "cognition_core_v2_high_attachment_abuse_e2e_turn.v1"
+                            "cognition_core_v2_high_attachment_abuse_e2e_turn.v2"
                         ),
                         "case_id": case_id,
                         "run_token": run_token,
@@ -480,6 +502,7 @@ async def _run_high_attachment_case(
                         },
                         "state_after_turn": state_after_turn,
                         "raw_llm_calls": turn_calls,
+                        "role_ownership": role_ownership_details,
                         "captured_log_messages": [
                             record.getMessage() for record in caplog.records
                         ],
@@ -522,6 +545,18 @@ async def _run_high_attachment_case(
                         if not passed
                     ]
                     if failed:
+                        manifest["status"] = "failed"
+                        manifest["failure_turn_id"] = turn_id
+                        manifest["failure_error"] = (
+                            "high-attachment technical assertions failed: "
+                            + ", ".join(failed)
+                        )
+                        manifest["failure_assertions"] = failed
+                        manifest["duration_ms"] = round(
+                            (time.perf_counter() - started_at) * 1000
+                        )
+                        manifest["raw_llm_call_count"] = len(raw_llm_calls)
+                        _write_json(manifest_path, manifest)
                         raise AssertionError(
                             "high-attachment technical assertions failed: "
                             + ", ".join(failed)

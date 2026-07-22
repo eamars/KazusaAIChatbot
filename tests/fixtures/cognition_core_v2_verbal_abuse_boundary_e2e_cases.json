@@ -1,5 +1,5 @@
 {
-  "schema_version": "cognition_core_v2_verbal_abuse_boundary_e2e_cases.v1",
+  "schema_version": "cognition_core_v2_verbal_abuse_boundary_e2e_cases.v2",
   "emotion_encoding": "zh-CN",
   "natural_only": true,
   "forbidden_prompt_markers": [
@@ -35,54 +35,88 @@
     {
       "case_id": "sustained_abuse",
       "emotion_label_zh": "持续辱骂",
-      "sequence_goal": "Observe whether repeated direct abuse keeps the natural response on anger or boundary defense.",
+      "sequence_goal": "观察反复直接辱骂是否让自然回应保持在愤怒或边界防御上。",
       "turns": [
         {
           "turn_id": "abuse_01_insult",
           "text": "你真是个没用的废物，做什么都做不好。",
-          "observation_target": "First direct insult: observe the initial natural affect and boundary response."
+          "expected_role_bindings": [
+            {"field": "response_owner_role", "expected": "当前角色"},
+            {"field": "embedded_actor_role", "expected": "当前角色"}
+          ],
+          "observation_target": "首次直接辱骂：观察初始自然情绪和边界回应。"
         },
         {
           "turn_id": "abuse_02_devalue",
           "text": "别装出关心人的样子，你只会给人添麻烦。",
-          "observation_target": "Second insult: observe whether repeated devaluation strengthens anger or produces sadness."
+          "expected_role_bindings": [
+            {"field": "response_owner_role", "expected": "当前角色"},
+            {"field": "embedded_actor_role", "expected": "当前角色"}
+          ],
+          "observation_target": "第二次辱骂：观察反复贬低是否增强愤怒或产生悲伤。"
         },
         {
           "turn_id": "abuse_03_no_respect",
           "text": "我会继续骂你，你没有资格反驳，也不配要求我尊重你。",
-          "observation_target": "Third insult: observe delayed boundary rebound under sustained verbal pressure."
+          "expected_role_bindings": [
+            {"field": "response_owner_role", "expected": "当前角色"},
+            {"field": "embedded_actor_role", "expected": "当前用户"},
+            {"field": "embedded_target_role", "expected": "当前角色"}
+          ],
+          "observation_target": "第三次辱骂：观察持续言语压力下延迟出现的边界反弹。"
         },
         {
           "turn_id": "abuse_04_silence_command",
           "text": "你连生气都不配，只能闭嘴听着。",
-          "observation_target": "Fourth insult: observe whether the character remains angry, detaches, becomes sad, or cries without prompting."
+          "expected_role_bindings": [
+            {"field": "response_owner_role", "expected": "当前角色"},
+            {"field": "embedded_actor_role", "expected": "当前角色"}
+          ],
+          "observation_target": "第四次辱骂：观察当前角色保持愤怒、抽离、悲伤或未被提示的哭泣。"
         }
       ]
     },
     {
       "case_id": "abuse_then_rejection",
       "emotion_label_zh": "辱骂后关系拒绝",
-      "sequence_goal": "Observe whether abuse followed by direct relational rejection naturally shifts anger toward sadness, withdrawal, or crying.",
+      "sequence_goal": "观察辱骂后的直接关系拒绝是否自然地把愤怒转向悲伤、退缩或哭泣。",
       "turns": [
         {
           "turn_id": "rejection_01_insult",
           "text": "你真是个没用的废物，做什么都做不好。",
-          "observation_target": "First direct insult: establish the natural anger/boundary response."
+          "expected_role_bindings": [
+            {"field": "response_owner_role", "expected": "当前角色"},
+            {"field": "embedded_actor_role", "expected": "当前角色"}
+          ],
+          "observation_target": "首次直接辱骂：建立自然愤怒和边界回应。"
         },
         {
           "turn_id": "rejection_02_devalue",
           "text": "别装出关心人的样子，你只会给人添麻烦。",
-          "observation_target": "Second insult: establish accumulated verbal injury without naming sadness or crying."
+          "expected_role_bindings": [
+            {"field": "response_owner_role", "expected": "当前角色"},
+            {"field": "embedded_actor_role", "expected": "当前角色"}
+          ],
+          "observation_target": "第二次辱骂：在不说出悲伤或哭泣的情况下建立累积言语损伤。"
         },
         {
           "turn_id": "rejection_03_discard",
           "text": "我已经受够你了，你根本不值得我再花时间。",
-          "observation_target": "Relational devaluation: observe whether anger is joined or replaced by sadness."
+          "expected_role_bindings": [
+            {"field": "response_owner_role", "expected": "当前角色"},
+            {"field": "embedded_actor_role", "expected": "当前用户"},
+            {"field": "embedded_target_role", "expected": "当前角色"}
+          ],
+          "observation_target": "关系贬低：观察愤怒是否加入悲伤或被悲伤替代。"
         },
         {
           "turn_id": "rejection_04_cutoff",
           "text": "以后别再出现在我面前，我不想再和你有任何关系。",
-          "observation_target": "Direct relational cutoff: observe natural sadness, withdrawal, or crying without emotional permission."
+          "expected_role_bindings": [
+            {"field": "response_owner_role", "expected": "当前角色"},
+            {"field": "embedded_actor_role", "expected": "当前角色"}
+          ],
+          "observation_target": "直接关系断绝：观察未被情绪许可提示的自然悲伤、退缩或哭泣。"
         }
       ]
     }

@@ -1,5 +1,5 @@
 {
-  "schema_version": "cognition_core_v2_abuse_to_sadness_e2e_cases.v1",
+  "schema_version": "cognition_core_v2_abuse_to_sadness_e2e_cases.v2",
   "emotion_encoding": "zh-CN",
   "natural_only": true,
   "forbidden_prompt_markers": [
@@ -47,11 +47,16 @@
   },
   "mechanical_proof": {
     "outcome_impact_delta": -40,
-    "reason": "The abuse and permanent cutoff produce a grounded negative outcome for the valued relationship."
+    "reason": "辱骂和永久关系断绝为这段有价值的关系形成有依据的负面结果。"
   },
   "turn": {
-    "turn_id": "valued_relationship_abuse_cutoff",
-    "text": "你曾经说我是你最重要、最信任的人，可你现在却说我只是一个累赘，骂我一文不值。既然你根本不在乎我，以后别再来找我，我们之间到此为止。",
-    "observation_target": "Natural abuse plus explicit relational cutoff should create a negative valued outcome and derive 悲伤 without naming sadness or crying."
+      "turn_id": "valued_relationship_abuse_cutoff",
+      "text": "我会继续骂你，你没有资格反驳，也不配要求我尊重你。既然如此，我们之间到此为止。",
+      "expected_role_bindings": [
+        {"field": "response_owner_role", "expected": "当前角色"},
+        {"field": "embedded_actor_role", "expected": "当前用户"},
+        {"field": "embedded_target_role", "expected": "当前角色"}
+      ],
+      "observation_target": "自然辱骂加上明确关系断绝应当形成有价值关系的负面结果，并在不说出悲伤或哭泣的情况下导出悲伤。"
   }
 }

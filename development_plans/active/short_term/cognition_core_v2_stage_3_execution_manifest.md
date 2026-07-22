@@ -13,6 +13,15 @@
 - Reread rule: reread the parent and this complete manifest after compaction
   and after each signed checkpoint.
 
+## User Quality Sign-off Record — 2026-07-22
+
+The user approved the Phase 3 artifact set, including the consolidated raw
+Chinese real-LLM dialog/monologue report and the emotion, abuse-boundary, role,
+mechanical-path, and bounded-error evidence overlay. This closes artifact
+quality review for the retained Phase 3 evidence. The manifest remains
+`in_progress` while the separately tracked external Browser acceptance and
+remaining lifecycle completion checks are pending.
+
 ## Approved Remediation Decision — 2026-07-19
 
 The user approved the Stage 3 answerability-separation remediation. The
@@ -1306,8 +1315,12 @@ row counts, or an executable transform derived without production discovery.
   is available; the external console E2E passes.
 - Independent review completed under reviewer identity `Hilbert`. The review
   findings were remediated or dispositioned, and the affected deterministic
-  gates were rerun. Final user quality/sign-off remains pending.
-- Checkpoint J independent review/user sign-off: pending.
+  gates were rerun. The user approved the Phase 3 artifact set on 2026-07-22;
+  external Browser acceptance and the remaining lifecycle completion checks
+  remain pending.
+- Checkpoint J artifact-quality sign-off: complete on 2026-07-22.
+- Checkpoint J full Stage 3 completion: pending external Browser acceptance and
+  the remaining lifecycle completion checks.
 
 ## Latest Verification Addendum — 2026-07-21 Chinese-Only Semantic Contract
 
@@ -1340,5 +1353,6 @@ row counts, or an executable transform derived without production discovery.
   recognized by the abuse-boundary technical assertion. These are test and
   evidence-contract corrections and do not add a crying tag or a verbal
   permission path.
-- Checkpoints I/J and final user quality sign-off remain pending until the
-  remaining independent review/browser acceptance conditions are closed.
+- The user approved the Phase 3 artifact set on 2026-07-22. Checkpoint J
+  artifact-quality sign-off is complete; external Browser acceptance and the
+  remaining lifecycle completion checks are still pending.

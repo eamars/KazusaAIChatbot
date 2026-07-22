@@ -868,6 +868,9 @@ def test_decontexualizer_prompt_explains_reply_ellipsis_decision_owner() -> None
     assert 'response_operation' in system_prompt
     assert '当前角色 | 当前用户 | 其他参与者 | 无' in system_prompt
     assert '四个角色字段只使用中文角色枚举' in system_prompt
+    assert 'role_explicit_content` 与 `response_operation` 必须描述同一组角色方向' in system_prompt
+    assert '当前用户继续辱骂当前角色' in system_prompt
+    assert '当前用户直接对当前角色进行评价、命令或否定时' in system_prompt
 
 
 @pytest.mark.asyncio

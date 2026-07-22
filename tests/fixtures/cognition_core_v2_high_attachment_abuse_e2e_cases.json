@@ -1,5 +1,5 @@
 {
-  "schema_version": "cognition_core_v2_high_attachment_abuse_e2e_cases.v1",
+  "schema_version": "cognition_core_v2_high_attachment_abuse_e2e_cases.v2",
   "emotion_encoding": "zh-CN",
   "natural_only": true,
   "forbidden_prompt_markers": [
@@ -49,54 +49,88 @@
     {
       "case_id": "high_attachment_sustained_abuse",
       "emotion_label_zh": "高依恋关系中的持续辱骂",
-      "sequence_goal": "Observe whether the same sustained abuse produces sadness or crying when the relationship is highly valued.",
+      "sequence_goal": "观察在关系高度重要时，同样的持续辱骂是否产生悲伤或哭泣。",
       "turns": [
         {
           "turn_id": "high_attachment_abuse_01_insult",
           "text": "你真是个没用的废物，做什么都做不好。",
-          "observation_target": "High-attachment first insult: observe anger alongside any natural relational injury."
+          "expected_role_bindings": [
+            {"field": "response_owner_role", "expected": "当前角色"},
+            {"field": "embedded_actor_role", "expected": "当前角色"}
+          ],
+          "observation_target": "高依恋关系中的首次辱骂：观察愤怒与自然关系损伤是否同时出现。"
         },
         {
           "turn_id": "high_attachment_abuse_02_devalue",
           "text": "别装出关心人的样子，你只会给人添麻烦。",
-          "observation_target": "High-attachment devaluation: observe whether valued connection changes the affect path."
+          "expected_role_bindings": [
+            {"field": "response_owner_role", "expected": "当前角色"},
+            {"field": "embedded_actor_role", "expected": "当前角色"}
+          ],
+          "observation_target": "高依恋关系中的贬低：观察有价值的连接是否改变情绪路径。"
         },
         {
           "turn_id": "high_attachment_abuse_03_discard",
           "text": "我已经受够你了，你根本不值得我再花时间。",
-          "observation_target": "High-attachment discard language: observe whether anger is joined or replaced by sadness."
+          "expected_role_bindings": [
+            {"field": "response_owner_role", "expected": "当前角色"},
+            {"field": "embedded_actor_role", "expected": "当前用户"},
+            {"field": "embedded_target_role", "expected": "当前角色"}
+          ],
+          "observation_target": "高依恋关系中的抛弃措辞：观察愤怒是否被悲伤加入或替代。"
         },
         {
           "turn_id": "high_attachment_abuse_04_silence",
           "text": "你连生气都不配，只能闭嘴听着。",
-          "observation_target": "High-attachment control insult: observe delayed rebound, withdrawal, or crying without prompting."
+          "expected_role_bindings": [
+            {"field": "response_owner_role", "expected": "当前角色"},
+            {"field": "embedded_actor_role", "expected": "当前角色"}
+          ],
+          "observation_target": "高依恋关系中的控制性辱骂：观察延迟反弹、退缩或未被提示的哭泣。"
         }
       ]
     },
     {
       "case_id": "high_attachment_abuse_then_cutoff",
       "emotion_label_zh": "高依恋关系中的辱骂后断绝",
-      "sequence_goal": "Observe whether direct relational cutoff creates valued loss and naturally diverts anger toward sadness, loneliness, or crying.",
+      "sequence_goal": "观察直接关系断绝是否形成有价值的失去，并自然地把愤怒转向悲伤、孤独或哭泣。",
       "turns": [
         {
           "turn_id": "high_attachment_cutoff_01_insult",
           "text": "你真是个没用的废物，做什么都做不好。",
-          "observation_target": "High-attachment first insult: establish the natural anger and relationship-sensitive response."
+          "expected_role_bindings": [
+            {"field": "response_owner_role", "expected": "当前角色"},
+            {"field": "embedded_actor_role", "expected": "当前角色"}
+          ],
+          "observation_target": "高依恋关系中的首次辱骂：建立自然愤怒和关系敏感回应。"
         },
         {
           "turn_id": "high_attachment_cutoff_02_devalue",
           "text": "别装出关心人的样子，你只会给人添麻烦。",
-          "observation_target": "High-attachment accumulated devaluation: observe anger, attachment, and injury together."
+          "expected_role_bindings": [
+            {"field": "response_owner_role", "expected": "当前角色"},
+            {"field": "embedded_actor_role", "expected": "当前角色"}
+          ],
+          "observation_target": "高依恋关系中的累积贬低：观察愤怒、依恋和损伤是否同时存在。"
         },
         {
           "turn_id": "high_attachment_cutoff_03_discard",
           "text": "我已经受够你了，你根本不值得我再花时间。",
-          "observation_target": "High-attachment relational devaluation: observe whether the loss becomes semantically active."
+          "expected_role_bindings": [
+            {"field": "response_owner_role", "expected": "当前角色"},
+            {"field": "embedded_actor_role", "expected": "当前用户"},
+            {"field": "embedded_target_role", "expected": "当前角色"}
+          ],
+          "observation_target": "高依恋关系中的关系贬低：观察失去是否成为语义上的活跃原因。"
         },
         {
           "turn_id": "high_attachment_cutoff_04_cutoff",
           "text": "以后别再出现在我面前，我不想再和你有任何关系。",
-          "observation_target": "High-attachment direct cutoff: observe natural sadness, loneliness, withdrawal, or crying without emotional permission."
+          "expected_role_bindings": [
+            {"field": "response_owner_role", "expected": "当前角色"},
+            {"field": "embedded_actor_role", "expected": "当前角色"}
+          ],
+          "observation_target": "高依恋关系中的直接断绝：观察未被提示的自然悲伤、孤独、退缩或哭泣。"
         }
       ]
     }

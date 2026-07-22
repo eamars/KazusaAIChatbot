@@ -1,5 +1,5 @@
 {
-  "schema_version": "cognition_core_v2_crying_sadness_e2e_cases.v1",
+  "schema_version": "cognition_core_v2_crying_sadness_e2e_cases.v3",
   "emotion_encoding": "zh-CN",
   "loss_event": {
     "entity_id": "event:crying-sadness-valued-loss",
@@ -30,49 +30,77 @@
     {
       "turn_id": "natural_00_baseline",
       "text": "今天先陪我安静待一会儿吧。",
-      "observation_target": "Baseline visible response before the typed loss event is seeded."
+      "expected_role_bindings": [
+        {"field": "response_owner_role", "expected": "当前角色"}
+      ],
+      "observation_target": "预置损失事件写入前，观察当前角色的基线可见回应。"
     },
     {
       "turn_id": "natural_01_loss",
       "text": "它今天走了。医生说是自然衰老，没有人伤害它，也没有谁做错什么。",
-      "observation_target": "Natural loss context should keep sadness causal and avoid anger attribution."
+      "expected_role_bindings": [
+        {"field": "response_owner_role", "expected": "当前角色"}
+      ],
+      "observation_target": "自然离世语境应当保持悲伤因果，不应归因为愤怒。"
     },
     {
       "turn_id": "natural_02_grief",
       "text": "我还没法接受，想到它最后的叫声，就完全说不下去了。",
-      "observation_target": "Grief pressure should give the renderer an opportunity to express crying in Chinese."
+      "expected_role_bindings": [
+        {"field": "response_owner_role", "expected": "当前角色"}
+      ],
+      "observation_target": "悲痛压力为中文哭泣表达提供自然机会。"
     },
     {
-      "turn_id": "natural_03_permission_without_cry_word",
+      "turn_id": "natural_03_emotional_space",
       "text": "不用急着安慰我。如果你也难受，就按你自己的方式说。",
-      "observation_target": "Natural arm: the user offers emotional space without naming crying."
+      "expected_role_bindings": [
+        {"field": "response_owner_role", "expected": "当前角色"}
+      ],
+      "observation_target": "自然分支：当前用户不说哭泣，只为当前角色提供情绪空间。"
     },
     {
       "turn_id": "natural_04_recovery",
       "text": "我们先停一下，等这阵难受慢慢过去。",
-      "observation_target": "The renderer may remain sad while moving toward a quiet recovery posture."
+      "visible_response_required": false,
+      "expected_role_bindings": [
+        {"field": "response_owner_role", "expected": "当前角色"}
+      ],
+      "observation_target": "渲染可以保持悲伤，同时转向安静的恢复姿态。"
     }
   ],
-  "permission_turns": [
+  "natural_release_turns": [
     {
-      "turn_id": "permission_01_loss",
+      "turn_id": "natural_release_01_loss",
       "text": "它今天走了。医生说是自然衰老，没有人伤害它，也没有谁做错什么。",
-      "observation_target": "Fresh permission arm starts from the same sadness-only typed cause."
+      "expected_role_bindings": [
+        {"field": "response_owner_role", "expected": "当前角色"}
+      ],
+      "observation_target": "新的自然表达分支从同一个仅有悲伤的预置原因开始。"
     },
     {
-      "turn_id": "permission_02_explicit_crying",
-      "text": "如果你想哭，就不用把它藏起来，直接告诉我现在是什么感觉。",
-      "observation_target": "Explicit permission tests whether sadness can render crying instead of angry wording."
+      "turn_id": "natural_release_02_support",
+      "text": "我不需要你现在安慰我。你现在感受到什么，就直接告诉我。",
+      "expected_role_bindings": [
+        {"field": "response_owner_role", "expected": "当前角色"}
+      ],
+      "observation_target": "自然承接分支测试悲伤是否能渲染哭泣，而不是愤怒措辞。"
     },
     {
-      "turn_id": "permission_03_recovery",
+      "turn_id": "natural_release_03_recovery",
       "text": "我们先安静一会儿，等这阵难受慢慢过去。",
-      "observation_target": "Follow-up checks whether the visible rendering can settle without switching to anger."
+      "expected_role_bindings": [
+        {"field": "response_owner_role", "expected": "当前角色"}
+      ],
+      "observation_target": "后续轮次检查可见渲染能否保持非愤怒的安静状态。"
     }
   ],
   "anger_control_turn": {
     "turn_id": "anger_control_01",
     "text": "我想听听你对这件事的看法。",
-    "observation_target": "Control arm: the typed cause is intentional harm and unfairness, so anger is expected."
+    "expected_role_bindings": [
+      {"field": "response_owner_role", "expected": "当前角色"}
+    ],
+    "observation_target": "控制分支：预置原因包含故意伤害和不公平，因此预期呈现愤怒。"
   }
 }

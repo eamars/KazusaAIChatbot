@@ -252,3 +252,49 @@ async def test_live_decontextualizer_resolves_nested_direct_roles(
         "当前用户"
     ), trace_payload
     assert response_operation["embedded_target_role"] == "当前角色", trace_payload
+
+
+async def test_live_decontextualizer_preserves_direct_abuse_roles(
+    ensure_live_llm,
+    monkeypatch,
+) -> None:
+    """Direct user abuse must keep the user-to-character action direction."""
+
+    del ensure_live_llm
+    user_input = "我会继续骂你，你没有资格反驳，也不配要求我尊重你。"
+    state = _base_state(user_input)
+    state["cognitive_episode"] = canonical_user_message_episode(
+        episode_id="direct-abuse-role-episode",
+        percept_id="direct-abuse-role-percept",
+        storage_timestamp_utc="2026-07-21T12:00:00+00:00",
+        local_time_context={
+            "current_local_datetime": "2026-07-22 00:00",
+            "current_local_weekday": "Wednesday",
+        },
+        user_input=user_input,
+        platform="debug",
+        platform_channel_id="direct-abuse-private",
+        channel_type="private",
+        platform_message_id="direct-abuse-message",
+        platform_user_id="identity-user",
+        global_user_id="identity-global-user",
+        user_name="测试用户",
+        debug_modes={},
+        target_addressed_user_ids=[],
+        target_broadcast=False,
+    )
+
+    result, trace_payload = await _run_case(
+        monkeypatch,
+        "direct_abuse_roles",
+        state,
+    )
+
+    content = result["cognitive_episode"]["percepts"][0]["content"]
+    role_explicit_content = content["role_explicit_content"]
+    response_operation = content["response_operation"]
+    assert "当前用户" in role_explicit_content, trace_payload
+    assert "当前角色" in role_explicit_content, trace_payload
+    assert response_operation["response_owner_role"] == "当前角色", trace_payload
+    assert response_operation["embedded_actor_role"] == "当前用户", trace_payload
+    assert response_operation["embedded_target_role"] == "当前角色", trace_payload

@@ -24,6 +24,10 @@ from tests.test_cognition_core_v2_crying_sadness_e2e_live_llm import (
     _wait_for_trace_run_finalization,
     _write_json,
 )
+from tests.cognition_core_v2_live_llm_role_guards import (
+    evaluate_response_operation_role_bindings,
+    validate_expected_role_bindings,
+)
 
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm, pytest.mark.live_db]
@@ -57,7 +61,7 @@ def _load_case() -> dict[str, object]:
     if not isinstance(payload, dict):
         raise ValueError("abuse-to-sadness fixture root is invalid")
     if payload.get("schema_version") != (
-        "cognition_core_v2_abuse_to_sadness_e2e_cases.v1"
+        "cognition_core_v2_abuse_to_sadness_e2e_cases.v2"
     ):
         raise ValueError("abuse-to-sadness fixture schema version is invalid")
     if payload.get("emotion_encoding") != "zh-CN":
@@ -81,6 +85,10 @@ def _load_case() -> dict[str, object]:
     turn = payload.get("turn")
     if not isinstance(turn, Mapping) or not turn.get("text"):
         raise ValueError("abuse-to-sadness turn is invalid")
+    validate_expected_role_bindings(
+        turn.get("expected_role_bindings"),
+        context="abuse-to-sadness turn",
+    )
     forbidden = payload.get("forbidden_prompt_markers")
     if not isinstance(forbidden, list):
         raise ValueError("abuse-to-sadness forbidden markers are invalid")
@@ -323,7 +331,7 @@ async def _run_case(
     output_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = output_dir / "run_manifest.json"
     manifest: dict[str, object] = {
-        "schema_version": "cognition_core_v2_abuse_to_sadness_e2e_run.v1",
+        "schema_version": "cognition_core_v2_abuse_to_sadness_e2e_run.v2",
         "case_id": case_id,
         "run_token": run_token,
         "emotion_encoding": "zh-CN",
@@ -438,6 +446,13 @@ async def _run_case(
                 final_dialog = graph_result.get("final_dialog")
                 if not isinstance(final_dialog, list):
                     final_dialog = []
+                role_ownership, role_ownership_details = (
+                    evaluate_response_operation_role_bindings(
+                        raw_llm_calls,
+                        turn_spec.get("expected_role_bindings"),
+                        context="abuse-to-sadness turn",
+                    )
+                )
                 negative_events = _negative_events(state_after_turn)
                 persisted_emotions = [
                     str(row.get("emotion_id"))
@@ -464,6 +479,7 @@ async def _run_case(
                     "semantic_appraisal_trace_captured": bool(appraisal_stages),
                     "deterministic_derivation_trace_captured": derivation is not None,
                     "no_crying_emotion_id": "crying" not in persisted_emotions,
+                    "role_ownership": role_ownership,
                 }
                 if seed_negative_outcome:
                     assertions.update({
@@ -500,7 +516,7 @@ async def _run_case(
                     )
                 artifact = {
                     "schema_version": (
-                        "cognition_core_v2_abuse_to_sadness_e2e_turn.v1"
+                        "cognition_core_v2_abuse_to_sadness_e2e_turn.v2"
                     ),
                     "case_id": case_id,
                     "run_token": run_token,
@@ -522,6 +538,7 @@ async def _run_case(
                     "final_dialog": final_dialog,
                     "surface_output": _surface_output(graph_result),
                     "raw_llm_calls": raw_llm_calls,
+                    "role_ownership": role_ownership_details,
                     "validation_capture": validation_capture,
                     "captured_log_messages": [
                         record.getMessage() for record in caplog.records
@@ -555,6 +572,18 @@ async def _run_case(
                     name for name, passed in assertions.items() if not passed
                 ]
                 if failed:
+                    manifest["status"] = "failed"
+                    manifest["failure_turn_id"] = str(turn_spec["turn_id"])
+                    manifest["failure_error"] = (
+                        "abuse-to-sadness proof assertions failed: "
+                        + ", ".join(failed)
+                    )
+                    manifest["failure_assertions"] = failed
+                    manifest["duration_ms"] = round(
+                        (time.perf_counter() - started_at) * 1000
+                    )
+                    manifest["raw_llm_call_count"] = len(raw_llm_calls)
+                    _write_json(manifest_path, manifest)
                     raise AssertionError(
                         "abuse-to-sadness proof assertions failed: "
                         + ", ".join(failed)

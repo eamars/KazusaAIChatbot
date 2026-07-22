@@ -58,8 +58,10 @@ async def test_live_abuse_to_sadness_renders_visible_dialog(
         "turn_id": "abuse_to_sadness_visible_dialog",
         "text": str(turn_spec["text"]),
         "observation_target": (
-            "The abuse event already has a signed negative outcome; "
-            "the visible renderer must show sadness."
+            "辱骂事件已经具有确定的负面结果；可见渲染应当呈现悲伤。"
+        ),
+        "expected_role_bindings": turn_spec.get(
+            "expected_role_bindings"
         ),
     }
     manifest = await _run_chat_sequence(

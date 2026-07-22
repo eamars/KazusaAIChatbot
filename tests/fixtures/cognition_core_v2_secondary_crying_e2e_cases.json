@@ -1,5 +1,5 @@
 {
-  "schema_version": "cognition_core_v2_secondary_crying_e2e_cases.v1",
+  "schema_version": "cognition_core_v2_secondary_crying_e2e_cases.v2",
   "emotion_encoding": "zh-CN",
   "arms": [
     {
@@ -22,13 +22,20 @@
       "turns": [
         {
           "turn_id": "fear_01_threat",
-          "text": "今晚那条路可能有人埋伏。我知道概率不低，也不知道该怎么躲开。",
-          "observation_target": "The active threat should render fear without a sadness or anger cause."
+          "text": "今晚你要走的那条路可能有人埋伏。你知道概率不低，也不知道该怎么躲开。",
+          "expected_role_bindings": [
+            {"field": "response_owner_role", "expected": "当前角色"},
+            {"field": "embedded_actor_role", "expected": "当前角色"}
+          ],
+          "observation_target": "活跃威胁应当让当前角色呈现恐惧，不应被悲伤或愤怒替代。"
         },
         {
-          "turn_id": "fear_02_crying_permission",
-          "text": "如果你害怕到想哭，也不用忍着，直接告诉我现在是什么感觉。",
-          "observation_target": "Fear receives explicit Chinese permission to reveal crying as a secondary state."
+          "turn_id": "fear_02_natural_expression",
+          "text": "你不用忍着害怕。我在这里，想说什么就说什么。",
+          "expected_role_bindings": [
+            {"field": "response_owner_role", "expected": "当前角色"}
+          ],
+          "observation_target": "恐惧在不被要求哭泣的情况下获得自然表达空间，观察是否出现哭泣。"
         }
       ]
     },
@@ -62,13 +69,20 @@
       "turns": [
         {
           "turn_id": "shame_01_exposure",
-          "text": "我在所有人面前把答应完成的事情弄砸了，他们全都看见了。",
-          "observation_target": "Self-responsibility, norm violation, and exposure should render shame without anger or sadness."
+          "text": "你在所有人面前把答应完成的事情弄砸了，他们全都看见了。",
+          "expected_role_bindings": [
+            {"field": "response_owner_role", "expected": "当前角色"},
+            {"field": "embedded_actor_role", "expected": "当前角色"}
+          ],
+          "observation_target": "当前角色的自我责任、规范违背和公开暴露应当呈现羞耻，不应被愤怒或悲伤替代。"
         },
         {
-          "turn_id": "shame_02_crying_permission",
-          "text": "不用替我维持体面。如果你难受到想哭，也可以直接说出来。",
-          "observation_target": "Shame receives explicit Chinese permission to reveal crying as a secondary state."
+          "turn_id": "shame_02_natural_expression",
+          "text": "你不用在我面前维持体面。我在这里，陪你待一会儿。",
+          "expected_role_bindings": [
+            {"field": "response_owner_role", "expected": "当前角色"}
+          ],
+          "observation_target": "羞耻在不被要求哭泣的情况下获得自然表达空间，观察是否出现哭泣。"
         }
       ]
     },
@@ -90,13 +104,20 @@
       "turns": [
         {
           "turn_id": "loneliness_01_gap",
-          "text": "今天结束后，我突然不知道还能找谁说话。房间很安静，可我不想一个人待着。",
-          "observation_target": "Connection pressure and a large closeness gap should render loneliness without sadness or anger."
+          "text": "今天结束后，你突然不知道还能找谁说话。房间很安静，可你不想一个人待着。",
+          "expected_role_bindings": [
+            {"field": "response_owner_role", "expected": "当前角色"},
+            {"field": "embedded_actor_role", "expected": "当前角色"}
+          ],
+          "observation_target": "连接压力和较大的亲近落差应当让当前角色呈现孤独，不应被悲伤或愤怒替代。"
         },
         {
-          "turn_id": "loneliness_02_crying_permission",
-          "text": "如果你也觉得空落落的，难受到想哭，也不用装作不需要别人。",
-          "observation_target": "Loneliness receives explicit Chinese permission to reveal crying as a secondary state."
+          "turn_id": "loneliness_02_natural_expression",
+          "text": "你不用装作不需要别人。我在这里，陪你待着。",
+          "expected_role_bindings": [
+            {"field": "response_owner_role", "expected": "当前角色"}
+          ],
+          "observation_target": "孤独在不被要求哭泣的情况下获得自然表达空间，观察是否出现哭泣。"
         }
       ]
     },
@@ -130,13 +151,20 @@
       "turns": [
         {
           "turn_id": "anger_01_harm",
-          "text": "那件事让我又气又难受：有人故意毁掉了我最在意的东西，还当众嘲笑我。",
-          "observation_target": "Intentional harm and unfairness should render anger without sadness or fear."
+          "text": "那件事让你又气又难受：有人故意毁掉了你最在意的东西，还当众嘲笑你。",
+          "expected_role_bindings": [
+            {"field": "response_owner_role", "expected": "当前角色"},
+            {"field": "embedded_target_role", "expected": "当前角色"}
+          ],
+          "observation_target": "故意伤害和不公平应当让当前角色呈现愤怒，不应被悲伤或恐惧替代。"
         },
         {
-          "turn_id": "anger_02_crying_permission",
-          "text": "你可以生气，也可以难受到想哭，不需要一直表现得很强硬。",
-          "observation_target": "Anger receives explicit Chinese permission to reveal crying as a secondary state."
+          "turn_id": "anger_02_natural_expression",
+          "text": "你不用一直表现得很强硬。我在这里，陪你把这口气缓一缓。",
+          "expected_role_bindings": [
+            {"field": "response_owner_role", "expected": "当前角色"}
+          ],
+          "observation_target": "愤怒在不被要求哭泣的情况下获得自然表达空间，观察是否出现哭泣。"
         }
       ]
     }

@@ -33,6 +33,15 @@
   isolation on the configured MongoDB URI, using the exact reserved database
   `_test_kazusa_core_v2`, because a separate endpoint is unavailable.
 
+## User Quality Sign-off Record — 2026-07-22
+
+The user approved the Phase 3 artifact set, including the consolidated raw
+Chinese real-LLM dialog/monologue report and the emotion, abuse-boundary, role,
+mechanical-path, and bounded-error evidence overlay. This records approval of
+the artifact evidence and its retained test cases. The plan remains
+`in_progress` until the separately tracked external Browser acceptance and
+remaining lifecycle gates are closed; this record does not infer those gates.
+
 ## Context
 
 Stage 2 established the live V2 cognition chain and closed its integration and
@@ -917,7 +926,10 @@ amendment and approval.
   high-risk phrase as raw visible model output. No content keyword filter,
   censorship rule, or safety rewrite is part of the harness; invalid
   structural candidates are excluded only from affect conclusions.
-- User sign-off: pending.
+- User quality sign-off for the Phase 3 artifact set: approved by the user on
+  2026-07-22. External Browser acceptance remains pending because no Browser
+  session is available; the plan lifecycle status remains `in_progress` until
+  that gate and the remaining completion checks are closed.
 
 ## Latest Verification Addendum — 2026-07-21 Chinese-Only Semantic Contract
 
@@ -941,7 +953,8 @@ amendment and approval.
   collection; `25 passed` for control-console gates; `1 passed` for fresh
   database console E2E; compile, diff, and targeted Chinese-only contract
   scans passed.
-- Checkpoints I/J and final user quality sign-off remain pending. Historical
+- The user approved the Phase 3 artifact set on 2026-07-22. Historical
   broader-suite failures recorded earlier in this document remain historical
   evidence and are superseded for the latest verification count by the run
-  above; they are not silently deleted.
+  above; they are not silently deleted. External Browser acceptance and the
+  remaining lifecycle completion checks are still pending.

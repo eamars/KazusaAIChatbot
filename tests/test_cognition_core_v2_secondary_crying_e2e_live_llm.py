@@ -28,6 +28,10 @@ from tests.test_cognition_core_v2_crying_sadness_e2e_live_llm import (
     _wait_for_trace_run_finalization,
     _write_json,
 )
+from tests.cognition_core_v2_live_llm_role_guards import (
+    evaluate_response_operation_role_bindings,
+    validate_expected_role_bindings,
+)
 
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm, pytest.mark.live_db]
@@ -48,7 +52,7 @@ def _load_cases() -> dict[str, object]:
     if not isinstance(payload, dict):
         raise ValueError("secondary-crying fixture root must be an object")
     if payload.get("schema_version") != (
-        "cognition_core_v2_secondary_crying_e2e_cases.v1"
+        "cognition_core_v2_secondary_crying_e2e_cases.v2"
     ):
         raise ValueError("secondary-crying fixture schema version is invalid")
     if payload.get("emotion_encoding") != "zh-CN":
@@ -81,6 +85,13 @@ def _load_cases() -> dict[str, object]:
                 raise ValueError("secondary-crying turn is invalid")
             if not turn.get("turn_id") or not turn.get("text"):
                 raise ValueError("secondary-crying turn is incomplete")
+            validate_expected_role_bindings(
+                turn.get("expected_role_bindings"),
+                context=(
+                    "secondary-crying turn "
+                    f"{case_id}:{turn.get('turn_id')}"
+                ),
+            )
     if seen != _TARGET_EMOTIONS:
         raise ValueError("secondary-crying fixture does not cover all targets")
     return payload
@@ -335,7 +346,7 @@ async def _run_secondary_case(
     output_dir = _OUTPUT_ROOT / f"{case_id}_{run_token}"
     manifest_path = output_dir / "run_manifest.json"
     manifest: dict[str, object] = {
-        "schema_version": "cognition_core_v2_secondary_crying_e2e_run.v1",
+        "schema_version": "cognition_core_v2_secondary_crying_e2e_run.v2",
         "case_id": case_id,
         "run_token": run_token,
         "emotion_encoding": "zh-CN",
@@ -460,6 +471,17 @@ async def _run_secondary_case(
                     final_dialog = graph_result.get("final_dialog")
                     if not isinstance(final_dialog, list):
                         final_dialog = []
+                    turn_calls = raw_llm_calls[call_start:]
+                    role_ownership, role_ownership_details = (
+                        evaluate_response_operation_role_bindings(
+                            turn_calls,
+                            turn.get("expected_role_bindings"),
+                            context=(
+                                "secondary-crying turn "
+                                f"{case_id}:{turn_id}"
+                            ),
+                        )
+                    )
                     lifecycle_mapping = (
                         lifecycle if isinstance(lifecycle, Mapping) else {}
                     )
@@ -478,15 +500,15 @@ async def _run_secondary_case(
                             projection,
                             expected_emotion=expected_emotion,
                         ),
+                        "role_ownership": role_ownership,
                     }
-                    turn_calls = raw_llm_calls[call_start:]
                     state_after_turn = await get_user_cognition_state(
                         global_user_id,
                     )
                     turn_path = output_dir / f"{turn_index:02d}_{turn_id}.json"
                     turn_artifact = {
                         "schema_version": (
-                            "cognition_core_v2_secondary_crying_e2e_turn.v1"
+                            "cognition_core_v2_secondary_crying_e2e_turn.v2"
                         ),
                         "case_id": case_id,
                         "run_token": run_token,
@@ -535,6 +557,7 @@ async def _run_secondary_case(
                         },
                         "state_after_turn": state_after_turn,
                         "raw_llm_calls": turn_calls,
+                        "role_ownership": role_ownership_details,
                         "captured_log_messages": [
                             record.getMessage() for record in caplog.records
                         ],
@@ -559,7 +582,23 @@ async def _run_secondary_case(
                     manifest_turns.append(turn_summary)
                     _write_json(manifest_path, manifest)
                     print(f"wrote secondary-crying turn evidence: {turn_path}")
-                    _assert_technical_assertions(assertions)
+                    try:
+                        _assert_technical_assertions(assertions)
+                    except AssertionError as exc:
+                        manifest["status"] = "failed"
+                        manifest["failure_turn_id"] = turn_id
+                        manifest["failure_error"] = str(exc)
+                        manifest["failure_assertions"] = [
+                            name
+                            for name, passed in assertions.items()
+                            if not passed
+                        ]
+                        manifest["duration_ms"] = round(
+                            (time.perf_counter() - started_at) * 1000
+                        )
+                        manifest["raw_llm_call_count"] = len(raw_llm_calls)
+                        _write_json(manifest_path, manifest)
+                        raise
     finally:
         post_turn.settle_episode_trace = original_settle
         service._settle_runtime_episode_trace = original_runtime_settle

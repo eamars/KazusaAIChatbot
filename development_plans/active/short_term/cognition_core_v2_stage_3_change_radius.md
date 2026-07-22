@@ -13,6 +13,14 @@
 - Change-control rule: amend this file and obtain plan approval before
   changing an unlisted production or test path.
 
+## User Quality Sign-off Record — 2026-07-22
+
+The user approved the Phase 3 artifact set, including the retained real-LLM
+emotion, abuse-boundary, role, mechanical-path, bounded-error, and consolidated
+Chinese dialog/monologue evidence. This inventory remains `in_progress` with
+the parent plan until the separately tracked external Browser acceptance and
+remaining lifecycle completion checks are closed.
+
 ## Exact Change Surface
 
 ### Create
