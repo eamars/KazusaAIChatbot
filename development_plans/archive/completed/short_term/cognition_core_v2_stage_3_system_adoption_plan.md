@@ -6,7 +6,7 @@
   Core V2 episode, action, surface, trace, and persistence contracts when the
   service starts against an empty database.
 - Plan class: high_risk_migration.
-- Status: in_progress.
+- Status: completed.
 - Mandatory skills: `development-plan`, `py-style`,
   `test-style-and-execution`, `local-llm-architecture`,
   `no-prepost-user-input`, `cjk-safety`, `debug-llm`, `character-test`, and
@@ -38,9 +38,8 @@
 The user approved the Phase 3 artifact set, including the consolidated raw
 Chinese real-LLM dialog/monologue report and the emotion, abuse-boundary, role,
 mechanical-path, and bounded-error evidence overlay. This records approval of
-the artifact evidence and its retained test cases. The plan remains
-`in_progress` until the separately tracked external Browser acceptance and
-remaining lifecycle gates are closed; this record does not infer those gates.
+the artifact evidence and its retained test cases. Final lifecycle closure is
+recorded in the 2026-07-23 closeout below.
 
 ## Context
 
@@ -672,12 +671,12 @@ required order is:
   - Evidence: source-to-owner matrix exercised; deletion inventory clean.
   - Handoff: reread plan; start G.
   - Sign-off: `parent/2026-07-19`.
-- [ ] G — operations, console, scripts, and documentation aligned.
+- [x] G — operations, console, scripts, and documentation aligned.
   - Files/steps: execution companion G1-G8.
   - Verify: ops/trace/script tests and control-console browser checks.
   - Evidence: screenshots/contract captures, redaction proof, doc-link check.
   - Handoff: reread plan; start H.
-  - Sign-off: `<parent/date>`.
+  - Sign-off: `parent/2026-07-23`.
 - [x] H — fresh-database E2E and real-LLM proof complete.
   - Files/steps: execution companion H1-H11.
   - Verify: cold start, five sources, restart, final sequential quality set.
@@ -685,14 +684,14 @@ required order is:
     review, call/latency ledger, native schema manifest.
   - Handoff: reread plan; start I.
   - Sign-off: `parent/2026-07-19`.
-- [ ] I — full deterministic regression and Stage 4 handoff complete.
+- [x] I — full deterministic regression and Stage 4 handoff complete.
   - Files/steps: execution companion I1-I6.
   - Verify: all exact I commands, `git diff --check`, link and placeholder
     scans.
   - Evidence: regression totals, allowed exceptions, Stage 4 input paths.
   - Handoff: reread plan; start J.
-  - Sign-off: `<parent/date>`.
-- [ ] J — independent code review and user sign-off complete.
+  - Sign-off: `parent/2026-07-23`.
+- [x] J — independent code review and user sign-off complete.
   - Scope: plan/manifest alignment, full diff, architecture/style, DB safety,
     budgets, tests, evidence, deletions, Stage 4 separation, and the
     emotion/boundary/bounded-error sign-off overlay.
@@ -700,14 +699,14 @@ required order is:
   - Evidence: reviewer identity/findings, remediation, reruns, residual risks,
     user quality decision, lifecycle update.
   - Handoff: archive Stage 3 only after all findings and user gates close.
-  - Sign-off: `<parent/reviewer/user/date>`.
+  - Sign-off: `Hilbert / user / 2026-07-23`.
 
 Current execution evidence and external gate status are recorded in
 `test_artifacts/cognition_core_v2/stage_3/checkpoint_i_verification_summary.md`.
-Checkpoints B-F and the technical H gates are complete. The revised 120-second
-p95 latency gate passes for the frozen sequence; repository-wide contract
-reconciliation is still open, in-app Browser acceptance is environment-pending,
-and final character-quality/user sign-off remains open.
+Checkpoints B-J are complete. The revised 120-second p95 latency gate passes
+for the frozen sequence. The in-app Browser exposed no session, so the accepted
+visual evidence uses the system-Chrome Playwright path; the user accepted the
+failure-mode screenshots as the artifact on 2026-07-23.
 
 ## Verification
 
@@ -901,19 +900,16 @@ amendment and approval.
   real-LLM commands completed one case at a time; the source comparison and
   latency disposition are recorded in `focused_source_comparison.md`.
   Technical completion carries the quality and latency residuals listed there.
-- Broader non-live collection note: the manifest-defined affected suites are
-  green. The final repository-wide non-live collection reported 3,229 passed,
-  2 skipped, 21 failures, and 744 deselected. The 21 failures are outside the
-  manifest's targeted affected-regression command set but within the broader
-  change-radius inventory; the exact list is recorded in
+- Broader non-live collection note at the 2026-07-19 checkpoint: the manifest-
+  defined affected suites were green, while 21 broader failures were retained
+  for later reconciliation. The final closeout reran that inventory at 3,296
+  passed, 2 skipped, and 759 deselected; the historical summary remains at
   `test_artifacts/cognition_core_v2/stage_3/broad_non_live_regression_summary.md`.
-  They remain open for separate contract reconciliation. This result keeps
-  Checkpoint I open and is not converted into an unreviewed Stage 3
-  production change.
-- Control-console/browser review: API and external Playwright E2E are green;
-  in-app Browser acceptance remains pending because no session is available.
-- Native schema manifest and Stage 4 handoff: schema-manifest generation is
-  verified; final handoff remains pending until H/I/J close.
+- Control-console/browser review at the earlier checkpoint used external
+  Playwright because no in-app Browser session was available. The final
+  system-Chrome screenshots were accepted by the user as the visual artifact.
+- Native schema manifest and Stage 4 handoff were verified; the final handoff
+  is recorded in the closeout below.
 - Independent code review: completed by `Hilbert`; remediation and affected
   reruns are recorded in the Stage 3 verification summary.
 - Emotion/boundary/bounded-error sign-off overlay: the readable consolidation at
@@ -927,9 +923,8 @@ amendment and approval.
   censorship rule, or safety rewrite is part of the harness; invalid
   structural candidates are excluded only from affect conclusions.
 - User quality sign-off for the Phase 3 artifact set: approved by the user on
-  2026-07-22. External Browser acceptance remains pending because no Browser
-  session is available; the plan lifecycle status remains `in_progress` until
-  that gate and the remaining completion checks are closed.
+  2026-07-22. Final Stage 3 closure and screenshot acceptance were directed by
+  the user on 2026-07-23 and are recorded in the closeout below.
 
 ## Latest Verification Addendum — 2026-07-21 Chinese-Only Semantic Contract
 
@@ -953,11 +948,34 @@ amendment and approval.
   collection; `25 passed` for control-console gates; `1 passed` for fresh
   database console E2E; compile, diff, and targeted Chinese-only contract
   scans passed.
-- The user approved the Phase 3 artifact set on 2026-07-22. Historical
-  broader-suite failures recorded earlier in this document remain historical
-  evidence and are superseded for the latest verification count by the run
-  above; they are not silently deleted. External Browser acceptance and the
-  remaining lifecycle completion checks are still pending.
+- The user approved the Phase 3 artifact set on 2026-07-22. The historical
+  broader-suite count is superseded by the final closeout run; the evidence is
+  retained rather than deleted.
+
+## Final Stage 3 Closeout — 2026-07-23
+
+- The user directed Stage 3 closure after accepting the rendered failure-mode
+  screenshots as the visual artifact. The accepted browser path is the
+  system-Chrome Playwright harness; the in-app Browser had no available
+  session, and this limitation is preserved as an environment disposition.
+- RCA closure: the settlement graph lost a valid top-level `summary` field in
+  console projection, so the inspector showed `No approved semantic detail
+  reported.` The existing allowlist and inspector order now preserve `summary`.
+  The Stage 3 handoff fixture also had a stale four-node expectation; it now
+  asserts the six-node debug graph that the fixture emits.
+- Final verification: the repository non-live collection recorded **3,296
+  passed, 2 skipped, and 759 deselected** with one existing dependency warning.
+  The affected console/API/browser gate recorded **48 passed** with the same
+  warning. Documentation/harmonization recorded **10 passed**; compileall,
+  diff validation, placeholder scan, and legacy-inventory scans passed.
+- The prior 40-case fresh-database real-LLM sequence, one-at-a-time
+  source/emotion/boundary/bounded-error overlay, native schema manifest,
+  latency disposition, and independent `Hilbert` review remain the required
+  Stage 3 evidence inputs. Review fixes were rerun at the affected gates.
+- Stage 3 is complete and hands Stage 4 the frozen native schema manifest,
+  fresh-database evidence, legacy inventory, exact migration-only boundary,
+  and the final release-candidate revision. No production database access,
+  migration, censorship, or semantic emotion rewrite is included.
 
 ## Latest Verification Addendum — 2026-07-23 Native V2 Failure-Mode Closure
 
@@ -985,12 +1003,11 @@ amendment and approval.
   required branch failures, collapse/action failures, missing/malformed native
   telemetry, metric/partition contradictions, orphan edges, browser rendering,
   and semantically wrong but structurally valid model output.
-- This closes the failure-coverage implementation subgate. Stage 3 remains
-  `in_progress`: the in-app Browser acceptance gate, the remaining operations
-  and documentation checklist items, and Checkpoint I reconciliation of the
-  previously recorded 21 broader non-live failures remain open. Checkpoint J
-  artifact-quality sign-off remains complete; full Stage 3 completion and the
-  Stage 4 handoff remain pending those lifecycle gates.
+- This closes the failure-coverage implementation subgate. At the time of this
+  addendum, the in-app Browser session and broader regression reconciliation
+  were still open; both dispositions are superseded by the final closeout
+  below. Checkpoint J artifact-quality sign-off remains part of the final
+  completed lifecycle record.
 - The retained real-LLM emotion/boundary evidence remains unchanged. This
   closure adds typed failure observability and test guardrails; it adds no
   censorship, content filter, or semantic emotion rewrite.

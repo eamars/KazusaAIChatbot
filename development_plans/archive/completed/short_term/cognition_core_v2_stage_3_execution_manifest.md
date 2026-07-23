@@ -7,7 +7,7 @@
 - Exact inventory companion:
   [cognition_core_v2_stage_3_change_radius.md](cognition_core_v2_stage_3_change_radius.md).
 - Plan class: high_risk_migration.
-- Status: in_progress.
+- Status: completed.
 - Authority: the parent plan governs; user-authorized implementation is active;
   this file grants no production-data authority.
 - Reread rule: reread the parent and this complete manifest after compaction
@@ -17,10 +17,11 @@
 
 The user approved the Phase 3 artifact set, including the consolidated raw
 Chinese real-LLM dialog/monologue report and the emotion, abuse-boundary, role,
-mechanical-path, and bounded-error evidence overlay. This closes artifact
-quality review for the retained Phase 3 evidence. The manifest remains
-`in_progress` while the separately tracked external Browser acceptance and
-remaining lifecycle completion checks are pending.
+mechanical-path, bounded-error, and rendered failure-mode evidence overlays.
+The user directed final Stage 3 closure on 2026-07-23 after accepting the
+system-Chrome screenshots as the visual artifact. The in-app Browser had no
+available session; this is recorded as an environment disposition rather than
+an in-app Browser validation claim.
 
 ## Approved Remediation Decision — 2026-07-19
 
@@ -1222,7 +1223,7 @@ venv\Scripts\python -m compileall -q src/kazusa_ai_chatbot src/control_console s
 venv\Scripts\python -m pytest tests/test_stage3_documentation_links.py tests/test_documentation_harmonization.py -q
 git diff --check
 $placeholderPattern = ('T' + 'BD|T' + 'ODO|similar' + ' to|handle' + ' edge cases|add' + ' tests')
-rg -n $placeholderPattern development_plans/active/short_term/cognition_core_v2_stage_3_system_adoption_plan.md development_plans/active/short_term/cognition_core_v2_stage_3_execution_manifest.md development_plans/active/short_term/cognition_core_v2_stage_3_change_radius.md
+rg -n $placeholderPattern development_plans/archive/completed/short_term/cognition_core_v2_stage_3_system_adoption_plan.md development_plans/archive/completed/short_term/cognition_core_v2_stage_3_execution_manifest.md development_plans/archive/completed/short_term/cognition_core_v2_stage_3_change_radius.md
 ```
 
 Expected: compile, link, harmonization, and diff checks pass. Placeholder scan
@@ -1304,23 +1305,21 @@ row counts, or an executable transform derived without production discovery.
   103,807 ms, within the user-approved 120,000 ms ceiling. The 125,418 ms
   maximum remains a separately reported tail metric. No LLM budget or output
   cap was raised.
-- The final broader non-live collection recorded 3,229 passed, 2 skipped, 21
-  failures, and 744 deselected after `tests/conftest.py` supplied the
-  canonical profile path by default. The 21 failures are outside the
-  manifest's targeted affected-regression command set but within the broader
-  change-radius inventory; the exact list is recorded in
-  `test_artifacts/cognition_core_v2/stage_3/broad_non_live_regression_summary.md`.
-  Checkpoint I remains open for that reconciliation.
-- In-app Browser acceptance is externally pending because no Browser session
-  is available; the external console E2E passes.
+- The 2026-07-19 broader non-live collection recorded 3,229 passed, 2 skipped,
+  21 failures, and 744 deselected. The final closeout reran the collection at
+  3,296 passed, 2 skipped, and 759 deselected; the historical failure list is
+  retained in `test_artifacts/cognition_core_v2/stage_3/broad_non_live_regression_summary.md`.
+- In-app Browser acceptance was unavailable because no session was exposed;
+  the user accepted the system-Chrome Playwright screenshot artifact and the
+  environment disposition is preserved here.
 - Independent review completed under reviewer identity `Hilbert`. The review
   findings were remediated or dispositioned, and the affected deterministic
-  gates were rerun. The user approved the Phase 3 artifact set on 2026-07-22;
-  external Browser acceptance and the remaining lifecycle completion checks
-  remain pending.
+  gates were rerun. The user approved the Phase 3 artifact set on 2026-07-22
+  and directed final closure on 2026-07-23.
 - Checkpoint J artifact-quality sign-off: complete on 2026-07-22.
-- Checkpoint J full Stage 3 completion: pending external Browser acceptance and
-  the remaining lifecycle completion checks.
+- Checkpoint J full Stage 3 completion: completed on 2026-07-23 with the
+  user-accepted system-Chrome visual artifact and documented in-app Browser
+  environment disposition.
 
 ## Latest Verification Addendum — 2026-07-23 Native V2 Failure-Mode Closure
 
@@ -1338,13 +1337,13 @@ row counts, or an executable transform derived without production discovery.
   validates, projects, redacts, and delivers bounded evidence. Structurally
   valid but semantically wrong model output remains quality evidence; no
   censorship or semantic emotion rewrite is added.
-- Evidence: 55 focused deterministic passes, 5 non-DB cognition integration
-  passes with 4 intentional deselections, 4 system-Chrome cognition-graph E2E
-  passes, successful Python compilation, and successful diff validation. The
-  in-app Browser had no available session, so its acceptance gate remains open.
-- This addendum closes the failure-mode implementation subgate. The manifest
-  remains open for in-app Browser acceptance, remaining G/I/J lifecycle checks,
-  and reconciliation of the previously recorded broader-suite failures.
+- Evidence at this addendum included 55 focused deterministic passes, 5 non-DB
+  cognition integration passes with 4 intentional deselections, 4
+  system-Chrome cognition-graph E2E passes, successful Python compilation, and
+  successful diff validation. The later closeout reran the broader collection,
+  affected console gate, and documentation gate.
+- This addendum closed the failure-mode implementation subgate; the final
+  closeout below closed the remaining lifecycle gates.
 
 ## Latest Verification Addendum — 2026-07-21 Chinese-Only Semantic Contract
 
@@ -1378,5 +1377,21 @@ row counts, or an executable transform derived without production discovery.
   evidence-contract corrections and do not add a crying tag or a verbal
   permission path.
 - The user approved the Phase 3 artifact set on 2026-07-22. Checkpoint J
-  artifact-quality sign-off is complete; external Browser acceptance and the
-  remaining lifecycle completion checks are still pending.
+  artifact-quality sign-off and final lifecycle closure were completed on
+  2026-07-23.
+
+## Final Stage 3 Closeout — 2026-07-23
+
+- J1-J5 are closed by the completed `Hilbert` review, affected-gate reruns,
+  the complete evidence package, and the user's explicit Stage 3 closure
+  instruction after accepting the system-Chrome screenshot artifact.
+- J6 is executed by setting the three Stage 3 records to `completed`, moving
+  them together into `development_plans/archive/completed/short_term/`, and
+  updating the registry and Stage 4 input links.
+- Final gates are green: 3,296 non-live passes, 2 skipped, 759 deselected;
+  48 affected console/API/browser passes; 10 documentation/harmonization
+  passes; compileall, diff, placeholder, and legacy scans passed. The one
+  dependency warning is pre-existing and non-blocking.
+- The console RCA fixed top-level `summary` projection and the stale six-node
+  handoff expectation. The final failure-mode report and screenshots remain
+  preserved under `test_artifacts/cognition_core_v2/stage_3/`.

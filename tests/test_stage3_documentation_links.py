@@ -68,15 +68,15 @@ def test_stage3_plan_companions_and_stage4_boundary_are_linked() -> None:
     """Lifecycle docs must expose the execution companions and handoff."""
 
     plan = _read(
-        "development_plans/active/short_term/"
+        "development_plans/archive/completed/short_term/"
         "cognition_core_v2_stage_3_system_adoption_plan.md",
     )
     manifest = _read(
-        "development_plans/active/short_term/"
+        "development_plans/archive/completed/short_term/"
         "cognition_core_v2_stage_3_execution_manifest.md",
     )
     radius = _read(
-        "development_plans/active/short_term/"
+        "development_plans/archive/completed/short_term/"
         "cognition_core_v2_stage_3_change_radius.md",
     )
 

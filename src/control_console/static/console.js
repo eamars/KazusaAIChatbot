@@ -955,6 +955,7 @@ function cognitionGraphInspectorRows(node) {
   const rows = [];
   const fieldOrder = [
     ["input", "Input"],
+    ["summary", "Summary"],
     ["reply_context", "Reply context"],
     ["decision", "Decision"],
     ["reasoning", "Reasoning"],
@@ -1049,6 +1050,7 @@ function cognitionGraphFirstSemanticValue(detail) {
   const fieldOrder = [
     "input",
     "reply_context",
+    "summary",
     "decision",
     "reasoning",
     "parallel_execution",

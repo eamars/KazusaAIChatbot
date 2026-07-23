@@ -42,9 +42,6 @@ long_term/todo.md
 | [coding_agent_assessment_gap_phase_c_plan.md](archive/completed/short_term/coding_agent_assessment_gap_phase_c_plan.md) | High-risk coding-agent assessment gap plan for typed blockers, affordances, approval evidence, locks, and benchmark seam | completed |
 | [coding_agent_assessment_gap_phase_d_plan.md](active/short_term/coding_agent_assessment_gap_phase_d_plan.md) | High-risk coding-agent migration plan for a generic JSON action loop, persistent repository index, exploration-cap removal, and delete/rename | in progress |
 | [coding_agent_full_workflow_hardening_plan_2.md](active/short_term/coding_agent_full_workflow_hardening_plan_2.md) | Large coding-agent full workflow hardening plan | completed |
-| [cognition_core_v2_stage_3_system_adoption_plan.md](active/short_term/cognition_core_v2_stage_3_system_adoption_plan.md) | High-risk big-bang native V2 whole-system adoption plan covering automatic profile bootstrap, five grounded trigger sources, action availability, single trace settlement, scaffold retirement, and fresh-database proof; implementation in progress | in progress |
-| [cognition_core_v2_stage_3_execution_manifest.md](active/short_term/cognition_core_v2_stage_3_execution_manifest.md) | Mandatory Stage 3 contract, LLM budget, checkpoint, command, and verification companion | in progress |
-| [cognition_core_v2_stage_3_change_radius.md](active/short_term/cognition_core_v2_stage_3_change_radius.md) | Mandatory Stage 3 exact Create/Modify/Delete/Keep inventory and change-control boundary | in progress |
 | [cognition_core_v2_stage_4_production_database_migration_plan.md](active/short_term/cognition_core_v2_stage_4_production_database_migration_plan.md) | Non-executable production database discovery, backup, transformation, deployment, rollback, and cutover placeholder; blocked on completed Stage 3 and explicit production authority | draft |
 | [cognition_graph_semantic_observability_plan.md](active/short_term/cognition_graph_semantic_observability_plan.md) | Large cognition graph semantic observability and shared inspector contract change | completed |
 
@@ -302,6 +299,20 @@ accepted policy uses organic discouragement and pass-through model variation.
 | Moved from active bugfix to superseded archive | `dialog_visible_speech_and_semantic_fidelity_bugfix_plan.md` |
 | Activated planning boundary | `cognition_core_v2_stage_3_system_adoption_plan.md`, its mandatory execution and change-radius companions, and the Stage 4 production-database placeholder |
 
+### 2026-07-23 Cognition Core V2 Stage 3 closure
+
+Stage 3 completed after the repository-wide non-live collection, affected
+console/API/browser gates, static/document checks, fresh-database and real-LLM
+evidence review, failure-mode screenshot acceptance, independent review
+remediation, and explicit user closure. The in-app Browser had no session; the
+user accepted the system-Chrome Playwright screenshots as the visual artifact,
+and that environment disposition remains recorded in the archived plans.
+
+| Outcome | Plans |
+|---|---|
+| Moved from active short-term to completed archive | `cognition_core_v2_stage_3_system_adoption_plan.md`, `cognition_core_v2_stage_3_execution_manifest.md`, `cognition_core_v2_stage_3_change_radius.md` |
+| Stage 4 handoff input | `cognition_core_v2_stage_4_production_database_migration_plan.md` remains a draft placeholder requiring separate production authority |
+
 ## Archive
 
 Completed and superseded records live under `archive/`. Use them for historical
@@ -412,6 +423,9 @@ plans.
 | [cognition_core_v2_stage_2_contract_spec.md](archive/completed/short_term/cognition_core_v2_stage_2_contract_spec.md) |
 | [cognition_core_v2_stage_2_execution_manifest.md](archive/completed/short_term/cognition_core_v2_stage_2_execution_manifest.md) |
 | [cognition_core_v2_stage_2_integration_plan.md](archive/completed/short_term/cognition_core_v2_stage_2_integration_plan.md) |
+| [cognition_core_v2_stage_3_change_radius.md](archive/completed/short_term/cognition_core_v2_stage_3_change_radius.md) |
+| [cognition_core_v2_stage_3_execution_manifest.md](archive/completed/short_term/cognition_core_v2_stage_3_execution_manifest.md) |
+| [cognition_core_v2_stage_3_system_adoption_plan.md](archive/completed/short_term/cognition_core_v2_stage_3_system_adoption_plan.md) |
 | [cognition_llm_stage_reconnection_plan.md](archive/completed/short_term/cognition_llm_stage_reconnection_plan.md) |
 | [cognition_visual_directives_control_plan.md](archive/completed/short_term/cognition_visual_directives_control_plan.md) |
 | [cognition_state_integrity_plan.md](archive/completed/short_term/cognition_state_integrity_plan.md) |

@@ -1189,7 +1189,7 @@ Plans may be approved once:
 ## Relationship To The Stage 3 Adoption Plan
 
 The active draft
-`development_plans/active/short_term/cognition_core_v2_stage_3_system_adoption_plan.md`
+`development_plans/archive/completed/short_term/cognition_core_v2_stage_3_system_adoption_plan.md`
 and its mandatory companions define the next native runtime slice of contracts
 1, 2, 3, 4, 6, and 7:
 

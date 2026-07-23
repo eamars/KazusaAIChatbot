@@ -71,7 +71,7 @@ def test_stage3_fresh_database_graph_and_debug_handoff(
                 "() => document.querySelector('#debug-cognition-status')?.textContent === 'completed'"
             )
             assert "fake brain reply" in page.locator("#chat-history").inner_text()
-            assert page.locator("#debug-cognition-graph .graph-node").count() == 4
+            assert page.locator("#debug-cognition-graph .graph-node").count() == 6
             assert len(getattr(page, "kazusa_console_messages", [])) == 0
             requests = fake_brain.chat_requests()
             assert len(requests) == 1

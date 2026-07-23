@@ -7,7 +7,7 @@
 - Execution companion:
   [cognition_core_v2_stage_3_execution_manifest.md](cognition_core_v2_stage_3_execution_manifest.md).
 - Plan class: high_risk_migration.
-- Status: in_progress.
+- Status: completed.
 - Authority: the parent plan governs; user-authorized implementation is active;
   this file grants no production-data authority.
 - Change-control rule: amend this file and obtain plan approval before
@@ -16,10 +16,11 @@
 ## User Quality Sign-off Record — 2026-07-22
 
 The user approved the Phase 3 artifact set, including the retained real-LLM
-emotion, abuse-boundary, role, mechanical-path, bounded-error, and consolidated
-Chinese dialog/monologue evidence. This inventory remains `in_progress` with
-the parent plan until the separately tracked external Browser acceptance and
-remaining lifecycle completion checks are closed.
+emotion, abuse-boundary, role, mechanical-path, bounded-error, consolidated
+Chinese dialog/monologue, and rendered failure-mode evidence. The user directed
+Stage 3 closure on 2026-07-23 after accepting the system-Chrome screenshots as
+the visual artifact. The in-app Browser session limitation remains recorded as
+an environment disposition.
 
 ## Exact Change Surface
 
@@ -469,9 +470,9 @@ development_plans/reference/designs/action_spec_effector_expansion_architecture.
 development_plans/reference/designs/cognition_core_evolution_progression.md
 development_plans/reference/designs/coding_agent_architecture.md
 development_plans/reference/documentation_harmonization_audit_report.md
-development_plans/active/short_term/cognition_core_v2_stage_3_system_adoption_plan.md
-development_plans/active/short_term/cognition_core_v2_stage_3_execution_manifest.md
-development_plans/active/short_term/cognition_core_v2_stage_3_change_radius.md
+development_plans/archive/completed/short_term/cognition_core_v2_stage_3_system_adoption_plan.md
+development_plans/archive/completed/short_term/cognition_core_v2_stage_3_execution_manifest.md
+development_plans/archive/completed/short_term/cognition_core_v2_stage_3_change_radius.md
 development_plans/active/short_term/cognition_core_v2_stage_4_production_database_migration_plan.md
 ```
 

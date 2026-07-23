@@ -23,6 +23,7 @@ from kazusa_ai_chatbot.time_boundary import build_turn_clock
 COGNITION_GRAPH_DETAIL_KEYS = frozenset(
     {
         "input",
+        "summary",
         "reply_context",
         "decision",
         "reasoning",
@@ -74,6 +75,7 @@ COGNITION_GRAPH_DETAIL_KEYS = frozenset(
 COGNITION_GRAPH_SCALAR_DETAIL_KEYS = frozenset(
     {
         "input",
+        "summary",
         "decision",
         "reasoning",
         "internal_monologue",

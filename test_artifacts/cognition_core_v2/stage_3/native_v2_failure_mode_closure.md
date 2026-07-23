@@ -6,9 +6,10 @@ The native Cognition Core V2 observability path now distinguishes successful,
 partial, failed, missing, and malformed cognition telemetry. Invalid telemetry
 does not enter the operator graph as a successful result.
 
-This closes the failure-coverage implementation slice of Stage 3. Stage 3
-remains `in_progress` because the independent in-app Browser acceptance and
-the previously recorded broader-regression reconciliation are still open.
+This closes the failure-coverage implementation slice of Stage 3. Final Stage
+3 closure is recorded in the archived lifecycle plans; the in-app Browser
+session limitation is preserved as an environment disposition, with the
+system-Chrome screenshots accepted by the user as the visual artifact.
 
 ## Failure-mode map
 
@@ -34,16 +35,22 @@ the previously recorded broader-regression reconciliation are still open.
 - Non-DB cognition integration suite: **5 passed, 4 deselected**.
 - Control-console graph browser suite: **4 passed** using the system-Chrome
   Playwright harness; browser console diagnostics were empty.
+- Final repository non-live collection: **3,296 passed, 2 skipped, 759
+  deselected**; final affected console/API/browser gate: **48 passed**; final
+  documentation/harmonization gate: **10 passed**.
+- Final console RCA also preserves the approved top-level `summary` field and
+  the Stage 3 handoff graph's six-node fixture contract.
 - Python `py_compile`: passed for all modified Python modules and tests.
 - `git diff --check`: passed; only expected Windows line-ending warnings were
   emitted.
 - In-app Browser: unavailable; `agent.browsers.list()` returned no sessions.
 
-Browser screenshots from the final E2E run:
+Browser screenshots preserved as tracked Stage 3 artifacts:
 
-- `C:\Users\rba90\AppData\Local\Temp\pytest-of-rba90\pytest-301\test_native_v2_failure_states_0\artifacts\native_v2_failure_branch.png`
-- `C:\Users\rba90\AppData\Local\Temp\pytest-of-rba90\pytest-301\test_native_v2_failure_states_0\artifacts\native_v2_terminal_failure.png`
-- `C:\Users\rba90\AppData\Local\Temp\pytest-of-rba90\pytest-301\test_native_v2_failure_states_0\artifacts\native_v2_failure_parallel.png`
+- [Mixed branch failure](native_v2_failure_branch.png)
+- [Terminal native failure](native_v2_terminal_failure.png)
+- [Partial parallel execution](native_v2_failure_parallel.png)
+- [Stage 3 settlement graph](stage3_settlement_graph.png)
 
 The retained real-LLM emotion and boundary cases remain the Stage 3 quality
 overlay; this closure adds deterministic failure plumbing and browser guards,

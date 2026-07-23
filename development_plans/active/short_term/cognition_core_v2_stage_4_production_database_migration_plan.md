@@ -41,10 +41,10 @@ Stage 3 proves the entire runtime on an absent dedicated test database and
 freezes the production target schema. Stage 4 then addresses the different
 problem: preserving and transforming existing production continuity.
 
-While Stage 3 is active, Stage 4 tracks:
+Stage 4 now tracks the completed Stage 3 handoff inputs:
 
 ```text
-development_plans/active/short_term/
+development_plans/archive/completed/short_term/
   cognition_core_v2_stage_3_system_adoption_plan.md
   cognition_core_v2_stage_3_execution_manifest.md
   cognition_core_v2_stage_3_change_radius.md
