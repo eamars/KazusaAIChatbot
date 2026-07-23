@@ -50,7 +50,7 @@ logger = logging.getLogger(__name__)
 pytestmark = pytest.mark.live_llm
 
 _ROOT = Path(__file__).resolve().parents[1]
-_PERSONALITY_PATH = _ROOT / "personalities" / "kazusa.json"
+_PERSONALITY_PATH = _ROOT / "personalities" / "asuna.json"
 _TRACE_VARIANT = os.getenv("CONVERSATION_PROGRESS_FLOW_TRACE_VARIANT", "before_change")
 _TRACE_SUITE_NAME = f"conversation_progress_flow_live_{_TRACE_VARIANT}"
 

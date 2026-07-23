@@ -60,7 +60,7 @@ def test_stage3_environment_accepts_same_endpoint_with_reserved_database(
 
     module = importlib.import_module("tests.stage3_fresh_database")
     uri = "mongodb://localhost:27017"
-    profile_path = tmp_path / "kazusa.json"
+    profile_path = tmp_path / "asuna.json"
     profile_path.write_text("{}", encoding="utf-8")
     environment = {
         "MONGODB_URI": uri,
@@ -79,7 +79,7 @@ def test_stage3_environment_rejects_uri_database_mismatch(tmp_path: Path) -> Non
     """An embedded URI database must agree with the exact guarded name."""
 
     module = importlib.import_module("tests.stage3_fresh_database")
-    profile_path = tmp_path / "kazusa.json"
+    profile_path = tmp_path / "asuna.json"
     profile_path.write_text("{}", encoding="utf-8")
     try:
         module.validate_stage3_environment({

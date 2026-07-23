@@ -86,7 +86,7 @@ _RECORDER_PROMPT = '''\
 - 本轮有明确证据表明行动已经完成、受益者已经收到结果，或双方明确取消且没有替代义务时，状态写 `resolved`；本轮保留这一项用于阻止下一轮重新打开，之后无新作用时可删除。
 - 本轮明确用新的行动、条件、受益者或预期结果替换旧义务时，这不是普通 `resolved`：必须把旧项写成 `superseded`，同时把替代项另写为 `active`。两项都保留在本轮 `interaction_obligations`，不能只把旧项放进 `resolved_threads`；不能仅因换题或措辞变化就推断替换。
 - `resolved` 和 `superseded` 都必须由本轮输入、实际回复或附近对话中的明确证据支持；没有证据时维持原状态或删除无用旧项，不猜测完成。
-- 明确替换示例：旧项是“杏山千纱在 2026-05-15 发送文字笔记”，本轮双方明确改成“杏山千纱在 2026-05-16 发送语音总结”，则 `interaction_obligations` 必须同时输出两项：旧文字笔记项完整保留原 actor、action、beneficiary、precondition、expected_outcome、source_kind 并把 status 改为 `superseded`；新语音总结项 status 写 `active`。只输出新项或只把旧项写进 `resolved_threads` 都不符合契约。
+- 明确替换示例：旧项是“{character_name}在 2026-05-15 发送文字笔记”，本轮双方明确改成“{character_name}在 2026-05-16 发送语音总结”，则 `interaction_obligations` 必须同时输出两项：旧文字笔记项完整保留原 actor、action、beneficiary、precondition、expected_outcome、source_kind 并把 status 改为 `superseded`；新语音总结项 status 写 `active`。只输出新项或只把旧项写进 `resolved_threads` 都不符合契约。
 - `resolved_threads` 写本轮已经处理完、收束或答复过的事项。
 - `avoid_reopening` 写除非用户主动重开，否则下一轮不要拖回来的旧事项或已闭合事项。
 - `emotional_trajectory` 写本轮局部情绪或张力的一行变化。

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import subprocess
+import sys
 from unittest.mock import AsyncMock
 
 import pytest
@@ -63,6 +65,63 @@ def _write_seed(path: Path, payload: dict[str, object]) -> Path:
 
     path.write_text(json.dumps(payload), encoding="utf-8")
     return path
+
+
+def test_profile_module_imports_before_database_package() -> None:
+    """Profile loading must not depend on database-package import order."""
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "from pathlib import Path; "
+                "from kazusa_ai_chatbot.character_profile import "
+                "load_character_profile_seed; "
+                "seed = load_character_profile_seed(Path("
+                "'personalities/asuna.json').resolve()); "
+                "assert seed['name'].endswith('(Ichinose Asuna)')"
+            ),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_checked_in_asuna_profile_is_valid_and_not_kazusa() -> None:
+    """The active checked-in profile must be the Asuna personality seed."""
+
+    from kazusa_ai_chatbot.character_profile import load_character_profile_seed
+
+    profile_path = (
+        Path(__file__).resolve().parents[1]
+        / "personalities"
+        / "asuna.json"
+    )
+    seed = load_character_profile_seed(profile_path)
+    serialized_seed = json.dumps(seed, ensure_ascii=True)
+
+    assert seed["name"].endswith("(Ichinose Asuna)")
+    assert "Kazusa" not in serialized_seed
+
+
+def test_active_profile_bindings_use_asuna_seed() -> None:
+    """Runtime defaults must point at the active Asuna personality seed."""
+
+    repository_root = Path(__file__).resolve().parents[1]
+    binding_files = (
+        repository_root / "Dockerfile",
+        repository_root / "tests" / "conftest.py",
+    )
+
+    for binding_file in binding_files:
+        binding_text = binding_file.read_text(encoding="utf-8")
+        assert "asuna.json" in binding_text
+        assert "kazusa.json" not in binding_text.casefold()
 
 
 def test_profile_loader_returns_validated_static_seed(tmp_path: Path) -> None:

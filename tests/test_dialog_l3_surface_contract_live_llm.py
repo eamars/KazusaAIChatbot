@@ -33,7 +33,7 @@ if hasattr(sys.stderr, 'reconfigure'):
 pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm]
 
 _ROOT = Path(__file__).resolve().parents[1]
-_PERSONALITY_PATH = _ROOT / 'personalities' / 'kazusa.json'
+_PERSONALITY_PATH = _ROOT / 'personalities' / 'asuna.json'
 _TRACE_SUITE = 'dialog_l3_surface_contract_live_llm'
 _COLLECT_ONLY_ENV = 'DIALOG_LIVE_COLLECT_ONLY'
 _PHASE_ENV = 'DIALOG_LIVE_PHASE'
@@ -139,7 +139,7 @@ def _stub_dialog_event_logging(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _character_profile() -> dict[str, Any]:
-    """Load the runtime Kazusa profile with prompt-safe default mood fields."""
+    """Load the active profile with prompt-safe default mood fields."""
 
     profile = load_personality(_PERSONALITY_PATH)
     profile.setdefault('mood', 'Neutral')

@@ -36,7 +36,7 @@ if hasattr(sys.stderr, 'reconfigure'):
 pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm]
 
 _ROOT = Path(__file__).resolve().parents[1]
-_PERSONALITY_PATH = _ROOT / 'personalities' / 'kazusa.json'
+_PERSONALITY_PATH = _ROOT / 'personalities' / 'asuna.json'
 _TRACE_SUITE = 'dialog_agent_direct_live_llm'
 _CURRENT_USER_NAME = 'Jigsaw'
 _CURRENT_USER_PLATFORM_ID = '411706805'

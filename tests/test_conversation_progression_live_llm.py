@@ -50,7 +50,7 @@ logger = logging.getLogger(__name__)
 pytestmark = pytest.mark.live_llm
 
 _ROOT = Path(__file__).resolve().parents[1]
-_PERSONALITY_PATH = _ROOT / "personalities" / "kazusa.json"
+_PERSONALITY_PATH = _ROOT / "personalities" / "asuna.json"
 _USER_TRACE_PATH = _ROOT / "test_artifacts" / "qq_673225019_recent_4h_chat_history.json"
 _TRACE_VARIANT = os.getenv("CONVERSATION_PROGRESSION_TRACE_VARIANT", "before_change")
 _TRACE_SUITE_NAME = f"conversation_progression_live_{_TRACE_VARIANT}"
@@ -109,7 +109,7 @@ async def ensure_live_llm() -> None:
 
 
 def _build_character_profile() -> dict:
-    """Load the Kazusa personality fixture with runtime defaults."""
+    """Load the active character personality fixture with runtime defaults."""
 
     profile = load_personality(_PERSONALITY_PATH)
     profile.setdefault("mood", "Neutral")

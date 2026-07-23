@@ -42,7 +42,7 @@ pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm]
 
 _ROOT = Path(__file__).resolve().parents[1]
 _IMAGE_DIR = _ROOT / "personalities" / "seeding_images" / "generated"
-_PERSONALITY_PATH = _ROOT / "personalities" / "kazusa.json"
+_PERSONALITY_PATH = _ROOT / "personalities" / "asuna.json"
 _TRACE_SUITE = "image_cognition_options_live_llm"
 _USER_MESSAGE = (
     "Look at this image and tell me what visual details matter for the reply."

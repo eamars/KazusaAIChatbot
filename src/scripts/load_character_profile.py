@@ -1,8 +1,8 @@
 """Validate and seed a character personality profile into MongoDB.
 
 Usage:
-    python -m scripts.load_character_profile personalities/kazusa.json
-    python -m scripts.load_character_profile personalities/kazusa.json --force
+    python -m scripts.load_character_profile personalities/asuna.json
+    python -m scripts.load_character_profile personalities/asuna.json --force
 
 The service performs the same seed-or-verify operation during native startup.
 ``--force`` explicitly replaces static profile fields while preserving runtime

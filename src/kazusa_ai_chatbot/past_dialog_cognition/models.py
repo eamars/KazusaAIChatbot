@@ -11,7 +11,7 @@ PastDialogCognitionSource = Literal["reply_context", "conversation_evidence"]
 
 @dataclass(frozen=True)
 class PastDialogCognitionCandidate:
-    """One already-attached Kazusa-authored dialog eligible for residual lookup.
+    """One already-attached character-authored dialog eligible for residual lookup.
 
     Args:
         visible_text: Prompt-visible text from the attached past dialog.

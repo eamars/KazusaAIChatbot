@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
-from kazusa_ai_chatbot.db.schemas import CharacterProfileSeedV1
+if TYPE_CHECKING:
+    from kazusa_ai_chatbot.db.schemas import CharacterProfileSeedV1
 
 _RUNTIME_OWNED_FIELDS = frozenset({
     "_id",
@@ -129,7 +130,9 @@ def _validate_profile_seed_payload(
                     "must be a number between 0 and 1"
                 )
 
-    return cast(CharacterProfileSeedV1, dict(payload))
+    validated_payload = dict(payload)
+    return_value = cast("CharacterProfileSeedV1", validated_payload)
+    return return_value
 
 
 def load_character_profile_seed(path: Path) -> CharacterProfileSeedV1:

@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 pytestmark = pytest.mark.live_llm
 
 _ROOT = Path(__file__).resolve().parents[1]
-_PERSONALITY_PATH = _ROOT / "personalities" / "kazusa.json"
+_PERSONALITY_PATH = _ROOT / "personalities" / "asuna.json"
 _ALLOWED_LOGICAL_STANCES = {"CONFIRM", "REFUSE", "TENTATIVE", "DIVERGE", "CHALLENGE"}
 _ALLOWED_CHARACTER_INTENTS = {"PROVIDE", "BANTAR", "REJECT", "EVADE", "CONFRONT", "DISMISS", "CLARIFY"}
 _LEGACY_FILLERS = ("反正", "而已", "罢了")
@@ -309,13 +309,10 @@ def _assert_no_legacy_fillers(text: str) -> None:
         assert token not in lowered, f"Legacy English filler leaked into dialog: {text!r}"
 
 
+_CHARACTER_PROFILE_DATA = load_personality(_PERSONALITY_PATH)
 _CHARACTER_PUBLIC_FACTS_DATA = {
-    "name": "杏山千纱 (Kyōyama Kazusa)",
-    "description": "杏山千纱是三一综合学园15岁的学生，放学后甜点部成员及'Sugar Rush'乐队主唱兼贝斯手。",
-    "gender": "女",
-    "age": 15,
-    "birthday": "8月5日 (狮子座)",
-    "backstory": "中学时期是令人畏惧的不良少女'凯茜·帕鲁格'，如今努力过上普通高中生活。",
+    key: _CHARACTER_PROFILE_DATA[key]
+    for key in ("name", "description", "gender", "age", "birthday", "backstory")
 }
 
 

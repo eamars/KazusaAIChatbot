@@ -23,7 +23,7 @@ from tests.test_coding_agent_phase3_handoff_e2e import (
 pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm]
 
 TRACE_ROOT = Path("test_artifacts/llm_traces/coding_agent_phase3_live_e2e")
-PERSONALITY_PATH = Path(__file__).resolve().parents[1] / "personalities" / "kazusa.json"
+PERSONALITY_PATH = Path(__file__).resolve().parents[1] / "personalities" / "asuna.json"
 
 
 async def test_live_gate01_writing_runs_from_user_input_to_delivery(
@@ -223,7 +223,7 @@ def _live_persona_state_for_input(
     character_profile.setdefault("character_reflection", "")
     character_profile.setdefault("global_user_id", CHARACTER_GLOBAL_USER_ID)
     state["character_profile"] = character_profile
-    state["character_name"] = character_profile.get("name", "Kazusa")
+    state["character_name"] = character_profile.get("name", "Character")
     state["channel_topic"] = "coding-agent live E2E"
     return state
 

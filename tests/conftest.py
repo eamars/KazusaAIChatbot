@@ -15,7 +15,7 @@ load_dotenv(override=False)
 _DEFAULT_CHARACTER_PROFILE_PATH = (
     Path(__file__).resolve().parents[1]
     / "personalities"
-    / "kazusa.json"
+    / "asuna.json"
 )
 os.environ.setdefault(
     "CHARACTER_PROFILE_PATH",
