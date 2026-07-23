@@ -31,6 +31,20 @@ _TARGET_PLATFORM_USER_ID = '673225019'
 _BOT_PLATFORM_USER_ID = '3768713357'
 
 
+class _DescriptorCacheRuntime:
+    """Small cache runtime fake for descriptor persistence tests."""
+
+    def __init__(self, cached_result: dict | None = None) -> None:
+        self.cached_result = cached_result
+        self.stored: list[dict] = []
+
+    async def get(self, *args, **kwargs) -> None:
+        return self.cached_result
+
+    async def store(self, **kwargs) -> None:
+        self.stored.append(kwargs)
+
+
 def _base_state():
     """Minimal GlobalPersonaState for testing call_msg_decontexualizer."""
     return {
@@ -391,6 +405,130 @@ async def test_multimedia_descriptor_updates_prompt_context_and_current_row(
         platform_message_id="msg_123",
         descriptions=["a desk with handwritten notes"],
     )
+
+
+@pytest.mark.asyncio
+async def test_multimedia_descriptor_routes_malformed_json_to_repair_parser(
+    monkeypatch,
+) -> None:
+    """Malformed vision JSON should use the bounded repair-parser path."""
+
+    state = _multimedia_state()
+    state["message_envelope"]["body_text"] = ""
+    valid_base64 = "aW1hZ2UtYnl0ZXM="
+    state["message_envelope"]["attachments"] = [{
+        "media_type": "image/jpeg",
+        "base64_data": valid_base64,
+        "storage_shape": "inline",
+    }]
+    state["user_multimedia_input"] = [{
+        "content_type": "image/jpeg",
+        "base64_data": valid_base64,
+        "description": "",
+    }]
+    runtime = _DescriptorCacheRuntime()
+    parse_output = MagicMock(return_value={
+        "description": "repaired visual description",
+    })
+    monkeypatch.setattr(
+        decontextualizer_module,
+        "get_rag_cache2_runtime",
+        lambda: runtime,
+    )
+    monkeypatch.setattr(
+        decontextualizer_module,
+        "parse_llm_json_output",
+        parse_output,
+    )
+    monkeypatch.setattr(
+        decontextualizer_module,
+        "upsert_media_descriptor_entry",
+        MagicMock(return_value=MagicMock()),
+    )
+    monkeypatch.setattr(
+        decontextualizer_module.asyncio,
+        "create_task",
+        MagicMock(),
+    )
+
+    response = _llm_response('{"description": "repaired visual description"')
+    with patch.object(
+        decontextualizer_module,
+        "_vision_descriptor_llm",
+    ) as mock_llm:
+        mock_llm.ainvoke = AsyncMock(return_value=response)
+        result = await multimedia_descriptor_agent(state)
+
+    parse_output.assert_called_once_with(
+        response.content,
+        expected_output_format=(
+            decontextualizer_module._VISION_DESCRIPTOR_OUTPUT_FORMAT
+        ),
+    )
+    assert result["user_multimedia_input"][0]["description"] == (
+        "repaired visual description"
+    )
+    assert runtime.stored[0]["result"]["description"] == (
+        "repaired visual description"
+    )
+
+
+@pytest.mark.asyncio
+async def test_multimedia_descriptor_does_not_cache_empty_parser_result(
+    monkeypatch,
+) -> None:
+    """An unusable descriptor result must remain retryable."""
+
+    state = _multimedia_state()
+    state["message_envelope"]["body_text"] = ""
+    valid_base64 = "aW1hZ2UtYnl0ZXM="
+    state["message_envelope"]["attachments"] = [{
+        "media_type": "image/jpeg",
+        "base64_data": valid_base64,
+        "storage_shape": "inline",
+    }]
+    state["user_multimedia_input"] = [{
+        "content_type": "image/jpeg",
+        "base64_data": valid_base64,
+        "description": "",
+    }]
+    runtime = _DescriptorCacheRuntime(cached_result={})
+    parse_output = MagicMock(return_value={})
+    update_descriptions = AsyncMock(return_value=True)
+    create_task = MagicMock()
+    monkeypatch.setattr(
+        decontextualizer_module,
+        "get_rag_cache2_runtime",
+        lambda: runtime,
+    )
+    monkeypatch.setattr(
+        decontextualizer_module,
+        "parse_llm_json_output",
+        parse_output,
+    )
+    monkeypatch.setattr(
+        decontextualizer_module,
+        "update_conversation_attachment_descriptions",
+        update_descriptions,
+    )
+    monkeypatch.setattr(
+        decontextualizer_module.asyncio,
+        "create_task",
+        create_task,
+    )
+
+    response = _llm_response('{"description": }')
+    with patch.object(
+        decontextualizer_module,
+        "_vision_descriptor_llm",
+    ) as mock_llm:
+        mock_llm.ainvoke = AsyncMock(return_value=response)
+        result = await multimedia_descriptor_agent(state)
+
+    assert result["user_multimedia_input"][0]["description"] == ""
+    assert runtime.stored == []
+    update_descriptions.assert_not_awaited()
+    create_task.assert_not_called()
 
 
 @pytest.mark.asyncio

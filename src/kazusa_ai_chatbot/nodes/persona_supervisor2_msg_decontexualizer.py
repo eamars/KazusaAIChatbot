@@ -100,6 +100,13 @@ _VISION_DESCRIPTOR_PROMPT = '''\
     "uncertainty": ["不确定或模糊之处"]
 }}
 '''
+_VISION_DESCRIPTOR_OUTPUT_FORMAT = '''{
+    "description": "non-empty natural-language image summary",
+    "visible_text": ["recognizable text"],
+    "salient_visual_facts": ["observable visual fact"],
+    "spatial_or_scene_facts": ["observable spatial or scene fact"],
+    "uncertainty": ["unclear or obstructed visual area"]
+}'''
 _llm_interface = LLInterface()
 _vision_descriptor_llm = LLInterface()
 _msg_decontexualizer_llm = LLInterface()
@@ -307,20 +314,26 @@ async def multimedia_descriptor_agent(state: IMProcessState) -> IMProcessState:
                     agent_name="media_descriptor",
                 )
 
-            if cached_result is not None:
-                # Cache hit — reconstruct output from cached LLM result
-                result = cached_result if isinstance(cached_result, dict) else {}
-                raw_description = result.get("description", "")
-                description = raw_description if isinstance(raw_description, str) else ""
-                description = description.strip()
-                image_observation = _build_current_image_observation(
-                    result=result,
-                    description=description,
+            cached_description = ""
+            cached_image_observation = None
+            if isinstance(cached_result, dict):
+                raw_description = cached_result.get("description", "")
+                if isinstance(raw_description, str):
+                    cached_description = raw_description.strip()
+                cached_image_observation = _build_current_image_observation(
+                    result=cached_result,
+                    description=cached_description,
                     source_message_id=state["platform_message_id"],
                 )
-                summary = image_observation["summary"]
-                if not description and isinstance(summary, str):
-                    description = summary
+                summary = cached_image_observation["summary"]
+                if not cached_description and isinstance(summary, str):
+                    cached_description = summary.strip()
+
+            if cached_description:
+                # Cache hit — reconstruct output from cached LLM result
+                result = cached_result
+                description = cached_description
+                image_observation = cached_image_observation
                 logger.debug(
                     f"Image descriptor cache hit: user={user_name} "
                     f"platform_user={platform_user_id} "
@@ -360,7 +373,7 @@ async def multimedia_descriptor_agent(state: IMProcessState) -> IMProcessState:
                     try:
                         result = parse_llm_json_output(
                             response.content,
-                            deterministic_only=True,
+                            expected_output_format=_VISION_DESCRIPTOR_OUTPUT_FORMAT,
                         )
                     except Exception as exc:
                         logger.warning(
@@ -385,7 +398,9 @@ async def multimedia_descriptor_agent(state: IMProcessState) -> IMProcessState:
                 )
                 summary = image_observation["summary"]
                 if not description and isinstance(summary, str):
-                    description = summary
+                    description = summary.strip()
+                if description:
+                    result["description"] = description
 
                 logger.debug(
                     f"Image description: user={user_name} "
@@ -395,7 +410,7 @@ async def multimedia_descriptor_agent(state: IMProcessState) -> IMProcessState:
                 )
 
                 # Store in LRU and fire-and-forget persistent write
-                if cache_key is not None:
+                if cache_key is not None and description:
                     await runtime.store(
                         cache_key=cache_key,
                         cache_name=MEDIA_DESCRIPTOR_CACHE_NAME,
