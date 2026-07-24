@@ -817,15 +817,11 @@ def _action_availability_runtime_for_target(
     adapter_status = "healthy" if adapter_ready else "unavailable"
     return {
         "worker_status": {
-            "accepted_task": (
-                "healthy"
-                if BACKGROUND_WORK_WORKER_ENABLED
-                else "unavailable"
-            ),
+            "accepted_task": "healthy",
             "background_work": (
                 "healthy"
                 if BACKGROUND_WORK_WORKER_ENABLED
-                else "unavailable"
+                else "degraded"
             ),
             "orchestrator": (
                 "healthy"

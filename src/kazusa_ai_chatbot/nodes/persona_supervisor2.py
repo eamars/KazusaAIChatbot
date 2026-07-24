@@ -8,6 +8,8 @@ from langgraph.graph import END, START, StateGraph
 from kazusa_ai_chatbot.action_spec.evaluator import ActionSpecEvaluator
 from kazusa_ai_chatbot.action_spec.execution import execute_action_specs_for_trace
 from kazusa_ai_chatbot.action_spec.registry import (
+    ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
+    ACCEPTED_TASK_REQUEST_CAPABILITY,
     BACKGROUND_WORK_REQUEST_CAPABILITY,
     FUTURE_SPEAK_CAPABILITY,
     SPEAK_CAPABILITY,
@@ -311,6 +313,8 @@ async def _action_results_for_state(
         spec
         for spec in _selected_action_specs(state)
         if spec.get("kind") not in (
+            ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
+            ACCEPTED_TASK_REQUEST_CAPABILITY,
             BACKGROUND_WORK_REQUEST_CAPABILITY,
             FUTURE_SPEAK_CAPABILITY,
         )
@@ -338,6 +342,8 @@ async def _execute_pre_surface_action_results(
         for spec in _selected_action_specs(state)
         if spec.get("kind") not in (
             SPEAK_CAPABILITY,
+            ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
+            ACCEPTED_TASK_REQUEST_CAPABILITY,
             BACKGROUND_WORK_REQUEST_CAPABILITY,
             FUTURE_SPEAK_CAPABILITY,
         )
@@ -369,6 +375,8 @@ async def stage_2a_background_work_enqueue(
         spec
         for spec in _selected_action_specs(state)
         if spec.get("kind") in (
+            ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
+            ACCEPTED_TASK_REQUEST_CAPABILITY,
             BACKGROUND_WORK_REQUEST_CAPABILITY,
             FUTURE_SPEAK_CAPABILITY,
         )

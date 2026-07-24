@@ -37,8 +37,8 @@ PROJECT_SUMMARY_RESULT = (
 )
 
 
-def test_v2_connector_materializes_initial_accepted_coding_request() -> None:
-    """The V2 bridge must preserve the initial coding action as `start`."""
+def test_v2_connector_materializes_initial_generic_coding_request() -> None:
+    """The V2 bridge traces the generic new-task owner plus visible speech."""
 
     from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
         _materialize_v2_action_requests,
@@ -51,8 +51,8 @@ def test_v2_connector_materializes_initial_accepted_coding_request() -> None:
     state["decontextualized_input"] = CODE_TASK
     output = canonical_cognition_output(owner_user_id="global-user-001")
     output["action_requests"] = [{
-        "action_kind": "accepted_coding_task_request",
-        "decision": "start",
+        "action_kind": "accepted_task_request",
+        "decision": "enqueue",
         "semantic_goal": "complete the accepted coding task",
         "reason": "the user accepted a new coding task",
         "context_ref": "",
@@ -66,10 +66,12 @@ def test_v2_connector_materializes_initial_accepted_coding_request() -> None:
 
     action_specs = _materialize_v2_action_requests(output, state)
 
-    assert len(action_specs) == 1
-    assert action_specs[0]["kind"] == "accepted_coding_task_request"
-    assert action_specs[0]["params"]["coding_action"] == "start"
+    assert [spec["kind"] for spec in action_specs] == [
+        "accepted_task_request",
+        "speak",
+    ]
     assert action_specs[0]["params"]["task_brief"] == CODE_TASK
+    assert action_specs[1]["params"]["delivery_mode"] == "visible_reply"
 
 
 @pytest.mark.asyncio

@@ -192,8 +192,36 @@ def test_connector_projects_runtime_owner_limits_into_cognition() -> None:
     )
 
 
-def test_connector_projects_full_registry_capacity() -> None:
-    """Visible cognition exposes every runtime-eligible public action."""
+def test_connector_keeps_queue_intake_available_without_automatic_worker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Queue-only runtime state must not block a generic accepted handover."""
+
+    monkeypatch.setattr(
+        connector,
+        "BACKGROUND_WORK_WORKER_ENABLED",
+        False,
+    )
+    state = _global_state()
+
+    snapshot = connector.build_action_availability_snapshot(state)
+    limits = connector.build_runtime_capability_limits(state)
+
+    assert snapshot["worker_status"]["accepted_task"] == "healthy"
+    assert snapshot["worker_status"]["background_work"] == "degraded"
+    assert all("仓库代码读取 owner 不可用" not in item for item in limits)
+    assert any(
+        row["action_kind"] == "accepted_task_request"
+        for row in connector._available_action_affordances(state)
+    )
+    assert all(
+        row["action_kind"] != "accepted_coding_task_request"
+        for row in connector._available_action_affordances(state)
+    )
+
+
+def test_connector_projects_new_work_through_one_accepted_task_owner() -> None:
+    """New coding work must not compete with an unbound coding-run start."""
 
     resolvers = connector._available_resolver_affordances(_global_state())
     actions = connector._available_action_affordances(_global_state())
@@ -211,9 +239,9 @@ def test_connector_projects_full_registry_capacity() -> None:
     assert "background_work_request" not in action_kinds
     assert {
         "accepted_task_request",
-        "accepted_coding_task_request",
         "future_speak",
     } <= action_kinds
+    assert "accepted_coding_task_request" not in action_kinds
     assert "trigger_future_cognition" not in action_kinds
     assert "memory_lifecycle_update" not in action_kinds
     assert all(row["context_ref"] == "" for row in actions)
@@ -292,8 +320,8 @@ def test_connector_projects_memory_lifecycle_only_for_active_commitments() -> No
     assert lifecycle["default_decision"] == "active_commitment_lifecycle"
 
 
-def test_connector_projects_distinct_open_coding_run_affordances() -> None:
-    """Start and each trusted open run remain separately selectable."""
+def test_connector_projects_only_bound_open_coding_run_affordances() -> None:
+    """Each trusted open run remains selectable without an unbound start."""
 
     state = _global_state()
     state["action_selection_context"] = {
@@ -327,21 +355,19 @@ def test_connector_projects_distinct_open_coding_run_affordances() -> None:
     ]
 
     assert [row["context_ref"] for row in coding_actions] == [
-        "",
         "coding_run:run-1",
         "coding_run:run-2",
     ]
-    assert coding_actions[0]["allowed_decisions"] == ["start"]
-    assert coding_actions[1]["allowed_decisions"] == [
+    assert coding_actions[0]["allowed_decisions"] == [
         "approve_and_verify",
         "cancel",
     ]
-    assert coding_actions[2]["allowed_decisions"] == [
+    assert coding_actions[1]["allowed_decisions"] == [
         "respond_to_blocker",
         "status",
     ]
-    assert "update the parser" in coding_actions[1]["capability"]
-    assert "Which execution boundary" in coding_actions[2]["capability"]
+    assert "update the parser" in coding_actions[0]["capability"]
+    assert "Which execution boundary" in coding_actions[1]["capability"]
 
 
 def test_connector_routes_unavailable_coding_status_to_persisted_lookup() -> None:
@@ -376,13 +402,12 @@ def test_connector_routes_unavailable_coding_status_to_persisted_lookup() -> Non
         for row in actions
     )
     assert [row["allowed_decisions"] for row in coding_actions] == [
-        ["start"],
         ["cancel"],
     ]
     assert "当前作用域的既有 coding run 只提供以下实际可用决定：cancel" in (
-        coding_actions[1]["capability"]
+        coding_actions[0]["capability"]
     )
-    assert "status" not in coding_actions[1]["capability"]
+    assert "status" not in coding_actions[0]["capability"]
 
 
 def test_connector_projects_persisted_coding_status_into_semantic_scene() -> None:

@@ -92,8 +92,9 @@ accepted_task_status_check 读取已有任务记录。该查询直接读取当�
 coding_run_context，不创建新的延迟任务，也不需要 coding worker。当前目标需要由 coding agent
 继续处理既有 run 的生命周期操作时，使用带 coding_run_ref 的
 accepted_coding_task_request；它适用于修改、验证、批准、取消、阻塞处理，以及可由 worker 执行的
-coding status。已有 run 的生命周期动作可以在 queue-only owner 下记录并排队，状态结果保持待执行；
-没有绑定 run 的 start 需要可用 coding worker。status 查询结果交给后续 surface 作为当前状态证据。
+coding status。已有 run 的生命周期动作可以在 queue-only owner 下记录并排队，状态结果保持待执行。
+未绑定 coding_run_ref 的新代码工作统一使用 accepted_task_request，由 coding worker 判断阅读、编写
+或修改类型。status 查询结果交给后续 surface 作为当前状态证据。
 当用户只是询问状态而没有明确提出取消、审核验证、修改或处理阻塞时，直接基于已有状态证据
 回答，或选择 accepted_task_status_check 的 check；既有 coding run 的生命周期动作只承载用户
 明确提出的取消、审核验证、修改或阻塞处理。
@@ -110,10 +111,12 @@ memory_lifecycle_update、accepted_task_request 或 background_work_request；�
 accepted_task_request 和 background_work_request 需要可用执行 owner；已绑定 coding_run_ref 且
 affordance 明确允许的 coding 生命周期动作可以按 queue-only 语义记录和排队，不能把排队结果说成已执行。
 
-只读仓库分析、项目架构评价、代码阅读和文件/函数定位统一属于 accepted_task_request；该公开 owner
-随后由 accepted-task 生命周期交给内部 coding agent 的 code_reading。public_answer_research 只负责
-当前外部事实或一般公共资料，不承担仓库源代码分析。accepted_coding_task_request 只用于代码修改、
-验证或既有 coding run 生命周期。当仓库阅读 owner 在 runtime_capability_limits 中不可用时，使用
+所有未绑定 coding_run_ref 的新后台代码工作统一属于 accepted_task_request，包括只读仓库分析、
+项目架构评价、代码阅读、文件/函数定位、新代码方案和现有代码修改方案；该公开 owner 随后由
+accepted-task 生命周期交给内部 coding agent，由 worker 判断 code_reading、code_writing 或
+code_modifying。public_answer_research 只负责当前外部事实或一般公共资料，不承担仓库源代码分析。
+accepted_coding_task_request 只用于绑定既有 coding_run_ref 的验证、批准、取消、阻塞处理或其他
+持久化 run 生命周期。当仓库工作 owner 在 runtime_capability_limits 中不可用时，使用
 goal_resolution=blocked、action_requests=[]、resolver_requests=[]，把当前限制交给后续可见 surface；
 不要改用 public_answer_research，也不要留下 requires_required_evidence 与空请求的组合。
 规划者本轮的推理、记忆回想、回复准备、措辞排练或本轮即可完成的思考不构成 action request。
@@ -165,8 +168,8 @@ source_backed_facts、assumptions_or_inferences、blockers 和 final_response_re
 字符串数组，每一项是一条简体中文语义短句。没有内容的字段返回空数组；每个数组元素直接写
 字符串，字段内部不再嵌套对象。所有新生成的语义内容使用简体中文，schema key、enum token
 和 capability name 保持协议原样。
-协议代码绑定 schema_version 和 original_goal，确定性代码从 current_resolver_goal_progress 保留
-省略的已知 checklist 字段。
+协议代码绑定 schema_version 和 original_goal，确定性代码从 current_resolver_goal_progress
+保留省略的已知 checklist 字段。
 
 # 输出格式
 只返回一个 JSON 对象，字段必须恰好是：

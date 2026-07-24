@@ -101,7 +101,7 @@ async def _plan(
 
 @pytest.mark.asyncio
 async def test_action_route_copies_only_available_typed_affordance() -> None:
-    """The model selects handles; code copies trusted targets and evidence."""
+    """Visible handoff copies trusted action data and retains speech routing."""
 
     result = await _plan(
         _decision(
@@ -126,7 +126,7 @@ async def test_action_route_copies_only_available_typed_affordance() -> None:
         }],
     )
 
-    assert result["intention"]["route"] == "action"
+    assert result["intention"]["route"] == "speech"
     assert result["action_requests"] == [{
         "action_kind": "background_work_request",
         "decision": "",
@@ -162,7 +162,7 @@ async def test_action_route_rejects_unavailable_affordance() -> None:
 
 @pytest.mark.asyncio
 async def test_generic_action_decision_preserves_coding_continuation() -> None:
-    """The planner passes a registry-grounded continuation without rewriting."""
+    """Visible coding handoff preserves its bound continuation and speech."""
 
     result = await _plan(
         _decision(
@@ -194,7 +194,7 @@ async def test_generic_action_decision_preserves_coding_continuation() -> None:
         }],
     )
 
-    assert result["intention"]["route"] == "action"
+    assert result["intention"]["route"] == "speech"
     assert result["action_requests"][0]["decision"] == "status"
     assert result["action_requests"][0]["context_ref"] == "coding_run:run-1"
 

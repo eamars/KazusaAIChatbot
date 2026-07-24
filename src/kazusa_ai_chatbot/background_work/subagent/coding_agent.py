@@ -14,7 +14,6 @@ from kazusa_ai_chatbot.coding_agent import (
     continue_coding_run,
     decide_background_coding_operation,
     get_coding_run,
-    handle_background_coding_task,
     start_coding_run,
 )
 from kazusa_ai_chatbot.config import (
@@ -31,6 +30,21 @@ DESCRIPTION = (
 )
 CODING_AGENT_WORKER_PAYLOAD_VERSION = "coding_agent_worker_payload.v2"
 CODING_RUN_REF_PREFIX = "coding_run:"
+_CODING_RUN_STATUSES = frozenset({
+    "created",
+    "source_resolved",
+    "evidence_collected",
+    "proposal_ready",
+    "awaiting_approval",
+    "applying",
+    "verifying",
+    "repairing",
+    "completed",
+    "blocked",
+    "rejected",
+    "failed",
+    "cancelled",
+})
 _LOCAL_PATH_RE = re.compile(
     r"(?<![A-Za-z0-9_.-])"
     r"(?P<path>(?:[A-Za-z]:[\\/]|~[\\/]|/|\./|\../)[^\r\n\"'<>`]{1,500})"
@@ -81,16 +95,16 @@ async def execute(
         )
         return result
 
-    response = await handle_background_coding_task({
-        "question": task_brief,
-        "source_summary": _bounded_text(decision.get("source_summary")),
-        "workspace_root": workspace_root,
-        "max_answer_chars": max_output_chars,
-        "max_artifact_chars": max_output_chars * 8,
-        **_local_source_hints_from_task_brief(task_brief),
-    })
-    result = _map_coding_agent_response(
-        response,
+    result = await _start_coding_run_from_payload(
+        decision,
+        worker_payload={
+            "schema_version": CODING_AGENT_WORKER_PAYLOAD_VERSION,
+            "operation": "start",
+            "task_brief": task_brief,
+            "coding_run_ref": "",
+            "execution_request": "",
+        },
+        workspace_root=workspace_root,
         max_output_chars=max_output_chars,
     )
     return result
@@ -309,7 +323,15 @@ def _map_coding_run_response(
     run_status = _bounded_text(response.get("status"), limit=80)
     run_id = _bounded_text(response.get("run_id"), limit=120)
     coding_run_ref = _coding_run_ref(run_id)
-    worker_status = _worker_status_for_run_status(run_status)
+    objective_type = _bounded_text(
+        response.get("objective_type"),
+        limit=80,
+    )
+    worker_status = _worker_status_for_run_status(
+        run_status,
+        objective_type=objective_type,
+        worker_operation=worker_operation,
+    )
     answer_text = _bounded_text(
         response.get("answer_text"),
         limit=max_output_chars,
@@ -340,10 +362,7 @@ def _map_coding_run_response(
             "worker_operation": worker_operation,
             "coding_run_ref": coding_run_ref,
             "coding_run_status": run_status,
-            "objective_type": _bounded_text(
-                response.get("objective_type"),
-                limit=80,
-            ),
+            "objective_type": objective_type,
             "repository": _optional_mapping(response.get("repository")),
             "source_scope": _optional_mapping(response.get("source_scope")),
             "evidence_refs": _evidence_refs(response.get("evidence")),
@@ -473,14 +492,30 @@ def _objective_type_for_operation(operation: str) -> str:
     return ""
 
 
-def _worker_status_for_run_status(run_status: str) -> str:
-    """Map durable run status into background-worker status."""
+def _worker_status_for_run_status(
+    run_status: str,
+    *,
+    objective_type: str,
+    worker_operation: str,
+) -> str:
+    """Map one durable outcome without treating partial work as success."""
 
-    if run_status in ("rejected",):
+    if (
+        worker_operation == "status"
+        and run_status in _CODING_RUN_STATUSES
+    ):
+        return "succeeded"
+    if worker_operation == "cancel" and run_status == "cancelled":
+        return "succeeded"
+    if run_status == "completed":
+        return "succeeded"
+    if run_status == "awaiting_approval" and objective_type == "propose_patch":
+        return "succeeded"
+    if run_status == "blocked":
+        return "needs_user_input"
+    if run_status in ("rejected", "cancelled"):
         return "rejected"
-    if run_status in ("failed",):
-        return "failed"
-    return "succeeded"
+    return "failed"
 
 
 def _coding_run_artifact_text(
@@ -557,67 +592,6 @@ def _worker_payload(
     return return_value
 
 
-def _map_coding_agent_response(
-    response: Mapping[str, object],
-    *,
-    max_output_chars: int,
-) -> BackgroundWorkResult:
-    """Map a public coding-agent response into a background-work result."""
-
-    status = _bounded_text(response.get("status"))
-    if status not in ("succeeded", "failed", "needs_user_input", "rejected"):
-        status = "failed"
-    answer_text = _bounded_text(
-        response.get("answer_text"),
-        limit=max_output_chars,
-    )
-    limitations = _text_list(response.get("limitations"))
-    evidence_refs = _evidence_refs(response.get("evidence"))
-    coding_operation = _bounded_text(
-        response.get("operation"),
-        limit=80,
-    )
-    if coding_operation not in (
-        "code_reading",
-        "code_writing",
-        "code_modifying",
-        "unsupported",
-    ):
-        coding_operation = "unsupported"
-    failure_summary = ""
-    if status != "succeeded":
-        answer_text = ""
-        failure_summary = _failure_summary(limitations)
-    result: BackgroundWorkResult = {
-        "status": status,
-        "worker": WORKER,
-        "artifact_text": answer_text,
-        "failure_summary": failure_summary,
-        "result_summary": _result_summary(
-            response,
-            status=status,
-            evidence_count=len(evidence_refs),
-        ),
-        "worker_metadata": {
-            "schema_version": "coding_agent_worker_metadata.v1",
-            "coding_operation": coding_operation,
-            "repository": _optional_mapping(response.get("repository")),
-            "source_scope": _optional_mapping(response.get("source_scope")),
-            "evidence_refs": evidence_refs,
-            "patch_artifacts": _patch_artifact_summaries(
-                response.get("patch_artifacts"),
-            ),
-            "created_files": _file_summaries(response.get("created_files")),
-            "changed_files": _file_summaries(response.get("changed_files")),
-            "validation": _optional_mapping(response.get("validation")),
-            "alignment": _optional_mapping(response.get("alignment")),
-            "limitations": limitations,
-            "trace_summary": _text_list(response.get("trace_summary"), limit=80),
-        },
-    }
-    return result
-
-
 def _failure_result(*, status: str, summary: str) -> BackgroundWorkResult:
     """Build one sanitized non-success result."""
 
@@ -642,34 +616,6 @@ def _failure_summary(limitations: list[str]) -> str:
         if limitation:
             return limitation
     return "Coding agent could not complete the request."
-
-
-def _result_summary(
-    response: Mapping[str, object],
-    *,
-    status: str,
-    evidence_count: int,
-) -> str:
-    """Build a prompt-safe bounded result summary."""
-
-    parts = [f"coding_agent {status}"]
-    operation = _bounded_text(response.get("operation"), limit=80)
-    if operation:
-        parts.append(operation)
-    repository = response.get("repository")
-    if isinstance(repository, Mapping):
-        owner = _bounded_text(repository.get("owner"), limit=80)
-        repo = _bounded_text(repository.get("repo"), limit=80)
-        if owner and repo:
-            parts.append(f"{owner}/{repo}")
-    parts.append(f"evidence={evidence_count}")
-    created_files = _file_summaries(response.get("created_files"))
-    changed_files = _file_summaries(response.get("changed_files"))
-    file_count = len(created_files) + len(changed_files)
-    if file_count:
-        parts.append(f"files={file_count}")
-    summary = "; ".join(parts)
-    return summary[:500]
 
 
 def _evidence_refs(value: object) -> list[dict[str, object]]:

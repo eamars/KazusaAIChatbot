@@ -172,6 +172,101 @@ def test_reading_pm_retries_when_assignment_cap_is_exceeded(
     assert len(trace["attempts"]) == 2
 
 
+def test_reading_pm_retries_overloaded_architecture_overview(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A representative repository overview gets one bounded reconsideration."""
+
+    from kazusa_ai_chatbot.coding_agent.code_reading import product_manager
+
+    responses = [
+        product_manager.json.dumps({
+            "status": "overloaded",
+            "intent": "architecture_overview",
+            "required_slots": ["architecture", "highlights"],
+            "assignments": [],
+            "missing_slots": ["The whole repository is too broad."],
+        }),
+        product_manager.json.dumps({
+            "status": "need_programmers",
+            "intent": "architecture_overview",
+            "required_slots": ["architecture", "highlights"],
+            "assignments": [{
+                "assignment_id": "architecture-entrypoints",
+                "role": "architecture reader",
+                "scope": {
+                    "kind": "search",
+                    "values": ["architecture", "entrypoint"],
+                },
+                "questions": [
+                    "What representative source evidence shows the architecture?"
+                ],
+                "required_slots": ["architecture", "highlights"],
+            }],
+            "missing_slots": [],
+        }),
+    ]
+    calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+
+    def _fake_invoke(*args: Any, **kwargs: Any) -> SimpleNamespace:
+        calls.append((args, kwargs))
+        return SimpleNamespace(content=responses[len(calls) - 1])
+
+    monkeypatch.setattr(product_manager._reading_pm_llm, "invoke", _fake_invoke)
+
+    decision = product_manager.decide_reading_work({
+        "question": "Evaluate this repository's architecture and highlights.",
+        "repository_summary": {"repo": "fixture"},
+        "source_scope": _source_scope(),
+        "repo_map_summary": {"files": ["README.md", "src/service.py"]},
+        "previous_reports": [],
+    })
+
+    assert decision["status"] == "need_programmers"
+    assert decision["intent"] == "architecture_overview"
+    assert len(decision["assignments"]) == 1
+    assert len(calls) == 2
+    retry_messages = calls[1][0][0]
+    assert "representative architecture evidence survey" in (
+        retry_messages[-1].content
+    )
+
+
+def test_reading_pm_preserves_repeated_architecture_overload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A genuinely exhaustive overview remains overloaded after regeneration."""
+
+    from kazusa_ai_chatbot.coding_agent.code_reading import product_manager
+
+    overloaded = product_manager.json.dumps({
+        "status": "overloaded",
+        "intent": "architecture_overview",
+        "required_slots": ["every file and behavior"],
+        "assignments": [],
+        "missing_slots": ["The explicit exhaustive scope is unbounded."],
+    })
+    calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+
+    def _fake_invoke(*args: Any, **kwargs: Any) -> SimpleNamespace:
+        calls.append((args, kwargs))
+        return SimpleNamespace(content=overloaded)
+
+    monkeypatch.setattr(product_manager._reading_pm_llm, "invoke", _fake_invoke)
+
+    decision = product_manager.decide_reading_work({
+        "question": "Explain every file and all behavior in this repository.",
+        "repository_summary": {"repo": "fixture"},
+        "source_scope": _source_scope(),
+        "repo_map_summary": {"files": ["README.md", "src/service.py"]},
+        "previous_reports": [],
+    })
+
+    assert decision["status"] == "overloaded"
+    assert decision["assignments"] == []
+    assert len(calls) == 2
+
+
 def test_assignment_validation_accepts_bounded_simplified_scope() -> None:
     from kazusa_ai_chatbot.coding_agent.code_reading.product_manager import (
         validate_programmer_assignment,

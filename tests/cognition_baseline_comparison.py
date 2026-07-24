@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 from collections import Counter
 from collections.abc import Mapping, Sequence
 import hashlib
@@ -31,7 +32,7 @@ _BASELINE_ROOT = Path("C:/workspace/kazusa_ai_chatbot_baseline_main")
 _V2_ROOT = Path("C:/workspace/kazusa_ai_chatbot_v2_prefix")
 _CURRENT_ROOT = _ROOT.resolve()
 _BASELINE_REVISION = "8f834bf87a83ee42aca804934fb44af63788420c"
-_CANDIDATE_REVISION = "0c2e929d51ac80c4519f564b61cbf8949efcca3d"
+_PRE_FIX_V2_REVISION = "0c2e929d51ac80c4519f564b61cbf8949efcca3d"
 _PROFILE_SHA256 = (
     "7cd3d773c584fee7656da15eec827cd26b450825ec878716389f1e9a2ae1a484"
 )
@@ -602,10 +603,24 @@ def _basic_case_payload(
             "reply_excerpt": str(state_seed.get("prior_message") or ""),
         }
     if case_id == "O03":
+        resource_value = state_seed.get("resource_path")
+        if not isinstance(resource_value, str) or not resource_value.strip():
+            raise ValueError("O03 requires a non-empty resource_path")
+        resource_path = (_ROOT / resource_value).resolve()
+        if _ROOT not in resource_path.parents:
+            raise ValueError(
+                f"O03 resource escaped repository root: {resource_path}"
+            )
+        if not resource_path.is_file():
+            raise ValueError(
+                f"O03 resource is not a file: {resource_path}"
+            )
+        image_bytes = resource_path.read_bytes()
         effective_input["attachments"] = [{
             "media_type": "image/png",
-            "storage_shape": "path",
-            "path": str(state_seed.get("resource_path") or ""),
+            "base64_data": base64.b64encode(image_bytes).decode("ascii"),
+            "size_bytes": len(image_bytes),
+            "storage_shape": "inline",
         }]
         effective_input["content_type"] = "mixed"
     return {
@@ -982,15 +997,34 @@ def _load_case_rows() -> list[dict[str, Any]]:
     return rows
 
 
+def _git_head_revision(target_root: Path) -> str:
+    """Resolve one target checkout revision for an evidence manifest."""
+
+    if not target_root.is_dir():
+        raise ValueError(f"target worktree is missing: {target_root}")
+    completed = subprocess.run(
+        ["git", "-C", str(target_root), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    revision = completed.stdout.strip()
+    if re.fullmatch(r"[0-9a-f]{40}", revision) is None:
+        raise ValueError(
+            f"target worktree returned an invalid revision: {revision}"
+        )
+    return revision
+
+
 def _corpus_config(corpus: str) -> tuple[str, Path, str]:
     """Return revision, target worktree and evidence label for one corpus."""
 
     if corpus == "pre_fix_main":
         return "main", _BASELINE_ROOT, _BASELINE_REVISION
     if corpus == "pre_fix_v2":
-        return "v2", _V2_ROOT, _CANDIDATE_REVISION
+        return "v2", _V2_ROOT, _PRE_FIX_V2_REVISION
     if corpus == "post_fix_v2":
-        return "v2", _CURRENT_ROOT, _CANDIDATE_REVISION
+        return "v2", _CURRENT_ROOT, _git_head_revision(_CURRENT_ROOT)
     raise ValueError(f"unsupported scored corpus: {corpus}")
 
 
@@ -1259,7 +1293,7 @@ def _preflight() -> int:
         raise ValueError("history export hash changed")
     for path, expected in (
         (_BASELINE_ROOT, _BASELINE_REVISION),
-        (_V2_ROOT, _CANDIDATE_REVISION),
+        (_V2_ROOT, _PRE_FIX_V2_REVISION),
     ):
         if not path.is_dir():
             raise ValueError(f"frozen worktree is missing: {path}")
@@ -1293,7 +1327,7 @@ def _preflight() -> int:
         "history_path": str(_HISTORY_PATH),
         "history_sha256": _HISTORY_SHA256,
         "main_revision": _BASELINE_REVISION,
-        "v2_revision": _CANDIDATE_REVISION,
+        "v2_revision": _PRE_FIX_V2_REVISION,
         "baseline_worktree": str(_BASELINE_ROOT),
         "v2_worktree": str(_V2_ROOT),
         "configured_database_name": configured_database_name,
@@ -1316,7 +1350,7 @@ def _preflight() -> int:
         "history_sha256": _HISTORY_SHA256,
         "scored_case_count": len(rows),
         "main_revision": _BASELINE_REVISION,
-        "v2_revision": _CANDIDATE_REVISION,
+        "v2_revision": _PRE_FIX_V2_REVISION,
         "configured_database_name": configured_database_name,
     }, ensure_ascii=False, indent=2))
     return 0

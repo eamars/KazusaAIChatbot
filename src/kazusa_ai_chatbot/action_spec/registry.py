@@ -789,7 +789,6 @@ def _accepted_coding_task_projection() -> dict[str, object]:
         "visibility": "private",
         "decision_mode": "closed",
         "allowed_decisions": [
-            "start",
             "revise_proposal",
             "summarize",
             "status",
@@ -797,17 +796,14 @@ def _accepted_coding_task_projection() -> dict[str, object]:
             "respond_to_blocker",
             "cancel",
         ],
-        "default_decision": "start",
+        "default_decision": "status",
         "decision_pattern": "",
         "context_ref": "",
         "semantic_input_summary": [
-            "代码工作由持久化 coding run 管理。",
+            "仅用于绑定既有 coding_run_ref 的生命周期操作。",
             (
-                "allowed_next_actions：start、revise_proposal、summarize、status、"
+                "allowed_next_actions：revise_proposal、summarize、status、"
                 "approve_and_verify、respond_to_blocker、cancel。"
-            ),
-            (
-                "start 创建新 run；其他决定继续处理匹配的开放 run。"
             ),
             (
                 "使用上下文 affordance 中的决定；无法区分 run 时由可见发言向用户澄清。"
@@ -837,6 +833,10 @@ def _accepted_task_request_projection() -> dict[str, object]:
         "context_ref": "",
         "semantic_input_summary": [
             "仅用于明确接受的、有界延迟工作。",
+            (
+                "所有未绑定 coding_run_ref 的新代码任务都从这里进入；"
+                "coding worker 负责区分代码阅读、代码编写和代码修改。"
+            ),
             "提供接受的任务目标，不写执行内部细节。",
             "不能代替未来提醒、主动联系或需要调度器负责的后续动作。",
             "把私有请求与可见确认一起使用。",

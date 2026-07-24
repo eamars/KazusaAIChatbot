@@ -15,6 +15,7 @@ import pytest
 from kazusa_ai_chatbot.action_spec.execution import execute_action_specs_for_trace
 from kazusa_ai_chatbot.action_spec.registry import (
     ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
+    ACCEPTED_TASK_REQUEST_CAPABILITY,
     SPEAK_CAPABILITY,
     build_initial_action_capabilities,
     project_prompt_affordances,
@@ -1247,15 +1248,20 @@ async def _run_live_background_turn(
         l2d_result.get("semantic_action_requests", []),
         state,
     )
+    expected_handover_kind = (
+        ACCEPTED_CODING_TASK_REQUEST_CAPABILITY
+        if coding_run_contexts
+        else ACCEPTED_TASK_REQUEST_CAPABILITY
+    )
     coding_specs = [
         spec for spec in action_specs
-        if spec.get("kind") == ACCEPTED_CODING_TASK_REQUEST_CAPABILITY
+        if spec.get("kind") == expected_handover_kind
     ]
     rejection_reason = ""
     if not coding_specs:
         rejection_reason = (
-            "No accepted coding action materialized from the current offered "
-            "coding-run contexts."
+            "No accepted coding handover materialized for the current "
+            "new-task or existing-run context."
         )
     trace = {
         "case_id": case_id,
@@ -1279,7 +1285,7 @@ async def _run_live_background_turn(
     if not coding_specs and not require_coding_spec:
         return trace
     assert coding_specs, (
-        "Live L2d did not produce accepted_coding_task_request. "
+        f"Live L2d did not produce {expected_handover_kind}. "
         f"raw={capturing_llm.raw_output}; "
         f"coding_run_contexts={coding_run_contexts}; trace={trace_path}"
     )
@@ -1381,6 +1387,7 @@ def _l2d_state(
             build_initial_action_capabilities(),
         )
         if row["capability"] in (
+            ACCEPTED_TASK_REQUEST_CAPABILITY,
             ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
             SPEAK_CAPABILITY,
         )
@@ -1427,7 +1434,8 @@ def _l2d_state(
             "The user is asking for bounded accepted coding-agent work."
         ),
         "internal_monologue": (
-            "Use the accepted coding task action for durable background work."
+            "Use generic accepted work for a new coding task, or the bound "
+            "coding-run action for an existing run lifecycle request."
         ),
         "emotional_appraisal": "focused",
         "interaction_subtext": "direct coding request",

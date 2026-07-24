@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
+
 import pytest
 
 from tests.cognition_baseline_worker import (
@@ -13,8 +15,6 @@ from tests.cognition_baseline_worker import (
     _extract_final_cognition_monologue,
     _has_unavailable_evidence,
     _requires_live_monologue,
-    _truthful_unavailable_coding_response,
-    _truthful_unavailable_repository_outcome,
     _truthful_unavailable_scheduler_outcome,
     _trace_status_is_valid,
     _v2_requires_final_cognition_monologue,
@@ -242,43 +242,8 @@ def test_unavailable_scheduler_gate_requires_surface_limit_contract() -> None:
     assert _truthful_unavailable_scheduler_outcome(runtime)
 
 
-def test_unavailable_repository_owner_accepts_truthful_blocked_result() -> None:
-    """Reader gates admit a typed unavailable-owner outcome."""
-
-    value = {
-        "graph_result": {
-            "action_availability_runtime": {
-                "worker_status": {
-                    "accepted_task": "unavailable",
-                    "background_work": "unavailable",
-                },
-            },
-            "cognition_core_output": {
-                "goal_resolution": "requires_user_input",
-                "action_requests": [],
-                "resolver_requests": [{
-                    "capability": "human_clarification",
-                }],
-            },
-            "consolidation_state": {
-                "text_surface_output_v2": {
-                    "runtime_capability_limits": [
-                        "当前仓库代码读取 owner 不可用；请用户提供代码材料。",
-                    ],
-                },
-            },
-        },
-    }
-
-    assert _truthful_unavailable_repository_outcome(value)
-    value["graph_result"]["cognition_core_output"]["resolver_requests"] = [{
-        "capability": "public_answer_research",
-    }]
-    assert not _truthful_unavailable_repository_outcome(value)
-
-
-def test_unavailable_coding_owner_satisfies_execution_gate_alternate() -> None:
-    """C11 execution gates accept a typed unavailable coding owner outcome."""
+def test_unavailable_coding_owner_fails_effect_gates() -> None:
+    """An unavailable owner is diagnostic evidence, not execution evidence."""
 
     case = {
         "case_id": "C11",
@@ -288,6 +253,8 @@ def test_unavailable_coding_owner_satisfies_execution_gate_alternate() -> None:
             "accepted_coding_task_persisted",
             "coding_run_bound",
             "guarded_workspace_effect",
+            "repository_map_evidence",
+            "coding_reader_route",
         ],
     }
     graph_result = {
@@ -335,79 +302,289 @@ def test_unavailable_coding_owner_satisfies_execution_gate_alternate() -> None:
         expected_delivery_text="",
     )
 
-    assert failures == []
-    assert results == {
-        "accepted_coding_task_persisted": True,
-        "coding_run_bound": True,
-        "guarded_workspace_effect": True,
-    }
-
-    graph_result["cognition_core_output"]["action_requests"] = [{
-        "action_kind": "accepted_coding_task_request",
-    }]
-    failures, results = _evaluate_hard_gates(
-        {},
-        case,
-        response_payload={
-            "messages": [
-                "当前无法读取仓库，请提供 README 内容。",
-            ],
-        },
-        monologue="当前 coding owner 不可用，我先说明限制。",
-        monologue_path="response.cognition_graph.nodes.l2.reasoning.internal_monologue",
-        graph_result=graph_result,
-        persisted_profile=None,
-        adapter_calls=[],
-        counts_before={"accepted_tasks": 0, "background_work_jobs": 0},
-        counts_after={"accepted_tasks": 0, "background_work_jobs": 0},
-        workspace_before={"sha256": "empty"},
-        workspace_after={"sha256": "empty"},
-        expected_delivery_text="",
-    )
-
     assert failures == [
         "hard gate failed: accepted_coding_task_persisted",
         "hard gate failed: coding_run_bound",
         "hard gate failed: guarded_workspace_effect",
+        "hard gate failed: repository_map_evidence",
+        "hard gate failed: coding_reader_route",
     ]
     assert results == {
         "accepted_coding_task_persisted": False,
         "coding_run_bound": False,
         "guarded_workspace_effect": False,
+        "repository_map_evidence": False,
+        "coding_reader_route": False,
     }
 
 
-def test_truthful_coding_limit_without_action_is_a_typed_alternate() -> None:
-    """A truthful C11 limitation can answer the current turn without an effect."""
+def test_failed_worker_summary_does_not_satisfy_terminal_gate() -> None:
+    """A failure summary cannot masquerade as a terminal successful result."""
 
-    value = {
-        "graph_result": {
-            "action_availability_runtime": {
-                "worker_status": {
-                    "accepted_task": "unavailable",
-                    "background_work": "unavailable",
-                    "orchestrator": "unavailable",
-                },
-            },
-            "cognition_core_output": {
-                "goal_resolution": "answerable_now",
-                "action_requests": [],
-                "resolver_requests": [],
-                "intention": {
-                    "reason": "当前仓库代码读取 owner 不可用。",
-                },
-            },
+    case = {
+        "output_mode": "visible",
+        "hard_gates": ["terminal_result"],
+    }
+    common_args = {
+        "input_payload": {},
+        "case": case,
+        "response_payload": {"messages": ["The coding worker failed."]},
+        "monologue": "The worker returned a failure.",
+        "monologue_path": "internal_monologue",
+        "persisted_profile": None,
+        "adapter_calls": [],
+        "counts_before": {},
+        "counts_after": {},
+        "workspace_before": {},
+        "workspace_after": {},
+        "expected_delivery_text": "",
+    }
+
+    failures, results = _evaluate_hard_gates(
+        **common_args,
+        graph_result={
+            "action_results": [{
+                "status": "failed",
+                "result_summary": "Selected worker unavailable.",
+            }],
         },
-        "response": {
-            "messages": ["当前无法读取仓库，请提供 README 内容。"],
+    )
+
+    assert failures == ["hard gate failed: terminal_result"]
+    assert results == {"terminal_result": False}
+
+    failures, results = _evaluate_hard_gates(
+        **common_args,
+        graph_result={
+            "action_results": [{
+                "status": "succeeded",
+                "result_summary": "Coding worker completed the action.",
+            }],
+        },
+    )
+
+    assert failures == []
+    assert results == {"terminal_result": True}
+
+
+def _valid_c07_handover_graph() -> dict[str, object]:
+    """Build one fully correlated C07 task, worker, and delivery result."""
+
+    return {
+        "background_handover": {
+            "runtime_ticks": [{
+                "processed_count": 1,
+                "succeeded_count": 1,
+                "failed_count": 0,
+                "delivery_delivered_count": 1,
+                "delivery_failed_count": 0,
+            }],
+            "jobs_before": [],
+            "jobs_after": [{
+                "job_id": "job-1",
+                "accepted_task_id": "task-1",
+                "source_message_id": "C07-current",
+                "task_brief": (
+                    "Review https://github.com/eamars/KazusaAIChatbot"
+                ),
+                "attempt_count": 1,
+                "delivery_attempt_count": 1,
+                "status": "delivered",
+                "delivery_tracking_id": "background-delivery-1",
+                "delivered_conversation_message_id": "conversation-row-1",
+                "worker": "coding_agent",
+                "failure_summary": "",
+                "result_summary": "coding_agent succeeded; code_reading",
+                "artifact_text": "The repository uses a staged cognition graph.",
+                "worker_metadata": {
+                    "coding_operation": "code_reading",
+                    "worker_operation": "start",
+                    "coding_run_status": "completed",
+                    "objective_type": "read_only",
+                    "repository": {
+                        "owner": "eamars",
+                        "repo": "KazusaAIChatbot",
+                    },
+                    "evidence_refs": [{
+                        "path": "src/kazusa_ai_chatbot/service.py",
+                        "line_start": 1,
+                        "line_end": 20,
+                    }],
+                },
+            }],
+            "accepted_tasks_before": [],
+            "accepted_tasks_after": [{
+                "accepted_task_id": "task-1",
+                "executor_ref": "job-1",
+                "action_kind": "accepted_task_request",
+                "first_source_message_id": "C07-current",
+                "state": "delivered",
+                "delivery_tracking_id": "background-delivery-1",
+                "delivered_conversation_message_id": "conversation-row-1",
+            }],
+            "conversation_rows_before": [],
+            "conversation_rows_after": [{
+                "row_id": "conversation-row-1",
+                "role": "assistant",
+                "body_text": "Here is the repository review.",
+                "delivery_tracking_id": "dispatcher-delivery-1",
+                "delivery_status": "delivered",
+                "platform_message_id": "adapter-message-1",
+                "platform_channel_id": "baseline-C07",
+            }],
+            "delivery_adapter_calls": [{
+                "message_id": "adapter-message-1",
+                "text": "Here is the repository review.",
+                "channel_id": "baseline-C07",
+            }],
+            "delivery_graph_results": [{
+                "cognitive_episode": {
+                    "percepts": [{
+                        "content": {
+                            "result": {"task_id": "task-1"},
+                        },
+                    }],
+                },
+                "action_results": [{
+                    "action_attempt_id": "speak-attempt-1",
+                    "action_kind": "speak",
+                    "status": "executed",
+                }],
+                "surface_outputs": [{
+                    "schema_version": "surface_output.v1",
+                    "surface_kind": "text",
+                    "visibility": "user_visible",
+                    "action_attempt_id": "speak-attempt-1",
+                    "fragments": ["Here is the repository review."],
+                }],
+                "episode_trace": {
+                    "delivery_correlation": {
+                        "tracking_id": "dispatcher-delivery-1",
+                    },
+                },
+            }],
         },
     }
 
-    assert _truthful_unavailable_coding_response(value)
-    value["graph_result"]["cognition_core_output"]["action_requests"] = [{
-        "action_kind": "accepted_coding_task_request",
-    }]
-    assert not _truthful_unavailable_coding_response(value)
+
+def _c07_gate_case() -> dict[str, object]:
+    """Return C07's exact dispatch and delivery gate list."""
+
+    return {
+        "case_id": "C07",
+        "output_mode": "visible",
+        "hard_gates": [
+            "visible_dialog",
+            "accepted_task_persisted",
+            "c07_exact_handover",
+            "coding_reader_route",
+            "repository_map_evidence",
+            "terminal_result",
+            "result_speak_called",
+            "one_authorized_delivery",
+        ],
+    }
+
+
+def _c07_gate_args() -> dict[str, object]:
+    """Return common visible and persistence evidence for C07 gate tests."""
+
+    return {
+        "input_payload": {},
+        "case": _c07_gate_case(),
+        "response_payload": {"messages": ["I accepted the repository review."]},
+        "monologue": "I will delegate the repository reading.",
+        "monologue_path": "internal_monologue",
+        "persisted_profile": None,
+        "adapter_calls": [{"text": "Here is the repository review."}],
+        "counts_before": {"accepted_tasks": 0},
+        "counts_after": {"accepted_tasks": 1},
+        "workspace_before": {},
+        "workspace_after": {},
+        "expected_delivery_text": "",
+    }
+
+
+def test_c07_execution_gates_require_structured_coding_reader_evidence() -> None:
+    """C07 passes only on one correlated coding read and result delivery."""
+
+    failures, results = _evaluate_hard_gates(
+        **_c07_gate_args(),
+        graph_result=_valid_c07_handover_graph(),
+    )
+
+    assert failures == []
+    assert all(results.values())
+
+
+@pytest.mark.parametrize(
+    ("failure_mode", "failed_gates"),
+    [
+        ("duplicate_job", ("c07_exact_handover",)),
+        ("wrong_repository", ("repository_map_evidence",)),
+        ("empty_evidence", ("repository_map_evidence",)),
+        ("unrelated_speech", ("result_speak_called",)),
+        ("mismatched_delivery_id", ("c07_exact_handover",)),
+        (
+            "blocked_partial_read",
+            (
+                "coding_reader_route",
+                "repository_map_evidence",
+                "terminal_result",
+            ),
+        ),
+        ("mismatched_surface_attempt", ("result_speak_called",)),
+    ],
+)
+def test_c07_execution_gates_reject_uncorrelated_or_incomplete_evidence(
+    failure_mode: str,
+    failed_gates: tuple[str, ...],
+) -> None:
+    """Every reviewed C07 false-pass shape must remain a failed gate."""
+
+    graph_result = _valid_c07_handover_graph()
+    handover = graph_result["background_handover"]
+    assert isinstance(handover, dict)
+    if failure_mode == "duplicate_job":
+        duplicate = deepcopy(handover["jobs_after"][0])
+        duplicate["job_id"] = "job-2"
+        handover["jobs_after"].append(duplicate)
+    elif failure_mode == "wrong_repository":
+        handover["jobs_after"][0]["worker_metadata"]["repository"] = {
+            "owner": "other",
+            "repo": "OtherRepository",
+        }
+    elif failure_mode == "empty_evidence":
+        handover["jobs_after"][0]["worker_metadata"]["evidence_refs"] = [{}]
+    elif failure_mode == "unrelated_speech":
+        handover["delivery_graph_results"][0]["cognitive_episode"] = {
+            "percepts": [{
+                "content": {"result": {"task_id": "unrelated-task"}},
+            }],
+        }
+    elif failure_mode == "mismatched_delivery_id":
+        handover["accepted_tasks_after"][0][
+            "delivery_tracking_id"
+        ] = "other-background-delivery"
+    elif failure_mode == "blocked_partial_read":
+        handover["jobs_after"][0]["worker_metadata"][
+            "coding_run_status"
+        ] = "blocked"
+    elif failure_mode == "mismatched_surface_attempt":
+        handover["delivery_graph_results"][0]["surface_outputs"][0][
+            "action_attempt_id"
+        ] = "other-speak-attempt"
+    else:
+        raise AssertionError(f"unsupported failure mode: {failure_mode}")
+
+    failures, results = _evaluate_hard_gates(
+        **_c07_gate_args(),
+        graph_result=graph_result,
+    )
+
+    for failed_gate in failed_gates:
+        assert results[failed_gate] is False
+        assert f"hard gate failed: {failed_gate}" in failures
 
 
 def test_coding_state_seed_builds_scoped_context_and_rejects_incomplete_seed() -> None:

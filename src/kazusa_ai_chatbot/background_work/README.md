@@ -21,9 +21,10 @@ and delivery bookkeeping out of cognition and dialog prompts.
 - L2d may request `future_speak` for accepted future reminders or delayed
   follow-up messages; deterministic action execution binds it to an accepted
   task and then to the `future_speak` worker.
-- L2d may request `accepted_coding_task_request` for durable coding-agent
-  runs; deterministic action execution validates the coding action and queues
-  the `coding_agent` worker with a versioned payload.
+- L2d may request `accepted_coding_task_request` only for a lifecycle action
+  bound to an existing durable coding run; deterministic action execution
+  validates the run reference and queues the `coding_agent` worker with a
+  versioned continuation payload.
 - The background-work router emits only `action`, `worker`, and `reason`.
 - Worker subagents own worker-local semantic parameters and artifacts.
 - L3/dialog remain the only visible wording owners and receive accepted-task
@@ -52,10 +53,11 @@ and requester scope, `requested_delivery="send_result_when_done"`,
 `task_identity_key` are lifecycle audit fields, not worker routing inputs.
 `requested_worker` plus `worker_payload` are allowed only for deterministic
 handoffs where an upstream handler already validated the worker-specific
-contract, such as `future_speak` or durable coding-run follow-up through
-`accepted_coding_task_request`. Generic delayed work should leave the worker
+contract, such as `future_speak` or an existing durable coding-run follow-up
+through `accepted_coding_task_request`. Generic delayed work leaves the worker
 unset so the background-work router can choose a worker from prompt-safe worker
-descriptions.
+descriptions. When it chooses `coding_agent`, that worker owns read-versus-write
+classification and starts the durable run.
 
 A worker is registered through `subagent.discover_background_work_workers()`.
 Each worker module must expose:
@@ -121,15 +123,15 @@ contract before enablement. A valid future worker must define:
   real LLM test when prompts or model-facing routing are involved.
 
 Coding-agent work enters through the registered `coding_agent` worker in two
-ways. Generic delayed coding tasks still route through the legacy
-`background_work_request` path, where the coding-agent supervisor chooses
-read-versus-write and returns a read answer or review-only proposal. Durable
-coding-run work enters through `accepted_coding_task_request`, which queues
+ways. Every new delayed coding task uses the generic
+`background_work_request` path. The coding-agent supervisor chooses
+read-versus-write and starts a durable run, returning either a completed read
+answer or a review-only proposal with a run context. Existing coding-run work
+enters through `accepted_coding_task_request`, which queues
 `requested_worker="coding_agent"` with `coding_agent_worker_payload.v2`.
-That payload supports closed operations `start`, `revise_proposal`,
+That payload supports closed continuation operations `revise_proposal`,
 `summarize`, `status`, `approve_and_verify`, `respond_to_blocker`, and `cancel`.
-The worker maps
-those actions to the coding-run supervisor and records
+The worker maps those actions to the coding-run supervisor and records
 `coding_agent_worker_metadata.v3` with the prompt-safe `coding_run_context.v1`
 `coding_run:<run_id>` reference, public changed-file summaries, attempt
 history, and allowed next actions.
@@ -170,10 +172,10 @@ time and a semantic continuation objective, then schedules a
 `future_cognition` calendar run. It does not store final user-facing text.
 The due self-cognition cycle decides again how to speak.
 
-`subagent.coding_agent` adapts the public standalone coding-agent
-`handle_background_coding_task(...)` interface. It handles accepted coding
-tasks, requires `CODING_AGENT_WORKSPACE_ROOT` at execution time, and returns
-bounded artifact text plus sanitized repository, evidence, and proposal
+`subagent.coding_agent` adapts the public durable coding-run interfaces. It
+handles accepted coding tasks, requires `CODING_AGENT_WORKSPACE_ROOT` at
+execution time, owns new-task read-versus-write classification, and returns
+bounded artifact text plus sanitized repository, evidence, proposal, and run
 metadata. It may produce proposal artifacts, but it does not apply patches,
 run project commands, install packages, or deliver adapter text.
 

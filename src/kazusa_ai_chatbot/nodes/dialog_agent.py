@@ -161,7 +161,9 @@ _V2_DIALOG_GENERATOR_PROMPT = '''你是当前角色的最终文字渲染器。�
 3. 把情绪、性格和互动姿态融入用词、句式与节奏，输出当前角色在聊天中实际会说出或发送的内容。
 4. permitted_action_results 是角色大脑能力的精确执行账本。只有 status 为 executed 才支持其
 有界的已完成效果；scheduled 与 pending 仍未完成，failed 与 unavailable 不支持成功声明。请求、
-意图或 content plan 本身只支持角色的言语立场，不代表现实效果已经发生。
+意图或 content plan 本身只支持角色的言语立场，不代表现实效果已经发生。scheduled 或 pending
+只支持已记录、已排队或等待对应 worker 的状态；不能写成立即执行，也不能保证立即反馈或立即得到
+结果。
 5. runtime_capability_limits 是可信的运行时能力边界。若其中明确标记能力不可用，不要把该能力
 表达为已经安排、发送或完成；可以自然表达当前限制、等待或下一步条件。
 6. 存在 repair_context 时，根据 current_visible_percepts 修正列出的每项硬错误，同时保留自然的
@@ -185,8 +187,10 @@ content plan 可能包含已经确认的错误，因此本次修复不再使用�
 具体对象、历史事件或已经发生的效果来填补缺口。
 3. 修正 verified_hard_issues 中的每一项，同时从 original_final_dialog 保留相容的含义、个性、
 鲜活感、幽默、亲密感和创造性细节。
-4. 遵守 permitted_action_results；只有 executed 的结果支持其有界的已完成效果。本次不提供自由
-文本 content plan、boundary 或 style guidance，因为这些字段可能含有已经确认的偏移。
+4. 遵守 permitted_action_results；只有 executed 的结果支持其有界的已完成效果。scheduled 或
+pending 只支持已记录、已排队或等待对应 worker，不能写成立即执行，也不能保证立即反馈或立即
+得到结果。本次不提供自由文本 content plan、boundary 或 style guidance，因为这些字段可能含有
+已经确认的偏移。
 5. 没有 executed 结果时，不要声称已完成、不要声称已经发送，也不要把请求或意图写成现实效果；
 使用等待、条件、询问或明确限制来表达当前状态。
 6. runtime_capability_limits 是本次修复必须遵守的可信边界。如果其中标记能力不可用，修复后的
@@ -716,11 +720,12 @@ async def _verify_dialog_role_direction(
 _V2_DIALOG_SURFACE_INTEGRITY_PROMPT = '''根据候选回应和精确的 permitted_action_results 核对
 能力执行事实。
 
-只有一种情况将 aligned 标为 false：候选回应声称角色大脑已经完成某项系统、工具、平台或其他
-能力，但 permitted_action_results 中没有匹配的 executed 结果。完成声明必须受该结果的
-action_kind、semantic_result 和 target_roles 约束。scheduled 或 pending 仍未完成；failed 或
-unavailable 不支持成功声明。单纯的言语立场、请求、邀请，以及未来、条件或假设事件都不等同于
-能力已经执行。
+以下情况将 aligned 标为 false：候选回应声称角色大脑已经完成某项系统、工具、平台或其他能力，
+但 permitted_action_results 中没有匹配的 executed 结果；或者结果为 scheduled 或 pending 时，
+候选回应把它写成立即执行，或保证立即反馈、立即得到结果。完成声明必须受该结果的 action_kind、
+semantic_result 和 target_roles 约束。scheduled 或 pending 只支持已记录、已排队或等待对应
+worker；failed 或 unavailable 不支持成功声明。单纯的言语立场、请求、邀请，以及没有即时保证的
+未来、条件或假设事件都不等同于能力已经执行。
 
 payload 可以包含 externally completed tool result 的 completed_source_evidence。
 如果候选回应准确表达了该证据支持的事实，即使没有 executed action result，也按有依据处理。

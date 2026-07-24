@@ -160,6 +160,9 @@ class ToolResultOriginV1(TypedDict, total=False):
 
     schema_version: Literal["tool_result_origin.v1"]
     owner: str
+    platform_message_id: str
+    active_turn_platform_message_ids: list[str]
+    active_turn_conversation_row_ids: list[str]
     task_id: str
     task_kind: str
     result_ref: str
@@ -829,8 +832,12 @@ def build_tool_result_episode(
         raise CognitiveEpisodeValidationError(
             "tool-result episode requires task_id and semantic_summary"
         )
+    trigger_message_id = f"tool-result:{task_id}"
     origin = _origin_with_defaults(
         {
+            "platform_message_id": trigger_message_id,
+            "active_turn_platform_message_ids": [trigger_message_id],
+            "active_turn_conversation_row_ids": [],
             "task_id": task_id,
             "task_kind": str(result_data.get("task_kind", "")),
             "result_ref": str(result_data.get("result_ref", task_id)),

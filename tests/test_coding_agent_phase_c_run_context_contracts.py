@@ -76,7 +76,6 @@ def test_coding_affordance_names_closed_continuation_vocabulary() -> None:
     summary = " ".join(coding_affordance["semantic_input_summary"])
 
     for action in (
-        "start",
         "revise_proposal",
         "summarize",
         "status",
@@ -85,4 +84,9 @@ def test_coding_affordance_names_closed_continuation_vocabulary() -> None:
         "cancel",
     ):
         assert action in summary
+    assert "start" not in coding_affordance["allowed_decisions"]
+    assert coding_affordance["default_decision"] in (
+        coding_affordance["allowed_decisions"]
+    )
+    assert "绑定既有 coding_run_ref" in summary
     assert "allowed_next_actions" in summary

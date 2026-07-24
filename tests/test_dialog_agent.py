@@ -177,6 +177,24 @@ def test_dialog_generator_repairs_unresolved_context_once() -> None:
     assert "不可用" in repair_prompt
 
 
+def test_dialog_prompts_map_pending_results_to_queue_only_truth() -> None:
+    """Every dialog pass must keep pending work at the queue boundary."""
+
+    prompts = (
+        dialog_module._V2_DIALOG_GENERATOR_PROMPT,
+        dialog_module._V2_DIALOG_HARD_FAILURE_REPAIR_PROMPT,
+        dialog_module._V2_DIALOG_SURFACE_INTEGRITY_PROMPT,
+    )
+
+    for prompt in prompts:
+        assert "pending" in prompt
+        assert "已记录" in prompt
+        assert "已排队" in prompt
+        assert "等待" in prompt
+        assert "立即执行" in prompt
+        assert "立即反馈" in prompt
+
+
 @pytest.mark.asyncio
 async def test_surface_integrity_prompt_receives_runtime_limits(
     monkeypatch,

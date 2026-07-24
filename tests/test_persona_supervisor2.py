@@ -5,6 +5,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from kazusa_ai_chatbot.action_spec.registry import (
+    ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
+    ACCEPTED_TASK_REQUEST_CAPABILITY,
+    SPEAK_CAPABILITY,
+)
 from kazusa_ai_chatbot.nodes import (
     persona_supervisor2_msg_decontextualizer as decontextualizer_module,
 )
@@ -18,6 +23,9 @@ from kazusa_ai_chatbot.cognition_core_v2.state_models import (
 )
 from kazusa_ai_chatbot.nodes import persona_supervisor2 as persona_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition as cognition_module
+from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_actions import (
+    materialize_semantic_action_requests,
+)
 from kazusa_ai_chatbot.cognition_resolver.loop import (
     _terminal_blocker_speak_action_spec,
 )
@@ -187,12 +195,117 @@ def _resolver_update(route: str) -> dict[str, object]:
     }
 
 
+def _accepted_coding_action_spec() -> dict[str, object]:
+    """Build one bound coding-run lifecycle action for handoff tests."""
+
+    state = _persona_state()
+    state["decontextualized_input"] = "Fix the coding worker handoff."
+    state["action_selection_context"] = {
+        "coding_runs": [{
+            "coding_run_ref": "coding_run:run-1",
+            "allowed_next_actions": ["revise_proposal"],
+        }],
+    }
+    specs = materialize_semantic_action_requests(
+        [{
+            "capability": ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
+            "decision": "revise_proposal",
+            "detail": "Revise the accepted coding proposal.",
+            "reason": "The user requested a revision to the existing run.",
+            "context_ref": "coding_run:run-1",
+        }],
+        state,
+    )
+    assert len(specs) == 1
+    return specs[0]
+
+
+def _accepted_task_action_spec() -> dict[str, object]:
+    """Build one validated generic accepted-task handoff."""
+
+    state = _persona_state()
+    state["decontextualized_input"] = (
+        "Inspect the repository architecture and report the result."
+    )
+    specs = materialize_semantic_action_requests(
+        [{
+            "capability": ACCEPTED_TASK_REQUEST_CAPABILITY,
+            "decision": "enqueue",
+            "detail": "Inspect the repository architecture.",
+            "reason": "The user requested bounded repository analysis.",
+        }],
+        state,
+    )
+    assert len(specs) == 1
+    return specs[0]
+
+
 def test_route_after_cognition_uses_validated_v2_speech_intention() -> None:
     """A validated V2 speech intention enters the visible surface path."""
 
     assert persona_module._route_after_cognition({
         "cognition_core_output": _cognition_output("speech"),
     }) == "respond"
+
+
+def test_v2_speech_intention_materializes_one_speak_action() -> None:
+    """The validated speech route must leave one canonical action residue."""
+
+    output = _cognition_output("speech")
+    specs = cognition_module._materialize_v2_action_requests(
+        output,
+        _persona_state(),
+    )
+
+    assert [spec["kind"] for spec in specs] == [SPEAK_CAPABILITY]
+    requirements = specs[0]["params"]["surface_requirements"]
+    assert requirements["decision"] == "visible_reply"
+    assert requirements["detail"] == (
+        "respond to the grounded episode"
+    )
+
+
+@pytest.mark.asyncio
+async def test_v2_speech_executes_and_correlates_speak_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Dialog execution must trace the same speak attempt on its surface."""
+
+    state = _persona_state()
+    output = _cognition_output("speech")
+    state.update(_resolver_update("speech"))
+    state["action_specs"] = cognition_module._materialize_v2_action_requests(
+        output,
+        state,
+    )
+    monkeypatch.setattr(
+        persona_module,
+        "call_l3_text_surface_handler",
+        AsyncMock(return_value={"text_surface_output_v2": {}}),
+    )
+    monkeypatch.setattr(
+        persona_module,
+        "dialog_agent",
+        AsyncMock(return_value={
+            "final_dialog": ["Hello."],
+            "target_addressed_user_ids": ["user-1"],
+            "target_broadcast": False,
+        }),
+    )
+
+    result = await persona_module.call_action_subgraph(state)
+
+    speak_results = [
+        row
+        for row in result["action_results"]
+        if row["action_kind"] == SPEAK_CAPABILITY
+    ]
+    assert len(speak_results) == 1
+    assert speak_results[0]["status"] == "executed"
+    assert speak_results[0]["action_attempt_id"]
+    assert result["surface_outputs"][0]["action_attempt_id"] == (
+        speak_results[0]["action_attempt_id"]
+    )
 
 
 def test_route_after_cognition_uses_validated_v2_silence_intention() -> None:
@@ -407,6 +520,194 @@ async def test_call_action_subgraph_preserves_dialog_and_trace(
     ]
     surface.assert_awaited_once()
     dialog.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_coding_enqueue_precedes_visible_speech_dialog(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Coding work is queued once before the acknowledgement reaches dialog."""
+
+    state = _persona_state()
+    state.update(_resolver_update("speech"))
+    state["action_specs"] = [_accepted_coding_action_spec()]
+    pending_result = {
+        "schema_version": "action_result.v1",
+        "action_attempt_id": "action_attempt:coding-1",
+        "action_kind": ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
+        "handler_owner": "background_work",
+        "status": "pending",
+        "result_summary": "Accepted task scheduled.",
+        "result_refs": [],
+        "completed_at": None,
+        "accepted_task_state": "scheduled",
+    }
+    execute = AsyncMock(side_effect=[[pending_result], []])
+    surface = AsyncMock(return_value={"text_surface_output_v2": {}})
+    dialog = AsyncMock(return_value={
+        "final_dialog": ["I accepted the coding task."],
+        "target_addressed_user_ids": ["user-1"],
+        "target_broadcast": False,
+    })
+    monkeypatch.setattr(
+        persona_module,
+        "execute_action_specs_for_trace",
+        execute,
+    )
+    monkeypatch.setattr(
+        persona_module,
+        "call_l3_text_surface_handler",
+        surface,
+    )
+    monkeypatch.setattr(persona_module, "dialog_agent", dialog)
+
+    enqueue_update = await persona_module.stage_2a_background_work_enqueue(state)
+
+    assert enqueue_update["pre_surface_action_results"] == [pending_result]
+    first_execution_specs = execute.await_args_list[0].args[0]
+    assert [spec["kind"] for spec in first_execution_specs] == [
+        ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
+    ]
+
+    state.update(enqueue_update)
+    result = await persona_module.call_action_subgraph(state)
+
+    assert result["final_dialog"] == ["I accepted the coding task."]
+    surface_state = surface.await_args.args[0]
+    assert surface_state["pre_surface_action_results"] == [pending_result]
+    dialog.assert_awaited_once()
+    coding_execution_calls = [
+        call
+        for call in execute.await_args_list
+        if any(
+            spec.get("kind") == ACCEPTED_CODING_TASK_REQUEST_CAPABILITY
+            for spec in call.args[0]
+        )
+    ]
+    assert len(coding_execution_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_coding_handoff_requires_visible_speech_route(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A private coding action cannot enqueue without an acknowledgement path."""
+
+    state = _persona_state()
+    state.update(_resolver_update("action"))
+    state["action_specs"] = [_accepted_coding_action_spec()]
+    execute = AsyncMock()
+    monkeypatch.setattr(
+        persona_module,
+        "execute_action_specs_for_trace",
+        execute,
+    )
+
+    result = await persona_module.stage_2a_background_work_enqueue(state)
+
+    action_results = result["pre_surface_action_results"]
+    assert len(action_results) == 1
+    assert action_results[0]["action_kind"] == (
+        ACCEPTED_CODING_TASK_REQUEST_CAPABILITY
+    )
+    assert action_results[0]["status"] == "failed"
+    assert "visible acknowledgement missing" in (
+        action_results[0]["result_summary"]
+    )
+    execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_generic_accepted_task_precedes_visible_speech_dialog(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Generic accepted work is queued once before L3 acknowledges it."""
+
+    state = _persona_state()
+    state.update(_resolver_update("speech"))
+    state["action_specs"] = [_accepted_task_action_spec()]
+    pending_result = {
+        "schema_version": "action_result.v1",
+        "action_attempt_id": "action_attempt:accepted-1",
+        "action_kind": ACCEPTED_TASK_REQUEST_CAPABILITY,
+        "handler_owner": "accepted_task",
+        "status": "pending",
+        "result_summary": "Accepted task scheduled.",
+        "result_refs": [],
+        "completed_at": None,
+        "accepted_task_state": "scheduled",
+    }
+    execute = AsyncMock(side_effect=[[pending_result], []])
+    surface = AsyncMock(return_value={"text_surface_output_v2": {}})
+    dialog = AsyncMock(return_value={
+        "final_dialog": ["I accepted the repository review."],
+        "target_addressed_user_ids": ["user-1"],
+        "target_broadcast": False,
+    })
+    monkeypatch.setattr(
+        persona_module,
+        "execute_action_specs_for_trace",
+        execute,
+    )
+    monkeypatch.setattr(
+        persona_module,
+        "call_l3_text_surface_handler",
+        surface,
+    )
+    monkeypatch.setattr(persona_module, "dialog_agent", dialog)
+
+    enqueue_update = await persona_module.stage_2a_background_work_enqueue(state)
+
+    assert enqueue_update["pre_surface_action_results"] == [pending_result]
+    first_execution_specs = execute.await_args_list[0].args[0]
+    assert [spec["kind"] for spec in first_execution_specs] == [
+        ACCEPTED_TASK_REQUEST_CAPABILITY,
+    ]
+
+    state.update(enqueue_update)
+    result = await persona_module.call_action_subgraph(state)
+
+    assert result["final_dialog"] == ["I accepted the repository review."]
+    surface_state = surface.await_args.args[0]
+    assert surface_state["pre_surface_action_results"] == [pending_result]
+    accepted_task_calls = [
+        call
+        for call in execute.await_args_list
+        if any(
+            spec.get("kind") == ACCEPTED_TASK_REQUEST_CAPABILITY
+            for spec in call.args[0]
+        )
+    ]
+    assert len(accepted_task_calls) == 1
+    dialog.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_generic_accepted_task_requires_visible_speech_route(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A generic accepted task cannot enqueue without acknowledgement."""
+
+    state = _persona_state()
+    state.update(_resolver_update("action"))
+    state["action_specs"] = [_accepted_task_action_spec()]
+    execute = AsyncMock()
+    monkeypatch.setattr(
+        persona_module,
+        "execute_action_specs_for_trace",
+        execute,
+    )
+
+    result = await persona_module.stage_2a_background_work_enqueue(state)
+
+    action_results = result["pre_surface_action_results"]
+    assert len(action_results) == 1
+    assert action_results[0]["action_kind"] == ACCEPTED_TASK_REQUEST_CAPABILITY
+    assert action_results[0]["status"] == "failed"
+    assert "visible acknowledgement missing" in (
+        action_results[0]["result_summary"]
+    )
+    execute.assert_not_awaited()
 
 
 @pytest.mark.asyncio

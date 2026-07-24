@@ -98,6 +98,12 @@ def test_tool_result_source_builder_creates_prompt_safe_episode() -> None:
     assert episode["percepts"][0]["source_kind"] == "tool_result"
     assert episode["origin_metadata"]["task_id"] == "task-001"
     assert episode["origin_metadata"]["task_kind"] == "accepted_task"
+    assert episode["origin_metadata"]["platform_message_id"] == (
+        "tool-result:task-001"
+    )
+    assert episode["origin_metadata"]["active_turn_platform_message_ids"] == [
+        "tool-result:task-001"
+    ]
     assert episode["percepts"][0]["content"]["semantic_summary"] == (
         "Generated a compact Fibonacci snippet."
     )
@@ -227,6 +233,10 @@ async def test_service_result_ready_delivery_uses_dispatcher_boundary(
     persona_state = persona_supervisor2.await_args.args[0]
     assert persona_state["cognitive_episode"] == episode
     assert persona_state["reason_to_respond"] == "tool_result"
+    assert persona_state["platform_message_id"] == "tool-result:task-001"
+    assert persona_state["active_turn_platform_message_ids"] == [
+        "tool-result:task-001"
+    ]
     assert persona_state["user_input"].startswith(
         "Tool result is completed."
     )
@@ -242,6 +252,7 @@ async def test_service_result_ready_delivery_uses_dispatcher_boundary(
     ]
     dispatch_context = handle_send_message.await_args.args[1]
     assert dispatch_context.bot_permission_role == "accepted_task_result"
+    assert dispatch_context.source_message_id == "tool-result:task-001"
     assert dispatch_context.source_platform_bot_id == "bot-1"
     post_turn.assert_awaited_once()
 

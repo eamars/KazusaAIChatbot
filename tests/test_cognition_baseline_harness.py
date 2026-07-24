@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import base64
 from copy import deepcopy
 from datetime import datetime
 from fnmatch import fnmatchcase
@@ -10,10 +12,14 @@ import json
 from pathlib import Path
 import subprocess
 from typing import Any
+from unittest.mock import AsyncMock
 
+from kazusa_ai_chatbot.brain_service.contracts import AttachmentRefIn
 from tests.cognition_baseline_comparison import (
+    _basic_case_payload,
     _completed_artifacts,
     _configured_database_name,
+    _corpus_config,
     _database_name,
     _is_executed_artifact,
     _load_case_rows,
@@ -21,6 +27,7 @@ from tests.cognition_baseline_comparison import (
 )
 from tests.cognition_baseline_worker import (
     _default_seed_timestamp_before_turn,
+    _drive_background_handover,
     _evaluate_hard_gates,
     _extract_background_monologue,
     _extract_canonical_monologue,
@@ -103,6 +110,31 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def test_o03_materializes_public_inline_attachment_bytes() -> None:
+    """O03 must reach the public request contract with its exact image bytes."""
+
+    owner_cases = _load_json(
+        _FIXTURE_ROOT / "cognition_baseline_owner_cases.json"
+    )["cases"]
+    o03_case = next(
+        case for case in owner_cases if case["case_id"] == "O03"
+    )
+    payload = _basic_case_payload(o03_case, active_name="Asuna")
+    attachments = payload["effective_input"]["attachments"]
+
+    assert len(attachments) == 1
+    raw_attachment = attachments[0]
+    assert "path" not in raw_attachment
+    validated = AttachmentRefIn.model_validate(raw_attachment)
+    expected_bytes = (_ROOT / "resources" / "avatar.png").read_bytes()
+    assert validated.storage_shape == "inline"
+    assert validated.size_bytes == len(expected_bytes)
+    assert base64.b64decode(
+        validated.base64_data,
+        validate=True,
+    ) == expected_bytes
+
+
 def _changed_paths() -> list[str]:
     """Return changed production paths against the frozen origin/main tip."""
 
@@ -147,6 +179,28 @@ def test_differential_harness_uses_configured_guarded_database() -> None:
     assert database_name == "_test_kazusa_core_v2"
     assert _database_name("pre_fix_main", "C01", 1) == database_name
     assert _database_name("pre_fix_v2", "C01", 1) == database_name
+
+
+def test_post_fix_corpus_binds_current_checkout_revision() -> None:
+    """Historical V2 stays frozen while post-fix follows its target checkout."""
+
+    _, pre_fix_root, pre_fix_revision = _corpus_config("pre_fix_v2")
+    _, post_fix_root, post_fix_revision = _corpus_config("post_fix_v2")
+    current_revision = subprocess.run(
+        ["git", "-C", str(post_fix_root), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    frozen_revision = subprocess.run(
+        ["git", "-C", str(pre_fix_root), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    assert post_fix_revision == current_revision
+    assert pre_fix_revision == frozen_revision
 
 
 def test_controlled_fixture_has_exact_twenty_cases_and_no_empty_selector() -> None:
@@ -329,6 +383,78 @@ def test_controlled_external_span_uses_declared_input_as_source() -> None:
     case = next(row for row in _load_case_rows() if row["case_id"] == "C07")
     assert case["source_input"] == {}
     assert _immutable_external_failures(case) == []
+
+
+def test_c07_fixture_requires_dispatch_result_and_delivery_evidence() -> None:
+    """C07 cannot pass on acknowledgement or queue persistence alone."""
+
+    case = next(row for row in _load_case_rows() if row["case_id"] == "C07")
+
+    assert case["hard_gates"] == [
+        "visible_dialog",
+        "accepted_task_persisted",
+        "c07_exact_handover",
+        "coding_reader_route",
+        "repository_map_evidence",
+        "terminal_result",
+        "result_speak_called",
+        "one_authorized_delivery",
+    ]
+
+
+def test_c07_handover_driver_runs_public_tick_to_terminal_state() -> None:
+    """The C07 helper drives one queued job and captures its terminal row."""
+
+    baseline = {
+        "jobs": [],
+        "accepted_tasks": [],
+        "conversation_rows": [],
+    }
+    queued = {
+        "jobs": [{"job_id": "job-1", "status": "queued"}],
+        "accepted_tasks": [{
+            "accepted_task_id": "task-1",
+            "status": "scheduled",
+        }],
+        "conversation_rows": [],
+    }
+    delivered = {
+        "jobs": [{
+            "job_id": "job-1",
+            "status": "delivered",
+            "worker": "coding_agent",
+        }],
+        "accepted_tasks": [{
+            "accepted_task_id": "task-1",
+            "status": "delivered",
+        }],
+        "conversation_rows": [],
+    }
+    snapshot = AsyncMock(side_effect=[queued, delivered])
+    tick = AsyncMock(return_value={
+        "status": "succeeded",
+        "processed_count": 1,
+        "succeeded_count": 1,
+        "failed_count": 0,
+        "delivery_processed_count": 1,
+        "delivery_delivered_count": 1,
+        "delivery_failed_count": 0,
+    })
+    deliver = AsyncMock()
+
+    evidence = asyncio.run(_drive_background_handover(
+        runtime_tick_func=tick,
+        deliver_result_episode_func=deliver,
+        snapshot_func=snapshot,
+        baseline_snapshot=baseline,
+    ))
+
+    tick.assert_awaited_once()
+    assert tick.await_args.kwargs["deliver_result_episode_func"] is deliver
+    assert evidence["runtime_ticks"][0]["processed_count"] == 1
+    assert evidence["jobs_before"] == []
+    assert evidence["jobs_before_tick"] == queued["jobs"]
+    assert evidence["jobs_after"] == delivered["jobs"]
 
 
 def test_real_history_identity_and_external_gates_are_implemented() -> None:

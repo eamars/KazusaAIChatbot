@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -14,6 +15,8 @@ from kazusa_ai_chatbot.cognition_core_v2.surface import (
 from kazusa_ai_chatbot.cognition_core_v2.surface_stages import (
     run_content_plan_stage,
 )
+from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
+from kazusa_ai_chatbot.nodes.dialog_agent import dialog_generator
 from kazusa_ai_chatbot.nodes.persona_supervisor2_l3_surface import (
     _build_text_surface_services,
     build_text_surface_input_from_global_state,
@@ -23,10 +26,6 @@ from tests.llm_trace import write_llm_trace
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm]
 
-_C07_ARTIFACT = Path(
-    'test_artifacts/cognition_core_v2/baseline_regression_hardening/'
-    'post_fix_v2/C07/r1.json'
-)
 _C11_ARTIFACT = Path(
     'test_artifacts/cognition_core_v2/baseline_regression_hardening/'
     'post_fix_v2/C11/r1.json'
@@ -184,12 +183,6 @@ async def _run_blocked_content_plan_case(case_id: str) -> None:
 
     assert capturing_llm.calls
     assert semantic_judgment['passed']
-
-
-async def test_c07_content_plan_respects_blocked_repository_owner() -> None:
-    """A blocked repository owner must not become an invented code review."""
-
-    await _run_blocked_content_plan_case('C07')
 
 
 async def test_c11_content_plan_respects_blocked_coding_owner() -> None:
@@ -359,7 +352,7 @@ async def test_c13_content_plan_preserves_pending_queue_only_boundary() -> None:
         services,
     )
     combined = ' '.join([content_plan, *content_requirements])
-    queue_markers = (
+    pending_paraphrases = (
         '已记录',
         '已排队',
         '排队',
@@ -368,27 +361,36 @@ async def test_c13_content_plan_preserves_pending_queue_only_boundary() -> None:
         '等待 worker',
         '等待 coding worker',
     )
-    execution_claim_markers = (
+    immediate_or_completed_claims = (
         '现在开始',
         '已经开始',
         '马上开始',
         '立即开始',
         '马上为您反馈',
+        '立即反馈',
         '已经完成',
         '已完成',
     )
-    semantic_judgment = {
+    observed_pending_paraphrases = [
+        marker for marker in pending_paraphrases if marker in combined
+    ]
+    observed_immediate_or_completed_claims = [
+        marker
+        for marker in immediate_or_completed_claims
+        if marker in combined
+    ]
+    quality_review = {
         'passed': (
-            any(marker in combined for marker in queue_markers)
-            and not any(
-                marker in combined
-                for marker in execution_claim_markers
-            )
+            bool(observed_pending_paraphrases)
+            and not observed_immediate_or_completed_claims
         ),
-        'reason': (
+        'criteria': (
             'canonical surface 输入带有 pending 的 accepted_coding_task_request；'
-            'content plan 应表达已记录或排队、等待执行的当前状态，不能把 worker 尚未'
-            '执行的 action 说成已经开始或完成。'
+            '检查输出是否保留 worker 尚未执行的边界，并避免保证立即反馈或声称已完成。'
+        ),
+        'observed_pending_paraphrases': observed_pending_paraphrases,
+        'observed_immediate_or_completed_claims': (
+            observed_immediate_or_completed_claims
         ),
     }
     trace_path = write_llm_trace(
@@ -404,7 +406,7 @@ async def test_c13_content_plan_preserves_pending_queue_only_boundary() -> None:
                 'content_plan': content_plan,
                 'content_requirements': content_requirements,
             },
-            'semantic_judgment': semantic_judgment,
+            'quality_review': quality_review,
         },
     )
     print(json.dumps({
@@ -415,8 +417,126 @@ async def test_c13_content_plan_preserves_pending_queue_only_boundary() -> None:
             'content_plan': content_plan,
             'content_requirements': content_requirements,
         },
-        'semantic_judgment': semantic_judgment,
+        'quality_review': quality_review,
     }, ensure_ascii=True, indent=2))
 
     assert capturing_llm.calls
-    assert semantic_judgment['passed']
+    assert content_plan.strip()
+    assert all(
+        isinstance(requirement, str) and requirement.strip()
+        for requirement in content_requirements
+    )
+    assert quality_review['passed']
+
+
+async def test_c13_dialog_renders_pending_queue_only_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The final dialog must render the canonical pending C13 surface."""
+
+    artifact_path = Path(
+        'test_artifacts/cognition_core_v2/baseline_regression_hardening/'
+        'post_fix_v2/C13/r1.json'
+    )
+    artifact = json.loads(artifact_path.read_text(encoding='utf-8'))
+    graph = artifact['graph_result']
+    surface_output = graph['consolidation_state']['text_surface_output_v2']
+    permitted_results = surface_output['permitted_action_results']
+    assert len(permitted_results) == 1
+    assert permitted_results[0]['status'] == 'pending'
+
+    capturing_llm = _CapturingLLM(dialog_module._dialog_generator_llm)
+    monkeypatch.setattr(
+        dialog_module,
+        '_dialog_generator_llm',
+        capturing_llm,
+    )
+    monkeypatch.setattr(
+        dialog_module.llm_tracing,
+        'record_llm_trace_step',
+        AsyncMock(),
+    )
+    for recorder_name in (
+        'record_llm_stage_event',
+        'record_model_contract_event',
+        'record_dialog_quality_event',
+    ):
+        monkeypatch.setattr(
+            dialog_module.event_logging,
+            recorder_name,
+            AsyncMock(),
+        )
+
+    result = await dialog_generator({
+        'dialog_usage_mode': 'live_response',
+        'text_surface_output_v2': surface_output,
+        'cognitive_episode': graph['cognitive_episode'],
+        'user_name': graph['user_name'],
+        'llm_trace_id': '',
+    })
+    final_dialog = result['final_dialog']
+    combined = ' '.join(final_dialog)
+    pending_paraphrases = (
+        '已记录',
+        '已排队',
+        '排队',
+        '待执行',
+        '等待执行',
+        '等待 worker',
+        '等待 coding worker',
+    )
+    immediate_claims = (
+        '马上开始',
+        '立即开始',
+        '马上为您反馈',
+        '立即反馈',
+        '马上给出结果',
+        '立即得到结果',
+    )
+    observed_pending_paraphrases = [
+        marker for marker in pending_paraphrases if marker in combined
+    ]
+    observed_immediate_claims = [
+        marker for marker in immediate_claims if marker in combined
+    ]
+    quality_review = {
+        'passed': (
+            bool(observed_pending_paraphrases)
+            and not observed_immediate_claims
+        ),
+        'criteria': (
+            'pending/scheduled 只能表达已记录、已排队或等待 worker；'
+            '不能保证立即执行、立即反馈或立即得到结果。'
+        ),
+        'observed_pending_paraphrases': observed_pending_paraphrases,
+        'observed_immediate_claims': observed_immediate_claims,
+    }
+    trace_path = write_llm_trace(
+        'cognition_core_v2_surface_owner_live_llm',
+        'c13_dialog_pending_queue_only_boundary',
+        {
+            'case_id': 'C13',
+            'source_artifact': str(artifact_path),
+            'surface_output': surface_output,
+            'model_calls': capturing_llm.calls,
+            'final_dialog': final_dialog,
+            'quality_review': quality_review,
+        },
+    )
+    print(json.dumps({
+        'case_id': 'C13',
+        'trace_path': str(trace_path),
+        'raw_model_outputs': [
+            call['raw_output'] for call in capturing_llm.calls
+        ],
+        'final_dialog': final_dialog,
+        'quality_review': quality_review,
+    }, ensure_ascii=True, indent=2))
+
+    assert capturing_llm.calls
+    assert final_dialog
+    assert all(
+        isinstance(message, str) and message.strip()
+        for message in final_dialog
+    )
+    assert quality_review['passed']

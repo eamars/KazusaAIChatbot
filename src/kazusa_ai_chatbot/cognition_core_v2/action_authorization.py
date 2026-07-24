@@ -47,8 +47,9 @@ runtime_capability_limits 是确定性运行时提供的可信能力限制，与
 声明的真实效果依赖其中标记为不可用的能力，必须拒绝该候选。queue-only coding owner 是一个
 有界例外：当候选的 semantic capability 明确来自绑定既有 coding run 的 affordance，且当前决定
 属于该 run 的 allowed_next_actions 时，可以核准记录并排队该生命周期动作；其结果保持待执行，
-后续 surface 只能表达已记录或待执行，不能表达 worker 已执行或完成。没有绑定 run 的 start
-仍然需要可用 coding owner。若某项能力不是所声明效果的拥有者，也必须拒绝替代关系；例如
+后续 surface 只能表达已记录或待执行，不能表达 worker 已执行或完成。没有绑定 run 的
+accepted_coding_task_request 不属于提供的生命周期 owner，必须拒绝。若某项能力不是所声明效果的
+拥有者，也必须拒绝替代关系；例如
 accepted_task_request 不能代替 future_speak 来安排未来提醒或主动联系。“告诉用户已经收到请求”
 是当前可见发言，不是有界延迟动作；不能因为这个即时确认目标就核准一个替代任务。只根据当前
 证据、候选的真实效果和可信运行限制做语义判断。
@@ -67,12 +68,13 @@ memory_lifecycle_update 的真实效果是 active commitment lifecycle review，
 风格事实的保存；这类偏好由记忆与 consolidation 流程处理。runtime_capability_limits 中的后台
 任务不可用事实覆盖普通 accepted_task_request 和 background_work_request；已绑定既有 coding run
 且由 affordance 明确提供的生命周期 action 按 queue-only 语义核准，结果保持待执行。候选若只是
-把当前确认、普通偏好或没有绑定 run 的 start 写成这些 action，授权结果应保持为拒绝。
+把当前确认、普通偏好或没有绑定 run 的请求写成这些 action，授权结果应保持为拒绝。
 
 能力 owner 的正向对应关系是：accepted_task_request 负责明确接受的延迟文本、仓库分析和代码阅读
-结果；accepted_coding_task_request 负责代码修改、验证或既有 coding run 生命周期。已有 run 的
-生命周期动作由其绑定的 coding run affordance 拥有；queue-only 时可以记录并排队，worker 执行结果
-仍保持待执行。没有绑定 run 的新 start 需要健康的后台 owner。public_answer_research 属于 resolver，
+结果，也负责所有未绑定 coding_run_ref 的新代码编写或修改任务；coding worker 在接收后判断阅读、
+编写或修改类型。accepted_coding_task_request 只负责绑定既有 coding_run_ref 的验证、批准、取消、
+阻塞处理或其他 run 生命周期。已有 run 的生命周期动作由其绑定的 coding run affordance 拥有；
+queue-only 时可以记录并排队，worker 执行结果仍保持待执行。public_answer_research 属于 resolver，
 不是这些 action 的替代 owner。
 
 # 输出格式

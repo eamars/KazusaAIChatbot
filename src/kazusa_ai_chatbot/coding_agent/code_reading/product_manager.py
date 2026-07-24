@@ -94,21 +94,18 @@ facts until programmer workers read bounded source evidence.
 
 # Decision Rules
 - Choose one generic intent from the allowed list.
-- If the question is too broad for at most three bounded workers, return
-  overloaded with missing_slots explaining the narrower scope needed.
-- Judge broadness from the user's requested scope, not from how small or easy
-  the current repository map looks. Requests to explain, inspect, summarize, or
-  analyze everything, the whole repository, every file, all behavior, or the
-  entire project are unbounded unless the user names a specific workflow,
-  subsystem, API, symbol, state transition, or bounded evidence question.
-- For unbounded whole-project requests, do not create representative
-  architecture-overview assignments. Return overloaded or needs_user_input and
-  ask for a narrower target instead.
-- A high-level architecture or responsibility-boundary question is bounded
-  when the user names the product, subsystem, workflow, interface, or symbol to
-  explain. For that case, choose representative entry points, interfaces, and
-  core orchestration slices rather than treating every repository file or every
-  behavior as required evidence.
+- Treat an ordinary request to evaluate, explain, or highlight the architecture
+  of an identified repository or product as a bounded representative evidence
+  survey. Choose representative documentation, entry points, interfaces, and
+  core orchestration slices; do not infer that every file or behavior must be
+  inspected.
+- If the user explicitly requests every file, every subsystem, all behavior,
+  exhaustive coverage, or an equivalent whole-project inventory that cannot fit
+  within three bounded workers, return overloaded with missing_slots explaining
+  the narrower scope needed.
+- Judge explicit exhaustive scope from the user's request, not from repository
+  size. A large repository alone does not make a representative architecture
+  overview overloaded.
 - If the request asks to rewrite, edit, modify, patch, implement, or otherwise
   change code, return needs_user_input with intent unsupported_request and no
   assignments.
@@ -232,6 +229,18 @@ decisive bounded source slices first, keep each assignment narrow, and do not
 return overloaded merely because extra lower-priority slices could be useful.
 '''
 
+READING_PM_ARCHITECTURE_SCOPE_RETRY_PROMPT = '''\
+Your previous decision marked an architecture overview as overloaded.
+Re-evaluate whether the user requested a representative architecture evidence
+survey or explicitly exhaustive coverage. An ordinary request to evaluate an
+identified repository's architecture and highlights is a bounded
+representative architecture evidence survey: return one to three decisive,
+bounded assignments over visible documentation, entry points, interfaces, or
+orchestration slices. If the user explicitly requested every file, every
+subsystem, all behavior, or exhaustive coverage, preserve overloaded and
+explain the required narrowing. Return strict JSON.
+'''
+
 _reading_pm_llm = LLInterface()
 _reading_pm_llm_config = LLMCallConfig(
     stage_name=__name__,
@@ -293,6 +302,7 @@ def decide_reading_work(
         return decision
     attempts: list[dict[str, object]] = []
     decision: ReadingPMDecision | None = None
+    retry_prompt: str | None = None
     raw_output = ""
     parsed: object = {}
     for attempt_index in range(MAX_PM_DECISION_ATTEMPTS):
@@ -300,9 +310,9 @@ def decide_reading_work(
             SystemMessage(content=READING_PM_PROMPT),
             HumanMessage(content=payload_text),
         ]
-        if attempt_index:
+        if retry_prompt is not None:
             retry_message = HumanMessage(
-                content=READING_PM_ASSIGNMENT_CAP_RETRY_PROMPT,
+                content=retry_prompt,
             )
             messages.append(retry_message)
         timed_out = False
@@ -329,7 +339,8 @@ def decide_reading_work(
             "normalized_output": decision,
             "timed_out": timed_out,
         })
-        if timed_out or not _should_retry_pm_decision(decision):
+        retry_prompt = _pm_retry_prompt(decision)
+        if timed_out or retry_prompt is None:
             break
 
     if decision is None:
@@ -727,12 +738,16 @@ def _overloaded_decision(reason: str) -> ReadingPMDecision:
     return decision
 
 
-def _should_retry_pm_decision(decision: ReadingPMDecision) -> bool:
+def _pm_retry_prompt(decision: ReadingPMDecision) -> str | None:
     if decision["status"] != "overloaded":
-        return False
-    return "Too many programmer assignments were requested." in decision[
+        return None
+    if "Too many programmer assignments were requested." in decision[
         "missing_slots"
-    ]
+    ]:
+        return READING_PM_ASSIGNMENT_CAP_RETRY_PROMPT
+    if decision["intent"] == "architecture_overview":
+        return READING_PM_ARCHITECTURE_SCOPE_RETRY_PROMPT
+    return None
 
 
 def _evidence_ref(row: dict[str, object]) -> str:

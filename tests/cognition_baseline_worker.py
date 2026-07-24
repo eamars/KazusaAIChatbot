@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import subprocess
 import sys
@@ -40,6 +40,14 @@ _PROFILE_RUNTIME_FIELDS = frozenset({
 })
 _KAZUSA_PROJECT_TOKEN = "KazusaAIChatbot"
 _KAZUSA_PROJECT_URL = "https://github.com/eamars/KazusaAIChatbot"
+_C07_BACKGROUND_TICK_LIMIT = 6
+_BACKGROUND_ACTIVE_JOB_STATUSES = frozenset({"queued", "in_progress"})
+_BACKGROUND_TERMINAL_JOB_STATUSES = frozenset({
+    "completed",
+    "delivered",
+    "delivery_failed",
+    "failed",
+})
 _REQUIRED_ENV = (
     "MONGODB_URI",
     "MONGODB_DB_NAME",
@@ -725,6 +733,282 @@ def _has_nonempty_key(value: object, keys: Sequence[str]) -> bool:
     return False
 
 
+def _c07_exact_handover(
+    graph_result: Mapping[str, Any],
+) -> tuple[Mapping[str, Any], Mapping[str, Any]] | None:
+    """Return the one fully linked C07 task and job handover."""
+
+    handover = graph_result.get("background_handover")
+    if not isinstance(handover, Mapping):
+        return None
+    jobs_before = handover.get("jobs_before")
+    jobs_after = handover.get("jobs_after")
+    tasks_before = handover.get("accepted_tasks_before")
+    tasks_after = handover.get("accepted_tasks_after")
+    ticks = handover.get("runtime_ticks")
+    if not all(
+        isinstance(rows, list)
+        for rows in (jobs_before, jobs_after, tasks_before, tasks_after, ticks)
+    ):
+        return None
+    prior_job_ids = {
+        str(row.get("job_id") or "")
+        for row in jobs_before
+        if isinstance(row, Mapping) and str(row.get("job_id") or "")
+    }
+    prior_task_ids = {
+        str(row.get("accepted_task_id") or "")
+        for row in tasks_before
+        if isinstance(row, Mapping)
+        and str(row.get("accepted_task_id") or "")
+    }
+    new_jobs = [
+        row
+        for row in jobs_after
+        if isinstance(row, Mapping)
+        and str(row.get("job_id") or "")
+        and str(row.get("job_id")) not in prior_job_ids
+    ]
+    new_tasks = [
+        row
+        for row in tasks_after
+        if isinstance(row, Mapping)
+        and str(row.get("accepted_task_id") or "")
+        and str(row.get("accepted_task_id")) not in prior_task_ids
+    ]
+    if len(new_jobs) != 1 or len(new_tasks) != 1:
+        return None
+    job = new_jobs[0]
+    task = new_tasks[0]
+    accepted_task_id = str(task.get("accepted_task_id") or "")
+    job_id = str(job.get("job_id") or "")
+    if (
+        job.get("accepted_task_id") != accepted_task_id
+        or task.get("executor_ref") != job_id
+        or task.get("action_kind") != "accepted_task_request"
+        or task.get("first_source_message_id") != "C07-current"
+        or job.get("source_message_id") != "C07-current"
+        or _KAZUSA_PROJECT_URL not in str(job.get("task_brief") or "")
+        or job.get("attempt_count") != 1
+        or job.get("delivery_attempt_count") != 1
+        or job.get("status") != "delivered"
+        or task.get("state") != "delivered"
+        or not str(job.get("delivery_tracking_id") or "")
+        or job.get("delivery_tracking_id")
+        != task.get("delivery_tracking_id")
+        or not str(job.get("delivered_conversation_message_id") or "")
+        or job.get("delivered_conversation_message_id")
+        != task.get("delivered_conversation_message_id")
+    ):
+        return None
+    if any(
+        isinstance(row, Mapping)
+        and row.get("status") in _BACKGROUND_ACTIVE_JOB_STATUSES
+        for row in jobs_after
+    ):
+        return None
+    tick_rows = [row for row in ticks if isinstance(row, Mapping)]
+    if (
+        sum(int(row.get("processed_count", 0)) for row in tick_rows) != 1
+        or sum(int(row.get("succeeded_count", 0)) for row in tick_rows) != 1
+        or sum(int(row.get("failed_count", 0)) for row in tick_rows) != 0
+        or sum(
+            int(row.get("delivery_delivered_count", 0))
+            for row in tick_rows
+        ) != 1
+        or sum(
+            int(row.get("delivery_failed_count", 0))
+            for row in tick_rows
+        ) != 0
+    ):
+        return None
+    return task, job
+
+
+def _successful_coding_reader_job(
+    graph_result: Mapping[str, Any],
+) -> Mapping[str, Any] | None:
+    """Return the completed and exactly linked C07 coding-reader job."""
+
+    linked_handover = _c07_exact_handover(graph_result)
+    if linked_handover is None:
+        return None
+    _, job = linked_handover
+    worker_metadata = job.get("worker_metadata")
+    if not isinstance(worker_metadata, Mapping):
+        return None
+    if (
+        job.get("worker") != "coding_agent"
+        or worker_metadata.get("coding_operation") != "code_reading"
+        or worker_metadata.get("worker_operation") != "start"
+        or worker_metadata.get("coding_run_status") != "completed"
+        or worker_metadata.get("objective_type") != "read_only"
+        or str(job.get("failure_summary") or "").strip()
+    ):
+        return None
+    return job
+
+
+def _valid_repository_evidence_ref(value: object) -> bool:
+    """Validate one repository-relative source evidence location."""
+
+    if not isinstance(value, Mapping):
+        return False
+    path = str(value.get("path") or "").strip().replace("\\", "/")
+    line_start = value.get("line_start")
+    line_end = value.get("line_end")
+    if (
+        not path
+        or PurePosixPath(path).is_absolute()
+        or ".." in PurePosixPath(path).parts
+        or not isinstance(line_start, int)
+        or not isinstance(line_end, int)
+    ):
+        return False
+    return 1 <= line_start <= line_end
+
+
+def _coding_reader_has_repository_evidence(
+    graph_result: Mapping[str, Any],
+) -> bool:
+    """Require a repository identity, source evidence, and visible artifact."""
+
+    job = _successful_coding_reader_job(graph_result)
+    if job is None:
+        return False
+    worker_metadata = job.get("worker_metadata")
+    if not isinstance(worker_metadata, Mapping):
+        return False
+    repository = worker_metadata.get("repository")
+    evidence_refs = worker_metadata.get("evidence_refs")
+    return (
+        isinstance(repository, Mapping)
+        and str(repository.get("owner") or "").casefold() == "eamars"
+        and repository.get("repo") == _KAZUSA_PROJECT_TOKEN
+        and isinstance(evidence_refs, list)
+        and any(
+            _valid_repository_evidence_ref(row)
+            for row in evidence_refs
+        )
+        and bool(str(job.get("artifact_text") or "").strip())
+    )
+
+
+def _background_result_speak_delivered(
+    graph_result: Mapping[str, Any],
+) -> bool:
+    """Require the result episode to execute speak and reach its adapter."""
+
+    handover = graph_result.get("background_handover")
+    if not isinstance(handover, Mapping):
+        return False
+    linked_handover = _c07_exact_handover(graph_result)
+    if linked_handover is None:
+        return False
+    task, job = linked_handover
+    accepted_task_id = str(task.get("accepted_task_id") or "")
+    delivery_graphs = handover.get("delivery_graph_results")
+    adapter_calls = handover.get("delivery_adapter_calls")
+    rows_before = handover.get("conversation_rows_before")
+    rows_after = handover.get("conversation_rows_after")
+    if not all(
+        isinstance(rows, list)
+        for rows in (
+            delivery_graphs,
+            adapter_calls,
+            rows_before,
+            rows_after,
+        )
+    ):
+        return False
+    if len(adapter_calls) != 1 or not isinstance(adapter_calls[0], Mapping):
+        return False
+    prior_row_ids = {
+        str(row.get("row_id") or "")
+        for row in rows_before
+        if isinstance(row, Mapping) and str(row.get("row_id") or "")
+    }
+    new_rows = [
+        row
+        for row in rows_after
+        if isinstance(row, Mapping)
+        and str(row.get("row_id") or "")
+        and str(row.get("row_id")) not in prior_row_ids
+    ]
+    if len(new_rows) != 1:
+        return False
+    conversation_row = new_rows[0]
+    adapter_call = adapter_calls[0]
+    if (
+        conversation_row.get("row_id")
+        != job.get("delivered_conversation_message_id")
+        or conversation_row.get("role") != "assistant"
+        or conversation_row.get("delivery_status") != "delivered"
+        or not str(conversation_row.get("delivery_tracking_id") or "")
+        or conversation_row.get("platform_message_id")
+        != adapter_call.get("message_id")
+        or conversation_row.get("body_text") != adapter_call.get("text")
+        or conversation_row.get("platform_channel_id")
+        != adapter_call.get("channel_id")
+    ):
+        return False
+    matching_graphs = [
+        graph
+        for graph in delivery_graphs
+        if isinstance(graph, Mapping)
+        and accepted_task_id in {
+            str(value)
+            for value in _mapping_values(graph, "task_id")
+            if isinstance(value, str)
+        }
+    ]
+    if len(matching_graphs) != 1:
+        return False
+    delivery_graph = matching_graphs[0]
+    episode_trace = delivery_graph.get("episode_trace")
+    if not isinstance(episode_trace, Mapping):
+        return False
+    delivery_correlation = episode_trace.get("delivery_correlation")
+    if (
+        not isinstance(delivery_correlation, Mapping)
+        or delivery_correlation.get("tracking_id")
+        != conversation_row.get("delivery_tracking_id")
+    ):
+        return False
+    speak_results = []
+    for nested_results in _mapping_values(delivery_graph, "action_results"):
+        if not isinstance(nested_results, list):
+            continue
+        speak_results.extend(
+            result
+            for result in nested_results
+            if isinstance(result, Mapping)
+            and result.get("action_kind") == "speak"
+            and result.get("status") in {"executed", "succeeded"}
+        )
+    speak_attempt_ids = {
+        str(result.get("action_attempt_id") or "")
+        for result in speak_results
+        if str(result.get("action_attempt_id") or "")
+    }
+    surface_outputs = delivery_graph.get("surface_outputs")
+    if not isinstance(surface_outputs, list):
+        return False
+    text_surfaces = [
+        surface
+        for surface in surface_outputs
+        if isinstance(surface, Mapping)
+        and surface.get("surface_kind") == "text"
+        and surface.get("visibility") == "user_visible"
+    ]
+    return (
+        len(speak_attempt_ids) == 1
+        and len(text_surfaces) == 1
+        and text_surfaces[0].get("action_attempt_id")
+        == next(iter(speak_attempt_ids))
+    )
+
+
 def _response_overlaps_source_evidence(
     case: Mapping[str, Any],
     response_payload: Mapping[str, Any],
@@ -975,88 +1259,6 @@ def _truthful_unavailable_scheduler_outcome(value: object) -> bool:
     )
 
 
-def _truthful_unavailable_repository_outcome(value: object) -> bool:
-    """Accept a typed unavailable repository owner without reader evidence."""
-
-    if not isinstance(value, Mapping):
-        return False
-    graph_result = value.get("graph_result")
-    if not isinstance(graph_result, Mapping):
-        return False
-    runtime = graph_result.get("action_availability_runtime")
-    if not isinstance(runtime, Mapping):
-        return False
-    worker_status = runtime.get("worker_status")
-    if not isinstance(worker_status, Mapping):
-        return False
-    if not all(
-        _unavailable_status(worker_status.get(owner))
-        for owner in ("accepted_task", "background_work")
-    ):
-        return False
-    cognition_output = graph_result.get("cognition_core_output")
-    if not isinstance(cognition_output, Mapping):
-        return False
-    if cognition_output.get("goal_resolution") not in {
-        "blocked",
-        "requires_user_input",
-    }:
-        return False
-    if cognition_output.get("action_requests") != []:
-        return False
-    resolver_requests = cognition_output.get("resolver_requests")
-    if not isinstance(resolver_requests, list):
-        return False
-    if any(
-        not isinstance(row, Mapping)
-        or row.get("capability") != "human_clarification"
-        for row in resolver_requests
-    ):
-        return False
-    return "仓库代码读取 owner 不可用" in json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        default=str,
-    )
-
-
-def _truthful_unavailable_coding_response(value: object) -> bool:
-    """Accept a truthful current limitation without an attempted coding effect."""
-
-    if not isinstance(value, Mapping):
-        return False
-    graph_result = value.get("graph_result")
-    if not isinstance(graph_result, Mapping):
-        return False
-    runtime = graph_result.get("action_availability_runtime")
-    if not isinstance(runtime, Mapping):
-        return False
-    worker_status = runtime.get("worker_status")
-    if not isinstance(worker_status, Mapping):
-        return False
-    if not all(
-        _unavailable_status(worker_status.get(owner))
-        for owner in ("accepted_task", "background_work", "orchestrator")
-    ):
-        return False
-    cognition_output = graph_result.get("cognition_core_output")
-    if not isinstance(cognition_output, Mapping):
-        return False
-    if cognition_output.get("goal_resolution") != "answerable_now":
-        return False
-    if cognition_output.get("action_requests") != []:
-        return False
-    if cognition_output.get("resolver_requests") != []:
-        return False
-    return "仓库代码读取 owner 不可用" in json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        default=str,
-    )
-
-
 def _scheduler_disabled_in_test_runtime() -> bool:
     """Return whether the isolated corpus process disables the scheduler."""
 
@@ -1157,13 +1359,6 @@ def _evaluate_hard_gates(
         _scheduler_disabled_in_test_runtime()
         and _truthful_unavailable_scheduler_outcome(graph_result)
     )
-    truthful_unavailable_repository = (
-        _truthful_unavailable_repository_outcome(combined_evidence)
-    )
-    truthful_unavailable_coding = (
-        str(case.get("case_id") or "") == "C11"
-        and _truthful_unavailable_coding_response(combined_evidence)
-    )
     coding_run_present = _has_nonempty_key(
         combined_evidence,
         ("coding_run", "coding_run_state", "coding_run_context"),
@@ -1172,11 +1367,6 @@ def _evaluate_hard_gates(
         counts_before,
         counts_after,
         "accepted_task",
-    )
-    background_work_delta = _count_named_delta(
-        counts_before,
-        counts_after,
-        "background_work",
     )
     accepted_task_count_after = _count_named_delta(
         {},
@@ -1189,13 +1379,6 @@ def _evaluate_hard_gates(
             "accepted_task",
             "accepted_task_state",
         ),
-    )
-    coding_owner_unavailable = (
-        (truthful_unavailable_repository or truthful_unavailable_coding)
-        and accepted_task_delta == 0
-        and background_work_delta == 0
-        and not coding_run_present
-        and not workspace_effect
     )
     cancelled = _has_status(combined_evidence, {"cancelled", "canceled"})
     status_terminal = _has_status(
@@ -1323,24 +1506,21 @@ def _evaluate_hard_gates(
                 ("clarification", "clarification_question", "human_clarification"),
             ) or _response_contains_clarification_question(response_payload)
         elif gate == "repository_map_evidence":
-            passed = _has_nonempty_key(
-                combined_evidence,
-                (
-                    "repository_map",
-                    "repository_map_evidence",
-                    "workspace_read_evidence",
-                    "repository_evidence",
-                ),
-            ) or coding_owner_unavailable
+            passed = _coding_reader_has_repository_evidence(graph_result)
         elif gate == "coding_reader_route":
-            passed = (
-                _contains_text(combined_evidence, "coding_reader")
-                or _contains_text(combined_evidence, "code_reading")
-                or coding_owner_unavailable
-            )
+            passed = _successful_coding_reader_job(graph_result) is not None
+        elif gate == "result_speak_called":
+            passed = _background_result_speak_delivered(graph_result)
         elif gate == "terminal_result":
+            coding_reader_job = _successful_coding_reader_job(graph_result)
             passed = (
-                _has_nonempty_key(
+                coding_reader_job is not None
+                and bool(str(
+                    coding_reader_job.get("result_summary") or "",
+                ).strip())
+            ) or (
+                status_terminal
+                and _has_nonempty_key(
                     combined_evidence,
                     (
                         "terminal_result",
@@ -1349,18 +1529,17 @@ def _evaluate_hard_gates(
                         "result_summary",
                     ),
                 )
-                or status_terminal
             )
         elif gate == "accepted_task_persisted":
             passed = accepted_task_delta > 0
+        elif gate == "c07_exact_handover":
+            passed = _c07_exact_handover(graph_result) is not None
         elif gate == "accepted_task_status":
             passed = accepted_task_count_after > 0 or accepted_task_state_present
         elif gate == "accepted_coding_task_persisted":
-            passed = (
-                accepted_task_delta > 0 and coding_run_present
-            ) or coding_owner_unavailable
+            passed = accepted_task_delta > 0 and coding_run_present
         elif gate in {"coding_run_bound", "no_unbound_run"}:
-            passed = coding_run_present or coding_owner_unavailable
+            passed = coding_run_present
         elif gate == "coding_run_status":
             passed = coding_run_present and bool(_status_values(graph_result))
         elif gate == "coding_run_unblocked":
@@ -1374,7 +1553,7 @@ def _evaluate_hard_gates(
                 ("progress", "conversation_progress", "bounded_progress"),
             )
         elif gate in {"file_effect", "guarded_workspace_effect"}:
-            passed = workspace_effect or coding_owner_unavailable
+            passed = workspace_effect
         elif gate == "approval_bound":
             passed = approval_pending or _has_nonempty_key(
                 graph_result,
@@ -2517,19 +2696,133 @@ class _WorkerDebugAdapter:
     ) -> object:
         from kazusa_ai_chatbot.dispatcher import SendResult
 
+        message_id = f"baseline-delivery-{uuid4().hex}"
         self.calls.append({
             "channel_id": channel_id,
             "text": text,
             "channel_type": channel_type,
             "reply_to_msg_id": reply_to_msg_id,
             "delivery_mentions": list(delivery_mentions or []),
+            "message_id": message_id,
         })
         return SendResult(
             platform=self.platform,
             channel_id=channel_id,
-            message_id=f"baseline-delivery-{uuid4().hex}",
+            message_id=message_id,
             sent_at=datetime.now(timezone.utc),
         )
+
+
+async def _background_handover_snapshot(db: Any) -> dict[str, list[dict]]:
+    """Read the complete accepted-task and background-job evidence rows."""
+
+    from kazusa_ai_chatbot.accepted_task.models import (
+        ACCEPTED_TASKS_COLLECTION,
+    )
+    from kazusa_ai_chatbot.background_work.models import (
+        BACKGROUND_WORK_JOBS_COLLECTION,
+    )
+
+    jobs = await db[BACKGROUND_WORK_JOBS_COLLECTION].find(
+        {},
+        {"_id": 0},
+    ).sort([("created_at", 1), ("job_id", 1)]).to_list(length=None)
+    accepted_tasks = await db[ACCEPTED_TASKS_COLLECTION].find(
+        {},
+        {"_id": 0},
+    ).sort([("created_at", 1), ("accepted_task_id", 1)]).to_list(length=None)
+    conversation_rows = await db.conversation_history.find(
+        {},
+        {
+            "_id": 1,
+            "role": 1,
+            "body_text": 1,
+            "delivery_tracking_id": 1,
+            "delivery_status": 1,
+            "platform_message_id": 1,
+            "platform_channel_id": 1,
+        },
+    ).sort([("timestamp", 1), ("_id", 1)]).to_list(length=None)
+    return {
+        "jobs": [dict(row) for row in jobs],
+        "accepted_tasks": [dict(row) for row in accepted_tasks],
+        "conversation_rows": [
+            {
+                **{
+                    key: value
+                    for key, value in row.items()
+                    if key != "_id"
+                },
+                "row_id": str(row["_id"]),
+            }
+            for row in conversation_rows
+        ],
+    }
+
+
+async def _drive_background_handover(
+    *,
+    runtime_tick_func: Callable[..., Awaitable[dict[str, Any]]],
+    deliver_result_episode_func: Callable[..., Awaitable[dict[str, Any]]],
+    snapshot_func: Callable[[], Awaitable[dict[str, list[dict]]]],
+    baseline_snapshot: Mapping[str, list[dict]] | None = None,
+    max_ticks: int = _C07_BACKGROUND_TICK_LIMIT,
+) -> dict[str, object]:
+    """Drive a bounded queued handover and retain every observed result."""
+
+    before_tick = await snapshot_func()
+    baseline = (
+        dict(baseline_snapshot)
+        if baseline_snapshot is not None
+        else before_tick
+    )
+    runtime_ticks: list[dict[str, Any]] = []
+    after = before_tick
+    tracked_job_ids = {
+        str(row.get("job_id") or "")
+        for row in before_tick["jobs"]
+        if row.get("status") in _BACKGROUND_ACTIVE_JOB_STATUSES
+        and str(row.get("job_id") or "")
+    }
+    for _ in range(max_ticks):
+        active_tracked_jobs = [
+            row
+            for row in after["jobs"]
+            if row.get("job_id") in tracked_job_ids
+            if row.get("status") in _BACKGROUND_ACTIVE_JOB_STATUSES
+        ]
+        if not active_tracked_jobs:
+            break
+        tick_result = await runtime_tick_func(
+            is_primary_interaction_busy=lambda: False,
+            deliver_result_episode_func=deliver_result_episode_func,
+        )
+        runtime_ticks.append(dict(tick_result))
+        after = await snapshot_func()
+        remaining_tracked_jobs = [
+            row
+            for row in after["jobs"]
+            if row.get("job_id") in tracked_job_ids
+            and row.get("status") not in _BACKGROUND_TERMINAL_JOB_STATUSES
+        ]
+        if (
+            not remaining_tracked_jobs
+            or int(tick_result.get("processed_count", 0)) == 0
+        ):
+            break
+    return {
+        "schema_version": "c07_background_handover_evidence.v1",
+        "max_ticks": max_ticks,
+        "runtime_ticks": runtime_ticks,
+        "jobs_before": baseline["jobs"],
+        "jobs_before_tick": before_tick["jobs"],
+        "jobs_after": after["jobs"],
+        "accepted_tasks_before": baseline["accepted_tasks"],
+        "accepted_tasks_before_tick": before_tick["accepted_tasks"],
+        "accepted_tasks_after": after["accepted_tasks"],
+        "conversation_rows_before": before_tick["conversation_rows"],
+        "conversation_rows_after": after["conversation_rows"],
+    }
 
 
 async def _run_chat_case(
@@ -2541,6 +2834,9 @@ async def _run_chat_case(
 
     from fastapi import BackgroundTasks
     from kazusa_ai_chatbot import service
+    from kazusa_ai_chatbot.background_work.runtime import (
+        run_background_work_runtime_tick,
+    )
     from kazusa_ai_chatbot.brain_service import post_turn
     from kazusa_ai_chatbot.db._client import get_db
 
@@ -2574,11 +2870,15 @@ async def _run_chat_case(
 
     async def capture_runtime_settle(**kwargs: object) -> Mapping[str, Any]:
         graph_result = kwargs.get("graph_result")
-        if isinstance(graph_result, Mapping):
-            graph_results.append(deepcopy(dict(graph_result)))
         if original_runtime_settle is None:
-            return {}
-        return await original_runtime_settle(**kwargs)
+            settled_trace: Mapping[str, Any] = {}
+        else:
+            settled_trace = await original_runtime_settle(**kwargs)
+        if isinstance(graph_result, Mapping):
+            captured_graph = deepcopy(dict(graph_result))
+            captured_graph["episode_trace"] = deepcopy(dict(settled_trace))
+            graph_results.append(captured_graph)
+        return settled_trace
 
     if original_settle is not None:
         post_turn.settle_episode_trace = capture_settle  # type: ignore[assignment]
@@ -2633,6 +2933,9 @@ async def _run_chat_case(
                 await db[ACCEPTED_TASKS_COLLECTION].insert_one(
                     seeded_coding_run,
                 )
+            c07_handover_baseline: dict[str, list[dict]] | None = None
+            if str(case.get("case_id") or "") == "C07":
+                c07_handover_baseline = await _background_handover_snapshot(db)
             counts_before_turn = await _collection_counts(db)
             response = await service.chat(request, BackgroundTasks())
             trace_run = await _wait_for_trace_run(
@@ -2640,6 +2943,37 @@ async def _run_chat_case(
                 platform_message_id=request.platform_message_id,
             )
             response_payload = response.model_dump(mode="json")
+            foreground_graph_result = (
+                graph_results[-1]
+                if graph_results
+                else settlements[-1]["graph_result"]
+                if settlements
+                else response_payload.get("cognition_graph")
+                if isinstance(response_payload.get("cognition_graph"), Mapping)
+                else {}
+            )
+            background_handover: dict[str, object] = {}
+            if str(case.get("case_id") or "") == "C07":
+                graph_count_before_handover = len(graph_results)
+                settlement_count_before_handover = len(settlements)
+                adapter_call_count_before_handover = len(adapter.calls)
+                background_handover = await _drive_background_handover(
+                    runtime_tick_func=run_background_work_runtime_tick,
+                    deliver_result_episode_func=(
+                        service._deliver_accepted_task_result_episode
+                    ),
+                    snapshot_func=lambda: _background_handover_snapshot(db),
+                    baseline_snapshot=c07_handover_baseline,
+                )
+                background_handover["delivery_graph_results"] = deepcopy(
+                    graph_results[graph_count_before_handover:]
+                )
+                background_handover["delivery_settlements"] = deepcopy(
+                    settlements[settlement_count_before_handover:]
+                )
+                background_handover["delivery_adapter_calls"] = deepcopy(
+                    adapter.calls[adapter_call_count_before_handover:]
+                )
             trace_id = str(trace_run.get("trace_id") or "")
             trace_steps = await db.llm_trace_steps.find(
                 {"trace_id": trace_id},
@@ -2650,15 +2984,9 @@ async def _run_chat_case(
                 {"_id": 0},
             )
             counts_after_turn = await _collection_counts(db)
-            graph_result = (
-                graph_results[-1]
-                if graph_results
-                else settlements[-1]["graph_result"]
-                if settlements
-                else response_payload.get("cognition_graph")
-                if isinstance(response_payload.get("cognition_graph"), Mapping)
-                else {}
-            )
+            graph_result = dict(foreground_graph_result)
+            if background_handover:
+                graph_result["background_handover"] = background_handover
             return {
                 "response": _json_safe(response_payload),
                 "trace_run": _json_safe(trace_run),

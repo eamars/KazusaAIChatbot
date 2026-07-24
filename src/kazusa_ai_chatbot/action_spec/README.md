@@ -84,8 +84,8 @@ internal executable capabilities stay hidden from L2d prompts.
 | `speak` | `l3_text` | `user_visible` | Selects a text surface. L2d provides surface intent, not final wording. |
 | `memory_lifecycle_update` | `memory_lifecycle_specialist` | `private` | Selects specialist review for active-commitment lifecycle changes. L2d does not choose a memory target or lifecycle decision. |
 | `apply_memory_lifecycle_update` | `memory_lifecycle` | `private` | Internal executable DB update produced after specialist alias validation. It is not projected to L2d. |
-| `accepted_task_request` | `accepted_task` | `private` | Model-facing delayed-work request. Deterministic code creates or reuses an accepted task, then queues the internal executor for new work. |
-| `accepted_coding_task_request` | `background_work` | `private` | Model-facing durable coding-run request. Deterministic code validates a closed coding action, creates or reuses accepted-task state, and queues the `coding_agent` worker with a versioned payload. |
+| `accepted_task_request` | `accepted_task` | `private` | Model-facing delayed-work request and the single entrypoint for every new unbound coding task. Deterministic code creates or reuses an accepted task, then queues the internal executor; the coding worker owns read-versus-write classification. |
+| `accepted_coding_task_request` | `background_work` | `private` | Model-facing lifecycle request bound to an existing durable coding run. Deterministic code validates the run reference and closed continuation action, creates or reuses accepted-task state, and queues the `coding_agent` worker with a versioned payload. |
 | `accepted_task_status_check` | `accepted_task` | `private` | Reports active accepted-task state without enqueueing new work. |
 | `background_work_request` | `background_work` | `private` | Internal executable queue request produced after accepted-task lifecycle validation. It is not projected to L2d as the public delayed-work contract. |
 | `future_speak` | `background_work` | `private` | Queues a deterministic accepted-task-backed worker that schedules a later self-cognition message from an exact trigger time and semantic objective. |
@@ -113,16 +113,20 @@ delivered, or failure acknowledgement state. Raw job ids, adapter ids, target
 ids, leases, retries, filesystem paths, credentials, worker choices, and worker
 state stay out of L2d and L3 prompts.
 
-Durable coding-agent work uses `accepted_coding_task_request` instead of the
-generic delayed-work route. L2d selects one closed semantic coding action:
-`start`, `revise_proposal`, `summarize`, `status`, `approve_and_verify`, or
-`respond_to_blocker`, or `cancel`. Deterministic validation requires a prompt-safe
-`coding_run:<run_id>` reference for revision, summary, status, approval, and
-cancellation or blocker response. Each continuation must also be present in
-that offered run's `allowed_next_actions`. The handler then queues
-`requested_worker="coding_agent"` with a
-versioned worker payload. The worker maps that payload onto
-`start_coding_run(...)`, `get_coding_run(...)`, or `continue_coding_run(...)`.
+Every new unbound coding-agent task uses `accepted_task_request`. The generic
+background router selects only the `coding_agent` worker; that worker classifies
+code reading, code writing, or code modification and starts the durable coding
+run. This keeps read-versus-write ownership out of L2d while preserving a run
+context for proposal follow-up.
+
+Existing coding-run work uses `accepted_coding_task_request`. L2d selects one
+closed semantic lifecycle action: `revise_proposal`, `summarize`, `status`,
+`approve_and_verify`, `respond_to_blocker`, or `cancel`. Deterministic
+validation requires a prompt-safe `coding_run:<run_id>` reference and requires
+the continuation to be present in that offered run's
+`allowed_next_actions`. The handler then queues
+`requested_worker="coding_agent"` with a versioned worker payload. The worker
+maps that payload onto `get_coding_run(...)` or `continue_coding_run(...)`.
 Execution specs are accepted only as structured allowlisted checks or planned
 inside the coding worker as `python_compileall` / focused `pytest`; shell
 commands, package installation, adapter delivery, and raw filesystem paths stay
@@ -133,8 +137,9 @@ ids, credentials, collection names, and database internals.
 
 ## Background Work Extension Boundary
 
-The current coding-agent worker is exposed through the accepted delayed-work
-capability for bounded coding and repository-analysis tasks. Future delayed
+The current coding-agent worker is exposed through the generic accepted
+delayed-work capability for every new bounded coding and repository-analysis
+task. Future delayed
 capabilities such as a complex resolver must be added as reviewed first-class
 capability contracts before they can become live background work. The
 action-spec layer owns the model-facing capability name, semantic purpose,

@@ -93,6 +93,65 @@ async def test_provider_passes_trusted_task_brief_to_worker(monkeypatch) -> None
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "operation",
+    [
+        "start",
+        "revise_proposal",
+        "summarize",
+        "status",
+        "approve_and_verify",
+        "respond_to_blocker",
+        "cancel",
+    ],
+)
+async def test_provider_preserves_every_coding_worker_payload(
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+) -> None:
+    """Provider dispatch must pass each bound coding operation unchanged."""
+
+    providers = importlib.import_module("kazusa_ai_chatbot.background_work.providers")
+    worker_execute = AsyncMock(return_value={
+        "status": "succeeded",
+        "worker": "coding_agent",
+        "artifact_text": "Coding operation accepted.",
+        "failure_summary": "",
+        "result_summary": "Coding operation accepted.",
+        "worker_metadata": {},
+    })
+    worker = SimpleNamespace(execute=worker_execute)
+    monkeypatch.setattr(
+        providers,
+        "load_background_work_workers",
+        lambda: {"coding_agent": worker},
+    )
+    coding_run_ref = "" if operation == "start" else "coding_run:run-001"
+    worker_payload = {
+        "schema_version": "coding_agent_worker_payload.v2",
+        "operation": operation,
+        "task_brief": "Perform the requested coding operation.",
+        "coding_run_ref": coding_run_ref,
+        "execution_request": "",
+    }
+
+    result = await providers.dispatch_background_work({
+        "action": "execute",
+        "worker": "coding_agent",
+        "reason": "Validated background action requested this worker.",
+        "task_brief": "Perform the requested coding operation.",
+        "source_summary": "The user requested durable coding work.",
+        "worker_payload": worker_payload,
+    })
+
+    assert result["status"] == "succeeded"
+    worker_execute.assert_awaited_once()
+    dispatched_decision = worker_execute.await_args.args[0]
+    assert dispatched_decision["worker"] == "coding_agent"
+    assert dispatched_decision["worker_payload"] == worker_payload
+
+
+@pytest.mark.asyncio
 async def test_provider_passes_max_output_cap_as_execution_context(
     monkeypatch,
 ) -> None:

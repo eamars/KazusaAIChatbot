@@ -142,7 +142,16 @@
         }
       ],
       "applicable_dimensions": ["goal_completion", "capability_ownership", "evidence_discipline", "source_output_mode", "dialog_fidelity"],
-      "hard_gates": ["visible_dialog", "repository_map_evidence", "coding_reader_route"],
+      "hard_gates": [
+        "visible_dialog",
+        "accepted_task_persisted",
+        "c07_exact_handover",
+        "coding_reader_route",
+        "repository_map_evidence",
+        "terminal_result",
+        "result_speak_called",
+        "one_authorized_delivery"
+      ],
       "state_seed": {},
       "output_mode": "visible"
     },

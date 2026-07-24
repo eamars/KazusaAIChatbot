@@ -430,7 +430,7 @@ def _materialize_v2_action_requests(
     output: CognitionCoreOutputV2,
     state: GlobalPersonaState,
 ) -> list[dict[str, Any]]:
-    """Materialize only route-approved action requests through the existing owner."""
+    """Materialize private requests and the selected V2 surface action."""
 
     requests = []
     evaluator = ActionSpecEvaluator()
@@ -453,10 +453,36 @@ def _materialize_v2_action_requests(
             "target_roles": list(request["target_roles"]),
             "evidence_handles": list(request["evidence_handles"]),
         })
-    if not requests:
-        return []
     materialization_state = dict(state)
-    return materialize_semantic_action_requests(requests, materialization_state)
+    action_specs = materialize_semantic_action_requests(
+        requests,
+        materialization_state,
+    )
+    if output["intention"]["route"] != "speech":
+        return action_specs
+
+    admitted_bid = output.get("admitted_bid")
+    evidence_handles = (
+        list(admitted_bid["evidence_handles"])
+        if isinstance(admitted_bid, Mapping)
+        else []
+    )
+    speak_specs = materialize_semantic_action_requests(
+        [{
+            "capability": SPEAK_CAPABILITY,
+            "decision": "visible_reply",
+            "detail": output["intention"]["intention"],
+            "reason": output["intention"]["reason"],
+            "target_roles": list(output["intention"]["target_roles"]),
+            "evidence_handles": evidence_handles,
+        }],
+        materialization_state,
+    )
+    if len(speak_specs) != 1:
+        raise CognitionExecutionError(
+            "V2 speech intention failed action-spec materialization"
+        )
+    return [*action_specs, speak_specs[0]]
 
 
 def _available_action_affordances(
@@ -505,7 +531,7 @@ def _available_action_affordances(
             raise CognitionExecutionError(
                 "action affordance semantic summary is invalid"
             )
-        affordances.append({
+        affordance: ActionAffordanceV2 = {
             "action_kind": capability_kind,
             "capability": " ".join(str(row) for row in semantic_summary),
             "permission": "allowed",
@@ -521,19 +547,15 @@ def _available_action_affordances(
             ),
             "context_ref": str(prompt_affordance["context_ref"]),
             "target_roles": [current_user],
-        })
+        }
         if capability_kind == ACCEPTED_CODING_TASK_REQUEST_CAPABILITY:
             contextual_affordances = _coding_run_action_affordances(
                 state,
-                base_affordance=affordances[-1],
-            )
-            affordances[-1]["allowed_decisions"] = ["start"]
-            affordances[-1]["default_decision"] = "start"
-            affordances[-1]["capability"] += (
-                " This base affordance starts a new run and has no active "
-                "run context."
+                base_affordance=affordance,
             )
             affordances.extend(contextual_affordances)
+            continue
+        affordances.append(affordance)
     return affordances
 
 
@@ -642,11 +664,9 @@ def _build_action_availability_snapshot(
         "memory_lifecycle": "healthy",
         "memory_lifecycle_specialist": "healthy",
         "l3_text": "healthy",
-        "accepted_task": (
-            "healthy" if BACKGROUND_WORK_WORKER_ENABLED else "unavailable"
-        ),
+        "accepted_task": "healthy",
         "background_work": (
-            "healthy" if BACKGROUND_WORK_WORKER_ENABLED else "unavailable"
+            "healthy" if BACKGROUND_WORK_WORKER_ENABLED else "degraded"
         ),
         "orchestrator": (
             "healthy" if CALENDAR_SCHEDULER_ENABLED else "unavailable"
@@ -760,7 +780,6 @@ def _coding_run_action_affordances(
         in unavailable_statuses
     )
     registry_decisions = {
-        "start",
         "revise_proposal",
         "summarize",
         "status",

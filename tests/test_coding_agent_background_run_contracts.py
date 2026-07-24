@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -104,6 +102,96 @@ async def test_accepted_coding_task_execution_enqueues_requested_worker(
         "coding_run_ref": "",
         "execution_request": "",
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("operation", "coding_run_ref"),
+    [
+        ("start", ""),
+        ("revise_proposal", "coding_run:run-001"),
+        ("summarize", "coding_run:run-001"),
+        ("status", "coding_run:run-001"),
+        ("approve_and_verify", "coding_run:run-001"),
+        ("respond_to_blocker", "coding_run:run-001"),
+        ("cancel", "coding_run:run-001"),
+    ],
+)
+async def test_every_coding_action_enqueues_exact_worker_payload(
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+    coding_run_ref: str,
+) -> None:
+    """Every public coding action must bind one exact coding worker payload."""
+
+    from kazusa_ai_chatbot.action_spec import execution as execution_module
+    from kazusa_ai_chatbot.action_spec.handlers import (
+        background_work as background_work_handler,
+    )
+
+    action_spec = _materialized_coding_action(
+        operation,
+        coding_run_ref=coding_run_ref,
+    )
+    accepted_task = {
+        "accepted_task_id": f"task-{operation}",
+        "task_identity_key": f"task-key-{operation}",
+        "accepted_task_summary": f"Coding task: {operation}",
+    }
+    queued_requests: list[dict[str, object]] = []
+
+    async def create_accepted_task(_request: dict[str, object]) -> dict:
+        return {
+            "status": "created",
+            "task": accepted_task,
+        }
+
+    async def mark_pending(
+        *,
+        accepted_task_id: str,
+        executor_ref: str,
+        updated_at: str,
+    ) -> dict[str, object]:
+        assert accepted_task_id == f"task-{operation}"
+        assert executor_ref == f"job-{operation}"
+        assert updated_at == "2026-07-09T01:00:00+00:00"
+        return {**accepted_task, "state": "pending"}
+
+    async def enqueue_background_work(
+        request: dict[str, object],
+    ) -> dict[str, object]:
+        queued_requests.append(dict(request))
+        return {
+            "status": "pending",
+            "job_id": f"job-{operation}",
+        }
+
+    monkeypatch.setattr(
+        background_work_handler,
+        "create_or_return_active_accepted_task",
+        create_accepted_task,
+    )
+    monkeypatch.setattr(
+        background_work_handler,
+        "mark_accepted_task_pending",
+        mark_pending,
+    )
+
+    results = await execution_module.execute_action_specs_for_trace(
+        [action_spec],
+        storage_timestamp_utc="2026-07-09T01:00:00+00:00",
+        enqueue_background_work_func=enqueue_background_work,
+    )
+
+    assert results[0]["status"] == "pending"
+    assert len(queued_requests) == 1
+    queued_request = queued_requests[0]
+    assert queued_request["requested_worker"] == "coding_agent"
+    worker_payload = queued_request["worker_payload"]
+    assert isinstance(worker_payload, dict)
+    assert worker_payload["schema_version"] == "coding_agent_worker_payload.v2"
+    assert worker_payload["operation"] == operation
+    assert worker_payload["coding_run_ref"] == coding_run_ref
 
 
 def test_l2d_materializes_accepted_coding_task_run_action() -> None:
@@ -386,6 +474,105 @@ async def test_coding_worker_start_payload_starts_durable_run(
     start_request = start.await_args.args[0]
     assert start_request["objective_type"] == "propose_patch"
     assert start_request["question"] == "Modify slugify behavior."
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("operation", "objective_type", "run_status"),
+    [
+        ("code_reading", "read_only", "completed"),
+        ("code_modifying", "propose_patch", "awaiting_approval"),
+    ],
+)
+async def test_generic_coding_handover_starts_worker_owned_durable_run(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+    operation: str,
+    objective_type: str,
+    run_status: str,
+) -> None:
+    """An unbound generic handover lets the coding worker own classification."""
+
+    from kazusa_ai_chatbot.background_work.subagent import coding_agent
+
+    decide = AsyncMock(return_value=(operation, "worker-owned route"))
+    start = AsyncMock(return_value=_coding_run_response(
+        status=run_status,
+        run_id="run-generic",
+        objective_type=objective_type,
+        answer_text="Worker-owned result.",
+    ))
+    monkeypatch.setattr(
+        coding_agent,
+        "CODING_AGENT_WORKSPACE_ROOT",
+        str(tmp_path / "workspace"),
+    )
+    monkeypatch.setattr(coding_agent, "decide_background_coding_operation", decide)
+    monkeypatch.setattr(coding_agent, "start_coding_run", start)
+
+    result = await coding_agent.execute(
+        _worker_decision({}),
+        max_output_chars=1000,
+    )
+
+    assert result["status"] == "succeeded"
+    assert result["worker_metadata"]["coding_operation"] == operation
+    assert result["worker_metadata"]["worker_operation"] == "start"
+    assert result["worker_metadata"]["coding_run_ref"] == (
+        "coding_run:run-generic"
+    )
+    start_request = start.await_args.args[0]
+    assert start_request["objective_type"] == objective_type
+    assert start_request["question"] == "Modify slugify behavior."
+
+
+@pytest.mark.asyncio
+async def test_blocked_generic_read_is_not_a_successful_worker_result(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """A blocked partial read must remain unavailable for result delivery."""
+
+    from kazusa_ai_chatbot.background_work.subagent import coding_agent
+
+    run_response = _coding_run_response(
+        status="blocked",
+        run_id="run-blocked-read",
+        objective_type="read_only",
+        answer_text="Partial repository observations.",
+    )
+    run_response["evidence"] = [{
+        "path": "src/kazusa_ai_chatbot/service.py",
+        "line_start": 1,
+        "line_end": 20,
+    }]
+    run_response["limitations"] = [
+        "Repository reading stopped before completion.",
+    ]
+    decide = AsyncMock(return_value=("code_reading", "worker-owned route"))
+    start = AsyncMock(return_value=run_response)
+    monkeypatch.setattr(
+        coding_agent,
+        "CODING_AGENT_WORKSPACE_ROOT",
+        str(tmp_path / "workspace"),
+    )
+    monkeypatch.setattr(coding_agent, "decide_background_coding_operation", decide)
+    monkeypatch.setattr(coding_agent, "start_coding_run", start)
+
+    result = await coding_agent.execute(
+        _worker_decision({}),
+        max_output_chars=1000,
+    )
+
+    assert result["status"] == "needs_user_input"
+    assert result["artifact_text"] == ""
+    assert result["failure_summary"] == (
+        "Repository reading stopped before completion."
+    )
+    assert result["worker_metadata"]["coding_operation"] == "code_reading"
+    assert result["worker_metadata"]["worker_operation"] == "start"
+    assert result["worker_metadata"]["coding_run_status"] == "blocked"
+    assert result["worker_metadata"]["objective_type"] == "read_only"
 
 
 @pytest.mark.asyncio
@@ -856,10 +1043,124 @@ async def test_coding_worker_rejects_approval_without_evidence_fallback(
 
 
 @pytest.mark.asyncio
-async def test_worker_tick_dispatches_requested_coding_worker(
+async def test_coding_worker_status_payload_reads_durable_run(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
 ) -> None:
-    """Requested coding jobs should bypass the generic router."""
+    """Status payloads must call the durable coding-run reader."""
+
+    from kazusa_ai_chatbot.background_work.subagent import coding_agent
+
+    get_run = AsyncMock(return_value=_coding_run_response(
+        status="awaiting_approval",
+        run_id="run-001",
+        objective_type="propose_patch",
+        answer_text="Proposal is awaiting approval.",
+    ))
+    monkeypatch.setattr(
+        coding_agent,
+        "CODING_AGENT_WORKSPACE_ROOT",
+        str(tmp_path / "workspace"),
+    )
+    monkeypatch.setattr(coding_agent, "get_coding_run", get_run)
+
+    result = await coding_agent.execute(
+        _worker_decision({
+            "schema_version": "coding_agent_worker_payload.v2",
+            "operation": "status",
+            "task_brief": "Report the current coding run status.",
+            "coding_run_ref": "coding_run:run-001",
+            "execution_request": "",
+        }),
+        max_output_chars=1000,
+    )
+
+    assert result["status"] == "succeeded"
+    assert result["worker_metadata"]["worker_operation"] == "status"
+    get_run.assert_awaited_once_with({
+        "workspace_root": str(tmp_path / "workspace"),
+        "run_id": "run-001",
+    })
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    (
+        "operation",
+        "run_status",
+        "expected_worker_status",
+        "has_revision_instruction",
+    ),
+    [
+        ("respond_to_blocker", "blocked", "needs_user_input", True),
+        ("cancel", "cancelled", "succeeded", False),
+    ],
+)
+async def test_remaining_coding_continuations_call_durable_run_api(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+    operation: str,
+    run_status: str,
+    expected_worker_status: str,
+    has_revision_instruction: bool,
+) -> None:
+    """Blocker responses and cancellation must continue the bound run."""
+
+    from kazusa_ai_chatbot.background_work.subagent import coding_agent
+
+    continue_run = AsyncMock(return_value=_coding_run_response(
+        status=run_status,
+        run_id="run-001",
+        objective_type="propose_patch",
+        answer_text=f"Run action recorded: {operation}.",
+    ))
+    monkeypatch.setattr(
+        coding_agent,
+        "CODING_AGENT_WORKSPACE_ROOT",
+        str(tmp_path / "workspace"),
+    )
+    monkeypatch.setattr(coding_agent, "continue_coding_run", continue_run)
+
+    result = await coding_agent.execute(
+        _worker_decision({
+            "schema_version": "coding_agent_worker_payload.v2",
+            "operation": operation,
+            "task_brief": "Use this response to continue the coding run.",
+            "coding_run_ref": "coding_run:run-001",
+            "execution_request": "",
+        }),
+        max_output_chars=1000,
+    )
+
+    assert result["status"] == expected_worker_status
+    assert result["worker_metadata"]["worker_operation"] == operation
+    continue_request = continue_run.await_args.args[0]
+    assert continue_request["run_id"] == "run-001"
+    assert continue_request["action"] == operation
+    assert ("revision_instruction" in continue_request) is (
+        has_revision_instruction
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("operation", "coding_run_ref"),
+    [
+        ("start", ""),
+        ("revise_proposal", "coding_run:run-001"),
+        ("summarize", "coding_run:run-001"),
+        ("status", "coding_run:run-001"),
+        ("approve_and_verify", "coding_run:run-001"),
+        ("respond_to_blocker", "coding_run:run-001"),
+        ("cancel", "coding_run:run-001"),
+    ],
+)
+async def test_worker_tick_dispatches_every_requested_coding_action(
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+    coding_run_ref: str,
+) -> None:
+    """Every requested coding job must cross the dispatcher boundary."""
 
     from kazusa_ai_chatbot.background_work import worker as worker_module
 
@@ -872,9 +1173,9 @@ async def test_worker_tick_dispatches_requested_coding_worker(
         "requested_worker": "coding_agent",
         "worker_payload": {
             "schema_version": "coding_agent_worker_payload.v2",
-            "operation": "start",
+            "operation": operation,
             "task_brief": "Modify slugify behavior.",
-            "coding_run_ref": "",
+            "coding_run_ref": coding_run_ref,
             "execution_request": "",
         },
         "source_action_attempt_id": "action_attempt:coding-001",
@@ -948,7 +1249,10 @@ async def test_worker_tick_dispatches_requested_coding_worker(
     assert result["succeeded_count"] == 1
     dispatch_decision = dispatch.await_args.args[0]
     assert dispatch_decision["worker"] == "coding_agent"
-    assert dispatch_decision["worker_payload"]["operation"] == "start"
+    assert dispatch_decision["worker_payload"]["operation"] == operation
+    assert dispatch_decision["worker_payload"]["coding_run_ref"] == (
+        coding_run_ref
+    )
     assert dispatch_decision["worker_payload"]["source_action_attempt_id"] == (
         "action_attempt:coding-001"
     )
