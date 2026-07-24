@@ -241,6 +241,11 @@ async def build_self_cognition_case_artifacts_async(
             action_attempt=action_attempt,
         )
         if action_attempt["status"] == models.ACTION_ATTEMPT_STATUS_CANDIDATE:
+            cognition_output = _materialize_v2_due_speak_action(
+                cognition_state,
+                cognition_output,
+                selected_route=selected_route,
+            )
             if pipeline_run_handle is not None:
                 pipeline_run_handle.raise_if_cancelled("before_dialog")
             dialog_state = await _build_dialog_state_with_text_surface(
@@ -335,6 +340,85 @@ async def build_self_cognition_case_artifacts_async(
         action_candidate=action_candidate,
     )
     return artifact_payloads
+
+
+def _materialize_v2_due_speak_action(
+    cognition_state: dict[str, Any],
+    cognition_output: dict[str, Any],
+    *,
+    selected_route: str,
+) -> dict[str, Any]:
+    """Materialize the canonical speak residue for a due V2 speech route."""
+
+    if selected_route != models.ROUTE_ACTION_CANDIDATE:
+        return cognition_output
+    episode = cognition_state.get("cognitive_episode")
+    if not isinstance(episode, dict):
+        return cognition_output
+    if episode.get("trigger_source") != "scheduled_tick":
+        return cognition_output
+    core_output = cognition_output.get("cognition_core_output")
+    if not isinstance(core_output, dict):
+        return cognition_output
+    intention = core_output.get("intention")
+    if not isinstance(intention, dict) or intention.get("route") != "speech":
+        return cognition_output
+    raw_specs = cognition_output.get("action_specs")
+    if raw_specs is not None and not isinstance(raw_specs, list):
+        return cognition_output
+    if isinstance(raw_specs, list) and any(
+        isinstance(spec, dict) and spec.get("kind") == SPEAK_CAPABILITY
+        for spec in raw_specs
+    ):
+        return cognition_output
+    intention_text = intention.get("intention")
+    episode_id = episode.get("episode_id")
+    if not isinstance(intention_text, str) or not intention_text.strip():
+        return cognition_output
+    if not isinstance(episode_id, str) or not episode_id.strip():
+        return cognition_output
+    speak_spec = {
+        "schema_version": "action_spec.v1",
+        "kind": SPEAK_CAPABILITY,
+        "cognition_mode": "deliberative",
+        "source_refs": [{
+            "schema_version": "action_source_ref.v1",
+            "ref_kind": "cognitive_episode",
+            "ref_id": episode_id,
+            "owner": "cognition",
+            "relationship": "basis",
+            "evidence_refs": [],
+        }],
+        "target": {
+            "schema_version": "action_target.v1",
+            "target_kind": "current_channel",
+            "target_id": None,
+            "owner": "l3_text",
+            "scope": {"surface": "text"},
+        },
+        "params": {
+            "delivery_mode": "visible_reply",
+            "execute_at": None,
+            "surface_requirements": {"intent": intention_text},
+        },
+        "urgency": "now",
+        "visibility": "user_visible",
+        "deadline": None,
+        "continuation": {
+            "schema_version": "action_continuation.v1",
+            "mode": "none",
+            "episode_type": None,
+            "max_depth": 0,
+            "include_result_as": None,
+        },
+        "reason": "当前到期认知已选择可见回应。",
+    }
+    updated_output = dict(cognition_output)
+    updated_output["action_specs"] = [
+        *(raw_specs if isinstance(raw_specs, list) else []),
+        speak_spec,
+    ]
+    return updated_output
 
 
 async def _load_residue_context_for_case(
@@ -513,7 +597,7 @@ def _build_consolidation_state(
     consolidation_state = dict(cognition_state)
     consolidation_state.update(cognition_output)
     consolidation_state.update(dialog_output)
-    consolidation_state["decontexualized_input"] = rendered_packet
+    consolidation_state["decontextualized_input"] = rendered_packet
     consolidation_state["final_dialog"] = _dialog_fragments(dialog_output)
     return consolidation_state
 
@@ -717,7 +801,7 @@ def _build_cognition_state(
         "internal_monologue_residue_context": residue_context,
         "debug_modes": {"no_visual_directives": True},
         "should_respond": False,
-        "decontexualized_input": models.SELF_COGNITION_INPUT_TEXT,
+        "decontextualized_input": models.SELF_COGNITION_INPUT_TEXT,
         "referents": [],
         "internal_monologue": "",
         "interaction_subtext": "",

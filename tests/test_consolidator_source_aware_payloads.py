@@ -133,7 +133,7 @@ def _state() -> dict[str, Any]:
             "supervisor_trace": {"unknown_slots": [], "loop_count": 0},
         },
         "existing_dedup_keys": set(),
-        "decontexualized_input": "Internal thought about a missed promise.",
+        "decontextualized_input": "Internal thought about a missed promise.",
         "chat_history_recent": [],
         "consolidation_origin": _internal_thought_origin(),
         "new_facts": [],
@@ -184,8 +184,8 @@ def _assert_internal_origin_payload(payload: dict[str, Any]) -> None:
         "output_mode": "preview",
         "episode_id": "self-cognition-episode-1",
     }
-    if "decontexualized_input" in payload:
-        input_value = payload["decontexualized_input"]
+    if "decontextualized_input" in payload:
+        input_value = payload["decontextualized_input"]
     else:
         input_value = payload["decontextualized_input"]
     assert input_value == "Internal thought about a missed promise."

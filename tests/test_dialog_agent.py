@@ -163,6 +163,55 @@ def test_v2_prompt_describes_surface_renderer_boundary() -> None:
     assert "action_directives" not in prompt
 
 
+def test_dialog_generator_repairs_unresolved_context_once() -> None:
+    """The bounded repair must turn unresolved referents into clarification."""
+
+    repair_prompt = dialog_module._V2_DIALOG_HARD_FAILURE_REPAIR_PROMPT
+
+    assert "未解析" in repair_prompt
+    assert "询问" in repair_prompt
+    assert "不能虚构" in repair_prompt
+    assert "没有 executed" in repair_prompt
+    assert "不要声称已完成" in repair_prompt
+    assert "runtime_capability_limits" in repair_prompt
+    assert "不可用" in repair_prompt
+
+
+@pytest.mark.asyncio
+async def test_surface_integrity_prompt_receives_runtime_limits(
+    monkeypatch,
+) -> None:
+    """The verifier receives trusted unavailable-owner facts with the candidate."""
+
+    surface_llm = MagicMock()
+    surface_llm.ainvoke = AsyncMock(
+        return_value=AIMessage(content='{"aligned": true, "issues": []}')
+    )
+    monkeypatch.setattr(
+        dialog_module,
+        "_dialog_surface_integrity_llm",
+        surface_llm,
+    )
+    surface_output = _text_surface_output()
+    surface_output["runtime_capability_limits"] = [
+        "当前调度能力不可用，不能把提醒说成已经安排。",
+    ]
+
+    await dialog_module._verify_dialog_surface_integrity(
+        surface_output=surface_output,
+        generated_dialog=["我现在还不能确认提醒已经安排。"],
+        current_visible_percepts=[],
+        llm_trace_id="runtime-limit-test",
+    )
+
+    payload = json.loads(
+        surface_llm.ainvoke.await_args.args[0][1].content,
+    )
+    assert payload["runtime_capability_limits"] == (
+        surface_output["runtime_capability_limits"]
+    )
+
+
 @pytest.mark.asyncio
 async def test_dialog_generator_forwards_native_surface_without_legacy_fields(
     monkeypatch,

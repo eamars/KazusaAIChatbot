@@ -53,7 +53,7 @@ _EXPECTED_SOURCE_PROFILES = {
 def build_text_chat_rag_request(
     *,
     episode: CognitiveEpisodeV1,
-    decontexualized_input: str,
+    decontextualized_input: str,
     character_profile: dict[str, Any],
     user_profile: dict[str, Any],
     prompt_message_context: dict[str, Any],
@@ -71,7 +71,7 @@ def build_text_chat_rag_request(
 
     Args:
         episode: Valid cognitive episode for the active text chat turn.
-        decontexualized_input: Query string already prepared for RAG.
+        decontextualized_input: Query string already prepared for RAG.
         character_profile: Active character identity fields.
         user_profile: Current user's profile payload.
         prompt_message_context: Safe message context already built upstream.
@@ -99,7 +99,7 @@ def build_text_chat_rag_request(
     if episode["trigger_source"] == "user_message":
         projection = project_text_chat_compatibility_fields(episode)
         return _build_rag_request_from_fields(
-            decontexualized_input=decontexualized_input,
+            decontextualized_input=decontextualized_input,
             character_user_id=character_user_id,
             character_name=character_name,
             user_profile=user_profile,
@@ -139,7 +139,7 @@ def build_text_chat_rag_request(
     target_scope = episode["target_scope"]
     origin_metadata = episode["origin_metadata"]
     return _build_rag_request_from_fields(
-        decontexualized_input=decontexualized_input,
+        decontextualized_input=decontextualized_input,
         character_user_id=character_user_id,
         character_name=character_name,
         user_profile=user_profile,
@@ -255,7 +255,7 @@ def _character_identity(character_profile: dict[str, Any]) -> tuple[str, str]:
 
 def _build_rag_request_from_fields(
     *,
-    decontexualized_input: str,
+    decontextualized_input: str,
     character_user_id: str,
     character_name: str,
     user_profile: dict[str, Any],
@@ -307,7 +307,7 @@ def _build_rag_request_from_fields(
     if llm_trace_id:
         context["llm_trace_id"] = llm_trace_id
     request: RAGEpisodeRequest = {
-        "original_query": decontexualized_input,
+        "original_query": decontextualized_input,
         "character_name": character_name,
         "context": context,
         "current_user_id": global_user_id,

@@ -63,7 +63,7 @@ def build_consolidation_source_views(
 
     source_views: list[dict[str, Any]] = []
     trigger_source = text_or_empty(origin.get("trigger_source"))
-    user_summary = text_or_empty(state.get("decontexualized_input"))
+    user_summary = text_or_empty(state.get("decontextualized_input"))
     if trigger_source == USER_MESSAGE_SOURCE_KIND:
         source_views.append(
             _source_view(

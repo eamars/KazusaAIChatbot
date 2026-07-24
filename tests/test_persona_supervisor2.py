@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from kazusa_ai_chatbot.nodes import (
-    persona_supervisor2_msg_decontexualizer as decontextualizer_module,
+    persona_supervisor2_msg_decontextualizer as decontextualizer_module,
 )
 
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
@@ -30,7 +30,7 @@ NOW = "2026-07-14T00:00:00Z"
 def test_decontextualizer_preserves_direct_imperative_roles() -> None:
     """A clear command keeps its implicit character subject and user pronouns."""
 
-    prompt = decontextualizer_module._MSG_DECONTEXUALIZER_PROMPT
+    prompt = decontextualizer_module._MSG_DECONTEXTUALIZER_PROMPT
 
     assert "祈使句或命令句" in prompt
     assert "隐含动作主体是{character_name}" in prompt
@@ -460,7 +460,7 @@ def _patch_persona_graph_stages(
     """Patch external persona stages with deterministic V2 updates."""
 
     decontextualizer = AsyncMock(
-        return_value={"decontexualized_input": "hello"},
+        return_value={"decontextualized_input": "hello"},
     )
     resolver = AsyncMock(return_value=_resolver_update(route))
     dialog = AsyncMock(return_value={
@@ -470,7 +470,7 @@ def _patch_persona_graph_stages(
     })
     monkeypatch.setattr(
         persona_module,
-        "call_msg_decontexualizer",
+        "call_msg_decontextualizer",
         decontextualizer,
     )
     monkeypatch.setattr(persona_module, "stage_1_goal_resolver", resolver)
@@ -505,7 +505,7 @@ async def test_persona_supervisor_returns_dialog_and_consolidation_snapshot(
     assert result["target_addressed_user_ids"] == ["user-1"]
     assert result["target_broadcast"] is False
     assert result["cognition_state_committed"] is True
-    assert result["consolidation_state"]["decontexualized_input"] == "hello"
+    assert result["consolidation_state"]["decontextualized_input"] == "hello"
     assert result["consolidation_state"]["final_dialog"] == ["Hello."]
     decontextualizer.assert_awaited_once()
     resolver.assert_awaited_once()

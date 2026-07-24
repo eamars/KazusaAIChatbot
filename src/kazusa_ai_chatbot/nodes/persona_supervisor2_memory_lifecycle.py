@@ -674,7 +674,7 @@ def _specialist_prompt_payload(
         for alias_row in alias_rows
     ]
     prompt_payload = {
-        "current_input": state["decontexualized_input"],
+        "current_input": state["decontextualized_input"],
         "formed_decision": formed_decision,
         "final_dialog": [],
         "user_visible_surface_text": [],
@@ -702,7 +702,7 @@ def _post_surface_specialist_prompt_payload(
         for alias_row in alias_rows
     ]
     prompt_payload = {
-        "current_input": state["decontexualized_input"],
+        "current_input": state["decontextualized_input"],
         "formed_decision": formed_decision,
         "final_dialog": _visible_final_dialog(state),
         "user_visible_surface_text": _user_visible_surface_text(state),

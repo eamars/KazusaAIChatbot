@@ -983,7 +983,7 @@ def _result_ready_content_plan_state(episode: dict[str, Any]) -> dict[str, Any]:
 
     state = {
         "character_profile": {"name": "Kazusa"},
-        "decontexualized_input": "A coding task result is ready.",
+        "decontextualized_input": "A coding task result is ready.",
         "referents": [],
         "rag_result": {
             "answer": "",
@@ -1419,7 +1419,7 @@ def _l2d_state(
         "user_name": "Live Coding User",
         "character_profile": {"name": "Kazusa"},
         "character_name": "Kazusa",
-        "decontexualized_input": user_request,
+        "decontextualized_input": user_request,
         "media_summary": "",
         "logical_stance": "ACCEPT",
         "character_intent": "HELP_WITH_CODING_TASK",

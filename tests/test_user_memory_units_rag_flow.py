@@ -824,7 +824,7 @@ def test_extractor_payload_includes_recent_history() -> None:
             "current_global_user_id": "user-1",
             "current_display_name": "User",
         },
-        "decontexualized_input": "The memory lacks factual basis.",
+        "decontextualized_input": "The memory lacks factual basis.",
         "final_dialog": ["That makes sense."],
         "internal_monologue": "Kazusa follows the architecture discussion.",
         "emotional_appraisal": "Kazusa feels focused.",

@@ -287,7 +287,7 @@ def test_connector_separates_current_event_continuity_and_private_residue() -> N
     state = {
         "cognitive_episode": _episode(),
         "global_user_id": "user-1",
-        "decontexualized_input": "Current request",
+        "decontextualized_input": "Current request",
         "user_multimedia_input": [],
         "rag_result": {"memory_evidence": []},
         "conversation_progress": {

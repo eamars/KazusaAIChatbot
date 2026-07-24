@@ -171,7 +171,7 @@ def _materialize_action_request(
 
     if action_spec is None:
         return None
-    action_spec["params"]["cognition_provenance"] = {
+    action_spec["cognition_provenance"] = {
         "target_roles": list(request.get("target_roles", [])),
         "evidence_handles": list(request.get("evidence_handles", [])),
     }
@@ -321,7 +321,7 @@ def _deterministic_work_seed(
     as an executable task rewrite.
     """
 
-    decontextualized = state.get("decontexualized_input")
+    decontextualized = state.get("decontextualized_input")
     if isinstance(decontextualized, str) and decontextualized.strip():
         work_seed = decontextualized.strip()[:2000]
     else:

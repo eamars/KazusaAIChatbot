@@ -339,7 +339,7 @@ def _cognition_initial_state(state: dict[str, Any]) -> dict[str, Any]:
         "channel_topic": state["channel_topic"],
         "conversation_progress": state.get("conversation_progress"),
         "promoted_reflection_context": state.get("promoted_reflection_context"),
-        "decontexualized_input": state["decontexualized_input"],
+        "decontextualized_input": state["decontextualized_input"],
         "referents": state["referents"],
         "rag_result": state["rag_result"],
     }

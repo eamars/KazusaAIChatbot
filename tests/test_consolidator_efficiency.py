@@ -103,7 +103,7 @@ def _global_state() -> dict:
         "logical_stance": "CONFIRM",
         "character_profile": {"name": "Kazusa"},
         "rag_result": {"user_memory_unit_candidates": []},
-        "decontexualized_input": "hello",
+        "decontextualized_input": "hello",
         "cognitive_episode": _cognitive_episode(),
     }
 

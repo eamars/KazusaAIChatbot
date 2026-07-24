@@ -153,6 +153,7 @@ async def test_action_authorization_rejects_capability_effect_mismatch() -> None
         action_handles={
             "a1": _affordance("background_work_request"),
         },
+        runtime_capability_limits=[],
         services=SimpleNamespace(
             llm=_LLM(),
             action_selection_config=object(),
@@ -161,6 +162,51 @@ async def test_action_authorization_rejects_capability_effect_mismatch() -> None
 
     assert result == []
     assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_action_authorization_receives_runtime_owner_limits() -> None:
+    """The authorizer receives trusted limits before deciding ownership."""
+
+    runtime_limits = [
+        '当前调度能力不可用，不能安排未来提醒。',
+        '未来提醒只属于 future_speak，不能由其他能力代替。',
+    ]
+
+    class _LLM:
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config: object,
+        ) -> SimpleNamespace:
+            del config
+            payload = json.loads(str(messages[-1].content))
+            assert payload['runtime_capability_limits'] == runtime_limits
+            assert 'future_speak' in str(messages[0].content)
+            return SimpleNamespace(content=json.dumps({
+                'decisions': {'c1': False},
+            }))
+
+    result = await authorize_action_requests(
+        action_requests=[_action(
+            'b1',
+            'a1',
+            '仅确认已经收到未来提醒请求',
+        )],
+        bid_handles={'b1': _bid()},
+        evidence=[_evidence('明天下午三点提醒我交周报。')],
+        action_handles={
+            'a1': _affordance('accepted_task_request'),
+        },
+        runtime_capability_limits=runtime_limits,
+        services=SimpleNamespace(
+            llm=_LLM(),
+            action_selection_config=object(),
+        ),
+    )
+
+    assert result == []
 
 
 @pytest.mark.asyncio
@@ -195,6 +241,7 @@ async def test_action_authorization_preserves_three_grounded_actions() -> None:
         bid_handles={"b1": _bid()},
         evidence=[_evidence("Accept all three independent durable effects.")],
         action_handles=action_handles,
+        runtime_capability_limits=[],
         services=SimpleNamespace(
             llm=_LLM(),
             action_selection_config=object(),
@@ -218,6 +265,7 @@ async def test_empty_action_plan_adds_no_authorization_call() -> None:
         bid_handles={"b1": _bid()},
         evidence=[_evidence("Hello")],
         action_handles={},
+        runtime_capability_limits=[],
         services=SimpleNamespace(
             llm=_LLM(),
             action_selection_config=object(),

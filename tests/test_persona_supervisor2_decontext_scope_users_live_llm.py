@@ -14,7 +14,7 @@ from kazusa_ai_chatbot.config import (
     MSG_DECONTEXTUALIZER_LLM_MODEL,
 )
 from kazusa_ai_chatbot.nodes import (
-    persona_supervisor2_msg_decontexualizer as decontext,
+    persona_supervisor2_msg_decontextualizer as decontext,
 )
 from tests.llm_trace import write_llm_trace
 
@@ -447,7 +447,7 @@ def _display_name_target_is_person_grounded(result: dict) -> bool:
     if _has_referent(result, '蚝爹油', 'resolved'):
         return True
 
-    output = str(result['decontexualized_input'])
+    output = str(result['decontextualized_input'])
     person_markers = [
         '用户蚝爹油',
         '群友蚝爹油',
@@ -468,11 +468,11 @@ async def _run_case(
 ) -> tuple[dict, dict]:
     """Run one live case and write a raw evidence trace."""
 
-    proxy_llm = _CapturingLiveLLM(decontext._msg_decontexualizer_llm)
-    monkeypatch.setattr(decontext, '_msg_decontexualizer_llm', proxy_llm)
+    proxy_llm = _CapturingLiveLLM(decontext._msg_decontextualizer_llm)
+    monkeypatch.setattr(decontext, '_msg_decontextualizer_llm', proxy_llm)
 
     started_at = perf_counter()
-    result = await decontext.call_msg_decontexualizer(state)
+    result = await decontext.call_msg_decontextualizer(state)
     duration_seconds = perf_counter() - started_at
 
     system_prompt = proxy_llm.messages[0].content
@@ -516,7 +516,7 @@ async def test_live_scope_users_resolves_original_qq_failure(
         state,
     )
 
-    output = result['decontexualized_input']
+    output = result['decontextualized_input']
     assert '蚝爹油' in output, trace_payload
     assert _has_referent(result, '他', 'resolved'), trace_payload
     assert not _has_referent(result, '他', 'unresolved'), trace_payload
@@ -538,7 +538,7 @@ async def test_live_direct_imperative_preserves_speaker_and_addressee(
         state,
     )
 
-    assert result['decontexualized_input'] == state['user_input'], trace_payload
+    assert result['decontextualized_input'] == state['user_input'], trace_payload
     assert result['referents'] == [], trace_payload
     assert trace_payload['duration_seconds'] < 30.0
 
@@ -557,7 +557,7 @@ async def test_live_scope_users_ground_display_name_target_from_observed_group_r
         state,
     )
 
-    output = result['decontexualized_input']
+    output = result['decontextualized_input']
     chat_history = trace_payload['input_payload']['chat_history']
     assert all(isinstance(row, str) for row in chat_history), trace_payload
     assert any(
@@ -587,7 +587,7 @@ async def test_live_scope_users_keeps_absent_person_unresolved(
         state,
     )
 
-    output = result['decontexualized_input']
+    output = result['decontextualized_input']
     assert '王小明' not in output, trace_payload
     assert '李小红' not in output, trace_payload
     assert _has_referent(result, '他', 'unresolved'), trace_payload
@@ -608,7 +608,7 @@ async def test_live_scope_users_keeps_gender_name_probe_unresolved(
         state,
     )
 
-    output = result['decontexualized_input']
+    output = result['decontextualized_input']
     assert '王小明' not in output, trace_payload
     assert '李小红' not in output, trace_payload
     assert _has_referent(result, '他', 'unresolved'), trace_payload

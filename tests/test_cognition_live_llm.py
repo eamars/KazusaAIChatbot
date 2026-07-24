@@ -8,8 +8,8 @@ import httpx
 import pytest
 
 from kazusa_ai_chatbot.config import COGNITION_LLM_BASE_URL
-from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer import (
-    call_msg_decontexualizer,
+from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer import (
+    call_msg_decontextualizer,
 )
 from tests.llm_trace import write_llm_trace
 
@@ -60,7 +60,7 @@ def _debug_snapshot(label: str, payload: object) -> None:
     )
 
 
-async def test_live_msg_decontexualizer_returns_non_empty_output(
+async def test_live_msg_decontextualizer_returns_non_empty_output(
     ensure_live_llm,
 ) -> None:
     state = {
@@ -88,9 +88,9 @@ async def test_live_msg_decontexualizer_returns_non_empty_output(
         "reply_context": {},
     }
     _debug_snapshot("decontext.input", state)
-    result = await call_msg_decontexualizer(state)
+    result = await call_msg_decontextualizer(state)
     _debug_snapshot("decontext.output", result)
 
-    decontextualized_input = result["decontexualized_input"]
+    decontextualized_input = result["decontextualized_input"]
     assert isinstance(decontextualized_input, str)
     assert decontextualized_input.strip()

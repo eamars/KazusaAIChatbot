@@ -154,7 +154,7 @@ async def run_rag_evidence_for_persona_state(
             f'Local context recall skipped metadata: platform={state["platform"]} '
             f'channel={state["platform_channel_id"] or "<dm>"} '
             f'user={state["global_user_id"]} '
-            f'query={log_preview(state["decontexualized_input"])} '
+            f'query={log_preview(state["decontextualized_input"])} '
             f"rag_result={log_preview(rag_result)}"
         )
         await _record_rag_event(
@@ -172,7 +172,7 @@ async def run_rag_evidence_for_persona_state(
 
     fresh_query = _fresh_query_for_objective(
         objective,
-        fallback_query=state["decontexualized_input"],
+        fallback_query=state["decontextualized_input"],
     )
     request_reason = text_or_empty(reason)
     if not request_reason:
@@ -257,7 +257,7 @@ async def run_first_cycle_shared_memory_prewarm(
     empty_rag_result = _empty_projected_rag_result(state)
     rag_request = build_text_chat_rag_request(
         episode=state["cognitive_episode"],
-        decontexualized_input=state["decontexualized_input"],
+        decontextualized_input=state["decontextualized_input"],
         character_profile=state["character_profile"],
         user_profile=state["user_profile"],
         prompt_message_context=state["prompt_message_context"],
@@ -460,7 +460,7 @@ async def _execute_public_answer_research(
     })
     resolver_context = validate_complex_task_resolver_context({
         "schema_version": COMPLEX_TASK_RESOLVER_CONTEXT_VERSION,
-        "conversation_summary": text_or_empty(state.get("decontexualized_input")),
+        "conversation_summary": text_or_empty(state.get("decontextualized_input")),
         "persona_context_summary": _complex_task_persona_context_summary(state),
         "time_context": _complex_task_time_context(state),
         "available_evidence": [],
@@ -905,7 +905,7 @@ def _local_context_resolver_context_from_state(
         "chat_history_recent": list(state["chat_history_recent"]),
         "chat_history_wide": list(state["chat_history_wide"]),
         "conversation_progress": progress_context,
-        "original_user_request": state["decontexualized_input"],
+        "original_user_request": state["decontextualized_input"],
         "current_timestamp_utc": state["storage_timestamp_utc"],
         "current_platform_message_id": text_or_empty(
             state.get("platform_message_id")

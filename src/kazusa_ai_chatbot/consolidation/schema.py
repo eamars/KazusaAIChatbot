@@ -122,7 +122,7 @@ class ConsolidatorState(TypedDict):
     existing_dedup_keys: set[str]
 
     # User related
-    decontexualized_input: str
+    decontextualized_input: str
     chat_history_recent: list[dict]
 
     # Shared metadata bundle seeded from RAG metadata and accumulated per node.

@@ -57,6 +57,7 @@ class ActionResultV1(TypedDict):
     job_ref: NotRequired[str]
     accepted_task_state: NotRequired[str]
     accepted_task_summary: NotRequired[str]
+    coding_run_context: NotRequired[dict[str, object]]
     wait_guidance: NotRequired[str]
     acknowledgement_constraint: NotRequired[str]
     semantic_result_v2: NotRequired["SemanticActionResultV2"]

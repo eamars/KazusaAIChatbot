@@ -369,7 +369,7 @@ def _base_state() -> dict:
         "reply_context": {},
         "indirect_speech_context": "",
         "channel_topic": '中文论文答辩 PPT 贡献页卡住，需要连续推进。',
-        "decontexualized_input": user_input,
+        "decontextualized_input": user_input,
         "rag_result": _rag_result(),
         "internal_monologue": (
             '用户仍在延续同一个 PPT 修改 episode。不要把回应主动作放在陪伴或让用户重新梳理上，'
@@ -562,7 +562,7 @@ def _release_case_state(case: dict[str, Any]) -> dict:
         "reply_context": case.get("reply_context", {}),
         "indirect_speech_context": case.get("indirect_speech_context", ""),
         "channel_topic": case["channel_topic"],
-        "decontexualized_input": case["user_input"],
+        "decontextualized_input": case["user_input"],
         "rag_result": _rag_result(),
         "internal_monologue": case["internal_monologue"],
         "logical_stance": case.get("logical_stance", "CONFIRM"),

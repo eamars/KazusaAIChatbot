@@ -94,7 +94,7 @@ def _build_extractor_state() -> dict:
         "global_user_id": "live-memory-unit-user",
         "character_profile": {"name": "杏山千纱 (Kyōyama Kazusa)"},
         "user_name": "LiveMemoryUnitUser",
-        "decontexualized_input": (
+        "decontextualized_input": (
             "Please remember the actual architecture decision: historical "
             "summary, recent window, and character diary are being replaced by "
             "fact-anchored memory units. Each unit should carry a simple fact, "
@@ -187,7 +187,7 @@ def _build_dated_commitment_extractor_state() -> dict:
         "global_user_id": "live-memory-unit-user",
         "character_profile": {"name": "杏山千纱 (Kyōyama Kazusa)"},
         "user_name": "LiveMemoryUnitUser",
-        "decontexualized_input": (
+        "decontextualized_input": (
             "用户接受了千纱提出的条件：明天要先完成展示，展示合格后"
             "才能继续推进更亲密的互动。"
         ),
@@ -268,7 +268,7 @@ def _build_unresolved_commitment_extractor_state() -> dict:
         "global_user_id": "live-memory-unit-user",
         "character_profile": {"name": "杏山千纱 (Kyōyama Kazusa)"},
         "user_name": "LiveMemoryUnitUser",
-        "decontexualized_input": (
+        "decontextualized_input": (
             "用户问下次见面以后是不是可以继续推进奖励。"
         ),
         "final_dialog": [

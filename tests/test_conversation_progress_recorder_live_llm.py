@@ -90,7 +90,7 @@ def _base_record_input() -> ConversationProgressRecordInput:
         "scope": ConversationProgressScope("qq", "673225019", "identity-user"),
         "storage_timestamp_utc": "2026-05-10T03:19:18+00:00",
         "prior_episode_state": None,
-        "decontexualized_input": '用户已经回答第一题：瓦尔萨尔瓦动作，也夸了千纱知识很多。',
+        "decontextualized_input": '用户已经回答第一题：瓦尔萨尔瓦动作，也夸了千纱知识很多。',
         "chat_history_recent": [
             {
                 "role": "user",
@@ -261,7 +261,7 @@ async def test_live_recorder_preserves_user_owned_helper_term(
 
     del ensure_live_llm
     record_input = _base_record_input()
-    record_input["decontexualized_input"] = (
+    record_input["decontextualized_input"] = (
         '用户在讨论自己的学习助手项目命名，并确认先保留这个名字。'
     )
     record_input["chat_history_recent"] = [
@@ -306,7 +306,7 @@ async def test_live_recorder_returns_string_items_for_progress_lists(
 
     del ensure_live_llm
     record_input = _base_record_input()
-    record_input["decontexualized_input"] = (
+    record_input["decontextualized_input"] = (
         '用户说周五可以加双倍提拉米苏，但要求千纱亲昵地喊他一声才答应。'
     )
     record_input["prior_episode_state"] = {
@@ -404,7 +404,7 @@ async def test_live_obligation_transitions_from_active_to_resolved(
         "next_affordances": ['确认交付结果'],
         "progression_guidance": '交付完成后收束',
     }
-    record_input["decontexualized_input"] = (
+    record_input["decontextualized_input"] = (
         '用户明确说已经收到千纱发送的评审笔记。'
     )
     record_input["chat_history_recent"] = [
@@ -474,7 +474,7 @@ async def test_live_obligation_transitions_from_active_to_superseded(
         "next_affordances": ['确认新的交付方式'],
         "progression_guidance": '以本轮明确替代方案为准',
     }
-    record_input["decontexualized_input"] = (
+    record_input["decontextualized_input"] = (
         '用户明确取消周五文字笔记，改请千纱在2026-05-16发送语音总结。'
     )
     record_input["chat_history_recent"] = [

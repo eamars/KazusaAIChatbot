@@ -12,8 +12,8 @@ import pytest
 
 from kazusa_ai_chatbot.config import MSG_DECONTEXTUALIZER_LLM_BASE_URL
 from kazusa_ai_chatbot.cognition_core_v2.contracts import CognitionExecutionError
-from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer import (
-    call_msg_decontexualizer,
+from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer import (
+    call_msg_decontextualizer,
 )
 from tests.llm_trace import write_llm_trace
 
@@ -39,7 +39,7 @@ def _base_state() -> dict:
     """Build a minimal decontextualizer state fixture.
 
     Returns:
-        State dictionary with the fields consumed by ``call_msg_decontexualizer``.
+        State dictionary with the fields consumed by ``call_msg_decontextualizer``.
     """
 
     state = {
@@ -104,7 +104,7 @@ def _decontextualizer_payload(
 
 
 @pytest.mark.asyncio
-async def test_decontexualizer_prompt_requires_character_name_and_identity_safe_examples(
+async def test_decontextualizer_prompt_requires_character_name_and_identity_safe_examples(
     monkeypatch,
 ) -> None:
     """Decontextualizer prompt renders character identity without payload duplication."""
@@ -117,14 +117,14 @@ async def test_decontexualizer_prompt_requires_character_name_and_identity_safe_
     )
     fake_llm = _CapturingLLM(llm_payload)
     monkeypatch.setattr(
-        "kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer."
-        "_msg_decontexualizer_llm",
+        "kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer."
+        "_msg_decontextualizer_llm",
         fake_llm,
     )
     state = _base_state()
     state["character_profile"] = {"name": '测试角色'}
 
-    await call_msg_decontexualizer(state)
+    await call_msg_decontextualizer(state)
 
     system_prompt = fake_llm.messages[0].content
     human_payload = json.loads(fake_llm.messages[1].content)
@@ -156,8 +156,8 @@ async def test_decontextualizer_projects_chat_history_as_transcript_lines(
     )
     fake_llm = _CapturingLLM(llm_payload)
     monkeypatch.setattr(
-        "kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer."
-        "_msg_decontexualizer_llm",
+        "kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer."
+        "_msg_decontextualizer_llm",
         fake_llm,
     )
     state = _base_state()
@@ -194,7 +194,7 @@ async def test_decontextualizer_projects_chat_history_as_transcript_lines(
         },
     ]
 
-    await call_msg_decontexualizer(state)
+    await call_msg_decontextualizer(state)
 
     human_payload = json.loads(fake_llm.messages[1].content)
     assert human_payload['chat_history'] == [
@@ -296,10 +296,10 @@ async def _run_live_case(ensure_live_llm: None, case_id: str, state: dict) -> tu
 
     del ensure_live_llm
     started_at = perf_counter()
-    result = await call_msg_decontexualizer(state)
+    result = await call_msg_decontextualizer(state)
     duration_seconds = perf_counter() - started_at
     write_llm_trace(
-        "decontexualizer_referents_live",
+        "decontextualizer_referents_live",
         case_id,
         {
             "input": state,
@@ -334,10 +334,10 @@ async def test_unresolved_reference_referent_flows() -> None:
     )
 
     with patch(
-        "kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer._msg_decontexualizer_llm"
+        "kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer._msg_decontextualizer_llm"
     ) as mock_llm:
         mock_llm.ainvoke = AsyncMock(return_value=llm_response)
-        result = await call_msg_decontexualizer(_base_state())
+        result = await call_msg_decontextualizer(_base_state())
 
     assert result["referents"] == [
         {"phrase": "这些", "referent_role": "object", "status": "unresolved"}
@@ -368,10 +368,10 @@ async def test_reply_excerpt_resolved_referent_flows() -> None:
     }
 
     with patch(
-        "kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer._msg_decontexualizer_llm"
+        "kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer._msg_decontextualizer_llm"
     ) as mock_llm:
         mock_llm.ainvoke = AsyncMock(return_value=llm_response)
-        result = await call_msg_decontexualizer(state)
+        result = await call_msg_decontextualizer(state)
 
     assert result["referents"] == [
         {"phrase": "这些", "referent_role": "object", "status": "resolved"}
@@ -406,10 +406,10 @@ async def test_mixed_referents_are_preserved() -> None:
     state["prompt_message_context"]["body_text"] = state["user_input"]
 
     with patch(
-        "kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer._msg_decontexualizer_llm"
+        "kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer._msg_decontextualizer_llm"
     ) as mock_llm:
         mock_llm.ainvoke = AsyncMock(return_value=llm_response)
-        result = await call_msg_decontexualizer(state)
+        result = await call_msg_decontextualizer(state)
 
     assert result["referents"] == [
         {"phrase": "他", "referent_role": "subject", "status": "resolved"},
@@ -436,12 +436,12 @@ async def test_malformed_referents_fail_closed_after_bounded_retry(caplog) -> No
     )
 
     with patch(
-        "kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer._msg_decontexualizer_llm"
+        "kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer._msg_decontextualizer_llm"
     ) as mock_llm:
         mock_llm.ainvoke = AsyncMock(return_value=llm_response)
         caplog.set_level(logging.WARNING)
         with pytest.raises(CognitionExecutionError) as error_info:
-            await call_msg_decontexualizer(_base_state())
+            await call_msg_decontextualizer(_base_state())
 
     assert error_info.value.error_code == (
         "message_decontextualizer_contract_exhausted"
@@ -571,7 +571,7 @@ async def test_live_decontext_resolves_group_mention_pronouns(ensure_live_llm) -
         state,
     )
 
-    output = result["decontexualized_input"]
+    output = result["decontextualized_input"]
     assert output != state["user_input"]
     assert '蚝爹油' in output
     assert any(token in output for token in ('杏山千纱', '千纱', 'active character'))
@@ -639,7 +639,7 @@ async def test_live_decontext_false_positive_preserves_current_user_wo(
         state,
     )
 
-    output = result["decontexualized_input"]
+    output = result["decontextualized_input"]
     assert '我刚才' in output
     assert '你的问题' in output
     assert '我确实更想' in output
@@ -707,7 +707,7 @@ async def test_live_decontext_false_positive_preserves_current_user_wode(
         state,
     )
 
-    output = result["decontexualized_input"]
+    output = result["decontextualized_input"]
     assert '我的目标' in output
     assert '你也不反对吧' in output
     assert '蚝爹油的目标' not in output
@@ -771,7 +771,7 @@ async def test_live_decontext_false_positive_preserves_direct_ni(
         state,
     )
 
-    output = result["decontexualized_input"]
+    output = result["decontextualized_input"]
     assert '问你' in output
     assert '你会不会' in output
     assert '杏山千纱会不会' not in output
@@ -833,7 +833,7 @@ async def test_live_decontext_false_negative_resolves_reported_wo(
         state,
     )
 
-    output = result["decontexualized_input"]
+    output = result["decontextualized_input"]
     assert '小鹭' in output
     assert '小鹭今天' in output or '小鹭真的不想去社团' in output
     assert '如果我转告老师' in output
@@ -894,7 +894,7 @@ async def test_live_decontext_false_negative_resolves_reported_wode(
         state,
     )
 
-    output = result["decontexualized_input"]
+    output = result["decontextualized_input"]
     output_without_spaces = output.replace(" ", "")
     assert '小鹭的琴谱' in output_without_spaces
     assert '我明天帮她拿' in output or '我明天帮小鹭拿' in output_without_spaces
@@ -969,7 +969,7 @@ async def test_live_decontext_false_negative_resolves_group_ni_longer(
         state,
     )
 
-    output = result["decontexualized_input"]
+    output = result["decontextualized_input"]
     assert output != user_input
     assert '蚝爹油' in output
     assert '如果蚝爹油还继续' in output

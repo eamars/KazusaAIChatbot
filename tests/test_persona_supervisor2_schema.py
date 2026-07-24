@@ -37,7 +37,7 @@ class TestGlobalPersonaState:
     def test_has_stage_output_fields(self):
         hints = typing.get_type_hints(GlobalPersonaState)
         # Decontextualizer
-        assert "decontexualized_input" in hints
+        assert "decontextualized_input" in hints
         assert "referents" in hints
         # RAG
         assert "rag_result" in hints

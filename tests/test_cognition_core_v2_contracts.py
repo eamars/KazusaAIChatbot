@@ -517,6 +517,7 @@ def test_text_surface_rejects_private_state_and_branch_fields() -> None:
             "target_roles": [],
             "reason": "there is no grounded need to speak",
         },
+        "goal_resolution": "answerable_now",
         "supporting_bids": [],
         "expression_policy": {
             "visibility": "none",
@@ -591,6 +592,7 @@ async def test_surface_stage_rejects_legacy_response_fallbacks() -> None:
             "target_roles": [],
             "reason": "the greeting is directly observed",
         },
+        "goal_resolution": "answerable_now",
         "supporting_bids": [],
         "expression_policy": {
             "visibility": "visible",

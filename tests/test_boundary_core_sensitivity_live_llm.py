@@ -313,7 +313,7 @@ def _cognition_state(
         "reply_context": {},
         "indirect_speech_context": "",
         "channel_topic": channel_topic,
-        "decontexualized_input": user_input,
+        "decontextualized_input": user_input,
         "rag_result": _rag_result(user_profile),
         "reason_to_respond": reason_to_respond,
         "referents": [],

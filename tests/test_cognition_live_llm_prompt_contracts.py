@@ -16,7 +16,7 @@ from kazusa_ai_chatbot.time_boundary import (
 )
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
 from kazusa_ai_chatbot.config import COGNITION_LLM_BASE_URL
-from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer import call_msg_decontexualizer
+from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer import call_msg_decontextualizer
 from kazusa_ai_chatbot.utils import load_personality
 from tests.llm_trace import write_llm_trace
 
@@ -212,7 +212,7 @@ def _make_state(
         "chat_history_recent": chat_history_recent,
         "indirect_speech_context": indirect_speech_context,
         "channel_topic": channel_topic,
-        "decontexualized_input": user_input,
+        "decontextualized_input": user_input,
         "referents": [],
         "rag_result": _rag_result(
             objective_facts=objective_facts,
@@ -470,15 +470,15 @@ def _decontext_case_by_id(case_id: str) -> dict:
     raise AssertionError(f"Unknown decontext case: {case_id}")
 
 
-async def _assert_live_msg_decontexualizer_prompt_contract(ensure_live_llm, case_id: str) -> None:
+async def _assert_live_msg_decontextualizer_prompt_contract(ensure_live_llm, case_id: str) -> None:
     """Run one inspectable decontextualizer live prompt-contract case."""
     del ensure_live_llm
     state = _decontext_case_by_id(case_id)
     _debug_snapshot(f"prompt_contracts.decontext.input.{case_id}", state)
-    result = await call_msg_decontexualizer(state)
+    result = await call_msg_decontextualizer(state)
     _debug_snapshot(f"prompt_contracts.decontext.output.{case_id}", result)
 
-    output = result["decontexualized_input"]
+    output = result["decontextualized_input"]
     assert output.strip(), f"Empty decontext output for {case_id}: {result!r}"
 
     if case_id == "resolve_recent_referent":
@@ -510,38 +510,38 @@ async def _assert_live_msg_decontexualizer_prompt_contract(ensure_live_llm, case
         assert "他" in output, f"Indirect speech case should keep third-person pronoun: {output!r}"
 
 
-async def test_live_msg_decontexualizer_resolves_recent_referent(ensure_live_llm) -> None:
-    await _assert_live_msg_decontexualizer_prompt_contract(ensure_live_llm, "resolve_recent_referent")
+async def test_live_msg_decontextualizer_resolves_recent_referent(ensure_live_llm) -> None:
+    await _assert_live_msg_decontextualizer_prompt_contract(ensure_live_llm, "resolve_recent_referent")
 
 
-async def test_live_msg_decontexualizer_keeps_complete_sentence(ensure_live_llm) -> None:
-    await _assert_live_msg_decontexualizer_prompt_contract(ensure_live_llm, "keep_complete_sentence")
+async def test_live_msg_decontextualizer_keeps_complete_sentence(ensure_live_llm) -> None:
+    await _assert_live_msg_decontextualizer_prompt_contract(ensure_live_llm, "keep_complete_sentence")
 
 
-async def test_live_msg_decontexualizer_preserves_third_person_indirect_speech(ensure_live_llm) -> None:
-    await _assert_live_msg_decontexualizer_prompt_contract(
+async def test_live_msg_decontextualizer_preserves_third_person_indirect_speech(ensure_live_llm) -> None:
+    await _assert_live_msg_decontextualizer_prompt_contract(
         ensure_live_llm,
         "preserve_third_person_in_indirect_speech",
     )
 
 
-async def test_live_msg_decontexualizer_preserves_literal_url_anchor(ensure_live_llm) -> None:
-    await _assert_live_msg_decontexualizer_prompt_contract(ensure_live_llm, "preserve_literal_url_anchor")
+async def test_live_msg_decontextualizer_preserves_literal_url_anchor(ensure_live_llm) -> None:
+    await _assert_live_msg_decontextualizer_prompt_contract(ensure_live_llm, "preserve_literal_url_anchor")
 
 
-async def test_live_msg_decontexualizer_recovers_reply_only_confirmation_flow(ensure_live_llm) -> None:
-    await _assert_live_msg_decontexualizer_prompt_contract(ensure_live_llm, "reply_only_confirmation_flow")
+async def test_live_msg_decontextualizer_recovers_reply_only_confirmation_flow(ensure_live_llm) -> None:
+    await _assert_live_msg_decontextualizer_prompt_contract(ensure_live_llm, "reply_only_confirmation_flow")
 
 
-async def test_live_msg_decontexualizer_marks_unresolved_reference(ensure_live_llm) -> None:
-    await _assert_live_msg_decontexualizer_prompt_contract(
+async def test_live_msg_decontextualizer_marks_unresolved_reference(ensure_live_llm) -> None:
+    await _assert_live_msg_decontextualizer_prompt_contract(
         ensure_live_llm,
         "unresolved_reference",
     )
 
 
-async def test_live_msg_decontexualizer_resolves_reply_excerpt_reference(ensure_live_llm) -> None:
-    await _assert_live_msg_decontexualizer_prompt_contract(
+async def test_live_msg_decontextualizer_resolves_reply_excerpt_reference(ensure_live_llm) -> None:
+    await _assert_live_msg_decontextualizer_prompt_contract(
         ensure_live_llm,
         "reply_excerpt_resolves_reference",
     )

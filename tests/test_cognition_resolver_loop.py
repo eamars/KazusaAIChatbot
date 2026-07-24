@@ -69,7 +69,7 @@ def _resolver_state() -> dict:
         current_global_user_id="global-user-123",
     )
     return {
-        "decontexualized_input": "Original user request about trust.",
+        "decontextualized_input": "Original user request about trust.",
         "referents": [],
         "character_profile": {
             "name": "Kazusa",
@@ -2138,7 +2138,7 @@ async def test_pending_loader_ignores_unrelated_same_scope_messages() -> None:
     pending_record = build_pending_resume_record(state, observation)
     unrelated_state = dict(state)
     unrelated_state["platform_message_id"] = "unrelated-message-456"
-    unrelated_state["decontexualized_input"] = "我今天心情变好了，谢谢你陪我说话。"
+    unrelated_state["decontextualized_input"] = "我今天心情变好了，谢谢你陪我说话。"
 
     async def list_rows(*, limit: int = 1000) -> list[dict]:
         del limit
@@ -2174,7 +2174,7 @@ async def test_pending_resume_load_restores_original_goal_progress() -> None:
     record = build_pending_resume_record(state, observation)
     follow_up_state = _resolver_state()
     follow_up_state["platform_message_id"] = "message-456"
-    follow_up_state["decontexualized_input"] = "就在奥克兰 CBD。"
+    follow_up_state["decontextualized_input"] = "就在奥克兰 CBD。"
     follow_up_state["reply_context"] = {
         "reply_to_message_id": "message-123",
     }
@@ -2203,7 +2203,7 @@ async def test_pending_resume_load_restores_original_goal_progress() -> None:
     assert loaded_progress["deliverables"][1]["description"] == (
         "两小时散步路线和时间切分"
     )
-    assert loaded_state["resolver_state"]["original_decontexualized_input"] == (
+    assert loaded_state["resolver_state"]["original_decontextualized_input"] == (
         "今晚安排一个两小时低预算计划。"
     )
     assert "就在奥克兰 CBD" not in loaded_state["resolver_context"]

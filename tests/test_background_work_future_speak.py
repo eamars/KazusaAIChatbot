@@ -7,7 +7,10 @@ from unittest.mock import AsyncMock
 import pytest
 
 from kazusa_ai_chatbot.action_spec.evaluator import ActionSpecEvaluator
-from kazusa_ai_chatbot.action_spec.registry import FUTURE_SPEAK_CAPABILITY
+from kazusa_ai_chatbot.action_spec.registry import (
+    ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
+    FUTURE_SPEAK_CAPABILITY,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_actions import (
     materialize_semantic_action_requests,
 )
@@ -18,7 +21,7 @@ def _cognition_state() -> dict[str, object]:
 
     state = {
         "storage_timestamp_utc": "2026-05-15T21:00:00+00:00",
-        "decontexualized_input": (
+        "decontextualized_input": (
             "The user asks the character to remind them tomorrow at 10:00 "
             "to drink water."
         ),
@@ -69,6 +72,29 @@ def test_l2d_materializes_future_speak_as_background_action() -> None:
     eval_result = ActionSpecEvaluator().evaluate(action_spec)
     assert eval_result["ok"] is True
     assert eval_result["handler_owner"] == "background_work"
+
+
+def test_l2d_materializes_status_check_without_handler_params() -> None:
+    """Status lookup provenance stays outside the empty handler params."""
+
+    action_specs = materialize_semantic_action_requests(
+        [
+            {
+                "capability": ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
+                "decision": "check",
+                "detail": "读取当前作用域中的任务状态。",
+                "reason": "用户询问已经接纳的任务状态。",
+            }
+        ],
+        _cognition_state(),
+    )
+
+    assert len(action_specs) == 1
+    action_spec = action_specs[0]
+    assert action_spec["params"] == {}
+    assert action_spec["cognition_provenance"]["evidence_handles"] == []
+    eval_result = ActionSpecEvaluator().evaluate(action_spec)
+    assert eval_result["ok"] is True
 
 
 def test_scheduled_self_cognition_cannot_reschedule_future_speak() -> None:

@@ -32,7 +32,7 @@ from kazusa_ai_chatbot.relevance.persona_relevance_agent import (
     relevance_agent,
     validate_settled_relevance_decision,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer import (
+from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer import (
     select_media_for_turn,
 )
 from tests.llm_trace import write_llm_trace

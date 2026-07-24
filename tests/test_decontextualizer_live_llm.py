@@ -11,7 +11,7 @@ import pytest
 
 from tests.cognition_core_v2_test_helpers import canonical_user_message_episode
 from kazusa_ai_chatbot.config import MSG_DECONTEXTUALIZER_LLM_BASE_URL
-from kazusa_ai_chatbot.nodes import persona_supervisor2_msg_decontexualizer as decontext
+from kazusa_ai_chatbot.nodes import persona_supervisor2_msg_decontextualizer as decontext
 from tests.llm_trace import write_llm_trace
 
 
@@ -124,18 +124,24 @@ def _identity_hits(value: str) -> list[str]:
 async def _run_case(monkeypatch, case_id: str, state: dict) -> tuple[dict, dict]:
     """Run one live decontextualizer case and write a durable trace."""
 
-    proxy_llm = _CapturingLiveLLM(decontext._msg_decontexualizer_llm)
-    monkeypatch.setattr(decontext, "_msg_decontexualizer_llm", proxy_llm)
+    proxy_llm = _CapturingLiveLLM(decontext._msg_decontextualizer_llm)
+    monkeypatch.setattr(decontext, "_msg_decontextualizer_llm", proxy_llm)
 
     started_at = perf_counter()
-    result = await decontext.call_msg_decontexualizer(state)
+    result = await decontext.call_msg_decontextualizer(state)
     duration_seconds = perf_counter() - started_at
 
     system_prompt = proxy_llm.messages[0].content
     human_payload = json.loads(proxy_llm.messages[1].content)
-    output = str(result["decontexualized_input"])
+    output = str(result["decontextualized_input"])
+    character_name = str(
+        state.get("character_profile", {}).get(
+            "name",
+            _CHARACTER_NAME,
+        )
+    )
     trace_payload = {
-        "character_name": _CHARACTER_NAME,
+        "character_name": character_name,
         "prompt_summary": {
             "system_prompt_length": len(system_prompt),
             "contains_current_character_label": '当前角色' in system_prompt,
@@ -174,7 +180,7 @@ async def test_live_decontextualizer_active_character_short_answer_uses_characte
         state,
     )
 
-    output = str(result["decontexualized_input"])
+    output = str(result["decontextualized_input"])
     assert _CHARACTER_NAME in output, trace_payload
     assert not _identity_hits(output), trace_payload
 
@@ -195,7 +201,7 @@ async def test_live_decontextualizer_direct_second_person_preserved(
         state,
     )
 
-    output = str(result["decontexualized_input"])
+    output = str(result["decontextualized_input"])
     assert '你也不反对吧' in output, trace_payload
     assert _CHARACTER_NAME not in output, trace_payload
 
@@ -298,3 +304,56 @@ async def test_live_decontextualizer_preserves_direct_abuse_roles(
     assert response_operation["response_owner_role"] == "当前角色", trace_payload
     assert response_operation["embedded_actor_role"] == "当前用户", trace_payload
     assert response_operation["embedded_target_role"] == "当前角色", trace_payload
+
+
+async def test_live_decontextualizer_preserves_retrospective_user_fact_roles(
+    ensure_live_llm,
+    monkeypatch,
+) -> None:
+    """A retrospective question keeps the user's embedded speech direction."""
+
+    del ensure_live_llm
+    user_input = "明日奈，我刚才说把门禁卡放在哪里了？"
+    state = _base_state(user_input)
+    state["character_profile"] = {"name": "明日奈"}
+    state["chat_history_recent"] = []
+    state["cognitive_episode"] = canonical_user_message_episode(
+        episode_id="retrospective-user-fact-role-episode",
+        percept_id="retrospective-user-fact-role-percept",
+        storage_timestamp_utc="2026-07-23T20:59:00+00:00",
+        local_time_context={
+            "current_local_datetime": "2026-07-24 09:00",
+            "current_local_weekday": "Friday",
+        },
+        user_input=user_input,
+        platform="debug",
+        platform_channel_id="retrospective-user-fact-private",
+        channel_type="private",
+        platform_message_id="retrospective-user-fact-message",
+        platform_user_id="identity-user",
+        global_user_id="identity-global-user",
+        user_name="基线测试用户",
+        debug_modes={},
+        target_addressed_user_ids=[],
+        target_broadcast=False,
+    )
+
+    result, trace_payload = await _run_case(
+        monkeypatch,
+        "retrospective_user_fact_roles",
+        state,
+    )
+
+    content = result["cognitive_episode"]["percepts"][0]["content"]
+    role_explicit_content = content["role_explicit_content"]
+    response_operation = content["response_operation"]
+    assert all(
+        token in role_explicit_content
+        for token in ("当前用户", "当前角色", "门禁卡")
+    ), trace_payload
+    assert response_operation["response_owner_role"] == "当前角色", trace_payload
+    assert response_operation["embedded_actor_role"] == "当前用户", trace_payload
+    assert response_operation["embedded_target_role"] in {
+        "当前角色",
+        "无",
+    }, trace_payload

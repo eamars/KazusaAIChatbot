@@ -109,7 +109,7 @@ def _state() -> dict:
             ),
         },
         "relationship_delta": 1,
-        "decontexualized_input": "remember tea",
+        "decontextualized_input": "remember tea",
         "consolidation_origin": _consolidation_origin(),
         "enabled_consolidation_write_lanes": [
             "character_state",

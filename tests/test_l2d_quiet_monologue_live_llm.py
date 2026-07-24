@@ -165,7 +165,7 @@ def _quiet_group_graphics_state() -> dict:
         'indirect_speech_context': '',
         'channel_topic': '群聊里随口讨论显卡和游戏优化',
         'referents': [],
-        'decontexualized_input': (
+        'decontextualized_input': (
             'Karma 在群聊中说：打游戏的话 i 卡没优化吧我记得。'
         ),
         'media_summary': '',

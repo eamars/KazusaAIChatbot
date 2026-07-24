@@ -241,6 +241,11 @@ def classify_route(
         route = _route_with_action_attempt(explicit_route, action_attempt)
         return route
 
+    v2_route = _v2_route_for_due_schedule(case, cognition_output)
+    if v2_route:
+        route = _route_with_action_attempt(v2_route, action_attempt)
+        return route
+
     action_spec_route = _route_from_action_specs(cognition_output)
     if action_spec_route:
         route = _route_with_action_attempt(action_spec_route, action_attempt)
@@ -443,6 +448,32 @@ def _explicit_route(cognition_output: dict[str, Any]) -> str:
             return_value = selected_route
             return return_value
 
+    return_value = ""
+    return return_value
+
+
+def _v2_route_for_due_schedule(
+    case: models.SelfCognitionCase,
+    cognition_output: dict[str, Any],
+) -> str:
+    """Project native V2 scheduled speech into the delivery owner."""
+
+    core_output = cognition_output.get("cognition_core_output")
+    if not isinstance(core_output, dict):
+        return ""
+    intention = core_output.get("intention")
+    if not isinstance(intention, dict):
+        return ""
+    native_route = intention.get("route")
+    source_kind = _first_source_ref(case).get("source_kind")
+    due_state = _optional_string_field(case, "semantic_due_state")
+    if (
+        source_kind == "scheduled_tick"
+        and due_state in models.CONTACT_DUE_STATES
+        and native_route in {"speech", "action"}
+    ):
+        return_value = models.ROUTE_ACTION_CANDIDATE
+        return return_value
     return_value = ""
     return return_value
 

@@ -801,21 +801,19 @@ def _accepted_coding_task_projection() -> dict[str, object]:
         "decision_pattern": "",
         "context_ref": "",
         "semantic_input_summary": [
-            "Accepted coding work is managed as a durable run.",
+            "代码工作由持久化 coding run 管理。",
             (
-                "allowed_next_actions: start, revise_proposal, summarize, "
-                "status, approve_and_verify, respond_to_blocker, cancel."
+                "allowed_next_actions：start、revise_proposal、summarize、status、"
+                "approve_and_verify、respond_to_blocker、cancel。"
             ),
             (
-                "start creates a run; other decisions continue the "
-                "matching open run."
+                "start 创建新 run；其他决定继续处理匹配的开放 run。"
             ),
             (
-                "Use the contextual affordance decision; ask visibly when no "
-                "run is distinguishable."
+                "使用上下文 affordance 中的决定；无法区分 run 时由可见发言向用户澄清。"
             ),
-            "Put verification or blocker answers in detail.",
-            "Pair this private request with visible acknowledgement.",
+            "把验证要求或阻塞答复放入 semantic detail。",
+            "把私有请求与可见确认配对。",
         ],
         "execution_boundary": (
             "durable accepted-task lifecycle queues the coding-run worker"
@@ -838,9 +836,10 @@ def _accepted_task_request_projection() -> dict[str, object]:
         "decision_pattern": "",
         "context_ref": "",
         "semantic_input_summary": [
-            "Use for explicitly accepted bounded delayed work.",
-            "Provide the accepted task objective without execution internals.",
-            "Pair the private request with a visible acknowledgement.",
+            "仅用于明确接受的、有界延迟工作。",
+            "提供接受的任务目标，不写执行内部细节。",
+            "不能代替未来提醒、主动联系或需要调度器负责的后续动作。",
+            "把私有请求与可见确认一起使用。",
         ],
         "execution_boundary": "accepted-task lifecycle queues the durable worker",
     }
@@ -956,9 +955,9 @@ def _accepted_task_status_check_projection() -> dict[str, object]:
         "decision_pattern": "",
         "context_ref": "",
         "semantic_input_summary": [
-            "Use when the user asks about already accepted delayed work.",
-            "Do not include worker, queue, or job parameters.",
-            "Pair this private check with a visible speak progress answer.",
+            "用户询问已经接纳的延迟任务或既有 coding run 状态时使用。",
+            "这是直接读取持久化状态的只读查询，不填写 worker、queue 或 job 参数。",
+            "把私有查询与可见的状态答复配对。",
         ],
         "execution_boundary": "durable accepted-task lifecycle status lookup",
     }
@@ -1001,9 +1000,9 @@ def _memory_lifecycle_projection() -> dict[str, object]:
         "decision_pattern": "",
         "context_ref": "",
         "semantic_input_summary": [
-            "Use when active commitments need semantic lifecycle review.",
-            "Use the fixed active_commitment_lifecycle decision and put the "
-            "concrete review objective in semantic_goal.",
+            '仅当当前证据明确要求复核已经存在的 active commitment 生命周期时使用。',
+            '普通用户偏好、互动风格事实或一般记忆保存由记忆与 consolidation 流程处理，不使用本能力。',
+            '使用固定的 active_commitment_lifecycle 决策，并在 semantic_goal 中写出具体复核目标。',
         ],
         "execution_boundary": "memory lifecycle specialist chooses aliases and decisions",
     }

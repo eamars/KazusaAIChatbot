@@ -48,7 +48,7 @@ def test_v2_connector_materializes_initial_accepted_coding_request() -> None:
         user_input=CODE_TASK,
         platform_message_id="v2-coding-materialization",
     )
-    state["decontexualized_input"] = CODE_TASK
+    state["decontextualized_input"] = CODE_TASK
     output = canonical_cognition_output(owner_user_id="global-user-001")
     output["action_requests"] = [{
         "action_kind": "accepted_coding_task_request",
@@ -409,7 +409,7 @@ async def _run_full_coding_handoff_case(
     )
     monkeypatch.setattr(
         persona_module,
-        "call_msg_decontexualizer",
+        "call_msg_decontextualizer",
         _fake_decontextualizer,
     )
     monkeypatch.setattr(
@@ -1116,10 +1116,10 @@ async def _fake_decontextualizer(state: dict[str, Any]) -> dict[str, str]:
         trigger_source = episode.get("trigger_source")
         if trigger_source == "tool_result":
             result = {
-                "decontexualized_input": "Accepted task result is ready."
+                "decontextualized_input": "Accepted task result is ready."
             }
             return result
-    result = {"decontexualized_input": str(state.get("user_input", ""))}
+    result = {"decontextualized_input": str(state.get("user_input", ""))}
     return result
 
 
@@ -1385,7 +1385,7 @@ def _cognition_update_for_actions(
         "cognition_core_output": cognition_output,
         "cognition_state_update": cognition_output["state_update"],
         "cognition_state_committed": True,
-        "decontexualized_input": state["decontexualized_input"],
+        "decontextualized_input": state["decontextualized_input"],
         "referents": [],
         "rag_result": {},
         "emotional_appraisal": "calm",

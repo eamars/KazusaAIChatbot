@@ -607,6 +607,9 @@ def _accepted_task_status_prompt_fields(
         return fields
     task = status_result["task"]
     accepted_task_state = _accepted_task_prompt_state(str(task["state"]))
+    coding_run_context = _project_coding_run_context(
+        task.get("coding_run_context")
+    )
     fields = {
         "result_summary": _accepted_task_result_summary(task),
         "accepted_task_state": accepted_task_state,
@@ -614,6 +617,8 @@ def _accepted_task_status_prompt_fields(
         "acknowledgement_constraint": "progress_report_allowed",
         "wait_guidance": _accepted_task_wait_guidance(accepted_task_state),
     }
+    if coding_run_context is not None:
+        fields["coding_run_context"] = coding_run_context
     return fields
 
 
@@ -659,11 +664,69 @@ def _accepted_task_result_summary(task: dict[str, Any]) -> str:
     if state in ("result_ready", "delivered"):
         result_summary = str(task.get("result_summary", "")).strip()
         if result_summary:
-            return result_summary
+            summary = f"任务已有结果：{result_summary}"
+            return _append_coding_run_summary(summary, task)
     if state in ("failure_ready", "enqueue_failed", "delivery_retryable"):
         failure_summary = str(task.get("failure_summary", "")).strip()
         if failure_summary:
-            return failure_summary
+            summary = f"任务失败：{failure_summary}"
+            return _append_coding_run_summary(summary, task)
     if summary:
-        return f"Accepted task is {state}: {summary}"
-    return f"Accepted task is {state}."
+        result_summary = f"已接纳任务当前状态为 {state}：{summary}"
+    else:
+        result_summary = f"已接纳任务当前状态为 {state}。"
+    return _append_coding_run_summary(result_summary, task)
+
+
+def _append_coding_run_summary(
+    summary: str,
+    task: Mapping[str, Any],
+) -> str:
+    """Append bounded coding-run facts without exposing persistence details."""
+
+    context = _project_coding_run_context(task.get("coding_run_context"))
+    if context is None:
+        return summary
+    status = str(context["status"])
+    fragments = [f"代码任务状态为 {status}"]
+    actions = context.get("allowed_next_actions")
+    if isinstance(actions, list) and actions:
+        fragments.append(f"后续可用动作：{'、'.join(str(item) for item in actions)}")
+    blocker = context.get("active_blocker")
+    fragments.append(
+        "当前阻塞：无" if blocker is None else "当前存在已记录阻塞"
+    )
+    return f"{summary}；{'；'.join(fragments)}"
+
+
+def _project_coding_run_context(value: object) -> dict[str, object] | None:
+    """Project only bounded coding lifecycle facts for later cognition."""
+
+    if not isinstance(value, Mapping):
+        return None
+    status = value.get("status")
+    if not isinstance(status, str) or not status.strip():
+        return None
+    context: dict[str, object] = {"status": status.strip()[:80]}
+    raw_actions = value.get("allowed_next_actions")
+    if isinstance(raw_actions, list):
+        actions = [
+            item.strip()[:80]
+            for item in raw_actions
+            if isinstance(item, str) and item.strip()
+        ]
+        if actions:
+            context["allowed_next_actions"] = list(dict.fromkeys(actions[:8]))
+    blocker = value.get("active_blocker")
+    if blocker is None:
+        context["active_blocker"] = None
+    elif isinstance(blocker, Mapping):
+        blocker_kind = blocker.get("blocker_kind")
+        context["active_blocker"] = {
+            "blocker_kind": str(blocker_kind).strip()[:80]
+            if isinstance(blocker_kind, str) and blocker_kind.strip()
+            else "recorded_blocker",
+        }
+    else:
+        context["active_blocker"] = "recorded_blocker"
+    return context

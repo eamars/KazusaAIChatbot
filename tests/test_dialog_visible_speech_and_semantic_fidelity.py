@@ -77,6 +77,7 @@ def _surface_input() -> dict[str, object]:
             "target_roles": [],
             "reason": "the current request asks for an inference",
         },
+        "goal_resolution": "answerable_now",
         "supporting_bids": [],
         "expression_policy": {
             "visibility": "visible",
@@ -249,6 +250,8 @@ def test_runtime_prompts_define_live_speech_and_hard_error_contracts() -> None:
     assert "行动者" in content_prompt
     assert "对象" in content_prompt
     assert "executed" in content_prompt
+    assert "已记录" in content_prompt
+    assert "待执行" in content_prompt
     assert "action description" not in content_prompt
     assert "动作描写" not in content_prompt
     assert "终端图像" in visual_prompt

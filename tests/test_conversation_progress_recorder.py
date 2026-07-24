@@ -92,7 +92,7 @@ def _record_input(
         "storage_timestamp_utc": "2026-05-01T04:00:00+00:00",
         "character_name": "TestCharacter",
         "prior_episode_state": None,
-        "decontexualized_input": "I meant the other thing.",
+        "decontextualized_input": "I meant the other thing.",
         "chat_history_recent": [],
         "content_plan": {
             "semantic_content": "Accept the clarification.",

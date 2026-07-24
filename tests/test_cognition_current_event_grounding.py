@@ -108,7 +108,7 @@ def _connector_payload() -> dict[str, Any]:
             "cognitive_episode": _episode(),
             "global_user_id": "secret-global-user-id",
             "user_input": "fallback should not replace the episode percept",
-            "decontexualized_input": "fallback semantic rewrite",
+            "decontextualized_input": "fallback semantic rewrite",
             "user_multimedia_input": [],
             "rag_result": {"memory_evidence": []},
         },
@@ -142,6 +142,93 @@ def test_current_event_is_canonical_episode_evidence() -> None:
         assert secret not in evidence["semantic_text"]
 
 
+def test_rag_recall_evidence_is_canonical_cognition_evidence() -> None:
+    """RAG recall facts remain available to downstream cognition."""
+
+    recalled_fact = "我把门禁卡放进书桌右边第二个抽屉了。"
+    payload = build_cognition_input_from_global_state(
+        {
+            "cognitive_episode": _episode(),
+            "global_user_id": "secret-global-user-id",
+            "user_input": CURRENT_EVENT_TEXT,
+            "decontextualized_input": CURRENT_EVENT_TEXT,
+            "user_multimedia_input": [],
+            "rag_result": {
+                "memory_evidence": [],
+                "conversation_evidence": [
+                    "用户曾在此前对话中说明门禁卡的存放地点。"
+                ],
+                "recall_evidence": [{
+                    "content": recalled_fact,
+                    "speaker": "当前用户",
+                    "type": "explicit_statement",
+                }],
+            },
+        },
+        mutable_state=build_acquaintance_user_state(
+            global_user_id="secret-global-user-id",
+            updated_at=V2_TIMESTAMP,
+        ),
+        character_state=build_character_production_state(
+            updated_at=V2_TIMESTAMP,
+        ),
+    )
+
+    evidence = payload["evidence"]
+    assert len(evidence) == 3
+    conversation = evidence[1]
+    assert conversation["evidence_ref"]["source_kind"] == (
+        "conversation_evidence"
+    )
+    assert conversation["semantic_text"] == (
+        "用户曾在此前对话中说明门禁卡的存放地点。"
+    )
+    recall = evidence[2]
+    assert recall["evidence_ref"]["source_kind"] == "recall_evidence"
+    assert recall["semantic_text"] == recalled_fact
+    assert recall["evidence_ref"]["semantic_summary"] == recalled_fact
+    assert recall["evidence_ref"]["occurred_at"] == V2_TIMESTAMP
+
+
+def test_rag_conversation_mapping_is_canonical_cognition_evidence() -> None:
+    """Conversation resolver mappings remain available to cognition."""
+
+    recalled_fact = "我把门禁卡放进书桌右边第二个抽屉了。"
+    payload = build_cognition_input_from_global_state(
+        {
+            "cognitive_episode": _episode(),
+            "global_user_id": "secret-global-user-id",
+            "user_input": CURRENT_EVENT_TEXT,
+            "decontextualized_input": CURRENT_EVENT_TEXT,
+            "user_multimedia_input": [],
+            "rag_result": {
+                "memory_evidence": [],
+                "conversation_evidence": [{
+                    "role": "user",
+                    "content": recalled_fact,
+                    "metadata": {"type": "direct_statement"},
+                }],
+                "recall_evidence": [],
+            },
+        },
+        mutable_state=build_acquaintance_user_state(
+            global_user_id="secret-global-user-id",
+            updated_at=V2_TIMESTAMP,
+        ),
+        character_state=build_character_production_state(
+            updated_at=V2_TIMESTAMP,
+        ),
+    )
+
+    evidence = payload["evidence"]
+    assert len(evidence) == 2
+    conversation = evidence[1]
+    assert conversation["evidence_ref"]["source_kind"] == (
+        "conversation_evidence"
+    )
+    assert conversation["semantic_text"] == recalled_fact
+
+
 def test_role_explicit_current_event_is_forwarded_without_reinterpretation() -> None:
     """Cognition should consume the upstream role meaning as current evidence."""
 
@@ -168,7 +255,7 @@ def test_role_explicit_current_event_is_forwarded_without_reinterpretation() -> 
             "cognitive_episode": episode,
             "global_user_id": "secret-global-user-id",
             "user_input": CURRENT_EVENT_TEXT,
-            "decontexualized_input": CURRENT_EVENT_TEXT,
+            "decontextualized_input": CURRENT_EVENT_TEXT,
             "user_multimedia_input": [],
             "rag_result": {"memory_evidence": []},
         },

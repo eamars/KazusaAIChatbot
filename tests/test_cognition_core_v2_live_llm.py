@@ -405,6 +405,7 @@ async def test_v2_text_surface_stage_contracts_live_llm() -> None:
             "target_roles": [],
             "reason": "the completed effort is directly observed",
         },
+        "goal_resolution": "answerable_now",
         "supporting_bids": [],
         "expression_policy": {
             "visibility": "visible",

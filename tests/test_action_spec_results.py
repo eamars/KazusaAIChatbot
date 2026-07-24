@@ -543,6 +543,15 @@ async def test_accepted_task_status_check_execution_projects_progress_state(
             "task": {
                 "state": "pending",
                 "accepted_task_summary": "Generate a Fibonacci function snippet.",
+                "coding_run_context": {
+                    "status": "proposal_ready",
+                    "allowed_next_actions": [
+                        "status",
+                        "cancel",
+                        "approve_and_verify",
+                    ],
+                    "active_blocker": None,
+                },
             },
         }
 
@@ -564,6 +573,8 @@ async def test_accepted_task_status_check_execution_projects_progress_state(
     assert result["accepted_task_summary"] == (
         "Generate a Fibonacci function snippet."
     )
+    assert result["coding_run_context"]["status"] == "proposal_ready"
+    assert "proposal_ready" in result["result_summary"]
     assert result["acknowledgement_constraint"] == "progress_report_allowed"
     assert result["wait_guidance"] == "non_numeric_wait"
     for forbidden in (

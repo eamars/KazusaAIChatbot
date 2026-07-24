@@ -269,7 +269,7 @@ def _lifecycle_update_state_from_case(case: dict) -> dict:
         rendered_packet,
     )
     state.update({
-        "decontexualized_input": rendered_packet,
+        "decontextualized_input": rendered_packet,
         "logical_stance": "CONFIRM",
         "character_intent": "DISMISS",
         "judgment_note": (

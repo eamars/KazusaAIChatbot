@@ -97,7 +97,7 @@ class GlobalPersonaState(TypedDict):
 
     # Bridge variables populated by persona graph nodes
     # Decontextualizer output
-    decontexualized_input: str
+    decontextualized_input: str
     referents: list[ReferentResolution]
 
     # RAG output
@@ -178,7 +178,7 @@ class CognitionState(TypedDict):
     coding_run_followup: NotRequired[dict]
     selected_text_surface_intent: NotRequired[str]
 
-    decontexualized_input: str
+    decontextualized_input: str
     referents: list[ReferentResolution]
     rag_result: dict
 

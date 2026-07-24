@@ -74,6 +74,18 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
 from kazusa_ai_chatbot.time_boundary import parse_storage_utc_datetime
 
 
+def _deduplicate_diagnostics_warnings(
+    warnings: Sequence[str],
+) -> list[str]:
+    """Keep diagnostic warnings in first-seen order without duplicates."""
+
+    unique_warnings: list[str] = []
+    for warning in warnings:
+        if warning not in unique_warnings:
+            unique_warnings.append(warning)
+    return unique_warnings
+
+
 async def run_cognition(
     input_payload: CognitionCoreInputV2,
     services: CognitionCoreServicesV2,
@@ -140,6 +152,10 @@ async def run_cognition(
         payload["evidence"],
         scene_context=payload["scene_context"],
         private_continuity_context=payload["private_continuity_context"],
+        runtime_capability_limits=payload.get(
+            "runtime_capability_limits",
+            [],
+        ),
     )
 
     appraisal_tasks = [
@@ -249,6 +265,10 @@ async def run_cognition(
                 private_continuity_context=payload[
                     "private_continuity_context"
                 ],
+                runtime_capability_limits=payload.get(
+                    "runtime_capability_limits",
+                    [],
+                ),
             ),
             final_state,
             payload,
@@ -283,6 +303,10 @@ async def run_cognition(
             available_actions=payload["available_actions"],
             available_resolvers=payload["available_resolver_capabilities"],
             resolver_context=payload["resolver_context"],
+            runtime_capability_limits=payload.get(
+                "runtime_capability_limits",
+                [],
+            ),
             services=services,
             current_goal_progress=payload.get("resolver_goal_progress"),
         )
@@ -343,7 +367,7 @@ async def run_cognition(
             final_execution.dependency_wait_ms if final_execution else 0,
         ),
         "total_ms": _elapsed_ms(started_at),
-        "warnings": warnings,
+        "warnings": _deduplicate_diagnostics_warnings(warnings),
     }
     cognition_observability = _build_cognition_observability(
         questions=questions,
@@ -611,6 +635,7 @@ def _branch_context(
     *,
     scene_context: Mapping[str, Any],
     private_continuity_context: str,
+    runtime_capability_limits: Sequence[str] = (),
 ) -> dict[str, Any]:
     """Build semantic branch context and retain handle bindings privately."""
 
@@ -656,6 +681,10 @@ def _branch_context(
     ]
     context["scene_context"] = dict(scene_context)
     context["private_continuity_context"] = private_continuity_context
+    if runtime_capability_limits:
+        context["runtime_capability_limits"] = list(
+            runtime_capability_limits
+        )
     del evidence
     return context
 

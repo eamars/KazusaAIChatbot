@@ -511,8 +511,9 @@ def _validate_worker_v2_cognition_result(
     *,
     required: bool,
 ) -> None:
-    """Enforce character-scoped commit completion before worker delivery."""
+    """Enforce the cognition-selected scope before worker delivery."""
 
+    cognition_input = artifact_payloads.get(models.ARTIFACT_COGNITION_INPUT)
     output = artifact_payloads.get(models.ARTIFACT_COGNITION_OUTPUT)
     if not isinstance(output, dict):
         if required and models.ARTIFACT_COGNITION_INPUT in artifact_payloads:
@@ -526,9 +527,24 @@ def _validate_worker_v2_cognition_result(
     state_update = core_output.get("state_update")
     if not isinstance(state_update, dict):
         raise StateContractError("self-cognition V2 state update is missing")
-    if state_update.get("state_scope") != "character":
+    actual_scope = state_update.get("state_scope")
+    if actual_scope not in {"character", "user"}:
         raise StateContractError(
-            "self-cognition V2 state update must use character scope"
+            "self-cognition V2 state update has an invalid scope"
+        )
+    expected_scope = (
+        cognition_input.get("state_scope")
+        if isinstance(cognition_input, dict)
+        else None
+    )
+    if expected_scope not in {"character", "user"}:
+        if required:
+            raise StateContractError(
+                "self-cognition V2 cognition input scope is missing"
+            )
+    elif actual_scope != expected_scope:
+        raise StateContractError(
+            "self-cognition V2 state scope does not match cognition input"
         )
     if output.get("cognition_state_committed") is not True:
         raise StateContractError(

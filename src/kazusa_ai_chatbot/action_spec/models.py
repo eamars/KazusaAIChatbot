@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Literal, TypedDict
+from typing import Literal, NotRequired, TypedDict
 
 from kazusa_ai_chatbot.cognition_core_v2.contracts import RoleRefV2
 
@@ -245,6 +245,7 @@ class ActionSpecV1(TypedDict):
     deadline: str | None
     continuation: ActionContinuationV1
     reason: str
+    cognition_provenance: NotRequired[dict[str, object]]
 
 
 class ActionEvalResult(TypedDict):

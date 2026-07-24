@@ -980,7 +980,7 @@ def _materialized_coding_action(
 def _cognition_state() -> dict[str, object]:
     return {
         "storage_timestamp_utc": "2026-07-09T01:00:00+00:00",
-        "decontexualized_input": "Add slugify tests.",
+        "decontextualized_input": "Add slugify tests.",
         "platform": "debug",
         "platform_channel_id": "debug:user:test-user",
         "channel_type": "private",

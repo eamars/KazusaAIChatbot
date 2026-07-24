@@ -55,7 +55,7 @@ def _state() -> dict[str, object]:
             content="private exchange",
         ),
         "cognition_core_output": cognition_output,
-        "action_results": [],
+        "pre_surface_action_results": [],
         "character_profile": _character_profile(),
     }
 
@@ -126,7 +126,7 @@ def test_l3_builder_projects_trace_status_into_exact_v2_action_result() -> None:
     """Legacy execution trace vocabulary stays outside the V2 surface API."""
 
     state = _state()
-    state["action_results"] = [{
+    state["pre_surface_action_results"] = [{
         "action_kind": "background_work_request",
         "status": "pending",
         "result_summary": "The accepted task was scheduled.",
@@ -150,7 +150,7 @@ async def test_text_surface_output_carries_exact_action_result_authority() -> No
     """Dialog receives deterministic action lifecycle truth, not L3 inference."""
 
     state = _state()
-    state["action_results"] = [{
+    state["pre_surface_action_results"] = [{
         "action_kind": "background_work_request",
         "status": "scheduled",
         "result_summary": "The accepted task is scheduled.",

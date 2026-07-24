@@ -157,7 +157,7 @@ def test_v2_connector_preserves_episode_and_projects_current_percept() -> None:
         "cognitive_episode": episode,
         "global_user_id": "user-1",
         "user_input": "fallback text",
-        "decontexualized_input": "fallback semantic text",
+        "decontextualized_input": "fallback semantic text",
         "user_multimedia_input": [],
         "rag_result": {"memory_evidence": []},
     }

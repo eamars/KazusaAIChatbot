@@ -127,7 +127,7 @@ def _consolidation_state() -> dict:
         "character_intent": "PROVIDE",
         "logical_stance": "CONFIRM",
         "rag_result": {},
-        "decontexualized_input": "please remember this",
+        "decontextualized_input": "please remember this",
         "chat_history_recent": [],
     }
     return return_value
@@ -1697,7 +1697,7 @@ async def test_build_graph_preserves_consolidation_state_from_supervisor(monkeyp
                 ],
                 "local_time_context": _GRAPH_TURN_CLOCK["local_time_context"],
                 "final_dialog": ["好呀。"],
-                "decontexualized_input": "一分钟后发消息",
+                "decontextualized_input": "一分钟后发消息",
             },
         }
 
@@ -1749,7 +1749,7 @@ async def test_build_graph_preserves_consolidation_state_from_supervisor(monkeyp
     })
 
     assert result["final_dialog"] == ["好呀。"]
-    assert result["consolidation_state"]["decontexualized_input"] == "一分钟后发消息"
+    assert result["consolidation_state"]["decontextualized_input"] == "一分钟后发消息"
 
 
 @pytest.mark.asyncio
@@ -1769,7 +1769,7 @@ async def test_build_graph_preserves_persona_no_response(monkeypatch):
             "consolidation_state": {
                 "should_respond": False,
                 "final_dialog": [],
-                "decontexualized_input": "silent turn",
+                "decontextualized_input": "silent turn",
             },
         }
 

@@ -72,6 +72,7 @@ def _surface_payload() -> dict[str, object]:
             "target_roles": [],
             "reason": "the current percept is visible",
         },
+        "goal_resolution": "answerable_now",
         "supporting_bids": [],
         "expression_policy": {
             "visibility": "visible",

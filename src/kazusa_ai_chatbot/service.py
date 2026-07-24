@@ -199,7 +199,7 @@ from kazusa_ai_chatbot.relevance import (
     frontline_relevance_agent,
     relevance_agent,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer import (
+from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer import (
     multimedia_descriptor_agent,
     select_media_for_turn,
 )

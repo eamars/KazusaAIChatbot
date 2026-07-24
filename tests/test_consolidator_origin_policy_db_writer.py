@@ -102,7 +102,7 @@ def _state(
                 updated_at="2026-04-27T00:00:00Z",
             ),
         },
-        "decontexualized_input": "remember tea",
+        "decontextualized_input": "remember tea",
         "rag_result": {"user_memory_unit_candidates": []},
         "consolidation_origin": origin,
     }

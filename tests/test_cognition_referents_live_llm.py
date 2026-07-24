@@ -116,7 +116,7 @@ async def test_live_CONTENT_PLAN_clarifies_live_failure_input(
     del ensure_live_llm
     state = {
         "character_profile": {"name": "Kazusa"},
-        "decontexualized_input": "这些是什么意思？",
+        "decontextualized_input": "这些是什么意思？",
         "referents": [
             {"phrase": "这些", "referent_role": "object", "status": "unresolved"}
         ],
@@ -177,7 +177,7 @@ async def test_live_CONTENT_PLAN_keeps_mixed_referent_question_narrow(
     del ensure_live_llm
     state = {
         "character_profile": {"name": "Kazusa"},
-        "decontexualized_input": "他上次说的那些关于X的话是什么意思？",
+        "decontextualized_input": "他上次说的那些关于X的话是什么意思？",
         "referents": [
             {"phrase": "他", "referent_role": "subject", "status": "resolved"},
             {"phrase": "那些话", "referent_role": "object", "status": "unresolved"},

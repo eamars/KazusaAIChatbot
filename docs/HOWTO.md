@@ -879,7 +879,7 @@ venv\Scripts\python -m pytest tests\test_cognition_resolver_contracts.py tests\t
 Live LLM tests must be run and inspected one at a time:
 
 ```bash
-pytest -m live_llm tests/test_cognition_live_llm.py::test_live_msg_decontexualizer_returns_non_empty_output -q -s
+pytest -m live_llm tests/test_cognition_live_llm.py::test_live_msg_decontextualizer_returns_non_empty_output -q -s
 pytest -m live_llm tests/test_coding_agent_full_workflow_integration_live_llm.py::test_live_gate_01_read_only_question_from_l2d_to_worker -q -s
 ```
 

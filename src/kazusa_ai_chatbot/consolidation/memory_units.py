@@ -85,7 +85,7 @@ def _json_payload(state: ConsolidatorState) -> dict:
         "consolidation_origin": project_consolidation_origin_prompt_block(
             state["consolidation_origin"]
         ),
-        "decontextualized_input": state["decontexualized_input"],
+        "decontextualized_input": state["decontextualized_input"],
         "final_dialog": state["final_dialog"],
         "internal_monologue": state["internal_monologue"],
         "emotional_appraisal": state["emotional_appraisal"],

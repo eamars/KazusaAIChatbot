@@ -73,7 +73,7 @@ def _stage_1_state(*, referents: list[dict[str, object]]) -> dict[str, object]:
 
     turn_clock = build_turn_clock("2026-04-27 00:00:00")
     state = {
-        "decontexualized_input": "private query text",
+        "decontextualized_input": "private query text",
         "referents": referents,
         "character_profile": {
             "name": "Kazusa",

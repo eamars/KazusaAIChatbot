@@ -37,7 +37,7 @@ def _minimal_persona_state() -> dict[str, Any]:
     )
     state = {
         "cognitive_episode": episode,
-        "decontexualized_input": "Need a memory-backed stance.",
+        "decontextualized_input": "Need a memory-backed stance.",
         "referents": [],
         "character_profile": {
             "name": "Kazusa",

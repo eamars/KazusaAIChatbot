@@ -128,6 +128,18 @@ _SETTLED_SYSTEM_PROMPT_COMMON = '''你是具备角色语境的 settled relevance
 - assembled turn 与 fresh history 分开判断。turn_relation 为 after_active_turn 的插入回答可能使
   角色回复变得重复。during_active_turn 的记录只能解决较早 fragment 已经表达的请求，不能回答
   较晚 fragment 才引入的含义。before_active_turn 或 unknown 不能证明当前请求已经被回答。
+- 对回顾型请求，若 effective_latest_fragment 询问当前用户先前说过的事实、位置或计划，
+  fresh_history 中 speaker_relation 为 current_author 且 turn_relation 为 before_active_turn
+  的行就是当前角色需要复述给当前用户的答案依据。当前 fragment 的回合目标是让当前角色
+  告知这项事实；只要当前回合已有角色参与依据，本类请求选择 proceed。
+- 回顾型请求的历史事实行提供回答内容，当前提问仍需要当前角色完成告知；wait 只用于组装后
+  的意图尚未完成、继续观察可以补全意图的回合。适用的 during_active_turn 或 after_active_turn
+  回应记录才提供当前请求的完成证据。
+- 回顾型请求的 action 映射是：存在角色参与依据并存在 before_active_turn 的 current_author
+  事实行时返回 proceed；只有组装后的意图尚未完成且继续观察可以补全意图时返回 wait；只有
+  适用的 during_active_turn 或 after_active_turn 回应已经完成当前请求时返回 already_resolved。
+- 抽象示例：当前用户询问“我刚才说 X 放在哪里”，before_active_turn 记录为“我把 X 放在 Y”，
+  当前角色被明确称呼；当前角色应把 Y 告知当前用户，semantic_disposition 为 proceed。
 - media_evidence_status 为 partial_media_view 表示描述遗漏了部分可用媒体。若发言依赖被省略的
   媒体，选择输出 contract 中适用的终止 action，而不是根据局部描述推断。
 
@@ -141,8 +153,9 @@ _SETTLED_SYSTEM_PROMPT_COMMON = '''你是具备角色语境的 settled relevance
 1. 阅读 effective_latest_fragment，应用其中的接收者或撤回含义。
 2. 把其余 assembled fragment 作为较早语境阅读。
 3. 指出具体角色参与依据；没有依据时选择输出 contract 中列出的终止 action。
-4. 选择 proceed 前，检查 after_active_turn 或适用的 during_active_turn fresh history 是否已经
-   解决当前请求；若已解决，为重复回复选择适用的终止 action。
+4. 对回顾型请求，先使用 before_active_turn 的 current_author 事实行作为答案依据，再检查
+   after_active_turn 或适用的 during_active_turn fresh history 是否已经解决当前请求；若已解决，
+   为重复回复选择适用的终止 action。
 5. 只选择下方输出 contract 列出的 action。
 6. 填写所有输出字段，使 action 与证据一致。proceed 的 reason 必须写明一项允许的参与依据。
 '''

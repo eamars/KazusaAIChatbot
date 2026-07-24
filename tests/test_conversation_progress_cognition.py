@@ -113,7 +113,7 @@ def _payload() -> dict[str, Any]:
             ),
             "global_user_id": "progress-user",
             "user_input": "What should the missing third point be?",
-            "decontexualized_input": "The participant asks for the missing point.",
+            "decontextualized_input": "The participant asks for the missing point.",
             "conversation_progress": _progress(),
             "user_multimedia_input": [],
             "rag_result": {"memory_evidence": []},

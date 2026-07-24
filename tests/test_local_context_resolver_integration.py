@@ -67,7 +67,7 @@ def _persona_state() -> dict[str, Any]:
     )
     state = {
         "cognitive_episode": episode,
-        "decontexualized_input": "Please check the local evidence.",
+        "decontextualized_input": "Please check the local evidence.",
         "referents": [],
         "character_profile": {
             "name": "Kazusa",

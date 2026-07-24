@@ -67,6 +67,10 @@ async def run_text_surface_planning(
             for row in payload["permitted_action_results"]
         ],
     }
+    if "runtime_capability_limits" in payload:
+        output["runtime_capability_limits"] = list(
+            payload["runtime_capability_limits"]
+        )
     validated_output = validate_text_surface_output(output)
     return validated_output
 
@@ -107,6 +111,7 @@ def _project_surface_payload(
     result: dict[str, Any] = {
         "episode": _project_episode(payload["episode"]),
         "intention": projected_intention,
+        "goal_resolution": payload["goal_resolution"],
         "supporting_bids": payload["supporting_bids"],
         "expression_policy": payload["expression_policy"],
         "semantic_affect": payload["semantic_affect"],
@@ -115,6 +120,10 @@ def _project_surface_payload(
         ),
         "interaction_style_context": payload["interaction_style_context"],
     }
+    if "runtime_capability_limits" in payload:
+        result["runtime_capability_limits"] = list(
+            payload["runtime_capability_limits"]
+        )
     if "primary_bid" in payload:
         result["primary_bid"] = payload["primary_bid"]
     if "semantic_relationship" in payload:

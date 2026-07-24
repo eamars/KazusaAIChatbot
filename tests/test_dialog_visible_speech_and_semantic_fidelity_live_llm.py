@@ -121,6 +121,7 @@ def _surface_input(case: dict[str, Any], profile: dict[str, Any]) -> dict[str, A
             "target_roles": [],
             "reason": case["reason"],
         },
+        "goal_resolution": "answerable_now",
         "supporting_bids": [],
         "expression_policy": {
             "visibility": "visible",

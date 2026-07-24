@@ -397,7 +397,7 @@ def _public_persona_result(result: dict[str, Any]) -> dict[str, Any]:
         "logical_stance",
         "character_intent",
         "judgment_note",
-        "decontexualized_input",
+        "decontextualized_input",
     )
     projected = {
         key: result.get(key)
@@ -428,7 +428,7 @@ def _record_visible_dialog_event(
         "logical_stance",
         "character_intent",
         "judgment_note",
-        "decontexualized_input",
+        "decontextualized_input",
     ):
         if key in persona_result:
             event[key] = persona_result[key]

@@ -31,24 +31,24 @@ MAX_PROJECTED_RESOLVER_OBSERVATIONS = 4
 
 def new_resolver_state(
     *,
-    decontexualized_input: str,
+    decontextualized_input: str,
     max_cycles: int,
 ) -> ResolverCycleStateV1:
     """Create the initial resolver state for a decontextualized user turn."""
 
-    _require_non_empty_text(decontexualized_input, "decontexualized_input")
+    _require_non_empty_text(decontextualized_input, "decontextualized_input")
     validated_max_cycles = _require_positive_int(max_cycles, "max_cycles")
     return_value: ResolverCycleStateV1 = {
         "schema_version": RESOLVER_CYCLE_STATE_VERSION,
         "cycle_index": 0,
         "max_cycles": validated_max_cycles,
         "status": "running",
-        "original_decontexualized_input": decontexualized_input,
+        "original_decontextualized_input": decontextualized_input,
         "observations": [],
         "cycle_traces": [],
         "held_action_specs": [],
         "goal_progress": new_empty_goal_progress(
-            original_goal=decontexualized_input,
+            original_goal=decontextualized_input,
         ),
         "terminal_reason": "",
     }
@@ -160,15 +160,15 @@ def ensure_initial_resolver_inputs(
 
     resolver_state = initialized.get("resolver_state")
     if resolver_state is None:
-        raw_input = initialized.get("decontexualized_input")
+        raw_input = initialized.get("decontextualized_input")
         if not isinstance(raw_input, str):
             raise ResolverValidationError(
-                "decontexualized_input: expected non-empty string",
+                "decontextualized_input: expected non-empty string",
             )
         if raw_input.strip():
-            decontexualized_input = raw_input
+            decontextualized_input = raw_input
         else:
-            decontexualized_input = ""
+            decontextualized_input = ""
             cognitive_episode = initialized.get("cognitive_episode")
             if isinstance(cognitive_episode, dict):
                 percepts = cognitive_episode.get("percepts")
@@ -192,14 +192,14 @@ def ensure_initial_resolver_inputs(
                         image_summary = image_summary.strip()
                         if not image_summary:
                             continue
-                        decontexualized_input = (
+                        decontextualized_input = (
                             f'当前输入包含图片观察：{image_summary}'
                         )
                         break
-            if not decontexualized_input:
-                _require_non_empty_text(raw_input, "decontexualized_input")
+            if not decontextualized_input:
+                _require_non_empty_text(raw_input, "decontextualized_input")
         resolver_state = new_resolver_state(
-            decontexualized_input=decontexualized_input,
+            decontextualized_input=decontextualized_input,
             max_cycles=max_cycles,
         )
     else:
@@ -273,7 +273,7 @@ def project_resolver_context(
             f"max_cycles={normalized_state['max_cycles']}; "
             f"terminal_reason={normalized_state['terminal_reason']}; "
             "original_goal="
-            f"{normalized_state['original_decontexualized_input']}"
+            f"{normalized_state['original_decontextualized_input']}"
         ),
     ]
     observations = normalized_state["observations"][-validated_limit:]
@@ -301,7 +301,7 @@ def validate_resolver_state(value: object) -> ResolverCycleStateV1:
     cycle_index = _require_non_negative_int(data.get("cycle_index"), "cycle_index")
     max_cycles = _require_positive_int(data.get("max_cycles"), "max_cycles")
     status = _require_state_enum(data, "status")
-    original_input = _require_state_text(data, "original_decontexualized_input")
+    original_input = _require_state_text(data, "original_decontextualized_input")
     raw_observations = _require_list(data, "observations")
     observations = [
         validate_resolver_observation(observation)
@@ -324,7 +324,7 @@ def validate_resolver_state(value: object) -> ResolverCycleStateV1:
         "cycle_index": cycle_index,
         "max_cycles": max_cycles,
         "status": status,
-        "original_decontexualized_input": original_input,
+        "original_decontextualized_input": original_input,
         "observations": observations,
         "cycle_traces": cycle_traces,
         "held_action_specs": held_action_specs,

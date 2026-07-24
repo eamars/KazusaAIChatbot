@@ -73,7 +73,7 @@ async def test_runtime_record_writes_and_updates_cache(monkeypatch) -> None:
             "storage_timestamp_utc": "2026-04-28T04:00:00+00:00",
             "character_name": "Character",
             "prior_episode_state": None,
-            "decontexualized_input": "what is the third point?",
+            "decontextualized_input": "what is the third point?",
             "chat_history_recent": [],
             "content_plan": {
                 "semantic_content": "Answer the current question.",
@@ -124,7 +124,7 @@ async def test_runtime_record_does_not_cache_stale_write(monkeypatch) -> None:
             "storage_timestamp_utc": "2026-04-28T04:00:00+00:00",
             "character_name": "Character",
             "prior_episode_state": None,
-            "decontexualized_input": "hello",
+            "decontextualized_input": "hello",
             "chat_history_recent": [],
             "content_plan": {
                 "semantic_content": "Say hello.",

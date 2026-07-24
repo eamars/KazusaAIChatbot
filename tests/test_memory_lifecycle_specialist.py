@@ -46,7 +46,7 @@ def _state_with_commitments(commitments: list[dict[str, object]]) -> dict[str, A
     return {
         "storage_timestamp_utc": "2026-05-17T06:00:49+00:00",
         "user_input": "Here is the promised item.",
-        "decontexualized_input": "Here is the promised item.",
+        "decontextualized_input": "Here is the promised item.",
         "logical_stance": "CONFIRM",
         "character_intent": "ACKNOWLEDGE_FULFILLMENT",
         "judgment_note": "The user may have fulfilled an active commitment.",

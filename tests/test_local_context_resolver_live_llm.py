@@ -448,7 +448,7 @@ def _production_persona_state(
     )
     state = {
         "cognitive_episode": episode,
-        "decontexualized_input": message_text,
+        "decontextualized_input": message_text,
         "referents": [],
         "character_profile": {
             "name": "active character",

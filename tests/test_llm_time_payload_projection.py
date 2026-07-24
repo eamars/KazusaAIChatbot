@@ -125,7 +125,7 @@ def _fake_consolidator_state(*, local_time_context: dict | None = None) -> dict:
             "current_global_user_id": "user-1",
             "current_display_name": "Tester",
         },
-        "decontexualized_input": "Test input.",
+        "decontextualized_input": "Test input.",
         "final_dialog": ["Test reply."],
         "internal_monologue": "",
         "emotional_appraisal": "",

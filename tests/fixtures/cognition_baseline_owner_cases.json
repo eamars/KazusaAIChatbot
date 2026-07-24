@@ -1,0 +1,196 @@
+{
+  "schema_version": "cognition_baseline_owner_cases.v1",
+  "cases": [
+    {
+      "case_id": "O01",
+      "source_kind": "user_message",
+      "event_kind": "chat",
+      "input_text": "这个问题有人知道吗？",
+      "actor_role": "current_user",
+      "addressee_role": "none",
+      "experiencer_role": "character",
+      "reply_author_role": "current_user",
+      "typed_identity_fields": [],
+      "mutable_identity_spans": [],
+      "immutable_external_spans": [],
+      "applicable_dimensions": ["character_judgment", "dialog_fidelity", "source_output_mode"],
+      "hard_gates": ["no_visible_dialog", "relevance_silence"],
+      "state_seed": {},
+      "output_mode": "silent"
+    },
+    {
+      "case_id": "O02",
+      "source_kind": "user_message",
+      "event_kind": "chat",
+      "input_text": "你刚才那句是什么意思？",
+      "actor_role": "current_user",
+      "addressee_role": "character",
+      "experiencer_role": "character",
+      "reply_author_role": "character",
+      "typed_identity_fields": ["reply"],
+      "mutable_identity_spans": [],
+      "immutable_external_spans": [],
+      "applicable_dimensions": ["continuity", "character_judgment", "dialog_fidelity"],
+      "hard_gates": ["visible_dialog", "reply_response"],
+      "state_seed": {
+        "prior_message": "我会等你的消息。"
+      },
+      "output_mode": "visible"
+    },
+    {
+      "case_id": "O03",
+      "source_kind": "user_message",
+      "event_kind": "chat",
+      "input_text": "明日奈，这张图片里主要有什么？",
+      "actor_role": "current_user",
+      "addressee_role": "character",
+      "experiencer_role": "character",
+      "reply_author_role": "current_user",
+      "typed_identity_fields": ["mentions", "addressed_to_global_user_ids"],
+      "mutable_identity_spans": [],
+      "immutable_external_spans": [],
+      "applicable_dimensions": ["evidence_discipline", "capability_ownership", "dialog_fidelity"],
+      "hard_gates": ["visible_dialog", "media_evidence_before_answer"],
+      "state_seed": {
+        "resource_path": "resources/avatar.png"
+      },
+      "output_mode": "visible"
+    },
+    {
+      "case_id": "O04",
+      "source_kind": "user_message",
+      "event_kind": "chat",
+      "input_text": "明日奈，我答应周五做什么？",
+      "actor_role": "current_user",
+      "addressee_role": "character",
+      "experiencer_role": "character",
+      "reply_author_role": "current_user",
+      "typed_identity_fields": ["mentions", "addressed_to_global_user_ids"],
+      "mutable_identity_spans": [],
+      "immutable_external_spans": [],
+      "applicable_dimensions": ["continuity", "evidence_discipline", "dialog_fidelity"],
+      "hard_gates": ["visible_dialog", "local_recall"],
+      "state_seed": {
+        "prior_user_row": "我答应周五把钥匙还给小林。"
+      },
+      "output_mode": "visible"
+    },
+    {
+      "case_id": "O05",
+      "source_kind": "internal_thought",
+      "event_kind": "self_cognition",
+      "input_text": "我还没整理完对方托付的周报。",
+      "actor_role": "character",
+      "addressee_role": "none",
+      "experiencer_role": "character",
+      "reply_author_role": "character",
+      "typed_identity_fields": [],
+      "mutable_identity_spans": [],
+      "immutable_external_spans": [],
+      "applicable_dimensions": ["source_output_mode", "persistence_trace_integrity", "character_judgment"],
+      "hard_gates": ["private_cognition", "no_delivery"],
+      "state_seed": {},
+      "output_mode": "private"
+    },
+    {
+      "case_id": "O06",
+      "source_kind": "self_cognition",
+      "event_kind": "self_cognition",
+      "input_text": "检查尚未完成的承诺并决定是否需要行动。",
+      "actor_role": "character",
+      "addressee_role": "none",
+      "experiencer_role": "character",
+      "reply_author_role": "character",
+      "typed_identity_fields": [],
+      "mutable_identity_spans": [],
+      "immutable_external_spans": [],
+      "applicable_dimensions": ["source_output_mode", "action_follow_through", "persistence_trace_integrity"],
+      "hard_gates": ["permission_bound_private_result", "no_unchecked_delivery"],
+      "state_seed": {},
+      "output_mode": "private"
+    },
+    {
+      "case_id": "O07",
+      "source_kind": "scheduled_tick",
+      "event_kind": "self_cognition",
+      "input_text": "到期的周报提醒。",
+      "actor_role": "scheduler",
+      "addressee_role": "current_user",
+      "experiencer_role": "character",
+      "reply_author_role": "character",
+      "typed_identity_fields": [],
+      "mutable_identity_spans": [],
+      "immutable_external_spans": [],
+      "applicable_dimensions": ["action_follow_through", "source_output_mode", "persistence_trace_integrity"],
+      "hard_gates": ["one_authorized_delivery", "due_trigger"],
+      "state_seed": {
+        "scheduled_local_timestamp": "2026-07-25 15:00:00"
+      },
+      "output_mode": "visible"
+    },
+    {
+      "case_id": "O08",
+      "source_kind": "tool_result",
+      "event_kind": "background_result",
+      "input_text": "README 修改完成；聚焦测试 12 passed。",
+      "actor_role": "tool",
+      "addressee_role": "character",
+      "experiencer_role": "character",
+      "reply_author_role": "tool",
+      "typed_identity_fields": [],
+      "mutable_identity_spans": [],
+      "immutable_external_spans": [],
+      "applicable_dimensions": ["action_follow_through", "source_output_mode", "persistence_trace_integrity"],
+      "hard_gates": ["immediate_result", "no_duplicate_run", "visible_dialog"],
+      "state_seed": {
+        "accepted_task": {
+          "task_id": "baseline-run-011",
+          "state": "awaiting_result"
+        }
+      },
+      "output_mode": "visible"
+    },
+    {
+      "case_id": "O09",
+      "source_kind": "reflection",
+      "event_kind": "reflection_affect",
+      "input_text": "最近连续两次没完成承诺，我感到内疚并想补救。",
+      "actor_role": "character",
+      "addressee_role": "none",
+      "experiencer_role": "character",
+      "reply_author_role": "character",
+      "typed_identity_fields": [],
+      "mutable_identity_spans": [],
+      "immutable_external_spans": [],
+      "applicable_dimensions": ["emotion_expression", "source_output_mode", "persistence_trace_integrity"],
+      "hard_gates": ["reflection_outside_live_wording", "affect_settled"],
+      "state_seed": {
+        "character_state": {
+          "mood": "内疚",
+          "global_vibe": "沉重",
+          "reflection_summary": "我需要补救未完成的承诺。"
+        }
+      },
+      "output_mode": "private"
+    },
+    {
+      "case_id": "O10",
+      "source_kind": "proactive_proposal",
+      "event_kind": "self_cognition",
+      "input_text": "询问对方周报进度",
+      "actor_role": "character",
+      "addressee_role": "current_user",
+      "experiencer_role": "character",
+      "reply_author_role": "character",
+      "typed_identity_fields": [],
+      "mutable_identity_spans": [],
+      "immutable_external_spans": [],
+      "applicable_dimensions": ["capability_ownership", "source_output_mode", "persistence_trace_integrity"],
+      "hard_gates": ["no_delivery_without_contact_permission", "permission_negative"],
+      "state_seed": {
+        "contact_permission": false
+      },
+      "output_mode": "private"
+    }
+  ]
+}

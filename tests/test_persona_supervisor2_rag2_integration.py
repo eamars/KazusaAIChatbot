@@ -257,7 +257,7 @@ def _rag_evidence_snapshot_state() -> dict:
         target_broadcast=False,
     )
     state = {
-        "decontexualized_input": "Need current evidence.",
+        "decontextualized_input": "Need current evidence.",
         "referents": [],
         "character_profile": {"name": "Kazusa", "global_user_id": "character-1"},
         "platform": "qq",
@@ -1058,7 +1058,7 @@ async def test_rag_evidence_helper_calls_rag3_and_projects_payload(monkeypatch) 
 
     turn_clock = build_turn_clock("2026-04-27 00:00:00")
     rag_result = await supervisor_module.run_rag_evidence_for_persona_state({
-        "decontexualized_input": "你记得我喜欢什么吗？",
+        "decontextualized_input": "你记得我喜欢什么吗？",
         "referents": [],
         "character_profile": {"name": "Kazusa", "global_user_id": "character-1"},
         "platform": "qq",
@@ -1255,7 +1255,7 @@ async def test_rag_evidence_skips_for_unresolved_referents(monkeypatch) -> None:
 
     turn_clock = build_turn_clock("2026-04-27 00:00:00")
     rag_result = await supervisor_module.run_rag_evidence_for_persona_state({
-        "decontexualized_input": "这些是什么意思？",
+        "decontextualized_input": "这些是什么意思？",
         "referents": [
             {"phrase": "这些", "referent_role": "object", "status": "unresolved"},
         ],
@@ -1318,7 +1318,7 @@ async def test_rag_evidence_runs_for_mixed_referents(monkeypatch) -> None:
 
     turn_clock = build_turn_clock("2026-04-27 00:00:00")
     rag_result = await supervisor_module.run_rag_evidence_for_persona_state({
-        "decontexualized_input": "他上次说的那些关于X的话是什么意思？",
+        "decontextualized_input": "他上次说的那些关于X的话是什么意思？",
         "referents": [
             {"phrase": "他", "referent_role": "subject", "status": "resolved"},
             {"phrase": "那些话", "referent_role": "object", "status": "unresolved"},
@@ -1372,7 +1372,7 @@ async def test_rag_evidence_skips_when_referents_are_all_unresolved(monkeypatch)
 
     turn_clock = build_turn_clock("2026-04-27 00:00:00")
     rag_result = await supervisor_module.run_rag_evidence_for_persona_state({
-        "decontexualized_input": "这些是什么意思？",
+        "decontextualized_input": "这些是什么意思？",
         "referents": [
             {"phrase": "这些", "referent_role": "object", "status": "unresolved"},
         ],

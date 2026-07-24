@@ -16,7 +16,7 @@ from kazusa_ai_chatbot.cognition_episode import (
     replace_text_chat_media_percepts,
 )
 from kazusa_ai_chatbot.nodes import (
-    persona_supervisor2_msg_decontexualizer as decontextualizer_module,
+    persona_supervisor2_msg_decontextualizer as decontextualizer_module,
 )
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     EVIDENCE_SOURCE_QUESTION_IDS,
@@ -66,7 +66,7 @@ def _builder_kwargs() -> dict[str, object]:
 def _rag_request_kwargs(episode: dict[str, object]) -> dict[str, object]:
     return {
         "episode": episode,
-        "decontexualized_input": "Please inspect the attached material.",
+        "decontextualized_input": "Please inspect the attached material.",
         "character_profile": {
             "global_user_id": "character-1",
             "name": "Test Character",
@@ -269,7 +269,7 @@ def test_connector_projects_media_as_separate_typed_evidence() -> None:
             "channel_type": "private",
             "cognitive_episode": episode,
             "user_input": "Please inspect the attached material.",
-            "decontexualized_input": "Please inspect the attached material.",
+            "decontextualized_input": "Please inspect the attached material.",
             "rag_result": {
                 "user_memory_unit_candidates": [],
             },

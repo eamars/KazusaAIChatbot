@@ -103,7 +103,7 @@ class ConversationProgressRuntime:
             storage_timestamp_utc=record_input["storage_timestamp_utc"],
             prior_episode_state=record_input["prior_episode_state"],
             recorder_output=recorder_output,
-            last_user_input=record_input["decontexualized_input"],
+            last_user_input=record_input["decontextualized_input"],
         )
         written = await repository.upsert_episode_state_guarded(document=document)
         cache_updated = False

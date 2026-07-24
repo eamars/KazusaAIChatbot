@@ -151,7 +151,7 @@ def _cognition_state(user_text: str) -> dict[str, Any]:
         'indirect_speech_context': '',
         'channel_topic': '普通闲聊与事务协作',
         'conversation_progress': None,
-        'decontexualized_input': user_text,
+        'decontextualized_input': user_text,
         'rag_result': _rag_result(),
         'boundary_core_assessment': _boundary_allow_confirm(),
         'logical_stance': 'CONFIRM',

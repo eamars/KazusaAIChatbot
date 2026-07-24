@@ -201,7 +201,7 @@ behavior changes as part of a structural split.
 
 ```text
 persona_supervisor2
-  -> stage_0_msg_decontexualizer
+  -> stage_0_msg_decontextualizer
   -> stage_1_goal_resolver
        L1 -> L2 -> L2d cognition cycle
        L2d selects `local_context_recall` only when local/private context is needed

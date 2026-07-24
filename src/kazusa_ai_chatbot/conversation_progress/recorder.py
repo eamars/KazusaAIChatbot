@@ -56,7 +56,7 @@ _RECORDER_PROMPT = '''\
 # 阅读顺序
 先看本轮实际发出的内容，再决定旧进度还能不能用：
 1. `final_dialog` 和 `content_plan`：这一轮最后说了什么、回复前的内容计划是什么。
-2. `decontexualized_input`：用户这一轮真正想表达什么。
+2. `decontextualized_input`：用户这一轮真正想表达什么。
 3. `logical_stance` 和 `character_intent`：这一轮大致是什么态度。
 4. `chat_history_recent`：附近几句是谁说的、怎么接上的。
 5. `prior_episode_state`：旧进度只当参考，不当待办清单。
@@ -156,7 +156,7 @@ _RECORDER_PROMPT = '''\
         "updated_at": "可选 UTC 时间",
         "expires_at": "可选 UTC 时间"
     }},
-    "decontexualized_input": "用户本轮消息经去上下文化后的内容",
+    "decontextualized_input": "用户本轮消息经去上下文化后的内容",
     "chat_history_recent": [
         "[YYYY-MM-DD HH:MM] 用户显示名或 {character_name}: 消息文本"
     ],
@@ -262,7 +262,7 @@ async def record_with_llm(record_input: ConversationProgressRecordInput) -> dict
         "prior_episode_state": build_recorder_prior_state(
             record_input["prior_episode_state"],
         ),
-        "decontexualized_input": record_input["decontexualized_input"],
+        "decontextualized_input": record_input["decontextualized_input"],
         "chat_history_recent": project_conversation_history_for_llm(
             record_input["chat_history_recent"],
             character_name=character_name,

@@ -824,6 +824,53 @@ def test_classify_route_returns_action_candidate_when_cognition_selects_contact(
     assert route == models.ROUTE_ACTION_CANDIDATE
 
 
+def test_classify_route_projects_v2_scheduled_speech_to_action_candidate() -> None:
+    """A due scheduled V2 speech route must enter the existing delivery owner."""
+
+    case = _commitment_case(due_state=models.DUE_STATE_DUE_NOW)
+    case["source_refs"][0]["source_kind"] = "scheduled_tick"
+    route = tracking.classify_route(
+        case,
+        {
+            "cognition_core_output": {
+                "intention": {"route": "speech"},
+            },
+        },
+    )
+
+    assert route == models.ROUTE_ACTION_CANDIDATE
+
+
+def test_v2_scheduled_speech_materializes_speak_action_spec() -> None:
+    """A native due speech route must provide the downstream speak residue."""
+
+    state = {
+        "cognitive_episode": {
+            "episode_id": "scheduled-episode-001",
+            "trigger_source": "scheduled_tick",
+        },
+    }
+    output = {
+        "cognition_core_output": {
+            "intention": {
+                "route": "speech",
+                "intention": "回应当前到期事项",
+            },
+        },
+    }
+
+    materialized = runner._materialize_v2_due_speak_action(
+        state,
+        output,
+        selected_route=models.ROUTE_ACTION_CANDIDATE,
+    )
+
+    assert materialized["action_specs"][0]["kind"] == SPEAK_CAPABILITY
+    assert materialized["action_specs"][0]["params"][
+        "delivery_mode"
+    ] == "visible_reply"
+
+
 def test_classify_route_does_not_use_content_plan_without_speak_action() -> None:
     case = _commitment_case()
     route = tracking.classify_route(
@@ -1034,7 +1081,7 @@ def test_runner_apply_consolidation_uses_empty_dialog_without_render() -> None:
     assert "output_mode" not in captured_consolidation_state["cognitive_episode"]
     assert captured_consolidation_state["final_dialog"] == []
     assert "The user expected a follow-up" in (
-        captured_consolidation_state["decontexualized_input"]
+        captured_consolidation_state["decontextualized_input"]
     )
     assert "no_remember" not in captured_consolidation_state["debug_modes"]
 
@@ -1901,9 +1948,9 @@ def test_cognition_state_keeps_source_packet_inside_internal_percept(
     assert captured["prompt_message_context"]["body_text"] == (
         models.SELF_COGNITION_INPUT_TEXT
     )
-    assert captured["decontexualized_input"] == models.SELF_COGNITION_INPUT_TEXT
+    assert captured["decontextualized_input"] == models.SELF_COGNITION_INPUT_TEXT
     assert rendered_text not in captured["prompt_message_context"]["body_text"]
-    assert rendered_text not in captured["decontexualized_input"]
+    assert rendered_text not in captured["decontextualized_input"]
     assert percept_content["semantic_text"] == rendered_text
 
 

@@ -16,6 +16,7 @@ from kazusa_ai_chatbot.action_spec.models import (
 from kazusa_ai_chatbot.action_spec.registry import (
     ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
     APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
+    BACKGROUND_WORK_REQUEST_CAPABILITY,
     MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     SPEAK_CAPABILITY,
     build_episode_affordances,
@@ -250,6 +251,9 @@ def build_cognition_input_from_global_state(
             "semantic_temporal_context": "immediate",
         },
     }
+    runtime_limits = build_runtime_capability_limits(state)
+    if runtime_limits:
+        payload["runtime_capability_limits"] = runtime_limits
     pending_resume = state.get("pending_resolver_resume")
     if isinstance(pending_resume, Mapping):
         payload["pending_resolver_resume"] = dict(pending_resume)
@@ -480,6 +484,7 @@ def _available_action_affordances(
         if capability_kind in {
             SPEAK_CAPABILITY,
             APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
+            BACKGROUND_WORK_REQUEST_CAPABILITY,
         }:
             continue
         if capability_kind not in availability_rows:
@@ -568,6 +573,62 @@ def build_action_availability_snapshot(
     """Build the current deterministic capability snapshot for one state."""
 
     return _build_action_availability_snapshot(state)
+
+
+def build_runtime_capability_limits(
+    state: Mapping[str, Any],
+) -> list[str]:
+    """Project trusted unavailable-owner facts into Chinese cognition context."""
+
+    snapshot = build_action_availability_snapshot(state)
+    unavailable = {"down", "unavailable", "disabled", "blocked"}
+    limits: list[str] = []
+    if snapshot["scheduler_status"] in unavailable:
+        limits.append(
+            "当前调度能力不可用，不能把未来提醒或主动联系说成已经安排、发送或完成。"
+        )
+        limits.append(
+            "未来提醒和主动联系只属于 future_speak；该能力不可用时不能用其他能力代替。"
+        )
+    worker_status = snapshot["worker_status"]
+    background_worker_unavailable = (
+        worker_status.get("background_work") in unavailable
+    )
+    queue_only_coding = (
+        background_worker_unavailable
+        and snapshot["repository_access"].get(
+            "background_work",
+            "read_write",
+        ) == "read_write"
+        and snapshot["coding_workspace_status"] not in unavailable
+    )
+    if queue_only_coding:
+        limits.append(
+            "当前 coding worker 尚未运行；绑定既有 coding_run_ref 的生命周期动作"
+            "可以记录并排队，结果保持待执行，不能表述为 worker 已执行或已完成。"
+        )
+    elif any(
+        worker_status.get(owner) in unavailable
+        for owner in ("accepted_task", "background_work")
+    ):
+        limits.append(
+            "当前后台任务能力不可用，不能把延迟任务说成已经创建、安排或完成。"
+        )
+    if any(
+        worker_status.get(owner) in unavailable
+        for owner in ("accepted_task", "background_work")
+    ):
+        limits.append(
+            "当前仓库代码读取 owner 不可用；没有实际读取结果时只能说明限制，或请用户提供可访问的代码材料。"
+        )
+    if any(
+        status in unavailable
+        for status in snapshot["adapter_target_status"].values()
+    ):
+        limits.append(
+            "当前消息投递目标不可用，不能把消息说成已经发送。"
+        )
+    return limits[:8]
 
 
 def _build_action_availability_snapshot(
@@ -692,6 +753,12 @@ def _coding_run_action_affordances(
     raw_contexts = action_context.get("coding_runs")
     if not isinstance(raw_contexts, list):
         return []
+    runtime_snapshot = _build_action_availability_snapshot(state)
+    unavailable_statuses = {"down", "unavailable", "disabled", "blocked"}
+    coding_worker_unavailable = (
+        runtime_snapshot["worker_status"].get("background_work")
+        in unavailable_statuses
+    )
     registry_decisions = {
         "start",
         "revise_proposal",
@@ -713,6 +780,10 @@ def _coding_run_action_affordances(
             decision
             for decision in raw_decisions
             if isinstance(decision, str) and decision in registry_decisions
+            and not (
+                decision == "status"
+                and coding_worker_unavailable
+            )
         ]
         allowed_decisions = list(dict.fromkeys(allowed_decisions))
         if not allowed_decisions:
@@ -722,9 +793,14 @@ def _coding_run_action_affordances(
         blocker_summary = _coding_run_blocker_summary(
             context.get("active_blocker")
         )
+        available_decisions = "、".join(allowed_decisions)
         semantic_context = (
-            f" Active run status: {status}. Objective: {objective}. "
-            f"Active blocker: {blocker_summary}."
+            " 这是绑定既有 coding run 的生命周期 affordance；当前作用域的既有 coding run "
+            "只提供以下实际可用决定："
+            f"{available_decisions}。"
+            "每次只从这些决定中选择。"
+            f" 当前状态：{status}。目标：{objective}。"
+            f" 当前阻塞：{blocker_summary}。"
         )
         default_decision = (
             "status" if "status" in allowed_decisions else allowed_decisions[0]
@@ -732,7 +808,7 @@ def _coding_run_action_affordances(
         affordances.append({
             "action_kind": base_affordance["action_kind"],
             "capability": (
-                base_affordance["capability"][:260] + semantic_context
+                "代码工作由持久化 coding run 管理。" + semantic_context
             )[:500],
             "permission": base_affordance["permission"],
             "decision_mode": "closed",
@@ -900,34 +976,99 @@ def _tool_result_text(
 
 
 def _rag_evidence(value: object, occurred_at: str) -> list[dict[str, Any]]:
-    """Convert RAG rows to evidence with complete source provenance."""
+    """Convert public RAG evidence fields to typed cognition evidence."""
 
     if not isinstance(value, Mapping):
         return []
-    rows = value.get("memory_evidence")
-    if not isinstance(rows, list):
-        return []
     evidence: list[dict[str, Any]] = []
-    for index, row in enumerate(rows, start=2):
+
+    memory_rows = value.get("memory_evidence")
+    for index, row in enumerate(
+        memory_rows if isinstance(memory_rows, list) else [],
+        start=1,
+    ):
         if not isinstance(row, Mapping):
             continue
-        text = _text(row.get("content") or row.get("summary"))
+        text = _rag_text(row)
         if not text:
             continue
-        evidence.append({
-            "evidence_handle": f"ev{index}",
-            "evidence_ref": {
-                "source_kind": "promoted_memory",
-                "source_id": str(row.get("id", f"memory:{index}")),
-                "occurred_at": occurred_at,
-                "semantic_summary": text,
-            },
-            "semantic_text": text,
-            "visible_to": list(
-                EVIDENCE_SOURCE_QUESTION_IDS["promoted_memory"]
-            ),
-        })
+
+        evidence.append(_build_rag_evidence_row(
+            text=text,
+            source_kind="promoted_memory",
+            source_id=str(row.get("id", f"memory:{index}")),
+            occurred_at=occurred_at,
+        ))
+
+    conversation_items = value.get("conversation_evidence")
+    for index, item in enumerate(
+        conversation_items if isinstance(conversation_items, list) else [],
+        start=1,
+    ):
+        text = (
+            _rag_text(item)
+            if isinstance(item, Mapping)
+            else _text(item)
+        )
+        if not text:
+            continue
+        evidence.append(_build_rag_evidence_row(
+            text=text,
+            source_kind="conversation_evidence",
+            source_id=f"rag-conversation:{index}",
+            occurred_at=occurred_at,
+        ))
+
+    recall_items = value.get("recall_evidence")
+    for index, item in enumerate(
+        recall_items if isinstance(recall_items, list) else [],
+        start=1,
+    ):
+        if not isinstance(item, Mapping):
+            continue
+        text = _rag_text(item)
+        if not text:
+            continue
+        evidence.append(_build_rag_evidence_row(
+            text=text,
+            source_kind="recall_evidence",
+            source_id=f"rag-recall:{index}",
+            occurred_at=occurred_at,
+        ))
     return evidence
+
+
+def _rag_text(value: Mapping[str, Any]) -> str:
+    """Select the canonical prompt-facing text from one RAG item."""
+
+    for field in ("content", "summary", "claim", "text"):
+        text = _text(value.get(field))
+        if text:
+            return text
+    return ""
+
+
+def _build_rag_evidence_row(
+    *,
+    text: str,
+    source_kind: str,
+    source_id: str,
+    occurred_at: str,
+) -> dict[str, Any]:
+    """Build one bounded RAG evidence row with registered provenance."""
+
+    semantic_text = text[:1000]
+    return {
+        "evidence_handle": "ev0",
+        "evidence_ref": {
+            "source_kind": source_kind,
+            "source_id": source_id,
+            "occurred_at": occurred_at,
+            "semantic_summary": semantic_text[:500],
+        },
+        "semantic_text": semantic_text,
+        "visible_to": list(EVIDENCE_SOURCE_QUESTION_IDS[source_kind]),
+    }
 
 
 def _media_evidence(
@@ -1039,29 +1180,74 @@ def _semantic_episode_text(state: Mapping[str, Any]) -> str:
         )
     value = (
         dialog_semantic_projection
-        or state.get("decontexualized_input")
+        or state.get("decontextualized_input")
         or state.get("user_input")
     )
     base_text = value.strip() if isinstance(value, str) else ""
     channel_name = _text(state.get("channel_name"))
     channel_topic = _text(state.get("channel_topic"))
+    scene_text = base_text
     if channel_name and channel_topic:
         group_context = (
             f'“{channel_name}”群聊中正在讨论：{channel_topic}'
         )
-        return f"{group_context}。{base_text}" if base_text else group_context
-    if base_text:
-        return base_text
-    media = state.get("user_multimedia_input")
-    if isinstance(media, list):
-        descriptions = [
-            _text(row.get("description"))
-            for row in media
-            if isinstance(row, Mapping) and _text(row.get("description"))
-        ]
-        if descriptions:
-            return "; ".join(descriptions)
-    return "没有有依据的语义事件"
+        scene_text = (
+            f"{group_context}。{base_text}"
+            if base_text
+            else group_context
+        )
+    if not scene_text:
+        media = state.get("user_multimedia_input")
+        if isinstance(media, list):
+            descriptions = [
+                _text(row.get("description"))
+                for row in media
+                if isinstance(row, Mapping) and _text(row.get("description"))
+            ]
+            if descriptions:
+                scene_text = "; ".join(descriptions)
+    coding_context = _active_coding_run_scene_text(state)
+    if coding_context:
+        scene_text = (
+            f"{scene_text}。{coding_context}"
+            if scene_text
+            else coding_context
+        )
+    return scene_text[:1000] if scene_text else "没有有依据的语义事件"
+
+
+def _active_coding_run_scene_text(state: Mapping[str, Any]) -> str:
+    """Project bounded active coding state into the semantic scene."""
+
+    action_context = state.get("action_selection_context")
+    if not isinstance(action_context, Mapping):
+        return ""
+    raw_contexts = action_context.get("coding_runs")
+    if not isinstance(raw_contexts, list):
+        return ""
+    summaries: list[str] = []
+    for context in raw_contexts[:3]:
+        if not isinstance(context, Mapping):
+            continue
+        status = _text(context.get("status"))[:80]
+        objective = _text(context.get("objective_summary"))[:160]
+        if not status or not objective:
+            continue
+        raw_actions = context.get("allowed_next_actions")
+        actions = [
+            action[:60]
+            for action in raw_actions
+            if isinstance(action, str) and action.strip()
+        ] if isinstance(raw_actions, list) else []
+        blocker = _coding_run_blocker_summary(
+            context.get("active_blocker")
+        )
+        summaries.append(
+            f"状态={status}；目标={objective}；后续动作={actions}；阻塞={blocker}"
+        )
+    if not summaries:
+        return ""
+    return "当前作用域已有持久化代码任务状态：" + "；".join(summaries)
 
 
 def _dialog_semantic_projection_text(

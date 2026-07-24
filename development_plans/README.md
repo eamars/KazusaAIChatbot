@@ -58,6 +58,7 @@ long_term/todo.md
 | [relevance_native_reply_anchor_guard_bugfix_plan.md](archive/completed/bugfix/relevance_native_reply_anchor_guard_bugfix_plan.md) | Medium settled-relevance native reply semantics and delivery-target guard bugfix plan | completed |
 | [relevance_input_scope_robustness_bugfix_plan.md](archive/completed/bugfix/relevance_input_scope_robustness_bugfix_plan.md) | Medium relevance input-scope and production-projection robustness bugfix plan | completed |
 | [cognition_core_v2_frozen_replay_drift_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_frozen_replay_drift_bugfix_plan.md) | Large bigbang cognition V2 state, continuity, monologue, voice, dialog-compliance, and consolidation drift bugfix proven against the frozen 20-turn replay | completed |
+| [cognition_core_v2_baseline_regression_hardening_plan.md](active/bugfix/cognition_core_v2_baseline_regression_hardening_plan.md) | High-risk current-main differential regression detection and Cognition Core V2 quality hardening plan | in progress |
 | [rag2_public_output_contract_leak_bugfix_plan.md](active/bugfix/rag2_public_output_contract_leak_bugfix_plan.md) | Large RAG2 prompt/evidence contract bugfix plan | draft |
 
 ## Reference Documents

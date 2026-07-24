@@ -1,0 +1,59 @@
+{
+  "schema_version": "cognition_deleted_baseline_selectors.v1",
+  "modules": [
+    {
+      "main_module": "tests/test_cognition_chain_core_action_selection.py",
+      "owner": "cognition",
+      "replacement_selector": "tests/test_cognition_core_v2_action_planning_bugfix.py",
+      "invariant": "action ownership and planner handle contract"
+    },
+    {
+      "main_module": "tests/test_cognition_chain_core_contracts.py",
+      "owner": "cognition",
+      "replacement_selector": "tests/test_cognition_core_v2_contracts.py",
+      "invariant": "cognition contract validation"
+    },
+    {
+      "main_module": "tests/test_cognition_live_llm_affinity_willingness.py",
+      "owner": "cognition",
+      "replacement_selector": "tests/test_cognition_core_v2_live_character_judgment.py",
+      "invariant": "character judgment and willingness"
+    },
+    {
+      "main_module": "tests/test_cognition_live_llm_boundary_affinity.py",
+      "owner": "cognition",
+      "replacement_selector": "tests/test_cognition_core_v2_live_character_judgment.py",
+      "invariant": "boundary and relationship judgment"
+    },
+    {
+      "main_module": "tests/test_multi_source_cognition_stage_07_reflection_dry_run.py",
+      "owner": "reflection",
+      "replacement_selector": "tests/test_reflection_affect_settling.py",
+      "invariant": "reflection remains outside live wording"
+    },
+    {
+      "main_module": "tests/test_multi_source_cognition_stage_08_internal_thought_dry_run.py",
+      "owner": "self_cognition",
+      "replacement_selector": "tests/test_self_cognition_integration.py",
+      "invariant": "internal thought source remains private"
+    },
+    {
+      "main_module": "tests/test_multi_source_cognition_stage_10_proactive_outbox.py",
+      "owner": "proactive",
+      "replacement_selector": "tests/test_stage3_trigger_source_cutover.py",
+      "invariant": "proactive delivery requires permission"
+    },
+    {
+      "main_module": "tests/test_multi_source_cognition_stage_10_proactive_policy.py",
+      "owner": "proactive",
+      "replacement_selector": "tests/test_stage3_trigger_source_cutover.py",
+      "invariant": "proactive policy and target validation"
+    },
+    {
+      "main_module": "tests/test_reflection_affect_settling_live_llm.py",
+      "owner": "reflection",
+      "replacement_selector": "tests/test_reflection_affect_settling.py",
+      "invariant": "live reflection affect settlement"
+    }
+  ]
+}

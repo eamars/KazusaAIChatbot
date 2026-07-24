@@ -58,8 +58,8 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_l3_surface import (
 from kazusa_ai_chatbot.nodes.persona_supervisor2_memory_lifecycle import (
     call_memory_lifecycle_update_handler,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer import (
-    call_msg_decontexualizer,
+from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer import (
+    call_msg_decontextualizer,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import (
     GlobalPersonaState,
@@ -302,6 +302,11 @@ async def _action_results_for_state(
     """Evaluate selected actions into traceable action results."""
 
     pre_surface_results = _pre_surface_action_results_for_state(state)
+    pre_surface_attempt_ids = {
+        action_attempt_id
+        for row in pre_surface_results
+        if (action_attempt_id := row.get("action_attempt_id"))
+    }
     remaining_specs = [
         spec
         for spec in _selected_action_specs(state)
@@ -309,6 +314,7 @@ async def _action_results_for_state(
             BACKGROUND_WORK_REQUEST_CAPABILITY,
             FUTURE_SPEAK_CAPABILITY,
         )
+        and _action_attempt_id_for_spec(spec) not in pre_surface_attempt_ids
     ]
     action_results = await execute_action_specs_for_trace(
         remaining_specs,
@@ -320,6 +326,38 @@ async def _action_results_for_state(
     )
     return_value = [*pre_surface_results, *action_results]
     return return_value
+
+
+async def _execute_pre_surface_action_results(
+    state: GlobalPersonaState,
+) -> list[dict]:
+    """Execute selected non-surface actions before L3 wording begins."""
+
+    action_specs = [
+        spec
+        for spec in _selected_action_specs(state)
+        if spec.get("kind") not in (
+            SPEAK_CAPABILITY,
+            BACKGROUND_WORK_REQUEST_CAPABILITY,
+            FUTURE_SPEAK_CAPABILITY,
+        )
+    ]
+    if not action_specs:
+        return []
+    return await execute_action_specs_for_trace(
+        action_specs,
+        storage_timestamp_utc=state["storage_timestamp_utc"],
+        availability_snapshot_factory=(
+            lambda _context: build_action_availability_snapshot(state)
+        ),
+    )
+
+
+def _action_attempt_id_for_spec(action_spec: dict) -> str:
+    """Return the deterministic attempt id used to avoid a second execution."""
+
+    eval_result = ActionSpecEvaluator().evaluate(action_spec)
+    return action_attempt_id_from_eval_result(eval_result)
 
 
 async def stage_2a_background_work_enqueue(
@@ -441,8 +479,15 @@ async def call_action_subgraph(state: GlobalPersonaState) -> dict:
         Partial state update with dialog fragments and addressed users.
     """
 
-    surface_update = await call_l3_text_surface_handler(state)
     surface_state = dict(state)
+    pre_surface_action_results = [
+        *_pre_surface_action_results_for_state(state),
+        *await _execute_pre_surface_action_results(state),
+    ]
+    surface_state["pre_surface_action_results"] = (
+        pre_surface_action_results
+    )
+    surface_update = await call_l3_text_surface_handler(surface_state)
     surface_state["text_surface_output_v2"] = surface_update[
         "text_surface_output_v2"
     ]
@@ -657,7 +702,7 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
     )
     interaction_history_recent = interaction_history_wide[-CHAT_HISTORY_RECENT_LIMIT:]
 
-    async def stage_0_msg_decontexualizer(
+    async def stage_0_msg_decontextualizer(
         persona_state: GlobalPersonaState,
     ) -> dict:
         """Run decontextualization with recent channel history and identities."""
@@ -666,15 +711,15 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         decontextualizer_state["chat_history_recent"] = (
             recent_channel_history_for_decontextualizer
         )
-        result = await call_msg_decontexualizer(decontextualizer_state)
+        result = await call_msg_decontextualizer(decontextualizer_state)
         return_value = result
         return return_value
 
     # Build the top level graph that connect stages
     persona_builder = StateGraph(GlobalPersonaState)
     persona_builder.add_node(
-        "stage_0_msg_decontexualizer",
-        stage_0_msg_decontexualizer,
+        "stage_0_msg_decontextualizer",
+        stage_0_msg_decontextualizer,
     )
     persona_builder.add_node("stage_1_goal_resolver", stage_1_goal_resolver)
     persona_builder.add_node(
@@ -687,9 +732,9 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
     )
     persona_builder.add_node("stage_3_action", call_action_subgraph)  # perform action
     persona_builder.add_node("stage_3_no_response", stage_3_no_response)
-    persona_builder.add_edge(START, "stage_0_msg_decontexualizer")
+    persona_builder.add_edge(START, "stage_0_msg_decontextualizer")
     persona_builder.add_edge(
-        "stage_0_msg_decontexualizer",
+        "stage_0_msg_decontextualizer",
         "stage_1_goal_resolver",
     )
     persona_builder.add_edge(

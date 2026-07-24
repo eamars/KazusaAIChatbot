@@ -241,7 +241,7 @@ def _recorder_input() -> ConversationProgressRecordInput:
         'timestamp': '2026-05-10T09:00:00+12:00',
         'character_name': '杏山千纱',
         'prior_episode_state': prior_episode_state,
-        'decontexualized_input': '现在先问今天上午要不要休息一下。',
+        'decontextualized_input': '现在先问今天上午要不要休息一下。',
         'chat_history_recent': [
             {
                 'role': 'user',

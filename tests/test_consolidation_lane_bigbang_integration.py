@@ -68,7 +68,7 @@ def _base_state() -> dict[str, Any]:
         },
         "storage_timestamp_utc": "2026-07-03T00:00:00+00:00",
         "local_time_context": {"current_date": "2026-07-03"},
-        "decontexualized_input": "I now work in Auckland.",
+        "decontextualized_input": "I now work in Auckland.",
         "final_dialog": ["Kazusa acknowledges the update."],
         "internal_monologue": "",
         "chat_history_recent": [],

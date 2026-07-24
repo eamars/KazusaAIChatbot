@@ -133,6 +133,12 @@ EVIDENCE_SOURCE_QUESTION_IDS = {
     "promoted_memory": tuple(f"q:{kind}" for kind in SEMANTIC_QUESTION_KINDS),
     "promoted_reflection": tuple(f"q:{kind}" for kind in SEMANTIC_QUESTION_KINDS),
     "media_observation": tuple(f"q:{kind}" for kind in SEMANTIC_QUESTION_KINDS),
+    "conversation_evidence": tuple(
+        f"q:{kind}" for kind in SEMANTIC_QUESTION_KINDS
+    ),
+    "recall_evidence": tuple(
+        f"q:{kind}" for kind in SEMANTIC_QUESTION_KINDS
+    ),
     "action_result": (
         "q:event_agency",
         "q:relationship_social",
@@ -572,6 +578,7 @@ class CognitionCoreInputV2(TypedDict):
     available_actions: list[ActionAffordanceV2]
     available_resolver_capabilities: list[ResolverAffordanceV2]
     resolver_context: str
+    runtime_capability_limits: NotRequired[list[str]]
     resolver_goal_progress: NotRequired[dict[str, Any]]
     pending_resolver_resume: NotRequired[dict[str, Any]]
     scene_context: SceneContextV2
@@ -633,12 +640,14 @@ class TextSurfaceInputV2(TypedDict):
     schema_version: Literal["text_surface_input.v2"]
     episode: CognitiveEpisodeV1
     intention: SelectedIntentionV2
+    goal_resolution: GoalResolutionV2
     primary_bid: NotRequired[SurfaceBidProjectionV2]
     supporting_bids: list[SurfaceBidProjectionV2]
     expression_policy: ExpressionPolicyV2
     semantic_affect: list[SemanticAffectProjectionV2]
     semantic_relationship: NotRequired[SemanticRelationshipProjectionV2]
     permitted_action_results: list[SemanticActionResultV2]
+    runtime_capability_limits: NotRequired[list[str]]
     interaction_style_context: str
     character_voice_context: str
 
@@ -654,6 +663,7 @@ class TextSurfaceOutputV2(TypedDict):
     style_guidance: str
     selected_surface_intent: str
     permitted_action_results: list[SemanticActionResultV2]
+    runtime_capability_limits: NotRequired[list[str]]
 
 
 class VisualSurfaceOutputV2(TypedDict):
@@ -724,6 +734,11 @@ def validate_cognition_core_input(
             {"pending_resolver_resume"}
             if "pending_resolver_resume" in payload
             else set()
+        )
+        | (
+            {"runtime_capability_limits"}
+            if "runtime_capability_limits" in payload
+            else set()
         ),
         "cognition core input",
     )
@@ -765,6 +780,7 @@ def validate_cognition_core_input(
         "resolver context",
         maximum=8000,
     )
+    _validate_runtime_capability_limits(payload)
     if "pending_resolver_resume" in payload:
         _validate_pending_resolver_resume(payload["pending_resolver_resume"])
     if "resolver_goal_progress" in payload:
@@ -876,19 +892,27 @@ def validate_text_surface_input(
             "schema_version",
             "episode",
             "intention",
+            "goal_resolution",
             "supporting_bids",
             "expression_policy",
             "semantic_affect",
             "permitted_action_results",
             "interaction_style_context",
             "character_voice_context",
-        } | ({"primary_bid"} if "primary_bid" in payload else set())
-        | ({"semantic_relationship"} if "semantic_relationship" in payload else set()),
+        }
+        | ({"primary_bid"} if "primary_bid" in payload else set())
+        | ({"semantic_relationship"} if "semantic_relationship" in payload else set())
+        | (
+            {"runtime_capability_limits"}
+            if "runtime_capability_limits" in payload
+            else set()
+        ),
         "text surface input",
     )
     if payload["schema_version"] != "text_surface_input.v2":
         raise CognitionContractError("unsupported text surface input schema")
     _validate_intention(payload["intention"])
+    _validate_goal_resolution(payload["goal_resolution"])
     _require_text(payload["interaction_style_context"], "interaction style")
     _require_text(
         payload["character_voice_context"],
@@ -915,6 +939,7 @@ def validate_text_surface_input(
         )
     for row in payload["permitted_action_results"]:
         _validate_action_result(row)
+    _validate_runtime_capability_limits(payload)
     return dict(payload)  # type: ignore[return-value]
 
 
@@ -933,7 +958,12 @@ def validate_text_surface_output(
         "selected_surface_intent",
         "permitted_action_results",
     }
-    _require_exact_keys(payload, required, "text surface output")
+    optional = (
+        {"runtime_capability_limits"}
+        if "runtime_capability_limits" in payload
+        else set()
+    )
+    _require_exact_keys(payload, required | optional, "text surface output")
     if payload["schema_version"] != "text_surface_output.v2":
         raise CognitionContractError("unsupported text surface output schema")
     for field_name in (
@@ -965,7 +995,28 @@ def validate_text_surface_output(
         )
     for row in action_results:
         _validate_action_result(row)
+    _validate_runtime_capability_limits(payload)
     return dict(payload)  # type: ignore[return-value]
+
+
+def _validate_runtime_capability_limits(
+    payload: Mapping[str, Any],
+) -> None:
+    """Validate trusted runtime limits projected into surface prompts."""
+
+    if "runtime_capability_limits" not in payload:
+        return
+    limits = payload["runtime_capability_limits"]
+    if not isinstance(limits, list) or len(limits) > 8:
+        raise CognitionContractError(
+            "runtime_capability_limits must contain 0-8 items"
+        )
+    for index, item in enumerate(limits):
+        _require_text(
+            item,
+            f"runtime_capability_limits[{index}]",
+            maximum=500,
+        )
 
 
 def validate_cognition_observability(

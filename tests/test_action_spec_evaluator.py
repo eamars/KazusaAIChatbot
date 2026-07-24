@@ -415,6 +415,23 @@ def test_prompt_affordances_declare_runtime_availability_requirements() -> None:
     assert lifecycle["default_decision"] == "active_commitment_lifecycle"
 
 
+def test_accepted_task_projection_cannot_replace_future_reminder_owner() -> None:
+    """Generic delayed work cannot impersonate the scheduler owner."""
+
+    projection = project_prompt_affordances(
+        build_initial_action_capabilities(),
+    )
+    accepted_task = next(
+        row
+        for row in projection
+        if row["capability"] == ACCEPTED_TASK_REQUEST_CAPABILITY
+    )
+    summary = " ".join(accepted_task["semantic_input_summary"])
+
+    assert "未来提醒" in summary
+    assert "不能代替" in summary
+
+
 def test_no_argument_action_affordances_use_closed_registry_verbs() -> None:
     """Planner decisions stay exact while semantic goals remain model-owned."""
 

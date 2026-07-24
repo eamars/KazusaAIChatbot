@@ -206,7 +206,7 @@ def _build_consolidator_state(
         "group_channel_style_image": {},
         "rag_result": global_state.get("rag_result", {}),
         "existing_dedup_keys": _build_existing_dedup_keys(global_state),
-        "decontexualized_input": global_state["decontexualized_input"],
+        "decontextualized_input": global_state["decontextualized_input"],
         "chat_history_recent": chat_history_recent,
         "metadata": {},
         "consolidation_origin": consolidation_origin,

@@ -200,7 +200,7 @@ def _goal_progress() -> dict:
 
 def _minimal_global_state() -> dict:
     return {
-        "decontexualized_input": "User asks for evidence-backed judgment.",
+        "decontextualized_input": "User asks for evidence-backed judgment.",
         "global_user_id": "user-1",
         "character_profile": {"global_user_id": "character-1"},
     }
@@ -233,7 +233,7 @@ def _minimal_global_state_with_media(
         media_description_rows=media_description_rows,
     )
     state = _minimal_global_state()
-    state["decontexualized_input"] = ""
+    state["decontextualized_input"] = ""
     state["cognitive_episode"] = episode
     return state
 
@@ -441,7 +441,7 @@ def test_new_resolver_state_initializes_cycle_zero() -> None:
     """A new resolver state should be empty and ready for cycle 0."""
 
     state = new_resolver_state(
-        decontexualized_input="Need a deliberate answer.",
+        decontextualized_input="Need a deliberate answer.",
         max_cycles=3,
     )
 
@@ -461,7 +461,7 @@ def test_append_observation_projects_alias_and_caps_context() -> None:
     """Observation projection should expose bounded aliases, not raw ids."""
 
     state = new_resolver_state(
-        decontexualized_input="Need repeated evidence.",
+        decontextualized_input="Need repeated evidence.",
         max_cycles=3,
     )
     for index in range(MAX_PROJECTED_RESOLVER_OBSERVATIONS + 2):
@@ -483,7 +483,7 @@ def test_append_cycle_trace_stores_bounded_trace_row() -> None:
     """Cycle traces should be normalized before they enter resolver state."""
 
     state = new_resolver_state(
-        decontexualized_input="Need one resolver cycle.",
+        decontextualized_input="Need one resolver cycle.",
         max_cycles=3,
     )
     trace = _cycle_trace()
@@ -566,8 +566,8 @@ def test_initial_resolver_inputs_uses_image_observation_when_text_empty() -> Non
 
     expected_goal = f'当前输入包含图片观察：{image_summary}'
     resolver_state = initialized["resolver_state"]
-    assert initialized["decontexualized_input"] == ""
-    assert resolver_state["original_decontexualized_input"] == expected_goal
+    assert initialized["decontextualized_input"] == ""
+    assert resolver_state["original_decontextualized_input"] == expected_goal
     assert resolver_state["goal_progress"]["original_goal"] == expected_goal
     assert expected_goal in initialized["resolver_context"]
     assert _first_image_observation_percept(state)["content"]["description"] == (
@@ -579,9 +579,9 @@ def test_initial_resolver_inputs_rejects_empty_text_without_image_goal() -> None
     """Empty text without image evidence remains invalid for the resolver."""
 
     state = _minimal_global_state()
-    state["decontexualized_input"] = ""
+    state["decontextualized_input"] = ""
 
-    with pytest.raises(ResolverValidationError, match="decontexualized_input"):
+    with pytest.raises(ResolverValidationError, match="decontextualized_input"):
         ensure_initial_resolver_inputs(state, max_cycles=3)
 
 
@@ -595,7 +595,7 @@ def test_initial_resolver_inputs_rejects_audio_only_empty_text() -> None:
         },
     ])
 
-    with pytest.raises(ResolverValidationError, match="decontexualized_input"):
+    with pytest.raises(ResolverValidationError, match="decontextualized_input"):
         ensure_initial_resolver_inputs(state, max_cycles=3)
 
 
@@ -611,7 +611,7 @@ def test_initial_resolver_inputs_rejects_audit_only_image_empty_text() -> None:
     image_percept = _first_image_observation_percept(state)
     image_percept["content"]["visibility"] = "audit_only"
 
-    with pytest.raises(ResolverValidationError, match="decontexualized_input"):
+    with pytest.raises(ResolverValidationError, match="decontextualized_input"):
         ensure_initial_resolver_inputs(state, max_cycles=3)
 
 
@@ -627,5 +627,5 @@ def test_initial_resolver_inputs_rejects_empty_image_content_empty_text() -> Non
     image_percept = _first_image_observation_percept(state)
     image_percept["content"]["description"] = " "
 
-    with pytest.raises(ResolverValidationError, match="decontexualized_input"):
+    with pytest.raises(ResolverValidationError, match="decontextualized_input"):
         ensure_initial_resolver_inputs(state, max_cycles=3)

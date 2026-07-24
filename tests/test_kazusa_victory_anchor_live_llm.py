@@ -205,7 +205,7 @@ def _state() -> dict:
         'user_input': _USER_TEXT,
         'prompt_message_context': prompt_message_context,
         'reply_context': reply_context,
-        'decontexualized_input': (
+        'decontextualized_input': (
             '用户接着企鹅叫声比赛的上一条回复，表示赢了，并把提拉米苏递给杏山千纱。'
         ),
         'referents': [],

@@ -334,7 +334,7 @@ async def test_canonical_private_source_has_no_legacy_output_mode() -> None:
     assert "output_mode" not in payload["episode"]
     assert output["intention"] == {
         "selected_branch_id": "ordinary_response",
-        "route": "speech",
+        "route": "silence",
         "intention": "acknowledge the grounded episode",
         "target_roles": [],
         "reason": "the episode supplies bounded evidence",
@@ -363,6 +363,7 @@ async def test_v2_surface_receives_semantic_handoff_only() -> None:
             "target_roles": [],
             "reason": "grounded evidence",
         },
+        "goal_resolution": "answerable_now",
         "primary_bid": {
             "motive": "continuity",
             "intention": "acknowledge the episode",
@@ -433,6 +434,7 @@ async def test_v2_text_surface_never_invokes_terminal_visual_stage() -> None:
             "target_roles": [],
             "reason": "grounded evidence",
         },
+        "goal_resolution": "answerable_now",
         "supporting_bids": [],
         "expression_policy": {
             "visibility": "visible",

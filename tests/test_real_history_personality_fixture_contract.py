@@ -8,6 +8,7 @@ from tests.test_real_history_personality_e2e_live_llm import (
     _CASES,
     _build_profile_case,
     _build_request,
+    _extract_private_monologue,
     _fixture_validity,
     _load_json_object,
     _relevance_dispositions,
@@ -145,6 +146,82 @@ def test_routing_guard_reads_frontline_discard_disposition() -> None:
     ]
 
     assert _relevance_dispositions(trace_steps) == ["discard"]
+
+
+def test_private_monologue_uses_only_canonical_reasoning_node() -> None:
+    """A later branch value must not replace the canonical reasoning value."""
+
+    response_payload = {
+        "cognition_graph": {
+            "nodes": [
+                {
+                    "id": "v2.branch.1",
+                    "detail": {
+                        "private_monologue": "错误的分支引用",
+                    },
+                },
+                {
+                    "id": "l2.reasoning",
+                    "detail": {
+                        "internal_monologue": "规范的认知独白",
+                    },
+                },
+                {
+                    "id": "v2.collapse",
+                    "detail": {
+                        "private_monologue": "错误的折叠引用",
+                    },
+                },
+            ],
+        },
+    }
+
+    assert _extract_private_monologue(response_payload) == (
+        "规范的认知独白",
+        'response.cognition_graph.nodes[id="l2.reasoning"]'
+        ".detail.internal_monologue",
+    )
+
+
+def test_private_monologue_fails_closed_when_canonical_node_is_missing() -> None:
+    """A non-canonical private field cannot satisfy the monologue contract."""
+
+    response_payload = {
+        "cognition_graph": {
+            "nodes": [
+                {
+                    "id": "v2.branch.1",
+                    "detail": {
+                        "private_monologue": "不能冒充认知独白",
+                    },
+                },
+            ],
+        },
+    }
+
+    assert _extract_private_monologue(response_payload) == ("", "")
+
+
+def test_external_project_url_is_immutable_during_asuna_projection() -> None:
+    """Profile projection keeps a project URL as external user evidence."""
+
+    source_case = next(
+        case
+        for case in _CASES
+        if "KazusaAIChatbot" in case["input_text"]
+    )
+    profile_case = _build_profile_case(
+        case=source_case,
+        profile_label="asuna",
+        profile_name=_profile_name("asuna"),
+        character_global_user_id="character-global",
+        current_global_id="real-history-current-global",
+    )
+
+    assert "https://github.com/eamars/KazusaAIChatbot" in (
+        profile_case["effective_input"]["body_text"]
+    )
+    assert "AsunaAIChatbot" not in profile_case["effective_input"]["body_text"]
 
 
 def _collect_source_leaks_for_test(

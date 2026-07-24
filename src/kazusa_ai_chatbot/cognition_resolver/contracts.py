@@ -231,7 +231,7 @@ class ResolverCycleStateV1(TypedDict):
     cycle_index: int
     max_cycles: int
     status: str
-    original_decontexualized_input: str
+    original_decontextualized_input: str
     observations: list[ResolverObservationV1]
     cycle_traces: list[ResolverCycleTraceV1]
     held_action_specs: list[ActionSpecV1]

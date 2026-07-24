@@ -58,7 +58,7 @@ def _state() -> dict[str, Any]:
     state: dict[str, Any] = {
         "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
         "local_time_context": turn_clock["local_time_context"],
-        "decontexualized_input": "I now work in Auckland.",
+        "decontextualized_input": "I now work in Auckland.",
         "final_dialog": ["Kazusa acknowledges the user's update."],
         "internal_monologue": "The user gave a concrete personal fact.",
         "chat_history_recent": [
@@ -366,7 +366,7 @@ def test_source_policy_does_not_make_text_semantic_decisions() -> None:
     forbidden_fragments = (
         'get("summary")',
         "['summary']",
-        "decontexualized_input",
+        "decontextualized_input",
         "decontextualized_input",
         "final_dialog",
         "喜欢",

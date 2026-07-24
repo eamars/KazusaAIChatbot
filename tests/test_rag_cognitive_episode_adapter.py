@@ -109,7 +109,7 @@ def _request_kwargs() -> dict:
     """
     kwargs = {
         "episode": _valid_episode(),
-        "decontexualized_input": "Need current evidence.",
+        "decontextualized_input": "Need current evidence.",
         "character_profile": {
             "global_user_id": "character-1",
             "name": "Kazusa",
@@ -226,7 +226,7 @@ def test_forbidden_context_keys_are_not_exposed() -> None:
 def test_internal_thought_episode_builds_rag_request_shape() -> None:
     kwargs = _request_kwargs()
     kwargs["episode"] = _internal_thought_episode()
-    kwargs["decontexualized_input"] = "回看群聊前文，判断这个内部想法是否有足够证据。"
+    kwargs["decontextualized_input"] = "回看群聊前文，判断这个内部想法是否有足够证据。"
 
     request = build_text_chat_rag_request(**kwargs)
 

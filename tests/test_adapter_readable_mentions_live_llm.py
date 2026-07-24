@@ -13,7 +13,7 @@ from kazusa_ai_chatbot.config import (
     MSG_DECONTEXTUALIZER_LLM_BASE_URL,
     RAG_PLANNER_LLM_BASE_URL,
 )
-from kazusa_ai_chatbot.nodes import persona_supervisor2_msg_decontexualizer as decontext
+from kazusa_ai_chatbot.nodes import persona_supervisor2_msg_decontextualizer as decontext
 from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_initializer as rag_initializer
 from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_supervisor2 as rag_supervisor
 from kazusa_ai_chatbot.rag.cache2_runtime import get_rag_cache2_runtime
@@ -210,18 +210,18 @@ async def test_live_adapter_readable_mentions_drive_person_context(
     """Readable mention text should survive decontextualization and route RAG."""
 
     del ensure_live_llm
-    decontext_llm = _CapturingLiveLLM(decontext._msg_decontexualizer_llm)
+    decontext_llm = _CapturingLiveLLM(decontext._msg_decontextualizer_llm)
     initializer_llm = _CapturingLiveLLM(rag_initializer._initializer_llm)
-    monkeypatch.setattr(decontext, '_msg_decontexualizer_llm', decontext_llm)
+    monkeypatch.setattr(decontext, '_msg_decontextualizer_llm', decontext_llm)
     monkeypatch.setattr(rag_initializer, '_initializer_llm', initializer_llm)
     monkeypatch.setattr(rag_supervisor, 'upsert_initializer_entry', _noop_async)
     monkeypatch.setattr(rag_supervisor, 'record_initializer_hit', _noop_async)
     await get_rag_cache2_runtime().clear()
 
     started_at = perf_counter()
-    decontext_result = await decontext.call_msg_decontexualizer(_decontext_state())
+    decontext_result = await decontext.call_msg_decontextualizer(_decontext_state())
     decontext_duration_seconds = perf_counter() - started_at
-    decontextualized_input = str(decontext_result['decontexualized_input'])
+    decontextualized_input = str(decontext_result['decontextualized_input'])
 
     started_at = perf_counter()
     initializer_result = await rag_supervisor.rag_initializer(

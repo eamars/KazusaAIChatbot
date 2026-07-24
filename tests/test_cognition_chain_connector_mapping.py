@@ -78,7 +78,7 @@ def _global_state() -> dict[str, object]:
         ),
         "storage_timestamp_utc": NOW,
         "user_input": "hello",
-        "decontexualized_input": "hello",
+        "decontextualized_input": "hello",
         "prompt_message_context": {},
         "cognitive_episode": canonical_episode(
             episode_id="episode-1",
@@ -158,6 +158,40 @@ def test_connector_projects_protocol_owned_resolver_goal_progress() -> None:
     assert payload["resolver_goal_progress"] == goal_progress
 
 
+def test_connector_projects_runtime_owner_limits_into_cognition() -> None:
+    """Cognition receives the same trusted owner limits as the surface."""
+
+    from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
+        build_cognition_input_from_global_state,
+    )
+
+    state = _global_state()
+    state["action_availability_runtime"] = {
+        "scheduler_status": "unavailable",
+        "worker_status": {
+            "accepted_task": "unavailable",
+            "background_work": "unavailable",
+        },
+    }
+    payload = build_cognition_input_from_global_state(
+        state,
+        mutable_state=build_acquaintance_user_state(
+            global_user_id="user-1",
+            updated_at=NOW,
+        ),
+    )
+
+    assert payload["runtime_capability_limits"]
+    assert any(
+        "future_speak" in item and "不可用" in item
+        for item in payload["runtime_capability_limits"]
+    )
+    assert any(
+        "绑定既有 coding_run_ref" in item and "待执行" in item
+        for item in payload["runtime_capability_limits"]
+    )
+
+
 def test_connector_projects_full_registry_capacity() -> None:
     """Visible cognition exposes every runtime-eligible public action."""
 
@@ -174,8 +208,10 @@ def test_connector_projects_full_registry_capacity() -> None:
     action_kinds = {row["action_kind"] for row in actions}
     assert "speak" not in action_kinds
     assert "apply_memory_lifecycle_update" not in action_kinds
+    assert "background_work_request" not in action_kinds
     assert {
-        "background_work_request",
+        "accepted_task_request",
+        "accepted_coding_task_request",
         "future_speak",
     } <= action_kinds
     assert "trigger_future_cognition" not in action_kinds
@@ -308,6 +344,68 @@ def test_connector_projects_distinct_open_coding_run_affordances() -> None:
     assert "Which execution boundary" in coding_actions[2]["capability"]
 
 
+def test_connector_routes_unavailable_coding_status_to_persisted_lookup() -> None:
+    """An unavailable coding worker leaves direct task status available."""
+
+    state = _global_state()
+    state["action_availability_runtime"] = {
+        "worker_status": {
+            "background_work": "unavailable",
+        },
+        "coding_workspace_status": "healthy",
+    }
+    state["action_selection_context"] = {
+        "coding_runs": [{
+            "coding_run_ref": "coding_run:run-1",
+            "status": "proposal_ready",
+            "objective_summary": "update the parser",
+            "allowed_next_actions": ["status", "cancel"],
+            "active_blocker": None,
+        }],
+    }
+
+    actions = connector._available_action_affordances(state)
+    coding_actions = [
+        row
+        for row in actions
+        if row["action_kind"] == "accepted_coding_task_request"
+    ]
+
+    assert any(
+        row["action_kind"] == "accepted_task_status_check"
+        for row in actions
+    )
+    assert [row["allowed_decisions"] for row in coding_actions] == [
+        ["start"],
+        ["cancel"],
+    ]
+    assert "当前作用域的既有 coding run 只提供以下实际可用决定：cancel" in (
+        coding_actions[1]["capability"]
+    )
+    assert "status" not in coding_actions[1]["capability"]
+
+
+def test_connector_projects_persisted_coding_status_into_semantic_scene() -> None:
+    """Goal cognition receives the current scoped coding status as context."""
+
+    state = _global_state()
+    state["action_selection_context"] = {
+        "coding_runs": [{
+            "coding_run_ref": "coding_run:run-1",
+            "status": "proposal_ready",
+            "objective_summary": "update the parser",
+            "allowed_next_actions": ["status", "cancel"],
+            "active_blocker": None,
+        }],
+    }
+
+    scene = connector._semantic_episode_text(state)
+
+    assert "当前作用域已有持久化代码任务状态" in scene
+    assert "proposal_ready" in scene
+    assert "update the parser" in scene
+
+
 def test_connector_keeps_media_as_typed_evidence_without_wire_payloads() -> None:
     """Media descriptions remain semantic evidence while raw bytes and URLs stay out."""
 
@@ -323,7 +421,7 @@ def test_connector_keeps_media_as_typed_evidence_without_wire_payloads() -> None
         "description": "whiteboard observation",
     }]
     state["user_input"] = ""
-    state["decontexualized_input"] = ""
+    state["decontextualized_input"] = ""
     payload = build_cognition_input_from_global_state(
         state,
         mutable_state=build_acquaintance_user_state(

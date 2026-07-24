@@ -196,7 +196,7 @@ async def _run_l2d_and_trace(
                 "logical_stance": frozen_state.get("logical_stance"),
                 "character_intent": frozen_state.get("character_intent"),
                 "decontextualized_input": frozen_state.get(
-                    "decontexualized_input"
+                    "decontextualized_input"
                 ),
             },
             "prompt_payload": prompt_payload,
@@ -239,7 +239,7 @@ def _build_local_reference_first_iteration_state() -> dict:
 
     return _make_state({
         "user_input": "@杏山千纱 我之前在群里说的'蚝爹油'是谁来着？",
-        "decontexualized_input": (
+        "decontextualized_input": (
             "@杏山千纱 我之前在群里说的'蚝爹油'是谁来着？"
         ),
         "conversation_progress": {
@@ -337,7 +337,7 @@ def _build_gibberish_state() -> dict:
 
     return _make_state({
         "user_input": "@杏山千纱 嗯嘿嘿呵呵哔嘿嗯",
-        "decontexualized_input": "@杏山千纱 嗯嘿嘿呵呵哔嘿嗯",
+        "decontextualized_input": "@杏山千纱 嗯嘿嘿呵呵哔嘿嗯",
         "conversation_progress": {
             "source": "db",
             "current_thread": "用户发送了无意义的词语",
@@ -424,7 +424,7 @@ def _build_internet_lookup_state() -> dict:
 
     return _make_state({
         "user_input": "@杏山千纱 何意味",
-        "decontexualized_input": "@杏山千纱 何意味",
+        "decontextualized_input": "@杏山千纱 何意味",
         "conversation_progress": {
             "source": "db",
             "current_thread": "用户发送了一个日文表达",

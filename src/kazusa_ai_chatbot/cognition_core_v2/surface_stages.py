@@ -61,7 +61,17 @@ async def run_style_stage(
 CONTENT_PLAN_SYSTEM_PROMPT = '''规划当前角色在这个场景中实际会说出或发送的内容，使其自然表达
 已经形成的角色判断。综合 selected intention、primary bid、supporting bid、visible episode、
 semantic affect、semantic relationship、expression policy、interaction style 和
-permitted_action_results。
+permitted_action_results。runtime_capability_limits 是运行时已经确认的能力边界；其中标记不可用的
+能力不能被表达为已经安排、发送或完成，但可以自然表达当前限制、等待或下一步条件。
+
+goal_resolution 是 cognition 对当前目标可回答性的已确认判断：answerable_now 表示可以在当前
+证据范围内直接回答；requires_required_evidence、requires_user_input 和 blocked 表示目标仍未
+完成。后面三种状态应把真实缺口、当前限制或下一步条件表达给用户，保持 selected intention 的
+主题，不把尚未获得的证据写成已经读取、分析或完成的结果。
+blocked 的可见表达停留在当前回合的真实边界，或请用户提供当前可访问的材料；它不产生新的未来
+阅读、分析、回传或完成承诺。只有 permitted_action_results 中已经存在的实际结果，才能支持对应
+的事实陈述或后续动作状态。runtime limits 若指出仓库代码读取 owner 不可用，直接表达“当前无法
+读取”并邀请用户提供材料；不要把“先访问、先阅读、等我处理”当作当前可执行步骤。
 
 # 规划步骤
 1. 按认知阶段选择的方式回应或参与当前输入。结合角色关系、情绪和场景压力推进互动，而不是机械
@@ -72,7 +82,9 @@ permitted_action_results。
 用户；“当前角色”表示当前角色，也是被直接称呼者和祈使句的隐含主语。自由文本使用自然的中文
 参与者称呼。
 4. permitted_action_results 是角色大脑能力的精确账本。只有 executed 支持其有界的已完成效果；
-其他 status 不支持完成声明。请求或目标候选只支持角色在言语中的态度，不代表能力已经执行。
+pending 或 scheduled 的正向语义是“已记录、已排队、待执行”，可在当前发言中确认请求和执行
+条件，保持后续 worker 结果开放。其他 status 不支持完成声明；请求或目标候选只支持角色在言语中的
+态度，不代表能力已经执行。
 5. 只规划角色要表达的含义和互动推进，让情绪、关系强度与动作倾向通过台词含义、语气和节奏
 呈现。
 
@@ -107,6 +119,7 @@ async def run_content_plan_stage(
 PREFERENCE_SYSTEM_PROMPT = '''识别当前角色判断和当前场景中真实存在的可见表达边界或称呼对象约束。
 以 selected intention、visible episode、projected bids、expression policy、semantic affect、
 semantic relationship、interaction style 和 permitted_action_results 为语境。
+runtime_capability_limits 是可信的运行时能力边界，只用于保持表达与现实能力一致。
 
 visible_boundaries 只记录当前生效的表达限制或细节范围；addressee_plan 只记录真实存在的语义称呼
 安排。没有相应约束时返回空列表，让角色按当前判断自然表达。能力结果的 status 按原义处理：只有
@@ -140,7 +153,8 @@ async def run_preference_stage(
 
 VISUAL_SYSTEM_PROMPT = '''根据 selected intention、visible episode、projected bids、
 expression policy、semantic affect、semantic relationship、permitted action results、
-interaction style context 和 character_voice_context，为终端图像表面生成 visual_directives。
+runtime_capability_limits、interaction style context 和 character_voice_context，为终端图像表面生成
+visual_directives。
 指导可以包含服务于 selected surface intent 的可见角色特征、姿势、表情、构图、环境与场景氛围。
 这些内容是私有的图像生成指导，不是发送给用户的文字、对话指导，也不是调用其他模型或处理器的
 指令。本阶段不写最终对话。

@@ -87,7 +87,7 @@ class ConversationProgressRecordInput(TypedDict):
     storage_timestamp_utc: str
     character_name: str
     prior_episode_state: ConversationEpisodeStateDoc | None
-    decontexualized_input: str
+    decontextualized_input: str
     chat_history_recent: list[dict]
     content_plan: dict[str, str]
     logical_stance: str

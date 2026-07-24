@@ -31,6 +31,14 @@ RESOLVER_AUTHORIZATION_PROMPT = '''你负责核准规划阶段提出的证据解
 上下文表明同一需求无法继续产生有效进展，则拒绝候选项。先前一次成功观察本身不妨碍不同的、或
 实质上更窄且所需证据仍缺失的后续请求。
 
+能力归属按以下关系判断：public_answer_research 负责当前外部事实、公开资料和可由公共来源核验的
+信息；local_context_recall 负责角色、关系、记忆、历史对话、承诺、档案和会话媒体；human_clarification
+负责向用户索取其掌握的缺失信息；approval_preparation 负责副作用前的批准问题；self_goal_resolution
+负责合资格私有来源的内部目标。指定 GitHub 仓库的源代码、目录、文件、函数、架构和实现分析属于
+已接纳任务的 coding reader owner，并非 public_answer_research 的结果。候选项提出这类目标时，
+公共研究能力保持 false，让调用方保留真实 owner 的可用性边界。来源地址是公开的，只说明资料可以
+被访问；结果若要求逐项读取仓库源代码并交付结构或实现分析，结果 owner 仍是 coding reader。
+
 本阶段只判断未解决的证据需求与能力匹配，不改写请求、不选择最终对话，也不判断角色意愿、文笔
 或虚构其他能力。
 
@@ -85,6 +93,17 @@ async def authorize_resolver_requests(
             "semantic_capability": affordance["semantic_capability"],
             "proposed_semantic_goal": request["semantic_goal"],
             "proposed_reason": request["reason"],
+            "owner_contract": {
+                "public_answer_research": (
+                    "当前外部事实、公开资料、一般公共信息"
+                ),
+                "repository_source_analysis": (
+                    "accepted_task_request -> coding reader；负责仓库源代码、目录、文件、函数、架构和实现分析"
+                ),
+                "owner_decision": (
+                    "按要交付的结果判断 owner；公开 URL 不会把仓库源代码分析改成 public_answer_research"
+                ),
+            },
             "admitted_bid": {
                 "intention": bid["intention"],
                 "desired_outcome": bid["desired_outcome"],

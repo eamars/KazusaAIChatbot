@@ -34,7 +34,7 @@ only real visible boundaries. `dialog_agent.py` owns final visible wording.
 
 | Area | Main files | Ownership |
 | --- | --- | --- |
-| Perception | `persona_supervisor2_msg_decontexualizer.py` | Current media observation, current-message rewrite, referent status, and one role-explicit current-turn meaning after the brain-service relevance settlement boundary. |
+| Perception | `persona_supervisor2_msg_decontextualizer.py` | Current media observation, current-message rewrite, referent status, and one role-explicit current-turn meaning after the brain-service relevance settlement boundary. |
 | Persona graph | `persona_supervisor2.py` | Resolver recurrence, final commit ordering, action/surface routing, no-response handling, and episode trace assembly. |
 | V2 connector | `persona_supervisor2_cognition.py`, `persona_supervisor2_cognition_actions.py` | Exact `CognitionCoreInputV2` construction, state loading, V2 service binding, output projection, final state replacement, and semantic action-request materialization. |
 | Text and terminal visual connector | `persona_supervisor2_l3_surface.py` | Prompt-safe interaction-style loading, exact `TextSurfaceInputV2` construction, three-call text planning, and independent one-call visual planning. |
@@ -62,7 +62,7 @@ settled-relevance gate, and conversation-progress loader have done their work.
 Inside `persona_supervisor2`, the live persona graph is:
 
 ```text
-stage_0_msg_decontexualizer
+stage_0_msg_decontextualizer
   -> stage_1_goal_resolver
        load one mutable user or character V2 state
        build CognitionCoreInputV2
@@ -87,7 +87,7 @@ stage_0_msg_decontexualizer
 ```
 
 For a live user message, Stage 0 returns semantic surfaces from its existing
-LLM call. `decontexualized_input` remains a natural equivalent used by
+LLM call. `decontextualized_input` remains a natural equivalent used by
 compatibility and retrieval paths. Optional `role_explicit_content` uses the
 Chinese role labels `当前用户` and `当前角色` to preserve nested actor, target,
 beneficiary, modality, and request direction. Optional structured

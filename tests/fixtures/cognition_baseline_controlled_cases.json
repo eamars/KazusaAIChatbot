@@ -1,0 +1,435 @@
+{
+  "schema_version": "cognition_baseline_controlled_cases.v1",
+  "fixed_clock": {
+    "local_timestamp": "2026-07-24 09:00:00",
+    "scheduled_local_timestamp": "2026-07-25 15:00:00",
+    "timezone": "Pacific/Auckland"
+  },
+  "cases": [
+    {
+      "case_id": "C01",
+      "source_kind": "user_message",
+      "event_kind": "chat",
+      "input_text": "明日奈，我在“先整理报告”和“先去散步十分钟”之间犹豫。你会建议我先做哪个？",
+      "actor_role": "current_user",
+      "addressee_role": "character",
+      "experiencer_role": "character",
+      "reply_author_role": "current_user",
+      "typed_identity_fields": ["mentions", "addressed_to_global_user_ids"],
+      "mutable_identity_spans": [],
+      "immutable_external_spans": [],
+      "applicable_dimensions": ["goal_completion", "character_judgment", "dialog_fidelity"],
+      "hard_gates": ["visible_dialog", "canonical_monologue"],
+      "state_seed": {},
+      "output_mode": "visible"
+    },
+    {
+      "case_id": "C02",
+      "source_kind": "user_message",
+      "event_kind": "chat",
+      "input_text": "事实：蓝盒只有旧票据，红盒只有备用钥匙。我要拿备用钥匙。明日奈，你猜我该开哪个盒子？",
+      "actor_role": "current_user",
+      "addressee_role": "character",
+      "experiencer_role": "character",
+      "reply_author_role": "current_user",
+      "typed_identity_fields": ["mentions", "addressed_to_global_user_ids"],
+      "mutable_identity_spans": [],
+      "immutable_external_spans": [],
+      "applicable_dimensions": ["evidence_discipline", "character_judgment", "dialog_fidelity"],
+      "hard_gates": ["visible_dialog", "evidence_grounded"],
+      "state_seed": {},
+      "output_mode": "visible"
+    },
+    {
+      "case_id": "C03",
+      "source_kind": "user_message",
+      "event_kind": "chat",
+      "input_text": "明日奈，我刚才说把门禁卡放在哪里了？",
+      "actor_role": "current_user",
+      "addressee_role": "character",
+      "experiencer_role": "character",
+      "reply_author_role": "current_user",
+      "typed_identity_fields": ["mentions", "addressed_to_global_user_ids"],
+      "mutable_identity_spans": [],
+      "immutable_external_spans": [],
+      "applicable_dimensions": ["continuity", "goal_completion", "dialog_fidelity"],
+      "hard_gates": ["visible_dialog", "local_recall"],
+      "state_seed": {
+        "conversation_rows": [
+          {
+            "role": "user",
+            "body_text": "我把门禁卡放进书桌右边第二个抽屉了。",
+            "platform_message_id": "baseline-c03-seed-001",
+            "platform_user_id": "baseline-current-user-platform",
+            "global_user_id": "baseline-current-user"
+          }
+        ]
+      },
+      "output_mode": "visible"
+    },
+    {
+      "case_id": "C04",
+      "source_kind": "user_message",
+      "event_kind": "chat",
+      "input_text": "明日奈，帮我把那个改成和上次一样。",
+      "actor_role": "current_user",
+      "addressee_role": "character",
+      "experiencer_role": "character",
+      "reply_author_role": "current_user",
+      "typed_identity_fields": ["mentions", "addressed_to_global_user_ids"],
+      "mutable_identity_spans": [],
+      "immutable_external_spans": [],
+      "applicable_dimensions": ["goal_completion", "character_judgment", "dialog_fidelity"],
+      "hard_gates": ["visible_dialog", "minimal_clarification"],
+      "state_seed": {},
+      "output_mode": "visible"
+    },
+    {
+      "case_id": "C05",
+      "source_kind": "user_message",
+      "event_kind": "chat",
+      "input_text": "明日奈，请查清楚 Python 3.14 的正式发布日期，再告诉我来源。",
+      "actor_role": "current_user",
+      "addressee_role": "character",
+      "experiencer_role": "character",
+      "reply_author_role": "current_user",
+      "typed_identity_fields": ["mentions", "addressed_to_global_user_ids"],
+      "mutable_identity_spans": [],
+      "immutable_external_spans": [],
+      "applicable_dimensions": ["goal_completion", "capability_ownership", "evidence_discipline", "dialog_fidelity"],
+      "hard_gates": ["visible_dialog", "source_attribution"],
+      "state_seed": {},
+      "output_mode": "visible"
+    },
+    {
+      "case_id": "C06",
+      "source_kind": "user_message",
+      "event_kind": "chat",
+      "input_text": "明日奈，请查证 Python 3.13 和 3.14 官方文档里 free-threaded build 的状态差异，并标明各自来源。",
+      "actor_role": "current_user",
+      "addressee_role": "character",
+      "experiencer_role": "character",
+      "reply_author_role": "current_user",
+      "typed_identity_fields": ["mentions", "addressed_to_global_user_ids"],
+      "mutable_identity_spans": [],
+      "immutable_external_spans": [],
+      "applicable_dimensions": ["goal_completion", "capability_ownership", "evidence_discipline", "dialog_fidelity"],
+      "hard_gates": ["visible_dialog", "source_attribution"],
+      "state_seed": {},
+      "output_mode": "visible"
+    },
+    {
+      "case_id": "C07",
+      "source_kind": "user_message",
+      "event_kind": "chat",
+      "input_text": "明日奈，帮我评价一下这个项目的架构和亮点：https://github.com/eamars/KazusaAIChatbot",
+      "actor_role": "current_user",
+      "addressee_role": "character",
+      "experiencer_role": "character",
+      "reply_author_role": "current_user",
+      "typed_identity_fields": ["mentions", "addressed_to_global_user_ids"],
+      "mutable_identity_spans": [],
+      "immutable_external_spans": [
+        {
+          "json_path": "message_envelope.body_text",
+          "value": "https://github.com/eamars/KazusaAIChatbot",
+          "kind": "repository_url"
+        },
+        {
+          "json_path": "message_envelope.body_text",
+          "value": "KazusaAIChatbot",
+          "kind": "repository_name"
+        }
+      ],
+      "applicable_dimensions": ["goal_completion", "capability_ownership", "evidence_discipline", "source_output_mode", "dialog_fidelity"],
+      "hard_gates": ["visible_dialog", "repository_map_evidence", "coding_reader_route"],
+      "state_seed": {},
+      "output_mode": "visible"
+    },
+    {
+      "case_id": "C08",
+      "source_kind": "user_message",
+      "event_kind": "chat",
+      "input_text": "明日奈，请读取 https://github.com/eamars/KazusaAIChatbot 的 src/kazusa_ai_chatbot/cognition_core_v2 代码，完成后告诉我 route 是在哪里决定的。",
+      "actor_role": "current_user",
+      "addressee_role": "character",
+      "experiencer_role": "character",
+      "reply_author_role": "current_user",
+      "typed_identity_fields": ["mentions", "addressed_to_global_user_ids"],
+      "mutable_identity_spans": [],
+      "immutable_external_spans": [
+        {
+          "json_path": "message_envelope.body_text",
+          "value": "https://github.com/eamars/KazusaAIChatbot",
+          "kind": "repository_url"
+        },
+        {
+          "json_path": "message_envelope.body_text",
+          "value": "KazusaAIChatbot",
+          "kind": "repository_name"
+        }
+      ],
+      "applicable_dimensions": ["goal_completion", "capability_ownership", "evidence_discipline", "source_output_mode", "dialog_fidelity"],
+      "hard_gates": ["visible_dialog", "repository_map_evidence", "coding_reader_route", "terminal_result"],
+      "state_seed": {},
+      "output_mode": "visible"
+    },
+    {
+      "case_id": "C09",
+      "source_kind": "user_message",
+      "event_kind": "chat",
+      "input_text": "明日奈，请把“目标明确、风险分级、验收可复现”整理成一份 Markdown 文件，完成后发给我。",
+      "actor_role": "current_user",
+      "addressee_role": "character",
+      "experiencer_role": "character",
+      "reply_author_role": "current_user",
+      "typed_identity_fields": ["mentions", "addressed_to_global_user_ids"],
+      "mutable_identity_spans": [],
+      "immutable_external_spans": [],
+      "applicable_dimensions": ["goal_completion", "capability_ownership", "action_follow_through", "persistence_trace_integrity"],
+      "hard_gates": ["visible_dialog", "accepted_task_persisted"],
+      "state_seed": {},
+      "output_mode": "visible"
+    },
+    {
+      "case_id": "C10",
+      "source_kind": "user_message",
+      "event_kind": "chat",
+      "input_text": "明日奈，刚才那份 Markdown 整理到哪一步了？",
+      "actor_role": "current_user",
+      "addressee_role": "character",
+      "experiencer_role": "character",
+      "reply_author_role": "current_user",
+      "typed_identity_fields": ["mentions", "addressed_to_global_user_ids"],
+      "mutable_identity_spans": [],
+      "immutable_external_spans": [],
+      "applicable_dimensions": ["continuity", "capability_ownership", "action_follow_through", "dialog_fidelity"],
+      "hard_gates": ["visible_dialog", "accepted_task_status"],
+      "state_seed": {
+        "accepted_task": {
+          "task_id": "baseline-task-001",
+          "state": "running",
+          "summary": "整理三条要点为 Markdown 文件"
+        }
+      },
+      "output_mode": "visible"
+    },
+    {
+      "case_id": "C11",
+      "source_kind": "user_message",
+      "event_kind": "chat",
+      "input_text": "明日奈，请在 https://github.com/eamars/KazusaAIChatbot 里修改 README：在测试章节增加一句“实时 LLM 用例必须逐个运行”，并执行验证。",
+      "actor_role": "current_user",
+      "addressee_role": "character",
+      "experiencer_role": "character",
+      "reply_author_role": "current_user",
+      "typed_identity_fields": ["mentions", "addressed_to_global_user_ids"],
+      "mutable_identity_spans": [],
+      "immutable_external_spans": [
+        {
+          "json_path": "message_envelope.body_text",
+          "value": "https://github.com/eamars/KazusaAIChatbot",
+          "kind": "repository_url"
+        },
+        {
+          "json_path": "message_envelope.body_text",
+          "value": "KazusaAIChatbot",
+          "kind": "repository_name"
+        }
+      ],
+      "applicable_dimensions": ["goal_completion", "capability_ownership", "action_follow_through", "source_output_mode", "persistence_trace_integrity"],
+      "hard_gates": ["visible_dialog", "accepted_coding_task_persisted", "coding_run_bound", "terminal_result", "repository_map_evidence", "guarded_workspace_effect"],
+      "state_seed": {},
+      "output_mode": "visible"
+    },
+    {
+      "case_id": "C12",
+      "source_kind": "user_message",
+      "event_kind": "chat",
+      "input_text": "明日奈，刚才那个 README 修改任务现在是什么状态？",
+      "actor_role": "current_user",
+      "addressee_role": "character",
+      "experiencer_role": "character",
+      "reply_author_role": "current_user",
+      "typed_identity_fields": ["mentions", "addressed_to_global_user_ids"],
+      "mutable_identity_spans": [],
+      "immutable_external_spans": [],
+      "applicable_dimensions": ["continuity", "capability_ownership", "action_follow_through", "dialog_fidelity"],
+      "hard_gates": ["visible_dialog", "coding_run_status", "no_unbound_run"],
+      "state_seed": {
+        "coding_run": {
+          "run_id": "baseline-run-012",
+          "status": "proposal_ready",
+          "action_set": ["status", "cancel", "approve_and_verify"]
+        }
+      },
+      "output_mode": "visible"
+    },
+    {
+      "case_id": "C13",
+      "source_kind": "user_message",
+      "event_kind": "chat",
+      "input_text": "可以使用现有虚拟环境运行聚焦测试；不要安装新依赖，继续吧。",
+      "actor_role": "current_user",
+      "addressee_role": "character",
+      "experiencer_role": "character",
+      "reply_author_role": "current_user",
+      "typed_identity_fields": ["mentions", "addressed_to_global_user_ids"],
+      "mutable_identity_spans": [],
+      "immutable_external_spans": [],
+      "applicable_dimensions": ["capability_ownership", "action_follow_through", "dialog_fidelity", "persistence_trace_integrity"],
+      "hard_gates": ["visible_dialog", "coding_run_unblocked", "bounded_progress"],
+      "state_seed": {
+        "coding_run": {
+          "run_id": "baseline-run-013",
+          "status": "blocked",
+          "open_blocker": "是否可使用现有虚拟环境运行聚焦测试？",
+          "action_set": ["respond_to_blocker"]
+        }
+      },
+      "output_mode": "visible"
+    },
+    {
+      "case_id": "C14",
+      "source_kind": "user_message",
+      "event_kind": "chat",
+      "input_text": "我批准这份补丁方案。应用后请运行聚焦测试验证。",
+      "actor_role": "current_user",
+      "addressee_role": "character",
+      "experiencer_role": "character",
+      "reply_author_role": "current_user",
+      "typed_identity_fields": ["mentions", "addressed_to_global_user_ids"],
+      "mutable_identity_spans": [],
+      "immutable_external_spans": [],
+      "applicable_dimensions": ["capability_ownership", "action_follow_through", "dialog_fidelity", "persistence_trace_integrity"],
+      "hard_gates": ["visible_dialog", "approval_bound", "guarded_workspace_effect", "terminal_result"],
+      "state_seed": {
+        "coding_run": {
+          "run_id": "baseline-run-014",
+          "status": "awaiting_approval",
+          "patch_digest": "frozen-readme-patch-digest",
+          "action_set": ["approve_and_verify"]
+        }
+      },
+      "output_mode": "visible"
+    },
+    {
+      "case_id": "C15",
+      "source_kind": "user_message",
+      "event_kind": "chat",
+      "input_text": "停止刚才的 README 修改任务，不要继续执行。",
+      "actor_role": "current_user",
+      "addressee_role": "character",
+      "experiencer_role": "character",
+      "reply_author_role": "current_user",
+      "typed_identity_fields": ["mentions", "addressed_to_global_user_ids"],
+      "mutable_identity_spans": [],
+      "immutable_external_spans": [],
+      "applicable_dimensions": ["capability_ownership", "action_follow_through", "dialog_fidelity", "persistence_trace_integrity"],
+      "hard_gates": ["visible_dialog", "cancel_once", "no_post_cancel_effect"],
+      "state_seed": {
+        "coding_run": {
+          "run_id": "baseline-run-015",
+          "status": "proposal_ready",
+          "action_set": ["cancel"]
+        }
+      },
+      "output_mode": "visible"
+    },
+    {
+      "case_id": "C16",
+      "source_kind": "user_message",
+      "event_kind": "chat",
+      "input_text": "明日奈，明天下午三点提醒我提交周报。",
+      "actor_role": "current_user",
+      "addressee_role": "character",
+      "experiencer_role": "character",
+      "reply_author_role": "current_user",
+      "typed_identity_fields": ["mentions", "addressed_to_global_user_ids"],
+      "mutable_identity_spans": [],
+      "immutable_external_spans": [],
+      "applicable_dimensions": ["goal_completion", "capability_ownership", "action_follow_through", "persistence_trace_integrity"],
+      "hard_gates": ["visible_dialog", "schedule_once", "schedule_time_exact", "no_unowned_delayed_side_effect"],
+      "state_seed": {},
+      "output_mode": "visible"
+    },
+    {
+      "case_id": "C17",
+      "source_kind": "user_message",
+      "event_kind": "chat",
+      "input_text": "明日奈，先准备好把 README 补丁应用到仓库，等我确认后再执行。",
+      "actor_role": "current_user",
+      "addressee_role": "character",
+      "experiencer_role": "character",
+      "reply_author_role": "current_user",
+      "typed_identity_fields": ["mentions", "addressed_to_global_user_ids"],
+      "mutable_identity_spans": [],
+      "immutable_external_spans": [],
+      "applicable_dimensions": ["capability_ownership", "action_follow_through", "dialog_fidelity", "persistence_trace_integrity"],
+      "hard_gates": ["visible_dialog", "approval_pending", "no_effect_before_approval"],
+      "state_seed": {},
+      "output_mode": "visible"
+    },
+    {
+      "case_id": "C18",
+      "source_kind": "user_message",
+      "event_kind": "chat",
+      "input_text": "明日奈，请记住我偏好短回复，明天下午三点提醒我交周报，再把三条要点整理成 Markdown 文件，完成后发给我。先告诉我你接到了哪些事。",
+      "actor_role": "current_user",
+      "addressee_role": "character",
+      "experiencer_role": "character",
+      "reply_author_role": "current_user",
+      "typed_identity_fields": ["mentions", "addressed_to_global_user_ids"],
+      "mutable_identity_spans": [],
+      "immutable_external_spans": [],
+      "applicable_dimensions": ["goal_completion", "capability_ownership", "action_follow_through", "continuity", "dialog_fidelity", "persistence_trace_integrity"],
+      "hard_gates": ["visible_dialog", "memory_lifecycle", "truthful_limitation", "no_false_promise", "no_unowned_delayed_side_effect"],
+      "state_seed": {},
+      "output_mode": "visible"
+    },
+    {
+      "case_id": "C19",
+      "source_kind": "tool_result",
+      "event_kind": "background_result",
+      "input_text": "# 周报\n- 完成 A\n- 风险 B",
+      "actor_role": "tool",
+      "addressee_role": "character",
+      "experiencer_role": "character",
+      "reply_author_role": "tool",
+      "typed_identity_fields": [],
+      "mutable_identity_spans": [],
+      "immutable_external_spans": [],
+      "applicable_dimensions": ["action_follow_through", "source_output_mode", "persistence_trace_integrity", "dialog_fidelity"],
+      "hard_gates": ["visible_dialog", "tool_result_delivery", "no_duplicate_run"],
+      "state_seed": {
+        "accepted_task": {
+          "task_id": "baseline-task-019",
+          "state": "awaiting_result",
+          "source_request": "C09"
+        }
+      },
+      "output_mode": "visible"
+    },
+    {
+      "case_id": "C20",
+      "source_kind": "user_message",
+      "event_kind": "chat",
+      "input_text": "明日奈，明天下午三点提醒我提交周报。",
+      "actor_role": "current_user",
+      "addressee_role": "character",
+      "experiencer_role": "character",
+      "reply_author_role": "current_user",
+      "typed_identity_fields": ["mentions", "addressed_to_global_user_ids"],
+      "mutable_identity_spans": [],
+      "immutable_external_spans": [],
+      "applicable_dimensions": ["goal_completion", "character_judgment", "dialog_fidelity", "persistence_trace_integrity"],
+      "hard_gates": ["visible_dialog", "truthful_limitation", "no_false_promise", "no_unowned_delayed_side_effect"],
+      "state_seed": {
+        "scheduler": {
+          "available": false
+        }
+      },
+      "output_mode": "visible"
+    }
+  ]
+}

@@ -517,7 +517,7 @@ def _case_state(case: MemoryWriteCase) -> dict[str, Any]:
         "channel_type": case.channel_type,
         "platform_message_id": f"message-{case.case_id}",
         "character_profile": {"name": "杏山千纱 (Kyōyama Kazusa)"},
-        "decontexualized_input": case.user_input,
+        "decontextualized_input": case.user_input,
         "final_dialog": (
             [case.assistant_final_dialog]
             if case.assistant_final_dialog

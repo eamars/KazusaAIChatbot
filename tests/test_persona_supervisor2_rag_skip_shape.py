@@ -50,7 +50,7 @@ def _clarification_state() -> dict:
         Global persona-state subset for the RAG routing node.
     """
     return {
-        "decontexualized_input": "这些是什么意思？",
+        "decontextualized_input": "这些是什么意思？",
         "referents": [
             {"phrase": "这些", "referent_role": "object", "status": "unresolved"},
         ],

@@ -53,6 +53,9 @@ _ASUNA_ALIAS = "明日奈"
 _KAZUSA_ALIAS = "千纱"
 _ASUNA_PROJECT_TOKEN = "AsunaAIChatbot"
 _KAZUSA_PROJECT_TOKEN = "KazusaAIChatbot"
+_KAZUSA_PROJECT_URL = (
+    "https://github.com/eamars/KazusaAIChatbot"
+)
 
 
 def _configure_utf8_streams() -> None:
@@ -385,9 +388,6 @@ def _source_identity_tokens(
         str(source_character["global_user_id"]),
         str(source_character["display_name"]),
         _KAZUSA_ALIAS,
-        _KAZUSA_PROJECT_TOKEN,
-        "Kazusa",
-        "kazusa",
     }
     tokens.update(
         str(value)
@@ -441,27 +441,6 @@ def _replace_text(
     return result
 
 
-def _replace_nested(
-    value: object,
-    replacements: list[tuple[str, str]],
-) -> object:
-    """Replace source identity strings through any nested JSON-shaped value."""
-
-    if isinstance(value, str):
-        return _replace_text(value, replacements)
-    if isinstance(value, list):
-        return [
-            _replace_nested(item, replacements)
-            for item in value
-        ]
-    if isinstance(value, Mapping):
-        return {
-            str(key): _replace_nested(item, replacements)
-            for key, item in value.items()
-        }
-    return value
-
-
 def _identity_replacements(
     *,
     profile_label: str,
@@ -506,10 +485,6 @@ def _identity_replacements(
     )
     for source_alias in source_character["aliases"]:
         add(source_alias, active_alias, "historical_character_alias")
-    if profile_label == "asuna":
-        add(_KAZUSA_PROJECT_TOKEN, _ASUNA_PROJECT_TOKEN, "project_identity")
-        add("Kazusa", "Asuna", "latin_character_identity")
-        add("kazusa", "asuna", "latin_character_identity")
     return replacements, mapping
 
 
@@ -550,10 +525,7 @@ def _project_source_message(
 ) -> dict[str, Any]:
     """Project one source row into the isolated active-profile replay."""
 
-    projected_value = _replace_nested(message, replacements)
-    if not isinstance(projected_value, dict):
-        raise AssertionError("projected source message is not an object")
-    projected = projected_value
+    projected = dict(message)
     role = str(message.get("role") or "")
     if role == "assistant":
         projected["platform_user_id"] = _REPLAY_BOT_PLATFORM_ID
@@ -578,6 +550,109 @@ def _project_source_message(
         )
         projected["platform_user_id"] = platform_user_id
         projected["global_user_id"] = global_user_id
+
+    source_character_global_id = str(source_character["global_user_id"])
+    source_character_platform_ids = {
+        str(value)
+        for value in source_character["platform_user_ids"]
+    }
+    source_global_id = str(message.get("global_user_id") or "")
+    source_platform_id = str(message.get("platform_user_id") or "")
+    body_text = message.get("body_text")
+    if isinstance(body_text, str):
+        projected["body_text"] = _replace_text(body_text, replacements)
+
+    addressed_ids = message.get("addressed_to_global_user_ids")
+    if isinstance(addressed_ids, list):
+        projected["addressed_to_global_user_ids"] = [
+            character_global_user_id
+            if str(value) == source_character_global_id
+            else current_global_id
+            if str(value) == source_current_global_id
+            else str(value)
+            for value in addressed_ids
+        ]
+
+    mentions = message.get("mentions")
+    if isinstance(mentions, list):
+        projected_mentions: list[dict[str, Any]] = []
+        for mention in mentions:
+            if not isinstance(mention, Mapping):
+                continue
+            projected_mention = dict(mention)
+            mention_global_id = str(
+                mention.get("global_user_id") or ""
+            )
+            mention_platform_id = str(
+                mention.get("platform_user_id") or ""
+            )
+            is_character_mention = (
+                mention_global_id == source_character_global_id
+                or mention_platform_id in source_character_platform_ids
+            )
+            if is_character_mention:
+                projected_mention["global_user_id"] = (
+                    character_global_user_id
+                )
+                projected_mention["platform_user_id"] = (
+                    _REPLAY_BOT_PLATFORM_ID
+                )
+                projected_mention["display_name"] = (
+                    _active_semantic_name(profile_name)
+                )
+            elif mention_global_id == source_current_global_id:
+                projected_mention["global_user_id"] = current_global_id
+                projected_mention["platform_user_id"] = (
+                    _REPLAY_CURRENT_USER_PLATFORM_ID
+                )
+            raw_text = projected_mention.get("raw_text")
+            if isinstance(raw_text, str):
+                mention_replacements = list(replacements)
+                if is_character_mention:
+                    mention_replacements.extend(
+                        (source_id, _REPLAY_BOT_PLATFORM_ID)
+                        for source_id in source_character_platform_ids
+                    )
+                projected_mention["raw_text"] = _replace_text(
+                    raw_text,
+                    mention_replacements,
+                )
+            projected_mentions.append(projected_mention)
+        projected["mentions"] = projected_mentions
+
+    reply_context = message.get("reply_context")
+    if isinstance(reply_context, Mapping):
+        projected_reply = dict(reply_context)
+        reply_id = str(reply_context.get("reply_to_message_id") or "")
+        if reply_id in message_id_map:
+            projected_reply["reply_to_message_id"] = message_id_map[reply_id]
+        reply_global_id = str(
+            reply_context.get("reply_to_global_user_id") or ""
+        )
+        reply_platform_id = str(
+            reply_context.get("reply_to_platform_user_id") or ""
+        )
+        is_character_reply = (
+            reply_global_id == source_character_global_id
+            or reply_platform_id in source_character_platform_ids
+        )
+        if is_character_reply:
+            projected_reply["reply_to_global_user_id"] = (
+                character_global_user_id
+            )
+            projected_reply["reply_to_platform_user_id"] = (
+                _REPLAY_BOT_PLATFORM_ID
+            )
+            projected_reply["reply_to_display_name"] = (
+                _active_semantic_name(profile_name)
+            )
+        excerpt = reply_context.get("reply_excerpt")
+        if isinstance(excerpt, str):
+            projected_reply["reply_excerpt"] = _replace_text(
+                excerpt,
+                replacements,
+            )
+        projected["reply_context"] = projected_reply
 
     if position is None:
         projected["platform_message_id"] = f"{case_id}-current"
@@ -604,20 +679,22 @@ def _project_source_message(
     original_raw_wire = str(
         message.get("raw_wire_text") or _message_body(message)
     )
-    if preserve_source_raw_wire:
-        projected["raw_wire_text"] = original_raw_wire
-    else:
-        raw_wire_replacements = [
-            *replacements,
-            *[
-                (source_id, target_id)
-                for source_id, target_id in message_id_map.items()
-            ],
-        ]
-        projected["raw_wire_text"] = _replace_text(
-            original_raw_wire,
-            raw_wire_replacements,
+    raw_wire_replacements = [
+        *replacements,
+        *[
+            (source_id, target_id)
+            for source_id, target_id in message_id_map.items()
+        ],
+    ]
+    if source_platform_id in source_character_platform_ids:
+        raw_wire_replacements.append(
+            (source_platform_id, _REPLAY_BOT_PLATFORM_ID)
         )
+    projected["raw_wire_text"] = (
+        original_raw_wire
+        if preserve_source_raw_wire
+        else _replace_text(original_raw_wire, raw_wire_replacements)
+    )
 
     return projected
 
@@ -901,36 +978,35 @@ async def _seed_context(
     return seeded_rows
 
 
-def _find_key(value: object, key: str) -> list[object]:
-    """Find all values for one semantic field in a captured trace payload."""
-
-    matches: list[object] = []
-    if isinstance(value, Mapping):
-        if key in value:
-            matches.append(value[key])
-        for nested in value.values():
-            matches.extend(_find_key(nested, key))
-    elif isinstance(value, list):
-        for nested in value:
-            matches.extend(_find_key(nested, key))
-    return matches
-
-
 def _extract_private_monologue(
-    trace_steps: list[dict[str, Any]],
+    response_payload: Mapping[str, Any],
 ) -> tuple[str, str]:
-    """Extract the cognition-owned private monologue from full trace rows."""
+    """Extract one monologue from the canonical response graph node."""
 
-    candidates: list[tuple[str, str]] = []
-    for step in trace_steps:
-        parsed_output = step.get("parsed_output")
-        for value in _find_key(parsed_output, "private_monologue"):
-            if isinstance(value, str) and value.strip():
-                candidates.append((str(step.get("stage_name", "")), value))
-    if not candidates:
+    cognition_graph = response_payload.get("cognition_graph")
+    if not isinstance(cognition_graph, Mapping):
         return "", ""
-    stage_name, monologue = candidates[-1]
-    return monologue, stage_name
+    nodes = cognition_graph.get("nodes")
+    if not isinstance(nodes, list):
+        return "", ""
+    reasoning_nodes = [
+        node
+        for node in nodes
+        if isinstance(node, Mapping)
+        and node.get("id") == "l2.reasoning"
+    ]
+    if len(reasoning_nodes) != 1:
+        return "", ""
+    detail = reasoning_nodes[0].get("detail")
+    if not isinstance(detail, Mapping):
+        return "", ""
+    monologue = detail.get("internal_monologue")
+    if not isinstance(monologue, str) or not monologue.strip():
+        return "", ""
+    return monologue, (
+        'response.cognition_graph.nodes[id="l2.reasoning"]'
+        ".detail.internal_monologue"
+    )
 
 
 def _extract_decontextualized_input(
@@ -947,7 +1023,7 @@ def _extract_decontextualized_input(
             continue
         for key in (
             "output",
-            "decontexualized_input",
+            "decontextualized_input",
             "decontextualized_input",
         ):
             value = parsed_output.get(key)
@@ -1094,6 +1170,9 @@ def _fixture_validity(
             failures.append("Kazusa body_text changed")
         if not effective_body:
             failures.append("effective body_text is empty")
+    failures.extend(
+        _immutable_external_text_failures(profile_case)
+    )
     envelope = request.message_envelope.model_dump(
         exclude_none=True,
         exclude_defaults=True,
@@ -1117,6 +1196,7 @@ def _fixture_validity(
             "source row is preserved as a separate evidence object",
             "effective request is constructed from the profile projection",
             "typed target fields are validated before the LLM call",
+            "external project name and URL spans are preserved exactly",
         ],
         "failures": failures,
     }
@@ -1137,6 +1217,9 @@ def _live_semantic_validity(
     """Validate model-visible identity and required behavioral evidence."""
 
     failures: list[str] = []
+    failures.extend(
+        _immutable_external_text_failures(profile_case)
+    )
     source_tokens = _source_identity_tokens(
         profile_case["source_character"]
     )
@@ -1205,6 +1288,53 @@ def _live_semantic_validity(
         "source_leaks": leaks,
         "relevance_dispositions": _relevance_dispositions(trace_steps),
     }
+
+
+def _immutable_external_text_failures(
+    profile_case: Mapping[str, Any],
+) -> list[str]:
+    """Ensure declared external project text survives identity projection."""
+
+    source_values = {
+        "input": profile_case.get("source_input"),
+        "context": profile_case.get("source_context"),
+    }
+    effective_values = {
+        "input": profile_case.get("effective_input"),
+        "context": profile_case.get("effective_context"),
+    }
+    failures: list[str] = []
+    for token in (_KAZUSA_PROJECT_TOKEN, _KAZUSA_PROJECT_URL):
+        source_count = sum(
+            _count_text_token(value, token)
+            for value in source_values.values()
+        )
+        if source_count == 0:
+            continue
+        effective_count = sum(
+            _count_text_token(value, token)
+            for value in effective_values.values()
+        )
+        if effective_count != source_count:
+            failures.append(
+                f"immutable external token changed: {token} "
+                f"source={source_count} effective={effective_count}"
+            )
+    return failures
+
+
+def _count_text_token(value: object, token: str) -> int:
+    """Count one external token in a JSON-shaped evidence value."""
+
+    if value is None:
+        return 0
+    serialized = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        default=str,
+    )
+    return serialized.count(token)
 
 
 def _write_artifact(
@@ -1355,13 +1485,13 @@ async def _run_case(
                 for step in trace_steps
                 if isinstance(step, Mapping)
             ]
+            response_payload = response.model_dump(mode="json")
             private_monologue, monologue_stage = _extract_private_monologue(
-                trace_steps
+                response_payload
             )
             decontextualized_input, decontextualized_field = (
                 _extract_decontextualized_input(trace_steps)
             )
-            response_payload = response.model_dump(mode="json")
             visible_dialog = response_payload.get("messages", [])
             response_surface = _response_surface_status(response_payload)
             semantic_validity = _live_semantic_validity(

@@ -37,6 +37,7 @@ from kazusa_ai_chatbot.nodes.linguistic_texture import (
     get_softener_density_description,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
+    build_runtime_capability_limits,
     _cognition_llm_config,
     _llm_interface,
 )
@@ -72,6 +73,7 @@ def build_text_surface_input_from_global_state(
         "schema_version": "text_surface_input.v2",
         "episode": _canonical_episode(state),
         "intention": dict(validated_output["intention"]),
+        "goal_resolution": validated_output["goal_resolution"],
         "supporting_bids": [
             _surface_bid_projection(bid)
             for bid in validated_output["supporting_bids"]
@@ -84,6 +86,9 @@ def build_text_surface_input_from_global_state(
         "interaction_style_context": interaction_style_context,
         "character_voice_context": _character_voice_context(state),
     }
+    runtime_limits = build_runtime_capability_limits(state)
+    if runtime_limits:
+        payload["runtime_capability_limits"] = runtime_limits
     admitted = validated_output.get("admitted_bid")
     if isinstance(admitted, Mapping):
         payload["primary_bid"] = _surface_bid_projection(admitted)
@@ -322,7 +327,7 @@ def _canonical_episode(state: Mapping[str, Any]) -> dict[str, Any]:
 def _action_results(state: Mapping[str, Any]) -> list[dict[str, Any]]:
     """Project already-permitted action results into the surface contract."""
 
-    rows = state.get("action_results")
+    rows = state.get("pre_surface_action_results")
     if not isinstance(rows, list):
         return []
     result = []

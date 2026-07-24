@@ -787,7 +787,7 @@ def _global_state_false_negative_payload() -> dict[str, Any]:
         'interaction_subtext': '这是一次称呼边界被讲清楚的互动。',
         'character_intent': 'PROVIDE',
         'logical_stance': 'CONFIRM',
-        'decontexualized_input': '用户要求以后不要被称呼为亲爱的。',
+        'decontextualized_input': '用户要求以后不要被称呼为亲爱的。',
         'final_dialog': ['我明白了，以后不会用这个称呼。'],
     }
 
@@ -801,7 +801,7 @@ def _global_state_false_positive_payload() -> dict[str, Any]:
         'interaction_subtext': '用户在解释自己状态，而不是评价角色。',
         'character_intent': 'PROVIDE',
         'logical_stance': 'CONFIRM',
-        'decontexualized_input': '用户说：我最近很累，所以回复会慢一点。',
+        'decontextualized_input': '用户说：我最近很累，所以回复会慢一点。',
         'final_dialog': ['没关系，先休息。'],
     }
 
@@ -818,7 +818,7 @@ def _global_state_short_descriptor_payload() -> dict[str, Any]:
         'interaction_subtext': '用户完成调试后认真道谢，互动带着轻微玩笑和信任。',
         'character_intent': 'ACKNOWLEDGE',
         'logical_stance': 'CONFIRM',
-        'decontexualized_input': (
+        'decontextualized_input': (
             '用户说：刚才那个修复思路真的救了我，辛苦你了。'
         ),
         'final_dialog': [

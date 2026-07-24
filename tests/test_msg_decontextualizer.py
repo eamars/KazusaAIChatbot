@@ -1,4 +1,4 @@
-"""Tests for persona_supervisor2_msg_decontexualizer.py — message decontextualization."""
+"""Tests for persona_supervisor2_msg_decontextualizer.py — message decontextualization."""
 
 from __future__ import annotations
 
@@ -14,10 +14,10 @@ from kazusa_ai_chatbot.cognition_episode import (
 )
 from kazusa_ai_chatbot.cognition_core_v2.contracts import CognitionExecutionError
 from kazusa_ai_chatbot.nodes import (
-    persona_supervisor2_msg_decontexualizer as decontextualizer_module,
+    persona_supervisor2_msg_decontextualizer as decontextualizer_module,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer import (
-    call_msg_decontexualizer,
+from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer import (
+    call_msg_decontextualizer,
     multimedia_descriptor_agent,
     select_media_for_turn,
 )
@@ -36,7 +36,7 @@ _BOT_PLATFORM_USER_ID = '3768713357'
 
 
 def _base_state():
-    """Minimal GlobalPersonaState for testing call_msg_decontexualizer."""
+    """Minimal GlobalPersonaState for testing call_msg_decontextualizer."""
     return {
         "user_input": "他在干啥？",
         "user_name": "TestUser",
@@ -197,11 +197,11 @@ async def test_decontextualizer_attaches_role_explicit_meaning_to_episode():
     })
 
     with patch(
-        "kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer."
-        "_msg_decontexualizer_llm",
+        "kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer."
+        "_msg_decontextualizer_llm",
     ) as mock_llm:
         mock_llm.ainvoke = AsyncMock(return_value=llm_response)
-        result = await call_msg_decontexualizer(state)
+        result = await call_msg_decontextualizer(state)
 
     dialog_percept = result["cognitive_episode"]["percepts"][0]
     assert dialog_percept["content"]["semantic_text"] == user_input
@@ -269,14 +269,14 @@ async def test_decontextualizer_leaves_accepted_task_episode_source_owned():
     })
 
     with patch(
-        "kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer."
-        "_msg_decontexualizer_llm",
+        "kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer."
+        "_msg_decontextualizer_llm",
     ) as mock_llm:
         mock_llm.ainvoke = AsyncMock(return_value=llm_response)
-        result = await call_msg_decontexualizer(state)
+        result = await call_msg_decontextualizer(state)
 
     assert "cognitive_episode" not in result
-    assert result["decontexualized_input"] == state["user_input"]
+    assert result["decontextualized_input"] == state["user_input"]
 
 
 def test_select_media_for_turn_keeps_opening_and_newest_unique_images() -> None:
@@ -555,12 +555,12 @@ async def test_multimedia_descriptor_updates_prompt_context_and_current_row(
     }]
     update_descriptions = AsyncMock(return_value=True)
     monkeypatch.setattr(
-        "kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer.update_conversation_attachment_descriptions",
+        "kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer.update_conversation_attachment_descriptions",
         update_descriptions,
     )
 
     response = _llm_response('{"description": "a desk with handwritten notes"}')
-    with patch("kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer._vision_descriptor_llm") as mock_llm:
+    with patch("kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer._vision_descriptor_llm") as mock_llm:
         mock_llm.ainvoke = AsyncMock(return_value=response)
         result = await multimedia_descriptor_agent(state)
 
@@ -599,11 +599,11 @@ async def test_multimedia_descriptor_continues_when_vision_llm_fails(
     }]
     update_descriptions = AsyncMock(return_value=True)
     monkeypatch.setattr(
-        "kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer.update_conversation_attachment_descriptions",
+        "kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer.update_conversation_attachment_descriptions",
         update_descriptions,
     )
 
-    with patch("kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer._vision_descriptor_llm") as mock_llm:
+    with patch("kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer._vision_descriptor_llm") as mock_llm:
         mock_llm.ainvoke = AsyncMock(side_effect=RuntimeError("vision down"))
         caplog.set_level(logging.WARNING)
         result = await multimedia_descriptor_agent(state)
@@ -619,17 +619,17 @@ async def test_multimedia_descriptor_continues_when_vision_llm_fails(
     assert "vision down" in caplog.text
 
 @pytest.mark.asyncio
-async def test_decontexualizer_filtered_history_recreates_group_referent_loss():
+async def test_decontextualizer_filtered_history_recreates_group_referent_loss():
     """Filtered history reproduces the logged empty-referents failure mode."""
 
     state = _qq_failure_state(_qq_failure_history()[:2])
     fake_llm = _HistoryAwareDecontextualizerLLM()
 
     with patch(
-        "kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer._msg_decontexualizer_llm",
+        "kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer._msg_decontextualizer_llm",
         new=fake_llm,
     ):
-        result = await call_msg_decontexualizer(state)
+        result = await call_msg_decontextualizer(state)
 
     history_lines = fake_llm.payloads[0]['chat_history']
     assert any('反正现在有AI' in line for line in history_lines)
@@ -647,29 +647,29 @@ async def test_decontexualizer_filtered_history_recreates_group_referent_loss():
         for line in fake_llm.payloads[0]['chat_history']
     )
     assert result == {
-        'decontexualized_input': _FAILURE_INPUT,
+        'decontextualized_input': _FAILURE_INPUT,
         'referents': [],
     }
 
 
 @pytest.mark.asyncio
-async def test_decontexualizer_full_history_surfaces_group_referent_evidence():
+async def test_decontextualizer_full_history_surfaces_group_referent_evidence():
     """Full recent history makes the third-party exchange visible to the stage."""
 
     state = _qq_failure_state(_qq_failure_history())
     fake_llm = _HistoryAwareDecontextualizerLLM()
 
     with patch(
-        "kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer._msg_decontexualizer_llm",
+        "kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer._msg_decontextualizer_llm",
         new=fake_llm,
     ):
-        result = await call_msg_decontexualizer(state)
+        result = await call_msg_decontextualizer(state)
 
     history_lines = fake_llm.payloads[0]['chat_history']
     assert any('把对方解决掉也是解决问题的方式之一哦' in line for line in history_lines)
     assert any('真的不喜欢' in line for line in history_lines)
     assert result == {
-        'decontexualized_input': _RESOLVED_FAILURE_INPUT,
+        'decontextualized_input': _RESOLVED_FAILURE_INPUT,
         'referents': [
             {
                 'phrase': '她',
@@ -686,7 +686,7 @@ async def test_decontexualizer_full_history_surfaces_group_referent_evidence():
 
 
 @pytest.mark.asyncio
-async def test_decontexualizer_returns_modified_input():
+async def test_decontextualizer_returns_modified_input():
     """When LLM says is_modified=true, output should be the decontextualized text."""
     llm_response = MagicMock()
     llm_response.content = json.dumps(
@@ -705,19 +705,19 @@ async def test_decontexualizer_returns_modified_input():
         ensure_ascii=False,
     )
 
-    with patch("kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer._msg_decontexualizer_llm") as mock_llm:
+    with patch("kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer._msg_decontextualizer_llm") as mock_llm:
         mock_llm.ainvoke = AsyncMock(return_value=llm_response)
 
-        result = await call_msg_decontexualizer(_base_state())
+        result = await call_msg_decontextualizer(_base_state())
 
-    assert result["decontexualized_input"] == "之前提到的那个人在干啥？"
+    assert result["decontextualized_input"] == "之前提到的那个人在干啥？"
     assert result["referents"] == [
         {"phrase": "他", "referent_role": "subject", "status": "resolved"}
     ]
 
 
 @pytest.mark.asyncio
-async def test_decontexualizer_returns_original_when_not_modified():
+async def test_decontextualizer_returns_original_when_not_modified():
     """When LLM says is_modified=false, output should be the original user_input."""
     llm_response = MagicMock()
     llm_response.content = json.dumps(
@@ -730,29 +730,29 @@ async def test_decontexualizer_returns_original_when_not_modified():
         ensure_ascii=False,
     )
 
-    with patch("kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer._msg_decontexualizer_llm") as mock_llm:
+    with patch("kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer._msg_decontextualizer_llm") as mock_llm:
         mock_llm.ainvoke = AsyncMock(return_value=llm_response)
 
-        result = await call_msg_decontexualizer(_base_state())
+        result = await call_msg_decontextualizer(_base_state())
 
-    assert result["decontexualized_input"] == "他在干啥？"
+    assert result["decontextualized_input"] == "他在干啥？"
     assert result["referents"] == []
 
 
 @pytest.mark.asyncio
-async def test_decontexualizer_fallback_on_llm_error():
+async def test_decontextualizer_fallback_on_llm_error():
     """If LLM call raises, output falls back to original user_input."""
-    with patch("kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer._msg_decontexualizer_llm") as mock_llm:
+    with patch("kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer._msg_decontextualizer_llm") as mock_llm:
         mock_llm.ainvoke = AsyncMock(side_effect=RuntimeError("LLM down"))
 
-        result = await call_msg_decontexualizer(_base_state())
+        result = await call_msg_decontextualizer(_base_state())
 
-    assert result["decontexualized_input"] == "他在干啥？"
+    assert result["decontextualized_input"] == "他在干啥？"
     assert result["referents"] == []
 
 
 @pytest.mark.asyncio
-async def test_decontexualizer_fallback_on_malformed_json():
+async def test_decontextualizer_fallback_on_malformed_json():
     """A malformed first candidate receives one bounded same-context repair."""
     repaired_response = _decontextualizer_response(
         output="他在干啥？",
@@ -761,20 +761,20 @@ async def test_decontexualizer_fallback_on_malformed_json():
         referents=[],
     )
 
-    with patch("kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer._msg_decontexualizer_llm") as mock_llm:
+    with patch("kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer._msg_decontextualizer_llm") as mock_llm:
         mock_llm.ainvoke = AsyncMock(
             side_effect=[_llm_response("not json at all"), repaired_response]
         )
 
-        result = await call_msg_decontexualizer(_base_state())
+        result = await call_msg_decontextualizer(_base_state())
 
-    assert result["decontexualized_input"] == "他在干啥？"
+    assert result["decontextualized_input"] == "他在干啥？"
     assert result["referents"] == []
     assert mock_llm.ainvoke.await_count == 2
 
 
 @pytest.mark.asyncio
-async def test_decontexualizer_forwards_reply_context_to_llm():
+async def test_decontextualizer_forwards_reply_context_to_llm():
     """Reply metadata should be forwarded so reply-only follow-ups can be resolved."""
     llm_response = MagicMock()
     llm_response.content = json.dumps(
@@ -818,10 +818,10 @@ async def test_decontexualizer_forwards_reply_context_to_llm():
         }
     )
 
-    with patch("kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer._msg_decontexualizer_llm") as mock_llm:
+    with patch("kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer._msg_decontextualizer_llm") as mock_llm:
         mock_llm.ainvoke = AsyncMock(return_value=llm_response)
 
-        result = await call_msg_decontexualizer(state)
+        result = await call_msg_decontextualizer(state)
 
     payload = mock_llm.ainvoke.await_args.args[0][1].content
     system_prompt = mock_llm.ainvoke.await_args.args[0][0].content
@@ -841,13 +841,13 @@ async def test_decontexualizer_forwards_reply_context_to_llm():
     assert "prompt_message_context.attachments" in system_prompt
     assert "`summary_status`" in system_prompt
     assert "reply_context.reply_excerpt" in system_prompt
-    assert result["decontexualized_input"] == "是的，我是想让 active character 具体评价我。"
+    assert result["decontextualized_input"] == "是的，我是想让 active character 具体评价我。"
 
 
-def test_decontexualizer_prompt_explains_reply_ellipsis_decision_owner() -> None:
+def test_decontextualizer_prompt_explains_reply_ellipsis_decision_owner() -> None:
     """Prompt should anchor omitted decision questions to reply-source ownership."""
 
-    system_prompt = decontextualizer_module._render_msg_decontexualizer_prompt(
+    system_prompt = decontextualizer_module._render_msg_decontextualizer_prompt(
         "Character",
     )
 
@@ -874,7 +874,7 @@ def test_decontexualizer_prompt_explains_reply_ellipsis_decision_owner() -> None
 
 
 @pytest.mark.asyncio
-async def test_decontexualizer_projects_group_name_into_channel_topic_text():
+async def test_decontextualizer_projects_group_name_into_channel_topic_text():
     """The LLM payload should receive scene text, not a new group-name field."""
 
     llm_response = MagicMock()
@@ -892,10 +892,10 @@ async def test_decontexualizer_projects_group_name_into_channel_topic_text():
     state['channel_name'] = '动画讨论群'
     state['channel_topic'] = '新番角色和剧情走向'
 
-    with patch("kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer._msg_decontexualizer_llm") as mock_llm:
+    with patch("kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer._msg_decontextualizer_llm") as mock_llm:
         mock_llm.ainvoke = AsyncMock(return_value=llm_response)
 
-        await call_msg_decontexualizer(state)
+        await call_msg_decontextualizer(state)
 
     payload = json.loads(mock_llm.ainvoke.await_args.args[0][1].content)
     assert payload['channel_topic'] == (
@@ -906,7 +906,7 @@ async def test_decontexualizer_projects_group_name_into_channel_topic_text():
 
 
 @pytest.mark.asyncio
-async def test_decontexualizer_forwards_scope_users_as_neutral_identity_table():
+async def test_decontextualizer_forwards_scope_users_as_neutral_identity_table():
     """Scoped users should reach the prompt as identity rows, not retry hints."""
     llm_response = MagicMock()
     llm_response.content = json.dumps(
@@ -941,10 +941,10 @@ async def test_decontexualizer_forwards_scope_users_as_neutral_identity_table():
     state = _base_state()
     state['scope_users'] = scope_users
 
-    with patch("kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer._msg_decontexualizer_llm") as mock_llm:
+    with patch("kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer._msg_decontextualizer_llm") as mock_llm:
         mock_llm.ainvoke = AsyncMock(return_value=llm_response)
 
-        result = await call_msg_decontexualizer(state)
+        result = await call_msg_decontextualizer(state)
 
     messages = mock_llm.ainvoke.await_args.args[0]
     system_prompt = messages[0].content
@@ -956,7 +956,7 @@ async def test_decontexualizer_forwards_scope_users_as_neutral_identity_table():
     assert '其他来源已经桥接到某个可见身份' in system_prompt
     assert '稳定显示名' in system_prompt
     assert result == {
-        'decontexualized_input': '@杏山千纱 还不报警抓蚝爹油吗？',
+        'decontextualized_input': '@杏山千纱 还不报警抓蚝爹油吗？',
         'referents': [
             {'phrase': '他', 'referent_role': 'object', 'status': 'resolved'},
         ],
@@ -964,7 +964,7 @@ async def test_decontexualizer_forwards_scope_users_as_neutral_identity_table():
 
 
 @pytest.mark.asyncio
-async def test_decontexualizer_parses_unresolved_reference_signal():
+async def test_decontextualizer_parses_unresolved_reference_signal():
     """New ambiguity fields should flow through when the LLM marks unresolved."""
     llm_response = MagicMock()
     llm_response.content = json.dumps(
@@ -988,13 +988,13 @@ async def test_decontexualizer_parses_unresolved_reference_signal():
     state["message_envelope"]["raw_wire_text"] = state["user_input"]
     state["prompt_message_context"]["body_text"] = state["user_input"]
 
-    with patch("kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer._msg_decontexualizer_llm") as mock_llm:
+    with patch("kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer._msg_decontextualizer_llm") as mock_llm:
         mock_llm.ainvoke = AsyncMock(return_value=llm_response)
 
-        result = await call_msg_decontexualizer(state)
+        result = await call_msg_decontextualizer(state)
 
     assert result == {
-        "decontexualized_input": "这些是什么意思？",
+        "decontextualized_input": "这些是什么意思？",
         "referents": [
             {"phrase": "这些", "referent_role": "object", "status": "unresolved"}
         ],
@@ -1002,21 +1002,21 @@ async def test_decontexualizer_parses_unresolved_reference_signal():
 
 
 @pytest.mark.asyncio
-async def test_decontexualizer_missing_new_fields_fails_closed(caplog):
+async def test_decontextualizer_missing_new_fields_fails_closed(caplog):
     """Missing contract fields are excluded after the bounded retry cap."""
     invalid_response = _llm_response(
         '{"output": "他在干啥？", "reasoning": "缺少 contract 字段", '
         '"is_modified": false}'
     )
 
-    with patch("kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer._msg_decontexualizer_llm") as mock_llm:
+    with patch("kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer._msg_decontextualizer_llm") as mock_llm:
         mock_llm.ainvoke = AsyncMock(
             side_effect=[invalid_response, invalid_response]
         )
         caplog.set_level(logging.WARNING)
 
         with pytest.raises(CognitionExecutionError) as error_info:
-            await call_msg_decontexualizer(_base_state())
+            await call_msg_decontextualizer(_base_state())
 
     assert error_info.value.error_code == (
         "message_decontextualizer_contract_exhausted"
@@ -1028,15 +1028,15 @@ async def test_decontexualizer_missing_new_fields_fails_closed(caplog):
 
 
 @pytest.mark.asyncio
-async def test_decontexualizer_llm_exception_warns_with_input_preview(caplog):
+async def test_decontextualizer_llm_exception_warns_with_input_preview(caplog):
     """LLM exception fallback should log at WARN with a user input preview."""
-    with patch("kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer._msg_decontexualizer_llm") as mock_llm:
+    with patch("kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer._msg_decontextualizer_llm") as mock_llm:
         mock_llm.ainvoke = AsyncMock(side_effect=RuntimeError("LLM down"))
         caplog.set_level(logging.WARNING)
 
-        result = await call_msg_decontexualizer(_base_state())
+        result = await call_msg_decontextualizer(_base_state())
 
-    assert result["decontexualized_input"] == "他在干啥？"
+    assert result["decontextualized_input"] == "他在干啥？"
     assert result["referents"] == []
     assert "Decontextualizer fallback after LLM exception" in caplog.text
     assert "LLM down" in caplog.text

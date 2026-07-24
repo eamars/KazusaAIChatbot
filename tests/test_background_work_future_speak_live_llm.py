@@ -741,7 +741,7 @@ def _future_speak_l2d_state(run_id: str) -> dict[str, Any]:
         "indirect_speech_context": "",
         "channel_topic": "private reminder request",
         "referents": [],
-        "decontexualized_input": (
+        "decontextualized_input": (
             "The user asks Kazusa to remind them tomorrow at 09:00 to drink "
             "water."
         ),

@@ -174,7 +174,7 @@ def _global_state() -> dict:
                 }
             },
         },
-        "decontexualized_input": "Please remember this.",
+        "decontextualized_input": "Please remember this.",
         "chat_history_recent": [],
         "cognitive_episode": _text_chat_episode(),
     }

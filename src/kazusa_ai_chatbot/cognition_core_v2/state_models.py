@@ -124,6 +124,8 @@ EVIDENCE_SOURCE_KINDS = (
     "promoted_memory",
     "promoted_reflection",
     "media_observation",
+    "conversation_evidence",
+    "recall_evidence",
 )
 
 COMMON_ENTITY_KEYS = {

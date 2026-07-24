@@ -11,6 +11,9 @@ from langchain_core.messages import HumanMessage
 from kazusa_ai_chatbot.cognition_core_v2.action_authorization import (
     invoke_semantic_authorizer,
 )
+from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
+    GOAL_COGNITION_PROMPT,
+)
 from kazusa_ai_chatbot.cognition_core_v2.action_selection import (
     ACTION_PLANNING_PROMPT,
     _validate_action_plan_decision,
@@ -117,7 +120,7 @@ def _planner_response(
 
 @pytest.mark.asyncio
 async def test_speech_composes_with_three_private_actions() -> None:
-    """Three admitted actions take the action route without truncation."""
+    """Visible speech retains three admitted private actions."""
 
     captured: dict[str, object] = {}
     response = _planner_response(
@@ -186,7 +189,7 @@ async def test_speech_composes_with_three_private_actions() -> None:
         ),
     )
 
-    assert result["intention"]["route"] == "action"
+    assert result["intention"]["route"] == "speech"
     assert [row["action_kind"] for row in result["action_requests"]] == [
         "background_work_request",
         "trigger_future_cognition",
@@ -266,6 +269,148 @@ def test_action_planning_prompt_separates_missing_user_input() -> None:
     assert "requires_user_input" in ACTION_PLANNING_PROMPT
     assert "resolver_requests=[]" in ACTION_PLANNING_PROMPT
     assert "requires_required_evidence" in ACTION_PLANNING_PROMPT
+    assert "scheduled_tick" in ACTION_PLANNING_PROMPT
+    assert "定时输出合同不允许 resolver_requests" in ACTION_PLANNING_PROMPT
+    assert "绑定既有 coding_run_ref" in ACTION_PLANNING_PROMPT
+    assert "queue-only" in ACTION_PLANNING_PROMPT
+
+
+def test_action_planning_prompt_binds_goal_progress_shape() -> None:
+    """The planner must not invent a partial invalid goal-progress object."""
+
+    assert "resolver_goal_progress 为 null" in ACTION_PLANNING_PROMPT
+    assert "deliverables" in ACTION_PLANNING_PROMPT
+    assert "description" in ACTION_PLANNING_PROMPT
+    assert "status" in ACTION_PLANNING_PROMPT
+    assert "note" in ACTION_PLANNING_PROMPT
+    assert "evidence_dependencies" in ACTION_PLANNING_PROMPT
+    assert "assumptions_or_inferences" in ACTION_PLANNING_PROMPT
+    assert "字符串数组" in ACTION_PLANNING_PROMPT
+    assert "所有新生成的语义内容使用简体中文" in ACTION_PLANNING_PROMPT
+
+
+def test_goal_cognition_prompt_binds_runtime_owner_limits() -> None:
+    """Cognition monologue must not promise an unavailable external effect."""
+
+    assert "runtime_capability_limits" in GOAL_COGNITION_PROMPT
+    assert "能力边界优先" in GOAL_COGNITION_PROMPT
+    assert "当前回合确认收到请求并说明真实限制" in GOAL_COGNITION_PROMPT
+    assert "我会记得" in GOAL_COGNITION_PROMPT
+
+
+def test_action_planning_repair_message_repeats_nested_contract() -> None:
+    """A replacement prompt must expose the nested fields that failed."""
+
+    from kazusa_ai_chatbot.cognition_core_v2.action_selection import (
+        _action_planning_repair_message,
+    )
+
+    payload = json.loads(
+        _action_planning_repair_message(
+            response_text='{"resolver_goal_progress": {}}',
+            contract_error="description: expected non-empty string",
+        ).content,
+    )
+
+    assert payload["contract_requirements"]["resolver_goal_progress"]
+    assert payload["contract_requirements"]["deliverable_fields"] == [
+        "description",
+        "status",
+        "note",
+    ]
+    assert payload["contract_requirements"]["scalar_list_fields"] == [
+        "missing_user_inputs",
+        "evidence_dependencies",
+        "attempted_paths",
+        "source_backed_facts",
+        "assumptions_or_inferences",
+        "blockers",
+        "final_response_requirements",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_action_planner_receives_runtime_owner_limits() -> None:
+    """The action owner must see trusted unavailable capability boundaries."""
+
+    captured: dict[str, object] = {}
+
+    class _LLM:
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config: object,
+        ) -> SimpleNamespace:
+            del config
+            captured.update(json.loads(str(messages[-1].content)))
+            return SimpleNamespace(content=json.dumps(_planner_response()))
+
+    await plan_actions(
+        primary_bid=_bid("ordinary_response"),
+        supporting_bids=[],
+        episode={
+            "episode_id": "episode-runtime-limit",
+            "trigger_source": "user_message",
+            "output_mode": "visible_reply",
+        },
+        evidence=[],
+        available_actions=[],
+        available_resolvers=[],
+        resolver_context="resolver_status=idle",
+        runtime_capability_limits=[
+            "当前调度能力不可用，不能把未来提醒说成已经安排。",
+        ],
+        services=SimpleNamespace(
+            llm=_LLM(),
+            action_selection_config=object(),
+        ),
+    )
+
+    assert captured["runtime_capability_limits"] == [
+        "当前调度能力不可用，不能把未来提醒说成已经安排。",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_scheduled_planning_prompt_carries_typed_output_mode() -> None:
+    """A scheduled planner receives the typed source and output mode."""
+
+    captured: dict[str, object] = {}
+
+    class _LLM:
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config: object,
+        ) -> SimpleNamespace:
+            del config
+            captured.update(json.loads(str(messages[-1].content)))
+            return SimpleNamespace(content=json.dumps(_planner_response()))
+
+    await plan_actions(
+        primary_bid=_bid("scheduled_reminder"),
+        supporting_bids=[],
+        episode={
+            "episode_id": "episode-scheduled",
+            "trigger_source": "scheduled_tick",
+            "output_mode": "scheduled_action_request",
+        },
+        evidence=[],
+        available_actions=[],
+        available_resolvers=[],
+        resolver_context="resolver_status=idle",
+        services=SimpleNamespace(
+            llm=_LLM(),
+            action_selection_config=object(),
+        ),
+    )
+
+    assert captured["episode"] == {
+        "trigger_source": "scheduled_tick",
+        "output_mode": "scheduled_action_request",
+    }
 
 
 @pytest.mark.asyncio
@@ -359,6 +504,150 @@ async def test_action_plan_contains_one_failed_replacement() -> None:
     assert result["intention"]["route"] == "speech"
     assert result["action_requests"] == []
     assert result["resolver_requests"] == []
+
+
+@pytest.mark.asyncio
+async def test_denied_required_action_closes_goal_without_progress() -> None:
+    """An unavailable owner cannot leave required evidence progress behind."""
+
+    planner_response = _planner_response(
+        actions=[{
+            "bid_handle": "b1",
+            "action_handle": "a1",
+            "decision": "start",
+            "semantic_goal": "读取指定仓库并返回代码分析",
+            "reason": "当前用户明确要求读取指定仓库",
+        }],
+        goal_resolution="requires_required_evidence",
+    )
+    planner_response["resolver_goal_progress"] = _goal_progress()
+    responses = [
+        planner_response,
+        {"decisions": {"c1": False}},
+    ]
+
+    class _LLM:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config: object,
+        ) -> SimpleNamespace:
+            del messages, config
+            response = responses[self.calls]
+            self.calls += 1
+            return SimpleNamespace(content=json.dumps(response))
+
+    llm = _LLM()
+    result = await plan_actions(
+        primary_bid=_bid("ordinary_response"),
+        supporting_bids=[],
+        episode={
+            "episode_id": "episode-denied-required-action",
+            "trigger_source": "user_message",
+            "output_mode": "visible_reply",
+        },
+        evidence=[{
+            "evidence_handle": "e1",
+            "evidence_ref": {
+                "source_kind": "episode",
+                "source_id": "episode-denied-required-action",
+                "occurred_at": "2026-07-17T00:00:00Z",
+                "semantic_summary": "当前用户要求读取指定仓库",
+            },
+            "semantic_text": "当前用户要求读取指定仓库",
+            "visible_to": ["q:event_agency"],
+        }],
+        available_actions=[_action("accepted_coding_task_request")],
+        available_resolvers=[],
+        resolver_context="resolver_status=idle",
+        runtime_capability_limits=[
+            "当前后台任务能力不可用，不能把延迟任务说成已经创建、安排或完成。",
+        ],
+        services=SimpleNamespace(
+            llm=llm,
+            action_selection_config=object(),
+        ),
+    )
+
+    assert llm.calls == 2
+    assert result["goal_resolution"] == "blocked"
+    assert result["action_requests"] == []
+    assert result["resolver_requests"] == []
+    assert result["resolver_goal_progress"] is None
+
+
+@pytest.mark.asyncio
+async def test_denied_required_resolver_closes_goal_without_progress() -> None:
+    """An unavailable resolver owner cannot leave required progress behind."""
+
+    planner_response = _planner_response(
+        resolvers=[{
+            "bid_handle": "b1",
+            "resolver_handle": "r1",
+            "semantic_goal": "分析指定仓库的源代码结构",
+            "reason": "当前用户要求读取指定仓库",
+        }],
+        goal_resolution="requires_required_evidence",
+    )
+    planner_response["resolver_goal_progress"] = _goal_progress()
+    responses = [
+        planner_response,
+        {"decisions": {"c1": False}},
+    ]
+
+    class _LLM:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config: object,
+        ) -> SimpleNamespace:
+            del messages, config
+            response = responses[self.calls]
+            self.calls += 1
+            return SimpleNamespace(content=json.dumps(response))
+
+    llm = _LLM()
+    result = await plan_actions(
+        primary_bid=_bid("ordinary_response"),
+        supporting_bids=[],
+        episode={
+            "episode_id": "episode-denied-required-resolver",
+            "trigger_source": "user_message",
+            "output_mode": "visible_reply",
+        },
+        evidence=[{
+            "evidence_handle": "e1",
+            "evidence_ref": {
+                "source_kind": "episode",
+                "source_id": "episode-denied-required-resolver",
+                "occurred_at": "2026-07-17T00:00:00Z",
+                "semantic_summary": "当前用户要求读取指定仓库",
+            },
+            "semantic_text": "当前用户要求读取指定仓库",
+            "visible_to": ["q:event_agency"],
+        }],
+        available_actions=[],
+        available_resolvers=[_resolver("public_answer_research")],
+        resolver_context="resolver_status=idle",
+        services=SimpleNamespace(
+            llm=llm,
+            action_selection_config=object(),
+        ),
+    )
+
+    assert llm.calls == 2
+    assert result["goal_resolution"] == "blocked"
+    assert result["action_requests"] == []
+    assert result["resolver_requests"] == []
+    assert result["resolver_goal_progress"] is None
 
 
 @pytest.mark.asyncio
@@ -521,33 +810,32 @@ def test_action_plan_merges_semantic_goal_progress_delta() -> None:
     assert progress["evidence_dependencies"] == ["character memory"]
 
 
-def test_action_plan_drops_invalid_registry_decision_format() -> None:
-    """A scheduled action drops prose appended to its typed decision."""
+def test_action_plan_rejects_invalid_registry_decision_format() -> None:
+    """A scheduled action invalidates the complete candidate on bad syntax."""
 
     action = _action("future_speak")
     action.update({
         "decision_mode": "required_text",
         "decision_pattern": r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}",
     })
-    decision = _validate_action_plan_decision(
-        _planner_response(
-            actions=[{
-                "bid_handle": "b1",
-                "action_handle": "a1",
-                "decision": "2026-07-15 08:00 | remind me",
-                "semantic_goal": "schedule the accepted reminder",
-                "reason": "the user requested a future reminder",
-            }],
-        ),
-        bid_handles={"b1": _bid("ordinary_response")},
-        action_handles={"a1": action},
-        resolver_handles={},
-    )
+    with pytest.raises(ValueError, match="invalid action request row"):
+        _validate_action_plan_decision(
+            _planner_response(
+                actions=[{
+                    "bid_handle": "b1",
+                    "action_handle": "a1",
+                    "decision": "2026-07-15 08:00 | remind me",
+                    "semantic_goal": "schedule the accepted reminder",
+                    "reason": "the user requested a future reminder",
+                }],
+            ),
+            bid_handles={"b1": _bid("ordinary_response")},
+            action_handles={"a1": action},
+            resolver_handles={},
+        )
 
-    assert decision["action_requests"] == []
 
-
-def test_closed_action_with_unknown_decision_is_dropped() -> None:
+def test_closed_action_with_unknown_decision_invalidates_candidate() -> None:
     """A closed action cannot escape its registry decision vocabulary."""
 
     action = _action("trigger_future_cognition")
@@ -555,22 +843,47 @@ def test_closed_action_with_unknown_decision_is_dropped() -> None:
     action["allowed_decisions"] = ["schedule"]
     action["default_decision"] = "schedule"
 
-    decision = _validate_action_plan_decision(
-        _planner_response(
-            actions=[{
-                "bid_handle": "b1",
-                "action_handle": "a1",
-                "decision": "think about the response later",
-                "semantic_goal": "continue one grounded private task",
-                "reason": "the admitted motive requires later cognition",
-            }],
-        ),
-        bid_handles={"b1": _bid("ordinary_response")},
-        action_handles={"a1": action},
-        resolver_handles={},
-    )
+    with pytest.raises(ValueError, match="invalid action request row"):
+        _validate_action_plan_decision(
+            _planner_response(
+                actions=[{
+                    "bid_handle": "b1",
+                    "action_handle": "a1",
+                    "decision": "think about the response later",
+                    "semantic_goal": "continue one grounded private task",
+                    "reason": "the admitted motive requires later cognition",
+                }],
+            ),
+            bid_handles={"b1": _bid("ordinary_response")},
+            action_handles={"a1": action},
+            resolver_handles={},
+        )
 
-    assert decision["action_requests"] == []
+
+def test_invalid_resolver_row_invalidates_valid_sibling() -> None:
+    """A malformed resolver row cannot silently erase a semantic failure."""
+
+    response = _planner_response(resolvers=[
+        {
+            "bid_handle": "b1",
+            "resolver_handle": "r1",
+            "semantic_goal": "recover grounded context",
+            "reason": "the answer depends on missing context",
+        },
+        {
+            "bid_handle": "b1",
+            "resolver_handle": "r1",
+            "semantic_goal": "recover grounded context",
+        },
+    ])
+
+    with pytest.raises(ValueError, match="invalid resolver request row"):
+        _validate_action_plan_decision(
+            response,
+            bid_handles={"b1": _bid("ordinary_response")},
+            action_handles={},
+            resolver_handles={"r1": _resolver("local_context_recall")},
+        )
 
 
 def test_action_plan_strips_extra_resolver_fields() -> None:

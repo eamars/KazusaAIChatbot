@@ -102,7 +102,7 @@ def _self_cognition_global_state() -> dict:
                 }
             }
         },
-        "decontexualized_input": "Internal thought about a missed promise.",
+        "decontextualized_input": "Internal thought about a missed promise.",
         "chat_history_recent": [],
         "cognitive_episode": _self_cognition_episode(),
     }

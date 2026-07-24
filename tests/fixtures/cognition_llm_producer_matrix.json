@@ -1,0 +1,177 @@
+{
+  "schema_version": "cognition_llm_producer_matrix.v1",
+  "call_site_rules": [
+    {
+      "pattern": "src/kazusa_ai_chatbot/cognition_core_v2/**",
+      "owner": "cognition_v2",
+      "route": "cognition_core_v2",
+      "parser": "parse_llm_json_output",
+      "attempt_cap": 2,
+      "fault_selector": "producer_v2_contract"
+    },
+    {
+      "pattern": "src/kazusa_ai_chatbot/cognition_chain_core/**",
+      "owner": "legacy_cognition_baseline",
+      "route": "legacy_cognition_chain",
+      "parser": "legacy_stage_contract",
+      "attempt_cap": 1,
+      "fault_selector": "producer_legacy_contract"
+    },
+    {
+      "pattern": "src/kazusa_ai_chatbot/relevance/**",
+      "owner": "relevance",
+      "route": "relevance",
+      "parser": "parse_llm_json_output",
+      "attempt_cap": 2,
+      "fault_selector": "producer_relevance_contract"
+    },
+    {
+      "pattern": "src/kazusa_ai_chatbot/nodes/**",
+      "owner": "cognition_surface",
+      "route": "persona_graph",
+      "parser": "parse_llm_json_output",
+      "attempt_cap": 2,
+      "fault_selector": "producer_node_contract"
+    },
+    {
+      "pattern": "src/kazusa_ai_chatbot/rag/**",
+      "owner": "rag",
+      "route": "rag",
+      "parser": "parse_llm_json_output",
+      "attempt_cap": 2,
+      "fault_selector": "producer_rag_contract"
+    },
+    {
+      "pattern": "src/kazusa_ai_chatbot/local_context_resolver/**",
+      "owner": "resolver",
+      "route": "local_context_resolver",
+      "parser": "parse_llm_json_output",
+      "attempt_cap": 2,
+      "fault_selector": "producer_resolver_contract"
+    },
+    {
+      "pattern": "src/kazusa_ai_chatbot/complex_task_resolver/**",
+      "owner": "resolver",
+      "route": "complex_task_resolver",
+      "parser": "parse_llm_json_output",
+      "attempt_cap": 2,
+      "fault_selector": "producer_resolver_contract"
+    },
+    {
+      "pattern": "src/kazusa_ai_chatbot/coding_agent/**",
+      "owner": "coding_agent",
+      "route": "coding_agent",
+      "parser": "parse_llm_json_output",
+      "attempt_cap": 2,
+      "fault_selector": "producer_coding_contract"
+    },
+    {
+      "pattern": "src/kazusa_ai_chatbot/background_work/**",
+      "owner": "background_work",
+      "route": "background_work",
+      "parser": "parse_llm_json_output",
+      "attempt_cap": 2,
+      "fault_selector": "producer_background_contract"
+    },
+    {
+      "pattern": "src/kazusa_ai_chatbot/consolidation/**",
+      "owner": "consolidation",
+      "route": "consolidation",
+      "parser": "parse_llm_json_output",
+      "attempt_cap": 2,
+      "fault_selector": "producer_consolidation_contract"
+    },
+    {
+      "pattern": "src/kazusa_ai_chatbot/reflection_cycle/**",
+      "owner": "reflection",
+      "route": "reflection",
+      "parser": "parse_llm_json_output",
+      "attempt_cap": 2,
+      "fault_selector": "producer_reflection_contract"
+    },
+    {
+      "pattern": "src/kazusa_ai_chatbot/self_cognition/**",
+      "owner": "self_cognition",
+      "route": "self_cognition",
+      "parser": "parse_llm_json_output",
+      "attempt_cap": 2,
+      "fault_selector": "producer_self_cognition_contract"
+    },
+    {
+      "pattern": "src/kazusa_ai_chatbot/conversation_progress/**",
+      "owner": "conversation_progress",
+      "route": "conversation_progress",
+      "parser": "parse_llm_json_output",
+      "attempt_cap": 2,
+      "fault_selector": "producer_progress_contract"
+    },
+    {
+      "pattern": "src/kazusa_ai_chatbot/internal_monologue_residue/**",
+      "owner": "monologue_residue",
+      "route": "internal_monologue_residue",
+      "parser": "parse_llm_json_output",
+      "attempt_cap": 2,
+      "fault_selector": "producer_residue_contract"
+    },
+    {
+      "pattern": "src/kazusa_ai_chatbot/global_character_growth/**",
+      "owner": "character_growth",
+      "route": "character_growth",
+      "parser": "parse_llm_json_output",
+      "attempt_cap": 2,
+      "fault_selector": "producer_growth_contract"
+    },
+    {
+      "pattern": "src/kazusa_ai_chatbot/media_inspection/**",
+      "owner": "media_inspection",
+      "route": "media_inspection",
+      "parser": "parse_llm_json_output",
+      "attempt_cap": 2,
+      "fault_selector": "producer_media_contract"
+    },
+    {
+      "pattern": "src/kazusa_ai_chatbot/utils.py",
+      "owner": "json_repair",
+      "route": "json_repair",
+      "parser": "parse_llm_json_output",
+      "attempt_cap": 1,
+      "fault_selector": "producer_json_repair_contract"
+    },
+    {
+      "pattern": "src/kazusa_ai_chatbot/llm_interface/**",
+      "owner": "llm_transport",
+      "route": "llm_transport",
+      "parser": "transport_boundary",
+      "attempt_cap": 1,
+      "fault_selector": "producer_transport_contract"
+    },
+    {
+      "pattern": "src/kazusa_ai_chatbot/service.py",
+      "owner": "graph_orchestration",
+      "route": "graph_orchestration",
+      "parser": "graph_state_contract",
+      "attempt_cap": 1,
+      "fault_selector": "producer_graph_contract"
+    }
+  ],
+  "required_semantic_routes": [
+    "relevance",
+    "decontextualizer_media",
+    "rag",
+    "semantic_appraisal",
+    "goal_generation",
+    "goal_selection",
+    "workspace_collapse",
+    "action_authorization",
+    "resolver_authorization",
+    "dialog_surface",
+    "dialog_generator",
+    "memory_lifecycle",
+    "conversation_progress",
+    "monologue_residue",
+    "consolidation",
+    "reflection",
+    "self_cognition",
+    "coding_agent"
+  ]
+}

@@ -800,7 +800,7 @@ def _base_layer_state(
         "chat_history_recent": [],
         "indirect_speech_context": "",
         "channel_topic": "image quality evaluation",
-        "decontexualized_input": user_message,
+        "decontextualized_input": user_message,
         "rag_result": _rag_result(),
         "cognitive_episode": episode,
         "referents": [],
@@ -964,7 +964,7 @@ async def _run_direct_image_layer_copy(
         "vibe_check": character_profile["vibe_check"],
         "user_memory_context": user_memory_context,
         "semantic_relationship_projection": state["user_profile"]["semantic_relationship_projection"],
-        "decontextualized_input": state["decontexualized_input"],
+        "decontextualized_input": state["decontextualized_input"],
         "active_commitments": user_memory_context["active_commitments"],
         "rag_result": _l2_cognition_rag_result(state["rag_result"]),
         "promoted_reflection_context": {},
@@ -996,7 +996,7 @@ async def _run_direct_image_layer_copy(
         stage="l3_content_plan_agent",
     )
     anchor_payload = {
-        "decontexualized_input": state["decontexualized_input"],
+        "decontextualized_input": state["decontextualized_input"],
         "referents": normalize_referents(state["referents"]),
         "rag_result": _l3_cognition_rag_result(state["rag_result"]),
         "internal_monologue": state["internal_monologue"],
