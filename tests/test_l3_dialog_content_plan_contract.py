@@ -96,7 +96,7 @@ def test_surface_output_validation_requires_exact_v2_fields() -> None:
 
 @pytest.mark.asyncio
 async def test_surface_handler_returns_native_output(monkeypatch) -> None:
-    """L3 returns the V2 surface directly for dialog consumption."""
+    """L3 retains its canonical input with both terminal surface outputs."""
 
     expected = {
         "schema_version": "text_surface_output.v2",
@@ -155,8 +155,9 @@ async def test_surface_handler_returns_native_output(monkeypatch) -> None:
 
     result = await surface_module.call_l3_text_surface_handler(_state())
 
-    assert result == {
-        "text_surface_output_v2": expected,
-        "visual_surface_output_v2": expected_visual,
-    }
+    assert result["text_surface_output_v2"] == expected
+    assert result["visual_surface_output_v2"] == expected_visual
+    assert result["text_surface_input_v2"]["schema_version"] == (
+        "text_surface_input.v2"
+    )
     assert "action_directives" not in result

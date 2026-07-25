@@ -79,7 +79,9 @@ stage_0_msg_decontextualizer
          -> build TextSurfaceInputV2
          -> run three bounded text stages
          -> run one terminal visual stage as a sibling when enabled
-         -> dialog_agent receives only the text output
+         -> retain the validated text input and output for dialog
+         -> dialog_agent renders the text output
+         -> one L3 semantic replacement and second render after hard rejection
          -> text surface, private image evidence, and action-result trace
        non-speech
          -> private terminal handling
@@ -96,6 +98,14 @@ or choice is required and who owns it, plus embedded actor and target roles.
 Deterministic code validates exact shape, enums, booleans, and bounds, then
 attaches the model-owned values unchanged to existing dialog-percept metadata.
 The raw percept content remains available beside this projection.
+
+An invalid decontextualizer candidate receives one regeneration in the message
+sequence `system -> human input -> rejected assistant candidate -> human
+correction`. The correction contains the exact nested field validation error.
+A byte-identical second invalid candidate raises
+`message_decontextualizer_unchanged_candidate_exhausted`; a different invalid
+replacement raises `message_decontextualizer_contract_exhausted`. Both remain
+pre-state-commit failures.
 
 The route decision requires a validated V2 cognition output. The presence of
 an action specification cannot create a text response and cannot substitute
@@ -209,8 +219,8 @@ interaction without supplying staging forms; dialog carries emotion,
 personality, and interaction posture through wording, sentence shape, and
 cadence. Action narration remains an ungated model variation: the prompts do
 not request it, and generated instances are neither rejected nor rewritten.
-Two bounded
-hard-error checks run in parallel on the existing dialog-model route. Semantic
+Three bounded hard-error checks run in parallel on the existing dialog-model
+route. Semantic
 fidelity receives only current percepts, the candidate role frame, and
 candidate dialog; it checks internal contradiction, direct current-input
 conflict, and actor/target/subject reversal. Surface integrity receives only
@@ -218,21 +228,55 @@ permitted action results and candidate dialog; it checks false claims of
 character-brain action execution. Generated content, addressee, intent, and
 style proposals cannot outvote typed source roles. Source percepts and
 generated character speech use separate typed pronoun frames before
-actor/action/target comparison. When present, semantic fidelity uses upstream
-`role_explicit_content` for nested role direction and `response_operation` for
-response, selection, and embedded-action ownership while retaining raw
-content as the current-turn record. Deterministic code merges the two verdict
-shapes without rewriting dialog semantics. Each owner returns at most four
-issues and the duplicate-free merged result returns at most eight. Neither
-check treats novelty or
-personality strength as failure. A negative merged verdict supplies the same
-grounding to the single allowed repair.
+actor/action/target comparison. Semantic fidelity owns non-selection role
+direction. The selection-only role verifier receives the five authoritative
+`response_operation` fields and owns selection transfer plus embedded
+actor/target reversal. Those selection-owned fields are removed from the
+semantic-fidelity projection while the raw current-input meaning remains.
+Deterministic code merges the three verdicts without rewriting dialog
+semantics. Each owner returns at most four issues and the duplicate-free
+merged result returns at most eight. None of the checks treats novelty or
+personality strength as failure. Refusal, negotiation, and conditions chosen
+by the character remain valid responses unless typed actor, target,
+response-owner, or selection-owner direction is reversed.
+
+Each semantic-fidelity, role-direction, and surface-integrity producer gets
+two structural attempts. An exact-shape failure retains the original system
+and human semantic packet, places the bounded rejected verdict in an assistant
+message, and supplies the exact contract error in one human correction. This
+does not re-render dialog or add another semantic owner. Protected traces
+retain the rejected and accepted attempts. Exhaustion exposes the owning
+`dialog.*` stage through its stage-specific `*_contract_exhausted` error with
+attempt count two and checkpoint `post_cognition_commit`.
+
+The semantic-fidelity producer returns exact `aligned` and `hard_errors`
+fields. This avoids the local model's demonstrated `issues`/`Issues` token
+collision. Deterministic validation accepts no alias and normalizes the
+validated `hard_errors` list to the internal merged `issues` vocabulary. The
+role-direction and surface-integrity producers retain their own exact
+`aligned` and `issues` contracts.
+
+A negative merged verdict returns the retained `TextSurfaceInputV2`, rejected
+surface semantics, and bounded verifier issues to the L3 owner. L3 replaces
+only content, requirements, visible boundaries, and addressee semantics while
+preserving validated style, selected intent, permitted action results, and
+runtime limits. Dialog then renders and verifies one second candidate. A
+second rejection raises `dialog_compliance_contract_exhausted` with stage
+`dialog_compliance`, attempt count two, and safe checkpoint
+`post_cognition_commit`.
 
 Before this dialog boundary, a typed character-owned required selection also
 activates one focused goal-level check. It prevents private continuity or a
 general submissive posture from delegating the current character's required
-choice to the user. A rejected goal is regenerated from clean typed/current
-context and rechecked; turns without the structural flag add no call.
+choice to the user. Dialog's corresponding focused check reads the canonical
+nested `percept.content.response_operation` and owns only explicit
+selection-owner transfer and actor/target reversal. Semantic completeness,
+brevity, and specificity remain with semantic fidelity and the L3 surface
+owner. A character-owned desire, request, or imperative can name the selected
+action, and speaking or sending content counts as an action when the typed
+operation requires it. A rejected goal is regenerated from clean
+typed/current context and rechecked; turns without the structural flag add no
+call.
 
 Dialog does not receive raw V2 mutable state, private branch payloads,
 suppressed bids, persistent handles, relationship scalars, or obsolete

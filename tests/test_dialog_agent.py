@@ -39,14 +39,19 @@ def _stub_dialog_event_logging(monkeypatch):
             recorder_name,
             AsyncMock(),
         )
-    for llm_name in (
-        "_dialog_semantic_fidelity_llm",
-        "_dialog_surface_integrity_llm",
-    ):
+    verifier_outputs = {
+        "_dialog_semantic_fidelity_llm": (
+            '{"aligned": true, "hard_errors": []}'
+        ),
+        "_dialog_surface_integrity_llm": (
+            '{"aligned": true, "issues": []}'
+        ),
+    }
+    for llm_name, verifier_output in verifier_outputs.items():
         compliance_llm = MagicMock()
         compliance_llm.ainvoke = AsyncMock(
             return_value=AIMessage(
-                content='{"aligned": true, "issues": []}',
+                content=verifier_output,
             )
         )
         monkeypatch.setattr(dialog_module, llm_name, compliance_llm)
@@ -164,15 +169,16 @@ def test_v2_prompt_describes_surface_renderer_boundary() -> None:
 
 
 def test_dialog_generator_repairs_unresolved_context_once() -> None:
-    """The bounded repair must turn unresolved referents into clarification."""
+    """The second renderer follows the L3 replacement and capability truth."""
 
     repair_prompt = dialog_module._V2_DIALOG_HARD_FAILURE_REPAIR_PROMPT
 
-    assert "未解析" in repair_prompt
+    assert "text_surface_output_v2" in repair_prompt
+    assert "repair_context" in repair_prompt
+    assert "current_visible_percepts" not in repair_prompt
     assert "询问" in repair_prompt
-    assert "不能虚构" in repair_prompt
     assert "没有 executed" in repair_prompt
-    assert "不要声称已完成" in repair_prompt
+    assert "不声称已经完成" in repair_prompt
     assert "runtime_capability_limits" in repair_prompt
     assert "不可用" in repair_prompt
 

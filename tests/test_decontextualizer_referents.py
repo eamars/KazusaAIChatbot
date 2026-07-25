@@ -444,7 +444,7 @@ async def test_malformed_referents_fail_closed_after_bounded_retry(caplog) -> No
             await call_msg_decontextualizer(_base_state())
 
     assert error_info.value.error_code == (
-        "message_decontextualizer_contract_exhausted"
+        "message_decontextualizer_unchanged_candidate_exhausted"
     )
     assert error_info.value.attempt_count == 2
     assert mock_llm.ainvoke.await_count == 2

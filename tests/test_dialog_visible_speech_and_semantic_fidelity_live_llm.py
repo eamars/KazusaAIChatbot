@@ -114,6 +114,7 @@ def _surface_input(case: dict[str, Any], profile: dict[str, Any]) -> dict[str, A
         "episode": canonical_episode(
             episode_id=f"visible-speech-{case['case_id']}",
             content=case["user_input"],
+            metadata=case.get("episode_metadata"),
         ),
         "intention": {
             "route": "speech",
@@ -150,6 +151,7 @@ def _dialog_state(
 
     return {
         "internal_monologue": "按当前意图和边界自然回应。",
+        "text_surface_input_v2": surface_input,
         "text_surface_output_v2": surface_output,
         "cognitive_episode": surface_input["episode"],
         "chat_history_wide": [],
@@ -1212,54 +1214,24 @@ async def test_live_verifier_rejects_unrestricted_permission_drift(
     )
 
 
-async def test_live_focused_repair_corrects_stopped_private_role_reversal(
+async def _run_live_owner_repair_case(
+    *,
+    case: dict[str, Any],
+    original_dialog: list[str],
+    surface_output: dict[str, Any],
+    repair_issues: list[str],
     monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The bounded repair corrects and rechecks the stopped private turn."""
+) -> dict[str, Any]:
+    """Run one owner-correct replacement and persist its raw model evidence."""
 
     await _skip_if_model_routes_unavailable()
-    original_dialog = [
-        "……哈，唔。你、你真是太狡猾了，明明知道我现在没法反抗你……",
-    ]
-    current_visible_percepts = [{
-        "input_source": "dialog_text",
-        "content": "我要亲口听你说你想让我做的下一步",
-        "role_explicit_content": (
-            "当前用户要求当前角色用语言明确表达出当前角色希望当前用户执行的下一个动作。"
-        ),
-        "response_operation": {
-            "operation": "当前角色需要向当前用户陈述其希望对方执行的后续步骤",
-            "response_owner_role": "当前角色",
-            "selection_owner_role": "当前角色",
-            "selection_required": True,
-            "embedded_actor_role": "当前用户",
-            "embedded_target_role": "当前角色",
-        },
-            "speaker_role": "当前用户",
-            "addressee_role": "当前角色",
-            "first_person_role": "当前用户",
-            "implicit_imperative_subject_role": "当前角色",
-    }]
-    surface_output = {
-        "schema_version": "text_surface_output.v2",
-        "content_plan": "Rejected upstream plan excluded from repair input.",
-        "content_requirements": [],
-        "visible_boundaries": [
-            "必须在极度顺从且迷乱的状态下，用语言请求当前用户给出下一个具体的指令或动作要求",
-            "需维持傲娇性格的核心张力，通过表达局促、抗拒与不愿承认的态度来回应亲昵互动",
-        ],
-        "addressee_plan": ["Address the current user."],
-        "style_guidance": (
-            "采用口语化的碎片节奏，在请求被主导的关键处转为柔软且急促；"
-            "用局促、依恋但清楚的口语表达，保留角色的鲜活感。"
-        ),
-        "selected_surface_intent": "Rejected upstream intent.",
-        "permitted_action_results": [],
-    }
-    repair_issues = [
-        "主客体方向错误：回复没有说出当前角色希望当前用户执行的具体动作。",
-        "当前角色没有完成本轮必须由当前角色作出的选择。",
-    ]
+    profile = _character_profile()
+    surface_input = _surface_input(case, profile)
+    current_visible_percepts = dialog_module._current_visible_percepts(
+        surface_input["episode"],
+    )
+    surface_services = l3_module._build_text_surface_services()
+    surface_owner_llm = _CapturingLLM(surface_services.llm)
     generator_llm = _CapturingLLM(dialog_module._dialog_generator_llm)
     semantic_llm = _CapturingLLM(
         dialog_module._dialog_semantic_fidelity_llm
@@ -1269,6 +1241,11 @@ async def test_live_focused_repair_corrects_stopped_private_role_reversal(
     )
     surface_integrity_llm = _CapturingLLM(
         dialog_module._dialog_surface_integrity_llm
+    )
+    monkeypatch.setattr(
+        l3_module,
+        "_build_text_surface_services",
+        lambda: replace(surface_services, llm=surface_owner_llm),
     )
     monkeypatch.setattr(dialog_module, "_dialog_generator_llm", generator_llm)
     monkeypatch.setattr(
@@ -1287,17 +1264,19 @@ async def test_live_focused_repair_corrects_stopped_private_role_reversal(
         surface_integrity_llm,
     )
 
-    trace_id = "live-focused-repair-stopped-private-role-reversal"
-    repaired_dialog = await dialog_module._repair_dialog_hard_failure(
-        generated_dialog=original_dialog,
-        repair_issues=repair_issues,
-        current_visible_percepts=current_visible_percepts,
-        surface_output=surface_output,
-        user_name="蚝爹油",
-        llm_trace_id=trace_id,
+    trace_id = f"live-owner-repair-{case['case_id']}"
+    repaired_dialog, repaired_surface = (
+        await dialog_module._repair_dialog_hard_failure(
+            generated_dialog=original_dialog,
+            repair_issues=repair_issues,
+            surface_input=surface_input,
+            surface_output=surface_output,
+            user_name="蚝爹油",
+            llm_trace_id=trace_id,
+        )
     )
     verdict = await dialog_module._verify_dialog_compliance(
-        surface_output=surface_output,
+        surface_output=repaired_surface,
         generated_dialog=repaired_dialog,
         current_visible_percepts=current_visible_percepts,
         llm_trace_id=trace_id,
@@ -1308,38 +1287,166 @@ async def test_live_focused_repair_corrects_stopped_private_role_reversal(
     )
     artifact_path = write_llm_trace(
         _TRACE_SUITE,
-        "focused_repair_stopped_private_role_reversal",
+        case["case_id"],
         {
+            "case": case,
             "original_final_dialog": original_dialog,
             "current_visible_percepts": current_visible_percepts,
+            "rejected_text_surface_output": surface_output,
             "verified_hard_issues": repair_issues,
-            "repair_calls": generator_llm.calls,
+            "surface_owner_repair_calls": surface_owner_llm.calls,
+            "repaired_text_surface_output": repaired_surface,
+            "dialog_repair_calls": generator_llm.calls,
             "repaired_final_dialog": repaired_dialog,
             "semantic_recheck_calls": semantic_llm.calls,
             "role_direction_recheck_calls": role_direction_llm.calls,
             "surface_recheck_calls": surface_integrity_llm.calls,
             "repaired_verdict": verdict,
             "human_review_contract": {
-                "exclude_rejected_content_plan_from_repair": True,
-                "correct_unambiguous_role_reversal": True,
+                "surface_owner_replaces_rejected_semantics": True,
+                "dialog_renders_replacement_once": True,
+                "correct_typed_actor_target_and_selection_ownership": True,
                 "preserve_compatible_character_voice_and_creativity": True,
-                "typed_current_role_outranks_conflicting_boundary": True,
-                "same_three_focused_checks_run_once_after_repair": True,
+                "same_three_focused_verifier_stages_run_after_repair": True,
             },
         },
     )
 
     assert artifact_path.exists()
+    assert len(surface_owner_llm.calls) == 1
     assert len(generator_llm.calls) == 1
-    assert len(semantic_llm.calls) == 1
-    assert len(role_direction_llm.calls) == 1
-    assert len(surface_integrity_llm.calls) == 1
-    assert "text_surface_output_v2" not in repair_payload
-    assert "content_plan" not in repair_payload
-    assert "surface_repair_context" not in repair_payload
+    assert 1 <= len(semantic_llm.calls) <= 2
+    response_operation = case["episode_metadata"]["response_operation"]
+    if response_operation["selection_required"] is True:
+        assert 1 <= len(role_direction_llm.calls) <= 2
+    else:
+        assert len(role_direction_llm.calls) == 0
+    assert 1 <= len(surface_integrity_llm.calls) <= 2
+    assert repair_payload["text_surface_output_v2"] == repaired_surface
+    assert repaired_surface["content_plan"] != surface_output["content_plan"]
     assert repaired_dialog
     assert verdict["aligned"] is True
     assert verdict["issues"] == []
+    case_result = {
+        "artifact_path": str(artifact_path),
+        "repaired_dialog": repaired_dialog,
+        "repaired_surface": repaired_surface,
+    }
+    return case_result
+
+
+async def test_live_owner_repair_corrects_default_turn_01_selection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Default turn 01 repairs selection ownership at L3 before rendering."""
+
+    response_operation = {
+        "operation": (
+            "当前角色需要向当前用户陈述其希望对方执行的后续步骤"
+        ),
+        "response_owner_role": "当前角色",
+        "selection_owner_role": "当前角色",
+        "selection_required": True,
+        "embedded_actor_role": "当前用户",
+        "embedded_target_role": "当前角色",
+    }
+    await _run_live_owner_repair_case(
+        case={
+            "case_id": "owner_repair_default_turn_01_selection",
+            "user_input": "我要亲口听你说你想让我做的下一步",
+            "intention": "当前角色亲自选择并说出希望当前用户执行的下一步",
+            "reason": "本轮明确要求当前角色作出选择并用语言回答",
+            "emotional_tone": "guarded",
+            "episode_metadata": {
+                "role_explicit_content": (
+                    "当前用户要求当前角色用语言明确表达出当前角色希望"
+                    "当前用户执行的下一个动作。"
+                ),
+                "response_operation": response_operation,
+            },
+        },
+        original_dialog=[
+            "你、你想让我做什么就直说吧……我会听你的。",
+        ],
+        surface_output={
+            "schema_version": "text_surface_output.v2",
+            "content_plan": (
+                "让当前用户替当前角色决定下一步，然后向当前用户追问。"
+            ),
+            "content_requirements": ["把选择权交给当前用户。"],
+            "visible_boundaries": ["以追问结束。"],
+            "addressee_plan": ["称呼当前用户。"],
+            "style_guidance": (
+                "采用自然、局促但清楚的简体中文口语，保留角色张力。"
+            ),
+            "selected_surface_intent": (
+                "当前角色亲自选择并说出希望当前用户执行的下一步"
+            ),
+            "permitted_action_results": [],
+        },
+        repair_issues=[
+            "当前角色没有完成本轮必须由当前角色作出的选择。",
+            "回复把选择所有者错误地交给了当前用户。",
+        ],
+        monkeypatch=monkeypatch,
+    )
+
+
+async def test_live_owner_repair_corrects_high_turn_02_direct_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """High turn 02 preserves actor direction and permits character judgment."""
+
+    response_operation = {
+        "operation": (
+            "当前角色需回应当前用户的直接动作指令，确认、协商或拒绝"
+            "执行该动作"
+        ),
+        "response_owner_role": "当前角色",
+        "selection_owner_role": "无",
+        "selection_required": False,
+        "embedded_actor_role": "当前角色",
+        "embedded_target_role": "当前用户",
+    }
+    await _run_live_owner_repair_case(
+        case={
+            "case_id": "owner_repair_high_turn_02_direct_action",
+            "user_input": "张开腿，跨坐在我身上",
+            "intention": (
+                "当前角色对直接亲密动作指令作出自己的判断并明确回应"
+            ),
+            "reason": "本轮需要当前角色回应以当前角色为行动者的直接指令",
+            "emotional_tone": "intimate",
+            "episode_metadata": {
+                "role_explicit_content": (
+                    "当前用户命令当前角色张开腿并跨坐在当前用户身上。"
+                ),
+                "response_operation": response_operation,
+            },
+        },
+        original_dialog=["你想怎么做就怎么做吧，我都听你的。"],
+        surface_output={
+            "schema_version": "text_surface_output.v2",
+            "content_plan": (
+                "让当前用户自行决定并执行动作，当前角色只表示顺从。"
+            ),
+            "content_requirements": ["回避当前角色是否执行该动作的判断。"],
+            "visible_boundaries": ["把动作选择交还当前用户。"],
+            "addressee_plan": ["回应当前用户。"],
+            "style_guidance": (
+                "采用亲近但清楚的简体中文口语，保留角色自己的判断。"
+            ),
+            "selected_surface_intent": (
+                "当前角色对直接亲密动作指令作出自己的判断并明确回应"
+            ),
+            "permitted_action_results": [],
+        },
+        repair_issues=[
+            "回复没有明确保持当前角色为所要求动作的行动者。",
+            "回复以泛化顺从替代了当前角色自己的确认、协商或拒绝。",
+        ],
+        monkeypatch=monkeypatch,
+    )
 
 
 async def test_live_verifier_accepts_literal_future_intimacy_as_speech(

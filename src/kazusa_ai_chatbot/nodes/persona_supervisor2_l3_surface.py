@@ -11,12 +11,14 @@ from kazusa_ai_chatbot.action_spec.results import (
 )
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     TextSurfaceInputV2,
+    TextSurfaceOutputV2,
     TextSurfaceServicesV2,
     VisualSurfaceServicesV2,
     validate_cognition_core_output,
     validate_text_surface_input,
 )
 from kazusa_ai_chatbot.cognition_core_v2.surface import (
+    repair_text_surface_planning,
     run_text_surface_planning,
     run_visual_surface_planning,
 )
@@ -112,7 +114,10 @@ async def call_l3_text_surface_handler(state: GlobalPersonaState) -> dict[str, A
     )
     if _visual_directives_disabled(input_payload):
         text_output = await text_call
-        return_value = {"text_surface_output_v2": text_output}
+        return_value = {
+            "text_surface_input_v2": input_payload,
+            "text_surface_output_v2": text_output,
+        }
         return return_value
     text_output, visual_output = await asyncio.gather(
         text_call,
@@ -122,10 +127,37 @@ async def call_l3_text_surface_handler(state: GlobalPersonaState) -> dict[str, A
         ),
     )
     return_value = {
+        "text_surface_input_v2": input_payload,
         "text_surface_output_v2": text_output,
         "visual_surface_output_v2": visual_output,
     }
     return return_value
+
+
+async def repair_text_surface_for_dialog(
+    *,
+    surface_input: TextSurfaceInputV2,
+    rejected_surface_output: TextSurfaceOutputV2,
+    verified_hard_issues: list[str],
+) -> TextSurfaceOutputV2:
+    """Bind dialog hard-error recovery to the text-surface semantic owner.
+
+    Args:
+        surface_input: Retained canonical input used by the original surface.
+        rejected_surface_output: Validated surface that produced bad dialog.
+        verified_hard_issues: Bounded semantic issues confirmed by verifiers.
+
+    Returns:
+        The validated semantic replacement produced by the surface owner.
+    """
+
+    repaired_output = await repair_text_surface_planning(
+        surface_input,
+        rejected_surface_output,
+        verified_hard_issues,
+        _build_text_surface_services(),
+    )
+    return repaired_output
 
 
 async def _load_interaction_style_context(

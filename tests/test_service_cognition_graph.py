@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionExecutionError,
 )
@@ -419,6 +421,96 @@ def test_response_graph_projects_terminal_native_failure_metadata() -> None:
     assert failure_node['detail']['failure']['stage'] == 'goal_cognition'
     assert failure_node['detail']['failure']['attempt_count'] == 2
     assert 'private failure detail' not in repr(graph)
+
+
+def test_service_projects_dialog_compliance_owner_metadata() -> None:
+    """Dialog exhaustion retains its owner attempts and commit checkpoint."""
+
+    from kazusa_ai_chatbot import service
+    from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
+
+    failure = dialog_module.DialogComplianceContractError(
+        "private verifier issues remain protected",
+    )
+
+    metadata = service._operational_failure_metadata(failure)
+    assert metadata == (
+        "dialog_compliance_contract_exhausted",
+        "dialog_compliance",
+        2,
+        False,
+        "",
+    )
+    graph = service._build_response_cognition_graph(
+        graph_result=_response_graph_result(),
+        consolidation_state=_response_state(visual_directives={}),
+        run_id="dialog-compliance-failure-run",
+        graph_status="failed",
+        failure=failure,
+    )
+    failure_detail = _node(graph, "v2.failure")["detail"]["failure"]
+    assert failure_detail["failure_code"] == (
+        "dialog_compliance_contract_exhausted"
+    )
+    assert failure_detail["stage"] == "dialog_compliance"
+    assert failure_detail["attempt_count"] == 2
+    assert failure_detail["safe_checkpoint"] == "post_cognition_commit"
+    assert "private verifier issues" not in repr(graph)
+
+
+@pytest.mark.parametrize(
+    ("error_code", "stage"),
+    [
+        (
+            "dialog_semantic_fidelity_contract_exhausted",
+            "dialog.semantic_fidelity",
+        ),
+        (
+            "dialog_role_direction_contract_exhausted",
+            "dialog.role_direction",
+        ),
+        (
+            "dialog_surface_integrity_contract_exhausted",
+            "dialog.surface_integrity",
+        ),
+    ],
+)
+def test_service_projects_focused_verifier_owner_metadata(
+    error_code: str,
+    stage: str,
+) -> None:
+    """Focused verifier exhaustion retains its exact post-commit owner."""
+
+    from kazusa_ai_chatbot import service
+    from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
+
+    failure = dialog_module.DialogVerifierContractError(
+        "private structural failure remains protected",
+        error_code=error_code,
+        stage=stage,
+    )
+
+    metadata = service._operational_failure_metadata(failure)
+    assert metadata == (
+        error_code,
+        stage,
+        2,
+        False,
+        "",
+    )
+    graph = service._build_response_cognition_graph(
+        graph_result=_response_graph_result(),
+        consolidation_state=_response_state(visual_directives={}),
+        run_id="dialog-focused-verifier-failure-run",
+        graph_status="failed",
+        failure=failure,
+    )
+    failure_detail = _node(graph, "v2.failure")["detail"]["failure"]
+    assert failure_detail["failure_code"] == error_code
+    assert failure_detail["stage"] == stage
+    assert failure_detail["attempt_count"] == 2
+    assert failure_detail["safe_checkpoint"] == "post_cognition_commit"
+    assert "private structural failure" not in repr(graph)
 
 
 def test_response_graph_marks_missing_and_malformed_native_telemetry() -> None:

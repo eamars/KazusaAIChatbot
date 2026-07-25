@@ -34,7 +34,8 @@ for the character singleton. The test database harness requires the exact
 mutable test row a unique owner.
 
 The public Stage 2 surface consists of `run_cognition(...)`,
-`run_text_surface_planning(...)`, and `run_visual_surface_planning(...)`.
+`run_text_surface_planning(...)`, `repair_text_surface_planning(...)`, and
+`run_visual_surface_planning(...)`.
 Cognition runs deterministic preparation, scoped semantic appraisal,
 dependency-ready goal branches, complete-bid collapse, route validation, and
 one replacement-state update. The caller commits that update before action,
@@ -110,14 +111,18 @@ scene, affect, relationship, and interaction style. Coherent imaginative
 detail is allowed when it remains compatible with current input, active
 constraints, and actor/target/subject roles. Preference planning emits only
 real visible boundaries and addressee constraints, so both lists may be empty.
-Dialog owns natural character-specific chat-ready wording. Two focused
+Dialog owns natural character-specific chat-ready wording. Three focused
 hard-error checks run in parallel on the existing dialog-model route within
 the shared 24,000-character surface-prompt bound. Semantic fidelity receives
-current model-visible percept rows, including any upstream response/selection
-ownership, the candidate role frame, and candidate dialog; it rejects internal
-contradiction, direct current-input conflict, and role reversal. Surface
-integrity receives permitted action results and candidate dialog; it rejects
-only false system, tool, platform, or other character-brain execution claims.
+current model-visible percept rows, the candidate role frame, and candidate
+dialog; it rejects internal contradiction, direct current-input conflict, and
+non-selection role reversal. Role direction receives only typed
+selection-required role tuples and rejects selection-owner transfer or
+actor/target reversal. Selection-required role fields are excluded from the
+semantic-fidelity projection, which retains the raw current-input meaning and
+cannot rejudge role-owned operation completion. Surface integrity receives
+permitted action results and candidate dialog; it rejects only false system,
+tool, platform, or other character-brain execution claims.
 Text planning owns expressed meaning and interaction progress without
 supplying staging forms. Dialog expresses emotion, character, and interaction
 posture through sendable wording and cadence. Action narration is outside the
@@ -128,9 +133,31 @@ hard-error authority. Source percepts and generated character speech carry
 separate typed pronoun frames before role direction is compared. Novelty and
 coherent drift are not failures by themselves. Deterministic code merges only
 the verdict shapes, bounding each owner to four issues and the merged result to
-eight, and a negative result may trigger one grounded repair. The
-protected turn trace records both checks, the merged verdict, and repair output
-as distinct evidence.
+eight. A negative result returns to the text-surface owner for one complete
+replacement of `content_plan`, `content_requirements`, `visible_boundaries`,
+and `addressee_plan`. The replacement preserves validated style, selected
+intent, action truth, and runtime capability limits before dialog renders the
+second and final candidate. Character-owned refusal, negotiation, and
+conditions remain compatible with a user request unless they reverse typed
+actor, target, response-owner, or selection-owner direction. A second rejected
+candidate raises the typed `dialog_compliance_contract_exhausted` failure from
+the post-cognition-commit checkpoint. The protected turn trace records the
+focused checks and dialog candidates as distinct evidence.
+
+Each focused verifier validates its own exact JSON verdict. A structurally
+invalid parsed verdict receives one complete replacement using the unchanged
+system and semantic payload plus a bounded rejected assistant candidate and
+the exact contract error. The replacement remains inside that verifier and
+does not create another dialog candidate. Both attempts are recorded in the
+protected trace. Semantic fidelity uses the collision-resistant producer
+field `hard_errors`; deterministic validation normalizes it to the shared
+internal `issues` list only after exact shape validation. Role direction and
+surface integrity keep their stage-owned `issues` shapes. A second structural
+failure raises the stage-specific
+`dialog_semantic_fidelity_contract_exhausted`,
+`dialog_role_direction_contract_exhausted`, or
+`dialog_surface_integrity_contract_exhausted` error from the
+post-cognition-commit checkpoint.
 
 ## Document Control
 
@@ -153,6 +180,7 @@ execution, dialog wording, and adapter delivery remain downstream owners.
 
 - `run_cognition(...)`
 - `run_text_surface_planning(...)`
+- `repair_text_surface_planning(...)`
 - `run_visual_surface_planning(...)`
 - `validate_cognition_input(...)`
 - `validate_cognition_core_output(...)`

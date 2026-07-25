@@ -496,6 +496,9 @@ async def call_action_subgraph(state: GlobalPersonaState) -> dict:
         pre_surface_action_results
     )
     surface_update = await call_l3_text_surface_handler(surface_state)
+    surface_state["text_surface_input_v2"] = surface_update[
+        "text_surface_input_v2"
+    ]
     surface_state["text_surface_output_v2"] = surface_update[
         "text_surface_output_v2"
     ]

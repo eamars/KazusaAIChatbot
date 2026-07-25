@@ -203,6 +203,10 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer import (
     multimedia_descriptor_agent,
     select_media_for_turn,
 )
+from kazusa_ai_chatbot.nodes.dialog_agent import (
+    DialogComplianceContractError,
+    DialogVerifierContractError,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2 import persona_supervisor2
 from kazusa_ai_chatbot.nodes.persona_supervisor2_memory_lifecycle import (
     call_post_surface_memory_lifecycle_review,
@@ -372,7 +376,15 @@ def _operational_failure_metadata(
         failure_attempt_count = 1
         retryable = False
         branch_id = ""
-    elif isinstance(exc, (CognitionExecutionError, SettledRelevanceContractError)):
+    elif isinstance(
+        exc,
+        (
+            CognitionExecutionError,
+            DialogComplianceContractError,
+            DialogVerifierContractError,
+            SettledRelevanceContractError,
+        ),
+    ):
         error_code = str(getattr(exc, "error_code", "internal_invariant"))
         stage = str(getattr(exc, "stage", ""))
         failure_attempt_count = int(getattr(exc, "attempt_count", 1))

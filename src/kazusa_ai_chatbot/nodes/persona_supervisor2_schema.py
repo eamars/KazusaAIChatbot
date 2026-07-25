@@ -9,6 +9,7 @@ from kazusa_ai_chatbot.action_spec.results import (
 from kazusa_ai_chatbot.cognition_episode import CognitiveEpisodeV1
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     GoalResolutionV2,
+    TextSurfaceInputV2,
     TextSurfaceOutputV2,
     VisualSurfaceOutputV2,
 )
@@ -115,6 +116,7 @@ class GlobalPersonaState(TypedDict):
     cognition_core_output: NotRequired[dict]
     cognition_state_update: NotRequired[dict]
     cognition_state_committed: NotRequired[bool]
+    text_surface_input_v2: NotRequired[TextSurfaceInputV2]
     text_surface_output_v2: NotRequired[TextSurfaceOutputV2]
     visual_surface_output_v2: NotRequired[VisualSurfaceOutputV2]
     action_specs: NotRequired[list[ActionSpecV1]]

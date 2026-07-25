@@ -1,4 +1,4 @@
-"""Four bounded V2 text-surface stage handlers."""
+"""Bounded V2 text and terminal visual surface stage handlers."""
 
 from __future__ import annotations
 
@@ -55,6 +55,7 @@ async def run_style_stage(
         config=services.style_config,
         stage_name="style",
         validator=_validate_style_result,
+        safe_checkpoint="pre_state_commit",
     )
 
 
@@ -113,6 +114,7 @@ async def run_content_plan_stage(
         config=services.content_plan_config,
         stage_name="content_plan",
         validator=_validate_content_plan_result,
+        safe_checkpoint="pre_state_commit",
     )
 
 
@@ -148,7 +150,67 @@ async def run_preference_stage(
         config=services.preference_config,
         stage_name="preference",
         validator=_validate_preference_result,
+        safe_checkpoint="pre_state_commit",
     )
+
+
+DIALOG_COMPLIANCE_REPAIR_SYSTEM_PROMPT = '''你负责在最终对话未通过硬错误检查后，重新生成一份
+完整的文本 surface 语义。surface 中的 episode、intention、goal_resolution、supporting bids、
+expression policy、semantic affect、semantic relationship、interaction style、
+permitted_action_results 和 runtime_capability_limits 是本轮权威语境。
+
+surface.dialog_compliance_repair.verified_hard_issues 是已经确认的硬错误；
+rejected_surface_semantics 是产生不合格对话的旧语义，只作为待替代数据。
+
+# 修复步骤
+1. 保持 selected intention、角色判断、情绪方向、关系方向、当前事实和能力执行结果。
+2. 修正每一项 verified_hard_issues，重新生成内容计划、语义要求、可见边界和称呼安排。
+3. 保持结构化角色中的行动者、对象、受益者、回应所有者和选择所有者。当前角色可以拒绝、协商或
+附加条件；只要没有颠倒这些结构化角色，这些角色判断仍与用户请求相容。
+4. visible_boundaries 只表达权威语境中已有的角色判断和真实约束。不得新增权威语境中不存在的
+通用安全、内容审查、亲密程度降级或通用助手礼貌边界；角色自己的拒绝、协商和条件仍按第 3 条处理。
+5. 只有 permitted_action_results 中 status 为 executed 的结果支持已完成效果；其他状态和
+runtime_capability_limits 按原义保留。
+6. 本阶段只替换 surface 语义。原有 style guidance、selected surface intent、能力结果和运行时
+边界由调用方保留。
+
+新生成的自由文本使用简体中文；用户引文、专有名词、代码、URL 以及 schema 或 enum token 保持
+原样。本阶段不写最终对话。
+
+# 输出格式
+只返回一个 JSON 对象，字段必须恰好是 content_plan、content_requirements、
+visible_boundaries 和 addressee_plan。content_plan 是一个非空字符串，最多 1000 字符；
+content_requirements 是一到八条互不重复的非空语义要求；visible_boundaries 和
+addressee_plan 分别是零到八条互不重复的非空字符串；每条列表文本最多 500 字符。'''
+
+
+async def run_dialog_compliance_repair_stage(
+    payload: Mapping[str, Any],
+    services: TextSurfaceServicesV2,
+) -> dict[str, Any]:
+    """Replace rejected semantics with bounded structural regeneration.
+
+    Args:
+        payload: Projected owner context and rejected semantic fields.
+        services: Configured text-surface model and route settings.
+
+    Returns:
+        A validated complete replacement for the four semantic fields.
+
+    Raises:
+        CognitionExecutionError: If two provider or contract attempts fail.
+    """
+
+    result = await _run_surface_stage(
+        payload=payload,
+        system_prompt=DIALOG_COMPLIANCE_REPAIR_SYSTEM_PROMPT,
+        llm=services.llm,
+        config=services.content_plan_config,
+        stage_name="dialog_compliance_repair",
+        validator=_validate_dialog_compliance_repair_result,
+        safe_checkpoint="post_cognition_commit",
+    )
+    return result
 
 
 VISUAL_SYSTEM_PROMPT = '''根据 selected intention、visible episode、projected bids、
@@ -181,6 +243,7 @@ async def run_visual_stage(
         config=services.visual_config,
         stage_name="visual",
         validator=_validate_visual_result,
+        safe_checkpoint="pre_state_commit",
     )
 
 
@@ -192,6 +255,7 @@ async def _run_surface_stage(
     config: Any,
     stage_name: str,
     validator: Callable[[object], Any],
+    safe_checkpoint: str,
 ) -> Any:
     """Run one surface owner with bounded parse, repair, and fail-closed handling."""
 
@@ -215,6 +279,7 @@ async def _run_surface_stage(
                     error_code="provider_exhausted",
                     attempt_count=attempt_index + 1,
                     detail="surface 阶段模型调用在有界重试后仍未完成",
+                    safe_checkpoint=safe_checkpoint,
                 ) from exc
             request_messages = _surface_repair_messages(
                 payload=payload,
@@ -236,6 +301,7 @@ async def _run_surface_stage(
                     error_code="contract_exhausted",
                     attempt_count=attempt_index + 1,
                     detail="surface 阶段候选在有界重生成后仍未通过 contract 校验",
+                    safe_checkpoint=safe_checkpoint,
                 ) from exc
             request_messages = _surface_repair_messages(
                 payload=payload,
@@ -248,6 +314,7 @@ async def _run_surface_stage(
         error_code="contract_exhausted",
         attempt_count=SURFACE_STAGE_ATTEMPT_LIMIT,
         detail=f"surface 阶段执行失败: {last_error}",
+        safe_checkpoint=safe_checkpoint,
     )
 
 
@@ -257,15 +324,16 @@ def _surface_execution_error(
     error_code: str,
     attempt_count: int,
     detail: str,
+    safe_checkpoint: str,
 ) -> CognitionExecutionError:
-    """Build a typed failure that keeps the pre-state checkpoint explicit."""
+    """Build a typed failure with the caller-owned checkpoint."""
 
     return CognitionExecutionError(
         detail,
         error_code=f"surface_{stage_name}_{error_code}",
         stage=f"surface.{stage_name}",
         attempt_count=attempt_count,
-        safe_checkpoint="pre_state_commit",
+        safe_checkpoint=safe_checkpoint,
         retryable=False,
     )
 
@@ -365,6 +433,35 @@ def _validate_preference_result(value: object) -> tuple[list[str], list[str]]:
             minimum=0,
         ),
     )
+
+
+def _validate_dialog_compliance_repair_result(
+    value: object,
+) -> dict[str, Any]:
+    """Validate the complete semantic replacement returned by the L3 owner."""
+
+    if not isinstance(value, Mapping) or set(value) != {
+        "content_plan",
+        "content_requirements",
+        "visible_boundaries",
+        "addressee_plan",
+    }:
+        raise ValueError("dialog compliance surface repair fields are not exact")
+    content_plan, content_requirements = _validate_content_plan_result({
+        "content_plan": value["content_plan"],
+        "content_requirements": value["content_requirements"],
+    })
+    visible_boundaries, addressee_plan = _validate_preference_result({
+        "visible_boundaries": value["visible_boundaries"],
+        "addressee_plan": value["addressee_plan"],
+    })
+    replacement = {
+        "content_plan": content_plan,
+        "content_requirements": content_requirements,
+        "visible_boundaries": visible_boundaries,
+        "addressee_plan": addressee_plan,
+    }
+    return replacement
 
 
 def _validate_visual_result(value: object) -> str:

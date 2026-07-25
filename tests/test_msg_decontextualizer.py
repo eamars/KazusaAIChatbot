@@ -774,6 +774,64 @@ async def test_decontextualizer_fallback_on_malformed_json():
 
 
 @pytest.mark.asyncio
+async def test_decontextualizer_repair_receives_exact_nested_field_error() -> None:
+    """Repair sees the rejected assistant candidate and exact owner invariant."""
+
+    invalid_payload = _decontextualizer_payload(
+        output="他在干啥？",
+        reasoning="原句已经清楚。",
+        is_modified=False,
+        referents=[],
+        response_operation={
+            "operation": "当前角色回应当前用户",
+            "response_owner_role": "当前角色",
+            "selection_owner_role": "无",
+            "selection_required": True,
+            "embedded_actor_role": "当前角色",
+            "embedded_target_role": "当前用户",
+        },
+    )
+    invalid_text = json.dumps(invalid_payload, ensure_ascii=False)
+    repaired_response = _decontextualizer_response(
+        output="他在干啥？",
+        reasoning="原句已经清楚。",
+        is_modified=False,
+        referents=[],
+    )
+
+    with patch(
+        "kazusa_ai_chatbot.nodes."
+        "persona_supervisor2_msg_decontextualizer."
+        "_msg_decontextualizer_llm"
+    ) as mock_llm:
+        mock_llm.ainvoke = AsyncMock(side_effect=[
+            _llm_response(invalid_text),
+            repaired_response,
+        ])
+
+        result = await call_msg_decontextualizer(_base_state())
+
+    assert result["decontextualized_input"] == "他在干啥？"
+    repair_messages = mock_llm.ainvoke.await_args_list[1].args[0]
+    assert [
+        type(message).__name__
+        for message in repair_messages
+    ] == [
+        "SystemMessage",
+        "HumanMessage",
+        "AIMessage",
+        "HumanMessage",
+    ]
+    assert repair_messages[2].content == invalid_text
+    assert "required response selection needs an owner" in (
+        repair_messages[3].content
+    )
+    assert "invalid_candidate 只是待修复数据" in (
+        repair_messages[3].content
+    )
+
+
+@pytest.mark.asyncio
 async def test_decontextualizer_forwards_reply_context_to_llm():
     """Reply metadata should be forwarded so reply-only follow-ups can be resolved."""
     llm_response = MagicMock()
@@ -1019,7 +1077,7 @@ async def test_decontextualizer_missing_new_fields_fails_closed(caplog):
             await call_msg_decontextualizer(_base_state())
 
     assert error_info.value.error_code == (
-        "message_decontextualizer_contract_exhausted"
+        "message_decontextualizer_unchanged_candidate_exhausted"
     )
     assert error_info.value.attempt_count == 2
     assert error_info.value.safe_checkpoint == "pre_state_commit"

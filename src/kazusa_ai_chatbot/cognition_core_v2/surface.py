@@ -18,6 +18,7 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     validate_visual_surface_output,
 )
 from kazusa_ai_chatbot.cognition_core_v2.surface_stages import (
+    run_dialog_compliance_repair_stage,
     run_content_plan_stage,
     run_preference_stage,
     run_style_stage,
@@ -70,6 +71,92 @@ async def run_text_surface_planning(
     if "runtime_capability_limits" in payload:
         output["runtime_capability_limits"] = list(
             payload["runtime_capability_limits"]
+        )
+    validated_output = validate_text_surface_output(output)
+    return validated_output
+
+
+async def repair_text_surface_planning(
+    input_payload: TextSurfaceInputV2,
+    rejected_surface_output: TextSurfaceOutputV2,
+    verified_hard_issues: list[str],
+    services: TextSurfaceServicesV2,
+) -> TextSurfaceOutputV2:
+    """Replace rejected semantic fields while preserving validated truth.
+
+    Args:
+        input_payload: Canonical cognition-owned surface input.
+        rejected_surface_output: Validated surface that produced bad dialog.
+        verified_hard_issues: Bounded verifier findings to resolve.
+        services: Configured text-surface model and route settings.
+
+    Returns:
+        A validated surface with replaced semantic fields and preserved style,
+        selected intent, capability results, and runtime limits.
+    """
+
+    payload = validate_text_surface_input(input_payload)
+    rejected_output = validate_text_surface_output(
+        rejected_surface_output,
+    )
+    if (
+        not isinstance(verified_hard_issues, list)
+        or not 1 <= len(verified_hard_issues) <= 8
+        or len(verified_hard_issues) != len(set(verified_hard_issues))
+    ):
+        raise ValueError("verified dialog hard issues are invalid")
+    if any(
+        not isinstance(issue, str)
+        or not issue.strip()
+        or len(issue) > 300
+        for issue in verified_hard_issues
+    ):
+        raise ValueError("verified dialog hard issue text is invalid")
+
+    stage_payload = _project_surface_payload(payload)
+    stage_payload["dialog_compliance_repair"] = {
+        "verified_hard_issues": list(verified_hard_issues),
+        "rejected_surface_semantics": {
+            "content_plan": rejected_output["content_plan"],
+            "content_requirements": list(
+                rejected_output["content_requirements"]
+            ),
+            "visible_boundaries": list(
+                rejected_output["visible_boundaries"]
+            ),
+            "addressee_plan": list(rejected_output["addressee_plan"]),
+        },
+    }
+    validate_prompt_projection(stage_payload)
+    replacement = await run_dialog_compliance_repair_stage(
+        stage_payload,
+        services,
+    )
+    output: TextSurfaceOutputV2 = {
+        "schema_version": "text_surface_output.v2",
+        "content_plan": replacement["content_plan"],
+        "content_requirements": list(
+            replacement["content_requirements"]
+        ),
+        "visible_boundaries": list(replacement["visible_boundaries"]),
+        "addressee_plan": list(replacement["addressee_plan"]),
+        "style_guidance": rejected_output["style_guidance"],
+        "selected_surface_intent": rejected_output[
+            "selected_surface_intent"
+        ],
+        "permitted_action_results": [
+            {
+                **row,
+                "target_roles": [
+                    dict(role) for role in row["target_roles"]
+                ],
+            }
+            for row in rejected_output["permitted_action_results"]
+        ],
+    }
+    if "runtime_capability_limits" in rejected_output:
+        output["runtime_capability_limits"] = list(
+            rejected_output["runtime_capability_limits"]
         )
     validated_output = validate_text_surface_output(output)
     return validated_output
