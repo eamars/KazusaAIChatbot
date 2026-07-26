@@ -23,7 +23,6 @@ from kazusa_ai_chatbot.cognition_core_v2.surface_stages import (
 )
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionContractError,
-    CognitionExecutionError,
     CognitionDiagnosticsV2,
     CognitionCoreServicesV2,
     CollapsedIntentionV2,
@@ -604,8 +603,8 @@ def test_text_surface_output_validates_every_list_entry() -> None:
 
 
 @pytest.mark.asyncio
-async def test_surface_stage_rejects_legacy_response_fallbacks() -> None:
-    """Each surface model must emit its exact stage-local result fields."""
+async def test_surface_stage_degrades_legacy_response_fallbacks() -> None:
+    """Legacy model shapes produce canonical degradation without leaking."""
 
     input_payload = {
         "schema_version": "text_surface_input.v2",
@@ -642,19 +641,14 @@ async def test_surface_stage_rejects_legacy_response_fallbacks() -> None:
         preference_config=make_llm_call_config("v2_preference"),
     )
 
-    with pytest.raises(CognitionExecutionError) as error_info:
-        await run_text_surface_planning(input_payload, services)
+    output = await run_text_surface_planning(input_payload, services)
 
-    assert error_info.value.error_code in {
-        "surface_content_plan_contract_exhausted",
-        "surface_preference_contract_exhausted",
-    }
-    assert error_info.value.stage in {
-        "surface.content_plan",
-        "surface.preference",
-    }
-    assert error_info.value.attempt_count == 2
-    assert error_info.value.safe_checkpoint == "pre_state_commit"
+    assert output["schema_version"] == "text_surface_output.v2"
+    assert output["content_plan"] == "acknowledge the greeting"
+    assert output["selected_surface_intent"] == "acknowledge the greeting"
+    assert output["content_requirements"]
+    assert output["permitted_action_results"] == []
+    assert "legacy" not in json.dumps(output)
 
 
 @pytest.mark.asyncio

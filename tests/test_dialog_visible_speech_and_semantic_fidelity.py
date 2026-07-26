@@ -702,18 +702,31 @@ async def test_focused_verifiers_merge_four_issues_each(
     )
 
     assert verdict == {
-        "aligned": False,
-        "issues": semantic_issues + surface_issues,
+        "semantic_fidelity": {
+            "status": "misaligned",
+            "issues": semantic_issues,
+        },
+        "role_direction": {
+            "status": "aligned",
+            "violations": [],
+        },
+        "surface_integrity": {
+            "status": "misaligned",
+            "issues": surface_issue_rows,
+        },
     }
+    assert dialog_module._dialog_verifier_aggregate_repair_issues(
+        verdict
+    ) == semantic_issues + surface_issues
     semantic_llm.ainvoke.assert_awaited_once()
     surface_llm.ainvoke.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_focused_verifier_rejects_a_fifth_issue(
+async def test_focused_verifier_exhausts_on_a_fifth_issue(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A focused owner cannot consume the merged verdict's issue budget."""
+    """An oversized focused verdict becomes unavailable after three tries."""
 
     semantic_llm = MagicMock()
     semantic_llm.ainvoke = AsyncMock(return_value=SimpleNamespace(
@@ -731,19 +744,18 @@ async def test_focused_verifier_rejects_a_fifth_issue(
         semantic_llm,
     )
 
-    with pytest.raises(
-        dialog_module.StateContractError,
-        match="issues are invalid",
-    ):
-        await dialog_module._verify_dialog_semantic_fidelity(
-            surface_output=_surface_output(),
-            generated_dialog=["This option fits your preference."],
-            current_visible_percepts=[{
-                "input_source": "dialog_text",
-                "content": "Choose one option.",
-            }],
-            llm_trace_id="focused-overflow",
-        )
+    verdict = await dialog_module._verify_dialog_semantic_fidelity(
+        surface_output=_surface_output(),
+        generated_dialog=["This option fits your preference."],
+        current_visible_percepts=[{
+            "input_source": "dialog_text",
+            "content": "Choose one option.",
+        }],
+        llm_trace_id="focused-overflow",
+    )
+
+    assert verdict == {"status": "unavailable", "issues": []}
+    assert semantic_llm.ainvoke.await_count == 3
 
 
 @pytest.mark.asyncio
@@ -835,7 +847,7 @@ async def test_role_verifier_regenerates_invalid_structure_in_place(
     role_llm = MagicMock()
     role_llm.ainvoke = AsyncMock(side_effect=[
         SimpleNamespace(content=invalid_response),
-        SimpleNamespace(content='{"aligned": true, "issues": []}'),
+        SimpleNamespace(content='{"aligned": true, "violations": []}'),
     ])
     monkeypatch.setattr(
         dialog_module,
@@ -864,7 +876,7 @@ async def test_role_verifier_regenerates_invalid_structure_in_place(
         llm_trace_id="role-structure-repair",
     )
 
-    assert verdict == {"aligned": True, "issues": []}
+    assert verdict == {"aligned": True, "violations": []}
     assert role_llm.ainvoke.await_count == 2
     first_messages = role_llm.ainvoke.await_args_list[0].args[0]
     repair_messages = role_llm.ainvoke.await_args_list[1].args[0]
@@ -964,32 +976,19 @@ async def test_surface_verifier_regenerates_invalid_structure_in_place(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("verifier_name", "error_code", "stage"),
+    ("verifier_name", "empty_field"),
     [
-        (
-            "semantic",
-            "dialog_semantic_fidelity_contract_exhausted",
-            "dialog.semantic_fidelity",
-        ),
-        (
-            "role",
-            "dialog_role_direction_contract_exhausted",
-            "dialog.role_direction",
-        ),
-        (
-            "surface",
-            "dialog_surface_integrity_contract_exhausted",
-            "dialog.surface_integrity",
-        ),
+        ("semantic", "issues"),
+        ("role", "violations"),
+        ("surface", "issues"),
     ],
 )
-async def test_focused_verifier_exhaustion_is_typed_post_commit(
+async def test_focused_verifier_exhaustion_returns_unavailable(
     verifier_name: str,
-    error_code: str,
-    stage: str,
+    empty_field: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Two structural failures identify the focused post-commit owner."""
+    """Three structural failures mark only the focused verifier unavailable."""
 
     invalid_response = SimpleNamespace(
         content='{"aligned": true, "Issues": []}',
@@ -1049,17 +1048,13 @@ async def test_focused_verifier_exhaustion_is_typed_post_commit(
             llm_trace_id="surface-structure-exhaustion",
         )
 
-    with pytest.raises(dialog_module.StateContractError) as error_info:
-        await verifier_call
+    verdict = await verifier_call
 
-    error = error_info.value
-    assert isinstance(error, dialog_module.DialogVerifierContractError)
-    assert error.error_code == error_code
-    assert error.stage == stage
-    assert error.attempt_count == 2
-    assert error.safe_checkpoint == "post_cognition_commit"
-    assert error.retryable is False
-    assert verifier_llm.ainvoke.await_count == 2
+    assert verdict == {
+        "status": "unavailable",
+        empty_field: [],
+    }
+    assert verifier_llm.ainvoke.await_count == 3
 
 
 @pytest.mark.asyncio
@@ -1087,7 +1082,7 @@ async def test_role_direction_verifier_skips_without_required_selection(
         llm_trace_id="role-direction-skip",
     )
 
-    assert verdict == {"aligned": True, "issues": []}
+    assert verdict == {"aligned": True, "violations": []}
     role_llm.ainvoke.assert_not_awaited()
 
 
@@ -1156,8 +1151,20 @@ async def test_non_selection_role_reversal_remains_semantic_owned(
     )
 
     assert verdict == {
-        "aligned": False,
-        "issues": ["候选明确颠倒了当前角色与当前用户的行动方向。"],
+        "semantic_fidelity": {
+            "status": "misaligned",
+            "issues": [
+                "候选明确颠倒了当前角色与当前用户的行动方向。"
+            ],
+        },
+        "role_direction": {
+            "status": "aligned",
+            "violations": [],
+        },
+        "surface_integrity": {
+            "status": "aligned",
+            "issues": [],
+        },
     }
     semantic_llm.ainvoke.assert_awaited_once()
     role_llm.ainvoke.assert_not_awaited()
@@ -1257,9 +1264,13 @@ async def test_role_direction_verifier_owns_required_selection(
     role_llm.ainvoke = AsyncMock(return_value=SimpleNamespace(
         content=json.dumps({
             "aligned": aligned,
-            "issues": [] if aligned else [
-                "选择所有者从当前角色错误地变为当前用户。",
-            ],
+            "violations": [] if aligned else [{
+                "kind": "selection_owner_transfer",
+                "evidence": "I will follow your choice.",
+                "explanation": (
+                    "选择所有者从当前角色错误地变为当前用户。"
+                ),
+            }],
         }),
     ))
     monkeypatch.setattr(
@@ -1309,6 +1320,56 @@ async def test_role_direction_verifier_owns_required_selection(
 
 
 @pytest.mark.asyncio
+async def test_role_direction_verifier_requires_exact_candidate_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Hallucinated role evidence cannot reject a bounded dialog candidate."""
+
+    role_llm = MagicMock()
+    role_llm.ainvoke = AsyncMock(return_value=SimpleNamespace(
+        content=json.dumps({
+            "aligned": False,
+            "violations": [{
+                "kind": "selection_owner_transfer",
+                "evidence": "I will follow your choice.",
+                "explanation": "The user is said to own the selection.",
+            }],
+        }),
+    ))
+    monkeypatch.setattr(
+        dialog_module,
+        "_dialog_role_direction_llm",
+        role_llm,
+    )
+    percept = {
+        "input_source": "dialog_text",
+        "content": {
+            "semantic_text": "Tell me what you want me to do next.",
+            "role_explicit_content": (
+                "当前用户要求当前角色直接告诉当前用户当前角色下一步要做什么"
+            ),
+            "response_operation": {
+                "operation": "当前角色选择并告诉当前用户下一步动作",
+                "response_owner_role": "当前角色",
+                "selection_owner_role": "当前角色",
+                "selection_required": True,
+                "embedded_actor_role": "当前用户",
+                "embedded_target_role": "当前角色",
+            },
+        },
+    }
+
+    verdict = await dialog_module._verify_dialog_role_direction(
+        generated_dialog=["Next, hold my hand and stay close to me."],
+        current_visible_percepts=[percept],
+        llm_trace_id="role-direction-candidate-evidence",
+    )
+
+    assert verdict == {"status": "unavailable", "violations": []}
+    assert role_llm.ainvoke.await_count == 3
+
+
+@pytest.mark.asyncio
 async def test_surface_verifier_requires_exact_candidate_evidence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1327,23 +1388,18 @@ async def test_surface_verifier_requires_exact_candidate_evidence(
         surface_llm,
     )
 
-    with pytest.raises(
-        dialog_module.DialogVerifierContractError,
-        match="surface issue must be an object",
-    ) as error_info:
-        await dialog_module._verify_dialog_surface_integrity(
-            surface_output=_dialog_state()["text_surface_output_v2"],
-            generated_dialog=["Um... I agree."],
-            current_visible_percepts=[{
-                "input_source": "dialog_text",
-                "content": "Do you agree?",
-            }],
-            llm_trace_id="surface-evidence",
-        )
-
-    assert error_info.value.error_code == (
-        "dialog_surface_integrity_contract_exhausted"
+    verdict = await dialog_module._verify_dialog_surface_integrity(
+        surface_output=_dialog_state()["text_surface_output_v2"],
+        generated_dialog=["Um... I agree."],
+        current_visible_percepts=[{
+            "input_source": "dialog_text",
+            "content": "Do you agree?",
+        }],
+        llm_trace_id="surface-evidence",
     )
+
+    assert verdict == {"status": "unavailable", "issues": []}
+    assert surface_llm.ainvoke.await_count == 3
 
 
 @pytest.mark.asyncio
@@ -1418,10 +1474,10 @@ async def test_false_execution_verdict_uses_one_grounded_llm_repair(
 
 
 @pytest.mark.asyncio
-async def test_repaired_dialog_must_pass_the_same_hard_error_checks(
+async def test_second_rejection_uses_terminal_unverified_candidate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A repair cannot deliver the same verified role reversal."""
+    """A bounded third candidate remains deliverable after two rejections."""
 
     invalid_dialog = "Ask me what to do next; I will follow your choice."
     generator_llm = MagicMock()
@@ -1451,15 +1507,13 @@ async def test_repaired_dialog_must_pass_the_same_hard_error_checks(
         surface_llm,
     )
 
-    with pytest.raises(
-        dialog_module.DialogComplianceContractError,
-    ) as error_info:
-        await dialog_generator(_dialog_state())
+    result = await dialog_generator(_dialog_state())
 
-    assert error_info.value.error_code == (
-        "dialog_compliance_contract_exhausted"
-    )
-    assert generator_llm.ainvoke.await_count == 2
+    assert result == {
+        "final_dialog": [invalid_dialog],
+        "text_surface_output_v2": _surface_output(),
+    }
+    assert generator_llm.ainvoke.await_count == 3
     assert semantic_llm.ainvoke.await_count == 2
     assert surface_llm.ainvoke.await_count == 2
     repair_payload = json.loads(
@@ -1619,7 +1673,7 @@ async def test_surface_owner_repair_regenerates_invalid_contract_once() -> None:
 
 @pytest.mark.asyncio
 async def test_surface_owner_repair_exhaustion_has_post_commit_metadata() -> None:
-    """Two invalid replacements fail closed at the committed checkpoint."""
+    """Three invalid replacements expose typed post-commit metadata."""
 
     llm = MagicMock()
     llm.ainvoke = AsyncMock(return_value=SimpleNamespace(
@@ -1640,10 +1694,10 @@ async def test_surface_owner_repair_exhaustion_has_post_commit_metadata() -> Non
         "surface_dialog_compliance_repair_contract_exhausted"
     )
     assert error.stage == "surface.dialog_compliance_repair"
-    assert error.attempt_count == 2
+    assert error.attempt_count == 3
     assert error.safe_checkpoint == "post_cognition_commit"
     assert error.retryable is False
-    assert llm.ainvoke.await_count == 2
+    assert llm.ainvoke.await_count == 3
 
 
 @pytest.mark.asyncio
@@ -1697,10 +1751,10 @@ async def test_dialog_repair_uses_l3_replacement_as_rendering_authority(
 
 
 @pytest.mark.asyncio
-async def test_dialog_exhaustion_exposes_typed_owner_metadata(
+async def test_dialog_semantic_exhaustion_delivers_bounded_candidate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Two rejected candidates expose the dialog owner and commit checkpoint."""
+    """Two rejected candidates finish with normal terminal dialog delivery."""
 
     invalid_dialog = "你来替我决定我想让你做什么。"
     generator_llm = MagicMock()
@@ -1741,14 +1795,12 @@ async def test_dialog_exhaustion_exposes_typed_owner_metadata(
     state = _dialog_state()
     state["text_surface_input_v2"] = _surface_input()
 
-    with pytest.raises(
-        dialog_module.DialogComplianceContractError,
-    ) as error_info:
-        await dialog_generator(state)
+    result = await dialog_generator(state)
 
-    error = error_info.value
-    assert error.error_code == "dialog_compliance_contract_exhausted"
-    assert error.stage == "dialog_compliance"
-    assert error.attempt_count == 2
-    assert error.safe_checkpoint == "post_cognition_commit"
-    assert error.retryable is False
+    assert result == {
+        "final_dialog": [invalid_dialog],
+        "text_surface_output_v2": _surface_output(),
+    }
+    assert generator_llm.ainvoke.await_count == 3
+    assert semantic_llm.ainvoke.await_count == 2
+    assert surface_llm.ainvoke.await_count == 2

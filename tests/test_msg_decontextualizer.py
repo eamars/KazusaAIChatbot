@@ -12,7 +12,6 @@ from kazusa_ai_chatbot.cognition_episode import (
     build_tool_result_episode,
     build_user_message_episode,
 )
-from kazusa_ai_chatbot.cognition_core_v2.contracts import CognitionExecutionError
 from kazusa_ai_chatbot.nodes import (
     persona_supervisor2_msg_decontextualizer as decontextualizer_module,
 )
@@ -311,6 +310,37 @@ def _llm_response(content: str) -> MagicMock:
     return response
 
 
+def _vision_descriptor_payload(description: str) -> dict[str, object]:
+    """Return one exact-shape vision descriptor result."""
+
+    return {
+        "description": description,
+        "visible_text": [],
+        "salient_visual_facts": ["a desk and handwritten notes"],
+        "spatial_or_scene_facts": ["the notes are on the desk"],
+        "uncertainty": [],
+    }
+
+
+def _state_with_inline_image() -> dict:
+    """Return a multimedia state containing one selected inline image."""
+
+    base64_data = "aW1hZ2UtYnl0ZXM="
+    state = _multimedia_state()
+    state["message_envelope"]["body_text"] = ""
+    state["message_envelope"]["attachments"] = [{
+        "media_type": "image/jpeg",
+        "base64_data": base64_data,
+        "storage_shape": "inline",
+    }]
+    state["user_multimedia_input"] = [{
+        "content_type": "image/jpeg",
+        "base64_data": base64_data,
+        "description": "",
+    }]
+    return state
+
+
 def _decontextualizer_payload(
     *,
     output: str,
@@ -559,7 +589,9 @@ async def test_multimedia_descriptor_updates_prompt_context_and_current_row(
         update_descriptions,
     )
 
-    response = _llm_response('{"description": "a desk with handwritten notes"}')
+    response = _llm_response(json.dumps(
+        _vision_descriptor_payload("a desk with handwritten notes"),
+    ))
     with patch("kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer._vision_descriptor_llm") as mock_llm:
         mock_llm.ainvoke = AsyncMock(return_value=response)
         result = await multimedia_descriptor_agent(state)
@@ -614,9 +646,144 @@ async def test_multimedia_descriptor_continues_when_vision_llm_fails(
         "description": "",
         "summary_status": "unavailable",
     }
+    assert mock_llm.ainvoke.await_count == 3
     update_descriptions.assert_not_awaited()
     assert "Image descriptor fallback after LLM exception" in caplog.text
     assert "vision down" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_multimedia_descriptor_retries_malformed_objects_before_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only an exact descriptor object can finish retries and enter cache."""
+
+    state = _state_with_inline_image()
+    runtime = MagicMock()
+    runtime.get = AsyncMock(return_value=None)
+    runtime.store = AsyncMock()
+    monkeypatch.setattr(
+        decontextualizer_module,
+        "get_rag_cache2_runtime",
+        lambda: runtime,
+    )
+    monkeypatch.setattr(
+        decontextualizer_module,
+        "update_conversation_attachment_descriptions",
+        AsyncMock(return_value=True),
+    )
+    monkeypatch.setattr(
+        decontextualizer_module,
+        "upsert_media_descriptor_entry",
+        AsyncMock(),
+    )
+    valid_payload = _vision_descriptor_payload("a recovered desk description")
+    responses = [
+        _llm_response("{}"),
+        _llm_response(json.dumps({
+            **valid_payload,
+            "description": [],
+        })),
+        _llm_response(json.dumps(valid_payload)),
+    ]
+
+    with patch.object(
+        decontextualizer_module,
+        "_vision_descriptor_llm",
+    ) as mock_llm:
+        mock_llm.ainvoke = AsyncMock(side_effect=responses)
+        result = await multimedia_descriptor_agent(state)
+
+    assert mock_llm.ainvoke.await_count == 3
+    assert result["user_multimedia_input"][0]["description"] == (
+        "a recovered desk description"
+    )
+    runtime.store.assert_awaited_once()
+    assert runtime.store.await_args.kwargs["result"] == valid_payload
+
+
+@pytest.mark.asyncio
+async def test_multimedia_descriptor_exhaustion_does_not_cache_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Malformed exhaustion remains unavailable and leaves cache recoverable."""
+
+    state = _state_with_inline_image()
+    runtime = MagicMock()
+    runtime.get = AsyncMock(return_value=None)
+    runtime.store = AsyncMock()
+    monkeypatch.setattr(
+        decontextualizer_module,
+        "get_rag_cache2_runtime",
+        lambda: runtime,
+    )
+    monkeypatch.setattr(
+        decontextualizer_module,
+        "update_conversation_attachment_descriptions",
+        AsyncMock(return_value=True),
+    )
+
+    with patch.object(
+        decontextualizer_module,
+        "_vision_descriptor_llm",
+    ) as mock_llm:
+        mock_llm.ainvoke = AsyncMock(return_value=_llm_response("{}"))
+        result = await multimedia_descriptor_agent(state)
+
+    assert mock_llm.ainvoke.await_count == 3
+    assert result["user_multimedia_input"][0]["description"] == ""
+    runtime.store.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_multimedia_descriptor_ignores_invalid_cached_object(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stale malformed cache row cannot suppress a fresh descriptor call."""
+
+    state = _state_with_inline_image()
+    runtime = MagicMock()
+    runtime.get = AsyncMock(return_value={})
+    runtime.store = AsyncMock()
+    record_hit = AsyncMock()
+    monkeypatch.setattr(
+        decontextualizer_module,
+        "get_rag_cache2_runtime",
+        lambda: runtime,
+    )
+    monkeypatch.setattr(
+        decontextualizer_module,
+        "record_media_descriptor_hit",
+        record_hit,
+    )
+    monkeypatch.setattr(
+        decontextualizer_module,
+        "update_conversation_attachment_descriptions",
+        AsyncMock(return_value=True),
+    )
+    monkeypatch.setattr(
+        decontextualizer_module,
+        "upsert_media_descriptor_entry",
+        AsyncMock(),
+    )
+    valid_payload = _vision_descriptor_payload("a fresh descriptor")
+
+    with patch.object(
+        decontextualizer_module,
+        "_vision_descriptor_llm",
+    ) as mock_llm:
+        mock_llm.ainvoke = AsyncMock(return_value=_llm_response(
+            json.dumps(valid_payload),
+        ))
+        result = await multimedia_descriptor_agent(state)
+
+    mock_llm.ainvoke.assert_awaited_once()
+    assert result["user_multimedia_input"][0]["description"] == (
+        "a fresh descriptor"
+    )
+    record_hit.assert_not_awaited()
+    runtime.store.assert_awaited_once()
+
 
 @pytest.mark.asyncio
 async def test_decontextualizer_filtered_history_recreates_group_referent_loss():
@@ -741,7 +908,7 @@ async def test_decontextualizer_returns_original_when_not_modified():
 
 @pytest.mark.asyncio
 async def test_decontextualizer_fallback_on_llm_error():
-    """If LLM call raises, output falls back to original user_input."""
+    """Provider exhaustion falls back to the original normalized input."""
     with patch("kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer._msg_decontextualizer_llm") as mock_llm:
         mock_llm.ainvoke = AsyncMock(side_effect=RuntimeError("LLM down"))
 
@@ -749,6 +916,7 @@ async def test_decontextualizer_fallback_on_llm_error():
 
     assert result["decontextualized_input"] == "他在干啥？"
     assert result["referents"] == []
+    assert mock_llm.ainvoke.await_count == 3
 
 
 @pytest.mark.asyncio
@@ -771,6 +939,34 @@ async def test_decontextualizer_fallback_on_malformed_json():
     assert result["decontextualized_input"] == "他在干啥？"
     assert result["referents"] == []
     assert mock_llm.ainvoke.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_decontextualizer_recovers_on_third_contract_attempt():
+    """Two invalid structures can recover on the final bounded attempt."""
+
+    invalid_response = _llm_response("not json at all")
+    repaired_response = _decontextualizer_response(
+        output="他在干啥？",
+        reasoning="原句已经清楚。",
+        is_modified=False,
+        referents=[],
+    )
+
+    with patch("kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer._msg_decontextualizer_llm") as mock_llm:
+        mock_llm.ainvoke = AsyncMock(
+            side_effect=[
+                invalid_response,
+                invalid_response,
+                repaired_response,
+            ]
+        )
+
+        result = await call_msg_decontextualizer(_base_state())
+
+    assert result["decontextualized_input"] == "他在干啥？"
+    assert result["referents"] == []
+    assert mock_llm.ainvoke.await_count == 3
 
 
 @pytest.mark.asyncio
@@ -1060,28 +1256,22 @@ async def test_decontextualizer_parses_unresolved_reference_signal():
 
 
 @pytest.mark.asyncio
-async def test_decontextualizer_missing_new_fields_fails_closed(caplog):
-    """Missing contract fields are excluded after the bounded retry cap."""
+async def test_decontextualizer_missing_new_fields_uses_original_input(caplog):
+    """Structural exhaustion omits uncertain role projection and continues."""
     invalid_response = _llm_response(
         '{"output": "他在干啥？", "reasoning": "缺少 contract 字段", '
         '"is_modified": false}'
     )
 
     with patch("kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer._msg_decontextualizer_llm") as mock_llm:
-        mock_llm.ainvoke = AsyncMock(
-            side_effect=[invalid_response, invalid_response]
-        )
+        mock_llm.ainvoke = AsyncMock(return_value=invalid_response)
         caplog.set_level(logging.WARNING)
 
-        with pytest.raises(CognitionExecutionError) as error_info:
-            await call_msg_decontextualizer(_base_state())
+        result = await call_msg_decontextualizer(_base_state())
 
-    assert error_info.value.error_code == (
-        "message_decontextualizer_unchanged_candidate_exhausted"
-    )
-    assert error_info.value.attempt_count == 2
-    assert error_info.value.safe_checkpoint == "pre_state_commit"
-    assert mock_llm.ainvoke.await_count == 2
+    assert result["decontextualized_input"] == "他在干啥？"
+    assert result["referents"] == []
+    assert mock_llm.ainvoke.await_count == 3
     assert "Decontextualizer output" not in caplog.text
 
 
@@ -1096,6 +1286,7 @@ async def test_decontextualizer_llm_exception_warns_with_input_preview(caplog):
 
     assert result["decontextualized_input"] == "他在干啥？"
     assert result["referents"] == []
+    assert mock_llm.ainvoke.await_count == 3
     assert "Decontextualizer fallback after LLM exception" in caplog.text
     assert "LLM down" in caplog.text
     assert "他在干啥？" in caplog.text

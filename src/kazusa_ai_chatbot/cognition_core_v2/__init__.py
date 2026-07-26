@@ -15,6 +15,15 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     VisualSurfaceServicesV2,
 )
 from kazusa_ai_chatbot.cognition_core_v2.facade import run_cognition
+from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
+    V2_MODEL_OWNER_POLICIES,
+    V2_MODEL_TOTAL_ATTEMPTS,
+    V2_VERIFIER_TOTAL_ATTEMPTS,
+    V2AttemptDisposition,
+    V2AttemptFailureKind,
+    V2AttemptRecord,
+    validate_v2_attempt_record,
+)
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     CognitionStateError,
     build_acquaintance_user_state,
@@ -38,6 +47,12 @@ __all__ = [
     "TextSurfaceServicesV2",
     "VisualSurfaceOutputV2",
     "VisualSurfaceServicesV2",
+    "V2AttemptDisposition",
+    "V2AttemptFailureKind",
+    "V2AttemptRecord",
+    "V2_MODEL_OWNER_POLICIES",
+    "V2_MODEL_TOTAL_ATTEMPTS",
+    "V2_VERIFIER_TOTAL_ATTEMPTS",
     "build_acquaintance_user_state",
     "build_character_production_state",
     "prune_terminal_entities",
@@ -46,6 +61,7 @@ __all__ = [
     "run_text_surface_planning",
     "run_visual_surface_planning",
     "validate_cognition_state",
+    "validate_v2_attempt_record",
 ]
 
 

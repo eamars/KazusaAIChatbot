@@ -99,13 +99,16 @@ Deterministic code validates exact shape, enums, booleans, and bounds, then
 attaches the model-owned values unchanged to existing dialog-percept metadata.
 The raw percept content remains available beside this projection.
 
-An invalid decontextualizer candidate receives one regeneration in the message
-sequence `system -> human input -> rejected assistant candidate -> human
-correction`. The correction contains the exact nested field validation error.
-A byte-identical second invalid candidate raises
-`message_decontextualizer_unchanged_candidate_exhausted`; a different invalid
-replacement raises `message_decontextualizer_contract_exhausted`. Both remain
-pre-state-commit failures.
+Provider or invalid decontextualizer output receives up to three total local
+attempts. A structural repair carries only the latest bounded rejected
+candidate and exact nested-field validation error. Exhaustion retains the
+normalized original input, omits uncertain role projection, and continues as
+accepted degraded output before state commit.
+
+The image descriptor likewise uses three total attempts and accepts only the
+exact five-field descriptor contract. Only validated descriptors enter the
+media cache. Exhaustion or a stale malformed cache row produces a typed
+unavailable observation for the current turn while preserving future recovery.
 
 The route decision requires a validated V2 cognition output. The presence of
 an action specification cannot create a text response and cannot substitute
@@ -163,9 +166,9 @@ execution boundary. Deterministic code revalidates capability availability,
 permissions, target bindings, and parameters. Action specs and action results
 remain trace/execution artifacts; they do not own cognition route selection.
 The proposal boundary keeps valid canonical rows and drops malformed rows
-individually. One unusable whole-object replacement degrades to an empty plan,
-and one unusable authorization replacement denies all proposed work. Speech
-remains available, while no malformed model output can grant execution.
+individually. Three unusable planning attempts degrade to an empty plan, and
+three unusable authorization attempts deny all proposed work. Speech remains
+available, while no malformed model output can grant execution.
 
 Memory-lifecycle requests follow a specialist boundary. Cognition may request
 a semantic lifecycle review, while the specialist chooses prompt-safe aliases
@@ -246,33 +249,35 @@ by the character remain valid responses unless typed actor, target,
 response-owner, or selection-owner direction is reversed.
 
 Each semantic-fidelity, role-direction, and surface-integrity producer gets
-two structural attempts. An exact-shape failure retains the original system
-and human semantic packet, places the bounded rejected verdict in an assistant
-message, and supplies the exact contract error in one human correction. This
-does not re-render dialog or add another semantic owner. Protected traces
-retain the rejected and accepted attempts. Exhaustion exposes the owning
-`dialog.*` stage through its stage-specific `*_contract_exhausted` error with
-attempt count two and checkpoint `post_cognition_commit`.
+three structural attempts. An exact-shape failure retains the original system
+and human semantic packet, places the latest bounded rejected verdict in an
+assistant message, and supplies the exact contract error in a human
+correction. This does not re-render dialog or add another semantic owner.
+Protected traces retain every attempt. Exhaustion marks that focused owner
+`unavailable`; the valid dialog candidate remains eligible.
 
 The semantic-fidelity producer returns exact `aligned` and `hard_errors`
 fields. This avoids the local model's demonstrated `issues`/`Issues` token
 collision. Deterministic validation accepts no alias and normalizes the
-validated `hard_errors` list to the internal merged `issues` vocabulary. The
-role-direction and surface-integrity producers retain their own exact
-`aligned` and `issues` contracts.
+validated `hard_errors` list only after exact validation. Role direction uses
+an exact `aligned` and typed `violations` contract. Its only violation kinds
+are `selection_owner_transfer` and `typed_operation_role_reversal`. Surface
+integrity retains its evidence-bearing `aligned` and `issues` contract.
 
 A negative merged verdict returns the retained canonical
 `TextSurfaceInputV2` and bounded verified issues to the L3 owner. Rejected
 surface fields and rejected dialog remain protected trace evidence only. L3
 replaces content, requirements, delivery profile, visible boundaries, and
 addressee together, then reconstructs selected intent, permitted action
-results, and runtime limits from canonical input. Dialog renders and verifies
-one second candidate without receiving the first dialog. A second rejection
-raises `dialog_compliance_contract_exhausted` with stage `dialog_compliance`,
-attempt count two, and safe checkpoint `post_cognition_commit`. Success returns
-both the accepted dialog and the exact original or replacement surface that
-produced it; the persona graph overwrites its earlier surface before any
-post-turn consumer runs.
+results, and runtime limits from canonical input. If surface replacement
+exhausts, dialog retains the latest validated surface. Dialog renders and
+verifies one second candidate without receiving the first dialog. A second
+rejection renders one terminal third candidate from canonical surface truth
+and typed remaining violation kinds, without verifier calls. A bounded third
+candidate is delivered as degraded output; an unusable third candidate falls
+back to candidate two, then candidate one. Only zero usable candidates is
+unrecoverable. The persona graph follows the normal post-turn path with the
+selected dialog and retained valid surface.
 
 Before this dialog boundary, a typed character-owned required selection also
 activates one focused goal-level check. It prevents private continuity or a
@@ -333,8 +338,14 @@ actions, deliver messages, schedule work, or reopen cognition.
 ## Failure And Safety Rules
 
 - Missing or partial V2 cognition output fails before surface routing.
-- Invalid canonical episodes, mutable state, bids, routes, or model outputs fail
-  at their owning contract boundary.
+- Recoverable V2 model failures use at least three total local attempts.
+- Degradable exhaustion finishes with the owner fallback: normalized original
+  input, omitted optional appraisal or visual output, already-valid bid,
+  empty or denied control work, validated neutral text surface, unavailable
+  verifier, or retained bounded dialog.
+- Invalid canonical episodes, mutable state, bids, routes, required zero-valid
+  cognition after clean graph retry, commit failures, and zero-candidate total
+  model unavailability remain unrecoverable at their owning boundary.
 - Model stages own semantic judgment; deterministic code owns contract
   validation, persistence, permissions, limits, and delivery eligibility.
 - Resolver observations and RAG rows remain evidence, never final stance.

@@ -1,11 +1,13 @@
 """Checkpoint E integration tests for V2 facade and surface handoff."""
 
+import asyncio
 import json
 from copy import deepcopy
 from types import SimpleNamespace
 
 import pytest
 
+from kazusa_ai_chatbot.cognition_core_v2 import facade as facade_module
 from kazusa_ai_chatbot.cognition_core_v2 import (
     run_cognition,
     run_text_surface_planning,
@@ -23,6 +25,7 @@ from kazusa_ai_chatbot.db.users import (
 )
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionCoreServicesV2,
+    CognitionExecutionError,
     EVIDENCE_SOURCE_QUESTION_IDS,
     TextSurfaceServicesV2,
     VisualSurfaceServicesV2,
@@ -31,6 +34,7 @@ from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     build_acquaintance_user_state,
     build_character_production_state,
 )
+from kazusa_ai_chatbot.cognition_core_v2.workspace import collapse_bids
 
 from llm_test_helpers import make_llm_call_config
 from tests.cognition_core_v2_test_helpers import canonical_episode
@@ -545,3 +549,230 @@ async def test_test_database_accepted_task_result_smoke(
         request,
         trigger_source="tool_result",
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("recover_on_third", [True, False])
+async def test_appraisal_retry_or_omission_preserves_cognition(
+    recover_on_third: bool,
+) -> None:
+    """One appraisal can recover or omit after three bounded attempts."""
+
+    class _AppraisalFailureLLM(_ScriptedLLM):
+        def __init__(self) -> None:
+            super().__init__()
+            self.target_calls = 0
+
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config: object,
+        ) -> SimpleNamespace:
+            stage_name = getattr(config, "stage_name", "")
+            payload = json.loads(str(getattr(messages[1], "content", "{}")))
+            question = payload.get("question", {})
+            if (
+                stage_name == "v2_appraisal"
+                and question.get("question_id") == "q:event_agency"
+            ):
+                self.target_calls += 1
+                if not recover_on_third or self.target_calls < 3:
+                    return SimpleNamespace(content='{"invalid": true}')
+                result = {
+                    "question_id": question["question_id"],
+                    "selected_evidence_handles": ["e1"],
+                    "selected_role_handles": (
+                        question["permitted_role_handles"][:1]
+                    ),
+                    "propositions": [],
+                    "deltas": [],
+                    "explanation": (
+                        "the evidence is accepted without a new delta"
+                    ),
+                }
+                return SimpleNamespace(
+                    content=json.dumps(result, ensure_ascii=False),
+                )
+            return await super().ainvoke(messages, config=config)
+
+    llm = _AppraisalFailureLLM()
+
+    output = await run_cognition(_input(), _core_services(llm))
+
+    assert output["schema_version"] == "cognition_core_output.v2"
+    assert llm.target_calls == 3
+
+
+@pytest.mark.asyncio
+async def test_appraisal_internal_invariant_propagates() -> None:
+    """An unexpected appraisal exception reaches the fatal pipeline boundary."""
+
+    async def _raise_internal_invariant() -> dict[str, object]:
+        raise AssertionError("appraisal task invariant failed")
+
+    task = asyncio.create_task(_raise_internal_invariant())
+
+    with pytest.raises(AssertionError, match="appraisal task invariant failed"):
+        await facade_module._collect_appraisals(
+            [task],
+            [{"question_id": "q:event_agency"}],
+        )
+
+
+@pytest.mark.asyncio
+async def test_appraisal_task_cancellation_propagates() -> None:
+    """A cancelled appraisal task preserves graph cancellation semantics."""
+
+    task = asyncio.create_task(asyncio.sleep(0))
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await facade_module._collect_appraisals(
+            [task],
+            [{"question_id": "q:event_agency"}],
+        )
+
+
+@pytest.mark.asyncio
+async def test_goal_structure_recovers_on_third_attempt() -> None:
+    """The required goal branch can recover on its final local attempt."""
+
+    class _GoalRecoveryLLM(_ScriptedLLM):
+        def __init__(self) -> None:
+            super().__init__()
+            self.goal_calls = 0
+
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config: object,
+        ) -> SimpleNamespace:
+            if getattr(config, "stage_name", "") == "v2_goal":
+                self.goal_calls += 1
+                if self.goal_calls < 3:
+                    return SimpleNamespace(content='{"invalid": true}')
+                result = {
+                    "intention": "acknowledge the grounded episode",
+                    "desired_outcome": "maintain a coherent exchange",
+                    "concrete_detail": "use the current episode only",
+                    "reason": "the episode supplies bounded evidence",
+                    "private_monologue": "I want to answer this carefully.",
+                    "target_role_handles": [],
+                    "evidence_handles": ["e1"],
+                    "expected_consequences": ["preserve continuity"],
+                    "confidence": "high",
+                }
+                return SimpleNamespace(
+                    content=json.dumps(result, ensure_ascii=False),
+                )
+            return await super().ainvoke(messages, config=config)
+
+    llm = _GoalRecoveryLLM()
+
+    output = await run_cognition(_input(), _core_services(llm))
+
+    assert output["admitted_bid"]["branch_id"] == "ordinary_response"
+    assert llm.goal_calls == 3
+
+
+@pytest.mark.asyncio
+async def test_required_goal_exhaustion_requests_clean_graph_retry() -> None:
+    """A required zero-valid branch remains a typed pre-commit retry case."""
+
+    class _GoalExhaustionLLM(_ScriptedLLM):
+        def __init__(self) -> None:
+            super().__init__()
+            self.goal_calls = 0
+
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config: object,
+        ) -> SimpleNamespace:
+            if getattr(config, "stage_name", "") == "v2_goal":
+                self.goal_calls += 1
+                return SimpleNamespace(content='{"invalid": true}')
+            return await super().ainvoke(messages, config=config)
+
+    llm = _GoalExhaustionLLM()
+
+    with pytest.raises(CognitionExecutionError) as error_info:
+        await run_cognition(_input(), _core_services(llm))
+
+    error = error_info.value
+    assert error.safe_checkpoint == "pre_state_commit"
+    assert error.retryable is True
+    assert error.attempt_count == 3
+    assert llm.goal_calls == 3
+
+
+def _workspace_bid(branch_id: str) -> dict[str, object]:
+    """Build one complete model-authored bid for collapse fallback tests."""
+
+    return {
+        "branch_id": branch_id,
+        "goal_ref": {
+            "scope": "user",
+            "kind": "goal",
+            "entity_id": branch_id,
+        },
+        "intention": f"advance {branch_id}",
+        "desired_outcome": "preserve a grounded response",
+        "concrete_detail": "use only current evidence",
+        "reason": "the current episode supports this bid",
+        "private_monologue": "I should answer deliberately.",
+        "target_roles": [],
+        "evidence_handles": ["e1"],
+        "expected_consequences": ["the response remains coherent"],
+        "confidence": "high",
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("recover_on_third", [True, False])
+async def test_workspace_retry_or_branch_order_fallback(
+    recover_on_third: bool,
+) -> None:
+    """Collapse recovers on attempt three or selects the first valid branch."""
+
+    class _WorkspaceLLM:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config: object,
+        ) -> SimpleNamespace:
+            del messages, config
+            self.calls += 1
+            if recover_on_third and self.calls == 3:
+                return SimpleNamespace(content=json.dumps({
+                    "primary_bid_handle": "b2",
+                    "supporting_bid_handles": [],
+                    "suppressed_bid_handles": ["b1"],
+                }))
+            return SimpleNamespace(content='{"invalid": true}')
+
+    llm = _WorkspaceLLM()
+    services = SimpleNamespace(llm=llm, collapse_config=object())
+
+    output = await collapse_bids(
+        [
+            _workspace_bid("ordinary_response"),
+            _workspace_bid("relationship_connection"),
+        ],
+        services,
+    )
+
+    expected_primary = (
+        "relationship_connection"
+        if recover_on_third
+        else "ordinary_response"
+    )
+    assert output["primary_branch_id"] == expected_primary
+    assert llm.calls == 3

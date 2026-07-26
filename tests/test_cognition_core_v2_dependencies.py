@@ -4,7 +4,7 @@ import asyncio
 import inspect
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -345,7 +345,7 @@ async def test_goal_bid_gets_one_bounded_schema_repair(
         for call in trace_recorder.await_args_list
     ] == [
         "goal_cognition.ordinary_response.initial",
-        "goal_cognition.ordinary_response.repair",
+        "goal_cognition.ordinary_response.repair_1",
     ]
     assert trace_recorder.await_args_list[0].kwargs["parse_status"] == (
         "contract_error"
@@ -353,8 +353,8 @@ async def test_goal_bid_gets_one_bounded_schema_repair(
 
 
 @pytest.mark.asyncio
-async def test_goal_bid_schema_repair_stops_after_one_retry() -> None:
-    """A second malformed bid is surfaced after exactly one repair attempt."""
+async def test_goal_bid_schema_exhaustion_is_typed_after_three_attempts() -> None:
+    """A required branch requests graph retry after its local attempt cap."""
 
     invalid = {
         "intention": "respond",
@@ -384,7 +384,7 @@ async def test_goal_bid_schema_repair_stops_after_one_retry() -> None:
             return SimpleNamespace(content=json.dumps(invalid))
 
     llm = _LLM()
-    with pytest.raises(ValueError, match="fields are not exact"):
+    with pytest.raises(CognitionExecutionError) as error_info:
         await run_goal_cognition(
             DEFAULT_BRANCH_DEFINITIONS["ordinary_response"],
             {"scope": "user", "kind": "goal", "entity_id": "g1"},
@@ -403,12 +403,18 @@ async def test_goal_bid_schema_repair_stops_after_one_retry() -> None:
             SimpleNamespace(llm=llm, goal_cognition_config=object()),
         )
 
-    assert llm.call_count == 2
+    assert error_info.value.safe_checkpoint == "pre_state_commit"
+    assert error_info.value.retryable is True
+    assert error_info.value.attempt_count == 3
+    assert llm.call_count == 3
 
 
 @pytest.mark.asyncio
-async def test_goal_bid_repairs_required_selection_delegation() -> None:
-    """Typed selection ownership is repaired before a bid reaches surface."""
+@pytest.mark.parametrize("final_aligned", [True, False])
+async def test_goal_bid_repairs_or_retains_required_selection(
+    final_aligned: bool,
+) -> None:
+    """The newest valid bid survives the fixed selection-repair ledger."""
 
     delegated = {
         "intention": "请求当前用户继续下令",
@@ -449,7 +455,12 @@ async def test_goal_bid_repairs_required_selection_delegation() -> None:
             "issues": ["目标仍然没有给出本轮具体选择。"],
         },
         repaired_second,
-        {"aligned": True, "issues": []},
+        {
+            "aligned": final_aligned,
+            "issues": [] if final_aligned else [
+                "目标仍然没有给出本轮具体选择。"
+            ],
+        },
     ]
 
     class _LLM:
@@ -523,6 +534,105 @@ async def test_goal_bid_repairs_required_selection_delegation() -> None:
     ]
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_kind", ["provider", "contract"])
+async def test_required_selection_verifier_recovers_on_third_attempt(
+    failure_kind: str,
+) -> None:
+    """Provider and contract failures receive three verifier opportunities."""
+
+    class _VerifierLLM:
+        def __init__(self) -> None:
+            self.call_count = 0
+
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config: object,
+        ) -> SimpleNamespace:
+            del messages, config
+            self.call_count += 1
+            if self.call_count < 3:
+                if failure_kind == "provider":
+                    raise RuntimeError("selection verifier unavailable")
+                return SimpleNamespace(
+                    content='{"aligned": "yes", "issues": []}',
+                )
+            return SimpleNamespace(
+                content='{"aligned": true, "issues": []}',
+            )
+
+    llm = _VerifierLLM()
+    verdict = await goal_module._verify_required_selection_bid(
+        definition=DEFAULT_BRANCH_DEFINITIONS["ordinary_response"],
+        draft={
+            "intention": "state one selected response",
+            "desired_outcome": "preserve selection ownership",
+            "concrete_detail": "the character makes the selection",
+            "reason": "the typed operation assigns selection ownership",
+            "private_monologue": "I will make this choice.",
+            "target_role_handles": [],
+            "evidence_handles": ["e1"],
+            "expected_consequences": ["the user receives one decision"],
+            "confidence": "high",
+        },
+        required_operations=[{
+            "response_operation": {
+                "selection_required": True,
+                "selection_owner_role": "当前角色",
+            },
+        }],
+        services=SimpleNamespace(
+            llm=llm,
+            action_selection_config=object(),
+        ),
+        stage_suffix="selection_verifier",
+    )
+
+    assert goal_module.REQUIRED_SELECTION_VERIFIER_ATTEMPT_LIMIT == 3
+    assert llm.call_count == 3
+    assert verdict == {"aligned": True, "issues": []}
+
+
+@pytest.mark.asyncio
+async def test_required_selection_verifier_exhaustion_is_unavailable() -> None:
+    """Three malformed verifier results retain the valid candidate as degraded."""
+
+    llm = MagicMock()
+    llm.ainvoke = AsyncMock(return_value=SimpleNamespace(
+        content='{"aligned": "yes", "issues": []}',
+    ))
+    verdict = await goal_module._verify_required_selection_bid(
+        definition=DEFAULT_BRANCH_DEFINITIONS["ordinary_response"],
+        draft={
+            "intention": "state one selected response",
+            "desired_outcome": "preserve selection ownership",
+            "concrete_detail": "the character makes the selection",
+            "reason": "the typed operation assigns selection ownership",
+            "private_monologue": "I will make this choice.",
+            "target_role_handles": [],
+            "evidence_handles": ["e1"],
+            "expected_consequences": ["the user receives one decision"],
+            "confidence": "high",
+        },
+        required_operations=[{
+            "response_operation": {
+                "selection_required": True,
+                "selection_owner_role": "当前角色",
+            },
+        }],
+        services=SimpleNamespace(
+            llm=llm,
+            action_selection_config=object(),
+        ),
+        stage_suffix="selection_verifier",
+    )
+
+    assert llm.ainvoke.await_count == 3
+    assert verdict is None
+
+
 def test_required_branch_failure_cannot_collapse_to_silence() -> None:
     """A required cognition failure remains an execution failure."""
 
@@ -534,7 +644,7 @@ def test_required_branch_failure_cannot_collapse_to_silence() -> None:
                 branch_id="ordinary_response",
                 error_code="required_selection_alignment_exhausted",
                 stage="goal_cognition.required_selection_alignment",
-                attempt_count=2,
+                attempt_count=3,
                 safe_checkpoint="pre_state_commit",
                 retryable=True,
                 exception_class="ValueError",
@@ -559,7 +669,7 @@ def test_required_branch_failure_cannot_collapse_to_silence() -> None:
     assert raised.value.stage == (
         "goal_cognition.required_selection_alignment"
     )
-    assert raised.value.attempt_count == 2
+    assert raised.value.attempt_count == 3
     assert raised.value.safe_checkpoint == "pre_state_commit"
     assert raised.value.retryable is True
     assert raised.value.__cause__ is original_error

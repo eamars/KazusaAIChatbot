@@ -6,7 +6,9 @@ import json
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+import httpx
 from langchain_core.messages import HumanMessage, SystemMessage
+from openai import OpenAIError
 
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     ActionBidV2,
@@ -16,7 +18,14 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
 from kazusa_ai_chatbot.cognition_core_v2.branch_activation import (
     branch_order_key,
 )
+from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
+    V2_MODEL_TOTAL_ATTEMPTS,
+)
 from kazusa_ai_chatbot.utils import parse_llm_json_output
+
+
+WORKSPACE_COLLAPSE_ATTEMPT_LIMIT = V2_MODEL_TOTAL_ATTEMPTS
+WORKSPACE_COLLAPSE_REPAIR_OUTPUT_CAP = 4000
 
 
 COLLAPSE_PROMPT = '''把完整的目标候选划分为本次 prompt 内的主目标、支持目标和抑制目标。
@@ -59,12 +68,83 @@ async def collapse_bids(
     prompt_text = json.dumps(prompt_payload, ensure_ascii=False, sort_keys=True)
     if len(prompt_text) > 24000:
         raise ValueError("workspace collapse prompt exceeds the contract cap")
-    response = await services.llm.ainvoke(
-        [SystemMessage(content=COLLAPSE_PROMPT), HumanMessage(content=prompt_text)],
-        config=services.collapse_config,
-    )
-    parsed = parse_llm_json_output(response.content)
-    partition = _validate_partition(parsed, set(handles))
+    system_message = SystemMessage(content=COLLAPSE_PROMPT)
+    request_messages = [
+        system_message,
+        HumanMessage(content=prompt_text),
+    ]
+    partition: dict[str, Any] | None = None
+    for attempt_index in range(WORKSPACE_COLLAPSE_ATTEMPT_LIMIT):
+        try:
+            response = await services.llm.ainvoke(
+                request_messages,
+                config=services.collapse_config,
+            )
+        except (
+            OpenAIError,
+            httpx.HTTPError,
+            ConnectionError,
+            OSError,
+            RuntimeError,
+            TimeoutError,
+        ):
+            if attempt_index + 1 >= WORKSPACE_COLLAPSE_ATTEMPT_LIMIT:
+                break
+            request_messages = [
+                system_message,
+                HumanMessage(content=prompt_text),
+            ]
+            continue
+
+        response_text = str(getattr(response, "content", ""))
+        parsed: object = {}
+        try:
+            parsed = parse_llm_json_output(response_text)
+            partition = _validate_partition(parsed, set(handles))
+        except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            if attempt_index + 1 >= WORKSPACE_COLLAPSE_ATTEMPT_LIMIT:
+                break
+            invalid_candidate = response_text
+            if len(invalid_candidate) > WORKSPACE_COLLAPSE_REPAIR_OUTPUT_CAP:
+                half_cap = WORKSPACE_COLLAPSE_REPAIR_OUTPUT_CAP // 2
+                invalid_candidate = (
+                    invalid_candidate[:half_cap]
+                    + "\n... 已截断的不合格候选 ...\n"
+                    + invalid_candidate[-half_cap:]
+                )
+            repair_payload = {
+                **prompt_payload,
+                "contract_repair": {
+                    "reason": str(exc)[:500],
+                    "invalid_candidate": invalid_candidate,
+                },
+            }
+            request_messages = [
+                system_message,
+                HumanMessage(content=json.dumps(
+                    repair_payload,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )),
+            ]
+            continue
+        break
+
+    if partition is None:
+        primary = ordered[0]
+        suppressed = ordered[1:]
+        fallback: CollapsedIntentionV2 = {
+            "primary_branch_id": primary["branch_id"],
+            "supporting_branch_ids": [],
+            "suppressed_branch_ids": [
+                bid["branch_id"] for bid in suppressed
+            ],
+            "primary_bid": primary,
+            "supporting_bids": [],
+            "competing_bids": list(suppressed),
+        }
+        return fallback
+
     primary_handle = partition["primary_bid_handle"]
     primary = handles[primary_handle]
     declared_supporting = [

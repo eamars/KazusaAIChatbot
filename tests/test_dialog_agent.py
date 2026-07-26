@@ -380,8 +380,10 @@ async def test_dialog_agent_rejects_missing_surface_before_llm_call(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_dialog_agent_handles_empty_dialog(monkeypatch):
-    """An empty model surface is preserved as an empty final-dialog list."""
+async def test_dialog_agent_rejects_total_empty_candidate_exhaustion(
+    monkeypatch,
+):
+    """Three empty candidates leave no normal dialog output to deliver."""
 
     generator_llm = MagicMock()
     generator_llm.ainvoke = AsyncMock(
@@ -389,10 +391,13 @@ async def test_dialog_agent_handles_empty_dialog(monkeypatch):
     )
     monkeypatch.setattr(dialog_module, "_dialog_generator_llm", generator_llm)
 
-    result = await dialog_agent(_base_global_state())
+    with pytest.raises(
+        StateContractError,
+        match="no bounded candidate",
+    ):
+        await dialog_agent(_base_global_state())
 
-    assert result["final_dialog"] == []
-    assert result["target_addressed_user_ids"] == []
+    assert generator_llm.ainvoke.await_count == 3
 
 
 @pytest.mark.asyncio

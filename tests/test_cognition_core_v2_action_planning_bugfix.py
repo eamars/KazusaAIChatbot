@@ -463,8 +463,8 @@ async def test_invalid_action_plan_receives_one_bounded_replacement() -> None:
 
 
 @pytest.mark.asyncio
-async def test_action_plan_contains_one_failed_replacement() -> None:
-    """A second invalid object yields speech without an unbounded retry loop."""
+async def test_action_plan_exhaustion_returns_empty_control_output() -> None:
+    """Three invalid objects yield speech without authorizing work."""
 
     calls = 0
 
@@ -500,7 +500,55 @@ async def test_action_plan_contains_one_failed_replacement() -> None:
         ),
     )
 
-    assert calls == 2
+    assert calls == 3
+    assert result["intention"]["route"] == "speech"
+    assert result["action_requests"] == []
+    assert result["resolver_requests"] == []
+
+
+@pytest.mark.asyncio
+async def test_action_plan_recovers_on_third_attempt() -> None:
+    """The final bounded planner attempt can restore a valid empty plan."""
+
+    responses = [
+        {"action_requests": "invalid"},
+        {"action_requests": "invalid"},
+        _planner_response(),
+    ]
+    calls = 0
+
+    class _LLM:
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config: object,
+        ) -> SimpleNamespace:
+            del messages, config
+            nonlocal calls
+            response = responses[calls]
+            calls += 1
+            return SimpleNamespace(content=json.dumps(response))
+
+    result = await plan_actions(
+        primary_bid=_bid("ordinary_response"),
+        supporting_bids=[],
+        episode={
+            "episode_id": "episode-third-attempt",
+            "trigger_source": "user_message",
+            "output_mode": "visible_reply",
+        },
+        evidence=[],
+        available_actions=[],
+        available_resolvers=[],
+        resolver_context="resolver_status=idle",
+        services=SimpleNamespace(
+            llm=_LLM(),
+            action_selection_config=object(),
+        ),
+    )
+
+    assert calls == 3
     assert result["intention"]["route"] == "speech"
     assert result["action_requests"] == []
     assert result["resolver_requests"] == []
@@ -514,7 +562,7 @@ async def test_denied_required_action_closes_goal_without_progress() -> None:
         actions=[{
             "bid_handle": "b1",
             "action_handle": "a1",
-            "decision": "start",
+            "decision": "",
             "semantic_goal": "读取指定仓库并返回代码分析",
             "reason": "当前用户明确要求读取指定仓库",
         }],
@@ -914,7 +962,7 @@ def test_action_plan_strips_extra_resolver_fields() -> None:
 
 
 @pytest.mark.asyncio
-async def test_authorizer_denies_after_one_unusable_replacement() -> None:
+async def test_authorizer_denies_after_bounded_exhaustion() -> None:
     """Schema failure cannot authorize work or crash the visible response."""
 
     calls = 0
@@ -942,8 +990,47 @@ async def test_authorizer_denies_after_one_unusable_replacement() -> None:
         output_state_fields=["authorized_requests"],
     )
 
-    assert calls == 2
+    assert calls == 3
     assert decisions == {"c1": False, "c2": False}
+
+
+@pytest.mark.asyncio
+async def test_authorizer_recovers_on_third_attempt() -> None:
+    """Two invalid decisions can recover without bypassing authorization."""
+
+    responses = [
+        {"invalid": True},
+        {"invalid": True},
+        {"decisions": {"c1": True, "c2": False}},
+    ]
+    calls = 0
+
+    class _LLM:
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config: object,
+        ) -> SimpleNamespace:
+            del messages, config
+            nonlocal calls
+            response = responses[calls]
+            calls += 1
+            return SimpleNamespace(content=json.dumps(response))
+
+    decisions = await invoke_semantic_authorizer(
+        services=SimpleNamespace(
+            llm=_LLM(),
+            action_selection_config=object(),
+        ),
+        messages=[HumanMessage(content="bounded candidates")],
+        candidate_handles=["c1", "c2"],
+        stage_name="test_authorization",
+        output_state_fields=["authorized_requests"],
+    )
+
+    assert calls == 3
+    assert decisions == {"c1": True, "c2": False}
 
 
 def test_speak_and_internal_apply_are_absent_from_planner_affordances() -> None:

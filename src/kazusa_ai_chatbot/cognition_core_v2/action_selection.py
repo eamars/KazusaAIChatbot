@@ -9,7 +9,9 @@ from collections.abc import Mapping, Sequence
 from time import perf_counter
 from typing import Any, cast
 
+import httpx
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from openai import OpenAIError
 
 from kazusa_ai_chatbot import llm_tracing
 from kazusa_ai_chatbot.cognition_core_v2.action_authorization import (
@@ -37,6 +39,9 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     SelectedIntentionV2,
     SemanticActionRequestV2,
 )
+from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
+    V2_MODEL_TOTAL_ATTEMPTS,
+)
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     ALLOWED_PENDING_DECISIONS,
     RESOLVER_GOAL_PROGRESS_VERSION,
@@ -48,7 +53,7 @@ from kazusa_ai_chatbot.utils import parse_llm_json_output
 ACTION_REQUEST_CAP = 3
 ACTION_PLANNING_PROMPT_CAP = 24000
 ACTION_PLANNING_REPAIR_OUTPUT_CAP = 4000
-ACTION_PLANNING_ATTEMPT_LIMIT = 2
+ACTION_PLANNING_ATTEMPT_LIMIT = V2_MODEL_TOTAL_ATTEMPTS
 MODEL_TEXT_CAP = 500
 
 
@@ -389,16 +394,51 @@ async def _invoke_action_planner(
     current_goal_progress: Mapping[str, Any] | None,
     runtime_capability_limits: Sequence[str],
 ) -> dict[str, Any]:
-    """Invoke the semantic planner with one bounded contract replacement."""
+    """Invoke the semantic planner with bounded contract replacements."""
 
-    current_messages = list(messages)
+    base_messages = list(messages)
+    current_messages = list(base_messages)
     for attempt_index in range(ACTION_PLANNING_ATTEMPT_LIMIT):
         started_at = perf_counter()
-        response = await services.llm.ainvoke(
-            current_messages,
-            config=services.action_selection_config,
-        )
-        response_text = str(response.content)
+        try:
+            response = await services.llm.ainvoke(
+                current_messages,
+                config=services.action_selection_config,
+            )
+        except (
+            OpenAIError,
+            httpx.HTTPError,
+            ConnectionError,
+            OSError,
+            RuntimeError,
+            TimeoutError,
+        ) as exc:
+            stage_name = (
+                "action_planning"
+                if attempt_index == 0
+                else "action_planning.repair"
+            )
+            await _record_action_planning_trace(
+                services=services,
+                messages=current_messages,
+                response_text="",
+                parsed_output={},
+                parse_status="provider_error",
+                status="failed",
+                started_at=started_at,
+                stage_name=stage_name,
+            )
+            if attempt_index + 1 >= ACTION_PLANNING_ATTEMPT_LIMIT:
+                logger.warning(
+                    f"Action planning denied work after provider exhaustion: "
+                    f"{exc}"
+                )
+                empty_decision = _empty_action_plan_decision()
+                return empty_decision
+            current_messages = list(base_messages)
+            continue
+
+        response_text = str(getattr(response, "content", ""))
         parsed: object = {}
         stage_name = (
             "action_planning"
@@ -427,17 +467,17 @@ async def _invoke_action_planner(
             )
             if attempt_index + 1 >= ACTION_PLANNING_ATTEMPT_LIMIT:
                 logger.warning(
-                    "Action planning dropped an unusable replacement: %s",
-                    exc,
+                    f"Action planning dropped an unusable replacement: {exc}"
                 )
                 return _empty_action_plan_decision()
-            current_messages.append(
+            current_messages = [
+                *base_messages,
                 _action_planning_repair_message(
                     response_text=response_text,
                     contract_error=str(exc),
                     runtime_capability_limits=runtime_capability_limits,
-                )
-            )
+                ),
+            ]
             continue
 
         await _record_action_planning_trace(

@@ -6,17 +6,22 @@ import json
 from collections.abc import Callable, Mapping
 from typing import Any
 
+import httpx
 from langchain_core.messages import HumanMessage, SystemMessage
+from openai import OpenAIError
 
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionExecutionError,
     TextSurfaceServicesV2,
     VisualSurfaceServicesV2,
 )
+from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
+    V2_MODEL_TOTAL_ATTEMPTS,
+)
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 
 
-SURFACE_STAGE_ATTEMPT_LIMIT = 2
+SURFACE_STAGE_ATTEMPT_LIMIT = V2_MODEL_TOTAL_ATTEMPTS
 SURFACE_STAGE_REPAIR_OUTPUT_CAP = 8000
 SURFACE_STAGE_REPAIR_PROMPT_CAP = 24000
 DELIVERY_PROFILE_FIELDS = (
@@ -205,7 +210,7 @@ async def run_dialog_compliance_repair_stage(
         A validated complete replacement for all producer-owned fields.
 
     Raises:
-        CognitionExecutionError: If two provider or contract attempts fail.
+        CognitionExecutionError: If all provider or contract attempts fail.
     """
 
     result = await _run_surface_stage(
@@ -278,7 +283,14 @@ async def _run_surface_stage(
                 request_messages,
                 config=config,
             )
-        except Exception as exc:
+        except (
+            OpenAIError,
+            httpx.HTTPError,
+            ConnectionError,
+            OSError,
+            RuntimeError,
+            TimeoutError,
+        ) as exc:
             last_error = exc
             if attempt_index + 1 >= SURFACE_STAGE_ATTEMPT_LIMIT:
                 raise _surface_execution_error(

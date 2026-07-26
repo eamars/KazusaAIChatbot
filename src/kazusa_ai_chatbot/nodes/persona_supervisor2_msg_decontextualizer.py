@@ -7,7 +7,9 @@ import json
 import logging
 import time
 
+import httpx
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from openai import OpenAIError
 
 from kazusa_ai_chatbot import llm_tracing
 from kazusa_ai_chatbot.config import (
@@ -37,8 +39,8 @@ from kazusa_ai_chatbot.cognition_episode import (
     replace_text_chat_media_percepts,
     validate_dialog_response_operation,
 )
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
-    CognitionExecutionError,
+from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
+    V2_MODEL_TOTAL_ATTEMPTS,
 )
 from kazusa_ai_chatbot.channel_scene_projection import project_channel_topic_text
 from kazusa_ai_chatbot.db import (
@@ -128,6 +130,56 @@ _vision_descriptor_llm_config = LLMCallConfig(
         enabled=VISION_DESCRIPTOR_LLM_THINKING_ENABLED,
     ),
 )
+IMAGE_DESCRIPTOR_ATTEMPT_LIMIT = V2_MODEL_TOTAL_ATTEMPTS
+_IMAGE_DESCRIPTOR_FIELDS = frozenset({
+    "description",
+    "visible_text",
+    "salient_visual_facts",
+    "spatial_or_scene_facts",
+    "uncertainty",
+})
+_IMAGE_DESCRIPTOR_LIST_FIELDS = (
+    "visible_text",
+    "salient_visual_facts",
+    "spatial_or_scene_facts",
+    "uncertainty",
+)
+
+
+def _validate_image_descriptor_result(value: object) -> dict[str, object]:
+    """Validate and normalize one exact image-descriptor result.
+
+    Args:
+        value: Parsed candidate returned by the vision descriptor model.
+
+    Returns:
+        Exact descriptor fields with surrounding whitespace removed.
+    """
+
+    if not isinstance(value, Mapping) or set(value) != _IMAGE_DESCRIPTOR_FIELDS:
+        raise ValueError("image descriptor fields are not exact")
+    description = value["description"]
+    if not isinstance(description, str) or not description.strip():
+        raise ValueError("image descriptor description is invalid")
+
+    validated: dict[str, object] = {
+        "description": description.strip(),
+    }
+    for field_name in _IMAGE_DESCRIPTOR_LIST_FIELDS:
+        field_value = value[field_name]
+        if (
+            not isinstance(field_value, list)
+            or any(not isinstance(item, str) for item in field_value)
+        ):
+            raise ValueError(
+                f"image descriptor {field_name} must be a string list"
+            )
+        validated[field_name] = [
+            item.strip()
+            for item in field_value
+            if item.strip()
+        ]
+    return validated
 
 
 def _descriptor_string_field(data: dict, field_name: str) -> str:
@@ -317,12 +369,25 @@ async def multimedia_descriptor_agent(state: IMProcessState) -> IMProcessState:
                     agent_name="media_descriptor",
                 )
 
+            result: dict[str, object] = {}
             if cached_result is not None:
-                # Cache hit — reconstruct output from cached LLM result
-                result = cached_result if isinstance(cached_result, dict) else {}
-                raw_description = result.get("description", "")
-                description = raw_description if isinstance(raw_description, str) else ""
-                description = description.strip()
+                try:
+                    result = _validate_image_descriptor_result(cached_result)
+                except (KeyError, TypeError, ValueError) as exc:
+                    logger.warning(
+                        f"Ignoring invalid image descriptor cache entry: "
+                        f"{exc} user={user_name} "
+                        f"platform_user={platform_user_id} "
+                        f"media_type={piece['content_type']}"
+                    )
+                    cached_result = None
+
+            if cached_result is not None:
+                # Cache hit — reconstruct output from validated LLM result
+                description = _descriptor_string_field(
+                    result,
+                    "description",
+                )
                 image_observation = _build_current_image_observation(
                     result=result,
                     description=description,
@@ -340,9 +405,13 @@ async def multimedia_descriptor_agent(state: IMProcessState) -> IMProcessState:
                 asyncio.create_task(record_media_descriptor_hit(cache_key))
             else:
                 # Cache miss — call vision LLM
-                system_prompt = SystemMessage(content=_VISION_DESCRIPTOR_PROMPT.format(
-                    max_description_chars=MAX_PROMPT_ATTACHMENT_DESCRIPTION_CHARS,
-                ))
+                system_prompt = SystemMessage(
+                    content=_VISION_DESCRIPTOR_PROMPT.format(
+                        max_description_chars=(
+                            MAX_PROMPT_ATTACHMENT_DESCRIPTION_CHARS
+                        ),
+                    ),
+                )
                 human_message = HumanMessage(content=[
                     {
                         "type": "image_url",
@@ -353,41 +422,70 @@ async def multimedia_descriptor_agent(state: IMProcessState) -> IMProcessState:
                 ])
 
                 description = ""
-                try:
-                    response = await _vision_descriptor_llm.ainvoke([
-                        system_prompt,
-                        human_message,
-                    ], config=_vision_descriptor_llm_config)
-                except Exception as exc:
-                    logger.warning(
-                        f"Image descriptor fallback after LLM exception: {exc} "
-                        f"user={user_name} platform_user={platform_user_id} "
-                        f"media_type={piece['content_type']}",
-                        exc_info=True,
-                    )
-                    result = {}
-                else:
+                descriptor_succeeded = False
+                for attempt_index in range(IMAGE_DESCRIPTOR_ATTEMPT_LIMIT):
                     try:
-                        result = parse_llm_json_output(
-                            response.content,
+                        response = await _vision_descriptor_llm.ainvoke([
+                            system_prompt,
+                            human_message,
+                        ], config=_vision_descriptor_llm_config)
+                    except (
+                        OpenAIError,
+                        httpx.HTTPError,
+                        ConnectionError,
+                        OSError,
+                        RuntimeError,
+                        TimeoutError,
+                    ) as exc:
+                        if (
+                            attempt_index + 1
+                            >= IMAGE_DESCRIPTOR_ATTEMPT_LIMIT
+                        ):
+                            logger.warning(
+                                f"Image descriptor fallback after LLM "
+                                f"exception: {exc} user={user_name} "
+                                f"platform_user={platform_user_id} "
+                                f"media_type={piece['content_type']}",
+                                exc_info=True,
+                            )
+                        continue
+
+                    response_text = getattr(response, "content", "")
+                    try:
+                        parsed_result = parse_llm_json_output(
+                            response_text,
                             deterministic_only=True,
                         )
-                    except Exception as exc:
-                        logger.warning(
-                            f"Image descriptor fallback after parse exception: {exc} "
-                            f"user={user_name} platform_user={platform_user_id} "
-                            f"media_type={piece['content_type']} "
-                            f"raw={log_preview(response.content)}",
-                            exc_info=True,
+                        result = _validate_image_descriptor_result(
+                            parsed_result
                         )
-                        result = {}
+                    except (
+                        AttributeError,
+                        KeyError,
+                        TypeError,
+                        ValueError,
+                    ) as exc:
+                        if (
+                            attempt_index + 1
+                            >= IMAGE_DESCRIPTOR_ATTEMPT_LIMIT
+                        ):
+                            logger.warning(
+                                f"Image descriptor fallback after parse "
+                                f"exception: {exc} user={user_name} "
+                                f"platform_user={platform_user_id} "
+                                f"media_type={piece['content_type']} "
+                                f"raw={log_preview(response_text)}",
+                                exc_info=True,
+                            )
+                        continue
 
-                if not isinstance(result, dict):
-                    result = {}
-                raw_description = result.get("description", "")
-                if isinstance(raw_description, str):
-                    description = raw_description
-                description = description.strip()
+                    descriptor_succeeded = True
+                    break
+
+                description = _descriptor_string_field(
+                    result,
+                    "description",
+                )
                 image_observation = _build_current_image_observation(
                     result=result,
                     description=description,
@@ -405,7 +503,7 @@ async def multimedia_descriptor_agent(state: IMProcessState) -> IMProcessState:
                 )
 
                 # Store in LRU and fire-and-forget persistent write
-                if cache_key is not None:
+                if cache_key is not None and descriptor_succeeded:
                     await runtime.store(
                         cache_key=cache_key,
                         cache_name=MEDIA_DESCRIPTOR_CACHE_NAME,
@@ -482,7 +580,7 @@ _msg_decontextualizer_llm_config = LLMCallConfig(
     ),
 )
 
-MSG_DECONTEXTUALIZER_ATTEMPT_LIMIT = 2
+MSG_DECONTEXTUALIZER_ATTEMPT_LIMIT = V2_MODEL_TOTAL_ATTEMPTS
 MSG_DECONTEXTUALIZER_REPAIR_OUTPUT_CAP = 8000
 MAX_DECONTEXTUALIZED_INPUT_CHARS = 4000
 MAX_DECONTEXTUALIZER_REASONING_CHARS = 500
@@ -682,7 +780,6 @@ async def call_msg_decontextualizer(state: GlobalPersonaState) -> dict:
     role_explicit_content: str | None = None
     response_operation: DialogResponseOperation | None = None
     request_messages = [system_prompt, human_message]
-    rejected_response_text: str | None = None
     for attempt_index in range(MSG_DECONTEXTUALIZER_ATTEMPT_LIMIT):
         started_at = time.perf_counter()
         try:
@@ -690,22 +787,31 @@ async def call_msg_decontextualizer(state: GlobalPersonaState) -> dict:
                 request_messages,
                 config=_msg_decontextualizer_llm_config,
             )
-        except Exception as exc:
-            if attempt_index:
-                raise CognitionExecutionError(
-                    "message decontextualizer regeneration failed",
-                    error_code="message_decontextualizer_regeneration_failed",
-                    stage="message_decontextualizer",
-                    attempt_count=attempt_index + 1,
-                    safe_checkpoint="pre_state_commit",
-                    retryable=False,
-                ) from exc
-            logger.warning(
-                f"Decontextualizer fallback after LLM exception: {exc} "
-                f"input={log_preview(user_input)}",
-                exc_info=True,
+        except (
+            OpenAIError,
+            httpx.HTTPError,
+            ConnectionError,
+            OSError,
+            RuntimeError,
+            TimeoutError,
+        ) as exc:
+            await _record_decontextualizer_trace_step(
+                state=state,
+                request_messages=request_messages,
+                response_text="",
+                parsed_output={},
+                parse_status="provider_error",
+                status="failed",
+                started_at=started_at,
+                attempt_index=attempt_index,
             )
-            break
+            if attempt_index + 1 >= MSG_DECONTEXTUALIZER_ATTEMPT_LIMIT:
+                logger.warning(
+                    f"Decontextualizer fallback after LLM exception: {exc} "
+                    f"input={log_preview(user_input)}",
+                    exc_info=True,
+                )
+            continue
 
         parsed: object = {}
         try:
@@ -730,27 +836,17 @@ async def call_msg_decontextualizer(state: GlobalPersonaState) -> dict:
                 attempt_index=attempt_index,
             )
             if attempt_index + 1 >= MSG_DECONTEXTUALIZER_ATTEMPT_LIMIT:
-                error_code = "message_decontextualizer_contract_exhausted"
-                if response_text == rejected_response_text:
-                    error_code = (
-                        "message_decontextualizer_"
-                        "unchanged_candidate_exhausted"
-                    )
-                raise CognitionExecutionError(
-                    "message decontextualizer contract regeneration exhausted",
-                    error_code=error_code,
-                    stage="message_decontextualizer",
-                    attempt_count=attempt_index + 1,
-                    safe_checkpoint="pre_state_commit",
-                    retryable=False,
-                ) from exc
-            rejected_response_text = str(response_text)
+                logger.warning(
+                    f"Decontextualizer fallback after contract exhaustion: "
+                    f"{exc} input={log_preview(user_input)}"
+                )
+                break
             request_messages = [
                 system_prompt,
                 human_message,
                 AIMessage(
                     content=_bounded_repair_text(
-                        rejected_response_text
+                        str(response_text)
                     )
                 ),
                 _decontextualizer_repair_message(

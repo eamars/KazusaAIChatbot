@@ -7,7 +7,9 @@ from collections.abc import Mapping, Sequence
 from time import perf_counter
 from typing import Any
 
+import httpx
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from openai import OpenAIError
 
 from kazusa_ai_chatbot import llm_tracing
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
@@ -18,7 +20,14 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionExecutionError,
     GoalBidDraftV2,
 )
+from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
+    V2_MODEL_TOTAL_ATTEMPTS,
+    V2_VERIFIER_TOTAL_ATTEMPTS,
+)
 from kazusa_ai_chatbot.utils import parse_llm_json_output
+
+
+GOAL_COGNITION_ATTEMPT_LIMIT = V2_MODEL_TOTAL_ATTEMPTS
 
 
 GOAL_COGNITION_PROMPT = '''你是一个独立的目标认知分支。请为当前事件选择一个完整、有证据支持，
@@ -101,6 +110,7 @@ expected_consequences 是非空字符串数组。不得输出其他字段。'''
 
 REQUIRED_SELECTION_VERIFIER_PROMPT_CAP = 12000
 REQUIRED_SELECTION_REPAIR_PROMPT_CAP = 18000
+REQUIRED_SELECTION_VERIFIER_ATTEMPT_LIMIT = V2_VERIFIER_TOTAL_ATTEMPTS
 REQUIRED_SELECTION_REPAIR_ATTEMPT_LIMIT = 2
 
 
@@ -149,104 +159,130 @@ async def run_goal_cognition(
     prompt_text = json.dumps(prompt_payload, ensure_ascii=False, sort_keys=True)
     if len(prompt_text) > 24000:
         raise ValueError("goal cognition prompt exceeds the contract cap")
-    initial_messages = [
+    initial_messages: list[BaseMessage] = [
         SystemMessage(content=GOAL_COGNITION_PROMPT),
         HumanMessage(content=prompt_text),
     ]
-    initial_started_at = perf_counter()
-    response = await services.llm.ainvoke(
-        initial_messages,
-        config=services.goal_cognition_config,
-    )
     validation_args = {
         "evidence_handles": set(evidence_handles),
         "role_handles": set(role_bindings),
     }
-    parsed: object = {}
-    try:
-        parsed = parse_llm_json_output(response.content)
-        draft = validate_goal_bid_draft(parsed, **validation_args)
-    except ValueError as exc:
-        await _record_goal_trace_step(
-            services=services,
-            definition=definition,
-            stage_suffix="initial",
-            messages=initial_messages,
-            response_text=str(response.content),
-            parsed_output=parsed,
-            parse_status="contract_error",
-            started_at=initial_started_at,
-        )
-        repair_payload = {
-            "contract": {
-                "required_fields": [
-                    "intention",
-                    "desired_outcome",
-                    "concrete_detail",
-                    "reason",
-                    "private_monologue",
-                    "target_role_handles",
-                    "evidence_handles",
-                    "expected_consequences",
-                    "confidence",
-                ],
-                "allowed_evidence_handles": sorted(evidence_handles),
-                "allowed_role_handles": sorted(role_bindings),
-            },
-            "validation_error": str(exc)[:500],
-            "invalid_draft": str(response.content)[:8000],
-        }
-        repair_text = json.dumps(
-            repair_payload,
-            ensure_ascii=False,
-            sort_keys=True,
-        )
-        repair_messages = [
-            SystemMessage(content=GOAL_COGNITION_REPAIR_PROMPT),
-            HumanMessage(content=repair_text),
-        ]
-        repair_started_at = perf_counter()
-        repair_response = await services.llm.ainvoke(
-            repair_messages,
-            config=services.goal_cognition_config,
-        )
-        repaired: object = {}
+    request_messages = initial_messages
+    draft: GoalBidDraftV2 | None = None
+    for attempt_index in range(GOAL_COGNITION_ATTEMPT_LIMIT):
+        started_at = perf_counter()
+        stage_suffix = "initial"
+        if attempt_index:
+            stage_suffix = f"repair_{attempt_index}"
         try:
-            repaired = parse_llm_json_output(repair_response.content)
-            draft = validate_goal_bid_draft(repaired, **validation_args)
-        except ValueError:
+            response = await services.llm.ainvoke(
+                request_messages,
+                config=services.goal_cognition_config,
+            )
+        except (
+            OpenAIError,
+            httpx.HTTPError,
+            ConnectionError,
+            OSError,
+            RuntimeError,
+            TimeoutError,
+        ) as exc:
             await _record_goal_trace_step(
                 services=services,
                 definition=definition,
-                stage_suffix="repair",
-                messages=repair_messages,
-                response_text=str(repair_response.content),
-                parsed_output=repaired,
-                parse_status="contract_error",
-                started_at=repair_started_at,
+                stage_suffix=stage_suffix,
+                messages=request_messages,
+                response_text="",
+                parsed_output={},
+                parse_status="provider_error",
+                status="failed",
+                started_at=started_at,
             )
-            raise
+            if attempt_index + 1 >= GOAL_COGNITION_ATTEMPT_LIMIT:
+                raise CognitionExecutionError(
+                    "goal bid provider attempts exhausted",
+                    error_code="goal_bid_provider_exhausted",
+                    branch_id=definition.branch_id,
+                    stage="goal_cognition",
+                    attempt_count=attempt_index + 1,
+                    safe_checkpoint="pre_state_commit",
+                    retryable=True,
+                ) from exc
+            request_messages = initial_messages
+            continue
+
+        response_text = str(getattr(response, "content", ""))
+        parsed: object = {}
+        try:
+            parsed = parse_llm_json_output(response_text)
+            draft = validate_goal_bid_draft(parsed, **validation_args)
+        except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            await _record_goal_trace_step(
+                services=services,
+                definition=definition,
+                stage_suffix=stage_suffix,
+                messages=request_messages,
+                response_text=response_text,
+                parsed_output=parsed,
+                parse_status="contract_error",
+                status="failed",
+                started_at=started_at,
+            )
+            if attempt_index + 1 >= GOAL_COGNITION_ATTEMPT_LIMIT:
+                raise CognitionExecutionError(
+                    "goal bid structure attempts exhausted",
+                    error_code="goal_bid_structure_exhausted",
+                    branch_id=definition.branch_id,
+                    stage="goal_cognition",
+                    attempt_count=attempt_index + 1,
+                    safe_checkpoint="pre_state_commit",
+                    retryable=True,
+                ) from exc
+            repair_payload = {
+                "contract": {
+                    "required_fields": [
+                        "intention",
+                        "desired_outcome",
+                        "concrete_detail",
+                        "reason",
+                        "private_monologue",
+                        "target_role_handles",
+                        "evidence_handles",
+                        "expected_consequences",
+                        "confidence",
+                    ],
+                    "allowed_evidence_handles": sorted(evidence_handles),
+                    "allowed_role_handles": sorted(role_bindings),
+                },
+                "validation_error": str(exc)[:500],
+                "invalid_draft": response_text[:8000],
+            }
+            repair_text = json.dumps(
+                repair_payload,
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+            request_messages = [
+                SystemMessage(content=GOAL_COGNITION_REPAIR_PROMPT),
+                HumanMessage(content=repair_text),
+            ]
+            continue
+
         await _record_goal_trace_step(
             services=services,
             definition=definition,
-            stage_suffix="repair",
-            messages=repair_messages,
-            response_text=str(repair_response.content),
-            parsed_output=repaired,
-            parse_status="succeeded",
-            started_at=repair_started_at,
-        )
-    else:
-        await _record_goal_trace_step(
-            services=services,
-            definition=definition,
-            stage_suffix="initial",
-            messages=initial_messages,
-            response_text=str(response.content),
+            stage_suffix=stage_suffix,
+            messages=request_messages,
+            response_text=response_text,
             parsed_output=parsed,
             parse_status="succeeded",
-            started_at=initial_started_at,
+            status="succeeded",
+            started_at=started_at,
         )
+        break
+
+    if draft is None:
+        raise AssertionError("goal cognition attempt loop produced no result")
     draft = await _enforce_required_selection_alignment(
         definition=definition,
         draft=draft,
@@ -299,10 +335,11 @@ async def _enforce_required_selection_alignment(
         services=services,
         stage_suffix="selection_verifier",
     )
-    if verdict["aligned"]:
+    if verdict is None or verdict["aligned"]:
         return draft
 
     latest_verifier_issues = verdict["issues"]
+    latest_valid_draft = draft
     for attempt_index in range(1, REQUIRED_SELECTION_REPAIR_ATTEMPT_LIMIT + 1):
         repair_payload = _required_selection_repair_payload(
             semantic_context=semantic_context,
@@ -326,24 +363,65 @@ async def _enforce_required_selection_alignment(
             HumanMessage(content=repair_text),
         ]
         started_at = perf_counter()
-        response = await services.llm.ainvoke(
-            messages,
-            config=services.goal_cognition_config,
-        )
-        parsed = parse_llm_json_output(response.content)
-        repaired = validate_goal_bid_draft(
-            parsed,
-            evidence_handles=evidence_handles,
-            role_handles=role_handles,
-        )
+        try:
+            response = await services.llm.ainvoke(
+                messages,
+                config=services.goal_cognition_config,
+            )
+        except (
+            OpenAIError,
+            httpx.HTTPError,
+            ConnectionError,
+            OSError,
+            RuntimeError,
+            TimeoutError,
+        ) as exc:
+            await _record_goal_trace_step(
+                services=services,
+                definition=definition,
+                stage_suffix=f"selection_repair_{attempt_index}",
+                messages=messages,
+                response_text="",
+                parsed_output={},
+                parse_status="provider_error",
+                status="failed",
+                started_at=started_at,
+            )
+            continue
+
+        response_text = str(getattr(response, "content", ""))
+        parsed: object = {}
+        try:
+            parsed = parse_llm_json_output(response_text)
+            repaired = validate_goal_bid_draft(
+                parsed,
+                evidence_handles=evidence_handles,
+                role_handles=role_handles,
+            )
+        except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            await _record_goal_trace_step(
+                services=services,
+                definition=definition,
+                stage_suffix=f"selection_repair_{attempt_index}",
+                messages=messages,
+                response_text=response_text,
+                parsed_output=parsed,
+                parse_status="contract_error",
+                status="failed",
+                started_at=started_at,
+            )
+            continue
+
+        latest_valid_draft = repaired
         await _record_goal_trace_step(
             services=services,
             definition=definition,
             stage_suffix=f"selection_repair_{attempt_index}",
             messages=messages,
-            response_text=str(response.content),
+            response_text=response_text,
             parsed_output=parsed,
             parse_status="succeeded",
+            status="succeeded",
             started_at=started_at,
         )
         recheck = await _verify_required_selection_bid(
@@ -353,19 +431,11 @@ async def _enforce_required_selection_alignment(
             services=services,
             stage_suffix=f"selection_recheck_{attempt_index}",
         )
-        if recheck["aligned"]:
+        if recheck is None or recheck["aligned"]:
             return repaired
         latest_verifier_issues = recheck["issues"]
 
-    raise CognitionExecutionError(
-        "goal bid remains misaligned with required selection",
-        error_code="required_selection_alignment_exhausted",
-        branch_id=definition.branch_id,
-        stage="goal_cognition.required_selection_alignment",
-        attempt_count=REQUIRED_SELECTION_REPAIR_ATTEMPT_LIMIT,
-        safe_checkpoint="pre_state_commit",
-        retryable=True,
-    )
+    return latest_valid_draft
 
 
 def _required_selection_operations(
@@ -405,8 +475,8 @@ async def _verify_required_selection_bid(
     required_operations: list[dict[str, Any]],
     services: CognitionCoreServicesV2,
     stage_suffix: str,
-) -> dict[str, Any]:
-    """Check one branch bid against upstream response-selection ownership."""
+) -> dict[str, Any] | None:
+    """Check one branch bid with bounded selection-verifier attempts."""
 
     payload = {
         "candidate_bid": {
@@ -426,23 +496,69 @@ async def _verify_required_selection_bid(
         SystemMessage(content=REQUIRED_SELECTION_VERIFIER_PROMPT),
         HumanMessage(content=prompt_text),
     ]
-    started_at = perf_counter()
-    response = await services.llm.ainvoke(
-        messages,
-        config=services.action_selection_config,
-    )
-    parsed = parse_llm_json_output(response.content)
-    verdict = _validate_selection_verdict(parsed)
-    await _record_selection_trace_step(
-        services=services,
-        definition=definition,
-        stage_suffix=stage_suffix,
-        messages=messages,
-        response_text=str(response.content),
-        parsed_output=parsed,
-        started_at=started_at,
-    )
-    return verdict
+    for attempt_index in range(REQUIRED_SELECTION_VERIFIER_ATTEMPT_LIMIT):
+        attempt_stage_suffix = stage_suffix
+        if attempt_index:
+            attempt_stage_suffix = f"{stage_suffix}_retry_{attempt_index}"
+        started_at = perf_counter()
+        try:
+            response = await services.llm.ainvoke(
+                messages,
+                config=services.action_selection_config,
+            )
+        except (
+            OpenAIError,
+            httpx.HTTPError,
+            ConnectionError,
+            OSError,
+            RuntimeError,
+            TimeoutError,
+        ):
+            await _record_selection_trace_step(
+                services=services,
+                definition=definition,
+                stage_suffix=attempt_stage_suffix,
+                messages=messages,
+                response_text="",
+                parsed_output={},
+                parse_status="provider_error",
+                status="failed",
+                started_at=started_at,
+            )
+            continue
+
+        response_text = str(getattr(response, "content", ""))
+        parsed: object = {}
+        try:
+            parsed = parse_llm_json_output(response_text)
+            verdict = _validate_selection_verdict(parsed)
+        except (AttributeError, KeyError, TypeError, ValueError):
+            await _record_selection_trace_step(
+                services=services,
+                definition=definition,
+                stage_suffix=attempt_stage_suffix,
+                messages=messages,
+                response_text=response_text,
+                parsed_output=parsed,
+                parse_status="contract_error",
+                status="failed",
+                started_at=started_at,
+            )
+            continue
+
+        await _record_selection_trace_step(
+            services=services,
+            definition=definition,
+            stage_suffix=attempt_stage_suffix,
+            messages=messages,
+            response_text=response_text,
+            parsed_output=parsed,
+            parse_status="succeeded",
+            status="succeeded",
+            started_at=started_at,
+        )
+        return verdict
+    return None
 
 
 def _required_selection_repair_payload(
@@ -517,6 +633,8 @@ async def _record_selection_trace_step(
     messages: Sequence[BaseMessage],
     response_text: str,
     parsed_output: object,
+    parse_status: str,
+    status: str,
     started_at: float,
 ) -> None:
     """Preserve one protected selection-verification model boundary."""
@@ -535,8 +653,8 @@ async def _record_selection_trace_step(
         messages=messages,
         response_text=response_text,
         parsed_output=parsed_output,
-        parse_status="succeeded",
-        status="succeeded",
+        parse_status=parse_status,
+        status=status,
         duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
         output_state_fields=["required_selection_verdict"],
     )
@@ -551,6 +669,7 @@ async def _record_goal_trace_step(
     response_text: str,
     parsed_output: object,
     parse_status: str,
+    status: str,
     started_at: float,
 ) -> None:
     """Preserve one protected goal-generation or repair model boundary."""
@@ -570,7 +689,7 @@ async def _record_goal_trace_step(
         response_text=response_text,
         parsed_output=parsed_output,
         parse_status=parse_status,
-        status="succeeded",
+        status=status,
         duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
         output_state_fields=["action_bid"],
     )

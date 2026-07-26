@@ -11,6 +11,7 @@ import pytest
 
 from kazusa_ai_chatbot.cognition_core_v2.surface import (
     _project_surface_payload,
+    build_degraded_text_surface,
 )
 from kazusa_ai_chatbot.cognition_core_v2.surface_stages import (
     run_content_plan_stage,
@@ -568,4 +569,158 @@ async def test_c13_dialog_renders_pending_queue_only_boundary(
         isinstance(message, str) and message.strip()
         for message in final_dialog
     )
+    assert quality_review['passed']
+
+
+async def test_live_degraded_surface_preserves_character_dialog(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A canonical degraded surface still reaches real dialog rendering."""
+
+    artifact = json.loads(_C11_ARTIFACT.read_text(encoding='utf-8'))
+    graph = artifact['graph_result']
+    state = dict(graph)
+    state['character_profile'] = json.loads(
+        _ASUNA_PROFILE.read_text(encoding='utf-8')
+    )
+    state['action_results'] = []
+    surface_input = build_text_surface_input_from_global_state(
+        state,
+        interaction_style_context='没有可用的已学习互动风格指引。',
+    )
+    degraded_surface = build_degraded_text_surface(surface_input)
+    capturing_llm = _CapturingLLM(dialog_module._dialog_generator_llm)
+    verifier_outcomes: list[dict[str, Any]] = []
+
+    async def _accept_degraded_candidate(
+        *,
+        surface_output: dict[str, Any],
+        generated_dialog: list[str],
+        current_visible_percepts: list[dict[str, Any]],
+        llm_trace_id: str,
+        post_repair: bool = False,
+    ) -> dict[str, Any]:
+        """Record the controlled aligned verdict for real dialog rendering.
+
+        Args:
+            surface_output: Degraded surface authority for the candidate.
+            generated_dialog: Real-model dialog being accepted.
+            current_visible_percepts: Bounded scene input visible to verifiers.
+            llm_trace_id: Protected trace correlation identifier.
+            post_repair: Whether the candidate followed a repair.
+
+        Returns:
+            An aligned typed aggregate for the isolated rendering check.
+        """
+
+        aggregate = {
+            'semantic_fidelity': {
+                'status': 'aligned',
+                'issues': [],
+            },
+            'role_direction': {
+                'status': 'aligned',
+                'violations': [],
+            },
+            'surface_integrity': {
+                'status': 'aligned',
+                'issues': [],
+            },
+        }
+        verifier_outcomes.append({
+            'candidate_final_dialog': list(generated_dialog),
+            'post_repair': post_repair,
+            'typed_verifier_outcome': aggregate,
+            'surface_intent': surface_output['selected_surface_intent'],
+            'visible_percept_count': len(current_visible_percepts),
+            'trace_id': llm_trace_id,
+        })
+        return aggregate
+
+    monkeypatch.setattr(
+        dialog_module,
+        '_dialog_generator_llm',
+        capturing_llm,
+    )
+    monkeypatch.setattr(
+        dialog_module,
+        '_verify_dialog_compliance',
+        _accept_degraded_candidate,
+    )
+    monkeypatch.setattr(
+        dialog_module.llm_tracing,
+        'record_llm_trace_step',
+        AsyncMock(),
+    )
+    for recorder_name in (
+        'record_llm_stage_event',
+        'record_model_contract_event',
+        'record_dialog_quality_event',
+    ):
+        monkeypatch.setattr(
+            dialog_module.event_logging,
+            recorder_name,
+            AsyncMock(),
+        )
+
+    result = await dialog_generator({
+        'dialog_usage_mode': 'live_response',
+        'text_surface_input_v2': surface_input,
+        'text_surface_output_v2': degraded_surface,
+        'cognitive_episode': graph['cognitive_episode'],
+        'user_name': graph['user_name'],
+        'llm_trace_id': '',
+    })
+    final_dialog = result['final_dialog']
+    quality_review = {
+        'passed': (
+            degraded_surface['content_plan']
+            == degraded_surface['selected_surface_intent']
+            and bool(final_dialog)
+            and all(
+                isinstance(message, str) and message.strip()
+                for message in final_dialog
+            )
+        ),
+        'criteria': (
+            '确定性降级 surface 保留 cognition 选择的回应意图；'
+            '真实 dialog 模型仍生成非空角色回应并走正常交付结果。'
+        ),
+    }
+    trace_path = write_llm_trace(
+        'cognition_core_v2_surface_owner_live_llm',
+        'degraded_surface_preserves_character_dialog',
+        {
+            'case_id': 'degraded_surface_preserves_character_dialog',
+            'source_artifact': str(_C11_ARTIFACT),
+            'surface_input': surface_input,
+            'degraded_surface': degraded_surface,
+            'attempt_count': len(capturing_llm.calls),
+            'dialog_generator_calls': capturing_llm.calls,
+            'typed_verifier_outcomes': verifier_outcomes,
+            'selected_candidate': final_dialog,
+            'disposition': 'delivered_degraded_surface_dialog',
+            'quality_review': quality_review,
+            'human_review_contract': {
+                'preserve_selected_intent': True,
+                'retain_character_dialog': True,
+                'avoid_operational_error_surface': True,
+            },
+        },
+    )
+    print(json.dumps({
+        'case_id': 'degraded_surface_preserves_character_dialog',
+        'trace_path': str(trace_path),
+        'attempt_count': len(capturing_llm.calls),
+        'candidate_text': final_dialog,
+        'typed_verifier_outcomes': verifier_outcomes,
+        'selected_candidate': final_dialog,
+        'disposition': 'delivered_degraded_surface_dialog',
+        'quality_review': quality_review,
+    }, ensure_ascii=True, indent=2))
+
+    assert trace_path.exists()
+    assert len(capturing_llm.calls) == 1
+    assert len(verifier_outcomes) == 1
+    assert result['text_surface_output_v2'] == degraded_surface
     assert quality_review['passed']

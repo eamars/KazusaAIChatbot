@@ -348,6 +348,18 @@ item.
 |---|---|
 | Moved from active bugfix to completed archive by explicit user acceptance with recorded residuals | `cognition_core_v2_baseline_regression_hardening_plan.md` |
 
+### 2026-07-27 Cognition Core V2 retry continuity completion
+
+The V2-only retry-exhaustion bugfix completed after a 17-owner policy cutover,
+bounded retries, stage-owned degraded delivery, normal-path service
+verification, four one-at-a-time real-model gates, independent review
+remediation, and final scope/static regression gates. Service and adapter
+production code remained at baseline.
+
+| Outcome | Plans |
+|---|---|
+| Moved from active bugfix to completed archive | `cognition_core_v2_retry_exhaustion_continuity_bugfix_plan.md` |
+
 ## Archive
 
 Completed and superseded records live under `archive/`. Use them for historical
@@ -371,6 +383,7 @@ plans.
 | [cognition_core_v2_compositional_action_planning_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_compositional_action_planning_bugfix_plan.md) |
 | [cognition_core_v2_live_character_judgment_rebalance_plan.md](archive/completed/bugfix/cognition_core_v2_live_character_judgment_rebalance_plan.md) |
 | [cognition_core_v2_intra_turn_transition_coherence_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_intra_turn_transition_coherence_bugfix_plan.md) |
+| [cognition_core_v2_retry_exhaustion_continuity_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_retry_exhaustion_continuity_bugfix_plan.md) |
 | [asuna_private_r18_affinity_harness_plan.md](archive/completed/bugfix/asuna_private_r18_affinity_harness_plan.md) |
 | [real_history_personality_comparison_fixture_bugfix_plan.md](archive/completed/bugfix/real_history_personality_comparison_fixture_bugfix_plan.md) |
 | [cognition_silence_short_circuit_and_dialog_evaluator_quality_plan.md](archive/completed/bugfix/cognition_silence_short_circuit_and_dialog_evaluator_quality_plan.md) |

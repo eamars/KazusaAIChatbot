@@ -7,12 +7,15 @@ import time
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from langchain_core.messages import HumanMessage, SystemMessage
+import httpx
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from openai import OpenAIError
 
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionCoreServicesV2,
     CognitionContextLimitError,
     CognitionEvidenceV2,
+    CognitionExecutionError,
     SemanticAppraisalResultV2,
     SemanticQuestionV2,
 )
@@ -22,10 +25,17 @@ from kazusa_ai_chatbot.cognition_core_v2.diagnostics import (
 from kazusa_ai_chatbot.cognition_core_v2.semantic_source_planner import (
     question_proposition_kinds,
 )
+from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
+    V2_MODEL_TOTAL_ATTEMPTS,
+)
 from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
     PromptProjectionV2,
 )
 from kazusa_ai_chatbot.utils import parse_llm_json_output
+
+
+SEMANTIC_APPRAISAL_ATTEMPT_LIMIT = V2_MODEL_TOTAL_ATTEMPTS
+SEMANTIC_APPRAISAL_REPAIR_OUTPUT_CAP = 8000
 
 
 SEMANTIC_APPRAISAL_PROMPT = '''你根据有界证据回答一个范围明确的语义问题。
@@ -94,53 +104,155 @@ async def appraise_semantic_question(
         "state": _project_question_state(projection, question),
     }
     payload_text = _fit_appraisal_payload(payload)
-    started_at = time.perf_counter()
-    raw_output: str | None = None
-    parsed_output: object | None = None
-    try:
-        response = await services.llm.ainvoke(
-            [
-                SystemMessage(content=SEMANTIC_APPRAISAL_PROMPT),
-                HumanMessage(content=payload_text),
-            ],
-            config=services.appraisal_config,
-        )
-        raw_output = response.content
-        parsed_output = parse_llm_json_output(raw_output)
-        result = validate_semantic_appraisal_result(
-            parsed_output,
-            question,
-            set(evidence_by_handle),
-            projection.handle_to_ref,
-        )
-    except Exception as exc:
+    system_message = SystemMessage(content=SEMANTIC_APPRAISAL_PROMPT)
+    human_message = HumanMessage(content=payload_text)
+    request_messages = [system_message, human_message]
+    for attempt_index in range(SEMANTIC_APPRAISAL_ATTEMPT_LIMIT):
+        started_at = time.perf_counter()
+        raw_output: str | None = None
+        parsed_output: object | None = None
+        stage_id = f"semantic_appraisal:{question['question_id']}"
+        if attempt_index:
+            stage_id = f"{stage_id}:repair_{attempt_index}"
+        try:
+            response = await services.llm.ainvoke(
+                request_messages,
+                config=services.appraisal_config,
+            )
+        except (
+            OpenAIError,
+            httpx.HTTPError,
+            ConnectionError,
+            OSError,
+            RuntimeError,
+            TimeoutError,
+        ) as exc:
+            ended_at = time.perf_counter()
+            capture_validation_stage(
+                stage_id=stage_id,
+                config=services.appraisal_config,
+                system_prompt=SEMANTIC_APPRAISAL_PROMPT,
+                human_payload=payload_text,
+                raw_output=None,
+                parsed_output=None,
+                parse_status="failed",
+                started_at=started_at,
+                ended_at=ended_at,
+                error=str(exc),
+            )
+            if attempt_index + 1 >= SEMANTIC_APPRAISAL_ATTEMPT_LIMIT:
+                raise CognitionExecutionError(
+                    "semantic appraisal provider attempts exhausted",
+                    error_code="semantic_appraisal_provider_exhausted",
+                    stage="semantic_appraisal",
+                    attempt_count=attempt_index + 1,
+                    safe_checkpoint="pre_state_commit",
+                    retryable=False,
+                ) from exc
+            request_messages = [system_message, human_message]
+            continue
+
+        raw_output = getattr(response, "content", "")
+        try:
+            parsed_output = parse_llm_json_output(raw_output)
+            result = validate_semantic_appraisal_result(
+                parsed_output,
+                question,
+                set(evidence_by_handle),
+                projection.handle_to_ref,
+            )
+        except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            ended_at = time.perf_counter()
+            capture_validation_stage(
+                stage_id=stage_id,
+                config=services.appraisal_config,
+                system_prompt=SEMANTIC_APPRAISAL_PROMPT,
+                human_payload=payload_text,
+                raw_output=raw_output,
+                parsed_output=parsed_output,
+                parse_status="failed",
+                started_at=started_at,
+                ended_at=ended_at,
+                error=str(exc),
+            )
+            if attempt_index + 1 >= SEMANTIC_APPRAISAL_ATTEMPT_LIMIT:
+                raise CognitionExecutionError(
+                    "semantic appraisal contract attempts exhausted",
+                    error_code="semantic_appraisal_contract_exhausted",
+                    stage="semantic_appraisal",
+                    attempt_count=attempt_index + 1,
+                    safe_checkpoint="pre_state_commit",
+                    retryable=False,
+                ) from exc
+            request_messages = _appraisal_repair_messages(
+                system_message=system_message,
+                human_message=human_message,
+                invalid_candidate=str(raw_output),
+                contract_error=str(exc),
+            )
+            continue
+
         ended_at = time.perf_counter()
         capture_validation_stage(
-            stage_id=f"semantic_appraisal:{question['question_id']}",
+            stage_id=stage_id,
             config=services.appraisal_config,
             system_prompt=SEMANTIC_APPRAISAL_PROMPT,
             human_payload=payload_text,
             raw_output=raw_output,
             parsed_output=parsed_output,
-            parse_status="failed",
+            parse_status="succeeded",
             started_at=started_at,
             ended_at=ended_at,
-            error=str(exc),
         )
-        raise
-    ended_at = time.perf_counter()
-    capture_validation_stage(
-        stage_id=f"semantic_appraisal:{question['question_id']}",
-        config=services.appraisal_config,
-        system_prompt=SEMANTIC_APPRAISAL_PROMPT,
-        human_payload=payload_text,
-        raw_output=raw_output,
-        parsed_output=parsed_output,
-        parse_status="succeeded",
-        started_at=started_at,
-        ended_at=ended_at,
-    )
-    return result
+        return result
+
+    raise AssertionError("semantic appraisal attempt loop did not terminate")
+
+
+def _appraisal_repair_messages(
+    *,
+    system_message: SystemMessage,
+    human_message: HumanMessage,
+    invalid_candidate: str,
+    contract_error: str,
+) -> list[SystemMessage | HumanMessage | AIMessage]:
+    """Build one bounded replacement request from the latest invalid output.
+
+    Args:
+        system_message: Stable semantic-appraisal instructions.
+        human_message: Canonical question and evidence payload.
+        invalid_candidate: Latest model output that failed validation.
+        contract_error: Validation detail used to direct structural repair.
+
+    Returns:
+        A same-context message sequence requesting a complete replacement.
+    """
+
+    if len(invalid_candidate) > SEMANTIC_APPRAISAL_REPAIR_OUTPUT_CAP:
+        half_cap = SEMANTIC_APPRAISAL_REPAIR_OUTPUT_CAP // 2
+        invalid_candidate = (
+            invalid_candidate[:half_cap]
+            + "\n... 已截断的不合格候选 ...\n"
+            + invalid_candidate[-half_cap:]
+        )
+    repair_payload = {
+        "repair_instruction": (
+            "请在相同语义问题和证据范围内返回完整替代对象，只修复 JSON、"
+            "字段、类型、handle 和 contract 约束。"
+        ),
+        "contract_error": contract_error[:500],
+    }
+    messages = [
+        system_message,
+        human_message,
+        AIMessage(content=invalid_candidate),
+        HumanMessage(content=json.dumps(
+            repair_payload,
+            ensure_ascii=False,
+            sort_keys=True,
+        )),
+    ]
+    return messages
 
 
 def validate_semantic_appraisal_result(

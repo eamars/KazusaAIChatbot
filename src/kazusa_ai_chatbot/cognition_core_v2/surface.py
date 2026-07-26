@@ -8,6 +8,7 @@ from typing import Any
 
 from kazusa_ai_chatbot.cognition_episode import project_model_visible_percepts
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    CognitionExecutionError,
     TextSurfaceInputV2,
     TextSurfaceOutputV2,
     TextSurfaceServicesV2,
@@ -45,7 +46,21 @@ async def run_text_surface_planning(
     content_result, preference = await asyncio.gather(
         run_content_plan_stage(content_payload, services),
         run_preference_stage(stage_payload, services),
+        return_exceptions=True,
     )
+    stage_results = (content_result, preference)
+    for stage_result in stage_results:
+        if (
+            isinstance(stage_result, BaseException)
+            and not isinstance(stage_result, CognitionExecutionError)
+        ):
+            raise stage_result
+    if any(
+        isinstance(stage_result, CognitionExecutionError)
+        for stage_result in stage_results
+    ):
+        degraded_output = build_degraded_text_surface(payload)
+        return degraded_output
     content_plan, content_requirements, delivery_profile = content_result
     visible_boundaries, addressee_plan = preference
     output: TextSurfaceOutputV2 = {
@@ -56,6 +71,55 @@ async def run_text_surface_planning(
         "addressee_plan": addressee_plan,
         "delivery_profile": delivery_profile,
         "selected_surface_intent": payload["intention"]["intention"],
+        "permitted_action_results": [
+            {
+                **row,
+                "target_roles": [
+                    dict(role) for role in row["target_roles"]
+                ],
+            }
+            for row in payload["permitted_action_results"]
+        ],
+    }
+    if "runtime_capability_limits" in payload:
+        output["runtime_capability_limits"] = list(
+            payload["runtime_capability_limits"]
+        )
+    validated_output = validate_text_surface_output(output)
+    return validated_output
+
+
+def build_degraded_text_surface(
+    input_payload: TextSurfaceInputV2,
+) -> TextSurfaceOutputV2:
+    """Project a valid neutral text surface from canonical cognition truth.
+
+    Args:
+        input_payload: Validated V2 cognition-to-surface contract.
+
+    Returns:
+        A validated surface that preserves selected intent, action truth, and
+        runtime capability limits without model-authored additions.
+    """
+
+    payload = validate_text_surface_input(input_payload)
+    selected_intention = payload["intention"]["intention"]
+    output: TextSurfaceOutputV2 = {
+        "schema_version": "text_surface_output.v2",
+        "content_plan": selected_intention,
+        "content_requirements": [
+            "表达已选择的回应意图，并保持当前事实、角色方向和能力结果原义。",
+        ],
+        "visible_boundaries": [],
+        "addressee_plan": [],
+        "delivery_profile": {
+            "lexical_register": "自然、清楚",
+            "sentence_shape": "简洁完整",
+            "rhythm": "平稳",
+            "hesitation": "按语义需要自然呈现",
+            "punctuation": "克制清晰",
+        },
+        "selected_surface_intent": selected_intention,
         "permitted_action_results": [
             {
                 **row,

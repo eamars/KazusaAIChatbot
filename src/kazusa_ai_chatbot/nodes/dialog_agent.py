@@ -15,6 +15,9 @@ import logging
 import time
 from typing import Any, NotRequired, TypedDict
 
+import httpx
+from openai import OpenAIError
+
 from kazusa_ai_chatbot import event_logging
 from kazusa_ai_chatbot import llm_tracing
 from kazusa_ai_chatbot.cognition_episode import (
@@ -24,10 +27,15 @@ from kazusa_ai_chatbot.cognition_episode import (
     project_model_visible_percepts,
 )
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    CognitionExecutionError,
     TextSurfaceInputV2,
     TextSurfaceOutputV2,
     validate_text_surface_input,
     validate_text_surface_output,
+)
+from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
+    V2_MODEL_TOTAL_ATTEMPTS,
+    V2_VERIFIER_TOTAL_ATTEMPTS,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_l3_surface import (
     repair_text_surface_for_dialog,
@@ -61,7 +69,8 @@ DEFAULT_DIALOG_USAGE_MODE = "live_visible_reply"
 DIALOG_USAGE_MODE_SELF_COGNITION_ACTION_CANDIDATE = (
     "self_cognition_action_candidate_render"
 )
-DIALOG_VERIFIER_ATTEMPT_LIMIT = 2
+DIALOG_GENERATOR_TOTAL_ATTEMPTS = V2_MODEL_TOTAL_ATTEMPTS
+DIALOG_VERIFIER_ATTEMPT_LIMIT = V2_VERIFIER_TOTAL_ATTEMPTS
 DIALOG_VERIFIER_REJECTED_OUTPUT_MAX_CHARS = 8000
 DIALOG_VERIFIER_CONTRACT_ERROR_MAX_CHARS = 500
 DIALOG_SEMANTIC_AUTHORITY_MAX_CHARS = 11000
@@ -69,6 +78,12 @@ DIALOG_CANDIDATE_MAX_CHARS = 12000
 DIALOG_SEMANTIC_PAYLOAD_MAX_CHARS = 50000
 DIALOG_STRING_VERDICT_FALSE_EXAMPLE = (
     '{"aligned": false, "issues": ["original issue text"]}'
+)
+DIALOG_ROLE_VERDICT_FALSE_EXAMPLE = (
+    '{"aligned": false, "violations": [{'
+    '"kind": "selection_owner_transfer", '
+    '"evidence": "exact candidate text", '
+    '"explanation": "specific role-direction conflict"}]}'
 )
 DIALOG_SEMANTIC_VERDICT_FALSE_EXAMPLE = (
     '{"aligned": false, "hard_errors": ["original error text"]}'
@@ -103,7 +118,17 @@ class DialogComplianceContractError(StateContractError):
 
     error_code = "dialog_compliance_contract_exhausted"
     stage = "dialog_compliance"
-    attempt_count = 2
+    attempt_count = DIALOG_GENERATOR_TOTAL_ATTEMPTS
+    safe_checkpoint = "post_cognition_commit"
+    retryable = False
+
+
+class DialogGenerationContractError(DialogComplianceContractError):
+    """Expose total dialog-generator exhaustion without candidate details."""
+
+    error_code = "dialog_generator_exhausted"
+    stage = "dialog_generation"
+    attempt_count = DIALOG_GENERATOR_TOTAL_ATTEMPTS
     safe_checkpoint = "post_cognition_commit"
     retryable = False
 
@@ -300,8 +325,8 @@ punctuation，把情绪和角色特征融入用词、句式与节奏，让相同
 非空列表。JSON 对象之外不添加 Markdown 代码围栏或解释。
 '''
 
-_V2_DIALOG_HARD_FAILURE_REPAIR_PROMPT = '''你负责把上游已替换并验证的 text_surface_output_v2
-渲染成第二份角色回应。上游语义规划已经依据 verified_hard_issues 重建内容、要求、可见边界和
+_V2_DIALOG_HARD_FAILURE_REPAIR_PROMPT = '''你负责把当前 text_surface_output_v2
+渲染成一份完整替代角色回应。上游语义规划可能已经依据 verified_hard_issues 重建内容、要求、可见边界和
 称呼安排；这些字段是本次修复的语义依据。
 
 # 修复职责
@@ -346,14 +371,17 @@ _dialog_generator_llm_config = LLMCallConfig(
 
 
 async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
-    """Render and verify dialog from one canonical V2 semantic surface.
+    """Render bounded candidates and preserve the newest usable dialog.
 
     Args:
         state: Dialog state containing the canonical surface and scene episode.
 
     Returns:
-        The accepted visible dialog paired with its accepted semantic surface.
-        A verified hard-failure repair replaces both members of the pair.
+        The accepted visible dialog paired with the surface that produced it.
+
+    Raises:
+        DialogGenerationContractError: If all three producer opportunities
+            fail to yield any bounded non-empty dialog.
     """
 
     usage_mode = state["dialog_usage_mode"]
@@ -364,170 +392,246 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
             f"for usage_mode={usage_mode}"
         )
     surface_output = validate_text_surface_output(surface_output)
-    system_prompt = SystemMessage(content=_V2_DIALOG_GENERATOR_PROMPT)
     current_visible_percepts = _current_visible_percepts(
         state["cognitive_episode"]
     )
-
-    msg = {
-        "text_surface_output_v2": dict(surface_output),
-        "user_name": state["user_name"],
-    }
-
-    human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
-
-    started_at = time.perf_counter()
-    response = await _dialog_generator_llm.ainvoke(
-        [system_prompt, human_message],
-        config=_dialog_generator_llm_config,
-    )
-
-    result = parse_llm_json_output(response.content)
-    invalid_fields: list[str] = []
-    if isinstance(result, list):
-        logger.warning(
-            "Dialog generator returned a top-level list; "
-            "normalizing it into final_dialog"
-        )
-        generated_dialog = result
-        parsed_keys = ["<top-level-list>"]
-        invalid_fields.append("top_level")
-    else:
-        generated_dialog = result.get("final_dialog", [])
-        parsed_keys = list(result.keys())
-
-    if not isinstance(generated_dialog, list):
-        logger.warning(
-            f"Dialog generator final_dialog is not a list: "
-            f"type={type(generated_dialog).__name__}"
-        )
-        generated_dialog = []
-        invalid_fields.append("final_dialog")
-    valid_dialog: list[str] = []
-    for segment in generated_dialog:
-        if not isinstance(segment, str):
-            continue
-        if segment:
-            valid_dialog.append(segment)
-    if len(valid_dialog) != len(generated_dialog):
-        logger.warning(
-            f"Dialog generator dropped invalid messages: "
-            f"raw_count={len(generated_dialog)} valid_count={len(valid_dialog)}"
-        )
-        invalid_fields.append("final_dialog_message")
-    generated_dialog = valid_dialog
-    parse_status = "succeeded" if not invalid_fields else "warning"
     llm_trace_id = state.get("llm_trace_id", "")
-    await llm_tracing.record_llm_trace_step(
-        trace_id=llm_trace_id,
-        stage_name="dialog_generator",
-        route_name="DIALOG_GENERATOR_LLM",
-        model_name=DIALOG_GENERATOR_LLM_MODEL,
-        messages=[system_prompt, human_message],
-        response_text=str(response.content),
-        parsed_output=result,
-        parse_status=parse_status,
-        status="succeeded",
-        duration_ms=_elapsed_ms(started_at),
-        output_state_fields=["final_dialog"],
-    )
-    if generated_dialog:
-        verdict = await _verify_dialog_compliance(
-            surface_output=surface_output,
-            generated_dialog=generated_dialog,
-            current_visible_percepts=current_visible_percepts,
-            llm_trace_id=state.get("llm_trace_id", ""),
-        )
-        if not verdict["aligned"]:
-            repair_issues = verdict["issues"]
+    candidate_ledger: list[
+        tuple[list[str], TextSurfaceOutputV2]
+    ] = []
+    remaining_issues: list[str] = []
+    surface_repair_pending = False
+
+    for attempt_number in range(1, DIALOG_GENERATOR_TOTAL_ATTEMPTS + 1):
+        if surface_repair_pending:
             surface_input = state.get("text_surface_input_v2")
             if not isinstance(surface_input, dict):
                 raise StateContractError(
                     "dialog repair requires text_surface_input_v2"
                 )
-            surface_input = validate_text_surface_input(surface_input)
-            generated_dialog, surface_output = (
-                await _repair_dialog_hard_failure(
-                    repair_issues=repair_issues,
-                    surface_input=surface_input,
-                    user_name=state["user_name"],
-                    llm_trace_id=llm_trace_id,
-                )
+            validated_surface_input = validate_text_surface_input(
+                surface_input
             )
-            repaired_verdict = await _verify_dialog_compliance(
-                surface_output=surface_output,
-                generated_dialog=generated_dialog,
-                current_visible_percepts=current_visible_percepts,
-                llm_trace_id=llm_trace_id,
-                post_repair=True,
-            )
-            if not repaired_verdict["aligned"]:
-                await event_logging.record_model_contract_event(
-                    component=DIALOG_COMPONENT,
-                    stage_name="dialog_compliance",
-                    violation_kind="semantic_dialog_misalignment",
-                    missing_fields=[],
-                    invalid_fields=repaired_verdict["issues"],
-                    repair_used=True,
-                    status="failed",
-                    correlation_id=llm_trace_id,
+            try:
+                repaired_surface = await repair_text_surface_for_dialog(
+                    surface_input=validated_surface_input,
+                    verified_hard_issues=remaining_issues,
                 )
-                raise DialogComplianceContractError(
-                    "dialog remains hard-invalid after two candidates"
+            except CognitionExecutionError as exc:
+                if exc.stage != "surface.dialog_compliance_repair":
+                    raise
+            else:
+                surface_output = validate_text_surface_output(
+                    repaired_surface
                 )
-            await event_logging.record_model_contract_event(
-                component=DIALOG_COMPONENT,
-                stage_name="dialog_compliance",
-                violation_kind="semantic_dialog_misalignment",
-                missing_fields=[],
-                invalid_fields=repair_issues,
-                repair_used=True,
-                status="repaired",
-                correlation_id=llm_trace_id,
-            )
-    generated_dialog_preview = (
-        generated_dialog
-        if isinstance(generated_dialog, list)
-        else []
-    )
-    logger.debug(
-        f"Dialog generator: "
-        f"parsed_keys={parsed_keys} "
-        f"messages={len(generated_dialog_preview)} "
-        f"dialog={log_list_preview(generated_dialog_preview)}"
-    )
-    await event_logging.record_llm_stage_event(
-        component=DIALOG_COMPONENT,
-        stage_name="dialog_generator",
-        route_name="generate",
-        model_name=DIALOG_GENERATOR_LLM_MODEL,
-        status="succeeded",
-        prompt_chars=len(system_prompt.content) + len(human_message.content),
-        output_chars=len(str(response.content)),
-        parse_status=parse_status,
-        retry_count=0,
-        json_repair_used=False,
-        duration_ms=_elapsed_ms(started_at),
-        severity="info" if not invalid_fields else "warning",
-        correlation_id=llm_trace_id,
-    )
-    if invalid_fields:
+            surface_repair_pending = False
+
+        generated_dialog, failure_kind = await _render_dialog_candidate(
+            surface_output=surface_output,
+            user_name=state["user_name"],
+            repair_issues=remaining_issues,
+            attempt_number=attempt_number,
+            llm_trace_id=llm_trace_id,
+        )
+        if not generated_dialog:
+            remaining_issues = [
+                f"dialog_generator_{failure_kind or 'structure'}"
+            ]
+            continue
+
+        candidate_ledger.append((generated_dialog, surface_output))
+        if attempt_number >= DIALOG_GENERATOR_TOTAL_ATTEMPTS:
+            break
+
+        verdict = await _verify_dialog_compliance(
+            surface_output=surface_output,
+            generated_dialog=generated_dialog,
+            current_visible_percepts=current_visible_percepts,
+            llm_trace_id=llm_trace_id,
+            post_repair=attempt_number > 1,
+        )
+        if _dialog_verifier_aggregate_is_aligned(verdict):
+            return_value = {
+                "final_dialog": generated_dialog,
+                "text_surface_output_v2": surface_output,
+            }
+            return return_value
+
+        remaining_issues = _dialog_verifier_aggregate_repair_issues(
+            verdict
+        )
+        if not remaining_issues:
+            remaining_issues = ["verifier_unavailable"]
+        if attempt_number == 1:
+            surface_repair_pending = True
         await event_logging.record_model_contract_event(
             component=DIALOG_COMPONENT,
-            stage_name="dialog_generator",
-            violation_kind="invalid_dialog_output",
+            stage_name="dialog_compliance",
+            violation_kind="semantic_dialog_misalignment",
             missing_fields=[],
-            invalid_fields=invalid_fields,
-            repair_used=True,
-            status="repaired",
+            invalid_fields=remaining_issues,
+            repair_used=attempt_number > 1,
+            status="retrying",
             correlation_id=llm_trace_id,
         )
 
+    if not candidate_ledger:
+        raise DialogGenerationContractError(
+            "dialog generator produced no bounded candidate"
+        )
+
+    generated_dialog, accepted_surface = candidate_ledger[-1]
     return_value = {
         "final_dialog": generated_dialog,
-        "text_surface_output_v2": surface_output,
+        "text_surface_output_v2": accepted_surface,
     }
     return return_value
+
+
+async def _render_dialog_candidate(
+    *,
+    surface_output: TextSurfaceOutputV2,
+    user_name: str,
+    repair_issues: list[str],
+    attempt_number: int,
+    llm_trace_id: str,
+) -> tuple[list[str], str | None]:
+    """Render one candidate in the shared three-opportunity dialog ledger.
+
+    Args:
+        surface_output: Current validated semantic surface authority.
+        user_name: Optional natural addressee name for final wording.
+        repair_issues: Typed bounded failures remaining from the prior round.
+        attempt_number: One-based producer opportunity in the shared ledger.
+        llm_trace_id: Correlation identifier for protected model evidence.
+
+    Returns:
+        A bounded dialog and no failure kind, or an empty dialog with the
+        classified provider or structure failure kind.
+    """
+
+    if not 1 <= attempt_number <= DIALOG_GENERATOR_TOTAL_ATTEMPTS:
+        raise ValueError("dialog generator attempt number is invalid")
+    validated_surface = validate_text_surface_output(surface_output)
+    if attempt_number == 1:
+        system_message = SystemMessage(content=_V2_DIALOG_GENERATOR_PROMPT)
+        payload: dict[str, Any] = {
+            "text_surface_output_v2": dict(validated_surface),
+            "user_name": user_name,
+        }
+        stage_name = "dialog_generator"
+    else:
+        system_message = SystemMessage(
+            content=_V2_DIALOG_HARD_FAILURE_REPAIR_PROMPT,
+        )
+        payload = {
+            "text_surface_output_v2": dict(validated_surface),
+            "user_name": user_name,
+            "repair_context": {
+                "verified_hard_issues": list(repair_issues),
+            },
+        }
+        stage_name = (
+            "dialog_generator_repair"
+            if attempt_number == 2
+            else "dialog_generator_terminal"
+        )
+    human_message = HumanMessage(content=json.dumps(
+        payload,
+        ensure_ascii=False,
+    ))
+    request_messages = [system_message, human_message]
+    started_at = time.perf_counter()
+    try:
+        response = await _dialog_generator_llm.ainvoke(
+            request_messages,
+            config=_dialog_generator_llm_config,
+        )
+    except (
+        OpenAIError,
+        httpx.HTTPError,
+        ConnectionError,
+        OSError,
+        RuntimeError,
+        TimeoutError,
+    ) as exc:
+        await llm_tracing.record_llm_trace_step(
+            trace_id=llm_trace_id,
+            stage_name=stage_name,
+            route_name="DIALOG_GENERATOR_LLM",
+            model_name=DIALOG_GENERATOR_LLM_MODEL,
+            messages=request_messages,
+            response_text="",
+            parsed_output={},
+            parse_status="provider_error",
+            status="failed",
+            duration_ms=_elapsed_ms(started_at),
+            output_state_fields=["final_dialog"],
+            sequence=attempt_number - 1,
+        )
+        logger.warning(
+            f"Dialog candidate {attempt_number} provider failure: {exc}"
+        )
+        return [], "provider"
+
+    response_text = str(getattr(response, "content", ""))
+    parsed: object = {}
+    try:
+        parsed = parse_llm_json_output(response_text)
+        generated_dialog = _validated_dialog_messages(parsed)
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        await llm_tracing.record_llm_trace_step(
+            trace_id=llm_trace_id,
+            stage_name=stage_name,
+            route_name="DIALOG_GENERATOR_LLM",
+            model_name=DIALOG_GENERATOR_LLM_MODEL,
+            messages=request_messages,
+            response_text=response_text,
+            parsed_output=parsed,
+            parse_status="contract_error",
+            status="failed",
+            duration_ms=_elapsed_ms(started_at),
+            output_state_fields=["final_dialog"],
+            sequence=attempt_number - 1,
+        )
+        logger.warning(
+            f"Dialog candidate {attempt_number} contract failure: {exc}"
+        )
+        return [], "structure"
+
+    await llm_tracing.record_llm_trace_step(
+        trace_id=llm_trace_id,
+        stage_name=stage_name,
+        route_name="DIALOG_GENERATOR_LLM",
+        model_name=DIALOG_GENERATOR_LLM_MODEL,
+        messages=request_messages,
+        response_text=response_text,
+        parsed_output=parsed,
+        parse_status="succeeded",
+        status="succeeded",
+        duration_ms=_elapsed_ms(started_at),
+        output_state_fields=["final_dialog"],
+        sequence=attempt_number - 1,
+    )
+    await event_logging.record_llm_stage_event(
+        component=DIALOG_COMPONENT,
+        stage_name=stage_name,
+        route_name="generate",
+        model_name=DIALOG_GENERATOR_LLM_MODEL,
+        status="succeeded",
+        prompt_chars=sum(
+            len(str(message.content))
+            for message in request_messages
+        ),
+        output_chars=len(response_text),
+        parse_status="succeeded",
+        retry_count=attempt_number - 1,
+        json_repair_used=False,
+        duration_ms=_elapsed_ms(started_at),
+        severity="info",
+        correlation_id=llm_trace_id,
+    )
+    return generated_dialog, None
 
 
 async def _repair_dialog_hard_failure(
@@ -553,40 +657,17 @@ async def _repair_dialog_hard_failure(
         surface_input=surface_input,
         verified_hard_issues=repair_issues,
     )
-    system_message = SystemMessage(
-        content=_V2_DIALOG_HARD_FAILURE_REPAIR_PROMPT,
+    repaired_dialog, _ = await _render_dialog_candidate(
+        surface_output=repaired_surface,
+        user_name=user_name,
+        repair_issues=repair_issues,
+        attempt_number=2,
+        llm_trace_id=llm_trace_id,
     )
-    payload = {
-        "text_surface_output_v2": dict(repaired_surface),
-        "user_name": user_name,
-        "repair_context": {
-            "verified_hard_issues": repair_issues,
-        },
-    }
-    human_message = HumanMessage(content=json.dumps(
-        payload,
-        ensure_ascii=False,
-    ))
-    started_at = time.perf_counter()
-    response = await _dialog_generator_llm.ainvoke(
-        [system_message, human_message],
-        config=_dialog_generator_llm_config,
-    )
-    parsed = parse_llm_json_output(response.content)
-    repaired_dialog = _validated_dialog_messages(parsed)
-    await llm_tracing.record_llm_trace_step(
-        trace_id=llm_trace_id,
-        stage_name="dialog_generator_repair",
-        route_name="DIALOG_GENERATOR_LLM",
-        model_name=DIALOG_GENERATOR_LLM_MODEL,
-        messages=[system_message, human_message],
-        response_text=str(response.content),
-        parsed_output=parsed,
-        parse_status="succeeded",
-        status="succeeded",
-        duration_ms=_elapsed_ms(started_at),
-        output_state_fields=["final_dialog"],
-    )
+    if not repaired_dialog:
+        raise DialogGenerationContractError(
+            "dialog repair produced no bounded candidate"
+        )
     return repaired_dialog, repaired_surface
 
 
@@ -779,32 +860,41 @@ async def _verify_dialog_semantic_fidelity(
             status="failed",
             correlation_id=llm_trace_id,
         )
-        raise DialogVerifierContractError(
-            (
-                "semantic fidelity verifier context limit exceeded: "
-                f"authority_chars={authority_chars}; "
-                f"candidate_chars={candidate_chars}; "
-                f"payload_chars={len(human_payload)}"
-            ),
-            error_code="dialog_semantic_fidelity_context_limit",
-            stage="dialog.semantic_fidelity",
-        )
+        return {"status": "unavailable", "issues": []}
+
     request_messages = [system_message, human_message]
     for attempt_index in range(DIALOG_VERIFIER_ATTEMPT_LIMIT):
         started_at = time.perf_counter()
-        response = await _dialog_semantic_fidelity_llm.ainvoke(
-            request_messages,
-            config=_dialog_semantic_fidelity_llm_config,
-        )
         parsed: object = {}
-        response_text = getattr(response, "content", "")
+        response_text = ""
+        failure_kind = ""
+        contract_error = ""
         try:
+            response = await _dialog_semantic_fidelity_llm.ainvoke(
+                request_messages,
+                config=_dialog_semantic_fidelity_llm_config,
+            )
+            response_text = str(getattr(response, "content", ""))
             parsed = parse_llm_json_output(response_text)
             verdict = _validate_semantic_fidelity_verdict(
                 parsed,
                 max_issues=MAX_FOCUSED_VERIFIER_ISSUES,
             )
+        except (
+            OpenAIError,
+            httpx.HTTPError,
+            ConnectionError,
+            OSError,
+            RuntimeError,
+            TimeoutError,
+        ) as exc:
+            failure_kind = "provider_error"
+            contract_error = f"{type(exc).__name__}: {exc}"
         except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            failure_kind = "contract_error"
+            contract_error = str(exc)
+
+        if failure_kind:
             await llm_tracing.record_llm_trace_step(
                 trace_id=llm_trace_id,
                 stage_name=trace_stage_name,
@@ -813,7 +903,7 @@ async def _verify_dialog_semantic_fidelity(
                 messages=request_messages,
                 response_text=str(response_text),
                 parsed_output=parsed,
-                parse_status="contract_error",
+                parse_status=failure_kind,
                 status="failed",
                 duration_ms=_elapsed_ms(started_at),
                 output_state_fields=[
@@ -822,16 +912,19 @@ async def _verify_dialog_semantic_fidelity(
                 sequence=attempt_index,
             )
             if attempt_index + 1 >= DIALOG_VERIFIER_ATTEMPT_LIMIT:
-                raise DialogVerifierContractError(
-                    (
-                        "semantic fidelity verifier contract exhausted: "
-                        f"{exc}"
+                await event_logging.record_model_contract_event(
+                    component=DIALOG_COMPONENT,
+                    stage_name="dialog.semantic_fidelity",
+                    violation_kind=(
+                        "dialog_semantic_fidelity_unavailable"
                     ),
-                    error_code=(
-                        "dialog_semantic_fidelity_contract_exhausted"
-                    ),
-                    stage="dialog.semantic_fidelity",
-                ) from exc
+                    missing_fields=[],
+                    invalid_fields=[failure_kind],
+                    repair_used=True,
+                    status="degraded",
+                    correlation_id=llm_trace_id,
+                )
+                return {"status": "unavailable", "issues": []}
             request_messages = [
                 system_message,
                 human_message,
@@ -841,7 +934,7 @@ async def _verify_dialog_semantic_fidelity(
                     )
                 )),
                 _dialog_verifier_structure_repair_message(
-                    contract_error=str(exc),
+                    contract_error=contract_error,
                     issue_field_name="hard_errors",
                     false_verdict_example=(
                         DIALOG_SEMANTIC_VERDICT_FALSE_EXAMPLE
@@ -888,7 +981,7 @@ async def _verify_dialog_semantic_fidelity(
         )
         return verdict
 
-    raise StateContractError("semantic fidelity verifier loop terminated")
+    raise StateContractError("semantic fidelity verifier loop invariant failed")
 
 
 _V2_DIALOG_ROLE_DIRECTION_PROMPT = '''只核对一份角色回应的选择所有者、行动者和对象方向。
@@ -917,13 +1010,15 @@ selection_owner_role 决定选择哪项动作，embedded_actor_role 执行已选
 要求和选择的所有者。
 
 本阶段不判断回应是否充分、详细、优雅或完全覆盖 content plan，也不得以不够具体、过于简短或
-未完成 required operation 为理由拒绝。issues 只能报告明确的选择所有者转移，或明确的行动者/
-对象颠倒。祈使句已经命名一个动作时，不因缺少解释、步骤或额外细节而拒绝。
+未完成 required operation 为理由拒绝。violations 只能报告明确的选择所有者转移，或明确的
+行动者/对象颠倒。祈使句已经命名一个动作时，不因缺少解释、步骤或额外细节而拒绝。
 
 # 输出格式
-只返回一个 JSON 对象，字段必须恰好是 aligned 和 issues。aligned 是布尔值；issues 是零到四条
-互不重复的简短角色方向问题，每条最多 300 字符。aligned 为 true 时 issues 为空；为 false 时
-至少包含一条问题。
+只返回一个 JSON 对象，字段必须恰好是 aligned 和 violations。aligned 是布尔值；violations
+是零到四个互不重复的对象，每个对象必须恰好包含 kind、evidence 和 explanation。kind 只能是
+selection_owner_transfer 或 typed_operation_role_reversal。evidence 必须逐字复制候选回应中的
+非空文字；explanation 用一句话说明角色方向冲突。aligned 为 true 时 violations 为空；为 false
+时至少包含一项。
 '''
 _dialog_role_direction_llm = LLInterface()
 _dialog_role_direction_llm_config = LLMCallConfig(
@@ -1001,7 +1096,7 @@ async def _verify_dialog_role_direction(
         current_visible_percepts
     )
     if not required_operations:
-        return {"aligned": True, "issues": []}
+        return {"aligned": True, "violations": []}
 
     system_message = SystemMessage(
         content=_V2_DIALOG_ROLE_DIRECTION_PROMPT,
@@ -1023,19 +1118,36 @@ async def _verify_dialog_role_direction(
     request_messages = [system_message, human_message]
     for attempt_index in range(DIALOG_VERIFIER_ATTEMPT_LIMIT):
         started_at = time.perf_counter()
-        response = await _dialog_role_direction_llm.ainvoke(
-            request_messages,
-            config=_dialog_role_direction_llm_config,
-        )
         parsed: object = {}
-        response_text = getattr(response, "content", "")
+        response_text = ""
+        failure_kind = ""
+        contract_error = ""
         try:
-            parsed = parse_llm_json_output(response_text)
-            verdict = _validate_compliance_verdict(
-                parsed,
-                max_issues=MAX_FOCUSED_VERIFIER_ISSUES,
+            response = await _dialog_role_direction_llm.ainvoke(
+                request_messages,
+                config=_dialog_role_direction_llm_config,
             )
+            response_text = str(getattr(response, "content", ""))
+            parsed = parse_llm_json_output(response_text)
+            verdict = _validate_role_direction_verdict(
+                parsed,
+                generated_dialog=generated_dialog,
+            )
+        except (
+            OpenAIError,
+            httpx.HTTPError,
+            ConnectionError,
+            OSError,
+            RuntimeError,
+            TimeoutError,
+        ) as exc:
+            failure_kind = "provider_error"
+            contract_error = f"{type(exc).__name__}: {exc}"
         except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            failure_kind = "contract_error"
+            contract_error = str(exc)
+
+        if failure_kind:
             await llm_tracing.record_llm_trace_step(
                 trace_id=llm_trace_id,
                 stage_name=trace_stage_name,
@@ -1044,23 +1156,24 @@ async def _verify_dialog_role_direction(
                 messages=request_messages,
                 response_text=str(response_text),
                 parsed_output=parsed,
-                parse_status="contract_error",
+                parse_status=failure_kind,
                 status="failed",
                 duration_ms=_elapsed_ms(started_at),
                 output_state_fields=["dialog_role_direction_verdict"],
                 sequence=attempt_index,
             )
             if attempt_index + 1 >= DIALOG_VERIFIER_ATTEMPT_LIMIT:
-                raise DialogVerifierContractError(
-                    (
-                        "role direction verifier contract exhausted: "
-                        f"{exc}"
-                    ),
-                    error_code=(
-                        "dialog_role_direction_contract_exhausted"
-                    ),
-                    stage="dialog.role_direction",
-                ) from exc
+                await event_logging.record_model_contract_event(
+                    component=DIALOG_COMPONENT,
+                    stage_name="dialog.role_direction",
+                    violation_kind="dialog_role_direction_unavailable",
+                    missing_fields=[],
+                    invalid_fields=[failure_kind],
+                    repair_used=True,
+                    status="degraded",
+                    correlation_id=llm_trace_id,
+                )
+                return {"status": "unavailable", "violations": []}
             request_messages = [
                 system_message,
                 human_message,
@@ -1070,10 +1183,10 @@ async def _verify_dialog_role_direction(
                     )
                 )),
                 _dialog_verifier_structure_repair_message(
-                    contract_error=str(exc),
-                    issue_field_name="issues",
+                    contract_error=contract_error,
+                    issue_field_name="violations",
                     false_verdict_example=(
-                        DIALOG_STRING_VERDICT_FALSE_EXAMPLE
+                        DIALOG_ROLE_VERDICT_FALSE_EXAMPLE
                     ),
                 ),
             ]
@@ -1117,7 +1230,7 @@ async def _verify_dialog_role_direction(
         )
         return verdict
 
-    raise StateContractError("role direction verifier loop terminated")
+    raise StateContractError("role direction verifier loop invariant failed")
 
 
 _V2_DIALOG_SURFACE_INTEGRITY_PROMPT = '''根据候选回应和精确的 permitted_action_results 核对
@@ -1202,19 +1315,36 @@ async def _verify_dialog_surface_integrity(
     request_messages = [system_message, human_message]
     for attempt_index in range(DIALOG_VERIFIER_ATTEMPT_LIMIT):
         started_at = time.perf_counter()
-        response = await _dialog_surface_integrity_llm.ainvoke(
-            request_messages,
-            config=_dialog_surface_integrity_llm_config,
-        )
         parsed: object = {}
-        response_text = getattr(response, "content", "")
+        response_text = ""
+        failure_kind = ""
+        contract_error = ""
         try:
+            response = await _dialog_surface_integrity_llm.ainvoke(
+                request_messages,
+                config=_dialog_surface_integrity_llm_config,
+            )
+            response_text = str(getattr(response, "content", ""))
             parsed = parse_llm_json_output(response_text)
             verdict = _validate_surface_compliance_verdict(
                 parsed,
                 generated_dialog=generated_dialog,
             )
+        except (
+            OpenAIError,
+            httpx.HTTPError,
+            ConnectionError,
+            OSError,
+            RuntimeError,
+            TimeoutError,
+        ) as exc:
+            failure_kind = "provider_error"
+            contract_error = f"{type(exc).__name__}: {exc}"
         except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            failure_kind = "contract_error"
+            contract_error = str(exc)
+
+        if failure_kind:
             await llm_tracing.record_llm_trace_step(
                 trace_id=llm_trace_id,
                 stage_name=trace_stage_name,
@@ -1223,7 +1353,7 @@ async def _verify_dialog_surface_integrity(
                 messages=request_messages,
                 response_text=str(response_text),
                 parsed_output=parsed,
-                parse_status="contract_error",
+                parse_status=failure_kind,
                 status="failed",
                 duration_ms=_elapsed_ms(started_at),
                 output_state_fields=[
@@ -1232,16 +1362,17 @@ async def _verify_dialog_surface_integrity(
                 sequence=attempt_index,
             )
             if attempt_index + 1 >= DIALOG_VERIFIER_ATTEMPT_LIMIT:
-                raise DialogVerifierContractError(
-                    (
-                        "surface integrity verifier contract exhausted: "
-                        f"{exc}"
-                    ),
-                    error_code=(
-                        "dialog_surface_integrity_contract_exhausted"
-                    ),
-                    stage="dialog.surface_integrity",
-                ) from exc
+                await event_logging.record_model_contract_event(
+                    component=DIALOG_COMPONENT,
+                    stage_name="dialog.surface_integrity",
+                    violation_kind="dialog_surface_integrity_unavailable",
+                    missing_fields=[],
+                    invalid_fields=[failure_kind],
+                    repair_used=True,
+                    status="degraded",
+                    correlation_id=llm_trace_id,
+                )
+                return {"status": "unavailable", "issues": []}
             request_messages = [
                 system_message,
                 human_message,
@@ -1251,7 +1382,7 @@ async def _verify_dialog_surface_integrity(
                     )
                 )),
                 _dialog_verifier_structure_repair_message(
-                    contract_error=str(exc),
+                    contract_error=contract_error,
                     issue_field_name="issues",
                     false_verdict_example=(
                         DIALOG_SURFACE_VERDICT_FALSE_EXAMPLE
@@ -1298,7 +1429,7 @@ async def _verify_dialog_surface_integrity(
         )
         return verdict
 
-    raise StateContractError("surface integrity verifier loop terminated")
+    raise StateContractError("surface integrity verifier loop invariant failed")
 
 
 async def _verify_dialog_compliance(
@@ -1309,9 +1440,9 @@ async def _verify_dialog_compliance(
     llm_trace_id: str,
     post_repair: bool = False,
 ) -> dict[str, Any]:
-    """Run the three focused checks and merge bounded verdict shapes."""
+    """Run focused checks and preserve each verifier owner's typed result."""
 
-    semantic_verdict, role_verdict, surface_verdict = await asyncio.gather(
+    verifier_results = await asyncio.gather(
         _verify_dialog_semantic_fidelity(
             surface_output=surface_output,
             generated_dialog=generated_dialog,
@@ -1332,28 +1463,124 @@ async def _verify_dialog_compliance(
             llm_trace_id=llm_trace_id,
             post_repair=post_repair,
         ),
+        return_exceptions=True,
     )
+    unavailable_shapes = (
+        {"status": "unavailable", "issues": []},
+        {"status": "unavailable", "violations": []},
+        {"status": "unavailable", "issues": []},
+    )
+    normalized_results: list[dict[str, Any]] = []
+    for result, unavailable_shape in zip(
+        verifier_results,
+        unavailable_shapes,
+        strict=True,
+    ):
+        if isinstance(
+            result,
+            DialogVerifierContractError,
+        ):
+            normalized_results.append(dict(unavailable_shape))
+            continue
+        if isinstance(result, BaseException):
+            raise result
+        normalized_results.append(result)
+
+    semantic_verdict, role_verdict, surface_verdict = normalized_results
+    aggregate = {
+        "semantic_fidelity": {
+            "status": _focused_verifier_status(semantic_verdict),
+            "issues": list(semantic_verdict.get("issues", [])),
+        },
+        "role_direction": {
+            "status": _focused_verifier_status(role_verdict),
+            "violations": [
+                dict(violation)
+                for violation in role_verdict.get("violations", [])
+            ],
+        },
+        "surface_integrity": {
+            "status": _focused_verifier_status(surface_verdict),
+            "issues": [
+                dict(issue)
+                for issue in surface_verdict.get("issues", [])
+            ],
+        },
+    }
+    return aggregate
+
+
+def _focused_verifier_status(verdict: Mapping[str, Any]) -> str:
+    """Project one focused verdict to its aggregate status token."""
+
+    if verdict.get("status") == "unavailable":
+        return "unavailable"
+    if verdict["aligned"]:
+        return "aligned"
+    return "misaligned"
+
+
+def _dialog_verifier_aggregate_is_aligned(
+    aggregate: Mapping[str, Any],
+) -> bool:
+    """Return whether every focused verifier accepted the candidate."""
+
+    all_aligned = all(
+        aggregate[owner]["status"] == "aligned"
+        for owner in (
+            "semantic_fidelity",
+            "role_direction",
+            "surface_integrity",
+        )
+    )
+    return all_aligned
+
+
+def _dialog_verifier_aggregate_repair_issues(
+    aggregate: Mapping[str, Any],
+) -> list[str]:
+    """Flatten typed verifier outcomes only for the next repair prompt.
+
+    Args:
+        aggregate: Exact owner-preserving verifier result for one candidate.
+
+    Returns:
+        Bounded unique issue text suitable for the next rendering attempt.
+    """
+
+    semantic = aggregate["semantic_fidelity"]
+    role = aggregate["role_direction"]
+    surface = aggregate["surface_integrity"]
+    combined_issues = list(semantic["issues"])
+    combined_issues.extend(
+        (
+            f"{violation['kind']}: {violation['evidence']!r} - "
+            f"{violation['explanation']}"
+        )
+        for violation in role["violations"]
+    )
+    combined_issues.extend(
+        (
+            f"{issue['kind']}: {issue['evidence']!r} - "
+            f"{issue['explanation']}"
+        )
+        for issue in surface["issues"]
+    )
+    for owner in (
+        "semantic_fidelity",
+        "role_direction",
+        "surface_integrity",
+    ):
+        if aggregate[owner]["status"] == "unavailable":
+            combined_issues.append(f"verifier_unavailable:{owner}")
+
     issues: list[str] = []
-    combined_issues = (
-        semantic_verdict["issues"]
-        + role_verdict["issues"]
-        + surface_verdict["issues"]
-    )
     for issue in combined_issues:
         if issue not in issues:
             issues.append(issue)
-    merged_verdict: dict[str, Any] = {
-        "aligned": (
-            semantic_verdict["aligned"]
-            and role_verdict["aligned"]
-            and surface_verdict["aligned"]
-        ),
-        "issues": issues,
-    }
-    return _validate_compliance_verdict(
-        merged_verdict,
-        max_issues=MAX_MERGED_VERIFIER_ISSUES,
-    )
+        if len(issues) >= MAX_MERGED_VERIFIER_ISSUES:
+            break
+    return issues
 
 
 
@@ -1591,6 +1818,104 @@ def _validate_compliance_verdict(
     return validated_verdict
 
 
+def _validate_role_direction_verdict(
+    value: object,
+    *,
+    generated_dialog: list[str],
+) -> dict[str, Any]:
+    """Validate the role owner's two typed violation conditions.
+
+    Args:
+        value: Parsed role-direction model output.
+        generated_dialog: Candidate text that must contain quoted evidence.
+
+    Returns:
+        Exact aligned state and validated typed violation rows.
+    """
+
+    verdict = _validate_exact_object_fields(
+        value,
+        label="dialog compliance",
+        expected_fields=frozenset({"aligned", "violations"}),
+    )
+    aligned = verdict["aligned"]
+    violations = verdict["violations"]
+    if not isinstance(aligned, bool):
+        raise StateContractError(
+            "dialog role direction aligned must be boolean"
+        )
+    if (
+        not isinstance(violations, list)
+        or len(violations) > MAX_FOCUSED_VERIFIER_ISSUES
+    ):
+        raise StateContractError(
+            "dialog role direction violations are invalid"
+        )
+
+    candidate_text = "\n".join(generated_dialog)
+    validated_violations: list[dict[str, str]] = []
+    normalized_rows: list[tuple[str, str, str]] = []
+    for violation in violations:
+        validated_violation = _validate_exact_object_fields(
+            violation,
+            label="dialog role direction violation",
+            expected_fields=frozenset({
+                "kind",
+                "evidence",
+                "explanation",
+            }),
+        )
+        kind = validated_violation["kind"]
+        evidence = validated_violation["evidence"]
+        explanation = validated_violation["explanation"]
+        if kind not in {
+            "selection_owner_transfer",
+            "typed_operation_role_reversal",
+        }:
+            raise StateContractError(
+                "dialog role direction violation kind is invalid"
+            )
+        if (
+            not isinstance(evidence, str)
+            or not evidence.strip()
+            or len(evidence) > 120
+            or evidence not in candidate_text
+        ):
+            raise StateContractError(
+                "dialog role direction violation evidence is invalid"
+            )
+        if (
+            not isinstance(explanation, str)
+            or not explanation.strip()
+            or len(explanation) > 300
+        ):
+            raise StateContractError(
+                "dialog role direction violation explanation is invalid"
+            )
+        normalized_rows.append((kind, evidence, explanation))
+        validated_violations.append({
+            "kind": kind,
+            "evidence": evidence,
+            "explanation": explanation,
+        })
+    if len(normalized_rows) != len(set(normalized_rows)):
+        raise StateContractError(
+            "dialog role direction violations are duplicated"
+        )
+    if aligned and validated_violations:
+        raise StateContractError(
+            "aligned dialog role direction cannot contain violations"
+        )
+    if not aligned and not validated_violations:
+        raise StateContractError(
+            "misaligned dialog role direction requires violations"
+        )
+    return {
+        "aligned": aligned,
+        "violations": validated_violations,
+    }
+
+
 def _validated_dialog_messages(value: object) -> list[str]:
     """Validate the single repair result without adding semantic judgment."""
 
@@ -1604,6 +1929,8 @@ def _validated_dialog_messages(value: object) -> list[str]:
         for message in messages
     ):
         raise StateContractError("dialog repair message text is invalid")
+    if sum(len(message) for message in messages) > DIALOG_CANDIDATE_MAX_CHARS:
+        raise StateContractError("dialog repair messages exceed text bound")
     validated_messages = list(messages)
     return validated_messages
 
@@ -1613,7 +1940,7 @@ def _validate_surface_compliance_verdict(
     *,
     generated_dialog: list[str],
 ) -> dict[str, Any]:
-    """Validate evidence-bearing surface issues and flatten them for repair."""
+    """Validate evidence-bearing surface issues without losing typed rows."""
 
     verdict = _validate_exact_object_fields(
         value,
@@ -1631,6 +1958,7 @@ def _validate_surface_compliance_verdict(
         raise StateContractError("surface compliance issues are invalid")
     candidate_text = "\n".join(generated_dialog)
     normalized_rows: list[tuple[str, str, str]] = []
+    validated_issues: list[dict[str, str]] = []
     for issue in issues:
         validated_issue = _validate_exact_object_fields(
             issue,
@@ -1662,17 +1990,18 @@ def _validate_surface_compliance_verdict(
         ):
             raise StateContractError("surface issue explanation is invalid")
         normalized_rows.append((kind, evidence, explanation))
+        validated_issues.append({
+            "kind": kind,
+            "evidence": evidence,
+            "explanation": explanation,
+        })
     if len(normalized_rows) != len(set(normalized_rows)):
         raise StateContractError("surface compliance issues are duplicated")
     if aligned and normalized_rows:
         raise StateContractError("aligned surface cannot contain issues")
     if not aligned and not normalized_rows:
         raise StateContractError("misaligned surface requires issues")
-    normalized_issues = [
-        f"{kind}: {evidence!r} - {explanation}"
-        for kind, evidence, explanation in normalized_rows
-    ]
     return {
         "aligned": aligned,
-        "issues": normalized_issues,
+        "issues": validated_issues,
     }

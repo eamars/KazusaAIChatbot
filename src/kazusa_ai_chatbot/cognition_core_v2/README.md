@@ -59,27 +59,29 @@ nested role and response ownership are resolved once before goal cognition
 instead of independently by every downstream local-model stage.
 
 Goal-bid output uses an exact route-to-capability-field matrix. A malformed bid
-receives at most one LLM-owned schema repair while deterministic validation
-remains strict. A still-failed required branch raises an execution error rather
-than becoming an empty workspace and character silence. Initial and repaired
-goal outputs are eligible for the protected turn trace.
+receives up to three total LLM attempts while deterministic validation remains
+strict. A still-failed required branch requests the existing clean graph retry
+and then raises an execution error rather than becoming an empty workspace and
+character silence. Every goal attempt is eligible for the protected turn trace.
 
 When upstream episode evidence carries a typed required selection, a focused
 goal-level check verifies that the owning role makes or explicitly expresses
-that choice before action planning. A rejected bid is regenerated from typed
-operations, current evidence, affect, relationship, character constraints,
-and scene context without the rejected bid or private continuity prose. The
-replacement is rechecked by the same owner. Ordinary turns add no selection
-check.
+that choice before action planning. Provider or contract failure receives up
+to three verifier attempts; exhaustion marks the check unavailable and retains
+the newest structurally valid bid as degraded. A negative semantic verdict may
+produce up to two replacement bids from typed operations, current evidence,
+affect, relationship, character constraints, and scene context without the
+rejected bid or private continuity prose. Each replacement is rechecked by the
+same bounded owner. Ordinary turns add no selection check.
 
 Action planning treats local-model output as a bounded proposal rather than an
 execution precondition. It canonicalizes the known envelope, keeps usable
 rows, drops invalid rows individually, ignores unknown fields, and caps each
 request list at three. Mutually exclusive action and resolver requests remain
-a semantic contract error. If one complete replacement is still unusable, the
-turn continues with an empty action plan; if action authorization cannot
-produce a usable replacement, every candidate is denied. Neither containment
-path authorizes work, changes the visible speech route, or reduces the
+a semantic contract error. If three total planning attempts remain unusable,
+the turn continues with an empty action plan; if three total authorization
+attempts remain unusable, every candidate is denied. Neither containment path
+authorizes work, changes the visible speech route, or reduces the
 registry-driven three-request capacity.
 
 The action-planning envelope also carries the required Cognition-Core-owned
@@ -148,27 +150,28 @@ text-surface owner for one complete replacement of `content_plan`,
 `addressee_plan`. Rejected surface fields and rejected dialog are trace-only
 and are absent from both repair-model payloads. Selected intent, action truth,
 and runtime capability limits are reconstructed from canonical input before
-dialog renders the second and final candidate. A second rejected candidate
-raises the typed `dialog_compliance_contract_exhausted` failure from the
-post-cognition-commit checkpoint. The accepted dialog is returned with the
-exact original or replacement surface that produced it, and only that pair can
-reach post-turn consumers. The protected turn trace records rejected focused
-checks, surfaces, and dialog candidates as diagnostic evidence.
+dialog renders candidate two. If that candidate is also rejected, dialog
+renders one terminal third candidate from canonical V2 truth and typed
+remaining violation kinds. Candidate three is not verified. A bounded,
+non-empty third candidate is delivered as degraded output; if it is unusable,
+candidate two and then candidate one remain eligible in newest-first order.
+Only total generator unavailability with no bounded candidate is
+unrecoverable. The returned dialog retains the exact latest valid surface, and
+only that pair can reach post-turn consumers. The protected turn trace records
+rejected checks, surfaces, and dialog candidates as diagnostic evidence.
 
 Each focused verifier validates its own exact JSON verdict. A structurally
-invalid parsed verdict receives one complete replacement using the unchanged
-system and semantic payload plus a bounded rejected assistant candidate and
-the exact contract error. The replacement remains inside that verifier and
-does not create another dialog candidate. Both attempts are recorded in the
-protected trace. Semantic fidelity uses the collision-resistant producer
-field `hard_errors`; deterministic validation normalizes it to the shared
-internal `issues` list only after exact shape validation. Role direction and
-surface integrity keep their stage-owned `issues` shapes. A second structural
-failure raises the stage-specific
-`dialog_semantic_fidelity_contract_exhausted`,
-`dialog_role_direction_contract_exhausted`, or
-`dialog_surface_integrity_contract_exhausted` error from the
-post-cognition-commit checkpoint.
+invalid parsed verdict receives up to two complete replacements using the
+unchanged system and semantic payload plus the latest bounded rejected
+assistant candidate and exact contract error. The replacement remains inside
+that verifier and does not create another dialog candidate. All attempts are
+recorded in the protected trace. Semantic fidelity uses the
+collision-resistant producer field `hard_errors`; deterministic validation
+normalizes it only after exact shape validation. Role direction uses typed
+`violations` limited to `selection_owner_transfer` and
+`typed_operation_role_reversal`; surface integrity retains evidence-bearing
+`issues`. Exhaustion marks only that verifier `unavailable`, so it cannot erase
+a structurally valid dialog candidate.
 
 ## Document Control
 
@@ -204,11 +207,20 @@ typed output validation run in one inspectable call.
 
 ## Failure Behavior
 
-Malformed input, invalid state, unsupported routes, unresolved required
-dependencies, and invalid required cognition output raise the package
-validation or execution error. Optional action proposal/authorization schema
-failure is contained as empty or denied work so a valid speech response can
-continue. Callers commit only validated replacement state.
+Every recoverable V2 producer and verifier has at least three total local
+attempts, while existing longer semantic ledgers keep their cap. The outcome
+ladder is `accepted`, `recovered`, `accepted_degraded`, then `unrecoverable`.
+Appraisal and optional visual exhaustion are omitted; decontextualization keeps
+the normalized original input; workspace keeps the highest-priority complete
+bid; action planning returns no work; authorization denies; and text-surface
+exhaustion projects a validated neutral surface from canonical V2 truth.
+
+Malformed canonical input, invalid persistent state, unsupported routes,
+unresolved required dependencies after the existing clean graph retry, failed
+commit or post-commit invariants, and total model unavailability with no owned
+fallback remain execution errors. Recoverable and degraded outcomes follow the
+normal persistence and delivery path. Callers commit only validated replacement
+state.
 
 ## Testing Contract
 

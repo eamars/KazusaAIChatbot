@@ -6,12 +6,14 @@ from dataclasses import replace
 import json
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock
 
 import httpx
 from langchain_core.messages import HumanMessage, SystemMessage
 import pytest
 
 from kazusa_ai_chatbot.cognition_core_v2.surface import (
+    build_degraded_text_surface,
     run_text_surface_planning,
     run_visual_surface_planning,
 )
@@ -368,6 +370,304 @@ async def _run_live_verifier_case(
     else:
         assert verdict["issues"]
     return evidence
+
+
+async def _run_live_selection_owner_acceptance_case(
+    *,
+    case_id: str,
+    candidate_dialog: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+    human_review_contract: dict[str, bool],
+) -> dict[str, Any]:
+    """Run one owner-preserving candidate through the real role verifier."""
+
+    await _skip_if_model_routes_unavailable()
+    role_llm = _CapturingLLM(
+        dialog_module._dialog_role_direction_llm
+    )
+    monkeypatch.setattr(
+        dialog_module,
+        "_dialog_role_direction_llm",
+        role_llm,
+    )
+    response_operation = {
+        "operation": (
+            "当前角色选择并告诉当前用户接下来替当前角色执行的具体动作"
+        ),
+        "response_owner_role": "当前角色",
+        "selection_owner_role": "当前角色",
+        "selection_required": True,
+        "embedded_actor_role": "当前用户",
+        "embedded_target_role": "当前角色",
+    }
+    current_visible_percepts = [{
+        "input_source": "dialog_text",
+        "content": {
+            "dialog_text": "请由你决定并告诉我下一步要替你做什么。",
+            "response_operation": response_operation,
+        },
+    }]
+
+    verdict = await dialog_module._verify_dialog_role_direction(
+        generated_dialog=candidate_dialog,
+        current_visible_percepts=current_visible_percepts,
+        llm_trace_id=f"live-{case_id}",
+    )
+    evidence = {
+        "case_id": case_id,
+        "candidate_final_dialog": candidate_dialog,
+        "current_visible_percepts": current_visible_percepts,
+        "role_direction_calls": role_llm.calls,
+        "typed_verifier_outcome": verdict,
+        "disposition": "accepted",
+        "human_review_contract": human_review_contract,
+    }
+    artifact_path = write_llm_trace(
+        _TRACE_SUITE,
+        case_id,
+        evidence,
+    )
+    print(json.dumps({
+        "case_id": case_id,
+        "trace_path": str(artifact_path),
+        "attempt_count": len(role_llm.calls),
+        "candidate_final_dialog": candidate_dialog,
+        "typed_verifier_outcome": verdict,
+        "disposition": "accepted",
+    }, ensure_ascii=True, indent=2))
+
+    assert artifact_path.exists()
+    assert 1 <= len(role_llm.calls) <= 3
+    assert verdict == {"aligned": True, "violations": []}
+    return evidence
+
+
+async def test_live_information_request_preserves_selection_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A clarifying request can retain the character's later selection."""
+
+    await _run_live_selection_owner_acceptance_case(
+        case_id="information_request_preserves_selection_owner",
+        candidate_dialog=[
+            (
+                "先告诉我你现在更在意轻一点还是更直接一点。"
+                "我听完会自己决定让你下一步做什么。"
+            ),
+        ],
+        monkeypatch=monkeypatch,
+        human_review_contract={
+            "information_request_is_not_selection_transfer": True,
+            "character_explicitly_retains_selection": True,
+            "real_role_direction_route": True,
+        },
+    )
+
+
+async def test_live_character_commanded_user_action_preserves_selection_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A character-selected imperative keeps owner and actor distinct."""
+
+    await _run_live_selection_owner_acceptance_case(
+        case_id="character_commanded_user_action_preserves_selection_owner",
+        candidate_dialog=[
+            "先握住我的手，别移开视线。这一步就照我说的做。",
+        ],
+        monkeypatch=monkeypatch,
+        human_review_contract={
+            "character_selects_concrete_action": True,
+            "current_user_remains_embedded_actor": True,
+            "real_role_direction_route": True,
+        },
+    )
+
+
+async def test_live_terminal_candidate_is_deliverable_after_semantic_exhaustion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The third real-model candidate remains deliverable without a fatal."""
+
+    await _skip_if_model_routes_unavailable()
+    profile = _character_profile()
+    case = {
+        "case_id": "terminal_candidate_is_deliverable_after_semantic_exhaustion",
+        "user_input": "这次由你决定下一步让我做什么。",
+        "intention": "当前角色亲自选择并说出希望当前用户执行的下一步",
+        "reason": "当前用户明确把本轮具体选择交给当前角色",
+        "emotional_tone": "guarded",
+        "episode_metadata": {
+            "role_explicit_content": (
+                "当前用户要求当前角色选择并说明希望当前用户执行的下一步。"
+            ),
+            "response_operation": {
+                "operation": (
+                    "当前角色选择并告诉当前用户接下来要执行的具体动作"
+                ),
+                "response_owner_role": "当前角色",
+                "selection_owner_role": "当前角色",
+                "selection_required": True,
+                "embedded_actor_role": "当前用户",
+                "embedded_target_role": "当前角色",
+            },
+        },
+    }
+    surface_input = _surface_input(case, profile)
+    degraded_surface = build_degraded_text_surface(surface_input)
+    generator_llm = _CapturingLLM(dialog_module._dialog_generator_llm)
+    verifier_outcomes: list[dict[str, Any]] = []
+
+    async def _forced_semantic_exhaustion(
+        *,
+        surface_output: dict[str, Any],
+        generated_dialog: list[str],
+        current_visible_percepts: list[dict[str, Any]],
+        llm_trace_id: str,
+        post_repair: bool = False,
+    ) -> dict[str, Any]:
+        """Record one controlled rejection in the real candidate ledger.
+
+        Args:
+            surface_output: Surface authority used for this candidate.
+            generated_dialog: Real-model candidate under controlled review.
+            current_visible_percepts: Bounded scene input visible to verifiers.
+            llm_trace_id: Protected trace correlation identifier.
+            post_repair: Whether this is the second verification opportunity.
+
+        Returns:
+            A typed aggregate with semantic fidelity marked misaligned.
+        """
+
+        candidate_index = len(verifier_outcomes) + 1
+        aggregate = {
+            "semantic_fidelity": {
+                "status": "misaligned",
+                "issues": [
+                    f"injected semantic rejection {candidate_index}",
+                ],
+            },
+            "role_direction": {
+                "status": "aligned",
+                "violations": [],
+            },
+            "surface_integrity": {
+                "status": "aligned",
+                "issues": [],
+            },
+        }
+        verifier_outcomes.append({
+            "candidate_index": candidate_index,
+            "candidate_final_dialog": list(generated_dialog),
+            "post_repair": post_repair,
+            "typed_verifier_outcome": aggregate,
+            "surface_intent": surface_output["selected_surface_intent"],
+            "visible_percept_count": len(current_visible_percepts),
+            "trace_id": llm_trace_id,
+        })
+        return aggregate
+
+    async def _retain_surface_after_semantic_rejection(
+        *,
+        surface_input: dict[str, Any],
+        verified_hard_issues: list[str],
+    ) -> dict[str, Any]:
+        """Retain canonical degraded authority after a controlled rejection.
+
+        Args:
+            surface_input: Canonical V2 input retained for surface repair.
+            verified_hard_issues: Bounded issues from the first candidate.
+
+        Returns:
+            The validated degraded surface used by the live test.
+        """
+
+        assert (
+            surface_input["intention"]["intention"]
+            == case["intention"]
+        )
+        assert verified_hard_issues
+        return degraded_surface
+
+    monkeypatch.setattr(
+        dialog_module,
+        "_dialog_generator_llm",
+        generator_llm,
+    )
+    monkeypatch.setattr(
+        dialog_module,
+        "_verify_dialog_compliance",
+        _forced_semantic_exhaustion,
+    )
+    monkeypatch.setattr(
+        dialog_module,
+        "repair_text_surface_for_dialog",
+        _retain_surface_after_semantic_rejection,
+    )
+    monkeypatch.setattr(
+        dialog_module.llm_tracing,
+        "record_llm_trace_step",
+        AsyncMock(),
+    )
+    for recorder_name in (
+        "record_llm_stage_event",
+        "record_model_contract_event",
+        "record_dialog_quality_event",
+    ):
+        monkeypatch.setattr(
+            dialog_module.event_logging,
+            recorder_name,
+            AsyncMock(),
+        )
+
+    result = await dialog_module.dialog_generator(_dialog_state(
+        surface_input=surface_input,
+        surface_output=degraded_surface,
+        profile=profile,
+    ))
+    terminal_payload = parse_llm_json_output(
+        generator_llm.calls[-1]["raw_output"]
+    )
+    terminal_candidate = terminal_payload["final_dialog"]
+    evidence = {
+        "case": case,
+        "degraded_surface": degraded_surface,
+        "attempt_count": len(generator_llm.calls),
+        "dialog_generator_calls": generator_llm.calls,
+        "typed_verifier_outcomes": verifier_outcomes,
+        "selected_candidate": result["final_dialog"],
+        "terminal_candidate": terminal_candidate,
+        "disposition": "delivered_terminal_candidate",
+        "human_review_contract": {
+            "three_real_generator_opportunities": True,
+            "only_first_two_candidates_are_verified": True,
+            "newest_valid_candidate_is_delivered": True,
+            "no_operational_error_surface": True,
+        },
+    }
+    artifact_path = write_llm_trace(
+        _TRACE_SUITE,
+        case["case_id"],
+        evidence,
+    )
+    print(json.dumps({
+        "case_id": case["case_id"],
+        "trace_path": str(artifact_path),
+        "attempt_count": len(generator_llm.calls),
+        "candidate_texts": [
+            outcome["candidate_final_dialog"]
+            for outcome in verifier_outcomes
+        ] + [terminal_candidate],
+        "typed_verifier_outcomes": verifier_outcomes,
+        "selected_candidate": result["final_dialog"],
+        "disposition": "delivered_terminal_candidate",
+    }, ensure_ascii=True, indent=2))
+
+    assert artifact_path.exists()
+    assert len(generator_llm.calls) == 3
+    assert len(verifier_outcomes) == 2
+    assert result["final_dialog"] == terminal_candidate
+    assert result["final_dialog"]
+    assert result["text_surface_output_v2"] == degraded_surface
 
 
 async def test_live_literal_speech_with_terminal_visual_branch(

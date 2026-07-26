@@ -8,7 +8,9 @@ from collections.abc import Mapping, Sequence
 from time import perf_counter
 from typing import Any, Literal
 
+import httpx
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from openai import OpenAIError
 
 from kazusa_ai_chatbot import llm_tracing
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
@@ -18,11 +20,14 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionEvidenceV2,
     CognitionExecutionError,
 )
+from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
+    V2_MODEL_TOTAL_ATTEMPTS,
+)
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 
 
 ACTION_AUTHORIZATION_PROMPT_CAP = 16000
-ACTION_AUTHORIZATION_ATTEMPT_LIMIT = 2
+ACTION_AUTHORIZATION_ATTEMPT_LIMIT = V2_MODEL_TOTAL_ATTEMPTS
 ACTION_AUTHORIZATION_OUTPUT_CAP = 3000
 ACTION_AUTHORIZATION_TEXT_CAP = 400
 
@@ -238,22 +243,55 @@ async def invoke_semantic_authorizer(
     output_state_fields: list[str],
     runtime_capability_limits: Sequence[str] = (),
 ) -> dict[str, bool]:
-    """Invoke one focused semantic authorizer with one shape repair."""
+    """Invoke one focused semantic authorizer with bounded shape repairs."""
 
-    current_messages = list(messages)
+    base_messages = list(messages)
+    current_messages = list(base_messages)
     for attempt_index in range(ACTION_AUTHORIZATION_ATTEMPT_LIMIT):
         started_at = perf_counter()
-        response = await services.llm.ainvoke(
-            current_messages,
-            config=services.action_selection_config,
-        )
-        response_text = str(response.content)
-        parsed: object = {}
         current_stage_name = (
             stage_name
             if attempt_index == 0
             else f"{stage_name}.repair"
         )
+        try:
+            response = await services.llm.ainvoke(
+                current_messages,
+                config=services.action_selection_config,
+            )
+        except (
+            OpenAIError,
+            httpx.HTTPError,
+            ConnectionError,
+            OSError,
+            RuntimeError,
+            TimeoutError,
+        ) as exc:
+            await _record_authorization_trace(
+                services=services,
+                messages=current_messages,
+                response_text="",
+                parsed_output={},
+                parse_status="provider_error",
+                status="failed",
+                started_at=started_at,
+                stage_name=current_stage_name,
+                output_state_fields=output_state_fields,
+            )
+            if attempt_index + 1 >= ACTION_AUTHORIZATION_ATTEMPT_LIMIT:
+                logger.warning(
+                    f"{stage_name} denied all candidates after provider "
+                    f"exhaustion: {exc}"
+                )
+                return {
+                    handle: False
+                    for handle in candidate_handles
+                }
+            current_messages = list(base_messages)
+            continue
+
+        response_text = str(getattr(response, "content", ""))
+        parsed: object = {}
         try:
             parsed = parse_llm_json_output(response_text)
             decisions = _validate_authorization_decisions(
@@ -274,21 +312,22 @@ async def invoke_semantic_authorizer(
             )
             if attempt_index + 1 >= ACTION_AUTHORIZATION_ATTEMPT_LIMIT:
                 logger.warning(
-                    "%s denied all candidates after an unusable replacement: "
-                    "%s",
-                    stage_name,
-                    exc,
+                    f"{stage_name} denied all candidates after an unusable "
+                    f"replacement: {exc}"
                 )
                 return {
                     handle: False
                     for handle in candidate_handles
                 }
-            current_messages.append(_authorization_repair_message(
-                response_text=response_text,
-                contract_error=str(exc),
-                candidate_handles=candidate_handles,
-                runtime_capability_limits=runtime_capability_limits,
-            ))
+            current_messages = [
+                *base_messages,
+                _authorization_repair_message(
+                    response_text=response_text,
+                    contract_error=str(exc),
+                    candidate_handles=candidate_handles,
+                    runtime_capability_limits=runtime_capability_limits,
+                ),
+            ]
             continue
         await _record_authorization_trace(
             services=services,

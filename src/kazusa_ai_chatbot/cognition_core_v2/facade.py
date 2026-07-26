@@ -25,7 +25,6 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionExecutionError,
     CognitionObservabilityV2,
     SemanticAppraisalResultV2,
-    classify_cognition_failure,
     validate_cognition_core_input,
     validate_cognition_core_output,
 )
@@ -72,6 +71,12 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     validate_resolver_pending_resume,
 )
 from kazusa_ai_chatbot.time_boundary import parse_storage_utc_datetime
+
+
+_DEGRADABLE_APPRAISAL_ERROR_CODES = frozenset({
+    "semantic_appraisal_provider_exhausted",
+    "semantic_appraisal_contract_exhausted",
+})
 
 
 def _deduplicate_diagnostics_warnings(
@@ -1092,10 +1097,16 @@ async def _collect_appraisals(
     failures: dict[str, str] = {}
     warnings: list[str] = []
     for question, result in zip(questions, collected, strict=True):
-        if isinstance(result, Exception):
+        if isinstance(result, BaseException):
             if isinstance(result, CognitionContextLimitError):
                 raise result
-            error_code = classify_cognition_failure(result)
+            if (
+                not isinstance(result, CognitionExecutionError)
+                or result.stage != "semantic_appraisal"
+                or result.error_code not in _DEGRADABLE_APPRAISAL_ERROR_CODES
+            ):
+                raise result
+            error_code = result.error_code
             failures[question["question_id"]] = error_code
             warnings.append(f"semantic_appraisal_failed:{error_code}")
         else:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import BackgroundTasks
@@ -1257,7 +1257,7 @@ async def test_precommit_cognition_failure_retries_once_then_succeeds(
                     error_code="required_selection_alignment_exhausted",
                     branch_id="ordinary_response",
                     stage="goal_cognition.required_selection_alignment",
-                    attempt_count=2,
+                    attempt_count=3,
                     safe_checkpoint="pre_state_commit",
                     retryable=True,
                 )
@@ -1306,6 +1306,91 @@ async def test_precommit_cognition_failure_retries_once_then_succeeds(
 
 
 @pytest.mark.asyncio
+async def test_postcommit_degraded_dialog_uses_normal_delivery_path(
+    monkeypatch,
+) -> None:
+    """A bounded degraded dialog persists and returns normal tracked text."""
+
+    await _reset_queue_state()
+
+    class _Graph:
+        """Return a terminal V2 dialog without raising to the service."""
+
+        def __init__(self) -> None:
+            self.call_count = 0
+
+        async def ainvoke(self, _state):
+            self.call_count += 1
+            return {
+                "should_respond": True,
+                "use_reply_feature": False,
+                "final_dialog": ["bounded degraded character response"],
+                "future_promises": [],
+                "consolidation_state": None,
+            }
+
+    graph = _Graph()
+    save_assistant_message = AsyncMock()
+    monkeypatch.setattr(
+        service_module,
+        "_save_assistant_message",
+        save_assistant_message,
+    )
+    operational_error_response = MagicMock(
+        wraps=service_module._operational_error_response,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_operational_error_response",
+        operational_error_response,
+    )
+    persist_lifecycle = AsyncMock()
+    monkeypatch.setattr(
+        service_module,
+        "_persist_post_turn_lifecycle_record",
+        persist_lifecycle,
+    )
+    record_bot_continuity = AsyncMock()
+    monkeypatch.setattr(
+        service_module._turn_settlement_coordinator,
+        "record_bot_continuity",
+        record_bot_continuity,
+    )
+    _patch_common_dependencies(monkeypatch, graph)
+    item = _item(1, direct_address=True)
+    item.conversation_row_id = "row-1"
+
+    await service_module._process_queued_chat_item(
+        item,
+        settled_decision={
+            "response_action": "proceed",
+            "reason_to_respond": "direct character request",
+            "use_reply_feature": False,
+            "channel_topic": "",
+            "indirect_speech_context": "",
+        },
+        skip_user_persist=True,
+        settlement_turn_id="turn-1",
+        settlement_version=1,
+        settlement_claimed=True,
+        prepared_media=[],
+        media_prepared=True,
+    )
+
+    response = await item.future
+    assert graph.call_count == 1
+    assert response.messages == ["bounded degraded character response"]
+    assert response.content_type == "text"
+    assert response.delivery_tracking_id
+    assert response.operational_error is None
+    operational_error_response.assert_not_called()
+    save_assistant_message.assert_awaited_once()
+    persist_lifecycle.assert_awaited_once()
+    record_bot_continuity.assert_awaited_once()
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
 async def test_precommit_cognition_retry_exhaustion_returns_operational_error(
     monkeypatch,
 ) -> None:
@@ -1326,7 +1411,7 @@ async def test_precommit_cognition_retry_exhaustion_returns_operational_error(
                 error_code="required_selection_alignment_exhausted",
                 branch_id="ordinary_response",
                 stage="goal_cognition.required_selection_alignment",
-                attempt_count=2,
+                attempt_count=3,
                 safe_checkpoint="pre_state_commit",
                 retryable=True,
             )
@@ -1375,7 +1460,7 @@ async def test_precommit_cognition_retry_exhaustion_returns_operational_error(
         "required_selection_alignment_exhausted"
     )
     assert response.operational_error.status == "exhausted"
-    assert response.operational_error.attempt_count == 2
+    assert response.operational_error.attempt_count == 3
     save_assistant_message.assert_not_awaited()
     finalize_trace.assert_awaited_once()
     assert finalize_trace.await_args.kwargs["final_dialog_count"] == 0

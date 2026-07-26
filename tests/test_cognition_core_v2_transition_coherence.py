@@ -149,6 +149,38 @@ def _dialog_state() -> dict[str, object]:
     }
 
 
+def _dialog_verifier_aggregate(
+    *,
+    aligned: bool,
+    semantic_issues: list[str],
+) -> dict[str, object]:
+    """Build the exact owner-preserving dialog verifier aggregate.
+
+    Args:
+        aligned: Whether semantic fidelity accepts the candidate.
+        semantic_issues: Bounded semantic errors for a rejected candidate.
+
+    Returns:
+        Three-owner verifier state with role and surface checks aligned.
+    """
+
+    semantic_status = "aligned" if aligned else "misaligned"
+    return {
+        "semantic_fidelity": {
+            "status": semantic_status,
+            "issues": list(semantic_issues),
+        },
+        "role_direction": {
+            "status": "aligned",
+            "violations": [],
+        },
+        "surface_integrity": {
+            "status": "aligned",
+            "issues": [],
+        },
+    }
+
+
 def test_v2_surface_services_have_no_independent_style_owner() -> None:
     """Normal V2 text planning exposes only content and preference configs."""
 
@@ -468,10 +500,10 @@ async def test_semantic_fidelity_payload_uses_only_surface_semantics(
 
 
 @pytest.mark.asyncio
-async def test_semantic_fidelity_candidate_limit_fails_before_call(
+async def test_semantic_fidelity_candidate_limit_degrades_before_call(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An oversized candidate records the typed pre-call failure."""
+    """An oversized candidate records typed verifier unavailability."""
 
     semantic_llm = MagicMock()
     semantic_llm.ainvoke = AsyncMock()
@@ -493,21 +525,16 @@ async def test_semantic_fidelity_candidate_limit_fails_before_call(
         contract_recorder,
     )
 
-    with pytest.raises(
-        dialog_agent.DialogVerifierContractError,
-    ) as error_info:
-        await dialog_agent._verify_dialog_semantic_fidelity(
-            surface_output=_surface_output(),
-            generated_dialog=[
-                "x" * (dialog_agent.DIALOG_CANDIDATE_MAX_CHARS + 1)
-            ],
-            current_visible_percepts=[],
-            llm_trace_id="semantic-context-limit",
-        )
+    verdict = await dialog_agent._verify_dialog_semantic_fidelity(
+        surface_output=_surface_output(),
+        generated_dialog=[
+            "x" * (dialog_agent.DIALOG_CANDIDATE_MAX_CHARS + 1)
+        ],
+        current_visible_percepts=[],
+        llm_trace_id="semantic-context-limit",
+    )
 
-    error = error_info.value
-    assert error.error_code == "dialog_semantic_fidelity_context_limit"
-    assert error.stage == "dialog.semantic_fidelity"
+    assert verdict == {"status": "unavailable", "issues": []}
     semantic_llm.ainvoke.assert_not_awaited()
     assert trace_recorder.await_args.kwargs["parse_status"] == (
         "not_called_context_limit"
@@ -596,7 +623,10 @@ async def test_dialog_generator_returns_first_pass_surface(
     monkeypatch.setattr(
         dialog_agent,
         "_verify_dialog_compliance",
-        AsyncMock(return_value={"aligned": True, "issues": []}),
+        AsyncMock(return_value=_dialog_verifier_aggregate(
+            aligned=True,
+            semantic_issues=[],
+        )),
     )
     monkeypatch.setattr(
         dialog_agent.llm_tracing,
@@ -623,9 +653,15 @@ async def test_dialog_generator_returns_repaired_surface(
     replacement = _surface_output()
     replacement["content_plan"] = "State one coherent accepting position."
     generator_llm = MagicMock()
-    generator_llm.ainvoke = AsyncMock(return_value=SimpleNamespace(
-        content='{"final_dialog": ["Initial candidate."]}',
-    ))
+    generator_llm.ainvoke = AsyncMock(side_effect=[
+        SimpleNamespace(
+            content='{"final_dialog": ["Initial candidate."]}',
+        ),
+        SimpleNamespace(
+            content='{"final_dialog": ["We are in this together."]}',
+        ),
+    ])
+    surface_repair = AsyncMock(return_value=replacement)
     monkeypatch.setattr(
         dialog_agent,
         "_dialog_generator_llm",
@@ -635,20 +671,20 @@ async def test_dialog_generator_returns_repaired_surface(
         dialog_agent,
         "_verify_dialog_compliance",
         AsyncMock(side_effect=[
-            {
-                "aligned": False,
-                "issues": ["Unsupported stance reversal."],
-            },
-            {"aligned": True, "issues": []},
+            _dialog_verifier_aggregate(
+                aligned=False,
+                semantic_issues=["Unsupported stance reversal."],
+            ),
+            _dialog_verifier_aggregate(
+                aligned=True,
+                semantic_issues=[],
+            ),
         ]),
     )
     monkeypatch.setattr(
         dialog_agent,
-        "_repair_dialog_hard_failure",
-        AsyncMock(return_value=(
-            ["We are in this together."],
-            replacement,
-        )),
+        "repair_text_surface_for_dialog",
+        surface_repair,
     )
     monkeypatch.setattr(
         dialog_agent.llm_tracing,
@@ -670,6 +706,7 @@ async def test_dialog_generator_returns_repaired_surface(
 
     assert result["final_dialog"] == ["We are in this together."]
     assert result["text_surface_output_v2"] == replacement
+    surface_repair.assert_awaited_once()
 
 
 @pytest.mark.asyncio

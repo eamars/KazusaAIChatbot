@@ -10,6 +10,7 @@ from kazusa_ai_chatbot.action_spec.results import (
     project_trace_action_result_v2,
 )
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    CognitionExecutionError,
     TextSurfaceInputV2,
     TextSurfaceOutputV2,
     TextSurfaceServicesV2,
@@ -121,18 +122,29 @@ async def call_l3_text_surface_handler(state: GlobalPersonaState) -> dict[str, A
             "text_surface_output_v2": text_output,
         }
         return return_value
-    text_output, visual_output = await asyncio.gather(
+    text_result, visual_result = await asyncio.gather(
         text_call,
         run_visual_surface_planning(
             input_payload,
             _build_visual_surface_services(),
         ),
+        return_exceptions=True,
     )
+    if isinstance(text_result, BaseException):
+        raise text_result
+    text_output = text_result
     return_value = {
         "text_surface_input_v2": input_payload,
         "text_surface_output_v2": text_output,
-        "visual_surface_output_v2": visual_output,
     }
+    if (
+        isinstance(visual_result, CognitionExecutionError)
+        and visual_result.stage == "surface.visual"
+    ):
+        return return_value
+    if isinstance(visual_result, BaseException):
+        raise visual_result
+    return_value["visual_surface_output_v2"] = visual_result
     return return_value
 
 
