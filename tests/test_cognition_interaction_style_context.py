@@ -82,7 +82,7 @@ def test_interaction_style_is_owned_by_unified_content_planning() -> None:
 
     assert "interaction style" in content_prompt
     assert "delivery_profile" in content_prompt
-    assert "不写最终对话" in content_prompt
+    assert "最终对话由 dialog 渲染器生成" in content_prompt
     assert "cognition state" not in content_prompt
 
 

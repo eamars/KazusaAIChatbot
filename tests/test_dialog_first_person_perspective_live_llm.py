@@ -108,7 +108,7 @@ def _surface_payload(
                 'lexical_register': lexical_register,
                 'sentence_shape': message_shape_guidance,
                 'rhythm': '自然口语节奏',
-                'hesitation': '只在当前情绪支持时轻微停顿',
+                'hesitation': '让轻微停顿随当前情绪自然出现',
                 'punctuation': '克制自然',
             },
             'selected_surface_intent': selected_surface_intent,

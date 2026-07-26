@@ -244,7 +244,7 @@ async def _seed_user_event(
             "logic": "emotionally honest and evidence-led",
             "defense": "reserved while visibly hurt",
             "quirks": "hesitates before admitting vulnerability",
-            "taboos": "do not flatten grief into neutrality",
+            "taboos": "Let grief remain emotionally visible.",
         },
     }
     activations = derive_persistent_emotion_activations(

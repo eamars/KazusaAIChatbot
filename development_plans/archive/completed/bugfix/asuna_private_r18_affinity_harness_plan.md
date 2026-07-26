@@ -89,7 +89,7 @@ paths, final state, and any fatal or bounded service failures.
 
 ## Change surface
 
-- `development_plans/active/bugfix/asuna_private_r18_affinity_harness_plan.md`
+- `development_plans/archive/completed/bugfix/asuna_private_r18_affinity_harness_plan.md`
 - `tests/test_asuna_private_r18_affinity_live_llm.py`
 - `tests/test_asuna_private_r18_affinity_harness_contract.py`
 - `tests/run_asuna_private_r18_affinity_replay.py`

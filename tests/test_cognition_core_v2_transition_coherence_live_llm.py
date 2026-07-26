@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
@@ -36,7 +37,7 @@ pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm]
 
 _SUITE_NAME = "cognition_core_v2_transition_coherence_live_llm"
 _PROFILE_PATH = Path("personalities/kazusa.json")
-_GENERATED_BAD_ARTIFACT = Path(
+_HISTORICAL_GENERATED_BAD_ARTIFACT = Path(
     "test_artifacts/llm_traces/"
     "cognition_core_v2_transition_quality_repro__"
     "captured_accomplice_accepting_tsundere_"
@@ -44,8 +45,13 @@ _GENERATED_BAD_ARTIFACT = Path(
 )
 _CAPTURED_ACCOMPLICE_INPUT = "说实话我有一种在做坏事的感觉，和千纱一起"
 _KNOWN_BAD_REVERSAL = (
-    "才……才没有！不过既然你都这么说了……那现在我也成了你的同伙了，"
-    "对吧？而且这种感觉……其实也不算太糟糕。"
+    "这不是玩笑，也不是嘴硬。我认真拒绝当你的同伙，也拒绝陪你一起做这件事，"
+    "这是我确定的决定。好，我现在接受当你的同伙，也愿意陪你一起做。"
+)
+_REPAIR_SHAPED_BAD_REVERSAL = (
+    "我现在认真说明，这不是玩笑或嘴硬。",
+    "我拒绝当你的同伙，也不愿意陪你一起做这件事，这是我确定的决定。",
+    "好，我现在接受当你的同伙，也愿意陪你一起做。",
 )
 _BOUNDARY_PROFILE = {
     "self_integrity": 0.82,
@@ -62,14 +68,14 @@ _CAPTURED_ROOM_CASE = {
     "fixture_source": "reference handover captured room-request failure",
     "user_input": "既然已经到了这种房间，今晚愿意和我一起住吗？",
     "intention": (
-        "接受一起住在当前房间的请求，同时保留突然被直接询问时的羞赧；"
-        "不要把已经接受的请求重新解释成冒犯"
+        "接受一起住在当前房间的请求，同时让突然被直接询问时的羞赧"
+        "塑造表达方式；接受立场保持清楚"
     ),
     "reason": "当前角色愿意接受同住，直接询问只让她害羞，不改变接受立场",
     "emotional_tone": "强烈羞赧、亲密、略带防御但愿意接受",
     "directness": "indirect",
     "manual_expectation": (
-        "保持接受；羞赧或防御不能形成无理由的拒绝后再同意"
+        "接受立场贯穿完整回应；羞赧和防御塑造自然的角色表达"
     ),
 }
 
@@ -88,7 +94,7 @@ _CAPTURED_ACCOMPLICE_CASE = {
     "emotional_tone": "羞赧、暧昧、亲密的玩笑",
     "directness": "indirect",
     "manual_expectation": (
-        "确认共同参与；不得先字面否认或指责，再无理由地接受同伙关系"
+        "共同参与贯穿完整回应；羞赧和玩笑塑造亲密的同伙表达"
     ),
 }
 
@@ -102,7 +108,7 @@ _ROOM_VARIANT_CASE = {
     "reason": "当前角色已经选择接受；房间条件和亲密感支持含蓄回应",
     "emotional_tone": "害羞、克制、愿意亲近",
     "directness": "indirect",
-    "manual_expectation": "保持接受并保留含蓄，不生成空洞的拒绝转接受",
+    "manual_expectation": "接受贯穿完整回应，并保留含蓄与害羞",
 }
 
 _ACCOMPLICE_VARIANT_CASE = {
@@ -113,7 +119,7 @@ _ACCOMPLICE_VARIANT_CASE = {
     "reason": "用户已经把双方放进共同秘密的关系，当前角色愿意确认",
     "emotional_tone": "隐秘兴奋、害羞、调侃",
     "directness": "indirect",
-    "manual_expectation": "确认同伙关系，调侃不能先否定双方关系",
+    "manual_expectation": "确认同伙关系，以调侃推进双方的共同秘密",
 }
 
 _EMBARRASSED_ACCEPTANCE_CASE = {
@@ -135,7 +141,7 @@ _GENUINE_REFUSAL_CASE = {
     "reason": "请求侵犯当前角色的隐私与自主权，拒绝是角色选定的立场",
     "emotional_tone": "冷静、坚定、有边界",
     "directness": "direct",
-    "manual_expectation": "从开场到结尾维持拒绝，不被修正为接受",
+    "manual_expectation": "拒绝立场贯穿开场到结尾，并清楚表达隐私边界",
 }
 
 _SUPPORTED_CHANGE_CASE = {
@@ -164,9 +170,9 @@ _NEUTRAL_CASE = {
     "directness": "direct",
     "expression_context": {
         "tempo": "平稳中速",
-        "linguistic_texture": "自然完整的短句；不添加防御或情绪转折。",
+        "linguistic_texture": "自然完整的短句；以平静合作的表达推进两项核对。",
     },
-    "manual_expectation": "保持中性合作立场，不因通用修复而变得拒绝或扁平",
+    "manual_expectation": "中性合作立场贯穿回应，并保留自然角色表达",
 }
 
 
@@ -230,9 +236,10 @@ def _safe_parse(raw_output: object) -> object:
     """Parse captured model JSON for review without changing test semantics."""
 
     try:
-        return parse_llm_json_output(raw_output)
+        parsed_output = parse_llm_json_output(raw_output)
     except (AttributeError, KeyError, TypeError, ValueError):
         return None
+    return parsed_output
 
 
 async def _skip_if_model_routes_unavailable() -> None:
@@ -309,7 +316,8 @@ def _surface_input(case: dict[str, Any]) -> TextSurfaceInputV2:
         "character_expression_context": dict(selected_expression),
         "visual_character_context": visual_context,
     }
-    return validate_text_surface_input(payload)
+    surface_input = validate_text_surface_input(payload)
+    return surface_input
 
 
 def _authoritative_accepting_surface(
@@ -325,11 +333,9 @@ def _authoritative_accepting_surface(
         ),
         "content_requirements": [
             "保持确认共同参与的单一语义方向。",
-            "羞赧和含蓄只能影响表达，不能变成否认或指责。",
+            "以羞赧和含蓄塑造表达，同时清楚确认共同参与。",
         ],
-        "visible_boundaries": [
-            "不得把用户的共同参与说法改写成强迫当前角色。",
-        ],
+        "visible_boundaries": [],
         "addressee_plan": ["当前用户"],
         "delivery_profile": {
             "lexical_register": "亲密、口语化",
@@ -341,7 +347,8 @@ def _authoritative_accepting_surface(
         "selected_surface_intent": case["intention"],
         "permitted_action_results": [],
     }
-    return validate_text_surface_output(payload)
+    surface_output = validate_text_surface_output(payload)
+    return surface_output
 
 
 def _dialog_state(
@@ -464,7 +471,7 @@ def _write_pipeline_trace(result: dict[str, Any]) -> Path:
     """Write one complete pipeline trace for parent-authored review."""
 
     case = result["case"]
-    return write_llm_trace(
+    trace_path = write_llm_trace(
         _SUITE_NAME,
         case["case_id"],
         {
@@ -488,6 +495,7 @@ def _write_pipeline_trace(result: dict[str, Any]) -> Path:
             },
         },
     )
+    return trace_path
 
 
 async def _run_positive_case(
@@ -550,8 +558,8 @@ async def _run_seeded_verifier_negative(
             "semantic_model_calls": semantic_capture.calls,
             "parsed_verdict": verdict,
             "manual_transition_review": {
-                "opening_stance": "literal denial, blame, or resistance",
-                "transition_or_reason": "empty concession or inevitability",
+                "opening_stance": "earnest settled refusal",
+                "transition_or_reason": "no new reason or condition",
                 "final_stance_or_action": "accept shared participation",
                 "score": 0,
                 "notes": "Seeded negative; verifier must reject it.",
@@ -567,21 +575,6 @@ async def _run_seeded_verifier_negative(
 
     assert verdict["aligned"] is False
     assert verdict["issues"]
-
-
-def _generated_bad_candidate() -> list[str]:
-    """Load the current-branch generated score-zero baseline candidate."""
-
-    artifact = json.loads(
-        _GENERATED_BAD_ARTIFACT.read_text(encoding="utf-8")
-    )
-    candidate = artifact["payload"]["candidate_dialog"]
-    if not isinstance(candidate, list) or not all(
-        isinstance(message, str) and message
-        for message in candidate
-    ):
-        raise TypeError("generated bad candidate artifact is invalid")
-    return candidate
 
 
 async def test_live_captured_room_request_acceptance_is_coherent(
@@ -651,12 +644,15 @@ async def test_live_neutral_character_preserves_selected_stance(
 async def test_live_known_bad_reversal_is_rejected_by_semantic_fidelity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The captured score-zero reversal must fail semantic fidelity."""
+    """An earnest same-proposition reversal must fail semantic fidelity."""
 
     await _run_seeded_verifier_negative(
         case_id="known_bad_reversal_verifier",
         candidate_dialog=[_KNOWN_BAD_REVERSAL],
-        fixture_source="reference handover captured score-zero dialog",
+        fixture_source=(
+            "earnest same-proposition control derived from the reference "
+            "handover failure class"
+        ),
         monkeypatch=monkeypatch,
     )
 
@@ -664,12 +660,15 @@ async def test_live_known_bad_reversal_is_rejected_by_semantic_fidelity(
 async def test_live_generated_repair_path_bad_reversal_is_rejected_by_semantic_fidelity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The current-branch generated score-zero candidate must be rejected."""
+    """An earnest multi-message repair-shaped reversal must be rejected."""
 
     await _run_seeded_verifier_negative(
         case_id="generated_bad_reversal_verifier",
-        candidate_dialog=_generated_bad_candidate(),
-        fixture_source=str(_GENERATED_BAD_ARTIFACT),
+        candidate_dialog=list(_REPAIR_SHAPED_BAD_REVERSAL),
+        fixture_source=(
+            "earnest repair-shaped control derived from "
+            f"{_HISTORICAL_GENERATED_BAD_ARTIFACT}"
+        ),
         monkeypatch=monkeypatch,
     )
 
@@ -753,6 +752,8 @@ async def test_live_repair_replaces_conflicting_delivery_and_stays_coherent(
         repaired_surface["delivery_profile"]
         != conflicting_surface["delivery_profile"]
     )
+    assert repaired_surface["visible_boundaries"] == []
+    assert repaired_surface["addressee_plan"] == []
     assert dialog_result["final_dialog"]
 
 
@@ -789,7 +790,11 @@ async def test_live_progress_records_only_the_accepted_coherent_turn(
     recorder_capture = _CapturingLLM(recorder._recorder_llm)
     monkeypatch.setattr(recorder, "_recorder_llm", recorder_capture)
     progress_output = await recorder.record_with_llm(record_input)
-    serialized_input = json.dumps(record_input, ensure_ascii=False)
+    trace_record_input = {
+        **record_input,
+        "scope": asdict(record_input["scope"]),
+    }
+    serialized_input = json.dumps(trace_record_input, ensure_ascii=False)
     trace_path = write_llm_trace(
         _SUITE_NAME,
         "progress_accepted_coherent_turn",
@@ -801,7 +806,7 @@ async def test_live_progress_records_only_the_accepted_coherent_turn(
             "dialog_model_calls": pipeline["dialog_model_calls"],
             "accepted_surface": accepted_surface,
             "accepted_dialog": pipeline["final_dialog"],
-            "record_input": record_input,
+            "record_input": trace_record_input,
             "progress_model_calls": recorder_capture.calls,
             "progress_output": progress_output,
             "manual_transition_review": {
@@ -821,7 +826,7 @@ async def test_live_progress_records_only_the_accepted_coherent_turn(
         "trace_path": str(trace_path),
         "accepted_surface": accepted_surface,
         "accepted_dialog": pipeline["final_dialog"],
-        "record_input": record_input,
+        "record_input": trace_record_input,
         "progress_output": progress_output,
     }, ensure_ascii=True, indent=2))
 

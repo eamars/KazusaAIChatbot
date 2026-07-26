@@ -44,7 +44,12 @@ class _SurfaceLLM:
         human = str(getattr(messages[1], "content", ""))
         payload = json.loads(human)["surface"]
         self.calls.append((system, payload))
-        if "content_plan" in system and "content_requirements" in system:
+        if "visible_boundaries" in system and "addressee_plan" in system:
+            result = {
+                "visible_boundaries": ["Use visible speech only."],
+                "addressee_plan": ["Address the current user."],
+            }
+        elif "content_plan" in system and "content_requirements" in system:
             result = {
                 "content_plan": "Perform the requested response operation.",
                 "content_requirements": ["Preserve current-turn meaning."],
@@ -55,11 +60,6 @@ class _SurfaceLLM:
                     "hesitation": "light",
                     "punctuation": "restrained",
                 },
-            }
-        elif "visible_boundaries" in system and "addressee_plan" in system:
-            result = {
-                "visible_boundaries": ["Use visible speech only."],
-                "addressee_plan": ["Address the current user."],
             }
         elif "visual_directives" in system:
             result = {
@@ -216,7 +216,7 @@ async def test_text_and_visual_planners_are_terminal_siblings() -> None:
     }
     assert len(llm.calls) == 2
     for system, payload in llm.calls:
-        if "delivery_profile" in system:
+        if "delivery_profile 必须恰好包含" in system:
             assert payload["character_expression_context"] == {
                 "tempo": "steady",
                 "linguistic_texture": (
@@ -310,8 +310,9 @@ def test_runtime_prompts_define_live_speech_and_hard_error_contracts() -> None:
     assert "current_visible_percepts" not in repair_prompt
     assert "text_surface_output_v2" in repair_prompt
     assert "repair_context" in repair_prompt
-    assert "不得新增" in surface_repair_prompt
-    assert "通用安全" in surface_repair_prompt
+    assert "visible_boundaries 的具体来源类型" in surface_repair_prompt
+    assert "隐私" in surface_repair_prompt
+    assert "安全" in surface_repair_prompt
     assert "内容审查" in surface_repair_prompt
     assert "权威语境" in surface_repair_prompt
     assert "l3" not in repair_prompt
@@ -323,13 +324,13 @@ def test_runtime_prompts_define_live_speech_and_hard_error_contracts() -> None:
     assert "response_operation" in semantic_prompt
     assert "selection_owner" in semantic_prompt
     assert "已经从本阶段输入中移除" in semantic_prompt
-    assert "不得重建、猜测或检查" in semantic_prompt
-    assert "不判断 response_operation 是否完成" in semantic_prompt
+    assert "角色方向检查独占" in semantic_prompt
+    assert "本阶段核对候选的内部语义连贯" in semantic_prompt
     assert "保留在输入中的非选择 response_operation" in semantic_prompt
     assert "负责核对行动者、对象" in semantic_prompt
-    assert "省略某个并列动作" in semantic_prompt
-    assert "属于内容完整性，不是角色颠倒" in semantic_prompt
-    assert "可能”“模糊”“未明确承接" in semantic_prompt
+    assert "并列动作覆盖度" in semantic_prompt
+    assert "属于内容完整性检查" in semantic_prompt
+    assert "hard_errors 必须引用候选原文" in semantic_prompt
     assert "ascii token hard_errors" in semantic_prompt
     assert "愿望、请求或祈使句" in role_prompt
     assert "说出、回答、选择或发送" in role_prompt

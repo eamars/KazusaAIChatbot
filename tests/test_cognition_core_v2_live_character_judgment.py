@@ -24,7 +24,6 @@ from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
 from kazusa_ai_chatbot.cognition_core_v2.surface_stages import (
     CONTENT_PLAN_SYSTEM_PROMPT,
     PREFERENCE_SYSTEM_PROMPT,
-    STYLE_SYSTEM_PROMPT,
     run_preference_stage,
 )
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
@@ -104,7 +103,6 @@ def test_live_character_prompts_fit_local_model_attention_caps() -> None:
     assert len(GOAL_COGNITION_PROMPT) <= 2200
     assert len(REQUIRED_SELECTION_VERIFIER_PROMPT) <= 800
     assert len(REQUIRED_SELECTION_REPAIR_PROMPT) <= 900
-    assert len(STYLE_SYSTEM_PROMPT) <= 1000
     assert len(CONTENT_PLAN_SYSTEM_PROMPT) <= 2400
     assert len(PREFERENCE_SYSTEM_PROMPT) <= 1200
     assert len(dialog_module._V2_DIALOG_GENERATOR_PROMPT) <= 2700
@@ -160,9 +158,9 @@ def test_surface_prompts_support_creativity_and_absent_boundaries() -> None:
     assert "想象细节" in content_prompt
     assert "角色判断" in content_prompt
     assert "当前输入" in content_prompt
-    assert "颠倒" in content_prompt
+    assert "确定行动者、对象、受益者和主语" in content_prompt
     assert "零到八" in preference_prompt
-    assert "没有相应约束" in preference_prompt
+    assert "相应约束为空时返回空列表" in preference_prompt
 
 
 def test_dialog_verifier_uses_only_the_hard_failure_taxonomy() -> None:
@@ -203,7 +201,7 @@ def test_dialog_verifier_uses_only_the_hard_failure_taxonomy() -> None:
     assert "零到四" in semantic_prompt
     assert "零到四" in verifier_prompt
     for ambiguity_text in (
-        "唯一明确的读法",
+        "唯一明确的颠倒",
         "双关",
         "多种合理角色读法",
     ):
@@ -211,7 +209,7 @@ def test_dialog_verifier_uses_only_the_hard_failure_taxonomy() -> None:
     for permitted_text in (
         "合理虚构",
         "创造性语言",
-        "不属于",
+        "aligned true",
     ):
         assert permitted_text in "\n".join((
             semantic_prompt,
@@ -228,12 +226,13 @@ def test_dialog_verifier_uses_only_the_hard_failure_taxonomy() -> None:
     assert "动作描写" not in generator_prompt
     for required_text in (
             "verified_hard_issues",
-            "current_visible_percepts",
-            "original_final_dialog",
+            "text_surface_output_v2",
+            "delivery_profile",
             "permitted_action_results",
     ):
         assert required_text in repair_prompt
-    assert "text_surface_output_v2" not in repair_prompt
+    assert "current_visible_percepts" not in repair_prompt
+    assert "original_final_dialog" not in repair_prompt
 
 
 def test_retired_blanket_suppression_is_absent() -> None:
@@ -269,7 +268,6 @@ def test_runtime_prompts_contain_no_frozen_case_material() -> None:
         GOAL_COGNITION_PROMPT,
         REQUIRED_SELECTION_VERIFIER_PROMPT,
         REQUIRED_SELECTION_REPAIR_PROMPT,
-        STYLE_SYSTEM_PROMPT,
         CONTENT_PLAN_SYSTEM_PROMPT,
         PREFERENCE_SYSTEM_PROMPT,
         dialog_module._V2_DIALOG_GENERATOR_PROMPT,

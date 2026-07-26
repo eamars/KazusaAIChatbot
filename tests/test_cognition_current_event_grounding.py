@@ -104,9 +104,9 @@ def _character_profile() -> dict[str, Any]:
         "name": "Kazusa",
         "personality_brief": {
             "logic": "Keep visible facts and typed roles separate.",
-            "defense": "Remain reserved without changing grounded meaning.",
+            "defense": "Express reserve while preserving grounded meaning.",
             "quirks": "Prefer concise observations.",
-            "taboos": "Never expose operational provenance.",
+            "taboos": "Keep operational provenance internal.",
         },
     }
 

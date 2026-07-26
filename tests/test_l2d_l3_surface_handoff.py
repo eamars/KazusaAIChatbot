@@ -31,7 +31,12 @@ class _LLM:
             "payload": payload,
             "system": system,
         })
-        if "content_plan" in system and "content_requirements" in system:
+        if "visible_boundaries" in system and "addressee_plan" in system:
+            result = {
+                "visible_boundaries": ["visible boundary"],
+                "addressee_plan": ["current participant"],
+            }
+        elif "content_plan" in system and "content_requirements" in system:
             result = {
                 "content_plan": "content plan",
                 "content_requirements": ["preserve the current addressee"],
@@ -42,11 +47,6 @@ class _LLM:
                     "hesitation": "occasional",
                     "punctuation": "restrained",
                 },
-            }
-        elif "visible_boundaries" in system and "addressee_plan" in system:
-            result = {
-                "visible_boundaries": ["visible boundary"],
-                "addressee_plan": ["current participant"],
             }
         elif "visual_directives" in system:
             result = {"visual_directives": "private image composition"}

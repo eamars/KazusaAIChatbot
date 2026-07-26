@@ -115,7 +115,7 @@ def _delivery_profile(lexical_register: str) -> dict[str, str]:
         "lexical_register": lexical_register,
         "sentence_shape": "紧凑自然的口语短句",
         "rhythm": "平稳，允许少量自然停顿",
-        "hesitation": "只在当前情绪支持时轻微犹豫",
+        "hesitation": "让轻微犹豫随当前情绪自然出现",
         "punctuation": "克制自然",
     }
 
@@ -737,7 +737,7 @@ async def test_live_verifier_accepts_personality_consistent_exclusivity_drift(
                 "在回应中构建一个局促且带有轻微攻击性的沟通姿态。",
             ],
             "delivery_profile": _delivery_profile(
-                "日常、直接、避免书面连接词的口语"
+                "日常、直接、以自然口语承接句子"
             ),
             "selected_surface_intent": (
                 "回应对方对肉包子的喜爱，并维持傲娇的人设。"

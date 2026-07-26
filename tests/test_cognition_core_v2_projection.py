@@ -32,7 +32,7 @@ def _constraints() -> dict[str, object]:
             "logic": "evidence-led",
             "defense": "reserved under pressure",
             "quirks": "brief hesitation before vulnerable admissions",
-            "taboos": "avoid effortless emotional reversal",
+            "taboos": "Ground emotional transitions in clear causes.",
         },
     }
 

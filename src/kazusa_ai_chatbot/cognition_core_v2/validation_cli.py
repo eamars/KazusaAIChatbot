@@ -204,6 +204,12 @@ def _build_benchmark_payload(case: dict[str, str]) -> dict[str, object]:
             "drives": character_state["drives"],
             "standards": character_state["standards"],
             "meaning_state": character_state["meaning_state"],
+            "personality_judgment": {
+                "logic": "Prefer evidence-grounded interpretation.",
+                "defense": "Preserve boundaries and the selected intent.",
+                "quirks": "Allow concise, characterful phrasing.",
+                "taboos": "Ground scene facts in available evidence.",
+            },
         },
         "evidence": [{
             "evidence_handle": "e1",

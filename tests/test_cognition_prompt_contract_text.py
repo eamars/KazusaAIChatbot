@@ -31,7 +31,6 @@ from kazusa_ai_chatbot.cognition_core_v2.semantic_source_planner import (
 from kazusa_ai_chatbot.cognition_core_v2.surface_stages import (
     CONTENT_PLAN_SYSTEM_PROMPT,
     PREFERENCE_SYSTEM_PROMPT,
-    STYLE_SYSTEM_PROMPT,
     VISUAL_SYSTEM_PROMPT,
 )
 from kazusa_ai_chatbot.cognition_core_v2.workspace import COLLAPSE_PROMPT
@@ -79,7 +78,6 @@ def _branch_modified_prompt_fragments() -> tuple[str, ...]:
         REQUIRED_SELECTION_REPAIR_PROMPT,
         RESOLVER_AUTHORIZATION_PROMPT,
         SEMANTIC_APPRAISAL_PROMPT,
-        STYLE_SYSTEM_PROMPT,
         CONTENT_PLAN_SYSTEM_PROMPT,
         PREFERENCE_SYSTEM_PROMPT,
         VISUAL_SYSTEM_PROMPT,
@@ -148,7 +146,6 @@ def test_text_prompts_organically_favor_spoken_or_typed_dialog() -> None:
     """Keep staging out of upstream guidance without adding a rejection gate."""
 
     planning_and_rendering = "\n".join((
-        STYLE_SYSTEM_PROMPT,
         CONTENT_PLAN_SYSTEM_PROMPT,
         dialog_agent._V2_DIALOG_GENERATOR_PROMPT,
         dialog_agent._V2_DIALOG_HARD_FAILURE_REPAIR_PROMPT,
@@ -208,11 +205,12 @@ def test_goal_prompt_owns_current_judgment_and_roles() -> None:
     """A bid chooses the present motive without reversing scene roles."""
 
     prompt = " ".join(GOAL_COGNITION_PROMPT.split())
+    compact_prompt = "".join(GOAL_COGNITION_PROMPT.split())
 
     assert "此刻真实动机" in prompt
     assert "当前事件" in prompt
     assert "关系" in prompt
-    assert "结构化用户对话角色具有权威性" in prompt
+    assert "结构化用户对话角色具有权威性" in compact_prompt
     assert "行动者" in prompt
     assert "对象" in prompt
 
@@ -241,10 +239,9 @@ def test_collapse_and_action_prompts_preserve_bid_ownership() -> None:
 
 
 def test_surface_prompts_leave_final_dialogue_to_dialog() -> None:
-    """Keep all four surface stages semantic and non-rendering."""
+    """Keep all active surface stages semantic and non-rendering."""
 
     surface_prompts = (
-        STYLE_SYSTEM_PROMPT,
         CONTENT_PLAN_SYSTEM_PROMPT,
         PREFERENCE_SYSTEM_PROMPT,
         VISUAL_SYSTEM_PROMPT,
@@ -259,7 +256,6 @@ def test_generated_semantic_prompts_preserve_language_policy() -> None:
         SEMANTIC_APPRAISAL_PROMPT,
         GOAL_COGNITION_PROMPT,
         ACTION_PLANNING_PROMPT,
-        STYLE_SYSTEM_PROMPT,
         CONTENT_PLAN_SYSTEM_PROMPT,
         PREFERENCE_SYSTEM_PROMPT,
         VISUAL_SYSTEM_PROMPT,
@@ -278,7 +274,6 @@ def test_semantic_prompts_preserve_typed_source_ownership() -> None:
         SEMANTIC_APPRAISAL_PROMPT,
         GOAL_COGNITION_PROMPT,
         ACTION_PLANNING_PROMPT,
-        STYLE_SYSTEM_PROMPT,
         CONTENT_PLAN_SYSTEM_PROMPT,
         PREFERENCE_SYSTEM_PROMPT,
         VISUAL_SYSTEM_PROMPT,
@@ -300,7 +295,6 @@ def test_v2_prompts_do_not_restore_operational_or_scalar_gates() -> None:
         GOAL_COGNITION_PROMPT,
         COLLAPSE_PROMPT,
         ACTION_PLANNING_PROMPT,
-        STYLE_SYSTEM_PROMPT,
         CONTENT_PLAN_SYSTEM_PROMPT,
         PREFERENCE_SYSTEM_PROMPT,
         VISUAL_SYSTEM_PROMPT,

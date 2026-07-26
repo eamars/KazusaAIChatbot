@@ -116,7 +116,10 @@ constraints, and actor/target/subject roles. Preference planning emits only
 real visible boundaries and addressee constraints, so both lists may be empty.
 Dialog owns natural character-specific chat-ready wording. Three focused
 hard-error checks run in parallel on the existing dialog-model route within
-the shared 24,000-character surface-prompt bound. Semantic fidelity receives
+the bounded verifier path. Current visible percepts retain their shared
+24,000-character cap. Semantic fidelity separately caps authoritative surface
+semantics at 11,000 characters, candidate dialog at 12,000 characters, and its
+complete serialized payload at 50,000 characters. Semantic fidelity receives
 current model-visible percept rows, the candidate role frame, candidate
 dialog, and the authoritative selected surface intent, content plan,
 requirements, and visible boundaries. It rejects internal contradiction,

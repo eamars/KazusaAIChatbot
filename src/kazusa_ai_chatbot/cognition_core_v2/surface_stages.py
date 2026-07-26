@@ -38,41 +38,42 @@ JSON 对象，不添加解释、markdown 或额外字段。'''
 CONTENT_PLAN_SYSTEM_PROMPT = '''规划当前角色在这个场景中实际会说出或发送的内容，使其自然表达
 已经形成的角色判断。综合 selected intention、primary bid、supporting bid、visible episode、
 semantic affect、semantic relationship、expression policy、interaction style 和
-permitted_action_results。character_expression_context 只提供 tempo 和 linguistic_texture，
-用于句式与节奏实现，不重新决定角色立场。runtime_capability_limits 是运行时已经确认的能力边界；
-其中标记不可用的能力不能被表达为已经安排、发送或完成，但可以自然表达当前限制、等待或下一步
-条件。
+permitted_action_results。character_expression_context 提供 tempo 和 linguistic_texture，与这些
+语境共同塑造句式、节奏和角色声音。runtime_capability_limits 提供运行时能力边界；按每项能力的
+真实状态表达已经发生的结果、当前限制、等待状态或下一步条件。
 
-goal_resolution 是 cognition 对当前目标可回答性的已确认判断：answerable_now 表示可以在当前
-证据范围内直接回答；requires_required_evidence、requires_user_input 和 blocked 表示目标仍未
-完成。后面三种状态应把真实缺口、当前限制或下一步条件表达给用户，保持 selected intention 的
-主题，不把尚未获得的证据写成已经读取、分析或完成的结果。
-blocked 的可见表达停留在当前回合的真实边界，或请用户提供当前可访问的材料；它不产生新的未来
-阅读、分析、回传或完成承诺。只有 permitted_action_results 中已经存在的实际结果，才能支持对应
-的事实陈述或后续动作状态。runtime limits 若指出仓库代码读取 owner 不可用，直接表达“当前无法
-读取”并邀请用户提供材料；不要把“先访问、先阅读、等我处理”当作当前可执行步骤。
+goal_resolution 是 cognition 对当前目标可回答性的已确认判断：answerable_now 对应在当前证据
+范围内直接回答；requires_required_evidence 对应说明证据缺口；requires_user_input 对应说明需要
+用户提供的材料；blocked 对应表达当前边界和可行下一步。permitted_action_results 提供事实状态：
+executed 对应其有界的已完成效果；pending 或 scheduled 对应“已记录、已排队、待执行”；failed、
+unavailable 和其他状态对应各自的真实限制。请求或目标候选表达角色的言语态度。
 
 # 规划步骤
-1. 按认知阶段选择的方式回应或参与当前输入。结合角色关系、情绪和场景压力推进互动，而不是机械
-复述先前对话。
-2. 选择鲜明、贴合角色的内容。只要不与当前输入或明确生效的约束冲突，也不颠倒行动者、对象、
-受益者或主语，连贯的想象细节、玩笑和有创造力的展开都可以使用。
-3. 结构化 visible percept 的角色字段具有权威性。在用户对话中，“当前用户”的第一人称指当前
-用户；“当前角色”表示当前角色，也是被直接称呼者和祈使句的隐含主语。自由文本使用自然的中文
+1. 回应当前输入，并结合先前消息、角色关系、情绪和场景压力推进互动。
+2. 在当前事实、角色方向和明确约束一致的范围内，自由加入连贯的想象细节、玩笑、主动性和有创造力
+的展开，让内容鲜明且贴合角色。
+3. 以结构化 visible percept 确定行动者、对象、受益者和主语。在用户对话中，“当前用户”的第一
+人称指当前用户；“当前角色”是说话者、被直接称呼者和祈使句的隐含主语。自由文本使用自然的中文
 参与者称呼。
-4. permitted_action_results 是角色大脑能力的精确账本。只有 executed 支持其有界的已完成效果；
-pending 或 scheduled 的正向语义是“已记录、已排队、待执行”，可在当前发言中确认请求和执行
-条件，保持后续 worker 结果开放。其他 status 不支持完成声明；请求或目标候选只支持角色在言语中的
-态度，不代表能力已经执行。
-5. 把拒绝、接受、指责、条件、让步以及改变立场的原因写入 content_plan 或
-content_requirements。delivery_profile 只描述词语层次、句式、节奏、犹豫与标点，不能新增、
-否定或改变语义立场。
+4. 按 permitted_action_results 的状态规划事实表述：executed 表达有界的完成结果；pending 或
+scheduled 表达已记录、已排队、待执行及相应条件；其他状态表达当前限制或下一步。让后续 worker
+结果保持开放。
+5. 以 selected intention 及 intention.reason 为语义锚点，阅读完整语境，分清角色是在回应请求
+本身，还是在回应提问的时机、突然程度或直接程度。可自由组合惊讶、害羞、防御、调侃、嘴硬、
+迟疑、温柔、热烈或其他符合角色的情绪与特征。这些表达可以先于明确决定出现，并与收尾共同组成
+表达同一已选决定的角色化弧线。当权威语境选择了实际立场变化时，把支持变化的新事实、动机、
+条件、让步或约束及其因果连接写入 content_plan 或 content_requirements。
+6. content_plan 和 content_requirements 承载拒绝、接受、指责、协商、条件、让步和立场变化等
+语义选择。content_requirements 使用正向目标句式，描述回应应呈现的立场、情绪流动、角色特征、
+事实和互动推进；delivery_profile 用词语层次、句式、节奏、犹豫与标点把这些语义实现为鲜明角色
+声音。
 
 返回一份简洁计划、一到八条语义要求和完整 delivery_profile。语义要求保护选定含义、当前真实
-边界、角色方向和能力执行事实。角色自己的反思和内部观察属于语境，不是当前用户的即时发言；
-运行元数据不属于对话内容。新生成的自由文本使用简体中文；用户引文、专有名词、代码、URL 以及
-schema 或 enum token 保持原样。内部角色句柄或英文角色称谓仅作为结构化值或原文内容保留；
-中文自由文本使用配置名称、当前角色、当前用户或其他参与者。本阶段不写最终对话。
+边界、角色方向和能力执行事实。当前用户的即时发言来自 visible percept；角色自己的反思和内部
+观察作为语境证据；运行元数据留在内部。新生成的自由文本使用简体中文；用户引文、专有名词、代码、
+URL 以及 schema 或 enum token 保持原样。内部角色句柄或英文角色称谓仅作为结构化值或原文内容
+保留；中文自由文本使用配置名称、当前角色、当前用户或其他参与者。最终对话由 dialog 渲染器生成；
+本阶段输出规划字段。
 
 # 输出格式
 只返回一个 JSON 对象，字段必须恰好是 content_plan、content_requirements 和
@@ -105,18 +106,23 @@ PREFERENCE_SYSTEM_PROMPT = '''识别当前角色判断和当前场景中真实�
 semantic relationship、interaction style 和 permitted_action_results 为语境。
 runtime_capability_limits 是可信的运行时能力边界，只用于保持表达与现实能力一致。
 
-visible_boundaries 只记录当前生效的表达限制或细节范围；addressee_plan 只记录真实存在的语义称呼
-安排。没有相应约束时返回空列表，让角色按当前判断自然表达。能力结果的 status 按原义处理：只有
-executed 支持其有界的已完成效果，其他 status 保留各自含义。角色自己的反思属于语境，不是当前
-用户的即时发言；运行元数据不属于对话内容。
+每一条 visible_boundaries 都对应权威语境中明确生效的表达限制或细节范围；每一条
+addressee_plan 都对应真实存在的称呼安排。相应约束为空时返回空列表，让角色按当前判断自然表达。
+普通场景事实、时间、情绪、关系状态和已选回应立场分别归入 content_plan、content_requirements
+或 delivery_profile。拒绝、接受、指责、协商、条件和立场变化归入 content_plan 或
+content_requirements；情绪、强度、直接程度和表达节奏归入 delivery_profile。通用安全、内容审查、
+亲密程度或通用助手礼貌边界在权威语境明确提供时进入 visible_boundaries。
+
+能力结果的 status 按原义处理：executed 对应其有界的已完成效果，其他 status 对应各自状态。
+当前用户的即时发言来自 visible percept；角色自己的反思作为语境证据；运行元数据留在内部。
 
 新生成的自由文本使用简体中文；用户引文、专有名词、代码、URL 以及 schema 或 enum token 保持
 原样。内部角色句柄或英文角色称谓仅作为结构化值或原文内容保留；中文自由文本使用配置名称、当前
-角色、当前用户或其他参与者。本阶段返回规划字段，不写最终对话。
+角色、当前用户或其他参与者。最终对话由 dialog 渲染器生成；本阶段返回规划字段。
 
 # 输出格式
 只返回一个 JSON 对象，字段必须恰好是 visible_boundaries 和 addressee_plan。每个字段都是包含
-零到八个非空字符串的列表，列表内不得重复，每条最多 500 字符。'''
+零到八个非空字符串的列表，列表内各条唯一，每条最多 500 字符。'''
 
 
 async def run_preference_stage(
@@ -145,21 +151,36 @@ character_expression_context、permitted_action_results 和 runtime_capability_l
 surface.dialog_compliance_repair.verified_hard_issues 是已经确认的硬错误；
 
 # 修复步骤
-1. 保持 selected intention、角色判断、情绪方向、关系方向、当前事实和能力执行结果。
-2. 修正每一项 verified_hard_issues，重新生成内容计划、语义要求、delivery profile、可见边界和
-称呼安排。
+1. 以 selected intention 及 intention.reason 为语义锚点，保持角色判断、情绪方向、关系方向、
+当前事实和能力执行结果。阅读完整语境，分清角色是在回应请求本身，还是在回应提问的时机、突然
+程度或直接程度。可自由组合惊讶、害羞、防御、调侃、嘴硬、迟疑、温柔、热烈或其他符合角色的情绪
+与特征。这些表达可以先于明确决定出现，并与收尾共同组成表达同一已选决定的角色化弧线。权威语境
+选择实际立场变化时，把支持变化的新事实、动机、条件、让步或约束及其因果连接写入 content_plan
+或 content_requirements。
+2. 修正每一项 verified_hard_issues，重新生成内容计划、语义要求和 delivery profile，并依据
+权威语境中的具体来源恢复可见边界和称呼安排。
 3. 保持结构化角色中的行动者、对象、受益者、回应所有者和选择所有者。当前角色可以拒绝、协商或
-附加条件；只要没有颠倒这些结构化角色，这些角色判断仍与用户请求相容。
-4. visible_boundaries 只表达权威语境中已有的角色判断和真实约束。不得新增权威语境中不存在的
-通用安全、内容审查、亲密程度降级或通用助手礼貌边界；角色自己的拒绝、协商和条件仍按第 3 条处理。
-5. 只有 permitted_action_results 中 status 为 executed 的结果支持已完成效果；其他状态和
-runtime_capability_limits 按原义保留。
-6. delivery_profile 只描述词语层次、句式、节奏、犹豫和标点。拒绝、接受、指责、条件、让步与
-立场变化原因必须写入 content_plan 或 content_requirements。
+附加条件，并按照权威语境保持这些语义选择的行动者和对象。
+4. visible_boundaries 的具体来源类型是权威语境明示的隐私、保密、同意、安全、内容审查或可见
+披露限制；每一条 addressee_plan 都对应真实存在的称呼安排。普通场景事实、时间、情绪、关系状态
+和已选回应立场分别归入 content_plan、content_requirements 或 delivery_profile。拒绝、接受、
+指责、协商、条件和立场变化归入 content_plan 或 content_requirements；主题、比喻和已选立场进入
+content_plan 或 content_requirements；情绪、强度、直接程度和表达节奏归入 delivery_profile。
+verified_hard_issues 中的内容冲突对应 content_plan 和 content_requirements 中的正向修复目标；
+visible_boundaries 和 addressee_plan 仍各自取自权威语境中的具体来源。没有具体来源时，这两个字段
+分别返回空列表。visible_boundaries 用正向范围句式写明已确认的表达范围；addressee_plan 写明现有
+参与者和实际称呼形式。addressee_plan 的条目格式为“现有参与者 + 本轮实际使用的称呼形式”；
+存在具体称呼安排时列出，其他情况返回空列表。亲密感、语气词、词汇、句式和节奏由
+delivery_profile 表达。
+5. 按 permitted_action_results 和 runtime_capability_limits 的原义重建状态：executed 对应有界
+的完成效果，pending 或 scheduled 对应等待状态，其他 status 对应当前限制。
+6. content_requirements 使用正向目标句式，描述回应应呈现的立场、情绪流动、角色特征、事实和
+互动推进；delivery_profile 用词语层次、句式、节奏、犹豫和标点实现这些语义选择，让角色声音
+保持鲜明。
 7. selected surface intent、能力结果和运行时边界由调用方从权威输入重建。
 
 新生成的自由文本使用简体中文；用户引文、专有名词、代码、URL 以及 schema 或 enum token 保持
-原样。本阶段不写最终对话。
+原样。本阶段输出完整的替代规划字段。
 
 # 输出格式
 只返回一个 JSON 对象，字段必须恰好是 content_plan、content_requirements、
@@ -177,7 +198,7 @@ async def run_dialog_compliance_repair_stage(
     """Replace rejected semantics with bounded structural regeneration.
 
     Args:
-        payload: Projected owner context and rejected semantic fields.
+        payload: Canonical projected owner context and verified hard issues.
         services: Configured text-surface model and route settings.
 
     Returns:

@@ -129,6 +129,25 @@ def _persona_state() -> dict[str, object]:
         "character_profile": {
             "name": "Test Character",
             "global_user_id": "character-1",
+            "personality_brief": {
+                "logic": "Keep present evidence and role ownership clear.",
+                "tempo": "moderate",
+                "defense": "Preserve boundaries and the selected intent.",
+                "quirks": "Use occasional concise, characterful phrasing.",
+                "taboos": "Ground scene facts in available evidence.",
+            },
+            "linguistic_texture_profile": {
+                "hesitation_density": 0.4,
+                "fragmentation": 0.4,
+                "emotional_leakage": 0.4,
+                "rhythmic_bounce": 0.4,
+                "direct_assertion": 0.4,
+                "softener_density": 0.4,
+                "counter_questioning": 0.4,
+                "formalism_avoidance": 0.4,
+                "abstraction_reframing": 0.4,
+                "self_deprecation": 0.4,
+            },
         },
         "platform_channel_id": "channel-1",
         "channel_type": "private",
@@ -145,6 +164,82 @@ def _persona_state() -> dict[str, object]:
             current_global_user_id="user-1",
             content="hello",
         ),
+    }
+
+
+def _text_surface_input() -> dict[str, object]:
+    """Build one exact V2 input retained through dialog rendering."""
+
+    return {
+        "schema_version": "text_surface_input.v2",
+        "episode": canonical_episode(
+            episode_id="persona-surface-input",
+            current_global_user_id="user-1",
+            content="hello",
+        ),
+        "intention": {
+            "route": "speech",
+            "intention": "respond to the grounded episode",
+            "target_roles": [],
+            "reason": "the current episode establishes a visible response",
+        },
+        "goal_resolution": "answerable_now",
+        "supporting_bids": [],
+        "expression_policy": {
+            "visibility": "visible",
+            "emotional_tone": "calm",
+            "intensity": "restrained",
+            "directness": "balanced",
+        },
+        "semantic_affect": [],
+        "permitted_action_results": [],
+        "interaction_style_context": "Keep the response conversational.",
+        "character_expression_context": {
+            "tempo": "moderate",
+            "linguistic_texture": "concise with light hesitation",
+        },
+        "visual_character_context": "Test Character",
+    }
+
+
+def _text_surface_output() -> dict[str, object]:
+    """Build one exact V2 surface accepted by dialog."""
+
+    return {
+        "schema_version": "text_surface_output.v2",
+        "content_plan": "Acknowledge the current episode.",
+        "content_requirements": ["Keep the selected stance."],
+        "visible_boundaries": [],
+        "addressee_plan": ["Address the current user."],
+        "delivery_profile": {
+            "lexical_register": "plain",
+            "sentence_shape": "compact",
+            "rhythm": "measured",
+            "hesitation": "light",
+            "punctuation": "restrained",
+        },
+        "selected_surface_intent": "acknowledge the current episode",
+        "permitted_action_results": [],
+    }
+
+
+def _surface_update() -> dict[str, object]:
+    """Build the exact L3 text-surface handoff."""
+
+    return {
+        "text_surface_input_v2": _text_surface_input(),
+        "text_surface_output_v2": _text_surface_output(),
+    }
+
+
+def _dialog_result(final_dialog: list[str]) -> dict[str, object]:
+    """Build a dialog result paired with its accepted surface."""
+
+    return {
+        "final_dialog": final_dialog,
+        "target_addressed_user_ids": ["user-1"] if final_dialog else [],
+        "target_broadcast": False,
+        "text_surface_output_v2": _text_surface_output(),
     }
 
 
@@ -281,16 +376,12 @@ async def test_v2_speech_executes_and_correlates_speak_action(
     monkeypatch.setattr(
         persona_module,
         "call_l3_text_surface_handler",
-        AsyncMock(return_value={"text_surface_output_v2": {}}),
+        AsyncMock(return_value=_surface_update()),
     )
     monkeypatch.setattr(
         persona_module,
         "dialog_agent",
-        AsyncMock(return_value={
-            "final_dialog": ["Hello."],
-            "target_addressed_user_ids": ["user-1"],
-            "target_broadcast": False,
-        }),
+        AsyncMock(return_value=_dialog_result(["Hello."])),
     )
 
     result = await persona_module.call_action_subgraph(state)
@@ -478,21 +569,19 @@ async def test_call_action_subgraph_preserves_dialog_and_trace(
 
     state = _persona_state()
     state.update(_resolver_update("speech"))
-    surface = AsyncMock(return_value={
-        "text_surface_output_v2": {
-            "content_plan": "acknowledge the current episode",
-        },
+    surface_update = _surface_update()
+    surface_update.update({
         "visual_surface_output_v2": {
             "schema_version": "visual_surface_output.v2",
             "visual_directives": "terminal visual scene",
             "selected_surface_intent": "illustrate the terminal scene",
         },
     })
-    dialog = AsyncMock(return_value={
-        "final_dialog": ["Hello.", "How are you?"],
-        "target_addressed_user_ids": ["user-1"],
-        "target_broadcast": False,
-    })
+    surface = AsyncMock(return_value=surface_update)
+    dialog = AsyncMock(return_value=_dialog_result([
+        "Hello.",
+        "How are you?",
+    ]))
     monkeypatch.setattr(
         persona_module,
         "call_l3_text_surface_handler",
@@ -543,12 +632,10 @@ async def test_coding_enqueue_precedes_visible_speech_dialog(
         "accepted_task_state": "scheduled",
     }
     execute = AsyncMock(side_effect=[[pending_result], []])
-    surface = AsyncMock(return_value={"text_surface_output_v2": {}})
-    dialog = AsyncMock(return_value={
-        "final_dialog": ["I accepted the coding task."],
-        "target_addressed_user_ids": ["user-1"],
-        "target_broadcast": False,
-    })
+    surface = AsyncMock(return_value=_surface_update())
+    dialog = AsyncMock(return_value=_dialog_result([
+        "I accepted the coding task.",
+    ]))
     monkeypatch.setattr(
         persona_module,
         "execute_action_specs_for_trace",
@@ -638,12 +725,10 @@ async def test_generic_accepted_task_precedes_visible_speech_dialog(
         "accepted_task_state": "scheduled",
     }
     execute = AsyncMock(side_effect=[[pending_result], []])
-    surface = AsyncMock(return_value={"text_surface_output_v2": {}})
-    dialog = AsyncMock(return_value={
-        "final_dialog": ["I accepted the repository review."],
-        "target_addressed_user_ids": ["user-1"],
-        "target_broadcast": False,
-    })
+    surface = AsyncMock(return_value=_surface_update())
+    dialog = AsyncMock(return_value=_dialog_result([
+        "I accepted the repository review.",
+    ]))
     monkeypatch.setattr(
         persona_module,
         "execute_action_specs_for_trace",
@@ -721,16 +806,12 @@ async def test_call_action_subgraph_preserves_empty_dialog(
     monkeypatch.setattr(
         persona_module,
         "call_l3_text_surface_handler",
-        AsyncMock(return_value={"text_surface_output_v2": {}}),
+        AsyncMock(return_value=_surface_update()),
     )
     monkeypatch.setattr(
         persona_module,
         "dialog_agent",
-        AsyncMock(return_value={
-            "final_dialog": [],
-            "target_addressed_user_ids": [],
-            "target_broadcast": False,
-        }),
+        AsyncMock(return_value=_dialog_result([])),
     )
 
     result = await persona_module.call_action_subgraph(state)
@@ -764,11 +845,7 @@ def _patch_persona_graph_stages(
         return_value={"decontextualized_input": "hello"},
     )
     resolver = AsyncMock(return_value=_resolver_update(route))
-    dialog = AsyncMock(return_value={
-        "final_dialog": ["Hello."],
-        "target_addressed_user_ids": ["user-1"],
-        "target_broadcast": False,
-    })
+    dialog = AsyncMock(return_value=_dialog_result(["Hello."]))
     monkeypatch.setattr(
         persona_module,
         "call_msg_decontextualizer",
@@ -783,7 +860,7 @@ def _patch_persona_graph_stages(
     monkeypatch.setattr(
         persona_module,
         "call_l3_text_surface_handler",
-        AsyncMock(return_value={"text_surface_output_v2": {}}),
+        AsyncMock(return_value=_surface_update()),
     )
     monkeypatch.setattr(persona_module, "dialog_agent", dialog)
     return decontextualizer, resolver, dialog

@@ -72,6 +72,12 @@ def _global_state() -> dict[str, object]:
         "character_profile": {
             "global_user_id": "character-1",
             "name": "千纱",
+            "personality_brief": {
+                "logic": "Keep present evidence and role ownership clear.",
+                "defense": "Preserve boundaries and the selected intent.",
+                "quirks": "Use occasional dry, characterful phrasing.",
+                "taboos": "Ground scene facts in available evidence.",
+            },
         },
         "character_cognition_state": build_character_production_state(
             updated_at=NOW,
@@ -135,6 +141,37 @@ def test_persona_connector_maps_one_native_user_scope() -> None:
     assert "千纱" in payload["scene_context"]["character_role"]
     assert "User" in payload["scene_context"]["current_user_role"]
     assert "隐含主语" in payload["scene_context"]["character_role"]
+    assert payload["character_constraints"]["personality_judgment"] == {
+        "logic": "Keep present evidence and role ownership clear.",
+        "defense": "Preserve boundaries and the selected intent.",
+        "quirks": "Use occasional dry, characterful phrasing.",
+        "taboos": "Ground scene facts in available evidence.",
+    }
+
+
+def test_connector_rejects_overlong_personality_judgment() -> None:
+    """The connector preserves the exact bounded personality contract."""
+
+    state = _global_state()
+    character_profile = state["character_profile"]
+    assert isinstance(character_profile, dict)
+    personality_brief = character_profile["personality_brief"]
+    assert isinstance(personality_brief, dict)
+    personality_brief["logic"] = "x" * (
+        connector.PERSONALITY_JUDGMENT_MAX_CHARS + 1
+    )
+
+    with pytest.raises(
+        connector.CognitionExecutionError,
+        match="personality logic",
+    ):
+        connector.build_cognition_input_from_global_state(
+            state,
+            mutable_state=build_acquaintance_user_state(
+                global_user_id="user-1",
+                updated_at=NOW,
+            ),
+        )
 
 
 def test_connector_projects_protocol_owned_resolver_goal_progress() -> None:

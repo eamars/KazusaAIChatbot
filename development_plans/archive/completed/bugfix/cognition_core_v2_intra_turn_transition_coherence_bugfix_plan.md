@@ -8,7 +8,7 @@
 - Plan class: high_risk_migration, because this is a big-bang replacement of
   response-path prompt, public surface, repair, verifier, and persistence
   handoff behavior.
-- Status: in_progress.
+- Status: completed.
 - Target revision audited:
   `cognition_core_v2@ba433e9be4805bb88b992419db1c99a6e376dc4a`.
 - Mandatory skills: `development-plan`, `local-llm-architecture`,
@@ -25,6 +25,8 @@
 - Execution authorization: the user authorized parent-only execution on
   2026-07-25T14:18:02Z. No subagent may participate in implementation or
   review.
+- Quality sign-off and closure: the user accepted the final quality evidence
+  and authorized lifecycle closure on 2026-07-26T04:46:36Z.
 
 ## Context
 
@@ -131,6 +133,15 @@ it will replace mainline.
   authors the Markdown quality review after inspecting the evidence.
 - Real LLM schema validity and pytest success are harness gates only. The
   parent applies the `0/1/2` transition rubric to the actual dialog.
+- Apply the rubric only after reading the current input, selected intent and
+  reason, and every candidate message in order. Identify whether an opening
+  reacts to the requested action or only to its timing/directness. Surprise,
+  embarrassment, defensiveness, teasing, hesitation, indirectness,
+  face-saving reluctance, and tsundere texture remain coherent when the whole
+  turn communicates the selected decision.
+- State prompt success criteria positively for content planning, boundary
+  planning, surface repair, dialog rendering, and hard-repair rendering.
+  Reserve negative taxonomy language for bounded verifier failure conditions.
 - LLM stages own semantic judgment. Deterministic code owns exact schemas,
   bounds, field projection, accepted-candidate propagation, call caps,
   persistence eligibility, and trace settlement.
@@ -590,6 +601,9 @@ direct dialog/progress consumers.
 
 ### Modify
 
+- `development_plans/archive/completed/bugfix/cognition_core_v2_intra_turn_transition_coherence_bugfix_plan.md`
+  - Record execution evidence, review findings, remediation, and lifecycle
+    sign-off.
 - `src/kazusa_ai_chatbot/cognition_core_v2/contracts.py`
   - Add exact `PersonalityJudgmentV2`,
     `CharacterExpressionContextV2`, and public `DeliveryProfileV2`.
@@ -637,8 +651,8 @@ direct dialog/progress consumers.
   - Clarify that only accepted dialog/surface semantics enter recording and
     rejected candidates remain trace-only.
 - `development_plans/README.md`
-  - Keep this plan's active-bugfix registry row and update its lifecycle status
-    only when the plan status changes.
+  - Record this plan as a completed archived bugfix and add its completion
+    evaluation entry.
 - Update exact-contract fixtures and assertions in:
   - `tests/test_cognition_core_v2_contracts.py`
   - `tests/test_cognition_core_v2_projection.py`
@@ -650,6 +664,7 @@ direct dialog/progress consumers.
   - `tests/test_cognition_prompt_contract_text.py`
   - `tests/test_cognition_chain_connector_mapping.py`
   - `tests/test_l2d_l3_surface_handoff.py`
+  - `tests/test_cognition_preference_adapter.py`
   - `tests/test_cognition_interaction_style_context.py`
   - `tests/test_conversation_progress_history_policy.py`
   - `tests/test_past_dialog_cognition_prompt_boundaries.py`
@@ -861,7 +876,7 @@ trusted.
     projection, exhaustion behavior, and progress input recorded.
   - Next: Stage 4 regressions and docs.
   - Sign-off: parent, 2026-07-25T14:58:05Z.
-- [ ] Stage 4 - old-contract fixtures, regressions, and docs complete.
+- [x] Stage 4 - old-contract fixtures, regressions, and docs complete.
   - Covers Steps 10-11.
   - Files: all listed tests and three subsystem READMEs.
   - Verify: static greps, `py_compile`, focused deterministic batches, and
@@ -869,8 +884,12 @@ trusted.
   - Evidence: collected test node IDs, outputs, doc diff, and zero forbidden
     references recorded.
   - Next: Stage 5 live quality gates.
-  - Sign-off: parent and UTC timestamp after evidence is recorded.
-- [ ] Stage 5 - post-fix live quality evidence accepted.
+  - Sign-off: parent, 2026-07-25T23:51:32Z. The amended exact-consumer
+    regression passed `81` tests with `4` live selectors deselected; the
+    repository-wide non-live gate selected `3,459` tests and completed with
+    `3,457 passed, 2 skipped, 838 deselected` under the user-approved nine
+    baseline exclusions.
+- [x] Stage 5 - post-fix live quality evidence accepted.
   - Covers Step 12.
   - Files: live traces and parent-authored review artifact.
   - Verify: every live selector is run and inspected individually; captured
@@ -878,8 +897,13 @@ trusted.
   - Evidence: raw trace per run, model/config fingerprint, surface output,
     dialog, verifier verdict, rubric score, and quality notes recorded.
   - Next: Stage 6 parent independent code review.
-  - Sign-off: parent and UTC timestamp after evidence is recorded.
-- [ ] Stage 6 - independent code review and remediation complete.
+  - Sign-off: parent, 2026-07-26T02:11:08Z. All required selectors were run
+    one at a time and reviewed from current input through accepted dialog and
+    downstream progress. The final-prompt positive/control matrix scored `2`;
+    both explicit same-proposition reversals were rejected; the final directly
+    affected gate passed `95`; and the amended exact-consumer gate passed `83`
+    with `8` live selectors deselected.
+- [x] Stage 6 - independent code review and remediation complete.
   - Covers Step 13.
   - Files: complete implementation diff, plan, evidence, and lifecycle docs.
   - Verify: run the full review rubric below, fix every in-scope critical/high
@@ -887,7 +911,10 @@ trusted.
   - Evidence: findings, file/line proof, fixes, reruns, residual risks, and
     final verdict recorded.
   - Next: request user sign-off before lifecycle closure.
-  - Sign-off: parent and UTC timestamp after review evidence is recorded.
+  - Sign-off: parent, 2026-07-26T03:13:04Z. The parent reread the plan and
+    complete 62-path diff, reviewed every production, documentation, and test
+    change, remediated all in-scope findings, and reran focused and broad
+    deterministic gates. No critical or high finding remains unresolved.
 
 ## Verification
 
@@ -896,7 +923,7 @@ trusted.
 - `git status --short`
   - Expected: only plan-approved files plus the pre-existing
     `test_runs/controlled/C07/1/r7a5e422b1304/` entry.
-- `rg -n "style_guidance|style_config|v2_surface_style|run_style_stage|character_voice_context" src/kazusa_ai_chatbot tests`
+- `rg -n "STYLE_SYSTEM_PROMPT|style_guidance|style_config|v2_surface_style|run_style_stage|character_voice_context" src/kazusa_ai_chatbot tests`
   - Expected: exit code `1` and zero matches. Any match is a failed big-bang
     cutover.
 - `rg -n "delivery_profile|character_expression_context|visual_character_context|personality_judgment" src/kazusa_ai_chatbot/cognition_core_v2 src/kazusa_ai_chatbot/nodes tests`
@@ -908,6 +935,7 @@ trusted.
   src\kazusa_ai_chatbot\cognition_core_v2\state_projection.py
   src\kazusa_ai_chatbot\cognition_core_v2\surface_stages.py
   src\kazusa_ai_chatbot\cognition_core_v2\surface.py
+  src\kazusa_ai_chatbot\cognition_core_v2\validation_cli.py
   src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition.py
   src\kazusa_ai_chatbot\nodes\persona_supervisor2_l3_surface.py
   src\kazusa_ai_chatbot\nodes\dialog_agent.py
@@ -979,6 +1007,13 @@ live tests batched into the run.
 
 Expected: exit code `0`; unrelated failures stop the gate for classification
 before scope changes.
+
+### Amended exact-consumer regression
+
+- Run the benchmark selector and the six test files added by the approved
+  Stage 4 scope amendment with `-m "not live_llm"`.
+  - Expected: exit code `0`; live selectors remain deselected and every
+    exact-contract consumer passes.
 
 ### Live LLM cases
 
@@ -1143,6 +1178,9 @@ This plan is complete only when:
     only pass/fail status.
 17. The parent independent code review has no unresolved critical/high
     finding, and the user accepts the final quality evidence.
+18. Generative prompts invite varied emotion and character traits through a
+    coherent contextual arc; they do not suppress expression through repeated
+    prohibition language.
 
 ## Risks
 
@@ -1166,10 +1204,12 @@ Record evidence as work completes; unchecked stages remain unproven.
 | Baseline | Authorized 2026-07-25T14:18:02Z on `cognition_core_v2`; `transition_base_sha=ba433e9be4805bb88b992419db1c99a6e376dc4a`; only plan/registry plus pre-existing `test_runs/controlled/C07/1/r7a5e422b1304/` were dirty. |
 | Contract red/green | Pre-fix focused file: 7 failed as expected. Stage 2 producer contracts and direct handoff suites passed (`46 passed`); expanded Stage 3 focused file passed (`14 passed`). Stage 3 also passed the dialog semantic/surface suite (`31 passed`) and the planned focused dialog batch (`48 passed`). |
 | Prompt/call budget | Stage 2 deterministic render: exactly 2 calls; content prompt/payload `1908/1837` chars, preference prompt/payload `687/1286` chars; five exact delivery fields returned. Stage 3 verifier tests prove the exact authoritative semantic projection, `11,000`-character authority cap, `12,000`-character candidate cap, `50,000`-character serialized payload cap, and typed pre-call failure with zero semantic-verifier, repair, delivery, or progress calls. |
-| Static/compile | Stage 2 changed-source/focused-test old-symbol grep exited `1` with zero matches. The planned repository-wide lowercase-symbol grep also exited `1` with zero matches, but the broader cutover audit found stale deleted `STYLE_SYSTEM_PROMPT` imports in `tests/test_cognition_core_v2_live_character_judgment.py` and `tests/test_cognition_prompt_contract_text.py`; those omitted paths stop collection. All changed Python files compile, all four changed prompt builders render through production paths, and `git diff --check` exits `0`. Stage 4 remains unsigned. |
-| Deterministic/regression | Focused final batches passed: contracts/projection/L2D `46 passed`; dialog visible/dialog-agent/L3 `48 passed`; progress/history/RAG `14 passed`; production prompt render `4 passed`; new transition suite `14 passed`; exact fixture follow-up `9 passed`. The affected suite passed `131` nodes when five demonstrably pre-existing failures were deselected. Broad non-live collection, after temporarily ignoring the two stale-import files above, reached `3422 passed, 26 failed, 2 skipped, 825 deselected`. Seventeen failures expose omitted V2 big-bang consumers: seven in `tests/test_cognition_chain_connector_mapping.py`, one in `tests/test_multi_source_cognition_stage_02_chat_episode_migration.py`, one in `tests/test_multi_source_cognition_stage_09_multimodal_input_sources.py`, seven in `tests/test_persona_supervisor2.py`, and one through the omitted production consumer `src/kazusa_ai_chatbot/cognition_core_v2/validation_cli.py`; the two stale-import files are additional collection blockers. Nine remaining failures are reproducible against `transition_base_sha` source and are unrelated baseline defects: two coding Phase 3 handoff, three self-cognition integration, one coding Phase 5 interface, one persona relevance, and two baseline-harness failures. |
+| Static/compile | Final repository-wide audit for `STYLE_SYSTEM_PROMPT`, `style_guidance`, `style_config`, `v2_surface_style`, `run_style_stage`, and `character_voice_context` exited `1` with zero matches. The exact new-symbol audit exited `0` with `216` matches, while the scoped production optional-fallback audit exited `1` with zero matches. All `57` changed Python files compile; all changed prompt builders render through production paths; final prompt sizes are content `2030`, preference `955`, full repair `2178`, dialog `1355`, hard repair `1010`, and semantic fidelity `1744`; `git diff --check` exits `0`; all `62` changed tracked paths are listed in the amended `Change Surface`. |
+| Deterministic/regression | Focused batches passed: contracts/projection/L2D `46 passed`; dialog visible/dialog-agent/L3 `48 passed`; progress/history/RAG `14 passed`; production prompt render `4 passed`; current transition suite `15 passed`; Stage 6 positive-fixture cleanup batch `68 passed`; final amended exact-consumer regression `84 passed, 8 deselected`; affected regression `131 passed, 9 deselected`. The final broad non-live gate on the fully reviewed state selected `3,461/4,299` non-excluded tests and completed with `3,459 passed, 2 skipped, 838 deselected`; the deselections comprise live markers plus the nine user-approved base-SHA defects. The earlier `26` failures are fully classified: `17` amended V2 cutover consumers are now green and the remaining `9` are the approved unrelated baseline exclusions (two coding Phase 3 handoff, three self-cognition integration, one coding Phase 5 interface, one persona relevance, and two baseline-harness failures). |
 | Stage 4 scope amendment | At 2026-07-25T23:29:23Z the user approved adding the seven exact-contract consumers discovered by regression verification: `src/kazusa_ai_chatbot/cognition_core_v2/validation_cli.py`, `tests/test_cognition_core_v2_live_character_judgment.py`, `tests/test_cognition_prompt_contract_text.py`, `tests/test_cognition_chain_connector_mapping.py`, `tests/test_multi_source_cognition_stage_02_chat_episode_migration.py`, `tests/test_multi_source_cognition_stage_09_multimodal_input_sources.py`, and `tests/test_persona_supervisor2.py`. The user also approved classifying the nine base-SHA-reproducible defects recorded above as outside this plan. Stage 4 resumed under this amended boundary. |
-| Live quality | Baseline verifier rerun accepted the seeded score-`0` reversal; baseline repair rerun returned correct content while preserving contradictory style. Review and raw trace paths are recorded in `test_artifacts/llm_reviews/cognition_core_v2_transition_coherence_after.md`. |
+| Live quality | Baseline verifier rerun accepted the seeded score-`0` reversal; baseline repair rerun returned correct content while preserving contradictory style. The first post-fix captured-room run scored `2`; the second scored `1` because unified content reintroduced compromise and preference exceeded boundary ownership. Execution stopped, the V2 prompts were corrected in scope, the focused regression passed, prompt caps remained valid, and the affected deterministic batch passed `33` tests with `4` live cases deselected. Corrected captured-room repetitions 1 and 2 both produced score-`2` dialog, but repetition 2 copied the accepting stance into `visible_boundaries`; execution stopped again. The clarified boundary-only contract failed red then passed green, both edited files compile, prompt caps are content `2088` / preference `875` / full repair `1644`, and the affected deterministic batch again passed `33` tests with `4` live cases deselected. On that prompt version, captured-room repetitions 1 and 2 scored `2`; repetition 3 scored `1` after dialog invented user insistence as a condition for acceptance, and semantic fidelity accepted it. Execution stopped. The focused dialog-creativity/verifier-authority contract failed red then passed green, edited files compile, and the complete affected prompt/dialog/verifier/L3 batch passed `81` tests with `4` live cases deselected. Renderer/verifier repetition 1 then scored `1`: content weakened the cognition-selected reason into compromise, dialog made acceptance conditional, and verifier treated the lower-priority content prose as permission. Execution stopped. The selected-intent/reason priority contract failed red then passed green; the semantic verifier was compressed from `1919` to `1797` characters to retain its existing cap; all edited files compile; and the complete affected batch again passed `81` tests with `4` live cases deselected. Intent-priority repetition 1 still scored `1` because dialog used the user's asking itself as the sole cause for acceptance and semantic fidelity accepted it. Execution stopped for a general in-scope causal-support clarification across the existing owners. Review and raw trace paths are recorded in `test_artifacts/llm_reviews/cognition_core_v2_transition_coherence_after.md`. |
+| Contextual quality recalibration | Supersedes the mechanical score-`1` labels in the historical live-quality row above. Whole-context review scores captured repetition 2, boundary repetition 3, dialog-authority repetition 1, and intent-priority repetition 1 as `2`: each opening reacts to suddenness/directness while the requested action remains accepted, and the face-saving wording is coherent tsundere texture. The Korean token in boundary repetition 3 remains a separate language defect; preference stance leakage and content-owner compromise wording remain separate ownership findings. The over-broad user-request causal prohibition was removed from every V2 owner. All changed generative prompts now use positive semantic-anchor, field-owner, expressive-arc, and character-variety criteria. A diagnostic live run then showed prohibition-heavy wording inside generated `content_requirements`, so content and full repair gained a positive target contract for stance, emotional movement, character traits, facts, and interaction progress. The ambiguous `才……才没有` verifier seed was also reclassified as coherent because its omitted object can target the `做坏事` label while shared participation remains accepted. Its replacement explicitly refuses and then accepts the same action/relationship. That true score-`0` control exposed a verifier miss; semantic fidelity now positively distinguishes timing/directness/label/emotion reactions with consistent action polarity and retains one bounded false rule for explicit opposite polarity within one or several messages. Three full-repair diagnostics each produced coherent score-`2` dialog but successively exposed field provenance leakage: issue/delivery goals entered both boundary fields, then tone remained in addressee, then themes/metaphors entered visible boundaries. The final positive schema maps verified issues, themes, metaphors, stance, and delivery to their owners; defines addressee entries as participant plus actual address form; and limits visible-boundary sources to explicit privacy, confidentiality, consent, safety, content-review, or visible-disclosure constraints. Final prompt sizes are content `2030`, preference `955`, full repair `2178`, dialog `1355`, hard repair `1010`, and semantic fidelity `1744`. Focused positive-prompt tests passed, the exact-consumer gate before the final verifier/repair clarifications passed `83` with `8` live deselections, and the directly affected surface/dialog batch before those clarifications passed `95`. All three final-prompt captured-room repetitions and all three captured-accomplice repetitions scored `2` in full context. Both explicit same-proposition negative controls were rejected with quoted hard errors. Detailed corrections and trace paths are in `test_artifacts/llm_reviews/cognition_core_v2_transition_coherence_after.md`. |
 | Progress | Deterministic tests prove the first-pass surface is returned unchanged, full repair returns and propagates its replacement surface, `persona_supervisor2` stores the dialog-accepted surface in both surface state views, and the recorder receives accepted dialog plus semantic content/intent only; delivery and rejected candidates are absent. |
-| Parent code review | Findings, severity, file/line evidence, remediation, reruns, residual risk, and verdict |
-| Lifecycle | User authorized parent-only execution at 2026-07-25T14:18:02Z; Stage 1 signed 2026-07-25T14:23:53Z; Stage 2 signed 2026-07-25T14:39:33Z; Stage 3 signed 2026-07-25T14:58:05Z; the user approved the Stage 4 scope amendment and unrelated-baseline disposition at 2026-07-25T23:29:23Z; Stage 4 and later stages remain pending. |
+| Stage 5 final gates | Final directly affected deterministic rerun: `95 passed`. Final amended exact-consumer rerun: `83 passed, 8 deselected`. The progress selector passed after a test-only dataclass trace-serialization correction; its dialog scored `2`, its recorder input contained the accepted plan/intent/dialog only, and its minor `道德压力` over-inference was recorded separately from transition coherence. Every required raw trace and contextual score is recorded in `test_artifacts/llm_reviews/cognition_core_v2_transition_coherence_after.md`. |
+| Parent code review | Completed from a fresh-review posture across all `62` changed tracked paths. One high finding (silent truncation of semantic personality judgment) was replaced with exact bounded failure. Medium findings covering optional accepted-surface access and a dialog prompt claiming unavailable context were corrected with direct validated access and truthful field descriptions. Low findings covering string coercion, fake-stage routing, registry classification, stale verifier-budget documentation, and model-visible negative fixture wording were corrected. Prompt review confirmed positive generative goals for content, preference, full repair, dialog, and hard repair; negative language remains only in exact contract diagnostics, regression assertions, explicit negative fixtures, and the semantic verifier's bounded failure taxonomy. Reruns: focused cleanup `68 passed`; changed Python compile `57`; broad non-live `3,459 passed, 2 skipped, 838 deselected`. Residual low risks are the deferred terminal-visual sibling's initial-surface timing, progress-recorder emotional over-inference observed in one live sample, and local-model variance that can still phrase generated requirements negatively. Verdict: pass; no unresolved critical/high finding. |
+| Lifecycle | User authorized parent-only execution at 2026-07-25T14:18:02Z; Stage 1 signed 2026-07-25T14:23:53Z; Stage 2 signed 2026-07-25T14:39:33Z; Stage 3 signed 2026-07-25T14:58:05Z; the user approved the Stage 4 scope amendment and unrelated-baseline disposition at 2026-07-25T23:29:23Z; Stage 4 signed 2026-07-25T23:51:32Z; Stage 5 signed 2026-07-26T02:11:08Z; Stage 6 signed 2026-07-26T03:13:04Z; the user accepted the final quality evidence and authorized lifecycle closure at 2026-07-26T04:46:36Z; the plan was marked completed and archived at the same timestamp. |

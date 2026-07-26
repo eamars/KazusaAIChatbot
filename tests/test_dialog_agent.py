@@ -182,11 +182,12 @@ def test_dialog_generator_repairs_unresolved_context_once() -> None:
     assert "text_surface_output_v2" in repair_prompt
     assert "repair_context" in repair_prompt
     assert "current_visible_percepts" not in repair_prompt
-    assert "询问" in repair_prompt
-    assert "没有 executed" in repair_prompt
-    assert "不声称已经完成" in repair_prompt
+    assert "executed 表达其有界的已完成效果" in repair_prompt
+    assert "failed 与 unavailable 表达当前限制和可行下一步" in (
+        repair_prompt
+    )
     assert "runtime_capability_limits" in repair_prompt
-    assert "不可用" in repair_prompt
+    assert "可信的能力边界、等待状态和下一步条件" in repair_prompt
 
 
 def test_dialog_prompts_map_pending_results_to_queue_only_truth() -> None:
@@ -203,8 +204,17 @@ def test_dialog_prompts_map_pending_results_to_queue_only_truth() -> None:
         assert "已记录" in prompt
         assert "已排队" in prompt
         assert "等待" in prompt
-        assert "立即执行" in prompt
-        assert "立即反馈" in prompt
+
+    assert "立即执行" in dialog_module._V2_DIALOG_SURFACE_INTEGRITY_PROMPT
+    assert "立即反馈" in dialog_module._V2_DIALOG_SURFACE_INTEGRITY_PROMPT
+    for prompt in (
+        dialog_module._V2_DIALOG_GENERATOR_PROMPT,
+        dialog_module._V2_DIALOG_HARD_FAILURE_REPAIR_PROMPT,
+    ):
+        assert "executed 表达其有界的已完成效果" in prompt
+        assert "failed 与 unavailable 表达当前限制和可行下一步" in (
+            prompt
+        )
 
 
 @pytest.mark.asyncio

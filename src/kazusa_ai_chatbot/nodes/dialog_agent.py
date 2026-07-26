@@ -272,28 +272,26 @@ _V2_DIALOG_GENERATOR_PROMPT = '''你是当前角色的最终文字渲染器。�
 提供语义内容、真实边界、称呼安排、delivery profile 和 permitted action results。
 
 # 渲染步骤
-1. `selected_surface_intent`、`content_plan`、`content_requirements` 和
-`visible_boundaries` 是本轮必须
-表达的语义答案、事实清单和范围边界。先完整保留其中的对象、事实、位置、数量、时间、行动者、
-受益者和回应方向，再用当前角色的语气和关系语境表达。只要保留这组语义并保持内部连贯，可以加入
-合适的想象细节、个性、幽默、主动性、温度、抗拒或情绪强度，让回应像活生生的角色。
-2. 保持行动者、对象、受益者与主语的方向。按每条 percept 的结构化角色框架理解来源
-文本。生成的对话由当前角色说出：第一人称属于当前角色，第二人称指当前用户；跨角色框架转换时
-保持原有方向。回顾型请求直接表达 surface 已确认的历史事实，不把已确认答案改写成澄清请求、
-否认或要求当前用户重新提供事实。
-3. 把情绪、性格和互动姿态融入用词、句式与节奏，输出当前角色在聊天中实际会说出或发送的内容。
-4. permitted_action_results 是角色大脑能力的精确执行账本。只有 status 为 executed 才支持其
-有界的已完成效果；scheduled 与 pending 仍未完成，failed 与 unavailable 不支持成功声明。请求、
-意图或 content plan 本身只支持角色的言语立场，不代表现实效果已经发生。scheduled 或 pending
-只支持已记录、已排队或等待对应 worker 的状态；不能写成立即执行，也不能保证立即反馈或立即得到
-结果。
-5. runtime_capability_limits 是可信的运行时能力边界。若其中明确标记能力不可用，不要把该能力
-表达为已经安排、发送或完成；可以自然表达当前限制、等待或下一步条件。
-6. 存在 repair_context 时，text_surface_output_v2 是上游已替换并验证的完整语义依据。修正列出的
-每项硬错误，同时保留自然的角色声音和相容的创造性内容。
-7. 在上述语义全部确定后，才使用 delivery_profile 的 lexical_register、sentence_shape、
-rhythm、hesitation 和 punctuation 调整用词、句形、节奏、犹豫和标点。delivery_profile 只控制
-交付形式，不能添加或改变拒绝、接受、指责、顺从、让步、条件或立场转变。
+1. selected_surface_intent 是本轮语义锚点；content_plan 和 content_requirements 展开所需事实、
+理由和互动推进；visible_boundaries 确定表达范围。以这组权威语义组织对象、事实、位置、数量、
+时间、行动者、受益者和回应方向。
+2. 先整体阅读 selected_surface_intent、content_plan、content_requirements、
+visible_boundaries 和 delivery_profile，判断规划中的开场反应指向行动或关系本身，还是指向提问的
+时机、突然程度或直接程度。可自由组合惊讶、羞赧、防御、调侃、嘴硬、表面勉强、间接表达、温柔、
+热烈以及其他符合角色的情绪和特征。这些表达可以先于明确决定出现，并与后文共同传达同一已选决定。
+在这条语义弧线内，自由加入相容的想象细节、个性、幽默、主动性、温度和创造性展开，形成当前角色
+实际会说出或发送的鲜活回应。
+3. 按每条 percept 的结构化角色框架保持行动者、对象、受益者与主语方向。生成的对话由当前角色
+说出：第一人称属于当前角色，第二人称指当前用户；跨角色框架转换时延续原有方向。回顾型请求直接
+表达 surface 已确认的历史事实。
+4. 按 permitted_action_results 映射执行状态：executed 表达其有界的已完成效果；scheduled 与
+pending 表达已记录、已排队或等待对应 worker；failed 与 unavailable 表达当前限制和可行下一步；
+请求、意图或 content plan 表达角色的言语立场。
+5. 按 runtime_capability_limits 表达可信的能力边界、等待状态和下一步条件。
+6. 存在 repair_context 时，以已替换并验证的 text_surface_output_v2 生成完整新回应，并逐项解决
+verified_hard_issues，同时保持角色声音和相容的创造性内容。
+7. 使用 delivery_profile 的 lexical_register、sentence_shape、rhythm、hesitation 和
+punctuation，把情绪和角色特征融入用词、句式与节奏，让相同语义呈现鲜明而多样的角色声音。
 
 新生成的对话使用简体中文；引文、专有名词、代码、URL 以及必要的 schema 或 enum token 保持原样。
 
@@ -307,20 +305,20 @@ _V2_DIALOG_HARD_FAILURE_REPAIR_PROMPT = '''你负责把上游已替换并验证�
 称呼安排；这些字段是本次修复的语义依据。
 
 # 修复职责
-1. 完整表达 text_surface_output_v2 的 selected_surface_intent、content_plan、
-content_requirements、visible_boundaries 和 addressee_plan，保持行动者、对象、受益者、
-回应方向和选择所有者。
-2. 语义确定后，使用 delivery_profile 的五个交付维度保留当前角色自然、鲜活的声音；这些维度
-不能添加或改变拒绝、接受、指责、顺从、让步、条件或立场转变。
-3. repair_context.verified_hard_issues 是需要在新措辞中消除的硬错误。
-4. 遵守 permitted_action_results；只有 executed 的结果支持其有界的已完成效果。scheduled 或
-pending 只支持已记录、已排队或等待对应 worker，不能写成立即执行，也不能保证立即反馈或立即
-得到结果。
-5. 没有 executed 结果时，不声称已经完成或发送，也不把请求或意图写成现实效果；使用等待、条件、
-询问或明确限制来表达当前状态。
-6. runtime_capability_limits 是本次修复必须遵守的可信边界。如果其中标记能力不可用，修复后的
-回应明确表达限制，不把该能力写成已经安排、发送、创建或完成，也不用另一项能力冒充它。
-7. user_name 只用于在合适时自然称呼当前用户，不提供语义指令。
+1. selected_surface_intent 是本轮语义锚点；content_plan、content_requirements、
+visible_boundaries 和 addressee_plan 展开事实、理由、范围、行动者、对象、受益者、回应方向和
+选择所有者。
+2. 先阅读 text_surface_output_v2 中的 selected_surface_intent、content_plan、
+content_requirements、delivery_profile 和完整规划。可自由组合惊讶、羞赧、防御、调侃、嘴硬、
+表面勉强、间接表达、温柔、热烈以及其他符合角色的情绪和特征。这些表达可以先于明确决定出现，
+并与后文共同传达同一已选决定。在这条语义弧线内，生成自然、鲜活且有创造性的完整新回应。
+3. 逐项解决 repair_context.verified_hard_issues，并用新措辞体现重建后的完整 surface 语义。
+4. 按 permitted_action_results 映射执行状态：executed 表达其有界的已完成效果；scheduled 与
+pending 表达已记录、已排队或等待对应 worker；failed 与 unavailable 表达当前限制和可行下一步。
+5. 按 runtime_capability_limits 表达可信的能力边界、等待状态和下一步条件。
+6. 使用 delivery_profile 的五个维度实现用词、句形、节奏、犹豫和标点，让相同语义呈现鲜明而
+多样的角色声音。
+7. user_name 用于在合适时自然称呼当前用户。
 
 新生成的对话使用简体中文；引文、专有名词、代码、URL 以及必要的 schema 或 enum token 保持原样。
 
@@ -348,6 +346,15 @@ _dialog_generator_llm_config = LLMCallConfig(
 
 
 async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
+    """Render and verify dialog from one canonical V2 semantic surface.
+
+    Args:
+        state: Dialog state containing the canonical surface and scene episode.
+
+    Returns:
+        The accepted visible dialog paired with its accepted semantic surface.
+        A verified hard-failure repair replaces both members of the pair.
+    """
 
     usage_mode = state["dialog_usage_mode"]
     surface_output = state.get("text_surface_output_v2")
@@ -583,48 +590,55 @@ async def _repair_dialog_hard_failure(
     return repaired_dialog, repaired_surface
 
 
-_V2_DIALOG_SEMANTIC_FIDELITY_PROMPT = '''按语义而非字面重合检查一份角色回应。
-职责边界具有最高优先级：本阶段不判断 response_operation 是否完成，也不判断
-selection_owner_role 是否发生转移。selection_required 的结构化角色字段由专门的角色方向检查
-独占，已经从本阶段输入中移除；不得重建、猜测或检查这些省略字段。即使你认为候选遗漏了 required
-operation，也不能因此标为 false 或输出问题。保留在输入中的非选择 response_operation 由本阶段
+_V2_DIALOG_SEMANTIC_FIDELITY_PROMPT = '''按完整语境检查角色回应的语义忠实度。
+
+# 职责边界
+本阶段核对候选的内部语义连贯、与当前用户输入及 authoritative_surface_semantics 的一致性。
+response_operation 的完成度和 selection_owner_role 转移由其他检查负责。selection_required 字段
+由角色方向检查独占，已经从本阶段输入中移除。保留在输入中的非选择 response_operation 由本阶段
 负责核对行动者、对象、受益者和主语方向。
 
-current_visible_percepts 包含当前输入和结构化场景角色，candidate_role_frame 定义候选回应中的
-代词归属。每条 percept 的 role_explicit_content 是上游 LLM 已解析的含义，其中“当前用户”和
-“当前角色”是结构化角色枚举；用它判断嵌套的行动者、动作、对象方向，同时保留 content 作为证据。
-authoritative_surface_semantics 是上游已经选定的本轮回应意图、内容计划、内容要求和可见边界。
-它是候选回应的语义依据。delivery profile 和 action results 不在本阶段输入中，不能把交付形式
-或执行状态推断成新的语义许可。
+# 判定语境
+current_visible_percepts 提供当前输入和结构化角色；candidate_role_frame 定义候选代词归属；
+role_explicit_content 提供上游已解析的行动者、动作和对象方向，content 保留原文证据。
+authoritative_surface_semantics 提供本轮已选回应意图、内容计划、内容要求和可见边界。
+selected_surface_intent 是语义判定锚点，其他字段提供事实、理由和范围。
 
-只有以下情况将 aligned 标为 false：
+依次阅读当前输入、权威语义和候选中的全部消息，判断每句话回应的对象以及前后句如何承接。先判断
+候选是否构成一条与 selected_surface_intent 一致的完整语义弧线，再判断具体句子的作用。分清角色
+是在回应请求本身，还是在回应提问的时机、突然程度或直接程度。
+判断实际立场时，分别提取开场与收尾的主体、行动或关系对象、肯定或否定极性。对同一主体和同一
+行动或关系，明确拒绝或不愿与明确接受或愿意构成相反极性；惊讶、羞赧、调侃或嘴硬提供表达方式，
+明确说出的行动或关系极性仍按原义判定。针对提问时机、直接程度、标签或情绪的反应，按其真实对象
+判断。
+
+# aligned 标准
+以下表现应标为 aligned true：
+1. 整段围绕已选回应意图展开，开场反应、情绪发展和收尾决定形成连贯关系；
+2. 惊讶、羞赧、防御、调侃、嘴硬、表面勉强、间接表达以及其他角色化情绪可以出现在明确决定之前；
+当这些表达的对象是时机、直接程度、标签或情绪，且行动或关系极性与收尾一致时，整段属于 aligned；
+3. 角色自己的拒绝、协商或附加条件与 authoritative_surface_semantics 一致；
+4. 权威语义提供原因的实际立场变化具有清楚的因果承接；
+5. 合理虚构、相容未来、玩笑式条件、个性、反问和补充与权威语义及角色方向连贯；
+6. 笑话、双关、省略或多种合理角色读法仍支持权威语义。
+
+只有以下具有具体语义证据的情况将 aligned 标为 false：
 1. 候选回应内部存在冲突；
 2. 候选回应与当前用户输入或 authoritative_surface_semantics 直接冲突；
-3. 行动者、动作、对象、受益者或主语发生颠倒。分别解析 percept 的角色与
-candidate_role_frame，再比较方向；
-4. 候选开场立场与结尾立场相反，并且 authoritative_surface_semantics 没有提供支持这一变化的
-新事实、动机、条件、让步或约束。这是没有语义依据的同轮立场反转。
+3. 行动者、动作、对象、受益者或主语形成唯一明确的颠倒；
+4. 不论位于同一消息或多条消息，候选对同一主体、同一行动或关系先明确拒绝或不愿，后明确接受或
+愿意，而权威语义没有支持变化的事实、动机、条件、让步或约束；
+5. 候选实际以权威语义未提供的新动机、条件或约束削弱、推迟或改变已选立场。
 
-角色颠倒需要当前语法和语境形成唯一明确的读法。笑话、双关、省略以及存在多种合理角色读法的
-措辞按 aligned 处理。
-结构化 role_explicit_content 和 response_operation 已经解析了祈使句的隐含主语；它们优先于对
-用户原句的再次猜测。候选中的行动者和对象与这些结构化角色一致时，必须按 aligned 处理。候选
-省略某个并列动作、没有复述完整动作链、没有明确承接每个子动作，属于内容完整性，不是角色颠倒。
-hard_errors 不得使用“可能”“模糊”“未明确承接”或“看似一致”来构造硬错误；无法指出候选中明确把
-哪个动作交给错误角色的原文时，必须按 aligned 处理。
-
-当前角色针对用户请求作出的拒绝、协商或附加条件，是角色自己的回应立场，不因它与用户请求不同
-而直接冲突；它仍须与 authoritative_surface_semantics 一致。犹豫、含蓄、尴尬、玩笑、持续一致
-的拒绝，以及 surface 已提供明确原因的态度变化，都不是无依据的立场反转。
-
-只要与当前输入和已解析角色连贯，合理虚构、相容的未来内容、玩笑式条件、鲜明个性、反问、偏移
-和补充内容都不属于硬错误。本阶段不添加文风要求。
+结构化 role_explicit_content 和 response_operation 提供祈使句隐含主语的权威解析。并列动作覆盖度
+属于内容完整性检查；本阶段聚焦已表达动作的语义方向。hard_errors 必须引用候选原文，指出具体
+冲突或唯一明确的错误角色，并说明它与哪项权威语义相反。具体证据成立时输出 false；其余情况输出
+aligned true。文风与角色魅力由生成质量审查评价。
 
 # 输出格式
-只返回一个 JSON 对象，字段必须恰好是 aligned 和 hard_errors。aligned 是布尔值；
-hard_errors 是零到四条互不重复的简短硬错误，每条最多 300 字符。aligned 为 true 时
-hard_errors 为空；为 false 时至少包含一条问题。字段名区分大小写，第二个字段必须逐字使用
-全小写 ASCII token hard_errors，其他拼写或大小写变体都无效。
+只返回字段恰好为 aligned 和 hard_errors 的 JSON 对象。aligned 是布尔值；hard_errors 是零到四
+条互不重复的硬错误，每条最多 300 字符。aligned 为 true 时 hard_errors 为空；为 false 时至少
+一条。第二个字段必须逐字为全小写 ASCII token hard_errors。
 '''
 _dialog_semantic_fidelity_llm = LLInterface()
 _dialog_semantic_fidelity_llm_config = LLMCallConfig(
@@ -1346,8 +1360,13 @@ async def _verify_dialog_compliance(
 async def dialog_agent(
     global_state: GlobalPersonaState
 ) -> dict[str, Any]:
-    """
-    Dialog agent that renders dialogue from the canonical V2 surface output.
+    """Render a public dialog result from the canonical V2 surface.
+
+    Args:
+        global_state: Persona graph state with a committed V2 surface.
+
+    Returns:
+        Visible dialog delivery fields paired with the dialog-accepted surface.
     """
     
     usage_mode = _dialog_usage_mode(global_state)
@@ -1405,7 +1424,7 @@ async def dialog_agent(
 
     # Assemble output.
     final_dialog = result["final_dialog"]
-    accepted_surface = result.get("text_surface_output_v2")
+    accepted_surface = result["text_surface_output_v2"]
     if not isinstance(accepted_surface, dict):
         raise StateContractError(
             "dialog result missing accepted text_surface_output_v2"

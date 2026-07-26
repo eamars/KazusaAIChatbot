@@ -94,6 +94,7 @@ from kazusa_ai_chatbot.time_boundary import parse_storage_utc_datetime
 
 logger = logging.getLogger(__name__)
 _llm_interface = LLInterface()
+PERSONALITY_JUDGMENT_MAX_CHARS = 180
 
 _cognition_llm_config = LLMCallConfig(
     stage_name="persona_supervisor2_cognition",
@@ -180,11 +181,16 @@ def build_cognition_input_from_global_state(
     personality_judgment: dict[str, str] = {}
     for field_name in ("logic", "defense", "quirks", "taboos"):
         field_value = personality_brief[field_name]
-        if not isinstance(field_value, str) or not field_value.strip():
+        if (
+            not isinstance(field_value, str)
+            or not field_value.strip()
+            or len(field_value) > PERSONALITY_JUDGMENT_MAX_CHARS
+        ):
             raise CognitionExecutionError(
-                f"character personality {field_name} must be text"
+                f"character personality {field_name} must be non-empty text "
+                f"within {PERSONALITY_JUDGMENT_MAX_CHARS} characters"
             )
-        personality_judgment[field_name] = field_value[:180]
+        personality_judgment[field_name] = field_value
     constraints = {
         "drives": selected_character_state["drives"],
         "standards": selected_character_state["standards"],

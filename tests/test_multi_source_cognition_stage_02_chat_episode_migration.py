@@ -156,6 +156,15 @@ def test_v2_connector_preserves_episode_and_projects_current_percept() -> None:
     state = {
         "cognitive_episode": episode,
         "global_user_id": "user-1",
+        "character_profile": {
+            "name": "Test Character",
+            "personality_brief": {
+                "logic": "Keep present evidence and role ownership clear.",
+                "defense": "Express boundaries while preserving intent.",
+                "quirks": "Use occasional concise, characterful phrasing.",
+                "taboos": "Ground scene facts in available evidence.",
+            },
+        },
         "user_input": "fallback text",
         "decontextualized_input": "fallback semantic text",
         "user_multimedia_input": [],

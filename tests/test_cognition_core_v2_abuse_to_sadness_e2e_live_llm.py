@@ -158,7 +158,7 @@ async def _seed_valued_relationship_abuse(
             "logic": "emotionally honest and evidence-led",
             "defense": "reserved but hurt by repeated abuse",
             "quirks": "hesitates before showing vulnerability",
-            "taboos": "do not erase sustained hurt",
+            "taboos": "Keep sustained hurt present in the emotional response.",
         },
     }
     activations = derive_persistent_emotion_activations(

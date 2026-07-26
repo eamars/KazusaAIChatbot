@@ -219,7 +219,14 @@ def _render_interaction_style_context(context: Mapping[str, Any]) -> str:
 def _character_surface_contexts(
     state: Mapping[str, Any],
 ) -> tuple[dict[str, str], str]:
-    """Project delivery-only text context and isolated visual context."""
+    """Project delivery-only text context and isolated visual context.
+
+    Args:
+        state: Persona state containing the validated character profile.
+
+    Returns:
+        The bounded text-expression context and visual-only profile context.
+    """
 
     profile = state.get("character_profile")
     if not isinstance(profile, Mapping):
@@ -279,9 +286,11 @@ def _character_surface_contexts(
 def _profile_text(value: object, maximum: int) -> str:
     """Render one required profile value into a bounded semantic fragment."""
 
-    text = str(value).strip()
+    if not isinstance(value, str):
+        raise ValueError("character profile value must be text")
+    text = value.strip()
     if not text:
-        raise ValueError("character voice value must be non-empty")
+        raise ValueError("character profile value must be non-empty")
     return text[:maximum]
 
 

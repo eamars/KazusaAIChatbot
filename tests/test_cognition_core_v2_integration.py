@@ -53,11 +53,30 @@ class _ScriptedLLM:
         *,
         config: object,
     ) -> SimpleNamespace:
-        del config
+        stage_name = getattr(config, "stage_name", "")
         system = str(getattr(messages[0], "content", ""))
         human = str(getattr(messages[-1], "content", "{}"))
         payload = json.loads(human)
-        if "selected_evidence_handles" in system:
+        if stage_name == "v2_content":
+            result = {
+                "content_plan": "bounded content-plan guidance",
+                "content_requirements": ["preserve actor direction"],
+                "delivery_profile": {
+                    "lexical_register": "plain",
+                    "sentence_shape": "concise",
+                    "rhythm": "steady",
+                    "hesitation": "light",
+                    "punctuation": "restrained",
+                },
+            }
+        elif stage_name == "v2_preference":
+            result = {
+                "visible_boundaries": ["bounded visible boundary"],
+                "addressee_plan": ["bounded addressee plan"],
+            }
+        elif stage_name == "v2_visual":
+            result = {"visual_directives": "bounded visual directives"}
+        elif "selected_evidence_handles" in system:
             question = payload["question"]
             roles = question["permitted_role_handles"]
             result = {
@@ -95,25 +114,6 @@ class _ScriptedLLM:
                 "resolver_pending_resolution": None,
                 "resolver_goal_progress": None,
             }
-        elif "content_plan" in system:
-            result = {
-                "content_plan": "bounded content-plan guidance",
-                "content_requirements": ["preserve actor direction"],
-                "delivery_profile": {
-                    "lexical_register": "plain",
-                    "sentence_shape": "concise",
-                    "rhythm": "steady",
-                    "hesitation": "light",
-                    "punctuation": "restrained",
-                },
-            }
-        elif "visible_boundaries" in system:
-            result = {
-                "visible_boundaries": ["bounded visible boundary"],
-                "addressee_plan": ["bounded addressee plan"],
-            }
-        elif "visual_directives" in system:
-            result = {"visual_directives": "bounded visual directives"}
         else:
             raise AssertionError("unexpected V2 model stage")
         self.calls.append(system)

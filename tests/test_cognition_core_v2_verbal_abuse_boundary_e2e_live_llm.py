@@ -160,7 +160,7 @@ async def _seed_anger_event_async(
             "logic": "evidence-led and boundary-aware",
             "defense": "firm when directly demeaned",
             "quirks": "uses restrained directness under pressure",
-            "taboos": "do not normalize sustained verbal abuse",
+            "taboos": "Treat sustained verbal abuse as a boundary violation.",
         },
     }
     activations = derive_persistent_emotion_activations(

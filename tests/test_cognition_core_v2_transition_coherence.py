@@ -14,6 +14,7 @@ import pytest
 import kazusa_ai_chatbot.cognition_core_v2 as cognition_core_v2
 from kazusa_ai_chatbot.cognition_core_v2 import contracts
 from kazusa_ai_chatbot.cognition_core_v2 import surface
+from kazusa_ai_chatbot.cognition_core_v2 import surface_stages
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     build_character_production_state,
 )
@@ -47,21 +48,21 @@ class _UnifiedSurfaceLLM:
         )
         surface_payload = human_payload["surface"]
         self.calls.append((system_prompt, surface_payload))
-        if "delivery_profile" in system_prompt:
-            result = {
-                "content_plan": "Accept the shared-participation framing.",
-                "content_requirements": [
-                    "Keep one accepting stance throughout the response.",
-                ],
-                "delivery_profile": _delivery_profile(),
-            }
-        elif (
+        if (
             "visible_boundaries" in system_prompt
             and "addressee_plan" in system_prompt
         ):
             result = {
                 "visible_boundaries": [],
                 "addressee_plan": ["Address the current user."],
+            }
+        elif "delivery_profile" in system_prompt:
+            result = {
+                "content_plan": "Accept the shared-participation framing.",
+                "content_requirements": [
+                    "Keep one accepting stance throughout the response.",
+                ],
+                "delivery_profile": _delivery_profile(),
             }
         else:
             raise AssertionError("unexpected V2 surface stage")
@@ -120,7 +121,7 @@ def _surface_output() -> dict[str, object]:
 
     return {
         "schema_version": "text_surface_output.v2",
-        "content_plan": "Confirm shared participation without denying it.",
+        "content_plan": "Confirm shared participation clearly and consistently.",
         "content_requirements": [
             "Keep one accepting stance throughout the response.",
         ],
@@ -246,6 +247,149 @@ async def test_text_surface_planning_uses_two_atomic_owner_calls() -> None:
     )
 
 
+def test_surface_prompts_use_contextual_stance_and_boundary_scope() -> None:
+    """Judge the whole stance while preserving characterful delivery."""
+
+    for prompt in (
+        surface_stages.CONTENT_PLAN_SYSTEM_PROMPT,
+        surface_stages.DIALOG_COMPLIANCE_REPAIR_SYSTEM_PROMPT,
+    ):
+        compact_prompt = "".join(prompt.split())
+        assert "selectedintention及intention.reason为语义锚点" in (
+            compact_prompt
+        )
+        assert "分清角色是在回应请求本身，还是在回应提问的时机、突然程度或直接程度" in (
+            compact_prompt
+        )
+        assert "可自由组合惊讶、害羞、防御、调侃、嘴硬、迟疑、温柔、热烈或其他符合角色的情绪与特征" in (
+            compact_prompt
+        )
+        assert "表达同一已选决定的角色化弧线" in compact_prompt
+        assert "content_requirements使用正向目标句式" in compact_prompt
+
+    preference_prompt = "".join(
+        surface_stages.PREFERENCE_SYSTEM_PROMPT.split()
+    )
+    assert "每一条visible_boundaries都对应权威语境中明确生效的表达限制或细节范围" in (
+        preference_prompt
+    )
+    assert "每一条addressee_plan都对应真实存在的称呼安排" in (
+        preference_prompt
+    )
+    for prompt in (
+        surface_stages.PREFERENCE_SYSTEM_PROMPT,
+        surface_stages.DIALOG_COMPLIANCE_REPAIR_SYSTEM_PROMPT,
+    ):
+        compact_prompt = "".join(prompt.split())
+        assert "普通场景事实、时间、情绪、关系状态和已选回应立场分别归入" in (
+            compact_prompt
+        )
+        assert "拒绝、接受、指责、协商、条件和立场变化归入content_plan或content_requirements" in (
+            compact_prompt
+        )
+
+    surface_repair_prompt = "".join(
+        surface_stages.DIALOG_COMPLIANCE_REPAIR_SYSTEM_PROMPT.split()
+    )
+    assert "verified_hard_issues中的内容冲突对应content_plan和content_requirements中的正向修复目标" in (
+        surface_repair_prompt
+    )
+    assert "visible_boundaries和addressee_plan仍各自取自权威语境中的具体来源" in (
+        surface_repair_prompt
+    )
+    assert "没有具体来源时，这两个字段分别返回空列表" in (
+        surface_repair_prompt
+    )
+    assert "addressee_plan的条目格式为“现有参与者+本轮实际使用的称呼形式”" in (
+        surface_repair_prompt
+    )
+    assert "亲密感、语气词、词汇、句式和节奏由delivery_profile表达" in (
+        surface_repair_prompt
+    )
+    assert "visible_boundaries的具体来源类型是权威语境明示的隐私、保密、同意、安全、内容审查或可见披露限制" in (
+        surface_repair_prompt
+    )
+    assert "主题、比喻和已选立场进入content_plan或content_requirements" in (
+        surface_repair_prompt
+    )
+
+    for prompt in (
+        dialog_agent._V2_DIALOG_GENERATOR_PROMPT,
+        dialog_agent._V2_DIALOG_HARD_FAILURE_REPAIR_PROMPT,
+    ):
+        compact_prompt = "".join(prompt.split())
+        assert "selected_surface_intent是本轮语义锚点" in (
+            compact_prompt
+        )
+        assert "可自由组合惊讶、羞赧、防御、调侃、嘴硬、表面勉强、间接表达、温柔、热烈以及其他符合角色的情绪和特征" in (
+            compact_prompt
+        )
+        assert "与后文共同传达同一已选决定" in compact_prompt
+        assert "让相同语义呈现鲜明而多样的角色声音" in (
+            compact_prompt
+        )
+
+    dialog_prompt = "".join(
+        dialog_agent._V2_DIALOG_GENERATOR_PROMPT.split()
+    )
+    assert (
+        "先整体阅读selected_surface_intent、content_plan、"
+        "content_requirements、visible_boundaries和delivery_profile"
+        in dialog_prompt
+    )
+    assert "判断规划中的开场反应指向行动或关系本身" in dialog_prompt
+    repair_prompt = "".join(
+        dialog_agent._V2_DIALOG_HARD_FAILURE_REPAIR_PROMPT.split()
+    )
+    assert "先阅读text_surface_output_v2中的selected_surface_intent" in (
+        repair_prompt
+    )
+
+    semantic_prompt = "".join(
+        dialog_agent._V2_DIALOG_SEMANTIC_FIDELITY_PROMPT.split()
+    )
+    assert "依次阅读当前输入、权威语义和候选中的全部消息" in (
+        semantic_prompt
+    )
+    assert "判断每句话回应的对象以及前后句如何承接" in semantic_prompt
+    assert "先判断候选是否构成一条与selected_surface_intent一致的完整语义弧线" in (
+        semantic_prompt
+    )
+    assert "分别提取开场与收尾的主体、行动或关系对象、肯定或否定极性" in (
+        semantic_prompt
+    )
+    assert "针对提问时机、直接程度、标签或情绪的反应，按其真实对象判断" in (
+        semantic_prompt
+    )
+    assert "惊讶、羞赧、防御、调侃、嘴硬、表面勉强、间接表达以及其他角色化情绪" in (
+        semantic_prompt
+    )
+    assert "当这些表达的对象是时机、直接程度、标签或情绪" in (
+        semantic_prompt
+    )
+    assert "且行动或关系极性与收尾一致时，整段属于aligned" in semantic_prompt
+    assert "不论位于同一消息或多条消息" in semantic_prompt
+    assert "对同一主体、同一行动或关系先明确拒绝或不愿，后明确接受或愿意" in (
+        semantic_prompt
+    )
+
+    generation_prompts = (
+        surface_stages.CONTENT_PLAN_SYSTEM_PROMPT,
+        surface_stages.DIALOG_COMPLIANCE_REPAIR_SYSTEM_PROMPT,
+        dialog_agent._V2_DIALOG_GENERATOR_PROMPT,
+        dialog_agent._V2_DIALOG_HARD_FAILURE_REPAIR_PROMPT,
+    )
+    for prompt in generation_prompts:
+        compact_prompt = "".join(prompt.split())
+        for overbroad_constraint in (
+            "只能表现这个决定",
+            "不能添加或改变拒绝",
+            "不得新增权威语义中不存在的拒绝",
+            "用户提出、追问、重复或坚持请求本身不是改变已选决定的新理由",
+        ):
+            assert overbroad_constraint not in compact_prompt
+
+
 def test_surface_repair_uses_canonical_input_without_rejected_surface() -> None:
     """The repair API cannot echo rejected surface semantics or delivery."""
 
@@ -309,7 +453,7 @@ async def test_semantic_fidelity_payload_uses_only_surface_semantics(
     )
     assert payload["authoritative_surface_semantics"] == {
         "selected_surface_intent": "confirm shared participation",
-        "content_plan": "Confirm shared participation without denying it.",
+        "content_plan": "Confirm shared participation clearly and consistently.",
         "content_requirements": [
             "Keep one accepting stance throughout the response.",
         ],

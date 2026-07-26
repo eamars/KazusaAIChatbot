@@ -729,7 +729,7 @@ This plan is complete when:
     and
     `test_artifacts/llm_traces/coding_agent_full_workflow_integration_live_llm__gate_01_read_only_question_turn_1.json`.
   - Agent review artifact:
-    `development_plans/active/short_term/coding_agent_full_workflow_hardening_plan_2_llm_gate_reviews.md`.
+    `development_plans/archive/completed/short_term/coding_agent_full_workflow_hardening_plan_2_llm_gate_reviews.md`.
 - Stage 5 Gate 02 RCA evidence:
   - `venv\Scripts\python -m pytest -m live_llm tests\test_coding_agent_full_workflow_integration_live_llm.py::test_live_gate_02_source_free_proposal_with_revision_followups -q -s --tb=short`: failed on turn 1 because the worker result was failed.
   - L2d selected `accepted_coding_task_request` with `decision=start`; the
@@ -773,7 +773,7 @@ This plan is complete when:
     and
     `test_artifacts/llm_traces/coding_agent_full_workflow_integration_live_llm__gate_02_source_free_revision_turn_3__20260709T013928049704Z.json`.
   - Gate 02 review appended to
-    `development_plans/active/short_term/coding_agent_full_workflow_hardening_plan_2_llm_gate_reviews.md`.
+    `development_plans/archive/completed/short_term/coding_agent_full_workflow_hardening_plan_2_llm_gate_reviews.md`.
   - Gate 03 command:
     `venv\Scripts\python -m pytest -m live_llm tests\test_coding_agent_full_workflow_integration_live_llm.py::test_live_gate_03_existing_source_proposal_with_runtime_only_followups -q -s --tb=short`:
     passed in 363.79 seconds.
@@ -836,7 +836,7 @@ This plan is complete when:
     rejected late cancellation as terminal, and returned final status
     `completed`.
   - Gate 05 review appended to
-    `development_plans/active/short_term/coding_agent_full_workflow_hardening_plan_2_llm_gate_reviews.md`.
+    `development_plans/archive/completed/short_term/coding_agent_full_workflow_hardening_plan_2_llm_gate_reviews.md`.
 - Stage 6 documentation evidence:
   - Updated `src/kazusa_ai_chatbot/background_work/README.md` with
     `revise_proposal`, `summarize`, attempt-history projection, allowed next

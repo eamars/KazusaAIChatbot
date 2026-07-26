@@ -28,10 +28,9 @@ class _PromptCaptureLLM:
         *,
         config: object,
     ) -> SimpleNamespace:
-        del config
-        system = str(getattr(messages[0], "content", ""))
         self.prompts.append(str(getattr(messages[-1], "content", "")))
-        if "content_plan" in system and "content_requirements" in system:
+        stage_name = getattr(config, "stage_name", "")
+        if stage_name == "history_content":
             result = {
                 "content_plan": "bounded",
                 "content_requirements": ["preserve the current addressee"],
@@ -43,7 +42,7 @@ class _PromptCaptureLLM:
                     "punctuation": "restrained",
                 },
             }
-        elif "visible_boundaries" in system and "addressee_plan" in system:
+        elif stage_name == "history_preference":
             result = {
                 "visible_boundaries": ["bounded"],
                 "addressee_plan": ["bounded"],

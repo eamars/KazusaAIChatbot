@@ -512,7 +512,7 @@ async def call_action_subgraph(state: GlobalPersonaState) -> dict:
     )
     result = await dialog_agent(surface_state)
     final_dialog = result["final_dialog"]
-    accepted_surface = result.get("text_surface_output_v2")
+    accepted_surface = result["text_surface_output_v2"]
     if not isinstance(accepted_surface, dict):
         raise StateContractError(
             "dialog result missing accepted text_surface_output_v2"

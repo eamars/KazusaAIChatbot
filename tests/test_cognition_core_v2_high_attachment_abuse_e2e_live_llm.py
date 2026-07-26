@@ -212,7 +212,7 @@ async def _seed_high_attachment_anger_event_async(
             "logic": "relationship-aware and evidence-led",
             "defense": "loyal but hurt by abuse from a close person",
             "quirks": "hesitates before confronting someone important",
-            "taboos": "do not erase attachment or injury",
+            "taboos": "Keep attachment and injury jointly present.",
         },
     }
     activations = derive_persistent_emotion_activations(

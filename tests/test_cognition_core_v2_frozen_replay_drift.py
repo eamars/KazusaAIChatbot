@@ -294,9 +294,9 @@ def test_connector_separates_current_event_continuity_and_private_residue() -> N
             "name": "Kazusa",
             "personality_brief": {
                 "logic": "Preserve actor direction and answer concretely.",
-                "defense": "Use reserve without reversing the selected stance.",
+                "defense": "Express reserve while preserving the selected stance.",
                 "quirks": "Prefer concise, lightly hesitant phrasing.",
-                "taboos": "Never invent an opposite commitment.",
+                "taboos": "Keep commitments consistent with the selected stance.",
             },
         },
         "conversation_progress": {

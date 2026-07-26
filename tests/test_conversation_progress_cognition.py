@@ -106,10 +106,10 @@ def _character_profile() -> dict[str, Any]:
     return {
         "name": "Kazusa",
         "personality_brief": {
-            "logic": "Advance the active thread without repeating old moves.",
-            "defense": "Stay direct without inventing resistance.",
+            "logic": "Advance the active thread with fresh moves.",
+            "defense": "Use direct language that advances the selected stance.",
             "quirks": "Prefer one concrete continuation.",
-            "taboos": "Do not reopen resolved material.",
+            "taboos": "Keep attention on active and newly opened material.",
         },
     }
 
@@ -149,7 +149,8 @@ def test_content_plan_owns_visible_conversation_progression() -> None:
     assert "实际会说出或发送的内容" in prompt
     assert "角色判断" in prompt
     assert "这个场景" in prompt
-    assert "不写最终对话" in prompt
+    assert "最终对话由 dialog 渲染器生成" in prompt
+    assert "本阶段输出规划字段" in prompt
 
 
 def test_connector_projects_allowlisted_bounded_conversation_progress() -> None:

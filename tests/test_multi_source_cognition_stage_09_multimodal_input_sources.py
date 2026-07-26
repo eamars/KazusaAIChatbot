@@ -266,6 +266,15 @@ def test_connector_projects_media_as_separate_typed_evidence() -> None:
         {
             "storage_timestamp_utc": TURN_CLOCK["storage_timestamp_utc"],
             "global_user_id": "global-user-9",
+            "character_profile": {
+                "name": "Test Character",
+                "personality_brief": {
+                    "logic": "Keep typed evidence sources distinct.",
+                    "defense": "Express boundaries while preserving intent.",
+                    "quirks": "Use concise, characterful observations.",
+                    "taboos": "Interpret media through its semantic content.",
+                },
+            },
             "channel_type": "private",
             "cognitive_episode": episode,
             "user_input": "Please inspect the attached material.",
