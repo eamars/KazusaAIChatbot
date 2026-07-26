@@ -19,6 +19,13 @@ from kazusa_ai_chatbot.utils import parse_llm_json_output
 SURFACE_STAGE_ATTEMPT_LIMIT = 2
 SURFACE_STAGE_REPAIR_OUTPUT_CAP = 8000
 SURFACE_STAGE_REPAIR_PROMPT_CAP = 24000
+DELIVERY_PROFILE_FIELDS = (
+    "lexical_register",
+    "sentence_shape",
+    "rhythm",
+    "hesitation",
+    "punctuation",
+)
 
 _SURFACE_REPAIR_PROMPT = '''上一份 surface 阶段输出没有通过当前节点的 contract 校验。
 请在完全相同的 surface 语境和语义判断下，生成一份完整替代对象。保留原始的角色判断、
@@ -28,42 +35,13 @@ schema key、ID、URL、代码、命令、enum token 和用户原文按原样保
 JSON 对象，不添加解释、markdown 或额外字段。'''
 
 
-STYLE_SYSTEM_PROMPT = '''根据 expression policy、semantic affect、semantic relationship、
-interaction style 和 character_voice_context 选择适合当前语境的说话方式。本阶段只决定词语层次、
-句式、节奏、停顿与标点，在不改变 selected intention 和 bid 含义、也不增加内容节点的前提下，
-把角色声音、情绪和互动姿态融入用词、句式与节奏，形成适合聊天发送的表达指导。
-
-角色自己的反思和内部观察属于语境，不是当前用户的即时发言；运行元数据也不属于措辞内容。
-新生成的自由文本使用简体中文；用户引文、专有名词、代码、URL 以及 schema 或 enum token 保持
-原样。内部角色句柄或英文角色称谓仅作为结构化值或原文内容保留；中文自由文本使用配置名称、当前
-角色、当前用户或其他参与者。本阶段返回风格指导，不写最终对话。
-
-# 输出格式
-只返回一个 JSON 对象，字段必须恰好是 style_guidance，其值是一个非空字符串，最多 1000 字符。'''
-
-
-async def run_style_stage(
-    payload: Mapping[str, Any],
-    services: TextSurfaceServicesV2,
-) -> str:
-    """Run the stage-local style prompt and validate its exact field."""
-
-    return await _run_surface_stage(
-        payload=payload,
-        system_prompt=STYLE_SYSTEM_PROMPT,
-        llm=services.llm,
-        config=services.style_config,
-        stage_name="style",
-        validator=_validate_style_result,
-        safe_checkpoint="pre_state_commit",
-    )
-
-
 CONTENT_PLAN_SYSTEM_PROMPT = '''规划当前角色在这个场景中实际会说出或发送的内容，使其自然表达
 已经形成的角色判断。综合 selected intention、primary bid、supporting bid、visible episode、
 semantic affect、semantic relationship、expression policy、interaction style 和
-permitted_action_results。runtime_capability_limits 是运行时已经确认的能力边界；其中标记不可用的
-能力不能被表达为已经安排、发送或完成，但可以自然表达当前限制、等待或下一步条件。
+permitted_action_results。character_expression_context 只提供 tempo 和 linguistic_texture，
+用于句式与节奏实现，不重新决定角色立场。runtime_capability_limits 是运行时已经确认的能力边界；
+其中标记不可用的能力不能被表达为已经安排、发送或完成，但可以自然表达当前限制、等待或下一步
+条件。
 
 goal_resolution 是 cognition 对当前目标可回答性的已确认判断：answerable_now 表示可以在当前
 证据范围内直接回答；requires_required_evidence、requires_user_input 和 blocked 表示目标仍未
@@ -86,26 +64,30 @@ blocked 的可见表达停留在当前回合的真实边界，或请用户提供
 pending 或 scheduled 的正向语义是“已记录、已排队、待执行”，可在当前发言中确认请求和执行
 条件，保持后续 worker 结果开放。其他 status 不支持完成声明；请求或目标候选只支持角色在言语中的
 态度，不代表能力已经执行。
-5. 只规划角色要表达的含义和互动推进，让情绪、关系强度与动作倾向通过台词含义、语气和节奏
-呈现。
+5. 把拒绝、接受、指责、条件、让步以及改变立场的原因写入 content_plan 或
+content_requirements。delivery_profile 只描述词语层次、句式、节奏、犹豫与标点，不能新增、
+否定或改变语义立场。
 
-返回一份简洁计划，并给出一到八条语义要求，用来保护选定含义、当前真实边界、角色方向和能力
-执行事实。角色自己的反思和内部观察属于语境，不是当前用户的即时发言；运行元数据不属于对话
-内容。新生成的自由文本使用简体中文；用户引文、专有名词、代码、URL 以及 schema 或 enum token
-保持原样。内部角色句柄或英文角色称谓仅作为结构化值或原文内容保留；中文自由文本使用配置名称、
-当前角色、当前用户或其他参与者。本阶段不写最终对话。
+返回一份简洁计划、一到八条语义要求和完整 delivery_profile。语义要求保护选定含义、当前真实
+边界、角色方向和能力执行事实。角色自己的反思和内部观察属于语境，不是当前用户的即时发言；
+运行元数据不属于对话内容。新生成的自由文本使用简体中文；用户引文、专有名词、代码、URL 以及
+schema 或 enum token 保持原样。内部角色句柄或英文角色称谓仅作为结构化值或原文内容保留；
+中文自由文本使用配置名称、当前角色、当前用户或其他参与者。本阶段不写最终对话。
 
 # 输出格式
-只返回一个 JSON 对象，字段必须恰好是 content_plan 和 content_requirements。
+只返回一个 JSON 对象，字段必须恰好是 content_plan、content_requirements 和
+delivery_profile。
 content_plan 是一个非空字符串，最多 1000 字符；content_requirements 是一到八条互不重复的
-非空语义要求，每条最多 500 字符。'''
+非空语义要求，每条最多 500 字符。delivery_profile 必须恰好包含 lexical_register、
+sentence_shape、rhythm、hesitation 和 punctuation；每个值都是非空字符串，最多 200 字符，
+只描述表达实现。'''
 
 
 async def run_content_plan_stage(
     payload: Mapping[str, Any],
     services: TextSurfaceServicesV2,
-) -> tuple[str, list[str]]:
-    """Run the content prompt and return its plan and semantic requirements."""
+) -> tuple[str, list[str], dict[str, str]]:
+    """Return the atomic content, requirements, and delivery result."""
 
     return await _run_surface_stage(
         payload=payload,
@@ -157,31 +139,35 @@ async def run_preference_stage(
 DIALOG_COMPLIANCE_REPAIR_SYSTEM_PROMPT = '''你负责在最终对话未通过硬错误检查后，重新生成一份
 完整的文本 surface 语义。surface 中的 episode、intention、goal_resolution、supporting bids、
 expression policy、semantic affect、semantic relationship、interaction style、
-permitted_action_results 和 runtime_capability_limits 是本轮权威语境。
+character_expression_context、permitted_action_results 和 runtime_capability_limits 是本轮权威
+语境。
 
 surface.dialog_compliance_repair.verified_hard_issues 是已经确认的硬错误；
-rejected_surface_semantics 是产生不合格对话的旧语义，只作为待替代数据。
 
 # 修复步骤
 1. 保持 selected intention、角色判断、情绪方向、关系方向、当前事实和能力执行结果。
-2. 修正每一项 verified_hard_issues，重新生成内容计划、语义要求、可见边界和称呼安排。
+2. 修正每一项 verified_hard_issues，重新生成内容计划、语义要求、delivery profile、可见边界和
+称呼安排。
 3. 保持结构化角色中的行动者、对象、受益者、回应所有者和选择所有者。当前角色可以拒绝、协商或
 附加条件；只要没有颠倒这些结构化角色，这些角色判断仍与用户请求相容。
 4. visible_boundaries 只表达权威语境中已有的角色判断和真实约束。不得新增权威语境中不存在的
 通用安全、内容审查、亲密程度降级或通用助手礼貌边界；角色自己的拒绝、协商和条件仍按第 3 条处理。
 5. 只有 permitted_action_results 中 status 为 executed 的结果支持已完成效果；其他状态和
 runtime_capability_limits 按原义保留。
-6. 本阶段只替换 surface 语义。原有 style guidance、selected surface intent、能力结果和运行时
-边界由调用方保留。
+6. delivery_profile 只描述词语层次、句式、节奏、犹豫和标点。拒绝、接受、指责、条件、让步与
+立场变化原因必须写入 content_plan 或 content_requirements。
+7. selected surface intent、能力结果和运行时边界由调用方从权威输入重建。
 
 新生成的自由文本使用简体中文；用户引文、专有名词、代码、URL 以及 schema 或 enum token 保持
 原样。本阶段不写最终对话。
 
 # 输出格式
 只返回一个 JSON 对象，字段必须恰好是 content_plan、content_requirements、
-visible_boundaries 和 addressee_plan。content_plan 是一个非空字符串，最多 1000 字符；
-content_requirements 是一到八条互不重复的非空语义要求；visible_boundaries 和
-addressee_plan 分别是零到八条互不重复的非空字符串；每条列表文本最多 500 字符。'''
+delivery_profile、visible_boundaries 和 addressee_plan。content_plan 是一个非空字符串，
+最多 1000 字符；content_requirements 是一到八条互不重复的非空语义要求；delivery_profile
+必须恰好包含 lexical_register、sentence_shape、rhythm、hesitation 和 punctuation，每个值最多
+200 字符；visible_boundaries 和 addressee_plan 分别是零到八条互不重复的非空字符串；每条列表
+文本最多 500 字符。'''
 
 
 async def run_dialog_compliance_repair_stage(
@@ -195,7 +181,7 @@ async def run_dialog_compliance_repair_stage(
         services: Configured text-surface model and route settings.
 
     Returns:
-        A validated complete replacement for the four semantic fields.
+        A validated complete replacement for all producer-owned fields.
 
     Raises:
         CognitionExecutionError: If two provider or contract attempts fail.
@@ -215,7 +201,7 @@ async def run_dialog_compliance_repair_stage(
 
 VISUAL_SYSTEM_PROMPT = '''根据 selected intention、visible episode、projected bids、
 expression policy、semantic affect、semantic relationship、permitted action results、
-runtime_capability_limits、interaction style context 和 character_voice_context，为终端图像表面生成
+runtime_capability_limits、interaction style context 和 visual_character_context，为终端图像表面生成
 visual_directives。
 指导可以包含服务于 selected surface intent 的可见角色特征、姿势、表情、构图、环境与场景氛围。
 这些内容是私有的图像生成指导，不是发送给用户的文字、对话指导，也不是调用其他模型或处理器的
@@ -389,20 +375,15 @@ def _bounded_repair_text(value: str) -> str:
     )
 
 
-def _validate_style_result(value: object) -> str:
-    """Validate the exact style-stage object."""
-
-    if not isinstance(value, Mapping) or set(value) != {"style_guidance"}:
-        raise ValueError("style stage fields are not exact")
-    return _bounded_text(value["style_guidance"], "style guidance", 1000)
-
-
-def _validate_content_plan_result(value: object) -> tuple[str, list[str]]:
-    """Validate the exact content-plan-stage object."""
+def _validate_content_plan_result(
+    value: object,
+) -> tuple[str, list[str], dict[str, str]]:
+    """Validate the atomic content-plan and delivery object."""
 
     if not isinstance(value, Mapping) or set(value) != {
         "content_plan",
         "content_requirements",
+        "delivery_profile",
     }:
         raise ValueError("content-plan stage fields are not exact")
     content_plan = _bounded_text(value["content_plan"], "content plan", 1000)
@@ -410,7 +391,28 @@ def _validate_content_plan_result(value: object) -> tuple[str, list[str]]:
         value["content_requirements"],
         "content requirements",
     )
-    return content_plan, content_requirements
+    delivery_profile = _validate_delivery_profile_result(
+        value["delivery_profile"]
+    )
+    return content_plan, content_requirements, delivery_profile
+
+
+def _validate_delivery_profile_result(value: object) -> dict[str, str]:
+    """Validate exact delivery dimensions shared by planning and repair."""
+
+    if not isinstance(value, Mapping) or set(value) != set(
+        DELIVERY_PROFILE_FIELDS
+    ):
+        raise ValueError("delivery profile fields are not exact")
+    delivery_profile = {
+        field_name: _bounded_text(
+            value[field_name],
+            f"delivery profile {field_name}",
+            200,
+        )
+        for field_name in DELIVERY_PROFILE_FIELDS
+    }
+    return delivery_profile
 
 
 def _validate_preference_result(value: object) -> tuple[list[str], list[str]]:
@@ -443,14 +445,18 @@ def _validate_dialog_compliance_repair_result(
     if not isinstance(value, Mapping) or set(value) != {
         "content_plan",
         "content_requirements",
+        "delivery_profile",
         "visible_boundaries",
         "addressee_plan",
     }:
         raise ValueError("dialog compliance surface repair fields are not exact")
-    content_plan, content_requirements = _validate_content_plan_result({
-        "content_plan": value["content_plan"],
-        "content_requirements": value["content_requirements"],
-    })
+    content_plan, content_requirements, delivery_profile = (
+        _validate_content_plan_result({
+            "content_plan": value["content_plan"],
+            "content_requirements": value["content_requirements"],
+            "delivery_profile": value["delivery_profile"],
+        })
+    )
     visible_boundaries, addressee_plan = _validate_preference_result({
         "visible_boundaries": value["visible_boundaries"],
         "addressee_plan": value["addressee_plan"],
@@ -458,6 +464,7 @@ def _validate_dialog_compliance_repair_result(
     replacement = {
         "content_plan": content_plan,
         "content_requirements": content_requirements,
+        "delivery_profile": delivery_profile,
         "visible_boundaries": visible_boundaries,
         "addressee_plan": addressee_plan,
     }

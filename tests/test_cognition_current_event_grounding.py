@@ -97,6 +97,20 @@ def _episode() -> dict[str, Any]:
     )
 
 
+def _character_profile() -> dict[str, Any]:
+    """Build the exact profile fields consumed by V2 cognition."""
+
+    return {
+        "name": "Kazusa",
+        "personality_brief": {
+            "logic": "Keep visible facts and typed roles separate.",
+            "defense": "Remain reserved without changing grounded meaning.",
+            "quirks": "Prefer concise observations.",
+            "taboos": "Never expose operational provenance.",
+        },
+    }
+
+
 def _connector_payload() -> dict[str, Any]:
     """Build an exact V2 input from the current typed episode."""
 
@@ -111,6 +125,7 @@ def _connector_payload() -> dict[str, Any]:
             "decontextualized_input": "fallback semantic rewrite",
             "user_multimedia_input": [],
             "rag_result": {"memory_evidence": []},
+            "character_profile": _character_profile(),
         },
         mutable_state=build_acquaintance_user_state(
             global_user_id="secret-global-user-id",
@@ -153,6 +168,7 @@ def test_rag_recall_evidence_is_canonical_cognition_evidence() -> None:
             "user_input": CURRENT_EVENT_TEXT,
             "decontextualized_input": CURRENT_EVENT_TEXT,
             "user_multimedia_input": [],
+            "character_profile": _character_profile(),
             "rag_result": {
                 "memory_evidence": [],
                 "conversation_evidence": [
@@ -201,6 +217,7 @@ def test_rag_conversation_mapping_is_canonical_cognition_evidence() -> None:
             "user_input": CURRENT_EVENT_TEXT,
             "decontextualized_input": CURRENT_EVENT_TEXT,
             "user_multimedia_input": [],
+            "character_profile": _character_profile(),
             "rag_result": {
                 "memory_evidence": [],
                 "conversation_evidence": [{
@@ -258,6 +275,7 @@ def test_role_explicit_current_event_is_forwarded_without_reinterpretation() -> 
             "decontextualized_input": CURRENT_EVENT_TEXT,
             "user_multimedia_input": [],
             "rag_result": {"memory_evidence": []},
+            "character_profile": _character_profile(),
         },
         mutable_state=build_acquaintance_user_state(
             global_user_id="secret-global-user-id",

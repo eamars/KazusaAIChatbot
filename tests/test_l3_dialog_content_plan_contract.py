@@ -86,7 +86,13 @@ def test_surface_output_validation_requires_exact_v2_fields() -> None:
         "content_requirements": ["Address the current user."],
         "visible_boundaries": [],
         "addressee_plan": ["current user"],
-        "style_guidance": "brief",
+        "delivery_profile": {
+            "lexical_register": "plain",
+            "sentence_shape": "brief",
+            "rhythm": "steady",
+            "hesitation": "minimal",
+            "punctuation": "restrained",
+        },
         "selected_surface_intent": "acknowledge",
         "permitted_action_results": [],
     }
@@ -104,7 +110,13 @@ async def test_surface_handler_returns_native_output(monkeypatch) -> None:
         "content_requirements": ["Address the current user."],
         "visible_boundaries": [],
         "addressee_plan": ["current user"],
-        "style_guidance": "brief",
+        "delivery_profile": {
+            "lexical_register": "plain",
+            "sentence_shape": "brief",
+            "rhythm": "steady",
+            "hesitation": "minimal",
+            "punctuation": "restrained",
+        },
         "selected_surface_intent": "acknowledge",
         "permitted_action_results": [],
     }

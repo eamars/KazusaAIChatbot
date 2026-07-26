@@ -44,12 +44,17 @@ class _SurfaceLLM:
         human = str(getattr(messages[1], "content", ""))
         payload = json.loads(human)["surface"]
         self.calls.append((system, payload))
-        if "style_guidance" in system and "content_plan" not in system:
-            result = {"style_guidance": "speech-safe cadence"}
-        elif "content_plan" in system and "content_requirements" in system:
+        if "content_plan" in system and "content_requirements" in system:
             result = {
                 "content_plan": "Perform the requested response operation.",
                 "content_requirements": ["Preserve current-turn meaning."],
+                "delivery_profile": {
+                    "lexical_register": "plain",
+                    "sentence_shape": "concise",
+                    "rhythm": "steady",
+                    "hesitation": "light",
+                    "punctuation": "restrained",
+                },
             }
         elif "visible_boundaries" in system and "addressee_plan" in system:
             result = {
@@ -88,7 +93,13 @@ def _surface_input() -> dict[str, object]:
         "semantic_affect": [],
         "permitted_action_results": [],
         "interaction_style_context": "brief conversational speech",
-        "character_voice_context": "A physical mannerism accompanies emotion.",
+        "character_expression_context": {
+            "tempo": "steady",
+            "linguistic_texture": "Light hesitation in concise spoken clauses.",
+        },
+        "visual_character_context": (
+            "A physical mannerism accompanies emotion."
+        ),
     }
 
 
@@ -98,7 +109,6 @@ def _surface_services(llm: _SurfaceLLM) -> SimpleNamespace:
     config = SimpleNamespace()
     return SimpleNamespace(
         llm=llm,
-        style_config=config,
         content_plan_config=config,
         preference_config=config,
         visual_config=config,
@@ -116,7 +126,13 @@ def _surface_output() -> dict[str, object]:
         ],
         "visible_boundaries": ["Return only literal visible speech."],
         "addressee_plan": ["Address the current user."],
-        "style_guidance": "Warm, concise spoken wording.",
+        "delivery_profile": {
+            "lexical_register": "warm",
+            "sentence_shape": "concise",
+            "rhythm": "steady",
+            "hesitation": "light",
+            "punctuation": "restrained",
+        },
         "selected_surface_intent": "answer by inference",
         "permitted_action_results": [],
     }
@@ -158,9 +174,7 @@ def _stub_recorders(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         dialog_module,
         "repair_text_surface_for_dialog",
-        AsyncMock(side_effect=lambda **kwargs: kwargs[
-            "rejected_surface_output"
-        ]),
+        AsyncMock(return_value=_surface_output()),
         raising=False,
     )
     monkeypatch.setattr(
@@ -196,18 +210,22 @@ async def test_text_and_visual_planners_are_terminal_siblings() -> None:
         "content_requirements",
         "visible_boundaries",
         "addressee_plan",
-        "style_guidance",
+        "delivery_profile",
         "selected_surface_intent",
         "permitted_action_results",
     }
-    assert len(llm.calls) == 3
+    assert len(llm.calls) == 2
     for system, payload in llm.calls:
-        if "style_guidance" in system and "content_plan" not in system:
-            assert payload["character_voice_context"] == (
-                "A physical mannerism accompanies emotion."
-            )
+        if "delivery_profile" in system:
+            assert payload["character_expression_context"] == {
+                "tempo": "steady",
+                "linguistic_texture": (
+                    "Light hesitation in concise spoken clauses."
+                ),
+            }
         else:
-            assert "character_voice_context" not in payload
+            assert "character_expression_context" not in payload
+        assert "visual_character_context" not in payload
 
     visual_services_type = getattr(
         surface_contracts,
@@ -229,7 +247,7 @@ async def test_text_and_visual_planners_are_terminal_siblings() -> None:
     }
     visual_system, visual_payload = llm.calls[-1]
     assert "visual_directives" in visual_system
-    assert visual_payload["character_voice_context"] == (
+    assert visual_payload["visual_character_context"] == (
         "A physical mannerism accompanies emotion."
     )
 
@@ -237,7 +255,6 @@ async def test_text_and_visual_planners_are_terminal_siblings() -> None:
 def test_runtime_prompts_define_live_speech_and_hard_error_contracts() -> None:
     """Reusable prompts support vivid speech while guarding hard failures."""
 
-    style_prompt = surface_stages.STYLE_SYSTEM_PROMPT.lower()
     content_prompt = surface_stages.CONTENT_PLAN_SYSTEM_PROMPT.lower()
     visual_prompt = surface_stages.VISUAL_SYSTEM_PROMPT.lower()
     dialog_prompt = dialog_module._V2_DIALOG_GENERATOR_PROMPT.lower()
@@ -260,8 +277,6 @@ def test_runtime_prompts_define_live_speech_and_hard_error_contracts() -> None:
     )
     verifier_prompt = f"{semantic_prompt}\n{surface_prompt}"
 
-    assert "表达指导" in style_prompt
-    assert "用词" in style_prompt
     assert "想象细节" in content_prompt
     assert "角色判断" in content_prompt
     assert "当前输入" in content_prompt
@@ -270,6 +285,8 @@ def test_runtime_prompts_define_live_speech_and_hard_error_contracts() -> None:
     assert "executed" in content_prompt
     assert "已记录" in content_prompt
     assert "待执行" in content_prompt
+    assert "delivery_profile" in content_prompt
+    assert "lexical_register" in content_prompt
     assert "action description" not in content_prompt
     assert "动作描写" not in content_prompt
     assert "终端图像" in visual_prompt
@@ -493,11 +510,17 @@ async def test_verifier_receives_bounded_visible_percepts(
 
     result = await dialog_generator(_dialog_state())
 
-    assert result == {"final_dialog": ["This option fits your preference."]}
+    assert result == {
+        "final_dialog": ["This option fits your preference."],
+        "text_surface_output_v2": _surface_output(),
+    }
     generator_payload = json.loads(
         generator_llm.ainvoke.await_args.args[0][1].content,
     )
-    assert "character_voice_context" not in json.dumps(generator_payload)
+    assert "character_expression_context" not in json.dumps(
+        generator_payload
+    )
+    assert "visual_character_context" not in json.dumps(generator_payload)
     assert "visual_directives" not in json.dumps(generator_payload)
     compliance_payload = json.loads(
         semantic_llm.ainvoke.await_args.args[0][1].content,
@@ -506,6 +529,7 @@ async def test_verifier_receives_bounded_visible_percepts(
         "candidate_final_dialog",
         "candidate_role_frame",
         "current_visible_percepts",
+        "authoritative_surface_semantics",
     }
     assert compliance_payload["candidate_role_frame"] == {
         "speaker_role": "当前角色",
@@ -531,6 +555,14 @@ async def test_verifier_receives_bounded_visible_percepts(
             },
         },
     }]
+    assert compliance_payload["authoritative_surface_semantics"] == {
+        "selected_surface_intent": "answer by inference",
+        "content_plan": "Answer the current request by inference.",
+        "content_requirements": [
+            "Preserve the requested response operation and current time scope.",
+        ],
+        "visible_boundaries": ["Return only literal visible speech."],
+    }
     surface_payload = json.loads(
         surface_llm.ainvoke.await_args.args[0][1].content,
     )
@@ -541,16 +573,11 @@ async def test_verifier_receives_bounded_visible_percepts(
     }
     semantic_llm.ainvoke.assert_awaited_once()
     surface_llm.ainvoke.assert_awaited_once()
-    rendered = json.dumps({
-        "semantic": compliance_payload,
-        "surface": surface_payload,
-    })
+    rendered = json.dumps(compliance_payload)
     for forbidden_field in (
-        "content_plan",
-        "content_requirements",
         "addressee_plan",
-        "style_guidance",
-        "selected_surface_intent",
+        "delivery_profile",
+        "permitted_action_results",
         "metadata",
         "target_scope",
         "origin_metadata",
@@ -595,7 +622,10 @@ async def test_dialog_preserves_explicit_high_risk_language_when_aligned(
 
     result = await dialog_generator(_dialog_state())
 
-    assert result == {"final_dialog": [candidate]}
+    assert result == {
+        "final_dialog": [candidate],
+        "text_surface_output_v2": _surface_output(),
+    }
     semantic_payload = json.loads(
         semantic_llm.ainvoke.await_args.args[0][1].content,
     )
@@ -705,6 +735,7 @@ async def test_focused_verifier_rejects_a_fifth_issue(
         match="issues are invalid",
     ):
         await dialog_module._verify_dialog_semantic_fidelity(
+            surface_output=_surface_output(),
             generated_dialog=["This option fits your preference."],
             current_visible_percepts=[{
                 "input_source": "dialog_text",
@@ -737,6 +768,7 @@ async def test_semantic_verifier_regenerates_invalid_structure_in_place(
     trace_recorder = dialog_module.llm_tracing.record_llm_trace_step
 
     verdict = await dialog_module._verify_dialog_semantic_fidelity(
+        surface_output=_surface_output(),
         generated_dialog=["I choose the next action."],
         current_visible_percepts=[{
             "input_source": "dialog_text",
@@ -970,6 +1002,7 @@ async def test_focused_verifier_exhaustion_is_typed_post_commit(
             verifier_llm,
         )
         verifier_call = dialog_module._verify_dialog_semantic_fidelity(
+            surface_output=_surface_output(),
             generated_dialog=["I choose the next action."],
             current_visible_percepts=[{
                 "input_source": "dialog_text",
@@ -1173,6 +1206,7 @@ async def test_selection_role_fields_stay_out_of_semantic_verifier(
     }
 
     verdict = await dialog_module._verify_dialog_semantic_fidelity(
+        surface_output=_surface_output(),
         generated_dialog=["Come sit beside me."],
         current_visible_percepts=[percept],
         llm_trace_id="selection-fields-excluded-from-semantic",
@@ -1198,7 +1232,7 @@ def test_hard_verifier_and_repair_exclude_drifted_l3_prose() -> None:
     repair_prompt = dialog_module._V2_DIALOG_HARD_FAILURE_REPAIR_PROMPT
 
     assert "active_visible_boundaries" not in surface_prompt
-    assert "style_guidance" not in surface_prompt
+    assert "delivery_profile" not in surface_prompt
     assert "text_surface_output_v2" in repair_prompt
     assert "current_visible_percepts" not in repair_prompt
 
@@ -1357,7 +1391,10 @@ async def test_false_execution_verdict_uses_one_grounded_llm_repair(
 
     result = await dialog_generator(_dialog_state())
 
-    assert result == {"final_dialog": ["This option fits your preference."]}
+    assert result == {
+        "final_dialog": ["This option fits your preference."],
+        "text_surface_output_v2": _surface_output(),
+    }
     assert generator_llm.ainvoke.await_count == 2
     assert semantic_llm.ainvoke.await_count == 2
     assert surface_llm.ainvoke.await_count == 2
@@ -1371,7 +1408,6 @@ async def test_false_execution_verdict_uses_one_grounded_llm_repair(
     }
     assert repair_payload["text_surface_output_v2"] == _surface_output()
     assert repair_payload["repair_context"] == {
-        "original_final_dialog": ["I changed the platform alarm."],
         "verified_hard_issues": [
             "false_execution: 'changed the platform alarm' - "
             "No executed result supports this claim.",
@@ -1433,8 +1469,8 @@ async def test_repaired_dialog_must_pass_the_same_hard_error_checks(
 
 
 @pytest.mark.asyncio
-async def test_surface_owner_repair_replaces_only_semantic_fields() -> None:
-    """The L3 owner replaces semantic fields while preserving style and truth."""
+async def test_surface_owner_repair_replaces_all_owned_fields() -> None:
+    """The L3 owner replaces its fields while preserving canonical truth."""
 
     class _RepairLLM:
         """Return one complete surface-owned semantic replacement."""
@@ -1459,13 +1495,20 @@ async def test_surface_owner_repair_replaces_only_semantic_fields() -> None:
                     "角色可以拒绝、协商或附加条件。",
                 ],
                 "addressee_plan": ["称呼当前用户。"],
+                "delivery_profile": {
+                    "lexical_register": "直接口语",
+                    "sentence_shape": "紧凑短句",
+                    "rhythm": "平稳",
+                    "hesitation": "无额外犹豫",
+                    "punctuation": "克制",
+                },
             }, ensure_ascii=False))
             return response
 
     llm = _RepairLLM()
     services = _surface_services(llm)
-    original = _surface_output()
-    original["permitted_action_results"] = [{
+    input_payload = _surface_input()
+    input_payload["permitted_action_results"] = [{
         "action_kind": "future_speak",
         "status": "pending",
         "semantic_result": "等待后台执行。",
@@ -1473,8 +1516,7 @@ async def test_surface_owner_repair_replaces_only_semantic_fields() -> None:
     }]
 
     repaired = await surface_module.repair_text_surface_planning(
-        _surface_input(),
-        original,
+        input_payload,
         ["选择所有者从当前角色错误地变为当前用户。"],
         services,
     )
@@ -1489,23 +1531,25 @@ async def test_surface_owner_repair_replaces_only_semantic_fields() -> None:
         "角色可以拒绝、协商或附加条件。",
     ]
     assert repaired["addressee_plan"] == ["称呼当前用户。"]
-    assert repaired["style_guidance"] == original["style_guidance"]
+    assert repaired["delivery_profile"] == {
+        "lexical_register": "直接口语",
+        "sentence_shape": "紧凑短句",
+        "rhythm": "平稳",
+        "hesitation": "无额外犹豫",
+        "punctuation": "克制",
+    }
     assert repaired["selected_surface_intent"] == (
-        original["selected_surface_intent"]
+        input_payload["intention"]["intention"]
     )
     assert repaired["permitted_action_results"] == (
-        original["permitted_action_results"]
+        input_payload["permitted_action_results"]
     )
     payload = json.loads(getattr(llm.messages[1], "content"))
     repair_context = payload["surface"]["dialog_compliance_repair"]
-    assert repair_context["verified_hard_issues"] == [
-        "选择所有者从当前角色错误地变为当前用户。",
-    ]
-    assert repair_context["rejected_surface_semantics"] == {
-        "content_plan": original["content_plan"],
-        "content_requirements": original["content_requirements"],
-        "visible_boundaries": original["visible_boundaries"],
-        "addressee_plan": original["addressee_plan"],
+    assert repair_context == {
+        "verified_hard_issues": [
+            "选择所有者从当前角色错误地变为当前用户。",
+        ],
     }
 
 
@@ -1535,13 +1579,19 @@ async def test_surface_owner_repair_regenerates_invalid_contract_once() -> None:
                     "content_requirements": ["保持选择所有者为当前角色。"],
                     "visible_boundaries": [],
                     "addressee_plan": ["直接称呼当前用户。"],
+                    "delivery_profile": {
+                        "lexical_register": "直接口语",
+                        "sentence_shape": "紧凑短句",
+                        "rhythm": "平稳",
+                        "hesitation": "无额外犹豫",
+                        "punctuation": "克制",
+                    },
                 }, ensure_ascii=False))
             return response
 
     llm = _RepairingLLM()
     repaired = await surface_module.repair_text_surface_planning(
         _surface_input(),
-        _surface_output(),
         ["选择所有者从当前角色错误地变为当前用户。"],
         _surface_services(llm),
     )
@@ -1580,7 +1630,6 @@ async def test_surface_owner_repair_exhaustion_has_post_commit_metadata() -> Non
     ) as error_info:
         await surface_module.repair_text_surface_planning(
             _surface_input(),
-            _surface_output(),
             ["选择所有者从当前角色错误地变为当前用户。"],
             _surface_services(llm),
         )
@@ -1623,10 +1672,8 @@ async def test_dialog_repair_uses_l3_replacement_as_rendering_authority(
 
     repaired_dialog, repaired_surface = (
         await dialog_module._repair_dialog_hard_failure(
-            generated_dialog=["你想让我做什么？"],
             repair_issues=["选择所有者被错误地交给当前用户。"],
             surface_input=_surface_input(),
-            surface_output=_surface_output(),
             user_name="Current User",
             llm_trace_id="surface-owner-repair",
         )
@@ -1636,7 +1683,6 @@ async def test_dialog_repair_uses_l3_replacement_as_rendering_authority(
     assert repaired_surface == replacement
     surface_repair.assert_awaited_once_with(
         surface_input=_surface_input(),
-        rejected_surface_output=_surface_output(),
         verified_hard_issues=["选择所有者被错误地交给当前用户。"],
     )
     repair_payload = json.loads(
@@ -1644,7 +1690,6 @@ async def test_dialog_repair_uses_l3_replacement_as_rendering_authority(
     )
     assert repair_payload["text_surface_output_v2"] == replacement
     assert repair_payload["repair_context"] == {
-        "original_final_dialog": ["你想让我做什么？"],
         "verified_hard_issues": ["选择所有者被错误地交给当前用户。"],
     }
     assert "current_visible_percepts" not in repair_payload

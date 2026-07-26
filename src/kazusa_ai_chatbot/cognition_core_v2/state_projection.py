@@ -371,7 +371,16 @@ def _project_constraints(constraints: Mapping[str, Any]) -> dict[str, Any]:
             "salience",
         )
     }
-    return {"drives": drives, "standards": standards, "meaning_state": meaning}
+    personality = {
+        field_name: constraints["personality_judgment"][field_name]
+        for field_name in ("logic", "defense", "quirks", "taboos")
+    }
+    return {
+        "drives": drives,
+        "standards": standards,
+        "meaning_state": meaning,
+        "personality_judgment": personality,
+    }
 
 
 def _project_activation(

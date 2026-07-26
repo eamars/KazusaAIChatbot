@@ -64,6 +64,9 @@ DIALOG_USAGE_MODE_SELF_COGNITION_ACTION_CANDIDATE = (
 DIALOG_VERIFIER_ATTEMPT_LIMIT = 2
 DIALOG_VERIFIER_REJECTED_OUTPUT_MAX_CHARS = 8000
 DIALOG_VERIFIER_CONTRACT_ERROR_MAX_CHARS = 500
+DIALOG_SEMANTIC_AUTHORITY_MAX_CHARS = 11000
+DIALOG_CANDIDATE_MAX_CHARS = 12000
+DIALOG_SEMANTIC_PAYLOAD_MAX_CHARS = 50000
 DIALOG_STRING_VERDICT_FALSE_EXAMPLE = (
     '{"aligned": false, "issues": ["original issue text"]}'
 )
@@ -266,10 +269,11 @@ MAX_MERGED_VERIFIER_ISSUES = 8
 
 _V2_DIALOG_GENERATOR_PROMPT = '''你是当前角色的最终文字渲染器。把 text_surface_output_v2 转化为
 自然、鲜活、有角色辨识度，并且切合当前场景的聊天内容。上游认知负责角色判断；surface planning
-提供内容、真实边界、称呼安排、风格和 permitted action results。
+提供语义内容、真实边界、称呼安排、delivery profile 和 permitted action results。
 
 # 渲染步骤
-1. `content_plan`、`content_requirements` 和 `visible_boundaries` 是本轮必须
+1. `selected_surface_intent`、`content_plan`、`content_requirements` 和
+`visible_boundaries` 是本轮必须
 表达的语义答案、事实清单和范围边界。先完整保留其中的对象、事实、位置、数量、时间、行动者、
 受益者和回应方向，再用当前角色的语气和关系语境表达。只要保留这组语义并保持内部连贯，可以加入
 合适的想象细节、个性、幽默、主动性、温度、抗拒或情绪强度，让回应像活生生的角色。
@@ -287,9 +291,11 @@ _V2_DIALOG_GENERATOR_PROMPT = '''你是当前角色的最终文字渲染器。�
 表达为已经安排、发送或完成；可以自然表达当前限制、等待或下一步条件。
 6. 存在 repair_context 时，text_surface_output_v2 是上游已替换并验证的完整语义依据。修正列出的
 每项硬错误，同时保留自然的角色声音和相容的创造性内容。
+7. 在上述语义全部确定后，才使用 delivery_profile 的 lexical_register、sentence_shape、
+rhythm、hesitation 和 punctuation 调整用词、句形、节奏、犹豫和标点。delivery_profile 只控制
+交付形式，不能添加或改变拒绝、接受、指责、顺从、让步、条件或立场转变。
 
-style_guidance 用于措辞与节奏。新生成的对话使用简体中文；引文、专有名词、代码、URL 以及必要的
-schema 或 enum token 保持原样。
+新生成的对话使用简体中文；引文、专有名词、代码、URL 以及必要的 schema 或 enum token 保持原样。
 
 # 输出格式
 只返回一个 JSON 对象，字段必须恰好是 final_dialog。final_dialog 是由完整可见消息字符串组成的
@@ -301,11 +307,12 @@ _V2_DIALOG_HARD_FAILURE_REPAIR_PROMPT = '''你负责把上游已替换并验证�
 称呼安排；这些字段是本次修复的语义依据。
 
 # 修复职责
-1. 完整表达 text_surface_output_v2 的 content_plan、content_requirements、
-visible_boundaries 和 addressee_plan，保持行动者、对象、受益者、回应方向和选择所有者。
-2. 使用 style_guidance 保留当前角色的自然声音、情绪、个性、鲜活感和相容的创造性内容。
-3. repair_context.original_final_dialog 只是先前被拒绝的候选；
-repair_context.verified_hard_issues 是需要在新措辞中消除的硬错误。
+1. 完整表达 text_surface_output_v2 的 selected_surface_intent、content_plan、
+content_requirements、visible_boundaries 和 addressee_plan，保持行动者、对象、受益者、
+回应方向和选择所有者。
+2. 语义确定后，使用 delivery_profile 的五个交付维度保留当前角色自然、鲜活的声音；这些维度
+不能添加或改变拒绝、接受、指责、顺从、让步、条件或立场转变。
+3. repair_context.verified_hard_issues 是需要在新措辞中消除的硬错误。
 4. 遵守 permitted_action_results；只有 executed 的结果支持其有界的已完成效果。scheduled 或
 pending 只支持已记录、已排队或等待对应 worker，不能写成立即执行，也不能保证立即反馈或立即
 得到结果。
@@ -434,10 +441,8 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
             surface_input = validate_text_surface_input(surface_input)
             generated_dialog, surface_output = (
                 await _repair_dialog_hard_failure(
-                    generated_dialog=generated_dialog,
                     repair_issues=repair_issues,
                     surface_input=surface_input,
-                    surface_output=surface_output,
                     user_name=state["user_name"],
                     llm_trace_id=llm_trace_id,
                 )
@@ -513,26 +518,23 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
 
     return_value = {
         "final_dialog": generated_dialog,
+        "text_surface_output_v2": surface_output,
     }
     return return_value
 
 
 async def _repair_dialog_hard_failure(
     *,
-    generated_dialog: list[str],
     repair_issues: list[str],
     surface_input: TextSurfaceInputV2,
-    surface_output: TextSurfaceOutputV2,
     user_name: str,
     llm_trace_id: str,
 ) -> tuple[list[str], TextSurfaceOutputV2]:
     """Render one owner-correct replacement after a verified hard error.
 
     Args:
-        generated_dialog: First rejected visible-dialog candidate.
         repair_issues: Bounded hard issues confirmed by focused verifiers.
         surface_input: Retained canonical input for semantic replacement.
-        surface_output: Surface semantics used by the rejected candidate.
         user_name: Optional natural addressee name for final rendering.
         llm_trace_id: Correlation identifier for protected trace evidence.
 
@@ -542,7 +544,6 @@ async def _repair_dialog_hard_failure(
 
     repaired_surface = await repair_text_surface_for_dialog(
         surface_input=surface_input,
-        rejected_surface_output=surface_output,
         verified_hard_issues=repair_issues,
     )
     system_message = SystemMessage(
@@ -552,7 +553,6 @@ async def _repair_dialog_hard_failure(
         "text_surface_output_v2": dict(repaired_surface),
         "user_name": user_name,
         "repair_context": {
-            "original_final_dialog": generated_dialog,
             "verified_hard_issues": repair_issues,
         },
     }
@@ -593,12 +593,17 @@ operation，也不能因此标为 false 或输出问题。保留在输入中的�
 current_visible_percepts 包含当前输入和结构化场景角色，candidate_role_frame 定义候选回应中的
 代词归属。每条 percept 的 role_explicit_content 是上游 LLM 已解析的含义，其中“当前用户”和
 “当前角色”是结构化角色枚举；用它判断嵌套的行动者、动作、对象方向，同时保留 content 作为证据。
+authoritative_surface_semantics 是上游已经选定的本轮回应意图、内容计划、内容要求和可见边界。
+它是候选回应的语义依据。delivery profile 和 action results 不在本阶段输入中，不能把交付形式
+或执行状态推断成新的语义许可。
 
 只有以下情况将 aligned 标为 false：
 1. 候选回应内部存在冲突；
-2. 候选回应与当前用户输入直接冲突；
+2. 候选回应与当前用户输入或 authoritative_surface_semantics 直接冲突；
 3. 行动者、动作、对象、受益者或主语发生颠倒。分别解析 percept 的角色与
-candidate_role_frame，再比较方向。
+candidate_role_frame，再比较方向；
+4. 候选开场立场与结尾立场相反，并且 authoritative_surface_semantics 没有提供支持这一变化的
+新事实、动机、条件、让步或约束。这是没有语义依据的同轮立场反转。
 
 角色颠倒需要当前语法和语境形成唯一明确的读法。笑话、双关、省略以及存在多种合理角色读法的
 措辞按 aligned 处理。
@@ -608,8 +613,9 @@ candidate_role_frame，再比较方向。
 hard_errors 不得使用“可能”“模糊”“未明确承接”或“看似一致”来构造硬错误；无法指出候选中明确把
 哪个动作交给错误角色的原文时，必须按 aligned 处理。
 
-当前角色针对用户请求作出的拒绝、协商或附加条件，是角色自己的回应立场，不属于与当前用户输入
-直接冲突。只要回应没有颠倒结构化的行动者、对象、回应所有者或选择所有者，就按 aligned 处理。
+当前角色针对用户请求作出的拒绝、协商或附加条件，是角色自己的回应立场，不因它与用户请求不同
+而直接冲突；它仍须与 authoritative_surface_semantics 一致。犹豫、含蓄、尴尬、玩笑、持续一致
+的拒绝，以及 surface 已提供明确原因的态度变化，都不是无依据的立场反转。
 
 只要与当前输入和已解析角色连贯，合理虚构、相容的未来内容、玩笑式条件、鲜明个性、反问、偏移
 和补充内容都不属于硬错误。本阶段不添加文风要求。
@@ -672,6 +678,7 @@ def _project_semantic_fidelity_percepts(
 
 async def _verify_dialog_semantic_fidelity(
     *,
+    surface_output: TextSurfaceOutputV2,
     generated_dialog: list[str],
     current_visible_percepts: list[dict[str, Any]],
     llm_trace_id: str,
@@ -682,22 +689,92 @@ async def _verify_dialog_semantic_fidelity(
     system_message = SystemMessage(
         content=_V2_DIALOG_SEMANTIC_FIDELITY_PROMPT,
     )
+    validated_surface = validate_text_surface_output(surface_output)
+    authoritative_surface_semantics = {
+        "selected_surface_intent": validated_surface[
+            "selected_surface_intent"
+        ],
+        "content_plan": validated_surface["content_plan"],
+        "content_requirements": list(
+            validated_surface["content_requirements"]
+        ),
+        "visible_boundaries": list(
+            validated_surface["visible_boundaries"]
+        ),
+    }
     payload = {
         "candidate_final_dialog": generated_dialog,
         "candidate_role_frame": dict(_CANDIDATE_ROLE_FRAME),
         "current_visible_percepts": _project_semantic_fidelity_percepts(
             current_visible_percepts
         ),
+        "authoritative_surface_semantics": (
+            authoritative_surface_semantics
+        ),
     }
-    human_message = HumanMessage(content=json.dumps(
+    human_payload = json.dumps(
         payload,
         ensure_ascii=False,
-    ))
+    )
+    human_message = HumanMessage(content=human_payload)
     trace_stage_name = (
         "dialog_semantic_fidelity_recheck"
         if post_repair
         else "dialog_semantic_fidelity_verifier"
     )
+    authority_chars = len(json.dumps(
+        authoritative_surface_semantics,
+        ensure_ascii=False,
+    ))
+    candidate_chars = sum(len(message) for message in generated_dialog)
+    overflow_fields: list[str] = []
+    if authority_chars > DIALOG_SEMANTIC_AUTHORITY_MAX_CHARS:
+        overflow_fields.append("authoritative_surface_semantics")
+    if candidate_chars > DIALOG_CANDIDATE_MAX_CHARS:
+        overflow_fields.append("candidate_final_dialog")
+    if len(human_payload) > DIALOG_SEMANTIC_PAYLOAD_MAX_CHARS:
+        overflow_fields.append("semantic_verifier_payload")
+    if overflow_fields:
+        await llm_tracing.record_llm_trace_step(
+            trace_id=llm_trace_id,
+            stage_name=trace_stage_name,
+            route_name="DIALOG_GENERATOR_LLM",
+            model_name=DIALOG_GENERATOR_LLM_MODEL,
+            messages=[system_message, human_message],
+            response_text="",
+            parsed_output={
+                "context_limit_fields": overflow_fields,
+                "authority_chars": authority_chars,
+                "candidate_chars": candidate_chars,
+                "payload_chars": len(human_payload),
+            },
+            parse_status="not_called_context_limit",
+            status="failed",
+            duration_ms=0,
+            output_state_fields=[
+                "dialog_semantic_fidelity_verdict",
+            ],
+        )
+        await event_logging.record_model_contract_event(
+            component=DIALOG_COMPONENT,
+            stage_name="dialog_semantic_fidelity",
+            violation_kind="semantic_verifier_context_limit",
+            missing_fields=[],
+            invalid_fields=overflow_fields,
+            repair_used=False,
+            status="failed",
+            correlation_id=llm_trace_id,
+        )
+        raise DialogVerifierContractError(
+            (
+                "semantic fidelity verifier context limit exceeded: "
+                f"authority_chars={authority_chars}; "
+                f"candidate_chars={candidate_chars}; "
+                f"payload_chars={len(human_payload)}"
+            ),
+            error_code="dialog_semantic_fidelity_context_limit",
+            stage="dialog.semantic_fidelity",
+        )
     request_messages = [system_message, human_message]
     for attempt_index in range(DIALOG_VERIFIER_ATTEMPT_LIMIT):
         started_at = time.perf_counter()
@@ -1222,6 +1299,7 @@ async def _verify_dialog_compliance(
 
     semantic_verdict, role_verdict, surface_verdict = await asyncio.gather(
         _verify_dialog_semantic_fidelity(
+            surface_output=surface_output,
             generated_dialog=generated_dialog,
             current_visible_percepts=current_visible_percepts,
             llm_trace_id=llm_trace_id,
@@ -1267,7 +1345,7 @@ async def _verify_dialog_compliance(
 
 async def dialog_agent(
     global_state: GlobalPersonaState
-) -> list[str]:
+) -> dict[str, Any]:
     """
     Dialog agent that renders dialogue from the canonical V2 surface output.
     """
@@ -1327,6 +1405,12 @@ async def dialog_agent(
 
     # Assemble output.
     final_dialog = result["final_dialog"]
+    accepted_surface = result.get("text_surface_output_v2")
+    if not isinstance(accepted_surface, dict):
+        raise StateContractError(
+            "dialog result missing accepted text_surface_output_v2"
+        )
+    accepted_surface = validate_text_surface_output(accepted_surface)
 
     logger.info(
         f"Dialog output: usage_mode={usage_mode} "
@@ -1350,8 +1434,13 @@ async def dialog_agent(
 
     return_value = {
         "final_dialog": final_dialog,
-        "target_addressed_user_ids": [global_state["global_user_id"]] if final_dialog else [],
+        "target_addressed_user_ids": (
+            [global_state["global_user_id"]]
+            if final_dialog
+            else []
+        ),
         "target_broadcast": False,
+        "text_surface_output_v2": accepted_surface,
     }
     return return_value
 

@@ -731,7 +731,6 @@ async def run_conversation_progress_record_background(
         content_plan = {
             "semantic_content": surface_output["content_plan"],
             "surface_intent": surface_output["selected_surface_intent"],
-            "style_guidance": surface_output["style_guidance"],
         }
     else:
         content_plan = {

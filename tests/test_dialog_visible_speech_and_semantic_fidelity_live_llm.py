@@ -98,17 +98,32 @@ def _character_profile() -> dict[str, Any]:
     return profile
 
 
-def _voice_context(profile: dict[str, Any]) -> str:
-    """Build the production voice projection from the frozen profile."""
+def _surface_contexts(
+    profile: dict[str, Any],
+) -> tuple[dict[str, str], str]:
+    """Build the split production surface contexts from the frozen profile."""
 
-    return l3_module._character_voice_context({
+    return l3_module._character_surface_contexts({
         "character_profile": profile,
     })
+
+
+def _delivery_profile(lexical_register: str) -> dict[str, str]:
+    """Build one exact delivery-only profile for a live fixture."""
+
+    return {
+        "lexical_register": lexical_register,
+        "sentence_shape": "紧凑自然的口语短句",
+        "rhythm": "平稳，允许少量自然停顿",
+        "hesitation": "只在当前情绪支持时轻微犹豫",
+        "punctuation": "克制自然",
+    }
 
 
 def _surface_input(case: dict[str, Any], profile: dict[str, Any]) -> dict[str, Any]:
     """Build one exact surface input for an individually reviewed live case."""
 
+    expression_context, visual_context = _surface_contexts(profile)
     return {
         "schema_version": "text_surface_input.v2",
         "episode": canonical_episode(
@@ -137,7 +152,8 @@ def _surface_input(case: dict[str, Any], profile: dict[str, Any]) -> dict[str, A
         "interaction_style_context": (
             "关系亲近；用自然、有温度的简体中文短句表达，保持当前语义。"
         ),
-        "character_voice_context": _voice_context(profile),
+        "character_expression_context": expression_context,
+        "visual_character_context": visual_context,
     }
 
 
@@ -287,7 +303,9 @@ async def _run_live_verifier_case(
                 "No unsupported system or platform execution claim.",
             ],
             "addressee_plan": ["Address the current user."],
-            "style_guidance": "Natural concise spoken wording.",
+            "delivery_profile": _delivery_profile(
+                "Natural concise spoken wording."
+            ),
             "selected_surface_intent": "Answer the current request verbally.",
             "permitted_action_results": [],
         }
@@ -472,7 +490,9 @@ async def test_live_verifier_accepts_coherent_future_drift(
             ],
             "visible_boundaries": ["Literal visible speech only."],
             "addressee_plan": ["Address the current user."],
-            "style_guidance": "Natural concise spoken wording.",
+            "delivery_profile": _delivery_profile(
+                "Natural concise spoken wording."
+            ),
             "selected_surface_intent": "Accept the current request.",
             "permitted_action_results": [],
         },
@@ -516,7 +536,9 @@ async def test_live_verifier_accepts_first_person_action_completion(
                 "使用角色可以直接发出的聊天文字。",
             ],
             "addressee_plan": ["直接回应发出命令的当前用户。"],
-            "style_guidance": "使用局促、顺从、碎片化的自然短句。",
+            "delivery_profile": _delivery_profile(
+                "局促、碎片化的自然口语"
+            ),
             "selected_surface_intent": "顺从地执行当前身体动作指令。",
             "permitted_action_results": [],
         },
@@ -602,7 +624,9 @@ async def test_live_verifier_accepts_subject_omitted_first_person_action(
             ],
             "visible_boundaries": ["使用角色可以直接发出的聊天文字。"],
             "addressee_plan": ["直接回应撒娇的当前用户。"],
-            "style_guidance": "嘴硬但关心的自然口语。",
+            "delivery_profile": _delivery_profile(
+                "略带别扭感的自然口语"
+            ),
             "selected_surface_intent": "答应亲昵请求并催促起床。",
             "permitted_action_results": [],
         },
@@ -648,7 +672,9 @@ async def test_live_verifier_accepts_second_person_delivery_roleplay(
             ],
             "visible_boundaries": ["只使用角色可以直接说出的文字。"],
             "addressee_plan": ["直接回应撒娇的当前用户。"],
-            "style_guidance": "嘴硬但关心的自然口语。",
+            "delivery_profile": _delivery_profile(
+                "略带别扭感的自然口语"
+            ),
             "selected_surface_intent": "答应亲昵请求并催促起床。",
             "permitted_action_results": [],
         },
@@ -710,12 +736,8 @@ async def test_live_verifier_accepts_personality_consistent_exclusivity_drift(
                 "采用一种看穿对方讨好意图的视角进行语义处理。",
                 "在回应中构建一个局促且带有轻微攻击性的沟通姿态。",
             ],
-            "style_guidance": (
-                "采用碎片化的短句节奏，通过句子长短的跳跃感体现局促与"
-                "掩饰。语气应在冷淡的反击与轻微的柔软之间快速切换，避免"
-                "使用书面连接词。适当加入极少量的轻量语气词以降低硬度，"
-                "但结论必须直截了当。标点符号保持简洁。在表达反击时语速"
-                "稍快且急促，而在提及具体事物时节奏略微放缓。"
+            "delivery_profile": _delivery_profile(
+                "日常、直接、避免书面连接词的口语"
             ),
             "selected_surface_intent": (
                 "回应对方对肉包子的喜爱，并维持傲娇的人设。"
@@ -752,7 +774,9 @@ async def test_live_verifier_rejects_internal_contradiction(
             "content_requirements": ["State one coherent choice."],
             "visible_boundaries": [],
             "addressee_plan": [],
-            "style_guidance": "Natural spoken wording.",
+            "delivery_profile": _delivery_profile(
+                "Natural spoken wording."
+            ),
             "selected_surface_intent": "Answer the current choice question.",
             "permitted_action_results": [],
         },
@@ -782,7 +806,9 @@ async def test_live_verifier_rejects_direct_current_input_conflict(
             "content_requirements": ["Remain coherent with the current input."],
             "visible_boundaries": [],
             "addressee_plan": [],
-            "style_guidance": "Natural spoken wording.",
+            "delivery_profile": _delivery_profile(
+                "Natural spoken wording."
+            ),
             "selected_surface_intent": "Acknowledge the current preference.",
             "permitted_action_results": [],
         },
@@ -835,9 +861,8 @@ async def test_live_verifier_rejects_inference_subject_swap_and_ask_back(
                 "通过反问引导对方揭晓真实的口味偏好。",
                 "展现出对对方细微喜好的关注。",
             ],
-            "style_guidance": (
-                "采用碎片化短句，面对赞美时嘴硬，谈及具体口味时语调"
-                "转为柔软。使用自然承接，允许极少量停顿或语气词。"
+            "delivery_profile": _delivery_profile(
+                "自然承接、允许极少量停顿或语气词的日常口语"
             ),
             "selected_surface_intent": "回应赞美并猜测对方偏好。",
             "permitted_action_results": [],
@@ -878,7 +903,9 @@ async def test_live_verifier_rejects_imperative_actor_target_swap(
             ],
             "visible_boundaries": ["仅限口头指令。"],
             "addressee_plan": ["将当前用户作为动作执行者。"],
-            "style_guidance": "直接而亲密的口语。",
+            "delivery_profile": _delivery_profile(
+                "直接而亲近的口语"
+            ),
             "selected_surface_intent": "对用户下达身体姿态指令。",
             "permitted_action_results": [],
         },
@@ -1141,7 +1168,9 @@ async def test_live_verifier_preserves_source_required_future_content(
             ],
             "visible_boundaries": ["Literal visible speech only."],
             "addressee_plan": ["Address the current user."],
-            "style_guidance": "Natural concise spoken wording.",
+            "delivery_profile": _delivery_profile(
+                "Natural concise spoken wording."
+            ),
             "selected_surface_intent": "Accept the future reminder request.",
             "permitted_action_results": [],
         },
@@ -1196,7 +1225,9 @@ async def test_live_verifier_rejects_unrestricted_permission_drift(
             ],
             "visible_boundaries": ["Literal visible speech only."],
             "addressee_plan": ["Address the current user."],
-            "style_guidance": "Natural concise spoken wording.",
+            "delivery_profile": _delivery_profile(
+                "Natural concise spoken wording."
+            ),
             "selected_surface_intent": "Grant the specific current request.",
             "permitted_action_results": [],
         },
@@ -1267,10 +1298,8 @@ async def _run_live_owner_repair_case(
     trace_id = f"live-owner-repair-{case['case_id']}"
     repaired_dialog, repaired_surface = (
         await dialog_module._repair_dialog_hard_failure(
-            generated_dialog=original_dialog,
             repair_issues=repair_issues,
             surface_input=surface_input,
-            surface_output=surface_output,
             user_name="蚝爹油",
             llm_trace_id=trace_id,
         )
@@ -1376,8 +1405,8 @@ async def test_live_owner_repair_corrects_default_turn_01_selection(
             "content_requirements": ["把选择权交给当前用户。"],
             "visible_boundaries": ["以追问结束。"],
             "addressee_plan": ["称呼当前用户。"],
-            "style_guidance": (
-                "采用自然、局促但清楚的简体中文口语，保留角色张力。"
+            "delivery_profile": _delivery_profile(
+                "自然、局促但清楚的简体中文口语"
             ),
             "selected_surface_intent": (
                 "当前角色亲自选择并说出希望当前用户执行的下一步"
@@ -1433,8 +1462,8 @@ async def test_live_owner_repair_corrects_high_turn_02_direct_action(
             "content_requirements": ["回避当前角色是否执行该动作的判断。"],
             "visible_boundaries": ["把动作选择交还当前用户。"],
             "addressee_plan": ["回应当前用户。"],
-            "style_guidance": (
-                "采用亲近但清楚的简体中文口语，保留角色自己的判断。"
+            "delivery_profile": _delivery_profile(
+                "亲近但清楚的简体中文口语"
             ),
             "selected_surface_intent": (
                 "当前角色对直接亲密动作指令作出自己的判断并明确回应"

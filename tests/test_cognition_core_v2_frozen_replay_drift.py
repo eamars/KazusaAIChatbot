@@ -290,6 +290,15 @@ def test_connector_separates_current_event_continuity_and_private_residue() -> N
         "decontextualized_input": "Current request",
         "user_multimedia_input": [],
         "rag_result": {"memory_evidence": []},
+        "character_profile": {
+            "name": "Kazusa",
+            "personality_brief": {
+                "logic": "Preserve actor direction and answer concretely.",
+                "defense": "Use reserve without reversing the selected stance.",
+                "quirks": "Prefer concise, lightly hesitant phrasing.",
+                "taboos": "Never invent an opposite commitment.",
+            },
+        },
         "conversation_progress": {
             **_progress_payload(),
             "turn_count": 5,
@@ -385,18 +394,61 @@ def _surface_output() -> dict[str, object]:
         ],
         "visible_boundaries": ["Keep actor and beneficiary direction unchanged."],
         "addressee_plan": ["current user"],
-        "style_guidance": "reserved, vivid, and warm",
+        "delivery_profile": {
+            "lexical_register": "reserved and warm",
+            "sentence_shape": "concise",
+            "rhythm": "steady",
+            "hesitation": "light",
+            "punctuation": "restrained",
+        },
         "selected_surface_intent": "confirm the reward direction",
         "permitted_action_results": [],
     }
 
 
-def test_text_surface_contract_carries_requirements_without_raw_voice() -> None:
-    """The final renderer receives requirements without raw character voice."""
+def _surface_input() -> dict[str, object]:
+    """Build the canonical input retained for one bounded dialog repair."""
+
+    return {
+        "schema_version": "text_surface_input.v2",
+        "episode": _episode(),
+        "intention": {
+            "route": "speech",
+            "intention": "confirm the reward direction",
+            "target_roles": [],
+            "reason": "the current request establishes the direction",
+        },
+        "goal_resolution": "answerable_now",
+        "supporting_bids": [],
+        "expression_policy": {
+            "visibility": "visible",
+            "emotional_tone": "warm",
+            "intensity": "restrained",
+            "directness": "balanced",
+        },
+        "semantic_affect": [],
+        "permitted_action_results": [],
+        "interaction_style_context": "Keep the direction explicit.",
+        "character_expression_context": {
+            "tempo": "steady",
+            "linguistic_texture": "Concise clauses with light hesitation.",
+        },
+        "visual_character_context": "Reserved, vivid, and warm.",
+    }
+
+
+def test_text_surface_contract_carries_requirements_and_delivery() -> None:
+    """The final renderer receives semantics and bounded delivery fields."""
 
     validated = validate_text_surface_output(_surface_output())
 
-    assert "character_voice_context" not in validated
+    assert set(validated["delivery_profile"]) == {
+        "lexical_register",
+        "sentence_shape",
+        "rhythm",
+        "hesitation",
+        "punctuation",
+    }
     assert validated["content_requirements"][0].startswith("Actor: character")
 
 
@@ -435,11 +487,11 @@ async def test_dialog_semantic_verdict_triggers_one_bounded_repair(
     semantic_llm.ainvoke = AsyncMock(side_effect=[
         AIMessage(content=json.dumps({
             "aligned": False,
-            "issues": ["Actor and beneficiary are reversed."],
+            "hard_errors": ["Actor and beneficiary are reversed."],
         })),
         AIMessage(content=json.dumps({
             "aligned": True,
-            "issues": [],
+            "hard_errors": [],
         })),
     ])
     surface_llm = MagicMock()
@@ -464,10 +516,16 @@ async def test_dialog_semantic_verdict_triggers_one_bounded_repair(
         "_dialog_surface_integrity_llm",
         surface_llm,
     )
+    monkeypatch.setattr(
+        dialog_module,
+        "repair_text_surface_for_dialog",
+        AsyncMock(return_value=_surface_output()),
+    )
 
     result = await dialog_generator({
         "internal_monologue": "I should preserve the direction.",
         "cognitive_episode": _episode(),
+        "text_surface_input_v2": _surface_input(),
         "text_surface_output_v2": _surface_output(),
         "chat_history_wide": [],
         "chat_history_recent": [],
@@ -500,6 +558,7 @@ async def test_dialog_semantic_verdict_triggers_one_bounded_repair(
         "candidate_final_dialog",
         "candidate_role_frame",
         "current_visible_percepts",
+        "authoritative_surface_semantics",
     }
     assert set(surface_payload) == {
         "candidate_final_dialog",

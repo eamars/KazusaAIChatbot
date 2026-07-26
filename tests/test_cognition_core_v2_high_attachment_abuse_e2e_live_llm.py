@@ -208,6 +208,12 @@ async def _seed_high_attachment_anger_event_async(
         "drives": character_state["drives"],
         "standards": character_state["standards"],
         "meaning_state": character_state["meaning_state"],
+        "personality_judgment": {
+            "logic": "relationship-aware and evidence-led",
+            "defense": "loyal but hurt by abuse from a close person",
+            "quirks": "hesitates before confronting someone important",
+            "taboos": "do not erase attachment or injury",
+        },
     }
     activations = derive_persistent_emotion_activations(
         state,

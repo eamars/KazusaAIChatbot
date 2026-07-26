@@ -18,7 +18,9 @@ from kazusa_ai_chatbot.cognition_core_v2.output_projection import (
     build_state_update,
     default_expression_policy,
 )
-from kazusa_ai_chatbot.cognition_core_v2.surface_stages import run_style_stage
+from kazusa_ai_chatbot.cognition_core_v2.surface_stages import (
+    run_content_plan_stage,
+)
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionContractError,
     CognitionExecutionError,
@@ -49,6 +51,18 @@ from tests.cognition_core_v2_test_helpers import (
 NOW = "2026-07-14T00:00:00Z"
 
 
+def _delivery_profile() -> dict[str, str]:
+    """Build one exact delivery-only surface profile."""
+
+    return {
+        "lexical_register": "自然口语",
+        "sentence_shape": "短句与完整句交替",
+        "rhythm": "节奏平稳",
+        "hesitation": "轻微停顿",
+        "punctuation": "自然标点",
+    }
+
+
 class _NoCallLLM:
     """Raise when a no-evidence episode reaches a model-owned stage."""
 
@@ -77,8 +91,8 @@ class _FallbackSurfaceLLM:
         return SimpleNamespace(content=json.dumps({"content": "legacy"}))
 
 
-class _RepairingStyleLLM:
-    """Return one invalid style object followed by a valid repair."""
+class _RepairingContentLLM:
+    """Return one invalid content object followed by a valid repair."""
 
     def __init__(self) -> None:
         self.calls = 0
@@ -96,7 +110,11 @@ class _RepairingStyleLLM:
         if self.calls == 1:
             content = {"legacy": "invalid"}
         else:
-            content = {"style_guidance": "修复后的中文措辞指导"}
+            content = {
+                "content_plan": "修复后的中文内容计划",
+                "content_requirements": ["保持当前角色判断。"],
+                "delivery_profile": _delivery_profile(),
+            }
         return SimpleNamespace(content=json.dumps(content, ensure_ascii=False))
 
 
@@ -132,6 +150,12 @@ def _input() -> dict[str, object]:
             "drives": character["drives"],
             "standards": character["standards"],
             "meaning_state": character["meaning_state"],
+            "personality_judgment": {
+                "logic": "analytical",
+                "defense": "reserved",
+                "quirks": "occasionally hesitant",
+                "taboos": "preserve character agency",
+            },
         },
         "evidence": [],
         "direct_facts": [],
@@ -335,7 +359,6 @@ def test_frozen_public_contract_fields_are_exact() -> None:
     ]
     assert [field.name for field in fields(TextSurfaceServicesV2)] == [
         "llm",
-        "style_config",
         "content_plan_config",
         "preference_config",
     ]
@@ -528,7 +551,11 @@ def test_text_surface_rejects_private_state_and_branch_fields() -> None:
         "semantic_affect": [],
         "permitted_action_results": [],
         "interaction_style_context": "brief and natural",
-        "character_voice_context": "reserved, analytical, and warm",
+        "character_expression_context": {
+            "tempo": "measured",
+            "linguistic_texture": "reserved, analytical, and warm",
+        },
+        "visual_character_context": "complete visual character context",
     }
     validate_text_surface_input(payload)
 
@@ -560,7 +587,7 @@ def test_text_surface_output_validates_every_list_entry() -> None:
         "content_requirements": ["Preserve the current addressee."],
         "visible_boundaries": ["keep the response concise"],
         "addressee_plan": ["address the current participant"],
-        "style_guidance": "natural",
+        "delivery_profile": _delivery_profile(),
         "selected_surface_intent": "acknowledge",
         "permitted_action_results": [{
             "action_kind": "background_work_request",
@@ -603,11 +630,14 @@ async def test_surface_stage_rejects_legacy_response_fallbacks() -> None:
         "semantic_affect": [],
         "permitted_action_results": [],
         "interaction_style_context": "brief and natural",
-        "character_voice_context": "reserved, analytical, and warm",
+        "character_expression_context": {
+            "tempo": "measured",
+            "linguistic_texture": "reserved, analytical, and warm",
+        },
+        "visual_character_context": "complete visual character context",
     }
     services = TextSurfaceServicesV2(
         llm=_FallbackSurfaceLLM(),
-        style_config=make_llm_call_config("v2_style"),
         content_plan_config=make_llm_call_config("v2_content"),
         preference_config=make_llm_call_config("v2_preference"),
     )
@@ -615,8 +645,14 @@ async def test_surface_stage_rejects_legacy_response_fallbacks() -> None:
     with pytest.raises(CognitionExecutionError) as error_info:
         await run_text_surface_planning(input_payload, services)
 
-    assert error_info.value.error_code == "surface_style_contract_exhausted"
-    assert error_info.value.stage == "surface.style"
+    assert error_info.value.error_code in {
+        "surface_content_plan_contract_exhausted",
+        "surface_preference_contract_exhausted",
+    }
+    assert error_info.value.stage in {
+        "surface.content_plan",
+        "surface.preference",
+    }
     assert error_info.value.attempt_count == 2
     assert error_info.value.safe_checkpoint == "pre_state_commit"
 
@@ -625,20 +661,23 @@ async def test_surface_stage_rejects_legacy_response_fallbacks() -> None:
 async def test_surface_stage_repairs_invalid_candidate_with_same_context() -> None:
     """A malformed candidate receives one bounded Chinese repair request."""
 
-    llm = _RepairingStyleLLM()
+    llm = _RepairingContentLLM()
     services = TextSurfaceServicesV2(
         llm=llm,
-        style_config=make_llm_call_config("v2_style"),
         content_plan_config=make_llm_call_config("v2_content"),
         preference_config=make_llm_call_config("v2_preference"),
     )
 
-    result = await run_style_stage(
+    result = await run_content_plan_stage(
         {"surface": "当前角色回应当前用户的输入"},
         services,
     )
 
-    assert result == "修复后的中文措辞指导"
+    assert result == (
+        "修复后的中文内容计划",
+        ["保持当前角色判断。"],
+        _delivery_profile(),
+    )
     assert llm.calls == 2
     repair_system = str(getattr(llm.messages[1][0], "content", ""))
     repair_payload = json.loads(

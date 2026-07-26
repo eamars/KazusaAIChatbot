@@ -90,7 +90,7 @@ def _surface_payload(
     *,
     content_plan: str,
     visible_boundaries: list[str],
-    style_guidance: str,
+    lexical_register: str,
     message_shape_guidance: str,
     selected_surface_intent: str,
     user_name: str,
@@ -104,8 +104,15 @@ def _surface_payload(
             'content_requirements': [selected_surface_intent],
             'visible_boundaries': visible_boundaries,
             'addressee_plan': [user_name],
-            'style_guidance': f'{style_guidance} {message_shape_guidance}',
+            'delivery_profile': {
+                'lexical_register': lexical_register,
+                'sentence_shape': message_shape_guidance,
+                'rhythm': '自然口语节奏',
+                'hesitation': '只在当前情绪支持时轻微停顿',
+                'punctuation': '克制自然',
+            },
             'selected_surface_intent': selected_surface_intent,
+            'permitted_action_results': [],
         },
         'user_name': user_name,
     }
@@ -124,7 +131,7 @@ def _touch_refusal_payload() -> dict:
             '可能对他来说就是随口一摸……但我可没打算就这么乖乖接受。'
         ),
         visible_boundaries=['拒绝未经允许的身体接触。'],
-        style_guidance='傲娇、克制短句，保留一点被逗乐但不接受的嘴硬。',
+        lexical_register='克制、略带别扭感的日常口语。',
         message_shape_guidance='1 条普通文字消息内保持紧凑短句。',
         selected_surface_intent='拒绝突如其来的亲昵动作并保留角色语气。',
         user_name='触碰测试用户',
@@ -274,7 +281,7 @@ async def test_live_dialog_agent_rewrites_touch_refusal_as_character_speech() ->
 
 
 async def test_live_dialog_generator_keeps_uncertainty_reply_on_topic() -> None:
-    """Style fields must not add unrelated private activity as visible text."""
+    """Delivery fields must not add unrelated private activity."""
 
     await _skip_if_dialog_generator_unavailable()
     payload = _surface_payload(
@@ -283,7 +290,7 @@ async def test_live_dialog_generator_keeps_uncertainty_reply_on_topic() -> None:
             '可以轻松表示听起来厉害，并问一句大家具体在聊哪种方案。'
         ),
         visible_boundaries=['不要装懂或扩展无关私人活动。'],
-        style_guidance='群聊短句，轻微困惑但自然。',
+        lexical_register='自然、略带困惑的群聊口语。',
         message_shape_guidance='1 条普通文字消息，2-3个短句。',
         selected_surface_intent='回应用户问什么时候玩喷雾式散热。',
         user_name='散热测试用户',
@@ -322,7 +329,7 @@ async def test_live_dialog_generator_does_not_invent_relationship_reading() -> N
             '可以问用户平时是否经常坐这条线。'
         ),
         visible_boundaries=['不要展开关系评价。'],
-        style_guidance='坦率认错，直接、简短，轻微不好意思。',
+        lexical_register='直接、简短、略显不好意思的日常口语。',
         message_shape_guidance='1 条普通文字消息，2-3个短句。',
         selected_surface_intent='承认武宜段已开通并回到铁路信息。',
         user_name='铁路测试用户',

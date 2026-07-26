@@ -91,11 +91,15 @@ def _dialog_payload(character_profile: dict, case: dict) -> tuple[HumanMessage, 
             'content_requirements': [case['content_plan']['visible_goal']],
             'visible_boundaries': [],
             'addressee_plan': ['current user'],
-            'style_guidance': (
-                f"{case['rhetorical_strategy']} {case['linguistic_style']} "
-                f"{case['content_plan']['rendering']}"
-            ),
+            'delivery_profile': {
+                'lexical_register': case['linguistic_style'],
+                'sentence_shape': case['content_plan']['rendering'],
+                'rhythm': '自然口语节奏',
+                'hesitation': '只在语义支持时轻微停顿',
+                'punctuation': '克制自然',
+            },
             'selected_surface_intent': case['content_plan']['visible_goal'],
+            'permitted_action_results': [],
         },
         'user_name': '测试用户',
     }
@@ -201,8 +205,15 @@ async def test_live_dialog_generator_node_accepts_deepseek_output() -> None:
             'content_requirements': ['保持建议对象和分类动作不变。'],
             'visible_boundaries': [],
             'addressee_plan': ['测试用户'],
-            'style_guidance': '务实、短句、略带吐槽，但不说教。25-45字。',
+            'delivery_profile': {
+                'lexical_register': '务实、略带吐槽但不说教',
+                'sentence_shape': '25-45 字的紧凑短句',
+                'rhythm': '自然口语节奏',
+                'hesitation': '少量',
+                'punctuation': '克制自然',
+            },
             'selected_surface_intent': '认可用户先按用途分类。',
+            'permitted_action_results': [],
         },
         'cognitive_episode': canonical_episode(
             episode_id='dialog-generator-live-contract',

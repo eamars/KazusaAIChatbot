@@ -167,10 +167,29 @@ def build_cognition_input_from_global_state(
             updated_at=timestamp,
         )
     selected_mutable_state = validate_cognition_state(selected_mutable_state)
+    character_profile = state.get("character_profile")
+    if not isinstance(character_profile, Mapping):
+        raise CognitionExecutionError(
+            "character profile is required for V2 cognition"
+        )
+    personality_brief = character_profile["personality_brief"]
+    if not isinstance(personality_brief, Mapping):
+        raise CognitionExecutionError(
+            "character personality brief must be a mapping"
+        )
+    personality_judgment: dict[str, str] = {}
+    for field_name in ("logic", "defense", "quirks", "taboos"):
+        field_value = personality_brief[field_name]
+        if not isinstance(field_value, str) or not field_value.strip():
+            raise CognitionExecutionError(
+                f"character personality {field_name} must be text"
+            )
+        personality_judgment[field_name] = field_value[:180]
     constraints = {
         "drives": selected_character_state["drives"],
         "standards": selected_character_state["standards"],
         "meaning_state": selected_character_state["meaning_state"],
+        "personality_judgment": personality_judgment,
     }
     episode_id = episode["episode_id"]
     semantic_text = _semantic_episode_text(state)
@@ -205,7 +224,6 @@ def build_cognition_input_from_global_state(
         episode["target_scope"].get("channel_type"),
         episode.get("trigger_source"),
     )
-    character_profile = state.get("character_profile")
     character_name = (
         _text(character_profile.get("name"))
         if isinstance(character_profile, Mapping)

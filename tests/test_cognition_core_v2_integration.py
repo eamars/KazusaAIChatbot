@@ -95,12 +95,17 @@ class _ScriptedLLM:
                 "resolver_pending_resolution": None,
                 "resolver_goal_progress": None,
             }
-        elif "style_guidance" in system:
-            result = {"style_guidance": "bounded style guidance"}
         elif "content_plan" in system:
             result = {
                 "content_plan": "bounded content-plan guidance",
                 "content_requirements": ["preserve actor direction"],
+                "delivery_profile": {
+                    "lexical_register": "plain",
+                    "sentence_shape": "concise",
+                    "rhythm": "steady",
+                    "hesitation": "light",
+                    "punctuation": "restrained",
+                },
             }
         elif "visible_boundaries" in system:
             result = {
@@ -129,11 +134,10 @@ def _core_services(llm: _ScriptedLLM) -> CognitionCoreServicesV2:
 
 
 def _surface_services(llm: _ScriptedLLM) -> TextSurfaceServicesV2:
-    """Build all three text-surface stage bindings."""
+    """Build both text-surface stage bindings."""
 
     return TextSurfaceServicesV2(
         llm=llm,
-        style_config=make_llm_call_config("v2_style"),
         content_plan_config=make_llm_call_config("v2_content"),
         preference_config=make_llm_call_config("v2_preference"),
     )
@@ -180,6 +184,12 @@ def _input(
             "drives": character["drives"],
             "standards": character["standards"],
             "meaning_state": character["meaning_state"],
+            "personality_judgment": {
+                "logic": "analytical",
+                "defense": "reserved",
+                "quirks": "occasional hesitation",
+                "taboos": "preserve character agency",
+            },
         },
         "evidence": [{
             "evidence_handle": "e1",
@@ -382,7 +392,11 @@ async def test_v2_surface_receives_semantic_handoff_only() -> None:
         "semantic_affect": [],
         "permitted_action_results": [],
         "interaction_style_context": "calm and concise",
-        "character_voice_context": "reserved, analytical, and warm",
+        "character_expression_context": {
+            "tempo": "steady",
+            "linguistic_texture": "Concise clauses with light hesitation.",
+        },
+        "visual_character_context": "reserved, analytical, and warm",
     }
 
     output = await run_text_surface_planning(input_payload, _surface_services(llm))
@@ -391,7 +405,7 @@ async def test_v2_surface_receives_semantic_handoff_only() -> None:
     assert output["content_plan"] == "bounded content-plan guidance"
     assert output["visible_boundaries"] == ["bounded visible boundary"]
     assert output["addressee_plan"] == ["bounded addressee plan"]
-    assert len(llm.calls) == 3
+    assert len(llm.calls) == 2
     rendered_prompts = "\n".join(llm.human_calls)
     for raw_value in (
         "v2-surface-integration",
@@ -410,7 +424,7 @@ async def test_v2_surface_receives_semantic_handoff_only() -> None:
         _visual_services(llm),
     )
     assert visual_output["visual_directives"] == "bounded visual directives"
-    assert len(llm.calls) == 4
+    assert len(llm.calls) == 3
 
 
 @pytest.mark.asyncio
@@ -445,7 +459,11 @@ async def test_v2_text_surface_never_invokes_terminal_visual_stage() -> None:
         "semantic_affect": [],
         "permitted_action_results": [],
         "interaction_style_context": "calm and concise",
-        "character_voice_context": "reserved, analytical, and warm",
+        "character_expression_context": {
+            "tempo": "steady",
+            "linguistic_texture": "Concise clauses with light hesitation.",
+        },
+        "visual_character_context": "reserved, analytical, and warm",
     }
 
     output = await run_text_surface_planning(
@@ -453,7 +471,7 @@ async def test_v2_text_surface_never_invokes_terminal_visual_stage() -> None:
         _surface_services(llm),
     )
 
-    assert len(llm.calls) == 3
+    assert len(llm.calls) == 2
     assert "pacing_guidance" not in output
 
 

@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from kazusa_ai_chatbot.cognition_core_v2.surface_stages import (
-    STYLE_SYSTEM_PROMPT,
+    CONTENT_PLAN_SYSTEM_PROMPT,
 )
 from kazusa_ai_chatbot.nodes import persona_supervisor2_l3_surface as surface_module
 from tests.cognition_core_v2_test_helpers import (
@@ -75,14 +75,15 @@ def _character_profile() -> dict[str, Any]:
     }
 
 
-def test_style_context_is_owned_by_the_surface_stage() -> None:
-    """Visible style stays downstream of cognition route selection."""
+def test_interaction_style_is_owned_by_unified_content_planning() -> None:
+    """Learned expression guidance stays downstream of cognition."""
 
-    style_prompt = STYLE_SYSTEM_PROMPT.casefold()
+    content_prompt = CONTENT_PLAN_SYSTEM_PROMPT.casefold()
 
-    assert "表达指导" in style_prompt
-    assert "不写最终对话" in style_prompt
-    assert "cognition state" not in style_prompt
+    assert "interaction style" in content_prompt
+    assert "delivery_profile" in content_prompt
+    assert "不写最终对话" in content_prompt
+    assert "cognition state" not in content_prompt
 
 
 @pytest.mark.asyncio
@@ -183,7 +184,13 @@ async def test_surface_handler_passes_loaded_style_to_v2_planner(
             "content_requirements": ["Address the current participant."],
             "visible_boundaries": [],
             "addressee_plan": ["current participant"],
-            "style_guidance": "brief",
+            "delivery_profile": {
+                "lexical_register": "plain",
+                "sentence_shape": "brief",
+                "rhythm": "steady",
+                "hesitation": "light",
+                "punctuation": "restrained",
+            },
             "selected_surface_intent": "acknowledge the current participant",
             "permitted_action_results": [],
         }
@@ -201,11 +208,14 @@ async def test_surface_handler_passes_loaded_style_to_v2_planner(
         "当前用户风格 语言: Prefer short direct sentences."
     )
     assert "internal-user-id" not in captured["interaction_style_context"]
-    voice = captured["character_voice_context"]
-    assert "fragmentation=" not in voice
-    assert "hesitation_density=" not in voice
-    assert "0.4" not in voice
-    assert len(voice) > 300
+    expression = captured["character_expression_context"]
+    assert expression["tempo"] == "moderate"
+    texture = expression["linguistic_texture"]
+    assert "fragmentation=" not in texture
+    assert "hesitation_density=" not in texture
+    assert "0.4" not in texture
+    assert len(texture) > 300
+    assert len(captured["visual_character_context"]) > 300
 
 
 def test_empty_style_context_has_explicit_semantic_fallback() -> None:

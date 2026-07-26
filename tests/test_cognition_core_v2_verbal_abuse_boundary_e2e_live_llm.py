@@ -156,6 +156,12 @@ async def _seed_anger_event_async(
         "drives": character_state["drives"],
         "standards": character_state["standards"],
         "meaning_state": character_state["meaning_state"],
+        "personality_judgment": {
+            "logic": "evidence-led and boundary-aware",
+            "defense": "firm when directly demeaned",
+            "quirks": "uses restrained directness under pressure",
+            "taboos": "do not normalize sustained verbal abuse",
+        },
     }
     activations = derive_persistent_emotion_activations(
         state,

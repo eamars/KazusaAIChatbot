@@ -21,7 +21,6 @@ from kazusa_ai_chatbot.cognition_core_v2.surface_stages import (
     run_dialog_compliance_repair_stage,
     run_content_plan_stage,
     run_preference_stage,
-    run_style_stage,
     run_visual_stage,
 )
 from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
@@ -33,22 +32,21 @@ async def run_text_surface_planning(
     input_payload: TextSurfaceInputV2,
     services: TextSurfaceServicesV2,
 ) -> TextSurfaceOutputV2:
-    """Run three bounded text-surface stages after cognition is committed."""
+    """Run two bounded text-surface stages after cognition is committed."""
 
     payload = validate_text_surface_input(input_payload)
     stage_payload = _project_surface_payload(payload)
     validate_prompt_projection(stage_payload)
-    style_payload = dict(stage_payload)
-    style_payload["character_voice_context"] = payload[
-        "character_voice_context"
-    ]
-    validate_prompt_projection(style_payload)
-    style, content_result, preference = await asyncio.gather(
-        run_style_stage(style_payload, services),
-        run_content_plan_stage(stage_payload, services),
+    content_payload = dict(stage_payload)
+    content_payload["character_expression_context"] = dict(
+        payload["character_expression_context"]
+    )
+    validate_prompt_projection(content_payload)
+    content_result, preference = await asyncio.gather(
+        run_content_plan_stage(content_payload, services),
         run_preference_stage(stage_payload, services),
     )
-    content_plan, content_requirements = content_result
+    content_plan, content_requirements, delivery_profile = content_result
     visible_boundaries, addressee_plan = preference
     output: TextSurfaceOutputV2 = {
         "schema_version": "text_surface_output.v2",
@@ -56,7 +54,7 @@ async def run_text_surface_planning(
         "content_requirements": content_requirements,
         "visible_boundaries": visible_boundaries,
         "addressee_plan": addressee_plan,
-        "style_guidance": style,
+        "delivery_profile": delivery_profile,
         "selected_surface_intent": payload["intention"]["intention"],
         "permitted_action_results": [
             {
@@ -78,27 +76,21 @@ async def run_text_surface_planning(
 
 async def repair_text_surface_planning(
     input_payload: TextSurfaceInputV2,
-    rejected_surface_output: TextSurfaceOutputV2,
     verified_hard_issues: list[str],
     services: TextSurfaceServicesV2,
 ) -> TextSurfaceOutputV2:
-    """Replace rejected semantic fields while preserving validated truth.
+    """Replace every producer-owned field from canonical cognition truth.
 
     Args:
         input_payload: Canonical cognition-owned surface input.
-        rejected_surface_output: Validated surface that produced bad dialog.
         verified_hard_issues: Bounded verifier findings to resolve.
         services: Configured text-surface model and route settings.
 
     Returns:
-        A validated surface with replaced semantic fields and preserved style,
-        selected intent, capability results, and runtime limits.
+        A validated replacement surface derived without rejected candidates.
     """
 
     payload = validate_text_surface_input(input_payload)
-    rejected_output = validate_text_surface_output(
-        rejected_surface_output,
-    )
     if (
         not isinstance(verified_hard_issues, list)
         or not 1 <= len(verified_hard_issues) <= 8
@@ -114,18 +106,11 @@ async def repair_text_surface_planning(
         raise ValueError("verified dialog hard issue text is invalid")
 
     stage_payload = _project_surface_payload(payload)
+    stage_payload["character_expression_context"] = dict(
+        payload["character_expression_context"]
+    )
     stage_payload["dialog_compliance_repair"] = {
         "verified_hard_issues": list(verified_hard_issues),
-        "rejected_surface_semantics": {
-            "content_plan": rejected_output["content_plan"],
-            "content_requirements": list(
-                rejected_output["content_requirements"]
-            ),
-            "visible_boundaries": list(
-                rejected_output["visible_boundaries"]
-            ),
-            "addressee_plan": list(rejected_output["addressee_plan"]),
-        },
     }
     validate_prompt_projection(stage_payload)
     replacement = await run_dialog_compliance_repair_stage(
@@ -140,10 +125,8 @@ async def repair_text_surface_planning(
         ),
         "visible_boundaries": list(replacement["visible_boundaries"]),
         "addressee_plan": list(replacement["addressee_plan"]),
-        "style_guidance": rejected_output["style_guidance"],
-        "selected_surface_intent": rejected_output[
-            "selected_surface_intent"
-        ],
+        "delivery_profile": dict(replacement["delivery_profile"]),
+        "selected_surface_intent": payload["intention"]["intention"],
         "permitted_action_results": [
             {
                 **row,
@@ -151,12 +134,12 @@ async def repair_text_surface_planning(
                     dict(role) for role in row["target_roles"]
                 ],
             }
-            for row in rejected_output["permitted_action_results"]
+            for row in payload["permitted_action_results"]
         ],
     }
-    if "runtime_capability_limits" in rejected_output:
+    if "runtime_capability_limits" in payload:
         output["runtime_capability_limits"] = list(
-            rejected_output["runtime_capability_limits"]
+            payload["runtime_capability_limits"]
         )
     validated_output = validate_text_surface_output(output)
     return validated_output
@@ -170,8 +153,8 @@ async def run_visual_surface_planning(
 
     payload = validate_text_surface_input(input_payload)
     stage_payload = _project_surface_payload(payload)
-    stage_payload["character_voice_context"] = payload[
-        "character_voice_context"
+    stage_payload["visual_character_context"] = payload[
+        "visual_character_context"
     ]
     validate_prompt_projection(stage_payload)
     visual_directives = await run_visual_stage(stage_payload, services)

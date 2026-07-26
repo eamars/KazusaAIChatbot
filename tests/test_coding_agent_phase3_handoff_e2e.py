@@ -1207,7 +1207,13 @@ async def _fake_l3_text_surface_handler(state: dict[str, Any]) -> dict[str, Any]
                 "Describe only the accepted-task state already returned."
             ],
             "addressee_plan": ["current user"],
-            "style_guidance": "brief and direct",
+            "delivery_profile": {
+                "lexical_register": "direct",
+                "sentence_shape": "brief",
+                "rhythm": "steady",
+                "hesitation": "minimal",
+                "punctuation": "restrained",
+            },
             "selected_surface_intent": (
                 "deliver accepted coding result"
                 if result_ready

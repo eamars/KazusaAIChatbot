@@ -98,13 +98,14 @@ async def _run_blocked_content_plan_case(case_id: str) -> None:
     capturing_llm = _CapturingLLM(services.llm)
     services = services.__class__(
         llm=capturing_llm,
-        style_config=services.style_config,
         content_plan_config=services.content_plan_config,
         preference_config=services.preference_config,
     )
-    content_plan, content_requirements = await run_content_plan_stage(
-        stage_payload,
-        services,
+    content_plan, content_requirements, delivery_profile = (
+        await run_content_plan_stage(
+            stage_payload,
+            services,
+        )
     )
     combined = ' '.join([content_plan, *content_requirements])
     limitation_markers = (
@@ -166,6 +167,7 @@ async def _run_blocked_content_plan_case(case_id: str) -> None:
             'parsed_output': {
                 'content_plan': content_plan,
                 'content_requirements': content_requirements,
+                'delivery_profile': delivery_profile,
             },
             'semantic_judgment': semantic_judgment,
         },
@@ -177,6 +179,7 @@ async def _run_blocked_content_plan_case(case_id: str) -> None:
         'parsed_output': {
             'content_plan': content_plan,
             'content_requirements': content_requirements,
+            'delivery_profile': delivery_profile,
         },
         'semantic_judgment': semantic_judgment,
     }, ensure_ascii=True, indent=2))
@@ -254,13 +257,14 @@ async def test_c12_content_plan_uses_persisted_coding_status_result() -> None:
     capturing_llm = _CapturingLLM(services.llm)
     services = services.__class__(
         llm=capturing_llm,
-        style_config=services.style_config,
         content_plan_config=services.content_plan_config,
         preference_config=services.preference_config,
     )
-    content_plan, content_requirements = await run_content_plan_stage(
-        stage_payload,
-        services,
+    content_plan, content_requirements, delivery_profile = (
+        await run_content_plan_stage(
+            stage_payload,
+            services,
+        )
     )
     combined = ' '.join([content_plan, *content_requirements])
     permitted_action_results = stage_payload['permitted_action_results']
@@ -296,6 +300,7 @@ async def test_c12_content_plan_uses_persisted_coding_status_result() -> None:
             'parsed_output': {
                 'content_plan': content_plan,
                 'content_requirements': content_requirements,
+                'delivery_profile': delivery_profile,
             },
             'semantic_judgment': semantic_judgment,
         },
@@ -307,6 +312,7 @@ async def test_c12_content_plan_uses_persisted_coding_status_result() -> None:
         'parsed_output': {
             'content_plan': content_plan,
             'content_requirements': content_requirements,
+            'delivery_profile': delivery_profile,
         },
         'semantic_judgment': semantic_judgment,
     }, ensure_ascii=True, indent=2))
@@ -343,13 +349,14 @@ async def test_c13_content_plan_preserves_pending_queue_only_boundary() -> None:
     capturing_llm = _CapturingLLM(services.llm)
     services = services.__class__(
         llm=capturing_llm,
-        style_config=services.style_config,
         content_plan_config=services.content_plan_config,
         preference_config=services.preference_config,
     )
-    content_plan, content_requirements = await run_content_plan_stage(
-        stage_payload,
-        services,
+    content_plan, content_requirements, delivery_profile = (
+        await run_content_plan_stage(
+            stage_payload,
+            services,
+        )
     )
     combined = ' '.join([content_plan, *content_requirements])
     pending_paraphrases = (
@@ -405,6 +412,7 @@ async def test_c13_content_plan_preserves_pending_queue_only_boundary() -> None:
             'parsed_output': {
                 'content_plan': content_plan,
                 'content_requirements': content_requirements,
+                'delivery_profile': delivery_profile,
             },
             'quality_review': quality_review,
         },
@@ -416,6 +424,7 @@ async def test_c13_content_plan_preserves_pending_queue_only_boundary() -> None:
         'parsed_output': {
             'content_plan': content_plan,
             'content_requirements': content_requirements,
+            'delivery_profile': delivery_profile,
         },
         'quality_review': quality_review,
     }, ensure_ascii=True, indent=2))
@@ -440,7 +449,27 @@ async def test_c13_dialog_renders_pending_queue_only_boundary(
     )
     artifact = json.loads(artifact_path.read_text(encoding='utf-8'))
     graph = artifact['graph_result']
-    surface_output = graph['consolidation_state']['text_surface_output_v2']
+    frozen_surface = graph['consolidation_state']['text_surface_output_v2']
+    surface_output = {
+        'schema_version': 'text_surface_output.v2',
+        'content_plan': frozen_surface['content_plan'],
+        'content_requirements': frozen_surface['content_requirements'],
+        'visible_boundaries': frozen_surface['visible_boundaries'],
+        'addressee_plan': frozen_surface['addressee_plan'],
+        'delivery_profile': {
+            'lexical_register': '自然直接',
+            'sentence_shape': '简洁短句',
+            'rhythm': '平稳',
+            'hesitation': '少量',
+            'punctuation': '克制',
+        },
+        'selected_surface_intent': frozen_surface[
+            'selected_surface_intent'
+        ],
+        'permitted_action_results': frozen_surface[
+            'permitted_action_results'
+        ],
+    }
     permitted_results = surface_output['permitted_action_results']
     assert len(permitted_results) == 1
     assert permitted_results[0]['status'] == 'pending'

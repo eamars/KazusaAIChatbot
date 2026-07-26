@@ -31,6 +31,7 @@ from kazusa_ai_chatbot.config import (
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionExecutionError,
     validate_cognition_core_output,
+    validate_text_surface_output,
     validate_visual_surface_output,
 )
 from kazusa_ai_chatbot.cognition_resolver.capabilities import (
@@ -48,7 +49,10 @@ from kazusa_ai_chatbot.cognition_resolver.pending import (
 from kazusa_ai_chatbot.cognition_resolver.state import (
     ensure_initial_resolver_inputs,
 )
-from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
+from kazusa_ai_chatbot.nodes.dialog_agent import (
+    StateContractError,
+    dialog_agent,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
     build_action_availability_snapshot,
     call_cognition_subgraph,
@@ -508,6 +512,14 @@ async def call_action_subgraph(state: GlobalPersonaState) -> dict:
     )
     result = await dialog_agent(surface_state)
     final_dialog = result["final_dialog"]
+    accepted_surface = result.get("text_surface_output_v2")
+    if not isinstance(accepted_surface, dict):
+        raise StateContractError(
+            "dialog result missing accepted text_surface_output_v2"
+        )
+    accepted_surface = validate_text_surface_output(accepted_surface)
+    surface_state["text_surface_output_v2"] = accepted_surface
+    surface_update["text_surface_output_v2"] = accepted_surface
     action_results = await _action_results_for_state(
         surface_state,
         executed_action_attempt_ids=(

@@ -66,7 +66,13 @@ def _text_surface_output() -> dict[str, object]:
         "content_requirements": ["Address the current user."],
         "visible_boundaries": [],
         "addressee_plan": ["current user"],
-        "style_guidance": "warm and concise",
+        "delivery_profile": {
+            "lexical_register": "warm",
+            "sentence_shape": "concise",
+            "rhythm": "steady",
+            "hesitation": "minimal",
+            "punctuation": "restrained",
+        },
         "selected_surface_intent": "acknowledge",
         "permitted_action_results": [],
     }
@@ -262,7 +268,7 @@ async def test_dialog_generator_forwards_native_surface_without_legacy_fields(
         "content_requirements",
         "visible_boundaries",
         "addressee_plan",
-        "style_guidance",
+        "delivery_profile",
         "selected_surface_intent",
         "permitted_action_results",
     }
@@ -344,6 +350,7 @@ async def test_dialog_agent_returns_final_dialog_and_target(monkeypatch) -> None
     assert result["final_dialog"] == ["Hello there!", "How are you?"]
     assert result["target_addressed_user_ids"] == ["global-user-123"]
     assert result["target_broadcast"] is False
+    assert result["text_surface_output_v2"] == _text_surface_output()
 
 
 @pytest.mark.asyncio

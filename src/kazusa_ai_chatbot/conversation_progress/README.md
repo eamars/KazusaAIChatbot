@@ -241,6 +241,14 @@ Conversation progress influences the intended response move. Dialog generation
 owns Kazusa's final lines, which keeps the module reusable across host
 chatbots with different voice layers.
 
+Recording starts only after dialog verification has accepted a candidate. The
+recorder receives that accepted dialog and the accepted surface's semantic
+content plan and selected intent. Delivery-profile fields are omitted because
+they describe response-local realization rather than future episode meaning.
+When dialog repair replaces a surface, the replacement surface is the sole
+recording source. Rejected dialog and surface candidates remain protected
+trace evidence and never become conversation-progress input.
+
 ## Semantic Ownership
 
 LLM judgment owns conversation semantics:
@@ -272,8 +280,9 @@ Deterministic code keeps the payload structural and bounded.
 
 Reusable integrations preserve the same capability split: response eligibility
 is decided outside the module, prompt-facing progress informs response
-planning, host cognition/dialog generates the response, and the completed turn
-updates short-term progress for the next interaction.
+planning, host cognition/dialog generates and verifies the response, and only
+the accepted completed turn updates short-term progress for the next
+interaction.
 
 ## Stable Capabilities
 

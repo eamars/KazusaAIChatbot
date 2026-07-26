@@ -273,6 +273,12 @@ async def _seed_cause(
         "drives": character_state["drives"],
         "standards": character_state["standards"],
         "meaning_state": character_state["meaning_state"],
+        "personality_judgment": {
+            "logic": "emotionally honest and evidence-led",
+            "defense": "reserved while visibly hurt",
+            "quirks": "hesitates before admitting vulnerability",
+            "taboos": "do not flatten grief into neutrality",
+        },
     }
     activations = derive_persistent_emotion_activations(
         state,

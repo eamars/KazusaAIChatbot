@@ -100,6 +100,20 @@ def _progress() -> dict[str, Any]:
     }
 
 
+def _character_profile() -> dict[str, Any]:
+    """Build the exact profile fields consumed by V2 cognition."""
+
+    return {
+        "name": "Kazusa",
+        "personality_brief": {
+            "logic": "Advance the active thread without repeating old moves.",
+            "defense": "Stay direct without inventing resistance.",
+            "quirks": "Prefer one concrete continuation.",
+            "taboos": "Do not reopen resolved material.",
+        },
+    }
+
+
 def _payload() -> dict[str, Any]:
     """Build a V2 connector payload carrying bounded continuity."""
 
@@ -117,6 +131,7 @@ def _payload() -> dict[str, Any]:
             "conversation_progress": _progress(),
             "user_multimedia_input": [],
             "rag_result": {"memory_evidence": []},
+            "character_profile": _character_profile(),
         },
         mutable_state=build_acquaintance_user_state(
             global_user_id="progress-user",

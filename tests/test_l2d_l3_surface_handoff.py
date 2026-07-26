@@ -20,16 +20,28 @@ from tests.cognition_core_v2_test_helpers import (
 class _LLM:
     """Return one bounded semantic result for every surface stage."""
 
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
     async def ainvoke(self, messages: list[object], *, config: object) -> SimpleNamespace:
-        del config
         system = str(getattr(messages[0], "content", ""))
-        json.loads(str(getattr(messages[-1], "content", "{}")))
-        if "style_guidance" in system and "content_plan" not in system:
-            result = {"style_guidance": "style"}
-        elif "content_plan" in system and "content_requirements" in system:
+        payload = json.loads(str(getattr(messages[-1], "content", "{}")))
+        self.calls.append({
+            "config": config,
+            "payload": payload,
+            "system": system,
+        })
+        if "content_plan" in system and "content_requirements" in system:
             result = {
                 "content_plan": "content plan",
                 "content_requirements": ["preserve the current addressee"],
+                "delivery_profile": {
+                    "lexical_register": "plain",
+                    "sentence_shape": "compact",
+                    "rhythm": "measured",
+                    "hesitation": "occasional",
+                    "punctuation": "restrained",
+                },
             }
         elif "visible_boundaries" in system and "addressee_plan" in system:
             result = {
@@ -90,9 +102,9 @@ def _character_profile() -> dict[str, object]:
 def _services() -> object:
     from kazusa_ai_chatbot.cognition_core_v2.contracts import TextSurfaceServicesV2
 
+    llm = _LLM()
     return TextSurfaceServicesV2(
-        llm=_LLM(),
-        style_config=object(),
+        llm=llm,
         content_plan_config=object(),
         preference_config=object(),
     )
@@ -119,6 +131,8 @@ def test_l3_builder_uses_only_committed_v2_surface_fields() -> None:
 
     assert payload["schema_version"] == "text_surface_input.v2"
     assert payload["primary_bid"]["desired_outcome"] == "maintain continuity"
+    assert payload["character_expression_context"]["tempo"] == "moderate"
+    assert "Kazusa" in payload["visual_character_context"]
     assert "entity_id" not in json.dumps(payload)
 
 
@@ -164,7 +178,8 @@ async def test_text_surface_output_carries_exact_action_result_authority() -> No
         run_text_surface_planning,
     )
 
-    output = await run_text_surface_planning(input_payload, _services())
+    services = _services()
+    output = await run_text_surface_planning(input_payload, services)
 
     assert output["permitted_action_results"] == [{
         "action_kind": "background_work_request",
@@ -172,6 +187,15 @@ async def test_text_surface_output_carries_exact_action_result_authority() -> No
         "semantic_result": "The accepted task is scheduled.",
         "target_roles": [],
     }]
+    assert output["delivery_profile"]["lexical_register"] == "plain"
+    assert len(services.llm.calls) == 2
+    content_call, preference_call = services.llm.calls
+    content_surface = content_call["payload"]["surface"]
+    preference_surface = preference_call["payload"]["surface"]
+    assert "character_expression_context" in content_surface
+    assert "character_expression_context" not in preference_surface
+    assert "visual_character_context" not in content_surface
+    assert "visual_character_context" not in preference_surface
 
 
 def test_surface_prompt_projects_action_roles_without_identity_leak() -> None:

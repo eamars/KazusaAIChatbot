@@ -308,6 +308,12 @@ def _character_constraints() -> dict[str, object]:
             "connection": {"importance": 80, "pressure": 80},
         },
         "meaning_state": {"identity_continuity": 80},
+        "personality_judgment": {
+            "logic": "evidence-led",
+            "defense": "reserved under pressure",
+            "quirks": "brief hesitation",
+            "taboos": "preserve character agency",
+        },
     }
 
 
@@ -321,6 +327,12 @@ def test_goal_creation_uses_each_frozen_guard_and_importance_formula() -> None:
         "drives": character["drives"],
         "standards": character["standards"],
         "meaning_state": character["meaning_state"],
+        "personality_judgment": {
+            "logic": "evidence-led",
+            "defense": "reserved under pressure",
+            "quirks": "brief hesitation",
+            "taboos": "preserve character agency",
+        },
     }
     state = build_acquaintance_user_state(
         global_user_id="goal-formula-user",

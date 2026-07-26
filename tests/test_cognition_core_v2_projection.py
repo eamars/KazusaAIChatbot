@@ -28,6 +28,12 @@ def _constraints() -> dict[str, object]:
         "drives": state["drives"],
         "standards": state["standards"],
         "meaning_state": state["meaning_state"],
+        "personality_judgment": {
+            "logic": "evidence-led",
+            "defense": "reserved under pressure",
+            "quirks": "brief hesitation before vulnerable admissions",
+            "taboos": "avoid effortless emotional reversal",
+        },
     }
 
 
@@ -108,6 +114,9 @@ def test_state_projection_separates_user_state_and_character_constraints() -> No
         "履行已经接受的承诺",
         "保护尊严与自主性",
     ]
+    assert projection.payload["character_constraints"][
+        "personality_judgment"
+    ] == _constraints()["personality_judgment"]
     assert projection.handle_to_ref["r1"]["entity_id"] == (
         "relationship:user:user-projection"
     )

@@ -156,7 +156,13 @@ def _dialog_global_state() -> dict[str, object]:
             "content_requirements": ["Address the current user."],
             "visible_boundaries": [],
             "addressee_plan": ["current user"],
-            "style_guidance": "concise",
+            "delivery_profile": {
+                "lexical_register": "plain",
+                "sentence_shape": "concise",
+                "rhythm": "steady",
+                "hesitation": "minimal",
+                "punctuation": "restrained",
+            },
             "selected_surface_intent": "acknowledge",
             "permitted_action_results": [],
         },
@@ -516,14 +522,19 @@ async def test_dialog_generator_records_llm_metadata_without_generated_text(
         '{"final_dialog": ["secret generated dialog"]}'
     )
     monkeypatch.setattr(dialog_module, "_dialog_generator_llm", llm)
-    for llm_name in (
-        "_dialog_semantic_fidelity_llm",
-        "_dialog_surface_integrity_llm",
-    ):
+    verifier_outputs = {
+        "_dialog_semantic_fidelity_llm": (
+            '{"aligned": true, "hard_errors": []}'
+        ),
+        "_dialog_surface_integrity_llm": (
+            '{"aligned": true, "issues": []}'
+        ),
+    }
+    for llm_name, verifier_output in verifier_outputs.items():
         monkeypatch.setattr(
             dialog_module,
             llm_name,
-            _StaticLLM('{"aligned": true, "issues": []}'),
+            _StaticLLM(verifier_output),
         )
     monkeypatch.setattr(
         dialog_module.event_logging,
@@ -569,14 +580,19 @@ async def test_dialog_agent_records_quality_without_dialog_text(monkeypatch) -> 
             '{"final_dialog": ["secret full graph reply"]}'
         ),
     )
-    for llm_name in (
-        "_dialog_semantic_fidelity_llm",
-        "_dialog_surface_integrity_llm",
-    ):
+    verifier_outputs = {
+        "_dialog_semantic_fidelity_llm": (
+            '{"aligned": true, "hard_errors": []}'
+        ),
+        "_dialog_surface_integrity_llm": (
+            '{"aligned": true, "issues": []}'
+        ),
+    }
+    for llm_name, verifier_output in verifier_outputs.items():
         monkeypatch.setattr(
             dialog_module,
             llm_name,
-            _StaticLLM('{"aligned": true, "issues": []}'),
+            _StaticLLM(verifier_output),
         )
     monkeypatch.setattr(
         dialog_module.event_logging,

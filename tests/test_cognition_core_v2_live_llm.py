@@ -149,6 +149,12 @@ def _chain_input(
             "drives": character["drives"],
             "standards": character["standards"],
             "meaning_state": character["meaning_state"],
+            "personality_judgment": {
+                "logic": "evidence-led",
+                "defense": "reserved under pressure",
+                "quirks": "brief hesitation",
+                "taboos": "preserve character agency",
+            },
         },
         "evidence": [{
             "evidence_handle": "e1",
@@ -422,7 +428,13 @@ async def test_v2_text_surface_stage_contracts_live_llm() -> None:
         }],
         "permitted_action_results": [],
         "interaction_style_context": "brief and natural",
-        "character_voice_context": "reserved, analytical, vivid, and warm",
+        "character_expression_context": {
+            "tempo": "measured",
+            "linguistic_texture": "Warm concise clauses with light hesitation.",
+        },
+        "visual_character_context": (
+            "reserved, analytical, vivid, and warm"
+        ),
     }
 
     output = await run_text_surface_planning(payload, text_services)
@@ -439,16 +451,22 @@ async def test_v2_text_surface_stage_contracts_live_llm() -> None:
             "visual_calls": visual_llm.calls,
             "output": output,
             "visual_output": visual_output,
-            "judgment": "three text schemas and one terminal visual schema passed",
+            "judgment": "two text schemas and one terminal visual schema passed",
         },
     )
 
-    assert len(text_llm.calls) == 3
+    assert len(text_llm.calls) == 2
     assert len(visual_llm.calls) == 1
     assert output["visible_boundaries"]
     assert output["addressee_plan"]
     assert output["content_requirements"]
-    assert "character_voice_context" not in output
+    assert set(output["delivery_profile"]) == {
+        "lexical_register",
+        "sentence_shape",
+        "rhythm",
+        "hesitation",
+        "punctuation",
+    }
     assert visual_output["visual_directives"]
     assert artifact_path.exists()
 

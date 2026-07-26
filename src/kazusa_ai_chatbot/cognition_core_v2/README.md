@@ -94,17 +94,20 @@ reclassifying it from keywords or adding another LLM stage.
 
 The shared surface input receives semantic intention, bounded affect and
 relationship projections, complete-bid projections, permitted action results,
-interaction style, and bounded character voice. The three-call text planner
-exposes raw character voice only to speech-style planning; content and
-preference planning cannot observe it. Speech-style output is limited to
-lexical register and wording, sentence length and shape, rhythm, hesitation,
-and punctuation; it never proposes details, topics, examples, images, actions,
-claims, inferences, or content beats. The exact text output contains no raw
-voice or visual directives. The independent one-call visual planner may
-observe raw voice and produces image-generation directives as terminal private
-evidence; it has no downstream image or dialog model. Raw episode traces
-retain those directives for audit, while every model-facing consolidation
-projection excludes their fragments.
+interaction style, an exact tempo/linguistic-texture expression context, and a
+separate bounded visual-character context. Normal text planning makes exactly
+two parallel calls. Unified content planning atomically returns the content
+plan, requirements, and a five-field delivery profile; preference planning
+returns only real visible boundaries and addressee constraints. Neither call
+receives the visual-character context, and preference receives no character
+expression context. The delivery profile is limited to lexical register,
+sentence shape, rhythm, hesitation, and punctuation and cannot authorize a
+semantic stance. The exact text output contains no raw character profile or
+visual directives. The independent one-call visual planner may observe the
+isolated visual-character context and produces image-generation directives as
+terminal private evidence; it has no downstream image or dialog model. Raw
+episode traces retain those directives for audit, while every model-facing
+consolidation projection excludes their fragments.
 
 Content planning expresses the selected character judgment using the current
 scene, affect, relationship, and interaction style. Coherent imaginative
@@ -114,9 +117,12 @@ real visible boundaries and addressee constraints, so both lists may be empty.
 Dialog owns natural character-specific chat-ready wording. Three focused
 hard-error checks run in parallel on the existing dialog-model route within
 the shared 24,000-character surface-prompt bound. Semantic fidelity receives
-current model-visible percept rows, the candidate role frame, and candidate
-dialog; it rejects internal contradiction, direct current-input conflict, and
-non-selection role reversal. Role direction receives only typed
+current model-visible percept rows, the candidate role frame, candidate
+dialog, and the authoritative selected surface intent, content plan,
+requirements, and visible boundaries. It rejects internal contradiction,
+direct current-input conflict, non-selection role reversal, and unsupported
+within-turn opposite-stance transitions. Delivery profile and action-result
+fields are excluded from semantic authority. Role direction receives only typed
 selection-required role tuples and rejects selection-owner transfer or
 actor/target reversal. Selection-required role fields are excluded from the
 semantic-fidelity projection, which retains the raw current-input meaning and
@@ -128,21 +134,23 @@ supplying staging forms. Dialog expresses emotion, character, and interaction
 posture through sendable wording and cadence. Action narration is outside the
 fatal taxonomy and remains unchanged when the model produces it; the runtime
 prompts neither request it nor create a rejection or repair rule for it.
-Generated content, addressee, intent, and style proposals stay outside
-hard-error authority. Source percepts and generated character speech carry
-separate typed pronoun frames before role direction is compared. Novelty and
-coherent drift are not failures by themselves. Deterministic code merges only
-the verdict shapes, bounding each owner to four issues and the merged result to
-eight. A negative result returns to the text-surface owner for one complete
-replacement of `content_plan`, `content_requirements`, `visible_boundaries`,
-and `addressee_plan`. The replacement preserves validated style, selected
-intent, action truth, and runtime capability limits before dialog renders the
-second and final candidate. Character-owned refusal, negotiation, and
-conditions remain compatible with a user request unless they reverse typed
-actor, target, response-owner, or selection-owner direction. A second rejected
-candidate raises the typed `dialog_compliance_contract_exhausted` failure from
-the post-cognition-commit checkpoint. The protected turn trace records the
-focused checks and dialog candidates as distinct evidence.
+Source percepts and generated character speech carry separate typed pronoun
+frames before role direction is compared. Novelty, coherent drift,
+character-owned refusal, negotiation, and supported changes of mind are not
+failures by themselves. Deterministic code merges only the verdict shapes,
+bounding each owner to four issues and the merged result to eight. A negative
+result returns canonical surface input plus bounded verified issues to the
+text-surface owner for one complete replacement of `content_plan`,
+`content_requirements`, `delivery_profile`, `visible_boundaries`, and
+`addressee_plan`. Rejected surface fields and rejected dialog are trace-only
+and are absent from both repair-model payloads. Selected intent, action truth,
+and runtime capability limits are reconstructed from canonical input before
+dialog renders the second and final candidate. A second rejected candidate
+raises the typed `dialog_compliance_contract_exhausted` failure from the
+post-cognition-commit checkpoint. The accepted dialog is returned with the
+exact original or replacement surface that produced it, and only that pair can
+reach post-turn consumers. The protected turn trace records rejected focused
+checks, surfaces, and dialog candidates as diagnostic evidence.
 
 Each focused verifier validates its own exact JSON verdict. A structurally
 invalid parsed verdict receives one complete replacement using the unchanged

@@ -287,12 +287,22 @@ class SceneContextV2(TypedDict):
     semantic_temporal_context: str
 
 
+class PersonalityJudgmentV2(TypedDict):
+    """Trusted semantic character descriptors used during cognition."""
+
+    logic: str
+    defense: str
+    quirks: str
+    taboos: str
+
+
 class CharacterConstraintSnapshotV2(TypedDict):
     """Read-only character constraints supplied to user-scope appraisal."""
 
     drives: dict[str, dict[str, Any]]
     standards: list[dict[str, Any]]
     meaning_state: dict[str, Any]
+    personality_judgment: PersonalityJudgmentV2
 
 
 class SemanticQuestionV2(TypedDict):
@@ -634,6 +644,23 @@ class SemanticActionResultV2(TypedDict):
     target_roles: list[RoleRefV2]
 
 
+class CharacterExpressionContextV2(TypedDict):
+    """Delivery-only character context exposed to text planning."""
+
+    tempo: str
+    linguistic_texture: str
+
+
+class DeliveryProfileV2(TypedDict):
+    """Bounded delivery dimensions owned atomically with surface content."""
+
+    lexical_register: str
+    sentence_shape: str
+    rhythm: str
+    hesitation: str
+    punctuation: str
+
+
 class TextSurfaceInputV2(TypedDict):
     """Public V2 text-surface input contract."""
 
@@ -649,7 +676,8 @@ class TextSurfaceInputV2(TypedDict):
     permitted_action_results: list[SemanticActionResultV2]
     runtime_capability_limits: NotRequired[list[str]]
     interaction_style_context: str
-    character_voice_context: str
+    character_expression_context: CharacterExpressionContextV2
+    visual_character_context: str
 
 
 class TextSurfaceOutputV2(TypedDict):
@@ -660,7 +688,7 @@ class TextSurfaceOutputV2(TypedDict):
     content_requirements: list[str]
     visible_boundaries: list[str]
     addressee_plan: list[str]
-    style_guidance: str
+    delivery_profile: DeliveryProfileV2
     selected_surface_intent: str
     permitted_action_results: list[SemanticActionResultV2]
     runtime_capability_limits: NotRequired[list[str]]
@@ -687,10 +715,9 @@ class CognitionCoreServicesV2:
 
 @dataclass(frozen=True)
 class TextSurfaceServicesV2:
-    """Injected three-stage V2 text-surface bindings."""
+    """Injected two-stage V2 text-surface bindings."""
 
     llm: LLMInvoker
-    style_config: LLMCallConfig
     content_plan_config: LLMCallConfig
     preference_config: LLMCallConfig
 
@@ -898,7 +925,8 @@ def validate_text_surface_input(
             "semantic_affect",
             "permitted_action_results",
             "interaction_style_context",
-            "character_voice_context",
+            "character_expression_context",
+            "visual_character_context",
         }
         | ({"primary_bid"} if "primary_bid" in payload else set())
         | ({"semantic_relationship"} if "semantic_relationship" in payload else set())
@@ -914,9 +942,29 @@ def validate_text_surface_input(
     _validate_intention(payload["intention"])
     _validate_goal_resolution(payload["goal_resolution"])
     _require_text(payload["interaction_style_context"], "interaction style")
+    expression_context = payload["character_expression_context"]
+    if not isinstance(expression_context, Mapping) or set(
+        expression_context
+    ) != {
+        "tempo",
+        "linguistic_texture",
+    }:
+        raise CognitionContractError(
+            "character expression context fields are not exact"
+        )
     _require_text(
-        payload["character_voice_context"],
-        "character voice context",
+        expression_context["tempo"],
+        "character expression tempo",
+        maximum=180,
+    )
+    _require_text(
+        expression_context["linguistic_texture"],
+        "character linguistic texture",
+        maximum=1000,
+    )
+    _require_text(
+        payload["visual_character_context"],
+        "visual character context",
         maximum=1500,
     )
     _validate_canonical_episode(payload["episode"])
@@ -954,7 +1002,7 @@ def validate_text_surface_output(
         "content_requirements",
         "visible_boundaries",
         "addressee_plan",
-        "style_guidance",
+        "delivery_profile",
         "selected_surface_intent",
         "permitted_action_results",
     }
@@ -968,10 +1016,10 @@ def validate_text_surface_output(
         raise CognitionContractError("unsupported text surface output schema")
     for field_name in (
         "content_plan",
-        "style_guidance",
         "selected_surface_intent",
     ):
         _require_text(payload[field_name], field_name, maximum=1000)
+    _validate_delivery_profile(payload["delivery_profile"])
     requirements = payload["content_requirements"]
     if not isinstance(requirements, list) or not 1 <= len(requirements) <= 8:
         raise CognitionContractError("content_requirements must contain 1-8 items")
@@ -980,13 +1028,18 @@ def validate_text_surface_output(
     for index, item in enumerate(requirements):
         _require_text(item, f"content_requirements[{index}]", maximum=500)
     for field_name in ("visible_boundaries", "addressee_plan"):
-        if not isinstance(payload[field_name], list):
-            raise CognitionContractError(f"{field_name} must be a list")
-        for index, item in enumerate(payload[field_name]):
+        items = payload[field_name]
+        if not isinstance(items, list) or len(items) > 8:
+            raise CognitionContractError(
+                f"{field_name} must contain 0-8 items"
+            )
+        if len(items) != len(set(items)):
+            raise CognitionContractError(f"{field_name} contains duplicates")
+        for index, item in enumerate(items):
             _require_text(
                 item,
                 f"{field_name}[{index}]",
-                maximum=1000,
+                maximum=500,
             )
     action_results = payload["permitted_action_results"]
     if not isinstance(action_results, list):
@@ -997,6 +1050,26 @@ def validate_text_surface_output(
         _validate_action_result(row)
     _validate_runtime_capability_limits(payload)
     return dict(payload)  # type: ignore[return-value]
+
+
+def _validate_delivery_profile(value: Any) -> None:
+    """Validate the exact delivery-only dimensions of a text surface."""
+
+    fields = {
+        "lexical_register",
+        "sentence_shape",
+        "rhythm",
+        "hesitation",
+        "punctuation",
+    }
+    if not isinstance(value, Mapping) or set(value) != fields:
+        raise CognitionContractError("delivery profile fields are not exact")
+    for field_name in fields:
+        _require_text(
+            value[field_name],
+            f"delivery_profile.{field_name}",
+            maximum=200,
+        )
 
 
 def _validate_runtime_capability_limits(
@@ -1914,6 +1987,7 @@ def _validate_character_constraints(value: Any) -> None:
         "drives",
         "standards",
         "meaning_state",
+        "personality_judgment",
     }:
         raise CognitionContractError("character constraints fields are not exact")
     drives = value["drives"]
@@ -1975,6 +2049,22 @@ def _validate_character_constraints(value: Any) -> None:
         _require_utc_timestamp(
             meaning["low_coherence_since"],
             "meaning_state.low_coherence_since",
+        )
+    personality = value["personality_judgment"]
+    if not isinstance(personality, Mapping) or set(personality) != {
+        "logic",
+        "defense",
+        "quirks",
+        "taboos",
+    }:
+        raise CognitionContractError(
+            "character constraint personality judgment is invalid"
+        )
+    for field_name in ("logic", "defense", "quirks", "taboos"):
+        _require_text(
+            personality[field_name],
+            f"personality_judgment.{field_name}",
+            maximum=180,
         )
 
 

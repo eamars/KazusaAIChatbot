@@ -487,7 +487,13 @@ def _text_surface_output(content_plan: str = "Checking in now.") -> dict[str, An
         "content_requirements": ["Preserve the scheduled follow-up purpose."],
         "visible_boundaries": [],
         "addressee_plan": ["current user"],
-        "style_guidance": "brief",
+        "delivery_profile": {
+            "lexical_register": "plain",
+            "sentence_shape": "brief",
+            "rhythm": "steady",
+            "hesitation": "minimal",
+            "punctuation": "restrained",
+        },
         "selected_surface_intent": "answer the scheduled follow-up",
         "permitted_action_results": [],
     }

@@ -105,6 +105,12 @@ def _character_constraints() -> dict[str, object]:
         "drives": character_state["drives"],
         "standards": character_state["standards"],
         "meaning_state": character_state["meaning_state"],
+        "personality_judgment": {
+            "logic": "emotionally honest and evidence-led",
+            "defense": "reserved but hurt by repeated abuse",
+            "quirks": "hesitates before showing vulnerability",
+            "taboos": "do not erase sustained hurt",
+        },
     }
 
 

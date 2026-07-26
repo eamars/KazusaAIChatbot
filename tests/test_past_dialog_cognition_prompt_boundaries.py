@@ -31,12 +31,17 @@ class _PromptCaptureLLM:
         del config
         system = str(getattr(messages[0], "content", ""))
         self.prompts.append(str(getattr(messages[-1], "content", "")))
-        if "style_guidance" in system and "content_plan" not in system:
-            result = {"style_guidance": "bounded"}
-        elif "content_plan" in system and "content_requirements" in system:
+        if "content_plan" in system and "content_requirements" in system:
             result = {
                 "content_plan": "bounded",
                 "content_requirements": ["preserve the current addressee"],
+                "delivery_profile": {
+                    "lexical_register": "plain",
+                    "sentence_shape": "concise",
+                    "rhythm": "steady",
+                    "hesitation": "light",
+                    "punctuation": "restrained",
+                },
             }
         elif "visible_boundaries" in system and "addressee_plan" in system:
             result = {
@@ -83,7 +88,11 @@ def _surface_payload() -> dict[str, object]:
         "semantic_affect": [],
         "permitted_action_results": [],
         "interaction_style_context": "brief and natural",
-        "character_voice_context": "reserved, analytical, and warm",
+        "character_expression_context": {
+            "tempo": "steady",
+            "linguistic_texture": "Concise clauses with light hesitation.",
+        },
+        "visual_character_context": "reserved, analytical, and warm",
     }
 
 
@@ -101,7 +110,6 @@ async def test_surface_contract_excludes_raw_dialog_history() -> None:
     llm = _PromptCaptureLLM()
     services = TextSurfaceServicesV2(
         llm=llm,
-        style_config=make_llm_call_config("past_dialog_style"),
         content_plan_config=make_llm_call_config("past_dialog_content"),
         preference_config=make_llm_call_config("past_dialog_preference"),
     )

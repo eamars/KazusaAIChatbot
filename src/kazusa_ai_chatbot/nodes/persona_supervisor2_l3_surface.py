@@ -71,6 +71,7 @@ def build_text_surface_input_from_global_state(
     if not isinstance(output, Mapping):
         raise ValueError("V2 cognition output is required before surface planning")
     validated_output = validate_cognition_core_output(output)
+    expression_context, visual_context = _character_surface_contexts(state)
     payload: TextSurfaceInputV2 = {
         "schema_version": "text_surface_input.v2",
         "episode": _canonical_episode(state),
@@ -86,7 +87,8 @@ def build_text_surface_input_from_global_state(
         ],
         "permitted_action_results": _action_results(state),
         "interaction_style_context": interaction_style_context,
-        "character_voice_context": _character_voice_context(state),
+        "character_expression_context": expression_context,
+        "visual_character_context": visual_context,
     }
     runtime_limits = build_runtime_capability_limits(state)
     if runtime_limits:
@@ -137,14 +139,12 @@ async def call_l3_text_surface_handler(state: GlobalPersonaState) -> dict[str, A
 async def repair_text_surface_for_dialog(
     *,
     surface_input: TextSurfaceInputV2,
-    rejected_surface_output: TextSurfaceOutputV2,
     verified_hard_issues: list[str],
 ) -> TextSurfaceOutputV2:
     """Bind dialog hard-error recovery to the text-surface semantic owner.
 
     Args:
         surface_input: Retained canonical input used by the original surface.
-        rejected_surface_output: Validated surface that produced bad dialog.
         verified_hard_issues: Bounded semantic issues confirmed by verifiers.
 
     Returns:
@@ -153,7 +153,6 @@ async def repair_text_surface_for_dialog(
 
     repaired_output = await repair_text_surface_planning(
         surface_input,
-        rejected_surface_output,
         verified_hard_issues,
         _build_text_surface_services(),
     )
@@ -217,8 +216,10 @@ def _render_interaction_style_context(context: Mapping[str, Any]) -> str:
     return " | ".join(fragments)
 
 
-def _character_voice_context(state: Mapping[str, Any]) -> str:
-    """Project the active profile into one bounded wording-only context."""
+def _character_surface_contexts(
+    state: Mapping[str, Any],
+) -> tuple[dict[str, str], str]:
+    """Project delivery-only text context and isolated visual context."""
 
     profile = state.get("character_profile")
     if not isinstance(profile, Mapping):
@@ -237,13 +238,13 @@ def _character_voice_context(state: Mapping[str, Any]) -> str:
         "quirks": "特征",
         "taboos": "禁忌",
     }
-    fragments = [
-        f"{field_labels['name']}：{_voice_value(profile['name'], 80)}"
+    visual_fragments = [
+        f"{field_labels['name']}：{_profile_text(profile['name'], 80)}"
     ]
     for field_name in ("logic", "tempo", "defense", "quirks", "taboos"):
-        fragments.append(
+        visual_fragments.append(
             f"{field_labels[field_name]}："
-            f"{_voice_value(personality[field_name], 180)}"
+            f"{_profile_text(personality[field_name], 180)}"
         )
     texture_labels = {
         "fragmentation": "碎片化",
@@ -257,18 +258,25 @@ def _character_voice_context(state: Mapping[str, Any]) -> str:
         "rhythmic_bounce": "节奏回弹",
         "self_deprecation": "自嘲",
     }
+    texture_fragments: list[str] = []
     for field_name, descriptor in _LINGUISTIC_TEXTURE_DESCRIPTORS.items():
         score = linguistic_texture[field_name]
         if not isinstance(score, (int, float)) or isinstance(score, bool):
             raise ValueError("character linguistic texture score must be numeric")
-        fragments.append(
+        texture_fragments.append(
             f"{texture_labels[field_name]}：{descriptor(float(score))}"
         )
-    context = " | ".join(fragments)[:1500]
-    return context
+    texture_context = " | ".join(texture_fragments)[:1000]
+    expression_context = {
+        "tempo": _profile_text(personality["tempo"], 180),
+        "linguistic_texture": texture_context,
+    }
+    visual_fragments.extend(texture_fragments)
+    visual_context = " | ".join(visual_fragments)[:1500]
+    return expression_context, visual_context
 
 
-def _voice_value(value: object, maximum: int) -> str:
+def _profile_text(value: object, maximum: int) -> str:
     """Render one required profile value into a bounded semantic fragment."""
 
     text = str(value).strip()
@@ -285,11 +293,10 @@ def _joined_length(fragments: list[str], candidate: str) -> int:
 
 
 def _build_text_surface_services() -> TextSurfaceServicesV2:
-    """Bind the three V2 text-surface stages to the project LLM interface."""
+    """Bind the two V2 text-surface stages to the project LLM interface."""
 
     return TextSurfaceServicesV2(
         llm=_llm_interface,
-        style_config=_surface_config("v2_surface_style"),
         content_plan_config=_surface_config("v2_surface_content"),
         preference_config=_surface_config("v2_surface_preference"),
     )

@@ -37,8 +37,8 @@ only real visible boundaries. `dialog_agent.py` owns final visible wording.
 | Perception | `persona_supervisor2_msg_decontextualizer.py` | Current media observation, current-message rewrite, referent status, and one role-explicit current-turn meaning after the brain-service relevance settlement boundary. |
 | Persona graph | `persona_supervisor2.py` | Resolver recurrence, final commit ordering, action/surface routing, no-response handling, and episode trace assembly. |
 | V2 connector | `persona_supervisor2_cognition.py`, `persona_supervisor2_cognition_actions.py` | Exact `CognitionCoreInputV2` construction, state loading, V2 service binding, output projection, final state replacement, and semantic action-request materialization. |
-| Text and terminal visual connector | `persona_supervisor2_l3_surface.py` | Prompt-safe interaction-style loading, exact `TextSurfaceInputV2` construction, three-call text planning, and independent one-call visual planning. |
-| Dialog | `dialog_agent.py` | Literal spoken or typed text from `TextSurfaceOutputV2`, plus bounded current-visible-percept verification and one repair maximum. |
+| Text and terminal visual connector | `persona_supervisor2_l3_surface.py` | Prompt-safe interaction-style loading, exact `TextSurfaceInputV2` construction, two-call unified-content/preference planning, and independent one-call visual planning. |
+| Dialog | `dialog_agent.py` | Literal spoken or typed text from `TextSurfaceOutputV2`, bounded current-visible-percept and authoritative-surface verification, accepted-surface return, and one full repair maximum. |
 | Specialist action handling | `persona_supervisor2_memory_lifecycle.py`, action-spec packages | Deterministic validation and execution of admitted semantic action requests. |
 | Consolidation handoff | `persona_supervisor2.py` | Completed persona state is handed to `kazusa_ai_chatbot.consolidation`, which owns extraction helpers, origin projection, target validation, and durable write routing. |
 
@@ -189,7 +189,8 @@ from:
 - expression policy;
 - semantic affect and optional relationship projections;
 - permitted semantic action results; and
-- bounded interaction-style guidance and character voice.
+- bounded interaction-style guidance, exact tempo/linguistic-texture character
+  expression, and an isolated visual-character context.
 
 The connector loads the existing sanitized user interaction-style overlay and,
 for group turns, the group-channel overlay. It renders only allowlisted speech,
@@ -198,18 +199,21 @@ string required by `TextSurfaceInputV2`. Storage identifiers, revisions,
 reflection lineage, and raw channel/user identifiers are excluded.
 
 `run_text_surface_planning(...)` projects visible episode content and runs
-three bounded stages for speech-safe style, content, and preference. Raw
-character voice reaches only the style call; content and preference cannot
-observe it. `TextSurfaceOutputV2` contains neither raw voice nor visual or
-pacing directives.
+exactly two bounded stages in parallel. Unified content planning atomically
+returns `content_plan`, `content_requirements`, and the exact five-field
+`delivery_profile`; preference planning returns only `visible_boundaries` and
+`addressee_plan`. Unified content receives tempo and linguistic texture,
+whereas preference receives no character-expression context. Delivery fields
+describe lexical register, sentence shape, rhythm, hesitation, and punctuation
+only; they cannot override the cognition-selected stance.
 
 When visual directives are enabled, `run_visual_surface_planning(...)` runs as
-an independent sibling call. It may observe bounded character voice and emits
-exact image-generation directives. No downstream image or dialog model
-consumes them. The persona graph retains them as a private `image` surface with
-`do_not_deliver` in the raw episode trace. Their fragments are audit-only and
-are excluded from every model-facing consolidation projection, source view,
-and router input.
+an independent sibling call. It alone receives the isolated bounded
+visual-character context and emits exact image-generation directives. No
+downstream image or dialog model consumes them. The persona graph retains them
+as a private `image` surface with `do_not_deliver` in the raw episode trace.
+Their fragments are audit-only and are excluded from every model-facing
+consolidation projection, source view, and router input.
 
 `dialog_agent.py` authors natural, vivid chat-ready words for the character.
 Character-consistent invention, ask-backs, playful development, and other
@@ -220,16 +224,17 @@ personality, and interaction posture through wording, sentence shape, and
 cadence. Action narration remains an ungated model variation: the prompts do
 not request it, and generated instances are neither rejected nor rewritten.
 Three bounded hard-error checks run in parallel on the existing dialog-model
-route. Semantic
-fidelity receives only current percepts, the candidate role frame, and
-candidate dialog; it checks internal contradiction, direct current-input
-conflict, and actor/target/subject reversal. Surface integrity receives only
-permitted action results and candidate dialog; it checks false claims of
-character-brain action execution. Generated content, addressee, intent, and
-style proposals cannot outvote typed source roles. Source percepts and
-generated character speech use separate typed pronoun frames before
-actor/action/target comparison. Semantic fidelity owns non-selection role
-direction. The selection-only role verifier receives the five authoritative
+route. Semantic fidelity receives current percepts, the candidate role frame,
+candidate dialog, and authoritative surface semantics containing selected
+intent, content plan, requirements, and visible boundaries. It checks internal
+contradiction, direct current-input conflict, actor/target/subject reversal,
+and unsupported within-turn opposite-stance transitions. Delivery profile,
+permitted action results, and selection-owned role fields are excluded from
+this semantic authority. Surface integrity receives only permitted action
+results and candidate dialog; it checks false claims of character-brain action
+execution. Source percepts and generated character speech use separate typed
+pronoun frames before actor/action/target comparison. Semantic fidelity owns
+non-selection role direction. The selection-only role verifier receives the five authoritative
 `response_operation` fields and owns selection transfer plus embedded
 actor/target reversal. Those selection-owned fields are removed from the
 semantic-fidelity projection while the raw current-input meaning remains.
@@ -256,14 +261,18 @@ validated `hard_errors` list to the internal merged `issues` vocabulary. The
 role-direction and surface-integrity producers retain their own exact
 `aligned` and `issues` contracts.
 
-A negative merged verdict returns the retained `TextSurfaceInputV2`, rejected
-surface semantics, and bounded verifier issues to the L3 owner. L3 replaces
-only content, requirements, visible boundaries, and addressee semantics while
-preserving validated style, selected intent, permitted action results, and
-runtime limits. Dialog then renders and verifies one second candidate. A
-second rejection raises `dialog_compliance_contract_exhausted` with stage
-`dialog_compliance`, attempt count two, and safe checkpoint
-`post_cognition_commit`.
+A negative merged verdict returns the retained canonical
+`TextSurfaceInputV2` and bounded verified issues to the L3 owner. Rejected
+surface fields and rejected dialog remain protected trace evidence only. L3
+replaces content, requirements, delivery profile, visible boundaries, and
+addressee together, then reconstructs selected intent, permitted action
+results, and runtime limits from canonical input. Dialog renders and verifies
+one second candidate without receiving the first dialog. A second rejection
+raises `dialog_compliance_contract_exhausted` with stage `dialog_compliance`,
+attempt count two, and safe checkpoint `post_cognition_commit`. Success returns
+both the accepted dialog and the exact original or replacement surface that
+produced it; the persona graph overwrites its earlier surface before any
+post-turn consumer runs.
 
 Before this dialog boundary, a typed character-owned required selection also
 activates one focused goal-level check. It prevents private continuity or a

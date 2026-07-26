@@ -15,14 +15,21 @@ from tests.cognition_core_v2_test_helpers import canonical_episode
 def _aligned_dialog_compliance(monkeypatch) -> None:
     """Keep mention tests focused on delivery-neutral authored text."""
 
-    for llm_name in (
-        "_dialog_semantic_fidelity_llm",
-        "_dialog_surface_integrity_llm",
-    ):
+    verifier_payloads = {
+        "_dialog_semantic_fidelity_llm": {
+            "aligned": True,
+            "hard_errors": [],
+        },
+        "_dialog_surface_integrity_llm": {
+            "aligned": True,
+            "issues": [],
+        },
+    }
+    for llm_name, payload in verifier_payloads.items():
         monkeypatch.setattr(
             dialog_module,
             llm_name,
-            _CapturingLLM({"aligned": True, "issues": []}),
+            _CapturingLLM(payload),
         )
 
 
@@ -69,7 +76,13 @@ def _dialog_state() -> dict:
             "content_requirements": ["address the current user"],
             "visible_boundaries": [],
             "addressee_plan": ["current user"],
-            "style_guidance": "brief",
+            "delivery_profile": {
+                "lexical_register": "plain",
+                "sentence_shape": "brief",
+                "rhythm": "steady",
+                "hesitation": "minimal",
+                "punctuation": "restrained",
+            },
             "selected_surface_intent": "answer",
             "permitted_action_results": [],
         },
@@ -122,7 +135,12 @@ async def test_dialog_generator_preserves_inline_tag_without_delivery_context(
 
     result = await dialog_module.dialog_generator(_dialog_state())
 
-    assert result == {"final_dialog": ["@User answer"]}
+    assert result == {
+        "final_dialog": ["@User answer"],
+        "text_surface_output_v2": _dialog_state()[
+            "text_surface_output_v2"
+        ],
+    }
     human_payload = json.loads(fake_llm.messages[1].content)
     assert human_payload["text_surface_output_v2"]["schema_version"] == (
         "text_surface_output.v2"
@@ -140,7 +158,12 @@ async def test_dialog_generator_does_not_require_mention_flag(monkeypatch) -> No
 
     result = await dialog_module.dialog_generator(_dialog_state())
 
-    assert result == {"final_dialog": ["answer"]}
+    assert result == {
+        "final_dialog": ["answer"],
+        "text_surface_output_v2": _dialog_state()[
+            "text_surface_output_v2"
+        ],
+    }
 
 
 @pytest.mark.asyncio

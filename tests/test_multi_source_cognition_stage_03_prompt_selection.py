@@ -32,6 +32,12 @@ def _constraints() -> dict[str, object]:
         "drives": character["drives"],
         "standards": character["standards"],
         "meaning_state": character["meaning_state"],
+        "personality_judgment": {
+            "logic": "evidence-led",
+            "defense": "reserved under pressure",
+            "quirks": "brief hesitation",
+            "taboos": "preserve character agency",
+        },
     }
 
 

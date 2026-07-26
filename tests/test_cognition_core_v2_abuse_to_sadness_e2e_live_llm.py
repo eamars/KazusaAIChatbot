@@ -154,6 +154,12 @@ async def _seed_valued_relationship_abuse(
         "drives": character_state["drives"],
         "standards": character_state["standards"],
         "meaning_state": character_state["meaning_state"],
+        "personality_judgment": {
+            "logic": "emotionally honest and evidence-led",
+            "defense": "reserved but hurt by repeated abuse",
+            "quirks": "hesitates before showing vulnerability",
+            "taboos": "do not erase sustained hurt",
+        },
     }
     activations = derive_persistent_emotion_activations(
         state,
