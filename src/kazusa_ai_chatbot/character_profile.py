@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from importlib import resources
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -56,6 +57,8 @@ _BOUNDARY_RECOVERY_MODES = frozenset({
     "decay",
     "detach",
 })
+_PACKAGED_PROFILE_DIRECTORY = "character_profiles"
+_PACKAGED_PROFILE_FILENAME = "example.json"
 
 
 def _validate_profile_seed_payload(
@@ -136,11 +139,9 @@ def _validate_profile_seed_payload(
 
 
 def load_character_profile_seed(path: Path) -> CharacterProfileSeedV1:
-    """Load and validate one absolute UTF-8 static profile seed."""
+    """Load and validate one UTF-8 static profile seed."""
 
     profile_path = Path(path)
-    if not profile_path.is_absolute():
-        raise ValueError("character profile path must be absolute")
     if not profile_path.is_file():
         raise ValueError(
             f"character profile path must point to a file: {profile_path}"
@@ -162,6 +163,35 @@ def load_character_profile_seed(path: Path) -> CharacterProfileSeedV1:
 
     if not isinstance(payload, Mapping):
         raise ValueError("character profile seed root must be an object")
+    return _validate_profile_seed_payload(payload)
+
+
+def load_packaged_character_profile_seed() -> CharacterProfileSeedV1:
+    """Load and validate the versioned clean-database profile seed."""
+
+    profile_resource = (
+        resources.files("kazusa_ai_chatbot")
+        .joinpath(_PACKAGED_PROFILE_DIRECTORY)
+        .joinpath(_PACKAGED_PROFILE_FILENAME)
+    )
+    try:
+        raw_text = profile_resource.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ValueError(
+            "failed to read packaged character profile "
+            f"{_PACKAGED_PROFILE_FILENAME}: {exc}"
+        ) from exc
+
+    try:
+        payload = json.loads(raw_text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            "packaged character profile is not valid JSON "
+            f"{_PACKAGED_PROFILE_FILENAME}: {exc}"
+        ) from exc
+
+    if not isinstance(payload, Mapping):
+        raise ValueError("packaged character profile seed root must be an object")
     return _validate_profile_seed_payload(payload)
 
 

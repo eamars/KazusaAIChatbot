@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-from pathlib import Path
 
 import pytest
 from dotenv import load_dotenv
@@ -12,15 +11,6 @@ from dotenv import load_dotenv
 from tests.stage3_fresh_database import STAGE3_TEST_DATABASE_NAME
 
 load_dotenv(override=False)
-_DEFAULT_CHARACTER_PROFILE_PATH = (
-    Path(__file__).resolve().parents[1]
-    / "personalities"
-    / "asuna.json"
-)
-os.environ.setdefault(
-    "CHARACTER_PROFILE_PATH",
-    str(_DEFAULT_CHARACTER_PROFILE_PATH),
-)
 if os.environ.get("MONGODB_DB_NAME") == STAGE3_TEST_DATABASE_NAME:
     os.environ["STAGE3_DATABASE_GUARD"] = "1"
 else:

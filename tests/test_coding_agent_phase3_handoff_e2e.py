@@ -204,18 +204,30 @@ async def test_gate01_writing_task_runs_from_user_input_to_final_delivery(
         "max_answer_chars": 3000,
         "max_artifact_chars": 24000,
     }]
+    assert trace["coding_run_requests"] == [{
+        "question": CODE_TASK,
+        "objective_type": "propose_patch",
+        "workspace_root": str(tmp_path / "coding-workspace"),
+        "max_answer_chars": 3000,
+        "max_artifact_chars": 24000,
+    }]
     assert trace["background_job"]["worker"] == "coding_agent"
     assert trace["background_job"]["worker_metadata"]["coding_operation"] == (
         "code_writing"
+    )
+    assert trace["background_job"]["worker_metadata"]["coding_run_status"] == (
+        "awaiting_approval"
     )
     assert trace["accepted_task"]["state"] == "delivered"
     assert trace["result_episode"]["trigger_source"] == (
         "tool_result"
     )
-    assert trace["result_episode"]["percepts"][0]["content"][
+    artifact_text = trace["result_episode"]["percepts"][0]["content"][
         "artifact_text"
-    ] == CODE_TASK_RESULT
-    assert trace["final_dialog"] == [CODE_TASK_RESULT]
+    ]
+    assert artifact_text.endswith(CODE_TASK_RESULT)
+    assert "Status: awaiting_approval" in artifact_text
+    assert trace["final_dialog"] == [artifact_text]
     serialized_delivery = repr({
         "result_episode": trace["result_episode"],
         "final_dialog": trace["final_dialog"],
@@ -254,14 +266,26 @@ async def test_project_summary_question_runs_from_input_to_final_delivery(
         "max_answer_chars": 3000,
         "max_artifact_chars": 24000,
     }]
+    assert trace["coding_run_requests"] == [{
+        "question": PROJECT_SUMMARY_TASK,
+        "objective_type": "read_only",
+        "workspace_root": str(tmp_path / "coding-workspace"),
+        "max_answer_chars": 3000,
+        "max_artifact_chars": 24000,
+    }]
     assert trace["background_job"]["worker_metadata"]["coding_operation"] == (
         "code_reading"
     )
+    assert trace["background_job"]["worker_metadata"]["coding_run_status"] == (
+        "completed"
+    )
     assert trace["accepted_task"]["state"] == "delivered"
-    assert trace["result_episode"]["percepts"][0]["content"][
+    artifact_text = trace["result_episode"]["percepts"][0]["content"][
         "artifact_text"
-    ] == PROJECT_SUMMARY_RESULT
-    assert trace["final_dialog"] == [PROJECT_SUMMARY_RESULT]
+    ]
+    assert artifact_text.endswith(PROJECT_SUMMARY_RESULT)
+    assert "Status: completed" in artifact_text
+    assert trace["final_dialog"] == [artifact_text]
     serialized_delivery = repr({
         "result_episode": trace["result_episode"],
         "final_dialog": trace["final_dialog"],
@@ -406,8 +430,13 @@ async def _run_full_coding_handoff_case(
     )
     monkeypatch.setattr(
         coding_worker,
-        "handle_background_coding_task",
-        store.handle_background_coding_task,
+        "decide_background_coding_operation",
+        store.decide_background_coding_operation,
+    )
+    monkeypatch.setattr(
+        coding_worker,
+        "start_coding_run",
+        store.start_coding_run,
     )
     monkeypatch.setattr(
         persona_module,
@@ -453,7 +482,7 @@ async def _run_full_coding_handoff_case(
         result["action_kind"]: result
         for result in acknowledgement["action_results"]
     }
-    assert "speak" not in action_results
+    assert action_results["speak"]["status"] == "executed"
     assert acknowledgement["cognition_core_output"]["intention"]["route"] == (
         "speech"
     )
@@ -519,9 +548,9 @@ async def _run_full_coding_handoff_case(
     result_episode = final_delivery["episode"]
     assert result_episode["trigger_source"] == "tool_result"
     assert result_episode["percepts"][0]["content"]["artifact_text"] == (
-        coding_result_text
+        store.coding_artifact_text
     )
-    assert final_delivery["dialog"] == [coding_result_text]
+    assert final_delivery["dialog"] == [store.coding_artifact_text]
     assert store.background_job is not None
     assert store.background_job["status"] == "delivered"
     assert store.accepted_task is not None
@@ -538,6 +567,7 @@ async def _run_full_coding_handoff_case(
         "worker_tick": worker_result,
         "delivery_tick": delivery_result,
         "coding_agent_requests": store.coding_agent_requests,
+        "coding_run_requests": store.coding_run_requests,
         "accepted_task": dict(store.accepted_task),
         "background_job": _public_background_job_trace(store.background_job),
         "result_episode": result_episode,
@@ -705,8 +735,25 @@ class _InMemoryAcceptedCodeWorkStore:
         self.accepted_task: dict[str, Any] | None = None
         self.background_job: dict[str, Any] | None = None
         self.coding_agent_requests: list[dict[str, Any]] = []
+        self.coding_run_requests: list[dict[str, Any]] = []
         self._coding_result_text = coding_result_text
         self._coding_operation = coding_operation
+        self._coding_run_id = f"{coding_operation}-run-001"
+
+    @property
+    def coding_artifact_text(self) -> str:
+        """Return the durable run text delivered by the worker adapter."""
+
+        run_status = (
+            "awaiting_approval"
+            if self._coding_operation == "code_writing"
+            else "completed"
+        )
+        return (
+            f"Coding run ref: coding_run:{self._coding_run_id}\n\n"
+            f"Status: {run_status}\n\n"
+            f"{self._coding_result_text}"
+        )
 
     async def insert_or_get_active_accepted_task(
         self,
@@ -1023,14 +1070,37 @@ class _InMemoryAcceptedCodeWorkStore:
         })
         return dict(job)
 
-    async def handle_background_coding_task(
+    async def decide_background_coding_operation(
+        self,
+        request: dict[str, Any],
+    ) -> tuple[str, str]:
+        self.coding_agent_requests.append(dict(request))
+        return (
+            self._coding_operation,
+            "The accepted task maps to the configured coding operation.",
+        )
+
+    async def start_coding_run(
         self,
         request: dict[str, Any],
     ) -> dict[str, Any]:
-        self.coding_agent_requests.append(dict(request))
+        self.coding_run_requests.append(dict(request))
+        objective_type = (
+            "propose_patch"
+            if self._coding_operation == "code_writing"
+            else "read_only"
+        )
+        assert request["objective_type"] == objective_type
+        run_status = (
+            "awaiting_approval"
+            if objective_type == "propose_patch"
+            else "completed"
+        )
         response = {
-            "status": "succeeded",
-            "operation": self._coding_operation,
+            "status": run_status,
+            "run_id": self._coding_run_id,
+            "objective_type": objective_type,
+            "goal": request["question"],
             "answer_text": self._coding_result_text,
             "repository": {
                 "provider": "github",
@@ -1076,9 +1146,14 @@ class _InMemoryAcceptedCodeWorkStore:
                 }
             ] if self._coding_operation == "code_writing" else [],
             "changed_files": [],
-            "validation": None,
+            "allowed_next_actions": (
+                ["approve_and_verify", "revise_proposal", "cancel"]
+                if objective_type == "propose_patch"
+                else []
+            ),
             "limitations": [],
             "trace_summary": [f"{self._coding_operation}:succeeded"],
+            "updated_at": "2026-07-03T01:02:00+00:00",
         }
         return response
 
@@ -1191,6 +1266,10 @@ async def _fake_cognition_subgraph(
 async def _fake_l3_text_surface_handler(state: dict[str, Any]) -> dict[str, Any]:
     """Return one exact V2 surface output for the selected speech route."""
 
+    from kazusa_ai_chatbot.nodes.persona_supervisor2_l3_surface import (
+        build_text_surface_input_from_global_state,
+    )
+
     episode = state["cognitive_episode"]
     result_ready = episode["trigger_source"] == "tool_result"
     content_plan = (
@@ -1199,6 +1278,12 @@ async def _fake_l3_text_surface_handler(state: dict[str, Any]) -> dict[str, Any]
         else "Acknowledge that the accepted coding task was scheduled."
     )
     result = {
+        "text_surface_input_v2": build_text_surface_input_from_global_state(
+            state,
+            interaction_style_context=(
+                "No learned interaction-style guidance is active."
+            ),
+        ),
         "text_surface_output_v2": {
             "schema_version": "text_surface_output.v2",
             "content_plan": content_plan,
@@ -1245,6 +1330,7 @@ async def _fake_dialog_agent(state: dict[str, Any]) -> dict[str, Any]:
         "final_dialog": final_dialog,
         "target_addressed_user_ids": ["global-user-001"],
         "target_broadcast": False,
+        "text_surface_output_v2": state["text_surface_output_v2"],
     }
     return result
 
@@ -1310,7 +1396,18 @@ def _persona_state_for_input(
                 "taboos": "none",
                 "mbti": "INTJ",
             },
-            "linguistic_texture_profile": {},
+            "linguistic_texture_profile": {
+                "fragmentation": 0.4,
+                "hesitation_density": 0.3,
+                "counter_questioning": 0.2,
+                "softener_density": 0.4,
+                "formalism_avoidance": 0.7,
+                "abstraction_reframing": 0.5,
+                "direct_assertion": 0.7,
+                "emotional_leakage": 0.3,
+                "rhythmic_bounce": 0.5,
+                "self_deprecation": 0.1,
+            },
             "boundary_profile": {},
         },
         "chat_history_wide": [],

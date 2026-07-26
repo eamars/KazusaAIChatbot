@@ -375,9 +375,17 @@ def test_settled_prompt_renders_only_currently_available_actions() -> None:
         _base_state(),
         observation_status="observation_complete",
     )
+    waiting_output_contract = waiting_messages[0].content.rsplit(
+        "# 输出格式",
+        maxsplit=1,
+    )[1]
+    final_output_contract = final_messages[0].content.rsplit(
+        "# 输出格式",
+        maxsplit=1,
+    )[1]
 
     assert '"semantic_disposition":"proceed|wait"' in (
-        waiting_messages[0].content
+        waiting_output_contract
     )
     assert "assembled_turn.author_relation 为 current_human" in (
         waiting_messages[0].content
@@ -389,12 +397,12 @@ def test_settled_prompt_renders_only_currently_available_actions() -> None:
         waiting_messages[0].content
     )
     assert '"semantic_disposition":"proceed"' in (
-        final_messages[0].content
+        final_output_contract
     )
-    assert "recipient_withdrawn" not in final_messages[0].content
-    assert "already_resolved" not in final_messages[0].content
-    assert "unavailable_retained_media" not in final_messages[0].content
-    assert "wait" not in final_messages[0].content.lower()
+    assert "recipient_withdrawn" not in final_output_contract
+    assert "already_resolved" not in final_output_contract
+    assert "unavailable_retained_media" not in final_output_contract
+    assert "wait" not in final_output_contract.lower()
     assert waiting_messages[1].content == final_messages[1].content
 
 

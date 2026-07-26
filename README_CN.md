@@ -598,12 +598,9 @@ pip install -U pip
 pip install -e ".[dev]"
 ```
 
-启动大脑之前，为角色档案配置绝对路径。全新启动会校验档案并原子地插入或
-验证角色 singleton；维护脚本只用于显式维护：
-
-```powershell
-CHARACTER_PROFILE_PATH=C:\workspace\kazusa_ai_chatbot\personalities\kazusa.json
-```
+发行包只内置中立的示例角色档案。数据库为空时，启动过程会从该版本化示例
+原子创建完整的原生角色 singleton；已有的原生 singleton 继续以数据库内容
+为准。真实角色档案保留在仓库外，仅通过明确的维护操作载入。
 
 普通本地运行会先启动 buildless Python/FastAPI 控制台，再通过控制台启动或停止
 大脑和适配器：

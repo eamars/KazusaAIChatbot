@@ -48,7 +48,7 @@ def test_stage3_docs_describe_native_startup_and_runtime_ownership() -> None:
 
     combined = "\n".join(_read(path) for path in STAGE3_DOCUMENTS)
     required_terms = (
-        "CHARACTER_PROFILE_PATH",
+        "packaged",
         "_test_kazusa_core_v2",
         "cognitive_episode.v1",
         "episode_trace.v2",
@@ -62,6 +62,7 @@ def test_stage3_docs_describe_native_startup_and_runtime_ownership() -> None:
     )
     for term in required_terms:
         assert term in combined
+    assert "CHARACTER_PROFILE_PATH" not in combined
 
 
 def test_stage3_plan_companions_and_stage4_boundary_are_linked() -> None:

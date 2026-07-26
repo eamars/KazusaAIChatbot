@@ -117,7 +117,6 @@ def _prepare_stage3_runtime() -> dict[str, str]:
         "MONGODB_URI": guarded["mongodb_uri"],
         "MONGODB_DB_NAME": guarded["database_name"],
         "STAGE3_DATABASE_GUARD": "1",
-        "CHARACTER_PROFILE_PATH": guarded["character_profile_path"],
         "SELF_COGNITION_ENABLED": "false",
         "CALENDAR_SCHEDULER_ENABLED": "false",
         "BACKGROUND_WORK_WORKER_ENABLED": "false",
@@ -1006,17 +1005,16 @@ async def _run_self_cognition_case(
     _prepare_stage3_runtime()
     from kazusa_ai_chatbot import service
     from kazusa_ai_chatbot.brain_service import post_turn
+    from kazusa_ai_chatbot.character_profile import (
+        load_packaged_character_profile_seed,
+    )
     from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
     from kazusa_ai_chatbot.self_cognition import models, runner
 
     now = _storage_now()
     run_token = uuid4().hex[:10]
     run_case_id = f"{case_id}:{run_token}"
-    profile = json.loads(
-        Path(os.environ["CHARACTER_PROFILE_PATH"]).read_text(encoding="utf-8")
-    )
-    if not isinstance(profile, dict):
-        raise ValueError("Stage 3 profile seed must be an object")
+    profile = dict(load_packaged_character_profile_seed())
     profile["global_user_id"] = CHARACTER_GLOBAL_USER_ID
     scope_type = "group" if trigger_kind == models.TRIGGER_GROUP_CHAT_REVIEW else "private"
     target_user_id = None if scope_type == "group" else "stage3-self-user"

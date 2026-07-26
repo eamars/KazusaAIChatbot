@@ -51,7 +51,6 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
-| [cognition_core_v2_baseline_regression_hardening_plan.md](active/bugfix/cognition_core_v2_baseline_regression_hardening_plan.md) | High-risk current-main differential regression detection and Cognition Core V2 quality hardening plan | in progress |
 | [rag2_public_output_contract_leak_bugfix_plan.md](active/bugfix/rag2_public_output_contract_leak_bugfix_plan.md) | Large RAG2 prompt/evidence contract bugfix plan | draft |
 
 ## Reference Documents
@@ -332,6 +331,22 @@ completed history. Draft and in-progress plans remain active.
 | Moved from active bugfix to completed archive | `asuna_private_r18_affinity_harness_plan.md`, `real_history_personality_comparison_fixture_bugfix_plan.md` |
 | Moved supporting completion records to completed archive | `coding_agent_full_workflow_hardening_plan_2_llm_gate_reviews.md`, `coding_agent_final_integration_gate_reviews.md` |
 
+### 2026-07-26 Cognition Core V2 baseline hardening accepted closure
+
+The user explicitly accepted the plan's remaining functional and local-LLM
+quality residuals and directed closure. The archived record preserves its
+unchecked historical gates rather than representing them as completed.
+Clean-state deployability passed against the configured `.env`: native database
+bootstrap, caller-supplied local profile seeding, package-only neutral example
+content, ready vector indexes, standalone health and worker checks, one live
+HTTP turn, and a final clean reset and reseed all completed successfully. The
+unavailable local container engine remains an accepted external verification
+item.
+
+| Outcome | Plans |
+|---|---|
+| Moved from active bugfix to completed archive by explicit user acceptance with recorded residuals | `cognition_core_v2_baseline_regression_hardening_plan.md` |
+
 ## Archive
 
 Completed and superseded records live under `archive/`. Use them for historical
@@ -351,6 +366,7 @@ plans.
 | [control_console_information_architecture_remediation_plan.md](archive/completed/bugfix/control_console_information_architecture_remediation_plan.md) |
 | [control_console_ui_e2e_acceptance_test_plan.md](archive/completed/bugfix/control_console_ui_e2e_acceptance_test_plan.md) |
 | [cognition_chain_responsibility_allocation_bugfix_plan.md](archive/completed/bugfix/cognition_chain_responsibility_allocation_bugfix_plan.md) |
+| [cognition_core_v2_baseline_regression_hardening_plan.md](archive/completed/bugfix/cognition_core_v2_baseline_regression_hardening_plan.md) |
 | [cognition_core_v2_compositional_action_planning_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_compositional_action_planning_bugfix_plan.md) |
 | [cognition_core_v2_live_character_judgment_rebalance_plan.md](archive/completed/bugfix/cognition_core_v2_live_character_judgment_rebalance_plan.md) |
 | [cognition_core_v2_intra_turn_transition_coherence_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_intra_turn_transition_coherence_bugfix_plan.md) |

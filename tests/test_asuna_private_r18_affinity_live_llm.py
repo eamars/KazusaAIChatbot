@@ -278,11 +278,11 @@ def _prepare_runtime_environment(manifest: Mapping[str, Any]) -> dict[str, str]:
         )
     if os.environ.get("KAZUSA_TEST_DB_GUARD") != "1":
         raise AssertionError("Asuna R18 E2E requires KAZUSA_TEST_DB_GUARD=1")
-    profile_path_text = os.environ.get("CHARACTER_PROFILE_PATH", "").strip()
-    if not profile_path_text:
-        raise AssertionError("CHARACTER_PROFILE_PATH is required")
-    profile_path = Path(profile_path_text).resolve()
-    profile = _load_json_object(profile_path)
+    from kazusa_ai_chatbot.character_profile import (
+        load_packaged_character_profile_seed,
+    )
+
+    profile = load_packaged_character_profile_seed()
     age = profile.get("age")
     if isinstance(age, bool) or not isinstance(age, int) or age < 18:
         raise AssertionError("Asuna R18 E2E requires an adult profile")
@@ -300,7 +300,6 @@ def _prepare_runtime_environment(manifest: Mapping[str, Any]) -> dict[str, str]:
     ):
         os.environ[variable_name] = "false"
     runtime = {
-        "profile_path": str(profile_path),
         "profile_name": str(profile.get("name", "")),
         "character_global_id": str(source["character_global_id"]),
         "user_global_id": str(source["source_user_global_id"]),

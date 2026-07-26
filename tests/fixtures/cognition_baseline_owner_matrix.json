@@ -14,6 +14,8 @@
     {"pattern": "src/kazusa_ai_chatbot/cognition_episode.py", "owner": "cognition", "gate": "episode"},
     {"pattern": "src/kazusa_ai_chatbot/cognition_resolver/**", "owner": "resolver", "gate": "resolver"},
     {"pattern": "src/kazusa_ai_chatbot/character_profile.py", "owner": "profile_bootstrap", "gate": "profile"},
+    {"pattern": "src/kazusa_ai_chatbot/character_profiles/**", "owner": "profile_bootstrap", "gate": "profile"},
+    {"pattern": "src/kazusa_ai_chatbot/coding_agent/**", "owner": "action_task_coding_scheduler", "gate": "coding_agent"},
     {"pattern": "src/kazusa_ai_chatbot/config.py", "owner": "runtime_configuration", "gate": "configuration"},
     {"pattern": "src/kazusa_ai_chatbot/consolidation/**", "owner": "persistence_consolidation", "gate": "consolidation"},
     {"pattern": "src/kazusa_ai_chatbot/conversation_progress/**", "owner": "persistence_consolidation", "gate": "continuity"},

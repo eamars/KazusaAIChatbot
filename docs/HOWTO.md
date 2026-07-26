@@ -82,7 +82,6 @@ EMBEDDING_API_KEY=lm-studio
 EMBEDDING_MODEL=your-embedding-model
 
 # Character and service behavior
-CHARACTER_PROFILE_PATH=C:\workspace\kazusa_ai_chatbot\personalities\kazusa.json
 CHARACTER_GLOBAL_USER_ID=00000000-0000-4000-8000-000000000001
 AUDIT_LOG_TTL_DAYS=90
 DEBUG_LOG_TTL_DAYS=14
@@ -442,26 +441,22 @@ be used.
 
 ## Character Profile
 
-Load a character profile before service startup.
-
-Normal startup reads and validates the absolute `CHARACTER_PROFILE_PATH`, then
-atomically inserts or verifies the native character singleton. It does not
-require a manual pre-start database seed:
-
-```bash
-CHARACTER_PROFILE_PATH=C:\workspace\kazusa_ai_chatbot\personalities\kazusa.json
-```
+Normal startup carries only the neutral example character profile inside the
+Python package. When `character_state._id == "global"` is absent, startup
+validates that packaged example and atomically creates the complete native
+singleton, including `cognition_state.v2`. Once the singleton exists, the
+database is authoritative and startup does not overwrite its static or mutable
+state.
 
 The maintenance loader remains available for an explicitly requested profile
 operation. Its overwrite policy is separate from normal startup:
 
 ```bash
-python -m scripts.load_character_profile personalities/kazusa.json --force
+python -m scripts.load_character_profile personalities/example.json --force
 ```
 
-Use `personalities/example.json` as a compact template, and
-`personalities/kazusa.json` or `personalities/asuna.json` as practical filled
-references.
+Use `personalities/example.json` as a compact template for an explicit
+maintenance profile. Keep real character profiles outside the repository.
 
 At minimum, a working profile should include:
 
@@ -545,11 +540,10 @@ uvicorn kazusa_ai_chatbot.service:app --host 0.0.0.0 --port 8000
 
 On startup the service:
 
-1. Runs `db_bootstrap()` to create current collections and indexes and drop
-   legacy `rag_cache_index` and `rag_metadata_index` collections if they are
-   still present.
-2. Hydrates persistent media descriptor cache entries.
-3. Loads the active character profile.
+1. Runs `db_bootstrap()` to create current collections and indexes.
+2. Loads and validates the existing native character singleton, or atomically
+   seeds the packaged example profile when the database is clean.
+3. Hydrates persistent media descriptor cache entries.
 4. Compiles the top-level LangGraph pipeline.
 5. Starts configured MCP servers.
 6. Builds the runtime adapter registry and starts the chat input worker.
@@ -797,8 +791,8 @@ compatibility rules are maintained in the
 
 ## Runtime Data Model
 
-`db_bootstrap()` creates current collections and indexes, and it drops legacy
-RAG1 collections `rag_cache_index` and `rag_metadata_index` when present.
+`db_bootstrap()` creates current collections and indexes. It performs no
+destructive legacy collection cleanup during service startup.
 
 Collection purpose, document ownership, storage invariants, and bootstrap/index
 rules are maintained in the
@@ -807,8 +801,8 @@ on operator commands and setup.
 
 ## Legacy Collection Cleanup
 
-Bootstrapping handles stale legacy collections automatically. There is also an
-idempotent one-shot cleanup script for operations:
+Use the explicit idempotent one-shot cleanup script when an approved operation
+needs to remove legacy RAG collections:
 
 ```bash
 python scripts/drop_legacy_rag_collections.py

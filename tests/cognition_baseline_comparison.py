@@ -34,7 +34,7 @@ _CURRENT_ROOT = _ROOT.resolve()
 _BASELINE_REVISION = "8f834bf87a83ee42aca804934fb44af63788420c"
 _PRE_FIX_V2_REVISION = "0c2e929d51ac80c4519f564b61cbf8949efcca3d"
 _PROFILE_SHA256 = (
-    "7cd3d773c584fee7656da15eec827cd26b450825ec878716389f1e9a2ae1a484"
+    "9a4b87e3ee800b4c3937889ef8994fd81979cff87c3ef2219d3463ec290f33b2"
 )
 _HISTORY_SHA256 = (
     "e42ef1a7a454e1208f5723fd3b87ba70d0e64579a68838ede911b5286e576008"
@@ -1143,7 +1143,6 @@ def _worker_environment(
     environment.update(configured)
     environment.update({
         "PYTHON_DOTENV_DISABLED": "1",
-        "CHARACTER_PROFILE_PATH": str(_PROFILE_PATH),
         "MONGODB_DB_NAME": configured_database_name,
         "CHARACTER_GLOBAL_USER_ID": _CHARACTER_GLOBAL_ID,
         "CHARACTER_TIME_ZONE": "Pacific/Auckland",

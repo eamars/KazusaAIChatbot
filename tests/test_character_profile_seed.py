@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -75,12 +75,10 @@ def test_profile_module_imports_before_database_package() -> None:
             sys.executable,
             "-c",
             (
-                "from pathlib import Path; "
                 "from kazusa_ai_chatbot.character_profile import "
-                "load_character_profile_seed; "
-                "seed = load_character_profile_seed(Path("
-                "'personalities/asuna.json').resolve()); "
-                "assert seed['name'].endswith('(Ichinose Asuna)')"
+                "load_packaged_character_profile_seed; "
+                "seed = load_packaged_character_profile_seed(); "
+                "assert isinstance(seed['name'], str) and seed['name'].strip()"
             ),
         ],
         check=False,
@@ -92,40 +90,47 @@ def test_profile_module_imports_before_database_package() -> None:
     assert result.returncode == 0, result.stderr
 
 
-def test_checked_in_asuna_profile_is_valid_and_not_kazusa() -> None:
-    """The active checked-in profile must be the Asuna personality seed."""
+def test_packaged_profile_matches_repository_example() -> None:
+    """The versioned package profile must contain only the public example."""
 
-    from kazusa_ai_chatbot.character_profile import load_character_profile_seed
-
-    profile_path = (
-        Path(__file__).resolve().parents[1]
-        / "personalities"
-        / "asuna.json"
+    from kazusa_ai_chatbot.character_profile import (
+        load_packaged_character_profile_seed,
     )
-    seed = load_character_profile_seed(profile_path)
-    serialized_seed = json.dumps(seed, ensure_ascii=True)
-
-    assert seed["name"].endswith("(Ichinose Asuna)")
-    assert "Kazusa" not in serialized_seed
-
-
-def test_active_profile_bindings_use_asuna_seed() -> None:
-    """Runtime defaults must point at the active Asuna personality seed."""
 
     repository_root = Path(__file__).resolve().parents[1]
-    binding_files = (
-        repository_root / "Dockerfile",
-        repository_root / "tests" / "conftest.py",
+    expected_seed = json.loads(
+        (repository_root / "personalities" / "example.json").read_text(
+            encoding="utf-8",
+        )
     )
+    seed = load_packaged_character_profile_seed()
 
-    for binding_file in binding_files:
-        binding_text = binding_file.read_text(encoding="utf-8")
-        assert "asuna.json" in binding_text
-        assert "kazusa.json" not in binding_text.casefold()
+    assert seed == expected_seed
+
+
+def test_deployment_artifacts_bind_only_packaged_example_seed() -> None:
+    """Package startup must carry only the example profile internally."""
+
+    repository_root = Path(__file__).resolve().parents[1]
+    package_profile_directory = (
+        repository_root
+        / "src"
+        / "kazusa_ai_chatbot"
+        / "character_profiles"
+    )
+    packaged_profiles = sorted(package_profile_directory.glob("*.json"))
+    package_config = (repository_root / "pyproject.toml").read_text(
+        encoding="utf-8",
+    )
+    dockerfile = (repository_root / "Dockerfile").read_text(encoding="utf-8")
+
+    assert [profile.name for profile in packaged_profiles] == ["example.json"]
+    assert 'character_profiles/*.json' in package_config
+    assert "CHARACTER_PROFILE_PATH" not in dockerfile
 
 
 def test_profile_loader_returns_validated_static_seed(tmp_path: Path) -> None:
-    """The loader should return static seed data from an absolute path."""
+    """The maintenance loader should return validated static seed data."""
 
     from kazusa_ai_chatbot.character_profile import load_character_profile_seed
 
@@ -195,13 +200,20 @@ def test_profile_loader_rejects_missing_required_profile_fields(
         load_character_profile_seed(profile_path)
 
 
-def test_profile_loader_rejects_relative_paths() -> None:
-    """Normal startup must receive an existing absolute profile path."""
+def test_profile_loader_accepts_relative_paths(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Maintenance callers may provide a path relative to their directory."""
 
     from kazusa_ai_chatbot.character_profile import load_character_profile_seed
 
-    with pytest.raises(ValueError):
-        load_character_profile_seed(Path("profile.json"))
+    _write_seed(tmp_path / "profile.json", _valid_seed_payload())
+    monkeypatch.chdir(tmp_path)
+
+    seed = load_character_profile_seed(Path("profile.json"))
+
+    assert seed["name"] == "Test Character"
 
 
 @pytest.mark.asyncio
@@ -293,3 +305,101 @@ async def test_profile_seed_rejects_conflicting_existing_identity(monkeypatch) -
 
     with pytest.raises(ValueError, match="name"):
         await ensure_character_profile_seed(_valid_seed_payload())
+
+
+@pytest.mark.asyncio
+async def test_startup_seeds_packaged_profile_only_when_singleton_absent(
+    monkeypatch,
+) -> None:
+    """Clean startup should insert packaged state and then use the database."""
+
+    from kazusa_ai_chatbot import service as service_module
+
+    seed = _valid_seed_payload(name="Packaged Example")
+    stored_profile = {
+        **seed,
+        "cognition_state": build_character_production_state(
+            updated_at="2026-07-26T00:00:00Z",
+        ),
+    }
+    get_profile = AsyncMock(side_effect=[{}, stored_profile])
+    load_packaged_seed = MagicMock(return_value=seed)
+    ensure_seed = AsyncMock(return_value="inserted")
+    get_cognition_state = AsyncMock(
+        return_value=stored_profile["cognition_state"],
+    )
+    monkeypatch.setattr(
+        service_module,
+        "get_character_profile",
+        get_profile,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "load_packaged_character_profile_seed",
+        load_packaged_seed,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "ensure_character_profile_seed",
+        ensure_seed,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "get_character_cognition_state",
+        get_cognition_state,
+    )
+
+    static_profile, runtime_state = (
+        await service_module._load_startup_character_profile()
+    )
+
+    load_packaged_seed.assert_called_once_with()
+    ensure_seed.assert_awaited_once_with(seed)
+    assert get_profile.await_count == 2
+    get_cognition_state.assert_awaited_once_with()
+    assert static_profile["name"] == "Packaged Example"
+    assert runtime_state["cognition_state"]["state_scope"] == "character"
+
+
+@pytest.mark.asyncio
+async def test_startup_preserves_existing_database_profile(monkeypatch) -> None:
+    """An existing native singleton should remain the startup authority."""
+
+    from kazusa_ai_chatbot import service as service_module
+
+    stored_profile = {
+        **_valid_seed_payload(name="Existing Character"),
+        "cognition_state": build_character_production_state(
+            updated_at="2026-07-26T00:00:00Z",
+        ),
+    }
+    load_packaged_seed = MagicMock()
+    ensure_seed = AsyncMock()
+    monkeypatch.setattr(
+        service_module,
+        "get_character_profile",
+        AsyncMock(return_value=stored_profile),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "load_packaged_character_profile_seed",
+        load_packaged_seed,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "ensure_character_profile_seed",
+        ensure_seed,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "get_character_cognition_state",
+        AsyncMock(return_value=stored_profile["cognition_state"]),
+    )
+
+    static_profile, _ = await service_module._load_startup_character_profile()
+
+    load_packaged_seed.assert_not_called()
+    ensure_seed.assert_not_awaited()
+    assert static_profile["name"] == "Existing Character"

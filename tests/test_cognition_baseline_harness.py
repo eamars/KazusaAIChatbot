@@ -15,6 +15,7 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 from kazusa_ai_chatbot.brain_service.contracts import AttachmentRefIn
+from tests import cognition_baseline_comparison
 from tests.cognition_baseline_comparison import (
     _basic_case_payload,
     _completed_artifacts,
@@ -65,7 +66,7 @@ _HISTORY_PATH = (
 )
 _PROFILE_PATH = _ROOT / "personalities" / "asuna.json"
 _EXPECTED_PROFILE_SHA256 = (
-    "7cd3d773c584fee7656da15eec827cd26b450825ec878716389f1e9a2ae1a484"
+    "9a4b87e3ee800b4c3937889ef8994fd81979cff87c3ef2219d3463ec290f33b2"
 )
 _EXPECTED_HISTORY_SHA256 = (
     "e42ef1a7a454e1208f5723fd3b87ba70d0e64579a68838ede911b5286e576008"
@@ -172,9 +173,21 @@ def test_frozen_inputs_have_expected_hashes() -> None:
     assert _sha256(_HISTORY_PATH) == _EXPECTED_HISTORY_SHA256
 
 
-def test_differential_harness_uses_configured_guarded_database() -> None:
+def test_differential_harness_uses_configured_guarded_database(
+    monkeypatch,
+) -> None:
     """Every corpus row must target the database declared by project ``.env``."""
 
+    configured = {
+        name: "configured"
+        for name in cognition_baseline_comparison._REQUIRED_DOTENV_ENV
+    }
+    configured["MONGODB_DB_NAME"] = "_test_kazusa_core_v2"
+    monkeypatch.setattr(
+        cognition_baseline_comparison,
+        "dotenv_values",
+        lambda _path: configured,
+    )
     database_name = _configured_database_name()
     assert database_name == "_test_kazusa_core_v2"
     assert _database_name("pre_fix_main", "C01", 1) == database_name

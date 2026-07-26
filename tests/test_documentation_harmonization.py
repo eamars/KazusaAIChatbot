@@ -122,8 +122,8 @@ def test_howto_startup_order_matches_service_lifespan() -> None:
         content,
         (
             "db_bootstrap()",
+            "Loads and validates the existing native character singleton",
             "Hydrates persistent media descriptor cache",
-            "Loads the active character profile",
             "Compiles the top-level LangGraph pipeline",
             "Starts configured MCP servers",
             "Builds the runtime adapter registry and starts the chat input worker",
@@ -137,7 +137,7 @@ def test_howto_startup_order_matches_service_lifespan() -> None:
     _assert_in_order(
         content,
         (
-            "Load a character profile",
+            "## Character Profile",
             "kazusa-control-console",
             "Direct service startup remains available for development fallback",
             "uvicorn kazusa_ai_chatbot.service:app",

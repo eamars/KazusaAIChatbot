@@ -48,9 +48,10 @@ from kazusa_ai_chatbot.config import (
     SELF_COGNITION_ENABLED,
     SELF_COGNITION_MAX_CASES_PER_TICK,
     SELF_COGNITION_WORKER_INTERVAL_SECONDS,
-    require_character_profile_path,
 )
-from kazusa_ai_chatbot.character_profile import load_character_profile_seed
+from kazusa_ai_chatbot.character_profile import (
+    load_packaged_character_profile_seed,
+)
 from kazusa_ai_chatbot.calendar_scheduler import models as calendar_models
 from kazusa_ai_chatbot.calendar_scheduler import repository as calendar_repository
 from kazusa_ai_chatbot.calendar_scheduler.reflection_phase import (
@@ -5879,6 +5880,27 @@ async def _hydrate_media_descriptor_cache() -> int:
     return loaded_count
 
 
+async def _load_startup_character_profile() -> tuple[dict, dict]:
+    """Load native character state, seeding a clean database when needed."""
+
+    character_profile = await get_character_profile()
+    if not character_profile.get("name"):
+        profile_seed = load_packaged_character_profile_seed()
+        seed_result = await ensure_character_profile_seed(profile_seed)
+        logger.info(
+            f"Packaged character profile seed {seed_result}: "
+            f"{profile_seed['name']}"
+        )
+        character_profile = await get_character_profile()
+
+    if not character_profile.get("name"):
+        raise RuntimeError(
+            "Native character profile bootstrap produced no singleton name"
+        )
+    await get_character_cognition_state()
+    return split_character_profile_runtime_state(character_profile)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _static_character_profile, _runtime_character_state
@@ -5902,29 +5924,14 @@ async def lifespan(app: FastAPI):
             status="ok",
         )
 
-        # 2. Load, validate, and atomically seed the static character profile
-        profile_path = require_character_profile_path()
-        profile_seed = load_character_profile_seed(profile_path)
-        seed_result = await ensure_character_profile_seed(profile_seed)
-        logger.info(
-            f"Native character profile seed {seed_result}: "
-            f"{profile_seed['name']}"
-        )
-
-        # 3. Validate the native runtime singleton before worker startup
-        character_profile = await get_character_profile()
-        if not character_profile.get("name"):
-            raise RuntimeError(
-                "Native character profile bootstrap produced no singleton name"
-            )
-        await get_character_cognition_state()
+        # 2. Seed a clean database or validate its native character singleton
         (
             _static_character_profile,
             _runtime_character_state,
-        ) = split_character_profile_runtime_state(character_profile)
+        ) = await _load_startup_character_profile()
         await _refresh_runtime_character_state()
 
-        # 4. Hydrate persistent media descriptor cache
+        # 3. Hydrate persistent media descriptor cache
         media_cache_started_at = time.perf_counter()
         await _hydrate_media_descriptor_cache()
         await event_logging.record_resource_health_event(
@@ -5936,10 +5943,10 @@ async def lifespan(app: FastAPI):
             status="ok",
         )
 
-        # 5. Build the LangGraph pipeline
+        # 4. Build the LangGraph pipeline
         _graph = _build_graph()
 
-        # 6. Start MCP tool servers
+        # 5. Start MCP tool servers
         mcp_started_at = time.perf_counter()
         try:
             await mcp_manager.start()
@@ -5984,7 +5991,7 @@ async def lifespan(app: FastAPI):
                 status="ok",
             )
 
-        # 7. Build runtime adapter registry and background workers
+        # 6. Build runtime adapter registry and background workers
         adapter_registry = AdapterRegistry()
         _adapter_registry = adapter_registry
 

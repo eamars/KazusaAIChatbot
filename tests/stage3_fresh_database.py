@@ -21,7 +21,6 @@ STAGE3_TEST_DATABASE_NAME = "_test_kazusa_core_v2"
 STAGE3_URI_ENV = "MONGODB_URI"
 STAGE3_DATABASE_ENV = "MONGODB_DB_NAME"
 STAGE3_DATABASE_GUARD_ENV = "STAGE3_DATABASE_GUARD"
-STAGE3_PROFILE_ENV = "CHARACTER_PROFILE_PATH"
 STAGE3_CASE_FIXTURE_SCHEMA = "stage3_fresh_database_cases.v1"
 STAGE3_SESSION_FILENAME = "stage3_run_session.json"
 STAGE3_EVIDENCE_SCHEMA = "stage3_fresh_database_evidence.v1"
@@ -105,19 +104,11 @@ def validate_stage3_environment(
     if uri_database_name and uri_database_name != database_name:
         raise ValueError("MongoDB URI database disagrees with the guarded name")
 
-    profile_path = _required_environment_value(source, STAGE3_PROFILE_ENV)
-    profile = Path(profile_path)
-    if not profile.is_absolute() or not profile.is_file():
-        raise ValueError(
-            f"{STAGE3_PROFILE_ENV} must be an existing absolute file path"
-        )
-
     return_value = {
         "mongodb_uri": uri,
         "database_name": database_name,
         "endpoint_fingerprint": actual_fingerprint,
         "database_guard": "exact_reserved_name",
-        "character_profile_path": str(profile),
     }
     return return_value
 
@@ -577,7 +568,6 @@ def _run_case_command(args: argparse.Namespace) -> None:
         "MONGODB_URI": guarded_environment["mongodb_uri"],
         "MONGODB_DB_NAME": guarded_environment["database_name"],
         STAGE3_DATABASE_GUARD_ENV: "1",
-        STAGE3_PROFILE_ENV: guarded_environment["character_profile_path"],
         "STAGE3_CASE_ID": args.case_id,
         "STAGE3_RUN_MODE": mode,
         "STAGE3_CASE_OUTPUT_PATH": str(args.output_dir / f"{args.case_id}.json"),

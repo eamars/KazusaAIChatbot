@@ -428,7 +428,10 @@ def _patch_dispatcher_persistence(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def _progress_cognition_output() -> dict[str, Any]:
+def _progress_cognition_output(
+    *,
+    state_scope: str = "user",
+) -> dict[str, Any]:
     """Build a cognition output that stays internal but affects state."""
 
     output = {
@@ -436,7 +439,7 @@ def _progress_cognition_output() -> dict[str, Any]:
         "character_intent": "WAIT",
         "self_cognition_route": models.ROUTE_PROGRESS_MAINTENANCE,
         "cognition_core_output": {
-            "state_update": {"state_scope": "character"},
+            "state_update": {"state_scope": state_scope},
         },
         "cognition_state_committed": True,
     }
@@ -499,7 +502,10 @@ def _text_surface_output(content_plan: str = "Checking in now.") -> dict[str, An
     }
 
 
-def _action_cognition_output() -> dict[str, Any]:
+def _action_cognition_output(
+    *,
+    state_scope: str = "user",
+) -> dict[str, Any]:
     """Build a cognition output that selects visible dialog through speak."""
 
     output = {
@@ -508,7 +514,7 @@ def _action_cognition_output() -> dict[str, Any]:
         "text_surface_output_v2": _text_surface_output(),
         "action_specs": [_speak_action_spec()],
         "cognition_core_output": {
-            "state_update": {"state_scope": "character"},
+            "state_update": {"state_scope": state_scope},
         },
         "cognition_state_committed": True,
     }
@@ -534,10 +540,13 @@ def _consolidation_result() -> dict[str, Any]:
     return result
 
 
-def test_worker_v2_result_requires_character_scope_and_completed_commit() -> None:
-    """Worker delivery must follow a committed character-scoped V2 result."""
+def test_worker_v2_result_requires_matching_scope_and_completed_commit() -> None:
+    """Worker delivery must follow the committed canonical input scope."""
 
     payloads = {
+        models.ARTIFACT_COGNITION_INPUT: {
+            "state_scope": "character",
+        },
         models.ARTIFACT_COGNITION_OUTPUT: {
             "cognition_core_output": {
                 "state_update": {"state_scope": "user"},
@@ -546,7 +555,7 @@ def test_worker_v2_result_requires_character_scope_and_completed_commit() -> Non
         },
     }
 
-    with pytest.raises(StateContractError, match="character scope"):
+    with pytest.raises(StateContractError, match="does not match cognition input"):
         worker._validate_worker_v2_cognition_result(
             payloads,
             required=True,

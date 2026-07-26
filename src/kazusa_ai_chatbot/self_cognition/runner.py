@@ -46,6 +46,9 @@ from kazusa_ai_chatbot.cognition_resolver.state import (
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     validate_text_surface_output,
 )
+from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+    resolve_state_scope,
+)
 from kazusa_ai_chatbot.nodes.dialog_agent import (
     DIALOG_USAGE_MODE_SELF_COGNITION_ACTION_CANDIDATE,
     StateContractError,
@@ -187,9 +190,14 @@ async def build_self_cognition_case_artifacts_async(
         pipeline_run_handle.raise_if_cancelled("before_source_packet")
     source_packet = projection.build_source_packet(case)
     rendered_packet = projection.render_source_packet_text(source_packet)
+    state_scope, _ = resolve_state_scope(
+        "self_cognition",
+        _target_scope(case)["user_id"],
+    )
     cognition_input = {
         "source_packet": source_packet,
         "rendered_text": rendered_packet,
+        "state_scope": state_scope,
     }
     artifact_payloads[models.ARTIFACT_COGNITION_INPUT] = cognition_input
 

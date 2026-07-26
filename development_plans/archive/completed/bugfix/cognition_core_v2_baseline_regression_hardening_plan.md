@@ -7,7 +7,7 @@
   corpus to prove closure.
 - Plan class: high_risk_migration, because the plan changes broad live
   cognition/action behavior and durable side-effect settlement.
-- Status: in_progress
+- Status: completed
 - Audited revisions: `origin/main@8f834bf87a83ee42aca804934fb44af63788420c`
   and `cognition_core_v2@0c2e929d51ac80c4519f564b61cbf8949efcca3d`.
 - Mandatory skills: `development-plan`, `local-llm-architecture`, `debug-llm`,
@@ -2906,3 +2906,93 @@ normally. The new artifact has a post-start write time and replaced the prior
 failed evidence. The focused runner now removes an existing output artifact
 before starting its worker, so a future interrupted run cannot read a stale
 `r1.json` as its result.
+
+### 2026-07-26 clean-state deployability amendment
+
+The user explicitly requires the Stage 3 release artifact to start from a
+clean database and authorizes correction of unintentional deployment
+regressions found against `origin/main`. This closes the lifecycle gap between
+Stage 3 fresh-state adoption and Stage 4 legacy production-data migration.
+
+Status: `completed`.
+
+Scope and acceptance contract:
+
+1. A clean database must receive a complete native example character singleton,
+   including `cognition_state.v2`, before workers start.
+2. Only the neutral example profile may be a versioned package artifact.
+   Character-specific profiles remain local or database-resident. Startup must
+   not depend on `CHARACTER_PROFILE_PATH`, the current working directory, an
+   ignored local personality file, or an operator pre-load step.
+3. Startup uses the packaged seed only when the singleton is absent. Once a
+   singleton exists, the database remains authoritative and startup validates
+   its native V2 state without overwriting static or mutable fields.
+4. Explicit profile maintenance remains available through
+   `scripts.load_character_profile` with a caller-supplied path.
+5. Docker and Python package builds must include everything needed for
+   clean-state startup. Compose must pass every required LLM route introduced
+   by V2.
+6. Generated baseline-run files must not be tracked as application source and
+   future `test_runs/` output must stay out of the worktree.
+7. Focused deterministic tests, package-content inspection, clean-database
+   bootstrap, restart verification, compose validation, and service health
+   smoke must pass before this amendment can be signed off.
+8. Existing legacy production rows that lack native V2 state remain a Stage 4
+   migration concern. This amendment performs no compatibility translation and
+   grants no production database discovery or write authority.
+
+Verification evidence:
+
+- The complete non-live suite passed with `3470 passed`, `2 skipped`, and
+  `831 deselected`.
+- The guarded live MongoDB proof passed from an empty
+  `_test_kazusa_core_v2` database through service readiness, `GET /health`,
+  shutdown, restart, and unchanged bootstrap state.
+- A fresh wheel contained only the packaged example profile; an isolated
+  import loaded and validated the example seed. The wheel SHA-256 is
+  `31b07d7b38a6a687490b6c55446e44e57cbf5ba9d808e5a4df99c5bdb21d7597`.
+- An initial local wheel inspection found a removed non-example profile in an
+  ignored generated build cache. The stale cache entry and failed wheel were
+  deleted; the clean rebuild and isolated archive inspection passed.
+- Compose parsed successfully and the deterministic deployment check confirmed
+  strict bindings for every required runtime environment variable.
+- Source/test compilation, focused deployment/profile/documentation tests, the
+  owner matrix, and `git diff --check` passed.
+- Docker, Podman, Buildah, and Nerdctl are unavailable on this host. The actual
+  container-image build remains an external verification item; the Python
+  package and clean-database runtime evidence are complete.
+
+### 2026-07-26 user-accepted residual closeout
+
+The user explicitly accepted the remaining functional and live-quality
+imperfections, including instability attributable to the configured local LLM,
+and directed this plan to close. Progress-checklist items C through F and their
+earlier gated reruns remain unchecked as historical residuals; this closeout
+records a waiver by explicit user acceptance rather than retroactively
+representing those gates as passed.
+
+The clean-state deployability amendment is complete on the following executable
+evidence:
+
+- the repository `.env` supplies every required runtime setting without
+  `CHARACTER_PROFILE_PATH`;
+- the configured database was dropped, rebuilt through the native bootstrap,
+  and seeded from one caller-supplied local profile;
+- the stored static profile exactly matches that local seed, the singleton has
+  native `cognition_state.v2`, and all three 768-dimensional vector search
+  indexes report `READY`;
+- standalone startup reaches healthy database and scheduler state, all enabled
+  background workers remain alive with no worker error level, and the startup
+  log reaches service readiness without a fatal error;
+- one real HTTP chat turn completed through the full service path, after which
+  the configured database was dropped and bootstrapped again so the final
+  executable state contains no synthetic conversation, user, memory, episode,
+  or LLM-trace rows; and
+- the versioned package contains only the neutral example profile, while the
+  selected deployment profile remains local and database-resident.
+
+The unavailable local container engine remains an accepted external verification
+item. Package construction, package-content inspection, Compose configuration,
+fresh-database bootstrap, live model and embedding connectivity, service
+startup, runtime health, worker status, and final clean-state verification are
+complete.

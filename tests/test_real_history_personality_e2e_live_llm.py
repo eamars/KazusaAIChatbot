@@ -81,9 +81,9 @@ def _source_path() -> Path:
 def _profile_path() -> Path:
     """Return the active comparison personality file."""
 
-    configured_path = os.environ.get("CHARACTER_PROFILE_PATH", "").strip()
+    configured_path = os.environ.get("REAL_HISTORY_PROFILE_PATH", "").strip()
     if not configured_path:
-        raise AssertionError("CHARACTER_PROFILE_PATH is required")
+        raise AssertionError("REAL_HISTORY_PROFILE_PATH is required")
     return Path(configured_path).resolve()
 
 

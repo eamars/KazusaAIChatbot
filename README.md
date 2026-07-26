@@ -664,13 +664,11 @@ pip install -U pip
 pip install -e ".[dev]"
 ```
 
-Configure an absolute character profile path before starting the brain. Fresh
-startup validates the profile and atomically inserts or verifies the character
-singleton; the maintenance loader is optional:
-
-```powershell
-CHARACTER_PROFILE_PATH=C:\workspace\kazusa_ai_chatbot\personalities\kazusa.json
-```
+The distribution includes only the neutral example character profile. On a
+clean database, startup atomically creates the complete native character
+singleton from that packaged example. Existing native singletons remain
+database-authoritative. Real character profiles stay outside the repository
+and are loaded only through an explicit maintenance operation.
 
 Normal local operation starts the buildless Python/FastAPI control console,
 then uses the console to start or stop the brain and adapters:

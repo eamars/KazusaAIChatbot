@@ -53,19 +53,14 @@ def test_stage3_endpoint_identity_ignores_credentials_and_host_order() -> None:
     )
 
 
-def test_stage3_environment_accepts_same_endpoint_with_reserved_database(
-    tmp_path: Path,
-) -> None:
+def test_stage3_environment_accepts_same_endpoint_with_reserved_database() -> None:
     """The exact reserved database name is the primary isolation guard."""
 
     module = importlib.import_module("tests.stage3_fresh_database")
     uri = "mongodb://localhost:27017"
-    profile_path = tmp_path / "asuna.json"
-    profile_path.write_text("{}", encoding="utf-8")
     environment = {
         "MONGODB_URI": uri,
         "MONGODB_DB_NAME": "_test_kazusa_core_v2",
-        "CHARACTER_PROFILE_PATH": str(profile_path),
     }
 
     result = module.validate_stage3_environment(environment)
@@ -75,17 +70,14 @@ def test_stage3_environment_accepts_same_endpoint_with_reserved_database(
     assert result["database_guard"] == "exact_reserved_name"
 
 
-def test_stage3_environment_rejects_uri_database_mismatch(tmp_path: Path) -> None:
+def test_stage3_environment_rejects_uri_database_mismatch() -> None:
     """An embedded URI database must agree with the exact guarded name."""
 
     module = importlib.import_module("tests.stage3_fresh_database")
-    profile_path = tmp_path / "asuna.json"
-    profile_path.write_text("{}", encoding="utf-8")
     try:
         module.validate_stage3_environment({
             "MONGODB_URI": "mongodb://localhost:27017/roleplay_bot",
             "MONGODB_DB_NAME": "_test_kazusa_core_v2",
-            "CHARACTER_PROFILE_PATH": str(profile_path),
         })
     except ValueError as exc:
         assert "disagrees" in str(exc)

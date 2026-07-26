@@ -20,7 +20,6 @@ async def test_stage3_claimed_latch_recovers_without_duplicate_consumption() -> 
     required_guard_names = (
         "MONGODB_URI",
         "MONGODB_DB_NAME",
-        "CHARACTER_PROFILE_PATH",
     )
     missing_guard_names = [
         name for name in required_guard_names if not os.environ.get(name)
@@ -35,9 +34,6 @@ async def test_stage3_claimed_latch_recovers_without_duplicate_consumption() -> 
     os.environ["STAGE3_DATABASE_GUARD"] = "1"
     os.environ["MONGODB_URI"] = guarded_environment["mongodb_uri"]
     os.environ["MONGODB_DB_NAME"] = guarded_environment["database_name"]
-    os.environ["CHARACTER_PROFILE_PATH"] = (
-        guarded_environment["character_profile_path"]
-    )
 
     from kazusa_ai_chatbot.db import close_db, db_bootstrap
     from kazusa_ai_chatbot.db.internal_action_latches import (

@@ -1,12 +1,12 @@
 """Validate and seed a character personality profile into MongoDB.
 
 Usage:
-    python -m scripts.load_character_profile personalities/asuna.json
-    python -m scripts.load_character_profile personalities/asuna.json --force
+    python -m scripts.load_character_profile personalities/example.json
+    python -m scripts.load_character_profile personalities/example.json --force
 
-The service performs the same seed-or-verify operation during native startup.
-``--force`` explicitly replaces static profile fields while preserving runtime
-state.
+Native startup uses the packaged default seed only when the database singleton
+is absent. This command explicitly loads another profile.
+``--force`` replaces static profile fields while preserving runtime state.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 async def main(path: Path, force: bool) -> None:
     await db_bootstrap()
-    seed = load_character_profile_seed(path.resolve())
+    seed = load_character_profile_seed(path)
     seed_result = await ensure_character_profile_seed(seed)
 
     existing = await get_character_profile()

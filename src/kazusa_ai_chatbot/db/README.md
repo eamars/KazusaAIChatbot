@@ -494,15 +494,16 @@ dropped only through maintenance helpers and explicit operator scripts.
 
 ## Bootstrap And Indexes
 
-`db_bootstrap()` owns startup collection/index preparation and required seed
-documents. It creates current collections and indexes, including
+`db_bootstrap()` owns startup collection and index preparation. It creates
+current collections and indexes, including
 `user_memory_units`, reflection-run indexes, interaction-style indexes,
 calendar schedule/run indexes, historical scheduled-event migration indexes,
 self-cognition action-attempt indexes, self-cognition group-review
 reviewed-window indexes, and other runtime indexes required by the facade.
 
-Bootstrap is idempotent. It creates or updates indexes and seed singleton
-documents. Destructive data repair belongs in explicit migration plans.
+Bootstrap is idempotent. The brain-service startup boundary separately creates
+the packaged native character singleton only when it is absent. Destructive
+data repair belongs in explicit migration plans.
 
 ## Reflection Interface
 
