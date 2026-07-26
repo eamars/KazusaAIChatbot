@@ -40,6 +40,8 @@ long_term/todo.md
 |---|---|---|
 | [coding_agent_assessment_gap_phase_d_plan.md](active/short_term/coding_agent_assessment_gap_phase_d_plan.md) | High-risk coding-agent migration plan for a generic JSON action loop, persistent repository index, exploration-cap removal, and delete/rename | in progress |
 | [cognition_core_v2_stage_4_production_database_migration_plan.md](active/short_term/cognition_core_v2_stage_4_production_database_migration_plan.md) | Non-executable production database discovery, backup, transformation, deployment, rollback, and cutover placeholder; blocked on completed Stage 3 and explicit production authority | draft |
+| [cognition_core_v2_model_assignment_quality_evaluation_plan.md](active/short_term/cognition_core_v2_model_assignment_quality_evaluation_plan.md) | Full-factorial real-LLM quality evaluation for assigning Core V2 callers between configured dense and MoE endpoints | draft |
+| [control_console_information_contract_v2_remediation_plan.md](active/short_term/control_console_information_contract_v2_remediation_plan.md) | All-page control-console information ownership, native V2 projection, duplication removal, and real-data verification plan | draft |
 
 ## Supporting Experiment Records
 
