@@ -342,6 +342,10 @@ async def test_dependency_order_requires_brain_before_adapter_and_stops_dependen
         operator_id="operator",
         reason="start brain",
     )
+    recovered_adapter_state = supervisor.service_state("adapter.debug")
+    assert recovered_adapter_state.actual_state == "stopped"
+    assert recovered_adapter_state.last_error_preview is None
+
     await supervisor.start_service(
         service_id="adapter.debug",
         operator_id="operator",
@@ -359,6 +363,109 @@ async def test_dependency_order_requires_brain_before_adapter_and_stops_dependen
     ]
     assert supervisor.service_state("adapter.debug").actual_state == "stopped"
     assert supervisor.service_state("brain").actual_state == "stopped"
+
+
+def test_persisted_dependency_failure_clears_after_dependency_recovers(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Recovered dependencies must clear obsolete persisted adapter failures."""
+
+    from control_console import supervisor as supervisor_module
+    from control_console.audit import LocalAuditWriter
+    from control_console.log_store import ProcessLogStore
+    from control_console.process_store import ProcessStore
+    from control_console.supervisor import ProcessSupervisor
+
+    brain_pid = 42116
+    monkeypatch.setattr(
+        supervisor_module,
+        "_pid_exists",
+        lambda pid: pid == brain_pid,
+    )
+    store = ProcessStore(tmp_path / "state")
+    store.update_service(
+        "brain",
+        {
+            "desired_state": "running",
+            "actual_state": "running",
+            "pid": brain_pid,
+            "last_error_preview": None,
+        },
+    )
+    store.update_service(
+        "adapter.napcat",
+        {
+            "desired_state": "running",
+            "actual_state": "unavailable",
+            "pid": None,
+            "last_error_preview": "dependency brain is not running",
+        },
+    )
+    services = {
+        "brain": _service_spec("brain", tmp_path),
+        "adapter.napcat": _service_spec(
+            "adapter.napcat",
+            tmp_path,
+            dependencies=["brain"],
+        ),
+    }
+    supervisor = ProcessSupervisor(
+        services=services,
+        store=store,
+        log_store=ProcessLogStore(tmp_path / "logs"),
+        audit_writer=LocalAuditWriter(tmp_path / "audit.jsonl"),
+    )
+
+    state = supervisor.service_state("adapter.napcat")
+    persisted_state = store.load_snapshot()["services"]["adapter.napcat"]
+
+    assert state.desired_state == "running"
+    assert state.actual_state == "stopped"
+    assert state.last_error_preview is None
+    assert persisted_state["actual_state"] == "stopped"
+    assert persisted_state["last_error_preview"] is None
+
+
+def test_dependency_recovery_preserves_unrelated_unavailable_failures(
+    tmp_path,
+) -> None:
+    """Dependency refresh must preserve failures owned by another boundary."""
+
+    from control_console.audit import LocalAuditWriter
+    from control_console.log_store import ProcessLogStore
+    from control_console.process_store import ProcessStore
+    from control_console.supervisor import ProcessSupervisor
+
+    store = ProcessStore(tmp_path / "state")
+    store.update_service(
+        "adapter.napcat",
+        {
+            "desired_state": "running",
+            "actual_state": "unavailable",
+            "pid": None,
+            "last_error_preview": "adapter configuration is unavailable",
+        },
+    )
+    services = {
+        "brain": _service_spec("brain", tmp_path),
+        "adapter.napcat": _service_spec(
+            "adapter.napcat",
+            tmp_path,
+            dependencies=["brain"],
+        ),
+    }
+    supervisor = ProcessSupervisor(
+        services=services,
+        store=store,
+        log_store=ProcessLogStore(tmp_path / "logs"),
+        audit_writer=LocalAuditWriter(tmp_path / "audit.jsonl"),
+    )
+
+    state = supervisor.service_state("adapter.napcat")
+
+    assert state.actual_state == "unavailable"
+    assert state.last_error_preview == "adapter configuration is unavailable"
 
 
 @pytest.mark.asyncio
