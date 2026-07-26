@@ -385,9 +385,36 @@ async def test_repository_owner_pages_write_off_unsupported_surfaces() -> None:
         assert platform_channel_id == "group-1"
         return {"application_order": []}
 
+    async def empty_group_activity(**kwargs: object) -> list[dict[str, object]]:
+        assert kwargs["platform"] == "qq"
+        assert kwargs["platform_channel_id"] == "group-1"
+        assert kwargs["limit"] == 1
+        return []
+
+    async def empty_group_reviews(**kwargs: object) -> list[dict[str, object]]:
+        assert kwargs["platform"] == "qq"
+        assert kwargs["platform_channel_id"] == "group-1"
+        assert kwargs["limit"] == 1
+        return []
+
+    async def empty_residue(**kwargs: object) -> dict[str, object]:
+        assert "trigger_scope" in kwargs
+        assert "current_timestamp_utc" in kwargs
+        return {
+            "status": "empty",
+            "internal_monologue_residue_context": "",
+        }
+
+    async def character_profile() -> dict[str, object]:
+        return {"name": "Test Character"}
+
     repository = ControlConsoleRepository(
         find_user_profile_by_identifier=missing_user_profile,
         build_interaction_style_context=group_style_context,
+        get_character_profile=character_profile,
+        list_recent_group_summaries=empty_group_activity,
+        list_group_review_windows=empty_group_reviews,
+        load_residue_context=empty_residue,
     )
 
     user = await repository.lookup_user_entity(
@@ -412,20 +439,23 @@ async def test_repository_owner_pages_write_off_unsupported_surfaces() -> None:
     assert set(user["panels"]) == {
         "profile",
         "relationship",
+        "cognition_state",
         "memory",
         "style",
-        "conversation_progress_prompt",
-        "current_carry_over",
+        "conversation_progress",
+        "carry_over",
     }
     assert all(panel["items"] == [] for panel in user["panels"].values())
     assert missing_group_platform["status"] == "needs_input"
     assert "platform is required" in missing_group_platform["panels"]["style"]["reason"]
-    assert group["status"] == "needs_input"
+    assert group["status"] == "empty"
     assert group["panels"]["style"]["reason"] == (
         "no interaction-style guidance matched the lookup"
     )
-    assert "not exposed" in group["panels"]["progress"]["reason"]
-    assert "not available" in group["panels"]["guidance"]["reason"]
+    assert group["panels"]["activity"]["status"] == "empty"
+    assert group["panels"]["review"]["status"] == "empty"
+    assert group["panels"]["carry_over"]["status"] == "empty"
+    assert group["panels"]["participant_progress"]["status"] == "needs_input"
 
 
 @pytest.mark.asyncio
@@ -435,21 +465,21 @@ async def test_repository_character_projection_fallbacks_are_readable() -> None:
     from control_console.repository import ControlConsoleRepository
 
     async def get_character_profile() -> dict[str, object]:
+        return {"name": "Test Character"}
+
+    async def runtime_state() -> dict[str, object]:
         return {
-            "name": "Test Character",
+            "cognition_state": {},
             "self_image": {
                 "summary": "steady",
                 "recent_window": ["first; second"],
                 "meta": {
                     "last_updated": "2026-06-19T00:00:00+00:00",
-                    "synthesis_count": 2,
+                    "synthesis_count": 1685,
                 },
                 "prompt_text": "must redact",
             },
         }
-
-    async def empty_runtime_state() -> dict[str, object]:
-        return {"reflection_summary": "background learning only"}
 
     async def mixed_growth_traits(*, limit: int) -> list[object]:
         assert limit == 12
@@ -462,24 +492,37 @@ async def test_repository_character_projection_fallbacks_are_readable() -> None:
             },
         ]
 
+    async def empty_growth_runs(*, limit: int) -> list[object]:
+        assert limit == 1
+        return []
+
+    async def empty_residue(**kwargs: object) -> dict[str, object]:
+        assert "trigger_scope" in kwargs
+        assert "current_timestamp_utc" in kwargs
+        return {
+            "status": "empty",
+            "internal_monologue_residue_context": "",
+        }
+
     repository = ControlConsoleRepository(
         get_character_profile=get_character_profile,
-        get_character_runtime_state=empty_runtime_state,
+        get_character_runtime_state=runtime_state,
         list_growth_traits=mixed_growth_traits,
+        list_recent_global_character_growth_runs=empty_growth_runs,
+        load_residue_context=empty_residue,
     )
 
     character = await repository.character_entity(limit=10)
     self_image = character["panels"]["self_image"]["items"][0]
-    learning = character["panels"]["learning"]["items"][0]
     growth = character["panels"]["growth"]["items"][0]
 
     assert character["status"] == "available"
     assert self_image["summary"] == "steady"
     assert self_image["recent_window"] == ["first; second"]
-    assert self_image["last_updated"] == "2026-06-19T00:00:00+00:00"
-    assert self_image["synthesis_count"] == 2
-    assert learning["source"] == "character_state.reflection_summary"
-    assert growth["trait_id"] == "trait-1"
+    assert self_image["updated_at"] == "2026-06-19T00:00:00+00:00"
+    assert "synthesis_count" not in self_image
+    assert growth["trait_name"] == "observable growth"
+    assert "trait_id" not in growth
     rendered = repr(character).lower()
     assert "prompt_text" not in rendered
     assert "must redact" not in rendered
@@ -570,15 +613,13 @@ def test_stream_parsing_replay_and_status_events_cover_failure_branches() -> Non
 
 
 @pytest.mark.asyncio
-async def test_app_service_helpers_cover_mixed_state_and_event_filters(tmp_path) -> None:
-    """App helpers should serialize mixed service state and filtered logs."""
+async def test_app_service_helpers_cover_mixed_state(tmp_path) -> None:
+    """App helpers should serialize mixed service state."""
 
     from fastapi import HTTPException
 
     from control_console.app import (
         _brain_http_available,
-        _event_matches_filters,
-        _read_process_events,
         _service_actual_state,
         _service_config_snapshot_or_http_error,
         _service_config_summaries,
@@ -588,8 +629,6 @@ async def test_app_service_helpers_cover_mixed_state_and_event_filters(tmp_path)
         _service_state_payload,
         _service_version,
     )
-    from control_console.contracts import OperationalEventQuery
-    from control_console.log_store import ProcessLogStore
     from control_console.service_config import (
         ServiceConfigDescriptor,
         ServiceConfigField,
@@ -632,25 +671,11 @@ async def test_app_service_helpers_cover_mixed_state_and_event_filters(tmp_path)
         ],
     )
     registry = ServiceConfigRegistry(descriptors=[descriptor])
-    store = ProcessLogStore(tmp_path / "logs")
-    store.append_line(service_id="brain", stream="stdout", line="startup")
-    store.append_line(service_id="adapter.debug", stream="stderr", line="error")
-    query = OperationalEventQuery(service_id="brain", limit=10)
-
     summaries = _service_config_summaries(
         states=[{"id": "missing"}, ModelState()],
         registry=registry,
         environment={"BRAIN_MODE": "invalid"},
         overrides=ServiceConfigOverrideStore(),
-    )
-    rows = await _read_process_events(
-        query,
-        log_store=store,
-        services={"brain": object(), "adapter.debug": object()},
-    )
-    filtered_out = _event_matches_filters(
-        {"service_id": "brain", "event_type": "service_started"},
-        OperationalEventQuery(service_id="adapter.debug"),
     )
     version = await _service_version(
         supervisor=AsyncVersionSupervisor(),
@@ -688,9 +713,6 @@ async def test_app_service_helpers_cover_mixed_state_and_event_filters(tmp_path)
     assert missing_service_error.value.status_code == 404
     assert missing_descriptor_error.value.status_code == 404
     assert invalid_default_error.value.status_code == 422
-    assert rows[0]["service_id"] == "brain"
-    assert rows[0]["message"] == "startup"
-    assert filtered_out is False
     assert version == 9
     assert _service_state_payload(None) == {"actual_state": "unavailable"}
     assert _service_state_payload({"actual_state": "running"}) == {

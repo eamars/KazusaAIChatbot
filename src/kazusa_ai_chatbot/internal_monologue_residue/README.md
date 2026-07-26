@@ -27,8 +27,10 @@ context only through the public facade.
 
 Runtime callers use:
 
-- `load_residue_context(trigger_scope, current_timestamp_utc)` to return one
-  bounded prompt-facing string plus sanitized load metadata.
+- `load_residue_context(trigger_scope, current_timestamp_utc,
+  record_telemetry=True)` to return one bounded prompt-facing string plus
+  sanitized load metadata. Read-only inspection callers may set
+  `record_telemetry=False` so the inspection does not create an event row.
 - `record_completed_episode_residue(completed_state, current_timestamp_utc)` to
   record one post-episode residue row or skip cleanly.
 - `project_residue_window(rows, current_timestamp_utc, context_char_limit)` for

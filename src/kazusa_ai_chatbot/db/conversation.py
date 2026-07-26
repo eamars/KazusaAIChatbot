@@ -40,6 +40,7 @@ CONVERSATION_VECTOR_FILTER_FIELDS = (
     "role",
     "timestamp",
 )
+MAX_RECENT_GROUP_SUMMARY_LIMIT = 100
 _conversation_vector_prefilter_support_cache: bool | None = None
 
 
@@ -541,6 +542,78 @@ async def aggregate_conversation_by_user(
         },
     }
     return return_value
+
+
+async def list_recent_group_summaries(
+    *,
+    limit: int,
+    platform: str | None = None,
+    platform_channel_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """Aggregate recent group activity without returning message content.
+
+    Args:
+        limit: Maximum number of group summaries to return.
+        platform: Optional exact platform filter.
+        platform_channel_id: Optional exact group-channel filter.
+
+    Returns:
+        Group summaries ordered by latest user activity with deterministic
+        platform and channel tie-breakers.
+    """
+
+    effective_limit = max(1, min(limit, MAX_RECENT_GROUP_SUMMARY_LIMIT))
+    match_filter: dict[str, Any] = {
+        "channel_type": "group",
+        "role": "user",
+        "platform": {"$type": "string", "$ne": ""},
+        "platform_channel_id": {"$type": "string", "$ne": ""},
+    }
+    if platform:
+        match_filter["platform"] = platform
+    if platform_channel_id:
+        match_filter["platform_channel_id"] = platform_channel_id
+
+    pipeline = [
+        {"$match": match_filter},
+        {"$sort": {"timestamp": -1}},
+        {
+            "$group": {
+                "_id": {
+                    "platform": "$platform",
+                    "platform_channel_id": "$platform_channel_id",
+                },
+                "channel_name": {"$first": "$channel_name"},
+                "last_activity_at": {"$max": "$timestamp"},
+                "message_count": {"$sum": 1},
+                "participants": {"$addToSet": "$platform_user_id"},
+            }
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "platform": "$_id.platform",
+                "platform_channel_id": "$_id.platform_channel_id",
+                "channel_name": 1,
+                "last_activity_at": 1,
+                "message_count": 1,
+                "participant_count": {"$size": "$participants"},
+            }
+        },
+        {
+            "$sort": {
+                "last_activity_at": -1,
+                "platform": 1,
+                "platform_channel_id": 1,
+            }
+        },
+        {"$limit": effective_limit},
+    ]
+    db = await get_db()
+    summaries = await db.conversation_history.aggregate(pipeline).to_list(
+        length=effective_limit,
+    )
+    return summaries
 
 
 async def save_conversation(doc: ConversationMessageDoc) -> str:

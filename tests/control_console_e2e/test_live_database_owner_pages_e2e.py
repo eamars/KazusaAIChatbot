@@ -1,34 +1,17 @@
 from __future__ import annotations
 
-import asyncio
 import os
-from dataclasses import dataclass
 from typing import Any
 
 import pytest
 
 from browser_harness import DEFAULT_E2E_OPERATOR_TOKEN
-from kazusa_ai_chatbot.db import close_db
-from kazusa_ai_chatbot.db.script_operations import export_collection_rows
 
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("KAZUSA_RUN_CONTROL_CONSOLE_LIVE_DB_E2E") != "1",
     reason="live DB owner-page E2E is opt-in because it reads configured MongoDB",
 )
-
-
-@dataclass(frozen=True)
-class LiveOwnerCandidates:
-    """Platform-facing identifiers selected from real read-only DB records."""
-
-    platform: str
-    platform_user_id: str
-    group_platform: str
-    group_id: str
-    user_id_mask: str
-    group_id_mask: str
-
 
 def test_live_database_owner_pages_render_human_readable_data(
     e2e_console,
@@ -38,8 +21,7 @@ def test_live_database_owner_pages_render_human_readable_data(
 ) -> None:
     """Validate real DB-backed owner pages render readable, redacted data."""
 
-    candidates = asyncio.run(_discover_live_owner_candidates())
-    with e2e_console() as console:
+    with e2e_console(use_live_project_db=True) as console:
         page = e2e_browser_page(console.base_url)
         _login(page)
 
@@ -51,16 +33,25 @@ def test_live_database_owner_pages_render_human_readable_data(
         _assert_owner_payload(
             payload=character_payload,
             owner="character",
-            required_populated_panels=("profile", "self_image"),
+            required_populated_panels=(
+                "profile",
+                "cognition_state",
+            ),
         )
+        self_image_panel = character_payload["panels"]["self_image"]
+        assert self_image_panel["status"] in {"available", "empty"}
+        if self_image_panel["status"] == "empty":
+            assert self_image_panel["reason"] == (
+                "character self-image is not available"
+            )
         _assert_owner_tables_readable(
             page,
             selectors=(
                 "#character-profile-table",
-                "#character-state-table",
+                "#character-cognition-state-table",
                 "#character-self-image-table",
                 "#character-growth-table",
-                "#character-learning-table",
+                "#character-carry-over-table",
             ),
         )
         character_screenshot_path = (
@@ -68,56 +59,139 @@ def test_live_database_owner_pages_render_human_readable_data(
         )
         page.screenshot(path=str(character_screenshot_path), full_page=True)
 
-        _open_page(page, "users", "Users")
-        page.locator("#user-platform").select_option(candidates.platform)
-        page.locator("#user-platform-user-id").fill(candidates.platform_user_id)
         with page.expect_response(
-            lambda response: "/api/entities/user" in response.url
+            lambda response: (
+                "/api/entities/users?" in response.url
+                and "/api/entities/users/" not in response.url
+            )
+        ) as user_directory_response_info:
+            _open_page(page, "users", "Users")
+        user_directory = user_directory_response_info.value.json()
+        assert user_directory["status"] == "available"
+        assert user_directory["items"]
+        user_account = user_directory["items"][0]["accounts"][0]
+        user_platform = user_account["platform"]
+        user_platform_user_id = user_account["platform_user_id"]
+        with page.expect_response(
+            lambda response: (
+                f"/api/entities/users/{user_platform}/"
+                f"{user_platform_user_id}" in response.url
+            )
         ) as user_response_info:
-            page.locator("#refresh-users").click()
+            page.locator("#user-directory-table button").first.click()
         user_payload = user_response_info.value.json()
         _assert_owner_payload(
             payload=user_payload,
             owner="user",
-            required_populated_panels=("profile",),
+            required_populated_panels=("profile", "relationship"),
         )
-        _assert_any_panel_populated(
-            user_payload,
-            panel_names=("relationship", "memory", "style"),
+        relationship = user_payload["panels"]["relationship"]
+        assert len(relationship["items"]) == 11
+        assert all(
+            set(item) == {"axis", "value", "band"}
+            for item in relationship["items"]
         )
+        assert relationship["evidence_count"] >= 0
+        assert relationship["updated_at"]
+        assert user_payload["panels"]["style"]["status"] == "empty"
         _assert_owner_tables_readable(
             page,
             selectors=(
                 "#user-profile-table",
+                "#user-relationship-table",
+                "#user-cognition-state-table",
                 "#user-memory-table",
                 "#user-style-table",
+                "#user-conversation-progress-table",
+                "#user-carry-over-table",
             ),
         )
         user_screenshot_path = e2e_artifact_dir / "live_db_owner_user.png"
         page.screenshot(path=str(user_screenshot_path), full_page=True)
 
-        _open_page(page, "groups", "Groups")
-        page.locator("#group-platform").select_option(candidates.group_platform)
-        page.locator("#group-id").fill(candidates.group_id)
         with page.expect_response(
-            lambda response: "/api/entities/group" in response.url
+            lambda response: (
+                "/api/entities/groups?" in response.url
+                and "/api/entities/groups/" not in response.url
+            )
+        ) as group_directory_response_info:
+            _open_page(page, "groups", "Groups")
+        group_directory = group_directory_response_info.value.json()
+        assert group_directory["status"] == "available"
+        assert group_directory["items"]
+        group_item = group_directory["items"][0]
+        group_platform = group_item["platform"]
+        group_id = group_item["group_id"]
+        with page.expect_response(
+            lambda response: (
+                f"/api/entities/groups/{group_platform}/{group_id}"
+                in response.url
+            )
         ) as group_response_info:
-            page.locator("#refresh-groups").click()
+            page.locator("#group-directory-table button").first.click()
         group_payload = group_response_info.value.json()
         _assert_owner_payload(
             payload=group_payload,
             owner="group",
-            required_populated_panels=("style",),
+            required_populated_panels=("activity",),
         )
+        assert group_payload["panels"]["style"]["status"] == "empty"
         _assert_owner_tables_readable(
             page,
             selectors=(
+                "#group-activity-table",
+                "#group-review-table",
                 "#group-style-table",
+                "#group-carry-over-table",
+                "#group-participant-progress-table",
             ),
         )
 
         group_screenshot_path = e2e_artifact_dir / "live_db_owner_group.png"
         page.screenshot(path=str(group_screenshot_path), full_page=True)
+
+        with page.expect_response(
+            lambda response: "/api/lookups/calendar" in response.url
+        ) as calendar_response_info:
+            _open_page(page, "calendar", "Calendar")
+        calendar_payload = calendar_response_info.value.json()
+        schedules_panel = calendar_payload["panels"]["schedules"]
+        assert schedules_panel["status"] in {"available", "empty"}
+        if schedules_panel["status"] == "available":
+            assert schedules_panel["items"]
+        else:
+            assert schedules_panel["reason"] == "no schedules are configured"
+        runs_panel = calendar_payload["panels"]["runs"]
+        assert runs_panel["status"] == "available"
+        assert any(
+            row.get("status") == "completed"
+            for row in runs_panel["items"]
+        )
+        _assert_owner_tables_readable(
+            page,
+            selectors=(
+                "#calendar-summary-table",
+                "#calendar-schedules-table",
+                "#calendar-runs-table",
+                "#calendar-cognition-visibility-table",
+            ),
+        )
+        calendar_screenshot_path = (
+            e2e_artifact_dir / "live_db_owner_calendar.png"
+        )
+        page.screenshot(path=str(calendar_screenshot_path), full_page=True)
+
+        visible_owner_text = page.locator("main").text_content()
+        for forbidden in (
+            "[object Object]",
+            "panel_contract",
+            "projection_owner",
+            "scope_order",
+            "scope_summary",
+            "affinity",
+            "relationship_summary",
+        ):
+            assert forbidden not in visible_owner_text
         console_messages = list(getattr(page, "kazusa_console_messages", []))
         assert console_messages == []
         summary = e2e_summary_writer(
@@ -127,23 +201,27 @@ def test_live_database_owner_pages_render_human_readable_data(
                 "console_url": console.base_url,
                 "tested_samples": {
                     "user": {
-                        "platform": candidates.platform,
-                        "platform_user_id_masked": candidates.user_id_mask,
+                        "platform": user_platform,
+                        "platform_user_id_masked": _mask_identifier(
+                            user_platform_user_id,
+                        ),
                     },
                     "group": {
-                        "platform": candidates.group_platform,
-                        "group_id_masked": candidates.group_id_mask,
+                        "platform": group_platform,
+                        "group_id_masked": _mask_identifier(group_id),
                     },
                 },
                 "panel_counts": {
                     "character": _panel_item_counts(character_payload),
                     "user": _panel_item_counts(user_payload),
                     "group": _panel_item_counts(group_payload),
+                    "calendar": _panel_item_counts(calendar_payload),
                 },
                 "screenshots": {
                     "character": str(character_screenshot_path),
                     "user": str(user_screenshot_path),
                     "group": str(group_screenshot_path),
+                    "calendar": str(calendar_screenshot_path),
                 },
                 "redaction": "no visible global_user_id, embeddings, prompts, or raw object placeholders",
             },
@@ -152,134 +230,17 @@ def test_live_database_owner_pages_render_human_readable_data(
     assert summary.exists()
 
 
-async def _discover_live_owner_candidates() -> LiveOwnerCandidates:
-    """Find real platform-facing user and group samples without DB mutation."""
-
-    projection = {"_id": 0, "embedding": 0}
-    try:
-        profiles = await export_collection_rows(
-            collection_name="user_profiles",
-            filter_doc={"platform_accounts.0": {"$exists": True}},
-            projection=projection,
-            sort_doc={},
-            limit=200,
-        )
-        memory_rows = await export_collection_rows(
-            collection_name="user_memory_units",
-            filter_doc={},
-            projection=projection,
-            sort_doc={"updated_at": -1},
-            limit=500,
-        )
-        style_rows = await export_collection_rows(
-            collection_name="interaction_style_images",
-            filter_doc={},
-            projection=projection,
-            sort_doc={"updated_at": -1},
-            limit=500,
-        )
-    finally:
-        await close_db()
-
-    user_candidate = _select_user_candidate(
-        profiles=profiles,
-        memory_rows=memory_rows,
-        style_rows=style_rows,
-    )
-    group_candidate = _select_group_candidate(style_rows)
-    candidates = LiveOwnerCandidates(
-        platform=user_candidate["platform"],
-        platform_user_id=user_candidate["platform_user_id"],
-        group_platform=group_candidate["platform"],
-        group_id=group_candidate["group_id"],
-        user_id_mask=_mask_identifier(user_candidate["platform_user_id"]),
-        group_id_mask=_mask_identifier(group_candidate["group_id"]),
-    )
-    return candidates
-
-
-def _select_user_candidate(
-    *,
-    profiles: list[dict[str, Any]],
-    memory_rows: list[dict[str, Any]],
-    style_rows: list[dict[str, Any]],
-) -> dict[str, str]:
-    """Select a real user that is likely to populate more than profile rows."""
-
-    memory_owner_ids = {
-        str(row.get("global_user_id", "")).strip()
-        for row in memory_rows
-        if str(row.get("global_user_id", "")).strip()
-    }
-    style_owner_ids = {
-        str(row.get("global_user_id", "")).strip()
-        for row in style_rows
-        if row.get("scope_type") == "user"
-        and str(row.get("global_user_id", "")).strip()
-    }
-    candidates: list[tuple[int, dict[str, str]]] = []
-    for profile in profiles:
-        global_user_id = str(profile.get("global_user_id", "")).strip()
-        account = _first_platform_account(profile)
-        if account is None:
-            continue
-        score = 0
-        if global_user_id in memory_owner_ids:
-            score += 2
-        if global_user_id in style_owner_ids:
-            score += 1
-        candidates.append((score, account))
-
-    assert candidates, "real DB has no user profile with a platform account"
-    candidates.sort(key=lambda item: item[0], reverse=True)
-    selected_candidate = candidates[0][1]
-    return selected_candidate
-
-
-def _first_platform_account(profile: dict[str, Any]) -> dict[str, str] | None:
-    """Return the first browser-lookup-safe platform account from a profile."""
-
-    accounts = profile.get("platform_accounts")
-    if not isinstance(accounts, list):
-        return None
-    for account in accounts:
-        if not isinstance(account, dict):
-            continue
-        platform = str(account.get("platform", "")).strip()
-        platform_user_id = str(account.get("platform_user_id", "")).strip()
-        if platform and platform_user_id:
-            result = {
-                "platform": platform,
-                "platform_user_id": platform_user_id,
-            }
-            return result
-    return None
-
-
-def _select_group_candidate(style_rows: list[dict[str, Any]]) -> dict[str, str]:
-    """Select a real group-channel style row for group owner validation."""
-
-    for row in style_rows:
-        if row.get("scope_type") != "group_channel":
-            continue
-        platform = str(row.get("platform", "")).strip()
-        group_id = str(row.get("platform_channel_id", "")).strip()
-        if platform and group_id:
-            candidate = {
-                "platform": platform,
-                "group_id": group_id,
-            }
-            return candidate
-    raise AssertionError("real DB has no group-channel interaction style row")
-
-
 def _login(page) -> None:
     """Authenticate the browser page as the E2E operator."""
 
     page.locator("#token").fill(DEFAULT_E2E_OPERATOR_TOKEN)
     page.locator("#login").click()
-    page.wait_for_selector("body[data-auth-state='authenticated']")
-    page.wait_for_selector("#overview-grid .metric")
+    page.wait_for_function(
+        """() => (
+          document.querySelector('#overview-service-status')?.textContent
+          !== 'not loaded'
+        )"""
+    )
 
 
 def _open_page(page, page_name: str, expected_heading: str) -> None:

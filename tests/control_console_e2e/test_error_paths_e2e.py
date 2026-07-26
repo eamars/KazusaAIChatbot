@@ -86,7 +86,12 @@ def _login(page) -> None:
 
     page.locator("#token").fill(DEFAULT_E2E_OPERATOR_TOKEN)
     page.locator("#login").click()
-    page.wait_for_selector("#overview-grid .metric")
+    page.wait_for_function(
+        """() => (
+          document.querySelector('#overview-service-status')?.textContent
+          !== 'not loaded'
+        )"""
+    )
     page.evaluate(
         """() => fetch('/api/auth/session')
           .then((response) => response.json())

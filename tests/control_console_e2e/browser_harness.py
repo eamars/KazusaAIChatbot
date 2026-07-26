@@ -37,6 +37,7 @@ class E2EConsoleConfig:
     artifact_dir: Path
     service_registry_path: Path | None = None
     sse_interval_seconds: float = 2.0
+    use_live_project_db: bool = False
 
 
 class E2EConsoleProcess(AbstractContextManager["E2EConsoleProcess"]):
@@ -126,10 +127,21 @@ class E2EConsoleProcess(AbstractContextManager["E2EConsoleProcess"]):
         return payload_dict
 
     def _write_launcher(self) -> None:
-        """Write a launcher that bypasses environment-backed settings."""
+        """Write a launcher with explicit console and optional DB settings."""
 
+        environment_source = ""
+        if self.config.use_live_project_db:
+            environment_source = (
+                "import os\n"
+                "os.environ.pop('MONGODB_DB_NAME', None)\n"
+                "os.environ.pop('KAZUSA_TEST_DB_GUARD', None)\n"
+                "os.environ.pop('STAGE3_DATABASE_GUARD', None)\n"
+                "from scripts._db_export import load_project_env\n"
+                "load_project_env()\n"
+            )
         launcher_source = (
             "from pathlib import Path\n"
+            f"{environment_source}"
             "import uvicorn\n"
             "from control_console.app import create_app\n"
             "from control_console.settings import ControlConsoleSettings\n"

@@ -15,14 +15,26 @@ def test_each_sidebar_page_has_connected_or_explicitly_gated_state(
         _login(page)
 
         _open_page(page, "overview", "Overview")
-        assert page.locator("#overview-grid .metric").count() > 0
+        assert page.locator("#overview-service-summary-table").inner_text().strip()
+        assert page.locator("#overview-readiness-table").inner_text().strip()
         assert page.locator("#overview-cognition-graph").inner_text().strip()
 
         _open_page(page, "services", "Services")
+        page.wait_for_selector("#service-grid .service-card")
         assert page.locator("#service-grid .service-card").count() >= 3
+        page.wait_for_selector(".brain-route-tile.selected")
+        assert page.locator(".brain-route-tile.selected code").count() == 0
+        assert page.locator(".brain-route-editor").inner_text().strip()
+
+        _open_page(page, "logs", "Live logs")
+        assert page.locator("#log-table").inner_text().strip()
+        assert page.locator("#log-stream-status").inner_text() != "signed out"
 
         _open_page(page, "debug", "Debug chat")
         assert page.locator("#debug-send").is_disabled()
+        assert "current browser session" in page.locator(
+            "[data-page='debug']"
+        ).inner_text().lower()
         assert "Start or connect the brain service" in page.locator(
             "textarea[name='message_text']"
         ).get_attribute("placeholder")
@@ -31,80 +43,109 @@ def test_each_sidebar_page_has_connected_or_explicitly_gated_state(
         with page.expect_response(lambda response: "/api/events" in response.url):
             page.locator("#refresh-events").click()
         assert page.locator("#event-table").inner_text().strip()
+        assert "Events updated." in page.locator("#ui-notice").inner_text()
 
         with page.expect_response(
             lambda response: "/api/entities/character" in response.url
         ):
             _open_page(page, "character", "Character")
+        assert page.locator("#ui-notice").is_hidden()
         assert page.locator("#character-profile-table").inner_text().strip()
-        assert page.locator("#character-state-table").inner_text().strip()
+        assert page.locator(
+            "#character-cognition-state-table"
+        ).inner_text().strip()
         assert page.locator("#character-self-image-table").inner_text().strip()
         assert page.locator("#character-growth-table").inner_text().strip()
-        assert page.locator("#character-memory-table").count() == 0
+        assert page.locator("#character-carry-over-table").inner_text().strip()
 
         _open_page(page, "users", "Users")
-        assert page.locator("#users-status").inner_text() == "needs input"
+        assert page.locator("#user-directory-table").inner_text().strip()
         assert page.locator("#user-global-user-id").count() == 0
         assert page.locator("select#user-platform").count() == 1
         page.locator("#user-platform").select_option("qq")
         page.locator("#user-platform-user-id").fill("e2e-user")
         with page.expect_response(
             lambda response: (
-                "/api/entities/user" in response.url
-                and "platform=qq" in response.url
-                and "platform_user_id=e2e-user" in response.url
+                "/api/entities/users/qq/e2e-user" in response.url
                 and "global_user_id" not in response.url
             )
         ):
             page.locator("#refresh-users").click()
         assert page.locator("#user-profile-table").inner_text().strip()
+        assert page.locator("#user-relationship-table").inner_text().strip()
+        assert page.locator("#user-cognition-state-table").inner_text().strip()
         assert page.locator("#user-memory-table").inner_text().strip()
         assert page.locator("#user-style-table").inner_text().strip()
+        assert page.locator(
+            "#user-conversation-progress-table"
+        ).inner_text().strip()
+        assert page.locator("#user-carry-over-table").inner_text().strip()
 
         _open_page(page, "groups", "Groups")
-        assert page.locator("#groups-status").inner_text() == "needs input"
+        assert page.locator("#group-directory-table").inner_text().strip()
         assert page.locator("#group-global-user-id").count() == 0
         assert page.locator("select#group-platform").count() == 1
         page.locator("#group-platform").select_option("debug")
         page.locator("#group-id").fill("e2e-group")
         with page.expect_response(
             lambda response: (
-                "/api/entities/group" in response.url
-                and "platform=debug" in response.url
-                and "group_id=e2e-group" in response.url
+                "/api/entities/groups/debug/e2e-group" in response.url
                 and "global_user_id" not in response.url
             )
         ):
             page.locator("#refresh-groups").click()
+        assert page.locator("#group-activity-table").inner_text().strip()
+        assert page.locator("#group-review-table").inner_text().strip()
         assert page.locator("#group-style-table").inner_text().strip()
-        assert page.locator("#group-progress-table").count() == 0
-        assert page.locator("#group-guidance-table").count() == 0
+        assert page.locator("#group-carry-over-table").inner_text().strip()
+        assert page.locator(
+            "#group-participant-progress-table"
+        ).inner_text().strip()
 
         with page.expect_response(
             lambda response: "/api/lookups/calendar" in response.url
         ):
             _open_page(page, "calendar", "Calendar")
         assert page.locator("#calendar-status").inner_text() != "not loaded"
-        assert page.locator("#calendar-prompt-runs-table").inner_text().strip()
+        assert page.locator("#calendar-summary-table").inner_text().strip()
         assert page.locator("#calendar-schedules-table").inner_text().strip()
-        assert page.locator("#calendar-due-runs-table").inner_text().strip()
+        assert page.locator("#calendar-runs-table").inner_text().strip()
+        assert page.locator(
+            "#calendar-cognition-visibility-table"
+        ).inner_text().strip()
 
         with page.expect_response(
-            lambda response: "/api/lookups/background" in response.url
+            lambda response: "/api/lookups/background-work" in response.url
         ):
             _open_page(page, "background", "Background work")
         assert page.locator("#background-status").inner_text() != "not loaded"
-        assert page.locator("#background-result-ready-table").inner_text().strip()
-        assert page.locator("#background-job-queue-table").inner_text().strip()
-        assert page.locator("#background-worker-events-table").inner_text().strip()
+        assert page.locator("#background-summary-table").inner_text().strip()
+        assert page.locator("#background-jobs-table").inner_text().strip()
+        assert page.locator("#background-worker-table").inner_text().strip()
+        assert page.locator("#background-errors-table").inner_text().strip()
+        assert page.locator("#background-delivery-table").inner_text().strip()
 
-        _open_page(page, "health", "Health/cache")
-        assert page.locator("#health-brain-status").inner_text() != "locked"
-        assert page.locator("#health-runtime-table").inner_text().strip()
+        with page.expect_response(lambda response: "/api/health" in response.url):
+            _open_page(page, "health", "Health/cache")
+        assert page.locator("#health-readiness-table").inner_text().strip()
+        assert page.locator("#health-workers-table").inner_text().strip()
+        assert page.locator("#health-cache-table").inner_text().strip()
 
         with page.expect_response(lambda response: "/api/audit" in response.url):
             _open_page(page, "audit", "Audit")
         assert page.locator("#audit-table").inner_text().strip()
+        assert page.locator("#audit-view-summary").inner_text().strip()
+        visible_text = page.locator("main").inner_text()
+        for forbidden_text in (
+            "[object Object]",
+            "panel_contract",
+            "projection_owner",
+            "scope_order",
+            "scope_summary",
+            "Growth Runs Audit",
+            "Event stream",
+        ):
+            assert forbidden_text not in visible_text
 
         summary = e2e_summary_writer(
             name="page_navigation_connected_states",
@@ -114,6 +155,7 @@ def test_each_sidebar_page_has_connected_or_explicitly_gated_state(
                 "pages": [
                     "overview",
                     "services",
+                    "logs",
                     "debug",
                     "events",
                     "character",
@@ -145,7 +187,7 @@ def test_owner_entity_unavailable_panels_render_reasons(
               const originalFetch = window.fetch.bind(window);
               window.fetch = (input, init) => {
                 const url = String(input);
-                if (url.includes('/api/entities/user')) {
+                if (url.includes('/api/entities/users/qq/e2e-user')) {
                   return Promise.resolve(new Response(JSON.stringify({
                     status: 'unavailable',
                     owner: 'user',
@@ -158,7 +200,12 @@ def test_owner_entity_unavailable_panels_render_reasons(
                       },
                       relationship: {
                         status: 'empty',
-                        reason: 'No relationship summary matched this user.',
+                        reason: 'No V2 relationship state matched this user.',
+                        items: []
+                      },
+                      cognition_state: {
+                        status: 'empty',
+                        reason: 'No V2 cognition state matched this user.',
                         items: []
                       },
                       memory: {
@@ -170,6 +217,16 @@ def test_owner_entity_unavailable_panels_render_reasons(
                         status: 'unavailable',
                         reason: 'User style helper is unavailable.',
                         items: []
+                      },
+                      conversation_progress: {
+                        status: 'needs_input',
+                        reason: 'Select a thread scope.',
+                        items: []
+                      },
+                      carry_over: {
+                        status: 'needs_input',
+                        reason: 'Select a thread scope.',
+                        items: []
                       }
                     },
                     redaction: {model_inputs: 'excluded'}
@@ -178,25 +235,35 @@ def test_owner_entity_unavailable_panels_render_reasons(
                     headers: {'Content-Type': 'application/json'}
                   }));
                 }
-                if (url.includes('/api/entities/group')) {
+                if (url.includes('/api/entities/groups/debug/e2e-group')) {
                   return Promise.resolve(new Response(JSON.stringify({
                     status: 'unavailable',
                     owner: 'group',
                     identity: {platform: 'debug', group_id: 'e2e-group'},
                     panels: {
+                      activity: {
+                        status: 'empty',
+                        reason: 'No group activity matched this scope.',
+                        items: []
+                      },
+                      review: {
+                        status: 'empty',
+                        reason: 'No group review matched this scope.',
+                        items: []
+                      },
                       style: {
                         status: 'unavailable',
                         reason: 'Group style helper is unavailable.',
                         items: []
                       },
-                      progress: {
-                        status: 'unavailable',
-                        reason: 'Group progress source is unavailable.',
+                      carry_over: {
+                        status: 'empty',
+                        reason: 'No promoted carry-over matched this scope.',
                         items: []
                       },
-                      guidance: {
-                        status: 'unavailable',
-                        reason: 'Reflection guidance source is unavailable.',
+                      participant_progress: {
+                        status: 'needs_input',
+                        reason: 'Select an optional participant.',
                         items: []
                       }
                     },
@@ -231,7 +298,12 @@ def test_owner_entity_unavailable_panels_render_reasons(
         assert "Group style helper is unavailable." in page.locator(
             "#group-style-table",
         ).inner_text()
-        assert page.locator("#group-guidance-table").count() == 0
+        assert "cognition" not in page.locator(
+            "[data-page='groups']",
+        ).inner_text().lower()
+        assert "relationship" not in page.locator(
+            "[data-page='groups']",
+        ).inner_text().lower()
 
         summary = e2e_summary_writer(
             name="owner_entity_unavailable_panel_states",
@@ -289,10 +361,13 @@ def test_owner_lookup_tables_render_nested_values_readably(
                           ]
                         }]
                       },
-                      state: {status: 'empty', items: [], reason: 'none'},
+                      cognition_state: {
+                        status: 'empty',
+                        items: [],
+                        reason: 'none'
+                      },
                       growth: {status: 'empty', items: [], reason: 'none'},
-                      memory: {status: 'empty', items: [], reason: 'none'},
-                      learning: {status: 'empty', items: [], reason: 'none'}
+                      carry_over: {status: 'empty', items: [], reason: 'none'}
                     },
                     redaction: {model_inputs: 'excluded'}
                   }), {
@@ -406,7 +481,11 @@ def test_character_page_uses_readable_profile_self_image_and_growth_panels(
                           synthesis_count: 1685
                         }]
                       },
-                      state: {status: 'empty', items: [], reason: 'none'},
+                      cognition_state: {
+                        status: 'empty',
+                        items: [],
+                        reason: 'none'
+                      },
                       growth: {
                         status: 'available',
                         items: [
@@ -433,8 +512,7 @@ def test_character_page_uses_readable_profile_self_image_and_growth_panels(
                           }
                         ]
                       },
-                      memory: {status: 'empty', items: [], reason: 'none'},
-                      learning: {status: 'empty', items: [], reason: 'none'}
+                      carry_over: {status: 'empty', items: [], reason: 'none'}
                     },
                     redaction: {model_inputs: 'excluded'}
                   }), {
@@ -476,6 +554,7 @@ def test_character_page_uses_readable_profile_self_image_and_growth_panels(
         )
         assert "timestamp:" not in self_image_text
         assert "summary:" not in self_image_text
+        assert "synthesis count" not in self_image_text.lower()
 
         growth = page.locator("#character-growth-table")
         assert growth.locator(".trait-card").count() == 2
@@ -505,12 +584,12 @@ def test_character_page_uses_readable_profile_self_image_and_growth_panels(
     assert summary.exists()
 
 
-def test_style_overlay_rows_use_readable_two_column_layout(
+def test_style_overlay_rows_use_readable_record_cards(
     e2e_console,
     e2e_browser_page,
     e2e_summary_writer,
 ) -> None:
-    """Style guidance should not be squeezed into four narrow columns."""
+    """Style guidance should render semantic cards without object dumps."""
 
     with e2e_console() as console:
         page = e2e_browser_page(console.base_url)
@@ -520,12 +599,14 @@ def test_style_overlay_rows_use_readable_two_column_layout(
               const originalFetch = window.fetch.bind(window);
               window.fetch = (input, init) => {
                 const url = String(input);
-                if (url.includes('/api/entities/group')) {
+                if (url.includes('/api/entities/groups/qq/group-1')) {
                   return Promise.resolve(new Response(JSON.stringify({
                     status: 'available',
                     owner: 'group',
                     identity: {platform: 'qq', group_id: 'group-1'},
                     panels: {
+                      activity: {status: 'empty', items: [], reason: 'none'},
+                      review: {status: 'empty', items: [], reason: 'none'},
                       style: {
                         status: 'available',
                         items: [{
@@ -538,8 +619,12 @@ def test_style_overlay_rows_use_readable_two_column_layout(
                           confidence: 'high'
                         }]
                       },
-                      progress: {status: 'empty', items: [], reason: 'none'},
-                      guidance: {status: 'empty', items: [], reason: 'none'}
+                      carry_over: {status: 'empty', items: [], reason: 'none'},
+                      participant_progress: {
+                        status: 'needs_input',
+                        items: [],
+                        reason: 'none'
+                      }
                     },
                     redaction: {model_inputs: 'excluded'}
                   }), {
@@ -560,18 +645,14 @@ def test_style_overlay_rows_use_readable_two_column_layout(
             "group_channel_style",
         ).wait_for()
 
-        row_count = page.locator("#group-style-table tr").count()
-        assert row_count == 1
-        for index in range(row_count):
-            row = page.locator("#group-style-table tr").nth(index)
-            cell_count = row.locator("td").count()
-            assert cell_count <= 2
+        assert page.locator("#group-style-table .record-card").count() == 1
+        assert page.locator("#group-style-table tr").count() == 0
         style_text = page.locator("#group-style-table").inner_text()
-        assert "Guidance" in style_text
-        assert "Scope" not in style_text
-        assert "Confidence" not in style_text
+        assert "speech_guidelines" in style_text
+        assert "scope" in style_text.lower()
+        assert "confidence" in style_text.lower()
         assert "group_channel_style" in style_text
-        assert "confidence: high" in style_text
+        assert "high" in style_text
         assert "keep the technical topic visible" in style_text
         assert "[object Object]" not in style_text
 
@@ -610,16 +691,21 @@ def test_owner_panels_use_panel_specific_readable_layouts(
                     panels: {
                       profile: {status: 'empty', items: [], reason: 'none'},
                       self_image: {status: 'empty', items: [], reason: 'none'},
-                      state: {
+                      cognition_state: {
                         status: 'available',
                         items: [
-                          {key: 'mood', value: 'focused'},
-                          {key: 'global_vibe', value: 'steady'}
+                          {
+                            key: 'drives',
+                            value: ['protect honest review', 'stay grounded']
+                          },
+                          {
+                            key: 'standards',
+                            value: {directness: 'high', restraint: 'steady'}
+                          }
                         ]
                       },
                       growth: {status: 'empty', items: [], reason: 'none'},
-                      memory: {status: 'empty', items: [], reason: 'none'},
-                      learning: {status: 'empty', items: [], reason: 'none'}
+                      carry_over: {status: 'empty', items: [], reason: 'none'}
                     },
                     redaction: {model_inputs: 'excluded'}
                   }), {
@@ -627,7 +713,7 @@ def test_owner_panels_use_panel_specific_readable_layouts(
                     headers: {'Content-Type': 'application/json'}
                   }));
                 }
-                if (url.includes('/api/entities/user')) {
+                if (url.includes('/api/entities/users/qq/platform-user-1')) {
                   return Promise.resolve(new Response(JSON.stringify({
                     status: 'available',
                     owner: 'user',
@@ -636,19 +722,37 @@ def test_owner_panels_use_panel_specific_readable_layouts(
                       platform_user_id: 'platform-user-1'
                     },
                     panels: {
-                      profile: {status: 'empty', items: [], reason: 'none'},
+                      profile: {
+                        status: 'available',
+                        items: [{
+                          platform: 'qq',
+                          platform_user_id: 'platform-user-1',
+                          display_name: 'Review User',
+                          alias_count: 2
+                        }]
+                      },
                       relationship: {
                         status: 'available',
                         items: [
-                          {key: 'affinity', value: 742},
-                          {key: 'relationship_summary', value: 'trusts direct review'}
+                          {axis: 'trust', value: 37, band: 'positive'},
+                          {axis: 'familiarity', value: 68, band: 'established'}
+                        ],
+                        evidence_count: 2,
+                        updated_at: '2026-06-19T00:00:00+00:00'
+                      },
+                      cognition_state: {
+                        status: 'available',
+                        items: [
+                          {
+                            key: 'goals',
+                            value: [{summary: 'complete a direct review'}]
+                          }
                         ]
                       },
                       memory: {
                         status: 'available',
                         items: [
                           {
-                            unit_id: 'unit-1',
                             unit_type: 'stable_pattern',
                             status: 'active',
                             fact: 'User wants product-grade UI checks.',
@@ -657,14 +761,23 @@ def test_owner_panels_use_panel_specific_readable_layouts(
                             updated_at: '2026-06-19T00:00:00+00:00'
                           },
                           {
-                            unit_id: 'unit-2',
                             unit_type: 'objective_fact',
                             status: 'active',
                             fact: 'User reviews every visible workflow.'
                           }
                         ]
                       },
-                      style: {status: 'empty', items: [], reason: 'none'}
+                      style: {status: 'empty', items: [], reason: 'none'},
+                      conversation_progress: {
+                        status: 'needs_input',
+                        items: [],
+                        reason: 'Select a thread scope.'
+                      },
+                      carry_over: {
+                        status: 'needs_input',
+                        items: [],
+                        reason: 'Select a thread scope.'
+                      }
                     },
                     redaction: {model_inputs: 'excluded'}
                   }), {
@@ -678,14 +791,14 @@ def test_owner_panels_use_panel_specific_readable_layouts(
         )
 
         _open_page(page, "character", "Character")
-        page.locator("#character-state-table").get_by_text("focused").wait_for()
-        state_rows = page.locator("#character-state-table tr")
-        assert state_rows.count() == 2
-        assert state_rows.nth(0).locator("td").nth(0).inner_text() == "mood"
-        assert state_rows.nth(0).locator("td").nth(1).inner_text() == "focused"
-        state_text = page.locator("#character-state-table").inner_text()
-        assert "key" not in state_text.lower()
-        assert "value" not in state_text.lower()
+        cognition = page.locator("#character-cognition-state-table")
+        cognition.get_by_text("protect honest review").wait_for()
+        cognition_text = cognition.inner_text()
+        assert "drives" in cognition_text.lower()
+        assert "standards" in cognition_text.lower()
+        assert "protect honest review" in cognition_text
+        assert "directness" in cognition_text.lower()
+        assert "[object Object]" not in cognition_text
 
         _open_page(page, "users", "Users")
         page.locator("#user-platform").select_option("qq")
@@ -695,18 +808,21 @@ def test_owner_panels_use_panel_specific_readable_layouts(
             "User wants product-grade UI checks.",
         ).wait_for()
         profile_text = page.locator("#user-profile-table").inner_text()
-        assert "affinity" in profile_text
-        assert "742" in profile_text
-        assert "relationship summary" in profile_text
-        assert "trusts direct review" in profile_text
-        assert page.locator("#user-relationship-table").count() == 0
-        user_profile_value = page.locator("#user-profile-table .table-primary").filter(
-            has_text="trusts direct review",
-        ).first
-        user_profile_value.wait_for()
-        assert user_profile_value.evaluate(
-            "element => getComputedStyle(element).whiteSpace",
-        ) == "pre-line"
+        assert "Review User" in profile_text
+        relationship_text = page.locator(
+            "#user-relationship-table",
+        ).inner_text()
+        assert "trust" in relationship_text.lower()
+        assert "37" in relationship_text
+        assert "positive" in relationship_text
+        assert "familiarity" in relationship_text.lower()
+        assert "68" in relationship_text
+        assert "affinity" not in relationship_text.lower()
+        cognition_text = page.locator(
+            "#user-cognition-state-table",
+        ).inner_text()
+        assert "complete a direct review" in cognition_text
+        assert "[object Object]" not in cognition_text
 
         memory_cards = page.locator("#user-memory-table .record-card")
         assert memory_cards.count() == 2
@@ -725,10 +841,6 @@ def test_owner_panels_use_panel_specific_readable_layouts(
         assert "prefers direct review" in memory_text
         assert "unit_id" not in memory_text
         assert "unit-1" not in memory_text
-        assert page.locator("#user-summary-memory .metric-value").inner_text() == "2"
-        assert page.locator("#user-summary-identity .metric-label").last.inner_text() == (
-            "platform-user-1"
-        )
 
         summary = e2e_summary_writer(
             name="owner_panel_specific_layouts",
@@ -736,7 +848,8 @@ def test_owner_panels_use_panel_specific_readable_layouts(
             details={
                 "console_url": console.base_url,
                 "checked": [
-                    "key-value state rows use field labels",
+                    "native V2 state renders nested meaning",
+                    "V2 relationship axes render separately from profile",
                     "memory units render one card per unit",
                 ],
             },
@@ -745,12 +858,12 @@ def test_owner_panels_use_panel_specific_readable_layouts(
     assert summary.exists()
 
 
-def test_prompt_operational_and_tabular_surfaces_use_right_structures(
+def test_semantic_owner_surfaces_exclude_internal_projection_metadata(
     e2e_console,
     e2e_browser_page,
     e2e_summary_writer,
 ) -> None:
-    """Prompt panels, typed records, and real tables should use distinct layouts."""
+    """Semantic panels should render meaning without projection machinery."""
 
     with e2e_console() as console:
         page = e2e_browser_page(console.base_url)
@@ -770,34 +883,38 @@ def test_prompt_operational_and_tabular_surfaces_use_right_structures(
                         items: [{name: 'Panel Order', description: 'Static profile'}]
                       },
                       self_image: {status: 'empty', items: [], reason: 'none'},
-                      state: {status: 'available', items: [{key: 'mood', value: 'steady'}]},
-                      growth: {status: 'empty', items: [], reason: 'none'},
-                      learning: {status: 'empty', items: [], reason: 'none'},
-                      promoted_global_growth_prompt: {
+                      cognition_state: {
                         status: 'available',
-                        content: {global_character_growth: ['growth prompt row']},
-                        prompt_view: true,
-                        panel_contract: 'production prompt input',
-                        selected_count: 1
-                      },
-                      current_carry_over: {
-                        status: 'available',
-                        content: 'character-global carry-over',
-                        prompt_view: true,
-                        panel_contract: 'production prompt input',
-                        selected_count: 1,
-                        scope_order: ['character_global']
-                      },
-                      growth_runs_audit: {
-                        status: 'available',
-                        panel_contract: 'operational backing; not prompt input',
                         items: [{
-                          run_id: 'run-1',
-                          status: 'applied',
-                          mode: 'apply',
-                          accepted_count: 1,
-                          promoted_count: 1,
-                          updated_at: '2026-06-19T00:00:00+00:00'
+                          key: 'goals',
+                          value: [{summary: 'answer direct review clearly'}]
+                        }]
+                      },
+                      growth: {
+                        status: 'available',
+                        items: [
+                          {
+                            kind: 'active_trait',
+                            trait_name: 'Clear intent handling',
+                            growth_axis: 'clarity',
+                            guidance: 'Stay concrete.',
+                            maturity_band: 'promoted'
+                          },
+                          {
+                            kind: 'recent_outcome',
+                            status: 'applied',
+                            summary: 'Accepted one direct-review calibration change.',
+                            accepted_candidates: ['ask one grounded follow-up'],
+                            trait_updates: ['clarity strengthened'],
+                            shadow_projection: {prompt_visible_now: true}
+                          }
+                        ]
+                      },
+                      carry_over: {
+                        status: 'available',
+                        items: [{
+                          content: 'character-global carry-over',
+                          scope: 'character'
                         }]
                       }
                     },
@@ -811,30 +928,41 @@ def test_prompt_operational_and_tabular_surfaces_use_right_structures(
                   return Promise.resolve(new Response(JSON.stringify({
                     status: 'available',
                     panels: {
-                      cognition_pending_runs: {
+                      summary: {
                         status: 'available',
-                        prompt_view: true,
-                        items: [{claim: 'pending cognition', source: 'calendar_runs'}],
-                        panel_contract: 'production prompt input'
-                      },
-                      schedule_definitions: {
-                        status: 'available',
-                        panel_contract: 'operational backing; not prompt input',
                         items: [{
-                          schedule_id: 'schedule-1',
+                          active: 1,
+                          upcoming: 1,
+                          overdue: 0,
+                          running: 0,
+                          completed: 1,
+                          failed: 0,
+                          skipped: 0
+                        }]
+                      },
+                      schedules: {
+                        status: 'available',
+                        items: [{
+                          label: 'Daily reflection',
                           trigger_kind: 'future_cognition',
                           status: 'active',
                           next_run_at: '2026-06-20T00:00:00+00:00'
                         }]
                       },
-                      due_runs: {
+                      runs: {
                         status: 'available',
-                        panel_contract: 'operational backing; not prompt input',
                         items: [{
-                          run_id: 'due-1',
-                          status: 'pending',
-                          due_at: '2026-06-20T00:00:00+00:00'
+                          run_kind: 'reflection',
+                          status: 'completed',
+                          scheduled_for: '2026-06-19T23:59:00+00:00',
+                          completed_at: '2026-06-20T00:00:01+00:00',
+                          result_summary: 'Reflection completed.'
                         }]
+                      },
+                      cognition_visibility: {
+                        status: 'needs_input',
+                        reason: 'Enter a user and channel scope.',
+                        items: []
                       }
                     }
                   }), {
@@ -842,35 +970,56 @@ def test_prompt_operational_and_tabular_surfaces_use_right_structures(
                     headers: {'Content-Type': 'application/json'}
                   }));
                 }
-                if (url.includes('/api/lookups/background')) {
+                if (url.includes('/api/lookups/background-work')) {
                   return Promise.resolve(new Response(JSON.stringify({
                     status: 'available',
                     panels: {
-                      result_ready_cognition_deliveries: {
+                      summary: {
                         status: 'available',
-                        prompt_view: true,
-                        items: [{episode_id: 'episode-1', content: 'ready result'}],
-                        panel_contract: 'production prompt input'
-                      },
-                      job_queue: {
-                        status: 'available',
-                        panel_contract: 'operational backing; not prompt input',
                         items: [{
-                          job_id: 'job-1',
+                          queued: 0,
+                          running: 0,
+                          completed: 1,
+                          failed: 1,
+                          delivery_ready: 1
+                        }]
+                      },
+                      jobs: {
+                        status: 'available',
+                        items: [{
                           worker: 'coding_agent',
                           status: 'completed',
                           delivery_state: 'ready',
                           updated_at: '2026-06-19T00:00:00+00:00'
                         }]
                       },
-                      worker_events: {
+                      worker_activity: {
                         status: 'available',
-                        panel_contract: 'operational backing; not prompt input',
                         items: [{
-                          event_id: 'event-1',
-                          event_type: 'background_work.worker',
-                          status: 'ok',
+                          worker_name: 'text_artifact',
+                          event_count: 3,
+                          processed_count: 4,
+                          succeeded_count: 3,
+                          failed_count: 1,
+                          skipped_count: 0,
+                          deferred_count: 0,
+                          last_status: 'failed'
+                        }]
+                      },
+                      errors: {
+                        status: 'available',
+                        items: [{
+                          worker_name: 'text_artifact',
+                          error: 'one bounded worker failure',
                           created_at: '2026-06-19T00:00:00+00:00'
+                        }]
+                      },
+                      delivery_detail: {
+                        status: 'available',
+                        items: [{
+                          worker: 'coding_agent',
+                          delivery_state: 'ready',
+                          delivery_attempt_count: 1
                         }]
                       }
                     }
@@ -882,12 +1031,22 @@ def test_prompt_operational_and_tabular_surfaces_use_right_structures(
                 if (url.includes('/api/events')) {
                   return Promise.resolve(new Response(JSON.stringify({
                     items: [{
-                      source: 'console',
-                      component: 'brain',
-                      event_type: 'service_start',
-                      status: 'ok',
+                      source: 'kazusa',
+                      component: 'brain_service',
+                      event_type: 'resource_health',
+                      level: 'warning',
+                      status: 'degraded',
+                      duration_ms: 42,
+                      error_class: 'TimeoutError',
+                      error_preview: 'bounded timeout',
+                      correlation_id: 'cc-req-1',
                       created_at: '2026-06-19T00:00:00+00:00'
-                    }]
+                    }],
+                    facets: {
+                      levels: {warning: 1},
+                      statuses: {degraded: 1},
+                      components: {brain_service: 1}
+                    }
                   }), {
                     status: 200,
                     headers: {'Content-Type': 'application/json'}
@@ -899,62 +1058,97 @@ def test_prompt_operational_and_tabular_surfaces_use_right_structures(
         )
 
         _open_page(page, "character", "Character")
-        page.locator("#character-carry-over-table .prompt-body").wait_for()
-        assert page.locator("#character-growth-runs-table .record-card").count() == 1
-        assert page.locator("#character-growth-runs-table tr").count() == 0
-        order = page.evaluate(
-            """() => {
-              const carry = document.querySelector('#character-carry-over-table');
-              const profile = document.querySelector('#character-profile-table');
-              return carry.compareDocumentPosition(profile);
-            }"""
-        )
-        assert order & 4
-
+        page.locator("#character-carry-over-table").get_by_text(
+            "character-global carry-over",
+        ).first.wait_for()
+        growth_text = page.locator("#character-growth-table").inner_text()
+        assert "Accepted one direct-review calibration change." in growth_text
+        assert "ask one grounded follow-up" in growth_text
+        assert "run_id" not in growth_text
         _open_page(page, "calendar", "Calendar")
         page.locator("#refresh-calendar").click()
-        page.locator("#calendar-prompt-runs-table .prompt-body").wait_for()
-        assert page.locator("#calendar-prompt-runs-table .prompt-body").count() >= 1
+        page.locator("#calendar-runs-table").get_by_text(
+            "Reflection completed.",
+        ).wait_for()
+        assert "completed" in page.locator(
+            "#calendar-summary-table",
+        ).inner_text().lower()
         assert page.locator("#calendar-schedules-table .record-card").count() == 1
-        assert page.locator("#calendar-due-runs-table .record-card").count() == 1
-        assert page.locator("#calendar-schedules-table tr").count() == 0
+        assert page.locator("#calendar-runs-table .record-card").count() == 1
+        calendar_text = page.locator("[data-page='calendar']").inner_text()
+        assert "schedule_id" not in calendar_text
+        assert "run_id" not in calendar_text
 
         _open_page(page, "background", "Background work")
         page.locator("#refresh-background").click()
-        page.locator("#background-result-ready-table .prompt-body").wait_for()
-        assert page.locator("#background-result-ready-table .prompt-body").count() >= 1
-        assert page.locator("#background-job-queue-table .record-card").count() == 1
-        assert page.locator("#background-worker-events-table .record-card").count() == 1
-        assert page.locator("#background-job-queue-table tr").count() == 0
+        page.locator("#background-worker-table").get_by_text(
+            "text artifact",
+        ).wait_for()
+        assert page.locator(
+            "#background-worker-table tr",
+        ).first.locator("td").all_inner_texts() == [
+            "text artifact",
+            "3",
+            "4",
+            "3",
+            "1",
+            "0",
+            "0",
+            "failed",
+        ]
+        assert page.locator("#background-jobs-table .record-card").count() == 1
+        assert "one bounded worker failure" in page.locator(
+            "#background-errors-table",
+        ).inner_text()
+        assert "ready" in page.locator(
+            "#background-delivery-table",
+        ).inner_text()
 
         _open_page(page, "events", "Event monitor")
         page.locator("#refresh-events").click()
-        page.locator("#event-table").get_by_text("service_start").wait_for()
+        page.locator("#event-table").get_by_text("resource health").wait_for()
         assert page.locator("[data-page='events'] thead th").all_inner_texts() == [
-            "SOURCE",
+            "TIME",
+            "SEVERITY",
             "COMPONENT",
             "EVENT",
-            "STATUS",
-            "CREATED",
+            "OUTCOME",
+            "DURATION",
+            "ERROR",
         ]
 
         _open_page(page, "audit", "Audit")
         assert page.locator("[data-page='audit'] thead th").all_inner_texts() == [
             "TIME",
-            "EVENT",
+            "ACTION",
             "TARGET",
-            "STATUS",
+            "OUTCOME",
+            "OPERATOR",
+            "REASON",
         ]
+        visible_text = page.locator("main").inner_text()
+        for forbidden in (
+            "[object Object]",
+            "panel_contract",
+            "projection_owner",
+            "scope_order",
+            "scope_summary",
+            "Growth Runs Audit",
+            "Prompt View",
+            "Operational Backing",
+        ):
+            assert forbidden not in visible_text
 
         summary = e2e_summary_writer(
-            name="prompt_operational_and_tabular_structures",
+            name="semantic_owner_surface_structures",
             conclusion="pass",
             details={
                 "console_url": console.base_url,
                 "checked": [
-                    "prompt panels use prompt-body",
-                    "operational records use record-card",
-                    "event and audit tables expose headers",
+                    "semantic character growth and carry-over",
+                    "calendar and background outcomes",
+                    "event and audit tables",
+                    "projection metadata absent",
                 ],
             },
         )
@@ -967,8 +1161,12 @@ def _login(page) -> None:
 
     page.locator("#token").fill(DEFAULT_E2E_OPERATOR_TOKEN)
     page.locator("#login").click()
-    page.wait_for_selector("body[data-auth-state='authenticated']")
-    page.wait_for_selector("#overview-grid .metric")
+    page.wait_for_function(
+        """() => (
+          document.querySelector('#overview-service-status')?.textContent
+          !== 'not loaded'
+        )"""
+    )
 
 
 def _open_page(page, page_name: str, expected_heading: str) -> None:

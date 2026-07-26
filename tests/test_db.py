@@ -774,6 +774,107 @@ async def test_list_self_cognition_action_attempts_returns_recent_rows() -> None
 
 
 @pytest.mark.asyncio
+async def test_list_recent_user_profiles_returns_safe_directory_rows() -> None:
+    """Recent-user inspection should redact every internal identity field."""
+
+    rows = [{
+        "platform_accounts": [{
+            "platform": "qq",
+            "platform_user_id": "platform-user-1",
+            "display_name": "Operator",
+        }],
+        "suspected_aliases": [
+            "suspected-alias-secret-1",
+            "suspected-alias-secret-2",
+        ],
+        "cognition_state": {
+            "owner_user_id": "global-user-secret",
+            "updated_at": "2026-07-27T00:00:00Z",
+        },
+    }]
+    cursor = MagicMock()
+    cursor.__aiter__.return_value = iter(rows)
+    db = _mock_db()
+    db.user_profiles.find.return_value.sort.return_value.limit.return_value = (
+        cursor
+    )
+
+    with _patched_get_db(db):
+        result = await db_users_module.list_recent_user_profiles(limit=5)
+
+    assert result == [{
+        "accounts": [{
+            "platform": "qq",
+            "platform_user_id": "platform-user-1",
+            "display_name": "Operator",
+        }],
+        "alias_count": 2,
+        "updated_at": "2026-07-27T00:00:00Z",
+    }]
+    find_args = db.user_profiles.find.call_args.args
+    assert find_args[0]["platform_accounts.0"] == {"$exists": True}
+    assert "global_user_id" not in find_args[1]
+    db.user_profiles.find.return_value.sort.assert_called_once_with([
+        ("cognition_state.updated_at", -1),
+        ("global_user_id", 1),
+    ])
+    (
+        db.user_profiles.find.return_value.sort.return_value.limit
+        .assert_called_once_with(5)
+    )
+    rendered = repr(result)
+    assert "global-user-secret" not in rendered
+    assert "suspected-alias-secret" not in rendered
+    assert "owner_user_id" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_list_group_review_windows_is_scoped_and_bounded() -> None:
+    """Console review history should use an exact group scope and stable order."""
+
+    rows = [{
+        "source_id": "scope_group:window-1",
+        "platform": "qq",
+        "platform_channel_id": "group-1",
+        "status": "reviewed",
+        "reviewed_at": "2026-07-27T00:00:00Z",
+    }]
+    cursor = MagicMock()
+    cursor.to_list = AsyncMock(return_value=rows)
+    db = _mock_db()
+    (
+        db.self_cognition_group_review_windows.find.return_value
+        .sort.return_value.limit.return_value
+    ) = cursor
+
+    with _patched_get_db(db):
+        result = await db_self_cognition_module.list_group_review_windows(
+            platform="qq",
+            platform_channel_id="group-1",
+            limit=5,
+        )
+
+    assert result == rows
+    db.self_cognition_group_review_windows.find.assert_called_once_with(
+        {
+            "platform": "qq",
+            "platform_channel_id": "group-1",
+            "channel_type": "group",
+        },
+        {"_id": 0},
+    )
+    (
+        db.self_cognition_group_review_windows.find.return_value.sort
+        .assert_called_once_with([("reviewed_at", -1), ("source_id", 1)])
+    )
+    (
+        db.self_cognition_group_review_windows.find.return_value
+        .sort.return_value.limit.assert_called_once_with(5)
+    )
+    cursor.to_list.assert_awaited_once_with(length=5)
+
+
+@pytest.mark.asyncio
 async def test_upsert_group_review_window_inserts_by_source_id() -> None:
     """Group review window terminal rows should be keyed by source identity."""
 

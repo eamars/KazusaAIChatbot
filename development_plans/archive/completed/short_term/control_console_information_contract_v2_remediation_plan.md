@@ -6,7 +6,7 @@
   information, with one canonical page owner for each datum and native
   Cognition Core V2 character/user state.
 - Plan class: large control-console information-contract remediation.
-- Status: draft.
+- Status: completed — 2026-07-27.
 - Scope: all twelve pages served by the control console: Overview, Services,
   Live logs, Debug chat, Event monitor, Character, Users, Groups, Calendar,
   Background work, Health/cache, and Audit.
@@ -36,8 +36,9 @@
 - Styling boundary: preserve the current stylesheet, page layout family,
   typography, and interaction model. Content elements may be removed, renamed,
   or populated only where the information contract requires it.
-- Production authority: withheld. This draft authorizes no production-code
-  edits, service restart, deployment, database write, or data migration.
+- Production authority: granted by the user's `Execute the plan` instruction
+  for the scoped code changes; deployment, database writes, and migration
+  remain outside scope.
 - Plan review: parent-agent self-review only, as explicitly required by the
   user. No plan-review subagent is used.
 
@@ -147,6 +148,10 @@ target contains no prompt, model-routing, cognition, or LLM-output change.
     source result and not on the July 26 sample counts remaining unchanged.
 16. Preserve the current visual styling. Image generation and visual redesign
     are outside this plan.
+17. Reread this complete plan after context compaction and after each major
+    checklist-stage sign-off before continuing.
+18. Record verification and parent code-review results in Execution
+    Evidence before lifecycle completion.
 
 ## Must Do
 
@@ -286,7 +291,7 @@ No database rollback is required because this plan performs no writes.
 
 - **Critical defects:** the page starts with an undiscoverable exact-ID form; profile returns only `updated_at`; relationship reads removed V1 summary/status/affinity fields; all five inspected profiles store V2 relationship under `cognition_state.v2`; tests encode V1 and can pass when relationship is broken; remaining V2 cognition is absent.
 - **Target/source:** add a bounded recent/known-user directory from the canonical profile repository; show safe account labels/display names and alias count; show every V2 relationship axis with exact value, canonical band, updated time, and evidence count; show V2 goals/threats/events/gaps/affects plus memory, style, thread progress, and carry-over with owner/thread provenance.
-- **Contract:** add `GET /api/entities/users?limit=<bounded>` sorted by recent profile/cognition update with deterministic tie-breaker; retain the ID detail route; exclude alias IDs and evidence references.
+- **Contract:** add `GET /api/entities/users?limit=<bounded>` sorted by recent profile/cognition update with deterministic tie-breaker; use `GET /api/entities/users/{platform}/{platform_user_id}` for detail; exclude global IDs, alias IDs, and evidence references.
 
 #### Groups
 
@@ -358,7 +363,7 @@ required-data page unavailable.
 | `GET /api/events` | structured `events`, dynamic `facets`, bounded query metadata |
 | `GET /api/entities/character` | `profile`, `cognition_state`, `self_image`, `growth`, `carry_over` |
 | `GET /api/entities/users` | bounded user directory |
-| `GET /api/entities/users/{global_user_id}` | `profile`, `relationship`, `cognition_state`, `memory`, `style`, `conversation_progress`, `carry_over` |
+| `GET /api/entities/users/{platform}/{platform_user_id}` | `profile`, `relationship`, `cognition_state`, `memory`, `style`, `conversation_progress`, `carry_over` |
 | `GET /api/entities/groups` | bounded group directory |
 | `GET /api/entities/groups/{platform}/{channel_id}` | `activity`, `review`, `style`, `carry_over`, `participant_progress` |
 | `GET /api/lookups/calendar` | `summary`, `schedules`, `runs`, `cognition_visibility` |
@@ -451,10 +456,14 @@ the current design language.
 - `src/kazusa_ai_chatbot/db/conversation.py`
   - add bounded recent-group metadata aggregation without returning message
     text.
+- `src/kazusa_ai_chatbot/db/users.py`
+  - add bounded recent-user profile inspection without returning global ids.
 - `src/kazusa_ai_chatbot/db/self_cognition.py`
   - add bounded recent/group-scope review lookup.
-- the corresponding package exports only where existing module conventions
-  require them.
+- `src/kazusa_ai_chatbot/db/__init__.py`
+  - export the new owner helpers through the existing database facade.
+- `src/kazusa_ai_chatbot/internal_monologue_residue/{loader.py,README.md}`
+  - support documented non-mutating console inspection reads.
 
 These helpers are read-only and contain no console rendering logic.
 
@@ -464,8 +473,12 @@ These helpers are read-only and contain no console rendering logic.
 - `tests/test_control_console_bootstrap.py`
 - `tests/test_control_console_event_monitor.py`
 - `tests/test_control_console_web_surface.py`
+- `tests/test_console_lookup_limits.py`
+- `tests/test_control_console_cognition_debug_visibility.py`
 - `tests/control_console_e2e/test_page_navigation_e2e.py`
 - `tests/control_console_e2e/test_live_database_owner_pages_e2e.py`
+- `tests/control_console_e2e/test_clickable_inventory_e2e.py`
+- `tests/test_internal_monologue_residue_loader.py`
 - focused existing tests for changed calendar, conversation, and
   self-cognition repository modules.
 
@@ -493,7 +506,7 @@ Safe operator meaning, source freshness, and actionability determine inclusion.
 After explicit implementation approval, the implementation owner may:
 
 - edit only the files listed in Change Surface and directly owned tests/docs;
-- add the three bounded read helpers and two directory endpoints frozen here;
+- add the four bounded read helpers and two directory endpoints frozen here;
 - remove obsolete V1 console projectors and renderers;
 - run deterministic tests and local authenticated browser validation.
 
@@ -558,18 +571,17 @@ The implementation owner must stop and request direction before:
      workflow;
    - verify every page against real source data;
    - capture screenshots and source/result notes;
-   - complete independent code review and resolve findings;
-   - obtain user sign-off before deployment.
+   - complete parent-only code review and resolve findings;
+   - obtain user authorization before lifecycle closure.
 
 ## Execution Model
 
-- One implementation owner controls the big-bang contract change and keeps the
-  repository, API, renderer, tests, and docs on one revision.
-- Work is checkpointed after each Implementation Order item with the progress
-  checklist updated in this file.
+- The parent owns test contracts, integration, verification, execution evidence,
+  review remediation, lifecycle updates, and final sign-off.
+- Initial scoped production implementation preceded the user's parent-only
+  review direction; every subsequent review, fix, and closure action is
+  parent-owned.
 - Plan review remains a parent-only self-review.
-- Independent code review occurs after implementation because it evaluates
-  concrete production changes rather than this plan.
 - Browser verification uses the in-app Browser first. If it again reports no
   available browser, regular Playwright is the recorded fallback.
 - A page is complete only when its backend contract, renderer, deterministic
@@ -583,19 +595,19 @@ The implementation owner must stop and request direction before:
 - [x] Gather bounded read-only current-data evidence.
 - [x] Freeze the page ownership and target panel contracts in this draft.
 - [x] Complete parent-only plan self-review.
-- [ ] Receive explicit user approval for production-code implementation.
-- [ ] Record implementation baseline and failing contract tests.
-- [ ] Implement domain-owner bounded reads.
-- [ ] Implement Character and Users native V2 projections.
-- [ ] Implement Groups discovery and detail.
-- [ ] Implement Calendar and Background work semantic projections.
-- [ ] Implement Health/cache and Audit correctness fixes.
-- [ ] Implement Event/Logs/Services/Debug/Overview ownership cleanup.
-- [ ] Complete static renderer and documentation cutover.
-- [ ] Pass scoped deterministic tests.
-- [ ] Pass authenticated populated browser verification for all twelve pages.
-- [ ] Complete independent code review and resolve findings.
-- [ ] Receive user sign-off for the implemented information state.
+- [x] Receive explicit user approval for production-code implementation.
+- [x] Record implementation baseline and failing contract tests.
+- [x] Implement domain-owner bounded reads.
+- [x] Implement Character and Users native V2 projections.
+- [x] Implement Groups discovery and detail.
+- [x] Implement Calendar and Background work semantic projections.
+- [x] Implement Health/cache and Audit correctness fixes.
+- [x] Implement Event/Logs/Services/Debug/Overview ownership cleanup.
+- [x] Complete static renderer and documentation cutover.
+- [x] Pass scoped deterministic tests.
+- [x] Pass authenticated populated browser verification for all twelve pages.
+- [x] Complete parent-only code review and resolve findings.
+- [x] Receive user authorization to commit and close the plan.
 
 ## Verification
 
@@ -684,7 +696,7 @@ Search server contracts and visible DOM text for the following:
 Any duplicate must be either removed or documented as a bounded Overview
 aggregate that links to its canonical owner.
 
-## Independent Plan Self-Review
+## Plan Self-Review
 
 The parent agent completed the plan review without a subagent.
 
@@ -699,16 +711,25 @@ Review checks:
   acceptance gates are specified;
 - no database mutation, LLM call, visual redesign, compatibility layer, or
   unresolved implementation choice is included;
-- populated browser verification remains open and mandatory because the current
-  browser session was unauthenticated.
+- populated browser verification was retained as a mandatory execution gate.
 
-Self-review disposition: ready for user review as a complete draft. Production
-implementation remains blocked on explicit approval.
+Self-review disposition: approved for scoped implementation by the user on
+2026-07-27.
 
-## Independent Code Review
+## Execution Evidence
 
-After implementation and before user sign-off, an independent code reviewer
-must verify:
+- Approval/baseline: user instructed `Execute the plan`; revision
+  `87cd6df5a869dc78b6e1ed48dd1d580db9d5f6da`; root HTTP 200 on port 8764.
+- Verification: 145 scoped tests, 22 regular browser E2E tests, one live-DB
+  owner-page test, and one exact-running-console signoff test passed.
+- Browser: in-app Browser had no available runtime; regular Playwright reviewed
+  all 12 pages with zero console, request, or HTTP failures and zero LLM calls.
+- Parent review resolved event-query starvation, residue read telemetry, status
+  pollution, stale worker fixtures, duplicate content, and raw labels.
+
+## Parent Code Review
+
+The parent completed the user-directed code review and verified:
 
 1. V1 relationship and character projectors are deleted rather than hidden
    behind fallback paths.
@@ -728,8 +749,8 @@ must verify:
    entered the diff.
 10. authenticated browser evidence comes from the reviewed revision.
 
-All blocking and major findings must be resolved. Minor findings must be
-resolved or explicitly accepted by the user before implementation sign-off.
+Disposition: all findings were resolved; the user directed commit and plan
+closure on 2026-07-27.
 
 ## Risks and Controls
 
@@ -774,6 +795,6 @@ The plan is implemented only when all conditions are true:
 12. Page status is `partial` whenever a required panel fails while another
     succeeds.
 13. Default page content exposes no prohibited sensitive or internal fields.
-14. Scoped deterministic tests, live-database E2E, independent code review,
-    and user information-state sign-off all pass.
+14. Scoped deterministic tests, live-database E2E, parent code review, and
+    user-authorized lifecycle closure all pass.
 15. LLM call count remains zero and the database remains unmodified.

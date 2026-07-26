@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
+import pytest
+
 from kazusa_ai_chatbot.internal_monologue_residue.loader import (
     select_residue_window,
 )
@@ -129,3 +133,45 @@ def test_select_residue_window_keeps_newest_rows_within_same_priority() -> None:
     )
 
     assert [row["residue_id"] for row in selected] == ["user-new"]
+
+
+@pytest.mark.asyncio
+async def test_load_residue_context_can_disable_read_telemetry(monkeypatch) -> None:
+    """Read-only inspectors can load residue without writing an event row."""
+
+    from kazusa_ai_chatbot.internal_monologue_residue import loader
+
+    list_rows = AsyncMock(return_value=[])
+    record_event = AsyncMock()
+    monkeypatch.setattr(
+        loader.db,
+        "list_internal_monologue_residue_rows",
+        list_rows,
+    )
+    monkeypatch.setattr(
+        loader.event_logging,
+        "record_database_operation_event",
+        record_event,
+    )
+    trigger_scope = ResidueTriggerScope(
+        character_id="character-1",
+        platform="qq",
+        platform_channel_id="group-1",
+        channel_type="group",
+        global_user_id="user-1",
+    )
+
+    result = await loader.load_residue_context(
+        trigger_scope=trigger_scope,
+        current_timestamp_utc="2026-07-27T00:00:00+00:00",
+        record_telemetry=False,
+    )
+
+    assert result["status"] == "empty"
+    record_event.assert_not_awaited()
+
+    await loader.load_residue_context(
+        trigger_scope=trigger_scope,
+        current_timestamp_utc="2026-07-27T00:00:00+00:00",
+    )
+    record_event.assert_awaited_once()

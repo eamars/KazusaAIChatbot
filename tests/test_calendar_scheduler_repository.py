@@ -210,6 +210,38 @@ async def test_list_pending_calendar_runs_for_source_scopes_future_evidence() ->
 
 
 @pytest.mark.asyncio
+async def test_list_recent_calendar_runs_is_bounded_and_deterministic() -> None:
+    """Operator inspection should read recent runs without claim semantics."""
+
+    from kazusa_ai_chatbot.calendar_scheduler import repository
+
+    db = _db()
+    rows = [
+        {
+            "run_id": "run-completed",
+            "status": "completed",
+            "updated_at": "2026-06-04T00:15:00+00:00",
+        },
+        {
+            "run_id": "run-pending",
+            "status": "pending",
+            "updated_at": "2026-06-04T00:10:00+00:00",
+        },
+    ]
+    cursor = _AsyncCursor(rows)
+    db.calendar_runs.find = MagicMock(return_value=cursor)
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(repository, "get_db", AsyncMock(return_value=db))
+        runs = await repository.list_recent_calendar_runs(limit=5)
+
+    assert runs == rows
+    assert db.calendar_runs.find.call_args.args == ({}, {"_id": 0})
+    assert cursor.sort_args == [("updated_at", -1), ("run_id", 1)]
+    assert cursor.limit_value == 5
+
+
+@pytest.mark.asyncio
 async def test_list_reflection_phase_runs_includes_boundary_period_start() -> None:
     """Daily readiness must include phase slots due at the next local boundary."""
 

@@ -24,6 +24,7 @@ _GROUP_REVIEW_SKIPPED_STATUSES = {
     "coalesced_skipped",
     "stale_skipped",
 }
+MAX_GROUP_REVIEW_WINDOW_LIMIT = 100
 
 
 async def upsert_self_cognition_action_attempt(
@@ -106,6 +107,58 @@ async def find_self_cognition_group_review_window(
         return return_value
     return_value: SelfCognitionGroupReviewWindowDoc = dict(document)
     return return_value
+
+
+async def list_group_review_windows(
+    *,
+    platform: str,
+    platform_channel_id: str,
+    limit: int,
+) -> list[SelfCognitionGroupReviewWindowDoc]:
+    """Return bounded terminal review state for one exact group scope.
+
+    Args:
+        platform: Exact source platform.
+        platform_channel_id: Exact group-channel identifier.
+        limit: Maximum number of terminal review rows to return.
+
+    Returns:
+        Review rows ordered from newest to oldest without MongoDB internals.
+
+    Raises:
+        DatabaseOperationError: When MongoDB rejects the read.
+    """
+
+    effective_limit = max(1, min(limit, MAX_GROUP_REVIEW_WINDOW_LIMIT))
+    db = await get_db()
+    collection = getattr(db, SELF_COGNITION_GROUP_REVIEW_WINDOWS_COLLECTION)
+    try:
+        cursor = (
+            collection.find(
+                {
+                    "platform": platform,
+                    "platform_channel_id": platform_channel_id,
+                    "channel_type": "group",
+                },
+                {"_id": 0},
+            )
+            .sort([
+                ("reviewed_at", -1),
+                ("source_id", 1),
+            ])
+            .limit(effective_limit)
+        )
+        documents = await cursor.to_list(length=effective_limit)
+    except PyMongoError as exc:
+        raise DatabaseOperationError(
+            f"failed to list self-cognition group review windows: {exc}"
+        ) from exc
+
+    windows: list[SelfCognitionGroupReviewWindowDoc] = [
+        dict(document)
+        for document in documents
+    ]
+    return windows
 
 
 async def upsert_self_cognition_group_review_window(

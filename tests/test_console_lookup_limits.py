@@ -24,14 +24,6 @@ def test_lookup_routes_enforce_pagination_redaction_and_no_embeddings(
     from control_console.auth import hash_operator_token
     from control_console.settings import ControlConsoleSettings
 
-    async def latest_character_status(self):
-        _ = self
-        return {"status": "empty", "items": []}
-
-    async def global_growth_summary(self):
-        _ = self
-        return {"status": "empty", "items": []}
-
     async def character_entity(
         self,
         *,
@@ -99,16 +91,24 @@ def test_lookup_routes_enforce_pagination_redaction_and_no_embeddings(
             "redaction": {"model_inputs": "excluded"},
         }
 
-    monkeypatch.setattr(
-        repository_module.ControlConsoleRepository,
-        "latest_character_status",
-        latest_character_status,
-    )
-    monkeypatch.setattr(
-        repository_module.ControlConsoleRepository,
-        "global_growth_summary",
-        global_growth_summary,
-    )
+    async def list_user_entities(self, *, limit: int):
+        _ = self
+        assert limit == 5
+        return {
+            "status": "empty",
+            "items": [],
+            "redaction": {"internal_global_ids": "excluded"},
+        }
+
+    async def list_group_entities(self, *, limit: int):
+        _ = self
+        assert limit == 5
+        return {
+            "status": "empty",
+            "items": [],
+            "redaction": {"raw_messages": "excluded"},
+        }
+
     monkeypatch.setattr(
         repository_module.ControlConsoleRepository,
         "character_entity",
@@ -125,6 +125,18 @@ def test_lookup_routes_enforce_pagination_redaction_and_no_embeddings(
         repository_module.ControlConsoleRepository,
         "lookup_group_entity",
         lookup_group_entity,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        repository_module.ControlConsoleRepository,
+        "list_user_entities",
+        list_user_entities,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        repository_module.ControlConsoleRepository,
+        "list_group_entities",
+        list_group_entities,
         raising=False,
     )
 
@@ -159,37 +171,24 @@ def test_lookup_routes_enforce_pagination_redaction_and_no_embeddings(
     assert style_payload["redaction"]["source_run_ids"] == "excluded"
 
     generic = client.get("/api/lookups/not-yet-wired?limit=5")
-    assert generic.status_code == 200
-    generic_payload = generic.json()
-    assert generic_payload["items"] == []
-    assert generic_payload["redaction"]["namespace"] == "not-yet-wired"
+    assert generic.status_code == 404
 
-    character = client.get("/api/character/status")
-    assert character.status_code == 200
-    assert character.json()["status"] in {"unavailable", "empty", "available"}
-
-    growth = client.get("/api/character/growth")
-    assert growth.status_code == 200
-    assert growth.json()["status"] in {"unavailable", "empty", "available"}
-
-    rejected_user = client.get("/api/entities/user?limit=101")
+    rejected_user = client.get("/api/entities/users?limit=101")
     assert rejected_user.status_code == 422
 
-    rejected_user_query = client.get(
-        f"/api/entities/user?query={'x' * 241}&limit=5",
-    )
-    assert rejected_user_query.status_code == 422
+    rejected_group = client.get("/api/entities/groups?limit=101")
+    assert rejected_group.status_code == 422
 
     character_entity_page = client.get("/api/entities/character?limit=5")
     assert character_entity_page.status_code == 200
     assert character_entity_page.json()["owner"] == "character"
 
-    user_entity_page = client.get("/api/entities/user?limit=5")
+    user_entity_page = client.get("/api/entities/users?limit=5")
     assert user_entity_page.status_code == 200
-    assert user_entity_page.json()["owner"] == "user"
-    assert user_entity_page.json()["status"] == "needs_input"
+    assert user_entity_page.json()["status"] == "empty"
+    assert user_entity_page.json()["items"] == []
 
-    group_entity_page = client.get("/api/entities/group?limit=5")
+    group_entity_page = client.get("/api/entities/groups?limit=5")
     assert group_entity_page.status_code == 200
-    assert group_entity_page.json()["owner"] == "group"
-    assert group_entity_page.json()["status"] == "needs_input"
+    assert group_entity_page.json()["status"] == "empty"
+    assert group_entity_page.json()["items"] == []

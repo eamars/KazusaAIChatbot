@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 import asyncio
 import inspect
 import logging
@@ -56,7 +56,12 @@ from control_console.brain_model_routes import (
     route_environment_value,
     route_field_key,
 )
-from control_console.event_monitor import EventMonitor
+from control_console.event_monitor import (
+    ATTENTION_LEVELS,
+    ATTENTION_STATUSES,
+    DEFAULT_AGGREGATE_EVENT_TYPES,
+    EventMonitor,
+)
 from control_console.kazusa_client import KazusaClient, not_reported_cognition_graph
 from control_console.log_store import ProcessLogStore
 from control_console.process_store import ProcessStore
@@ -89,6 +94,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GENERATED_OPERATOR_TOKEN_BYTES = 24
 DEBUG_CHAT_TIMEOUT_SECONDS = 120.0
+AUDIT_EVENT_READ_LIMIT = 100
 logger = logging.getLogger(__name__)
 KazusaFindEvents = Callable[..., Awaitable[list[dict[str, Any]]]]
 KAZUSA_EVENT_READER_ERRORS = (
@@ -96,6 +102,16 @@ KAZUSA_EVENT_READER_ERRORS = (
     KeyError,
     PyMongoError,
     ValueError,
+)
+SAFE_KAZUSA_EVENT_PAYLOAD_FIELDS = (
+    "processed_count",
+    "succeeded_count",
+    "failed_count",
+    "skipped_count",
+    "deferred",
+    "defer_reason",
+    "run_kind",
+    "worker_name",
 )
 
 
@@ -292,6 +308,69 @@ def create_app(
         }
         return payload
 
+    @app.get("/api/overview")
+    async def overview(
+        _: ControlConsoleOperator = Depends(current_operator),
+    ) -> dict[str, Any]:
+        """Return bounded cross-owner aggregates for the Overview page."""
+
+        states = _all_service_states(app_supervisor, services)
+        operational_sources = await _load_operational_sources(
+            states=states,
+            kazusa_client=kazusa_client,
+        )
+        latest_cognition_graph = operational_sources[
+            "latest_cognition_graph"
+        ]
+        latest_self_cognition_graph = operational_sources[
+            "latest_self_cognition_graph"
+        ]
+        latest_cognition_graph_state["run_id"] = (
+            latest_cognition_graph.run_id
+        )
+        latest_cognition_graph_state["self_run_id"] = (
+            latest_self_cognition_graph.run_id
+        )
+        audit_events = [
+            event.model_dump(mode="json")
+            for event in audit_writer.read_recent(
+                limit=AUDIT_EVENT_READ_LIMIT,
+            )
+        ]
+        audit_page = repository.audit_page(
+            events=audit_events,
+            limit=10,
+        )
+        health_page = _project_health_page(
+            brain_health=operational_sources["brain_health"],
+            runtime_status=operational_sources["runtime_status"],
+        )
+        page = _project_overview_page(
+            states=states,
+            health_page=health_page,
+            audit_page=audit_page,
+            latest_cognition_graph=latest_cognition_graph,
+            latest_self_cognition_graph=latest_self_cognition_graph,
+        )
+        return page
+
+    @app.get("/api/health")
+    async def console_health(
+        _: ControlConsoleOperator = Depends(current_operator),
+    ) -> dict[str, Any]:
+        """Return Health/cache owner panels from live brain endpoints."""
+
+        states = _all_service_states(app_supervisor, services)
+        operational_sources = await _load_operational_sources(
+            states=states,
+            kazusa_client=kazusa_client,
+        )
+        page = _project_health_page(
+            brain_health=operational_sources["brain_health"],
+            runtime_status=operational_sources["runtime_status"],
+        )
+        return page
+
     @app.get("/api/bootstrap")
     async def bootstrap(
         request: Request,
@@ -300,86 +379,41 @@ def create_app(
         """Return the initial UI snapshot."""
 
         states = _all_service_states(app_supervisor, services)
-        brain_record = _service_state_record(states, service_id="brain")
-        brain_state = _service_actual_state(brain_record)
-        brain_error = _service_last_error_preview(brain_record)
-        brain_http_available = _brain_http_available(
-            brain_state,
-            last_error_preview=brain_error,
+        operational_sources = await _load_operational_sources(
+            states=states,
+            kazusa_client=kazusa_client,
         )
-        brain_health: dict[str, Any]
-        runtime_status: dict[str, Any]
-        if brain_http_available:
-            try:
-                brain_health = await kazusa_client.get_health()
-            except httpx.HTTPError as exc:
-                brain_health = {
-                    "status": "unavailable",
-                    "reason": str(exc),
-                }
-            try:
-                runtime_status = await kazusa_client.get_runtime_status()
-            except httpx.HTTPError as exc:
-                runtime_status = {
-                    "status": "unavailable",
-                    "reason": str(exc),
-                }
-        else:
-            reason = f"brain service is {brain_state}"
-            brain_health = {"status": "unavailable", "reason": reason}
-            runtime_status = {"status": "unavailable", "reason": reason}
-
-        raw_cache2 = brain_health.get("cache2", {})
-        cache2 = raw_cache2 if isinstance(raw_cache2, dict) else {}
-        latest_cognition_graph = not_reported_cognition_graph(
-            source="overview_latest",
-        )
-        latest_self_cognition_graph = not_reported_cognition_graph(
-            source="self_latest",
-        )
-        if brain_http_available:
-            try:
-                latest_cognition_graph = await (
-                    kazusa_client.get_latest_cognition_graph()
-                )
-            except (AttributeError, httpx.HTTPError) as exc:
-                latest_cognition_graph = not_reported_cognition_graph(
-                    source="overview_latest",
-                    reason=f"brain latest cognition graph unavailable: {exc}",
-                )
-            try:
-                latest_self_cognition_graph = await (
-                    kazusa_client.get_latest_self_cognition_graph()
-                )
-            except (AttributeError, httpx.HTTPError) as exc:
-                latest_self_cognition_graph = not_reported_cognition_graph(
-                    source="self_latest",
-                    reason=(
-                        "brain latest self-cognition graph unavailable: "
-                        f"{exc}"
-                    ),
-                )
+        latest_cognition_graph = operational_sources[
+            "latest_cognition_graph"
+        ]
+        latest_self_cognition_graph = operational_sources[
+            "latest_self_cognition_graph"
+        ]
         latest_cognition_graph_state["run_id"] = latest_cognition_graph.run_id
         latest_cognition_graph_state["self_run_id"] = (
             latest_self_cognition_graph.run_id
         )
-        overview = {
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-            "service_count": len(states),
-            "brain_health": redact_mapping(brain_health),
-            "runtime_status": redact_mapping(runtime_status),
-            "cache2": redact_mapping(cache2),
-            "latest_cognition_graph": latest_cognition_graph.model_dump(
-                mode="json",
-            ),
-            "latest_self_cognition_graph": (
-                latest_self_cognition_graph.model_dump(mode="json")
-            ),
-        }
         recent_audit = [
             event.model_dump(mode="json")
-            for event in audit_writer.read_recent(limit=10)
+            for event in audit_writer.read_recent(
+                limit=AUDIT_EVENT_READ_LIMIT,
+            )
         ]
+        audit_page = repository.audit_page(
+            events=recent_audit,
+            limit=10,
+        )
+        health_page = _project_health_page(
+            brain_health=operational_sources["brain_health"],
+            runtime_status=operational_sources["runtime_status"],
+        )
+        overview_page = _project_overview_page(
+            states=states,
+            health_page=health_page,
+            audit_page=audit_page,
+            latest_cognition_graph=latest_cognition_graph,
+            latest_self_cognition_graph=latest_self_cognition_graph,
+        )
         application_identity = await repository.application_identity()
         payload = ControlConsoleBootstrapResponse(
             generated_at=datetime.now(timezone.utc),
@@ -392,13 +426,13 @@ def create_app(
             ),
             application_identity=application_identity,
             services=states,
-            overview=overview,
+            overview=overview_page,
+            health=health_page,
             latest_cognition_graph=latest_cognition_graph,
             latest_self_cognition_graph=latest_self_cognition_graph,
-            recent_audit_events=recent_audit,
+            recent_audit_events=audit_page["actions"],
             event_counters={"audit": len(recent_audit), "services": len(states)},
             ui_capabilities={
-                "event_stream": True,
                 "debug_chat": True,
                 "service_lifecycle": True,
                 "lookups": True,
@@ -738,40 +772,41 @@ def create_app(
 
     @app.get("/api/events")
     async def events(
-        source: str = "all",
+        source: Literal["all", "kazusa"] = "all",
+        service_id: str | None = Query(default=None, max_length=80),
+        event_type: str | None = Query(default=None, max_length=80),
+        level: str | None = Query(default=None, max_length=40),
         request_id: str | None = Query(default=None, max_length=120),
         tracking_id: str | None = Query(default=None, max_length=120),
+        since: datetime | None = Query(default=None),
         limit: int = Query(default=100, ge=1, le=200),
         _: ControlConsoleOperator = Depends(current_operator),
     ) -> dict[str, Any]:
-        """Return a bounded merged event monitor page."""
+        """Return a bounded application-event monitor page."""
 
         query = OperationalEventQuery.model_validate({
             "source": source,
+            "service_id": service_id,
+            "event_type": event_type,
+            "level": level,
             "request_id": request_id,
             "tracking_id": tracking_id,
+            "since": since,
             "limit": limit,
         })
-        monitor = EventMonitor(
-            read_audit_events=lambda event_query: _read_audit_events(
-                event_query,
-                audit_writer=audit_writer,
-            ),
-            read_process_logs=lambda event_query: _read_process_events(
-                event_query,
-                log_store=log_store,
-                services=services,
-            ),
-            read_kazusa_events=_read_kazusa_events,
-        )
+        monitor = EventMonitor(read_kazusa_events=_read_kazusa_events)
         page = await monitor.query(query)
         audit_writer.write_event(
             event_type="event_view",
             operator_id=_.operator_id,
             target={
                 "source": source,
+                "service_id": service_id,
+                "event_type": event_type,
+                "level": level,
                 "request_id": request_id,
                 "tracking_id": tracking_id,
+                "since": since.isoformat() if since else None,
                 "limit": limit,
             },
         )
@@ -781,24 +816,32 @@ def create_app(
     @app.get("/api/audit")
     async def audit_events(
         limit: int = Query(default=25, ge=1, le=100),
-        operator: ControlConsoleOperator = Depends(current_operator),
+        category: str = Query(default="", max_length=80),
+        event_type: str = Query(default="", max_length=80),
+        service_id: str = Query(default="", max_length=80),
+        operator_id: str = Query(default="", max_length=120),
+        outcome: str = Query(default="", max_length=40),
+        request_id: str = Query(default="", max_length=120),
+        since: datetime | None = Query(default=None),
+        _: ControlConsoleOperator = Depends(current_operator),
     ) -> dict[str, Any]:
-        """Return a bounded local audit page."""
+        """Return collapsed operator actions and summarized view activity."""
 
-        audit_writer.write_event(
-            event_type="audit_view",
-            operator_id=operator.operator_id,
-            target={"limit": limit},
-        )
         events = [
             event.model_dump(mode="json")
-            for event in audit_writer.read_recent(limit=limit)
+            for event in audit_writer.read_recent(limit=AUDIT_EVENT_READ_LIMIT)
         ]
-        payload = {
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-            "items": events,
-            "next_cursor": None,
-        }
+        payload = repository.audit_page(
+            events=events,
+            limit=limit,
+            category=category,
+            event_type=event_type,
+            service_id=service_id,
+            operator_id=operator_id,
+            outcome=outcome,
+            request_id=request_id,
+            since=since.isoformat() if since else "",
+        )
         return payload
 
     @app.post(
@@ -964,7 +1007,7 @@ def create_app(
         limit: int = Query(default=25, ge=1, le=100),
         _: ControlConsoleOperator = Depends(current_operator),
     ) -> dict[str, Any]:
-        """Return calendar prompt and backing panels."""
+        """Return schedule, run, and scoped cognition-visibility panels."""
 
         lookup_query = ConsoleLookupQuery.model_validate({
             "platform": platform,
@@ -997,7 +1040,7 @@ def create_app(
         )
         return payload
 
-    @app.get("/api/lookups/background")
+    @app.get("/api/lookups/background-work")
     async def lookup_background_work(
         limit: int = Query(default=25, ge=1, le=100),
         _: ControlConsoleOperator = Depends(current_operator),
@@ -1046,11 +1089,26 @@ def create_app(
         )
         return payload
 
-    @app.get("/api/entities/user")
+    @app.get("/api/entities/users")
+    async def user_entities(
+        limit: int = Query(default=25, ge=1, le=100),
+        operator: ControlConsoleOperator = Depends(current_operator),
+    ) -> dict[str, Any]:
+        """Return a bounded safe directory of known users."""
+
+        audit_writer.write_event(
+            event_type="lookup_view",
+            operator_id=operator.operator_id,
+            target={"namespace": "entity.users", "limit": limit},
+        )
+        payload = await repository.list_user_entities(limit=limit)
+        return payload
+
+    @app.get("/api/entities/users/{platform}/{platform_user_id}")
     async def user_entity(
+        platform: str,
+        platform_user_id: str,
         query: str = Query(default="", max_length=240),
-        platform: str | None = Query(default=None, max_length=80),
-        platform_user_id: str | None = Query(default=None, max_length=120),
         platform_channel_id: str | None = Query(default=None, max_length=120),
         channel_type: str | None = Query(default=None, max_length=40),
         limit: int = Query(default=25, ge=1, le=100),
@@ -1092,10 +1150,25 @@ def create_app(
         )
         return payload
 
-    @app.get("/api/entities/group")
+    @app.get("/api/entities/groups")
+    async def group_entities(
+        limit: int = Query(default=25, ge=1, le=100),
+        operator: ControlConsoleOperator = Depends(current_operator),
+    ) -> dict[str, Any]:
+        """Return a bounded safe directory of active group scopes."""
+
+        audit_writer.write_event(
+            event_type="lookup_view",
+            operator_id=operator.operator_id,
+            target={"namespace": "entity.groups", "limit": limit},
+        )
+        payload = await repository.list_group_entities(limit=limit)
+        return payload
+
+    @app.get("/api/entities/groups/{platform}/{group_id}")
     async def group_entity(
-        platform: str | None = Query(default=None, max_length=80),
-        group_id: str | None = Query(default=None, max_length=120),
+        platform: str,
+        group_id: str,
         participant_platform_user_id: str | None = Query(
             default=None,
             max_length=120,
@@ -1133,50 +1206,6 @@ def create_app(
             current_timestamp_utc=datetime.now(timezone.utc).isoformat(),
             limit=lookup_query.limit,
         )
-        return payload
-
-    @app.get("/api/character/status")
-    async def character_status(
-        operator: ControlConsoleOperator = Depends(current_operator),
-    ) -> dict[str, Any]:
-        """Return the latest bounded character status projection."""
-
-        audit_writer.write_event(
-            event_type="lookup_view",
-            operator_id=operator.operator_id,
-            target={"namespace": "character_status"},
-        )
-        payload = await repository.latest_character_status()
-        return payload
-
-    @app.get("/api/character/growth")
-    async def character_growth(
-        operator: ControlConsoleOperator = Depends(current_operator),
-    ) -> dict[str, Any]:
-        """Return bounded global character-growth projection."""
-
-        audit_writer.write_event(
-            event_type="lookup_view",
-            operator_id=operator.operator_id,
-            target={"namespace": "global_growth"},
-        )
-        payload = await repository.global_growth_summary()
-        return payload
-
-    @app.get("/api/lookups/{namespace}")
-    async def lookup_empty(
-        namespace: str,
-        limit: int = Query(default=25, ge=1, le=100),
-        _: ControlConsoleOperator = Depends(current_operator),
-    ) -> dict[str, Any]:
-        """Return safe empty lookup pages for not-yet-wired helpers."""
-
-        audit_writer.write_event(
-            event_type="lookup_view",
-            operator_id=_.operator_id,
-            target={"namespace": namespace, "limit": limit},
-        )
-        payload = await repository.empty_lookup(namespace=namespace)
         return payload
 
     @app.get("/api/stream")
@@ -1516,6 +1545,7 @@ def _kazusa_event_filter(query: OperationalEventQuery) -> dict[str, Any]:
     """Build a bounded event-log query from operator filters."""
 
     filter_doc: dict[str, Any] = {}
+    compound_clauses: list[dict[str, Any]] = []
     if query.service_id:
         filter_doc["component"] = query.service_id
     if query.event_type:
@@ -1525,12 +1555,30 @@ def _kazusa_event_filter(query: OperationalEventQuery) -> dict[str, Any]:
     if query.request_id:
         filter_doc["correlation_id"] = query.request_id
     if query.tracking_id:
-        filter_doc["$or"] = [
-            {"run_id": query.tracking_id},
-            {"trigger_id": query.tracking_id},
-            {"attempt_id": query.tracking_id},
-            {"refs.ref_id": query.tracking_id},
-        ]
+        compound_clauses.append({
+            "$or": [
+                {"run_id": query.tracking_id},
+                {"trigger_id": query.tracking_id},
+                {"attempt_id": query.tracking_id},
+                {"refs.ref_id": query.tracking_id},
+            ],
+        })
+    if not query.event_type:
+        compound_clauses.append({
+            "$or": [
+                {
+                    "event_type": {
+                        "$nin": sorted(DEFAULT_AGGREGATE_EVENT_TYPES),
+                    },
+                },
+                {"severity": {"$in": sorted(ATTENTION_LEVELS)}},
+                {"status": {"$in": sorted(ATTENTION_STATUSES)}},
+            ],
+        })
+    if len(compound_clauses) == 1:
+        filter_doc.update(compound_clauses[0])
+    elif compound_clauses:
+        filter_doc["$and"] = compound_clauses
     if query.since:
         filter_doc["occurred_at"] = {"$gte": query.since.isoformat()}
     return filter_doc
@@ -1564,6 +1612,12 @@ def _project_kazusa_event(document: dict[str, Any]) -> dict[str, Any]:
             row["error_class"] = str(error_class)
         if error_preview:
             row["message"] = str(error_preview)
+    payload = document.get("payload")
+    if isinstance(payload, dict):
+        for field in SAFE_KAZUSA_EVENT_PAYLOAD_FIELDS:
+            value = payload.get(field)
+            if value not in (None, ""):
+                row[field] = value
     projected_row = redact_mapping({
         key: value
         for key, value in row.items()
@@ -1585,69 +1639,6 @@ def _kazusa_event_reader_unavailable(*, reason: str) -> dict[str, Any]:
     }
     projected_row = redact_mapping(row)
     return projected_row
-
-
-async def _read_audit_events(
-    query: OperationalEventQuery,
-    *,
-    audit_writer: LocalAuditWriter,
-) -> list[dict[str, Any]]:
-    """Read local control-console audit events for the event monitor."""
-
-    events = audit_writer.read_recent(limit=query.limit)
-    rows = [
-        {
-            **event.model_dump(mode="json"),
-            "source": "console",
-            "level": "info",
-        }
-        for event in events
-        if _event_matches_filters(event.model_dump(mode="json"), query)
-    ]
-    return rows
-
-
-async def _read_process_events(
-    query: OperationalEventQuery,
-    *,
-    log_store: ProcessLogStore,
-    services: dict[str, Any],
-) -> list[dict[str, Any]]:
-    """Read bounded process log lines as event-monitor rows."""
-
-    service_ids = [query.service_id] if query.service_id else list(services)
-    rows: list[dict[str, Any]] = []
-    for service_id in service_ids:
-        if service_id not in services:
-            continue
-        for line in log_store.tail(service_id=service_id, limit=query.limit):
-            rows.append({
-                "source": "process",
-                "service_id": line.service_id,
-                "event_type": f"log.{line.stream}",
-                "level": "error" if line.stream == "stderr" else "info",
-                "created_at": line.created_at.isoformat(),
-                "message": line.line,
-                "cursor": line.cursor,
-            })
-    return rows[: query.limit]
-
-
-def _event_matches_filters(
-    event: dict[str, Any],
-    query: OperationalEventQuery,
-) -> bool:
-    """Return whether one audit event matches bounded UI filters."""
-
-    if query.service_id and event.get("service_id") != query.service_id:
-        return False
-    if query.event_type and event.get("event_type") != query.event_type:
-        return False
-    if query.request_id and event.get("request_id") != query.request_id:
-        return False
-    if query.tracking_id and event.get("tracking_id") != query.tracking_id:
-        return False
-    return True
 
 
 async def _run_lifecycle_action(
@@ -2244,6 +2235,463 @@ def _service_config_environment() -> dict[str, str]:
     return environment
 
 
+async def _load_operational_sources(
+    *,
+    states: list[Any],
+    kazusa_client: Any,
+) -> dict[str, Any]:
+    """Load live brain owner sources for console projections."""
+
+    brain_record = _service_state_record(states, service_id="brain")
+    brain_state = _service_actual_state(brain_record)
+    brain_error = _service_last_error_preview(brain_record)
+    brain_http_available = _brain_http_available(
+        brain_state,
+        last_error_preview=brain_error,
+    )
+    if brain_http_available:
+        try:
+            brain_health = await kazusa_client.get_health()
+        except httpx.HTTPError as exc:
+            brain_health = {
+                "status": "unavailable",
+                "reason": str(exc),
+            }
+        try:
+            runtime_status = await kazusa_client.get_runtime_status()
+        except httpx.HTTPError as exc:
+            runtime_status = {
+                "status": "unavailable",
+                "reason": str(exc),
+            }
+    else:
+        reason = f"brain service is {brain_state}"
+        brain_health = {"status": "unavailable", "reason": reason}
+        runtime_status = {"status": "unavailable", "reason": reason}
+
+    latest_cognition_graph = not_reported_cognition_graph(
+        source="overview_latest",
+    )
+    latest_self_cognition_graph = not_reported_cognition_graph(
+        source="self_latest",
+    )
+    if brain_http_available:
+        try:
+            latest_cognition_graph = await (
+                kazusa_client.get_latest_cognition_graph()
+            )
+        except (AttributeError, httpx.HTTPError) as exc:
+            latest_cognition_graph = not_reported_cognition_graph(
+                source="overview_latest",
+                reason=(
+                    "brain latest cognition graph unavailable: "
+                    f"{exc}"
+                ),
+            )
+        try:
+            latest_self_cognition_graph = await (
+                kazusa_client.get_latest_self_cognition_graph()
+            )
+        except (AttributeError, httpx.HTTPError) as exc:
+            latest_self_cognition_graph = not_reported_cognition_graph(
+                source="self_latest",
+                reason=(
+                    "brain latest self-cognition graph unavailable: "
+                    f"{exc}"
+                ),
+            )
+    sources = {
+        "brain_health": brain_health,
+        "runtime_status": runtime_status,
+        "latest_cognition_graph": latest_cognition_graph,
+        "latest_self_cognition_graph": latest_self_cognition_graph,
+    }
+    return sources
+
+
+def _project_health_page(
+    *,
+    brain_health: dict[str, Any],
+    runtime_status: dict[str, Any],
+) -> dict[str, Any]:
+    """Project readiness, worker liveness, and Cache2 owner panels."""
+
+    health_status = str(brain_health.get("status", "unavailable"))
+    runtime_source_status = str(
+        runtime_status.get("status", "available")
+    )
+    health_available = health_status != "unavailable"
+    runtime_available = runtime_source_status != "unavailable"
+    raw_descriptors = runtime_status.get("semantic_descriptors", {})
+    descriptors = (
+        raw_descriptors
+        if isinstance(raw_descriptors, dict)
+        else {}
+    )
+    readiness_status = _combined_source_status(
+        health_available,
+        runtime_available,
+    )
+    readiness_reason = _source_failure_reason(
+        brain_health,
+        runtime_status,
+    )
+    readiness_item = {
+        "status": health_status,
+        "database": brain_health.get("db"),
+        "scheduler": brain_health.get("scheduler"),
+        "worker_error_level": descriptors.get(
+            "worker_error_level",
+            "unknown",
+        ),
+    }
+    readiness_panel = _console_panel(
+        status=readiness_status,
+        items=[readiness_item],
+        reason=readiness_reason,
+    )
+
+    raw_workers = runtime_status.get("workers", {})
+    workers = raw_workers if isinstance(raw_workers, dict) else {}
+    worker_items: list[dict[str, Any]] = []
+    for worker_name, raw_worker in sorted(workers.items()):
+        if isinstance(raw_worker, dict):
+            worker = raw_worker
+        else:
+            worker = {"last_status": str(raw_worker)}
+        worker_items.append({
+            "worker_name": str(worker_name),
+            "enabled": worker.get("enabled"),
+            "task_alive": worker.get("task_alive"),
+            "last_status": worker.get("last_status", "unknown"),
+            "last_event_at": worker.get("last_event_at", ""),
+        })
+    if runtime_available:
+        workers_status = "available" if worker_items else "empty"
+        workers_reason = (
+            ""
+            if worker_items
+            else "no runtime worker state was reported"
+        )
+    else:
+        workers_status = "unavailable"
+        workers_reason = str(
+            runtime_status.get(
+                "reason",
+                "runtime worker state is unavailable",
+            )
+        )
+    workers_panel = _console_panel(
+        status=workers_status,
+        items=worker_items,
+        reason=workers_reason,
+    )
+
+    raw_cache = brain_health.get("cache2", {})
+    cache = raw_cache if isinstance(raw_cache, dict) else {}
+    raw_agents = cache.get("agents", [])
+    agents = raw_agents if isinstance(raw_agents, list) else []
+    cache_items: list[dict[str, Any]] = []
+    for raw_agent in agents:
+        if not isinstance(raw_agent, dict):
+            continue
+        hits = _nonnegative_int(raw_agent.get("hit_count"))
+        misses = _nonnegative_int(raw_agent.get("miss_count"))
+        cache_items.append({
+            "agent_name": str(raw_agent.get("agent_name", "")),
+            "hits": hits,
+            "misses": misses,
+            "total": hits + misses,
+            "hit_rate": raw_agent.get("hit_rate", 0.0),
+        })
+    if health_available:
+        cache_status = "available" if cache_items else "empty"
+        cache_reason = (
+            ""
+            if cache_items
+            else "no Cache2 agent statistics were reported"
+        )
+    else:
+        cache_status = "unavailable"
+        cache_reason = str(
+            brain_health.get(
+                "reason",
+                "Cache2 health is unavailable",
+            )
+        )
+    cache_panel = _console_panel(
+        status=cache_status,
+        items=cache_items,
+        reason=cache_reason,
+    )
+    panels = {
+        "readiness": readiness_panel,
+        "workers": workers_panel,
+        "cache_agents": cache_panel,
+    }
+    page = {
+        "status": _console_page_status(panels),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "panels": panels,
+    }
+    return page
+
+
+def _project_overview_page(
+    *,
+    states: list[Any],
+    health_page: dict[str, Any],
+    audit_page: dict[str, Any],
+    latest_cognition_graph: Any,
+    latest_self_cognition_graph: Any,
+) -> dict[str, Any]:
+    """Project only bounded cross-owner aggregates for Overview."""
+
+    service_counts = {
+        "managed_services": len(states),
+        "running": 0,
+        "stopped": 0,
+        "starting": 0,
+        "stopping": 0,
+        "unhealthy": 0,
+        "crashed": 0,
+        "conflict": 0,
+        "unavailable": 0,
+        "other": 0,
+    }
+    service_failures: list[dict[str, Any]] = []
+    known_states = set(service_counts) - {"managed_services", "other"}
+    for state in states:
+        state_payload = _service_state_payload(state)
+        actual_state = str(
+            state_payload.get("actual_state", "unavailable")
+        )
+        count_key = (
+            actual_state
+            if actual_state in known_states
+            else "other"
+        )
+        service_counts[count_key] += 1
+        if actual_state not in {
+            "unhealthy",
+            "crashed",
+            "conflict",
+            "unavailable",
+        }:
+            continue
+        service_failures.append({
+            "kind": "service",
+            "target": str(
+                state_payload.get(
+                    "display_name",
+                    state_payload.get("id", "service"),
+                )
+            ),
+            "outcome": actual_state,
+            "reason": str(
+                state_payload.get("last_error_preview", "")
+            ),
+            "created_at": state_payload.get("last_event_at", ""),
+        })
+
+    health_panels = health_page.get("panels", {})
+    health_panels = (
+        health_panels
+        if isinstance(health_panels, dict)
+        else {}
+    )
+    readiness_panel = health_panels.get("readiness", {})
+    readiness_panel = (
+        readiness_panel
+        if isinstance(readiness_panel, dict)
+        else {}
+    )
+    readiness_items = readiness_panel.get("items", [])
+    readiness_items = (
+        readiness_items
+        if isinstance(readiness_items, list)
+        else []
+    )
+    internal_readiness = _console_panel(
+        status=str(readiness_panel.get("status", "unavailable")),
+        items=[
+            item
+            for item in readiness_items[:1]
+            if isinstance(item, dict)
+        ],
+        reason=str(readiness_panel.get("reason", "")),
+    )
+
+    raw_actions = audit_page.get("actions", [])
+    actions = raw_actions if isinstance(raw_actions, list) else []
+    audit_failures = [
+        {
+            "kind": "operator action",
+            "target": action.get("target_label", ""),
+            "outcome": action.get("outcome", ""),
+            "reason": action.get("reason", ""),
+            "created_at": action.get("created_at", ""),
+        }
+        for action in actions
+        if (
+            isinstance(action, dict)
+            and action.get("outcome") == "failed"
+        )
+    ]
+    recent_changes = [
+        {
+            "action": action.get("action", ""),
+            "target": action.get("target_label", ""),
+            "outcome": action.get("outcome", ""),
+            "created_at": action.get("created_at", ""),
+        }
+        for action in actions
+        if (
+            isinstance(action, dict)
+            and action.get("outcome") != "failed"
+        )
+    ][:5]
+    recent_failures = (service_failures + audit_failures)[:5]
+
+    graph_items: list[dict[str, Any]] = []
+    for graph_kind, graph in (
+        ("conversation", latest_cognition_graph),
+        ("self_cognition", latest_self_cognition_graph),
+    ):
+        graph_payload = graph.model_dump(mode="json")
+        if graph_payload.get("status") == "not_reported":
+            continue
+        graph_items.append({
+            "graph_kind": graph_kind,
+            "graph": graph_payload,
+        })
+
+    cognition_graphs_panel = _console_panel(
+        status="available" if graph_items else "empty",
+        items=graph_items,
+        reason=(
+            ""
+            if graph_items
+            else "no cognition run graphs have been reported"
+        ),
+    )
+    if graph_items:
+        # The cognition graph projector already enforces its semantic
+        # allowlist. Preserve approved detail text instead of applying the
+        # generic console text-preview limit a second time.
+        cognition_graphs_panel["items"] = graph_items
+
+    panels = {
+        "service_summary": _console_panel(
+            status="available",
+            items=[service_counts],
+        ),
+        "internal_readiness": internal_readiness,
+        "recent_failures": _console_panel(
+            status="available" if recent_failures else "empty",
+            items=recent_failures,
+            reason=(
+                ""
+                if recent_failures
+                else "no recent service or operator failures"
+            ),
+        ),
+        "recent_changes": _console_panel(
+            status="available" if recent_changes else "empty",
+            items=recent_changes,
+            reason=(
+                ""
+                if recent_changes
+                else "no recent state-changing operator actions"
+            ),
+        ),
+        "cognition_graphs": cognition_graphs_panel,
+    }
+    page = {
+        "status": _console_page_status(panels),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "panels": panels,
+    }
+    return page
+
+
+def _console_panel(
+    *,
+    status: str,
+    items: list[dict[str, Any]],
+    reason: str = "",
+) -> dict[str, Any]:
+    """Build one semantic console panel."""
+
+    panel = {
+        "status": status,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "items": [
+            redact_mapping(item)
+            for item in items
+            if isinstance(item, dict)
+        ],
+        "reason": str(reason)[:240],
+    }
+    return panel
+
+
+def _console_page_status(panels: dict[str, dict[str, Any]]) -> str:
+    """Combine semantic panel states without hiding partial failures."""
+
+    statuses = {
+        str(panel.get("status", "empty"))
+        for panel in panels.values()
+    }
+    has_available = bool(
+        statuses & {"available", "empty", "needs_input"}
+    )
+    if "partial" in statuses:
+        return "partial"
+    if "unavailable" in statuses and has_available:
+        return "partial"
+    if statuses == {"unavailable"}:
+        return "unavailable"
+    if "available" in statuses:
+        return "available"
+    if "needs_input" in statuses:
+        return "needs_input"
+    return "empty"
+
+
+def _combined_source_status(*source_states: bool) -> str:
+    """Return availability for a panel backed by independent sources."""
+
+    if all(source_states):
+        return "available"
+    if any(source_states):
+        return "partial"
+    return "unavailable"
+
+
+def _source_failure_reason(*sources: dict[str, Any]) -> str:
+    """Join bounded failure reasons from unavailable owner sources."""
+
+    reasons = [
+        str(source.get("reason", "")).strip()
+        for source in sources
+        if (
+            source.get("status") == "unavailable"
+            and str(source.get("reason", "")).strip()
+        )
+    ]
+    reason = "; ".join(dict.fromkeys(reasons))
+    return reason
+
+
+def _nonnegative_int(value: Any) -> int:
+    """Return a nonnegative integer for an aggregate metric."""
+
+    if isinstance(value, int) and not isinstance(value, bool):
+        return max(value, 0)
+    return 0
+
+
 def _service_state_payload(state: Any) -> dict[str, Any]:
     """Serialize one service state model or dictionary for API output."""
 
@@ -2343,8 +2791,11 @@ def _page_capabilities() -> dict[str, dict[str, Any]]:
     capabilities = {
         "overview": {
             "status": "ready",
-            "label": "ready",
-            "reason": "Service and audit summary is available after login.",
+            "label": "aggregates",
+            "reason": (
+                "Service totals, readiness, exceptions, changes, and cognition "
+                "graph entry points are available."
+            ),
         },
         "services": {
             "status": "ready",
@@ -2363,43 +2814,67 @@ def _page_capabilities() -> dict[str, dict[str, Any]]:
         },
         "events": {
             "status": "ready",
-            "label": "event log",
-            "reason": "Local audit, process logs, and application event-log telemetry are available.",
+            "label": "structured events",
+            "reason": (
+                "Structured application events support bounded filters and "
+                "dynamic facets."
+            ),
         },
         "character": {
-            "status": "partial",
-            "label": "partial",
-            "reason": "Character profile, state, growth, and safe learning panels are available; raw reflection output is excluded.",
+            "status": "ready",
+            "label": "native V2",
+            "reason": (
+                "Character profile, V2 cognition, self-image, semantic growth, "
+                "and carry-over panels are implemented."
+            ),
         },
         "users": {
-            "status": "partial",
-            "label": "platform lookup",
-            "reason": "Platform-facing user profile, relationship, memory, and style panels are available.",
+            "status": "ready",
+            "label": "directory + V2",
+            "reason": (
+                "Known-user discovery and native V2 relationship, cognition, "
+                "memory, style, progress, and carry-over panels are implemented."
+            ),
         },
         "groups": {
-            "status": "partial",
-            "label": "group lookup",
-            "reason": "Platform-facing group style guidance is available.",
+            "status": "ready",
+            "label": "activity + review",
+            "reason": (
+                "Active-group discovery, activity, review, style, carry-over, "
+                "and participant progress panels are implemented."
+            ),
         },
         "calendar": {
-            "status": "partial",
-            "label": "due runs",
-            "reason": "Due calendar-run inspection is available; schedule editing is not implemented.",
+            "status": "ready",
+            "label": "schedules + runs",
+            "reason": (
+                "Calendar counts, schedules, recent outcomes, and scoped "
+                "cognition visibility are implemented."
+            ),
         },
         "background": {
-            "status": "partial",
-            "label": "worker events",
-            "reason": "Sanitized background worker event telemetry is available.",
+            "status": "ready",
+            "label": "jobs + workers",
+            "reason": (
+                "Queue counts, canonical jobs, worker aggregates, errors, and "
+                "delivery detail are implemented."
+            ),
         },
         "health": {
-            "status": "partial",
-            "label": "runtime gated",
-            "reason": "Brain health and runtime status are live when the brain HTTP endpoint is available.",
+            "status": "ready",
+            "label": "live readiness",
+            "reason": (
+                "Dependency readiness, nested worker liveness, semantic error "
+                "level, and Cache2 metrics are implemented."
+            ),
         },
         "audit": {
-            "status": "partial",
-            "label": "local only",
-            "reason": "Local JSONL audit is available.",
+            "status": "ready",
+            "label": "collapsed actions",
+            "reason": (
+                "Operator actions use explicit outcomes while page views are "
+                "summarized separately."
+            ),
         },
     }
     return capabilities

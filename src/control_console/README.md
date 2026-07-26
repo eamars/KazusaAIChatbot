@@ -20,14 +20,11 @@ The console is not mounted by the brain service and must not change `/chat`, cog
 - Send debug-chat messages through the existing brain `/chat` contract when the brain is running, with operator-selectable visible-reply, think-only, listen-only, and no-remember debug modes.
 - Browse bounded read-only Character, Users, Groups, calendar, background-work,
   health/cache, event, and audit summaries.
-- Inspect cognition-debug Prompt View panels for the production prompt-facing
-  windows used by calendar recall, background-work result delivery,
-  conversation progress, internal-monologue carry-over, and promoted global
-  growth. Supporting queue, schedule, run, and event rows remain separate
-  Operational Backing panels.
-- Inspect due calendar runs and sanitized background-worker telemetry as
-  partial read-only workflows; schedule editing and job payload browsing are
-  not implemented.
+- Discover known users and active groups before opening their bounded detail.
+- Inspect native Cognition Core V2 character and user state without V1
+  relationship aliases.
+- Inspect calendar schedules and recent outcomes, background jobs and
+  aggregate worker activity, runtime readiness, and collapsed audit actions.
 
 ## Interface boundary
 
@@ -47,7 +44,9 @@ The brain owns cognition and persistence coordination for chat turns. Adapters o
 - CLI: `kazusa-control-console`
 - Static UI: `GET /`
 - Auth: `POST /api/auth/login`, `GET /api/auth/session`
-- Bootstrap: `GET /api/bootstrap`
+- Bootstrap and cross-owner aggregate: `GET /api/bootstrap`,
+  `GET /api/overview`
+- Health/cache owner projection: `GET /api/health`
 - Lifecycle: `POST /api/services/{service_id}/start|stop|restart`
 - Service config:
   `GET /api/services/{service_id}/config`,
@@ -61,13 +60,20 @@ The brain owns cognition and persistence coordination for chat turns. Adapters o
 - Logs and events:
   `GET /api/logs/{service_id}`,
   `GET /api/logs/stream`,
-  `GET /api/events`
+  `GET /api/events`,
+  `GET /api/audit`
 - Debug chat: `POST /api/debug-chat`
 - Owner entity inspection:
   `GET /api/entities/character`,
-  `GET /api/entities/user`,
-  `GET /api/entities/group`
-- Lookups: `GET /api/lookups/{namespace}`
+  `GET /api/entities/users`,
+  `GET /api/entities/users/{platform}/{platform_user_id}`,
+  `GET /api/entities/groups`,
+  `GET /api/entities/groups/{platform}/{group_id}`
+- Read-only lookups:
+  `GET /api/lookups/memory`,
+  `GET /api/lookups/style`,
+  `GET /api/lookups/calendar`,
+  `GET /api/lookups/background-work`
 - SSE: `GET /api/stream`
 
 Every `/api/*` endpoint except login and the read-only session-status check
@@ -90,8 +96,10 @@ field count only. Full field metadata is loaded on demand through the generic
 service config route.
 
 `GET /api/bootstrap` returns `latest_cognition_graph` and
-`latest_self_cognition_graph`, mirroring both under `overview`. When the brain
-HTTP endpoint is available, the console reads both values from the brain
+`latest_self_cognition_graph`. Its `overview` field uses the same five-panel
+aggregate contract as `GET /api/overview`, and its `health` field uses the
+same three-panel owner contract as `GET /api/health`. When the brain HTTP
+endpoint is available, the console reads both graph values from the brain
 `GET /ops/latest-cognition-graph` endpoint; otherwise each returns
 `status: not_reported`. `POST /api/debug-chat` returns `cognition_graph` for
 the most recent debug turn. These fields use the same bounded cognition-run
@@ -107,6 +115,9 @@ graph snapshot contract:
   `reference` kind.
 - `redaction`: an explicit policy summary for excluded prompts, embeddings,
   raw messages, message envelopes, and operational identifiers.
+
+The renderer labels each graph by semantic source. Its machine run identifier
+appears only in the closed `Run reference` disclosure used for correlation.
 
 The brain `/chat` response may include a bounded `cognition_graph` snapshot
 derived from the actual graph result and consolidation state. The console
@@ -165,10 +176,76 @@ The stream emits:
 - `log.keepalive`: idle heartbeat.
 
 The Live logs page is the intended operator workflow for raw process output.
-Event monitor remains the structured audit and application-event search page.
+Event monitor contains structured application events and never duplicates the
+raw process stream, Audit records, or successful aggregate-owned tick/residue
+access chatter. Audit remains the sole owner of collapsed operator/security
+actions and summarized page views.
 Service cards include a `Logs` action that opens Live logs filtered to that
 service. The browser keeps only a bounded local row set and supports local
 pause, clear, autoscroll, wrapping, text filtering, highlighting, and row copy.
+
+## Information Ownership And Safe Projection Contracts
+
+Each datum has one canonical page owner. Overview may repeat only bounded
+cross-owner aggregates or exceptions; it does not repeat service, route,
+worker, cache-agent, or audit-action detail.
+
+| Page | Canonical information | Endpoint |
+|---|---|---|
+| Overview | Managed-service counts, one readiness aggregate, recent failures, recent changes, cognition graph entry points | `GET /api/overview` |
+| Services | Authoritative lifecycle state, action/block reason, bounded process detail, one current value per model route | bootstrap and `/api/services/*` |
+| Live logs | Bounded supervisor/stdout/stderr text and stream connection state | `GET /api/logs/stream` |
+| Debug chat | Request controls, current response/error, cognition graph, browser-session history | `POST /api/debug-chat` |
+| Event monitor | Structured events, filters, dynamic facets, duration/error/correlation detail | `GET /api/events` |
+| Character | Profile, native V2 cognition, self-image, semantic growth, promoted carry-over | `GET /api/entities/character` |
+| Users | Safe directory; profile, native V2 relationship/cognition, memory, style, progress, carry-over | plural user entity routes |
+| Groups | Activity directory; review, style, carry-over, participant progress | plural group entity routes |
+| Calendar | Counts, schedules, recent run outcomes, scoped cognition visibility | `GET /api/lookups/calendar` |
+| Background work | Queue counts, canonical jobs, worker aggregates, errors, delivery detail | `GET /api/lookups/background-work` |
+| Health/cache | Database/scheduler readiness, worker liveness, semantic error level, Cache2 metrics | `GET /api/health` |
+| Audit | Collapsed actions with explicit outcomes, view summary, dynamic facets | `GET /api/audit` |
+
+Safe-field boundaries are fixed:
+
+- The user directory returns only platform account labels/ids, display names,
+  alias count, and update time. It excludes global ids, alias ids, cognition
+  content, relationship evidence ids, and ownership ids.
+- User relationship detail returns all eleven stored V2 axes with the exact
+  numeric value and canonical semantic band, plus evidence count and update
+  time. It does not calculate an affinity replacement.
+- The group directory returns platform/channel label, last activity, message
+  count, and participant count. Raw messages and participant ids are excluded.
+- Character growth includes active traits and only the latest semantic growth
+  outcome. Group detail includes only the latest review window and excludes
+  route/dispatch ledger machinery.
+- User-thread continuity requires channel id and channel type. Group-thread
+  style inspection passes the selected group id to the canonical style helper.
+  Console carry-over reads disable residue-load telemetry so inspection does
+  not write application-event rows.
+- Calendar rows expose schedule/run kind, state, operator-relevant times, and
+  safe result/failure summaries. Run ids, schedule ids, leases, attempts,
+  idempotency machinery, and raw payloads are excluded.
+- Background rows expose job/delivery state and safe aggregate worker counts.
+  Task briefs, prompts, artifacts, raw messages, run ids, and leases are
+  excluded.
+- Health exposes readiness once, one row per runtime worker, and one row per
+  cache agent with hits, misses, total, and hit rate.
+- Audit groups only exact request ids, maps terminal events to explicit
+  outcomes, humanizes targets from whitelisted fields, and summarizes view
+  events outside the action list.
+- Event monitor excludes process output and Audit-owned console records.
+  Successful tick/residue access chatter stays on aggregate owner pages unless
+  an exact event-type filter requests it. Error previews and correlation ids
+  remain bounded row detail rather than default-page prose.
+
+Every data-bearing panel reports `available`, `empty`, `needs_input`,
+`partial`, or `unavailable`. A required child-source failure propagates to the
+page as `partial` or `unavailable`; a successful sibling does not mask it.
+Character profile/cognition, User profile/relationship/cognition, Group
+activity/review, Calendar summary/schedules/runs, and Background
+summary/jobs/worker activity own top-level availability. Optional continuity,
+style, delivery, error, and scoped-visibility panels report their own status
+without changing an otherwise truthful owner-page status.
 
 ## Page Capability Status
 
@@ -183,21 +260,22 @@ working pages from partial or unavailable pages. The status vocabulary is:
 - `disabled`: the page must not be presented as usable because its repository
   or API adapter is not implemented.
 
-The current first-slice status is:
+The current implementation status is:
 
 | Page | Status | Source |
 |---|---|---|
-| Overview | `ready` | Bootstrap service and audit summary |
+| Overview | `ready` | Five frozen aggregate panels |
 | Services | `ready` | Registry and supervisor state |
+| Live logs | `ready` | Console-owned process streams |
 | Debug chat | `ready` | Existing brain `/chat` contract when brain is running |
-| Event monitor | `ready` | Local audit, process logs, and sanitized Kazusa event-log telemetry |
-| Character | `partial` | Owner-oriented profile, runtime state, self-image, active growth traits, promoted global-growth Prompt View, character-global carry-over Prompt View, growth-run audit rows, and background-learning summaries where safely available |
-| Users | `partial` | Platform-facing user lookup for profile, relationship summary, `user_memory_units`, user-scoped interaction-style guidance, exact conversation-progress Prompt View, and current carry-over Prompt View; internal global user ids are not browser inputs |
-| Groups | `partial` | Platform-facing group lookup for group-channel style, group-scene carry-over Prompt View, and participant conversation-progress Prompt View when a participant platform user id is supplied |
-| Calendar | `partial` | Pending calendar recall Prompt View, schedule definition backing rows, and due `calendar_runs` inspection; schedule editing is not implemented |
-| Background work | `partial` | Result-ready cognition delivery Prompt View, recent job queue backing rows, and sanitized `background_work.worker` event telemetry |
-| Health/cache | `partial` | Brain `/health` and `/ops/runtime-status` when brain is running |
-| Audit | `partial` | Local JSONL audit only |
+| Event monitor | `ready` | Structured Kazusa application-event telemetry |
+| Character | `ready` | Native V2 owner projection |
+| Users | `ready` | Safe directory and native V2 detail |
+| Groups | `ready` | Activity directory and sourced detail |
+| Calendar | `ready` | Schedules, recent outcomes, scoped visibility |
+| Background work | `ready` | Jobs, worker aggregates, errors, delivery |
+| Health/cache | `ready` | Live readiness, workers, and Cache2 projection |
+| Audit | `ready` | Collapsed local actions and view summary |
 
 ## Operator Token
 
@@ -244,14 +322,10 @@ shows the login form.
 
 The console binds to loopback by default and has only the operating-system permissions of the user that launched it. Services are controlled only through validated registry `command` argv arrays. Browser requests never submit arbitrary commands, shell strings, process ids, container ids, system service names, remote hosts, or lifecycle targets outside the registry.
 
-Responses are redacted before they reach the browser. Secrets, tokens, prompts, embeddings, raw environment values, raw message bodies, callback secrets, and unbounded text are excluded from logs, events, audit records, and lookup pages.
-
-Prompt View panels show only production prompt-facing projections or source
-episodes returned by their owning runtime helpers. Operational Backing panels
-show bounded redacted rows for queue, schedule, audit, or telemetry context and
-are not prompt input. Event-log snapshot browsing remains excluded from the
-control console because snapshots are aggregate debugging telemetry, not a
-cognition prompt window.
+Responses are redacted before they reach the browser. Secrets, tokens,
+prompts, embeddings, raw environment values, raw message bodies, callback
+secrets, internal global ids, run/lease machinery, and unbounded text are
+excluded from logs, events, audit records, and owner pages.
 
 ## Service Registry And Supervisor
 

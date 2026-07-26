@@ -140,14 +140,14 @@ def test_cognition_debug_routes_pass_exact_scope_to_repository(
         "?platform=qq&platform_channel_id=group-1"
         "&platform_user_id=platform-user-1&channel_type=group&limit=4",
     )
-    background = client.get("/api/lookups/background?limit=6")
+    background = client.get("/api/lookups/background-work?limit=6")
     user = client.get(
-        "/api/entities/user?platform=qq&platform_user_id=platform-user-1"
-        "&platform_channel_id=group-1&channel_type=group&query=debug&limit=7",
+        "/api/entities/users/qq/platform-user-1"
+        "?platform_channel_id=group-1&channel_type=group&query=debug&limit=7",
     )
     group = client.get(
-        "/api/entities/group?platform=qq&group_id=group-1"
-        "&participant_platform_user_id=platform-user-1&limit=8",
+        "/api/entities/groups/qq/group-1"
+        "?participant_platform_user_id=platform-user-1&limit=8",
     )
     character = client.get("/api/entities/character?limit=9")
 
@@ -175,8 +175,8 @@ def test_cognition_debug_routes_pass_exact_scope_to_repository(
     assert captured["character"]["current_timestamp_utc"]
 
 
-def test_static_surface_adds_existing_widget_prompt_panels(tmp_path) -> None:
-    """Static UI should expose new panels through existing console widgets."""
+def test_static_surface_exposes_semantic_v2_owner_panels(tmp_path) -> None:
+    """Static UI should expose owner information without prompt internals."""
 
     client = _authenticated_client(tmp_path)
 
@@ -194,24 +194,25 @@ def test_static_surface_adds_existing_widget_prompt_panels(tmp_path) -> None:
     assert 'id="calendar-platform-channel-id"' in html
     assert 'id="calendar-platform-user-id"' in html
     assert 'id="calendar-channel-type"' in html
-    assert 'id="calendar-prompt-runs-table"' in html
+    assert 'id="calendar-summary-table"' in html
     assert 'id="calendar-schedules-table"' in html
-    assert 'id="calendar-due-runs-table"' in html
-    assert 'id="background-result-ready-table"' in html
-    assert 'id="background-job-queue-table"' in html
-    assert 'id="background-worker-events-table"' in html
-    assert 'id="character-growth-prompt-table"' in html
+    assert 'id="calendar-runs-table"' in html
+    assert 'id="calendar-cognition-visibility-table"' in html
+    assert 'id="background-summary-table"' in html
+    assert 'id="background-jobs-table"' in html
+    assert 'id="background-worker-table"' in html
+    assert 'id="background-errors-table"' in html
+    assert 'id="background-delivery-table"' in html
+    assert 'id="character-cognition-state-table"' in html
+    assert 'id="character-growth-table"' in html
     assert 'id="character-carry-over-table"' in html
-    assert 'id="character-growth-runs-table"' in html
-    assert 'class="card-content prompt-panel"' in html
-    assert 'class="card-content operational-list"' in html
     assert 'class="card-content record-list"' in html
     high_volume_targets = [
         "user-memory-table",
         "calendar-schedules-table",
-        "calendar-due-runs-table",
-        "background-job-queue-table",
-        "background-worker-events-table",
+        "calendar-runs-table",
+        "background-jobs-table",
+        "background-worker-table",
     ]
     for target in high_volume_targets:
         assert re.search(
@@ -221,34 +222,47 @@ def test_static_surface_adds_existing_widget_prompt_panels(tmp_path) -> None:
         )
     assert "<thead>" in html
     assert "Brain stopped" not in html
-    assert "Prompt View" in html
-    assert "Operational Backing" in html
     assert 'data-component="Card"' in html
     assert 'class="input"' in html
+    for obsolete_copy in (
+        "Event stream",
+        "Growth Runs Audit",
+        "Prompt View",
+        "Operational Backing",
+        "Background work state",
+    ):
+        assert obsolete_copy not in html
 
     script = client.get("/static/console.js")
     assert script.status_code == 200
     script_text = script.text
-    assert "renderPromptPanel" in script_text
-    assert "renderOperationalPanel" in script_text
-    assert "panel_contract" in script_text
-    assert "scope_summary" in script_text
     assert "record-card" in script_text
-    assert "prompt-body" in script_text
     assert "setSummaryMetric" in script_text
     assert "platform_channel_id" in script_text
     assert "participant_platform_user_id" in script_text
-    assert "calendar-prompt-runs-table" in script_text
-    assert "background-result-ready-table" in script_text
-    assert "character-growth-prompt-table" in script_text
+    assert "calendar-cognition-visibility-table" in script_text
+    assert "background-delivery-table" in script_text
+    assert "character-cognition-state-table" in script_text
+    assert "/api/entities/users" in script_text
+    assert "/api/entities/groups" in script_text
+    assert "/api/lookups/background-work" in script_text
+    for obsolete_internal in (
+        "renderPromptPanel",
+        "renderOperationalPanel",
+        "panel_contract",
+        "projection_owner",
+        "scope_order",
+        "scope_summary",
+        "Model inputs",
+        "synthesis count",
+        "No current entries.",
+    ):
+        assert obsolete_internal not in script_text
 
     stylesheet = client.get("/static/console.css")
     assert stylesheet.status_code == 200
     css = stylesheet.text
-    assert ".prompt-content" in css
-    assert ".prompt-panel" in css
     assert ".record-card" in css
-    assert ".operational-list" in css
     assert "background: var(--panel)" in css
     assert "color: var(--ink)" in css
 
@@ -264,8 +278,6 @@ def test_static_renderers_tolerate_missing_optional_panel_targets(tmp_path) -> N
     guarded_renderers = [
         "renderPanelState",
         "renderLookupTable",
-        "renderPromptPanel",
-        "renderOperationalPanel",
         "renderReadableLookupTable",
         "renderPanelEmptyContent",
         "renderCharacterProfilePanel",
@@ -273,8 +285,6 @@ def test_static_renderers_tolerate_missing_optional_panel_targets(tmp_path) -> N
         "renderCharacterGrowthPanel",
         "renderMemoryUnitRows",
         "renderStyleOverlayRows",
-        "renderPromptPanelCards",
-        "renderOperationalCards",
     ]
 
     for function_name in guarded_renderers:
@@ -328,12 +338,12 @@ def test_static_shell_dom_access_uses_guarded_helpers(tmp_path) -> None:
         r"addEventListener|scrollTop|scrollHeight|placeholder)\b",
         script_text,
     )
-    assert 'getValue("#event-source", "console") || "console"' in script_text
+    assert 'getValue("#event-source", "all") || "all"' in script_text
 
 
 @pytest.mark.asyncio
-async def test_calendar_lookup_uses_prompt_collector_and_backing_panels() -> None:
-    """Calendar lookup should separate prompt candidates from backing rows."""
+async def test_calendar_lookup_uses_semantic_schedule_and_visibility_panels() -> None:
+    """Calendar should separate schedule/run state from scoped visibility."""
 
     from control_console.repository import ControlConsoleRepository
 
@@ -389,15 +399,15 @@ async def test_calendar_lookup_uses_prompt_collector_and_backing_panels() -> Non
             },
         ]
 
-    async def list_due_calendar_runs(**kwargs):
-        assert kwargs["limit"] == 5
+    async def list_recent_calendar_runs(*, limit: int):
+        assert limit == 5
         return []
 
     repository = ControlConsoleRepository(
         find_user_profile_by_identifier=find_user_profile_by_identifier,
         collect_calendar_pending_runs=collect_calendar_pending_runs,
         list_calendar_schedules=list_calendar_schedules,
-        list_due_calendar_runs=list_due_calendar_runs,
+        list_recent_calendar_runs=list_recent_calendar_runs,
     )
 
     page = await repository.lookup_calendar(
@@ -420,27 +430,19 @@ async def test_calendar_lookup_uses_prompt_collector_and_backing_panels() -> Non
         },
     ]
     panels = page["panels"]
-    prompt_panel = panels["cognition_pending_runs"]
-    assert prompt_panel["prompt_view"] is True
-    assert prompt_panel["projection_owner"] == "CalendarRunCollector.collect"
-    assert prompt_panel["panel_contract"] == "production prompt input"
-    assert prompt_panel["scope_summary"] == {
-        "platform": "qq",
-        "channel_type": "group",
-        "has_platform_channel_id": True,
-        "has_user_identifier": True,
-        "user_identifier_kind": "platform_user_id",
+    assert set(panels) == {
+        "summary",
+        "schedules",
+        "runs",
+        "cognition_visibility",
     }
-    assert prompt_panel["items"][0]["source"] == "calendar_runs"
-    assert prompt_panel["items"][0]["claim"].startswith("Pending calendar")
-    schedule_panel = panels["schedule_definitions"]
-    assert schedule_panel["prompt_view"] is False
-    assert schedule_panel["projection_owner"] == (
-        "calendar_scheduler.repository.list_calendar_schedules_for_inspection"
-    )
+    visibility_panel = panels["cognition_visibility"]
+    assert visibility_panel["status"] == "available"
+    assert visibility_panel["items"][0]["source"] == "calendar_runs"
+    assert visibility_panel["items"][0]["claim"].startswith("Pending calendar")
+    schedule_panel = panels["schedules"]
     assert schedule_panel["items"] == [
         {
-            "schedule_id": "schedule-1",
             "trigger_kind": "future_cognition",
             "status": "active",
             "next_run_at": "2026-06-25T00:00:00+00:00",
@@ -449,18 +451,19 @@ async def test_calendar_lookup_uses_prompt_collector_and_backing_panels() -> Non
             "recurrence": {"kind": "once"},
         },
     ]
-    assert panels["due_runs"]["prompt_view"] is False
-    assert panels["due_runs"]["panel_contract"] == (
-        "operational backing; not prompt input"
-    )
+    assert panels["runs"]["status"] == "empty"
+    assert panels["runs"]["items"] == []
     rendered = repr(page)
     assert "must-not-leak" not in rendered
     assert "global-user-1" not in rendered
+    assert "panel_contract" not in rendered
+    assert "projection_owner" not in rendered
+    assert "scope_summary" not in rendered
 
 
 @pytest.mark.asyncio
-async def test_background_lookup_uses_result_ready_episode_projection() -> None:
-    """Background lookup should display result-ready cognition inputs."""
+async def test_background_lookup_separates_jobs_and_delivery_detail() -> None:
+    """Background lookup should avoid duplicating jobs as prompt episodes."""
 
     from control_console.repository import ControlConsoleRepository
 
@@ -474,39 +477,13 @@ async def test_background_lookup_uses_result_ready_episode_projection() -> None:
                 "task_brief": "summarize the benchmark notes",
                 "source_context": "must-not-leak",
                 "artifact_text": "model-visible artifact",
+                "result_summary": "summary ready",
                 "source_platform": "qq",
                 "source_channel_type": "private",
                 "updated_at": "2026-06-24T00:00:00+00:00",
                 "idempotency_key": "must-not-leak",
             },
         ]
-
-    def build_result_ready_episode_from_job(job: dict[str, Any]):
-        assert job["job_id"] == "job-1"
-        return {
-            "schema_version": "cognitive_episode.v1",
-            "episode_id": "tool_result:task-1",
-            "trigger_source": "tool_result",
-            "origin_metadata": {
-                "source_character_name": "Stage 3 Character",
-            },
-            "target_scope": {
-                "platform": "qq",
-                "platform_channel_id": "private-1",
-                "channel_type": "private",
-                "current_global_user_id": "must-not-leak",
-            },
-            "percepts": [
-                {
-                    "source_kind": "tool_result",
-                    "content": {
-                        "semantic_summary": "summary ready",
-                        "artifact_text": "model-visible artifact",
-                        "failure_text": "",
-                    },
-                },
-            ],
-        }
 
     async def list_recent_background_work_jobs(*, limit: int):
         assert limit == 3
@@ -525,7 +502,6 @@ async def test_background_lookup_uses_result_ready_episode_projection() -> None:
 
     repository = ControlConsoleRepository(
         find_deliverable_background_work_jobs=find_deliverable_background_work_jobs,
-        build_result_ready_episode_from_job=build_result_ready_episode_from_job,
         list_recent_background_work_jobs=list_recent_background_work_jobs,
     )
 
@@ -535,40 +511,41 @@ async def test_background_lookup_uses_result_ready_episode_projection() -> None:
     )
 
     panels = page["panels"]
-    prompt_panel = panels["result_ready_cognition_deliveries"]
-    assert prompt_panel["prompt_view"] is True
-    assert prompt_panel["projection_owner"] == (
-        "background_work.result_source.build_result_ready_episode_from_job"
-    )
-    assert prompt_panel["items"][0]["episode_id"] == (
-        "tool_result:task-1"
-    )
-    assert prompt_panel["items"][0]["source_kind"] == "tool_result"
-    assert prompt_panel["items"][0]["content"] == "model-visible artifact"
-    assert prompt_panel["items"][0]["metadata"]["result_summary"] == (
-        "summary ready"
-    )
-    assert panels["job_queue"]["prompt_view"] is False
-    assert panels["job_queue"]["items"][0]["job_id"] == "job-2"
+    assert set(panels) == {
+        "summary",
+        "jobs",
+        "worker_activity",
+        "errors",
+        "delivery_detail",
+    }
+    assert panels["jobs"]["items"][0]["status"] == "queued"
+    assert panels["delivery_detail"]["items"][0] == {
+        "status": "completed",
+        "delivery_state": "ready",
+        "updated_at": "2026-06-24T00:00:00+00:00",
+        "result_summary": "summary ready",
+        "source_platform": "qq",
+        "source_channel_type": "private",
+    }
     rendered = repr(page)
     assert "source_context" not in rendered
     assert "idempotency_key" not in rendered
+    assert "artifact_text" not in rendered
+    assert "task_brief" not in rendered
+    assert "job_id" not in rendered
+    assert "prompt_view" not in repr(panels)
     assert "must-not-leak" not in rendered
 
 
 @pytest.mark.asyncio
-async def test_background_lookup_handles_malformed_result_ready_jobs() -> None:
-    """Malformed deliverable rows should not break the console route."""
+async def test_background_lookup_reports_delivery_source_failure() -> None:
+    """A failed delivery read should remain distinct from an empty queue."""
 
     from control_console.repository import ControlConsoleRepository
 
     async def find_deliverable_background_work_jobs(*, limit: int):
         assert limit == 2
-        return [{"job_id": "legacy-job-without-required-fields"}]
-
-    def build_result_ready_episode_from_job(job: dict[str, Any]):
-        assert job["job_id"] == "legacy-job-without-required-fields"
-        raise KeyError("created_at")
+        raise KeyError("delivery source unavailable")
 
     async def list_recent_background_work_jobs(*, limit: int):
         assert limit == 2
@@ -576,7 +553,6 @@ async def test_background_lookup_handles_malformed_result_ready_jobs() -> None:
 
     repository = ControlConsoleRepository(
         find_deliverable_background_work_jobs=find_deliverable_background_work_jobs,
-        build_result_ready_episode_from_job=build_result_ready_episode_from_job,
         list_recent_background_work_jobs=list_recent_background_work_jobs,
     )
 
@@ -585,20 +561,21 @@ async def test_background_lookup_handles_malformed_result_ready_jobs() -> None:
         limit=2,
     )
 
-    panel = page["panels"]["result_ready_cognition_deliveries"]
+    panel = page["panels"]["delivery_detail"]
     assert panel["status"] == "unavailable"
     assert panel["items"] == []
-    assert "could not be projected" in panel["reason"]
+    assert "delivery source unavailable" in panel["reason"]
 
 
 @pytest.mark.asyncio
-async def test_user_entity_shows_exact_progress_and_residue_prompt_views() -> None:
-    """User entity should load exact scoped cognition prompt windows."""
+async def test_user_entity_shows_scoped_progress_and_carry_over() -> None:
+    """User continuity panels should preserve meaning without scope internals."""
 
     from control_console.repository import ControlConsoleRepository
 
     progress_calls: list[dict[str, str]] = []
     residue_calls: list[dict[str, Any]] = []
+    style_calls: list[dict[str, str]] = []
     prompt_doc = {
         "status": "active",
         "episode_label": "current",
@@ -617,7 +594,7 @@ async def test_user_entity_shows_exact_progress_and_residue_prompt_views() -> No
         "resolved_threads": [],
         "avoid_reopening": [],
         "emotional_trajectory": "steady",
-        "next_affordances": ["show exact prompt window"],
+        "next_affordances": ["show the next grounded step"],
         "progression_guidance": "Stay concrete.",
     }
 
@@ -668,9 +645,28 @@ async def test_user_entity_shows_exact_progress_and_residue_prompt_views() -> No
             "status": "loaded",
         }
 
+    async def query_user_memory_units(global_user_id: str, *, limit: int):
+        assert global_user_id == "global-user-1"
+        assert limit == 5
+        return []
+
+    async def search_user_memory_units_by_keyword(*args, **kwargs):
+        _ = args
+        _ = kwargs
+        return []
+
+    async def build_interaction_style_context(**kwargs):
+        style_calls.append(dict(kwargs))
+        return {"application_order": []}
+
     repository = ControlConsoleRepository(
         get_character_profile=get_character_profile,
         find_user_profile_by_identifier=find_user_profile_by_identifier,
+        query_user_memory_units=query_user_memory_units,
+        search_user_memory_units_by_keyword=(
+            search_user_memory_units_by_keyword
+        ),
+        build_interaction_style_context=build_interaction_style_context,
         load_progress_context=load_progress_context,
         load_residue_context=load_residue_context,
     )
@@ -700,24 +696,30 @@ async def test_user_entity_shows_exact_progress_and_residue_prompt_views() -> No
         "channel_type": "group",
         "global_user_id": "global-user-1",
     }
-    progress_panel = page["panels"]["conversation_progress_prompt"]
-    assert progress_panel["prompt_view"] is True
-    assert progress_panel["content"] == prompt_doc
-    assert progress_panel["source"] == "db"
-    assert progress_panel["scope_summary"] == {
-        "platform": "qq",
+    assert style_calls == [{
+        "global_user_id": "global-user-1",
         "channel_type": "group",
-        "has_platform_channel_id": True,
-        "has_user_identifier": True,
-        "user_identifier_kind": "resolved_global_user",
+        "platform": "qq",
+        "platform_channel_id": "group-1",
+    }]
+    progress_panel = page["panels"]["conversation_progress"]
+    assert progress_panel["status"] == "available"
+    assert progress_panel["items"][0]["source"] == "db"
+    assert progress_panel["items"][0]["state"]["current_thread"] == (
+        "Console debugging."
+    )
+    assert progress_panel["items"][0]["state"]["turn_count"] == 4
+    residue_panel = page["panels"]["carry_over"]
+    assert residue_panel["status"] == "available"
+    assert residue_panel["items"][0] == {
+        "context": "约1分钟前: still thinking about debug state.",
     }
-    residue_panel = page["panels"]["current_carry_over"]
-    assert residue_panel["prompt_view"] is True
-    assert residue_panel["content"] == "约1分钟前: still thinking about debug state."
     rendered = repr(page)
     assert "last_user_input" not in rendered
     assert "must-not-leak" not in rendered
     assert "global-user-1" not in rendered
+    assert "scope_order" not in rendered
+    assert "prompt_view" not in rendered
 
 
 @pytest.mark.asyncio
@@ -766,9 +768,38 @@ async def test_group_entity_splits_group_residue_and_participant_progress() -> N
             "status": "loaded",
         }
 
+    async def list_recent_group_summaries(
+        *,
+        limit: int,
+        platform: str | None = None,
+        platform_channel_id: str | None = None,
+    ):
+        assert limit == 1
+        assert platform == "qq"
+        assert platform_channel_id == "group-1"
+        return [{
+            "platform": "qq",
+            "platform_channel_id": "group-1",
+            "channel_name": "Review group",
+            "last_activity_at": "2026-06-24T00:00:00+00:00",
+            "message_count": 4,
+            "participant_count": 2,
+        }]
+
+    async def list_group_review_windows(**kwargs):
+        _ = kwargs
+        return []
+
+    async def build_interaction_style_context(**kwargs):
+        _ = kwargs
+        return {"application_order": []}
+
     repository = ControlConsoleRepository(
         get_character_profile=get_character_profile,
         find_user_profile_by_identifier=find_user_profile_by_identifier,
+        list_recent_group_summaries=list_recent_group_summaries,
+        list_group_review_windows=list_group_review_windows,
+        build_interaction_style_context=build_interaction_style_context,
         load_progress_context=load_progress_context,
         load_residue_context=load_residue_context,
     )
@@ -788,24 +819,30 @@ async def test_group_entity_splits_group_residue_and_participant_progress() -> N
         limit=5,
     )
 
-    assert missing_participant["panels"]["group_carry_over"]["content"] == (
-        "group-scene carry-over"
-    )
-    participant_panel = missing_participant["panels"][
-        "participant_conversation_progress_prompt"
-    ]
+    carry_over = missing_participant["panels"]["carry_over"]
+    assert carry_over["items"][0]["context"] == "group-scene carry-over"
+    participant_panel = missing_participant["panels"]["participant_progress"]
     assert participant_panel["status"] == "needs_input"
-    assert participant_panel["prompt_view"] is True
-    assert with_participant["panels"][
-        "participant_conversation_progress_prompt"
-    ]["content"] == {"status": "active", "turn_count": 2}
+    assert participant_panel["items"] == []
+    participant_with_data = with_participant["panels"]["participant_progress"]
+    assert participant_with_data["status"] == "available"
+    assert participant_with_data["items"][0]["state"] == {
+        "status": "active",
+        "turn_count": 2,
+    }
+    rendered = repr(with_participant)
+    assert "scope_order" not in rendered
+    assert "prompt_view" not in rendered
 
 
 @pytest.mark.asyncio
-async def test_character_entity_shows_growth_context_runs_and_global_residue() -> None:
-    """Character entity should expose prompt growth and backing run audit."""
+async def test_character_entity_shows_semantic_growth_and_global_carry_over() -> None:
+    """Character should show growth meaning without execution machinery."""
 
     from control_console.repository import ControlConsoleRepository
+    from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+        build_character_production_state,
+    )
 
     async def get_character_profile():
         return {
@@ -813,32 +850,46 @@ async def test_character_entity_shows_growth_context_runs_and_global_residue() -
             "global_user_id": "character-1",
         }
 
-    async def build_global_character_growth_context():
+    async def get_character_runtime_state():
         return {
-            "global_character_growth": [
-                {
-                    "growth_axis": "repair",
-                    "guidance": "repair quickly after tension",
-                    "maturity": "promoted",
-                    "updated_at": "2026-06-24",
-                },
-            ],
+            "cognition_state": build_character_production_state(
+                updated_at="2026-06-24T00:00:00+00:00",
+            ),
+            "self_image": {},
         }
 
+    async def list_growth_traits(*, limit: int):
+        assert limit == 12
+        return [{
+            "trait_id": "trait-secret",
+            "growth_axis": "repair",
+            "trait_name": "repair calibration",
+            "guidance": "repair quickly after tension",
+            "status": "active",
+            "maturity_band": "promoted",
+            "evidence_count": 2,
+        }]
+
     async def list_recent_global_character_growth_runs(*, limit: int):
-        assert limit == 5
+        assert limit == 1
         return [
-            {
-                "run_id": "run-1",
-                "status": "applied",
-                "mode": "apply",
-                "accepted_count": 1,
-                "promoted_count": 1,
-                "raw_llm_output": "must-not-leak",
-                "source_memory_ids": ["must-not-leak"],
-                "updated_at": "2026-06-24T00:00:00+00:00",
-            },
-        ]
+                {
+                    "run_id": "run-secret",
+                    "status": "completed",
+                    "summary": "Promoted repair calibration.",
+                    "accepted_candidates": [{
+                        "growth_axis": "repair",
+                        "summary": "Repair guidance was consistently useful.",
+                    }],
+                    "trait_updates": [{
+                        "trait_name": "repair calibration",
+                        "change": "promoted",
+                    }],
+                    "raw_llm_output": "must-not-leak",
+                    "source_memory_ids": ["must-not-leak"],
+                    "completed_at": "2026-06-24T00:00:00+00:00",
+                },
+            ]
 
     async def load_residue_context(*, trigger_scope, current_timestamp_utc: str):
         assert trigger_scope == {
@@ -859,7 +910,8 @@ async def test_character_entity_shows_growth_context_runs_and_global_residue() -
 
     repository = ControlConsoleRepository(
         get_character_profile=get_character_profile,
-        build_global_character_growth_context=build_global_character_growth_context,
+        get_character_runtime_state=get_character_runtime_state,
+        list_growth_traits=list_growth_traits,
         list_recent_global_character_growth_runs=list_recent_global_character_growth_runs,
         load_residue_context=load_residue_context,
     )
@@ -869,34 +921,21 @@ async def test_character_entity_shows_growth_context_runs_and_global_residue() -
         limit=5,
     )
 
-    growth_prompt = page["panels"]["promoted_global_growth_prompt"]
-    assert growth_prompt["prompt_view"] is True
-    assert growth_prompt["content"] == {
-        "global_character_growth": [
-            {
-                "growth_axis": "repair",
-                "guidance": "repair quickly after tension",
-                "maturity": "promoted",
-                "updated_at": "2026-06-24",
-            },
-        ],
-    }
-    assert page["panels"]["current_carry_over"]["content"] == (
+    growth_panel = page["panels"]["growth"]
+    assert growth_panel["status"] == "available"
+    assert growth_panel["items"][0]["trait_name"] == "repair calibration"
+    assert growth_panel["items"][1]["summary"] == (
+        "Promoted repair calibration."
+    )
+    carry_over = page["panels"]["carry_over"]
+    assert carry_over["items"][0]["context"] == (
         "character-global carry-over"
     )
-    runs_panel = page["panels"]["growth_runs_audit"]
-    assert runs_panel["prompt_view"] is False
-    assert runs_panel["items"] == [
-        {
-            "run_id": "run-1",
-            "status": "applied",
-            "mode": "apply",
-            "accepted_count": 1,
-            "promoted_count": 1,
-            "updated_at": "2026-06-24T00:00:00+00:00",
-        },
-    ]
     rendered = repr(page)
     assert "raw_llm_output" not in rendered
     assert "source_memory_ids" not in rendered
+    assert "run-secret" not in rendered
+    assert "trait-secret" not in rendered
+    assert "prompt_view" not in rendered
+    assert "growth_runs_audit" not in rendered
     assert "must-not-leak" not in rendered

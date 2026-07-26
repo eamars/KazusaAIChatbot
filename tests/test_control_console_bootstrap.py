@@ -3,6 +3,46 @@
 from __future__ import annotations
 
 
+def test_overview_api_returns_only_owner_aggregates(tmp_path) -> None:
+    """Overview should expose exceptions and links without owner-page detail."""
+
+    from fastapi.testclient import TestClient
+
+    from control_console.app import create_app
+    from control_console.auth import hash_operator_token
+    from control_console.settings import ControlConsoleSettings
+
+    settings = ControlConsoleSettings(
+        state_dir=tmp_path,
+        operator_token_hash=hash_operator_token("secret"),
+    )
+    client = TestClient(create_app(settings=settings))
+    login = client.post("/api/auth/login", json={"token": "secret"})
+    assert login.status_code == 200
+
+    response = client.get("/api/overview")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert set(payload["panels"]) == {
+        "service_summary",
+        "internal_readiness",
+        "recent_failures",
+        "recent_changes",
+        "cognition_graphs",
+    }
+    rendered = repr(payload)
+    for duplicated_owner_detail in (
+        "brain_health",
+        "runtime_status",
+        "cache2",
+        "event_stream",
+        "csrf_header_name",
+        "model_routes",
+    ):
+        assert duplicated_owner_detail not in rendered
+
+
 def test_bootstrap_returns_initial_state_session_csrf_services_and_stream_url(
     monkeypatch,
     tmp_path,
@@ -56,27 +96,31 @@ def test_bootstrap_returns_initial_state_session_csrf_services_and_stream_url(
         service["id"] for service in payload["services"]
     }
     assert payload["stream_url"] == "/api/stream"
-    assert payload["ui_capabilities"]["event_stream"] is True
+    assert "event_stream" not in payload["ui_capabilities"]
     page_capabilities = payload["page_capabilities"]
     assert page_capabilities["overview"]["status"] == "ready"
     assert page_capabilities["events"]["status"] == "ready"
     assert "unsupported" not in page_capabilities["events"]
-    assert page_capabilities["users"]["status"] == "partial"
-    assert page_capabilities["groups"]["status"] == "partial"
-    assert page_capabilities["calendar"]["status"] == "partial"
-    assert page_capabilities["background"]["status"] == "partial"
-    assert "remediated" not in page_capabilities["character"]["reason"]
-    assert page_capabilities["character"]["reason"] == (
-        "Character profile, state, growth, and safe learning panels are "
-        "available; raw reflection output is excluded."
-    )
+    for page_name in (
+        "character",
+        "users",
+        "groups",
+        "calendar",
+        "background",
+        "health",
+        "audit",
+    ):
+        assert page_capabilities[page_name]["status"] == "ready"
+    assert page_capabilities["character"]["label"] == "native V2"
+    assert page_capabilities["users"]["label"] == "directory + V2"
+    assert page_capabilities["groups"]["label"] == "activity + review"
 
 
-def test_bootstrap_reports_live_brain_health_when_brain_is_running(
+def test_bootstrap_projects_live_health_without_overview_duplication(
     monkeypatch,
     tmp_path,
 ) -> None:
-    """Health/cache overview should use live brain data when brain is running."""
+    """Health should own live readiness, worker, and cache information."""
 
     from fastapi.testclient import TestClient
 
@@ -104,6 +148,12 @@ def test_bootstrap_reports_live_brain_health_when_brain_is_running(
             )
             return [state]
 
+    long_graph_detail = (
+        "input-start "
+        + ("semantic-detail " * 100)
+        + "input-end"
+    )
+
     class FakeKazusaClient:
         def __init__(self, *, base_url: str, timeout_seconds: float) -> None:
             _ = base_url
@@ -113,6 +163,7 @@ def test_bootstrap_reports_live_brain_health_when_brain_is_running(
             return {
                 "status": "ok",
                 "db": True,
+                "scheduler": True,
                 "cache2": {
                     "agents": [
                         {
@@ -127,8 +178,23 @@ def test_bootstrap_reports_live_brain_health_when_brain_is_running(
 
         async def get_runtime_status(self) -> dict:
             return {
-                "worker_error_level": "ok",
-                "workers": {"calendar": "running"},
+                "semantic_descriptors": {
+                    "worker_error_level": "ok",
+                },
+                "workers": {
+                    "calendar": {
+                        "enabled": True,
+                        "task_alive": True,
+                        "last_status": "succeeded",
+                        "last_event_at": "2026-07-27T01:02:03+00:00",
+                    },
+                    "reflection": {
+                        "enabled": False,
+                        "task_alive": False,
+                        "last_status": "disabled",
+                        "last_event_at": "",
+                    },
+                },
             }
 
         async def get_latest_cognition_graph(self):
@@ -150,7 +216,7 @@ def test_bootstrap_reports_live_brain_health_when_brain_is_running(
                                 "branch": "reasoning",
                                 "status": "completed",
                                 "detail": {
-                                    "internal_monologue": "bounded reason",
+                                    "input": long_graph_detail,
                                 },
                             },
                         ],
@@ -181,17 +247,66 @@ def test_bootstrap_reports_live_brain_health_when_brain_is_running(
     bootstrap = client.get("/api/bootstrap")
 
     assert bootstrap.status_code == 200
-    overview = bootstrap.json()["overview"]
-    assert overview["brain_health"]["status"] == "ok"
-    assert overview["brain_health"]["db"] is True
-    assert overview["cache2"]["agents"][0]["agent_name"] == "memory_agent"
-    assert overview["runtime_status"]["worker_error_level"] == "ok"
-    assert overview["latest_cognition_graph"]["run_id"] == "turn-123"
-    assert overview["latest_cognition_graph"]["nodes"][0]["id"] == "l2.reasoning"
-    assert bootstrap.json()["latest_cognition_graph"]["run_id"] == "turn-123"
+    payload = bootstrap.json()
+    health = payload["health"]
+    assert set(health["panels"]) == {
+        "readiness",
+        "workers",
+        "cache_agents",
+    }
+    readiness = health["panels"]["readiness"]["items"][0]
+    assert readiness == {
+        "status": "ok",
+        "database": True,
+        "scheduler": True,
+        "worker_error_level": "ok",
+    }
+    workers = health["panels"]["workers"]["items"]
+    assert workers == [
+        {
+            "worker_name": "calendar",
+            "enabled": True,
+            "task_alive": True,
+            "last_status": "succeeded",
+            "last_event_at": "2026-07-27T01:02:03+00:00",
+        },
+        {
+            "worker_name": "reflection",
+            "enabled": False,
+            "task_alive": False,
+            "last_status": "disabled",
+            "last_event_at": "",
+        },
+    ]
+    assert health["panels"]["cache_agents"]["items"] == [
+        {
+            "agent_name": "memory_agent",
+            "hits": 4,
+            "misses": 1,
+            "total": 5,
+            "hit_rate": 0.8,
+        },
+    ]
+    overview = payload["overview"]
+    assert set(overview["panels"]) == {
+        "service_summary",
+        "internal_readiness",
+        "recent_failures",
+        "recent_changes",
+        "cognition_graphs",
+    }
+    assert "workers" not in overview["panels"]
+    assert "cache_agents" not in overview["panels"]
+    graphs = overview["panels"]["cognition_graphs"]["items"]
+    assert graphs[0]["graph"]["run_id"] == "turn-123"
+    assert (
+        graphs[0]["graph"]["nodes"][0]["detail"]["input"]
+        == long_graph_detail
+    )
+    assert payload["latest_cognition_graph"]["run_id"] == "turn-123"
 
 
-def test_bootstrap_reports_live_brain_health_when_brain_is_unmanaged(
+def test_bootstrap_projects_live_health_when_brain_is_unmanaged(
     monkeypatch,
     tmp_path,
 ) -> None:
@@ -235,7 +350,11 @@ def test_bootstrap_reports_live_brain_health_when_brain_is_unmanaged(
             return {"status": "ok", "db": True}
 
         async def get_runtime_status(self) -> dict:
-            return {"worker_error_level": "ok"}
+            return {
+                "semantic_descriptors": {
+                    "worker_error_level": "ok",
+                },
+            }
 
         async def get_latest_cognition_graph(self):
             from control_console.kazusa_client import not_reported_cognition_graph
@@ -264,10 +383,13 @@ def test_bootstrap_reports_live_brain_health_when_brain_is_unmanaged(
     bootstrap = client.get("/api/bootstrap")
 
     assert bootstrap.status_code == 200
-    overview = bootstrap.json()["overview"]
-    assert overview["brain_health"]["status"] == "ok"
-    assert overview["brain_health"]["db"] is True
-    assert overview["runtime_status"]["worker_error_level"] == "ok"
+    payload = bootstrap.json()
+    readiness = payload["health"]["panels"]["readiness"]["items"][0]
+    assert readiness["status"] == "ok"
+    assert readiness["database"] is True
+    assert readiness["worker_error_level"] == "ok"
+    failures = payload["overview"]["panels"]["recent_failures"]["items"]
+    assert failures[0]["outcome"] == "conflict"
 
 
 def test_bootstrap_does_not_query_brain_for_stale_unowned_conflict(
@@ -339,6 +461,11 @@ def test_bootstrap_does_not_query_brain_for_stale_unowned_conflict(
     bootstrap = client.get("/api/bootstrap")
 
     assert bootstrap.status_code == 200
-    overview = bootstrap.json()["overview"]
-    assert overview["brain_health"]["status"] == "unavailable"
-    assert overview["brain_health"]["reason"] == "brain service is conflict"
+    payload = bootstrap.json()
+    readiness = payload["health"]["panels"]["readiness"]
+    assert readiness["status"] == "unavailable"
+    assert readiness["reason"] == "brain service is conflict"
+    overview_readiness = payload["overview"]["panels"]["internal_readiness"]
+    assert overview_readiness["status"] == readiness["status"]
+    assert overview_readiness["items"] == readiness["items"]
+    assert overview_readiness["reason"] == readiness["reason"]

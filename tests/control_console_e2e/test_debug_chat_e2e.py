@@ -56,9 +56,14 @@ def test_debug_chat_sends_to_brain_and_updates_history_and_graph(
             assert "listen only probe" in chat_text
             assert "fake brain reply" in chat_text
             assert page.locator("#debug-cognition-status").inner_text() == "completed"
-            assert "debug-run-1" in page.locator(
+            run_summary = page.locator(
                 "#debug-cognition-graph .graph-run-summary"
-            ).inner_text()
+            )
+            assert "Current debug cognition" in run_summary.inner_text()
+            assert "debug-run-1" not in run_summary.inner_text()
+            run_reference = run_summary.locator(".graph-run-reference")
+            run_reference.evaluate("element => { element.open = true; }")
+            assert "debug-run-1" in run_reference.inner_text()
             assert page.locator("#debug-cognition-graph .graph-stage-group").count() == 4
             assert page.locator("#debug-cognition-graph .graph-edge-layer").count() == 0
             debug_graph = page.locator("#debug-cognition-graph")
@@ -173,7 +178,12 @@ def _login(page) -> None:
 
     page.locator("#token").fill(DEFAULT_E2E_OPERATOR_TOKEN)
     page.locator("#login").click()
-    page.wait_for_selector("#overview-grid .metric")
+    page.wait_for_function(
+        """() => (
+          document.querySelector('#overview-service-status')?.textContent
+          !== 'not loaded'
+        )"""
+    )
 
 
 def _send_debug_message(page, *, mode: str, message: str) -> None:

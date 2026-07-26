@@ -333,9 +333,9 @@ class ProcessLogLine(StrictModel):
 
 
 class OperationalEventQuery(StrictModel):
-    """Bounded merged operational-event query."""
+    """Bounded application operational-event query."""
 
-    source: Literal["all", "kazusa", "console", "process"] = "all"
+    source: Literal["all", "kazusa"] = "all"
     service_id: str | None = Field(default=None, max_length=80)
     event_type: str | None = Field(default=None, max_length=80)
     level: str | None = Field(default=None, max_length=40)
@@ -347,29 +347,13 @@ class OperationalEventQuery(StrictModel):
 
 
 class OperationalEventPage(StrictModel):
-    """Merged event-monitor page."""
+    """Structured event-monitor page with dynamic result facets."""
 
     generated_at: datetime
     items: list[dict[str, Any]]
+    facets: dict[str, dict[str, int]] = Field(default_factory=dict)
+    query: dict[str, Any] = Field(default_factory=dict)
     next_cursor: str | None = None
-
-
-class ControlConsoleOverviewResponse(StrictModel):
-    """Initial or refreshed overview projection."""
-
-    generated_at: datetime
-    services: list[ServiceRuntimeState]
-    brain_health: dict[str, Any] = Field(default_factory=dict)
-    adapter_runtime_status: dict[str, Any] = Field(default_factory=dict)
-    cache2: dict[str, Any] = Field(default_factory=dict)
-    character: dict[str, Any] | None = None
-    calendar_summary: dict[str, int] = Field(default_factory=dict)
-    background_work_summary: dict[str, int] = Field(default_factory=dict)
-    event_summary: dict[str, int] = Field(default_factory=dict)
-    recent_audit_events: list[ControlAuditEvent] = Field(default_factory=list)
-    recent_process_errors: list[ProcessLogLine] = Field(default_factory=list)
-    latest_cognition_graph: CognitionRunGraphSnapshot | None = None
-    latest_self_cognition_graph: CognitionRunGraphSnapshot | None = None
 
 
 class ConsoleDebugChatRequest(StrictModel):
@@ -437,6 +421,7 @@ class ControlConsoleBootstrapResponse(StrictModel):
     application_identity: dict[str, Any]
     services: list[ServiceRuntimeState]
     overview: dict[str, Any]
+    health: dict[str, Any]
     latest_cognition_graph: CognitionRunGraphSnapshot | None = None
     latest_self_cognition_graph: CognitionRunGraphSnapshot | None = None
     recent_audit_events: list[dict[str, Any]]

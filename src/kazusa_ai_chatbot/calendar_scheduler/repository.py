@@ -14,6 +14,7 @@ from kazusa_ai_chatbot.time_boundary import local_date_bounds_to_storage_utc_iso
 
 CALENDAR_SCHEDULES_COLLECTION = "calendar_schedules"
 CALENDAR_RUNS_COLLECTION = "calendar_runs"
+MAX_RECENT_CALENDAR_RUN_LIMIT = 100
 
 
 async def upsert_calendar_schedule(schedule: dict[str, Any]) -> object:
@@ -112,6 +113,35 @@ async def list_calendar_schedules_for_inspection(
     async for schedule in cursor:
         schedules.append(schedule)
     return schedules
+
+
+async def list_recent_calendar_runs(
+    *,
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Return recent calendar run outcomes for bounded operator inspection.
+
+    Args:
+        limit: Maximum number of runs to return.
+
+    Returns:
+        Runs ordered by latest update with a deterministic run-id tie-breaker.
+    """
+
+    effective_limit = max(1, min(limit, MAX_RECENT_CALENDAR_RUN_LIMIT))
+    db = await get_db()
+    cursor = (
+        db.calendar_runs.find({}, {"_id": 0})
+        .sort([
+            ("updated_at", -1),
+            ("run_id", 1),
+        ])
+        .limit(effective_limit)
+    )
+    runs: list[dict[str, Any]] = []
+    async for run in cursor:
+        runs.append(run)
+    return runs
 
 
 async def list_pending_calendar_runs_for_source(

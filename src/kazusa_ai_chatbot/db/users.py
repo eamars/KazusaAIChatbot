@@ -26,6 +26,7 @@ from kazusa_ai_chatbot.db.schemas import (
 from kazusa_ai_chatbot.time_boundary import storage_utc_now_iso
 
 logger = logging.getLogger(__name__)
+MAX_RECENT_USER_PROFILE_LIMIT = 100
 
 
 def _now_iso() -> str:
@@ -514,6 +515,72 @@ async def list_users_by_relationship(
 
     ranked.sort(key=lambda row: row[0], reverse=rank_order != "bottom")
     return [row[1] for row in ranked[:limit]]
+
+
+async def list_recent_user_profiles(
+    *,
+    limit: int,
+) -> list[dict]:
+    """Return recently updated user profiles for bounded operator discovery.
+
+    Args:
+        limit: Maximum number of profiles to return.
+
+    Returns:
+        Safe account summaries ordered by native cognition update time. MongoDB
+        internals, canonical ids, alias ids, and cognition internals are
+        excluded.
+    """
+
+    effective_limit = max(1, min(limit, MAX_RECENT_USER_PROFILE_LIMIT))
+    db = await get_db()
+    cursor = (
+        db.user_profiles.find(
+            {
+                "global_user_id": {"$ne": CHARACTER_GLOBAL_USER_ID},
+                "platform_accounts.0": {"$exists": True},
+                "cognition_state.state_scope": "user",
+            },
+            {
+                "_id": 0,
+                "platform_accounts": 1,
+                "suspected_aliases": 1,
+                "cognition_state.updated_at": 1,
+            },
+        )
+        .sort([
+            ("cognition_state.updated_at", -1),
+            ("global_user_id", 1),
+        ])
+        .limit(effective_limit)
+    )
+    profiles: list[dict] = []
+    async for document in cursor:
+        cognition_state = document.get("cognition_state")
+        if not isinstance(cognition_state, dict):
+            cognition_state = {}
+        accounts = document.get("platform_accounts")
+        if not isinstance(accounts, list):
+            accounts = []
+        aliases = document.get("suspected_aliases")
+        if not isinstance(aliases, list):
+            aliases = []
+        profiles.append({
+            "accounts": [
+                {
+                    "platform": str(account.get("platform", "")),
+                    "platform_user_id": str(
+                        account.get("platform_user_id", "")
+                    ),
+                    "display_name": str(account.get("display_name", "")),
+                }
+                for account in accounts
+                if isinstance(account, dict)
+            ],
+            "alias_count": len(aliases),
+            "updated_at": str(cognition_state.get("updated_at", "")),
+        })
+    return profiles
 
 
 async def add_suspected_alias(

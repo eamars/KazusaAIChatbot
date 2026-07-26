@@ -54,9 +54,14 @@ def test_overview_cognition_graph_updates_from_latest_brain_run(
             _assert_graph_status(page, "running")
             assert page.locator("#overview-cognition-graph .graph-node").count() == 6
             assert page.locator("#overview-cognition-graph .graph-stage-group").count() == 4
-            assert "run-live" in page.locator(
+            run_summary = page.locator(
                 "#overview-cognition-graph .graph-run-summary"
-            ).inner_text()
+            )
+            assert "Latest conversation cognition" in run_summary.inner_text()
+            assert "run-live" not in run_summary.inner_text()
+            run_reference = run_summary.locator(".graph-run-reference")
+            run_reference.evaluate("element => { element.open = true; }")
+            assert "run-live" in run_reference.inner_text()
             dependency_panel = page.locator(
                 "#overview-cognition-graph .graph-dependency-panel"
             )
@@ -134,9 +139,18 @@ def test_overview_cognition_graph_updates_from_latest_brain_run(
             page.wait_for_function(
                 "() => document.querySelector('#overview-cognition-status')?.textContent === 'completed'"
             )
-            assert "run-complete" in page.locator(
+            completed_summary = page.locator(
                 "#overview-cognition-graph .graph-run-summary"
-            ).inner_text()
+            )
+            assert "Latest conversation cognition" in (
+                completed_summary.inner_text()
+            )
+            assert "run-complete" not in completed_summary.inner_text()
+            completed_reference = completed_summary.locator(
+                ".graph-run-reference"
+            )
+            completed_reference.evaluate("element => { element.open = true; }")
+            assert "run-complete" in completed_reference.inner_text()
             assert "Final node detail" in page.locator(
                 "#overview-cognition-graph .graph-inspector"
             ).inner_text()
@@ -516,7 +530,12 @@ def _login(page) -> None:
 
     page.locator("#token").fill(DEFAULT_E2E_OPERATOR_TOKEN)
     page.locator("#login").click()
-    page.wait_for_selector("#overview-grid .metric")
+    page.wait_for_function(
+        """() => (
+          document.querySelector('#overview-service-status')?.textContent
+          !== 'not loaded'
+        )"""
+    )
 
 
 def _assert_graph_status(page, expected_status: str) -> None:

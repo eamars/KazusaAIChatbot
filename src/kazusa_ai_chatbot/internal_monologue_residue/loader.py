@@ -30,12 +30,14 @@ async def load_residue_context(
     *,
     trigger_scope: ResidueTriggerScope,
     current_timestamp_utc: str,
+    record_telemetry: bool = True,
 ) -> ResidueLoadResult:
     """Load and project the eligible rolling residue window for a trigger.
 
     Args:
         trigger_scope: Current character, platform, channel, and user scope.
         current_timestamp_utc: Storage UTC timestamp used for projection ages.
+        record_telemetry: Whether to record the sanitized database-read event.
 
     Returns:
         Sanitized load status plus the single L2a prompt-facing context string.
@@ -54,11 +56,12 @@ async def load_residue_context(
         )
     except DatabaseOperationError as exc:
         logger.warning(f"Internal monologue residue load failed: {exc}")
-        await _record_load_event(
-            status="failed",
-            selected_count=0,
-            candidate_count=0,
-        )
+        if record_telemetry:
+            await _record_load_event(
+                status="failed",
+                selected_count=0,
+                candidate_count=0,
+            )
         result = _empty_load_result(status="load_failed")
         return result
 
@@ -73,11 +76,12 @@ async def load_residue_context(
         context_char_limit=INTERNAL_MONOLOGUE_RESIDUE_CONTEXT_CHAR_LIMIT,
     )
     status = "loaded" if context else "empty"
-    await _record_load_event(
-        status=status,
-        selected_count=len(selected_rows),
-        candidate_count=len(rows),
-    )
+    if record_telemetry:
+        await _record_load_event(
+            status=status,
+            selected_count=len(selected_rows),
+            candidate_count=len(rows),
+        )
     result: ResidueLoadResult = {
         "internal_monologue_residue_context": context,
         "selected_count": len(selected_rows),
