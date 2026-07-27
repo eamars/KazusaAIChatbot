@@ -26,6 +26,9 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
 from kazusa_ai_chatbot.cognition_core_v2.resolver_authorization import (
     authorize_resolver_requests,
 )
+from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+    build_acquaintance_user_state,
+)
 from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
     PromptProjectionV2,
 )
@@ -108,6 +111,7 @@ class _CapturingInvoker:
 
         self.responses = list(responses)
         self.configs: list[LLMCallConfig] = []
+        self.messages: list[list[object]] = []
 
     async def ainvoke(
         self,
@@ -117,7 +121,7 @@ class _CapturingInvoker:
     ) -> SimpleNamespace:
         """Capture the config and return the next queued response."""
 
-        del messages
+        self.messages.append(list(messages))
         self.configs.append(config)
         response = self.responses.pop(0)
         if isinstance(response, BaseException):
@@ -350,6 +354,10 @@ async def test_each_appraisal_family_reuses_its_route_for_repair_and_trace(
             [],
             PromptProjectionV2(payload={}, handle_to_ref={}),
             services,
+            validation_state=build_acquaintance_user_state(
+                global_user_id="routing-user",
+                updated_at="2026-07-28T00:00:00Z",
+            ),
         )
 
         assert result["question_id"] == question_id

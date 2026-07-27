@@ -114,7 +114,62 @@ def apply_semantic_appraisals(
     )
     for proposal in unsupported:
         _apply_unretained_character_delta(updated, proposal)
+    _reassert_terminal_postconditions(
+        updated,
+        results,
+        local_handle_to_ref,
+    )
     return updated
+
+
+def _reassert_terminal_postconditions(
+    state: dict[str, Any],
+    results: Sequence[SemanticAppraisalResultV2],
+    handle_to_ref: Mapping[str, Mapping[str, str]],
+) -> None:
+    """Restore canonical axes selected by accepted terminal propositions.
+
+    Args:
+        state: Reduced mutable state after all accepted appraisal deltas.
+        results: Appraisal batch whose terminal assertions own postconditions.
+        handle_to_ref: Native bindings after candidate materialization.
+    """
+
+    contracts = {
+        "goal_completed": ("goal", {"progress": 100}),
+        "event_completed": ("event", {"repair_need": 0}),
+        "event_repaired": (
+            "event",
+            {"repair_need": 0, "reparability": 100},
+        ),
+        "threat_resolved": ("threat", {"residual_pressure": 0}),
+        "knowledge_answered": ("knowledge_gap", {"uncertainty": 0}),
+    }
+    for result in results:
+        for proposition in result["propositions"]:
+            contract = contracts.get(proposition["proposition_kind"])
+            if contract is None:
+                continue
+            entity_kind, axes = contract
+            subject_ref = handle_to_ref[proposition["subject_handle"]]
+            if subject_ref["kind"] != entity_kind:
+                raise CognitionStateError(
+                    "terminal proposition postcondition kind is invalid"
+                )
+            field_name = ENTITY_LIST_FIELDS[entity_kind]
+            entity = next(
+                (
+                    row
+                    for row in state[field_name]
+                    if row["entity_id"] == subject_ref["entity_id"]
+                ),
+                None,
+            )
+            if entity is None:
+                raise CognitionStateError(
+                    "terminal proposition postcondition target is unknown"
+                )
+            entity.update(axes)
 
 
 def _materialize_proposition_root(
@@ -129,6 +184,8 @@ def _materialize_proposition_root(
 ) -> None:
     """Turn a validated prompt-local proposition into a causal state root."""
 
+    if proposition["proposition_kind"] == "outcome_pending":
+        return
     subject_handle = proposition["subject_handle"]
     subject_ref = handle_to_ref.get(subject_handle)
     if subject_ref is None:
@@ -188,6 +245,10 @@ def _materialize_proposition_root(
         )
         incoming["role_refs"] = incoming_roles
         existing = _matching_event(state, incoming)
+    terminal_status = _proposition_terminal_status(
+        subject_kind,
+        proposition["proposition_kind"],
+    )
     if existing is None:
         existing = _new_causal_candidate(
             state,
@@ -205,18 +266,28 @@ def _materialize_proposition_root(
             handle_to_ref,
         )
         entities.append(existing)
-        new_causal_ids.add(existing["entity_id"])
-        outcome = "create"
+        if terminal_status:
+            outcome = _apply_proposition_transition(
+                existing,
+                subject_kind,
+                proposition["proposition_kind"],
+                evidence_ref,
+            )
+            if outcome == "resolve":
+                batch_terminalizations.add((
+                    subject_kind,
+                    existing["entity_id"],
+                    terminal_status,
+                ))
+        else:
+            new_causal_ids.add(existing["entity_id"])
+            outcome = "create"
     else:
         superseding_goal_validated = _validate_goal_supersession(
             state,
             existing,
             proposition,
             handle_to_ref,
-        )
-        terminal_status = _proposition_terminal_status(
-            subject_kind,
-            proposition["proposition_kind"],
         )
         terminalization = (
             subject_kind,
@@ -277,23 +348,17 @@ def _proposition_terminal_status(
 
     if proposition_kind in {"goal_release", "goal_supersession"}:
         return "abandoned" if entity_kind == "goal" else ""
-    if proposition_kind == "completion_meaning":
-        statuses = {
-            "goal": "satisfied",
-            "event": "resolved",
-            "knowledge_gap": "resolved",
-        }
-        terminal_status = statuses.get(entity_kind, "")
-        return terminal_status
-    if proposition_kind == "resolution_meaning":
-        statuses = {
-            "threat": "resolved",
-            "event": "resolved",
-            "knowledge_gap": "resolved",
-        }
-        terminal_status = statuses.get(entity_kind, "")
-        return terminal_status
-    return ""
+    statuses = {
+        "goal_completed": ("goal", "satisfied"),
+        "event_completed": ("event", "resolved"),
+        "threat_resolved": ("threat", "resolved"),
+        "event_repaired": ("event", "resolved"),
+        "knowledge_answered": ("knowledge_gap", "resolved"),
+    }
+    terminal_kind = statuses.get(proposition_kind)
+    if terminal_kind is None or terminal_kind[0] != entity_kind:
+        return ""
+    return terminal_kind[1]
 
 
 def _apply_proposition_transition(
@@ -317,58 +382,50 @@ def _apply_proposition_transition(
         )
         entity.update(transitioned)
         return "resolve"
-    if proposition_kind == "completion_meaning":
-        marker = {"outcome_kind": "completion"}
-        if entity_kind == "goal":
-            transitioned = transition_goal(
-                entity,
-                transition="satisfied",
-                evidence=marker,
-            )
-        elif entity_kind == "event":
-            transitioned = transition_event(
-                entity,
-                transition="resolved",
-                evidence=marker,
-            )
-        elif entity_kind == "knowledge_gap":
-            entity["uncertainty"] = 0
-            transitioned = transition_knowledge_gap(
-                entity,
-                transition="resolved",
-                evidence=marker,
-            )
-        else:
-            return "reinforce"
-        entity.update(transitioned)
-        return "resolve"
-    if proposition_kind == "resolution_meaning":
-        marker = {"outcome_kind": "resolve"}
-        if entity_kind == "threat":
-            if entity["residual_pressure"] > 20:
-                raise CognitionStateError("threat resolution requires reduced pressure")
-            transitioned = transition_threat(
-                entity,
-                transition="resolved",
-                evidence=marker,
-            )
-        elif entity_kind == "event":
-            transitioned = transition_event(
-                entity,
-                transition="resolved",
-                evidence={"outcome_kind": "repair"},
-            )
-        elif entity_kind == "knowledge_gap":
-            transitioned = transition_knowledge_gap(
-                entity,
-                transition="resolved",
-                evidence={"outcome_kind": "answer"},
-            )
-        else:
-            return "reinforce"
-        entity.update(transitioned)
-        return "resolve"
-    return "reinforce"
+    candidate = deepcopy(entity)
+    if proposition_kind == "goal_completed" and entity_kind == "goal":
+        candidate["progress"] = 100
+        transitioned = transition_goal(
+            candidate,
+            transition="satisfied",
+            evidence={"outcome_kind": "completion"},
+        )
+    elif proposition_kind == "event_completed" and entity_kind == "event":
+        candidate["repair_need"] = 0
+        transitioned = transition_event(
+            candidate,
+            transition="resolved",
+            evidence={"outcome_kind": "completion"},
+        )
+    elif proposition_kind == "threat_resolved" and entity_kind == "threat":
+        candidate["residual_pressure"] = 0
+        transitioned = transition_threat(
+            candidate,
+            transition="resolved",
+            evidence={"outcome_kind": "resolve"},
+        )
+    elif proposition_kind == "event_repaired" and entity_kind == "event":
+        candidate["repair_need"] = 0
+        candidate["reparability"] = 100
+        transitioned = transition_event(
+            candidate,
+            transition="resolved",
+            evidence={"outcome_kind": "repair"},
+        )
+    elif (
+        proposition_kind == "knowledge_answered"
+        and entity_kind == "knowledge_gap"
+    ):
+        candidate["uncertainty"] = 0
+        transitioned = transition_knowledge_gap(
+            candidate,
+            transition="resolved",
+            evidence={"outcome_kind": "answer"},
+        )
+    else:
+        return "reinforce"
+    entity.update(transitioned)
+    return "resolve"
 
 
 def _validate_goal_supersession(

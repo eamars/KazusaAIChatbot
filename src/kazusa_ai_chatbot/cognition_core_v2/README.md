@@ -76,6 +76,27 @@ workspace collapse, action planning, and the applicable authorization stage
 remain ordered after that wave. Routing changes endpoint ownership only; model
 call count, prompts, schemas, attempt caps, and DAG edges stay unchanged.
 
+Goal, threat, and outcome appraisal uses affirmative entity-specific terminal
+assertions: `goal_completed`, `event_completed`, `threat_resolved`,
+`event_repaired`, and `knowledge_answered`, alongside goal release and
+supersession. `outcome_pending` records an explicit nonterminal observation
+without state mutation or candidate materialization. The payload maps subject,
+object, role-assignment entity, and evidence fields to their exact handle
+domains. It also maps the structured `self` and `current_user` handles to their
+Chinese semantic-text references so role fields and prose use the same actor
+roots without sharing representations. Structural validation binds each
+terminal kind to its exact entity kind. A valid assertion atomically
+establishes the terminal axis before the unchanged transition guard runs,
+including when the assertion first materializes a causal candidate. Terminal
+candidates bypass the nonterminal salience-pruning path. After all same-batch
+numeric observations are reduced, the accepted terminal assertions reassert
+their canonical axes without repeating or weakening the guarded transition.
+Every candidate is trial-reduced inside the appraisal's existing attempt cap.
+Final reduction validates each added appraisal by replaying the bounded
+accepted prefix from the original state, so handle composition is preserved
+and one residual rejection is omitted without discarding other appraisal
+results or the preliminary character response.
+
 Current-event scene text, public conversation continuity, and private residue
 continuity are separate inputs. Private continuity reaches goal-cognition
 branches only and remains non-binding prior context: each branch decides

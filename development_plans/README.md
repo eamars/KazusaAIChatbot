@@ -39,7 +39,7 @@ long_term/todo.md
 | Document | Type | Status |
 |---|---|---|
 | [coding_agent_assessment_gap_phase_d_plan.md](active/short_term/coding_agent_assessment_gap_phase_d_plan.md) | High-risk coding-agent migration plan for a generic JSON action loop, persistent repository index, exploration-cap removal, and delete/rename | in progress |
-| [cognition_core_v2_stage_4_production_database_migration_plan.md](active/short_term/cognition_core_v2_stage_4_production_database_migration_plan.md) | Non-executable production database discovery, backup, transformation, deployment, rollback, and cutover placeholder; blocked on completed Stage 3 and explicit production authority | draft |
+| [cognition_core_v2_stage_4_production_database_migration_plan.md](active/short_term/cognition_core_v2_stage_4_production_database_migration_plan.md) | Executable draft for read-only `kazusa_bot_core` discovery and isolated construction of native `kazusa_core_v2`; application configuration and cutover remain user-owned | draft |
 
 ## Supporting Experiment Records
 
@@ -304,7 +304,7 @@ and that environment disposition remains recorded in the archived plans.
 | Outcome | Plans |
 |---|---|
 | Moved from active short-term to completed archive | `cognition_core_v2_stage_3_system_adoption_plan.md`, `cognition_core_v2_stage_3_execution_manifest.md`, `cognition_core_v2_stage_3_change_radius.md` |
-| Stage 4 handoff input | `cognition_core_v2_stage_4_production_database_migration_plan.md` remains a draft placeholder requiring separate production authority |
+| Stage 4 handoff input | `cognition_core_v2_stage_4_production_database_migration_plan.md` is an executable draft for isolated target construction and requires separate authority for discovery, target writes, and later user-owned activation |
 
 ### 2026-07-26 Cognition Core V2 transition-coherence completion
 
@@ -465,6 +465,7 @@ plans.
 | [relevance_native_reply_anchor_guard_bugfix_plan.md](archive/completed/bugfix/relevance_native_reply_anchor_guard_bugfix_plan.md) |
 | [resolver_image_only_empty_input_bugfix_plan.md](archive/completed/bugfix/resolver_image_only_empty_input_bugfix_plan.md) |
 | [runtime_prompt_chinese_and_dialog_surface_guidance_plan.md](archive/completed/bugfix/runtime_prompt_chinese_and_dialog_surface_guidance_plan.md) |
+| [semantic_appraisal_terminal_transition_reliability_plan.md](archive/completed/bugfix/semantic_appraisal_terminal_transition_reliability_plan.md) |
 | [self_cognition_background_context_budget_bugfix_plan.md](archive/completed/bugfix/self_cognition_background_context_budget_bugfix_plan.md) |
 | [self_cognition_group_digest_context_evidence_bugfix_plan.md](archive/completed/bugfix/self_cognition_group_digest_context_evidence_bugfix_plan.md) |
 | [self_cognition_character_global_id_config_bugfix_plan.md](archive/completed/bugfix/self_cognition_character_global_id_config_bugfix_plan.md) |

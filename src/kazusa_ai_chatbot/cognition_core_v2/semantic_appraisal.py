@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from typing import Any
 
 import httpx
@@ -23,6 +24,7 @@ from kazusa_ai_chatbot.cognition_core_v2.diagnostics import (
     capture_validation_stage,
 )
 from kazusa_ai_chatbot.cognition_core_v2.semantic_source_planner import (
+    question_proposition_kind_semantics,
     question_proposition_kinds,
 )
 from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
@@ -31,16 +33,30 @@ from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
 from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
     PromptProjectionV2,
 )
+from kazusa_ai_chatbot.cognition_core_v2.state_reducers import (
+    apply_semantic_appraisals,
+)
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 
 
 SEMANTIC_APPRAISAL_ATTEMPT_LIMIT = V2_MODEL_TOTAL_ATTEMPTS
 SEMANTIC_APPRAISAL_REPAIR_OUTPUT_CAP = 8000
 
+_PROPOSITION_SUBJECT_KINDS = {
+    "goal_release": "goal",
+    "goal_supersession": "goal",
+    "goal_completed": "goal",
+    "event_completed": "event",
+    "threat_resolved": "threat",
+    "event_repaired": "event",
+    "knowledge_answered": "knowledge_gap",
+}
+
 
 SEMANTIC_APPRAISAL_PROMPT = '''你根据有界证据回答一个范围明确的语义问题。
 只使用本次 prompt 允许的 handle 和语义描述。动作选择、对话生成、emotion id、生命周期状态与
 事实补充不属于本阶段。只有在所给证据支持时，才返回语义命题和允许路径上的数值变化。
+每个 proposition_kind 都是其所给语义定义已经成立的肯定式断言。
 
 遵守每条证据的 source_kind。角色自己的反思或内部观察属于证据，不是当前用户的即时发言。
 生成的文字不复述来源包标题、时间戳、传输摘要、schema key 或运行元数据。新生成的自由文本使用
@@ -72,8 +88,22 @@ async def appraise_semantic_question(
     evidence: Sequence[CognitionEvidenceV2],
     projection: PromptProjectionV2,
     services: CognitionCoreServicesV2,
+    *,
+    validation_state: Mapping[str, Any],
 ) -> SemanticAppraisalResultV2:
-    """Run one bounded family appraisal and return no state authority."""
+    """Run one bounded family appraisal and return no state authority.
+
+    Args:
+        question: Scoped semantic question selected for this family.
+        evidence: Typed evidence rows available to the question.
+        projection: Prompt-safe state plus private handle bindings.
+        services: Configured stage-specific model services.
+        validation_state: Validated preliminary state used only for trial
+            reduction of each candidate.
+
+    Returns:
+        The first structurally and reducer-compatible appraisal result.
+    """
 
     config_by_question_kind = {
         "event_agency": services.appraisal_event_agency_config,
@@ -105,6 +135,27 @@ async def appraise_semantic_question(
             "permitted_proposition_kinds": list(
                 question_proposition_kinds(question["question_kind"])
             ),
+            "proposition_kind_semantics": (
+                question_proposition_kind_semantics(
+                    question["question_kind"]
+                )
+            ),
+            "handle_field_domains": {
+                "subject_handle": question["permitted_role_handles"],
+                "object_handle": question["permitted_role_handles"],
+                "entity_handle": question["permitted_role_handles"],
+                "evidence_handles": question["evidence_handles"],
+            },
+            "role_handle_semantics": {
+                "self": {
+                    "structured_handle": "self",
+                    "semantic_text_reference": '当前角色',
+                },
+                "current_user": {
+                    "structured_handle": "current_user",
+                    "semantic_text_reference": '当前用户',
+                },
+            },
             "output_schema": {
                 "propositions": "有证据支持的 proposition 对象列表",
                 "deltas": "允许路径上的有符号整数 delta 列表",
@@ -170,6 +221,13 @@ async def appraise_semantic_question(
                 parsed_output,
                 question,
                 set(evidence_by_handle),
+                projection.handle_to_ref,
+            )
+            trial_state = deepcopy(dict(validation_state))
+            apply_semantic_appraisals(
+                trial_state,
+                [result],
+                evidence,
                 projection.handle_to_ref,
             )
         except (AttributeError, KeyError, TypeError, ValueError) as exc:
@@ -367,6 +425,12 @@ def _validate_proposition(
     subject = value["subject_handle"]
     if subject not in set(question["permitted_role_handles"]):
         raise ValueError("semantic proposition subject handle is not permitted")
+    required_subject_kind = _PROPOSITION_SUBJECT_KINDS.get(proposition_kind)
+    if (
+        required_subject_kind is not None
+        and handle_to_ref[subject]["kind"] != required_subject_kind
+    ):
+        raise ValueError("semantic proposition kind requires subject kind")
     if "object_handle" in value and value["object_handle"] not in set(
         question["permitted_role_handles"]
     ):
@@ -408,7 +472,13 @@ def _validate_proposition(
         if assignment["entity_handle"] not in set(
             question["permitted_role_handles"]
         ):
-            raise ValueError("semantic role handle is not permitted")
+            permitted_handles = sorted(
+                set(question["permitted_role_handles"])
+            )
+            raise ValueError(
+                "role_assignments[*].entity_handle must be one of "
+                + json.dumps(permitted_handles)
+            )
         normalized_assignments.append(dict(assignment))
     referenced_handles = [subject]
     if "object_handle" in value:

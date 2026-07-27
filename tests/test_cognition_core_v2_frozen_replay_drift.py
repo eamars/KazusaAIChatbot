@@ -80,7 +80,7 @@ def _completion_proposition() -> dict[str, object]:
     """Return one completion meaning for the same current event."""
 
     return {
-        "proposition_kind": "completion_meaning",
+        "proposition_kind": "event_completed",
         "subject_handle": "ce1",
         "evidence_handles": ["e1"],
         "role_assignments": [],
@@ -122,7 +122,7 @@ def test_same_batch_repeated_terminal_meaning_is_idempotent() -> None:
 
     assert updated["active_events"][0]["status"] == "resolved"
     assert [row["outcome"] for row in comparisons] == [
-        "create",
+        "resolve",
         "resolve",
         "resolve",
     ]

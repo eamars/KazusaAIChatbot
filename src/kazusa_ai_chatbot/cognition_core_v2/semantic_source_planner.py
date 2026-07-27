@@ -28,14 +28,49 @@ _QUESTION_PROPOSITION_KINDS = {
     "goal_threat_outcome": (
         "goal_release",
         "goal_supersession",
-        "completion_meaning",
-        "resolution_meaning",
+        "goal_completed",
+        "event_completed",
+        "threat_resolved",
+        "event_repaired",
+        "knowledge_answered",
+        "outcome_pending",
     ),
     "epistemic_comparison_memory": (
         "comparison_meaning",
         "memory_cue",
     ),
     "existential_drive": ("meaning_relevance",),
+}
+
+_QUESTION_PROPOSITION_KIND_SEMANTICS = {
+    "event_agency": {
+        "responsibility": "事件主体对结果负有责任",
+        "intentionality": "事件主体有意促成该结果",
+    },
+    "relationship_social": {
+        "social_meaning": "该事件具有明确的社交含义",
+        "relationship_threat": "该事件对现有关系构成威胁",
+    },
+    "moral_identity": {
+        "norm_meaning": "该事件体现明确的规范或身份含义",
+    },
+    "goal_threat_outcome": {
+        "goal_release": "主体目标已被明确放下",
+        "goal_supersession": "主体目标已被另一个进行中的目标取代",
+        "goal_completed": "主体目标已经完成",
+        "event_completed": "主体事件已经完成",
+        "threat_resolved": "主体威胁已经解除",
+        "event_repaired": "主体事件所需的修复已经完成",
+        "knowledge_answered": "主体知识缺口已经获得答案",
+        "outcome_pending": "主体结果仍在进行并等待明确终态",
+    },
+    "epistemic_comparison_memory": {
+        "comparison_meaning": "该事件体现明确的比较含义",
+        "memory_cue": "该事件构成明确的记忆线索",
+    },
+    "existential_drive": {
+        "meaning_relevance": "该事件与当前意义或驱动力明确相关",
+    },
 }
 
 _QUESTION_DESCRIPTIONS = {
@@ -49,7 +84,7 @@ _QUESTION_DESCRIPTIONS = {
         "判断已授权 event handle 的规范含义与修复相关性。"
     ),
     "goal_threat_outcome": (
-        "判断现有 handle 的目标释放、取代、完成与解决含义。"
+        "判断现有 handle 是否已经达到目标、事件、威胁或知识缺口的明确终态。"
     ),
     "epistemic_comparison_memory": (
         "判断现有 handle 的比较含义、记忆线索与认知含义。"
@@ -123,6 +158,20 @@ def question_proposition_kinds(question_kind: str) -> tuple[str, ...]:
         return _QUESTION_PROPOSITION_KINDS[question_kind]
     except KeyError as exc:
         raise ValueError(f"unknown semantic question kind: {question_kind}") from exc
+
+
+def question_proposition_kind_semantics(
+    question_kind: str,
+) -> dict[str, str]:
+    """Return positive meanings for one question family's proposition kinds."""
+
+    try:
+        semantics = _QUESTION_PROPOSITION_KIND_SEMANTICS[question_kind]
+    except KeyError as exc:
+        raise ValueError(
+            f"unknown semantic question kind: {question_kind}"
+        ) from exc
+    return dict(semantics)
 
 
 def _select_evidence_rows(

@@ -52,6 +52,7 @@ from kazusa_ai_chatbot.cognition_core_v2.semantic_source_planner import (
     plan_semantic_questions,
 )
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+    CognitionStateError,
     ROLE_ENTITY_KINDS,
     validate_cognition_state,
 )
@@ -170,6 +171,7 @@ async def run_cognition(
                 payload["evidence"],
                 projection,
                 services,
+                validation_state=preliminary_state,
             )
         )
         for question in questions
@@ -207,12 +209,21 @@ async def run_cognition(
     comparison_results: list[dict[str, Any]] = []
     final_state = preliminary_state
     if appraisal_results:
-        final_state = apply_semantic_appraisals(
+        (
+            final_state,
+            appraisal_results,
+            reduction_failures,
+            comparison_results,
+        ) = _reduce_appraisals_with_isolation(
             final_state,
             appraisal_results,
             payload["evidence"],
             projection.handle_to_ref,
-            comparison_results,
+        )
+        appraisal_failures.update(reduction_failures)
+        warnings.extend(
+            f"semantic_appraisal_failed:{error_code}"
+            for error_code in reduction_failures.values()
         )
     relief_transitions = _semantic_relief_transitions(
         preliminary_state,
@@ -1082,6 +1093,69 @@ def _cognition_elapsed_seconds(
     if state["state_scope"] == "character":
         return 0
     return _elapsed_seconds(state["updated_at"], current)
+
+
+def _reduce_appraisals_with_isolation(
+    state: Mapping[str, Any],
+    results: Sequence[SemanticAppraisalResultV2],
+    evidence: Sequence[Mapping[str, Any]],
+    handle_to_ref: Mapping[str, Mapping[str, str]],
+) -> tuple[
+    dict[str, Any],
+    list[SemanticAppraisalResultV2],
+    dict[str, str],
+    list[dict[str, Any]],
+]:
+    """Validate each appraisal through a cumulative accepted-prefix reduction.
+
+    Args:
+        state: Validated preliminary cognition state.
+        results: Producer-validated semantic appraisal results.
+        evidence: Typed evidence available to the appraisal batch.
+        handle_to_ref: Private prompt-handle bindings for native reduction.
+
+    Returns:
+        The last valid state, accepted results, rejected question diagnostics,
+        and comparison rows produced only by accepted reductions.
+    """
+
+    updated_state = dict(state)
+    accepted_results: list[SemanticAppraisalResultV2] = []
+    failures: dict[str, str] = {}
+    comparison_results: list[dict[str, Any]] = []
+    for result in results:
+        candidate_results = [*accepted_results, result]
+        candidate_comparisons: list[dict[str, Any]] = []
+        try:
+            candidate_state = apply_semantic_appraisals(
+                state,
+                candidate_results,
+                evidence,
+                handle_to_ref,
+                candidate_comparisons,
+            )
+        except CognitionStateError as exc:
+            error_code = "semantic_appraisal_reduction_rejected"
+            failures[result["question_id"]] = error_code
+            capture_validation_event(
+                "semantic_appraisal_reduction",
+                {
+                    "question_id": result["question_id"],
+                    "status": "rejected",
+                    "error_code": error_code,
+                    "error": str(exc),
+                },
+            )
+            continue
+        updated_state = candidate_state
+        accepted_results.append(result)
+        comparison_results = candidate_comparisons
+    return (
+        updated_state,
+        accepted_results,
+        failures,
+        comparison_results,
+    )
 
 
 async def _collect_appraisals(

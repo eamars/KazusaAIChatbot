@@ -342,6 +342,7 @@ async def test_appraisal_prompt_excludes_current_event_provenance_ids() -> None:
         evidence,
         projection,
         services,
+        validation_state=payload["mutable_state"],
     )
 
     assert CURRENT_EVENT_TEXT in llm.human_payload
