@@ -41,6 +41,41 @@ dependency-ready goal branches, complete-bid collapse, route validation, and
 one replacement-state update. The caller commits that update before action,
 surface, resolver, or dialog work.
 
+## Stage Model Routing
+
+Core V2 receives one independent `LLMCallConfig` for each existing semantic
+model owner:
+
+| Semantic owner | Service field | Environment route |
+|---|---|---|
+| Event and agency appraisal | `appraisal_event_agency_config` | `COGNITION_LLM_APPRAISAL_EVENT_AGENCY` |
+| Relationship and social appraisal | `appraisal_relationship_social_config` | `COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL` |
+| Moral and identity appraisal | `appraisal_moral_identity_config` | `COGNITION_LLM_APPRAISAL_MORAL_IDENTITY` |
+| Goal, threat, and outcome appraisal | `appraisal_goal_threat_outcome_config` | `COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME` |
+| Epistemic, comparison, and memory appraisal | `appraisal_epistemic_comparison_memory_config` | `COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY` |
+| Existential and drive appraisal | `appraisal_existential_drive_config` | `COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE` |
+| Ordinary-response goal | `goal_ordinary_response_config` | `COGNITION_LLM_GOAL_ORDINARY_RESPONSE` |
+| Active persistent-goal branches | `goal_active_branch_config` | `COGNITION_LLM_GOAL_ACTIVE_BRANCH` |
+| Required-selection verification | `required_selection_verifier_config` | `COGNITION_LLM_REQUIRED_SELECTION_VERIFIER` |
+| Workspace collapse | `workspace_collapse_config` | `COGNITION_LLM_WORKSPACE_COLLAPSE` |
+| Action planning and goal resolution | `action_planning_config` | `COGNITION_LLM_ACTION_PLANNING` |
+| Action authorization | `action_authorization_config` | `COGNITION_LLM_ACTION_AUTHORIZATION` |
+| Resolver authorization | `resolver_authorization_config` | `COGNITION_LLM_RESOLVER_AUTHORIZATION` |
+
+Every initial call, provider retry, structural replacement, and trace row uses
+the config selected by that semantic owner. Required-selection verification
+has its own route, while a replacement bid returns to the goal route that
+produced the bid. Stage routes are complete required environment bundles and
+have no route inheritance or fallback. The generic `COGNITION_LLM` route
+continues to serve cognition callers outside this Core V2 boundary.
+
+The existing first wave remains unchanged: six appraisal families, the
+ordinary-response goal, and dependency-ready active-goal branches can submit
+up to twenty model tasks concurrently. Final dependency-ready goal work,
+workspace collapse, action planning, and the applicable authorization stage
+remain ordered after that wave. Routing changes endpoint ownership only; model
+call count, prompts, schemas, attempt caps, and DAG edges stay unchanged.
+
 Current-event scene text, public conversation continuity, and private residue
 continuity are separate inputs. Private continuity reaches goal-cognition
 branches only and remains non-binding prior context: each branch decides

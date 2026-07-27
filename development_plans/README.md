@@ -40,7 +40,6 @@ long_term/todo.md
 |---|---|---|
 | [coding_agent_assessment_gap_phase_d_plan.md](active/short_term/coding_agent_assessment_gap_phase_d_plan.md) | High-risk coding-agent migration plan for a generic JSON action loop, persistent repository index, exploration-cap removal, and delete/rename | in progress |
 | [cognition_core_v2_stage_4_production_database_migration_plan.md](active/short_term/cognition_core_v2_stage_4_production_database_migration_plan.md) | Non-executable production database discovery, backup, transformation, deployment, rollback, and cutover placeholder; blocked on completed Stage 3 and explicit production authority | draft |
-| [cognition_core_v2_model_assignment_quality_evaluation_plan.md](active/short_term/cognition_core_v2_model_assignment_quality_evaluation_plan.md) | Full-factorial real-LLM quality evaluation for assigning Core V2 callers between configured dense and MoE endpoints | draft |
 
 ## Supporting Experiment Records
 
@@ -360,6 +359,33 @@ production code remained at baseline.
 |---|---|
 | Moved from active bugfix to completed archive | `cognition_core_v2_retry_exhaustion_continuity_bugfix_plan.md` |
 
+### 2026-07-27 Cognition Core V2 model-assignment evaluation closure
+
+The user explicitly closed the completed 384-sample model-assignment
+experiment despite its procedural and input-shaping flaws. The archived record
+retains its rejected independent-review gate, the rejected aggregate
+recommendation, the valid technical call evidence, the `0/192` wrong-target
+robustness result, and the user-defined goal criterion results. Production
+assignment moved to a separate approved stage-routing plan with exact
+environment and Control Console contracts.
+
+| Outcome | Plans |
+|---|---|
+| Moved from active short-term to completed archive with accepted limitations | `cognition_core_v2_model_assignment_quality_evaluation_plan.md` |
+| Added to active short-term | `cognition_core_v2_stage_llm_endpoint_routing_plan.md` |
+
+### 2026-07-27 Cognition Core V2 stage endpoint routing completion
+
+The stage-owned Core V2 route cutover completed after deterministic routing,
+configuration, diagnostics, Control Console, browser, and full non-live
+verification. The final regression also restored baseline owner-matrix coverage
+for the concurrent character-name cutover's dispatcher and message-envelope
+documentation paths; this was test-only and left routing behavior unchanged.
+
+| Outcome | Plans |
+|---|---|
+| Moved from active short-term to completed archive | `cognition_core_v2_stage_llm_endpoint_routing_plan.md` |
+
 ### 2026-07-27 brain-owned adapter character-name completion
 
 The big-bang runtime-adapter cutover made the active process-local brain
@@ -496,6 +522,8 @@ plans.
 | [cognition_core_v2_stage_3_change_radius.md](archive/completed/short_term/cognition_core_v2_stage_3_change_radius.md) |
 | [cognition_core_v2_stage_3_execution_manifest.md](archive/completed/short_term/cognition_core_v2_stage_3_execution_manifest.md) |
 | [cognition_core_v2_stage_3_system_adoption_plan.md](archive/completed/short_term/cognition_core_v2_stage_3_system_adoption_plan.md) |
+| [cognition_core_v2_model_assignment_quality_evaluation_plan.md](archive/completed/short_term/cognition_core_v2_model_assignment_quality_evaluation_plan.md) |
+| [cognition_core_v2_stage_llm_endpoint_routing_plan.md](archive/completed/short_term/cognition_core_v2_stage_llm_endpoint_routing_plan.md) |
 | [cognition_llm_stage_reconnection_plan.md](archive/completed/short_term/cognition_llm_stage_reconnection_plan.md) |
 | [cognition_visual_directives_control_plan.md](archive/completed/short_term/cognition_visual_directives_control_plan.md) |
 | [cognition_state_integrity_plan.md](archive/completed/short_term/cognition_state_integrity_plan.md) |
@@ -616,4 +644,3 @@ plans.
 | [short_circuit_early_stop_plan.md](archive/superseded/short_circuit_early_stop_plan.md) |
 | [coding_agent_phase2_code_writing_plan_superseded_20260623.md](archive/superseded/coding_agent_phase2_code_writing_plan_superseded_20260623.md) |
 | [visual_descriptor_seeded_reference_images_plan.md](archive/superseded/visual_descriptor_seeded_reference_images_plan.md) |
-

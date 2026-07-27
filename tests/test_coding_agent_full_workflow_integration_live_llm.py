@@ -1237,7 +1237,7 @@ async def _run_live_background_turn(
     services = build_cognition_core_services()
     capturing_llm = _CapturingLLM(services.llm)
     token = l2d.set_action_selection_llm(
-        LLMStageBinding(capturing_llm, services.action_selection_config)
+        LLMStageBinding(capturing_llm, services.action_planning_config)
     )
     try:
         l2d_result = await select_semantic_actions(state)

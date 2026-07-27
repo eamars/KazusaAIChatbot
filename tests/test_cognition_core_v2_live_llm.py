@@ -76,6 +76,21 @@ _RESOLUTION_MESSAGE = (
     "The previously active cause is now resolved and no longer applies."
 )
 _NEUTRAL_MESSAGE = "Please describe the weather in one sentence."
+_CORE_STAGE_CONFIG_FIELDS = (
+    "appraisal_event_agency_config",
+    "appraisal_relationship_social_config",
+    "appraisal_moral_identity_config",
+    "appraisal_goal_threat_outcome_config",
+    "appraisal_epistemic_comparison_memory_config",
+    "appraisal_existential_drive_config",
+    "goal_ordinary_response_config",
+    "goal_active_branch_config",
+    "required_selection_verifier_config",
+    "workspace_collapse_config",
+    "action_planning_config",
+    "action_authorization_config",
+    "resolver_authorization_config",
+)
 
 
 class _CapturingSurfaceLLM:
@@ -345,23 +360,32 @@ async def _run_cross_model_case(
 
     owner_id, state = await _prepare_user_state(live_db, request)
     services = build_cognition_core_services()
-    primary_model = services.appraisal_config.model
-    comparison_model = services.action_selection_config.model
+    primary_profile = services.appraisal_event_agency_config
+    comparison_profile = services.appraisal_relationship_social_config
+    primary_model = primary_profile.model
+    comparison_model = comparison_profile.model
     if primary_model == comparison_model:
         raise AssertionError(
-            "COGNITION_LLM and BOUNDARY_CORE_LLM must use distinct models"
+            "configured stage profiles must use distinct models"
         )
+    comparison_services = replace(
+        services,
+        **{
+            field_name: replace(
+                getattr(services, field_name),
+                base_url=comparison_profile.base_url,
+                api_key=comparison_profile.api_key,
+                model=comparison_profile.model,
+            )
+            for field_name in _CORE_STAGE_CONFIG_FIELDS
+        },
+    )
     try:
         outputs: list[dict[str, object]] = []
         for index, service_set in enumerate(
             (
                 services,
-                replace(
-                    services,
-                    appraisal_config=services.action_selection_config,
-                    goal_cognition_config=services.action_selection_config,
-                    collapse_config=services.action_selection_config,
-                ),
+                comparison_services,
             )
         ):
             payload = _chain_input(

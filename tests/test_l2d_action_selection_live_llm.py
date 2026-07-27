@@ -78,7 +78,7 @@ async def test_l2d_live_case_against_frozen_upstream(
     monkeypatch.setattr(
         l2d,
         "_action_selection_llm",
-        LLMStageBinding(capturing_llm, services.action_selection_config),
+        LLMStageBinding(capturing_llm, services.action_planning_config),
     )
     result = await select_semantic_actions(frozen_state)
     raw_output = capturing_llm.raw_output

@@ -489,7 +489,7 @@ def test_bootstrap_and_debug_unavailable_return_graph_contract(tmp_path) -> None
     assert bootstrap.status_code == 200
     bootstrap_payload = bootstrap.json()
     assert bootstrap_payload["latest_cognition_graph"]["status"] == "not_reported"
-    assert bootstrap_payload["overview"]["latest_cognition_graph"]["nodes"] == []
+    assert bootstrap_payload["latest_cognition_graph"]["nodes"] == []
 
     debug = client.post(
         "/api/debug-chat",

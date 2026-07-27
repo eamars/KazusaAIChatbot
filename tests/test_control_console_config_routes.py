@@ -3,6 +3,39 @@
 from __future__ import annotations
 
 
+COGNITION_CORE_V2_ROUTES = (
+    "COGNITION_LLM_APPRAISAL_EVENT_AGENCY",
+    "COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL",
+    "COGNITION_LLM_APPRAISAL_MORAL_IDENTITY",
+    "COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME",
+    "COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY",
+    "COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE",
+    "COGNITION_LLM_GOAL_ORDINARY_RESPONSE",
+    "COGNITION_LLM_GOAL_ACTIVE_BRANCH",
+    "COGNITION_LLM_REQUIRED_SELECTION_VERIFIER",
+    "COGNITION_LLM_WORKSPACE_COLLAPSE",
+    "COGNITION_LLM_ACTION_PLANNING",
+    "COGNITION_LLM_ACTION_AUTHORIZATION",
+    "COGNITION_LLM_RESOLVER_AUTHORIZATION",
+)
+BRAIN_ROUTE_PREFIXES = (
+    "RELEVANCE_AGENT_LLM",
+    "VISION_DESCRIPTOR_LLM",
+    "MSG_DECONTEXTUALIZER_LLM",
+    "RAG_PLANNER_LLM",
+    "RAG_SUBAGENT_LLM",
+    "WEB_SEARCH_LLM",
+    "COGNITION_LLM",
+    *COGNITION_CORE_V2_ROUTES,
+    "DIALOG_GENERATOR_LLM",
+    "CONSOLIDATION_LLM",
+    "JSON_REPAIR_LLM",
+    "BACKGROUND_WORK_LLM",
+    "CODING_AGENT_PM_LLM",
+    "CODING_AGENT_PROGRAMMER_LLM",
+)
+
+
 class _ConfigRouteSupervisor:
     """Small supervisor fake for config-route restart orchestration."""
 
@@ -116,21 +149,8 @@ def _client_with_login(tmp_path, supervisor: _ConfigRouteSupervisor):
 def _route_environment(monkeypatch) -> None:
     """Install complete route env defaults without reading local dotenv files."""
 
-    routes = [
-        "RELEVANCE_AGENT_LLM",
-        "VISION_DESCRIPTOR_LLM",
-        "MSG_DECONTEXTUALIZER_LLM",
-        "RAG_PLANNER_LLM",
-        "RAG_SUBAGENT_LLM",
-        "WEB_SEARCH_LLM",
-        "COGNITION_LLM",
-        "BOUNDARY_CORE_LLM",
-        "DIALOG_GENERATOR_LLM",
-        "CONSOLIDATION_LLM",
-        "JSON_REPAIR_LLM",
-    ]
     monkeypatch.setenv("DEFAULT_LLM_MAX_COMPLETION_TOKENS", "8192")
-    for route in routes:
+    for route in BRAIN_ROUTE_PREFIXES:
         monkeypatch.setenv(f"{route}_BASE_URL", "http://localhost:1234/v1")
         monkeypatch.setenv(f"{route}_API_KEY", "test-key")
         monkeypatch.setenv(f"{route}_MODEL", f"{route.lower()}-qwen3")
@@ -198,20 +218,27 @@ def test_brain_model_route_api_applies_and_resets_selected_route(
     _route_environment(monkeypatch)
     supervisor = _ConfigRouteSupervisor(napcat_state="stopped")
     client, auth, settings = _client_with_login(tmp_path, supervisor)
-    route_url = "/api/services/brain/model-routes/cognition_llm"
+    route_key = "cognition_llm_action_planning"
+    route_url = f"/api/services/brain/model-routes/{route_key}"
 
     snapshot_response = client.get("/api/services/brain/model-routes")
     assert snapshot_response.status_code == 200
     snapshot = snapshot_response.json()
     assert snapshot["service_id"] == "brain"
     assert snapshot["service_state"]["actual_state"] == "running"
-    assert len(snapshot["routes"]) == 14
+    assert len(snapshot["routes"]) == 26
+    core_routes = [
+        route
+        for route in snapshot["routes"]
+        if route["group"] == "Cognition Core V2"
+    ]
+    assert len(core_routes) == 13
     assert "test-key" not in snapshot_response.text
 
     missing_csrf = client.put(
         route_url,
         json={
-            "reason": "change cognition route",
+            "reason": "change action planning route",
             "values": {"model": "deepseek-v4-flash"},
         },
     )
@@ -221,7 +248,7 @@ def test_brain_model_route_api_applies_and_resets_selected_route(
         route_url,
         headers={auth["csrf_header_name"]: auth["csrf_token"]},
         json={
-            "reason": "change cognition route",
+            "reason": "change action planning route",
             "expected_version": 3,
             "values": {
                 "model": "deepseek-v4-flash",
@@ -241,11 +268,13 @@ def test_brain_model_route_api_applies_and_resets_selected_route(
     reset_response = client.post(
         f"{route_url}/reset",
         headers={auth["csrf_header_name"]: auth["csrf_token"]},
-        json={"reason": "reset cognition route", "expected_version": 4},
+        json={"reason": "reset action planning route", "expected_version": 4},
     )
     assert reset_response.status_code == 200
     reset_payload = reset_response.json()
-    assert reset_payload["route"]["effective"]["model"] == "cognition_llm-qwen3"
+    assert reset_payload["route"]["effective"]["model"] == (
+        "cognition_llm_action_planning-qwen3"
+    )
 
     from control_console.audit import LocalAuditWriter
 
@@ -282,12 +311,15 @@ def test_available_models_route_returns_redacted_provider_status(
     client, _, _ = _client_with_login(tmp_path, supervisor)
 
     response = client.get(
-        "/api/services/brain/model-routes/cognition_llm/available-models",
+        (
+            "/api/services/brain/model-routes/"
+            "cognition_llm_action_planning/available-models"
+        ),
     )
 
     assert response.status_code == 200
     assert response.json() == {
-        "route_key": "cognition_llm",
+        "route_key": "cognition_llm_action_planning",
         "status": "available",
         "models": [{"id": "qwen3-32b", "family": "qwen"}],
         "message": None,
@@ -321,12 +353,15 @@ def test_available_models_route_reports_empty_provider_result(
     client, _, _ = _client_with_login(tmp_path, supervisor)
 
     response = client.get(
-        "/api/services/brain/model-routes/cognition_llm/available-models",
+        (
+            "/api/services/brain/model-routes/"
+            "cognition_llm_action_planning/available-models"
+        ),
     )
 
     assert response.status_code == 200
     assert response.json() == {
-        "route_key": "cognition_llm",
+        "route_key": "cognition_llm_action_planning",
         "status": "empty",
         "models": [],
         "message": "Provider returned no valid model ids.",

@@ -75,6 +75,17 @@ async def appraise_semantic_question(
 ) -> SemanticAppraisalResultV2:
     """Run one bounded family appraisal and return no state authority."""
 
+    config_by_question_kind = {
+        "event_agency": services.appraisal_event_agency_config,
+        "relationship_social": services.appraisal_relationship_social_config,
+        "moral_identity": services.appraisal_moral_identity_config,
+        "goal_threat_outcome": services.appraisal_goal_threat_outcome_config,
+        "epistemic_comparison_memory": (
+            services.appraisal_epistemic_comparison_memory_config
+        ),
+        "existential_drive": services.appraisal_existential_drive_config,
+    }
+    config = config_by_question_kind[question["question_kind"]]
     evidence_by_handle = {
         row["evidence_handle"]: {
             "handle": row["evidence_handle"],
@@ -117,7 +128,7 @@ async def appraise_semantic_question(
         try:
             response = await services.llm.ainvoke(
                 request_messages,
-                config=services.appraisal_config,
+                config=config,
             )
         except (
             OpenAIError,
@@ -130,7 +141,7 @@ async def appraise_semantic_question(
             ended_at = time.perf_counter()
             capture_validation_stage(
                 stage_id=stage_id,
-                config=services.appraisal_config,
+                config=config,
                 system_prompt=SEMANTIC_APPRAISAL_PROMPT,
                 human_payload=payload_text,
                 raw_output=None,
@@ -165,7 +176,7 @@ async def appraise_semantic_question(
             ended_at = time.perf_counter()
             capture_validation_stage(
                 stage_id=stage_id,
-                config=services.appraisal_config,
+                config=config,
                 system_prompt=SEMANTIC_APPRAISAL_PROMPT,
                 human_payload=payload_text,
                 raw_output=raw_output,
@@ -195,7 +206,7 @@ async def appraise_semantic_question(
         ended_at = time.perf_counter()
         capture_validation_stage(
             stage_id=stage_id,
-            config=services.appraisal_config,
+            config=config,
             system_prompt=SEMANTIC_APPRAISAL_PROMPT,
             human_payload=payload_text,
             raw_output=raw_output,

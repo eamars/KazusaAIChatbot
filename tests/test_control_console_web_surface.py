@@ -388,6 +388,8 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     assert "Manual model " + "ID" not in script.text
     assert "provider model " + "id" not in script.text
     assert "data-brain-route-key" in script.text
+    assert "const currentValue = `" in script.text
+    assert 'const currentValue = isSelected ? "" :' not in script.text
     assert "/api/services/brain/model-routes" in script.text
     assert "function renderServiceConfigDialog" in script.text
     assert "function applyServiceConfig" in script.text
@@ -453,8 +455,25 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     )
     assert ".service-card.brain-service-card" in stylesheet.text
     assert ".brain-service-layout" in stylesheet.text
+    assert (
+        ".brain-service-layout { display: grid; grid-template-columns: "
+        "1fr; gap: 12px; align-items: start;"
+    ) in stylesheet.text
     assert ".brain-route-matrix" in stylesheet.text
     assert ".brain-route-editor" in stylesheet.text
+    assert (
+        ".brain-route-tile.selected { border-color: "
+        "var(--nav-active-border);"
+    ) in stylesheet.text
+    assert (
+        ".brain-route-tile.selected { border-color: "
+        "var(--nav-active-border); background: var(--nav-active-bg); }"
+    ) in stylesheet.text
+    assert (
+        ".brain-route-tile.selected { border-color: "
+        "var(--nav-active-border); box-shadow:"
+        not in stylesheet.text
+    )
     assert ".content-grid { display: grid; gap: 12px; align-items: start; }" in (
         stylesheet.text
     )

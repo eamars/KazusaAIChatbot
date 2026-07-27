@@ -23,6 +23,7 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
 from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
     V2_MODEL_TOTAL_ATTEMPTS,
 )
+from kazusa_ai_chatbot.llm_interface import LLMCallConfig
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 
 
@@ -218,6 +219,7 @@ async def authorize_action_requests(
     ]
     decisions = await invoke_semantic_authorizer(
         services=services,
+        config=services.action_authorization_config,
         messages=messages,
         candidate_handles=list(candidate_requests),
         stage_name="action_authorization",
@@ -237,6 +239,7 @@ async def authorize_action_requests(
 async def invoke_semantic_authorizer(
     *,
     services: CognitionCoreServicesV2,
+    config: LLMCallConfig,
     messages: list[BaseMessage],
     candidate_handles: list[str],
     stage_name: str,
@@ -257,7 +260,7 @@ async def invoke_semantic_authorizer(
         try:
             response = await services.llm.ainvoke(
                 current_messages,
-                config=services.action_selection_config,
+                config=config,
             )
         except (
             OpenAIError,
@@ -268,7 +271,7 @@ async def invoke_semantic_authorizer(
             TimeoutError,
         ) as exc:
             await _record_authorization_trace(
-                services=services,
+                config=config,
                 messages=current_messages,
                 response_text="",
                 parsed_output={},
@@ -300,7 +303,7 @@ async def invoke_semantic_authorizer(
             )
         except ValueError as exc:
             await _record_authorization_trace(
-                services=services,
+                config=config,
                 messages=current_messages,
                 response_text=response_text,
                 parsed_output=parsed,
@@ -330,7 +333,7 @@ async def invoke_semantic_authorizer(
             ]
             continue
         await _record_authorization_trace(
-            services=services,
+            config=config,
             messages=current_messages,
             response_text=response_text,
             parsed_output={"decisions": decisions},
@@ -403,7 +406,7 @@ def _authorization_repair_message(
 
 async def _record_authorization_trace(
     *,
-    services: CognitionCoreServicesV2,
+    config: LLMCallConfig,
     messages: Sequence[BaseMessage],
     response_text: str,
     parsed_output: object,
@@ -418,7 +421,6 @@ async def _record_authorization_trace(
     trace_id = llm_tracing.current_trace_id()
     if not trace_id:
         return
-    config = services.action_selection_config
     await llm_tracing.record_llm_trace_step(
         trace_id=trace_id,
         stage_name=stage_name,

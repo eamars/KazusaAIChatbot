@@ -13,7 +13,19 @@ ROUTE_KEYS = (
     "RAG_SUBAGENT_LLM",
     "WEB_SEARCH_LLM",
     "COGNITION_LLM",
-    "BOUNDARY_CORE_LLM",
+    "COGNITION_LLM_APPRAISAL_EVENT_AGENCY",
+    "COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL",
+    "COGNITION_LLM_APPRAISAL_MORAL_IDENTITY",
+    "COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME",
+    "COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY",
+    "COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE",
+    "COGNITION_LLM_GOAL_ORDINARY_RESPONSE",
+    "COGNITION_LLM_GOAL_ACTIVE_BRANCH",
+    "COGNITION_LLM_REQUIRED_SELECTION_VERIFIER",
+    "COGNITION_LLM_WORKSPACE_COLLAPSE",
+    "COGNITION_LLM_ACTION_PLANNING",
+    "COGNITION_LLM_ACTION_AUTHORIZATION",
+    "COGNITION_LLM_RESOLVER_AUTHORIZATION",
     "BACKGROUND_WORK_LLM",
     "DIALOG_GENERATOR_LLM",
     "CONSOLIDATION_LLM",
@@ -93,6 +105,11 @@ def test_top_level_readmes_include_current_route_families() -> None:
         if route_key == "EMBEDDING":
             env_name = "EMBEDDING_BASE_URL"
         assert env_name in howto
+
+    removed_route = "BOUNDARY_CORE_" + "LLM"
+    assert removed_route not in english_readme
+    assert removed_route not in chinese_readme
+    assert removed_route not in howto
 
 
 def test_top_level_readmes_link_current_runtime_subsystems() -> None:

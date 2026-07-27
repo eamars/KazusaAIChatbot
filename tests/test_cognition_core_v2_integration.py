@@ -130,10 +130,27 @@ def _core_services(llm: _ScriptedLLM) -> CognitionCoreServicesV2:
 
     return CognitionCoreServicesV2(
         llm=llm,
-        appraisal_config=make_llm_call_config("v2_appraisal"),
-        goal_cognition_config=make_llm_call_config("v2_goal"),
-        collapse_config=make_llm_call_config("v2_collapse"),
-        action_selection_config=make_llm_call_config("v2_route"),
+        appraisal_event_agency_config=make_llm_call_config("v2_appraisal"),
+        appraisal_relationship_social_config=make_llm_call_config(
+            "v2_appraisal"
+        ),
+        appraisal_moral_identity_config=make_llm_call_config("v2_appraisal"),
+        appraisal_goal_threat_outcome_config=make_llm_call_config(
+            "v2_appraisal"
+        ),
+        appraisal_epistemic_comparison_memory_config=make_llm_call_config(
+            "v2_appraisal"
+        ),
+        appraisal_existential_drive_config=make_llm_call_config(
+            "v2_appraisal"
+        ),
+        goal_ordinary_response_config=make_llm_call_config("v2_goal"),
+        goal_active_branch_config=make_llm_call_config("v2_goal"),
+        required_selection_verifier_config=make_llm_call_config("v2_route"),
+        workspace_collapse_config=make_llm_call_config("v2_collapse"),
+        action_planning_config=make_llm_call_config("v2_route"),
+        action_authorization_config=make_llm_call_config("v2_route"),
+        resolver_authorization_config=make_llm_call_config("v2_route"),
     )
 
 
@@ -759,7 +776,7 @@ async def test_workspace_retry_or_branch_order_fallback(
             return SimpleNamespace(content='{"invalid": true}')
 
     llm = _WorkspaceLLM()
-    services = SimpleNamespace(llm=llm, collapse_config=object())
+    services = SimpleNamespace(llm=llm, workspace_collapse_config=object())
 
     output = await collapse_bids(
         [

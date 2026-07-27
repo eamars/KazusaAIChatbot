@@ -73,7 +73,9 @@ class _ActionLLM:
 def _services(decision: dict[str, object]) -> SimpleNamespace:
     return SimpleNamespace(
         llm=_ActionLLM(decision),
-        action_selection_config=object(),
+        action_planning_config=object(),
+        action_authorization_config=object(),
+        resolver_authorization_config=object(),
     )
 
 
@@ -217,7 +219,9 @@ async def test_no_admitted_bid_returns_silence_without_llm() -> None:
         resolver_context="resolver_status=idle",
         services=SimpleNamespace(
             llm=_UnexpectedLLM(),
-            action_selection_config=object(),
+            action_planning_config=object(),
+            action_authorization_config=object(),
+            resolver_authorization_config=object(),
         ),
     )
 

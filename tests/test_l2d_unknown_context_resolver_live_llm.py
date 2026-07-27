@@ -163,7 +163,7 @@ async def _run_l2d_and_trace(
     monkeypatch.setattr(
         l2d,
         "_action_selection_llm",
-        LLMStageBinding(capturing_llm, services.action_selection_config),
+        LLMStageBinding(capturing_llm, services.action_planning_config),
     )
 
     result = await select_semantic_actions(frozen_state)

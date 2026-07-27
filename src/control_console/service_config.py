@@ -12,7 +12,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 NAPCAT_ACTIVE_GROUP_PATTERN = r"^[0-9]{1,32}$"
 DEFAULT_MAX_ITEMS = 50
 DEFAULT_MAX_ITEM_LENGTH = 120
-MAX_DESCRIPTOR_FIELDS = 64
+MAX_DESCRIPTOR_FIELDS = 80
+MAX_SERVICE_CONFIG_FIELD_KEY_LENGTH = 80
 
 ConfigValue = str | int | bool | list[str]
 CommandRenderer = Callable[[list[str], dict[str, object]], list[str]]
@@ -32,7 +33,9 @@ class StrictConfigModel(BaseModel):
 class ServiceConfigField(StrictConfigModel):
     """One operator-editable field in a service configuration descriptor."""
 
-    key: str = Field(pattern=r"^[a-z][a-z0-9_]{0,63}$")
+    key: str = Field(
+        pattern=rf"^[a-z][a-z0-9_]{{0,{MAX_SERVICE_CONFIG_FIELD_KEY_LENGTH - 1}}}$"
+    )
     label: str = Field(min_length=1, max_length=80)
     description: str = Field(min_length=1, max_length=240)
     value_type: Literal["string_list", "string", "boolean", "integer", "enum"]

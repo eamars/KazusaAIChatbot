@@ -153,7 +153,7 @@ body[data-auth-state="authenticated"] #login-form { display: none; }
 .service-error { margin: 0 12px; padding: 9px 10px; border: 1px solid color-mix(in srgb, var(--danger) 24%, var(--line)); border-radius: var(--radius-control); color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, var(--panel)); font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
 .service-card-actions { padding: 10px 12px 12px; }
 .service-card.brain-service-card { grid-column: 1 / -1; min-height: 560px; }
-.brain-service-layout { display: grid; grid-template-columns: minmax(260px, 0.62fr) minmax(520px, 1.38fr); gap: 12px; min-width: 0; padding: 12px; }
+.brain-service-layout { display: grid; grid-template-columns: 1fr; gap: 12px; align-items: start; min-width: 0; padding: 12px; }
 .brain-runtime-panel, .brain-routes-panel, .brain-route-editor { min-width: 0; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--panel-soft); }
 .brain-runtime-panel { display: grid; align-content: start; gap: 12px; padding: 12px; }
 .brain-runtime-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px 12px; }
@@ -163,7 +163,7 @@ body[data-auth-state="authenticated"] #login-form { display: none; }
 .brain-route-matrix { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr)); gap: 8px; min-width: 0; }
 .brain-route-tile { min-width: 0; min-height: 92px; display: grid; gap: 6px; align-content: start; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--panel-soft); color: var(--ink); text-align: left; }
 .brain-route-tile:hover { border-color: var(--line-strong); background: var(--panel); }
-.brain-route-tile.selected { border-color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary); background: var(--panel); }
+.brain-route-tile.selected { border-color: var(--nav-active-border); background: var(--nav-active-bg); }
 .brain-route-name { font-size: 13px; font-weight: 650; overflow-wrap: anywhere; }
 .brain-route-tile code { min-width: 0; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .brain-route-meta { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }

@@ -78,7 +78,7 @@ async def test_live_l2d_future_speak_runs_real_background_worker() -> None:
     services = build_cognition_core_services()
     capturing_llm = _CapturingLLM(services.llm)
     token = l2d.set_action_selection_llm(
-        LLMStageBinding(capturing_llm, services.action_selection_config)
+        LLMStageBinding(capturing_llm, services.action_planning_config)
     )
 
     job_id = ""

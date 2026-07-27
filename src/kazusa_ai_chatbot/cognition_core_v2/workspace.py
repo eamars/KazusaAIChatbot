@@ -78,7 +78,7 @@ async def collapse_bids(
         try:
             response = await services.llm.ainvoke(
                 request_messages,
-                config=services.collapse_config,
+                config=services.workspace_collapse_config,
             )
         except (
             OpenAIError,

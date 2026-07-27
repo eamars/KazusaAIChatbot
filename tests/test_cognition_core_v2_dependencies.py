@@ -196,7 +196,7 @@ async def test_collapse_copies_complete_bids_from_handle_partition() -> None:
 
     services = SimpleNamespace(
         llm=_LLM(),
-        collapse_config=object(),
+        workspace_collapse_config=object(),
     )
 
     result = await collapse_bids([_bid("first"), _bid("second")], services)
@@ -228,7 +228,7 @@ async def test_collapse_assigns_handles_in_frozen_registry_order() -> None:
 
     result = await collapse_bids(
         [_bid("social_care"), _bid("autonomy_boundary")],
-        SimpleNamespace(llm=_LLM(), collapse_config=object()),
+        SimpleNamespace(llm=_LLM(), workspace_collapse_config=object()),
     )
 
     assert captured["bids"]["b1"]["intention"] == (
@@ -327,8 +327,8 @@ async def test_goal_bid_gets_one_bounded_schema_repair(
         }],
         SimpleNamespace(
             llm=llm,
-            goal_cognition_config=SimpleNamespace(
-                route_name="COGNITION_LLM",
+            goal_ordinary_response_config=SimpleNamespace(
+                route_name="COGNITION_LLM_GOAL_ORDINARY_RESPONSE",
                 model="test-model",
             ),
         ),
@@ -400,7 +400,10 @@ async def test_goal_bid_schema_exhaustion_is_typed_after_three_attempts() -> Non
                 "semantic_text": "direct greeting",
                 "visible_to": ["q:event_agency"],
             }],
-            SimpleNamespace(llm=llm, goal_cognition_config=object()),
+            SimpleNamespace(
+                llm=llm,
+                goal_ordinary_response_config=object(),
+            ),
         )
 
     assert error_info.value.safe_checkpoint == "pre_state_commit"
@@ -516,8 +519,8 @@ async def test_goal_bid_repairs_or_retains_required_selection(
         }],
         SimpleNamespace(
             llm=llm,
-            goal_cognition_config=object(),
-            action_selection_config=object(),
+            goal_ordinary_response_config=object(),
+            required_selection_verifier_config=object(),
         ),
     )
 
@@ -585,7 +588,7 @@ async def test_required_selection_verifier_recovers_on_third_attempt(
         }],
         services=SimpleNamespace(
             llm=llm,
-            action_selection_config=object(),
+            required_selection_verifier_config=object(),
         ),
         stage_suffix="selection_verifier",
     )
@@ -624,7 +627,7 @@ async def test_required_selection_verifier_exhaustion_is_unavailable() -> None:
         }],
         services=SimpleNamespace(
             llm=llm,
-            action_selection_config=object(),
+            required_selection_verifier_config=object(),
         ),
         stage_suffix="selection_verifier",
     )

@@ -707,10 +707,19 @@ class CognitionCoreServicesV2:
     """Injected V2 model bindings; services never enter model payloads."""
 
     llm: LLMInvoker
-    appraisal_config: LLMCallConfig
-    goal_cognition_config: LLMCallConfig
-    collapse_config: LLMCallConfig
-    action_selection_config: LLMCallConfig
+    appraisal_event_agency_config: LLMCallConfig
+    appraisal_relationship_social_config: LLMCallConfig
+    appraisal_moral_identity_config: LLMCallConfig
+    appraisal_goal_threat_outcome_config: LLMCallConfig
+    appraisal_epistemic_comparison_memory_config: LLMCallConfig
+    appraisal_existential_drive_config: LLMCallConfig
+    goal_ordinary_response_config: LLMCallConfig
+    goal_active_branch_config: LLMCallConfig
+    required_selection_verifier_config: LLMCallConfig
+    workspace_collapse_config: LLMCallConfig
+    action_planning_config: LLMCallConfig
+    action_authorization_config: LLMCallConfig
+    resolver_authorization_config: LLMCallConfig
 
 
 @dataclass(frozen=True)

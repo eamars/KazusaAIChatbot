@@ -60,7 +60,9 @@ async def test_v2_planner_returns_typed_resolver_request() -> None:
     llm = _ResolverPlannerLLM()
     services = SimpleNamespace(
         llm=llm,
-        action_selection_config=object(),
+        action_planning_config=object(),
+        action_authorization_config=object(),
+        resolver_authorization_config=object(),
     )
 
     result = await plan_actions(

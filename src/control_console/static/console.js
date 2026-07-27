@@ -1433,7 +1433,7 @@ function renderBrainRouteTile(route) {
   const sourceClass = source === "override" ? "badge warn" : "badge";
   const family = route.diagnostics?.model_family || "unknown";
   const thinking = route.effective?.thinking_enabled ? "thinking" : "standard";
-  const currentValue = isSelected ? "" : `
+  const currentValue = `
       <code>${escapeHtml(route.effective?.model || "not configured")}</code>
       <span class="brain-route-meta">
         <span class="${sourceClass}">${escapeHtml(source)}</span>

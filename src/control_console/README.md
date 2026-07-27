@@ -410,6 +410,29 @@ can override only the route model id, max completion token budget, and
 thinking flag. The console does not expose API keys, base URLs, embedding
 routes, raw dotenv values, or a general environment editor.
 
+The `Cognition Core V2` route group contains these ordinary Brain route
+descriptors:
+
+```text
+COGNITION_LLM_APPRAISAL_EVENT_AGENCY
+COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL
+COGNITION_LLM_APPRAISAL_MORAL_IDENTITY
+COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME
+COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY
+COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE
+COGNITION_LLM_GOAL_ORDINARY_RESPONSE
+COGNITION_LLM_GOAL_ACTIVE_BRANCH
+COGNITION_LLM_REQUIRED_SELECTION_VERIFIER
+COGNITION_LLM_WORKSPACE_COLLAPSE
+COGNITION_LLM_ACTION_PLANNING
+COGNITION_LLM_ACTION_AUTHORIZATION
+COGNITION_LLM_RESOLVER_AUTHORIZATION
+```
+
+Each descriptor uses the same selected-route editor and model-discovery
+workflow as every existing chat route. Adding these rows changes no API
+fields, credential projection, storage behavior, or browser component.
+
 Brain route overrides are process-local. If the Brain service is running and
 console-owned, saving a route restarts it through the existing lifecycle path.
 If it is stopped, the override is rendered as descriptor-approved

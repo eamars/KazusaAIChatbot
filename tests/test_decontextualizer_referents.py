@@ -11,8 +11,8 @@ import httpx
 import pytest
 
 from kazusa_ai_chatbot.config import MSG_DECONTEXTUALIZER_LLM_BASE_URL
-from kazusa_ai_chatbot.cognition_core_v2.contracts import CognitionExecutionError
 from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer import (
+    MSG_DECONTEXTUALIZER_ATTEMPT_LIMIT,
     call_msg_decontextualizer,
 )
 from tests.llm_trace import write_llm_trace
@@ -418,8 +418,10 @@ async def test_mixed_referents_are_preserved() -> None:
 
 
 @pytest.mark.asyncio
-async def test_malformed_referents_fail_closed_after_bounded_retry(caplog) -> None:
-    """Malformed referent rows are excluded after the bounded retry cap."""
+async def test_malformed_referents_preserve_input_after_bounded_retry(
+    caplog,
+) -> None:
+    """Malformed referent rows fall back to the unchanged input after retries."""
 
     llm_response = MagicMock()
     llm_response.content = _decontextualizer_payload(
@@ -440,14 +442,15 @@ async def test_malformed_referents_fail_closed_after_bounded_retry(caplog) -> No
     ) as mock_llm:
         mock_llm.ainvoke = AsyncMock(return_value=llm_response)
         caplog.set_level(logging.WARNING)
-        with pytest.raises(CognitionExecutionError) as error_info:
-            await call_msg_decontextualizer(_base_state())
+        state = _base_state()
+        result = await call_msg_decontextualizer(state)
 
-    assert error_info.value.error_code == (
-        "message_decontextualizer_unchanged_candidate_exhausted"
-    )
-    assert error_info.value.attempt_count == 2
-    assert mock_llm.ainvoke.await_count == 2
+    assert result == {
+        "decontextualized_input": state["user_input"],
+        "referents": [],
+    }
+    assert mock_llm.ainvoke.await_count == MSG_DECONTEXTUALIZER_ATTEMPT_LIMIT
+    assert "fallback after contract exhaustion" in caplog.text
     assert "Decontextualizer output" not in caplog.text
 
 

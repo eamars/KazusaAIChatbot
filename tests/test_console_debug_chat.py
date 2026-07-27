@@ -79,8 +79,9 @@ def test_debug_chat_returns_brain_unavailable_without_cognition_when_stopped(
 
     audit_response = client.get("/api/bootstrap")
     event_types = [
-        event["event_type"]
-        for event in audit_response.json()["recent_audit_events"]
+        event_type
+        for action in audit_response.json()["recent_audit_events"]
+        for event_type in action["event_types"]
     ]
     assert "debug_chat_unavailable" in event_types
 

@@ -156,7 +156,7 @@ async def test_action_authorization_rejects_capability_effect_mismatch() -> None
         runtime_capability_limits=[],
         services=SimpleNamespace(
             llm=_LLM(),
-            action_selection_config=object(),
+            action_authorization_config=object(),
         ),
     )
 
@@ -202,7 +202,7 @@ async def test_action_authorization_receives_runtime_owner_limits() -> None:
         runtime_capability_limits=runtime_limits,
         services=SimpleNamespace(
             llm=_LLM(),
-            action_selection_config=object(),
+            action_authorization_config=object(),
         ),
     )
 
@@ -244,7 +244,7 @@ async def test_action_authorization_preserves_three_grounded_actions() -> None:
         runtime_capability_limits=[],
         services=SimpleNamespace(
             llm=_LLM(),
-            action_selection_config=object(),
+            action_authorization_config=object(),
         ),
     )
 
@@ -268,7 +268,7 @@ async def test_empty_action_plan_adds_no_authorization_call() -> None:
         runtime_capability_limits=[],
         services=SimpleNamespace(
             llm=_LLM(),
-            action_selection_config=object(),
+            action_authorization_config=object(),
         ),
     )
 

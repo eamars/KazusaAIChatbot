@@ -149,6 +149,33 @@ intention, admitted/supporting bids, semantic affect and relationship
 projections, action requests, resolver requests, progress, expression policy,
 diagnostics, and bounded residue.
 
+The connector constructs thirteen independent required Core V2 route
+bindings:
+
+```text
+COGNITION_LLM_APPRAISAL_EVENT_AGENCY
+COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL
+COGNITION_LLM_APPRAISAL_MORAL_IDENTITY
+COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME
+COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY
+COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE
+COGNITION_LLM_GOAL_ORDINARY_RESPONSE
+COGNITION_LLM_GOAL_ACTIVE_BRANCH
+COGNITION_LLM_REQUIRED_SELECTION_VERIFIER
+COGNITION_LLM_WORKSPACE_COLLAPSE
+COGNITION_LLM_ACTION_PLANNING
+COGNITION_LLM_ACTION_AUTHORIZATION
+COGNITION_LLM_RESOLVER_AUTHORIZATION
+```
+
+Each binding has its own endpoint, credential, model, completion budget, and
+thinking setting. Missing required values stop configuration loading. The
+connector passes the bindings directly to their semantic owners, including
+the same owner config for retries, repairs, and traces. The generic
+`COGNITION_LLM` route remains available to callers outside the Core V2
+boundary. The connector adds no route inheritance, endpoint selection logic,
+or fallback.
+
 Persistent identifiers and raw numeric state remain behind deterministic
 handle bindings. Model-facing projections use semantic roles and qualitative
 bands. RAG evidence does not become persona, affect, or final stance merely by

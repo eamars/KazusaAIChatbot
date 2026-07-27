@@ -185,7 +185,9 @@ async def test_speech_composes_with_three_private_actions() -> None:
         resolver_context="resolver_status=idle",
         services=SimpleNamespace(
             llm=_LLM(),
-            action_selection_config=object(),
+            action_planning_config=object(),
+            action_authorization_config=object(),
+            resolver_authorization_config=object(),
         ),
     )
 
@@ -253,7 +255,9 @@ async def test_answerable_now_drops_optional_resolver_request() -> None:
         resolver_context="resolver_status=idle",
         services=SimpleNamespace(
             llm=_LLM(),
-            action_selection_config=object(),
+            action_planning_config=object(),
+            action_authorization_config=object(),
+            resolver_authorization_config=object(),
         ),
     )
 
@@ -363,7 +367,9 @@ async def test_action_planner_receives_runtime_owner_limits() -> None:
         ],
         services=SimpleNamespace(
             llm=_LLM(),
-            action_selection_config=object(),
+            action_planning_config=object(),
+            action_authorization_config=object(),
+            resolver_authorization_config=object(),
         ),
     )
 
@@ -403,7 +409,9 @@ async def test_scheduled_planning_prompt_carries_typed_output_mode() -> None:
         resolver_context="resolver_status=idle",
         services=SimpleNamespace(
             llm=_LLM(),
-            action_selection_config=object(),
+            action_planning_config=object(),
+            action_authorization_config=object(),
+            resolver_authorization_config=object(),
         ),
     )
 
@@ -449,7 +457,9 @@ async def test_invalid_action_plan_receives_one_bounded_replacement() -> None:
         resolver_context="resolver_status=idle",
         services=SimpleNamespace(
             llm=_LLM(),
-            action_selection_config=object(),
+            action_planning_config=object(),
+            action_authorization_config=object(),
+            resolver_authorization_config=object(),
         ),
     )
 
@@ -496,7 +506,9 @@ async def test_action_plan_exhaustion_returns_empty_control_output() -> None:
         resolver_context="resolver_status=idle",
         services=SimpleNamespace(
             llm=_LLM(),
-            action_selection_config=object(),
+            action_planning_config=object(),
+            action_authorization_config=object(),
+            resolver_authorization_config=object(),
         ),
     )
 
@@ -544,7 +556,9 @@ async def test_action_plan_recovers_on_third_attempt() -> None:
         resolver_context="resolver_status=idle",
         services=SimpleNamespace(
             llm=_LLM(),
-            action_selection_config=object(),
+            action_planning_config=object(),
+            action_authorization_config=object(),
+            resolver_authorization_config=object(),
         ),
     )
 
@@ -617,7 +631,9 @@ async def test_denied_required_action_closes_goal_without_progress() -> None:
         ],
         services=SimpleNamespace(
             llm=llm,
-            action_selection_config=object(),
+            action_planning_config=object(),
+            action_authorization_config=object(),
+            resolver_authorization_config=object(),
         ),
     )
 
@@ -687,7 +703,9 @@ async def test_denied_required_resolver_closes_goal_without_progress() -> None:
         resolver_context="resolver_status=idle",
         services=SimpleNamespace(
             llm=llm,
-            action_selection_config=object(),
+            action_planning_config=object(),
+            action_authorization_config=object(),
+            resolver_authorization_config=object(),
         ),
     )
 
@@ -754,7 +772,9 @@ async def test_contextual_action_binds_ref_without_prompt_exposure() -> None:
         resolver_context="resolver_status=idle",
         services=SimpleNamespace(
             llm=_LLM(),
-            action_selection_config=object(),
+            action_planning_config=object(),
+            action_authorization_config=object(),
+            resolver_authorization_config=object(),
         ),
     )
 
@@ -982,8 +1002,11 @@ async def test_authorizer_denies_after_bounded_exhaustion() -> None:
     decisions = await invoke_semantic_authorizer(
         services=SimpleNamespace(
             llm=_LLM(),
-            action_selection_config=object(),
+            action_planning_config=object(),
+            action_authorization_config=object(),
+            resolver_authorization_config=object(),
         ),
+        config=object(),
         messages=[HumanMessage(content="bounded candidates")],
         candidate_handles=["c1", "c2"],
         stage_name="test_authorization",
@@ -1021,8 +1044,11 @@ async def test_authorizer_recovers_on_third_attempt() -> None:
     decisions = await invoke_semantic_authorizer(
         services=SimpleNamespace(
             llm=_LLM(),
-            action_selection_config=object(),
+            action_planning_config=object(),
+            action_authorization_config=object(),
+            resolver_authorization_config=object(),
         ),
+        config=object(),
         messages=[HumanMessage(content="bounded candidates")],
         candidate_handles=["c1", "c2"],
         stage_name="test_authorization",

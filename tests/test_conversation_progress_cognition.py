@@ -188,10 +188,19 @@ async def test_goal_branch_receives_conversation_progress_before_surface() -> No
     config = make_llm_call_config("conversation_progress_goal")
     services = CognitionCoreServicesV2(
         llm=llm,
-        appraisal_config=config,
-        goal_cognition_config=config,
-        collapse_config=config,
-        action_selection_config=config,
+        appraisal_event_agency_config=config,
+        appraisal_relationship_social_config=config,
+        appraisal_moral_identity_config=config,
+        appraisal_goal_threat_outcome_config=config,
+        appraisal_epistemic_comparison_memory_config=config,
+        appraisal_existential_drive_config=config,
+        goal_ordinary_response_config=config,
+        goal_active_branch_config=config,
+        required_selection_verifier_config=config,
+        workspace_collapse_config=config,
+        action_planning_config=config,
+        action_authorization_config=config,
+        resolver_authorization_config=config,
     )
 
     bid = await run_goal_cognition(

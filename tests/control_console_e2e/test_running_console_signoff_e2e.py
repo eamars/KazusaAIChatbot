@@ -195,7 +195,20 @@ def _inspect_all_pages(*, page: Any, artifact_dir: Path) -> dict[str, Any]:
         for route in routes.get("routes", [])
     )
     assert current_route_values == len(routes.get("routes", []))
-    assert page.locator(".brain-route-tile.selected code").count() == 0
+    selected_route = page.locator(".brain-route-tile.selected")
+    assert selected_route.locator("code").count() == 1
+    assert selected_route.locator("code").inner_text().strip()
+    assert selected_route.locator(".brain-route-meta .badge").count() == 3
+    assert selected_route.evaluate(
+        "element => getComputedStyle(element).boxShadow"
+    ) == "none"
+    runtime_box = page.locator(".brain-runtime-panel").bounding_box()
+    routes_box = page.locator(".brain-routes-panel").bounding_box()
+    assert runtime_box is not None
+    assert routes_box is not None
+    assert runtime_box["height"] < routes_box["height"]
+    assert abs(runtime_box["x"] - routes_box["x"]) < 1
+    assert abs(runtime_box["width"] - routes_box["width"]) < 1
     evidence["services"] = {
         "data_sources": (
             "/api/bootstrap",

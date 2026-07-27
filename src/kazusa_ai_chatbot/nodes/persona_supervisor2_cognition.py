@@ -27,11 +27,6 @@ from kazusa_ai_chatbot.action_spec.registry import (
 from kazusa_ai_chatbot.action_spec.evaluator import ActionSpecEvaluator
 from kazusa_ai_chatbot.action_spec.results import project_trace_action_result_v2
 from kazusa_ai_chatbot.config import (
-    BOUNDARY_CORE_LLM_API_KEY,
-    BOUNDARY_CORE_LLM_BASE_URL,
-    BOUNDARY_CORE_LLM_MAX_COMPLETION_TOKENS,
-    BOUNDARY_CORE_LLM_MODEL,
-    BOUNDARY_CORE_LLM_THINKING_ENABLED,
     BACKGROUND_WORK_WORKER_ENABLED,
     CALENDAR_SCHEDULER_ENABLED,
     COGNITION_LLM_API_KEY,
@@ -39,6 +34,71 @@ from kazusa_ai_chatbot.config import (
     COGNITION_LLM_MAX_COMPLETION_TOKENS,
     COGNITION_LLM_MODEL,
     COGNITION_LLM_THINKING_ENABLED,
+    COGNITION_LLM_ACTION_AUTHORIZATION_API_KEY,
+    COGNITION_LLM_ACTION_AUTHORIZATION_BASE_URL,
+    COGNITION_LLM_ACTION_AUTHORIZATION_MAX_COMPLETION_TOKENS,
+    COGNITION_LLM_ACTION_AUTHORIZATION_MODEL,
+    COGNITION_LLM_ACTION_AUTHORIZATION_THINKING_ENABLED,
+    COGNITION_LLM_ACTION_PLANNING_API_KEY,
+    COGNITION_LLM_ACTION_PLANNING_BASE_URL,
+    COGNITION_LLM_ACTION_PLANNING_MAX_COMPLETION_TOKENS,
+    COGNITION_LLM_ACTION_PLANNING_MODEL,
+    COGNITION_LLM_ACTION_PLANNING_THINKING_ENABLED,
+    COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY_API_KEY,
+    COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY_BASE_URL,
+    COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY_MAX_COMPLETION_TOKENS,
+    COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY_MODEL,
+    COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY_THINKING_ENABLED,
+    COGNITION_LLM_APPRAISAL_EVENT_AGENCY_API_KEY,
+    COGNITION_LLM_APPRAISAL_EVENT_AGENCY_BASE_URL,
+    COGNITION_LLM_APPRAISAL_EVENT_AGENCY_MAX_COMPLETION_TOKENS,
+    COGNITION_LLM_APPRAISAL_EVENT_AGENCY_MODEL,
+    COGNITION_LLM_APPRAISAL_EVENT_AGENCY_THINKING_ENABLED,
+    COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE_API_KEY,
+    COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE_BASE_URL,
+    COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE_MAX_COMPLETION_TOKENS,
+    COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE_MODEL,
+    COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE_THINKING_ENABLED,
+    COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME_API_KEY,
+    COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME_BASE_URL,
+    COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME_MAX_COMPLETION_TOKENS,
+    COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME_MODEL,
+    COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME_THINKING_ENABLED,
+    COGNITION_LLM_APPRAISAL_MORAL_IDENTITY_API_KEY,
+    COGNITION_LLM_APPRAISAL_MORAL_IDENTITY_BASE_URL,
+    COGNITION_LLM_APPRAISAL_MORAL_IDENTITY_MAX_COMPLETION_TOKENS,
+    COGNITION_LLM_APPRAISAL_MORAL_IDENTITY_MODEL,
+    COGNITION_LLM_APPRAISAL_MORAL_IDENTITY_THINKING_ENABLED,
+    COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL_API_KEY,
+    COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL_BASE_URL,
+    COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL_MAX_COMPLETION_TOKENS,
+    COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL_MODEL,
+    COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL_THINKING_ENABLED,
+    COGNITION_LLM_GOAL_ACTIVE_BRANCH_API_KEY,
+    COGNITION_LLM_GOAL_ACTIVE_BRANCH_BASE_URL,
+    COGNITION_LLM_GOAL_ACTIVE_BRANCH_MAX_COMPLETION_TOKENS,
+    COGNITION_LLM_GOAL_ACTIVE_BRANCH_MODEL,
+    COGNITION_LLM_GOAL_ACTIVE_BRANCH_THINKING_ENABLED,
+    COGNITION_LLM_GOAL_ORDINARY_RESPONSE_API_KEY,
+    COGNITION_LLM_GOAL_ORDINARY_RESPONSE_BASE_URL,
+    COGNITION_LLM_GOAL_ORDINARY_RESPONSE_MAX_COMPLETION_TOKENS,
+    COGNITION_LLM_GOAL_ORDINARY_RESPONSE_MODEL,
+    COGNITION_LLM_GOAL_ORDINARY_RESPONSE_THINKING_ENABLED,
+    COGNITION_LLM_REQUIRED_SELECTION_VERIFIER_API_KEY,
+    COGNITION_LLM_REQUIRED_SELECTION_VERIFIER_BASE_URL,
+    COGNITION_LLM_REQUIRED_SELECTION_VERIFIER_MAX_COMPLETION_TOKENS,
+    COGNITION_LLM_REQUIRED_SELECTION_VERIFIER_MODEL,
+    COGNITION_LLM_REQUIRED_SELECTION_VERIFIER_THINKING_ENABLED,
+    COGNITION_LLM_RESOLVER_AUTHORIZATION_API_KEY,
+    COGNITION_LLM_RESOLVER_AUTHORIZATION_BASE_URL,
+    COGNITION_LLM_RESOLVER_AUTHORIZATION_MAX_COMPLETION_TOKENS,
+    COGNITION_LLM_RESOLVER_AUTHORIZATION_MODEL,
+    COGNITION_LLM_RESOLVER_AUTHORIZATION_THINKING_ENABLED,
+    COGNITION_LLM_WORKSPACE_COLLAPSE_API_KEY,
+    COGNITION_LLM_WORKSPACE_COLLAPSE_BASE_URL,
+    COGNITION_LLM_WORKSPACE_COLLAPSE_MAX_COMPLETION_TOKENS,
+    COGNITION_LLM_WORKSPACE_COLLAPSE_MODEL,
+    COGNITION_LLM_WORKSPACE_COLLAPSE_THINKING_ENABLED,
 )
 from kazusa_ai_chatbot.cognition_episode import (
     CognitiveEpisodeValidationError,
@@ -109,18 +169,226 @@ _cognition_llm_config = LLMCallConfig(
     presence_penalty=None,
     thinking=LLMThinkingConfig(enabled=COGNITION_LLM_THINKING_ENABLED),
 )
-_boundary_core_llm_config = LLMCallConfig(
-    stage_name="persona_supervisor2_boundary",
-    route_name="BOUNDARY_CORE_LLM",
-    base_url=BOUNDARY_CORE_LLM_BASE_URL,
-    api_key=BOUNDARY_CORE_LLM_API_KEY,
-    model=BOUNDARY_CORE_LLM_MODEL,
+_appraisal_event_agency_config = LLMCallConfig(
+    stage_name="cognition_core_v2.appraisal_event_agency",
+    route_name="COGNITION_LLM_APPRAISAL_EVENT_AGENCY",
+    base_url=COGNITION_LLM_APPRAISAL_EVENT_AGENCY_BASE_URL,
+    api_key=COGNITION_LLM_APPRAISAL_EVENT_AGENCY_API_KEY,
+    model=COGNITION_LLM_APPRAISAL_EVENT_AGENCY_MODEL,
     temperature=0.1,
     top_p=0.7,
     top_k=None,
-    max_completion_tokens=BOUNDARY_CORE_LLM_MAX_COMPLETION_TOKENS,
+    max_completion_tokens=(
+        COGNITION_LLM_APPRAISAL_EVENT_AGENCY_MAX_COMPLETION_TOKENS
+    ),
     presence_penalty=None,
-    thinking=LLMThinkingConfig(enabled=BOUNDARY_CORE_LLM_THINKING_ENABLED),
+    thinking=LLMThinkingConfig(
+        enabled=COGNITION_LLM_APPRAISAL_EVENT_AGENCY_THINKING_ENABLED
+    ),
+)
+_appraisal_relationship_social_config = LLMCallConfig(
+    stage_name="cognition_core_v2.appraisal_relationship_social",
+    route_name="COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL",
+    base_url=COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL_BASE_URL,
+    api_key=COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL_API_KEY,
+    model=COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL_MODEL,
+    temperature=0.1,
+    top_p=0.7,
+    top_k=None,
+    max_completion_tokens=(
+        COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL_MAX_COMPLETION_TOKENS
+    ),
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL_THINKING_ENABLED
+    ),
+)
+_appraisal_moral_identity_config = LLMCallConfig(
+    stage_name="cognition_core_v2.appraisal_moral_identity",
+    route_name="COGNITION_LLM_APPRAISAL_MORAL_IDENTITY",
+    base_url=COGNITION_LLM_APPRAISAL_MORAL_IDENTITY_BASE_URL,
+    api_key=COGNITION_LLM_APPRAISAL_MORAL_IDENTITY_API_KEY,
+    model=COGNITION_LLM_APPRAISAL_MORAL_IDENTITY_MODEL,
+    temperature=0.1,
+    top_p=0.7,
+    top_k=None,
+    max_completion_tokens=(
+        COGNITION_LLM_APPRAISAL_MORAL_IDENTITY_MAX_COMPLETION_TOKENS
+    ),
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=COGNITION_LLM_APPRAISAL_MORAL_IDENTITY_THINKING_ENABLED
+    ),
+)
+_appraisal_goal_threat_outcome_config = LLMCallConfig(
+    stage_name="cognition_core_v2.appraisal_goal_threat_outcome",
+    route_name="COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME",
+    base_url=COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME_BASE_URL,
+    api_key=COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME_API_KEY,
+    model=COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME_MODEL,
+    temperature=0.1,
+    top_p=0.7,
+    top_k=None,
+    max_completion_tokens=(
+        COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME_MAX_COMPLETION_TOKENS
+    ),
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME_THINKING_ENABLED
+    ),
+)
+_appraisal_epistemic_comparison_memory_config = LLMCallConfig(
+    stage_name="cognition_core_v2.appraisal_epistemic_comparison_memory",
+    route_name="COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY",
+    base_url=COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY_BASE_URL,
+    api_key=COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY_API_KEY,
+    model=COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY_MODEL,
+    temperature=0.1,
+    top_p=0.7,
+    top_k=None,
+    max_completion_tokens=(
+        COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY_MAX_COMPLETION_TOKENS
+    ),
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=(
+            COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY_THINKING_ENABLED
+        )
+    ),
+)
+_appraisal_existential_drive_config = LLMCallConfig(
+    stage_name="cognition_core_v2.appraisal_existential_drive",
+    route_name="COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE",
+    base_url=COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE_BASE_URL,
+    api_key=COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE_API_KEY,
+    model=COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE_MODEL,
+    temperature=0.1,
+    top_p=0.7,
+    top_k=None,
+    max_completion_tokens=(
+        COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE_MAX_COMPLETION_TOKENS
+    ),
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE_THINKING_ENABLED
+    ),
+)
+_goal_ordinary_response_config = LLMCallConfig(
+    stage_name="cognition_core_v2.goal_ordinary_response",
+    route_name="COGNITION_LLM_GOAL_ORDINARY_RESPONSE",
+    base_url=COGNITION_LLM_GOAL_ORDINARY_RESPONSE_BASE_URL,
+    api_key=COGNITION_LLM_GOAL_ORDINARY_RESPONSE_API_KEY,
+    model=COGNITION_LLM_GOAL_ORDINARY_RESPONSE_MODEL,
+    temperature=0.1,
+    top_p=0.7,
+    top_k=None,
+    max_completion_tokens=(
+        COGNITION_LLM_GOAL_ORDINARY_RESPONSE_MAX_COMPLETION_TOKENS
+    ),
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=COGNITION_LLM_GOAL_ORDINARY_RESPONSE_THINKING_ENABLED
+    ),
+)
+_goal_active_branch_config = LLMCallConfig(
+    stage_name="cognition_core_v2.goal_active_branch",
+    route_name="COGNITION_LLM_GOAL_ACTIVE_BRANCH",
+    base_url=COGNITION_LLM_GOAL_ACTIVE_BRANCH_BASE_URL,
+    api_key=COGNITION_LLM_GOAL_ACTIVE_BRANCH_API_KEY,
+    model=COGNITION_LLM_GOAL_ACTIVE_BRANCH_MODEL,
+    temperature=0.1,
+    top_p=0.7,
+    top_k=None,
+    max_completion_tokens=(
+        COGNITION_LLM_GOAL_ACTIVE_BRANCH_MAX_COMPLETION_TOKENS
+    ),
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=COGNITION_LLM_GOAL_ACTIVE_BRANCH_THINKING_ENABLED
+    ),
+)
+_required_selection_verifier_config = LLMCallConfig(
+    stage_name="cognition_core_v2.required_selection_verifier",
+    route_name="COGNITION_LLM_REQUIRED_SELECTION_VERIFIER",
+    base_url=COGNITION_LLM_REQUIRED_SELECTION_VERIFIER_BASE_URL,
+    api_key=COGNITION_LLM_REQUIRED_SELECTION_VERIFIER_API_KEY,
+    model=COGNITION_LLM_REQUIRED_SELECTION_VERIFIER_MODEL,
+    temperature=0.1,
+    top_p=0.7,
+    top_k=None,
+    max_completion_tokens=(
+        COGNITION_LLM_REQUIRED_SELECTION_VERIFIER_MAX_COMPLETION_TOKENS
+    ),
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=COGNITION_LLM_REQUIRED_SELECTION_VERIFIER_THINKING_ENABLED
+    ),
+)
+_workspace_collapse_config = LLMCallConfig(
+    stage_name="cognition_core_v2.workspace_collapse",
+    route_name="COGNITION_LLM_WORKSPACE_COLLAPSE",
+    base_url=COGNITION_LLM_WORKSPACE_COLLAPSE_BASE_URL,
+    api_key=COGNITION_LLM_WORKSPACE_COLLAPSE_API_KEY,
+    model=COGNITION_LLM_WORKSPACE_COLLAPSE_MODEL,
+    temperature=0.1,
+    top_p=0.7,
+    top_k=None,
+    max_completion_tokens=(
+        COGNITION_LLM_WORKSPACE_COLLAPSE_MAX_COMPLETION_TOKENS
+    ),
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=COGNITION_LLM_WORKSPACE_COLLAPSE_THINKING_ENABLED
+    ),
+)
+_action_planning_config = LLMCallConfig(
+    stage_name="cognition_core_v2.action_planning",
+    route_name="COGNITION_LLM_ACTION_PLANNING",
+    base_url=COGNITION_LLM_ACTION_PLANNING_BASE_URL,
+    api_key=COGNITION_LLM_ACTION_PLANNING_API_KEY,
+    model=COGNITION_LLM_ACTION_PLANNING_MODEL,
+    temperature=0.1,
+    top_p=0.7,
+    top_k=None,
+    max_completion_tokens=COGNITION_LLM_ACTION_PLANNING_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=COGNITION_LLM_ACTION_PLANNING_THINKING_ENABLED
+    ),
+)
+_action_authorization_config = LLMCallConfig(
+    stage_name="cognition_core_v2.action_authorization",
+    route_name="COGNITION_LLM_ACTION_AUTHORIZATION",
+    base_url=COGNITION_LLM_ACTION_AUTHORIZATION_BASE_URL,
+    api_key=COGNITION_LLM_ACTION_AUTHORIZATION_API_KEY,
+    model=COGNITION_LLM_ACTION_AUTHORIZATION_MODEL,
+    temperature=0.1,
+    top_p=0.7,
+    top_k=None,
+    max_completion_tokens=(
+        COGNITION_LLM_ACTION_AUTHORIZATION_MAX_COMPLETION_TOKENS
+    ),
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=COGNITION_LLM_ACTION_AUTHORIZATION_THINKING_ENABLED
+    ),
+)
+_resolver_authorization_config = LLMCallConfig(
+    stage_name="cognition_core_v2.resolver_authorization",
+    route_name="COGNITION_LLM_RESOLVER_AUTHORIZATION",
+    base_url=COGNITION_LLM_RESOLVER_AUTHORIZATION_BASE_URL,
+    api_key=COGNITION_LLM_RESOLVER_AUTHORIZATION_API_KEY,
+    model=COGNITION_LLM_RESOLVER_AUTHORIZATION_MODEL,
+    temperature=0.1,
+    top_p=0.7,
+    top_k=None,
+    max_completion_tokens=(
+        COGNITION_LLM_RESOLVER_AUTHORIZATION_MAX_COMPLETION_TOKENS
+    ),
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=COGNITION_LLM_RESOLVER_AUTHORIZATION_THINKING_ENABLED
+    ),
 )
 
 
@@ -129,10 +397,27 @@ def build_cognition_core_services() -> CognitionCoreServicesV2:
 
     return CognitionCoreServicesV2(
         llm=_llm_interface,
-        appraisal_config=_cognition_llm_config,
-        goal_cognition_config=_cognition_llm_config,
-        collapse_config=_cognition_llm_config,
-        action_selection_config=_boundary_core_llm_config,
+        appraisal_event_agency_config=_appraisal_event_agency_config,
+        appraisal_relationship_social_config=(
+            _appraisal_relationship_social_config
+        ),
+        appraisal_moral_identity_config=_appraisal_moral_identity_config,
+        appraisal_goal_threat_outcome_config=(
+            _appraisal_goal_threat_outcome_config
+        ),
+        appraisal_epistemic_comparison_memory_config=(
+            _appraisal_epistemic_comparison_memory_config
+        ),
+        appraisal_existential_drive_config=_appraisal_existential_drive_config,
+        goal_ordinary_response_config=_goal_ordinary_response_config,
+        goal_active_branch_config=_goal_active_branch_config,
+        required_selection_verifier_config=(
+            _required_selection_verifier_config
+        ),
+        workspace_collapse_config=_workspace_collapse_config,
+        action_planning_config=_action_planning_config,
+        action_authorization_config=_action_authorization_config,
+        resolver_authorization_config=_resolver_authorization_config,
     )
 
 

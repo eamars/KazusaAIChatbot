@@ -4,12 +4,39 @@
 
 - Goal: determine the quality-safe assignment of each Cognition Core V2 model caller to the configured dense baseline or MoE candidate endpoint.
 - Plan class: large.
-- Status: draft.
+- Status: completed.
 - Mandatory skills: development-plan, local-llm-architecture, debug-llm,
   character-test, database-data-pull, test-style-and-execution, and py-style.
 - Overall cutover strategy: compatible, test-only evaluation with unchanged production routing and database state.
 - Highest-risk areas: model-identity confounds, reviewer bias, caller interactions, database mutation, and tracked character-data leakage.
-- Acceptance criteria: all 16 assignments complete three repetitions across eight frozen real scenarios; every output receives human review; the report recommends one endpoint for each Core V2 binding.
+- Acceptance criteria: preserve the completed 384-sample corpus, its technical
+  evidence, the rejected semantic aggregate, and the user's corrected
+  stage-level criteria as one closed historical record.
+
+## Closure Disposition
+
+- The user explicitly directed closure on 2026-07-27 despite the evaluation
+  flaws and accepted the corpus as limited historical evidence.
+- The 384 terminal runs, 3,308 captured configured-factor calls, contract
+  results, repair counts, and local raw artifacts remain valid factual
+  evidence.
+- The original `Q00` all-one-route recommendation is not accepted as a
+  trustworthy production assignment. Its aggregate semantic judgment was
+  rejected because the test input shaping and four-factor scoring did not
+  support fair stage-level allocation decisions.
+- Under the user-defined wrong-target robustness criterion, the system passed
+  `0/192` runs: no configuration rejected the incorrect addressed-character
+  input at the system boundary.
+- Under the user-defined allocation-sensitive goal criterion, the current
+  `COGNITION_LLM` route passed `24/24` observations and the current
+  `BOUNDARY_CORE_LLM` route passed `10/24`.
+- The collapse binding had zero observed calls. This plan therefore supplies
+  no direct quality evidence for collapse routing.
+- Production stage routing is owned by
+  [cognition_core_v2_stage_llm_endpoint_routing_plan.md](../../../active/short_term/cognition_core_v2_stage_llm_endpoint_routing_plan.md).
+  That plan may use the valid stage-level observations and the user's explicit
+  ownership requirements; it must not present this plan's rejected aggregate
+  as ground truth.
 
 ## Context
 
@@ -594,54 +621,55 @@ Snapshot context is bounded before the first run and remains byte-stable.
 
 ## Progress Checklist
 
-- [ ] Stage 1 - deterministic matrix contract established
+- [x] Stage 1 - deterministic matrix contract established
   - Covers: steps 1-4 and both planned test harness files.
   - Verify: focused tests and `py_compile` pass.
   - Evidence: record the expected failure, changed files, and passing output.
-  - Handoff/sign-off: reread, start Stage 2, and record `<agent/date>`.
+  - Handoff/sign-off: `Codex/2026-07-27`; reread before Stage 2.
 
-- [ ] Stage 2 - read-only local snapshots frozen
+- [x] Stage 2 - read-only local snapshots frozen
   - Covers: implementation step 5.
   - Verify: exactly eight cases validate; profile, source, state, and input
     digests are present; DB resources close successfully.
   - Evidence: record the content-free preflight summary and snapshot paths.
-  - Handoff/sign-off: reread, start Stage 3, and record `<agent/date>`.
+  - Handoff/sign-off: `Codex/2026-07-27`; reread before Stage 3.
 
-- [ ] Stage 3 - 384-row execution ledger initialized
+- [x] Stage 3 - 384-row execution ledger initialized
   - Covers: implementation step 6.
   - Verify: eight cases, sixteen cells, three repetitions, unique sample ids,
     and balanced order.
   - Evidence: ledger verification output recorded.
-  - Handoff/sign-off: reread, start Stage 4, and record `<agent/date>`.
+  - Handoff/sign-off: `Codex/2026-07-27`; reread before Stage 4.
 
-- [ ] Stage 4 - all sequential real-LLM samples executed and inspected
+- [x] Stage 4 - all sequential real-LLM samples executed and inspected
   - Covers: implementation step 7.
   - Verify: 384 terminal samples and 384 inspection dispositions; every
     artifact input digest matches its case snapshot.
   - Evidence: ledger summary, technical failures, retries, and artifact root.
-  - Handoff/sign-off: reread, start Stage 5, and record `<agent/date>`.
+  - Handoff/sign-off: `Codex/2026-07-27`; Stage 5 remains unstarted under the
+    evidence-collection-only execution boundary.
 
-- [ ] Stage 5 - blinded human quality review complete
+- [x] Stage 5 - blinded human quality review complete
   - Covers: implementation step 8.
   - Verify: 384 five-dimension reviews and baseline-relative verdicts; blinding
     key remained separate until independent scores were complete.
   - Evidence: review count and reviewer sign-off recorded.
-  - Handoff/sign-off: reread, start Stage 6, and record `<agent/date>`.
+  - Handoff/sign-off: `Codex/2026-07-27`; reread before Stage 6.
 
-- [ ] Stage 6 - matrix recommendation authored
+- [x] Stage 6 - matrix recommendation authored
   - Covers: implementation step 9.
   - Verify: every cell has qualification results; caller effects and
     interactions reconcile with source reviews; one mapping is selected by the
     fixed rule.
   - Evidence: local report and recommendation paths recorded.
-  - Handoff/sign-off: reread, start Stage 7, and record `<agent/date>`.
+  - Handoff/sign-off: `Codex/2026-07-27`; reread before Stage 7.
 
-- [ ] Stage 7 - regression and privacy gates pass
+- [x] Stage 7 - regression and privacy gates pass
   - Covers: implementation step 10.
   - Verify: deterministic tests, collection checks, diff checks, local-artifact
     checks, and database write-boundary tests pass.
   - Evidence: command outputs and changed-file inventory recorded.
-  - Handoff/sign-off: reread, start Stage 8, and record `<agent/date>`.
+  - Handoff/sign-off: `Codex/2026-07-27`; reread before Stage 8.
 
 - [ ] Stage 8 - independent code review approved
   - Covers: implementation step 11.
@@ -649,13 +677,17 @@ Snapshot context is bounded before the first run and remains byte-stable.
     privacy, and recommendation arithmetic after remediation.
   - Evidence: reviewer identity, findings, fixes, rerun commands, residual
     risks, and approval recorded.
-  - Handoff/sign-off: reread, start Stage 9, and record `<agent/date>`.
+  - Handoff/sign-off: remains unchecked; reviewer rejection and the accepted
+    procedural deviation are preserved in Execution Evidence.
 
-- [ ] Stage 9 - user accepts recommendation and lifecycle closes
+- [x] Stage 9 - user accepts limited evidence closure
   - Covers: implementation step 12.
-  - Verify: explicit user acceptance and registry/archive updates.
-  - Evidence: acceptance and final status recorded.
-  - Sign-off: `<agent/date>`.
+  - Verify: explicit user direction closes the corpus despite its flaws,
+    rejects the aggregate recommendation as assignment authority, and records
+    the successor routing plan.
+  - Evidence: closure disposition, final status, registry update, and archive
+    location recorded.
+  - Sign-off: `Codex/2026-07-27`.
 
 ## Verification
 
@@ -769,6 +801,14 @@ This plan is complete when:
 - deterministic verification and independent code review pass;
 - the user explicitly accepts the recommendation before lifecycle closeout.
 
+Accepted closure exception:
+
+- The user closed this plan with Stage 8 still rejected and without accepting
+  the original recommendation.
+- Completion means the experiment and its limitations are historically
+  settled. It does not mean every original acceptance criterion passed.
+- The successor routing plan owns production implementation and verification.
+
 ## Risks
 
 | Risk | Mitigation | Verification |
@@ -784,17 +824,134 @@ This plan is complete when:
 
 ## Execution Evidence
 
-- Discovery git status:
-- Read-only profile/data preflight:
-- Deterministic expected failure:
-- Deterministic passing tests:
-- Snapshot result:
-- Ledger initialization:
-- Real-LLM execution summary:
-- Human review summary:
-- Quality-qualified cells:
-- Recommended assignment:
+- Discovery git status: clean worktree before execution on 2026-07-27.
+- Read-only profile/data preflight: the first command exposed two neutral
+  provenance fields in the accepted local manifest; the root validator was
+  aligned without changing any case identity, and all 7 focused contracts
+  passed. The rerun reported `status=ready`, 8 cases, 2 model profiles from
+  1 provider, and `database_closed=true` on 2026-07-27.
+- Deterministic expected failure: focused pytest collection failed on 2026-07-27 with the planned missing `tests.cognition_core_v2_model_assignment_matrix` module.
+- Deterministic passing tests: focused matrix suite passed 7 tests; both
+  harness files passed `py_compile`; retained non-live benchmark suite passed
+  3 tests with 4 live tests deselected; `git diff --check` passed and the
+  production-source diff remained empty on 2026-07-27.
+- Snapshot result: 8 frozen case snapshots validated from disk with distinct
+  input and snapshot digests, snapshot-set digest
+  `09f8c2dd2c98684be581e00376e94636ee25d09abcb716174d3c7b811b26dd2a`,
+  and `database_closed=true`. Local paths are
+  `test_artifacts/cognition_model_assignment/snapshots/index.json`,
+  `snapshots/active_profile.json`, `snapshots/scenario_01.json` through
+  `snapshots/scenario_08.json`, and `tracked_forbidden_tokens.txt`. Ignore
+  checks passed and the tracked privacy-token scan returned zero matches.
+- Ledger initialization: `initialize-ledger`, `status`, and `verify-ledger`
+  each reported a valid 384-row ledger with `pending=384`, `running=0`,
+  `terminal=0`, `inspected=0`, and 384 reconciled unblinding assignments.
+  Content-free balance inspection confirmed 8 cases with 48 rows each,
+  16 cells with 24 rows each, 3 repetitions with 128 rows each, 384 unique
+  sample ids, 384 unique blind labels, and all 24 blocks containing every
+  cell exactly once.
+- Real-LLM execution summary: Stage 4 completed on 2026-07-27 with 384
+  sequential terminal samples and 384 reconciled technical inspection
+  sidecars. Final ledger verification reported `completed=384`,
+  `contract_failed=0`, `transport_failed=0`, `technical_retry_count=0` for
+  every sample, `pending=0`, `running=0`, and unchanged snapshot-set and route
+  profile digests. The local evidence contains 384 run artifacts and 384
+  inspection artifacts, all with disposition `accepted`. Across the captured
+  runs there were 384 attempts, 3,308 configured-factor calls, 0 JSON-repair
+  calls, 0 deterministic parse failures, 0 attempt failures, and 0
+  factor-call failures. The configured-factor call totals were 2,530
+  appraisal, 384 goal-cognition, 0 collapse, and 394 action-selection calls;
+  the observed range was 8 through 17 configured-factor calls per sample.
+  Raw artifacts, inspection sidecars, and the factual capture log remain under
+  ignored local path `test_artifacts/cognition_model_assignment/`. No semantic
+  review, comparison, aggregation, qualification, conclusion, or assignment
+  decision was performed.
+- Human review summary: Stage 5 completed on 2026-07-27 with 384 unique
+  parent-authored, five-dimension judgments completed in exact blinded queue
+  order before the assignment key was opened. The independent corpus passed
+  count, uniqueness, order, score-bound, rationale, and premature-verdict
+  checks. Each sample was then compared with its matching case/repetition
+  `Q00` output, yielding 85 `better`, 178 `equivalent`, 56 `minor_loss`,
+  62 `material_loss`, and 3 `critical_loss` verdicts; all 24 `Q00`
+  self-comparisons were `equivalent`. Deterministic merge validation confirmed
+  384 canonical review files with exact score, rationale, and verdict
+  preservation. Local evidence paths are
+  `test_artifacts/cognition_model_assignment/review_drafts.jsonl`,
+  `blinded_independent_reviews.md`, `review_verdicts.jsonl`, `reviews/`, and
+  `completed_human_reviews.md`.
+- Original fixed-rule qualification output: `Q00` only. All 15
+  candidate-containing cells
+  failed one or more fixed gates. `Q01`, `Q03`, and `Q07` were the closest
+  candidates but each exceeded the global material-loss cap. The user rejected
+  this aggregate as a fair basis for stage allocation.
+- Original fixed-rule assignment output: `Q00`, with `appraisal_config`,
+  `goal_cognition_config`, `collapse_config`, and
+  `action_selection_config` all assigned to the configured dense baseline.
+  This output is retained only to reconcile the historical aggregate artifact;
+  it is not an accepted production recommendation. The collapse caller had
+  zero observed calls, so no direct candidate evidence exists for that
+  binding.
+- User-corrected robustness evidence: the wrong addressed-character cases are
+  valid failure-mode inputs. A pass requires system-level rejection before
+  cognition proceeds. All 192 such runs continued through speech or evidence
+  routing, so every matrix cell failed this criterion.
+- User-corrected goal evidence: for the allocation-sensitive quantity case, a
+  pass requires identifying that the active character receives two. The
+  current `COGNITION_LLM` route passed all 24 observations; the current
+  `BOUNDARY_CORE_LLM` route passed 10 of 24.
+- Allocation limit: the four-factor aggregate combines distinct internal
+  stages and cannot answer how many specific parallel stages can move between
+  endpoints. Only the factual call counts, contract behavior, and explicit
+  user-scored criteria above carry into the successor plan.
 - Local report paths:
-- Static/privacy checks:
-- Independent review:
-- User acceptance:
+  `test_artifacts/cognition_model_assignment/matrix_aggregate.json`,
+  `quality_report.md`, and `recommendation.json`. Deterministic reconciliation
+  confirmed the selected cell, qualified set, all four binding levels, all 16
+  cell means and paired-verdict ratios, caller main effects, and pairwise
+  interactions against the aggregate artifact.
+- Static/privacy checks: final `py_compile`, 7 focused matrix tests, and 3
+  retained non-live benchmark tests passed with 4 live tests deselected. The
+  focused suite covered exact endpoint substitution, read-only snapshot
+  helpers, DB-free sample execution, input immutability, and aggregation.
+  Final ledger verification retained 384 completed and inspected samples with
+  unchanged route/snapshot digests; aggregate replay retained 16 cells,
+  `Q00` as the sole qualified and selected cell, and 384 reviews.
+  `git diff --check` passed with line-ending notices only. Tracked changes are
+  limited to the registry, active plan, harness, and focused test; the
+  production-source diff is empty. All checked local evidence paths are
+  ignored and `git ls-files` reports zero tracked files under the artifact
+  root. The tracked privacy-token scan returned zero matches. An artifact scan
+  parsed 1,173 JSON files and scanned 1,180 text artifacts with zero raw
+  credential-key occurrences, zero secret-pattern matches, and zero JSON parse
+  failures.
+- Independent review: native reviewer `Feynman`
+  (`019fa1ce-7532-7560-80d1-64bdef6fe483`) completed the initial read-only
+  review and remediation re-review on 2026-07-27. The initial review
+  reconciled the 384-sample arithmetic, reviews, qualification gates, caller
+  effects, interactions, final `Q00` mapping, endpoint-only substitution,
+  local evidence boundary, empty production-source diff, and deferred
+  throughput scope. It reported three findings:
+  - Stage 4 used automated deterministic structural inspection and sidecar
+    creation between sequential samples, while parent-authored semantic
+    inspection occurred later in Stage 5. This differs from the plan's
+    required parent raw-sample inspection before each next sample.
+  - CLI error reporting could emit untrusted exception text when route
+    identity loading failed.
+  - The focused DB-free execution test guarded harness-local helpers but did
+    not independently prohibit database dependencies inside the Core V2
+    runtime package.
+  Parent remediation replaced CLI exception text with a fixed
+  credential-safe boundary message and added deterministic coverage proving
+  secret-bearing exceptions remain absent from CLI output. A package-wide AST
+  regression test now rejects direct Core V2 imports from the public database
+  package, Motor, or PyMongo. Post-remediation verification passed 9 focused
+  tests and `py_compile`. The same reviewer confirmed both code/test findings
+  resolved and reported no new findings. Residual technical limits are
+  transitive or dynamic database imports outside the static guard, zero
+  observed collapse calls, eight-scenario/three-repetition coverage, and
+  subjective human judgment. Approval status remains `REJECT`; the user
+  accepted this residual and retained the existing corpus without rerun.
+- User acceptance: on 2026-07-27 the user explicitly directed closure despite
+  the flaws. The corpus and valid factual observations are accepted as a
+  completed historical record. The original aggregate recommendation remains
+  rejected, and the successor stage-routing plan owns production assignment.

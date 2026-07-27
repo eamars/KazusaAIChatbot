@@ -403,7 +403,7 @@ async def _invoke_action_planner(
         try:
             response = await services.llm.ainvoke(
                 current_messages,
-                config=services.action_selection_config,
+                config=services.action_planning_config,
             )
         except (
             OpenAIError,
@@ -897,7 +897,7 @@ async def _record_action_planning_trace(
     trace_id = llm_tracing.current_trace_id()
     if not trace_id:
         return
-    config = services.action_selection_config
+    config = services.action_planning_config
     await llm_tracing.record_llm_trace_step(
         trace_id=trace_id,
         stage_name=stage_name,

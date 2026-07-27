@@ -122,10 +122,27 @@ def _services() -> CognitionCoreServicesV2:
 
     return CognitionCoreServicesV2(
         llm=_NoCallLLM(),
-        appraisal_config=make_llm_call_config("v2_appraisal"),
-        goal_cognition_config=make_llm_call_config("v2_goal"),
-        collapse_config=make_llm_call_config("v2_collapse"),
-        action_selection_config=make_llm_call_config("v2_route"),
+        appraisal_event_agency_config=make_llm_call_config("v2_appraisal"),
+        appraisal_relationship_social_config=make_llm_call_config(
+            "v2_appraisal"
+        ),
+        appraisal_moral_identity_config=make_llm_call_config("v2_appraisal"),
+        appraisal_goal_threat_outcome_config=make_llm_call_config(
+            "v2_appraisal"
+        ),
+        appraisal_epistemic_comparison_memory_config=make_llm_call_config(
+            "v2_appraisal"
+        ),
+        appraisal_existential_drive_config=make_llm_call_config(
+            "v2_appraisal"
+        ),
+        goal_ordinary_response_config=make_llm_call_config("v2_goal"),
+        goal_active_branch_config=make_llm_call_config("v2_goal"),
+        required_selection_verifier_config=make_llm_call_config("v2_route"),
+        workspace_collapse_config=make_llm_call_config("v2_collapse"),
+        action_planning_config=make_llm_call_config("v2_route"),
+        action_authorization_config=make_llm_call_config("v2_route"),
+        resolver_authorization_config=make_llm_call_config("v2_route"),
     )
 
 
@@ -351,10 +368,19 @@ def test_frozen_public_contract_fields_are_exact() -> None:
 
     assert [field.name for field in fields(CognitionCoreServicesV2)] == [
         "llm",
-        "appraisal_config",
-        "goal_cognition_config",
-        "collapse_config",
-        "action_selection_config",
+        "appraisal_event_agency_config",
+        "appraisal_relationship_social_config",
+        "appraisal_moral_identity_config",
+        "appraisal_goal_threat_outcome_config",
+        "appraisal_epistemic_comparison_memory_config",
+        "appraisal_existential_drive_config",
+        "goal_ordinary_response_config",
+        "goal_active_branch_config",
+        "required_selection_verifier_config",
+        "workspace_collapse_config",
+        "action_planning_config",
+        "action_authorization_config",
+        "resolver_authorization_config",
     ]
     assert [field.name for field in fields(TextSurfaceServicesV2)] == [
         "llm",

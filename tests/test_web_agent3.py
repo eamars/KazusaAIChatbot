@@ -24,6 +24,32 @@ from kazusa_ai_chatbot.rag.web_agent3 import providers as provider_module
 from kazusa_ai_chatbot.rag.web_agent3 import searxng_tools as searxng_module
 from kazusa_ai_chatbot.time_boundary import build_turn_clock_from_storage_utc
 
+_COGNITION_CORE_V2_ROUTE_PREFIXES = (
+    "COGNITION_LLM_APPRAISAL_EVENT_AGENCY",
+    "COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL",
+    "COGNITION_LLM_APPRAISAL_MORAL_IDENTITY",
+    "COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME",
+    "COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY",
+    "COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE",
+    "COGNITION_LLM_GOAL_ORDINARY_RESPONSE",
+    "COGNITION_LLM_GOAL_ACTIVE_BRANCH",
+    "COGNITION_LLM_REQUIRED_SELECTION_VERIFIER",
+    "COGNITION_LLM_WORKSPACE_COLLAPSE",
+    "COGNITION_LLM_ACTION_PLANNING",
+    "COGNITION_LLM_ACTION_AUTHORIZATION",
+    "COGNITION_LLM_RESOLVER_AUTHORIZATION",
+)
+_COGNITION_CORE_V2_ROUTE_ENV = tuple(
+    f"{prefix}_{suffix}"
+    for prefix in _COGNITION_CORE_V2_ROUTE_PREFIXES
+    for suffix in (
+        "BASE_URL",
+        "API_KEY",
+        "MODEL",
+        "MAX_COMPLETION_TOKENS",
+        "THINKING_ENABLED",
+    )
+)
 _WEB_AGENT3_REQUIRED_ROUTE_ENV_VARS = (
     "RELEVANCE_AGENT_LLM_BASE_URL",
     "RELEVANCE_AGENT_LLM_API_KEY",
@@ -46,9 +72,7 @@ _WEB_AGENT3_REQUIRED_ROUTE_ENV_VARS = (
     "COGNITION_LLM_BASE_URL",
     "COGNITION_LLM_API_KEY",
     "COGNITION_LLM_MODEL",
-    "BOUNDARY_CORE_LLM_BASE_URL",
-    "BOUNDARY_CORE_LLM_API_KEY",
-    "BOUNDARY_CORE_LLM_MODEL",
+    *_COGNITION_CORE_V2_ROUTE_ENV,
     "DIALOG_GENERATOR_LLM_BASE_URL",
     "DIALOG_GENERATOR_LLM_API_KEY",
     "DIALOG_GENERATOR_LLM_MODEL",
@@ -97,7 +121,12 @@ def _web_agent3_subprocess_env(
     env["PYTHONPATH"] = os.pathsep.join(python_path_entries)
     env["PYTHON_DOTENV_DISABLED"] = "1"
     for name in _WEB_AGENT3_REQUIRED_ROUTE_ENV_VARS:
-        env[name] = "configured"
+        if name.endswith("_MAX_COMPLETION_TOKENS"):
+            env[name] = "8192"
+        elif name.endswith("_THINKING_ENABLED"):
+            env[name] = "false"
+        else:
+            env[name] = "configured"
     env["EMBEDDING_BASE_URL"] = "configured"
     env["EMBEDDING_API_KEY"] = "configured"
     env["EMBEDDING_MODEL"] = "configured"

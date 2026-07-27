@@ -104,7 +104,19 @@ HOWTO. One working-style configuration looks like this:
 | `RAG_SUBAGENT_LLM`         | `local-model`                            | `http://localhost:1234/v1` |
 | `WEB_SEARCH_LLM`           | `local-model`                            | `http://localhost:1234/v1` |
 | `COGNITION_LLM`            | `local-model`                            | `http://localhost:1234/v1` |
-| `BOUNDARY_CORE_LLM`        | `local-model`                            | `http://localhost:1234/v1` |
+| `COGNITION_LLM_APPRAISAL_EVENT_AGENCY` | `local-model`                | `http://localhost:1234/v1` |
+| `COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL` | `local-model`          | `http://localhost:1234/v1` |
+| `COGNITION_LLM_APPRAISAL_MORAL_IDENTITY` | `local-model`              | `http://localhost:1234/v1` |
+| `COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME` | `local-model`          | `http://localhost:1234/v1` |
+| `COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY` | `local-model` | `http://localhost:1234/v1` |
+| `COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE` | `local-model`            | `http://localhost:1234/v1` |
+| `COGNITION_LLM_GOAL_ORDINARY_RESPONSE` | `local-model`                 | `http://localhost:1234/v1` |
+| `COGNITION_LLM_GOAL_ACTIVE_BRANCH` | `local-model`                      | `http://localhost:1234/v1` |
+| `COGNITION_LLM_REQUIRED_SELECTION_VERIFIER` | `local-model`             | `http://localhost:1234/v1` |
+| `COGNITION_LLM_WORKSPACE_COLLAPSE` | `local-model`                       | `http://localhost:1234/v1` |
+| `COGNITION_LLM_ACTION_PLANNING` | `local-model`                          | `http://localhost:1234/v1` |
+| `COGNITION_LLM_ACTION_AUTHORIZATION` | `local-model`                     | `http://localhost:1234/v1` |
+| `COGNITION_LLM_RESOLVER_AUTHORIZATION` | `local-model`                   | `http://localhost:1234/v1` |
 | `BACKGROUND_WORK_LLM`      | `local-model`                            | `http://localhost:1234/v1` |
 | `CODING_AGENT_PM_LLM`      | `local-model`                            | `http://localhost:1234/v1` |
 | `CODING_AGENT_PROGRAMMER_LLM` | `local-model`                          | `http://localhost:1234/v1` |
@@ -116,6 +128,11 @@ HOWTO. One working-style configuration looks like this:
 The table is an example, not a fixed requirement. Any route can point to any
 OpenAI-compatible endpoint that can satisfy that stage's latency and quality
 needs.
+
+`COGNITION_LLM` remains the generic cognition route for callers outside
+Cognition Core V2. Core V2 uses the thirteen independent stage routes above;
+each route owns a complete endpoint, credential, model, completion-budget, and
+thinking bundle with no route inheritance or fallback.
 
 Code-reading uses separate required routes for PM decisions and programmer
 workers. Final synthesis intentionally reuses `CODING_AGENT_PM_LLM`; there is

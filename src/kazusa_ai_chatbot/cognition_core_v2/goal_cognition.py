@@ -24,6 +24,7 @@ from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
     V2_MODEL_TOTAL_ATTEMPTS,
     V2_VERIFIER_TOTAL_ATTEMPTS,
 )
+from kazusa_ai_chatbot.llm_interface import LLMCallConfig
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 
 
@@ -123,6 +124,10 @@ async def run_goal_cognition(
 ) -> ActionBidV2:
     """Run one goal branch and map its draft to a complete deterministic bid."""
 
+    if definition.branch_id == "ordinary_response":
+        goal_config = services.goal_ordinary_response_config
+    else:
+        goal_config = services.goal_active_branch_config
     evidence_handles = [row["evidence_handle"] for row in evidence]
     role_bindings = semantic_context.get("_role_bindings", {})
     if not isinstance(role_bindings, Mapping):
@@ -177,7 +182,7 @@ async def run_goal_cognition(
         try:
             response = await services.llm.ainvoke(
                 request_messages,
-                config=services.goal_cognition_config,
+                config=goal_config,
             )
         except (
             OpenAIError,
@@ -188,7 +193,7 @@ async def run_goal_cognition(
             TimeoutError,
         ) as exc:
             await _record_goal_trace_step(
-                services=services,
+                config=goal_config,
                 definition=definition,
                 stage_suffix=stage_suffix,
                 messages=request_messages,
@@ -218,7 +223,7 @@ async def run_goal_cognition(
             draft = validate_goal_bid_draft(parsed, **validation_args)
         except (AttributeError, KeyError, TypeError, ValueError) as exc:
             await _record_goal_trace_step(
-                services=services,
+                config=goal_config,
                 definition=definition,
                 stage_suffix=stage_suffix,
                 messages=request_messages,
@@ -269,7 +274,7 @@ async def run_goal_cognition(
             continue
 
         await _record_goal_trace_step(
-            services=services,
+            config=goal_config,
             definition=definition,
             stage_suffix=stage_suffix,
             messages=request_messages,
@@ -291,6 +296,7 @@ async def run_goal_cognition(
         evidence_handles=set(evidence_handles),
         role_handles=set(role_bindings),
         services=services,
+        goal_config=goal_config,
     )
     target_roles = [
         dict(role_bindings[handle])
@@ -321,6 +327,7 @@ async def _enforce_required_selection_alignment(
     evidence_handles: set[str],
     role_handles: set[str],
     services: CognitionCoreServicesV2,
+    goal_config: LLMCallConfig,
 ) -> GoalBidDraftV2:
     """Replace a bid that delegates one typed character-owned selection."""
 
@@ -366,7 +373,7 @@ async def _enforce_required_selection_alignment(
         try:
             response = await services.llm.ainvoke(
                 messages,
-                config=services.goal_cognition_config,
+                config=goal_config,
             )
         except (
             OpenAIError,
@@ -377,7 +384,7 @@ async def _enforce_required_selection_alignment(
             TimeoutError,
         ) as exc:
             await _record_goal_trace_step(
-                services=services,
+                config=goal_config,
                 definition=definition,
                 stage_suffix=f"selection_repair_{attempt_index}",
                 messages=messages,
@@ -400,7 +407,7 @@ async def _enforce_required_selection_alignment(
             )
         except (AttributeError, KeyError, TypeError, ValueError) as exc:
             await _record_goal_trace_step(
-                services=services,
+                config=goal_config,
                 definition=definition,
                 stage_suffix=f"selection_repair_{attempt_index}",
                 messages=messages,
@@ -414,7 +421,7 @@ async def _enforce_required_selection_alignment(
 
         latest_valid_draft = repaired
         await _record_goal_trace_step(
-            services=services,
+            config=goal_config,
             definition=definition,
             stage_suffix=f"selection_repair_{attempt_index}",
             messages=messages,
@@ -504,7 +511,7 @@ async def _verify_required_selection_bid(
         try:
             response = await services.llm.ainvoke(
                 messages,
-                config=services.action_selection_config,
+                config=services.required_selection_verifier_config,
             )
         except (
             OpenAIError,
@@ -642,7 +649,7 @@ async def _record_selection_trace_step(
     trace_id = llm_tracing.current_trace_id()
     if not trace_id:
         return
-    config = services.action_selection_config
+    config = services.required_selection_verifier_config
     await llm_tracing.record_llm_trace_step(
         trace_id=trace_id,
         stage_name=(
@@ -662,7 +669,7 @@ async def _record_selection_trace_step(
 
 async def _record_goal_trace_step(
     *,
-    services: CognitionCoreServicesV2,
+    config: LLMCallConfig,
     definition: BranchDefinition,
     stage_suffix: str,
     messages: Sequence[BaseMessage],
@@ -677,7 +684,6 @@ async def _record_goal_trace_step(
     trace_id = llm_tracing.current_trace_id()
     if not trace_id:
         return
-    config = services.goal_cognition_config
     await llm_tracing.record_llm_trace_step(
         trace_id=trace_id,
         stage_name=(

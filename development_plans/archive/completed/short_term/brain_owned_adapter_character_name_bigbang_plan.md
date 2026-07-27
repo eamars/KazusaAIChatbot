@@ -432,6 +432,8 @@ generic assistant-name fallback is allowed.
   - Next: final user sign-off.
   - Sign-off: Codex parent, 2026-07-27.
 
+- [ ] Stage 6 continue and close off the reminder steps of development_plans\active\short_term\cognition_core_v2_stage_llm_endpoint_routing_plan.md without subagent.
+
 ## Verification
 
 ### Syntax

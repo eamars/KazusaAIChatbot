@@ -550,7 +550,7 @@ async def test_c20_goal_stage_preserves_unavailable_reminder_boundary() -> None:
                 content=json.dumps(quality_payload, ensure_ascii=False),
             ),
         ],
-        config=base_services.goal_cognition_config,
+        config=base_services.goal_ordinary_response_config,
     )
     quality_raw = str(quality_response.content)
     quality = parse_llm_json_output(quality_raw)

@@ -104,7 +104,7 @@ async def test_initial_missing_evidence_request_is_authorized() -> None:
         resolver_context="resolver_status=idle",
         services=SimpleNamespace(
             llm=_LLM(),
-            action_selection_config=object(),
+            resolver_authorization_config=object(),
         ),
     )
 
@@ -158,7 +158,7 @@ async def test_satisfied_rephrased_request_is_rejected() -> None:
         ),
         services=SimpleNamespace(
             llm=_LLM(),
-            action_selection_config=object(),
+            resolver_authorization_config=object(),
         ),
     )
 
@@ -199,7 +199,7 @@ async def test_three_distinct_resolver_requests_are_preserved() -> None:
         resolver_context="resolver_status=idle",
         services=SimpleNamespace(
             llm=_LLM(),
-            action_selection_config=object(),
+            resolver_authorization_config=object(),
         ),
     )
 
@@ -223,7 +223,7 @@ async def test_empty_resolver_plan_adds_no_authorization_call() -> None:
         resolver_context="resolver_status=idle",
         services=SimpleNamespace(
             llm=_LLM(),
-            action_selection_config=object(),
+            resolver_authorization_config=object(),
         ),
     )
 

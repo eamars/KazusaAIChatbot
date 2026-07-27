@@ -129,6 +129,7 @@ async def authorize_resolver_requests(
     ]
     decisions = await invoke_semantic_authorizer(
         services=services,
+        config=services.resolver_authorization_config,
         messages=messages,
         candidate_handles=list(candidate_requests),
         stage_name="resolver_authorization",
