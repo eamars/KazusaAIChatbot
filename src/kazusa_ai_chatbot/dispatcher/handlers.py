@@ -51,51 +51,38 @@ async def _ensure_dispatcher_character_identity(
 ) -> str:
     """Resolve the active character identity for a dispatcher-owned send."""
 
-    if not str(platform_bot_id or "").strip():
-        return_value = CHARACTER_GLOBAL_USER_ID
-        return return_value
+    clean_platform_bot_id = str(platform_bot_id).strip()
+    if not clean_platform_bot_id:
+        raise ValueError("source_platform_bot_id is required")
+    clean_character_name = str(character_name).strip()
+    if not clean_character_name:
+        raise ValueError("source_character_name is required")
 
     return_value = await ensure_character_identity(
         platform=platform,
-        platform_user_id=platform_bot_id,
-        display_name=character_name,
+        platform_user_id=clean_platform_bot_id,
+        display_name=clean_character_name,
         global_user_id=CHARACTER_GLOBAL_USER_ID,
     )
     return return_value
 
 
-def _adapter_text_attr(adapter: object, attr_name: str) -> str:
-    """Read an optional adapter string attribute."""
+def _platform_bot_id(ctx: DispatchContext) -> str:
+    """Return the required brain-bound platform bot id."""
 
-    value = getattr(adapter, attr_name, "")
-    if not isinstance(value, str):
-        return_value = ""
-        return return_value
-    return_value = value.strip()
-    return return_value
+    platform_bot_id = ctx.source_platform_bot_id.strip()
+    if not platform_bot_id:
+        raise ValueError("source_platform_bot_id is required")
+    return platform_bot_id
 
 
-def _platform_bot_id(ctx: DispatchContext, adapter: object) -> str:
-    """Return the best available platform bot id for outbound history."""
+def _character_name(ctx: DispatchContext) -> str:
+    """Return the required brain-owned character display name."""
 
-    return_value = (
-        ctx.source_platform_bot_id.strip()
-        or _adapter_text_attr(adapter, "platform_bot_id")
-        or _adapter_text_attr(adapter, "bot_id")
-    )
-    return return_value
-
-
-def _character_name(ctx: DispatchContext, adapter: object) -> str:
-    """Return the best available display name for outbound history."""
-
-    return_value = (
-        ctx.source_character_name.strip()
-        or _adapter_text_attr(adapter, "display_name")
-        or _adapter_text_attr(adapter, "bot_name")
-        or "assistant"
-    )
-    return return_value
+    character_name = ctx.source_character_name.strip()
+    if not character_name:
+        raise ValueError("source_character_name is required")
+    return character_name
 
 
 SEND_MESSAGE_SCHEMA = {
@@ -164,8 +151,8 @@ async def handle_send_message(
                 f"{target_channel}"
             )
         delivery_tracking_id = uuid4().hex
-        platform_bot_id = _platform_bot_id(ctx, adapter)
-        character_name = _character_name(ctx, adapter)
+        platform_bot_id = _platform_bot_id(ctx)
+        character_name = _character_name(ctx)
         addressed_to = [ctx.source_user_id] if ctx.source_user_id.strip() else []
         delivery_mentions = _delivery_mentions(args)
         conversation_message_id = await record_assistant_outbound_message(

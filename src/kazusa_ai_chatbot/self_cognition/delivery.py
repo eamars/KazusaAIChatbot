@@ -49,7 +49,8 @@ async def deliver_selected_speak(
     Args:
         text: Final dialog text rendered by the shared dialog graph.
         delivery_target: Deterministic target metadata bound before cognition.
-        character_profile: Runtime character profile used as name fallback.
+        character_profile: Active runtime character profile that owns the
+            visible character name.
         adapter_registry: Process-local runtime adapter registry.
         now: Worker tick time used for deterministic dispatch context.
         reply_to_msg_id: Optional platform reply target.
@@ -66,6 +67,13 @@ async def deliver_selected_speak(
     if adapter_registry is None:
         result = _failed_result("adapter_registry_unavailable")
         return result
+
+    raw_character_name = character_profile["name"]
+    if not isinstance(raw_character_name, str):
+        raise ValueError("character profile name must be a string")
+    character_name = raw_character_name.strip()
+    if not character_name:
+        raise ValueError("character profile name is required")
 
     ctx = DispatchContext(
         source_platform=delivery_target["platform"],
@@ -87,10 +95,7 @@ async def deliver_selected_speak(
             or delivery_target["channel_type"]
         ),
         source_platform_bot_id=delivery_target["source_platform_bot_id"],
-        source_character_name=(
-            delivery_target["source_character_name"]
-            or str(character_profile.get("name") or "active character")
-        ),
+        source_character_name=character_name,
     )
     args = {
         "target_platform": delivery_target["platform"],

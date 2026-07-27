@@ -209,10 +209,12 @@ async def test_self_cognition_delivery_preserves_mentions(
 
     async def save_conversation(document: dict[str, Any]) -> str:
         assert document["body_text"] == "Checking in now."
+        assert document["display_name"] == "Current Character"
         return "conversation-row-1"
 
     async def ensure_character_identity(**kwargs: Any) -> str:
         assert kwargs["platform"] == "qq"
+        assert kwargs["display_name"] == "Current Character"
         return "character-global"
 
     async def apply_receipt(**kwargs: Any) -> None:
@@ -251,7 +253,7 @@ async def test_self_cognition_delivery_preserves_mentions(
     result = await deliver_selected_speak(
         text="Checking in now.",
         delivery_target=_delivery_target(),
-        character_profile={"name": "Character"},
+        character_profile={"name": "Current Character"},
         adapter_registry=registry,
         now=datetime(2026, 5, 17, 5, 57, tzinfo=timezone.utc),
         delivery_mentions=[mention],
@@ -259,3 +261,19 @@ async def test_self_cognition_delivery_preserves_mentions(
 
     assert result["status"] == "sent"
     assert adapter.calls[0]["delivery_mentions"] == [mention]
+
+
+@pytest.mark.asyncio
+async def test_self_cognition_delivery_rejects_non_string_character_name() -> None:
+    """New self-cognition output must require valid brain identity."""
+
+    from kazusa_ai_chatbot.self_cognition.delivery import deliver_selected_speak
+
+    with pytest.raises(ValueError, match="character profile name must be a string"):
+        await deliver_selected_speak(
+            text="Checking in now.",
+            delivery_target=_delivery_target(),
+            character_profile={"name": None},
+            adapter_registry=AdapterRegistry(),
+            now=datetime(2026, 5, 17, 5, 57, tzinfo=timezone.utc),
+        )

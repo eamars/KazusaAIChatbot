@@ -26,6 +26,8 @@ def _context() -> DispatchContext:
         bot_permission_role="user",
         now=datetime(2026, 5, 14, tzinfo=timezone.utc),
         source_channel_type="group",
+        source_platform_bot_id="discord-bot-1",
+        source_character_name="Character",
     )
     return ctx
 

@@ -1319,16 +1319,21 @@ async def test_delivery_receipt_endpoint_returns_updated_and_not_found(monkeypat
 async def test_hydrate_reply_context_fills_missing_metadata_from_delivered_row(
     monkeypatch,
 ) -> None:
-    """Brain-side fallback should hydrate sparse native reply metadata."""
+    """Historical bot replies should use the current active brain name."""
     lookup = AsyncMock(return_value={
         "platform_user_id": "bot-1",
-        "display_name": "Kazusa",
+        "display_name": '杏山千纱',
         "body_text": "previous assistant answer",
     })
     monkeypatch.setattr(
         service_module,
         "get_conversation_by_platform_message_id",
         lookup,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_static_character_profile",
+        {"name": '一之濑明日奈'},
     )
     request = _chat_request()
     request.message_envelope.reply = service_module.ReplyTargetIn(
@@ -1339,13 +1344,44 @@ async def test_hydrate_reply_context_fills_missing_metadata_from_delivered_row(
 
     assert reply_context["reply_to_message_id"] == "platform-123"
     assert reply_context["reply_to_platform_user_id"] == "bot-1"
-    assert reply_context["reply_to_display_name"] == "Kazusa"
+    assert reply_context["reply_to_display_name"] == '一之濑明日奈'
     assert reply_context["reply_excerpt"] == "previous assistant answer"
     lookup.assert_awaited_once_with(
         platform="qq",
         platform_channel_id="chan-1",
         platform_message_id="platform-123",
     )
+
+
+@pytest.mark.asyncio
+async def test_hydrate_reply_context_overrides_adapter_bot_display_name(
+    monkeypatch,
+) -> None:
+    """Typed adapter bot metadata should use the active brain character name."""
+
+    lookup = AsyncMock(return_value=None)
+    monkeypatch.setattr(
+        service_module,
+        "get_conversation_by_platform_message_id",
+        lookup,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_static_character_profile",
+        {"name": '一之濑明日奈'},
+    )
+    request = _chat_request()
+    request.message_envelope.reply = service_module.ReplyTargetIn(
+        platform_message_id="platform-123",
+        platform_user_id="bot-1",
+        display_name='杏山千纱',
+        excerpt="adapter excerpt",
+    )
+
+    reply_context = await service_module._hydrate_reply_context(request)
+
+    assert reply_context["reply_to_display_name"] == '一之濑明日奈'
+    lookup.assert_awaited_once()
 
 
 @pytest.mark.asyncio

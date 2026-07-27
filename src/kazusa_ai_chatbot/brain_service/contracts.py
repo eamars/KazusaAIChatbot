@@ -224,16 +224,17 @@ class OpsSelfCognitionStatsResponse(OpsStatsResponse):
 
 
 class RuntimeAdapterRegistrationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     platform: str
     callback_url: str
-
+    platform_bot_id: str = Field(min_length=1)
     shared_secret: str = ""
     timeout_seconds: float = 10.0
-    platform_bot_id: str = ""
-    display_name: str = ""
 
 
 class RuntimeAdapterRegistrationResponse(BaseModel):
     status: str
     platform: str
     callback_url: str
+    character_name: str = Field(min_length=1)

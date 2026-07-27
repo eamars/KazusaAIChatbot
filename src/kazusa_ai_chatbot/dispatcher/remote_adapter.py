@@ -24,6 +24,7 @@ class RemoteHttpAdapter:
     Args:
         platform: Platform key such as ``qq`` or ``discord``.
         callback_url: Base URL exposed by the live adapter process.
+        platform_bot_id: Native account id used for outbound history rows.
         shared_secret: Optional bearer token used for adapter callback auth.
         timeout_seconds: HTTP timeout for one outbound send attempt.
     """
@@ -33,14 +34,12 @@ class RemoteHttpAdapter:
         *,
         platform: str,
         callback_url: str,
+        platform_bot_id: str,
         shared_secret: str = "",
         timeout_seconds: float = 10.0,
-        platform_bot_id: str = "",
-        display_name: str = "",
     ) -> None:
         self.platform = platform
         self.platform_bot_id = platform_bot_id
-        self.display_name = display_name
         self._callback_url = callback_url.rstrip("/")
         self._shared_secret = shared_secret
         self._timeout_seconds = timeout_seconds

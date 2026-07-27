@@ -171,6 +171,11 @@ async def test_service_result_ready_delivery_uses_dispatcher_boundary(
     monkeypatch.setattr(service_module, "_adapter_registry", object())
     monkeypatch.setattr(
         service_module,
+        "_static_character_profile",
+        {"name": "Current Character"},
+    )
+    monkeypatch.setattr(
+        service_module,
         "_refresh_runtime_character_state",
         AsyncMock(),
     )
@@ -188,7 +193,7 @@ async def test_service_result_ready_delivery_uses_dispatcher_boundary(
         service_module,
         "compose_character_profile",
         lambda *_args, **_kwargs: {
-            "name": "Test Character",
+            "name": "Current Character",
             "global_user_id": "character-global-1",
         },
     )
@@ -254,6 +259,9 @@ async def test_service_result_ready_delivery_uses_dispatcher_boundary(
     assert dispatch_context.bot_permission_role == "accepted_task_result"
     assert dispatch_context.source_message_id == "tool-result:task-001"
     assert dispatch_context.source_platform_bot_id == "bot-1"
+    assert dispatch_context.source_character_name == "Current Character"
+    ensure_identity = service_module._ensure_character_global_identity
+    assert ensure_identity.await_args.kwargs["character_name"] == "Current Character"
     post_turn.assert_awaited_once()
 
 

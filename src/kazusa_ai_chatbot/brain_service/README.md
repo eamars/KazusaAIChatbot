@@ -501,16 +501,32 @@ Purpose:
 - Register a cross-process adapter callback so trusted dispatcher or proactive
   delivery owners can send through that adapter.
 
-Fields:
+Request fields:
 
 | Field | Required | Owner | Meaning |
 | --- | --- | --- | --- |
 | `platform` | yes | adapter | Platform key used by callback delivery tasks. |
 | `callback_url` | yes | adapter | Base URL exposed by the adapter process. |
+| `platform_bot_id` | yes | adapter | Native bot account id used for typed identity and outbound history. |
 | `shared_secret` | no | adapter/operator | Bearer token expected by the adapter callback, if configured. |
 | `timeout_seconds` | no | adapter/operator | Brain-side timeout for callback sends. |
 
-The brain service stores this registration in the live adapter registry.
+The request model forbids extra fields. In particular, adapter-fetched
+`display_name` is not accepted.
+
+Response fields:
+
+| Field | Required | Owner | Meaning |
+| --- | --- | --- | --- |
+| `status` | yes | brain service | Registration disposition. |
+| `platform` | yes | brain service | Registered platform key. |
+| `callback_url` | yes | brain service | Registered callback URL. |
+| `character_name` | yes | brain service | Character display name from the active process-local brain profile. |
+
+The brain service stores transport registration in the live adapter registry
+and returns the name used by the running brain. The adapter validates and
+caches that value; the platform account's own nickname or display name is not
+a character-name authority.
 
 ### `POST /runtime/adapters/heartbeat`
 
@@ -523,10 +539,12 @@ Purpose:
 - Refresh the same runtime adapter callback registration so brain restarts and
   adapter restarts can self-heal.
 
-The payload contract is identical to `/runtime/adapters/register`.
+The request and response contracts are identical to
+`/runtime/adapters/register`.
 
 Adapters heartbeat periodically while running. The brain service treats
-heartbeat as an idempotent re-registration.
+heartbeat as an idempotent re-registration and returns its current active
+`character_name` on every successful refresh.
 
 ### `POST /event`
 
@@ -557,10 +575,16 @@ brain service can look up a delivered conversation row by exact
 
 Hydration rules:
 
-- Adapter-provided metadata wins over database fallback metadata.
+- Adapter-provided metadata wins over database fallback metadata for human
+  targets.
+- When `reply.platform_user_id` equals the request `platform_bot_id`, the
+  brain's current active profile name replaces any adapter or historical row
+  display label in the live reply context.
 - Database fallback uses exact platform/channel/message-id scope.
 - Missing fallback rows are allowed and should degrade to the original adapter
   metadata.
+
+This canonicalization does not update historical conversation rows.
 
 ## Persistence Timing
 
@@ -629,6 +653,8 @@ Runtime adapters own:
 - Posting `/delivery_receipt` when the adapter supports durable outbound ids.
 - Registering and heartbeating runtime callback URLs when dispatcher or
   proactive callback delivery is enabled.
+- Supplying the native `platform_bot_id` while treating the returned
+  `character_name` as authoritative for platform-bot mention and reply labels.
 
 The brain service owns:
 
@@ -636,6 +662,8 @@ The brain service owns:
 - Queueing and collapse policy.
 - Global identity resolution.
 - Reply context hydration from typed metadata and delivered conversation rows.
+- Character display-name authority and distribution through runtime
+  registration and heartbeat responses.
 - Persona graph invocation.
 - Assistant row persistence, logical message indexes, and delivery receipt
   updates.
@@ -657,6 +685,9 @@ The database package owns:
   them without behavior loss.
 - Adding required request fields to `/chat`, `/delivery_receipt`, or runtime
   adapter registration is breaking and requires coordinated adapter updates.
+- Runtime adapter registration currently uses the coordinated big-bang shape:
+  required `platform_bot_id`, forbidden legacy `display_name`, and required
+  response `character_name`.
 - Changing the meaning of `platform`, `platform_channel_id`,
   `platform_message_id`, or `delivery_tracking_id` is breaking.
 - Changing delivery receipts beyond one platform id per logical message is
@@ -685,6 +716,8 @@ Receipt failure behavior:
 - Unexpected receipt status: adapter logs and stops.
 
 Runtime callback registration failures should be logged by adapters and retried
-through heartbeat/startup behavior. Missing runtime adapters cause dispatcher
-delivery validation to reject or fail callback sends according to dispatcher
-policy.
+through heartbeat/startup behavior. A missing, non-string, or empty
+`character_name` makes startup registration fail. Heartbeat validation failure
+keeps the adapter's last successfully validated brain name. Missing runtime
+adapters cause dispatcher delivery validation to reject or fail callback sends
+according to dispatcher policy.

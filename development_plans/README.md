@@ -360,6 +360,19 @@ production code remained at baseline.
 |---|---|
 | Moved from active bugfix to completed archive | `cognition_core_v2_retry_exhaustion_continuity_bugfix_plan.md` |
 
+### 2026-07-27 brain-owned adapter character-name completion
+
+The big-bang runtime-adapter cutover made the active process-local brain
+profile the only character display-name authority. Discord and NapCat now
+receive the required name through registration and heartbeat, enforce it for
+platform-bot mention and reply labels, and preserve platform display names
+only for human identities. Dispatcher and background output use current brain
+identity without rewriting historical conversation rows.
+
+| Outcome | Plans |
+|---|---|
+| Moved from active short-term to completed archive | `brain_owned_adapter_character_name_bigbang_plan.md` |
+
 ## Archive
 
 Completed and superseded records live under `archive/`. Use them for historical
@@ -451,6 +464,7 @@ plans.
 | [backend_control_console_web_test_plan.md](archive/completed/short_term/backend_control_console_web_test_plan.md) |
 | [background_artifact_handoff_poc_plan.md](archive/completed/short_term/background_artifact_handoff_poc_plan.md) |
 | [background_work_semantic_lifecycle_plan.md](archive/completed/short_term/background_work_semantic_lifecycle_plan.md) |
+| [brain_owned_adapter_character_name_bigbang_plan.md](archive/completed/short_term/brain_owned_adapter_character_name_bigbang_plan.md) |
 | [cache2_agent_stats_health_plan.md](archive/completed/short_term/cache2_agent_stats_health_plan.md) |
 | [channel_name_semantic_projection_plan.md](archive/completed/short_term/channel_name_semantic_projection_plan.md) |
 | [character_local_time_context_plan.md](archive/completed/short_term/character_local_time_context_plan.md) |

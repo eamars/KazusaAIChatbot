@@ -35,8 +35,8 @@ class DispatchContext:
     bot_permission_role: BotPermissionRole
     now: datetime
     source_channel_type: str
-    source_platform_bot_id: str = ""
-    source_character_name: str = ""
+    source_platform_bot_id: str
+    source_character_name: str
 
 
 @dataclass(frozen=True)

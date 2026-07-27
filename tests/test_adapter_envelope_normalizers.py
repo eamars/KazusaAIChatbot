@@ -8,6 +8,8 @@ import re
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from adapters import napcat_qq_adapter as napcat_module
 from adapters.discord_adapter import DiscordEnvelopeNormalizer
 from adapters.napcat_qq_adapter import QQEnvelopeNormalizer
@@ -163,13 +165,15 @@ def test_qq_normalizer_rewrites_cq_mentions_as_readable_tokens() -> None:
             "[CQ:at,qq=673225019][CQ:face,id=344]"
         ),
         platform_bot_id="3768713357",
+        character_name='一之濑明日奈',
         mention_display_names={
-            "3768713357": "Kazusa",
+            "3768713357": '杏山千纱',
             "673225019": "Other User",
         },
         reply_context={
             "reply_to_message_id": "1733223276",
             "reply_to_platform_user_id": "3768713357",
+            "reply_to_display_name": '杏山千纱',
             "reply_excerpt": "previous bot message",
         },
         attachments=[],
@@ -182,17 +186,62 @@ def test_qq_normalizer_rewrites_cq_mentions_as_readable_tokens() -> None:
     )
 
     assert envelope["body_text"] == (
-        '@Kazusa what are these @Other User <image>大怨种表情</image>'
+        '@一之濑明日奈 what are these @Other User <image>大怨种表情</image>'
     )
     assert "<@3768713357>" not in envelope["body_text"]
     assert "[CQ:" not in envelope["body_text"]
     assert envelope["mentions"][0]["entity_kind"] == "bot"
     assert envelope["mentions"][0]["global_user_id"] == CHARACTER_GLOBAL_USER_ID
-    assert envelope["mentions"][0]["display_name"] == "Kazusa"
+    assert envelope["mentions"][0]["display_name"] == '一之濑明日奈'
     assert envelope["mentions"][1]["display_name"] == "Other User"
     assert envelope["reply"]["global_user_id"] == CHARACTER_GLOBAL_USER_ID
+    assert envelope["reply"]["display_name"] == '一之濑明日奈'
     assert envelope["reply"]["platform_message_id"] == "1733223276"
     assert envelope["addressed_to_global_user_ids"] == [CHARACTER_GLOBAL_USER_ID]
+
+
+def test_qq_normalizer_rejects_non_string_character_name() -> None:
+    """QQ normalization must fail closed on malformed brain identity."""
+
+    request = SimpleNamespace(
+        platform="qq",
+        channel_type="group",
+        content="[CQ:at,qq=3768713357]",
+        platform_bot_id="3768713357",
+        character_name=None,
+        mention_display_names={},
+        reply_context={},
+        attachments=[],
+    )
+
+    with pytest.raises(ValueError, match="character_name must be a string"):
+        QQEnvelopeNormalizer().normalize(
+            request,
+            PassthroughMentionResolver(),
+            build_default_attachment_handler_registry(),
+        )
+
+
+def test_qq_normalizer_rejects_missing_platform_bot_id() -> None:
+    """QQ normalization must require native bot transport identity."""
+
+    request = SimpleNamespace(
+        platform="qq",
+        channel_type="group",
+        content="[CQ:at,qq=3768713357]",
+        platform_bot_id="",
+        character_name="Character",
+        mention_display_names={"3768713357": "Platform Name"},
+        reply_context={},
+        attachments=[],
+    )
+
+    with pytest.raises(ValueError, match="platform_bot_id is required"):
+        QQEnvelopeNormalizer().normalize(
+            request,
+            PassthroughMentionResolver(),
+            build_default_attachment_handler_registry(),
+        )
 
 
 def test_qq_normalizer_uses_platform_neutral_label_without_display_name() -> None:
@@ -204,6 +253,7 @@ def test_qq_normalizer_uses_platform_neutral_label_without_display_name() -> Non
         channel_type="group",
         content="[CQ:at,qq=673225019] hello",
         platform_bot_id="3768713357",
+        character_name="Character",
         reply_context={},
         attachments=[],
     )
@@ -230,6 +280,7 @@ def test_qq_normalizer_drops_image_only_reply_excerpt_cq() -> None:
         channel_type="group",
         content="[CQ:reply,id=1733223276]what is this?",
         platform_bot_id="3768713357",
+        character_name="Character",
         reply_context={
             "reply_to_message_id": "1733223276",
             "reply_excerpt": "[CQ:image,file=sam.png]",
@@ -256,6 +307,7 @@ def test_qq_normalizer_sanitizes_mixed_reply_excerpt_cq() -> None:
         channel_type="group",
         content="[CQ:reply,id=1733223276]what is this?",
         platform_bot_id="3768713357",
+        character_name="Character",
         reply_context={
             "reply_to_message_id": "1733223276",
             "reply_excerpt": "look[CQ:image,file=sam.png]nice",
@@ -282,6 +334,7 @@ def test_qq_reply_excerpt_mentions_use_same_display_map() -> None:
         channel_type="group",
         content="[CQ:reply,id=1733223276]what is this?",
         platform_bot_id="3768713357",
+        character_name="Character",
         mention_display_names={"673225019": "Other User"},
         reply_context={
             "reply_to_message_id": "1733223276",
@@ -311,6 +364,7 @@ def test_qq_normalizer_projects_known_face_as_inline_image_block() -> None:
         channel_type="group",
         content="[CQ:face,id=344]",
         platform_bot_id="3768713357",
+        character_name="Character",
         reply_context={},
         attachments=[],
     )
@@ -336,6 +390,7 @@ def test_qq_normalizer_preserves_inline_face_position() -> None:
         channel_type="group",
         content='我[CQ:face,id=344]服了',
         platform_bot_id="3768713357",
+        character_name="Character",
         reply_context={},
         attachments=[],
     )
@@ -358,6 +413,7 @@ def test_qq_normalizer_omits_unknown_face() -> None:
         channel_type="group",
         content="[CQ:face,id=999999]",
         platform_bot_id="3768713357",
+        character_name="Character",
         reply_context={},
         attachments=[],
     )
@@ -380,6 +436,7 @@ def test_qq_normalizer_omits_face_without_id() -> None:
         channel_type="group",
         content="[CQ:face]",
         platform_bot_id="3768713357",
+        character_name="Character",
         reply_context={},
         attachments=[],
     )
@@ -402,6 +459,7 @@ def test_qq_normalizer_omits_unknown_inline_face() -> None:
         channel_type="group",
         content='我[CQ:face,id=999999]服了',
         platform_bot_id="3768713357",
+        character_name="Character",
         reply_context={},
         attachments=[],
     )
@@ -424,6 +482,7 @@ def test_qq_normalizer_reads_face_id_from_any_parameter_position() -> None:
         channel_type="group",
         content="[CQ:face,foo=bar,id=344]",
         platform_bot_id="3768713357",
+        character_name="Character",
         reply_context={},
         attachments=[],
     )
@@ -446,6 +505,7 @@ def test_qq_normalizer_preserves_multiple_adjacent_faces() -> None:
         channel_type="group",
         content="[CQ:face,id=344][CQ:face,id=999999]",
         platform_bot_id="3768713357",
+        character_name="Character",
         reply_context={},
         attachments=[],
     )
@@ -486,6 +546,7 @@ def test_qq_normalizer_projects_faces_in_reply_excerpt() -> None:
         channel_type="group",
         content="[CQ:reply,id=1733223276]what is this?",
         platform_bot_id="3768713357",
+        character_name="Character",
         reply_context={
             "reply_to_message_id": "1733223276",
             "reply_excerpt": "[CQ:face,id=344]",
@@ -527,10 +588,15 @@ def test_discord_normalizer_rewrites_tags_as_readable_tokens() -> None:
             "<:sparkle:999> @everyone @here"
         ),
         platform_bot_id="12345",
-        user_mention_display_names={"12345": "Character"},
+        character_name='一之濑明日奈',
+        user_mention_display_names={"12345": '杏山千纱'},
         role_mention_display_names={"777": "Regulars"},
         channel_mention_display_names={"888": "general"},
-        reply_context={},
+        reply_context={
+            "reply_to_message_id": "msg-bot",
+            "reply_to_platform_user_id": "12345",
+            "reply_to_display_name": '杏山千纱',
+        },
         attachments=[],
     )
 
@@ -540,17 +606,68 @@ def test_discord_normalizer_rewrites_tags_as_readable_tokens() -> None:
         handlers,
     )
 
-    assert envelope["body_text"] == "@Character hello @Regulars #general @everyone @here"
+    assert envelope["body_text"] == (
+        '@一之濑明日奈 hello @Regulars #general @everyone @here'
+    )
     assert "<@12345>" not in envelope["body_text"]
     assert "<#888>" not in envelope["body_text"]
     assert envelope["mentions"][0]["entity_kind"] == "bot"
-    assert envelope["mentions"][0]["display_name"] == "Character"
+    assert envelope["mentions"][0]["display_name"] == '一之濑明日奈'
+    assert envelope["reply"]["display_name"] == '一之濑明日奈'
     assert {mention["entity_kind"] for mention in envelope["mentions"]} == {
         "bot",
         "platform_role",
         "channel",
         "everyone",
     }
+
+
+def test_discord_normalizer_rejects_non_string_character_name() -> None:
+    """Discord normalization must fail closed on malformed brain identity."""
+
+    request = SimpleNamespace(
+        platform="discord",
+        channel_type="group",
+        content="<@12345>",
+        platform_bot_id="12345",
+        character_name=None,
+        user_mention_display_names={},
+        role_mention_display_names={},
+        channel_mention_display_names={},
+        reply_context={},
+        attachments=[],
+    )
+
+    with pytest.raises(ValueError, match="character_name must be a string"):
+        DiscordEnvelopeNormalizer().normalize(
+            request,
+            PassthroughMentionResolver(),
+            build_default_attachment_handler_registry(),
+        )
+
+
+def test_discord_normalizer_rejects_missing_platform_bot_id() -> None:
+    """Discord normalization must require native bot transport identity."""
+
+    request = SimpleNamespace(
+        platform="discord",
+        channel_type="group",
+        content="<@12345>",
+        platform_bot_id="",
+        character_name="Character",
+        user_mention_display_names={"12345": "Platform Name"},
+        role_mention_display_names={},
+        channel_mention_display_names={},
+        reply_context={},
+        attachments=[],
+    )
+
+    with pytest.raises(ValueError, match="platform_bot_id is required"):
+        DiscordEnvelopeNormalizer().normalize(
+            request,
+            PassthroughMentionResolver(),
+            build_default_attachment_handler_registry(),
+        )
 
 
 def test_discord_normalizer_uses_platform_neutral_unknown_fallback_tokens() -> None:
@@ -562,6 +679,7 @@ def test_discord_normalizer_uses_platform_neutral_unknown_fallback_tokens() -> N
         channel_type="group",
         content="<@12345> <@&777> <#888>",
         platform_bot_id="99999",
+        character_name="Character",
         user_mention_display_names={},
         role_mention_display_names={},
         channel_mention_display_names={},
@@ -590,6 +708,7 @@ def test_discord_reply_excerpt_is_normalized_like_body_text() -> None:
         channel_type="group",
         content="replying",
         platform_bot_id="99999",
+        character_name="Character",
         user_mention_display_names={"12345": "Alex"},
         role_mention_display_names={"777": "Regulars"},
         channel_mention_display_names={"888": "general"},
@@ -621,6 +740,7 @@ def test_group_message_without_target_is_not_inbound_broadcast() -> None:
         channel_type="group",
         content="plain group chatter",
         platform_bot_id="3768713357",
+        character_name="Character",
         reply_context={},
         attachments=[],
     )

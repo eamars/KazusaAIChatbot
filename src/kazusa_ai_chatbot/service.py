@@ -524,9 +524,23 @@ def _register_runtime_adapter_payload(
     return_value = brain_runtime_registry.register_runtime_adapter_payload(
         req,
         status=status,
+        character_name=_active_character_name(),
         register_remote_runtime_adapter_func=register_remote_runtime_adapter,
     )
     return return_value
+
+
+def _active_character_name() -> str:
+    """Return the validated display name owned by the active brain profile."""
+
+    raw_character_name = _static_character_profile["name"]
+    if not isinstance(raw_character_name, str):
+        raise ValueError("character profile name must be a string")
+
+    character_name = raw_character_name.strip()
+    if not character_name:
+        raise ValueError("character profile name is required")
+    return character_name
 
 
 # ── Graph builder ───────────────────────────────────────────────────
@@ -721,6 +735,15 @@ async def _hydrate_reply_context(req: ChatRequest) -> ReplyContext:
                 body_text = str(row.get("body_text") or "")
                 if body_text:
                     reply_context["reply_excerpt"] = body_text
+
+    reply_to_platform_user_id = str(
+        reply_context.get("reply_to_platform_user_id") or ""
+    )
+    if (
+        req.platform_bot_id
+        and reply_to_platform_user_id == req.platform_bot_id
+    ):
+        reply_context["reply_to_display_name"] = _active_character_name()
 
     return_value = _compact_reply_context(reply_context)
     return return_value
@@ -2538,11 +2561,8 @@ async def _deliver_accepted_task_result_episode(
     try:
         await _refresh_runtime_character_state()
         user_profile = await get_user_profile(requester_global_user_id)
-        character_name = _static_character_profile.get("name", "Character")
+        character_name = _active_character_name()
         result_metadata = _accepted_task_result_metadata(episode)
-        source_name = str(result_metadata.get("source_character_name", "")).strip()
-        if source_name:
-            character_name = source_name
         source_platform_bot_id = str(
             result_metadata.get("source_platform_bot_id", "")
         ).strip()
@@ -5835,20 +5855,18 @@ def register_remote_runtime_adapter(
     *,
     platform: str,
     callback_url: str,
+    platform_bot_id: str,
     shared_secret: str = "",
     timeout_seconds: float = 10.0,
-    platform_bot_id: str = "",
-    display_name: str = "",
 ) -> None:
     """Register a cross-process adapter callback for scheduled delivery.
 
     Args:
         platform: Platform key such as ``qq`` or ``discord``.
         callback_url: Base callback URL exposed by the adapter process.
+        platform_bot_id: Platform account id for outbound history rows.
         shared_secret: Optional bearer token used when the brain calls back.
         timeout_seconds: Timeout for one outbound callback request.
-        platform_bot_id: Platform account id for outbound history rows.
-        display_name: Adapter-side display name fallback.
     """
 
     register_runtime_adapter(
@@ -5858,7 +5876,6 @@ def register_remote_runtime_adapter(
             shared_secret=shared_secret,
             timeout_seconds=timeout_seconds,
             platform_bot_id=platform_bot_id,
-            display_name=display_name,
         )
     )
 

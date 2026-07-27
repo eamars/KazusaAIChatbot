@@ -21,7 +21,7 @@ class _FakeAdapter:
 
     platform = "qq"
     platform_bot_id = "bot-1"
-    display_name = "Character"
+    display_name = '杏山千纱'
 
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
@@ -88,6 +88,7 @@ async def test_handle_send_message_returns_delivery_metadata(
     async def ensure_character_identity(**kwargs: Any) -> str:
         assert kwargs["platform"] == "qq"
         assert kwargs["platform_user_id"] == "bot-1"
+        assert kwargs["display_name"] == "Character"
         return "character-global"
 
     async def apply_receipt(**kwargs: Any) -> None:
@@ -140,6 +141,7 @@ async def test_handle_send_message_returns_delivery_metadata(
     assert saved_docs[0]["delivery_tracking_id"] == (
         result["delivery_tracking_id"]
     )
+    assert saved_docs[0]["display_name"] == "Character"
     assert adapter.calls == [
         {
             "channel_id": "dm-1",
