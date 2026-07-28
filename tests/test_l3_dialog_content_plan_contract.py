@@ -13,6 +13,7 @@ from kazusa_ai_chatbot.nodes import persona_supervisor2_l3_surface as surface_mo
 from tests.cognition_core_v2_test_helpers import (
     canonical_cognition_output,
     canonical_episode,
+    canonical_service_character_profile,
 )
 
 
@@ -40,9 +41,11 @@ def _state() -> dict[str, Any]:
 def _character_profile() -> dict[str, Any]:
     """Build the required wording-only character voice source."""
 
-    return {
+    profile = canonical_service_character_profile(marker="l3-dialog")
+    profile.update({
         "name": "Kazusa",
         "personality_brief": {
+            "mbti": "ISTP",
             "logic": "analytical",
             "tempo": "moderate",
             "defense": "reserved",
@@ -61,7 +64,8 @@ def _character_profile() -> dict[str, Any]:
             "abstraction_reframing": 0.4,
             "self_deprecation": 0.4,
         },
-    }
+    })
+    return profile
 
 
 def test_surface_input_uses_native_v2_contract() -> None:

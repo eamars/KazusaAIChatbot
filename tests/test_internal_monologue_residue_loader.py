@@ -88,7 +88,7 @@ def test_select_residue_window_filters_scope_and_respects_priority() -> None:
             ),
             _row(
                 residue_id="global-new",
-                scope_kind="character_global",
+                scope_kind="user_thread",
                 platform_channel_id="",
                 global_user_id="",
                 created_at="2026-05-20T00:10:00+00:00",

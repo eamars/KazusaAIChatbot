@@ -319,19 +319,20 @@ flowchart TD
         SC["self_cognition worker<br/>active commitment、recent dialog、topic follow-up、group review cases"]
         REF["reflection_cycle worker<br/>hourly slot、daily channel、global promotion、affect settling"]
         ME["memory_evolution<br/>共享记忆插入、替换、合并、种子重置"]
-        GG["global_character_growth<br/>已提升特质漂移"]
+        IG["character_identity_growth<br/>经审核的不可变身份修订"]
         CONS["consolidation<br/>目标计划 -> 来源视图 -> 通道路由 -> 通道审查 -> 写入意图校验 -> 持久化"]
         DISP["dispatcher [deterministic]<br/>可信发送的已注册适配器回调投递"]
         TR["EpisodeTraceV2 + 回合后生命周期<br/>不可变终态证据和幂等审计"]
         CAL --> SC
         CAL --> REF
         REF --> ME
-        REF --> GG
+        REF --> IG
         REF --> SC
         SC --> DISP
         SC --> CONS
+        CONS --> IG
         CONS --> ME
-        GG --> H
+        IG --> H
         ME --> H
     end
 
@@ -587,7 +588,7 @@ Kazusa 不把所有上下文压平成一个提示词。即时表面文本、对�
 | 自我认知 | 空闲来源收集、自我认知回合、路由追踪和来源绑定投递 | [自我认知](src/kazusa_ai_chatbot/self_cognition/README.md) |
 | 反思循环 | 后台反思运行、提升门控、提示词安全反思上下文 | [反思循环 ICD](src/kazusa_ai_chatbot/reflection_cycle/README.md) |
 | 记忆演化 | curated 共享记忆生命周期、谱系、种子重置、已提升记忆写入 | [记忆演化 ICD](src/kazusa_ai_chatbot/memory_evolution/README.md) |
-| 全局角色成长 | 从已批准反思记忆中缓慢漂移出的已提升特质 | [全局角色成长 ICD](src/kazusa_ai_chatbot/global_character_growth/README.md) |
+| 角色身份成长 | 经审核、按根事件计数的全局身份修订与最新版本运行时投影 | [角色身份成长](src/kazusa_ai_chatbot/character_identity_growth/README.md) |
 | 回合 trace 和生命周期 | 不可变 `episode_trace.v2` 终态结算和幂等回合后审计 | [Brain Service ICD](src/kazusa_ai_chatbot/brain_service/README.md) |
 
 其他项目文档：
@@ -672,7 +673,7 @@ src/
     self_cognition/            空闲自我认知触发、追踪和投递
     reflection_cycle/          后台反思和提升
     memory_evolution/          共享记忆生命周期和种子重置
-    global_character_growth/   缓慢的已提升角色成长特质
+    character_identity_growth/ 经审核的角色身份成长与运行时投影
     character_profile.py       原生启动使用的静态档案校验
   scripts/                     运维和维护 CLI
 docs/

@@ -230,6 +230,93 @@ async def test_no_evidence_records_a_sanitized_run_without_llm(
 
 
 @pytest.mark.asyncio
+async def test_semantic_no_change_run_retains_evaluated_root_lineage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A semantic hold remains distinguishable from missing source data."""
+
+    from kazusa_ai_chatbot.character_identity_growth import runner
+
+    proposal = {
+        "schema_version": models.IDENTITY_PROPOSAL_DECISION_SCHEMA_VERSION,
+        "action": "no_change",
+        "candidate_id": None,
+        "proposed_changes": [],
+        "character_authorship": "absent",
+        "identity_relevance": "absent",
+        "global_applicability": "absent",
+        "confidence": "high",
+        "private_detail_risk": "low",
+        "character_owned_abstraction": "No durable identity change.",
+        "evidence_ref_ids": [],
+        "contradiction_candidate_ids": [],
+        "reason_code": "proposal_no_change",
+    }
+    review = {
+        "schema_version": models.IDENTITY_REVIEW_DECISION_SCHEMA_VERSION,
+        "verdict": "no_change",
+        "selected_candidate_id": None,
+        "rejected_candidate_ids": [],
+        "accepted_change_kind": None,
+        "accepted_changes": [],
+        "character_authorship": "absent",
+        "identity_relevance": "absent",
+        "coherence": "absent",
+        "global_applicability": "absent",
+        "review_confidence": "high",
+        "private_detail_risk": "low",
+        "character_owned_summary": "No durable identity change.",
+        "privacy_safe_evidence_summaries": [],
+        "reason_code": "proposal_no_change",
+    }
+    insert_run = AsyncMock(side_effect=lambda run: dict(run))
+    monkeypatch.setattr(runner, "get_growth_run", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        runner,
+        "propose_identity_growth",
+        AsyncMock(return_value=_stage(proposal)),
+    )
+    monkeypatch.setattr(
+        runner,
+        "review_identity_growth",
+        AsyncMock(return_value=_stage(review)),
+    )
+    monkeypatch.setattr(
+        runner,
+        "list_current_growth_candidates",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        runner,
+        "list_identity_revisions",
+        AsyncMock(return_value=[_revision()]),
+    )
+    monkeypatch.setattr(
+        runner,
+        "count_inferred_identity_promotions_on_local_date",
+        AsyncMock(return_value=0),
+    )
+    monkeypatch.setattr(runner, "insert_growth_run", insert_run)
+
+    result = await runner.evaluate_episode_identity_growth(
+        settled_episode={
+            "correlation_id": "correlation-1",
+            "llm_trace_id": "trace-1",
+            "evidence_refs": [_evidence_ref()],
+            "evidence_cards": [_evidence_card()],
+        },
+        current_revision=_revision(),
+    )
+
+    assert result["status"] == "no_change"
+    assert result["policy_reason_code"] == "proposal_no_change"
+    persisted_run = insert_run.await_args.args[0]
+    assert persisted_run["root_episode_ids"] == ["episode-1"]
+    assert persisted_run["source_evidence_count"] == 1
+    assert persisted_run["candidate_id"] is None
+
+
+@pytest.mark.asyncio
 async def test_explicit_episode_promotes_through_the_single_identity_owner(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

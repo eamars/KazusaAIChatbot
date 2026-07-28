@@ -92,7 +92,7 @@ def test_brain_descriptor_projects_routes_and_environment_overlay() -> None:
         environment=environment,
         overrides=overrides,
     )
-    assert len(snapshot.fields) == 78
+    assert len(snapshot.fields) == 83
 
     routes = project_brain_model_routes(snapshot=snapshot, environment=environment)
     assert len(routes) == 26

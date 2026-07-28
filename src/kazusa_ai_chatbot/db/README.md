@@ -148,7 +148,7 @@ The runtime facade exports helpers for:
   relationship insight updates;
 - user memory unit creation, validation, keyword search, vector search, and
   semantic/window updates;
-- character profile, character state, and character self-image persistence;
+- immutable character identity revisions and operational character state;
 - interaction-style image overlays for reflection-derived style guidance;
 - calendar schedule/run query helpers used by recall and calendar-owned
   repository operations;
@@ -513,11 +513,12 @@ calendar schedule/run indexes, historical scheduled-event migration indexes,
 self-cognition action-attempt indexes, self-cognition group-review
 reviewed-window indexes, and other runtime indexes required by the facade.
 
-Bootstrap is idempotent. The brain-service startup boundary separately creates
-the operational singleton, then inserts the packaged canonical identity as
-revision `0` only when the ledger is empty. Existing semantic singleton state
-fails with clean-target guidance; startup performs no legacy conversion,
-history read, replay, or backfill. Destructive data repair belongs in explicit
+Bootstrap is idempotent and never creates identity data. An operator must use
+the maintenance profile loader to insert a validated canonical identity as
+revision `0` before starting the brain service. Startup reads the identity
+ledger first and crashes before creating the operational singleton when no
+revision exists. It performs no packaged fallback, legacy conversion, history
+read, replay, or backfill. Destructive data repair belongs in explicit
 migration plans.
 
 ## Reflection Interface

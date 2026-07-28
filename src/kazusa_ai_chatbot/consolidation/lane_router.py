@@ -121,6 +121,8 @@ HumanMessage 中包含：
 - active_commitment：当前角色已经接受、且仅面向当前用户的未来行为，例如承诺、提醒、称呼规则
   或持续互动规则。
 - character_identity_growth：角色自己的认同、人格判断、边界或自我概念出现可能持久的变化。
+  亲密关系经历也可能促成角色自己的持久变化；关系对象、关系事实与私密细节仍归原有作用域，
+  只有角色自己的抽象变化进入此 lane。
   此 lane 的 task 额外返回 identity_evidence，其中 decontextualized_event 概括发生的事，
   character_cognition_summary 概括角色自身判断，visible_self_expression_summary 概括角色
   可见的自我表达。摘要保持抽象并适用于所有聊天范围。

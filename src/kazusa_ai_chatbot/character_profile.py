@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from importlib import resources
 from pathlib import Path
 
 from kazusa_ai_chatbot.character_identity_growth.models import (
@@ -13,10 +12,6 @@ from kazusa_ai_chatbot.character_identity_growth.models import (
 from kazusa_ai_chatbot.character_identity_growth.validation import (
     validate_effective_identity,
 )
-
-
-_PACKAGED_PROFILE_DIRECTORY = "character_profiles"
-_PACKAGED_PROFILE_FILENAME = "example.json"
 
 
 def _validate_profile_seed_payload(
@@ -68,29 +63,6 @@ def load_character_profile_seed(
     return _decode_profile_text(
         raw_text=raw_text,
         source_description=str(profile_path),
-    )
-
-
-def load_packaged_character_profile_seed(
-) -> CharacterEffectiveIdentityV1:
-    """Load the versioned clean-database identity seed."""
-
-    profile_resource = (
-        resources.files("kazusa_ai_chatbot")
-        .joinpath(_PACKAGED_PROFILE_DIRECTORY)
-        .joinpath(_PACKAGED_PROFILE_FILENAME)
-    )
-    try:
-        raw_text = profile_resource.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise ValueError(
-            "failed to read packaged character profile "
-            f"{_PACKAGED_PROFILE_FILENAME}: {exc}"
-        ) from exc
-
-    return _decode_profile_text(
-        raw_text=raw_text,
-        source_description=_PACKAGED_PROFILE_FILENAME,
     )
 
 

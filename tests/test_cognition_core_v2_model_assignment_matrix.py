@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 
 from kazusa_ai_chatbot.character_profile import (
-    load_packaged_character_profile_seed,
+    load_character_profile_seed,
 )
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionCoreServicesV2,
@@ -447,7 +447,10 @@ async def test_snapshot_uses_only_read_helpers_and_freezes_inputs(
         encoding="utf-8",
     )
     assert load_source_manifest(manifest_path)["case_count"] == CASE_COUNT
-    profile = dict(load_packaged_character_profile_seed())
+    _repository_root = Path(__file__).resolve().parents[1]
+    profile = dict(load_character_profile_seed(
+        _repository_root / "personalities" / "example.json",
+    ))
     profile["cognition_state"] = build_character_production_state(
         updated_at=SOURCE_TIME,
     )

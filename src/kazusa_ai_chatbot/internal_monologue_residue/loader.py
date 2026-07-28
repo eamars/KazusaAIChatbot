@@ -133,17 +133,6 @@ def build_scope_candidates(
             "rank": 1,
         })
 
-    candidates.append({
-        "scope_kind": "character_global",
-        "scope_key": build_scope_key(
-            character_id=character_id,
-            scope_kind="character_global",
-            platform="",
-            platform_channel_id="",
-            global_user_id="",
-        ),
-        "rank": 2,
-    })
     return candidates
 
 
@@ -157,9 +146,7 @@ def build_scope_key(
 ) -> str:
     """Return a stable private residue scope key."""
 
-    if scope_kind == "character_global":
-        scope_key = f"character_global:{character_id}"
-    elif scope_kind == "group_scene":
+    if scope_kind == "group_scene":
         scope_key = f"group_scene:{character_id}:{platform}:{platform_channel_id}"
     else:
         scope_key = (
@@ -218,10 +205,6 @@ def _row_matches_trigger_scope(
 
     if str(row.get("character_id") or "") != trigger_scope["character_id"]:
         return_value = False
-        return return_value
-
-    if row_scope_kind == "character_global":
-        return_value = True
         return return_value
 
     if str(row.get("platform") or "") != trigger_scope["platform"]:

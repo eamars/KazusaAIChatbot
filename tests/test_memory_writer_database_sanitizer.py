@@ -15,24 +15,19 @@ pytestmark = pytest.mark.asyncio
 CHARACTER_NAME = '杏山千纱 (Kyōyama Kazusa)'
 
 
-async def test_character_state_scan_uses_profile_self_image_lane(
-    monkeypatch,
-) -> None:
-    """Character scanning should use the remaining self-image owner."""
+async def test_retired_character_state_scope_is_absent() -> None:
+    """The perspective migration has no identity compatibility lane."""
 
-    monkeypatch.setattr(
-        sanitizer,
-        'get_character_profile',
-        AsyncMock(return_value={
-            'self_image': {'recent_window': [{'summary': 'bounded'}]},
-        }),
-    )
-
-    records = await sanitizer.scan_character_state(limit=1)
-
-    assert records[0]['before'] == {
-        'self_image': {'recent_window': [{'summary': 'bounded'}]},
+    parser = sanitizer.build_parser()
+    option_strings = {
+        option
+        for action in parser._actions
+        for option in action.option_strings
     }
+
+    assert '--scan-character-state' not in option_strings
+    assert not hasattr(sanitizer, 'SCOPE_CHARACTER_STATE')
+    assert not hasattr(sanitizer, 'scan_character_state')
 
 
 async def test_dry_run_report_rewrites_ready_records(monkeypatch) -> None:
@@ -175,7 +170,7 @@ async def test_dry_run_honors_llm_blocked_status(monkeypatch) -> None:
     assert report['records'][0]['after'] == scan_record['before']
 
 
-async def test_apply_report_uses_existing_user_and_character_helpers(
+async def test_apply_report_uses_existing_user_helpers(
     monkeypatch,
 ) -> None:
     """Apply should route reviewed rows through owning helper functions."""
@@ -185,11 +180,7 @@ async def test_apply_report_uses_existing_user_and_character_helpers(
     async def _update_unit(unit_id, after, **kwargs):
         calls.append(('unit', unit_id, after, kwargs))
 
-    async def _upsert_self_image(image_doc):
-        calls.append(('self_image', image_doc))
-
     monkeypatch.setattr(sanitizer, 'update_user_memory_unit_semantics', _update_unit)
-    monkeypatch.setattr(sanitizer, 'upsert_character_self_image', _upsert_self_image)
 
     report = {
         'dry_run': True,
@@ -216,18 +207,6 @@ async def test_apply_report_uses_existing_user_and_character_helpers(
                 },
             },
             {
-                'collection': sanitizer.SCOPE_CHARACTER_STATE,
-                'document_id': 'global',
-                'status': 'ready',
-                'after': {
-                    'self_image': {
-                        'recent_window': [
-                            {'summary': f'{CHARACTER_NAME}更重视边界表达。'},
-                        ],
-                    },
-                },
-            },
-            {
                 'collection': sanitizer.SCOPE_USER_PROFILES,
                 'document_id': 'user-2',
                 'status': 'unchanged',
@@ -238,20 +217,21 @@ async def test_apply_report_uses_existing_user_and_character_helpers(
 
     apply_result = await sanitizer.apply_report(report)
 
-    assert apply_result['applied_count'] == 2
+    assert apply_result['applied_count'] == 1
     assert apply_result['skipped_count'] == 1
     assert apply_result['blocked_count'] == 1
     assert calls[0][0] == 'unit'
     assert calls[0][3]['increment_count'] is False
-    assert calls[1][0] == 'self_image'
-    assert apply_result['blocked_records'] == [{
-        'collection': sanitizer.SCOPE_USER_PROFILES,
-        'document_id': 'user-1',
-        'status': 'blocked',
-        'notes': [
-            'user-profile relationship prose is outside the V2 migration scope'
-        ],
-    }]
+    assert apply_result['blocked_records'] == [
+        {
+            'collection': sanitizer.SCOPE_USER_PROFILES,
+            'document_id': 'user-1',
+            'status': 'blocked',
+            'notes': [
+                'user-profile relationship prose is outside the V2 migration scope'
+            ],
+        },
+    ]
 
 
 async def test_apply_persistent_memory_uses_supersede(monkeypatch) -> None:

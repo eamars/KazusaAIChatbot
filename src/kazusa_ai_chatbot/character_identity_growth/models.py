@@ -211,6 +211,7 @@ IDENTITY_CONSUMER_KINDS = frozenset({
     "relationship_social",
     "event_agency",
     "goal_threat_outcome",
+    "goal_cognition",
     "epistemic_comparison_memory",
     "text",
     "visual",
@@ -412,6 +413,7 @@ class CharacterIdentityCognitionContextV1(TypedDict):
     relationship_social: dict[str, object]
     event_agency: dict[str, object]
     goal_threat_outcome: dict[str, object]
+    goal_cognition: dict[str, object]
     epistemic_comparison_memory: dict[str, object]
 
 

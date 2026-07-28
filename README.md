@@ -338,19 +338,20 @@ flowchart TD
         SC["self_cognition worker<br/>active commitment, recent dialog, topic follow-up, group review cases"]
         REF["reflection_cycle worker<br/>hourly slot, daily channel, global promotion, affect settling"]
         ME["memory_evolution<br/>shared memory insert, supersede, merge, seed reset"]
-        GG["global_character_growth<br/>promoted trait drift"]
+        IG["character_identity_growth<br/>reviewed immutable identity revisions"]
         CONS["consolidation<br/>target plan -> source views -> lane router -> lane review -> write-intent validation -> persistence"]
         DISP["dispatcher [deterministic]<br/>registered adapter callback delivery for trusted sends"]
         TR["EpisodeTraceV2 + post-turn lifecycle<br/>immutable terminal evidence and idempotent audit"]
         CAL --> SC
         CAL --> REF
         REF --> ME
-        REF --> GG
+        REF --> IG
         REF --> SC
         SC --> DISP
         SC --> CONS
+        CONS --> IG
         CONS --> ME
-        GG --> H
+        IG --> H
         ME --> H
     end
 
@@ -653,7 +654,7 @@ cognition, and calendar scheduling remain in the platform-neutral core.
 | Self-cognition           | Idle source collection, self-cognition episodes, route tracking, and source-bound delivery | [Self-Cognition](src/kazusa_ai_chatbot/self_cognition/README.md)                    |
 | Reflection cycle         | Background reflection runs, promotion gates, prompt-safe reflection context             | [Reflection Cycle ICD](src/kazusa_ai_chatbot/reflection_cycle/README.md)               |
 | Memory evolution         | Curated shared memory lifecycle, lineage, seed reset, promoted memory writes            | [Memory Evolution ICD](src/kazusa_ai_chatbot/memory_evolution/README.md)               |
-| Global character growth  | Slow promoted-trait drift from approved reflection memory                               | [Global Character Growth ICD](src/kazusa_ai_chatbot/global_character_growth/README.md) |
+| Character identity growth | Reviewed, root-counted global identity revisions and latest-only runtime projection     | [Character Identity Growth](src/kazusa_ai_chatbot/character_identity_growth/README.md) |
 | Episode trace and lifecycle | Immutable `episode_trace.v2` settlement and idempotent post-turn audit records       | [Brain Service ICD](src/kazusa_ai_chatbot/brain_service/README.md)                    |
 
 Other project documents:
@@ -681,11 +682,17 @@ pip install -U pip
 pip install -e ".[dev]"
 ```
 
-The distribution includes only the neutral example character profile. On a
-clean database, startup atomically creates the complete native character
-singleton from that packaged example. Existing native singletons remain
-database-authoritative. Real character profiles stay outside the repository
-and are loaded only through an explicit maintenance operation.
+The service requires a manually seeded character identity ledger. Before the
+first startup against a clean database, load one complete canonical profile:
+
+```powershell
+venv\Scripts\python -m scripts.load_character_profile personalities\example.json
+```
+
+Startup reads the latest immutable identity revision and fails before intake
+when no revision exists. Existing ledgers remain database-authoritative. A
+replacement profile requires the explicit revisioned operator-reset command
+documented in [docs/HOWTO.md](docs/HOWTO.md#character-profile).
 
 Normal local operation starts the buildless Python/FastAPI control console,
 then uses the console to start or stop the brain and adapters:
@@ -743,8 +750,8 @@ src/
     self_cognition/            Idle self-cognition triggers, tracking, and delivery
     reflection_cycle/          Background reflection and promotion
     memory_evolution/          Shared memory lifecycle and seed reset
-    global_character_growth/   Slow promoted character-growth traits
-    character_profile.py       Static profile validation for native startup
+    character_identity_growth/ Reviewed identity semantics and runtime projection
+    character_profile.py       Canonical manual-seed profile validation
     db/internal_action_latches.py  Durable internal-thought continuation latches
   scripts/                     Operator and maintenance CLIs
 docs/

@@ -114,14 +114,6 @@
       "fault_selector": "producer_residue_contract"
     },
     {
-      "pattern": "src/kazusa_ai_chatbot/global_character_growth/**",
-      "owner": "character_growth",
-      "route": "character_growth",
-      "parser": "parse_llm_json_output",
-      "attempt_cap": 2,
-      "fault_selector": "producer_growth_contract"
-    },
-    {
       "pattern": "src/kazusa_ai_chatbot/media_inspection/**",
       "owner": "media_inspection",
       "route": "media_inspection",

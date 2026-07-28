@@ -23,7 +23,6 @@ from kazusa_ai_chatbot.db import (
     close_db,
     get_character_profile,
     update_user_memory_unit_semantics,
-    upsert_character_self_image,
 )
 from kazusa_ai_chatbot.db.script_operations import (
     find_persistent_memory_without_embedding,
@@ -46,7 +45,6 @@ DEFAULT_OUTPUT = Path('test_artifacts') / 'memory_writer_perspective_dry_run.jso
 
 SCOPE_USER_MEMORY_UNITS = 'user_memory_units'
 SCOPE_USER_PROFILES = 'user_profiles'
-SCOPE_CHARACTER_STATE = 'character_state'
 SCOPE_MEMORY = 'memory'
 
 MIGRATION_REWRITE_SYSTEM_PROMPT = '''\
@@ -61,7 +59,7 @@ MIGRATION_REWRITE_SYSTEM_PROMPT = '''\
 # 读取顺序
 1. 先读 collection、document_id 和字段名，再读字段内容。字段名是判断语义来源的重要证据。
 2. fact 通常记录事件、用户事实、用户偏好、承诺或对话事实；不要把用户说的“我”改成 {character_name}。
-3. subjective_appraisal、relationship_signal、character_reflection、self_image 和自我引导类 content 通常记录 {character_name} 对互动的感受、判断或未来应对；除非原文明确说这是用户的感受，否则不要把这类字段里的感受误写成用户的感受。
+3. subjective_appraisal、relationship_signal、character_reflection 和自我引导类 content 通常记录 {character_name} 对互动的感受、判断或未来应对；除非原文明确说这是用户的感受，否则不要把这类字段里的感受误写成用户的感受。
 4. memory_name 是标题，保持短而事实性；只在标题本来必须区分主体时才写名称。
 5. 只改写为满足视角、语言和名称契约所必需的文本；不要做风格润色或补充剧情。
 
@@ -137,7 +135,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument('--limit', type=int, default=500)
     parser.add_argument('--scan-active-user-memory-units', action='store_true')
     parser.add_argument('--scan-user-profiles', action='store_true')
-    parser.add_argument('--scan-character-state', action='store_true')
     parser.add_argument('--scan-persistent-memory', action='store_true')
     return parser
 
@@ -197,10 +194,6 @@ async def scan_memory_writer_records(
         batch = await scan_user_profiles(limit=remaining)
         records.extend(batch)
         remaining = max(0, limit - len(records))
-    if SCOPE_CHARACTER_STATE in scopes and remaining:
-        batch = await scan_character_state(limit=remaining)
-        records.extend(batch)
-        remaining = max(0, limit - len(records))
     if SCOPE_MEMORY in scopes and remaining:
         batch = await scan_persistent_memory(limit=remaining)
         records.extend(batch)
@@ -248,27 +241,6 @@ async def scan_user_profiles(*, limit: int) -> list[dict[str, Any]]:
             before=before,
         ))
     return records
-
-
-async def scan_character_state(*, limit: int) -> list[dict[str, Any]]:
-    """Scan singleton character-state prompt-facing memory fields."""
-
-    if limit <= 0:
-        return []
-    state = await get_character_profile()
-    if not state:
-        return []
-    before = _field_view(state, ('self_image',))
-    if not before:
-        return []
-    return [
-        _scan_record(
-            collection=SCOPE_CHARACTER_STATE,
-            document_key='_id',
-            document_id='global',
-            before=before,
-        ),
-    ]
 
 
 async def scan_persistent_memory(*, limit: int) -> list[dict[str, Any]]:
@@ -428,24 +400,10 @@ async def apply_record(record: dict[str, Any]) -> None:
         raise ValueError(
             "user-profile relationship prose is outside the V2 migration scope"
         )
-    if collection == SCOPE_CHARACTER_STATE:
-        await _apply_character_state(after)
-        return
     if collection == SCOPE_MEMORY:
         await _apply_persistent_memory(document_id, after)
         return
     raise ValueError(f'unsupported collection: {collection!r}')
-
-
-async def _apply_character_state(after: dict[str, Any]) -> None:
-    """Apply only the native character self-image lane."""
-
-    self_image = after.get('self_image')
-    if not isinstance(self_image, dict):
-        raise ValueError(
-            "character cognition-state prose is outside the V2 migration scope"
-        )
-    await upsert_character_self_image(self_image)
 
 
 async def _apply_persistent_memory(
@@ -550,8 +508,6 @@ def selected_scopes(args: argparse.Namespace) -> set[str]:
         scopes.add(SCOPE_USER_MEMORY_UNITS)
     if args.scan_user_profiles:
         scopes.add(SCOPE_USER_PROFILES)
-    if args.scan_character_state:
-        scopes.add(SCOPE_CHARACTER_STATE)
     if args.scan_persistent_memory:
         scopes.add(SCOPE_MEMORY)
     return scopes

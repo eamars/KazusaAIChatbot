@@ -215,6 +215,17 @@ def test_goal_prompt_owns_current_judgment_and_roles() -> None:
     assert "对象" in prompt
 
 
+def test_goal_prompt_uses_latest_identity_as_current_authority() -> None:
+    """Learned identity must shape goals instead of remaining appraisal data."""
+
+    prompt = " ".join(GOAL_COGNITION_PROMPT.split())
+
+    assert "semantic_context.character_identity" in prompt
+    assert "最新且权威的角色身份" in prompt
+    assert "覆盖初始种子身份" in prompt
+    assert "不得用旧习惯" in prompt
+
+
 def test_goal_prompt_treats_physical_requests_as_verbal_stance() -> None:
     """The character brain does not invent a physical actuator."""
 

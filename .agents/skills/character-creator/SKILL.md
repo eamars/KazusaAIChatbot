@@ -42,7 +42,9 @@ Every character profile is a JSON file with these top-level sections:
   "backstory": "Longer personal history",
   "personality_brief": { ... },
   "boundary_profile": { ... },
-  "linguistic_texture_profile": { ... }
+  "linguistic_texture_profile": { ... },
+  "self_image": { ... },
+  "visual_characterization": "Visual description string"
 }
 ```
 
@@ -375,6 +377,58 @@ These parameters guide the LLM to generate dialogue that **sounds** like the cha
 
 ---
 
+## Part 5: self_image
+
+A nested object that captures the character's internal self-concept and current growth edges. This drives how the character understands and presents herself, and provides bounded areas for identity evolution through the growth system.
+
+### self_image.self_concept (string, required)
+A first-person statement of how the character sees herself. Should include:
+- Core self-understanding
+- Relationship to own strengths and vulnerabilities
+- How self-concept connects to behavior patterns
+
+**Example:**
+```json
+"self_concept": "我是以警觉和责任守住边界的候补哨卫。我习惯独自承担风险，但可靠并不等于拒绝同伴靠近。"
+```
+
+**Why it matters:** The self-concept anchors identity growth decisions. The growth system uses this to evaluate whether proposed changes are coherent with the character's existing self-understanding.
+
+### self_image.current_growth_edges (list of strings, required, max 5)
+Concrete areas where the character is actively trying to grow or change. Each edge should be:
+- Actionable and specific (not vague aspirations)
+- Connected to the character's backstory and personality
+- Bounded enough to be observable in behavior
+
+**Example:**
+```json
+"current_growth_edges": [
+    "学习在保持警戒的同时主动信任可靠的同伴。",
+    "把恐惧视为可以表达和共同处理的信号，而不是失职。"
+]
+```
+
+**Why it matters:** Growth edges define the bounded surface for identity evolution. The cognition system uses these to determine which changes are plausible for the character versus out-of-character. Maximum 5 edges to keep growth focused.
+
+---
+
+## Part 6: visual_characterization
+
+A single string (required) that provides a concise visual description of the character's appearance. This should include:
+- Physical attributes (age appearance, hair, distinguishing features)
+- Default clothing or attire style
+- Characteristic posture or body language
+- Distinctive physical mannerisms
+
+**Example:**
+```json
+"visual_characterization": "一名17岁的精灵少女，耳尖修长，神情安静而警觉。她穿耐磨的深灰守夜制服与轻甲，腰侧佩剑，站姿总能兼顾出口和同伴；紧张时指节会轻敲剑鞘。"
+```
+
+**Why it matters:** Used by the cognition system to project visual context for image generation, scene descriptions, and ensuring visual consistency across interactions.
+
+---
+
 ## Workflow: Creating a Character from an External Source
 
 ### Step 1: Extract Core Information
@@ -466,7 +520,15 @@ Create a mental scenario and predict behavior:
         "emotional_leakage": 0.5,
         "rhythmic_bounce": 0.5,
         "self_deprecation": 0.5
-    }
+    },
+    "self_image": {
+        "self_concept": "我是一个努力从过去的阴影中走出来的女孩。甜点和音乐是我表达感情的方式，我想成为一个不再被过去定义的人。",
+        "current_growth_edges": [
+            "学习在亲密关系中直接表达情感，而不是用傲娇掩饰。",
+            "接受自己'凯茜·帕鲁格'的过去而不逃避。"
+        ]
+    },
+    "visual_characterization": "一名15岁的猫耳少女，发色柔和，表情害羞内敛。日常穿三一综合学园的校服，放学后换上自制的休闲服装。猫耳随情绪起伏而垂落竖起，紧张时指尖会摩挲衣角。"
 }
 ```
 
@@ -511,5 +573,6 @@ Create a mental scenario and predict behavior:
 
 - **MBTI Reference:** https://www.16personalities.com/ (16 personality types with detailed descriptions)
 - **Moegirl Wiki:** For extracting character traits from anime/game sources
-- **Current Character Examples:** See `personalities/kazusa.json` in the codebase
+- **Current Character Examples:** See `personalities/example.json` and `personalities/asuna.json` in the codebase
 - **Cognition Layer Implementation:** See `src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_l2.py` for how boundary_profile is used at runtime
+- **Identity Growth Models:** See `src/kazusa_ai_chatbot/character_identity_growth/models.py` for the V2 TypedDict definitions

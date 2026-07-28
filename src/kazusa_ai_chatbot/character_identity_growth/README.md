@@ -29,6 +29,9 @@ reflection run IDs enrich audit lineage and never add corroboration.
 Revision zero comes only from a complete canonical profile. Mongo persistence
 uses immutable full snapshots, unique repository-root claims, a max-revision
 reader, transaction-required promotion, and revisioned operator reset.
+The service never auto-seeds: an operator must create revision zero with
+`python -m scripts.load_character_profile <profile.json>` before startup.
+Missing identity fails before intake and before operational state is created.
 
 Proposal and independent review are separate background semantic stages on the
 consolidation model route. Their human payload contains a band-projected
@@ -44,3 +47,20 @@ stale-candidate rebasing, and fresh-root reversal thresholds. Semantic meaning,
 character authorship, durability, contradiction, and safe abstraction remain
 owned by the two LLM stages. The package remains free of raw database access,
 character names, and personality-specific logic.
+
+Identity is global to the character, not to one conversation partner. A close
+relationship can therefore support growth in the character's own durable
+capacity for love, trust, care, or reciprocal vulnerability. The relationship
+target, user-specific facts, private promises, exact utterances, and intimate
+details remain scoped evidence and are forbidden from the global patch. This
+allows private conversation to shape later group behavior, and group
+experience to shape later private behavior, only through a redacted
+character-owned abstraction.
+
+The latest revision is resolved once per cognition episode. Bounded partitions
+feed moral/identity, event/agency, relationship/social, goal/threat/outcome,
+existential/drive, and goal-cognition owners; `goal_cognition` includes core,
+personality, boundaries, and self-image. Separate bounded projections feed
+naming, text expression, and visual characterization. The first eligible
+episode after promotion atomically records a sanitized consumption receipt on
+the promotion run. Previous revisions remain available for review only.

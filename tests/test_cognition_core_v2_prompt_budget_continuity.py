@@ -967,6 +967,17 @@ async def test_goal_prompt_fits_maximum_evidence_without_duplication() -> None:
     assert "evidence" not in prompt_payload["semantic_context"]
     assert "goal_projection" not in prompt_payload["semantic_context"]
     assert "role_summaries" not in prompt_payload["semantic_context"]
+    assert "personality_judgment" not in (
+        prompt_payload["semantic_context"]["character_constraints"]
+    )
+    assert set(
+        prompt_payload["semantic_context"]["character_identity"]
+    ) == {
+        "core",
+        "personality",
+        "boundaries",
+        "self_image",
+    }
     assert set(prompt_payload["role_handles"]) == expected_role_handles
     assert set(prompt_payload["role_summaries"]) == expected_role_handles
     assert [

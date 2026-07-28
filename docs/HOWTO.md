@@ -212,8 +212,11 @@ REFLECTION_PHASE_MIN_SLOT_SPACING_SECONDS=60
 REFLECTION_PHASE_MAX_SLOTS_PER_PERIOD=3
 REFLECTION_DAILY_RUN_AFTER_LOCAL_TIME=04:30
 REFLECTION_PROMOTION_RUN_AFTER_LOCAL_TIME=05:00
-GLOBAL_CHARACTER_GROWTH_PASS_ENABLED=true
-GLOBAL_CHARACTER_GROWTH_PROMPT_CHAR_BUDGET=32000
+CHARACTER_IDENTITY_GROWTH_ENABLED=true
+CHARACTER_IDENTITY_GROWTH_INFERRED_MIN_EPISODES=3
+CHARACTER_IDENTITY_GROWTH_INFERRED_MIN_LOCAL_DATES=2
+CHARACTER_IDENTITY_GROWTH_MAX_INFERRED_PROMOTIONS_PER_LOCAL_DAY=1
+CHARACTER_IDENTITY_GROWTH_PROMPT_CHAR_BUDGET=18000
 
 # Persistent profile-memory policy
 PROFILE_MEMORY_DIARY_TTL_SECONDS=7776000
@@ -509,22 +512,27 @@ be used.
 
 ## Character Profile
 
-Normal startup carries only the neutral example character profile inside the
-Python package. When `character_state._id == "global"` is absent, startup
-validates that packaged example and atomically creates the complete native
-singleton, including `cognition_state.v2`. Once the singleton exists, the
-database is authoritative and startup does not overwrite its static or mutable
-state.
-
-The maintenance loader remains available for an explicitly requested profile
-operation. Its overwrite policy is separate from normal startup:
+Normal startup never creates identity data. Seed a complete canonical profile
+manually before starting the brain against a clean database:
 
 ```bash
-python -m scripts.load_character_profile personalities/example.json --force
+python -m scripts.load_character_profile personalities/example.json
 ```
 
-Use `personalities/example.json` as a compact template for an explicit
-maintenance profile. Keep real character profiles outside the repository.
+The loader validates the whole profile before writing immutable revision `0`
+and the operational character state. Re-running it without `--force`
+preserves the existing ledger. An intentional replacement creates a new
+immutable `operator_reset` revision and requires an audit identifier:
+
+```bash
+python -m scripts.load_character_profile personalities/example.json \
+  --force --operator-action-id change-ticket-123
+```
+
+If the ledger has no revision, brain startup raises an error before intake and
+does not derive identity from `character_state`, conversations, reflection,
+residue, or any packaged fallback. Use `personalities/example.json` only as a
+template; character-specific profiles can remain outside the repository.
 
 At minimum, a working profile should include:
 
@@ -609,8 +617,9 @@ uvicorn kazusa_ai_chatbot.service:app --host 0.0.0.0 --port 8000
 On startup the service:
 
 1. Runs `db_bootstrap()` to create current collections and indexes.
-2. Loads and validates the existing native character singleton, or atomically
-   seeds the packaged example profile when the database is clean.
+2. Requires and loads the latest manually seeded immutable identity revision,
+   then composes it with operational character state; missing identity stops
+   startup before intake.
 3. Hydrates persistent media descriptor cache entries.
 4. Compiles the top-level LangGraph pipeline.
 5. Starts configured MCP servers.
@@ -898,35 +907,43 @@ atomic compare-and-upsert against the `character_state.updated_at` value read
 before the LLM call; a stale state records a skipped reflection run and does
 not overwrite newer state.
 
-## Global Character Growth
+## Character Identity Growth
 
-Global character growth runs after daily global reflection promotion when the
-worker is enabled and `GLOBAL_CHARACTER_GROWTH_PASS_ENABLED=true`. It writes
-only `global_character_growth_traits` and `global_character_growth_runs`.
-Candidate generation receives a final rendered prompt bounded by
-`GLOBAL_CHARACTER_GROWTH_PROMPT_CHAR_BUDGET`, which defaults to `32000`
-characters.
+Character identity growth runs after settled episodes selected by
+consolidation and once after the daily reflection promotion when
+`CHARACTER_IDENTITY_GROWTH_ENABLED=true`. Separate proposal and review LLM
+stages decide whether evidence represents a character-owned, durable, global,
+privacy-safe identity change. Deterministic policy owns root deduplication,
+pace, reversal protection, validation, and immutable persistence.
 
-Dry-run:
+The default inferred pace requires three distinct root episodes across two
+character-local dates and permits one inferred promotion per local date.
+Explicit, independently reviewed self-redefinitions may promote immediately.
+Raise the minimum episode/date settings to slow change. A value of `0` for the
+daily promotion cap pauses inferred promotion while retaining candidates for
+review.
 
-```bash
-python -m scripts.run_global_character_growth --dry-run --limit 80
-```
-
-Apply:
-
-```bash
-python -m scripts.run_global_character_growth --apply --enable-trait-writes --limit 80
-```
-
-Rollback:
+The operator command defaults to a read-only evaluation of the previous
+character-local date:
 
 ```bash
-GLOBAL_CHARACTER_GROWTH_PASS_ENABLED=false
+python -m scripts.run_character_identity_growth
 ```
 
-Only active promoted traits enter L2 cognition through promoted reflection
-context. Emerging and stabilizing traits remain audit-only in run records.
+An intentional revision write requires both apply gates:
+
+```bash
+python -m scripts.run_character_identity_growth \
+  --character-local-date YYYY-MM-DD \
+  --apply --enable-revision-writes
+```
+
+Only the latest full revision reaches cognition, naming, text, and visual
+surfaces. Older revisions and emerging candidates remain review-only. Close
+relationships may shape global identity when evidence describes the
+character's own durable capacity for love, trust, care, or vulnerability;
+the other person's identity, private facts, promises, and intimate details
+remain scoped and cannot enter the global revision.
 
 ## Testing
 
@@ -963,4 +980,5 @@ is ignored by git.
   service-oriented deployment template that expects all required environment
   variables to be supplied.
 - The maintenance profile script is `src/scripts/load_character_profile.py`;
-  normal service startup owns profile validation and seed verification.
+  the operator owns initial seeding and normal startup verifies that a revision
+  already exists.

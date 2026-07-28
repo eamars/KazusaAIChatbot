@@ -43,15 +43,15 @@ availability.
 | `identify_group_image.py` | `python -m scripts.identify_group_image <group-id>` / `identify-group-image` | Export or inspect group image metadata by ID. |
 | `identify_user_image.py` | `python -m scripts.identify_user_image <user-id>` / `identify-user-image` | Export or inspect user image diagnostics. |
 | `inspect_consolidation_target_lifecycle.py` | `python -m scripts.inspect_consolidation_target_lifecycle [--apply]` | Dry-run report and approved apply cleanup for synthetic consolidation user rows and malformed target lifecycle data. |
-| `load_character_profile.py` | `python -m scripts.load_character_profile personalities/<file>.json` | Explicit maintenance profile operation using the shared validator; clean startup uses only the packaged example profile. |
+| `load_character_profile.py` | `python -m scripts.load_character_profile personalities/<file>.json` | Required manual seed operation for a clean identity ledger; `--force --operator-action-id ...` creates an immutable operator-reset revision. |
 | `manage_memory_knowledge.py` | `manage-memory-knowledge` | Edit and sync local memory knowledge entries. |
 | `migrate_conversation_history_envelope.py` | `python -m scripts.migrate_conversation_history_envelope [--apply]` | Repair conversation rows that violate typed-envelope storage fields or semantic-text cleanliness. |
 | `profile_embedding_prefix_modes.py` | `python -m scripts.profile_embedding_prefix_modes` | Compare embedding prefix strategies for RAG tuning. |
 | `profile_rag_retrieval.py` | `python -m scripts.profile_rag_retrieval` | Generate RAG retrieval profile cases for tuning and validation. |
 | `reembed_text_vector_embeddings.py` | `python -m scripts.reembed_text_vector_embeddings` | Replay text embedding generation for documents or collections. |
 | `reset_memory_lore.py` | `python -m scripts.reset_memory_lore --dry-run|--apply` | Reset and regenerate shared memory lore under operator control. |
-| `run_global_character_growth.py` | `python -m scripts.run_global_character_growth --dry-run` | Manual global growth pass from reflection-promoted memory. |
 | `run_reflection_cycle.py` | `python -m scripts.run_reflection_cycle hourly|daily|promote` | Run production reflection worker modes with dry-run support. |
+| `run_character_identity_growth.py` | `python -m scripts.run_character_identity_growth [--character-local-date YYYY-MM-DD] [--apply --enable-revision-writes]` | Evaluate daily root-linked reflection evidence; defaults to read-only and requires both apply gates for revision writes. |
 | `run_reflection_cycle_readonly.py` | `python -m scripts.run_reflection_cycle_readonly --lookback-hours 24` | Read-only reflection-cycle evaluator for diagnostics. |
 | `sanitize_memory_writer_perspective.py` | `python -m scripts.sanitize_memory_writer_perspective` | Offline migration and sanitization of durable memory perspective wording. |
 | `search_conversation.py` | `search-conversations` | Search conversation history with keyword or vector search. |

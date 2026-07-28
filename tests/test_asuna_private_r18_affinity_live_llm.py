@@ -279,10 +279,13 @@ def _prepare_runtime_environment(manifest: Mapping[str, Any]) -> dict[str, str]:
     if os.environ.get("KAZUSA_TEST_DB_GUARD") != "1":
         raise AssertionError("Asuna R18 E2E requires KAZUSA_TEST_DB_GUARD=1")
     from kazusa_ai_chatbot.character_profile import (
-        load_packaged_character_profile_seed,
+        load_character_profile_seed,
     )
 
-    profile = load_packaged_character_profile_seed()
+    _repository_root = Path(__file__).resolve().parents[1]
+    profile = load_character_profile_seed(
+        _repository_root / "personalities" / "asuna.json",
+    )
     age = profile.get("age")
     if isinstance(age, bool) or not isinstance(age, int) or age < 18:
         raise AssertionError("Asuna R18 E2E requires an adult profile")

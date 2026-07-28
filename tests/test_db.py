@@ -15,7 +15,6 @@ import kazusa_ai_chatbot.db._client as db_client_module
 import kazusa_ai_chatbot.db.bootstrap as db_bootstrap_module
 import kazusa_ai_chatbot.db.character as db_character_module
 import kazusa_ai_chatbot.db.conversation as db_conversation_module
-import kazusa_ai_chatbot.db.global_character_growth as db_global_growth_module
 import kazusa_ai_chatbot.db.memory as db_memory_module
 import kazusa_ai_chatbot.db.self_cognition as db_self_cognition_module
 import kazusa_ai_chatbot.db.script_operations as db_script_operations_module
@@ -25,12 +24,8 @@ from kazusa_ai_chatbot.db import (
     build_memory_doc,
     close_db,
     compose_character_profile,
-    get_character_profile,
-    get_character_runtime_state,
-    get_character_state,
     get_conversation_history,
     get_user_profile,
-    save_character_profile,
     save_conversation,
     save_memory,
     search_memory,
@@ -52,7 +47,6 @@ def _isolate_bootstrap_dependencies(monkeypatch) -> None:
         "ensure_background_work_job_indexes",
         "ensure_reflection_run_indexes",
         "ensure_interaction_style_image_indexes",
-        "ensure_global_character_growth_indexes",
         "ensure_event_log_indexes",
         "ensure_llm_trace_indexes",
         "ensure_internal_monologue_residue_indexes",
@@ -111,8 +105,6 @@ class _BootstrapDb:
             "conversation_episode_state",
             "character_reflection_runs",
             "interaction_style_images",
-            "global_character_growth_traits",
-            "global_character_growth_runs",
             "rag_cache2_persistent",
             "event_log_events",
             "event_log_snapshots",
@@ -301,35 +293,6 @@ async def test_get_conversation_history_filters():
         db.conversation_history.find.assert_called_with({
             "global_user_id": "user_123"
         })
-
-
-@pytest.mark.asyncio
-async def test_get_character_state_found():
-    db = _mock_db()
-    db.character_state.find_one = AsyncMock(return_value={
-        "_id": "global",
-        "mood": "calm",
-        "emotional_tone": "warm",
-        "recent_events": [],
-        "updated_at": "t1",
-    })
-
-    with _patched_get_db(db):
-        result = await get_character_state()
-
-    assert result["mood"] == "calm"
-    assert "_id" not in result
-
-
-@pytest.mark.asyncio
-async def test_get_character_state_not_found():
-    db = _mock_db()
-    db.character_state.find_one = AsyncMock(return_value=None)
-
-    with _patched_get_db(db):
-        result = await get_character_state()
-
-    assert result == {}
 
 
 # ── User profile ────────────────────────────────────────────────────
@@ -1079,11 +1042,6 @@ async def test_db_bootstrap_creates_platform_message_lookup_index(monkeypatch) -
     )
     monkeypatch.setattr(
         db_bootstrap_module,
-        "ensure_global_character_growth_indexes",
-        AsyncMock(),
-    )
-    monkeypatch.setattr(
-        db_bootstrap_module,
         "ensure_event_log_indexes",
         AsyncMock(),
     )
@@ -1119,11 +1077,6 @@ async def test_db_bootstrap_creates_calendar_collections_and_indexes(
     monkeypatch.setattr(
         db_bootstrap_module,
         "ensure_interaction_style_image_indexes",
-        AsyncMock(),
-    )
-    monkeypatch.setattr(
-        db_bootstrap_module,
-        "ensure_global_character_growth_indexes",
         AsyncMock(),
     )
     monkeypatch.setattr(
@@ -1184,11 +1137,6 @@ async def test_db_bootstrap_preserves_legacy_background_artifact_collection(
     monkeypatch.setattr(
         db_bootstrap_module,
         "ensure_interaction_style_image_indexes",
-        AsyncMock(),
-    )
-    monkeypatch.setattr(
-        db_bootstrap_module,
-        "ensure_global_character_growth_indexes",
         AsyncMock(),
     )
     monkeypatch.setattr(
@@ -1311,11 +1259,6 @@ async def test_db_bootstrap_creates_self_cognition_attempt_indexes(
     )
     monkeypatch.setattr(
         db_bootstrap_module,
-        "ensure_global_character_growth_indexes",
-        AsyncMock(),
-    )
-    monkeypatch.setattr(
-        db_bootstrap_module,
         "ensure_event_log_indexes",
         AsyncMock(),
     )
@@ -1361,11 +1304,6 @@ async def test_db_bootstrap_creates_group_review_window_indexes(
     )
     monkeypatch.setattr(
         db_bootstrap_module,
-        "ensure_global_character_growth_indexes",
-        AsyncMock(),
-    )
-    monkeypatch.setattr(
-        db_bootstrap_module,
         "ensure_event_log_indexes",
         AsyncMock(),
     )
@@ -1395,41 +1333,6 @@ async def test_db_bootstrap_creates_group_review_window_indexes(
 
 
 @pytest.mark.asyncio
-async def test_db_bootstrap_delegates_global_character_growth_indexes(
-    monkeypatch,
-) -> None:
-    """Bootstrap should prepare global character-growth storage."""
-
-    db = _BootstrapDb()
-    ensure_global_growth = AsyncMock()
-    monkeypatch.setattr(db_bootstrap_module, "get_db", AsyncMock(return_value=db))
-    monkeypatch.setattr(db_bootstrap_module, "enable_vector_index", AsyncMock())
-    monkeypatch.setattr(
-        db_bootstrap_module,
-        "ensure_reflection_run_indexes",
-        AsyncMock(),
-    )
-    monkeypatch.setattr(
-        db_bootstrap_module,
-        "ensure_interaction_style_image_indexes",
-        AsyncMock(),
-    )
-    monkeypatch.setattr(
-        db_bootstrap_module,
-        "ensure_global_character_growth_indexes",
-        ensure_global_growth,
-    )
-    monkeypatch.setattr(
-        db_bootstrap_module,
-        "ensure_event_log_indexes",
-        AsyncMock(),
-    )
-    await db_bootstrap_module.db_bootstrap()
-
-    ensure_global_growth.assert_awaited_once()
-
-
-@pytest.mark.asyncio
 async def test_db_bootstrap_delegates_event_log_indexes(
     monkeypatch,
 ) -> None:
@@ -1447,11 +1350,6 @@ async def test_db_bootstrap_delegates_event_log_indexes(
     monkeypatch.setattr(
         db_bootstrap_module,
         "ensure_interaction_style_image_indexes",
-        AsyncMock(),
-    )
-    monkeypatch.setattr(
-        db_bootstrap_module,
-        "ensure_global_character_growth_indexes",
         AsyncMock(),
     )
     monkeypatch.setattr(
@@ -1490,11 +1388,6 @@ async def test_db_bootstrap_configures_conversation_vector_filter_paths(
     )
     monkeypatch.setattr(
         db_bootstrap_module,
-        "ensure_global_character_growth_indexes",
-        AsyncMock(),
-    )
-    monkeypatch.setattr(
-        db_bootstrap_module,
         "ensure_event_log_indexes",
         AsyncMock(),
     )
@@ -1514,115 +1407,6 @@ async def test_db_bootstrap_configures_conversation_vector_filter_paths(
     )
 
 
-@pytest.mark.asyncio
-async def test_global_character_growth_index_bootstrap(monkeypatch) -> None:
-    """Global growth DB interface should create all required indexes."""
-
-    db = _BootstrapDb()
-    db.collections.pop("global_character_growth_traits")
-    db.collections.pop("global_character_growth_runs")
-    delattr(db, "global_character_growth_traits")
-    delattr(db, "global_character_growth_runs")
-    monkeypatch.setattr(
-        db_global_growth_module,
-        "get_db",
-        AsyncMock(return_value=db),
-    )
-
-    await db_global_growth_module.ensure_global_character_growth_indexes()
-
-    traits = db["global_character_growth_traits"]
-    runs = db["global_character_growth_runs"]
-    trait_index_names = {
-        index["kwargs"]["name"]
-        for index in traits.indexes
-    }
-    run_index_names = {
-        index["kwargs"]["name"]
-        for index in runs.indexes
-    }
-    assert trait_index_names == {
-        "global_growth_trait_id_unique",
-        "global_growth_trait_status_maturity",
-        "global_growth_trait_axis_status",
-        "global_growth_trait_source_memory",
-    }
-    assert run_index_names == {
-        "global_growth_run_id_unique",
-        "global_growth_run_status_updated",
-        "global_growth_run_source_memory",
-        "global_growth_run_source_reflection",
-    }
-
-
-# ── Character profile ─────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_get_character_profile_found():
-    """All top-level fields (minus _id) are returned."""
-    db = _mock_db()
-    db.character_state.find_one = AsyncMock(return_value={
-        "_id": "global",
-        "mood": "calm",
-        "name": "Kazusa",
-        "age": 15,
-    })
-
-    with _patched_get_db(db):
-        result = await get_character_profile()
-
-    assert result == {"mood": "calm", "name": "Kazusa", "age": 15}
-    assert "_id" not in result
-
-
-@pytest.mark.asyncio
-async def test_get_character_profile_not_found():
-    """Returns empty dict when no global doc exists."""
-    db = _mock_db()
-    db.character_state.find_one = AsyncMock(return_value=None)
-
-    with _patched_get_db(db):
-        result = await get_character_profile()
-
-    assert result == {}
-
-
-@pytest.mark.asyncio
-async def test_save_character_profile():
-    """Each profile key is $set at the top level."""
-    db = _mock_db()
-    db.character_state.update_one = AsyncMock()
-
-    profile = {"name": "Kazusa", "age": 15, "tone": "warm"}
-
-    with _patched_get_db(db):
-        await save_character_profile(profile)
-
-    db.character_state.update_one.assert_called_once_with(
-        {"_id": "global"},
-        {"$set": profile},
-        upsert=True,
-    )
-
-
-@pytest.mark.asyncio
-async def test_get_character_state_returns_same_as_profile():
-    """get_character_state is an alias for get_character_profile."""
-    db = _mock_db()
-    db.character_state.find_one = AsyncMock(return_value={
-        "_id": "global",
-        "mood": "happy",
-        "name": "Kazusa",
-        "vibe_check": "warm",
-    })
-
-    with _patched_get_db(db):
-        result = await get_character_state()
-
-    assert result == {"mood": "happy", "name": "Kazusa", "vibe_check": "warm"}
-    assert "_id" not in result
-
 
 def test_split_character_profile_runtime_state_separates_runtime_fields():
     """Static profile and runtime state should be split without DB shape changes."""
@@ -1630,10 +1414,7 @@ def test_split_character_profile_runtime_state_separates_runtime_fields():
         "_id": "global",
         "name": "Kazusa",
         "personality_brief": "sharp but kind",
-        "mood": "focused",
-        "vibe_check": "warm",
-        "character_reflection": "recent chat was calm",
-        "self_image": {"core": "steady"},
+        "self_image": {"self_concept": "steady"},
         "cognition_state": {"schema_version": "cognition_state.v2"},
         "updated_at": "t1",
     }
@@ -1643,12 +1424,9 @@ def test_split_character_profile_runtime_state_separates_runtime_fields():
     assert static_profile == {
         "name": "Kazusa",
         "personality_brief": "sharp but kind",
-        "mood": "focused",
-        "vibe_check": "warm",
-        "character_reflection": "recent chat was calm",
+        "self_image": {"self_concept": "steady"},
     }
     assert runtime_state == {
-        "self_image": {"core": "steady"},
         "cognition_state": {"schema_version": "cognition_state.v2"},
         "updated_at": "t1",
     }
@@ -1661,9 +1439,8 @@ def test_compose_character_profile_merges_static_runtime_and_identity():
         "personality_brief": "sharp but kind",
     }
     runtime_state = {
-        "mood": "focused",
-        "vibe_check": "warm",
-        "character_reflection": "recent chat was calm",
+        "cognition_state": {"schema_version": "cognition_state.v2"},
+        "updated_at": "t1",
     }
 
     result = compose_character_profile(
@@ -1675,42 +1452,9 @@ def test_compose_character_profile_merges_static_runtime_and_identity():
     assert result == {
         "name": "Kazusa",
         "personality_brief": "sharp but kind",
-        "mood": "focused",
-        "vibe_check": "warm",
-        "character_reflection": "recent chat was calm",
+        "cognition_state": {"schema_version": "cognition_state.v2"},
+        "updated_at": "t1",
         "global_user_id": "character-global-id",
-    }
-
-
-@pytest.mark.asyncio
-async def test_get_character_runtime_state_uses_runtime_projection():
-    """Runtime reader should only request mutable runtime character fields."""
-    db = _mock_db()
-    db.character_state.find_one = AsyncMock(return_value={
-        "_id": "global",
-        "mood": "calm",
-        "vibe_check": "warm",
-        "character_reflection": "recent chat was calm",
-        "self_image": {"core": "steady"},
-        "updated_at": "t1",
-    })
-
-    with _patched_get_db(db):
-        result = await get_character_runtime_state()
-
-    expected_projection = {
-        field_name: 1 for field_name in RUNTIME_CHARACTER_STATE_FIELDS
-    }
-    db.character_state.find_one.assert_awaited_once_with(
-        {"_id": "global"},
-        expected_projection,
-    )
-    assert result == {
-        "mood": "calm",
-        "vibe_check": "warm",
-        "character_reflection": "recent chat was calm",
-        "self_image": {"core": "steady"},
-        "updated_at": "t1",
     }
 
 

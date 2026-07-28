@@ -139,7 +139,7 @@ def test_howto_startup_order_matches_service_lifespan() -> None:
         content,
         (
             "db_bootstrap()",
-            "Loads and validates the existing native character singleton",
+            "Requires and loads the latest manually seeded immutable identity revision",
             "Hydrates persistent media descriptor cache",
             "Compiles the top-level LangGraph pipeline",
             "Starts configured MCP servers",

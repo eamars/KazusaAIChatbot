@@ -16,7 +16,10 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
 from kazusa_ai_chatbot.time_boundary import (
     local_time_context_from_storage_utc,
 )
-from tests.cognition_core_v2_test_helpers import canonical_user_message_episode
+from tests.cognition_core_v2_test_helpers import (
+    canonical_service_character_profile,
+    canonical_user_message_episode,
+)
 
 
 STORAGE_TIMESTAMP_UTC = "2026-05-01T00:00:00+00:00"
@@ -153,18 +156,24 @@ def test_v2_connector_preserves_episode_and_projects_current_percept() -> None:
     episode = _episode()
     original = deepcopy(episode)
     character_state = build_character_production_state(updated_at=V2_TIMESTAMP)
+    character_profile = canonical_service_character_profile(
+        marker="stage-02",
+    )
+    character_profile.update({
+        "name": "Test Character",
+        "personality_brief": {
+            "mbti": "ISTP",
+            "logic": "Keep present evidence and role ownership clear.",
+            "tempo": "Measured.",
+            "defense": "Express boundaries while preserving intent.",
+            "quirks": "Use occasional concise, characterful phrasing.",
+            "taboos": "Ground scene facts in available evidence.",
+        },
+    })
     state = {
         "cognitive_episode": episode,
         "global_user_id": "user-1",
-        "character_profile": {
-            "name": "Test Character",
-            "personality_brief": {
-                "logic": "Keep present evidence and role ownership clear.",
-                "defense": "Express boundaries while preserving intent.",
-                "quirks": "Use occasional concise, characterful phrasing.",
-                "taboos": "Ground scene facts in available evidence.",
-            },
-        },
+        "character_profile": character_profile,
         "user_input": "fallback text",
         "decontextualized_input": "fallback semantic text",
         "user_multimedia_input": [],

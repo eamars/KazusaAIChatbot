@@ -7,7 +7,6 @@ import copy
 import pytest
 
 from kazusa_ai_chatbot.memory_writer_prompt_projection import (
-    project_character_image_prompt_payload,
     project_memory_unit_extractor_prompt_payload,
     project_memory_unit_rewrite_prompt_payload,
     project_reflection_promotion_prompt_payload,
@@ -71,8 +70,7 @@ def test_noop_projection_functions_return_isolated_copies() -> None:
     projectors = [
         project_memory_unit_rewrite_prompt_payload,
         project_relationship_prompt_payload,
-        project_character_image_prompt_payload,
-        project_reflection_promotion_prompt_payload,
+            project_reflection_promotion_prompt_payload,
     ]
 
     for projector in projectors:

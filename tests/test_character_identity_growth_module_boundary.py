@@ -28,6 +28,7 @@ _OPERATOR_LOADER = (
     / "scripts"
     / "load_character_profile.py"
 )
+_SERVICE = _ROOT / "src" / "kazusa_ai_chatbot" / "service.py"
 
 
 def test_domain_package_contains_no_raw_database_operations() -> None:
@@ -122,6 +123,17 @@ def test_operator_reset_boundary_is_revisioned_and_llm_free() -> None:
     assert "save_character_profile" not in loader_source
     assert "kazusa_ai_chatbot.llm" not in owner_source
     assert ".ainvoke(" not in owner_source
+
+
+def test_runtime_has_no_identity_auto_seed_path() -> None:
+    """Only the explicit maintenance loader may create revision zero."""
+
+    service_source = _SERVICE.read_text(encoding="utf-8")
+    loader_source = _OPERATOR_LOADER.read_text(encoding="utf-8")
+
+    assert "ensure_seed_identity" not in service_source
+    assert "load_packaged_character_profile" not in service_source
+    assert "ensure_seed_identity" in loader_source
 
 
 def test_database_and_operator_growth_code_is_character_generic() -> None:

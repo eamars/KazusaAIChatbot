@@ -1,76 +1,96 @@
-"""Live disposable-database proof for packaged character startup."""
+"""Live Asuna-database proof for the manual identity-seed boundary."""
 
 from __future__ import annotations
 
+from copy import deepcopy
 import os
 
 import pytest
-from pymongo import MongoClient
 
 
-_STAGE3_DATABASE_NAME = "_test_kazusa_core_v2"
+_AUTHORIZED_DATABASE_NAME = "asuna_core_v2"
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.live_db]
 
 
-async def test_brain_clean_start_and_restart_preserve_packaged_profile(
+def _require_authorized_database() -> None:
+    """Require the explicit read-only Asuna live-DB guard."""
+
+    if os.environ.get("IDENTITY_GROWTH_DATABASE_GUARD") != "1":
+        pytest.skip("manual-seed proof requires the identity-growth guard")
+    if (
+        os.environ.get("IDENTITY_GROWTH_TEST_DATABASE")
+        != _AUTHORIZED_DATABASE_NAME
+    ):
+        pytest.skip("manual-seed proof is restricted to asuna_core_v2")
+    if os.environ.get("MONGODB_DB_NAME") != _AUTHORIZED_DATABASE_NAME:
+        pytest.skip("manual-seed proof is restricted to asuna_core_v2")
+
+
+async def test_live_startup_requires_seed_without_mutating_clean_identity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A clean database should start twice without external profile config."""
+    """A missing identity crashes before startup creates operational state."""
 
-    if os.environ.get("MONGODB_DB_NAME") != _STAGE3_DATABASE_NAME:
-        pytest.skip("clean-start proof requires the Stage 3 database")
-    if os.environ.get("KAZUSA_TEST_DB_GUARD") != "1":
-        pytest.skip("clean-start proof requires KAZUSA_TEST_DB_GUARD=1")
-    if os.environ.get("STAGE3_DATABASE_GUARD") != "1":
-        pytest.skip("clean-start proof requires STAGE3_DATABASE_GUARD=1")
-    if os.environ.get("CHARACTER_PROFILE_PATH"):
-        raise AssertionError("clean-start proof forbids profile path config")
+    _require_authorized_database()
 
     from kazusa_ai_chatbot import service
-    from kazusa_ai_chatbot.character_profile import (
-        load_packaged_character_profile_seed,
-    )
-    from kazusa_ai_chatbot.db import (
-        close_db,
-        get_character_cognition_state,
-        get_character_profile,
-    )
+    from kazusa_ai_chatbot.db import close_db
+    from kazusa_ai_chatbot.db._client import get_db
 
-    for setting_name in (
-        "BACKGROUND_WORK_WORKER_ENABLED",
-        "CALENDAR_SCHEDULER_ENABLED",
-        "REFLECTION_CYCLE_ENABLED",
-        "SELF_COGNITION_ENABLED",
-    ):
-        monkeypatch.setattr(service, setting_name, False)
-
-    client = MongoClient(
-        os.environ["MONGODB_URI"],
-        serverSelectionTimeoutMS=5_000,
+    database = await get_db()
+    revision_count_before = (
+        await database.character_identity_revisions.count_documents({})
     )
-    client.admin.command("ping")
-    client.drop_database(_STAGE3_DATABASE_NAME)
-    packaged_seed = load_packaged_character_profile_seed()
+    state_before = await database.character_state.find_one(
+        {},
+        {"_id": 0},
+    )
+    missing_character_id = (
+        f"{service.CHARACTER_GLOBAL_USER_ID}:missing-seed-proof"
+    )
+    monkeypatch.setattr(
+        service,
+        "CHARACTER_GLOBAL_USER_ID",
+        missing_character_id,
+    )
 
     try:
-        async with service.lifespan(service.app):
-            first_profile = await get_character_profile()
-            first_state = await get_character_cognition_state()
-            health_response = await service.health()
-            for field_name, expected_value in packaged_seed.items():
-                assert first_profile[field_name] == expected_value
-            assert first_state["state_scope"] == "character"
-            assert first_state["schema_version"] == "cognition_state.v2"
-            assert health_response.status == "ok"
-            assert health_response.db is True
+        with pytest.raises(
+            RuntimeError,
+            match="No character identity revision",
+        ):
+            await service._load_startup_character_profile()
 
-        async with service.lifespan(service.app):
-            restart_profile = await get_character_profile()
-            restart_state = await get_character_cognition_state()
-            assert restart_profile == first_profile
-            assert restart_state == first_state
+        revision_count_after = (
+            await database.character_identity_revisions.count_documents({})
+        )
+        state_after = await database.character_state.find_one(
+            {},
+            {"_id": 0},
+        )
+        assert revision_count_after == revision_count_before
+        assert state_after == state_before
     finally:
         await close_db()
-        client.drop_database(_STAGE3_DATABASE_NAME)
-        client.close()
+
+
+async def test_live_startup_loads_the_existing_manual_seed() -> None:
+    """The authorized manually seeded ledger supplies startup identity."""
+
+    _require_authorized_database()
+
+    from kazusa_ai_chatbot import service
+    from kazusa_ai_chatbot.db import close_db
+
+    try:
+        identity, runtime_state = (
+            await service._load_startup_character_profile()
+        )
+        identity_snapshot = deepcopy(identity)
+
+        assert identity_snapshot["name"]
+        assert identity_snapshot["self_image"]["self_concept"]
+        assert runtime_state["cognition_state"]["state_scope"] == "character"
+    finally:
+        await close_db()

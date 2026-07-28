@@ -126,6 +126,12 @@ def project_identity_for_cognition(
             "personality": deepcopy(personality),
             "boundaries": deepcopy(boundaries),
         },
+        "goal_cognition": {
+            "core": deepcopy(core),
+            "personality": deepcopy(personality),
+            "boundaries": deepcopy(boundaries),
+            "self_image": deepcopy(self_image),
+        },
         "epistemic_comparison_memory": (
             {"core": deepcopy(core)}
             if include_epistemic_core

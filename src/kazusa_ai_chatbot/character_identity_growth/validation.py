@@ -466,16 +466,60 @@ def validate_identity_proposal_decision(
         context="identity proposal decision reason_code",
         allowed_values=models.IDENTITY_GROWTH_REASON_CODES,
     )
+    character_authorship = _require_enum(
+        payload["character_authorship"],
+        context="identity proposal character_authorship",
+        allowed_values=models.CHARACTER_AUTHORSHIP_VALUES,
+    )
+    if (
+        action == "explicit_self_redefinition"
+        and character_authorship != "self_declared"
+    ):
+        raise ValueError(
+            "identity proposal explicit action requires self_declared "
+            "authorship"
+        )
+    if (
+        action in {"inferred_growth", "corroborate_candidate"}
+        and character_authorship != "inferred"
+    ):
+        raise ValueError(
+            "identity proposal inferred action requires inferred authorship"
+        )
+    if (
+        action == "no_change"
+        and reason_code not in {
+            "proposal_no_change",
+            "privacy_blocked",
+            "contradiction_blocked",
+        }
+    ):
+        raise ValueError(
+            "identity proposal no_change reason_code is inconsistent"
+        )
+    if (
+        action == "explicit_self_redefinition"
+        and reason_code != "candidate_ready"
+    ):
+        raise ValueError(
+            "identity proposal explicit reason_code is inconsistent"
+        )
+    if (
+        action in {"inferred_growth", "corroborate_candidate"}
+        and reason_code not in {
+            "candidate_emerging",
+            "candidate_ready",
+        }
+    ):
+        raise ValueError(
+            "identity proposal inferred reason_code is inconsistent"
+        )
     validated: dict[str, object] = {
         "schema_version": schema_version,
         "action": action,
         "candidate_id": candidate_id,
         "proposed_changes": patches,
-        "character_authorship": _require_enum(
-            payload["character_authorship"],
-            context="identity proposal character_authorship",
-            allowed_values=models.CHARACTER_AUTHORSHIP_VALUES,
-        ),
+        "character_authorship": character_authorship,
         "identity_relevance": _require_enum(
             payload["identity_relevance"],
             context="identity proposal identity_relevance",
@@ -689,6 +733,57 @@ def validate_identity_review_decision(
                 "identity review cannot reject a proposal no_change"
             )
 
+    reason_code = _require_enum(
+        payload["reason_code"],
+        context="identity review reason_code",
+        allowed_values=models.IDENTITY_GROWTH_REASON_CODES,
+    )
+    character_authorship = _require_enum(
+        payload["character_authorship"],
+        context="identity review character_authorship",
+        allowed_values=models.CHARACTER_AUTHORSHIP_VALUES,
+    )
+    if verdict == "no_change" and reason_code != "proposal_no_change":
+        raise ValueError(
+            "identity review no_change reason_code is inconsistent"
+        )
+    if (
+        verdict == "reject"
+        and reason_code not in {
+            "review_rejected",
+            "privacy_blocked",
+            "contradiction_blocked",
+        }
+    ):
+        raise ValueError(
+            "identity review reject reason_code is inconsistent"
+        )
+    if verdict == "accept":
+        accepted_reason_codes = {
+            "candidate_emerging",
+            "candidate_ready",
+        }
+        if reason_code not in accepted_reason_codes:
+            raise ValueError(
+                "identity review accept reason_code is inconsistent"
+            )
+        if (
+            accepted_change_kind == "explicit_self_redefinition"
+            and reason_code != "candidate_ready"
+        ):
+            raise ValueError(
+                "identity review explicit reason_code is inconsistent"
+            )
+        expected_authorship = (
+            "self_declared"
+            if accepted_change_kind == "explicit_self_redefinition"
+            else "inferred"
+        )
+        if character_authorship != expected_authorship:
+            raise ValueError(
+                "identity review accepted authorship is inconsistent"
+            )
+
     validated: dict[str, object] = {
         "schema_version": schema_version,
         "verdict": verdict,
@@ -696,11 +791,7 @@ def validate_identity_review_decision(
         "rejected_candidate_ids": sorted(rejected_candidate_ids),
         "accepted_change_kind": accepted_change_kind,
         "accepted_changes": accepted_changes,
-        "character_authorship": _require_enum(
-            payload["character_authorship"],
-            context="identity review character_authorship",
-            allowed_values=models.CHARACTER_AUTHORSHIP_VALUES,
-        ),
+        "character_authorship": character_authorship,
         "identity_relevance": _require_enum(
             payload["identity_relevance"],
             context="identity review identity_relevance",
@@ -728,11 +819,7 @@ def validate_identity_review_decision(
         ),
         "character_owned_summary": character_owned_summary,
         "privacy_safe_evidence_summaries": summaries,
-        "reason_code": _require_enum(
-            payload["reason_code"],
-            context="identity review reason_code",
-            allowed_values=models.IDENTITY_GROWTH_REASON_CODES,
-        ),
+        "reason_code": reason_code,
     }
     return_value = cast(models.IdentityReviewDecisionV1, validated)
     return return_value

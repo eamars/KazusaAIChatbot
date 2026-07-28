@@ -22,7 +22,7 @@ from kazusa_ai_chatbot.character_identity_growth.projection import (
     projected_identity_consumer_kinds,
 )
 from kazusa_ai_chatbot.character_profile import (
-    load_packaged_character_profile_seed,
+    load_character_profile_seed,
 )
 from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
 from kazusa_ai_chatbot.db._client import (
@@ -208,7 +208,10 @@ async def _prepare_identity_growth_data() -> None:
     await _drop_identity_growth_data(close_client=False)
     await ensure_character_identity_growth_indexes()
     await ensure_operational_character_state()
-    seed = load_packaged_character_profile_seed()
+    _repository_root = Path(__file__).resolve().parents[2]
+    seed = load_character_profile_seed(
+        _repository_root / "personalities" / "example.json",
+    )
     await ensure_seed_identity(
         character_id=CHARACTER_GLOBAL_USER_ID,
         seed=seed,

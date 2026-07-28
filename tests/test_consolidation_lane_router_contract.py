@@ -223,6 +223,17 @@ def test_lane_roster_includes_character_self_guidance_for_chat() -> None:
     assert "active_commitment" in roster_lanes
 
 
+def test_relationship_experience_can_route_character_owned_identity() -> None:
+    """Close relationships may shape identity without globalizing details."""
+
+    module = _lane_router_module()
+    prompt = module._ROUTER_PROMPT
+
+    assert "亲密关系经历也可能促成角色自己的持久变化" in prompt
+    assert "关系对象、关系事实与私密细节仍归原有作用域" in prompt
+    assert "角色自己的抽象变化" in prompt
+
+
 def test_router_output_accepts_only_coarse_lane_tasks() -> None:
     """Router output should contain lane tasks, not memory text or DB ops."""
 

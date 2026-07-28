@@ -22,6 +22,7 @@ from tests.cognition_baseline_worker import (
 from tests.cognition_core_v2_test_helpers import (
     canonical_cognition_output,
     canonical_episode,
+    canonical_service_character_profile,
 )
 from kazusa_ai_chatbot.cognition_core_v2.action_authorization import (
     derive_action_route,
@@ -161,6 +162,32 @@ def test_worker_v2_validator_accepts_canonical_user_scope() -> None:
 def _surface_state_for_runtime_limit() -> dict[str, object]:
     """Build a committed surface state with a trusted runtime override."""
 
+    character_profile = canonical_service_character_profile(
+        marker="runtime-limit",
+    )
+    character_profile.update({
+        "name": "明日奈",
+        "personality_brief": {
+            "mbti": "ISTP",
+            "logic": "清晰",
+            "tempo": "适中",
+            "defense": "克制",
+            "quirks": "温和",
+            "taboos": "保持真实",
+        },
+        "linguistic_texture_profile": {
+            "fragmentation": 0.4,
+            "hesitation_density": 0.4,
+            "counter_questioning": 0.4,
+            "softener_density": 0.4,
+            "formalism_avoidance": 0.4,
+            "abstraction_reframing": 0.4,
+            "direct_assertion": 0.4,
+            "emotional_leakage": 0.4,
+            "rhythmic_bounce": 0.4,
+            "self_deprecation": 0.4,
+        },
+    })
     return {
         "cognitive_episode": canonical_episode(
             episode_id="runtime-limit-episode",
@@ -168,28 +195,7 @@ def _surface_state_for_runtime_limit() -> dict[str, object]:
         ),
         "cognition_core_output": canonical_cognition_output(),
         "action_results": [],
-        "character_profile": {
-            "name": "明日奈",
-            "personality_brief": {
-                "logic": "清晰",
-                "tempo": "适中",
-                "defense": "克制",
-                "quirks": "温和",
-                "taboos": "保持真实",
-            },
-            "linguistic_texture_profile": {
-                "fragmentation": 0.4,
-                "hesitation_density": 0.4,
-                "counter_questioning": 0.4,
-                "softener_density": 0.4,
-                "formalism_avoidance": 0.4,
-                "abstraction_reframing": 0.4,
-                "direct_assertion": 0.4,
-                "emotional_leakage": 0.4,
-                "rhythmic_bounce": 0.4,
-                "self_deprecation": 0.4,
-            },
-        },
+        "character_profile": character_profile,
         "action_availability_runtime": {
             "scheduler_status": "unavailable",
             "worker_status": {

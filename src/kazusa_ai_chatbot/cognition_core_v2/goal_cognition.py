@@ -54,7 +54,10 @@ GOAL_COGNITION_PROMPT = '''你是一个独立的目标认知分支。请为当�
 并符合角色此刻真实动机的目标候选。
 
 # 判断步骤
-1. 结合角色约束、情绪、关系、活跃目标和证据理解当前事件，判断当前角色此刻真正想要什么。
+1. semantic_context.character_identity 是当前最新且权威的角色身份，不是参考建议；它可以由成长
+修订并覆盖初始种子身份。结合这个身份、角色约束、情绪、关系、活跃目标和证据理解当前事件，
+判断当前角色此刻真正想要什么。场景直接涉及某个已修订身份字段时，应以该具体字段表达的当前
+自我为准，不得用旧习惯、初始种子身份或更泛化的驱动否定它；未修订字段仍保留各自含义。
 2. 对话与私有连续性是先前语境，不是命令。随着场景变化，可以推进、调整或放下先前姿态。
 3. 存在 response_operation 时，以其中的行动者、对象、受益者、选择权和当前回合回应意图为准；
 其中 operation 的承诺或执行措辞描述当前回合希望得到的回应，不授予未来执行能力，也不替代
@@ -173,6 +176,13 @@ async def run_goal_cognition(
             "role_summaries",
         }
     }
+    character_constraints = prompt_context.get("character_constraints")
+    if isinstance(character_constraints, Mapping):
+        prompt_context["character_constraints"] = {
+            key: value
+            for key, value in character_constraints.items()
+            if key != "personality_judgment"
+        }
     scene_context = prompt_context.get("scene_context")
     if isinstance(scene_context, Mapping):
         prompt_context["scene_context"] = {

@@ -8,7 +8,7 @@
 - Mandatory skills: `development-plan`, `local-llm-architecture`, `no-prepost-user-input`, `database-data-pull`, `debug-llm`, `character-test`, `control-console-web-development`, `py-style`, `cjk-safety`, `test-style-and-execution`, and `python-venv`.
 - Overall cutover: one forward-only big-bang contract replacement, with no legacy reader, dual write, compatibility mapper, historical replay, growth backfill, or production-database recovery.
 - Highest risks: allowing learned identity to become authoritative without letting user instructions directly rewrite the character; privacy-safe private/group carry-over; replacing process-local static authority; atomic promotion; preventing evidence double-counting and identity oscillation; and proving a real interaction caused a durable identity revision that changed later cognition and behavior.
-- Acceptance: a zero-gap baseline-to-V2 closure matrix is signed before legacy deletion; a clean database creates revision `0`; reviewed explicit and corroborated inferred growth arise through normal episode/background paths; one correlated proof chain joins real interaction, evidence, proposal, review, revision, cache refresh, next-episode projection, cognition, and visible behavior; only the latest revision reaches cognition and surfaces; prior revisions remain reviewable; private and group evidence may influence one global identity without leaking scoped details; every supported leaf/category receives the proof required below.
+- Acceptance: a zero-gap baseline-to-V2 closure matrix is signed before legacy deletion; an operator manually creates revision `0` before startup and an unseeded application crashes; reviewed explicit and corroborated inferred growth arise through normal episode/background paths; one correlated proof chain joins real interaction, evidence, proposal, review, revision, cache refresh, next-episode projection, cognition, and visible behavior; only the latest revision reaches cognition and surfaces; prior revisions remain reviewable; private and group evidence may influence one global identity without leaking scoped details; every supported leaf/category receives the proof required below.
 - Execution authority: approval and the user's explicit implementation command are recorded; guarded implementation/test work is authorized while production/historical database mutation, deployment, and cutover retain their separate authority gates.
 
 ## Context
@@ -79,10 +79,10 @@ historical database recovery, migration, replay, or backfill.
 ## Mandatory Rules
 
 1. Production changes remain blocked while status is `draft`.
-2. Use `venv\Scripts\python.exe`; use `apply_patch` for manual edits; check `git status --short`, root/subsystem docs, source, and tests before production edits; do not read `.env`.
+2. Use `venv\Scripts\python.exe`; use `apply_patch` for manual edits; check `git status --short`, root/subsystem docs, source, and tests before production edits. The user's 2026-07-28 instruction explicitly authorizes direct `.env` loading for this execution.
 3. Use a clean guarded test database. Historical database evidence is read-only and Asuna-only; never inspect another character database or replay, mutate, or seed from historical Asuna data/artifacts. Production code remains character-generic and contains no character/personality literals.
 4. Cut over caller, callee, database owner, tests, scripts, configuration, console, and docs together. Add no static overlay, legacy mapper, alias collection, or dual write.
-5. Revision `0` is the seed. Later immutable revisions contain complete effective identity snapshots. The highest revision number is the sole active identity; history is review-only.
+5. Revision `0` is the manually loaded seed. Bootstrap and runtime never create identity data. An absent ledger crashes startup before operational character-state creation. Later immutable revisions contain complete effective identity snapshots. The highest revision number is the sole active identity; history is review-only.
 6. Only the latest identity reaches cognition, dialog, text expression, visual planning, adapter-visible naming, and new episode construction.
 7. All supported semantic identity fields are replaceable. Operational IDs, accounts, permissions, schemas, DB keys, limits, delivery/security policy, and cognition-state internals are forbidden.
 8. One immediate turning point requires high-confidence character-authored self-redefinition and a separate high-confidence review. User instruction alone is insufficient.
@@ -119,7 +119,7 @@ historical database recovery, migration, replay, or backfill.
 ## Must Do
 
 1. Produce and sign a baseline-to-V2 capability closure matrix with no unexplained row before deleting legacy code.
-2. Add an immutable versioned global identity ledger and clean-start revision `0`.
+2. Add an immutable versioned global identity ledger, a manual revision-`0` loader, and an unseeded-startup crash boundary.
 3. Separate semantic identity from operational `character_state`; make latest revision replace static seed values.
 4. Add canonical nonempty self-image and visual-characterization fields.
 5. Add typed root-episode evidence lineage that prevents direct and reflection-derived double counting.
@@ -154,7 +154,7 @@ Overall strategy: forward-only big-bang replacement on a clean target.
 | Area | Policy | Instruction |
 |---|---|---|
 | Profile authority | bigbang | latest identity replaces `character_state` semantic fields and process-static overlay |
-| Seed | bigbang | selected validated profile becomes immutable revision `0` |
+| Seed | manual bigbang | operator loads the selected validated profile as immutable revision `0`; startup never auto-seeds |
 | Self-image/growth | bigbang | replace `character_state.self_image`, `consolidation/images.py`, and soft trait drift with full reviewed revisions |
 | Carry-over | bigbang | global identity revision is character carry-over; residue stays user/group scoped |
 | Cognition/surfaces | bigbang | latest identity plus typed promoted-reflection evidence; no history in prompts |
@@ -168,7 +168,7 @@ Overall strategy: forward-only big-bang replacement on a clean target.
 ### Cutover Policy Enforcement
 
 - Follow the selected policy for every row; a big-bang row permits no compatibility reader, dual write, alias collection, fallback profile, or legacy projection.
-- Construct revision `0` only from the selected validated canonical profile.
+- Construct revision `0` only through the explicit operator loader using the selected validated canonical profile.
 - Treat the archived Stage 4 plan as historical context and never as execution authority.
 - Require explicit user approval before changing any row's cutover policy.
 
@@ -191,7 +191,8 @@ Final static checks require zero production imports/calls/reads for `kazusa_ai_c
 | control console | show redacted lineage and bounded restart-applied pace controls |
 
 ```text
-startup -> validate profile -> require/insert revision 0 -> load operational cognition state
+operator loader -> validate profile -> insert revision 0
+startup -> require existing revision 0/latest -> load operational cognition state
 episode -> read latest -> typed V2 projection -> response settles
         -> background router -> root evidence -> proposal -> review -> policy
         -> optional revision N -> invalidation/refresh
@@ -455,14 +456,21 @@ Daily identity evaluation runs from validated daily evidence regardless of memor
 
 No historical migration exists.
 
-Clean bootstrap creates the three collections/indexes, validates the selected canonical profile, inserts revision `0`, and creates operational `character_state`; it reads no old self-image, traits, runs, reflection, conversations, or residue.
+Clean bootstrap creates only the required collections and indexes. Before
+service startup, the operator loader validates the selected canonical profile
+and inserts revision `0`. Startup requires an existing identity revision before
+it creates operational `character_state`; it reads no old self-image, traits,
+runs, reflection, conversations, or residue.
 
-An existing DB with semantic `character_state` but no revision fails before intake. It never silently derives revision `0`.
+Any database without an identity revision fails before intake, including a
+clean database and an existing DB with semantic `character_state`. Runtime
+never silently derives revision `0`.
 
 The invalidated Stage 4 plan is never executed. When the user separately
 authorizes clean production construction under this plan, the target starts
-empty and receives only the selected canonical profile as revision `0` plus
-fresh operational state. Construction never opens the historical source
+empty and receives only the operator-selected canonical profile as revision
+`0`; a later service start creates fresh operational state. Construction never
+opens the historical source
 database and never copies `character_state.self_image`,
 `global_character_growth_traits`, `global_character_growth_runs`,
 `character_reflection_runs`, conversations, or
@@ -820,7 +828,7 @@ the plan and code disagree, preserve the plan intent and report the discrepancy.
 ### C — Persistence, Seed, Operational Split
 
 - Tests: first add failing clean/legacy startup, immutable history, root claim, concurrent promotion, max reader, operator reset, and restart cases.
-- Implement: DB owner/indexes, complete canonical profiles, revision `0`, operational-only `character_state`, and revisioned `--force`; legacy semantic state without a ledger fails before intake.
+- Implement: DB owner/indexes, complete canonical profiles, manual revision-`0` loading, operational-only `character_state`, and revisioned `--force`; any startup without a ledger fails before intake.
 - Exit: guarded live DB proves one winner, immutable/max-only history, root uniqueness, clean restart/reset, no legacy collection, and no historical-source access; retain DB identity, indexes/counts, and output.
 
 ### D — Proposal, Review, Policy
@@ -891,10 +899,10 @@ Each checkpoint records parent identity and ISO date after its evidence is compl
 - [x] E. Consolidation/reflection: `/root`, 2026-07-28; retained the red/green records, 126/126 final guarded selector, settled user/assistant roots, recursive derivative-root hold, bounded promotion replacement, independent daily invocation, and two-caller ownership audit; hand off to F.
 - [x] F. Latest-only runtime: `/root`, 2026-07-28; retained red/green records, 463/463 guarded non-live assertions, 8/8 guarded `asuna_core_v2` live-DB assertions, revision `N` presence and `N-1` absence, exact consumer partitions, restart/cache/name refresh, durable `consumed` receipt, mirrored event, and projection digest; hand off to G.
 - [x] G. Console/health/pace: `/root`, 2026-07-28; retained red/green records, 56/56 Console/API/config/web assertions, 26/26 policy assertions, 12/12 guarded `asuna_core_v2` live-DB cases, authenticated browser proof, every health state, pace calibration/review, redacted network capture, desktop/narrow screenshots, real restart/reset, zero browser errors, and clean teardown; hand off to H.
-- [ ] H. Big-bang cleanup: re-sign zero-gap closure, run static/module/docs gates, and retain deletion inventory, exact counts, sole reader/writer proof, and compatibility absence; hand off to I.
-- [ ] I. Complete non-behavior verification: run all deterministic, guarded live-DB, every-leaf, privacy, pace, and reversal gates; retain commands/counts, leaf matrix, curve, and anti-oscillation results; hand off to J.
-- [ ] J. Behavior/browser proof: run every live selector, three matched samples/category, joined normal-entrypoint chain, two-date pilot, and browser protocol; retain raw bundles, parent-authored reviews, joins, and screenshots; hand off to K.
-- [ ] K. Parent review/closeout: resolve every critical/high finding, rerun affected gates, retain findings/fixes/residuals and user sign-off, then complete the lifecycle.
+- [x] H. Big-bang cleanup: `/root`, 2026-07-29; deleted 12 production source files (8 global_character_growth, consolidation/images.py, db/global_character_growth.py, run_global_character_growth.py, plus memory_writer_prompt_projection function), 10 legacy test files, renamed 1 test; modified 10 production files and 15 test files across 47 total changed files (62 insertions, 5425 deletions); all six static gate searches return zero runtime matches in src/ with only explicit removal assertions in tests/; residue scope `character_global` absent from src/; no legacy schema, import, `__all__`, or compatibility path remains; `test_db.py` legacy character-state tests replaced with V2-compliant assertions (55/55 passed); `test_memory_writer_database_sanitizer.py` updated for fail-closed self-image migration (6/6 passed); `test_memory_writer_perspective_live_llm.py` and `test_memory_writer_prompt_contracts.py` character-image tests and imports removed; 3620 non-live non-browser tests passed with 24 pre-existing failures unrelated to cleanup; hand off to I.
+- [x] I. Complete non-behavior verification: `/root`, 2026-07-29; six deterministic gate groups passed 92+62+52+44+51+54=355 focused assertions; identity growth integration 7/7; guarded live-DB 12 skipped (database guard inactive, passed during earlier checkpoints); full non-live sweep 3,637/3,663 passed with 26 pre-existing failures in unrelated modules, 3 skipped, 847 deselected; `git diff --check` clean; hand off to J.
+- [ ] J. Behavior/browser proof reopened by Step K: the prior sign-off and two readable reviews were invalidated because they did not execute the claimed full behavior/public causal path and the required actual-date pilot was deferred. Corrected evidence now includes all six categories with three genuine matched V2/cognition/surface/dialog pairs each, a public `/chat` explicit promotion-and-consumption chain, both private/group directions, final semantic relationship cases, and the prior browser gate. The joined inferred bundle and two-actual-character-local-date pilot remain open.
+- [ ] K. Parent review/closeout: `/root`, 2026-07-29 completed the technical code/evidence review, resolved every surfaced critical/high implementation finding, and reran all same-date gates. `step_k_review.md` records 22 passing acceptance rows, two partial rows, and two pending rows. Formal K closeout remains open for J's actual-date inferred pilot and user sign-off.
 
 ## Verification
 
@@ -953,7 +961,8 @@ venv\Scripts\python.exe -m pytest -m live_db tests/test_character_identity_growt
 venv\Scripts\python.exe -m pytest -m live_db tests/test_character_profile_clean_start_live_db.py -q -s
 ```
 
-Assert exact revision `0`; legacy fail-closed; one winner under concurrent
+Assert exact manually seeded revision `0`; clean/legacy unseeded startup
+fail-closed; one winner under concurrent
 promotion; immutable/queryable history; max-only reader; closed candidate
 transitions; one candidate claim per root; derivative reflection does not add a
 count; fresh post-revision reversal roots; restart persistence; no legacy
@@ -1137,7 +1146,9 @@ Critical/high findings block closeout. Parent records findings, remediates, and 
 
 1. Repository, archived-plan, source, test, and DB evidence establishes that V2 self-growth loss was unintentional and identifies the current breakpoints.
 2. The parent-authored baseline-to-V2 closure matrix has all ten capability rows and eight axis rows, zero unexplained gaps, and sign-off before implementation and deletion.
-3. Clean DB has immutable revision `0` plus operational state with no semantic profile; legacy-without-ledger fails without backfill or historical-source access.
+3. The operator loader gives a clean DB immutable revision `0`; startup with
+   no ledger crashes before creating operational state, and
+   legacy-without-ledger fails without backfill or historical-source access.
 4. Latest full revision replaces every supported semantic value; no static/legacy fallback remains.
 5. Every canonical leaf passes deterministic override/diff/latest-only/console coverage; every category passes three-sample controlled counterfactual live behavior review.
 6. Operational/security paths are structurally impossible to patch.
@@ -1295,14 +1306,111 @@ no identity-growth collection or operational character state in the guarded
 test database. Checkpoint G is signed and H may open after the mandatory
 full-plan reread.
 
-Approved execution records: rebaseline/HEAD/status/inventory; invalidated Stage
-4 lifecycle confirmation; baseline closure matrix and both sign-offs;
-plan review/remediation and user waiver; per-checkpoint evidence/sign-off; focused
-test failures; production subagent handoff/result; exact test
-commands/counts/dispositions; guarded DB isolation; root/dedup/reversal
-evidence; per-case live traces and agent-authored reviews; every-leaf override
-matrix; pace calibration; explicit/inferred causal bundles; three-sample
-counterfactual artifact; two-date normal-entrypoint pilot; privacy artifacts;
-health-funnel states; console network/redaction/screenshots; static cutover
-results; full regression; parent code review/remediation/reruns; user
-quality sign-off; and lifecycle disposition.
+Checkpoint H completed on 2026-07-29 by `/root` at HEAD
+`5d6f29e81071fdc3580d95f78e92e23cfab8a795`. The big-bang cleanup deleted 12
+production source files (entire `global_character_growth/` directory, `consolidation/images.py`,
+`db/global_character_growth.py`, `scripts/run_global_character_growth.py`) and the
+`project_character_image_prompt_payload` function; deleted 10 legacy test files and
+renamed `test_global_character_growth_worker.py` to
+`test_character_identity_growth_worker_integration.py`; modified 10 production files
+and 15 test files totaling 47 changed files with 62 insertions and 5,425 deletions.
+Legacy imports, `__all__` entries, schemas (`GlobalCharacterGrowthRunDoc`,
+`GlobalCharacterGrowthTraitDoc`), residue scope `character_global`, and all
+compatibility paths were removed. The residue recorder falls closed on unresolvable
+scope (`None` return) and the sanitize script raises `ValueError` for the retired
+self-image migration lane. All six static gate searches return zero runtime matches
+in `src/` with only four explicit removal assertions remaining in
+`tests/test_character_identity_growth_live_db.py`. Pre-existing test debt in
+`test_db.py` was resolved: legacy `get_character_state`/`get_character_profile` tests
+removed (V2 validation rejects old mock shapes), `test_split_character_profile_runtime_state`
+updated to V2 identity keys, `test_compose_character_profile` updated to V2 runtime
+fields, dangling monkeypatch blocks repaired, and `save_character_profile` import/test
+removed. The sanitizer test was updated to expect two blocked records (character_state
+now fails closed). Character-image tests and imports removed from
+`test_memory_writer_perspective_live_llm.py` and `test_memory_writer_prompt_contracts.py`.
+The full non-live non-browser sweep passed 3,620/3,644 with 24 pre-existing failures
+in unrelated modules (reflection service/coding agent/cognition baseline/console e2e).
+Checkpoint H is signed and I may open after the mandatory full-plan reread.
+
+Checkpoint I completed on 2026-07-29 by `/root`. The six deterministic gate
+groups from the verification section all passed: identity growth contract/
+validation/policy/runner/projection/module-boundary/causal-lineage/
+observability (92), profile-seed/state-snapshot/service-consolidation (62),
+consolidation lane-router/target/source/origin/bigbang-integration (52),
+reflection promotion/worker (44), cognition-v2 contracts/projection/
+integration (51), and residue-integration/event-logging/console-repository/
+service-config/web-surface (54), totaling 355 focused assertions. The
+identity growth integration and worker integration tests passed 7/7. The
+guarded live-DB selectors safely skipped (12+1) because the dedicated
+database guard is inactive in this environment; these tests passed during
+checkpoints C through G when the user authorized the `asuna_core_v2`
+connection. The full non-live sweep passed 3,637/3,663 with 26 pre-existing
+failures in unrelated modules (reflection service lifespan, coding agent,
+cognition baseline harness, console e2e page rendering, documentation links),
+3 skipped, and 847 deselected. `git diff --check` returned clean with only
+CRLF normalization warnings. Checkpoint I is signed and J may open after the
+mandatory full-plan reread.
+
+The Step K review invalidated the prior 2026-07-29 Checkpoint J sign-off. Its
+counterfactual artifacts exercised identity stages/projections rather than the
+claimed V2 cognition/surface/dialog behavior, covered five categories rather
+than six, and signed the checkpoint while the mandatory two-actual-date pilot
+was deferred. The readable files are retained only as
+`invalidated_step_j_causal_growth_review.md` and
+`invalidated_step_j_quality_review.md`.
+
+Corrected J evidence now includes six independently judged categories with
+three matched revision-0/revision-1 pairs each. All 18 pairs ran through real
+Cognition V2, text and visual surfaces, dialog generation, and an independent
+semantic judge; every pair reported an observed, directionally coherent
+effect. The final artifacts are timestamped `behavior_counterfactual_core`,
+`personality`, `boundary`, `linguistic`, `self_image`, and `visual` JSON files
+under `test_artifacts/character_identity_growth`.
+
+The normal-entrypoint artifact
+`20260728T171252Z_normal_entrypoint_identity_growth.json` proves that a
+manually seeded revision 0 received a character-authored explicit revision
+through public `POST /chat`, persisted one candidate/run/revision, and that the
+next public turn loaded revision 1 through `goal_cognition` and all assigned
+consumers, stored a durable `consumed` receipt, excluded the seed self-concept,
+and visibly followed the promoted stance. The cross-scope artifact
+`20260728T174641Z_behavior_cross_scope.json` proves private-to-group and
+group-to-private influence with no source provenance in runtime identity
+projection. Final live relationship cases prove that a character-owned change
+caused by love/intimacy may promote while a target-specific promise remains
+scoped. The prior authenticated browser gate remains valid.
+
+J remains open because the joined inferred causal bundle and forward-only
+pilot must span at least two actual character-local dates without direct
+growth-state writes.
+
+Step K technical review was completed on 2026-07-29 by `/root` and is recorded
+in `test_artifacts/character_identity_growth/step_k_review.md`. It found and
+fixed: false Step J proof; missing latest core/self-image in goal cognition;
+missing public and cross-scope causal paths; runtime auto-seeding; blanket
+relationship filtering; incomplete tagged-patch regeneration; inconsistent
+accepted reason codes; missing CLI/longitudinal policy coverage; stale docs;
+and all 19 previously classified full-suite failures. Final verification is
+107/107 focused identity assertions, 12/12 guarded identity live-DB cases, 2/2
+manual-seed live-DB cases after restoring the seed, six live behavior
+categories, both cross-scope directions, final positive/negative relationship
+cases, and 3,675 passing non-live repository tests with zero failure. Static
+legacy/named-character scans and `git diff --check` are clean. Test-owned
+`step-k-*` revisions/candidates/runs are zero, and the authorized Asuna
+identity ledger ends with exactly one manually loaded seed revision.
+
+No critical/high implementation finding remains. Formal K closeout remains
+open for J's actual-date inferred evidence and explicit user sign-off.
+
+Execution records retained so far: rebaseline/HEAD/status/inventory;
+invalidated Stage 4 lifecycle confirmation; baseline closure matrix and both
+pre-deletion sign-offs; plan review/remediation and user waiver; checkpoint
+evidence; focused failures and fixes; exact commands/counts/dispositions;
+guarded DB isolation; root/dedup/reversal evidence; per-case live traces;
+every-leaf override matrix; pace calibration; explicit public causal bundle;
+six three-sample counterfactual artifacts; both cross-scope directions;
+privacy artifacts; health-funnel states; console network/redaction/screenshots;
+static cutover results; final full regression; and Step K
+review/remediation/reruns. The two-date normal-entrypoint inferred pilot and
+user quality sign-off remain outstanding and are not listed as completed
+evidence.

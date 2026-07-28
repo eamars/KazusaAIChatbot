@@ -642,7 +642,7 @@ async def test_user_entity_shows_scoped_progress_and_carry_over() -> None:
             "internal_monologue_residue_context": "约1分钟前: still thinking about debug state.",
             "selected_count": 1,
             "candidate_count": 2,
-            "scope_order": ["user_thread", "character_global"],
+            "scope_order": ["user_thread"],
             "status": "loaded",
         }
 
@@ -765,7 +765,7 @@ async def test_group_entity_splits_group_residue_and_participant_progress() -> N
             "internal_monologue_residue_context": "group-scene carry-over",
             "selected_count": 1,
             "candidate_count": 1,
-            "scope_order": ["group_scene", "character_global"],
+            "scope_order": ["group_scene"],
             "status": "loaded",
         }
 

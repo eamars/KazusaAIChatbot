@@ -1,5 +1,4 @@
-"""One-shot startup routine that ensures collections, indices, and seeded
-documents exist.
+"""One-shot startup routine that ensures collections and indices exist.
 
 All operations are idempotent — safe to run on every service start.
 """
@@ -73,7 +72,7 @@ CALENDAR_RUNS_COLLECTION = "calendar_runs"
 
 
 async def db_bootstrap() -> None:
-    """Create all required collections, indices, and seeded documents.
+    """Create all required collections and indices.
 
     Called once at service startup. Safe to call repeatedly.
     """

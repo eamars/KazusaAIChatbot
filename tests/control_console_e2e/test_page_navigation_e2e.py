@@ -368,10 +368,8 @@ def test_owner_lookup_tables_render_nested_values_readably(
                       self_image: {
                         status: 'available',
                         items: [{
-                          historical_summary: 'First self image line\\nSecond self image line',
-                          milestones: [
-                            {title: 'joined band', year: '2026'}
-                          ]
+                          self_concept: 'First self image line\\nSecond self image line',
+                          current_growth_edges: ['joined band']
                         }]
                       },
                       cognition_state: {
@@ -411,7 +409,7 @@ def test_owner_lookup_tables_render_nested_values_readably(
         assert "Second profile line" in profile_text
         assert "First self image line" in self_image_text
         assert "Second self image line" in self_image_text
-        assert "title: joined band" in self_image_text
+        assert "joined band" in self_image_text
         for selector, expected_text in (
             ("#character-profile-table .character-prose", "First profile line"),
             ("#character-self-image-table .character-prose", "First self image line"),
@@ -479,19 +477,11 @@ def test_character_page_uses_readable_profile_self_image_and_growth_panels(
                       self_image: {
                         status: 'available',
                         items: [{
-                          historical_summary: 'First self image paragraph\\n\\nSecond self image paragraph',
-                          recent_window: [
-                            {
-                              timestamp: '2026-06-19T01:21:23+00:00',
-                              summary: 'She relaxed into ordinary conversation.'
-                            },
-                            {
-                              timestamp: '2026-06-19T03:20:12+00:00',
-                              summary: 'She answered with a warmer, steadier tone.'
-                            }
-                          ],
-                          last_updated: '2026-06-19T03:20:12+00:00',
-                          synthesis_count: 1685
+                          self_concept: 'First self image paragraph\\n\\nSecond self image paragraph',
+                          current_growth_edges: [
+                            'She relaxed into ordinary conversation.',
+                            'She answered with a warmer, steadier tone.'
+                          ]
                         }]
                       },
                       cognition_state: {
@@ -503,25 +493,23 @@ def test_character_page_uses_readable_profile_self_image_and_growth_panels(
                         status: 'available',
                         items: [
                           {
-                            trait_id: 'gct_raw_identifier',
-                            growth_axis: 'clarity',
-                            trait_name: 'Clear intent handling',
-                            guidance: 'Ask one grounded follow-up before guessing.',
-                            strength: 0.36272249999999995,
-                            status: 'active',
-                            maturity_band: 'emerging',
-                            evidence_count: 3,
+                            kind: 'identity_candidate',
+                            change_kind: 'inferred_growth',
+                            status: 'emerging',
+                            proposed_paths: ['self_image.self_concept'],
+                            base_revision_number: 0,
+                            root_count: 3,
+                            local_date_count: 2,
                             updated_at: '2026-06-19T03:20:12+00:00'
                           },
                           {
-                            trait_id: 'gct_second_identifier',
-                            growth_axis: 'boundary_timing',
-                            trait_name: 'Boundary timing',
-                            guidance: 'Hold the refusal posture without overexplaining.',
-                            strength: 0.27,
-                            status: 'active',
-                            maturity_band: 'observed',
-                            evidence_count: 2
+                            kind: 'identity_candidate',
+                            change_kind: 'explicit_self_redefinition',
+                            status: 'ready',
+                            proposed_paths: ['boundary_profile.control_sensitivity'],
+                            base_revision_number: 0,
+                            root_count: 1,
+                            local_date_count: 1
                           }
                         ]
                       },
@@ -556,29 +544,22 @@ def test_character_page_uses_readable_profile_self_image_and_growth_panels(
         ) == "pre-line"
 
         self_image = page.locator("#character-self-image-table")
-        assert self_image.locator(".timeline-item").count() == 2
         self_image_text = self_image.inner_text()
         assert "She relaxed into ordinary conversation." in self_image_text
         assert "She answered with a warmer, steadier tone." in self_image_text
-        assert "Long-term self-image" in self_image_text
-        assert "Historical summary" not in self_image_text
-        assert self_image_text.index("Recent window") < self_image_text.index(
-            "Long-term self-image"
-        )
+        assert "Current self-concept" in self_image_text
+        assert "Current growth edges" in self_image_text
         assert "timestamp:" not in self_image_text
         assert "summary:" not in self_image_text
         assert "synthesis count" not in self_image_text.lower()
 
         growth = page.locator("#character-growth-table")
-        assert growth.locator(".trait-card").count() == 2
+        assert growth.locator(".record-card").count() == 2
         growth_text = growth.inner_text()
-        assert "Clear intent handling" in growth_text
-        assert "Ask one grounded follow-up before guessing." in growth_text
-        assert "0.363" in growth_text
-        assert "0.36272249999999995" not in growth_text
-        assert "trait_id" not in growth_text
-        assert "trait id" not in growth_text.lower()
-        assert "gct_raw_identifier" not in growth_text
+        assert "inferred growth candidate" in growth_text.lower()
+        assert "explicit self redefinition candidate" in growth_text.lower()
+        assert "self concept" in growth_text.lower()
+        assert "control sensitivity" in growth_text.lower()
         assert growth.locator("tr").count() == 0
 
         summary = e2e_summary_writer(
@@ -907,28 +888,48 @@ def test_semantic_owner_surfaces_exclude_internal_projection_metadata(
                         status: 'available',
                         items: [
                           {
-                            kind: 'active_trait',
-                            trait_name: 'Clear intent handling',
-                            growth_axis: 'clarity',
-                            guidance: 'Stay concrete.',
-                            maturity_band: 'promoted'
+                            kind: 'identity_candidate',
+                            change_kind: 'inferred_growth',
+                            status: 'emerging',
+                            proposed_paths: ['self_image.self_concept'],
+                            base_revision_number: 0,
+                            root_count: 2,
+                            local_date_count: 1
                           },
                           {
-                            kind: 'recent_outcome',
-                            status: 'applied',
-                            summary: 'Accepted one direct-review calibration change.',
-                            accepted_candidates: ['ask one grounded follow-up'],
-                            trait_updates: ['clarity strengthened'],
-                            shadow_projection: {prompt_visible_now: true}
+                            kind: 'identity_growth_run',
+                            run_kind: 'episode',
+                            disposition: 'candidate_updated',
+                            lifecycle_state: 'complete',
+                            latest_reason_code: 'candidate_emerging',
+                            base_revision_number: 0,
+                            root_count: 2
                           }
                         ]
                       },
                       carry_over: {
                         status: 'available',
-                        items: [{
-                          content: 'character-global carry-over',
-                          scope: 'character'
-                        }]
+                        items: [
+                          {
+                            kind: 'identity_growth_health',
+                            state: 'waiting_for_evidence',
+                            latest_reason_code: 'candidate_emerging',
+                            latest_revision_number: 0,
+                            latest_consumed_revision_number: 0,
+                            root_count: 2,
+                            local_date_count: 1
+                          },
+                          {
+                            kind: 'identity_revision',
+                            revision_number: 0,
+                            revision_kind: 'seed',
+                            is_current: true,
+                            base_revision_number: null,
+                            evidence_root_count: 0,
+                            evidence_local_date_count: 0,
+                            change_diff: []
+                          }
+                        ]
                       }
                     },
                     redaction: {model_inputs: 'excluded'}
@@ -1072,11 +1073,11 @@ def test_semantic_owner_surfaces_exclude_internal_projection_metadata(
 
         _open_page(page, "character", "Character")
         page.locator("#character-carry-over-table").get_by_text(
-            "character-global carry-over",
+            "Growth pipeline health",
         ).first.wait_for()
         growth_text = page.locator("#character-growth-table").inner_text()
-        assert "Accepted one direct-review calibration change." in growth_text
-        assert "ask one grounded follow-up" in growth_text
+        assert "inferred growth candidate" in growth_text.lower()
+        assert "Latest reason: candidate emerging" in growth_text
         assert "run_id" not in growth_text
         _open_page(page, "calendar", "Calendar")
         page.locator("#refresh-calendar").click()

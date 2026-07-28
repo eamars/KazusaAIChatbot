@@ -222,6 +222,12 @@ def _build_benchmark_payload(case: dict[str, str]) -> dict[str, object]:
             "personality": dict(personality_judgment),
             "boundaries": {},
         },
+        "goal_cognition": {
+            "core": {},
+            "personality": dict(personality_judgment),
+            "boundaries": {},
+            "self_image": {},
+        },
         "epistemic_comparison_memory": {},
     }
     return {

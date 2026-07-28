@@ -81,5 +81,5 @@ include = ["kazusa_ai_chatbot*", "scripts*", "adapters*", "control_console*"]
 
 [tool.setuptools.package-data]
 src = ["*.py"]
-kazusa_ai_chatbot = ["character_profiles/*.json"]
+kazusa_ai_chatbot = []
 control_console = ["static/*"]

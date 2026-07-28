@@ -93,6 +93,7 @@ def test_cognition_projection_is_closed_and_latest_only() -> None:
         "relationship_social",
         "event_agency",
         "goal_threat_outcome",
+        "goal_cognition",
         "epistemic_comparison_memory",
     }
     assert set(latest_projection["moral_identity"]) == {
@@ -115,6 +116,12 @@ def test_cognition_projection_is_closed_and_latest_only() -> None:
             "personality",
             "boundaries",
         }
+    assert set(latest_projection["goal_cognition"]) == {
+        "core",
+        "personality",
+        "boundaries",
+        "self_image",
+    }
     assert latest_projection["epistemic_comparison_memory"] == {}
     assert (
         latest_projection["moral_identity"]["self_image"]["self_concept"]
@@ -217,6 +224,7 @@ def test_projection_digest_and_consumers_track_exact_latest_context() -> None:
     assert projected_identity_consumer_kinds(latest_cognition) == [
         "event_agency",
         "existential_drive",
+        "goal_cognition",
         "goal_threat_outcome",
         "moral_identity",
         "naming",

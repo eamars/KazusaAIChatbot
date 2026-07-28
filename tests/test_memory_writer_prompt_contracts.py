@@ -5,9 +5,6 @@ from __future__ import annotations
 import pytest
 
 from kazusa_ai_chatbot.consolidation import (
-    images as images_module,
-)
-from kazusa_ai_chatbot.consolidation import (
     memory_units as memory_units_module,
 )
 from kazusa_ai_chatbot.reflection_cycle import promotion as promotion_module
@@ -35,21 +32,6 @@ def test_memory_unit_prompts_render_third_person_contract() -> None:
     assert 'YYYY-MM-DD HH:MM' in extractor_prompt
     assert '规范名称是一个不可拆分的完整字符串' in extractor_prompt
 
-
-def test_character_image_prompts_render_third_person_contract() -> None:
-    """Self-image prompts should require the profile-derived character name."""
-
-    prompts = [
-        images_module._CHARACTER_IMAGE_SESSION_SUMMARY_PROMPT.format(
-            character_name=CHARACTER_NAME,
-        ),
-        images_module._CHARACTER_IMAGE_COMPRESS_PROMPT.format(
-            character_name=CHARACTER_NAME,
-        ),
-    ]
-
-    for prompt in prompts:
-        _assert_third_person_contract(prompt)
 
 
 def test_reflection_promotion_prompt_renders_third_person_contract() -> None:

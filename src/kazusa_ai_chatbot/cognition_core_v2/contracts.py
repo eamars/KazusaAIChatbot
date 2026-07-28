@@ -2091,6 +2091,7 @@ def _validate_character_identity_context(value: Any) -> None:
         "relationship_social",
         "event_agency",
         "goal_threat_outcome",
+        "goal_cognition",
         "epistemic_comparison_memory",
     }
     if not isinstance(value, Mapping) or set(value) != expected_families:
@@ -2112,6 +2113,12 @@ def _validate_character_identity_context(value: Any) -> None:
         "relationship_social": {"personality", "boundaries"},
         "event_agency": {"personality", "boundaries"},
         "goal_threat_outcome": {"personality", "boundaries"},
+        "goal_cognition": {
+            "core",
+            "personality",
+            "boundaries",
+            "self_image",
+        },
     }
     for family, expected in expected_categories.items():
         projection = value[family]

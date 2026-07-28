@@ -156,6 +156,9 @@ Before finalizing a character:
 - [ ] All 7 boundary_profile parameters filled (2 enums, 5 floats)
 - [ ] All 10 linguistic_texture_profile parameters filled (all floats)
 - [ ] 2–3 linguistic traits notably HIGH or LOW (not all at 0.5)
+- [ ] self_image.self_concept is a first-person statement anchoring identity
+- [ ] self_image.current_growth_edges has 1–5 actionable, specific edges
+- [ ] visual_characterization describes appearance, attire, and body language
 - [ ] Compliance strategy matches character's observed behavior in source material
 - [ ] Boundary recovery makes sense psychologically with compliance strategy
 - [ ] MBTI + personality_brief cohere with boundary profile values

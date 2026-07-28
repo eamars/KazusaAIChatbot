@@ -104,7 +104,6 @@ _STAGE7_TIME_BOUNDARY_DIRS = (
     "src/kazusa_ai_chatbot/event_logging",
     "src/kazusa_ai_chatbot/db",
     "src/kazusa_ai_chatbot/memory_evolution",
-    "src/kazusa_ai_chatbot/global_character_growth",
     "src/kazusa_ai_chatbot/reflection_cycle",
     "src/scripts",
 )

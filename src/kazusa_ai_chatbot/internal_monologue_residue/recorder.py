@@ -248,6 +248,17 @@ async def record_completed_episode_residue(
         current_timestamp_utc=current_timestamp_utc,
         source_kind=recorder_input["source_kind"],
     )
+    if row is None:
+        result = _record_result(
+            status="unresolvable_scope",
+            source_kind=recorder_input["source_kind"],
+            scope_kind="",
+            written=False,
+            retry_count=retry_count,
+            validation_errors=["scope could not be resolved"],
+        )
+        await _record_write_event(result)
+        return result
     try:
         await db.insert_internal_monologue_residue_row(row)
     except DatabaseOperationError as exc:
@@ -512,8 +523,12 @@ def _build_residue_row(
     residue_text: str,
     current_timestamp_utc: str,
     source_kind: ResidueSourceKind,
-) -> InternalMonologueResidueRow:
-    """Build the storage row for one accepted residue string."""
+) -> InternalMonologueResidueRow | None:
+    """Build the storage row for one accepted residue string.
+
+    Returns ``None`` when the episode scope cannot be resolved to a
+    supported residue scope kind (fail closed without a write).
+    """
 
     character_profile = completed_state["character_profile"]
     if not isinstance(character_profile, Mapping):
@@ -533,6 +548,8 @@ def _build_residue_row(
         channel_type=channel_type,
         global_user_id=global_user_id,
     )
+    if scope_kind is None:
+        return None
     scope_key = build_scope_key(
         character_id=character_id,
         scope_kind=scope_kind,
@@ -582,7 +599,7 @@ def _scope_kind(
     platform_channel_id: str,
     channel_type: str,
     global_user_id: str,
-) -> ResidueScopeKind:
+) -> ResidueScopeKind | None:
     """Choose the most specific storage scope available for the episode."""
 
     if global_user_id and platform and platform_channel_id:
@@ -591,8 +608,7 @@ def _scope_kind(
     if channel_type == "group" and platform and platform_channel_id:
         return_value = "group_scene"
         return return_value
-    return_value = "character_global"
-    return return_value
+    return None
 
 
 def _ambient_condition(

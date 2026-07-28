@@ -333,6 +333,16 @@ group-review phase handler shares the monitored activity projection only;
 hourly and daily reflection records continue to contribute to normal cognition
 only through the existing promoted, gated reflection context.
 
+After the daily global-promotion attempt, the worker independently invokes the
+character identity growth pass when
+`CHARACTER_IDENTITY_GROWTH_ENABLED=true`. This invocation occurs even when the
+memory-promotion stage writes nothing. It converts only validated succeeded
+daily documents into prompt-safe derivative cards linked to their original
+settled root episodes; derivative cards never add a cadence count. Proposal,
+review, policy, and immutable revision persistence remain owned by
+`character_identity_growth`. A promoted revision first affects the next
+eligible cognition episode.
+
 The service does not serialize ordinary reflection records behind `/chat`.
 Both paths may run at the same time and may contend for shared LLM or database
 resources. The exception is visible-output-capable group self-cognition review:
@@ -386,10 +396,8 @@ document.
 - `REFLECTION_LORE_PROMOTION_ENABLED=true`: lore lane is enabled by default.
 - `REFLECTION_SELF_GUIDANCE_PROMOTION_ENABLED=true`: self-guidance lane is
   enabled by default.
-- `GLOBAL_CHARACTER_GROWTH_PASS_ENABLED=true`: after daily global promotion,
-  the worker runs the global character-growth pass when the busy probe remains
-  idle. This pass writes only the global growth trait/run collections and can
-  be disabled as a rollback switch.
+- `CHARACTER_IDENTITY_GROWTH_ENABLED=true`: run the independent daily identity
+  evaluation after global reflection promotion.
 
 Feature flags are process-loaded from config. Changing them requires a process
 restart unless a test monkeypatches the module value directly.
@@ -450,6 +458,8 @@ python src\scripts\run_reflection_cycle.py daily --dry-run
 python src\scripts\run_reflection_cycle.py promote --dry-run
 python src\scripts\run_reflection_cycle.py affect-settle --dry-run
 python src\scripts\run_reflection_cycle.py affect-settle --enable-character-state-write
+python -m scripts.run_character_identity_growth
+python -m scripts.run_character_identity_growth --character-local-date YYYY-MM-DD --apply --enable-revision-writes
 ```
 
 `daily` and `promote` default to the previous character-local date. Use
@@ -458,6 +468,9 @@ python src\scripts\run_reflection_cycle.py affect-settle --enable-character-stat
 `--settling-local-date YYYY-MM-DD` for deterministic runs. It writes
 `character_state` only when `--enable-character-state-write` is supplied and
 `--dry-run` is not supplied.
+The identity command defaults to a read-only pass over the previous
+character-local date. Revision writes require both `--apply` and
+`--enable-revision-writes`.
 
 ## Integration Boundaries
 
@@ -466,4 +479,5 @@ Reflection integrates through:
 - the reflection-cycle package facade,
 - named database interfaces for conversation evidence and run persistence,
 - memory-evolution public APIs for promoted memory writes,
+- the character-identity runner for root-linked daily evidence,
 - bounded promoted reflection context for normal chat.

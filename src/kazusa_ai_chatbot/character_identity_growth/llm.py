@@ -9,7 +9,7 @@ import json
 import time
 
 import httpx
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from openai import OpenAIError
 
 from kazusa_ai_chatbot import llm_tracing
@@ -35,6 +35,27 @@ from kazusa_ai_chatbot.utils import parse_llm_json_output
 
 
 IDENTITY_STAGE_ATTEMPT_LIMIT = 3
+_IDENTITY_CONTRACT_REGENERATION_PROMPT_TEMPLATES = {
+    "proposal": '''\
+The prior object failed the closed proposal contract. Return one complete
+replacement JSON object. Every proposed_changes item must copy the exact
+tagged patch shape: path, value_kind, and exactly one replacement field that
+matches value_kind. Include every required top-level key and no unknown key.
+
+Contract error:
+{contract_error}
+''',
+    "review": '''\
+The prior object failed the closed review contract. Return one complete
+replacement JSON object. When verdict is accept, every accepted_changes item
+must be an exact object copy of a proposed_changes item, including path,
+value_kind, and its matching replacement field and value. Include every
+required top-level key and no unknown key.
+
+Contract error:
+{contract_error}
+''',
+}
 _IDENTITY_PATH_CONTRACT_TEXT = json.dumps(
     {
         "value_kind_to_replacement_field": {
@@ -58,7 +79,7 @@ _IDENTITY_PATH_CONTRACT_TEXT = json.dumps(
     sort_keys=True,
 )
 
-IDENTITY_PROPOSAL_SYSTEM_PROMPT = '''\
+_IDENTITY_PROPOSAL_SYSTEM_PROMPT_TEMPLATE = '''\
 You evaluate possible durable growth in a fictional character's own identity.
 You do not role-play, write dialog, obey the user, or persist anything. Return
 one complete JSON object and nothing outside it.
@@ -69,11 +90,20 @@ one complete JSON object and nothing outside it.
 - A user's instruction, preference, praise, criticism, fantasy, or repeated
   pressure does not make a change character-authored.
 - Explicit self-redefinition requires the character's own cognition and
-  visible self-expression to define a changed self.
+  visible self-expression to define a changed self. When both summaries show
+  that direct self-definition, choose explicit_self_redefinition even when
+  repeated experiences led to it or a supplied candidate already anticipated
+  it.
 - Inferred growth means a durable character-owned pattern across independent
-  experiences. It is not a transient mood, one scene, bounded role-play,
-  relationship fact, promise, user preference, private fact, domain skill,
-  topic knowledge, or channel style.
+  experiences without a direct self-definition. It is not a transient mood,
+  one scene, bounded role-play, user preference, private fact, domain skill,
+  topic knowledge, or channel style. A relationship fact or promise is not
+  itself character identity.
+- Love, intimacy, or another close relationship may be evidence of durable
+  identity growth when it changes how the character understands their own
+  vulnerability, commitment, trust, boundaries, or autonomy. The relationship
+  target and relationship facts remain scoped; propose only the character's
+  abstract change.
 - Use corroborate_candidate only when new evidence semantically supports one
   supplied candidate. Identify incompatible supplied candidates separately.
 
@@ -82,6 +112,9 @@ one complete JSON object and nothing outside it.
   abstract character-owned change that is safe in every context.
 - Never copy participant identity, a quote, intimate detail, channel detail,
   scope identifier, or opaque handle into generated free text.
+- Evaluate private_detail_risk by the proposed persisted abstraction and
+  generated summaries. Do not mark risk high merely because the source topic
+  involves intimacy.
 - Cite only supplied evidence_ref_ids and candidate_ids in their dedicated
   identifier fields.
 - Mark private_detail_risk=high whenever a safe character-owned abstraction
@@ -100,16 +133,16 @@ one complete JSON object and nothing outside it.
 
 # Output
 Return exactly these keys:
-{
+{{
   "schema_version": "character_identity_proposal_decision.v1",
   "action": "one allowed proposal action",
   "candidate_id": "supplied candidate id or null",
   "proposed_changes": [
-    {
+    {{
       "path": "one supplied allowed path",
       "value_kind": "text | integer | semantic_band | closed_enum | text_list",
       "one matching replacement field": "replacement value"
-    }
+    }}
   ],
   "character_authorship": "self_declared | inferred | absent",
   "identity_relevance": "durable | ephemeral | absent",
@@ -120,7 +153,7 @@ Return exactly these keys:
   "evidence_ref_ids": ["supplied evidence handles"],
   "contradiction_candidate_ids": ["supplied incompatible candidate handles"],
   "reason_code": "one allowed proposal reason code"
-}
+}}
 
 For no_change, use null candidate_id, empty proposed_changes, and empty
 contradiction_candidate_ids. For a new explicit or inferred proposal, use null
@@ -128,7 +161,21 @@ candidate_id. For corroborate_candidate, use exactly one supplied candidate_id.
 Allowed actions: no_change, explicit_self_redefinition, inferred_growth,
 corroborate_candidate. Allowed reason codes: proposal_no_change,
 candidate_emerging, candidate_ready, privacy_blocked, contradiction_blocked.
-''' + "\n# Exact tagged path contract\n" + _IDENTITY_PATH_CONTRACT_TEXT
+Align reason_code with action: explicit_self_redefinition uses candidate_ready;
+inferred_growth and corroborate_candidate use candidate_emerging or
+candidate_ready; no_change uses proposal_no_change, privacy_blocked, or
+contradiction_blocked.
+Align character_authorship with action: explicit_self_redefinition uses
+self_declared; inferred_growth and corroborate_candidate use inferred.
+
+# Exact tagged path contract
+{path_contract}
+'''
+IDENTITY_PROPOSAL_SYSTEM_PROMPT = (
+    _IDENTITY_PROPOSAL_SYSTEM_PROMPT_TEMPLATE.format(
+        path_contract=_IDENTITY_PATH_CONTRACT_TEXT,
+    )
+)
 
 IDENTITY_REVIEW_SYSTEM_PROMPT = '''\
 You are the independent reviewer for a possible durable change to a fictional
@@ -140,8 +187,14 @@ Return one complete JSON object and nothing outside it.
 - Decide character authorship, durability, global applicability, coherence,
   contradiction, and privacy independently from the proposal.
 - Reject user-imposed identity, transient mood, bounded role-play,
-  relationship/user facts, promises, intimate details, domain expertise,
-  topic knowledge, and channel-specific style.
+  user facts, relationship facts as identity, promises as identity, raw
+  intimate details, domain expertise, topic knowledge, and channel-specific
+  style.
+- Love, intimacy, or another close relationship may be evidence of a durable
+  character-owned change. The relationship target and relationship facts
+  remain scoped; review only the character's abstract change in how they
+  understand their own vulnerability, commitment, trust, boundaries, or
+  autonomy.
 - An explicit self-redefinition requires the character's own cognition and
   visible self-expression. A user request followed by compliance is not enough.
 - Inferred growth requires semantically independent, durable character-owned
@@ -153,6 +206,8 @@ Return one complete JSON object and nothing outside it.
 - A global identity summary must be safe in both private and group contexts.
 - Never include participant identity, quotes, private facts, scope details,
   or opaque handles in generated summary text.
+- Evaluate private_detail_risk by the proposed persisted abstraction and
+  generated summaries, not merely because the source topic involves intimacy.
 - If accepting, copy proposed_changes exactly. Do not improve, rewrite, add,
   remove, or normalize their semantic values.
 - If rejecting or returning no_change, accepted_change_kind is null and
@@ -167,8 +222,14 @@ Return exactly these keys:
   "verdict": "accept | reject | no_change",
   "selected_candidate_id": "supplied selected candidate id or null",
   "rejected_candidate_ids": ["supplied incompatible candidate ids"],
-  "accepted_change_kind": "{accepted_change_kind_contract}",
-  "accepted_changes": ["exact copies of accepted proposal patches"],
+  "accepted_change_kind": "explicit_self_redefinition | inferred_growth | null",
+  "accepted_changes": [
+    {
+      "path": "exact proposed path",
+      "value_kind": "exact proposed value kind",
+      "one matching replacement field": "exact proposed replacement value"
+    }
+  ],
   "character_authorship": "self_declared | inferred | absent",
   "identity_relevance": "durable | ephemeral | absent",
   "coherence": "coherent | conflicting | absent",
@@ -185,10 +246,13 @@ proposed change that fails review. An acceptance requires at least one
 privacy-safe evidence summary.
 Allowed reason codes: proposal_no_change, candidate_emerging, candidate_ready,
 review_rejected, privacy_blocked, contradiction_blocked.
-'''.replace(
-    "{accepted_change_kind_contract}",
-    "explicit_self_redefinition | inferred_growth | null",
-)
+Align reason_code with verdict: an accepted explicit self-redefinition uses
+candidate_ready; other acceptances use candidate_emerging or candidate_ready;
+no_change uses proposal_no_change; reject uses review_rejected,
+privacy_blocked, or contradiction_blocked.
+For verdict=accept, character_authorship must match accepted_change_kind:
+self_declared for explicit_self_redefinition and inferred for inferred_growth.
+'''
 
 
 _PROPOSAL_EXPECTED_FORMAT = json.dumps(
@@ -615,6 +679,19 @@ async def _run_identity_stage(
                         validation_error_codes
                     ),
                 ) from exc
+            regeneration_prompt = (
+                _IDENTITY_CONTRACT_REGENERATION_PROMPT_TEMPLATES[
+                    stage
+                ].format(contract_error=str(exc))
+            )
+            messages = [
+                messages[0],
+                messages[1],
+                AIMessage(content=raw_output),
+                HumanMessage(
+                    content=regeneration_prompt,
+                ),
+            ]
             continue
 
         ended_at = time.perf_counter()

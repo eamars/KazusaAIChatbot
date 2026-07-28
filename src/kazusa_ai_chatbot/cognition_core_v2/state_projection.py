@@ -160,7 +160,7 @@ def project_state_for_prompt(
         },
         "character_constraints": _project_constraints(character_constraints),
         "character_identity": deepcopy(dict(
-            character_identity_context["goal_threat_outcome"]
+            character_identity_context["goal_cognition"]
         )),
     }
     for field_name, prompt_name, prefix in (

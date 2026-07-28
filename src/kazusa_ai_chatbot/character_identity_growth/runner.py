@@ -132,16 +132,14 @@ async def reconcile_identity_growth_post_commit(
                     revision_number=revision_number,
                 )
             except Exception as persistence_exc:
-                logger.error(
-                    "Identity post-commit retry evidence failed: %s",
-                    type(persistence_exc).__name__,
+                logger.exception(
+                    "Identity post-commit retry evidence failed: "
+                    f"{type(persistence_exc).__name__}: {persistence_exc}"
                 )
-            logger.warning(
-                "Identity post-commit reconciliation failed: run=%s "
-                "revision=%s error=%s",
-                run["run_id"],
-                revision_number,
-                type(exc).__name__,
+            logger.exception(
+                "Identity post-commit reconciliation failed: "
+                f"run={run['run_id']} revision={revision_number} "
+                f"error={type(exc).__name__}: {exc}"
             )
             continue
         completed_count += 1
@@ -507,14 +505,22 @@ async def _evaluate_identity_growth(
     )
     lifecycle_state = "in_progress" if write_revision else "complete"
     completed_at = None if write_revision else timestamp
+    run_root_episode_ids = list(policy["claimed_root_episode_ids"])
+    source_evidence_count = policy["distinct_episode_count"]
+    if not run_root_episode_ids:
+        run_root_episode_ids = sorted({
+            str(ref["root_episode_id"])
+            for ref in refs
+        })
+        source_evidence_count = len(run_root_episode_ids)
     run = _growth_run_document(
         run_id=run_id,
         run_kind=run_kind,
         character_id=character_id,
         base_revision_number=revision_number,
         correlation_id=correlation_id,
-        root_episode_ids=policy["claimed_root_episode_ids"],
-        source_evidence_count=policy["distinct_episode_count"],
+        root_episode_ids=run_root_episode_ids,
+        source_evidence_count=source_evidence_count,
         attempt_count_by_stage=attempts,
         lifecycle_state=lifecycle_state,
         disposition=disposition,

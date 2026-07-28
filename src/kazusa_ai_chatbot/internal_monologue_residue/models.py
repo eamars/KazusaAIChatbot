@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Literal, NotRequired, TypedDict
 
 ResidueScopeKind = Literal[
-    "character_global",
     "group_scene",
     "user_thread",
 ]

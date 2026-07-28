@@ -352,6 +352,76 @@ def test_proposal_and_review_contracts_are_closed() -> None:
         )
 
 
+def test_stage_reason_codes_match_their_semantic_disposition() -> None:
+    """Observability reason codes cannot contradict the stage decision."""
+
+    invalid_proposal = _proposal(
+        action="explicit_self_redefinition",
+        authorship="self_declared",
+        reason_code="proposal_no_change",
+    )
+    with pytest.raises(ValueError, match="explicit reason_code"):
+        validate_identity_proposal_decision(
+            invalid_proposal,
+            evidence_ref_ids={"evidence-1"},
+            candidate_ids=set(),
+        )
+
+    invalid_authorship = _proposal(
+        action="inferred_growth",
+        authorship="self_declared",
+        reason_code="candidate_emerging",
+    )
+    with pytest.raises(ValueError, match="requires inferred authorship"):
+        validate_identity_proposal_decision(
+            invalid_authorship,
+            evidence_ref_ids={"evidence-1"},
+            candidate_ids=set(),
+        )
+
+    proposal = _proposal(
+        action="explicit_self_redefinition",
+        authorship="self_declared",
+        reason_code="candidate_ready",
+    )
+    invalid_review = _review(
+        proposal,
+        change_kind="explicit_self_redefinition",
+        authorship="self_declared",
+        reason_code="proposal_no_change",
+    )
+    with pytest.raises(ValueError, match="accept reason_code"):
+        validate_identity_review_decision(
+            invalid_review,
+            proposal=proposal,
+            evidence_ref_ids={"evidence-1"},
+            candidate_ids=set(),
+        )
+
+    invalid_blocked_proposal = _proposal(
+        action="inferred_growth",
+        reason_code="privacy_blocked",
+    )
+    with pytest.raises(ValueError, match="inferred reason_code"):
+        validate_identity_proposal_decision(
+            invalid_blocked_proposal,
+            evidence_ref_ids={"evidence-1"},
+            candidate_ids=set(),
+        )
+
+    invalid_blocked_acceptance = _review(
+        _proposal(),
+        reason_code="contradiction_blocked",
+    )
+    with pytest.raises(ValueError, match="accept reason_code"):
+        validate_identity_review_decision(
+            invalid_blocked_acceptance,
+            proposal=_proposal(),
+            evidence_ref_ids={"evidence-1"},
+            candidate_ids=set(),
+        )
+
+
 def test_explicit_character_authored_change_is_ready_after_one_root() -> None:
     """A separately reviewed self-redefinition bypasses inferred cadence."""
 
@@ -387,11 +457,13 @@ def test_explicit_change_requires_visible_character_authorship_evidence(
     proposal = _proposal(
         action="explicit_self_redefinition",
         authorship="self_declared",
+        reason_code="candidate_ready",
     )
     review = _review(
         proposal,
         change_kind="explicit_self_redefinition",
         authorship="self_declared",
+        reason_code="candidate_ready",
     )
     card = _evidence_card(1, expression="")
 
@@ -412,6 +484,7 @@ def test_user_imposition_is_rejected_by_semantic_review() -> None:
     proposal = _proposal(
         action="explicit_self_redefinition",
         authorship="self_declared",
+        reason_code="candidate_ready",
     )
     review = _review(
         proposal,
@@ -607,10 +680,15 @@ def test_high_private_detail_risk_blocks_policy(stage: str) -> None:
     """Either semantic stage can block unsafe global carry-over."""
 
     proposal = _proposal(privacy="high" if stage == "proposal" else "low")
-    review = _review(
-        proposal,
-        privacy="high" if stage == "review" else "low",
-        reason_code="privacy_blocked",
+    review = (
+        _review(
+            proposal,
+            verdict="reject",
+            privacy="high",
+            reason_code="privacy_blocked",
+        )
+        if stage == "review"
+        else _review(proposal)
     )
 
     result = _policy(
@@ -879,10 +957,60 @@ async def test_proposal_stage_regenerates_full_output_with_same_context(
         for messages in fake.calls
     ]
     assert len(set(human_payloads)) == 1
+    assert len(fake.calls[1]) == 4
+    assert fake.calls[1][2].content == json.dumps(
+        {"schema_version": "wrong"}
+    )
+    assert "Contract error:" in fake.calls[1][3].content
+    assert "missing required keys" in fake.calls[1][3].content
+    assert "action" in fake.calls[1][3].content
+    assert fake.calls[2][2].content == json.dumps(
+        {**valid, "unknown": "field"}
+    )
+    assert "unknown" in fake.calls[2][3].content
     assert result.validation_error_codes == (
         "proposal_contract_error",
         "proposal_contract_error",
     )
+
+
+@pytest.mark.asyncio
+async def test_review_regeneration_restores_complete_tagged_patches() -> None:
+    """A malformed accepted patch receives bounded structural guidance."""
+
+    proposal = _proposal()
+    valid_review = _review(proposal)
+    invalid_review = deepcopy(valid_review)
+    del invalid_review["accepted_changes"][0]["value_kind"]
+    fake = _SequenceLLM([
+        json.dumps(invalid_review),
+        json.dumps(valid_review),
+    ])
+    proposal_input = build_identity_proposal_input(
+        current_identity=_identity(),
+        evidence_refs=[_evidence_ref(1)],
+        evidence_cards=[_evidence_card(1)],
+        current_candidates=[],
+    )
+    review_input = build_identity_review_input(
+        proposal_input=proposal_input,
+        proposal=proposal,
+    )
+
+    result = await llm.review_identity_growth(
+        review_input,
+        invoker=fake,
+    )
+
+    assert result.decision == valid_review
+    assert result.attempt_count == 2
+    assert len(fake.calls[0]) == 2
+    assert len(fake.calls[1]) == 4
+    assert fake.calls[1][2].content == json.dumps(invalid_review)
+    assert "Contract error:" in fake.calls[1][3].content
+    assert "value_kind" in fake.calls[1][3].content
+    assert "including path" in fake.calls[1][3].content
+    assert result.validation_error_codes == ("review_contract_error",)
 
 
 @pytest.mark.asyncio

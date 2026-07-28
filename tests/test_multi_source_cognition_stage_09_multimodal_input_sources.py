@@ -30,7 +30,10 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
     build_cognition_input_from_global_state,
 )
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
-from tests.cognition_core_v2_test_helpers import canonical_user_message_episode
+from tests.cognition_core_v2_test_helpers import (
+    canonical_service_character_profile,
+    canonical_user_message_episode,
+)
 from kazusa_ai_chatbot.rag.cognitive_episode_adapter import (
     RAGEpisodeAdapterError,
     build_text_chat_rag_request,
@@ -68,7 +71,10 @@ def _rag_request_kwargs(episode: dict[str, object]) -> dict[str, object]:
         "episode": episode,
         "decontextualized_input": "Please inspect the attached material.",
         "character_profile": {
-            "global_user_id": "character-1",
+            **canonical_service_character_profile(
+                marker="stage-09-rag",
+                global_user_id="character-1",
+            ),
             "name": "Test Character",
         },
         "user_profile": {},
@@ -262,19 +268,25 @@ def test_connector_projects_media_as_separate_typed_evidence() -> None:
         global_user_id="global-user-9",
         updated_at=NOW,
     )
+    character_profile = canonical_service_character_profile(
+        marker="stage-09",
+    )
+    character_profile.update({
+        "name": "Test Character",
+        "personality_brief": {
+            "mbti": "ISTP",
+            "logic": "Keep typed evidence sources distinct.",
+            "tempo": "Measured.",
+            "defense": "Express boundaries while preserving intent.",
+            "quirks": "Use concise, characterful observations.",
+            "taboos": "Interpret media through its semantic content.",
+        },
+    })
     payload = build_cognition_input_from_global_state(
         {
             "storage_timestamp_utc": TURN_CLOCK["storage_timestamp_utc"],
             "global_user_id": "global-user-9",
-            "character_profile": {
-                "name": "Test Character",
-                "personality_brief": {
-                    "logic": "Keep typed evidence sources distinct.",
-                    "defense": "Express boundaries while preserving intent.",
-                    "quirks": "Use concise, characterful observations.",
-                    "taboos": "Interpret media through its semantic content.",
-                },
-            },
+            "character_profile": character_profile,
             "channel_type": "private",
             "cognitive_episode": episode,
             "user_input": "Please inspect the attached material.",

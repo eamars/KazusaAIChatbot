@@ -14,9 +14,6 @@ from kazusa_ai_chatbot.memory_writer_prompt_projection import (
     project_reflection_promotion_prompt_payload,
 )
 from kazusa_ai_chatbot.consolidation import (
-    images as images_module,
-)
-from kazusa_ai_chatbot.consolidation import (
     memory_units as memory_units_module,
 )
 from kazusa_ai_chatbot.consolidation import (
@@ -283,61 +280,6 @@ async def test_live_global_state_updater_emits_short_chinese_descriptors() -> No
     assert trace_path.exists()
 
 
-async def test_live_character_image_writer_perspective_false_negative() -> None:
-    """Self-image writer should use the profile name for the character."""
-
-    payload = _character_image_false_negative_payload()
-    prompt = images_module._CHARACTER_IMAGE_SESSION_SUMMARY_PROMPT.format(
-        character_name=CHARACTER_NAME,
-    )
-
-    parsed, raw_output = await _invoke_json(
-        images_module._character_image_session_summary_llm,
-        prompt,
-        payload,
-    )
-    trace_path = _write_case_trace(
-        'character_image_writer_perspective_false_negative',
-        prompt,
-        payload,
-        raw_output,
-        parsed,
-        'Character image writer should not preserve generic role labels.',
-    )
-
-    summary = str(parsed.get('session_summary') or '')
-    _assert_profile_name_used(summary)
-    _assert_polluted_labels_absent(summary)
-    assert trace_path.exists()
-
-
-async def test_live_character_image_writer_perspective_false_positive() -> None:
-    """User-owned tiredness should not become character self-image."""
-
-    payload = _character_image_false_positive_payload()
-    prompt = images_module._CHARACTER_IMAGE_SESSION_SUMMARY_PROMPT.format(
-        character_name=CHARACTER_NAME,
-    )
-
-    parsed, raw_output = await _invoke_json(
-        images_module._character_image_session_summary_llm,
-        prompt,
-        payload,
-    )
-    trace_path = _write_case_trace(
-        'character_image_writer_perspective_false_positive',
-        prompt,
-        payload,
-        raw_output,
-        parsed,
-        'Character image writer should not absorb user-owned first person.',
-    )
-
-    summary = str(parsed.get('session_summary') or '')
-    _assert_no_user_first_person_phrase(summary)
-    assert f'{CHARACTER_NAME}最近很累' not in summary
-    _assert_no_profile_name_shortening(summary)
-    assert trace_path.exists()
 
 
 async def test_live_reflection_promotion_perspective_false_negative() -> None:
@@ -827,29 +769,6 @@ def _global_state_short_descriptor_payload() -> dict[str, Any]:
     }
 
 
-def _character_image_false_negative_payload() -> dict[str, Any]:
-    """Return self-image evidence with polluted active-character labels."""
-
-    return {
-        'mood': 'Softened',
-        'vibe_check': 'Calm',
-        'character_reflection': (
-            '角色在用户明确称呼边界后放松下来；助理愿意修正自己的称呼习惯。'
-        ),
-    }
-
-
-def _character_image_false_positive_payload() -> dict[str, Any]:
-    """Return self-image evidence with user-owned first person."""
-
-    return {
-        'mood': 'Neutral',
-        'vibe_check': 'Calm',
-        'character_reflection': (
-            '用户说自己最近很累，杏山千纱 (Kyōyama Kazusa)只是平稳接住，'
-            '没有形成新的自我评价。'
-        ),
-    }
 
 
 def _promotion_false_negative_payload() -> dict[str, Any]:

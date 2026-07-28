@@ -294,6 +294,7 @@ async def test_db_interface_uses_message_field_allowlist(monkeypatch) -> None:
         "broadcast": 1,
         "reply_context.reply_to_current_bot": 1,
         "reply_context.reply_to_platform_user_id": 1,
+        "source_episode_id": 1,
         "timestamp": 1,
         "attachments.description": 1,
     }

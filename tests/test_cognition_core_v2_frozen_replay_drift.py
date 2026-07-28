@@ -9,7 +9,10 @@ from unittest.mock import AsyncMock, MagicMock
 from langchain_core.messages import AIMessage
 import pytest
 
-from tests.cognition_core_v2_test_helpers import canonical_user_message_episode
+from tests.cognition_core_v2_test_helpers import (
+    canonical_service_character_profile,
+    canonical_user_message_episode,
+)
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     validate_text_surface_output,
 )
@@ -284,21 +287,31 @@ def _episode(user_input: str = "Current request") -> dict[str, object]:
 def test_connector_separates_current_event_continuity_and_private_residue() -> None:
     """Current input, public continuity, and private continuity stay distinct."""
 
+    character_profile = canonical_service_character_profile(
+        marker="frozen-replay",
+    )
+    character_profile.update({
+        "name": "Kazusa",
+        "personality_brief": {
+            "mbti": "ISTP",
+            "logic": "Preserve actor direction and answer concretely.",
+            "tempo": "Measured.",
+            "defense": (
+                "Express reserve while preserving the selected stance."
+            ),
+            "quirks": "Prefer concise, lightly hesitant phrasing.",
+            "taboos": (
+                "Keep commitments consistent with the selected stance."
+            ),
+        },
+    })
     state = {
         "cognitive_episode": _episode(),
         "global_user_id": "user-1",
         "decontextualized_input": "Current request",
         "user_multimedia_input": [],
         "rag_result": {"memory_evidence": []},
-        "character_profile": {
-            "name": "Kazusa",
-            "personality_brief": {
-                "logic": "Preserve actor direction and answer concretely.",
-                "defense": "Express reserve while preserving the selected stance.",
-                "quirks": "Prefer concise, lightly hesitant phrasing.",
-                "taboos": "Keep commitments consistent with the selected stance.",
-            },
-        },
+        "character_profile": character_profile,
         "conversation_progress": {
             **_progress_payload(),
             "turn_count": 5,

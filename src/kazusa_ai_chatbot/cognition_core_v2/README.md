@@ -28,6 +28,13 @@ constraints and optional relationship context are passed as dedicated
 projections; they are not merged into mutable state. Character sleep recovery
 is deterministic and separate from user elapsed decay.
 
+Character identity is resolved from the latest immutable revision once per
+episode. Appraisal owners receive only their bounded identity partitions.
+Goal cognition receives `core`, `personality`, `boundaries`, and `self_image`,
+so reviewed changes to backstory, character judgment, boundaries, or
+self-concept can alter later goals without exposing revision history or old
+values. Text and visual surfaces receive separate expression-only projections.
+
 Database-backed callers use `db.users` for user-owned state and `db.character`
 for the character singleton. The test database harness requires the exact
 `_test_kazusa_live_llm` name, validates seeded V2 state, and gives every

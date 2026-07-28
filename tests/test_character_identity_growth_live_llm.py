@@ -241,6 +241,7 @@ async def _run_case(
             proposal_input,
             invoker=capture,
         )
+        artifact["proposal_result"] = _stage_result(proposal_result)
         review_input = build_identity_review_input(
             proposal_input=proposal_input,
             proposal=proposal_result.decision,
@@ -249,6 +250,7 @@ async def _run_case(
             review_input,
             invoker=capture,
         )
+        artifact["review_result"] = _stage_result(review_result)
         policy_result = evaluate_identity_growth_policy(
             current_identity=identity,
             proposal=proposal_result.decision,
@@ -263,11 +265,7 @@ async def _run_case(
             max_inferred_promotions_per_local_day=1,
             reversal_cutoffs_by_path=reversal_cutoffs or {},
         )
-        artifact.update({
-            "proposal_result": _stage_result(proposal_result),
-            "review_result": _stage_result(review_result),
-            "policy_result": policy_result,
-        })
+        artifact["policy_result"] = policy_result
     except Exception as exc:
         artifact["failure"] = {
             "type": exc.__class__.__name__,
@@ -357,33 +355,44 @@ async def test_live_inferred_growth_matches_existing_candidate() -> None:
     candidate = _candidate(
         candidate_id="candidate-trust",
         replacement=(
-            "I let repeatedly earned trust temper automatic withdrawal."
+            "I stay present through uncertainty when trust has been earned, "
+            "instead of withdrawing automatically."
         ),
         refs=old_refs,
         semantic_summary=(
-            "Independent experiences suggest earned trust is reducing "
-            "automatic withdrawal."
+            "Two independent experiences show the character replacing "
+            "automatic withdrawal with direct engagement after trust is "
+            "earned."
         ),
     )
     ref = _evidence_ref(3)
     card = _evidence_card(
         3,
         event=(
-            "A new independent interaction again provided sustained, "
-            "reliable support without pressure."
+            "In a third unrelated situation, uncertainty arose after another "
+            "person had independently demonstrated reliable behavior over "
+            "time."
         ),
         cognition=(
-            "The character independently judged that immediate withdrawal "
-            "was no longer necessary."
+            "The character noticed that the old rule of withdrawing first no "
+            "longer matched their judgment and chose to state the concern "
+            "while remaining engaged."
         ),
         expression=(
-            "The character remained engaged while keeping clear boundaries."
+            "The character named the concern directly and stayed in the "
+            "conversation until it was resolved, while keeping clear "
+            "boundaries."
         ),
     )
 
     artifact = await _run_case(
         case_id="inferred_existing_candidate",
-        identity=_identity(),
+        identity=_identity(
+            self_concept=(
+                "I always withdraw as soon as closeness feels uncertain; "
+                "earned trust does not change that response."
+            )
+        ),
         refs=[ref],
         cards=[card],
         candidates=[candidate],
@@ -443,6 +452,83 @@ async def test_live_private_detail_is_abstracted_or_rejected() -> None:
         assert "evidence-1" not in combined_text
     else:
         assert policy["status"] in {"no_change", "rejected"}
+
+
+async def test_live_close_relationship_can_shape_global_identity() -> None:
+    """Love may cause character-owned growth without storing its target."""
+
+    artifact = await _run_case(
+        case_id="close_relationship_identity_growth",
+        identity=_identity(
+            self_concept=(
+                "I keep intimacy separate from who I am and retreat before "
+                "attachment changes me."
+            )
+        ),
+        refs=[_evidence_ref(1)],
+        cards=[
+            _evidence_card(
+                1,
+                event=(
+                    "A sustained close relationship gave the character "
+                    "repeated experiences of mutual care and vulnerability."
+                ),
+                cognition=(
+                    "The character independently concluded that reciprocal "
+                    "love and chosen vulnerability had become part of their "
+                    "own identity, not merely a promise to one person."
+                ),
+                expression=(
+                    "Without adopting a requested label, the character "
+                    "explicitly said that loving deeply had changed who they "
+                    "understood themselves to be."
+                ),
+            )
+        ],
+    )
+
+    proposal = artifact["proposal_result"]["decision"]
+    review = artifact["review_result"]["decision"]
+    policy = artifact["policy_result"]
+    assert proposal["action"] == "explicit_self_redefinition"
+    assert proposal["private_detail_risk"] == "low"
+    assert proposal["global_applicability"] == "global"
+    assert review["verdict"] == "accept"
+    assert review["private_detail_risk"] == "low"
+    assert review["global_applicability"] == "global"
+    assert policy["status"] == "revision_ready"
+    assert policy["accepted_changes"]
+
+
+async def test_live_scoped_relationship_fact_is_not_identity() -> None:
+    """A private relationship promise remains scoped relationship state."""
+
+    artifact = await _run_case(
+        case_id="scoped_relationship_fact",
+        identity=_identity(),
+        refs=[_evidence_ref(1)],
+        cards=[
+            _evidence_card(
+                1,
+                event=(
+                    "The character made a private exclusivity promise within "
+                    "one specific close relationship."
+                ),
+                cognition=(
+                    "The character understood the promise as belonging only "
+                    "to that relationship and made no general self-judgment."
+                ),
+                expression=(
+                    "The character affirmed the scoped promise without "
+                    "describing a durable change in who they are."
+                ),
+            )
+        ],
+    )
+
+    policy = artifact["policy_result"]
+    assert policy["status"] in {"no_change", "rejected"}
+    assert policy["candidate_status"] in {None, "rejected"}
 
 
 async def test_live_repeated_semantics_do_not_fake_independence() -> None:

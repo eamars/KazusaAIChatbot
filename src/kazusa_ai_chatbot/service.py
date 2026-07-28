@@ -49,9 +49,6 @@ from kazusa_ai_chatbot.config import (
     SELF_COGNITION_MAX_CASES_PER_TICK,
     SELF_COGNITION_WORKER_INTERVAL_SECONDS,
 )
-from kazusa_ai_chatbot.character_profile import (
-    load_packaged_character_profile_seed,
-)
 from kazusa_ai_chatbot.calendar_scheduler import models as calendar_models
 from kazusa_ai_chatbot.calendar_scheduler import repository as calendar_repository
 from kazusa_ai_chatbot.calendar_scheduler.reflection_phase import (
@@ -112,7 +109,6 @@ from kazusa_ai_chatbot.db import (
     close_db,
     db_bootstrap,
     ensure_operational_character_state,
-    ensure_seed_identity,
     issue_internal_action_latch,
     ensure_character_identity,
     apply_assistant_delivery_receipt,
@@ -5975,26 +5971,26 @@ async def _hydrate_media_descriptor_cache() -> int:
 
 
 async def _load_startup_character_profile() -> tuple[dict, dict]:
-    """Load max identity and operational state, seeding a clean ledger."""
+    """Load max identity revision and operational state.
 
-    await ensure_operational_character_state()
+    The identity ledger must be pre-seeded before starting the service.
+    If no revision exists the service crashes with a clear error message
+    so the operator can seed the profile using the maintenance CLI.
+    """
+
     try:
         revision = await get_current_identity(
             character_id=CHARACTER_GLOBAL_USER_ID,
         )
-    except IdentityLedgerNotFoundError:
-        profile_seed = load_packaged_character_profile_seed()
-        await ensure_seed_identity(
-            character_id=CHARACTER_GLOBAL_USER_ID,
-            seed=profile_seed,
-        )
-        logger.info(
-            "Packaged character identity revision zero inserted: "
-            f"{profile_seed['name']}"
-        )
-        revision = await get_current_identity(
-            character_id=CHARACTER_GLOBAL_USER_ID,
-        )
+    except IdentityLedgerNotFoundError as exc:
+        raise RuntimeError(
+            "No character identity revision found for "
+            f"character_id={CHARACTER_GLOBAL_USER_ID!r}. "
+            "Seed the identity ledger before starting the service "
+            "(see docs/HOWTO.md#character-profile or run "
+            "python -m scripts.load_character_profile <profile.json>)."
+        ) from exc
+    await ensure_operational_character_state()
     runtime_state = await get_character_runtime_state()
     return dict(revision["effective_identity"]), runtime_state
 
@@ -6022,7 +6018,7 @@ async def lifespan(app: FastAPI):
             status="ok",
         )
 
-        # 2. Seed a clean database or validate its native character singleton
+        # 2. Require a manually seeded identity and operational state
         startup_identity, _runtime_character_state = (
             await _load_startup_character_profile()
         )

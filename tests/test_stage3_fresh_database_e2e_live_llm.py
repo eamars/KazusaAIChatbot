@@ -1030,7 +1030,7 @@ async def _run_self_cognition_case(
     from kazusa_ai_chatbot import service
     from kazusa_ai_chatbot.brain_service import post_turn
     from kazusa_ai_chatbot.character_profile import (
-        load_packaged_character_profile_seed,
+        load_character_profile_seed,
     )
     from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
     from kazusa_ai_chatbot.self_cognition import models, runner
@@ -1038,7 +1038,10 @@ async def _run_self_cognition_case(
     now = _storage_now()
     run_token = uuid4().hex[:10]
     run_case_id = f"{case_id}:{run_token}"
-    profile = dict(load_packaged_character_profile_seed())
+    _repository_root = Path(__file__).resolve().parents[1]
+    profile = dict(load_character_profile_seed(
+        _repository_root / "personalities" / "example.json",
+    ))
     profile["global_user_id"] = CHARACTER_GLOBAL_USER_ID
     scope_type = "group" if trigger_kind == models.TRIGGER_GROUP_CHAT_REVIEW else "private"
     target_user_id = None if scope_type == "group" else "stage3-self-user"

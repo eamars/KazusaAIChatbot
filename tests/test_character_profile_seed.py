@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -103,9 +103,7 @@ def test_profile_module_imports_before_database_package() -> None:
             "-c",
             (
                 "from kazusa_ai_chatbot.character_profile import "
-                "load_packaged_character_profile_seed; "
-                "seed = load_packaged_character_profile_seed(); "
-                "assert isinstance(seed['name'], str) and seed['name'].strip()"
+                "load_character_profile_seed"
             ),
         ],
         check=False,
@@ -117,25 +115,8 @@ def test_profile_module_imports_before_database_package() -> None:
     assert result.returncode == 0, result.stderr
 
 
-def test_packaged_profile_matches_repository_example() -> None:
-    """The versioned package profile must match the public example."""
-
-    from kazusa_ai_chatbot.character_profile import (
-        load_packaged_character_profile_seed,
-    )
-
-    repository_root = Path(__file__).resolve().parents[1]
-    expected_seed = json.loads(
-        (repository_root / "personalities" / "example.json").read_text(
-            encoding="utf-8",
-        )
-    )
-
-    assert load_packaged_character_profile_seed() == expected_seed
-
-
-def test_deployment_artifacts_bind_only_packaged_example_seed() -> None:
-    """Package startup must carry only the example profile internally."""
+def test_application_does_not_carry_packaged_profile() -> None:
+    """The application must not bundle a packaged character profile."""
 
     repository_root = Path(__file__).resolve().parents[1]
     package_profile_directory = (
@@ -144,15 +125,7 @@ def test_deployment_artifacts_bind_only_packaged_example_seed() -> None:
         / "kazusa_ai_chatbot"
         / "character_profiles"
     )
-    packaged_profiles = sorted(package_profile_directory.glob("*.json"))
-    package_config = (repository_root / "pyproject.toml").read_text(
-        encoding="utf-8",
-    )
-    dockerfile = (repository_root / "Dockerfile").read_text(encoding="utf-8")
-
-    assert [profile.name for profile in packaged_profiles] == ["example.json"]
-    assert 'character_profiles/*.json' in package_config
-    assert "CHARACTER_PROFILE_PATH" not in dockerfile
+    assert not package_profile_directory.exists()
 
 
 def test_every_repository_profile_is_a_complete_canonical_identity() -> None:
@@ -163,16 +136,6 @@ def test_every_repository_profile_is_a_complete_canonical_identity() -> None:
     repository_root = Path(__file__).resolve().parents[1]
     profile_paths = sorted(
         (repository_root / "personalities").glob("*.json")
-    )
-    profile_paths.extend(
-        sorted(
-            (
-                repository_root
-                / "src"
-                / "kazusa_ai_chatbot"
-                / "character_profiles"
-            ).glob("*.json")
-        )
     )
 
     assert profile_paths
@@ -379,33 +342,20 @@ async def test_profile_facade_composes_latest_identity_and_runtime(
 
 
 @pytest.mark.asyncio
-async def test_clean_startup_seeds_revision_zero(
+async def test_clean_startup_crashes_without_pre_seeded_identity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A clean startup should build operational state and revision zero."""
+    """A clean startup must crash if no identity revision is pre-seeded."""
 
     from kazusa_ai_chatbot import service as service_module
     from kazusa_ai_chatbot.db.character_identity_growth import (
         IdentityLedgerNotFoundError,
     )
 
-    seed = _valid_seed_payload(name="Packaged Example")
-    revision = {
-        "revision_number": 0,
-        "effective_identity": seed,
-    }
     ensure_operational = AsyncMock(return_value="inserted")
     get_current = AsyncMock(
-        side_effect=[IdentityLedgerNotFoundError("missing"), revision],
+        side_effect=IdentityLedgerNotFoundError("missing"),
     )
-    load_packaged_seed = MagicMock(return_value=seed)
-    ensure_seed = AsyncMock(return_value=revision)
-    runtime_state = {
-        "cognition_state": build_character_production_state(
-            updated_at="2026-07-26T00:00:00Z",
-        ),
-        "updated_at": "2026-07-26T00:00:00Z",
-    }
     monkeypatch.setattr(
         service_module,
         "ensure_operational_character_state",
@@ -418,37 +368,14 @@ async def test_clean_startup_seeds_revision_zero(
         get_current,
         raising=False,
     )
-    monkeypatch.setattr(
-        service_module,
-        "load_packaged_character_profile_seed",
-        load_packaged_seed,
-        raising=False,
-    )
-    monkeypatch.setattr(
-        service_module,
-        "ensure_seed_identity",
-        ensure_seed,
-        raising=False,
-    )
-    monkeypatch.setattr(
-        service_module,
-        "get_character_runtime_state",
-        AsyncMock(return_value=runtime_state),
-    )
 
-    static_profile, loaded_runtime = (
+    with pytest.raises(RuntimeError, match="No character identity revision"):
         await service_module._load_startup_character_profile()
-    )
 
-    ensure_operational.assert_awaited_once_with()
-    load_packaged_seed.assert_called_once_with()
-    ensure_seed.assert_awaited_once_with(
+    get_current.assert_awaited_once_with(
         character_id=service_module.CHARACTER_GLOBAL_USER_ID,
-        seed=seed,
     )
-    assert get_current.await_count == 2
-    assert static_profile == seed
-    assert loaded_runtime == runtime_state
+    ensure_operational.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -468,8 +395,6 @@ async def test_restart_uses_existing_latest_revision(
         updated_at="2026-07-26T00:00:00Z",
     )
     ensure_operational = AsyncMock(return_value="verified")
-    load_packaged_seed = MagicMock()
-    ensure_seed = AsyncMock()
     monkeypatch.setattr(
         service_module,
         "ensure_operational_character_state",
@@ -480,18 +405,6 @@ async def test_restart_uses_existing_latest_revision(
         service_module,
         "get_current_identity",
         AsyncMock(return_value=revision),
-        raising=False,
-    )
-    monkeypatch.setattr(
-        service_module,
-        "load_packaged_character_profile_seed",
-        load_packaged_seed,
-        raising=False,
-    )
-    monkeypatch.setattr(
-        service_module,
-        "ensure_seed_identity",
-        ensure_seed,
         raising=False,
     )
     monkeypatch.setattr(
@@ -508,8 +421,6 @@ async def test_restart_uses_existing_latest_revision(
     )
 
     ensure_operational.assert_awaited_once_with()
-    load_packaged_seed.assert_not_called()
-    ensure_seed.assert_not_awaited()
     assert static_profile == identity
     assert runtime_state["cognition_state"] == cognition_state
 

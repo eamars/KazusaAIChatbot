@@ -48,7 +48,7 @@ The MongoDB collection is `internal_monologue_residue_state`. Rows contain:
 - `residue_id`
 - `character_id`
 - `scope_key`
-- `scope_kind`: `user_thread`, `group_scene`, or `character_global`
+- `scope_kind`: `user_thread` or `group_scene`
 - `platform`, `platform_channel_id`, `channel_type`, `global_user_id`
 - `residue_text`: one short first-person private residue string
 - `source_kind`: `chat` or `self_cognition`
@@ -64,7 +64,6 @@ The loader builds candidate scopes from the current trigger:
 
 1. Exact `user_thread`
 2. Matching `group_scene`
-3. `character_global`
 
 It ranks eligible rows by that scope priority, then by recency, and caps the
 selected window by `INTERNAL_MONOLOGUE_RESIDUE_WINDOW_SIZE`.

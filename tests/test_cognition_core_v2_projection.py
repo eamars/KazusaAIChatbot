@@ -119,6 +119,15 @@ def test_state_projection_separates_user_state_and_character_constraints() -> No
     assert projection.payload["character_constraints"][
         "personality_judgment"
     ] == _constraints()["personality_judgment"]
+    assert projection.payload["character_identity"] == (
+        canonical_identity_context()["goal_cognition"]
+    )
+    assert set(projection.payload["character_identity"]) == {
+        "core",
+        "personality",
+        "boundaries",
+        "self_image",
+    }
     assert projection.handle_to_ref["r1"]["entity_id"] == (
         "relationship:user:user-projection"
     )

@@ -13,6 +13,7 @@ from kazusa_ai_chatbot.nodes import persona_supervisor2_l3_surface as surface_mo
 from tests.cognition_core_v2_test_helpers import (
     canonical_cognition_output,
     canonical_episode,
+    canonical_service_character_profile,
 )
 
 
@@ -51,9 +52,11 @@ def _state(*, channel_type: str = "private") -> dict[str, Any]:
 def _character_profile() -> dict[str, Any]:
     """Build the required wording-only character voice source."""
 
-    return {
+    profile = canonical_service_character_profile(marker="style-context")
+    profile.update({
         "name": "Kazusa",
         "personality_brief": {
+            "mbti": "ISTP",
             "logic": "analytical",
             "tempo": "moderate",
             "defense": "reserved",
@@ -72,7 +75,8 @@ def _character_profile() -> dict[str, Any]:
             "abstraction_reframing": 0.4,
             "self_deprecation": 0.4,
         },
-    }
+    })
+    return profile
 
 
 def test_interaction_style_is_owned_by_unified_content_planning() -> None:
@@ -215,7 +219,8 @@ async def test_surface_handler_passes_loaded_style_to_v2_planner(
     assert "hesitation_density=" not in texture
     assert "0.4" not in texture
     assert len(texture) > 300
-    assert len(captured["visual_character_context"]) > 300
+    assert len(captured["visual_character_context"]) > 50
+    assert "visual-style-context" in captured["visual_character_context"]
 
 
 def test_empty_style_context_has_explicit_semantic_fallback() -> None:

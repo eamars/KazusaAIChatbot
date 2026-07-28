@@ -4,7 +4,7 @@ Submodule map:
 
 * ``_client``      — MongoDB connection, embedding client, vector index helper
 * ``schemas``      — TypedDict document shapes
-* ``bootstrap``    — startup: collections, indices, seeded documents
+* ``bootstrap``    — startup: collections and indices
 * ``conversation`` — ``conversation_history`` operations
 * ``users``        — ``user_profiles`` operations (identity, profile, V2 state)
 * ``character``    — ``character_state`` operations
@@ -45,8 +45,6 @@ from kazusa_ai_chatbot.db.schemas import (
     ConversationEpisodeEntryDoc,
     ConversationEpisodeStateDoc,
     ConversationMessageDoc,
-    GlobalCharacterGrowthRunDoc,
-    GlobalCharacterGrowthTraitDoc,
     InternalMonologueResidueDoc,
     InternalMonologueResidueSourceRefDoc,
     InternalActionLatchClaimV1,
@@ -110,13 +108,6 @@ from kazusa_ai_chatbot.db.reflection_cycle import (
     list_hourly_runs_for_channel_day,
     list_reflection_runs_for_kind_date,
     upsert_reflection_run,
-)
-from kazusa_ai_chatbot.db.global_character_growth import (
-    ensure_global_character_growth_indexes,
-    insert_growth_run_document,
-    list_active_growth_traits,
-    list_prompt_visible_growth_traits,
-    upsert_growth_trait_documents,
 )
 from kazusa_ai_chatbot.db.interaction_style_images import (
     build_group_engagement_action_context,
@@ -296,8 +287,7 @@ __all__ = [
     "CharacterProfileDoc",
     "CharacterReflectionRunDoc",
     "ConversationEpisodeEntryDoc", "ConversationEpisodeStateDoc",
-    "ConversationMessageDoc", "GlobalCharacterGrowthRunDoc",
-    "GlobalCharacterGrowthTraitDoc", "InteractionStyleImageDoc",
+    "ConversationMessageDoc", "InteractionStyleImageDoc",
     "InternalMonologueResidueDoc", "InternalMonologueResidueSourceRefDoc",
     "InternalActionLatchClaimV1", "InternalActionLatchV1",
     "InteractionStyleOverlayDoc", "InteractionStyleScopeType",
@@ -330,9 +320,6 @@ __all__ = [
     "list_daily_channel_runs", "list_existing_run_ids",
     "list_hourly_runs_for_channel_day", "list_reflection_runs_for_kind_date",
     "upsert_reflection_run",
-    "ensure_global_character_growth_indexes", "insert_growth_run_document",
-    "list_active_growth_traits", "list_prompt_visible_growth_traits",
-    "upsert_growth_trait_documents",
     "build_group_engagement_action_context", "build_interaction_style_context",
     "build_user_engagement_relevance_context",
     "empty_interaction_style_overlay", "ensure_interaction_style_image_indexes",

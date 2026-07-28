@@ -10,7 +10,10 @@ from typing import Any
 
 import pytest
 
-from tests.cognition_core_v2_test_helpers import canonical_cognition_output
+from tests.cognition_core_v2_test_helpers import (
+    canonical_cognition_output,
+    canonical_service_character_profile,
+)
 
 
 CODE_TASK = (
@@ -1383,6 +1386,10 @@ def _persona_state_for_input(
         "platform_bot_id": "platform-bot-001",
         "character_name": "Kazusa",
         "character_profile": {
+            **canonical_service_character_profile(
+                marker="coding-handoff",
+                global_user_id="character-001",
+            ),
             "name": "Kazusa",
             "global_user_id": "character-001",
             "mood": "neutral",
@@ -1408,7 +1415,6 @@ def _persona_state_for_input(
                 "rhythmic_bounce": 0.5,
                 "self_deprecation": 0.1,
             },
-            "boundary_profile": {},
         },
         "chat_history_wide": [],
         "reply_context": {},
