@@ -17,6 +17,10 @@ from kazusa_ai_chatbot.action_spec.registry import (
 from kazusa_ai_chatbot.brain_service import post_turn as post_turn_module
 from kazusa_ai_chatbot.chat_input_queue import QueuedChatItem
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
+from tests.cognition_core_v2_test_helpers import (
+    canonical_episode_identity_snapshot,
+    canonical_service_character_profile,
+)
 
 
 _CONSOLIDATION_TURN_CLOCK = build_turn_clock("2026-04-25 18:00:58")
@@ -336,8 +340,8 @@ def _patch_chat_dependencies(
 
     monkeypatch.setattr(
         service_module,
-        "_static_character_profile",
-        {"name": "Character"},
+        "_active_character_name_snapshot",
+        "Character",
     )
     monkeypatch.setattr(
         service_module,
@@ -347,6 +351,24 @@ def _patch_chat_dependencies(
             "vibe_check": "old vibe",
             "character_reflection": "old reflection",
         },
+    )
+    character_profile = canonical_service_character_profile(
+        marker="background-consolidation",
+        global_user_id=service_module.CHARACTER_GLOBAL_USER_ID,
+    )
+    identity_snapshot = canonical_episode_identity_snapshot(
+        marker="background-consolidation",
+        global_user_id=service_module.CHARACTER_GLOBAL_USER_ID,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_load_latest_character_profile_snapshot",
+        AsyncMock(return_value=character_profile),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "load_latest_identity_for_episode",
+        AsyncMock(return_value=identity_snapshot),
     )
     monkeypatch.setattr(
         service_module,
@@ -381,6 +403,11 @@ def _patch_chat_dependencies(
     )
     monkeypatch.setattr(
         service_module,
+        "set_conversation_source_episode_id",
+        AsyncMock(return_value=1),
+    )
+    monkeypatch.setattr(
+        service_module,
         "build_promoted_reflection_context",
         AsyncMock(return_value={}),
     )
@@ -388,6 +415,16 @@ def _patch_chat_dependencies(
         service_module,
         "_hydrate_reply_context",
         AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        service_module.llm_tracing,
+        "ensure_llm_trace_run",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        service_module.llm_tracing,
+        "finalize_llm_trace_run",
+        AsyncMock(),
     )
 
     async def _frontline(_state):
@@ -1332,8 +1369,8 @@ async def test_hydrate_reply_context_fills_missing_metadata_from_delivered_row(
     )
     monkeypatch.setattr(
         service_module,
-        "_static_character_profile",
-        {"name": '一之濑明日奈'},
+        "_active_character_name_snapshot",
+        "Character",
     )
     request = _chat_request()
     request.message_envelope.reply = service_module.ReplyTargetIn(
@@ -1344,7 +1381,7 @@ async def test_hydrate_reply_context_fills_missing_metadata_from_delivered_row(
 
     assert reply_context["reply_to_message_id"] == "platform-123"
     assert reply_context["reply_to_platform_user_id"] == "bot-1"
-    assert reply_context["reply_to_display_name"] == '一之濑明日奈'
+    assert reply_context["reply_to_display_name"] == "Character"
     assert reply_context["reply_excerpt"] == "previous assistant answer"
     lookup.assert_awaited_once_with(
         platform="qq",
@@ -1367,8 +1404,8 @@ async def test_hydrate_reply_context_overrides_adapter_bot_display_name(
     )
     monkeypatch.setattr(
         service_module,
-        "_static_character_profile",
-        {"name": '一之濑明日奈'},
+        "_active_character_name_snapshot",
+        "Character",
     )
     request = _chat_request()
     request.message_envelope.reply = service_module.ReplyTargetIn(
@@ -1380,7 +1417,7 @@ async def test_hydrate_reply_context_overrides_adapter_bot_display_name(
 
     reply_context = await service_module._hydrate_reply_context(request)
 
-    assert reply_context["reply_to_display_name"] == '一之濑明日奈'
+    assert reply_context["reply_to_display_name"] == "Character"
     lookup.assert_awaited_once()
 
 
@@ -1928,8 +1965,8 @@ async def test_chat_listen_only_drops_before_graph(monkeypatch):
     await _reset_queue_state()
     monkeypatch.setattr(
         service_module,
-        "_static_character_profile",
-        {"name": "Character"},
+        "_active_character_name_snapshot",
+        "Character",
     )
     monkeypatch.setattr(
         service_module,
@@ -1939,6 +1976,24 @@ async def test_chat_listen_only_drops_before_graph(monkeypatch):
             "vibe_check": "old vibe",
             "character_reflection": "old reflection",
         },
+    )
+    character_profile = canonical_service_character_profile(
+        marker="listen-only",
+        global_user_id="character-global-id",
+    )
+    identity_snapshot = canonical_episode_identity_snapshot(
+        marker="listen-only",
+        global_user_id="character-global-id",
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_load_latest_character_profile_snapshot",
+        AsyncMock(return_value=character_profile),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "load_latest_identity_for_episode",
+        AsyncMock(return_value=identity_snapshot),
     )
     monkeypatch.setattr(
         service_module,
@@ -1970,6 +2025,11 @@ async def test_chat_listen_only_drops_before_graph(monkeypatch):
         service_module,
         "get_conversation_history",
         AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "set_conversation_source_episode_id",
+        AsyncMock(return_value=1),
     )
     monkeypatch.setattr(
         service_module,

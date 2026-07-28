@@ -25,7 +25,10 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
     build_cognition_core_services,
 )
 from tests.live_llm_mongo import live_db, seed_shared_documents
-from tests.cognition_core_v2_test_helpers import canonical_episode
+from tests.cognition_core_v2_test_helpers import (
+    canonical_episode,
+    canonical_identity_context,
+)
 
 
 BENCHMARK_FIXTURE_PATH = Path(
@@ -160,6 +163,7 @@ def _chain_input(case: dict[str, str]) -> dict[str, object]:
                 "taboos": "preserve character agency",
             },
         },
+        "character_identity_context": canonical_identity_context(),
         "evidence": [{
             "evidence_handle": "e1",
             "evidence_ref": {

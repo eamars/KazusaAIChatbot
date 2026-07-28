@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -12,6 +13,7 @@ from kazusa_ai_chatbot.config import CHARACTER_TIME_ZONE
 from kazusa_ai_chatbot.db import reflection_cycle as reflection_store
 from kazusa_ai_chatbot.db.schemas import (
     CharacterReflectionRunDoc,
+    ReflectionEpisodeRefDoc,
     ReflectionMessageRefDoc,
     ReflectionScopeDoc,
 )
@@ -193,8 +195,149 @@ def source_message_refs(scope: ReflectionScopeInput) -> list[ReflectionMessageRe
         ).strip()
         if conversation_history_id:
             message_ref["conversation_history_id"] = conversation_history_id
+        source_episode_id = str(
+            message.get("source_episode_id", "") or ""
+        ).strip()
+        if source_episode_id:
+            message_ref["source_episode_id"] = source_episode_id
         refs.append(message_ref)
     return refs
+
+
+def source_episode_refs(
+    scope: ReflectionScopeInput,
+) -> list[ReflectionEpisodeRefDoc]:
+    """Build unique settled-episode roots from one raw message scope."""
+
+    roots: dict[str, ReflectionEpisodeRefDoc] = {}
+    for message in scope.messages:
+        if str(message.get("role", "")) not in {"user", "assistant"}:
+            continue
+        root_episode_id = str(
+            message.get("source_episode_id", "") or ""
+        ).strip()
+        timestamp = str(message.get("timestamp", "") or "").strip()
+        if not root_episode_id or not timestamp:
+            continue
+        scope_kind = str(
+            message.get("channel_type", scope.channel_type)
+            or scope.channel_type
+        ).strip()
+        if scope_kind not in {"private", "group"}:
+            continue
+        captured_at = normalize_storage_utc_iso(timestamp)
+        candidate: ReflectionEpisodeRefDoc = {
+            "root_episode_id": root_episode_id,
+            "correlation_id": root_episode_id,
+            "character_local_date": character_local_date_for_utc(
+                parse_timestamp(captured_at)
+            ),
+            "scope_kind": scope_kind,
+            "captured_at": captured_at,
+        }
+        existing = roots.get(root_episode_id)
+        if existing is None or captured_at < existing["captured_at"]:
+            if (
+                existing is not None
+                and existing["scope_kind"] != candidate["scope_kind"]
+            ):
+                raise ValueError(
+                    "one reflection episode root cannot span scope kinds"
+                )
+            roots[root_episode_id] = candidate
+        elif existing["scope_kind"] != candidate["scope_kind"]:
+            raise ValueError(
+                "one reflection episode root cannot span scope kinds"
+            )
+    return sorted(
+        roots.values(),
+        key=lambda row: (row["captured_at"], row["root_episode_id"]),
+    )
+
+
+def union_source_episode_refs(
+    documents: Sequence[Mapping[str, Any]],
+) -> list[ReflectionEpisodeRefDoc]:
+    """Recursively union settled-episode roots from reflection documents."""
+
+    rows: list[Mapping[str, Any]] = []
+    for document in documents:
+        raw_refs = document.get("source_episode_refs", [])
+        if not isinstance(raw_refs, list):
+            raise ValueError("source_episode_refs must be a list")
+        for raw_ref in raw_refs:
+            if not isinstance(raw_ref, Mapping):
+                raise ValueError("source_episode_refs entries must be objects")
+            rows.append(raw_ref)
+    return _normalize_source_episode_refs(rows)
+
+
+def _normalize_source_episode_refs(
+    refs: Sequence[Mapping[str, Any]],
+) -> list[ReflectionEpisodeRefDoc]:
+    """Validate and deduplicate recursive episode-root rows."""
+
+    roots: dict[str, ReflectionEpisodeRefDoc] = {}
+    expected_keys = {
+        "root_episode_id",
+        "correlation_id",
+        "character_local_date",
+        "scope_kind",
+        "captured_at",
+    }
+    for raw_ref in refs:
+        if set(raw_ref) != expected_keys:
+            raise ValueError("source episode ref has an invalid shape")
+        root_episode_id = _required_text(
+            raw_ref["root_episode_id"],
+            context="root_episode_id",
+        )
+        correlation_id = _required_text(
+            raw_ref["correlation_id"],
+            context="correlation_id",
+        )
+        character_local_date = _required_text(
+            raw_ref["character_local_date"],
+            context="character_local_date",
+        )
+        datetime.strptime(character_local_date, "%Y-%m-%d")
+        scope_kind = _required_text(
+            raw_ref["scope_kind"],
+            context="scope_kind",
+        )
+        if scope_kind not in {"private", "group", "self_cognition"}:
+            raise ValueError("source episode ref scope_kind is unsupported")
+        captured_at = normalize_storage_utc_iso(
+            _required_text(
+                raw_ref["captured_at"],
+                context="captured_at",
+            )
+        )
+        candidate: ReflectionEpisodeRefDoc = {
+            "root_episode_id": root_episode_id,
+            "correlation_id": correlation_id,
+            "character_local_date": character_local_date,
+            "scope_kind": scope_kind,
+            "captured_at": captured_at,
+        }
+        existing = roots.get(root_episode_id)
+        if existing is not None and existing != candidate:
+            raise ValueError(
+                "recursive reflection root metadata is inconsistent"
+            )
+        roots[root_episode_id] = candidate
+    return sorted(
+        roots.values(),
+        key=lambda row: (row["captured_at"], row["root_episode_id"]),
+    )
+
+
+def _required_text(value: object, *, context: str) -> str:
+    """Require nonempty text in repository-owned root metadata."""
+
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{context} must be nonempty text")
+    return value.strip()
 
 
 def active_character_utterances(
@@ -273,6 +416,7 @@ def build_hourly_run_document(
         "hour_end": hour_end_dt.isoformat(),
         "character_local_date": character_local_date_for_utc(hour_start_dt),
         "source_message_refs": source_message_refs(scope),
+        "source_episode_refs": source_episode_refs(scope),
         "source_reflection_run_ids": [],
         "output": parsed_output,
         "promotion_decisions": [],
@@ -319,6 +463,7 @@ def build_daily_channel_run_document(
         "window_end": _last_value(hourly_docs, "hour_end"),
         "character_local_date": character_local_date,
         "source_message_refs": [],
+        "source_episode_refs": union_source_episode_refs(hourly_docs),
         "source_reflection_run_ids": source_run_ids,
         "output": output,
         "promotion_decisions": [],
@@ -335,6 +480,7 @@ def build_global_promotion_run_document(
     character_local_date: str,
     prompt_version: str,
     source_run_ids: list[str],
+    source_episode_refs: list[ReflectionEpisodeRefDoc],
     output: dict[str, Any],
     promotion_decisions: list[dict[str, Any]],
     status: str,
@@ -364,6 +510,9 @@ def build_global_promotion_run_document(
         },
         "character_local_date": character_local_date,
         "source_message_refs": [],
+        "source_episode_refs": _normalize_source_episode_refs(
+            source_episode_refs
+        ),
         "source_reflection_run_ids": source_run_ids,
         "output": output,
         "promotion_decisions": promotion_decisions,
@@ -408,6 +557,7 @@ def build_daily_affect_settling_run_document(
         },
         "character_local_date": settling_local_date,
         "source_message_refs": [],
+        "source_episode_refs": [],
         "source_reflection_run_ids": source_run_ids,
         "output": output,
         "promotion_decisions": [],

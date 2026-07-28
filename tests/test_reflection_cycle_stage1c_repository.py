@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from kazusa_ai_chatbot.db import reflection_cycle as db_reflection_runs
+from kazusa_ai_chatbot.db import conversation_reflection
 from kazusa_ai_chatbot.reflection_cycle import repository as repository_module
 from kazusa_ai_chatbot.reflection_cycle.models import (
     READONLY_REFLECTION_PROMPT_VERSION,
@@ -51,6 +52,7 @@ def test_hourly_run_document_uses_parent_scope_and_source_refs() -> None:
             "channel_type": "group",
             "role": "user",
             "timestamp": "2026-05-04T10:05:00+00:00",
+            "source_episode_id": "episode-root-1",
         },
         {
             "platform": "qq",
@@ -58,8 +60,16 @@ def test_hourly_run_document_uses_parent_scope_and_source_refs() -> None:
             "channel_type": "group",
             "role": "assistant",
             "timestamp": "2026-05-04T10:07:00+00:00",
+            "source_episode_id": "episode-root-1",
         },
     ]
+    assert document["source_episode_refs"] == [{
+        "root_episode_id": "episode-root-1",
+        "correlation_id": "episode-root-1",
+        "character_local_date": "2026-05-04",
+        "scope_kind": "group",
+        "captured_at": "2026-05-04T10:05:00+00:00",
+    }]
     assert document["output"]["active_character_utterances"] == [
         "The channel rule should stay factual, not personal."
     ]
@@ -77,6 +87,47 @@ def test_hourly_scope_parent_parser_uses_timestamp_suffix_only() -> None:
 
     assert parsed_scope == "scope_20_slug"
     assert unchanged_scope == "scope_20_slug"
+
+
+def test_daily_and_global_runs_recursively_union_episode_roots() -> None:
+    """Reflection derivatives retain roots without multiplying them."""
+
+    scope = _hourly_scope()
+    first_hourly = repository_module.build_hourly_run_document(
+        scope=scope,
+        result=_hourly_result(scope),
+        status=REFLECTION_STATUS_DRY_RUN,
+        attempt_count=0,
+    )
+    second_hourly = dict(first_hourly)
+    second_hourly["run_id"] = "hourly-second"
+    second_hourly["_id"] = "hourly-second"
+    daily = repository_module.build_daily_channel_run_document(
+        channel_scope=scope,
+        hourly_docs=[first_hourly, second_hourly],
+        result=None,
+        character_local_date="2026-05-04",
+        status=REFLECTION_STATUS_DRY_RUN,
+        attempt_count=0,
+    )
+    global_run = repository_module.build_global_promotion_run_document(
+        character_local_date="2026-05-04",
+        prompt_version="promotion-v1",
+        source_run_ids=[str(daily["run_id"])],
+        source_episode_refs=daily["source_episode_refs"],
+        output={"promotion_decisions": []},
+        promotion_decisions=[],
+        status=REFLECTION_STATUS_DRY_RUN,
+        attempt_count=0,
+        validation_warnings=[],
+    )
+
+    assert daily["source_episode_refs"] == first_hourly[
+        "source_episode_refs"
+    ]
+    assert global_run["source_episode_refs"] == daily[
+        "source_episode_refs"
+    ]
 
 
 @pytest.mark.asyncio
@@ -126,6 +177,14 @@ def test_reflection_cycle_source_has_no_direct_storage_operations() -> None:
                 offenders.append(f"{module.__name__}:{token}")
 
     assert offenders == []
+
+
+def test_reflection_query_projects_opaque_episode_roots() -> None:
+    """Reflection reads retain lineage without widening transcript content."""
+
+    projection = conversation_reflection._REFLECTION_MESSAGE_PROJECTION
+
+    assert projection["source_episode_id"] == 1
 
 
 @pytest.mark.asyncio
@@ -179,11 +238,13 @@ def _hourly_scope() -> ReflectionScopeInput:
                 "role": "user",
                 "body_text": "User-specific detail should not become lore.",
                 "timestamp": "2026-05-04T10:05:00+00:00",
+                "source_episode_id": "episode-root-1",
             },
             {
                 "role": "assistant",
                 "body_text": "The channel rule should stay factual, not personal.",
                 "timestamp": "2026-05-04T10:07:00+00:00",
+                "source_episode_id": "episode-root-1",
             },
         ],
     )

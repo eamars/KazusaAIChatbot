@@ -9,6 +9,9 @@ from __future__ import annotations
 
 from typing import Literal, TypedDict
 
+from kazusa_ai_chatbot.character_identity_growth.models import (
+    CharacterEffectiveIdentityV1,
+)
 from kazusa_ai_chatbot.message_envelope.types import (
     ConversationAuthorRole,
     MentionEntityKind,
@@ -99,6 +102,7 @@ class ConversationMessageDoc(TypedDict, total=False):
     delivered_at: str          # ISO timestamp reported by the adapter
     delivery_adapter: str      # Adapter that reported the delivery receipt
     llm_trace_id: str          # Turn-scoped LLM trace id, when available
+    source_episode_id: str     # Settled cognitive episode root for reflection
     timestamp: str             # ISO-8601 UTC timestamp
     embedding: list[float]     # Dense vector (on text content only)
 
@@ -344,47 +348,12 @@ class InteractionStyleImageDoc(TypedDict, total=False):
     updated_at: str
 
 
-class CharacterProfileDoc(TypedDict, total=False):
-    """All fields of the singleton ``_id: "global"`` document in
-    the ``character_state`` collection.
+class CharacterProfileDoc(CharacterEffectiveIdentityV1, total=False):
+    """Graph-facing composition of latest identity and operational state."""
 
-    Both personality profile fields **and** runtime state fields live
-    at the top level. The schema is intentionally open-ended
-    (``total=False``) so new fields can be added without migration.
-    """
-
-    # ── personality profile ────────────────────────────────────────
-    name: str
-    description: str
-    gender: str
-    age: int
-    birthday: str
-    tone: str
-    speech_patterns: str
-    backstory: str
-    personality_brief: dict
-    boundary_profile: BoundaryProfileDoc
-    linguistic_texture_profile: LinguisticTextureProfileDoc
-
-    # ── Three-tier character self-image (NEW) ─────────────────
-    self_image: dict        # {milestones, recent_window, historical_summary, meta}
-    cognition_state: dict   # Validated cognition_state.v2 character state
-
-
-class CharacterProfileSeedV1(TypedDict, total=False):
-    """Static character fields accepted by the native profile bootstrap."""
-
-    name: str
-    description: str
-    gender: str
-    age: int
-    birthday: str
-    tone: str
-    speech_patterns: str
-    backstory: str
-    personality_brief: dict
-    boundary_profile: BoundaryProfileDoc
-    linguistic_texture_profile: LinguisticTextureProfileDoc
+    global_user_id: str
+    cognition_state: dict
+    updated_at: str
 
 
 class InternalActionLatchV1(TypedDict, total=False):
@@ -469,7 +438,18 @@ class ReflectionMessageRefDoc(TypedDict, total=False):
     platform_channel_id: str
     channel_type: str
     role: Literal["user", "assistant"]
+    source_episode_id: str
     timestamp: str
+
+
+class ReflectionEpisodeRefDoc(TypedDict):
+    """Recursive settled-episode root carried across reflection levels."""
+
+    root_episode_id: str
+    correlation_id: str
+    character_local_date: str
+    scope_kind: Literal["private", "group", "self_cognition"]
+    captured_at: str
 
 
 class ReflectionScopeDoc(TypedDict):
@@ -506,6 +486,7 @@ class CharacterReflectionRunDoc(TypedDict, total=False):
     hour_end: str
     character_local_date: str
     source_message_refs: list[ReflectionMessageRefDoc]
+    source_episode_refs: list[ReflectionEpisodeRefDoc]
     source_reflection_run_ids: list[str]
     output: dict
     promotion_decisions: list[dict]

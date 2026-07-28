@@ -12,7 +12,11 @@ import pytest
 
 from kazusa_ai_chatbot import chat_input_queue as queue_module
 from kazusa_ai_chatbot import service as service_module
-from tests.cognition_core_v2_test_helpers import canonical_user_message_episode
+from tests.cognition_core_v2_test_helpers import (
+    canonical_episode_identity_snapshot,
+    canonical_service_character_profile,
+    canonical_user_message_episode,
+)
 from kazusa_ai_chatbot.consolidation.origin import (
     build_user_message_consolidation_origin,
 )
@@ -209,13 +213,31 @@ def _patch_service_dependencies(
     """Patch service dependencies around initial-state construction."""
     monkeypatch.setattr(
         service_module,
-        "_static_character_profile",
-        {"name": "Active Character", "personality_brief": "brief"},
+        "_active_character_name_snapshot",
+        "Active Character",
     )
     monkeypatch.setattr(
         service_module,
         "_runtime_character_state",
         {"mood": "calm", "vibe_check": "steady"},
+    )
+    character_profile = canonical_service_character_profile(
+        marker="image-input",
+        global_user_id="character-1",
+    )
+    identity_snapshot = canonical_episode_identity_snapshot(
+        marker="image-input",
+        global_user_id="character-1",
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_load_latest_character_profile_snapshot",
+        AsyncMock(return_value=character_profile),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "load_latest_identity_for_episode",
+        AsyncMock(return_value=identity_snapshot),
     )
     monkeypatch.setattr(
         service_module,
@@ -249,8 +271,23 @@ def _patch_service_dependencies(
     )
     monkeypatch.setattr(
         service_module,
+        "set_conversation_source_episode_id",
+        AsyncMock(return_value=1),
+    )
+    monkeypatch.setattr(
+        service_module,
         "build_promoted_reflection_context",
         AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        service_module.llm_tracing,
+        "ensure_llm_trace_run",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        service_module.llm_tracing,
+        "finalize_llm_trace_run",
+        AsyncMock(),
     )
     monkeypatch.setattr(service_module, "_graph", graph)
 

@@ -132,10 +132,6 @@ class E2EConsoleProcess(AbstractContextManager["E2EConsoleProcess"]):
         environment_source = ""
         if self.config.use_live_project_db:
             environment_source = (
-                "import os\n"
-                "os.environ.pop('MONGODB_DB_NAME', None)\n"
-                "os.environ.pop('KAZUSA_TEST_DB_GUARD', None)\n"
-                "os.environ.pop('STAGE3_DATABASE_GUARD', None)\n"
                 "from scripts._db_export import load_project_env\n"
                 "load_project_env()\n"
             )

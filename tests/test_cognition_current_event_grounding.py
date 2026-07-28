@@ -8,7 +8,11 @@ from typing import Any
 
 import pytest
 
-from tests.cognition_core_v2_test_helpers import canonical_user_message_episode
+from tests.cognition_core_v2_test_helpers import (
+    canonical_character_identity,
+    canonical_identity_context,
+    canonical_user_message_episode,
+)
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionCoreServicesV2,
 )
@@ -100,15 +104,16 @@ def _episode() -> dict[str, Any]:
 def _character_profile() -> dict[str, Any]:
     """Build the exact profile fields consumed by V2 cognition."""
 
-    return {
-        "name": "Kazusa",
-        "personality_brief": {
-            "logic": "Keep visible facts and typed roles separate.",
-            "defense": "Express reserve while preserving grounded meaning.",
-            "quirks": "Prefer concise observations.",
-            "taboos": "Keep operational provenance internal.",
-        },
+    profile = canonical_character_identity(marker="grounding")
+    profile["personality_brief"] = {
+        "mbti": "test",
+        "logic": "Keep visible facts and typed roles separate.",
+        "tempo": "measured",
+        "defense": "Express reserve while preserving grounded meaning.",
+        "quirks": "Prefer concise observations.",
+        "taboos": "Keep operational provenance internal.",
     }
+    return profile
 
 
 def _connector_payload() -> dict[str, Any]:
@@ -311,6 +316,10 @@ async def test_appraisal_prompt_excludes_current_event_provenance_ids() -> None:
     projection = project_state_for_prompt(
         mutable_state,
         character_constraints=constraints,
+        character_identity_context=payload.get(
+            "character_identity_context",
+            canonical_identity_context(),
+        ),
         evidence=evidence,
     )
     questions = plan_semantic_questions(

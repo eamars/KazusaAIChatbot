@@ -101,6 +101,9 @@ def test_target_plan_builds_user_target_for_valid_chat() -> None:
     assert "user_style_image" in user_target["write_lanes"]
     assert "user_memory_units" in user_target["write_lanes"]
     assert "group_channel" not in targets_by_kind
+    character_target = targets_by_kind["character"][0]
+    assert "character_identity_growth" in character_target["write_lanes"]
+    assert "character_self_image" not in character_target["write_lanes"]
 
 
 def test_group_chat_target_plan_includes_group_and_current_author() -> None:

@@ -224,7 +224,11 @@ async def test_worker_tick_passes_busy_probe_to_promotion(monkeypatch) -> None:
         "_run_global_reflection_promotion",
         _run_global_reflection_promotion,
     )
-    monkeypatch.setattr(worker_module, "GLOBAL_CHARACTER_GROWTH_PASS_ENABLED", False)
+    monkeypatch.setattr(
+        worker_module,
+        "CHARACTER_IDENTITY_GROWTH_ENABLED",
+        False,
+    )
     monkeypatch.setattr(worker_module, "_local_time_is_after", lambda *_: True)
 
     def _busy_probe() -> bool:
@@ -902,7 +906,11 @@ async def test_worker_tick_runs_period_maintenance_once_for_many_phase_intents(
     monkeypatch.setattr(worker_module, "_run_daily_channel_reflection_cycle", daily)
     monkeypatch.setattr(worker_module, "_run_daily_interaction_style_update", style)
     monkeypatch.setattr(worker_module, "_run_global_reflection_promotion", promotion)
-    monkeypatch.setattr(worker_module, "GLOBAL_CHARACTER_GROWTH_PASS_ENABLED", False)
+    monkeypatch.setattr(
+        worker_module,
+        "CHARACTER_IDENTITY_GROWTH_ENABLED",
+        False,
+    )
     monkeypatch.setattr(worker_module, "_local_time_is_after", lambda *_: True)
 
     results = await worker_module._run_worker_tick(
@@ -988,7 +996,11 @@ async def test_worker_tick_runs_due_daily_affect_settling_once(
         affect,
         raising=False,
     )
-    monkeypatch.setattr(worker_module, "GLOBAL_CHARACTER_GROWTH_PASS_ENABLED", False)
+    monkeypatch.setattr(
+        worker_module,
+        "CHARACTER_IDENTITY_GROWTH_ENABLED",
+        False,
+    )
     monkeypatch.setattr(worker_module, "_local_time_is_after", lambda *_: True)
     monkeypatch.setattr(
         worker_module,
@@ -1446,7 +1458,11 @@ async def test_worker_loop_runs_period_maintenance_once_across_phase_wakes(
     monkeypatch.setattr(worker_module, "_run_daily_channel_reflection_cycle", daily)
     monkeypatch.setattr(worker_module, "_run_daily_interaction_style_update", style)
     monkeypatch.setattr(worker_module, "_run_global_reflection_promotion", promotion)
-    monkeypatch.setattr(worker_module, "GLOBAL_CHARACTER_GROWTH_PASS_ENABLED", False)
+    monkeypatch.setattr(
+        worker_module,
+        "CHARACTER_IDENTITY_GROWTH_ENABLED",
+        False,
+    )
     monkeypatch.setattr(worker_module, "_local_time_is_after", lambda *_: True)
     monkeypatch.setattr(worker_module.asyncio, "wait_for", _wait_for)
 

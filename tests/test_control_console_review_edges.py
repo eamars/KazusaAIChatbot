@@ -465,64 +465,78 @@ async def test_repository_character_projection_fallbacks_are_readable() -> None:
     from control_console.repository import ControlConsoleRepository
 
     async def get_character_profile() -> dict[str, object]:
-        return {"name": "Test Character"}
-
-    async def runtime_state() -> dict[str, object]:
         return {
-            "cognition_state": {},
+            "name": "Test Character",
+            "global_user_id": "character-1",
             "self_image": {
-                "summary": "steady",
-                "recent_window": ["first; second"],
-                "meta": {
-                    "last_updated": "2026-06-19T00:00:00+00:00",
-                    "synthesis_count": 1685,
-                },
+                "self_concept": "steady",
+                "current_growth_edges": ["first", "second"],
                 "prompt_text": "must redact",
             },
         }
 
-    async def mixed_growth_traits(*, limit: int) -> list[object]:
-        assert limit == 12
-        return [
-            ["invalid"],
-            {
-                "trait_id": "trait-1",
-                "trait_name": "observable growth",
-                "prompt_text": "must redact",
-            },
-        ]
+    async def runtime_state() -> dict[str, object]:
+        return {"cognition_state": {}}
 
-    async def empty_growth_runs(*, limit: int) -> list[object]:
-        assert limit == 1
-        return []
+    async def identity_revisions(**kwargs: object) -> list[object]:
+        assert kwargs == {"character_id": "character-1", "limit": 10}
+        return [{
+            "revision_number": 0,
+            "revision_kind": "seed",
+            "base_revision_number": None,
+            "changed_paths": [],
+            "change_diff": [],
+            "evidence_summary": "seed",
+            "source_scope_kinds": [],
+            "evidence_refs": [],
+            "proposal_confidence": "seed",
+            "review_confidence": "seed",
+            "created_at": "2026-06-19T00:00:00+00:00",
+            "prompt_text": "must redact",
+        }]
 
-    async def empty_residue(**kwargs: object) -> dict[str, object]:
-        assert "trigger_scope" in kwargs
-        assert "current_timestamp_utc" in kwargs
+    async def empty_growth_rows(**kwargs: object) -> list[object]:
+        assert kwargs == {"character_id": "character-1", "limit": 10}
+        return [["invalid"]]
+
+    async def idle_health(**kwargs: object) -> dict[str, object]:
+        assert kwargs == {"character_id": "character-1"}
         return {
-            "status": "empty",
-            "internal_monologue_residue_context": "",
+            "state": "healthy_idle",
+            "routed_count": 0,
+            "no_change_count": 0,
+            "emerging_candidate_count": 0,
+            "ready_candidate_count": 0,
+            "rejected_count": 0,
+            "failed_count": 0,
+            "promoted_count": 0,
+            "consumed_count": 0,
+            "latest_revision_number": 0,
+            "latest_consumed_revision_number": None,
+            "latest_reason_code": "not_routed",
+            "root_count": 0,
+            "local_date_count": 0,
         }
 
     repository = ControlConsoleRepository(
         get_character_profile=get_character_profile,
         get_character_runtime_state=runtime_state,
-        list_growth_traits=mixed_growth_traits,
-        list_recent_global_character_growth_runs=empty_growth_runs,
-        load_residue_context=empty_residue,
+        list_identity_revisions=identity_revisions,
+        list_identity_growth_candidates=empty_growth_rows,
+        list_recent_identity_growth_runs=empty_growth_rows,
+        build_identity_growth_health=idle_health,
     )
 
     character = await repository.character_entity(limit=10)
     self_image = character["panels"]["self_image"]["items"][0]
-    growth = character["panels"]["growth"]["items"][0]
+    lineage = character["panels"]["carry_over"]["items"]
 
     assert character["status"] == "available"
-    assert self_image["summary"] == "steady"
-    assert self_image["recent_window"] == ["first; second"]
-    assert self_image["updated_at"] == "2026-06-19T00:00:00+00:00"
-    assert "synthesis_count" not in self_image
-    assert growth["trait_name"] == "observable growth"
-    assert "trait_id" not in growth
+    assert self_image["self_concept"] == "steady"
+    assert self_image["current_growth_edges"] == ["first", "second"]
+    assert character["panels"]["growth"]["status"] == "empty"
+    assert lineage[0]["state"] == "healthy_idle"
+    assert lineage[1]["revision_number"] == 0
     rendered = repr(character).lower()
     assert "prompt_text" not in rendered
     assert "must redact" not in rendered

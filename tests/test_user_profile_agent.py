@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
+from kazusa_ai_chatbot.rag.cache2_events import CacheInvalidationEvent
 from kazusa_ai_chatbot.rag.cache2_policy import build_user_profile_cache_key
 from kazusa_ai_chatbot.rag.cache2_runtime import RAGCache2Runtime
 from kazusa_ai_chatbot.rag.person_context.workers.profile import (
@@ -147,6 +148,48 @@ async def test_user_profile_agent_keeps_character_profile_cacheable(monkeypatch)
     assert second["cache"]["hit"] is True
     assert second["result"]["name"] == "Kazusa"
     get_character_profile.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_character_identity_revision_invalidates_cached_profile(
+    monkeypatch,
+) -> None:
+    """A promoted global identity should refresh the character RAG profile."""
+
+    get_character_profile = AsyncMock(
+        side_effect=[
+            {"name": "revision-old"},
+            {"name": "revision-new"},
+        ]
+    )
+    monkeypatch.setattr(
+        "kazusa_ai_chatbot.rag.person_context.workers.profile.get_character_profile",
+        get_character_profile,
+    )
+    runtime = RAGCache2Runtime(max_entries=10)
+    agent = UserProfileAgent(cache_runtime=runtime)
+    context = {
+        "known_facts": [{
+            "raw_result": {
+                "global_user_id": CHARACTER_GLOBAL_USER_ID,
+                "display_name": "Character",
+            }
+        }]
+    }
+
+    first = await agent.run(task="retrieve character profile", context=context)
+    removed = await runtime.invalidate(CacheInvalidationEvent(
+        source="character_identity",
+        global_user_id=CHARACTER_GLOBAL_USER_ID,
+        reason="identity_revision:1",
+    ))
+    second = await agent.run(task="retrieve character profile", context=context)
+
+    assert first["result"]["name"] == "revision-old"
+    assert removed == 1
+    assert second["cache"]["hit"] is False
+    assert second["result"]["name"] == "revision-new"
+    assert get_character_profile.await_count == 2
 
 
 @pytest.mark.asyncio

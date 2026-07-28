@@ -784,6 +784,12 @@ def _project_question_state(
     )
     if constraints:
         result["character_constraints"] = constraints
+    identity = projection.identity_by_question.get(
+        question["question_kind"],
+        {},
+    )
+    if identity:
+        result["character_identity"] = deepcopy(identity)
     return result
 
 

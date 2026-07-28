@@ -282,7 +282,8 @@ def test_static_renderers_tolerate_missing_optional_panel_targets(tmp_path) -> N
         "renderPanelEmptyContent",
         "renderCharacterProfilePanel",
         "renderCharacterSelfImagePanel",
-        "renderCharacterGrowthPanel",
+        "renderIdentityGrowthPanel",
+        "renderIdentityLineagePanel",
         "renderMemoryUnitRows",
         "renderStyleOverlayRows",
     ]
@@ -836,8 +837,8 @@ async def test_group_entity_splits_group_residue_and_participant_progress() -> N
 
 
 @pytest.mark.asyncio
-async def test_character_entity_shows_semantic_growth_and_global_carry_over() -> None:
-    """Character should show growth meaning without execution machinery."""
+async def test_character_entity_shows_growth_and_revision_carry_over() -> None:
+    """Character should show redacted identity process and continuity."""
 
     from control_console.repository import ControlConsoleRepository
     from kazusa_ai_chatbot.cognition_core_v2.state_models import (
@@ -848,6 +849,10 @@ async def test_character_entity_shows_semantic_growth_and_global_carry_over() ->
         return {
             "name": "Test Character",
             "global_user_id": "character-1",
+            "self_image": {
+                "self_concept": "steady under review",
+                "current_growth_edges": ["repair after tension"],
+            },
         }
 
     async def get_character_runtime_state():
@@ -855,65 +860,116 @@ async def test_character_entity_shows_semantic_growth_and_global_carry_over() ->
             "cognition_state": build_character_production_state(
                 updated_at="2026-06-24T00:00:00+00:00",
             ),
-            "self_image": {},
         }
 
-    async def list_growth_traits(*, limit: int):
-        assert limit == 12
+    async def list_identity_growth_candidates(**kwargs):
+        assert kwargs == {"character_id": "character-1", "limit": 5}
         return [{
-            "trait_id": "trait-secret",
-            "growth_axis": "repair",
-            "trait_name": "repair calibration",
-            "guidance": "repair quickly after tension",
-            "status": "active",
-            "maturity_band": "promoted",
-            "evidence_count": 2,
+            "status": "ready",
+            "base_revision_number": 1,
+            "change_kind": "inferred_growth",
+            "proposed_changes": [{
+                "path": "personality_brief.defense",
+                "value_kind": "text",
+                "replacement_text": "must-not-leak",
+            }],
+            "distinct_episode_count": 3,
+            "distinct_local_dates": ["2026-06-23", "2026-06-24"],
+            "source_scope_kinds": ["group", "private"],
+            "fresh_post_revision_root_count": 3,
+            "reversal_of_paths": [],
+            "character_authorship": "inferred",
+            "proposal_confidence": "high",
+            "review_confidence": "high",
+            "privacy_review": "low",
+            "promoted_revision_number": None,
+            "rejection_reason": None,
+            "created_at": "2026-06-23T00:00:00+00:00",
+            "updated_at": "2026-06-24T00:00:00+00:00",
+            "candidate_id": "candidate-secret",
+            "claimed_root_episode_ids": ["root-secret"],
         }]
 
-    async def list_recent_global_character_growth_runs(*, limit: int):
-        assert limit == 1
-        return [
-                {
-                    "run_id": "run-secret",
-                    "status": "completed",
-                    "summary": "Promoted repair calibration.",
-                    "accepted_candidates": [{
-                        "growth_axis": "repair",
-                        "summary": "Repair guidance was consistently useful.",
-                    }],
-                    "trait_updates": [{
-                        "trait_name": "repair calibration",
-                        "change": "promoted",
-                    }],
-                    "raw_llm_output": "must-not-leak",
-                    "source_memory_ids": ["must-not-leak"],
-                    "completed_at": "2026-06-24T00:00:00+00:00",
-                },
-            ]
+    async def list_recent_identity_growth_runs(**kwargs):
+        assert kwargs == {"character_id": "character-1", "limit": 5}
+        return [{
+            "run_kind": "episode",
+            "base_revision_number": 1,
+            "root_episode_ids": ["root-secret"],
+            "source_evidence_count": 1,
+            "attempt_count_by_stage": {"proposal": 1, "review": 1},
+            "lifecycle_state": "complete",
+            "disposition": "candidate_updated",
+            "proposal_reason_code": "candidate_ready",
+            "review_reason_code": "candidate_ready",
+            "policy_reason_code": "candidate_ready",
+            "persistence_reason_code": "candidate_ready",
+            "promoted_revision_number": None,
+            "validation_error_codes": [],
+            "first_consumption": None,
+            "post_commit_attempt_count": 0,
+            "started_at": "2026-06-24T00:00:00+00:00",
+            "completed_at": "2026-06-24T00:00:00+00:00",
+            "run_id": "run-secret",
+            "correlation_id": "correlation-secret",
+        }]
 
-    async def load_residue_context(*, trigger_scope, current_timestamp_utc: str):
-        assert trigger_scope == {
-            "character_id": "character-1",
-            "platform": "",
-            "platform_channel_id": "",
-            "channel_type": "",
-            "global_user_id": "",
-        }
-        assert current_timestamp_utc == "2026-06-24T00:00:00+00:00"
+    async def list_identity_revisions(**kwargs):
+        assert kwargs == {"character_id": "character-1", "limit": 5}
+        return [{
+            "revision_number": 1,
+            "revision_kind": "explicit_turning_point",
+            "base_revision_number": 0,
+            "changed_paths": ["self_image.self_concept"],
+            "change_diff": [{
+                "path": "self_image.self_concept",
+                "value_kind": "text",
+                "before": "must-not-leak",
+                "after": "must-not-leak",
+            }],
+            "evidence_summary": "Reviewed turning point.",
+            "source_scope_kinds": ["private"],
+            "evidence_refs": [{
+                "root_episode_id": "revision-root-secret",
+                "character_local_date": "2026-06-24",
+            }],
+            "proposal_confidence": "high",
+            "review_confidence": "high",
+            "created_at": "2026-06-24T00:00:00+00:00",
+            "revision_id": "revision-secret",
+        }]
+
+    async def build_identity_growth_health(**kwargs):
+        assert kwargs == {"character_id": "character-1"}
         return {
-            "internal_monologue_residue_context": "character-global carry-over",
-            "selected_count": 1,
-            "candidate_count": 1,
-            "scope_order": ["character_global"],
-            "status": "loaded",
+            "state": "promotion_ready",
+            "routed_count": 4,
+            "no_change_count": 1,
+            "emerging_candidate_count": 0,
+            "ready_candidate_count": 1,
+            "rejected_count": 0,
+            "failed_count": 0,
+            "promoted_count": 1,
+            "consumed_count": 1,
+            "latest_revision_number": 1,
+            "latest_consumed_revision_number": 1,
+            "latest_reason_code": "candidate_ready",
+            "root_count": 3,
+            "local_date_count": 2,
         }
+
+    async def residue_must_not_load(**kwargs):
+        _ = kwargs
+        raise AssertionError("Character carry-over is identity lineage")
 
     repository = ControlConsoleRepository(
         get_character_profile=get_character_profile,
         get_character_runtime_state=get_character_runtime_state,
-        list_growth_traits=list_growth_traits,
-        list_recent_global_character_growth_runs=list_recent_global_character_growth_runs,
-        load_residue_context=load_residue_context,
+        list_identity_revisions=list_identity_revisions,
+        list_identity_growth_candidates=list_identity_growth_candidates,
+        list_recent_identity_growth_runs=list_recent_identity_growth_runs,
+        build_identity_growth_health=build_identity_growth_health,
+        load_residue_context=residue_must_not_load,
     )
 
     page = await repository.character_entity(
@@ -923,19 +979,18 @@ async def test_character_entity_shows_semantic_growth_and_global_carry_over() ->
 
     growth_panel = page["panels"]["growth"]
     assert growth_panel["status"] == "available"
-    assert growth_panel["items"][0]["trait_name"] == "repair calibration"
-    assert growth_panel["items"][1]["summary"] == (
-        "Promoted repair calibration."
-    )
+    assert growth_panel["items"][0]["status"] == "ready"
+    assert growth_panel["items"][0]["root_count"] == 3
+    assert growth_panel["items"][1]["latest_reason_code"] == "candidate_ready"
     carry_over = page["panels"]["carry_over"]
-    assert carry_over["items"][0]["context"] == (
-        "character-global carry-over"
-    )
+    assert carry_over["items"][0]["state"] == "promotion_ready"
+    assert carry_over["items"][1]["revision_number"] == 1
+    assert carry_over["items"][1]["is_current"] is True
     rendered = repr(page)
-    assert "raw_llm_output" not in rendered
-    assert "source_memory_ids" not in rendered
     assert "run-secret" not in rendered
-    assert "trait-secret" not in rendered
+    assert "candidate-secret" not in rendered
+    assert "revision-secret" not in rendered
+    assert "root-secret" not in rendered
+    assert "correlation-secret" not in rendered
     assert "prompt_view" not in rendered
-    assert "growth_runs_audit" not in rendered
     assert "must-not-leak" not in rendered

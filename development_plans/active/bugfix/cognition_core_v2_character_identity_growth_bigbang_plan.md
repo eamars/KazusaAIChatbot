@@ -4,12 +4,12 @@
 
 - Goal: make character self-image, growth, and cross-scope carry-over a first-class Cognition Core V2 identity system whose promoted revisions replace every supported semantic seed field.
 - Plan class: `high_risk_migration`.
-- Status: `draft`.
+- Status: `in_progress`.
 - Mandatory skills: `development-plan`, `local-llm-architecture`, `no-prepost-user-input`, `database-data-pull`, `debug-llm`, `character-test`, `control-console-web-development`, `py-style`, `cjk-safety`, `test-style-and-execution`, and `python-venv`.
 - Overall cutover: one forward-only big-bang contract replacement, with no legacy reader, dual write, compatibility mapper, historical replay, growth backfill, or production-database recovery.
 - Highest risks: allowing learned identity to become authoritative without letting user instructions directly rewrite the character; privacy-safe private/group carry-over; replacing process-local static authority; atomic promotion; preventing evidence double-counting and identity oscillation; and proving a real interaction caused a durable identity revision that changed later cognition and behavior.
 - Acceptance: a zero-gap baseline-to-V2 closure matrix is signed before legacy deletion; a clean database creates revision `0`; reviewed explicit and corroborated inferred growth arise through normal episode/background paths; one correlated proof chain joins real interaction, evidence, proposal, review, revision, cache refresh, next-episode projection, cognition, and visible behavior; only the latest revision reaches cognition and surfaces; prior revisions remain reviewable; private and group evidence may influence one global identity without leaking scoped details; every supported leaf/category receives the proof required below.
-- Execution authority: this draft authorizes documentation only. Production edits, database writes, live-service changes, and execution require plan approval plus an explicit implementation command.
+- Execution authority: approval and the user's explicit implementation command are recorded; guarded implementation/test work is authorized while production/historical database mutation, deployment, and cutover retain their separate authority gates.
 
 ## Context
 
@@ -80,7 +80,7 @@ historical database recovery, migration, replay, or backfill.
 
 1. Production changes remain blocked while status is `draft`.
 2. Use `venv\Scripts\python.exe`; use `apply_patch` for manual edits; check `git status --short`, root/subsystem docs, source, and tests before production edits; do not read `.env`.
-3. Use a clean guarded test database. Never replay, mutate, or seed from the historical Asuna database or the diagnostic artifacts above.
+3. Use a clean guarded test database. Historical database evidence is read-only and Asuna-only; never inspect another character database or replay, mutate, or seed from historical Asuna data/artifacts. Production code remains character-generic and contains no character/personality literals.
 4. Cut over caller, callee, database owner, tests, scripts, configuration, console, and docs together. Add no static overlay, legacy mapper, alias collection, or dual write.
 5. Revision `0` is the seed. Later immutable revisions contain complete effective identity snapshots. The highest revision number is the sole active identity; history is review-only.
 6. Only the latest identity reaches cognition, dialog, text expression, visual planning, adapter-visible naming, and new episode construction.
@@ -100,10 +100,10 @@ historical database recovery, migration, replay, or backfill.
 20. Reflection remains offline. Only validated daily cards and repository-linked root episode refs support scheduled identity evaluation.
 21. Growth adds no foreground call. Post-turn promotion first affects the next episode.
 22. One episode promotes at most one revision. Explicit turning points bypass inferred daily cadence, while inferred growth defaults to one promotion per local day.
-23. Stale-base candidates are reviewed again against latest identity; never overlay silently.
-24. Unique indexes plus current-base and root-claim checks reject revision/evidence duplicates and concurrent races.
+23. A stale candidate retains its claimed roots and is reviewed against latest identity in place; accepted patches atomically rebase that same candidate, while incoherent candidates become `superseded`. Roots never move to another candidate.
+24. Mongo transactions plus unique current-base/root-claim indexes reject duplicate evidence and concurrent forks; promotion and first-consumption claims fail closed when transaction support is unavailable.
 25. Every identity-routing decision emits a sanitized stage/reason event. Routed evaluations additionally persist one sanitized growth-run row.
-26. The first eligible episode after a revision records the loaded revision number, consumer kinds, and projection digest in sanitized event telemetry. No identity text enters telemetry.
+26. The first eligible episode after a revision atomically stores its loaded revision number, episode ID, consumer kinds, and projection digest in that revision's sanitized growth run; TTL event telemetry mirrors this durable receipt. No identity text enters either.
 27. Console health must distinguish healthy inactivity, insufficient evidence, semantic rejection, cadence wait, pipeline failure, awaiting first consumption, and revision-consumption regression.
 28. Raw prompts/output stay in protected traces. Growth-run rows contain sanitized outcome metadata only.
 29. Console code consumes public redacted projections, not raw collections or traces.
@@ -114,7 +114,7 @@ historical database recovery, migration, replay, or backfill.
 34. Before legacy deletion, the baseline-to-V2 closure matrix must contain zero unexplained capability rows and receive parent sign-off.
 35. After any automatic context compaction, reread this complete plan before continuing.
 36. After signing off each major progress stage, reread this complete plan before starting the next stage.
-37. Complete independent code review and parent-owned remediation/reruns before lifecycle closeout, merge, or final sign-off.
+37. Complete parent-owned code review and remediation/reruns before lifecycle closeout, merge, or final sign-off.
 
 ## Must Do
 
@@ -144,7 +144,7 @@ historical database recovery, migration, replay, or backfill.
 - No historical self-image, traits, growth runs, reflection output, residue, or conversation recovery/replay/backfill; no in-place Asuna DB repair.
 - User identity/memory, relationship state, group style, commitments, lore, skills, facts, and domain expertise do not become character identity.
 - V2 emotion/cognition-state reducers, autonomous contact, scheduler policy, action permissions, adapters, and delivery remain unchanged.
-- RAG ranking, retrieval, memory evolution, conversation progress, and residue algorithms remain unchanged except for consuming latest identity through existing profile boundaries where required.
+- RAG ranking, retrieval, memory evolution, and conversation progress remain unchanged. Residue keeps its private/group algorithms while deleting the `character_global` enum, loader candidate, recorder fallback, and console query; unresolved scope fails closed without a write.
 - Identity branching/merge, active rollback, mutable revision editing, per-user personas, alternate simultaneous identities, and console candidate approval are outside scope.
 
 ## Cutover Policy
@@ -197,7 +197,7 @@ episode -> read latest -> typed V2 projection -> response settles
         -> optional revision N -> invalidation/refresh
 daily   -> validated reflection cards -> independent memory promotion and identity evaluation
 next eligible episode -> load N -> authorized cognition/surface consumers
-                      -> sanitized identity-consumption event
+                      -> durable receipt plus sanitized mirrored event
 ```
 
 ### Baseline-To-V2 Capability Closure Gate
@@ -272,9 +272,27 @@ Every successful non-seed insert emits `CacheInvalidationEvent(source="character
 
 The existing consolidation router may select `character_identity_growth` for durable character-owned identity evidence. Selection never promotes.
 
-Proposal input: latest prompt-safe identity, one settled episode or validated daily evidence set, up to eight candidates on the current base, opaque repository evidence handles, and allowed paths. Output action is `no_change`, `explicit_self_redefinition`, `inferred_growth`, or `corroborate_candidate`, with at most five typed changes.
+Both stages use closed JSON. `IdentityProposalInputV1` contains only latest prompt-safe identity, one bounded `IdentityEvidenceCardV1` set, up to eight current-base candidates, opaque evidence handles, and allowed paths. `IdentityReviewInputV1` adds the parsed proposal to the same input. Unknown keys fail. The existing router/reflection producing LLM authors each card from its already authorized same-scope input: root/date/scope class plus bounded decontextualized event, character-cognition summary, and visible self-expression summary; participant names/IDs, channel IDs, exact user/character text, raw transcript/reflection/residue, and unrelated RAG facts are excluded before identity stages.
 
-Review input: proposal, latest identity, and the same bounded evidence. It independently judges character authorship, identity relevance, coherence, global applicability, privacy, contradiction/turning-point intent, and exact accepted patch.
+```text
+IdentityProposalDecisionV1
+  schema_version; action=no_change|explicit_self_redefinition|inferred_growth|corroborate_candidate
+  candidate_id:str|null; proposed_changes:0..5 IdentityPatchV1
+  character_authorship=self_declared|inferred|absent
+  identity_relevance=durable|ephemeral|absent; global_applicability=global|scoped|absent
+  confidence=low|medium|high; private_detail_risk=low|high
+  character_owned_abstraction; evidence_ref_ids; contradiction_candidate_ids; reason_code
+IdentityReviewDecisionV1
+  schema_version; verdict=accept|reject|no_change
+  selected_candidate_id:str|null; rejected_candidate_ids
+  accepted_change_kind=explicit_self_redefinition|inferred_growth|null
+  accepted_changes:0..5 IdentityPatchV1
+  character_authorship; identity_relevance; coherence=coherent|conflicting|absent
+  global_applicability; review_confidence=low|medium|high; private_detail_risk=low|high
+  character_owned_summary; privacy_safe_evidence_summaries; reason_code
+```
+
+Proposal and review independently own authorship, relevance, scope, contradiction, and semantic privacy. Only a low-risk reviewer-authored character abstraction/summaries may persist. Deterministic validation owns closed keys, bounds, opaque-handle membership, prohibited identifier fields, paths/types, and exact patch equality; it never manufactures or rewrites semantic content.
 
 Immediate promotion requires matching explicit classifications, high confidence from both stages, repository-linked character cognition/visible utterance, `character_authorship=self_declared`, low privacy risk, removed user detail, valid patch, and current base.
 
@@ -308,10 +326,24 @@ The same root can enrich semantic review through several cards but contributes
 exactly one count to one candidate. Retries and duplicate delivery reuse the
 same ref and emit duplicate dispositions.
 
+The live episode ID is persisted as `source_episode_id` on its user and
+character conversation rows. `db.conversation_reflection` projects that opaque
+field; hourly reflection runs store sorted unique source roots; daily
+channel/global runs recursively union those roots while separately retaining
+derivative run IDs. A reflection row without resolvable repository roots is
+ineligible and records `no_eligible_evidence`; timestamps, message IDs, and
+reflection-run IDs never substitute for a root.
+
 Candidate matching is semantic and LLM-owned. Root claiming, date counting,
 and duplicate prevention are deterministic. A candidate may contain up to five
 coherent patches, so one root never needs to be claimed by parallel
 field-specific candidates.
+
+Closed transitions are `emerging -> emerging|ready|rejected|superseded`,
+`ready -> promoted|rejected|superseded`, and no transition out of a terminal
+state. Competing same-path/current-base candidates enter one review set; the
+review names at most one winner and all incompatible candidates are rejected
+or superseded in the same transaction.
 
 For an inferred change to reverse a path changed by revision `N`, all counting
 roots for the reversing candidate must be newer than revision `N`. They must
@@ -324,9 +356,12 @@ contradictory candidates, and consecutive-day flip attempts.
 
 ### Growth Health And Empty-State Diagnosis
 
-The existing event-log owner records sanitized stage transitions; the identity
-module persists only revisions, candidates, and growth runs. No fourth growth
-collection is added.
+The existing event-log owner exposes one keyword-only identity recorder with
+closed `event_type=routing|proposal|review|policy|promotion|consumption`,
+stage/reason/status, correlation/run IDs, revision number, and counts. Its
+sanitizer rejects other keys. The identity module persists only revisions,
+candidates, and growth runs; durable consumption belongs to the run, so no
+fourth growth collection is added.
 
 Closed reason codes are:
 
@@ -364,13 +399,14 @@ pipeline_error
 consumption_error
 ```
 
-`healthy_idle` means no identity-relevant evidence was selected.
-`waiting_for_evidence` shows exact root/date progress without content.
-`semantic_rejection` means the LLM-owned decision rejected identity change
-without an infrastructure failure. `pipeline_error` means a contract,
-persistence, or scheduler stage failed. `consumption_error` means a promoted
-revision was not the revision loaded by the first later eligible episode.
-This funnel is the required operator answer to “no data or broken process?”
+Health uses this exact precedence: latest-revision receipt mismatch
+`consumption_error`; unresolved failed contract/persistence/scheduler run
+`pipeline_error`; latest non-seed revision without receipt
+`awaiting_consumption`; ready candidate `promotion_ready`; latest routed
+semantic/privacy/contradiction rejection `semantic_rejection`; emerging,
+duplicate, or cadence-held candidate `waiting_for_evidence`; matching durable
+receipt `healthy_active`; otherwise `healthy_idle`. Counts and latest reason
+remain visible without content. This funnel answers “no data or broken process?”
 
 ### Typed Patches
 
@@ -389,17 +425,17 @@ Numeric fields are prompt-visible as semantic descriptors. Mapping is `very_low=
 
 ### Natural V2 Projection
 
-Latest identity is authoritative constraint, not RAG evidence:
-
-- all goal branches receive bounded relevant identity, personality, boundaries, and self-image;
-- `moral_identity` gets core, personality, boundaries, self-image;
-- `existential_drive` gets core, personality, self-image;
-- `relationship_social` gets personality/boundaries;
-- `event_agency` and `goal_threat_outcome` get relevant personality/boundaries;
-- `epistemic_comparison_memory` gets core only for character-self questions;
-- text gets latest tempo plus semantic linguistic descriptors;
-- visual gets latest visual characterization plus minimal relevant identity;
-- revision/evidence/history metadata stays outside model prompts.
+Latest identity is authoritative constraint, not RAG evidence. Closed projection
+keys are: `moral_identity={core,personality,boundaries,self_image}`;
+`existential_drive={core,personality,self_image}`;
+`relationship_social={personality,boundaries}`;
+`event_agency={personality,boundaries}`;
+`goal_threat_outcome={personality,boundaries}`;
+`epistemic_comparison_memory={core}` only for character-self questions and `{}` otherwise;
+`text={name,personality.tempo,personality.defense,personality.quirks,linguistic_texture_profile}`;
+`visual={name,description,gender,age,visual_characterization}`; and
+`naming={name}`. Each consumer receives exactly its closed object; revision,
+evidence, history, and unlisted categories stay outside prompts.
 
 Existing `promoted_reflection_context` becomes bounded `source_kind=promoted_reflection` V2 evidence. It cannot directly override identity. RAG `character_image`, if retained, remains evidence and cannot outrank latest identity.
 
@@ -483,7 +519,7 @@ CharacterIdentityRevisionV1
   change_diff:list[IdentityChangeDiffV1]
   evidence_summary; source_scope_kinds; evidence_refs
   promotion_run_id; promotion_correlation_id
-  proposal_confidence=seed|high; review_confidence=seed|high; created_at
+  proposal_confidence=seed|high|operator; review_confidence=seed|high|operator; created_at
 
 CharacterIdentityGrowthCandidateV1
   schema_version="character_identity_growth_candidate.v1"
@@ -501,20 +537,20 @@ CharacterIdentityGrowthCandidateV1
 
 CharacterIdentityGrowthRunV1
   schema_version="character_identity_growth_run.v1"
-  run_id; run_kind=episode|daily_reflection; base_revision_number
+  run_id; run_kind=episode|daily_reflection|operator_reset; base_revision_number
   correlation_id; root_episode_ids
   source_evidence_count; attempt_count_by_stage
+  lifecycle_state=in_progress|committed|post_commit_pending|complete|failed
   disposition=no_change|candidate_updated|revision_promoted|
-              rejected|failed|deferred
+               rejected|failed|deferred
   proposal_reason_code; review_reason_code; policy_reason_code
   persistence_reason_code
   candidate_id; promoted_revision_number:int|null
-  validation_error_codes; started_at; completed_at
+  validation_error_codes; first_consumption:IdentityConsumptionReceiptV1|null
+  post_commit_attempt_count; started_at; completed_at
 
-IdentityConsumptionEventV1
-  event_family="character_identity_growth"
-  event_type="identity_revision_consumption"
-  correlation_id; episode_id; loaded_revision_number
+IdentityConsumptionReceiptV1
+  episode_id; correlation_id; claimed_at; loaded_revision_number
   consumer_kinds:sorted unique list
   projection_digest; status=consumed|mismatch
 
@@ -529,17 +565,19 @@ CharacterIdentityGrowthHealthV1
   latest_reason_code; root_count; local_date_count
 ```
 
-Revision `0` is `seed`, has empty diff/no runtime refs, and seed confidence.
-Later revisions require current base, changed path, high confidences, and
-repository-owned evidence refs. Candidate transitions are closed; promoted
-cannot regress. One `root_episode_id` can be claimed by only one candidate and
-can appear at most once in a candidate regardless of derivative reflection
-runs. Raw prompts/output, messages, user/scope IDs, private facts, identity
-text, and raw diffs are forbidden in run and consumption-event rows.
+Revision `0` is `seed`, has empty diff/no runtime refs, seed confidence, and no
+run. Growth revisions require current base, changed paths, high confidences,
+and repository-owned roots. `operator_reset` instead requires an explicit
+`--force` action ID, a linked `operator_reset` run with no evidence, operator
+confidence, and a fully validated snapshot; it invokes no semantic stage.
+Promoted candidates cannot regress. One root can be claimed by one candidate
+and appears once regardless of derivatives. Raw prompts/output, messages,
+user/scope IDs, private facts, identity text, and raw diffs are forbidden in
+runs, receipts, and telemetry.
 
 `CharacterIdentityGrowthHealthV1` is a redacted derived projection over the
-three growth collections and sanitized event logging. It is never persisted as
-a fourth identity-growth collection.
+three growth collections; TTL event logging is observability only. It is never
+persisted as a fourth identity-growth collection.
 
 ### Public Interfaces And Indexes
 
@@ -581,6 +619,10 @@ async def build_identity_growth_health(
 ) -> CharacterIdentityGrowthHealthV1: ...
 ```
 
+`IdentityGrowthEvaluationResultV1` has `status=not_routed|no_change|candidate_updated|revision_promoted|rejected|failed|deferred`, run/candidate IDs,
+base/promoted revision numbers, four stage reason codes, and validation error
+codes. Cognition/surface contexts are the exact closed consumer objects above.
+
 Only `db.character_identity_growth` accesses raw collections. Required indexes:
 
 ```text
@@ -595,6 +637,18 @@ character_identity_run_id_unique
 character_identity_run_kind_completed
 character_identity_run_revision
 ```
+
+Promotion requires a Mongo transaction: re-read max revision/current base,
+conditionally match the ready candidate by status/base, insert revision `N`,
+transition that candidate and its incompatible competitors, and finalize the
+run. Any write/commit error aborts all three changes. Retry by `run_id` returns
+an already consistent commit or repeats the transaction; any partial mismatch
+fails closed. After commit the run remains `post_commit_pending` until
+idempotent revision-keyed invalidation/event emission succeeds; startup and
+the background worker reconcile pending rows. Before cognition, a transaction
+compares loaded/max revision and conditionally claims the run's empty receipt;
+a stale load retries once, then fails closed. Failure injection covers every
+write boundary, commit, post-commit replay, restart, and concurrent claim.
 
 ## LLM Call And Context Budget
 
@@ -672,25 +726,25 @@ The following groups are justified outside the target module:
 ```text
 README.md; docs/HOWTO.md
 personalities/{asuna.json,example.json,kazusa.json,qingche.json}; src/kazusa_ai_chatbot/character_profiles/example.json
-src/kazusa_ai_chatbot/{character_profile.py,config.py,state.py,service.py}
-src/kazusa_ai_chatbot/db/{__init__.py,bootstrap.py,character.py,schemas.py,README.md,script_operations.py}
-src/kazusa_ai_chatbot/brain_service/{post_turn.py,README.md}
+src/kazusa_ai_chatbot/{character_profile.py,config.py,state.py,service.py,memory_writer_prompt_projection.py}
+src/kazusa_ai_chatbot/db/{__init__.py,bootstrap.py,character.py,conversation.py,conversation_reflection.py,event_logging.py,schemas.py,README.md,script_operations.py}
+src/kazusa_ai_chatbot/brain_service/{outbound.py,post_turn.py,README.md}
 src/kazusa_ai_chatbot/consolidation/{__init__.py,core.py,lane_router.py,origin_policy.py,persistence.py,schema.py,source_policy.py,target.py,README.md}
-src/kazusa_ai_chatbot/reflection_cycle/{models.py,promotion.py,worker.py,context.py,README.md}
+src/kazusa_ai_chatbot/reflection_cycle/{models.py,promotion.py,worker.py,context.py,selector.py,repository.py,projection.py,activity_windows.py,prompts.py,README.md}
 src/kazusa_ai_chatbot/cognition_core_v2/{contracts.py,state_projection.py,semantic_appraisal.py,goal_cognition.py,README.md}
-src/kazusa_ai_chatbot/nodes/{persona_supervisor2_schema.py,persona_supervisor2_cognition.py,persona_supervisor2_l3_surface.py,boundary_profile.py,linguistic_texture.py,README.md}
-src/kazusa_ai_chatbot/internal_monologue_residue/README.md; src/kazusa_ai_chatbot/self_cognition/{sources.py,worker.py}
+src/kazusa_ai_chatbot/nodes/{persona_supervisor2_schema.py,persona_supervisor2_cognition.py,persona_supervisor2_l3_surface.py,persona_supervisor2_rag_prompt_views.py,boundary_profile.py,linguistic_texture.py,README.md}
+src/kazusa_ai_chatbot/internal_monologue_residue/{models.py,loader.py,recorder.py,README.md}; src/kazusa_ai_chatbot/self_cognition/{sources.py,worker.py}
 src/kazusa_ai_chatbot/rag/{cache2_policy.py,README.md}; src/kazusa_ai_chatbot/rag/person_context/projection.py; src/kazusa_ai_chatbot/rag/person_context/workers/profile.py
-src/kazusa_ai_chatbot/local_context_resolver/cache.py; src/kazusa_ai_chatbot/event_logging/{recording.py,README.md}
+src/kazusa_ai_chatbot/local_context_resolver/cache.py; src/kazusa_ai_chatbot/event_logging/{__init__.py,recording.py,sanitization.py,README.md}
 src/scripts/{_lane_cleanup.py,character_state_snapshot.py,load_character_profile.py,sanitize_memory_writer_perspective.py,README.md}
 src/control_console/{app.py,repository.py,service_config.py,README.md}; src/control_console/static/{index.html,console.js,console.css}
 tests/{test_character_profile_seed.py,test_character_profile_clean_start_live_db.py,test_character_state_snapshot.py,test_service_background_consolidation.py}
 tests/{test_consolidation_lane_router_contract.py,test_consolidation_target_routing.py,test_consolidation_source_policy.py,test_consolidation_origin_policy.py,test_consolidation_lane_bigbang_integration.py}
-tests/{test_reflection_cycle_stage1c_promotion.py,test_reflection_cycle_stage1c_promotion_live_llm.py,test_reflection_cycle_stage1c_worker.py,test_reflection_cycle_stage1c_service.py,test_reflection_cycle_stage1c_reflection_context.py}
+tests/{test_reflection_cycle_stage1c_promotion.py,test_reflection_cycle_stage1c_promotion_live_llm.py,test_reflection_cycle_stage1c_worker.py,test_reflection_cycle_stage1c_service.py,test_reflection_cycle_stage1c_repository.py,test_reflection_cycle_stage1c_reflection_context.py,test_reflection_cycle_activity_windows.py,test_reflection_cycle_readonly.py}
 tests/{test_cognition_core_v2_contracts.py,test_cognition_core_v2_projection.py,test_cognition_core_v2_integration.py,test_cognition_live_llm_prompt_contracts.py}
-tests/{test_internal_monologue_residue_integration.py,test_self_cognition_group_review_source.py,test_user_profile_agent.py}
+tests/{test_internal_monologue_residue_loader.py,test_internal_monologue_residue_recorder.py,test_internal_monologue_residue_integration.py,test_self_cognition_group_review_source.py,test_user_profile_agent.py}
 tests/{test_rag_projection.py,test_rag_cache2_persistent.py,test_local_context_resolver_cache.py,test_db_writer_cache2_invalidation.py}
-tests/{test_memory_writer_database_sanitizer.py,test_config.py,test_db.py,test_event_logging_interface.py,test_llm_time_payload_projection.py}
+tests/{test_memory_writer_database_sanitizer.py,test_memory_writer_information_flow_contracts.py,test_memory_writer_prompt_projection.py,test_memory_writer_prompt_contracts.py,test_memory_writer_perspective_live_llm.py,test_config.py,test_db.py,test_event_logging_interface.py,test_llm_time_payload_projection.py}
 tests/fixtures/cognition_llm_producer_matrix.json
 tests/{test_control_console_repository.py,test_control_console_review_edges.py,test_control_console_cognition_debug_visibility.py,test_control_console_service_config.py,test_control_console_web_surface.py}
 tests/control_console_e2e/{test_live_database_owner_pages_e2e.py,test_clickable_inventory_e2e.py,test_page_navigation_e2e.py}
@@ -746,7 +800,7 @@ growth-state writes, root lineage cannot be correlated, private detail can
 escape, concurrent history can fork, same-path inferred growth can oscillate,
 latest-only behavior is unproven, a promoted revision cannot be tied to its
 first consumer, scope expands materially, a test could touch production, or
-required native subagents are unavailable without user-approved fallback. If
+the parent cannot execute the bounded production surface safely. If
 the plan and code disagree, preserve the plan intent and report the discrepancy.
 
 ## Implementation Order
@@ -784,7 +838,7 @@ the plan and code disagree, preserve the plan intent and report the discrepancy.
 ### F — Latest-Only Runtime
 
 - Tests: add failing service/profile/cache/self-cognition/V2/text/visual/name cases holding non-identity context fixed while varying only revision.
-- Implement: sole latest reader plus operational state, identity invalidation, name/dependent-cache refresh, per-episode latest resolution, relevant bounded projections, and first-consumption telemetry; exclude history, metadata, and old values.
+- Implement: sole latest reader plus operational state, identity invalidation, name/dependent-cache refresh, per-episode latest resolution, relevant bounded projections, and durable first-consumption receipt plus mirrored telemetry; exclude history, metadata, and old values.
 - Exit: revision `N` present, `N-1` absent, consumers correct, restart/cache correct, and status `consumed`.
 
 ### G — Console And Pace
@@ -814,18 +868,15 @@ the plan and code disagree, preserve the plan intent and report the discrepancy.
 ### K — Review And Closeout
 
 - Map every requirement, decision, risk, and acceptance row to a command/artifact; run unresolved-language, contract, and granularity scans.
-- Independent reviewer inspects approved plan, diff, raw/readable evidence, closure, causal proof, realism, privacy, pace, and lifecycle; parent remediates and reruns all affected gates.
+- Parent inspects the approved plan, diff, raw/readable evidence, closure, causal proof, realism, privacy, pace, and lifecycle; parent remediates and reruns all affected gates.
 - Exit: retain commands/counts/artifacts/findings/fixes/residuals/user judgment; require no critical/high finding, every mapped row passing, and user sign-off before closeout.
 
 ## Execution Model
 
 1. Parent owns A and writes B's failing contract tests.
-2. Parent then spawns exactly one production-code subagent with approved plan, bounded surface, and test contract.
-3. Production subagent implements source and reports files/commands; it does not own acceptance, live evidence, lifecycle, or closeout.
-4. Parent inspects changes, owns test remediation, verification, artifacts, and plan maintenance.
-5. After initial verification, parent spawns exactly one independent review subagent that did not implement.
-6. Reviewer reports findings only; parent owns remediation/reruns.
-7. If native subagents are unavailable, stop until user explicitly approves a fallback.
+2. After the focused test contract, the parent attempted one bounded production-code subagent; it produced no files or blocker after repeated implementation prompts and was stopped.
+3. The user's 2026-07-28 direction to proceed straight to implementation governs the fallback: the parent owns production implementation, tests, verification, artifacts, review, and plan maintenance.
+4. The user also waived independent plan/code subagent review and the plan-length gate; no further subagent is required for this execution.
 
 Parallel production writers are prohibited because schema, prompt, runtime, and cutover share one contract.
 
@@ -833,17 +884,17 @@ Parallel production writers are prohibited because schema, prompt, runtime, and 
 
 Each checkpoint records parent identity and ISO date after its evidence is complete, then requires a full-plan reread before handoff.
 
-- [ ] A. Rebaseline/closure contract: inspect every matrix field and unresolved-language scan; retain HEAD/status/source commands and zero-gap sign-off; hand off to B's named failing tests.
-- [ ] B. Identity/root/health/module contracts: run focused contract, validation, lineage, observability, and boundary tests; retain expected failures, implementation diff, and passes; hand off to C's persistence tests.
-- [ ] C. Persistence/seed/operational split: run profile, bootstrap, live-DB, restart, root-claim, and race tests; retain isolated DB, indexes/counts, source non-access, and commands; hand off to D.
-- [ ] D. Proposal/review/policy: run deterministic and individually inspected role-level live tests; retain prompts, budgets, raw outputs, and readable review; hand off to E.
-- [ ] E. Consolidation/reflection: run router, policy, target, persistence, and reflection tests; retain root lineage, derivative hold, daily independence, and call count; hand off to F.
-- [ ] F. Latest-only runtime: run service, profile, cache, self-cognition, V2, text, visual, and naming tests; retain revision `N` presence, `N-1` absence, consumption event, and digest; hand off to G.
-- [ ] G. Console/health/pace: run repository, API, config, web, and real-data browser gates; retain every health case, pace artifact, redacted network capture, screenshots, and zero browser errors; hand off to H.
+- [x] A. Rebaseline/closure contract: `/root`, 2026-07-28; retained branch/HEAD/status, exact baseline source commands/blob IDs, Asuna-only diagnostic counts, Stage 4 invalidation, 10 capability/8 axis zero-gap matrix, initial reviewer findings/remediation, user review waiver, and named B selectors.
+- [x] B. Identity/root/health/module contracts: `/root`, 2026-07-28; retained the module-not-found red phase, bounded domain implementation, contract-diff review, dotenv-disabled command, and 51/51 passing assertions with clean teardown; hand off to C's persistence tests.
+- [x] C. Persistence/seed/operational split: run profile, bootstrap, live-DB, restart, root-claim, and race tests; retain isolated DB, indexes/counts, source non-access, and commands; hand off to D.
+- [x] D. Proposal/review/policy: `/root`, 2026-07-28; retained red/green records, 25/25 focused and 111/111 combined non-live assertions, eight individually inspected live cases, 16 raw calls, prompt budgets, zero handle leaks, and parent-readable review; hand off to E.
+- [x] E. Consolidation/reflection: `/root`, 2026-07-28; retained the red/green records, 126/126 final guarded selector, settled user/assistant roots, recursive derivative-root hold, bounded promotion replacement, independent daily invocation, and two-caller ownership audit; hand off to F.
+- [x] F. Latest-only runtime: `/root`, 2026-07-28; retained red/green records, 463/463 guarded non-live assertions, 8/8 guarded `asuna_core_v2` live-DB assertions, revision `N` presence and `N-1` absence, exact consumer partitions, restart/cache/name refresh, durable `consumed` receipt, mirrored event, and projection digest; hand off to G.
+- [x] G. Console/health/pace: `/root`, 2026-07-28; retained red/green records, 56/56 Console/API/config/web assertions, 26/26 policy assertions, 12/12 guarded `asuna_core_v2` live-DB cases, authenticated browser proof, every health state, pace calibration/review, redacted network capture, desktop/narrow screenshots, real restart/reset, zero browser errors, and clean teardown; hand off to H.
 - [ ] H. Big-bang cleanup: re-sign zero-gap closure, run static/module/docs gates, and retain deletion inventory, exact counts, sole reader/writer proof, and compatibility absence; hand off to I.
 - [ ] I. Complete non-behavior verification: run all deterministic, guarded live-DB, every-leaf, privacy, pace, and reversal gates; retain commands/counts, leaf matrix, curve, and anti-oscillation results; hand off to J.
 - [ ] J. Behavior/browser proof: run every live selector, three matched samples/category, joined normal-entrypoint chain, two-date pilot, and browser protocol; retain raw bundles, parent-authored reviews, joins, and screenshots; hand off to K.
-- [ ] K. Independent review/closeout: resolve every critical/high finding, rerun affected gates, retain reviewer identity/findings/fixes/residuals and user sign-off, then complete the lifecycle.
+- [ ] K. Parent review/closeout: resolve every critical/high finding, rerun affected gates, retain findings/fixes/residuals and user sign-off, then complete the lifecycle.
 
 ## Verification
 
@@ -868,17 +919,19 @@ once before implementation and again immediately before legacy deletion.
 
 ```powershell
 rg -n "kazusa_ai_chatbot\\.global_character_growth|run_global_character_growth_pass|GLOBAL_CHARACTER_GROWTH" src tests
-rg -n "upsert_character_self_image|global_character_growth_traits|global_character_growth_runs" src tests
-rg -n "character_global" src/control_console src/kazusa_ai_chatbot/internal_monologue_residue tests
-rg -n '"tone"|"speech_patterns"' src/kazusa_ai_chatbot personalities tests
+rg -n "upsert_character_self_image|project_character_image_prompt_payload|global_character_growth_traits|global_character_growth_runs" src tests
+rg -n '\bcharacter_global\b' src/control_console src/kazusa_ai_chatbot/internal_monologue_residue tests
+rg -n '"(tone|speech_patterns)"\s*:' personalities src/kazusa_ai_chatbot/character_profiles src/kazusa_ai_chatbot/character_profile.py src/kazusa_ai_chatbot/db/schemas.py tests/test_character_profile_seed.py
+rg -n -i '\b(asuna|kazusa|qingche)\b' src/kazusa_ai_chatbot/character_identity_growth src/kazusa_ai_chatbot/db/character_identity_growth.py src/scripts/run_character_identity_growth.py
 rg -n "character_identity_revisions|character_identity_growth_candidates|character_identity_growth_runs" src tests
-rg -n "root_episode_id|identity_revision_consumption|waiting_for_evidence|revision_consumption_mismatch" src tests
+rg -n "root_episode_id|first_consumption|waiting_for_evidence|revision_consumed|revision_consumption_mismatch" src tests
 rg -n "T[B]D|T[O]DO|m[a]ybe|c[o]nsider|choose[ ]one|similar[ ]to|handle[ ]edge[ ]cases|add[ ]tests" development_plans/active/bugfix/cognition_core_v2_character_identity_growth_bigbang_plan.md
 ```
 
 Expected: legacy searches have zero runtime/test matches except explicit removal
-assertions; Character page has no global-residue query; retired profile fields
-have no canonical matches; new collections appear only through DB
+assertions; Character page/runtime has no exact global-residue scope; retired
+profile fields have no canonical matches; new growth code has no named
+character/personality literal; new collections appear only through DB
 owner/bootstrap/projections/tests/docs; root/health/consumption terms appear in
 their declared owners and tests; placeholder search returns zero matches.
 
@@ -1057,30 +1110,26 @@ git diff --check
 git status --short
 ```
 
-## Independent Plan Review
+## Plan Review
 
-The 2026-07-28 parent system review covered the plan contract, repository/DB
-evidence, current source, baseline ownership, archived Stage 2/3 intent, and
-the then-approved Stage 4 plan. It blocked approval on missing baseline
-traceability, end-to-end causal correlation, normal-path longitudinal proof,
-evidence-root dedupe, pace/reversal stability, counterfactual attribution,
-empty-state observability, and the Stage 4 contradiction. This revision
-incorporates those findings, and Stage 4 is now invalidated. Independent review
-has not occurred; status remains `draft`.
+The 2026-07-28 parent review established baseline intent, causal/longitudinal
+proof, root/pace/reversal rules, observability, and Stage 4 invalidation.
+On 2026-07-28 `/root/identity_growth_reviewer` returned `DO NOT APPROVE`: zero critical and seven high findings covering derived-root provenance, atomic
+promotion/recovery, operator reset, residue policy, strict semantic/privacy/
+projection contracts, durable consumption/health, and executable static gates.
+This revision resolves them with persisted generic episode roots, recursive
+reflection lineage, transactions/reconciliation, a closed operator exception,
+scoped-residue cutover owners, strict two-stage/consumer schemas, run-owned
+first-consumption receipts and precedence, and narrowed static checks.
+The same reviewer began a full remediation recheck. On 2026-07-28 the user
+explicitly waived further subagent checking and directed immediate
+implementation. The parent verified the signed closure inventory, change
+surface, commands, and zero unresolved choice/placeholder/compatibility or
+untestable acceptance; lifecycle advanced through `approved` to `in_progress`.
 
-Before approval, an independent reviewer verifies requirement-to-step-to-
-evidence traceability; the signed zero-gap closure inventory; complete
-semantic/forbidden paths; no-history consistency; root/derivative dedupe;
-anti-oscillation; latest-only authority; cross-scope privacy; bounded
-calls/context/retry/pace; causal-bundle completeness; controlled-versus-natural
-test separation; current change paths/commands; and absence of unresolved
-choices, placeholders, compatibility layers, or untestable acceptance. Record
-reviewer/date, blockers, non-blocking findings, remediation, and approval
-status in Execution Evidence before changing status to `approved`.
+## Code Review
 
-## Independent Code Review
-
-After implementation/initial verification, one non-implementing subagent reviews ownership; Mongo immutability/index/race/startup; root claims and reflection derivatives; LLM parsing/regeneration/no-prepost semantics; explicit/inferred/reversal/contradiction policy; path registry; privacy/redaction; latest-only service/cognition/text/visual/name/restart; consumption telemetry; reflection repair/scheduling; health-funnel truthfulness; baseline closure; legacy removal; controlled and natural test realism; causal joins; and production-data isolation.
+The parent reviews ownership; Mongo immutability/index/race/startup; root claims and reflection derivatives; LLM parsing/regeneration/no-prepost semantics; explicit/inferred/reversal/contradiction policy; path registry; privacy/redaction; latest-only service/cognition/text/visual/name/restart; consumption receipts; reflection repair/scheduling; health-funnel truthfulness; baseline closure; legacy removal; controlled and natural test realism; causal joins; and production-data isolation.
 
 Critical/high findings block closeout. Parent records findings, remediates, and reruns every affected gate.
 
@@ -1111,7 +1160,7 @@ Critical/high findings block closeout. Parent records findings, remediates, and 
 23. The archived Stage 4 plan remains non-executable; clean construction reads no historical database and imports no legacy growth, self-image, reflection, residue, or conversations.
 24. Concurrency, restart, clean/legacy startup, immutable history, focused, live-DB, one-at-a-time live-LLM, counterfactual, longitudinal, browser, and full non-live gates pass.
 25. Console auth/redaction/validation/responsive/screenshots/network/zero-error checks pass.
-26. Independent plan/code reviews are recorded, critical/high findings remediated, affected gates rerun, and the user signs off on the readable growth evidence before completion.
+26. Plan/parent code reviews are recorded, critical/high findings remediated, affected gates rerun, and the user signs off on the readable growth evidence before completion.
 
 ## Risks
 
@@ -1123,11 +1172,11 @@ Critical/high findings block closeout. Parent records findings, remediates, and 
 | identity flip-flops | fresh post-revision reversal threshold and contradiction review | same-path inferred reversal from old evidence |
 | private leakage | low-risk abstraction, forbidden raw fields, redaction tests | source/user detail in revision/prompt |
 | hidden static winner | one latest reader and old-value absence tests | old value after revision |
-| concurrent fork | compound unique index/current-base check | duplicate revision or skipped base |
+| concurrent fork | Mongo transaction plus unique/current-base checks | duplicate revision or skipped base |
 | weak numeric judgment | semantic bands with declared mapping | raw-number dependency/invalid write |
 | latency/context growth | background-only fixed caps/budget | foreground call or overflow |
 | reflection stays silently empty | bounded regeneration/separate scheduling | invalid output treated as success |
-| empty state is misread as healthy | closed stage/reason funnel and consumption telemetry | ready/failed/mismatched path shown as idle |
+| empty state is misread as healthy | closed stage/reason funnel and durable consumption receipt | ready/failed/mismatched path shown as idle |
 | test-shaped success | separate normal-entrypoint pilot with no direct growth writes | only fixture/manual revision proof exists |
 | model variation is mistaken for identity effect | three matched samples plus appraisal/projection attribution | prose differs without relevant cognition delta |
 | console audit leak | public projection/network/browser tests | raw ID/ref/quote/prompt |
@@ -1136,16 +1185,124 @@ Critical/high findings block closeout. Parent records findings, remediates, and 
 
 ## Execution Evidence
 
-No execution is authorized while status is `draft`.
+Checkpoint A completed on 2026-07-28 by `/root` at branch
+`cognition_core_v2`, HEAD `4971c9b05d4149c52c4fc90396806c7adf0198ca`.
+The parent retained exact source/blob evidence and
+`test_artifacts/character_identity_growth/baseline_v2_closure_matrix.md`;
+the user waived further subagent checking and authorized implementation.
+The single attempted production subagent produced no changes and was stopped;
+the parent continued under the user's straight-to-implementation direction.
+
+Checkpoint B completed on 2026-07-28 by `/root`. The retained red and green
+records are
+`test_artifacts/character_identity_growth/checkpoint_b_red_phase.md` and
+`test_artifacts/character_identity_growth/checkpoint_b_green_phase.md`.
+The final dotenv-disabled selector supplied 81 inert process-local
+configuration names, passed 51/51 assertions with zero teardown errors in
+0.97 seconds, and left `git diff --check` clean. The checkpoint implementation
+is restricted to the identity domain contract, validation, pure application
+and lineage/health helpers, package exports, and its subsystem README.
+
+Checkpoint C implementation reached its guarded live-DB boundary on
+2026-07-28. The retained records are
+`test_artifacts/character_identity_growth/checkpoint_c_red_phase.md` and
+`test_artifacts/character_identity_growth/checkpoint_c_pending_live_db.md`.
+Strict profiles, revision-zero/latest persistence, operational-only
+`character_state`, root claims, transaction-required promotion/reset,
+bootstrap, startup/restart, and operator loading are implemented. The combined
+deterministic selector passes 79/79 assertions, while all seven live-DB cases
+are safely skipped because the process has no `MONGODB_URI`. A local portable
+MongoDB fallback was blocked before download or filesystem creation.
+After the user selected `asuna_core_v2` as the guarded test database, read-only
+connector metadata confirmed that exact database is reachable and contains the
+legacy state/growth collection names. A character-generic environment-bound
+database guard was added and its expanded non-live selector passes 86/86
+assertions. The application live-DB process still lacks an authorized source
+for `MONGODB_URI`; no database mutation has occurred.
+The user then authorized direct `.env` use and selected `asuna_core_v2` as the
+test database. The dedicated four-part guard forced that exact target without
+a character-named code literal. After two test-harness-only fixes, all seven
+live-DB cases passed in 2.74 seconds, proving exact indexes, revision zero,
+legacy failure, immutable/max-only history, exclusive root claims,
+transactional one-winner promotion, operator reset, restart persistence, and
+legacy-collection absence. The fixture removed only its six declared
+state/growth collections; read-only post-run metadata confirmed the other 22
+collections remained. Evidence is retained in
+`test_artifacts/character_identity_growth/checkpoint_c_green_phase.md`.
+Checkpoint C is signed and D may open after the mandatory full-plan reread.
+
+Checkpoint D completed on 2026-07-28 by `/root`. The retained records are
+`test_artifacts/character_identity_growth/checkpoint_d_red_phase.md`,
+`test_artifacts/character_identity_growth/checkpoint_d_green_phase.md`, and
+`test_artifacts/character_identity_growth/checkpoint_d_live_llm_review.md`.
+The proposal, independent review, prompt-safe projection, canonical parsing,
+strict contracts, and deterministic growth policy now cover explicit and
+inferred authorship, privacy, contradiction, cadence, root deduplication,
+daily caps, rebasing, and fresh-evidence reversals. The focused policy selector
+passes 25/25 assertions; the combined non-live boundary passes 111/111 with
+three live-DB cases deselected. All eight required live selectors passed one
+at a time against the configured real model. Their 16 final calls required one
+attempt each, stayed below the 18,000-character prompt budget, and leaked zero
+repository handles into generated free text. The first explicit calibration
+failure is retained because its fixture duplicated an existing growth edge;
+the corrected non-overlapping fixture passed and confirms that the semantic
+stages compare evidence with current identity. Checkpoint D is signed and E
+may open after the mandatory full-plan reread.
+
+Checkpoint E completed on 2026-07-28 by `/root`. The retained records are
+`test_artifacts/character_identity_growth/checkpoint_e_red_phase.md` and
+`test_artifacts/character_identity_growth/checkpoint_e_green_phase.md`.
+The consolidation router now emits the closed `character_identity_growth`
+evidence card only when character-owned evidence exists, while repository
+lineage supplies one settled episode root without exposing identifiers to the
+semantic stage. Hourly, daily, and global reflection preserve the recursive
+root union, so derivative artifacts never inflate episode or date evidence.
+The global promotion evaluator performs at most three complete replacements,
+and the daily worker invokes the single identity owner independently from
+memory mutations. The final guarded selector passed 126/126 assertions with
+all database connections bound to the authorized `asuna_core_v2` database.
+Runtime calls to the identity owner are limited to post-settlement
+consolidation and the daily reflection worker. Checkpoint E is signed and F
+may open after the mandatory full-plan reread.
+
+Checkpoint F completed on 2026-07-28 by `/root`. The retained record is
+`test_artifacts/character_identity_growth/checkpoint_f_red_green.md`.
+The final guarded non-live selectors passed 463/463 assertions across latest
+runtime, service/profile/cache, self-cognition, V2 appraisal partitions,
+text/visual/name surfaces, and observability. The guarded live-DB selector
+passed 8/8 against the user-authorized `asuna_core_v2` database, including
+transaction-checked max revision consumption, one durable `consumed` receipt,
+projection digest, concurrent claim convergence, stale-load rejection,
+immutable prior history, and restart behavior. Counterfactual assertions hold
+the stale profile at `N-1` and prove only revision `N` reaches each declared
+consumer. Checkpoint F is signed and G may open after the mandatory full-plan
+reread.
+
+Checkpoint G completed on 2026-07-28 by `/root`. The retained record is
+`test_artifacts/character_identity_growth/checkpoint_g_red_green.md`.
+The final deterministic gates passed 56/56 Console/API/config/web assertions
+and 26/26 identity policy assertions. The guarded live-DB selector passed
+12/12 against `asuna_core_v2`, including all eight derived health states. The
+authenticated browser gate passed with real validated revision/candidate/run
+data, all five redacted diff kinds, current/prior revision inspection,
+keyboard/loading/empty/error/responsive coverage, every health label, all five
+bounded pace fields, rejected invalid bounds/cross-field values, successful
+Brain restart/reset, redacted network evidence, desktop/narrow screenshots,
+and zero browser diagnostics. The frozen pace artifact records baseline
+promotion on day 10 versus V2 readiness at root three/date two, plus duplicate,
+unrelated, no-change, daily-cap, and reversal stability. Browser teardown left
+no identity-growth collection or operational character state in the guarded
+test database. Checkpoint G is signed and H may open after the mandatory
+full-plan reread.
 
 Approved execution records: rebaseline/HEAD/status/inventory; invalidated Stage
 4 lifecycle confirmation; baseline closure matrix and both sign-offs;
-independent plan review/remediation; per-checkpoint evidence/sign-off; focused
+plan review/remediation and user waiver; per-checkpoint evidence/sign-off; focused
 test failures; production subagent handoff/result; exact test
 commands/counts/dispositions; guarded DB isolation; root/dedup/reversal
 evidence; per-case live traces and agent-authored reviews; every-leaf override
 matrix; pace calibration; explicit/inferred causal bundles; three-sample
 counterfactual artifact; two-date normal-entrypoint pilot; privacy artifacts;
 health-funnel states; console network/redaction/screenshots; static cutover
-results; full regression; independent code review/remediation/reruns; user
+results; full regression; parent code review/remediation/reruns; user
 quality sign-off; and lifecycle disposition.

@@ -191,6 +191,35 @@ def test_character_self_guidance_requires_acceptance_source() -> None:
     assert accepted["accepted"] is True
 
 
+def test_character_identity_growth_requires_character_owned_source() -> None:
+    """A user message alone cannot satisfy identity-growth provenance."""
+
+    module = _source_policy_module()
+
+    user_only = module.validate_lane_source_policy(
+        "character_identity_growth",
+        [_source("current_turn_user_message", "user_message")],
+    )
+    character_expression = module.validate_lane_source_policy(
+        "character_identity_growth",
+        [
+            _source("current_turn_user_message", "user_message"),
+            _source("assistant_final_dialog", "assistant_final_dialog"),
+        ],
+    )
+    internal_judgment = module.validate_lane_source_policy(
+        "character_identity_growth",
+        [_source("internal_thought", "internal_thought")],
+    )
+
+    assert user_only == {
+        "accepted": False,
+        "reason": "source_class_not_allowed",
+    }
+    assert character_expression["accepted"] is True
+    assert internal_judgment["accepted"] is True
+
+
 def test_shared_memory_promotion_rejects_ordinary_chat_sources() -> None:
     """Ordinary chat cannot promote generic shared/world memory."""
 

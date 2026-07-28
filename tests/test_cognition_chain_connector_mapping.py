@@ -5,6 +5,12 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from kazusa_ai_chatbot.character_identity_growth.projection import (
+    identity_projection_digest,
+    project_identity_for_cognition,
+    project_identity_for_surface,
+    projected_identity_consumer_kinds,
+)
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition as connector
 
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
@@ -14,7 +20,10 @@ from kazusa_ai_chatbot.cognition_core_v2.state_models import (
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     new_empty_goal_progress,
 )
-from tests.cognition_core_v2_test_helpers import canonical_episode
+from tests.cognition_core_v2_test_helpers import (
+    canonical_character_identity,
+    canonical_episode,
+)
 
 
 NOW = "2026-07-14T00:00:00Z"
@@ -68,17 +77,48 @@ def _core_output() -> dict[str, object]:
 def _global_state() -> dict[str, object]:
     """Build the adapter-owned fields needed by the V2 mapper."""
 
+    character_profile = canonical_character_identity()
+    character_profile.update({
+        "global_user_id": "character-1",
+        "name": "千纱",
+    })
+    personality = character_profile["personality_brief"]
+    assert isinstance(personality, dict)
+    personality.update({
+        "logic": "Keep present evidence and role ownership clear.",
+        "defense": "Preserve boundaries and the selected intent.",
+        "quirks": "Use occasional dry, characterful phrasing.",
+        "taboos": "Ground scene facts in available evidence.",
+    })
+    episode = canonical_episode(
+        episode_id="episode-1",
+        current_global_user_id="global-user-1",
+        content="hello",
+    )
+    revision = {
+        "effective_identity": {
+            key: value
+            for key, value in character_profile.items()
+            if key != "global_user_id"
+        }
+    }
+    cognition_context = project_identity_for_cognition(revision)
+    surface_context = project_identity_for_surface(revision)
     return {
-        "character_profile": {
-            "global_user_id": "character-1",
-            "name": "千纱",
-            "personality_brief": {
-                "logic": "Keep present evidence and role ownership clear.",
-                "defense": "Preserve boundaries and the selected intent.",
-                "quirks": "Use occasional dry, characterful phrasing.",
-                "taboos": "Ground scene facts in available evidence.",
-            },
-        },
+        "character_profile": character_profile,
+        "character_identity_revision_number": 0,
+        "character_identity_context": cognition_context,
+        "character_identity_surface_context": surface_context,
+        "character_identity_projection_digest": identity_projection_digest(
+            revision_number=0,
+            cognition_context=cognition_context,
+            surface_context=surface_context,
+        ),
+        "character_identity_consumer_kinds": (
+            projected_identity_consumer_kinds(cognition_context)
+        ),
+        "character_identity_episode_id": "episode-1",
+        "character_identity_epistemic_core_included": False,
         "character_cognition_state": build_character_production_state(
             updated_at=NOW,
         ),
@@ -86,11 +126,7 @@ def _global_state() -> dict[str, object]:
         "user_input": "hello",
         "decontextualized_input": "hello",
         "prompt_message_context": {},
-        "cognitive_episode": canonical_episode(
-            episode_id="episode-1",
-            current_global_user_id="global-user-1",
-            content="hello",
-        ),
+        "cognitive_episode": episode,
         "user_multimedia_input": [],
         "platform": "debug",
         "platform_channel_id": "channel-1",
@@ -692,3 +728,86 @@ async def test_recurrent_cycle_uses_uncommitted_replacement_state(
     get_user_state.assert_not_awaited()
     cognition_input = run_cognition.await_args.args[0]
     assert cognition_input["mutable_state"]["relationship"]["care"] == 77
+
+
+@pytest.mark.asyncio
+async def test_cognition_entry_replaces_stale_profile_with_episode_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The shared chat/self-cognition boundary should load identity once."""
+
+    state = _global_state()
+    for field_name in (
+        "character_identity_revision_number",
+        "character_identity_context",
+        "character_identity_surface_context",
+        "character_identity_projection_digest",
+        "character_identity_consumer_kinds",
+        "character_identity_episode_id",
+        "character_identity_epistemic_core_included",
+    ):
+        state.pop(field_name)
+    latest_identity = canonical_character_identity(marker="revision-n")
+    latest_profile = {
+        **latest_identity,
+        "global_user_id": "character-1",
+    }
+    latest_revision = {"effective_identity": latest_identity}
+    cognition_context = project_identity_for_cognition(latest_revision)
+    surface_context = project_identity_for_surface(latest_revision)
+    snapshot = {
+        "revision_number": 5,
+        "character_profile": latest_profile,
+        "cognition_context": cognition_context,
+        "surface_context": surface_context,
+        "projection_digest": identity_projection_digest(
+            revision_number=5,
+            cognition_context=cognition_context,
+            surface_context=surface_context,
+        ),
+        "consumer_kinds": (
+            projected_identity_consumer_kinds(cognition_context)
+        ),
+    }
+    load_latest = AsyncMock(return_value=snapshot)
+    run_cognition = AsyncMock(return_value=_core_output())
+    monkeypatch.setattr(
+        connector,
+        "load_latest_identity_for_episode",
+        load_latest,
+    )
+    monkeypatch.setattr(
+        connector,
+        "get_user_cognition_state",
+        AsyncMock(return_value=build_acquaintance_user_state(
+            global_user_id="user-1",
+            updated_at=NOW,
+        )),
+    )
+    monkeypatch.setattr(
+        connector,
+        "get_character_cognition_state",
+        AsyncMock(return_value=build_character_production_state(
+            updated_at=NOW,
+        )),
+    )
+    monkeypatch.setattr(connector, "run_cognition", run_cognition)
+
+    update = await connector.call_cognition_subgraph(state, commit=False)
+
+    load_latest.assert_awaited_once_with(
+        episode_id="episode-1",
+        correlation_id="episode-1",
+        include_epistemic_core=False,
+    )
+    cognition_input = run_cognition.await_args.args[0]
+    assert (
+        cognition_input["character_identity_context"]
+        == cognition_context
+    )
+    assert "revision-n" in str(cognition_input["character_identity_context"])
+    assert "canonical" not in str(
+        cognition_input["character_identity_context"]
+    )
+    assert update["character_profile"]["name"] == latest_profile["name"]
+    assert update["character_identity_revision_number"] == 5

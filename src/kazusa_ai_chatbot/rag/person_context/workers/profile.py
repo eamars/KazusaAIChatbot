@@ -193,8 +193,11 @@ class UserProfileAgent(BaseRAGHelperAgent):
         if global_user_id == CHARACTER_GLOBAL_USER_ID:
             character_profile = await get_character_profile()
             hydrated_profile = _public_character_profile(dict(character_profile))
-            dependencies = [CacheDependency(source="character_state")]
-            metadata = {"profile_source": "character_state"}
+            dependencies = [CacheDependency(
+                source="character_identity",
+                global_user_id=global_user_id,
+            )]
+            metadata = {"profile_source": "character_identity"}
         else:
             input_embedding = await get_query_text_embedding(task)
             hydrated_profile, _ = await user_image_retriever_agent(

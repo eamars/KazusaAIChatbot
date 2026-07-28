@@ -46,7 +46,10 @@ from tests.live_llm_mongo import (
     seed_shared_documents,
     unique_owner_id,
 )
-from tests.cognition_core_v2_test_helpers import canonical_episode
+from tests.cognition_core_v2_test_helpers import (
+    canonical_episode,
+    canonical_identity_context,
+)
 
 _FIXTURE_PATH = Path("tests/fixtures/cognition_core_v2_emotion_lifecycle_cases.json")
 _CASE_MESSAGES = {
@@ -171,6 +174,7 @@ def _chain_input(
                 "taboos": "preserve character agency",
             },
         },
+        "character_identity_context": canonical_identity_context(),
         "evidence": [{
             "evidence_handle": "e1",
             "evidence_ref": {

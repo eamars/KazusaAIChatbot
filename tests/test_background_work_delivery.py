@@ -10,6 +10,10 @@ from unittest.mock import AsyncMock
 import pytest
 
 from kazusa_ai_chatbot.action_spec.results import build_text_surface_output
+from tests.cognition_core_v2_test_helpers import (
+    canonical_episode_identity_snapshot,
+    canonical_service_character_profile,
+)
 
 
 
@@ -171,13 +175,33 @@ async def test_service_result_ready_delivery_uses_dispatcher_boundary(
     monkeypatch.setattr(service_module, "_adapter_registry", object())
     monkeypatch.setattr(
         service_module,
-        "_static_character_profile",
-        {"name": "Current Character"},
+        "_active_character_name_snapshot",
+        "Current Character",
     )
     monkeypatch.setattr(
         service_module,
         "_refresh_runtime_character_state",
         AsyncMock(),
+    )
+    character_profile = canonical_service_character_profile(
+        marker="background-result",
+        global_user_id="character-global-1",
+    )
+    identity_snapshot = canonical_episode_identity_snapshot(
+        marker="background-result",
+        global_user_id="character-global-1",
+    )
+    character_profile["name"] = "Current Character"
+    identity_snapshot["character_profile"]["name"] = "Current Character"
+    monkeypatch.setattr(
+        service_module,
+        "_load_latest_character_profile_snapshot",
+        AsyncMock(return_value=character_profile),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "load_latest_identity_for_episode",
+        AsyncMock(return_value=identity_snapshot),
     )
     monkeypatch.setattr(
         service_module,
@@ -188,14 +212,6 @@ async def test_service_result_ready_delivery_uses_dispatcher_boundary(
         service_module,
         "_ensure_character_global_identity",
         AsyncMock(return_value="character-global-1"),
-    )
-    monkeypatch.setattr(
-        service_module,
-        "compose_character_profile",
-        lambda *_args, **_kwargs: {
-            "name": "Current Character",
-            "global_user_id": "character-global-1",
-        },
     )
     monkeypatch.setattr(
         service_module,

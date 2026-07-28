@@ -503,8 +503,8 @@ def test_runtime_registration_rejects_non_string_active_name(
     )
     monkeypatch.setattr(
         service_module,
-        "_static_character_profile",
-        {"name": None},
+        "_active_character_name_snapshot",
+        None,
     )
 
     with pytest.raises(ValueError, match="character profile name must be a string"):
@@ -530,8 +530,8 @@ def test_register_runtime_adapter_payload_reuses_remote_registration(monkeypatch
     monkeypatch.setattr(service_module, "register_remote_runtime_adapter", register_remote)
     monkeypatch.setattr(
         service_module,
-        "_static_character_profile",
-        {"name": '一之濑明日奈'},
+        "_active_character_name_snapshot",
+        '一之濑明日奈',
     )
 
     response = service_module._register_runtime_adapter_payload(payload, status="heartbeat_ok")
@@ -546,6 +546,40 @@ def test_register_runtime_adapter_payload_reuses_remote_registration(monkeypatch
     assert response.status == "heartbeat_ok"
     assert response.platform == "qq"
     assert response.character_name == '一之濑明日奈'
+
+
+@pytest.mark.asyncio
+async def test_adapter_heartbeat_refreshes_latest_identity_name(
+    monkeypatch,
+) -> None:
+    """Adapter-visible naming should refresh before each heartbeat response."""
+
+    payload = service_module.RuntimeAdapterRegistrationRequest(
+        platform="qq",
+        callback_url="http://127.0.0.1:8011",
+        platform_bot_id="bot-1",
+    )
+
+    async def refresh_profile():
+        service_module._active_character_name_snapshot = "revision-new-name"
+        return {"name": "revision-new-name"}
+
+    monkeypatch.setattr(
+        service_module,
+        "_load_latest_character_profile_snapshot",
+        AsyncMock(side_effect=refresh_profile),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "register_remote_runtime_adapter",
+        MagicMock(),
+    )
+
+    response = await service_module.runtime_adapter_heartbeat_endpoint(
+        payload,
+    )
+
+    assert response.character_name == "revision-new-name"
 
 
 def test_self_cognition_uses_registered_runtime_adapter() -> None:

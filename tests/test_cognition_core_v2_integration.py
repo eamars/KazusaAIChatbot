@@ -37,7 +37,10 @@ from kazusa_ai_chatbot.cognition_core_v2.state_models import (
 from kazusa_ai_chatbot.cognition_core_v2.workspace import collapse_bids
 
 from llm_test_helpers import make_llm_call_config
-from tests.cognition_core_v2_test_helpers import canonical_episode
+from tests.cognition_core_v2_test_helpers import (
+    canonical_episode,
+    canonical_identity_context,
+)
 from tests.live_llm_mongo import live_db, seed_shared_documents, unique_owner_id
 
 
@@ -212,6 +215,7 @@ def _input(
                 "taboos": "preserve character agency",
             },
         },
+        "character_identity_context": canonical_identity_context(),
         "evidence": [{
             "evidence_handle": "e1",
             "evidence_ref": {

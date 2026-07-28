@@ -12,10 +12,138 @@ from kazusa_ai_chatbot.cognition_episode import (
 )
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     build_acquaintance_user_state,
+    build_character_production_state,
+)
+from kazusa_ai_chatbot.character_identity_growth.projection import (
+    identity_projection_digest,
+    project_identity_for_cognition,
+    project_identity_for_surface,
+    projected_identity_consumer_kinds,
 )
 
 
 NOW = "2026-07-14T00:00:00Z"
+
+
+def canonical_character_identity(
+    *,
+    marker: str = "current",
+) -> dict[str, object]:
+    """Build a complete generic effective identity for V2 tests."""
+
+    return {
+        "name": f"character-{marker}",
+        "description": f"description-{marker}",
+        "gender": f"gender-{marker}",
+        "age": 20,
+        "birthday": f"birthday-{marker}",
+        "backstory": f"backstory-{marker}",
+        "personality_brief": {
+            "mbti": f"mbti-{marker}",
+            "logic": f"logic-{marker}",
+            "tempo": f"tempo-{marker}",
+            "defense": f"defense-{marker}",
+            "quirks": f"quirks-{marker}",
+            "taboos": f"taboos-{marker}",
+        },
+        "boundary_profile": {
+            "self_integrity": 0.7,
+            "control_sensitivity": 0.7,
+            "compliance_strategy": "resist",
+            "relational_override": 0.3,
+            "control_intimacy_misread": 0.3,
+            "boundary_recovery": "rebound",
+            "authority_skepticism": 0.7,
+        },
+        "linguistic_texture_profile": {
+            "fragmentation": 0.3,
+            "hesitation_density": 0.3,
+            "counter_questioning": 0.3,
+            "softener_density": 0.3,
+            "formalism_avoidance": 0.7,
+            "abstraction_reframing": 0.7,
+            "direct_assertion": 0.7,
+            "emotional_leakage": 0.3,
+            "rhythmic_bounce": 0.7,
+            "self_deprecation": 0.3,
+        },
+        "self_image": {
+            "self_concept": f"self-concept-{marker}",
+            "current_growth_edges": [f"growth-edge-{marker}"],
+        },
+        "visual_characterization": f"visual-{marker}",
+    }
+
+
+def canonical_identity_context(
+    *,
+    marker: str = "current",
+    include_epistemic_core: bool = False,
+) -> dict[str, dict[str, object]]:
+    """Build the closed cognition projection from one complete identity."""
+
+    return project_identity_for_cognition(
+        {
+            "effective_identity": canonical_character_identity(
+                marker=marker,
+            ),
+        },
+        include_epistemic_core=include_epistemic_core,
+    )
+
+
+def canonical_service_character_profile(
+    *,
+    marker: str = "current",
+    global_user_id: str = "character-global-id",
+) -> dict[str, object]:
+    """Build one complete latest-only profile for service boundary tests."""
+
+    return {
+        **canonical_character_identity(marker=marker),
+        "global_user_id": global_user_id,
+        "cognition_state": build_character_production_state(
+            updated_at=NOW,
+        ),
+        "updated_at": NOW,
+    }
+
+
+def canonical_episode_identity_snapshot(
+    *,
+    marker: str = "current",
+    global_user_id: str = "character-global-id",
+    revision_number: int = 1,
+    include_epistemic_core: bool = False,
+) -> dict[str, object]:
+    """Build exact latest-identity episode fields for service test seams."""
+
+    identity = canonical_character_identity(marker=marker)
+    revision = {
+        "effective_identity": identity,
+    }
+    cognition_context = project_identity_for_cognition(
+        revision,
+        include_epistemic_core=include_epistemic_core,
+    )
+    surface_context = project_identity_for_surface(revision)
+    return {
+        "revision_number": revision_number,
+        "character_profile": canonical_service_character_profile(
+            marker=marker,
+            global_user_id=global_user_id,
+        ),
+        "cognition_context": cognition_context,
+        "surface_context": surface_context,
+        "projection_digest": identity_projection_digest(
+            revision_number=revision_number,
+            cognition_context=cognition_context,
+            surface_context=surface_context,
+        ),
+        "consumer_kinds": projected_identity_consumer_kinds(
+            cognition_context,
+        ),
+    }
 
 
 def canonical_user_message_episode(

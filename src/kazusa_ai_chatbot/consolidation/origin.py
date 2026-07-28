@@ -16,6 +16,7 @@ class ConsolidationOriginError(ValueError):
 
 class ConsolidationOriginMetadata(TypedDict):
     episode_id: str
+    correlation_id: str
     trigger_source: TriggerSource
     input_sources: list[str]
     output_mode: str
@@ -168,6 +169,10 @@ def _project_consolidation_origin_metadata(
     )
     metadata: ConsolidationOriginMetadata = {
         "episode_id": episode["episode_id"],
+        "correlation_id": str(
+            origin_metadata.get("correlation_id")
+            or episode["episode_id"]
+        ),
         "trigger_source": episode["trigger_source"],
         "input_sources": input_sources,
         "output_mode": output_mode,

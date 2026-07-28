@@ -9,6 +9,12 @@ from typing import Any
 from kazusa_ai_chatbot.action_spec.results import (
     project_trace_action_result_v2,
 )
+from kazusa_ai_chatbot.character_identity_growth.models import (
+    TOP_LEVEL_IDENTITY_KEYS,
+)
+from kazusa_ai_chatbot.character_identity_growth.projection import (
+    project_identity_for_surface,
+)
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionExecutionError,
     TextSurfaceInputV2,
@@ -240,31 +246,41 @@ def _character_surface_contexts(
         The bounded text-expression context and visual-only profile context.
     """
 
-    profile = state.get("character_profile")
-    if not isinstance(profile, Mapping):
-        raise ValueError("character profile is required for surface planning")
-    personality = profile["personality_brief"]
-    linguistic_texture = profile["linguistic_texture_profile"]
+    projected = state.get("character_identity_surface_context")
+    if not isinstance(projected, Mapping):
+        profile = state.get("character_profile")
+        if not isinstance(profile, Mapping):
+            raise ValueError(
+                "character profile is required for surface planning"
+            )
+        effective_identity = {
+            key: profile[key]
+            for key in TOP_LEVEL_IDENTITY_KEYS
+        }
+        projected = project_identity_for_surface({
+            "effective_identity": effective_identity,
+        })
+    if set(projected) != {"text", "visual", "naming"}:
+        raise ValueError(
+            "character surface identity must contain exact consumers"
+        )
+    text_identity = projected["text"]
+    visual_identity = projected["visual"]
+    if not isinstance(text_identity, Mapping):
+        raise ValueError("character text identity must be a mapping")
+    if not isinstance(visual_identity, Mapping):
+        raise ValueError("character visual identity must be a mapping")
+    personality = text_identity["personality"]
+    linguistic_texture = text_identity["linguistic_texture_profile"]
     if not isinstance(personality, Mapping):
         raise ValueError("character personality brief must be a mapping")
     if not isinstance(linguistic_texture, Mapping):
         raise ValueError("character linguistic texture must be a mapping")
-    field_labels = {
-        "name": "姓名",
-        "logic": "逻辑",
-        "tempo": "节奏",
-        "defense": "防御",
-        "quirks": "特征",
-        "taboos": "禁忌",
-    }
-    visual_fragments = [
-        f"{field_labels['name']}：{_profile_text(profile['name'], 80)}"
+    expression_fragments = [
+        f"姓名：{_profile_text(text_identity['name'], 80)}",
+        f"防御：{_profile_text(personality['defense'], 180)}",
+        f"特征：{_profile_text(personality['quirks'], 180)}",
     ]
-    for field_name in ("logic", "tempo", "defense", "quirks", "taboos"):
-        visual_fragments.append(
-            f"{field_labels[field_name]}："
-            f"{_profile_text(personality[field_name], 180)}"
-        )
     texture_labels = {
         "fragmentation": "碎片化",
         "hesitation_density": "犹豫密度",
@@ -288,9 +304,19 @@ def _character_surface_contexts(
     texture_context = " | ".join(texture_fragments)[:1000]
     expression_context = {
         "tempo": _profile_text(personality["tempo"], 180),
-        "linguistic_texture": texture_context,
+        "linguistic_texture": " | ".join([
+            *expression_fragments,
+            texture_context,
+        ])[:1000],
     }
-    visual_fragments.extend(texture_fragments)
+    visual_fragments = [
+        f"姓名：{_profile_text(visual_identity['name'], 80)}",
+        f"描述：{_profile_text(visual_identity['description'], 500)}",
+        f"性别：{_profile_text(visual_identity['gender'], 80)}",
+        f"年龄：{visual_identity['age']}",
+        "视觉特征："
+        f"{_profile_text(visual_identity['visual_characterization'], 700)}",
+    ]
     visual_context = " | ".join(visual_fragments)[:1500]
     return expression_context, visual_context
 

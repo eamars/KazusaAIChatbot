@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,7 +18,7 @@ from kazusa_ai_chatbot.action_spec.registry import (
 from kazusa_ai_chatbot.nodes.dialog_agent import StateContractError
 from kazusa_ai_chatbot.self_cognition import models, projection
 from kazusa_ai_chatbot.self_cognition import sources, tracking
-from kazusa_ai_chatbot.self_cognition import runner
+from kazusa_ai_chatbot.self_cognition import runner, worker
 
 
 @pytest.fixture(autouse=True)
@@ -38,6 +39,36 @@ def _disable_live_residue_recorder(monkeypatch: pytest.MonkeyPatch) -> None:
         "record_completed_episode_residue",
         record_residue,
     )
+
+
+@pytest.mark.asyncio
+async def test_worker_awaits_latest_character_profile_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The scheduler should resolve one fresh profile at each worker tick."""
+
+    stop_event = asyncio.Event()
+    received_profiles: list[dict[str, Any]] = []
+
+    async def profile_provider() -> dict[str, Any]:
+        return {"name": "revision-n"}
+
+    async def run_tick(**kwargs: Any) -> worker.SelfCognitionWorkerResult:
+        received_profiles.append(kwargs["character_profile"])
+        stop_event.set()
+        return worker.SelfCognitionWorkerResult(processed_count=1)
+
+    monkeypatch.setattr(worker, "run_self_cognition_worker_tick", run_tick)
+
+    await worker._self_cognition_worker_loop(
+        stop_event=stop_event,
+        is_primary_interaction_busy=lambda: False,
+        character_profile_provider=profile_provider,
+        adapter_registry_provider=None,
+        latest_cognition_graph_publisher=None,
+    )
+
+    assert received_profiles == [{"name": "revision-n"}]
 
 
 def _target_scope(channel_type: str = "private") -> dict[str, str | None]:

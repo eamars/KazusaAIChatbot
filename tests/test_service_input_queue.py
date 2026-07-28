@@ -20,6 +20,10 @@ from kazusa_ai_chatbot.brain_service.turn_settlement import (
 )
 from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
 from kazusa_ai_chatbot.time_boundary import build_turn_clock_from_storage_utc
+from tests.cognition_core_v2_test_helpers import (
+    canonical_episode_identity_snapshot,
+    canonical_service_character_profile,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -233,11 +237,8 @@ def _patch_common_dependencies(monkeypatch, graph) -> None:
 
     monkeypatch.setattr(
         service_module,
-        "_static_character_profile",
-        {
-            "name": "Kazusa",
-            "personality_brief": "static brief",
-        },
+        "_active_character_name_snapshot",
+        "Test Character",
     )
     monkeypatch.setattr(
         service_module,
@@ -247,6 +248,26 @@ def _patch_common_dependencies(monkeypatch, graph) -> None:
             "vibe_check": "old vibe",
             "character_reflection": "old reflection",
         },
+    )
+    character_profile = canonical_service_character_profile(
+        marker="input-queue",
+        global_user_id=CHARACTER_GLOBAL_USER_ID,
+    )
+    identity_snapshot = canonical_episode_identity_snapshot(
+        marker="input-queue",
+        global_user_id=CHARACTER_GLOBAL_USER_ID,
+    )
+    character_profile["name"] = "Test Character"
+    identity_snapshot["character_profile"]["name"] = "Test Character"
+    monkeypatch.setattr(
+        service_module,
+        "_load_latest_character_profile_snapshot",
+        AsyncMock(return_value=character_profile),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "load_latest_identity_for_episode",
+        AsyncMock(return_value=identity_snapshot),
     )
     monkeypatch.setattr(
         service_module,
@@ -260,7 +281,7 @@ def _patch_common_dependencies(monkeypatch, graph) -> None:
     monkeypatch.setattr(
         service_module,
         "_ensure_character_global_identity",
-        AsyncMock(return_value="character-global-id"),
+        AsyncMock(return_value=CHARACTER_GLOBAL_USER_ID),
     )
     monkeypatch.setattr(
         service_module,
@@ -284,13 +305,33 @@ def _patch_common_dependencies(monkeypatch, graph) -> None:
     )
     monkeypatch.setattr(
         service_module,
+        "set_conversation_source_episode_id",
+        AsyncMock(side_effect=lambda **kwargs: len(kwargs["row_ids"])),
+    )
+    monkeypatch.setattr(
+        service_module,
         "build_promoted_reflection_context",
         AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        service_module.llm_tracing,
+        "ensure_llm_trace_run",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        service_module.llm_tracing,
+        "finalize_llm_trace_run",
+        AsyncMock(),
     )
     monkeypatch.setattr(
         service_module,
         "_run_post_turn_memory_lifecycle_background",
         AsyncMock(side_effect=lambda state: state),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "upsert_post_turn_lifecycle_record",
+        AsyncMock(),
     )
     async def _frontline(_state):
         """Admit deterministic service fixtures through the new contract."""
@@ -1475,8 +1516,8 @@ async def test_settled_fresh_history_excludes_active_turn_fragments(
 
     monkeypatch.setattr(
         service_module,
-        "_static_character_profile",
-        {"name": "Kazusa"},
+        "_active_character_name_snapshot",
+        "Test Character",
     )
     item = _item(1)
     fragment = PersistedChatFragment(
@@ -1568,7 +1609,7 @@ async def test_settled_fresh_history_excludes_active_turn_fragments(
     assert state["relationship_context"] == "direct participant"
     assert state["group_attention"] == "medium_noise"
     assert state["conversation_scope"] == "group"
-    assert state["active_character_name"] == "Kazusa"
+    assert state["active_character_name"] == "Test Character"
     assert state["current_author_global_user_id"] == "global-user-1"
     assert state["current_author_platform_user_id"] == "user-1"
     assert state["character_global_user_id"] == CHARACTER_GLOBAL_USER_ID
@@ -1577,9 +1618,15 @@ async def test_settled_fresh_history_excludes_active_turn_fragments(
 
 @pytest.mark.asyncio
 async def test_settled_history_uses_timestamps_when_active_row_is_outside_window(
+    monkeypatch,
 ) -> None:
     """Intervening rows stay ordered when a busy group evicts the anchor."""
 
+    monkeypatch.setattr(
+        service_module,
+        "_active_character_name_snapshot",
+        "Test Character",
+    )
     item = _item(
         1,
         storage_timestamp_utc="2026-07-16T00:00:05+00:00",
@@ -2427,7 +2474,9 @@ async def test_private_frontline_sees_complete_coalesced_logical_input(
     )
     assert current_message["semantic_target_labels"] == ["character"]
     assert captured_frontline_state["conversation_scope"] == "private"
-    assert captured_frontline_state["active_character_name"] == "Kazusa"
+    assert captured_frontline_state["active_character_name"] == (
+        "Test Character"
+    )
 
     await _reset_queue_state()
 
@@ -2538,19 +2587,16 @@ async def test_worker_derives_graph_input_from_message_envelope(monkeypatch) -> 
 
     assert response.messages == []
     assert captured_state["user_input"] == "clean body"
-    assert captured_state["character_profile"]["name"] == "Kazusa"
-    assert (
-        captured_state["character_profile"]["personality_brief"]
-        == "static brief"
+    assert captured_state["character_profile"]["name"] == "Test Character"
+    assert isinstance(
+        captured_state["character_profile"]["personality_brief"],
+        dict,
     )
-    assert captured_state["character_profile"]["mood"] == "fresh mood"
-    assert captured_state["character_profile"]["vibe_check"] == "fresh vibe"
-    assert (
-        captured_state["character_profile"]["character_reflection"]
-        == "fresh reflection"
-    )
+    assert "mood" not in captured_state["character_profile"]
+    assert "vibe_check" not in captured_state["character_profile"]
+    assert "character_reflection" not in captured_state["character_profile"]
     assert captured_state["character_profile"]["global_user_id"] == (
-        "character-global-id"
+        CHARACTER_GLOBAL_USER_ID
     )
     assert captured_state["message_envelope"]["raw_wire_text"] == "<@bot-1> clean body"
     assert captured_state["response_action"] == "proceed"

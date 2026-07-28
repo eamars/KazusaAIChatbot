@@ -342,7 +342,7 @@ def build_character_profile_cache_key(global_user_id: str) -> str:
         USER_PROFILE_CACHE_NAME,
         {
             "policy_version": USER_PROFILE_POLICY_VERSION,
-            "profile_source": "character_state",
+            "profile_source": "character_identity",
             "global_user_id": global_user_id.strip(),
         },
     )

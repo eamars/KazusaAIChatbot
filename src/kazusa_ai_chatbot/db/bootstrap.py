@@ -39,10 +39,9 @@ from kazusa_ai_chatbot.db.post_turn_lifecycle import (
     POST_TURN_LIFECYCLE_RECORDS_COLLECTION,
     ensure_post_turn_lifecycle_record_indexes,
 )
-from kazusa_ai_chatbot.db.global_character_growth import (
-    GLOBAL_CHARACTER_GROWTH_RUNS_COLLECTION,
-    GLOBAL_CHARACTER_GROWTH_TRAITS_COLLECTION,
-    ensure_global_character_growth_indexes,
+from kazusa_ai_chatbot.db.character_identity_growth import (
+    GROWTH_COLLECTION_NAMES,
+    ensure_character_identity_growth_indexes,
 )
 from kazusa_ai_chatbot.db.event_logging import (
     EVENT_LOG_EVENTS_COLLECTION,
@@ -93,8 +92,7 @@ async def db_bootstrap() -> None:
         "conversation_episode_state",
         "character_reflection_runs",
         "interaction_style_images",
-        GLOBAL_CHARACTER_GROWTH_TRAITS_COLLECTION,
-        GLOBAL_CHARACTER_GROWTH_RUNS_COLLECTION,
+        *GROWTH_COLLECTION_NAMES,
         PERSISTENT_CACHE_COLLECTION,
         EVENT_LOG_EVENTS_COLLECTION,
         EVENT_LOG_SNAPSHOTS_COLLECTION,
@@ -282,7 +280,7 @@ async def db_bootstrap() -> None:
     )
     await ensure_reflection_run_indexes()
     await ensure_interaction_style_image_indexes()
-    await ensure_global_character_growth_indexes()
+    await ensure_character_identity_growth_indexes()
     await ensure_event_log_indexes()
     await ensure_llm_trace_indexes()
     await ensure_internal_monologue_residue_indexes()

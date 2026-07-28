@@ -55,6 +55,13 @@ class ScopeUser(TypedDict):
 class GlobalPersonaState(TypedDict):
     # Character related
     character_profile: CharacterProfileDoc
+    character_identity_revision_number: NotRequired[int]
+    character_identity_context: NotRequired[dict[str, object]]
+    character_identity_surface_context: NotRequired[dict[str, object]]
+    character_identity_projection_digest: NotRequired[str]
+    character_identity_consumer_kinds: NotRequired[list[str]]
+    character_identity_episode_id: NotRequired[str]
+    character_identity_epistemic_core_included: NotRequired[bool]
 
     # Inputs
     storage_timestamp_utc: str
@@ -150,6 +157,13 @@ class GlobalPersonaState(TypedDict):
 
 class CognitionState(TypedDict):
     character_profile: CharacterProfileDoc
+    character_identity_revision_number: NotRequired[int]
+    character_identity_context: NotRequired[dict[str, object]]
+    character_identity_surface_context: NotRequired[dict[str, object]]
+    character_identity_projection_digest: NotRequired[str]
+    character_identity_consumer_kinds: NotRequired[list[str]]
+    character_identity_episode_id: NotRequired[str]
+    character_identity_epistemic_core_included: NotRequired[bool]
 
     storage_timestamp_utc: str
     local_time_context: LocalTimeContextDoc

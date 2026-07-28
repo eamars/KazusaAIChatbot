@@ -217,6 +217,14 @@ def test_active_node_cache_dependencies_match_user_global_invalidations() -> Non
         person_dependencies[0],
         other_user_event,
     )
+    assert person_dependencies[1].source == "character_identity"
+    assert dependency_matches_event(
+        person_dependencies[1],
+        CacheInvalidationEvent(
+            source="character_identity",
+            global_user_id="character-global",
+        ),
+    )
 
 
 def _request() -> dict[str, Any]:

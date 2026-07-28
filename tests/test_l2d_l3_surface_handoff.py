@@ -9,9 +9,13 @@ import pytest
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionContractError,
 )
+from kazusa_ai_chatbot.character_identity_growth.projection import (
+    project_identity_for_surface,
+)
 from kazusa_ai_chatbot.nodes import persona_supervisor2 as persona_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_l3_surface as l3_surface
 from tests.cognition_core_v2_test_helpers import (
+    canonical_character_identity,
     canonical_cognition_output,
     canonical_episode,
 )
@@ -75,28 +79,12 @@ def _state() -> dict[str, object]:
 def _character_profile() -> dict[str, object]:
     """Build the required wording-only character voice source."""
 
-    return {
-        "name": "Kazusa",
-        "personality_brief": {
-            "logic": "analytical",
-            "tempo": "moderate",
-            "defense": "reserved",
-            "quirks": "occasional hesitation",
-            "taboos": "stay in character",
-        },
-        "linguistic_texture_profile": {
-            "hesitation_density": 0.4,
-            "fragmentation": 0.4,
-            "emotional_leakage": 0.4,
-            "rhythmic_bounce": 0.4,
-            "direct_assertion": 0.4,
-            "softener_density": 0.4,
-            "counter_questioning": 0.4,
-            "formalism_avoidance": 0.4,
-            "abstraction_reframing": 0.4,
-            "self_deprecation": 0.4,
-        },
-    }
+    identity = canonical_character_identity(marker="surface")
+    identity["name"] = "Current Character"
+    personality = identity["personality_brief"]
+    assert isinstance(personality, dict)
+    personality["tempo"] = "moderate"
+    return identity
 
 
 def _services() -> object:
@@ -132,8 +120,37 @@ def test_l3_builder_uses_only_committed_v2_surface_fields() -> None:
     assert payload["schema_version"] == "text_surface_input.v2"
     assert payload["primary_bid"]["desired_outcome"] == "maintain continuity"
     assert payload["character_expression_context"]["tempo"] == "moderate"
-    assert "Kazusa" in payload["visual_character_context"]
+    assert "Current Character" in payload["visual_character_context"]
     assert "entity_id" not in json.dumps(payload)
+
+
+def test_l3_builder_prefers_latest_surface_snapshot_over_stale_profile() -> None:
+    """Text and visual consumers must use revision N, never stale N-1."""
+
+    state = _state()
+    state["character_profile"] = canonical_character_identity(
+        marker="revision-n-1",
+    )
+    latest_identity = canonical_character_identity(marker="revision-n")
+    state["character_identity_surface_context"] = (
+        project_identity_for_surface({
+            "effective_identity": latest_identity,
+        })
+    )
+
+    payload = l3_surface.build_text_surface_input_from_global_state(
+        state,
+        interaction_style_context="brief and natural",
+    )
+    serialized = json.dumps({
+        "text": payload["character_expression_context"],
+        "visual": payload["visual_character_context"],
+    })
+
+    assert "revision-n" in serialized
+    assert "revision-n-1" not in serialized
+    assert "change_diff" not in serialized
+    assert "evidence_refs" not in serialized
 
 
 def test_l3_builder_projects_trace_status_into_exact_v2_action_result() -> None:

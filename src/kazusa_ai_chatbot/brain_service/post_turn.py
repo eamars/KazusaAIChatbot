@@ -418,6 +418,14 @@ async def save_assistant_message(
     else:
         delivery_mentions = None
 
+    cognitive_episode = result.get("cognitive_episode")
+    if isinstance(cognitive_episode, Mapping):
+        source_episode_id = str(
+            cognitive_episode.get("episode_id") or ""
+        ).strip()
+    else:
+        source_episode_id = ""
+
     for logical_message_index, body_text in enumerate(assistant_output):
         await record_assistant_outbound_message(
             platform=platform,
@@ -432,6 +440,7 @@ async def save_assistant_message(
             delivery_tracking_id=str(result.get("delivery_tracking_id") or ""),
             logical_message_index=logical_message_index,
             llm_trace_id=str(result.get("llm_trace_id") or ""),
+            source_episode_id=source_episode_id,
             storage_timestamp_utc=utc_timestamp(now_func),
             ensure_character_global_identity_func=(
                 ensure_character_global_identity_func

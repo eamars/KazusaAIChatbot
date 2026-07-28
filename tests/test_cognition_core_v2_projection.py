@@ -15,6 +15,7 @@ from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
     project_trend,
     validate_prompt_projection,
 )
+from tests.cognition_core_v2_test_helpers import canonical_identity_context
 
 
 NOW = "2026-07-14T00:00:00Z"
@@ -92,6 +93,7 @@ def test_state_projection_separates_user_state_and_character_constraints() -> No
     projection = project_state_for_prompt(
         state,
         character_constraints=_constraints(),
+        character_identity_context=canonical_identity_context(),
     )
 
     assert projection.payload["character_constraints"]["drives"]["care"][

@@ -192,6 +192,38 @@ def _build_benchmark_payload(case: dict[str, str]) -> dict[str, object]:
         local_time_context=local_time_context_from_storage_utc(occurred_at),
         created_at=occurred_at,
     )
+    personality_judgment = {
+        "logic": "Prefer evidence-grounded interpretation.",
+        "defense": "Preserve boundaries and the selected intent.",
+        "quirks": "Allow concise, characterful phrasing.",
+        "taboos": "Ground scene facts in available evidence.",
+    }
+    identity_context = {
+        "moral_identity": {
+            "core": {},
+            "personality": dict(personality_judgment),
+            "boundaries": {},
+            "self_image": {},
+        },
+        "existential_drive": {
+            "core": {},
+            "personality": dict(personality_judgment),
+            "self_image": {},
+        },
+        "relationship_social": {
+            "personality": dict(personality_judgment),
+            "boundaries": {},
+        },
+        "event_agency": {
+            "personality": dict(personality_judgment),
+            "boundaries": {},
+        },
+        "goal_threat_outcome": {
+            "personality": dict(personality_judgment),
+            "boundaries": {},
+        },
+        "epistemic_comparison_memory": {},
+    }
     return {
         "schema_version": "cognition_core_input.v2",
         "episode": episode,
@@ -204,13 +236,9 @@ def _build_benchmark_payload(case: dict[str, str]) -> dict[str, object]:
             "drives": character_state["drives"],
             "standards": character_state["standards"],
             "meaning_state": character_state["meaning_state"],
-            "personality_judgment": {
-                "logic": "Prefer evidence-grounded interpretation.",
-                "defense": "Preserve boundaries and the selected intent.",
-                "quirks": "Allow concise, characterful phrasing.",
-                "taboos": "Ground scene facts in available evidence.",
-            },
+            "personality_judgment": personality_judgment,
         },
+        "character_identity_context": identity_context,
         "evidence": [{
             "evidence_handle": "e1",
             "evidence_ref": {

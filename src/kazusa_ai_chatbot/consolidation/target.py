@@ -5,13 +5,15 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, Literal, TypedDict
 
+from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
+
 
 TargetKind = Literal["user", "group_channel", "character", "internal"]
 WriteLane = Literal[
     "user_memory_units",
     "user_style_image",
     "group_channel_style_image",
-    "character_self_image",
+    "character_identity_growth",
     "character_self_guidance",
     "shared_memory_promotion",
     "audit",
@@ -53,7 +55,10 @@ INTERNAL_TARGET_ALIAS = "internal"
 
 USER_WRITE_LANES = ["user_memory_units", "user_style_image"]
 GROUP_CHANNEL_WRITE_LANES = ["group_channel_style_image"]
-CHARACTER_WRITE_LANES = ["character_self_image", "character_self_guidance"]
+CHARACTER_WRITE_LANES = [
+    "character_identity_growth",
+    "character_self_guidance",
+]
 INTERNAL_WRITE_LANES = ["audit", "shared_memory_promotion"]
 
 SYNTHETIC_USER_IDS = frozenset(
@@ -322,12 +327,8 @@ def _character_target_id(global_state: Mapping[str, Any]) -> str:
         if isinstance(global_user_id, str) and global_user_id.strip():
             return_value = global_user_id.strip()
             return return_value
-        name = character_profile.get("name")
-        if isinstance(name, str) and name.strip():
-            return_value = name.strip()
-            return return_value
 
-    return_value = "active_character"
+    return_value = CHARACTER_GLOBAL_USER_ID
     return return_value
 
 

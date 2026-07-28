@@ -23,7 +23,10 @@ from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     build_acquaintance_user_state,
     build_character_production_state,
 )
-from tests.cognition_core_v2_test_helpers import canonical_episode
+from tests.cognition_core_v2_test_helpers import (
+    canonical_episode,
+    canonical_identity_context,
+)
 NOW = "2026-07-14T00:00:00Z"
 
 
@@ -72,6 +75,7 @@ def test_episode_evidence_selects_each_family_once_with_unique_path_owners() -> 
     projection = project_state_for_prompt(
         state,
         character_constraints=constraints,
+        character_identity_context=canonical_identity_context(),
         evidence=evidence,
     )
     questions = plan_semantic_questions(
@@ -114,6 +118,7 @@ def test_scheduler_evidence_selects_only_goal_threat_outcome() -> None:
     projection = project_state_for_prompt(
         state,
         character_constraints=constraints,
+        character_identity_context=canonical_identity_context(),
         evidence=evidence,
     )
     questions = plan_semantic_questions(
@@ -139,6 +144,7 @@ def test_each_question_receives_only_family_local_handles_and_state() -> None:
     projection = project_state_for_prompt(
         state,
         character_constraints=constraints,
+        character_identity_context=canonical_identity_context(),
         evidence=evidence,
     )
     questions = plan_semantic_questions(
@@ -169,6 +175,53 @@ def test_each_question_receives_only_family_local_handles_and_state() -> None:
     assert "character_constraints" not in event_state
 
 
+def test_each_question_receives_only_its_latest_identity_partition() -> None:
+    """Exclude other families, history, metadata, and prior identity values."""
+
+    state = build_acquaintance_user_state(
+        global_user_id="user-identity-partitions",
+        updated_at=NOW,
+    )
+    evidence = _evidence()
+    identity_context = canonical_identity_context(marker="revision-n")
+    family_markers: dict[str, str] = {}
+    for family, context in identity_context.items():
+        if not context:
+            continue
+        marker = f"identity-family-{family}"
+        family_markers[family] = marker
+        context["proof_marker"] = marker
+    projection = project_state_for_prompt(
+        state,
+        character_constraints=_constraints(),
+        character_identity_context=identity_context,
+        evidence=evidence,
+    )
+    questions = plan_semantic_questions(
+        evidence,
+        state,
+        projection.handle_to_ref,
+    )
+
+    for question in questions:
+        family = question["question_kind"]
+        question_state = _project_question_state(projection, question)
+        serialized = str(question_state)
+        expected_identity = identity_context[family]
+        if expected_identity:
+            assert question_state["character_identity"] == expected_identity
+            assert family_markers[family] in serialized
+        else:
+            assert "character_identity" not in question_state
+        for other_family, marker in family_markers.items():
+            if other_family != family:
+                assert marker not in serialized
+        assert "revision-n-1" not in serialized
+        assert "revision_number" not in serialized
+        assert "change_diff" not in serialized
+        assert "evidence_refs" not in serialized
+
+
 def test_candidate_handles_share_the_projection_authority() -> None:
     """Keep sparse evidence ids resolvable through one prompt-handle owner."""
 
@@ -182,6 +235,7 @@ def test_candidate_handles_share_the_projection_authority() -> None:
     projection = project_state_for_prompt(
         state,
         character_constraints=constraints,
+        character_identity_context=canonical_identity_context(),
         evidence=evidence,
     )
     questions = plan_semantic_questions(
@@ -225,6 +279,7 @@ def test_v2_input_rejects_scope_mismatch_before_any_model_call() -> None:
         "state_scope": "character",
         "mutable_state": state,
         "character_constraints": _constraints(),
+        "character_identity_context": canonical_identity_context(),
         "evidence": _evidence(),
         "direct_facts": [],
         "available_actions": [],

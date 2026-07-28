@@ -98,6 +98,54 @@ def test_guard_allows_reserved_stage3_database_with_explicit_marker(
     client_module._assert_guarded_database_name()
 
 
+def test_guard_allows_exact_identity_growth_database_from_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Allow one explicitly named identity-growth test database."""
+
+    database_name = "identity-growth-test-target"
+    monkeypatch.setenv("KAZUSA_TEST_DB_GUARD", "1")
+    monkeypatch.setenv(
+        client_module.IDENTITY_GROWTH_DATABASE_GUARD_ENV,
+        "1",
+    )
+    monkeypatch.setenv(
+        client_module.IDENTITY_GROWTH_TEST_DATABASE_ENV,
+        database_name,
+    )
+    monkeypatch.setattr(
+        client_module,
+        "MONGODB_DB_NAME",
+        database_name,
+    )
+
+    client_module._assert_guarded_database_name()
+
+
+def test_guard_rejects_identity_growth_database_name_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reject any database other than the explicitly named growth target."""
+
+    monkeypatch.setenv("KAZUSA_TEST_DB_GUARD", "1")
+    monkeypatch.setenv(
+        client_module.IDENTITY_GROWTH_DATABASE_GUARD_ENV,
+        "1",
+    )
+    monkeypatch.setenv(
+        client_module.IDENTITY_GROWTH_TEST_DATABASE_ENV,
+        "identity-growth-test-target",
+    )
+    monkeypatch.setattr(
+        client_module,
+        "MONGODB_DB_NAME",
+        "different-database",
+    )
+
+    with pytest.raises(client_module.DatabaseTestGuardError):
+        client_module._assert_guarded_database_name()
+
+
 def test_mongodb_log_descriptor_excludes_credentials_and_query_options() -> None:
     """Connection diagnostics must not expose raw URI secrets."""
 

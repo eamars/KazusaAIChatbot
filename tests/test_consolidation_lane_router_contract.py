@@ -18,6 +18,7 @@ from kazusa_ai_chatbot.cognition_core_v2.state_models import (
 EXPECTED_LANES = {
     "user_memory_units",
     "active_commitment",
+    "character_identity_growth",
     "character_self_guidance",
     "interaction_style_image",
     "shared_memory_promotion",
@@ -217,6 +218,7 @@ def test_lane_roster_includes_character_self_guidance_for_chat() -> None:
     roster_lanes = {entry["lane"] for entry in roster}
 
     assert "character_self_guidance" in roster_lanes
+    assert "character_identity_growth" in roster_lanes
     assert "user_memory_units" in roster_lanes
     assert "active_commitment" in roster_lanes
 
@@ -240,6 +242,84 @@ def test_router_output_accepts_only_coarse_lane_tasks() -> None:
     validated = module.validate_lane_router_output(output, roster)
 
     assert validated == output
+
+
+def test_identity_route_requires_one_closed_semantic_evidence_card() -> None:
+    """Identity routing owns summaries while repositories own opaque roots."""
+
+    module = _lane_router_module()
+    target_plan = build_consolidation_target_plan(_base_state())
+    roster = module.build_lane_roster(target_plan)
+    output = {
+        "lane_tasks": [{
+            "lane": "character_identity_growth",
+            "reason": "the character expressed a potentially durable change",
+            "source_keys": [
+                "assistant_final_dialog",
+                "internal_thought",
+            ],
+            "identity_evidence": {
+                "decontextualized_event": (
+                    "The character reconsidered a recurring response pattern."
+                ),
+                "character_cognition_summary": (
+                    "The character framed the change as her own judgment."
+                ),
+                "visible_self_expression_summary": (
+                    "The character explicitly described a changed self-view."
+                ),
+            },
+        }],
+    }
+
+    validated = module.validate_lane_router_output(output, roster)
+
+    assert validated == output
+    assert "episode_id" not in str(validated["lane_tasks"][0][
+        "identity_evidence"
+    ])
+
+
+@pytest.mark.asyncio
+async def test_router_prompt_excludes_repository_refs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The lane model receives semantic source views without raw identifiers."""
+
+    module = _lane_router_module()
+    captured_messages: list[Any] = []
+
+    class _Response:
+        content = '{"lane_tasks":[]}'
+
+    async def _invoke(messages, *, config):
+        del config
+        captured_messages.extend(messages)
+        return _Response()
+
+    monkeypatch.setattr(module._lane_router_llm, "ainvoke", _invoke)
+    state = _base_state()
+    state["consolidation_target_plan"] = build_consolidation_target_plan(state)
+    await module.call_lane_router_llm(
+        state,
+        source_views=[{
+            "source_key": "assistant_final_dialog",
+            "source_kind": "assistant_final_dialog",
+            "summary": "A bounded visible response.",
+            "source_refs": [{
+                "episode_id": "episode-private-root",
+                "platform_message_id": "private-message",
+            }],
+        }],
+        roster=module.build_lane_roster(
+            state["consolidation_target_plan"]
+        ),
+    )
+
+    human_prompt = str(captured_messages[1].content)
+    assert "source_refs" not in human_prompt
+    assert "episode-private-root" not in human_prompt
+    assert "private-message" not in human_prompt
 
 
 @pytest.mark.parametrize(

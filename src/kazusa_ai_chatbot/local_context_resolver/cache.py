@@ -105,7 +105,7 @@ def build_active_node_cache_dependencies(
         dependencies.append(CacheDependency(
             source="user_profile",
         ))
-        dependencies.append(CacheDependency(source="character_state"))
+        dependencies.append(CacheDependency(source="character_identity"))
     elif node_kind == "recall_evidence":
         dependencies.append(CacheDependency(
             source="conversation_history",

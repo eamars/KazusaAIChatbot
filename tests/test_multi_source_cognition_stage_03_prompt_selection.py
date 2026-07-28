@@ -21,6 +21,7 @@ from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     build_acquaintance_user_state,
     build_character_production_state,
 )
+from tests.cognition_core_v2_test_helpers import canonical_identity_context
 
 
 NOW = "2026-07-14T00:00:00Z"
@@ -73,6 +74,7 @@ def test_source_kind_selects_its_exact_question_families(
     projection = project_state_for_prompt(
         state,
         character_constraints=constraints,
+        character_identity_context=canonical_identity_context(),
         evidence=evidence,
     )
     questions = plan_semantic_questions(

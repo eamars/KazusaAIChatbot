@@ -16,7 +16,10 @@ from kazusa_ai_chatbot.cognition_core_v2.state_models import (
 from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_projection import (
     project_known_facts,
 )
-from tests.cognition_core_v2_test_helpers import canonical_episode
+from tests.cognition_core_v2_test_helpers import (
+    canonical_episode,
+    canonical_identity_context,
+)
 
 
 NOW = "2026-07-14T00:00:00Z"
@@ -59,6 +62,7 @@ def _payload() -> dict[str, object]:
                 "taboos": "preserve character agency",
             },
         },
+        "character_identity_context": canonical_identity_context(),
         "evidence": [],
         "direct_facts": [],
         "available_actions": [],

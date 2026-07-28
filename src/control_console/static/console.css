@@ -130,6 +130,16 @@ body[data-auth-state="authenticated"] #login-form { display: none; }
 .trait-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px 12px; flex-wrap: wrap; min-width: 0; }
 .trait-header > div { min-width: 0; }
 .trait-header h4 { margin: 0; color: var(--ink); font-size: 14px; line-height: 1.4; font-weight: 650; overflow-wrap: anywhere; }
+.semantic-list, .identity-diff-list { margin: 0; padding-left: 20px; display: grid; gap: 7px; color: var(--ink); font-size: 13px; line-height: 1.55; }
+.identity-health-card { display: grid; gap: 12px; min-width: 0; padding: 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-card); background: var(--panel-soft); }
+.identity-revision-list { display: grid; gap: 10px; min-width: 0; }
+.identity-revision-card { min-width: 0; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--panel); overflow: hidden; }
+.identity-revision-card summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; padding: 11px 12px; color: var(--ink); font-size: 13px; font-weight: 650; cursor: pointer; }
+.identity-revision-card summary:hover, .identity-revision-card summary:focus-visible { background: var(--panel-soft); outline: 0; }
+.identity-revision-content { display: grid; gap: 12px; min-width: 0; padding: 12px; border-top: 1px solid var(--line); }
+.identity-diff-list li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; align-items: start; }
+.identity-diff-list strong { overflow-wrap: anywhere; }
+.identity-diff-list span { color: var(--muted); font-size: 12px; }
 .record-list, .operational-list, .prompt-panel { display: grid; gap: 10px; min-width: 0; }
 .record-list, .operational-list { grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr)); align-items: start; }
 .record-card { display: grid; gap: 10px; min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--panel); }

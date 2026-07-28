@@ -195,6 +195,12 @@ _db_loop: asyncio.AbstractEventLoop | None = None
 TEST_DATABASE_NAME = "_test_kazusa_live_llm"
 STAGE3_TEST_DATABASE_NAME = "_test_kazusa_core_v2"
 STAGE3_DATABASE_GUARD_ENV = "STAGE3_DATABASE_GUARD"
+IDENTITY_GROWTH_DATABASE_GUARD_ENV = (
+    "IDENTITY_GROWTH_DATABASE_GUARD"
+)
+IDENTITY_GROWTH_TEST_DATABASE_ENV = (
+    "IDENTITY_GROWTH_TEST_DATABASE"
+)
 
 
 class DatabaseTestGuardError(RuntimeError):
@@ -229,6 +235,17 @@ def _assert_guarded_database_name() -> None:
     allowed_database_names = {TEST_DATABASE_NAME}
     if os.getenv(STAGE3_DATABASE_GUARD_ENV) == "1":
         allowed_database_names.add(STAGE3_TEST_DATABASE_NAME)
+    if os.getenv(IDENTITY_GROWTH_DATABASE_GUARD_ENV) == "1":
+        identity_growth_database_name = os.getenv(
+            IDENTITY_GROWTH_TEST_DATABASE_ENV,
+            "",
+        ).strip()
+        if not identity_growth_database_name:
+            raise DatabaseTestGuardError(
+                f"{IDENTITY_GROWTH_TEST_DATABASE_ENV} must name the "
+                "explicit identity-growth test database"
+            )
+        allowed_database_names.add(identity_growth_database_name)
     if MONGODB_DB_NAME not in allowed_database_names:
         raise DatabaseTestGuardError(
             f"guarded DB access requires one of "

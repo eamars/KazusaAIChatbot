@@ -21,6 +21,7 @@ from kazusa_ai_chatbot.event_logging.sanitization import (
 
 _RECORDER_NAMES = [
     "record_cognition_v2_event",
+    "record_character_identity_growth_event",
     "record_process_event",
     "record_worker_event",
     "record_llm_stage_event",

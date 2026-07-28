@@ -137,6 +137,7 @@ async def run_cognition(
     projection = project_state_for_prompt(
         preliminary_state,
         character_constraints=payload["character_constraints"],
+        character_identity_context=payload["character_identity_context"],
         relationship_context=payload.get("relationship_context"),
         evidence=payload["evidence"],
     )
@@ -251,6 +252,7 @@ async def run_cognition(
     final_projection = project_state_for_prompt(
         final_state,
         character_constraints=payload["character_constraints"],
+        character_identity_context=payload["character_identity_context"],
         relationship_context=payload.get("relationship_context"),
         evidence=payload["evidence"],
     )

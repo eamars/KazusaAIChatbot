@@ -10,8 +10,31 @@ from dotenv import load_dotenv
 
 from tests.stage3_fresh_database import STAGE3_TEST_DATABASE_NAME
 
+_IDENTITY_GROWTH_DATABASE_GUARD_ENV = (
+    "IDENTITY_GROWTH_DATABASE_GUARD"
+)
+_IDENTITY_GROWTH_TEST_DATABASE_ENV = (
+    "IDENTITY_GROWTH_TEST_DATABASE"
+)
+
 load_dotenv(override=False)
-if os.environ.get("MONGODB_DB_NAME") == STAGE3_TEST_DATABASE_NAME:
+if os.environ.get(_IDENTITY_GROWTH_DATABASE_GUARD_ENV) == "1":
+    identity_growth_database_name = os.environ.get(
+        _IDENTITY_GROWTH_TEST_DATABASE_ENV,
+        "",
+    ).strip()
+    if not identity_growth_database_name:
+        raise RuntimeError(
+            f"{_IDENTITY_GROWTH_TEST_DATABASE_ENV} must name the "
+            "identity-growth test database"
+        )
+    if os.environ.get("MONGODB_DB_NAME") != identity_growth_database_name:
+        raise RuntimeError(
+            "MONGODB_DB_NAME must match the guarded identity-growth "
+            "test database"
+        )
+    os.environ.pop("STAGE3_DATABASE_GUARD", None)
+elif os.environ.get("MONGODB_DB_NAME") == STAGE3_TEST_DATABASE_NAME:
     os.environ["STAGE3_DATABASE_GUARD"] = "1"
 else:
     os.environ["MONGODB_DB_NAME"] = "_test_kazusa_live_llm"

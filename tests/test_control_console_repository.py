@@ -5,6 +5,19 @@ from __future__ import annotations
 import pytest
 
 
+def _console_identity_profile() -> dict[str, object]:
+    """Build one complete generic identity for console projection tests."""
+
+    from tests.cognition_core_v2_test_helpers import (
+        canonical_character_identity,
+    )
+
+    return {
+        **canonical_character_identity(marker="latest"),
+        "global_user_id": "character-internal-secret",
+    }
+
+
 @pytest.mark.asyncio
 async def test_repository_returns_safe_unavailable_summaries_without_db() -> None:
     """Owner envelopes should degrade to bounded unavailable data."""
@@ -22,8 +35,10 @@ async def test_repository_returns_safe_unavailable_summaries_without_db() -> Non
     repository = ControlConsoleRepository(
         get_character_profile=unavailable_character_helper,
         get_character_runtime_state=unavailable_character_helper,
-        list_growth_traits=unavailable_helper,
-        list_recent_global_character_growth_runs=unavailable_helper,
+        list_identity_revisions=unavailable_helper,
+        list_identity_growth_candidates=unavailable_helper,
+        list_recent_identity_growth_runs=unavailable_helper,
+        build_identity_growth_health=unavailable_helper,
         find_user_profile_by_identifier=unavailable_helper,
         load_residue_context=unavailable_helper,
     )
@@ -67,7 +82,7 @@ async def test_repository_projects_application_identity_from_character_profile()
 
     assert identity["status"] == "available"
     assert identity["character_name"] == "杏山千纱 (Kyōyama Kazusa)"
-    assert identity["source"] == "character_state"
+    assert identity["source"] == "character_identity_revisions"
     assert "generated_at" in identity
     assert "prompt" not in repr(identity).lower()
 
@@ -277,75 +292,78 @@ async def test_repository_projects_native_v2_character_and_user_state() -> None:
         "status": "active",
     }]
 
+    character_profile = _console_identity_profile()
+    character_profile["name"] = "Test Character"
+    character_profile["description"] = "A precise character."
+    personality = character_profile["personality_brief"]
+    assert isinstance(personality, dict)
+    personality["mbti"] = "ISTP"
+    boundaries = character_profile["boundary_profile"]
+    assert isinstance(boundaries, dict)
+    boundaries["self_integrity"] = 0.9
+    boundaries["control_sensitivity"] = 0.8
+    linguistic = character_profile["linguistic_texture_profile"]
+    assert isinstance(linguistic, dict)
+    linguistic["fragmentation"] = 0.4
+    linguistic["direct_assertion"] = 0.7
+    character_profile["self_image"] = {
+        "self_concept": "quiet precision",
+        "current_growth_edges": ["calibrate direct review"],
+    }
+
     async def get_character_profile():
-        return {
-            "name": "Test Character",
-            "description": "A precise character.",
-            "tone": "restrained",
-            "speech_patterns": "short direct clauses",
-            "backstory": "Safe operator-visible background.",
-            "personality_brief": {"mbti": "ISTP"},
-            "boundary_profile": {
-                "self_integrity": 0.9,
-                "control_sensitivity": 0.8,
-            },
-            "linguistic_texture_profile": {
-                "fragmentation": 0.4,
-                "direct_assertion": 0.7,
-            },
-            "self_image": {"historical_summary": "quiet precision"},
-            "cognition_state": character_state,
-        }
+        return character_profile
 
     async def get_character_runtime_state():
         return {
-            "self_image": {"historical_summary": "quiet precision"},
             "cognition_state": character_state,
             "updated_at": updated_at,
         }
 
-    async def list_growth_traits(*, limit: int):
-        assert limit == 12
+    async def list_identity_revisions(**kwargs):
+        assert kwargs == {
+            "character_id": "character-internal-secret",
+            "limit": 5,
+        }
         return [{
-            "trait_id": "growth-trait-secret",
-            "growth_axis": "operator trust",
-            "trait_name": "direct-review calibration",
-            "guidance": "Treat concrete corrections as high-signal evidence.",
-            "status": "active",
-            "maturity_band": "observed",
-            "evidence_count": 3,
+            "revision_number": 0,
+            "revision_kind": "seed",
+            "base_revision_number": None,
+            "changed_paths": [],
+            "change_diff": [],
+            "evidence_summary": "seed",
+            "source_scope_kinds": [],
+            "evidence_refs": [],
+            "proposal_confidence": "seed",
+            "review_confidence": "seed",
+            "created_at": updated_at,
         }]
 
-    async def list_recent_global_character_growth_runs(*, limit: int):
-        assert limit == 1
-        return [
-            {
-                "run_id": "growth-run-secret",
-                "status": "completed",
-                "summary": "Accepted one direct-review calibration change.",
-                "accepted_candidates": [{
-                    "growth_axis": "operator trust",
-                    "summary": "Direct correction improved calibration.",
-                }],
-                "trait_updates": [{
-                    "trait_name": "direct-review calibration",
-                    "change": "strengthened",
-                }],
-                "shadow_projection": {
-                    "growth_axis": "operator trust",
-                    "guidance": "Use the correction on the next review.",
-                    "maturity": "observed",
-                    "prompt_visible_now": True,
-                    "review_note": "Semantically useful and bounded.",
-                },
-                "source_reflection_run_ids": ["growth-source-secret"],
-            },
-            {
-                "run_id": "older-growth-run-secret",
-                "status": "completed",
-                "summary": "Older growth outcome that must stay hidden.",
-            },
-        ]
+    async def empty_identity_history(**kwargs):
+        assert kwargs == {
+            "character_id": "character-internal-secret",
+            "limit": 5,
+        }
+        return []
+
+    async def idle_identity_health(**kwargs):
+        assert kwargs == {"character_id": "character-internal-secret"}
+        return {
+            "state": "healthy_idle",
+            "routed_count": 0,
+            "no_change_count": 0,
+            "emerging_candidate_count": 0,
+            "ready_candidate_count": 0,
+            "rejected_count": 0,
+            "failed_count": 0,
+            "promoted_count": 0,
+            "consumed_count": 0,
+            "latest_revision_number": 0,
+            "latest_consumed_revision_number": None,
+            "latest_reason_code": "not_routed",
+            "root_count": 0,
+            "local_date_count": 0,
+        }
 
     async def find_user_profile_by_identifier(
         *,
@@ -405,10 +423,10 @@ async def test_repository_projects_native_v2_character_and_user_state() -> None:
     repository = ControlConsoleRepository(
         get_character_profile=get_character_profile,
         get_character_runtime_state=get_character_runtime_state,
-        list_growth_traits=list_growth_traits,
-        list_recent_global_character_growth_runs=(
-            list_recent_global_character_growth_runs
-        ),
+        list_identity_revisions=list_identity_revisions,
+        list_identity_growth_candidates=empty_identity_history,
+        list_recent_identity_growth_runs=empty_identity_history,
+        build_identity_growth_health=idle_identity_health,
         find_user_profile_by_identifier=find_user_profile_by_identifier,
         query_user_memory_units=query_user_memory_units,
         search_user_memory_units_by_keyword=search_user_memory_units_by_keyword,
@@ -436,8 +454,8 @@ async def test_repository_projects_native_v2_character_and_user_state() -> None:
         "carry_over",
     }
     character_profile = character["panels"]["profile"]["items"][0]
-    assert character_profile["tone"] == "restrained"
-    assert character_profile["speech_patterns"] == "short direct clauses"
+    assert "tone" not in character_profile
+    assert "speech_patterns" not in character_profile
     assert character_profile["boundary_profile"]["self_integrity"] == 0.9
     assert (
         character_profile["linguistic_texture_profile"]["direct_assertion"]
@@ -458,12 +476,10 @@ async def test_repository_projects_native_v2_character_and_user_state() -> None:
         "affect_activations",
         "updated_at",
     } <= character_keys
-    growth_rendered = repr(character["panels"]["growth"])
-    assert "Accepted one direct-review calibration change." in growth_rendered
-    assert "prompt_visible_now" in growth_rendered
-    assert "growth-run-secret" not in growth_rendered
-    assert "growth-source-secret" not in growth_rendered
-    assert "Older growth outcome that must stay hidden." not in growth_rendered
+    assert character["panels"]["growth"]["status"] == "empty"
+    lineage = character["panels"]["carry_over"]["items"]
+    assert lineage[0]["state"] == "healthy_idle"
+    assert lineage[1]["revision_number"] == 0
 
     assert set(user["panels"]) == {
         "profile",
@@ -1319,3 +1335,326 @@ def test_repository_style_projection_skips_invalid_entries_and_limits_rows() -> 
         "guidelines": ["one"],
         "confidence": "high",
     }]
+
+
+@pytest.mark.asyncio
+async def test_character_identity_lineage_health_and_growth_are_redacted() -> None:
+    """Character should expose identity continuity without internal lineage."""
+
+    from control_console.repository import ControlConsoleRepository
+    from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+        build_character_production_state,
+    )
+
+    profile = _console_identity_profile()
+    timestamp = "2026-07-28T08:30:00+00:00"
+
+    async def get_character_profile() -> dict[str, object]:
+        return profile
+
+    async def get_character_runtime_state() -> dict[str, object]:
+        return {
+            "cognition_state": build_character_production_state(
+                updated_at=timestamp,
+            ),
+            "updated_at": timestamp,
+        }
+
+    async def list_identity_revisions(
+        *,
+        character_id: str,
+        limit: int,
+    ) -> list[dict[str, object]]:
+        assert character_id == "character-internal-secret"
+        assert limit == 5
+        return [
+            {
+                "revision_id": "revision-internal-secret",
+                "character_id": character_id,
+                "revision_number": 2,
+                "revision_kind": "corroborated_growth",
+                "base_revision_number": 1,
+                "effective_identity": profile,
+                "changed_paths": [
+                    "personality_brief.tempo",
+                    "self_image.self_concept",
+                ],
+                "change_diff": [
+                    {
+                        "path": "personality_brief.tempo",
+                        "value_kind": "text",
+                        "before": "raw-prior-identity-text-secret",
+                        "after": "raw-next-identity-text-secret",
+                    },
+                    {
+                        "path": "self_image.self_concept",
+                        "value_kind": "text",
+                        "before": "raw-private-detail-secret",
+                        "after": "raw-reviewed-identity-secret",
+                    },
+                ],
+                "evidence_summary": "Reviewed character-owned abstraction.",
+                "source_scope_kinds": ["group", "private"],
+                "evidence_refs": [
+                    {
+                        "root_episode_id": "root-episode-secret",
+                        "correlation_id": "correlation-secret",
+                        "evidence_ref_id": "evidence-ref-secret",
+                        "character_local_date": "2026-07-27",
+                        "scope_kind": "private",
+                        "raw_message": "raw-source-text-secret",
+                    },
+                    {
+                        "root_episode_id": "root-episode-secret-2",
+                        "correlation_id": "correlation-secret-2",
+                        "evidence_ref_id": "evidence-ref-secret-2",
+                        "character_local_date": "2026-07-28",
+                        "scope_kind": "group",
+                        "prompt_text": "prompt-secret",
+                    },
+                ],
+                "promotion_run_id": "promotion-run-secret",
+                "promotion_correlation_id": "promotion-correlation-secret",
+                "proposal_confidence": "high",
+                "review_confidence": "high",
+                "created_at": timestamp,
+            },
+            {
+                "revision_id": "revision-prior-secret",
+                "character_id": character_id,
+                "revision_number": 1,
+                "revision_kind": "explicit_turning_point",
+                "base_revision_number": 0,
+                "effective_identity": profile,
+                "changed_paths": ["boundary_profile.self_integrity"],
+                "change_diff": [
+                    {
+                        "path": "boundary_profile.self_integrity",
+                        "value_kind": "semantic_band",
+                        "before": 0.3,
+                        "after": 0.7,
+                    },
+                ],
+                "evidence_summary": "Earlier reviewed turning point.",
+                "source_scope_kinds": ["private"],
+                "evidence_refs": [
+                    {
+                        "root_episode_id": "prior-root-secret",
+                        "character_local_date": "2026-07-26",
+                        "scope_kind": "private",
+                    },
+                ],
+                "promotion_run_id": "prior-run-secret",
+                "promotion_correlation_id": "prior-correlation-secret",
+                "proposal_confidence": "high",
+                "review_confidence": "high",
+                "created_at": "2026-07-26T08:30:00+00:00",
+            },
+        ]
+
+    async def list_identity_growth_candidates(
+        *,
+        character_id: str,
+        limit: int,
+    ) -> list[dict[str, object]]:
+        assert character_id == "character-internal-secret"
+        assert limit == 5
+        return [
+            {
+                "candidate_id": "candidate-internal-secret",
+                "character_id": character_id,
+                "base_revision_number": 2,
+                "status": "emerging",
+                "change_kind": "inferred_growth",
+                "proposed_changes": [
+                    {
+                        "path": "personality_brief.logic",
+                        "value_kind": "text",
+                        "replacement_text": "candidate-identity-text-secret",
+                    },
+                ],
+                "semantic_summary": "private-candidate-summary-secret",
+                "evidence_refs": [
+                    {
+                        "root_episode_id": "candidate-root-secret",
+                        "character_local_date": "2026-07-28",
+                        "scope_kind": "private",
+                    },
+                ],
+                "distinct_episode_count": 2,
+                "distinct_local_dates": ["2026-07-28"],
+                "source_scope_kinds": ["private"],
+                "claimed_root_episode_ids": [
+                    "candidate-root-secret",
+                    "candidate-root-secret-2",
+                ],
+                "newest_root_captured_at": timestamp,
+                "reversal_of_paths": [],
+                "fresh_post_revision_root_count": 2,
+                "character_authorship": "inferred",
+                "proposal_confidence": "high",
+                "review_confidence": "high",
+                "privacy_review": "low",
+                "promoted_revision_number": None,
+                "rejection_reason": None,
+                "created_at": timestamp,
+                "updated_at": timestamp,
+            },
+        ]
+
+    async def list_recent_identity_growth_runs(
+        *,
+        character_id: str,
+        limit: int,
+    ) -> list[dict[str, object]]:
+        assert character_id == "character-internal-secret"
+        assert limit == 5
+        return [
+            {
+                "run_id": "run-internal-secret",
+                "character_id": character_id,
+                "run_kind": "episode",
+                "base_revision_number": 2,
+                "correlation_id": "run-correlation-secret",
+                "root_episode_ids": ["run-root-secret"],
+                "source_evidence_count": 1,
+                "attempt_count_by_stage": {"proposal": 1, "review": 1},
+                "lifecycle_state": "complete",
+                "disposition": "candidate_updated",
+                "proposal_reason_code": "candidate_emerging",
+                "review_reason_code": "candidate_emerging",
+                "policy_reason_code": "candidate_emerging",
+                "persistence_reason_code": "candidate_emerging",
+                "candidate_id": "candidate-internal-secret",
+                "promoted_revision_number": None,
+                "validation_error_codes": [],
+                "first_consumption": {
+                    "episode_id": "consumption-episode-secret",
+                    "correlation_id": "consumption-correlation-secret",
+                    "claimed_at": timestamp,
+                    "loaded_revision_number": 2,
+                    "consumer_kinds": ["moral_identity", "text"],
+                    "projection_digest": "projection-digest-secret",
+                    "status": "consumed",
+                },
+                "post_commit_attempt_count": 1,
+                "started_at": timestamp,
+                "completed_at": timestamp,
+            },
+        ]
+
+    async def build_identity_growth_health(
+        *,
+        character_id: str,
+    ) -> dict[str, object]:
+        assert character_id == "character-internal-secret"
+        return {
+            "state": "waiting_for_evidence",
+            "routed_count": 6,
+            "no_change_count": 2,
+            "emerging_candidate_count": 1,
+            "ready_candidate_count": 0,
+            "rejected_count": 1,
+            "failed_count": 0,
+            "promoted_count": 2,
+            "consumed_count": 2,
+            "latest_revision_number": 2,
+            "latest_consumed_revision_number": 2,
+            "latest_reason_code": "candidate_emerging",
+            "root_count": 2,
+            "local_date_count": 1,
+        }
+
+    async def character_residue_must_not_load(**kwargs: object) -> None:
+        _ = kwargs
+        raise AssertionError("Character identity continuity must not load residue")
+
+    repository = ControlConsoleRepository(
+        get_character_profile=get_character_profile,
+        get_character_runtime_state=get_character_runtime_state,
+        list_identity_revisions=list_identity_revisions,
+        list_identity_growth_candidates=list_identity_growth_candidates,
+        list_recent_identity_growth_runs=list_recent_identity_growth_runs,
+        build_identity_growth_health=build_identity_growth_health,
+        load_residue_context=character_residue_must_not_load,
+    )
+
+    page = await repository.character_entity(limit=5)
+
+    self_image = page["panels"]["self_image"]["items"][0]
+    assert self_image == profile["self_image"]
+
+    growth_items = page["panels"]["growth"]["items"]
+    assert [item["kind"] for item in growth_items] == [
+        "identity_candidate",
+        "identity_growth_run",
+    ]
+    assert growth_items[0]["proposed_paths"] == ["personality_brief.logic"]
+    assert growth_items[0]["root_count"] == 2
+    assert growth_items[0]["local_date_count"] == 1
+    assert growth_items[1]["latest_reason_code"] == "candidate_emerging"
+    assert growth_items[1]["first_consumption"] == {
+        "claimed_at": timestamp,
+        "loaded_revision_number": 2,
+        "consumer_kinds": ["moral_identity", "text"],
+        "status": "consumed",
+    }
+
+    carry_over_items = page["panels"]["carry_over"]["items"]
+    assert carry_over_items[0] == {
+        "kind": "identity_growth_health",
+        "state": "waiting_for_evidence",
+        "routed_count": 6,
+        "no_change_count": 2,
+        "emerging_candidate_count": 1,
+        "ready_candidate_count": 0,
+        "rejected_count": 1,
+        "failed_count": 0,
+        "promoted_count": 2,
+        "consumed_count": 2,
+        "latest_revision_number": 2,
+        "latest_consumed_revision_number": 2,
+        "latest_reason_code": "candidate_emerging",
+        "root_count": 2,
+        "local_date_count": 1,
+    }
+    revisions = carry_over_items[1:]
+    assert [item["revision_number"] for item in revisions] == [2, 1]
+    assert revisions[0]["is_current"] is True
+    assert revisions[1]["is_current"] is False
+    assert revisions[0]["evidence_root_count"] == 2
+    assert revisions[0]["evidence_local_date_count"] == 2
+    assert revisions[0]["change_diff"] == [
+        {
+            "path": "personality_brief.tempo",
+            "value_kind": "text",
+            "change": "value_changed",
+        },
+        {
+            "path": "self_image.self_concept",
+            "value_kind": "text",
+            "change": "value_changed",
+        },
+    ]
+
+    rendered = repr(page)
+    forbidden_values = (
+        "character-internal-secret",
+        "revision-internal-secret",
+        "root-episode-secret",
+        "correlation-secret",
+        "candidate-internal-secret",
+        "run-internal-secret",
+        "raw-prior-identity-text-secret",
+        "raw-next-identity-text-secret",
+        "raw-private-detail-secret",
+        "raw-reviewed-identity-secret",
+        "raw-source-text-secret",
+        "prompt-secret",
+        "candidate-identity-text-secret",
+        "private-candidate-summary-secret",
+        "projection-digest-secret",
+        "character_global",
+    )
+    for forbidden_value in forbidden_values:
+        assert forbidden_value not in rendered

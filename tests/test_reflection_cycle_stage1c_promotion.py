@@ -329,6 +329,115 @@ async def test_global_promotion_records_failed_write_phase_without_worker_crash(
 
 
 @pytest.mark.asyncio
+async def test_invalid_promotion_contract_requests_complete_replacement(
+    monkeypatch,
+) -> None:
+    """A wrong lane memory type must regenerate before any memory write."""
+
+    invalid = _decision("self_guidance")
+    invalid["memory_type"] = "fact"
+    valid = _decision("self_guidance")
+    persisted = []
+
+    async def _upsert(document):
+        persisted.append(document)
+
+    run_promotion_llm = AsyncMock(side_effect=[
+        {"promotion_decisions": [invalid]},
+        {"promotion_decisions": [valid]},
+    ])
+    monkeypatch.setattr(
+        promotion_module.repository,
+        "daily_channel_runs",
+        AsyncMock(return_value=[_daily_doc()]),
+    )
+    monkeypatch.setattr(
+        promotion_module.repository,
+        "reflection_run_by_id",
+        AsyncMock(return_value=_hourly_doc()),
+    )
+    monkeypatch.setattr(
+        promotion_module,
+        "run_global_promotion_llm",
+        run_promotion_llm,
+    )
+    monkeypatch.setattr(
+        promotion_module,
+        "find_active_memory_units",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        promotion_module,
+        "insert_memory_unit",
+        AsyncMock(return_value=_stored_memory_unit("unit-repaired")),
+    )
+    monkeypatch.setattr(promotion_module.repository, "upsert_run", _upsert)
+
+    result = await promotion_module.run_global_reflection_promotion(
+        character_local_date="2026-05-04",
+        dry_run=False,
+        enable_memory_writes=True,
+    )
+
+    assert result.succeeded_count == 1
+    assert run_promotion_llm.await_count == 2
+    assert persisted[-1]["attempt_count"] == 2
+    assert persisted[-1]["status"] == "succeeded"
+    assert persisted[-1]["promotion_decisions"][0]["memory_type"] == (
+        "defense_rule"
+    )
+
+
+@pytest.mark.asyncio
+async def test_invalid_promotion_contract_exhaustion_fails_without_write(
+    monkeypatch,
+) -> None:
+    """Three invalid replacements persist a typed failure and no candidate."""
+
+    invalid = _decision("self_guidance")
+    invalid["memory_type"] = "fact"
+    persisted = []
+
+    async def _upsert(document):
+        persisted.append(document)
+
+    run_promotion_llm = AsyncMock(
+        return_value={"promotion_decisions": [invalid]},
+    )
+    insert_memory = AsyncMock()
+    monkeypatch.setattr(
+        promotion_module.repository,
+        "daily_channel_runs",
+        AsyncMock(return_value=[_daily_doc()]),
+    )
+    monkeypatch.setattr(
+        promotion_module.repository,
+        "reflection_run_by_id",
+        AsyncMock(return_value=_hourly_doc()),
+    )
+    monkeypatch.setattr(
+        promotion_module,
+        "run_global_promotion_llm",
+        run_promotion_llm,
+    )
+    monkeypatch.setattr(promotion_module, "insert_memory_unit", insert_memory)
+    monkeypatch.setattr(promotion_module.repository, "upsert_run", _upsert)
+
+    result = await promotion_module.run_global_reflection_promotion(
+        character_local_date="2026-05-04",
+        dry_run=False,
+        enable_memory_writes=True,
+    )
+
+    assert result.failed_count == 1
+    assert run_promotion_llm.await_count == 3
+    assert persisted[-1]["attempt_count"] == 3
+    assert persisted[-1]["status"] == "failed"
+    assert "contract" in persisted[-1]["error"].lower()
+    insert_memory.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_global_promotion_skips_memory_write_when_scores_are_unavailable(
     monkeypatch,
 ) -> None:

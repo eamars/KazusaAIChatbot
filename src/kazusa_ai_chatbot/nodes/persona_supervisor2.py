@@ -826,6 +826,17 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
     cognitive_episode = state.get("cognitive_episode")
     if cognitive_episode is not None:
         initial_persona_state["cognitive_episode"] = cognitive_episode
+    for identity_field in (
+        "character_identity_revision_number",
+        "character_identity_context",
+        "character_identity_surface_context",
+        "character_identity_projection_digest",
+        "character_identity_consumer_kinds",
+        "character_identity_episode_id",
+        "character_identity_epistemic_core_included",
+    ):
+        if identity_field in state:
+            initial_persona_state[identity_field] = state[identity_field]
     
     results = await persona_graph.ainvoke(initial_persona_state)
     
@@ -850,5 +861,27 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         "action_results": results.get("action_results", []),
         "episode_trace": results.get("episode_trace"),
         "llm_trace_id": state.get("llm_trace_id", ""),
+        "character_profile": results["character_profile"],
+        "character_identity_revision_number": results.get(
+            "character_identity_revision_number"
+        ),
+        "character_identity_context": results.get(
+            "character_identity_context"
+        ),
+        "character_identity_surface_context": results.get(
+            "character_identity_surface_context"
+        ),
+        "character_identity_projection_digest": results.get(
+            "character_identity_projection_digest"
+        ),
+        "character_identity_consumer_kinds": results.get(
+            "character_identity_consumer_kinds"
+        ),
+        "character_identity_episode_id": results.get(
+            "character_identity_episode_id"
+        ),
+        "character_identity_epistemic_core_included": results.get(
+            "character_identity_epistemic_core_included"
+        ),
     }
     return return_value

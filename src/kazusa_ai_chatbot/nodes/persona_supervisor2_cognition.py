@@ -126,6 +126,16 @@ from kazusa_ai_chatbot.cognition_core_v2.state_models import (
 from kazusa_ai_chatbot.cognition_resolver.capabilities import (
     project_resolver_observation_for_cognition,
 )
+from kazusa_ai_chatbot.character_identity_growth.models import (
+    TOP_LEVEL_IDENTITY_KEYS,
+)
+from kazusa_ai_chatbot.character_identity_growth.projection import (
+    project_identity_for_cognition,
+)
+from kazusa_ai_chatbot.character_identity_growth.runtime import (
+    load_latest_identity_for_episode,
+    snapshot_state_update,
+)
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     ALLOWED_RESOLVER_CAPABILITIES,
     RESOLVER_CAPABILITY_REQUEST_VERSION,
@@ -482,6 +492,20 @@ def build_cognition_input_from_global_state(
         "meaning_state": selected_character_state["meaning_state"],
         "personality_judgment": personality_judgment,
     }
+    raw_identity_context = state.get("character_identity_context")
+    if isinstance(raw_identity_context, Mapping):
+        character_identity_context = dict(raw_identity_context)
+    else:
+        effective_identity = {
+            key: character_profile[key]
+            for key in TOP_LEVEL_IDENTITY_KEYS
+        }
+        character_identity_context = project_identity_for_cognition(
+            {"effective_identity": effective_identity},
+            include_epistemic_core=(
+                selected_mutable_state["state_scope"] == "character"
+            ),
+        )
     episode_id = episode["episode_id"]
     semantic_text = _semantic_episode_text(state)
     evidence = _episode_evidence(
@@ -496,6 +520,10 @@ def build_cognition_input_from_global_state(
         timestamp,
     ))
     evidence.extend(_rag_evidence(state.get("rag_result"), timestamp))
+    evidence.extend(_promoted_reflection_evidence(
+        state.get("promoted_reflection_context"),
+        timestamp,
+    ))
     resolver_observations = state.get("resolver_observations")
     resolver_state = state.get("resolver_state")
     if isinstance(resolver_state, Mapping):
@@ -541,6 +569,7 @@ def build_cognition_input_from_global_state(
         "state_scope": scope,
         "mutable_state": dict(selected_mutable_state),
         "character_constraints": constraints,
+        "character_identity_context": character_identity_context,
         "evidence": evidence[:32],
         "direct_facts": _typed_direct_facts(state.get("direct_facts")),
         "available_actions": _available_action_affordances(state),
@@ -590,6 +619,39 @@ async def call_cognition_subgraph(
         target_user_id,
         origin_scope=tuple(origin_scope) if isinstance(origin_scope, list) else origin_scope,
     )
+    if not isinstance(episode, Mapping):
+        raise CognitionExecutionError(
+            "cognitive episode is required for identity resolution"
+        )
+    episode_id = _text(episode.get("episode_id"))
+    if not episode_id:
+        raise CognitionExecutionError(
+            "cognitive episode_id is required for identity resolution"
+        )
+    include_epistemic_core = scope == "character"
+    if not _state_has_episode_identity_snapshot(
+        state,
+        episode_id=episode_id,
+        include_epistemic_core=include_epistemic_core,
+    ):
+        origin_metadata = episode.get("origin_metadata")
+        correlation_id = ""
+        if isinstance(origin_metadata, Mapping):
+            correlation_id = _text(origin_metadata.get("correlation_id"))
+        if not correlation_id:
+            correlation_id = _text(state.get("llm_trace_id")) or episode_id
+        identity_snapshot = await load_latest_identity_for_episode(
+            episode_id=episode_id,
+            correlation_id=correlation_id,
+            include_epistemic_core=include_epistemic_core,
+        )
+        resolved_state = dict(state)
+        resolved_state.update(snapshot_state_update(
+            identity_snapshot,
+            episode_id=episode_id,
+            include_epistemic_core=include_epistemic_core,
+        ))
+        state = resolved_state  # type: ignore[assignment]
     prior_update = state.get("cognition_state_update")
     prior_replacement: Mapping[str, Any] | None = None
     if isinstance(prior_update, Mapping):
@@ -633,7 +695,67 @@ async def call_cognition_subgraph(
     update["cognition_input"] = cognition_input
     update["cognition_core_output"] = output
     update["cognition_scope"] = output["state_update"]["state_scope"]
+    update.update(_episode_identity_state_update(state))
     return update  # type: ignore[return-value]
+
+
+def _state_has_episode_identity_snapshot(
+    state: Mapping[str, object],
+    *,
+    episode_id: str,
+    include_epistemic_core: bool,
+) -> bool:
+    """Return whether one graph state already holds this episode's snapshot."""
+
+    revision_number = state.get("character_identity_revision_number")
+    return (
+        state.get("character_identity_episode_id") == episode_id
+        and state.get("character_identity_epistemic_core_included")
+        is include_epistemic_core
+        and isinstance(revision_number, int)
+        and not isinstance(revision_number, bool)
+        and revision_number >= 0
+        and isinstance(state.get("character_profile"), Mapping)
+        and isinstance(state.get("character_identity_context"), Mapping)
+        and isinstance(
+            state.get("character_identity_surface_context"),
+            Mapping,
+        )
+        and isinstance(
+            state.get("character_identity_projection_digest"),
+            str,
+        )
+        and isinstance(
+            state.get("character_identity_consumer_kinds"),
+            list,
+        )
+    )
+
+
+def _episode_identity_state_update(
+    state: Mapping[str, object],
+) -> dict[str, object]:
+    """Carry one latest identity snapshot through resolver recurrence."""
+
+    field_names = (
+        "character_profile",
+        "character_identity_revision_number",
+        "character_identity_context",
+        "character_identity_surface_context",
+        "character_identity_projection_digest",
+        "character_identity_consumer_kinds",
+        "character_identity_episode_id",
+        "character_identity_epistemic_core_included",
+    )
+    missing = [name for name in field_names if name not in state]
+    if missing:
+        raise CognitionExecutionError(
+            f"identity snapshot is missing runtime fields: {missing}"
+        )
+    return {
+        name: state[name]
+        for name in field_names
+    }
 
 
 async def commit_cognition_output(output: CognitionCoreOutputV2) -> None:
@@ -1363,6 +1485,44 @@ def _rag_evidence(value: object, occurred_at: str) -> list[dict[str, Any]]:
             source_id=f"rag-recall:{index}",
             occurred_at=occurred_at,
         ))
+    return evidence
+
+
+def _promoted_reflection_evidence(
+    value: object,
+    occurred_at: str,
+) -> list[dict[str, Any]]:
+    """Convert bounded promoted reflection memory into typed V2 evidence."""
+
+    if not isinstance(value, Mapping):
+        return []
+    evidence: list[dict[str, Any]] = []
+    lane_fields = (
+        ("promoted_lore", "lore"),
+        ("promoted_self_guidance", "self_guidance"),
+    )
+    for field_name, lane_name in lane_fields:
+        rows = value.get(field_name)
+        if not isinstance(rows, list):
+            continue
+        for index, row in enumerate(rows[:3], start=1):
+            if not isinstance(row, Mapping):
+                continue
+            name = _text(row.get("memory_name"))
+            content = _text(row.get("content"))
+            semantic_text = " — ".join(
+                part for part in (name, content) if part
+            )
+            if not semantic_text:
+                continue
+            evidence.append(_build_rag_evidence_row(
+                text=semantic_text,
+                source_kind="promoted_reflection",
+                source_id=(
+                    f"promoted-reflection:{lane_name}:{index}"
+                ),
+                occurred_at=occurred_at,
+            ))
     return evidence
 
 

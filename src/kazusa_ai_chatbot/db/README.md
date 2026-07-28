@@ -332,15 +332,26 @@ lifecycle specialist and is not executable by database code.
 
 ### `character_state`
 
-Stores singleton character profile/state documents and runtime self-image
-material. Character state updates are explicit persistence events owned by
-named service or promotion paths.
+Stores only the `_id="global"` operational cognition state and `updated_at`.
+Any semantic profile, self-image, mood/vibe summary, or unknown field causes
+clean-cutover startup to fail. The graph-facing profile is composed from this
+operational state and the maximum immutable character identity revision.
 
-`compare_and_upsert_character_state(...)` is the stale-write guarded runtime
-state helper. It updates mood, global vibe, reflection summary, and
-`updated_at` only when `_id="global"` and the previously read `updated_at`
-value still match. Callers use its boolean return to record a skipped stale
-operation; database code does not interpret the free-form mood or vibe text.
+### Character Identity Growth
+
+`db.character_identity_growth` is the sole raw owner of:
+
+- `character_identity_revisions`;
+- `character_identity_growth_candidates`;
+- `character_identity_growth_runs`.
+
+Revision `0` is the complete validated seed. Later revisions are immutable
+full effective-identity snapshots, and the maximum revision number is the only
+runtime authority. Candidate root ownership and revision numbering are
+protected by unique indexes. Candidate promotion and operator reset require a
+MongoDB transaction and fail closed when that capability is unavailable.
+Operator reset creates a linked sanitized run and full `operator_reset`
+revision; it does not call an LLM or mutate earlier history.
 
 ### `memory`
 
@@ -495,15 +506,19 @@ dropped only through maintenance helpers and explicit operator scripts.
 ## Bootstrap And Indexes
 
 `db_bootstrap()` owns startup collection and index preparation. It creates
-current collections and indexes, including
-`user_memory_units`, reflection-run indexes, interaction-style indexes,
+current collections and indexes, including the three character identity
+growth collections, `user_memory_units`, reflection-run indexes,
+interaction-style indexes,
 calendar schedule/run indexes, historical scheduled-event migration indexes,
 self-cognition action-attempt indexes, self-cognition group-review
 reviewed-window indexes, and other runtime indexes required by the facade.
 
 Bootstrap is idempotent. The brain-service startup boundary separately creates
-the packaged native character singleton only when it is absent. Destructive
-data repair belongs in explicit migration plans.
+the operational singleton, then inserts the packaged canonical identity as
+revision `0` only when the ledger is empty. Existing semantic singleton state
+fails with clean-target guidance; startup performs no legacy conversion,
+history read, replay, or backfill. Destructive data repair belongs in explicit
+migration plans.
 
 ## Reflection Interface
 

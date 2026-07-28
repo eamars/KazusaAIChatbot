@@ -29,6 +29,7 @@ from tests.test_cognition_core_v2_stage_model_routing import (
     _CapturingInvoker,
     _services,
 )
+from tests.cognition_core_v2_test_helpers import canonical_identity_context
 
 
 _TIMESTAMP = "2026-07-27T00:00:00Z"
@@ -516,6 +517,7 @@ async def test_appraisal_retries_a_reducer_incompatible_candidate() -> None:
     projection = project_state_for_prompt(
         state,
         character_constraints=_character_constraints(),
+        character_identity_context=canonical_identity_context(),
         evidence=evidence,
     )
     question = semantic_source_planner.plan_semantic_questions(

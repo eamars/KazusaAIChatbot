@@ -1337,6 +1337,7 @@ function renderBrainServiceCard(service) {
   const restartButton = serviceActionButton(service, "restart", "Restart");
   const stopButton = serviceActionButton(service, "stop", "Stop", "danger");
   const logsButton = serviceLogsButton(service);
+  const configButton = serviceConfigButton(service);
   const configBadge = serviceConfigBadge(service);
   const stateExplanation = brainServiceStateExplanation(service);
   const serviceErrorText = service.last_error_preview || stateExplanation;
@@ -1374,6 +1375,7 @@ function renderBrainServiceCard(service) {
             ${restartButton}
             ${stopButton}
             ${logsButton}
+            ${configButton}
             <button class="btn" data-brain-route-refresh-all type="button">Refresh routes</button>
           </div>
         </section>
@@ -2049,6 +2051,8 @@ function configValidationText(validation) {
   if (validation.pattern) parts.push(`pattern ${validation.pattern}`);
   if (validation.max_items) parts.push(`max ${validation.max_items} items`);
   if (validation.max_item_length) parts.push(`max ${validation.max_item_length} chars per item`);
+  if (validation.min_value !== undefined) parts.push(`minimum ${validation.min_value}`);
+  if (validation.max_value !== undefined) parts.push(`maximum ${validation.max_value}`);
   if (Array.isArray(validation.options) && validation.options.length) {
     parts.push(`options ${validation.options.join(", ")}`);
   }
@@ -2549,37 +2553,29 @@ function renderCharacterSelfImagePanel(target, {items = [], emptyText = "No self
     return;
   }
   const item = firstObjectItem(items);
-  const historicalSummary = item.historical_summary || item.current_self_concept || item.summary || "";
-  const recentEntries = recentWindowEntries(item.recent_window);
-  const milestoneEntries = recentWindowEntries(item.milestones);
+  const selfConcept = item.self_concept || "";
+  const growthEdges = Array.isArray(item.current_growth_edges)
+    ? item.current_growth_edges
+    : [];
   setHtml(element, `
     <section class="character-summary">
-      ${recentEntries.length ? `
+      ${selfConcept ? `
         <section class="detail-section">
-          <h5>Recent window</h5>
-          ${renderTimeline(recentEntries)}
+          <h5>Current self-concept</h5>
+          <p class="character-prose">${escapeHtml(formatCharacterProse(selfConcept))}</p>
         </section>
       ` : ""}
-      ${milestoneEntries.length ? `
-        <section class="detail-section">
-          <h5>Milestones</h5>
-          ${renderTimeline(milestoneEntries)}
-        </section>
-      ` : ""}
-      ${historicalSummary ? `
-        <section class="detail-section">
-          <h5>Long-term self-image</h5>
-          <p class="character-prose">${escapeHtml(formatCharacterProse(historicalSummary))}</p>
-        </section>
-      ` : ""}
-      ${detailChipRow([
-        ["last updated", item.updated_at || item.last_updated],
-      ])}
+      <section class="detail-section">
+        <h5>Current growth edges</h5>
+        ${growthEdges.length
+          ? `<ul class="semantic-list">${growthEdges.map((edge) => `<li>${escapeHtml(formatCharacterProse(edge))}</li>`).join("")}</ul>`
+          : '<p class="detail-muted">No current growth edges.</p>'}
+      </section>
     </section>
   `);
 }
 
-function renderCharacterGrowthPanel(target, {items = [], emptyText = "No growth traits.", redaction = {}} = {}) {
+function renderIdentityGrowthPanel(target, {items = [], emptyText = "No growth activity.", redaction = {}} = {}) {
   const element = typeof target === "string" ? qs(target) : target;
   if (!element) return;
   if (!items.length) {
@@ -2587,36 +2583,157 @@ function renderCharacterGrowthPanel(target, {items = [], emptyText = "No growth 
     return;
   }
   setHtml(element, items.map((item) => {
-    if (item.kind === "recent_outcome") {
+    if (item.kind === "identity_candidate") {
       return renderRecordCard(item, {
-        title: "Recent growth outcome",
+        title: `${formatLookupLabel(item.change_kind || "identity")} candidate`,
         status: item.status || "",
-        hiddenKeys: ["kind", "summary", "status", "completed_at"],
-        body: item.summary || "",
-        chips: [["completed", item.completed_at]],
+        hiddenKeys: [
+          "kind",
+          "status",
+          "change_kind",
+          "proposed_paths",
+          "root_count",
+          "local_date_count",
+          "updated_at",
+        ],
+        body: (item.proposed_paths || []).map(formatLookupLabel).join(", "),
+        chips: [
+          ["base revision", item.base_revision_number],
+          ["roots", item.root_count],
+          ["local dates", item.local_date_count],
+          ["updated", item.updated_at],
+        ],
       });
     }
-    const title = item.trait_name || item.growth_axis || "Growth trait";
-    const guidance = item.guidance || "";
-    return `
-      <article class="trait-card">
-        <div class="trait-header">
-          <div>
-            <h4>${escapeHtml(formatLookupValue(title))}</h4>
-            ${item.updated_at ? `<span class="detail-muted">updated ${escapeHtml(formatLookupValue(item.updated_at))}</span>` : ""}
-          </div>
-          ${item.status ? `<span class="${badgeClass(item.status)}">${escapeHtml(formatLookupValue(item.status))}</span>` : ""}
-        </div>
-        ${detailChipRow([
-          ["axis", item.growth_axis],
-          ["maturity", item.maturity_band],
-          ["evidence", item.evidence_count],
-          ["strength", formatTraitStrength(item.strength)],
-        ])}
-        ${guidance ? `<p class="character-prose">${escapeHtml(formatCharacterProse(guidance))}</p>` : ""}
-      </article>
-    `;
+    return renderRecordCard(item, {
+      title: `${formatLookupLabel(item.run_kind || "identity")} growth run`,
+      status: item.disposition || item.lifecycle_state || "",
+      hiddenKeys: [
+        "kind",
+        "run_kind",
+        "disposition",
+        "lifecycle_state",
+        "latest_reason_code",
+        "started_at",
+        "completed_at",
+      ],
+      body: item.latest_reason_code
+        ? `Latest reason: ${formatLookupLabel(item.latest_reason_code)}`
+        : "",
+      chips: [
+        ["lifecycle", item.lifecycle_state],
+        ["base revision", item.base_revision_number],
+        ["roots", item.root_count],
+        ["started", item.started_at],
+        ["completed", item.completed_at],
+      ],
+    });
   }).join(""));
+}
+
+const IDENTITY_HEALTH_LABELS = {
+  healthy_idle: "healthy idle",
+  waiting_for_evidence: "waiting for evidence",
+  semantic_rejection: "semantic rejection",
+  promotion_ready: "promotion ready",
+  awaiting_consumption: "awaiting consumption",
+  healthy_active: "healthy active",
+  pipeline_error: "pipeline error",
+  consumption_error: "consumption error",
+};
+
+function identityHealthLabel(value) {
+  return IDENTITY_HEALTH_LABELS[value] || formatLookupLabel(value || "unknown");
+}
+
+function renderIdentityHealth(item) {
+  return `
+    <article class="identity-health-card">
+      <div class="trait-header">
+        <div>
+          <h4>Growth pipeline health</h4>
+          <span class="detail-muted">Latest reason: ${escapeHtml(formatLookupLabel(item.latest_reason_code || "not routed"))}</span>
+        </div>
+        <span class="${badgeClass(item.state || "")}">${escapeHtml(identityHealthLabel(item.state))}</span>
+      </div>
+      ${detailChipRow([
+        ["latest revision", item.latest_revision_number],
+        ["latest consumed", item.latest_consumed_revision_number],
+        ["roots", item.root_count],
+        ["local dates", item.local_date_count],
+      ])}
+      ${renderDetailGrid([
+        ["routed", item.routed_count],
+        ["no change", item.no_change_count],
+        ["emerging", item.emerging_candidate_count],
+        ["ready", item.ready_candidate_count],
+        ["rejected", item.rejected_count],
+        ["failed", item.failed_count],
+        ["promoted", item.promoted_count],
+        ["consumed", item.consumed_count],
+      ])}
+    </article>
+  `;
+}
+
+function renderIdentityRevision(item) {
+  const diffRows = Array.isArray(item.change_diff) ? item.change_diff : [];
+  const currentLabel = item.is_current ? "current" : `revision ${item.revision_number}`;
+  const diffContent = diffRows.length
+    ? diffRows.map((row) => `
+        <li>
+          <strong>${escapeHtml(formatLookupLabel(row.path || ""))}</strong>
+          <span>${escapeHtml(formatLookupLabel(row.value_kind || "value"))}</span>
+        </li>
+      `).join("")
+    : '<li class="detail-muted">Seed revision; no changed paths.</li>';
+  return `
+    <details class="identity-revision-card"${item.is_current ? " open" : ""}>
+      <summary>
+        <span>${escapeHtml(formatLookupLabel(item.revision_kind || "identity revision"))}</span>
+        <span class="${item.is_current ? "badge success" : "badge"}">${escapeHtml(currentLabel)}</span>
+      </summary>
+      <div class="identity-revision-content">
+        ${detailChipRow([
+          ["base", item.base_revision_number],
+          ["roots", item.evidence_root_count],
+          ["local dates", item.evidence_local_date_count],
+          ["created", item.created_at],
+        ])}
+        ${item.evidence_summary
+          ? `<p class="character-prose">${escapeHtml(formatCharacterProse(item.evidence_summary))}</p>`
+          : ""}
+        <section class="detail-section">
+          <h5>Redacted diff</h5>
+          <ul class="identity-diff-list">${diffContent}</ul>
+        </section>
+        ${renderDetailGrid([
+          ["source scopes", item.source_scope_kinds],
+          ["proposal confidence", item.proposal_confidence],
+          ["review confidence", item.review_confidence],
+        ])}
+      </div>
+    </details>
+  `;
+}
+
+function renderIdentityLineagePanel(target, {items = [], emptyText = "No identity lineage.", redaction = {}} = {}) {
+  const element = typeof target === "string" ? qs(target) : target;
+  if (!element) return;
+  if (!items.length) {
+    renderPanelEmptyContent(element, {emptyText, redaction});
+    return;
+  }
+  const health = items.find((item) => item.kind === "identity_growth_health");
+  const revisions = items.filter((item) => item.kind === "identity_revision");
+  setHtml(element, `
+    ${health ? renderIdentityHealth(health) : '<p class="panel-empty">Identity health is unavailable.</p>'}
+    <div class="identity-revision-list">
+      ${revisions.length
+        ? revisions.map(renderIdentityRevision).join("")
+        : '<p class="panel-empty">No identity revisions are available.</p>'}
+    </div>
+  `);
 }
 
 function renderMemoryUnitRows(target, {items = [], emptyText = "No memory rows available.", redaction = {}} = {}) {
@@ -3045,8 +3162,43 @@ function renderBackgroundWorkers(panel) {
     : `<tr><td colspan="8">${escapeHtml(panelEmptyText(panel, "No background worker activity is available."))}</td></tr>`);
 }
 
+const CHARACTER_PANEL_TARGETS = [
+  "#character-profile-table",
+  "#character-cognition-state-table",
+  "#character-self-image-table",
+  "#character-growth-table",
+  "#character-carry-over-table",
+];
+
+function renderCharacterLoadingState() {
+  setEntityStatus("#character-status", "loading");
+  CHARACTER_PANEL_TARGETS.forEach((target) => {
+    setHtml(target, '<p class="panel-empty">Loading character identity...</p>');
+  });
+}
+
+function renderCharacterErrorState(error) {
+  const reason = error instanceof Error && error.message
+    ? error.message
+    : "request failed";
+  setEntityStatus("#character-status", "unavailable");
+  CHARACTER_PANEL_TARGETS.forEach((target) => {
+    setHtml(
+      target,
+      `<p class="panel-empty">Character identity could not be loaded. ${escapeHtml(reason)}</p>`,
+    );
+  });
+}
+
 async function refreshCharacter() {
-  const payload = await api("/api/entities/character?limit=25");
+  renderCharacterLoadingState();
+  let payload;
+  try {
+    payload = await api("/api/entities/character?limit=25");
+  } catch (error) {
+    renderCharacterErrorState(error);
+    throw error;
+  }
   setEntityStatus("#character-status", payload.status || "unavailable");
   const panels = payload.panels || {};
   renderCharacterProfilePanel("#character-profile-table", {
@@ -3060,12 +3212,16 @@ async function refreshCharacter() {
     emptyText: panelEmptyText(panels.self_image, "No self-image rows."),
     redaction: payload.redaction || {},
   });
-  renderCharacterGrowthPanel("#character-growth-table", {
+  renderIdentityGrowthPanel("#character-growth-table", {
     items: panelItems(panels.growth),
-    emptyText: panelEmptyText(panels.growth, "No semantic growth records."),
+    emptyText: panelEmptyText(panels.growth, "No identity growth activity."),
     redaction: payload.redaction || {},
   });
-  renderContinuityPanel("#character-carry-over-table", panels.carry_over, "No character-global carry-over is available.");
+  renderIdentityLineagePanel("#character-carry-over-table", {
+    items: panelItems(panels.carry_over),
+    emptyText: panelEmptyText(panels.carry_over, "No identity lineage is available."),
+    redaction: payload.redaction || {},
+  });
 }
 
 async function refreshUsers(showNeedsInput = true) {

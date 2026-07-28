@@ -26,7 +26,10 @@ from kazusa_ai_chatbot.llm_interface import (
     LLMCallConfig,
     LLMThinkingConfig,
 )
-from tests.cognition_core_v2_test_helpers import canonical_cognition_output
+from tests.cognition_core_v2_test_helpers import (
+    canonical_cognition_output,
+    canonical_identity_context,
+)
 from tests.cognition_core_v2_model_assignment_matrix import (
     FACTOR_FIELDS,
     FACTOR_SERVICE_FIELDS,
@@ -607,6 +610,7 @@ async def test_sample_execution_is_db_free_blinded_and_input_immutable(
                 "taboos": "preserve roles",
             },
         },
+        "character_identity_context": canonical_identity_context(),
         "evidence": [],
         "direct_facts": [],
         "available_actions": [],

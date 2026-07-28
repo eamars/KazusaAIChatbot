@@ -35,7 +35,10 @@ def _base_state() -> dict[str, Any]:
         "platform": "qq",
         "platform_channel_id": "private-1",
         "channel_type": "private",
-        "character_profile": {"name": "Kazusa"},
+        "character_profile": {
+            "name": "Test Character",
+            "global_user_id": "character-global-1",
+        },
         "cognitive_episode": {
             "episode_id": "episode-bigbang-1",
             "trigger_source": "user_message",
@@ -52,6 +55,7 @@ def _base_state() -> dict[str, Any]:
         },
         "consolidation_origin": {
             "episode_id": "episode-bigbang-1",
+            "correlation_id": "correlation-bigbang-1",
             "trigger_source": "user_message",
             "input_sources": ["dialog_text"],
             "output_mode": "visible_reply",
@@ -156,6 +160,7 @@ def test_lane_roster_excludes_retired_relationship_and_affect_lanes() -> None:
     assert roster_lanes == {
         "user_memory_units",
         "active_commitment",
+        "character_identity_growth",
         "character_self_guidance",
     }
 
@@ -212,6 +217,113 @@ async def test_native_user_memory_route_builds_auditable_write_intent(
     assert packet["write_intents"][0]["target_alias"] == "current_user"
     assert packet["write_intents"][0]["write_lane"] == "user_memory_units"
     assert packet["write_intents"][0]["payload"]["source_refs"]
+
+
+@pytest.mark.asyncio
+async def test_identity_route_builds_root_linked_evaluation_intent(
+    monkeypatch,
+) -> None:
+    """A settled route joins LLM summaries to repository-owned provenance."""
+
+    state = _base_state()
+
+    async def _fake_router(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        del args, kwargs
+        return {
+            "lane_tasks": [{
+                "lane": "character_identity_growth",
+                "reason": "possible durable character-owned change",
+                "source_keys": ["assistant_final_dialog"],
+                "identity_evidence": {
+                    "decontextualized_event": (
+                        "The character reconsidered a recurring response."
+                    ),
+                    "character_cognition_summary": (
+                        "The response reflected a self-owned judgment."
+                    ),
+                    "visible_self_expression_summary": (
+                        "The character described the change as her own."
+                    ),
+                },
+            }]
+        }
+
+    monkeypatch.setattr(lane_router, "call_lane_router_llm", _fake_router)
+
+    packet = await lane_router.run_consolidation_lane_pipeline(
+        state,
+        dry_run=True,
+    )
+
+    assert packet["accepted_lanes"] == ["character_identity_growth"]
+    intent = packet["write_intents"][0]
+    assert intent["target_alias"] == "character"
+    assert intent["write_lane"] == "character_identity_growth"
+    evidence_ref = intent["payload"]["evidence_refs"][0]
+    evidence_card = intent["payload"]["evidence_cards"][0]
+    assert evidence_ref["root_episode_id"] == "episode-bigbang-1"
+    assert evidence_ref["correlation_id"] == "correlation-bigbang-1"
+    assert evidence_ref["character_local_date"] == "2026-07-03"
+    assert evidence_card["evidence_ref_id"] == evidence_ref["evidence_ref_id"]
+    assert "platform_message_id" not in str(intent["payload"])
+
+
+@pytest.mark.asyncio
+async def test_non_route_and_missing_evidence_are_sanitized(
+    monkeypatch,
+) -> None:
+    """Routing diagnostics distinguish no route from missing provenance."""
+
+    state = _base_state()
+
+    async def _no_route(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        del args, kwargs
+        return {"lane_tasks": []}
+
+    monkeypatch.setattr(lane_router, "call_lane_router_llm", _no_route)
+    not_routed = await lane_router.run_consolidation_lane_pipeline(
+        state,
+        dry_run=True,
+    )
+
+    async def _missing_source(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        del args, kwargs
+        return {
+            "lane_tasks": [{
+                "lane": "character_identity_growth",
+                "reason": "possible change",
+                "source_keys": ["missing-source"],
+                "identity_evidence": {
+                    "decontextualized_event": "A possible change.",
+                    "character_cognition_summary": "",
+                    "visible_self_expression_summary": "",
+                },
+            }]
+        }
+
+    monkeypatch.setattr(
+        lane_router,
+        "call_lane_router_llm",
+        _missing_source,
+    )
+    no_evidence = await lane_router.run_consolidation_lane_pipeline(
+        state,
+        dry_run=True,
+    )
+
+    assert not_routed["state"]["metadata"]["identity_growth_routing"] == {
+        "status": "not_routed",
+        "reason_code": "not_routed",
+    }
+    assert no_evidence["state"]["metadata"]["identity_growth_routing"] == {
+        "status": "rejected",
+        "reason_code": "no_eligible_evidence",
+    }
+    serialized = str(no_evidence["state"]["metadata"][
+        "identity_growth_routing"
+    ])
+    assert "episode-bigbang-1" not in serialized
+    assert "message-bigbang-1" not in serialized
 
 
 @pytest.mark.asyncio

@@ -807,6 +807,34 @@ async def list_conversation_rows_by_row_ids(
     return rows
 
 
+async def set_conversation_source_episode_id(
+    *,
+    row_ids: Sequence[str],
+    source_episode_id: str,
+) -> int:
+    """Attach one settled cognitive-episode root to conversation rows."""
+
+    clean_row_ids = _unique_row_ids(row_ids)
+    clean_episode_id = str(source_episode_id).strip()
+    if not clean_episode_id:
+        raise ValueError("source_episode_id must be nonempty")
+    if not clean_row_ids:
+        return 0
+
+    object_ids = _object_ids_from_row_ids(clean_row_ids)
+    query_parts: list[dict[str, Any]] = [
+        {"conversation_row_id": {"$in": clean_row_ids}},
+    ]
+    if object_ids:
+        query_parts.append({"_id": {"$in": object_ids}})
+    db = await get_db()
+    result = await db.conversation_history.update_many(
+        {"$or": query_parts},
+        {"$set": {"source_episode_id": clean_episode_id}},
+    )
+    return int(result.matched_count)
+
+
 def _unique_row_ids(row_ids: Sequence[str]) -> list[str]:
     """Return stripped row ids in first-seen order."""
 

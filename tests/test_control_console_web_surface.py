@@ -58,6 +58,12 @@ class _StaticStoppedSupervisor:
                 return state
         raise KeyError(service_id)
 
+    def service_version(self, service_id: str) -> int:
+        """Return the stable version used by stopped config tests."""
+
+        _ = self.service_state(service_id)
+        return 0
+
 
 def _client_with_login(tmp_path, *, supervisor=None):
     """Create a test client and return authenticated CSRF metadata."""
@@ -1263,3 +1269,77 @@ def test_main_invokes_uvicorn_with_cli_arguments(monkeypatch) -> None:
             "timeout_graceful_shutdown": 3,
         },
     ]
+
+
+def test_character_identity_surface_and_pace_api_contract(
+    tmp_path,
+) -> None:
+    """The authenticated browser surface should expose bounded identity growth."""
+
+    client, login = _client_with_login(
+        tmp_path,
+        supervisor=_StaticStoppedSupervisor(),
+    )
+
+    index = client.get("/")
+    script = client.get("/static/console.js")
+
+    assert index.status_code == 200
+    assert script.status_code == 200
+    assert "Identity lineage and health" in index.text
+    assert "Growth candidates and outcomes" in index.text
+    assert "renderIdentityLineagePanel" in script.text
+    assert "renderIdentityGrowthPanel" in script.text
+    assert "renderCharacterLoadingState" in script.text
+    assert "renderCharacterErrorState" in script.text
+    assert "Loading character identity" in script.text
+    assert "Character identity could not be loaded" in script.text
+    for health_label in (
+        "healthy idle",
+        "waiting for evidence",
+        "semantic rejection",
+        "promotion ready",
+        "awaiting consumption",
+        "healthy active",
+        "pipeline error",
+        "consumption error",
+    ):
+        assert health_label in script.text
+    assert "character_global" not in index.text
+    assert "character_global" not in script.text
+    assert "No character-global carry-over" not in script.text
+    assert "validation.min_value" in script.text
+    assert "validation.max_value" in script.text
+
+    config = client.get("/api/services/brain/config")
+
+    assert config.status_code == 200
+    fields = {
+        field["key"]: field
+        for field in config.json()["fields"]
+    }
+    assert (
+        fields["character_identity_growth_inferred_min_episodes"][
+            "validation"
+        ]
+        == {"min_value": 2, "max_value": 8}
+    )
+    assert fields["character_identity_growth_enabled"][
+        "restart_required"
+    ] is True
+
+    headers = {login["csrf_header_name"]: login["csrf_token"]}
+    invalid = client.put(
+        "/api/services/brain/config",
+        headers=headers,
+        json={
+            "reason": "test cross-field validation",
+            "values": {
+                "character_identity_growth_inferred_min_episodes": 2,
+                "character_identity_growth_inferred_min_local_dates": 3,
+            },
+        },
+    )
+
+    assert invalid.status_code == 422
+    assert "cannot exceed" in invalid.json()["detail"]["message"]

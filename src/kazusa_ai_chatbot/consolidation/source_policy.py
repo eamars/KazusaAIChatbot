@@ -40,6 +40,13 @@ _STYLE_SOURCE_KINDS = frozenset(
         REFLECTION_RUN_SOURCE_KIND,
     )
 )
+_CHARACTER_IDENTITY_SOURCE_KINDS = frozenset(
+    (
+        ASSISTANT_ACCEPTANCE_SOURCE_KIND,
+        INTERNAL_THOUGHT_SOURCE_KIND,
+        EPISODE_TRACE_SOURCE_KIND,
+    )
+)
 
 
 def build_consolidation_source_views(
@@ -161,6 +168,11 @@ def validate_lane_source_policy(
     if lane == "character_self_guidance":
         return _accepted_if(
             _has_user_and_assistant_sources(source_kinds),
+            "source_class_not_allowed",
+        )
+    if lane == "character_identity_growth":
+        return _accepted_if(
+            bool(source_kinds & _CHARACTER_IDENTITY_SOURCE_KINDS),
             "source_class_not_allowed",
         )
     if lane == "shared_memory_promotion":

@@ -100,6 +100,13 @@ class IMProcessState(TypedDict):
     platform_bot_id: str  # Bot's ID on the current platform (provided by the adapter)
     character_name: str
     character_profile: dict
+    character_identity_revision_number: NotRequired[int]
+    character_identity_context: NotRequired[dict[str, object]]
+    character_identity_surface_context: NotRequired[dict[str, object]]
+    character_identity_projection_digest: NotRequired[str]
+    character_identity_consumer_kinds: NotRequired[list[str]]
+    character_identity_episode_id: NotRequired[str]
+    character_identity_epistemic_core_included: NotRequired[bool]
 
     platform_channel_id: str  # Original channel/group/DM ID from the platform
     channel_type: str  # "group" | "private" | "system"

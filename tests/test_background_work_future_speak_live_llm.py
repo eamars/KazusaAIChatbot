@@ -30,7 +30,6 @@ from kazusa_ai_chatbot.db import (
     db_bootstrap,
     get_character_profile,
     resolve_global_user_id,
-    split_character_profile_runtime_state,
 )
 from kazusa_ai_chatbot.db._client import get_db
 from kazusa_ai_chatbot.db.background_work_jobs import (
@@ -296,10 +295,7 @@ async def test_live_user_message_future_speak_e2e_feedback_handover() -> None:
         character_profile = await get_character_profile()
         if not character_profile.get("name"):
             pytest.fail("Character profile is missing from MongoDB.")
-        (
-            brain_service._static_character_profile,
-            brain_service._runtime_character_state,
-        ) = split_character_profile_runtime_state(character_profile)
+        brain_service._adopt_character_profile_snapshot(character_profile)
         brain_service._graph = brain_service._build_graph()
 
         request = _future_speak_chat_request(

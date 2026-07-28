@@ -83,9 +83,9 @@ the configured CSRF header.
 `GET /api/bootstrap` also returns the active shell identity:
 
 - `application_identity.status`: `available`, `empty`, or `unavailable`.
-- `application_identity.character_name`: the `character_state._id == "global"`
-  profile `name` when the database is reachable and configured; otherwise
-  `not connected`.
+- `application_identity.character_name`: the latest
+  `character_identity_revisions` effective identity `name` when the database
+  is reachable and configured; otherwise `not connected`.
 - `csrf_token`: the current session CSRF token, returned only after the
   HTTP-only session cookie has authenticated the browser.
 
@@ -197,7 +197,7 @@ worker, cache-agent, or audit-action detail.
 | Live logs | Bounded supervisor/stdout/stderr text and stream connection state | `GET /api/logs/stream` |
 | Debug chat | Request controls, current response/error, cognition graph, browser-session history | `POST /api/debug-chat` |
 | Event monitor | Structured events, filters, dynamic facets, duration/error/correlation detail | `GET /api/events` |
-| Character | Profile, native V2 cognition, self-image, semantic growth, promoted carry-over | `GET /api/entities/character` |
+| Character | Latest profile, native V2 cognition, current self-image, redacted growth candidates/outcomes, immutable identity lineage and health | `GET /api/entities/character` |
 | Users | Safe directory; profile, native V2 relationship/cognition, memory, style, progress, carry-over | plural user entity routes |
 | Groups | Activity directory; review, style, carry-over, participant progress | plural group entity routes |
 | Calendar | Counts, schedules, recent run outcomes, scoped cognition visibility | `GET /api/lookups/calendar` |
@@ -215,9 +215,13 @@ Safe-field boundaries are fixed:
   time. It does not calculate an affinity replacement.
 - The group directory returns platform/channel label, last activity, message
   count, and participant count. Raw messages and participant ids are excluded.
-- Character growth includes active traits and only the latest semantic growth
-  outcome. Group detail includes only the latest review window and excludes
-  route/dispatch ledger machinery.
+- Character self-image comes from the latest identity revision. Growth shows
+  bounded candidate and run projections. Carry-over shows derived health plus
+  current/prior immutable revisions. These projections expose counts, coarse
+  scope kinds, paths, value kinds, states, reasons, confidences, and times;
+  they exclude database ids, evidence handles, correlations, before/after
+  values, source text, prompts, and private facts. Group detail includes only
+  the latest review window and excludes route/dispatch ledger machinery.
 - User-thread continuity requires channel id and channel type. Group-thread
   style inspection passes the selected group id to the canonical style helper.
   Console carry-over reads disable residue-load telemetry so inspection does
@@ -403,12 +407,23 @@ space-separated list of numeric group ids and renders the effective list as
 the adapter's existing `--channels` argv when the list is non-empty. An empty
 effective list renders no `--channels` argument.
 
-The Brain service also has a descriptor-backed model-route workflow on the
-Services tab. The Brain service card spans the full service-grid row and shows
-all chat LLM routes in a route matrix with a selected-route editor. Operators
-can override only the route model id, max completion token budget, and
-thinking flag. The console does not expose API keys, base URLs, embedding
-routes, raw dotenv values, or a general environment editor.
+The Brain service has descriptor-backed model-route and character identity
+growth configuration on the Services tab. The Brain service card spans the
+full service-grid row, shows all chat LLM routes in a route matrix with a
+selected-route editor, and exposes the generic Configure action. Operators can
+override only the route model id, max completion token budget, thinking flag,
+and these restart-applied identity-growth fields:
+
+| Field | Default | Bounds |
+|---|---:|---|
+| `character_identity_growth_enabled` | `true` | boolean |
+| `character_identity_growth_inferred_min_episodes` | `3` | `2..8` |
+| `character_identity_growth_inferred_min_local_dates` | `2` | `1..7`, at most the episode threshold |
+| `character_identity_growth_max_inferred_promotions_per_local_day` | `1` | `0..3` |
+| `character_identity_growth_prompt_char_budget` | `18000` | `8000..30000` |
+
+The console does not expose API keys, base URLs, embedding routes, raw dotenv
+values, or a general environment editor.
 
 The `Cognition Core V2` route group contains these ordinary Brain route
 descriptors:

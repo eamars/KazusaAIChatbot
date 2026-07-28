@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
 
@@ -31,6 +32,9 @@ class PromptProjectionV2:
 
     payload: dict[str, Any]
     handle_to_ref: dict[str, dict[str, str]]
+    identity_by_question: dict[str, dict[str, object]] = field(
+        default_factory=dict,
+    )
 
 
 def project_numeric_band(value: int, *, signed: bool = False) -> str:
@@ -131,6 +135,7 @@ def project_state_for_prompt(
     state: Mapping[str, Any],
     *,
     character_constraints: Mapping[str, Any],
+    character_identity_context: Mapping[str, Mapping[str, object]],
     relationship_context: Mapping[str, Any] | None = None,
     evidence: Sequence[Mapping[str, Any]] = (),
 ) -> PromptProjectionV2:
@@ -154,6 +159,9 @@ def project_state_for_prompt(
             "当前用户": "当前用户",
         },
         "character_constraints": _project_constraints(character_constraints),
+        "character_identity": deepcopy(dict(
+            character_identity_context["goal_threat_outcome"]
+        )),
     }
     for field_name, prompt_name, prefix in (
         ("goals", "goals", "g"),
@@ -246,7 +254,15 @@ def project_state_for_prompt(
                 "lifecycle": "候选，等待有依据的评估",
             })
     validate_prompt_projection(payload)
-    return PromptProjectionV2(payload=payload, handle_to_ref=handle_to_ref)
+    identity_by_question = {
+        question_kind: deepcopy(dict(context))
+        for question_kind, context in character_identity_context.items()
+    }
+    return PromptProjectionV2(
+        payload=payload,
+        handle_to_ref=handle_to_ref,
+        identity_by_question=identity_by_question,
+    )
 
 
 def validate_prompt_projection(payload: Mapping[str, Any]) -> None:

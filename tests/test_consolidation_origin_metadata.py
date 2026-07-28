@@ -188,6 +188,7 @@ def test_user_message_origin_projects_exact_identifier_metadata() -> None:
 
     assert metadata == {
         "episode_id": "episode-1",
+        "correlation_id": "episode-1",
         "trigger_source": "user_message",
         "input_sources": ["dialog", "system_event"],
         "output_mode": "visible_reply",

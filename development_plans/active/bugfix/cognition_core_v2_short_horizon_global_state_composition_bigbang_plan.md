@@ -2,13 +2,13 @@
 
 ## Summary
 
-- Goal: close the V2 functional gaps formerly covered by mood, global vibe, and last relationship insight through native short-horizon character state, causal per-user relationship projection, and one role-based user/group interaction-style composition path.
+- Goal: close the V2 functional gaps formerly covered by mood, global vibe, and last relationship insight through native emotion-specific character carry-over, ordinary elapsed fading between sleep cycles, causal per-user relationship projection, and one role-based user/group interaction-style composition path.
 - Plan class: `high_risk_migration`.
 - Status: `draft`.
 - Mandatory skills: `development-plan`, `local-llm-architecture`, `no-prepost-user-input`, `debug-llm`, `character-test`, `control-console-web-development`, `py-style`, `cjk-safety`, `test-style-and-execution`, and `python-venv`.
 - Overall cutover strategy: a forward-only V2 big-bang contract replacement after the character identity-growth plan completes, with no legacy prose-state restoration, compatibility mapper, dual read, dual write, channel-situation store, historical replay, or database backfill.
-- Highest-risk areas: keeping global operational state fresh across private/group boundaries without leaking scoped detail; proving that state changes cognition rather than merely appearing in a prompt; preserving current-scene authority; ordering post-turn global updates before the next eligible turn; avoiding prompt/latency regression; and showing both source state and actual consumed projection in the console.
-- Acceptance criteria: a zero-gap capability matrix is signed; a normal settled interaction can create a privacy-safe global operational update; the next eligible cross-channel turn consumes its committed state version; native relationship causes reach settled relevance and cognition; current history and conversation progress remain scene authority; one interaction-style snapshot serves relevance, cognition, and surface; controlled and natural real-LLM evidence demonstrates appropriate causal behavior changes; and authenticated browser sign-off shows the persisted state and exact latest consumed projection.
+- Highest-risk areas: preserving the frozen twenty-one-emotion semantics while extending character-scope elapsed evolution; deriving a global consequence without copying user-scoped relationship state; keeping global operational state fresh across private/group boundaries without leaking scoped detail; proving that state changes cognition rather than merely appearing in a prompt; preserving current-scene authority; ordering post-turn global updates before the next eligible turn; avoiding prompt/latency regression; and showing full source/effective affect plus the actual consumed subset in the console.
+- Acceptance criteria: a zero-gap capability matrix and twenty-one-emotion scope matrix are signed; a normal offence can produce separately derived offender-specific relationship injury and privacy-safe character-global affect; ordinary elapsed evolution changes the effective global emotion before sleep; the next eligible cross-channel turn consumes its committed state version without treating another user as the offender; current history and conversation progress remain scene authority; one interaction-style snapshot serves relevance, cognition, and surface; controlled and natural real-LLM evidence demonstrates emotion-specific causal behavior and fading; and authenticated browser sign-off shows full persisted/effective affect, scoped relationship state, and the exact latest consumed subset.
 - Execution authority: this draft authorizes documentation only. Production edits, database writes, live-service changes, and execution require plan approval plus an explicit implementation command.
 
 ## Context
@@ -28,48 +28,44 @@ different function:
 The target is functional supersession, not restoration of the strings
 `mood`, `global_vibe`, or `last_relationship_insight`.
 
+The concrete behavioral requirement is:
+
+```text
+user A offends the character
+  -> user-A cognition retains relationship injury and A-specific consequences
+  -> a separate character-scope carry-over episode derives native global affect
+  -> a later turn with user B composes that elapsed-effective global affect
+     with B's own relationship state and the current scene
+  -> the response may remain angry, sad, disgusted, fearful, surprised, or
+     otherwise affected for an emotion-specific duration without blaming B
+```
+
+This is not a user-affect copy. The foreground user episode and the post-turn
+character carry-over episode each retain one mutable scope and one
+`StateUpdateV2`. They represent different consequences of the same settled
+interaction: person-specific relationship continuity and source-free
+character-wide emotional carry-over.
+
 The current dependency chain is:
 
 ```text
-settled message/history
-  -> settled relevance
-       currently receives blank legacy mood/relationship values
-  -> conversation-progress projection
-       correctly owns fast channel topic, phase, and open loops
-  -> Cognition Core V2
-       loads native user and character state
-       projects user state, but uses only character drives/standards/meaning
-  -> L3 text surface
-       independently reloads user/group interaction style
-  -> post-turn consolidation
-       does not produce a native character operational update
-  -> console
-       shows stored axes/state, not the exact runtime composition
+settled message/history -> relevance with blank legacy state
+-> conversation progress as scene owner -> Core V2 with user state plus only
+character drives/standards/meaning -> L3 independent style reload
+-> post-turn without character update -> console stored state only
 ```
 
 The target dependency chain is:
 
 ```text
-prior accepted post-turn operational receipt
-  -> bounded predecessor barrier
-  -> one turn-context load
-       character operational state + user/group style snapshot
-  -> settled relevance
-       current scene + causal relationship + global posture + style tie-breakers
-  -> conversation progress
-       remains fast channel-scene authority
-  -> Cognition Core V2
-       latest identity constraints
-       + effective global operational projection
-       + current-user relationship projection
-       + stage-specific style projection
-  -> text surface
-       selected stance + global expression cues + same style snapshot
-  -> settled post-turn consolidation
-       router-selected character-operational-state specialist
-       -> native V2 reducer -> optimistic commit -> receipt
-  -> next eligible private/group turn
-       consumes committed operational state version
+prior receipt -> bounded barrier -> one global/user/style load
+-> relevance with scene + causal relationship + global posture + style
+-> conversation progress remains scene authority
+-> Core V2 with latest identity + effective global + current-user relationship
++ stage style -> surface with selected stance + same snapshot
+-> consolidation target -> Core V2 state-only carry-over
+-> native reducer -> one character StateUpdateV2 -> optimistic commit/receipt
+-> next eligible private/group turn consumes the committed version
 ```
 
 This plan is a follow-on to
@@ -84,7 +80,7 @@ branch has been rebaselined.
 
 - `development-plan`: approval, execution, review, lifecycle updates, evidence, and sign-off.
 - `local-llm-architecture`: prompt ownership, projection budgets, routing, latency, and local-model reliability.
-- `no-prepost-user-input`: the operational-state specialist owns semantic persistence judgment; deterministic code cannot infer it from words or rewrite its decision.
+- `no-prepost-user-input`: the Core V2 carry-over stage owns semantic persistence judgment; deterministic code cannot infer it from words or rewrite its decision.
 - `debug-llm`: controlled prompt comparisons, live calls, protected raw artifacts, and parent-authored readable reviews.
 - `character-test`: adaptive multi-turn private/group tests through normal service entrypoints with trace and database inspection.
 - `control-console-web-development`: console contracts, browser validation, cache checks, screenshots, and authenticated visual sign-off.
@@ -102,55 +98,59 @@ branch has been rebaselined.
 6. Create no persisted `mood`, `global_vibe`, relationship-insight prose field, second character-state document, channel-situation document, or shadow state.
 7. Latest identity is durable character authority; global operational state is transient posture; per-user cognition is relational authority; conversation progress is fast channel-scene authority; interaction-style images are learned expression/participation guidance.
 8. Current message, reply/media evidence, bounded history, and conversation progress own current facts and topic. Global state and style cannot introduce a topic, event, promise, relationship fact, or reason to speak.
-9. Private and group interactions may affect one global operational state only through source-free model projections containing closed cause classes, qualitative bands, lifecycle, trend, and freshness.
+9. Private and group interactions may affect one global operational state only through a separately derived character-scope V2 update containing source-free native causal roots and native affect; no user activation row, relationship row, or relationship root is copied.
 10. Cross-scope model context and public console payloads contain no user/channel identifier, quote, raw message, raw evidence ref, entity handle, event description, memory text, or private fact from global state.
 11. Native relationship causal context stays with the current user. It never becomes global state or group-channel style.
-12. The consolidation LLM owns `no_change` versus `apply`, semantic appraisal, and whether an effect should linger. Deterministic code owns parsing, enums, schema, source provenance, privacy shape, reducer application, caps, idempotency, compare-and-set persistence, timeout, and telemetry.
+12. The consolidation LLM owns target routing only; its target adapter may orchestrate idempotency and commit. A Core V2 state-only carry-over stage owns `no_change` versus `apply`, semantic appraisal, and whether an interaction has a lingering character-wide effect. Deterministic code owns parsing, enums, schema, scope binding, source provenance, privacy shape, native reduction, caps, persistence, timeout, and telemetry.
 13. Every raw operational-state LLM response uses `kazusa_ai_chatbot.utils.parse_llm_json_output(...)`; invalid keys, types, enums, or structure trigger stage-owned full replacement, capped at three attempts.
-14. The new lane adds no foreground LLM call. Its specialist runs only after the existing consolidation router selects it for a settled, consolidatable episode.
-15. One accepted episode can commit at most one global operational update. The source episode ID is the idempotency root.
+14. The new lane adds no foreground LLM call. Its Core V2 state-only stage runs only after the existing consolidation router selects it for a settled, consolidatable episode; it does not run the full response, goal, action, or surface DAG.
+15. One accepted source episode can commit at most one separately scoped global operational update. The source episode ID is the idempotency root, and the carry-over stage emits either no update or exactly one character-scoped `StateUpdateV2`.
 16. Every character cognition-state writer uses the canonical optimistic commit owner with the prior `updated_at` as its version token. A stale base may reload and reapply the same validated additive proposal once; a second conflict fails explicitly.
 17. A predecessor update registered before a turn becomes eligible either commits, records `no_change`, or reaches a typed failure/timeout before that turn consumes global state.
 18. Healthy predecessor completion is visible to the next private or group turn. Failure releases the turn with the last valid committed state plus an explicit degraded receipt; stale consumption is never silent.
-19. Read-time elapsed fading changes the effective projection without writing on every read. The next semantic write or sleep recovery persists from the evolved base.
-20. Sleep recovery remains the stronger character recovery path. Ordinary elapsed fading cannot invent relief, change identity, erase unresolved pressure below existing floors, or reinterpret causes.
-21. Load user and group interaction-style documents once per logical turn, in parallel where both apply, and reuse one immutable snapshot for relevance, cognition, surface, telemetry, and console comparison.
-22. Style guidance remains labeled by source and consumer. It affects participation or expression only within its role and cannot override identity, boundaries, current evidence, relationship state, or selected semantic stance.
-23. Keep all prompt projections bounded. Do not raise an existing V2 context cap to make the new context fit.
-24. The console consumes redacted public projections. Raw model prompts/outputs remain in protected traces.
-25. Controlled state-seeding proof and natural forward-only service proof are separate gates. Passing either one never substitutes for the other.
-26. The natural proof uses a clean guarded database and normal chat/background paths. It cannot directly edit character operational state, relationship state, interaction-style state, receipts, or cognition output.
-27. The historical/current Asuna database is outside blocking acceptance. Any future read-only smoke against it requires a separate explicit user instruction.
-28. Run live LLM cases one at a time, inspect each result, and create human-readable reviews from real inputs, outputs, traces, state, and dialog.
-29. Browser sign-off is a blocking acceptance gate and uses real persisted data from the natural live-LLM proof.
-30. After automatic context compaction, reread this complete plan before continuing.
-31. After each major checklist stage is signed, reread this complete plan before starting the next stage.
-32. Complete independent code review, parent remediation, verification reruns, and lifecycle evidence before merge or completion.
+19. Read-time character elapsed fading is an intentional extension of the frozen Stage 2 lifecycle clause that previously restricted character evolution to sleep. It changes the effective projection without writing on every read; the next semantic write or sleep recovery persists from the evolved base.
+20. Preserve all twenty-one emotion definitions, required-root guards, adjacent-emotion distinctions, begin/sustain/inactive thresholds, per-emotion decay rates, phase/trend rules, and retention thresholds. Sleep recovery remains the stronger character recovery path. Ordinary elapsed fading cannot invent relief, change identity, erase unresolved pressure below existing floors, or reinterpret causes.
+21. Emotion globality is activation-instance ownership, not an emotion-id classification. The carry-over lane may derive the eighteen emotions whose frozen guards can be satisfied from character-owned roots. `love_attachment`, `jealousy`, and `loneliness` remain user-scoped on this lane because their guards require relationship state; any source-free global consequence must be independently supported as another native character-rooted emotion.
+22. Closed cause classes are deterministic privacy-safe projection and UI labels only. They cannot be LLM appraisal inputs, persisted emotion authority, required update-decision fields, or substitutes for native root kinds and axes.
+23. Load user and group interaction-style documents once per logical turn, in parallel where both apply, and reuse one immutable snapshot for relevance, cognition, surface, telemetry, and console comparison.
+24. Style guidance remains labeled by source and consumer. It affects participation or expression only within its role and cannot override identity, boundaries, current evidence, relationship state, or selected semantic stance.
+25. Persist and expose all active/fading native affect rows up to the frozen twenty-one-row state bound. Consumer-specific prompt selections remain bounded and branch-relevant; a top-N prompt cap cannot define state truth or console truth.
+26. Keep all prompt projections bounded. Do not raise an existing V2 context cap to make the new context fit.
+27. The console consumes redacted public projections. Raw model prompts/outputs remain in protected traces.
+28. Controlled state-seeding proof and natural forward-only service proof are separate gates. Passing either one never substitutes for the other.
+29. The natural proof uses a clean guarded database and normal chat/background paths. It cannot directly edit character operational state, relationship state, interaction-style state, receipts, or cognition output; a controlled clock advance is allowed to prove elapsed evolution.
+30. The historical/current Asuna database is outside blocking acceptance. Any future read-only smoke against it requires a separate explicit user instruction.
+31. Run live LLM cases one at a time, inspect each result, and create human-readable reviews from real inputs, outputs, traces, state, and dialog.
+32. Browser sign-off is a blocking acceptance gate and uses real persisted data from the natural live-LLM proof.
+33. After automatic context compaction, reread this complete plan before continuing.
+34. After each major checklist stage is signed, reread this complete plan before starting the next stage.
+35. Complete independent code review, parent remediation, verification reruns, and lifecycle evidence before merge or completion.
 
 ## Must Do
 
 1. Produce a baseline-to-post-identity-V2 capability closure matrix covering every producer, persistence, fading, relevance, cognition, surface, self-cognition, style, ordering, privacy, telemetry, and UI dependency.
 2. Make character cognition-state `updated_at` a strictly increasing version token and add one compare-and-set persistence entrypoint.
-3. Add deterministic read-time character elapsed fading for event/threat/goal/gap salience and affect, while retaining existing unresolved floors and sleep recovery.
-4. Add a privacy-safe global operational projection from effective character state.
-5. Add a causal relationship projection from native current-user relationship state, relationship-rooted entities, evidence freshness, and relationship-rooted affect.
-6. Replace settled relevance’s dead legacy reads with the two native projections.
-7. Add a consolidation lane that semantically decides and produces bounded additive character operational effects from settled episodes.
-8. Apply accepted effects through native V2 reducers and canonical optimistic persistence with episode idempotency.
-9. Add bounded predecessor ordering across normal chat and accepted background-task result paths.
-10. Load one user/group interaction-style snapshot before settled relevance and project it by consumer role.
-11. Carry the same state/style snapshot through Cognition Core V2 and L3 instead of reloading at the surface.
-12. Wire global posture only into relevant appraisal/goal branches and expression; wire relationship causes into relationship/social relevance and appraisal.
-13. Preserve projected history and conversation progress as fast scene/topic authority, with explicit topic-pivot regression coverage.
-14. Expose persisted global operational source state, effective state, latest consumed projection, version timestamp/digests, predecessor health, causal relationship context, and consumer-specific style projections in the control console.
-15. Prove causal effect with controlled A/B real-LLM tests and normal-entrypoint cross-scope live sequences.
-16. Measure LLM call counts, DB reads, prompt sizes, barrier overhead, routed update latency, and no-pending-turn latency against the post-identity baseline.
+3. Add deterministic read-time character elapsed fading for event/threat/goal/gap salience and all native affect rows, while retaining existing unresolved floors, emotion-specific rates, lifecycle thresholds, and stronger sleep recovery.
+4. Add a signed twenty-one-emotion ownership matrix proving the eighteen character-root-eligible emotions, the three relationship-required user-scoped emotions, dual-scope same-id isolation, and unchanged frozen formulas/guards.
+5. Add one canonical privacy-safe full operational state view plus bounded consumer selections from effective character state.
+6. Add a causal relationship projection from native current-user relationship state, relationship-rooted entities, evidence freshness, and relationship-rooted affect.
+7. Replace settled relevance’s dead legacy reads with the two native projections.
+8. Add a consolidation target that routes settled episodes into one Core V2 state-only character carry-over stage.
+9. Apply accepted carry-over appraisals through the existing native V2 reducer to produce zero or one character-scoped `StateUpdateV2`, then commit through canonical optimistic persistence with episode idempotency.
+10. Add bounded predecessor ordering across normal chat and accepted background-task result paths.
+11. Load one user/group interaction-style snapshot before settled relevance and project it by consumer role.
+12. Carry the same state/style snapshot through Cognition Core V2 and L3 instead of reloading at the surface.
+13. Wire branch-relevant global affect/pressure only into relevant appraisal/goal branches and expression; wire relationship causes into relationship/social relevance and appraisal.
+14. Preserve projected history and conversation progress as fast scene/topic authority, with explicit topic-pivot regression coverage.
+15. Expose full persisted/effective global affect, bounded pressures, latest consumed subset, version timestamp/digests, predecessor health, causal relationship context, and consumer-specific style projections in the control console.
+16. Prove offence-driven dual consequences, cross-user carry-over, relationship isolation, and emotion-specific elapsed fading with controlled A/B and normal-entrypoint real-LLM sequences.
+17. Measure LLM call counts, DB reads, prompt sizes, barrier overhead, routed update latency, and no-pending-turn latency against the post-identity baseline.
 
 ## Deferred
 
 - Durable identity, self-image, growth, identity revisioning, and Character-page identity lineage remain owned by the prerequisite identity-growth plan.
 - Current-message projection, reply/media normalization, conversation-history policy, conversation-progress algorithms, RAG ranking, memory evolution, residue, and reflection algorithms remain unchanged.
-- No new short-lived channel topic, channel mood, scene snapshot, or synthetic character-global residue is created.
+- No new short-lived channel topic, channel mood, scene snapshot, or separate residue lane is created; native character cognition state is the only global carry-over authority.
 - User relationship axes and their foreground V2 reducers remain unchanged; this plan changes their projection and consumers.
 - Interaction-style producers, reflection cadence, persisted overlay schema, and user/group ownership remain unchanged.
 - Adapters, delivery, scheduler permissions, autonomous contact, action authorization, and tool execution remain unchanged.
@@ -164,10 +164,12 @@ Overall strategy: post-identity forward-only V2 big-bang replacement.
 | Area | Policy | Instruction |
 |---|---|---|
 | Global transient state | canonical V2 | existing character cognition singleton with monotonic `updated_at`; no prose summaries |
+| Emotion ownership | native scoped derivation | derive character carry-over from character roots; never copy user activation or relationship rows |
+| Character elapsed evolution | intentional V2 extension | apply frozen per-emotion rates between sleeps through a pure effective-state pass; retain stronger sleep recovery |
 | Relationship continuity | native projection | axes plus relationship-rooted causal entities/affect/freshness; no stored insight string |
 | Channel scene | keep | current projected history and conversation progress remain sole fast scene/topic context |
 | Style composition | one snapshot | load user/group overlays before relevance and reuse stage projections |
-| Update producer | post-turn routed | one router-selected consolidation specialist; no foreground call |
+| Update producer | post-turn routed Core V2 | consolidation selects the target; one state-only Core V2 carry-over stage produces zero or one character update; no foreground call |
 | Ordering | bounded predecessor | register before response exposure, release on commit/no-change/typed failure |
 | Persistence | optimistic big-bang | one canonical compare-and-set writer and episode idempotency |
 | Prompts | bounded big-bang | replace legacy relevance keys and update all V2 consumers together |
@@ -196,6 +198,18 @@ Cutover enforcement:
 | current evidence/history | intake/RAG | facts, participants, current event, direct reasons to respond | durable state mutation |
 | user style image | interaction-style owner | person-directed social/expression preference | facts, relationship stance, response reason |
 | group style image | interaction-style owner | shared participation, engagement, and pacing | current topic or person-specific relationship |
+
+One interaction may therefore create two separately owned effects:
+
+```text
+foreground user-scope cognition
+  -> current user's relationship axes/entities/affect
+
+post-turn character-scope carry-over cognition
+  -> source-free character entities/affect
+```
+
+Each operation has one mutable scope and one update. A repeated emotion id in both scopes is valid because its roots and owner differ. No activation, relationship entity, or evidence row is copied between scopes.
 
 When contexts appear to conflict:
 
@@ -234,7 +248,10 @@ Required capability rows:
 13. cross-scope privacy;
 14. immediate-next-turn ordering;
 15. operator observability and web UI;
-16. call, prompt, DB-read, and latency cost.
+16. all twenty-one emotions across user scope, character carry-over eligibility,
+    decay, and relationship-required exclusions;
+17. offence-driven dual consequence and non-offender isolation;
+18. call, prompt, DB-read, and latency cost.
 
 The matrix must have zero unexplained rows and parent sign-off before Stage 7.
 
@@ -242,8 +259,11 @@ The matrix must have zero unexplained rows and parent sign-off before Stage 7.
 
 ### Functional Successors
 
-- Mood is superseded by the top effective character affect activations:
-  emotion, qualitative intensity, phase, trend, closed cause class, and freshness.
+- Mood is superseded by the complete effective character affect state, bounded
+  by the frozen maximum of one activation per emotion id: emotion, qualitative
+  intensity, phase, trend, native root kind, projection-only cause class, and
+  freshness. Prompt consumers receive branch-relevant subsets; the console
+  retains the complete redacted view.
 - Global vibe is superseded by the composition of effective character affect
   and active operational pressures from goals, threats, events, gaps, drives,
   and meaning. No single summary string is persisted.
@@ -251,19 +271,44 @@ The matrix must have zero unexplained rows and parent sign-off before Stage 7.
   to two relationship-rooted causal entities, relationship affect, evidence
   freshness, and update freshness. No replacement prose field is persisted.
 
+### Emotion Scope And Carry-Over
+
+The twenty-one-emotion registry remains unchanged. This plan changes where a
+new activation may be independently derived and when character activations
+decay; it does not change an emotion formula.
+
+| Carry-over class | Emotion ids | Rule |
+|---|---|---|
+| character-root eligible | `joy`, `fear`, `anger`, `sadness`, `disgust`, `surprise`, `compassion_empathy`, `gratitude`, `envy`, `pride`, `shame`, `guilt`, `embarrassment`, `curiosity`, `awe`, `nostalgia`, `relief`, `ennui_existential_angst` | The character carry-over episode may derive the emotion only when its existing native character roots and frozen guard pass. |
+| relationship-required | `love_attachment`, `jealousy`, `loneliness` | The ordinary carry-over episode receives no `RelationshipStateV2`; these activations remain current-user state. A global anger, sadness, fear, or other consequence requires its own character root and formula. |
+
+For an offence, native appraisal axes determine the emotional result:
+unfairness/intentionality or boundary injury can support anger; loss or failed
+recovery can support sadness; norm violation can support disgust; credible
+threat can support fear; exposure and identity threat can support embarrassment
+or shame only when their self-responsibility guards also pass. Multiple
+activations may coexist when each frozen guard passes. The
+carry-over LLM never outputs an emotion id; the native reducer derives every
+activation from accepted typed causes.
+
 ### Global Operational Update
 
 The existing consolidation router gains
 `character_operational_state` as a targetable lane. The router sees the settled
-episode projection and decides whether the lane is warranted. The specialist
-then returns `no_change` or a bounded semantic-appraisal proposal.
+episode projection and decides whether to invoke the lane. The lane calls the
+Core V2-owned `run_character_carryover_cognition(...)` state-only entrypoint.
+That stage answers one semantic question: whether the settled interaction has
+a source-free lingering effect on the character and, if so, which existing
+native character roots/axes it supports. It returns `no_change` or one bounded
+character-scope state update and does not run response goals, action planning,
+surface planning, or dialog.
 
 Allowed operational effects:
 
 - create/reinforce one abstract current event;
 - create/reinforce one threat, goal, or knowledge gap when supported;
-- apply up to four existing native semantic deltas to character drive pressure
-  or meaning-state operational axes;
+- include up to four existing native semantic deltas inside accepted
+  `SemanticAppraisalResultV2` rows for character drive pressure or meaning axes;
 - derive affect through the existing causal emotion reducer.
 
 Forbidden effects:
@@ -271,6 +316,7 @@ Forbidden effects:
 - identity/profile/self-image changes;
 - drive importance or standards changes;
 - relationship-axis changes;
+- relationship context or relationship-rooted activation creation;
 - user/group style changes;
 - source-specific text, identifiers, promises, facts, or quotes;
 - absolute state replacement.
@@ -280,14 +326,16 @@ the persistence owner reloads the latest state, applies elapsed fading, and
 reapplies the same validated proposal. It never asks deterministic code to
 reinterpret the episode.
 
-The specialist selects from prompt-local `self`, `unspecified_other`, and
-`group_context` roles plus canonical cause-class candidates. Deterministic
-mapping gives new entities a generic cause-class description; model-authored
-explanations and delta reasons are never persisted. Opaque episode provenance
-remains internal for idempotency, while user/channel IDs and relationship
-handles are invalid in a character-operational proposal. This makes the
-persisted semantic state itself abstract before any later projection strips
-internal provenance.
+The Core V2 carry-over stage selects from prompt-local `self`,
+`unspecified_other`, and `group_context` roles plus native event, threat, goal,
+and knowledge-gap candidates. Accepted semantic appraisals retain the existing
+typed native axes needed by the emotion formulas. Deterministic mapping gives
+new entities a generic root-kind description solely to satisfy the native
+entity shape; descriptions and projection-only cause classes never determine
+emotion. Model-authored explanations and delta reasons are not persisted.
+Opaque episode provenance remains internal for idempotency, while user/channel
+IDs and relationship handles are invalid in a character-operational proposal.
+The persisted state is source-free before later projection.
 
 ### Elapsed Fading
 
@@ -302,10 +350,18 @@ decay rates. It:
   threshold;
 - leaves identity, standards, drive importance, drive pressure, and meaning
   values unchanged;
-- returns an effective copy and performs no write by itself.
+- computes once from the persisted state's version timestamp to `effective_at`,
+  retains that version timestamp on the pure copy, and performs no write;
+- lets a later semantic commit or sleep pass persist from the effective copy
+  with one new strictly increasing version timestamp, preventing double decay.
 
 Sleep recovery remains the only stronger recovery pass for drive pressure and
-residual pressure.
+residual pressure. This deliberately replaces the prior character-scope
+sleep-only evolution rule while preserving the frozen emotion rates and
+lifecycle. An activation can move from active to fading and disappear between
+sleeps. Ongoing causal entities retain existing unresolved salience floors;
+completed or repaired global entities follow native terminalization. Durable
+injury toward the offender remains only in that user's relationship state.
 
 ### Relationship Causal Projection
 
@@ -324,29 +380,32 @@ state and `effective_at`. It:
 The same canonical projection is reduced by consumer cap, not reconstructed by
 relevance, cognition, or the console.
 
-### Global Privacy Projection
+### Projection-Only Cause Classes
 
 Global cross-scope context contains no free-form source description. It maps
 typed native roots to this closed cause vocabulary:
 
 | Cause class | Deterministic source |
 |---|---|
-| `connection_warmth` | generic social event with positive attachment/joy/gratitude/compassion activation or high memory warmth |
-| `relationship_strain` | generic social event with injury, mismatch, jealousy, loneliness, or negative social activation |
+| `connection_warmth` | generic social event with joy/gratitude/compassion activation or high memory warmth |
+| `relationship_strain` | generic social event with source-free social harm, mismatch, or negative character-rooted activation |
 | `boundary_pressure` | elevated unfairness, norm violation, exposure, identity threat, autonomy-boundary goal, or anger/disgust rooted there |
 | `repair_pressure` | elevated repair need, guilt, shame, reparable harm, or moral-repair goal |
 | `safety_pressure` | active threat, elevated harm, fear, or safety goal |
-| `loss_pressure` | temporal loss, loss-recovery goal, sadness, nostalgia, or loneliness rooted there |
+| `loss_pressure` | temporal loss, loss-recovery goal, sadness, or nostalgia rooted there |
 | `goal_pressure` | active obstructed goal without a more specific class |
-| `uncertainty_pressure` | active knowledge gap, surprise, curiosity, or trust-verification uncertainty |
+| `uncertainty_pressure` | active knowledge gap, surprise, or curiosity |
 | `meaning_pressure` | meaning root, meaning-reconstruction goal, awe, ennui, or low coherence |
 | `competence_pressure` | competence drive/goal obstruction or pride/shame rooted in competence |
 | `general_activation` | validated active root with no more specific class |
 
 Precedence is the table order except that a direct root kind
 `threat`, `knowledge_gap`, or `meaning` selects its corresponding class first.
-The projector emits only the class, qualitative bands, lifecycle, trend, and
-freshness.
+The class is derived only after native reduction. It is not present in the
+carry-over LLM input or decision, is not persisted as affect authority, and
+cannot create, suppress, merge, or rename an emotion. Model-facing contexts
+receive the class, native emotion id or pressure kind, qualitative bands,
+lifecycle, trend, and freshness.
 
 ### Interaction-Style Composition
 
@@ -368,17 +427,19 @@ The surface stops loading the database independently.
 
 ### Branch Routing
 
-- `relationship_social` receives causal relationship context, top global
-  affect, and cognition-stage social/engagement style.
-- `goal_threat_outcome` receives global affect and operational pressures.
+- `relationship_social` receives causal current-user relationship context,
+  branch-relevant global affect, and cognition-stage social/engagement style.
+- `goal_threat_outcome` receives branch-relevant global affect and operational
+  pressures.
 - `moral_identity` receives only boundary/repair global rows.
 - `existential_drive` receives meaning/goal/competence pressure rows.
 - `event_agency` and `epistemic` receive no global posture unless the existing
   semantic source planner routes a matching typed root.
-- goal cognition receives the complete bounded global projection and current
-  relationship projection.
-- text surface receives top two global affect rows and the surface style
-  projection; it cannot change selected stance or content facts.
+- goal cognition receives the bounded branch-relevant global selection and
+  current relationship projection.
+- text surface receives up to two affect rows selected from the complete
+  effective state by selected-stance relevance, then intensity, lifecycle, and
+  freshness; it cannot change selected stance or content facts.
 
 ### Ordering And Freshness
 
@@ -390,7 +451,7 @@ Create one process-local character operational ordering coordinator:
    timeout.
 3. Before settled relevance loads character state, capture and await all older
    tokens.
-4. Bound the complete operational specialist/update path to 45 seconds.
+4. Bound the complete Core V2 carry-over/update path to 45 seconds.
 5. On timeout, record `timed_out`, release waiters, and consume the last valid
    state version with degraded health.
 6. Use `updated_at` compare-and-set for self-cognition, sleep, and
@@ -407,8 +468,12 @@ shows:
 
 - persisted operational update time/version token;
 - effective-at time and whether read-time fading changed the view;
-- bounded affect and pressure rows;
-- latest turn’s consumed state version, projection digest, exact public projection,
+- every redacted persisted/effective native affect row up to the twenty-one-row
+  bound, including emotion id, intensity, phase, trend, root kind, cause class,
+  and freshness;
+- bounded effective pressure rows and the separate consumer-selected affect
+  and pressure subset;
+- latest turn’s consumed state version, context digest, exact public context,
   run ID, and consumption status;
 - predecessor outcome and degraded/failure status.
 
@@ -431,32 +496,46 @@ initialization from baseline fields is allowed.
 
 ## Contracts And Data Shapes
 
-### Character Operational Projection
+### Character Operational State View And Consumer Context
 
 ```text
-character_operational_context.v1
+character_operational_state_view.v1
   source_updated_at: UTC timestamp
   effective_at: UTC timestamp
   source_digest: sha256 digest
-  projection_digest: sha256 digest
-  affect: list[max 3]
+  view_digest: sha256 digest
+  affect: list[max 21]
     emotion_id: existing EMOTION_IDS
     intensity: existing qualitative band
     phase: existing phase
     trend: existing trend
+    primary_root_kind: goal | threat | event | knowledge_gap | meaning
     cause_class: closed enum above
     freshness: existing project_duration label
-  pressures: list[max 4]
+  pressures: list[max 8]
     pressure_kind: goal | threat | event | knowledge_gap | drive | meaning
     salience: existing qualitative band
     lifecycle: existing lifecycle label
     cause_class: closed enum above
     freshness: existing project_duration label
+
+character_operational_context.v1
+  source_updated_at: UTC timestamp
+  effective_at: UTC timestamp
+  view_digest: sha256 digest
+  context_digest: sha256 digest
+  consumer_role: settled_relevance | appraisal branch id | goal | surface
+  affect: list[max 3]
+    same row shape as state view
+  pressures: list[max 4]
+    same row shape as state view
 ```
 
 `source_digest` hashes the canonical persisted operational state.
-`projection_digest` hashes the canonical public projection excluding itself.
-Neither digest is used as semantic evidence.
+`view_digest` hashes the complete redacted state view excluding itself.
+`context_digest` hashes the exact consumer selection excluding itself. Neither
+digest is semantic evidence. All consumer contexts are selected from the
+canonical state view; they never re-read or reinterpret persistent state.
 
 ### Relationship Operational Projection
 
@@ -479,25 +558,27 @@ relationship_operational_context.v1
   evidence_freshness: duration label | "无证据"
 ```
 
-### Operational Update Decision
+### Character Carry-Over Decision
 
 ```text
-character_operational_update_decision.v1
+character_carryover_decision.v1
   action: no_change | apply
   reason_code:
     no_lingering_effect | already_represented | transient_scene_only |
     unsupported | lingering_character_effect
-  abstract_cause_class: closed cause enum | none
-  private_detail_risk: low | high
-  semantic_appraisals: existing bounded SemanticAppraisalResultV2 rows
-  semantic_deltas: existing bounded native character delta rows, max 4
+  privacy_disposition: source_free | unsafe
+  semantic_appraisals: existing bounded SemanticAppraisalResultV2 rows, max 4
 ```
 
-`no_change` requires empty appraisals/deltas and
-`abstract_cause_class=none`. `apply` requires `private_detail_risk=low`, one
-closed cause class, at least one supported appraisal or delta, and the settled
-episode evidence root. The public cross-scope projection never includes the
-specialist’s free-form descriptions.
+`no_change` requires empty appraisals. `apply` requires
+`privacy_disposition=source_free`, at least one supported appraisal,
+and the settled episode evidence root. Scope is deterministically bound to
+`character`; it is absent from model output. The LLM does not emit cause
+classes or emotion ids. The Core V2 owner trial-reduces the proposal, derives
+native affect, validates the replacement state, and returns a
+`CharacterCarryoverResultV2` containing the decision plus either no update or
+exactly one character-scoped `StateUpdateV2`. Free-form explanations remain
+trace-only.
 
 ### Interaction-Style Snapshot
 
@@ -540,11 +621,12 @@ timestamps, duration, and bounded error code.
 ### Public Interfaces
 
 - `cognition_core_v2.state_reducers.apply_character_elapsed_decay(state, *, elapsed_seconds) -> dict`
-- `cognition_core_v2.state_projection.project_character_operational_context(state, *, effective_at) -> dict`
+- `cognition_core_v2.state_projection.project_character_operational_state(state, *, effective_at) -> character_operational_state_view.v1`
+- `cognition_core_v2.state_projection.select_character_operational_context(state_view, *, consumer_role) -> character_operational_context.v1`
 - `cognition_core_v2.state_projection.project_relationship_context(user_state, *, effective_at) -> dict`
+- `cognition_core_v2.character_carryover.run_character_carryover_cognition(...) -> CharacterCarryoverResultV2`
 - `db.character.compare_and_replace_character_cognition_state(*, expected_updated_at, replacement) -> bool`
 - `db.interaction_style_images.build_interaction_style_context(...) -> interaction_style_turn_snapshot.v1`
-- `consolidation.character_operational_state.evaluate_character_operational_update(...) -> decision`
 - `consolidation.character_operational_state.commit_character_operational_update(...) -> receipt`
 - `brain_service.character_state_ordering.register_predecessor(...)`
 - `brain_service.character_state_ordering.complete_predecessor(...)`
@@ -556,13 +638,20 @@ No second public reader/writer/projection path is permitted.
 
 - Foreground call count: unchanged.
 - Existing consolidation router call count: unchanged.
-- Operational specialist: zero or one call only when its lane is selected;
+- Core V2 character carry-over stage: zero or one state-only call only when its
+  consolidation target is selected;
   maximum three replacement attempts for invalid output, never semantic
   accumulation across attempts.
+- Carry-over dynamic input: settled semantic episode evidence plus one bounded
+  qualitative character-state projection; complete serialized packet at most
+  8,000 characters. It contains no cause-class vocabulary, raw database shape,
+  relationship state, user/channel identifier, or prompt-irrelevant context.
 - Operational update deadline: 45 seconds including replacements, reducer, and
   commit.
-- Global projection: at most three affect and four pressure rows; no free-form
-  source text; serialized payload at most 1,200 characters.
+- Full redacted state view: at most twenty-one affect and eight pressure rows;
+  console/telemetry only and never copied wholesale into a model prompt.
+- Each model-facing global context: at most three branch-relevant affect and
+  four pressure rows, no free-form source text, and at most 1,200 characters.
 - Relationship projection: at most two causal and two affect rows; serialized
   payload at most 900 characters.
 - Relevance style: at most three engagement guidelines per source.
@@ -579,10 +668,13 @@ No second public reader/writer/projection path is permitted.
 
 ### Create
 
-- `src/kazusa_ai_chatbot/consolidation/character_operational_state.py`: specialist contract, prompt, validation, reducer application, idempotency, and commit orchestration.
+- `src/kazusa_ai_chatbot/cognition_core_v2/character_carryover.py`: Core V2 state-only prompt, exact decision contract, bounded attempts, native trial reduction, and zero-or-one `StateUpdateV2` result.
+- `src/kazusa_ai_chatbot/consolidation/character_operational_state.py`: target adapter, episode idempotency, optimistic commit orchestration, and receipts; it owns no emotion schema or semantic reinterpretation.
 - `src/kazusa_ai_chatbot/brain_service/character_state_ordering.py`: bounded predecessor tokens and public receipts.
-- `tests/test_cognition_core_v2_operational_projection.py`: fading, cause mapping, relationship causes, caps, digests, and privacy.
-- `tests/test_character_operational_state_consolidation.py`: specialist validation, reducer application, idempotency, and compare-and-set retry.
+- `tests/test_cognition_core_v2_operational_projection.py`: elapsed fading, full-state view, consumer selection, projection-only cause mapping, relationship causes, caps, digests, and privacy.
+- `tests/test_cognition_core_v2_emotion_scope_matrix.py`: all twenty-one ids, eighteen character-root-eligible cases, three relationship-required exclusions, same-id cross-scope isolation, unchanged formulas, and decay-rate parity.
+- `tests/test_cognition_core_v2_character_carryover.py`: decision validation, no emotion/cause-class output, native derivation, offence distinctions, and zero-or-one character update.
+- `tests/test_character_operational_state_consolidation.py`: router/adapter ownership, idempotency, optimistic commit, and compare-and-set retry.
 - `tests/test_character_operational_state_ordering.py`: normal, cross-worker, failure, timeout, and shutdown behavior.
 - `tests/test_short_horizon_state_composition_integration.py`: relevance/cognition/surface/style wiring and precedence.
 - `tests/test_short_horizon_state_composition_live_llm.py`: controlled A/B live-model cases.
@@ -592,9 +684,9 @@ No second public reader/writer/projection path is permitted.
 
 ### Modify
 
-- `src/kazusa_ai_chatbot/cognition_core_v2/state_reducers.py`: read-time character fading and version-safe operational reducer use.
-- `src/kazusa_ai_chatbot/cognition_core_v2/state_projection.py`: canonical global and causal relationship projections.
-- `src/kazusa_ai_chatbot/cognition_core_v2/contracts.py`, `workspace.py`, `semantic_source_planner.py`, `semantic_appraisal.py`, `goal_cognition.py`, and `facade.py`: typed input, branch routing, prompt variables, and bounded consumption.
+- `src/kazusa_ai_chatbot/cognition_core_v2/state_reducers.py`: pure read-time character fading and version-safe native reducer use.
+- `src/kazusa_ai_chatbot/cognition_core_v2/state_projection.py`: canonical full global view, consumer selection, projection-only cause labels, and causal relationship projection.
+- `src/kazusa_ai_chatbot/cognition_core_v2/__init__.py`, `contracts.py`, `workspace.py`, `semantic_source_planner.py`, `semantic_appraisal.py`, `goal_cognition.py`, and `facade.py`: public carry-over entrypoint, typed input, branch routing, prompt variables, and bounded consumption.
 - `src/kazusa_ai_chatbot/cognition_core_v2/README.md`: state ownership, projection, fading, and branch contracts.
 - `src/kazusa_ai_chatbot/db/character.py` and `db/__init__.py`: monotonic update timestamp and canonical compare-and-set writer.
 - `src/kazusa_ai_chatbot/db/interaction_style_images.py` and `db/__init__.py`: immutable all-stage snapshot, concurrent group loads, and stage projections.
@@ -627,17 +719,22 @@ No second public reader/writer/projection path is permitted.
 - Native relationship axes and foreground user-state reducer semantics.
 - Conversation-progress and bounded-history producers.
 - Interaction-style persistence, producer, validation, and ownership schemas.
-- Existing emotion definitions, causal reducer invariants, and sleep recovery.
+- Existing emotion definitions, root guards, adjacent-emotion distinctions,
+  thresholds, rates, causal reducer invariants, and stronger sleep recovery;
+  only ordinary character-scope elapsed scheduling is extended.
 - Baseline/historical cleanup references that are isolated from runtime.
 - Adapters, RAG evidence ownership, dialog content ownership, actions, permissions, delivery, scheduler, reflection, and residue boundaries.
 
 ## Overdesign Guardrail
 
-The actual problem is missing transient global disposition, missing native
-relationship causes, and late/disconnected style composition. The minimal
-solution is one existing character state, two canonical projections, one
-router-selected post-turn semantic lane, one shared style snapshot, one bounded
-ordering coordinator, and public observability.
+The actual problem is that an interaction can change only the current user's
+state, so the character cannot remain emotion-specifically affected with later
+users or decay naturally between sleep cycles; native relationship causes and
+style composition are also disconnected. The minimal solution is one existing
+character state, one Core V2-owned state-only carry-over stage, one canonical
+global view with bounded consumer selections, one relationship projection, one
+shared style snapshot, one bounded ordering coordinator, and public
+observability.
 
 Forbidden complexity:
 
@@ -646,14 +743,20 @@ Forbidden complexity:
 - a second global-state collection;
 - event sourcing or historical operational-state replay;
 - a new foreground model stage;
+- a second emotion ontology, generic mood classifier, or cause-class-driven
+  emotion producer;
+- copying user affect, relationship rows, or relationship-required emotions
+  into character state;
+- a full second response-cognition DAG for post-turn carry-over;
 - a second relationship reducer;
 - style-to-topic or style-to-relevance authority;
 - per-consumer DB reloads or projection implementations;
 - compatibility aliases, flags, fallback readers, or dual writes;
 - an operator editor.
 
-A new helper is permitted only for nontrivial projection validation,
-compare-and-set ownership, or predecessor coordination defined in this plan.
+A new helper is permitted only for the Core V2 state-only carry-over boundary,
+nontrivial projection/selection validation, compare-and-set ownership, or
+predecessor coordination defined in this plan.
 Evidence must show an existing owner cannot hold that responsibility before
 adding any further module or field.
 
@@ -671,8 +774,9 @@ Execution agents may:
 Execution agents must stop and request direction before:
 
 - adding a persisted semantic field or collection;
-- changing the cause enum, projection caps, 45-second deadline, fading rate,
-  branch routing, or composition precedence;
+- changing the eighteen/three emotion scope matrix, any emotion formula/guard,
+  cause enum, projection caps, 45-second deadline, fading rate, lifecycle
+  threshold, branch routing, or composition precedence;
 - changing identity, relationship reducer, conversation-progress, RAG,
   relevance reason-to-speak, action, scheduler, adapter, or delivery semantics;
 - adding a model call, fallback path, compatibility layer, feature flag,
@@ -688,12 +792,15 @@ Execution agents must stop and request direction before:
 1. Confirm the prerequisite plan is completed and its execution evidence is signed.
 2. Record `git status --short`, HEAD, Python version, mandatory-skill reads, and relevant README/source/test baselines.
 3. Locate every character cognition-state reader/writer and every legacy runtime occurrence with `rg` and `git grep main`.
-4. Create and sign the baseline-to-V2 capability closure artifact.
+4. Create and sign the baseline-to-V2 capability closure artifact and the
+   twenty-one-emotion scope/decay matrix.
 5. Record the post-identity focused test list and exact self-cognition/sleep writer paths.
 
 ### Stage 2 — Parent-Owned Focused Test Contract
 
-6. Create projection tests for state versions, fading, cause mapping, causal relationship selection, privacy, caps, and digests.
+6. Create emotion-scope and projection tests for all twenty-one ids, versions,
+   ordinary character fading, full-state versus consumer selection, cause
+   mapping, causal relationship selection, privacy, caps, and digests.
 7. Run each focused file and record the expected missing-symbol/contract failures.
 8. Create persistence and ordering tests for optimistic commits, one retry, episode idempotency, predecessor success/failure/timeout, and shutdown.
 9. Run each focused file and record expected failures.
@@ -706,11 +813,11 @@ Execution agents must stop and request direction before:
 13. Add the `expected_updated_at` compare-and-set writer and update existing writers.
 14. Pass all Stage 2 state/projection/persistence tests before integration wiring.
 
-### Stage 4 — Operational Consolidation Lane
+### Stage 4 — Core V2 Carry-Over And Consolidation Adapter
 
-15. Add the decision schema, prompt, parser/regeneration policy, and privacy validation.
-16. Add the lane-router target and call the specialist only when selected.
-17. Apply the validated proposal through native reducers and optimistic persistence.
+15. Add the Core V2 state-only decision schema, prompt, parser/replacement policy, privacy validation, and zero-or-one character update result.
+16. Add the consolidation target adapter and invoke Core V2 only when the router selects it.
+17. Trial-reduce the validated proposal through native reducers, derive affect, and commit the validated `StateUpdateV2` through optimistic persistence.
 18. Record sanitized route, no-change, commit, conflict, failure, and timeout metadata.
 19. Pass focused consolidation tests.
 
@@ -725,7 +832,7 @@ Execution agents must stop and request direction before:
 
 24. Replace dead relevance inputs with native global/relationship/style projections.
 25. Add branch-specific operational/relationship/style context to V2 contracts and prompts.
-26. Add goal-stage context and top-affect surface context.
+26. Add goal-stage context and selected-stance-relevant surface affect.
 27. Remove the surface DB reload and enforce topic/authority precedence.
 28. Pass integration, prompt-size, context-limit, and negative-authority tests.
 
@@ -744,10 +851,10 @@ Execution agents must stop and request direction before:
 
 ### Stage 9 — One-At-A-Time Real-LLM Verification
 
-36. Run each controlled A/B case separately and inspect protected traces.
-37. Run natural private-to-group and group-to-private sequences through normal entrypoints without direct state writes.
-38. Run privacy, stale-topic, irrelevant-state, and style-cannot-create-reason negative cases.
-39. Parent authors the controlled and natural causal reviews.
+36. Run each controlled emotion-specific A/B case separately and inspect protected traces.
+37. Run the offence-by-A to later-user-B sequence, controlled-clock elapsed-fading sequence, apology/repair sequence, and private/group cross-scope sequences through normal entrypoints without direct state writes.
+38. Run relationship-emotion isolation, privacy, stale-topic, irrelevant-state, and style-cannot-create-reason negative cases.
+39. Parent authors the emotion-scope, controlled, and natural causal reviews.
 
 ### Stage 10 — Real-Service Browser Sign-Off
 
@@ -776,72 +883,17 @@ Execution agents must stop and request direction before:
 
 ## Progress Checklist
 
-- [ ] Stage 1 — prerequisite and closure matrix signed.
-  - Covers: steps 1-5.
-  - Verify: status/HEAD/static inventory and zero unexplained matrix rows.
-  - Evidence: rebaseline and closure artifact.
-  - Handoff: reread this plan; start Stage 2.
-  - Sign-off: `<parent/date>`.
-- [ ] Stage 2 — focused test contract established and production subagent started.
-  - Covers: steps 6-10.
-  - Verify: named tests fail for the recorded missing contracts.
-  - Evidence: commands, failures, and subagent brief.
-  - Handoff: reread this plan; start Stage 3.
-  - Sign-off: `<parent/date>`.
-- [ ] Stage 3 — native versioning, fading, projection, and persistence pass.
-  - Covers: steps 11-14.
-  - Verify: focused state/projection/persistence tests.
-  - Evidence: changed files and pass output.
-  - Handoff: reread this plan; start Stage 4.
-  - Sign-off: `<parent/date>`.
-- [ ] Stage 4 — routed operational consolidation lane passes.
-  - Covers: steps 15-19.
-  - Verify: focused consolidation tests and sanitized event assertions.
-  - Evidence: route/no-change/commit/conflict/failure results.
-  - Handoff: reread this plan; start Stage 5.
-  - Sign-off: `<parent/date>`.
-- [ ] Stage 5 — ordering and one-snapshot handoff pass.
-  - Covers: steps 20-23.
-  - Verify: ordering, timeout, read-count, and style tests.
-  - Evidence: update-time sequence and timing/read counts.
-  - Handoff: reread this plan; start Stage 6.
-  - Sign-off: `<parent/date>`.
-- [ ] Stage 6 — relevance/cognition/surface composition passes.
-  - Covers: steps 24-28.
-  - Verify: integration, authority, prompt-size, and context-limit tests.
-  - Evidence: consumer inputs/digests and regression output.
-  - Handoff: reread this plan; start Stage 7.
-  - Sign-off: `<parent/date>`.
-- [ ] Stage 7 — public telemetry and console contracts pass.
-  - Covers: steps 29-32.
-  - Verify: control-console unit/web/fake-service tests.
-  - Evidence: redacted payload fixtures and render assertions.
-  - Handoff: reread this plan; start Stage 8.
-  - Sign-off: `<parent/date>`.
-- [ ] Stage 8 — deterministic, guarded-DB, and performance gates pass.
-  - Covers: steps 33-35.
-  - Verify: all deterministic/database/performance commands below.
-  - Evidence: test output and performance review.
-  - Handoff: reread this plan; start Stage 9.
-  - Sign-off: `<parent/date>`.
-- [ ] Stage 9 — controlled and natural real-LLM gates pass.
-  - Covers: steps 36-39.
-  - Verify: each node run separately; reviews satisfy rubrics.
-  - Evidence: protected raw artifacts plus readable reviews.
-  - Handoff: reread this plan; start Stage 10.
-  - Sign-off: `<parent/date>`.
-- [ ] Stage 10 — authenticated real-service browser gate passes.
-  - Covers: steps 40-42.
-  - Verify: all target pages/controls, screenshots, payload redaction, zero browser errors.
-  - Evidence: browser sign-off artifact.
-  - Handoff: reread this plan; start Stage 11.
-  - Sign-off: `<parent/date>`.
-- [ ] Stage 11 — independent review, remediation, and closeout pass.
-  - Covers: steps 43-46.
-  - Verify: review approval and rerun results; no unresolved findings.
-  - Evidence: review record, final diff, lifecycle entry, and user sign-off.
-  - Handoff: archive only after completion evidence.
-  - Sign-off: `<parent/date>`.
+- [ ] Stage 1 — prerequisite and closure matrices signed. Covers steps 1-5; verify status/HEAD/static inventory, zero unexplained closure rows, and all twenty-one scope/decay rows; retain rebaseline and both matrices; reread, hand off to Stage 2, and sign `<parent/date>`.
+- [ ] Stage 2 — focused test contract established and production subagent started. Covers steps 6-10; verify named expected failures; retain commands/failures/subagent brief; reread, hand off to Stage 3, and sign `<parent/date>`.
+- [ ] Stage 3 — native versioning, fading, projection, and persistence pass. Covers steps 11-14; verify focused state/projection/persistence tests; retain changed files/pass output; reread, hand off to Stage 4, and sign `<parent/date>`.
+- [ ] Stage 4 — Core V2 carry-over and consolidation adapter pass. Covers steps 15-19; verify native derivation, zero-or-one update, sanitized events, idempotency, and conflicts; retain route/update/commit/failure evidence; reread, hand off to Stage 5, and sign `<parent/date>`.
+- [ ] Stage 5 — ordering and one-snapshot handoff pass. Covers steps 20-23; verify ordering/timeout/read-count/style tests; retain sequence/timing/read evidence; reread, hand off to Stage 6, and sign `<parent/date>`.
+- [ ] Stage 6 — relevance/cognition/surface composition passes. Covers steps 24-28; verify integration/authority/prompt-size/context-limit tests; retain consumer contexts/digests/regressions; reread, hand off to Stage 7, and sign `<parent/date>`.
+- [ ] Stage 7 — telemetry and console contracts pass. Covers steps 29-32; verify console unit/web/fake-service tests; retain redacted fixtures/render assertions; reread, hand off to Stage 8, and sign `<parent/date>`.
+- [ ] Stage 8 — deterministic, guarded-DB, and performance gates pass. Covers steps 33-35; run every listed gate and retain output/performance review; reread, hand off to Stage 9, and sign `<parent/date>`.
+- [ ] Stage 9 — one-at-a-time real-LLM gates pass. Covers steps 36-39; verify offence/emotion/elapsed/repair/cross-scope/negative rubrics; retain protected artifacts and readable reviews; reread, hand off to Stage 10, and sign `<parent/date>`.
+- [ ] Stage 10 — authenticated browser gate passes. Covers steps 40-42; verify all target states/layouts/controls, redaction, screenshots, and zero browser errors; retain browser sign-off; reread, hand off to Stage 11, and sign `<parent/date>`.
+- [ ] Stage 11 — independent review, remediation, and closeout pass. Covers steps 43-46; verify review approval/reruns/no unresolved findings; retain review/diff/lifecycle/user sign-off; archive only after evidence and sign `<parent/date>`.
 
 ## Verification
 
@@ -863,7 +915,7 @@ post-identity writer/consumer appears in the inventory.
 rg -n "user_profile\.get\(\"last_relationship_insight\"|character_mood|state\.get\(\"mood\"|\"mood\"\s*:" src/kazusa_ai_chatbot/service.py src/kazusa_ai_chatbot/relevance src/kazusa_ai_chatbot/nodes src/kazusa_ai_chatbot/cognition_core_v2
 rg -n "global_vibe|last_relationship_insight" src/kazusa_ai_chatbot src/control_console
 rg -n "build_interaction_style_context" src/kazusa_ai_chatbot/nodes/persona_supervisor2_l3_surface.py
-rg -n "character_operational_context|relationship_operational_context|interaction_style_turn_snapshot" src tests
+rg -n "character_operational_state_view|character_operational_context|character_carryover_decision|relationship_operational_context|interaction_style_turn_snapshot" src tests
 ```
 
 Expected:
@@ -879,6 +931,8 @@ Expected:
 
 ```powershell
 venv\Scripts\python.exe -m pytest tests/test_cognition_core_v2_operational_projection.py -q
+venv\Scripts\python.exe -m pytest tests/test_cognition_core_v2_emotion_scope_matrix.py -q
+venv\Scripts\python.exe -m pytest tests/test_cognition_core_v2_character_carryover.py -q
 venv\Scripts\python.exe -m pytest tests/test_character_operational_state_consolidation.py -q
 venv\Scripts\python.exe -m pytest tests/test_character_operational_state_ordering.py -q
 venv\Scripts\python.exe -m pytest tests/test_short_horizon_state_composition_integration.py -q
@@ -901,8 +955,14 @@ Required proofs:
 - one stale writer reloads/reapplies once and succeeds;
 - second conflict fails without overwrite;
 - restart loads the latest committed state version;
-- read-time fading changes effective projection without a read write;
-- a later commit persists from the effective base;
+- every emotion score follows its frozen rate in the pure character effective
+  copy, including representative 1/hour, 4/hour, and 12/hour cases;
+- read-time fading changes phase/trend/retention without a read write or source
+  version change;
+- a later commit persists exactly once from the effective base without double
+  decay;
+- a user-A relationship activation and same-id character activation retain
+  separate roots/owners through persistence and restart;
 - accepted-task update and incoming chat consume state versions in order;
 - timeout releases by 45.5 seconds and exposes degraded health.
 
@@ -911,20 +971,31 @@ Required proofs:
 Run every parameter ID separately:
 
 ```powershell
-venv\Scripts\python.exe -m pytest "tests/test_short_horizon_state_composition_live_llm.py::test_global_hurt_counterfactual[case_01]" -q -s
+venv\Scripts\python.exe -m pytest "tests/test_short_horizon_state_composition_live_llm.py::test_offence_emotion_specific_counterfactual[anger_case]" -q -s
+venv\Scripts\python.exe -m pytest "tests/test_short_horizon_state_composition_live_llm.py::test_offence_emotion_specific_counterfactual[sadness_case]" -q -s
+venv\Scripts\python.exe -m pytest "tests/test_short_horizon_state_composition_live_llm.py::test_offence_emotion_specific_counterfactual[disgust_case]" -q -s
+venv\Scripts\python.exe -m pytest "tests/test_short_horizon_state_composition_live_llm.py::test_elapsed_global_affect_counterfactual[case_01]" -q -s
 venv\Scripts\python.exe -m pytest "tests/test_short_horizon_state_composition_live_llm.py::test_global_warmth_counterfactual[case_01]" -q -s
 venv\Scripts\python.exe -m pytest "tests/test_short_horizon_state_composition_live_llm.py::test_relationship_cause_counterfactual[case_01]" -q -s
 venv\Scripts\python.exe -m pytest "tests/test_short_horizon_state_composition_live_llm.py::test_style_scope_counterfactual[case_01]" -q -s
 ```
 
-Repeat with `case_02` and `case_03`, inspecting each before the next run.
-All non-target input, identity revision, current message/history, model
-assignment, generation settings, and database seed remain fixed within a pair.
+Repeat the elapsed, warmth, relationship, and style nodes with `case_02` and
+`case_03`, inspecting each before the next run. All non-target input, identity
+revision, current message/history, model assignment, generation settings, and
+database seed remain fixed within a pair.
 
 Rubric:
 
-- global hurt/defensiveness changes a relevant appraisal, goal, stance, or
-  expression in the expected guarded direction in at least two of three pairs;
+- anger, sadness, and disgust offence cases produce their respective native
+  activation only when the frozen root guard passes; acceptance requires
+  persisted reducer output, not prompt wording or a cause class;
+- each offence activation changes a relevant appraisal, goal, stance, or
+  expression in its emotion-appropriate direction without accusing the
+  non-offending current user;
+- controlled elapsed time lowers effective intensity/phase according to the
+  frozen rate and changes later expression in at least two of three pairs,
+  before any sleep pass;
 - global warmth/curiosity changes openness or exploration in at least two of
   three pairs;
 - causal relationship context changes relationship/social interpretation or
@@ -944,6 +1015,9 @@ test_artifacts/cognition_core_v2_short_horizon_state/controlled_ab_review.md
 Run each sequence separately:
 
 ```powershell
+venv\Scripts\python.exe -m pytest tests/test_short_horizon_state_composition_e2e_live_llm.py::test_offence_by_user_a_changes_next_user_b_turn -q -s
+venv\Scripts\python.exe -m pytest tests/test_short_horizon_state_composition_e2e_live_llm.py::test_offence_global_affect_fades_before_sleep -q -s
+venv\Scripts\python.exe -m pytest tests/test_short_horizon_state_composition_e2e_live_llm.py::test_apology_repairs_user_a_and_global_carryover -q -s
 venv\Scripts\python.exe -m pytest tests/test_short_horizon_state_composition_e2e_live_llm.py::test_private_event_changes_next_group_turn -q -s
 venv\Scripts\python.exe -m pytest tests/test_short_horizon_state_composition_e2e_live_llm.py::test_group_event_changes_next_private_turn -q -s
 ```
@@ -954,12 +1028,12 @@ Each proof must join:
 normal chat intake
 -> settled episode
 -> consolidation route
--> specialist decision
--> native reducer
+-> Core V2 state-only carry-over decision
+-> native root reduction and emotion derivation
 -> committed operational state version
 -> predecessor receipt
 -> different-scope next turn
--> consumed state version and projection digest
+-> elapsed-effective state view and consumed context digest
 -> relevant appraisal/goal
 -> visible dialog
 -> matching console projection
@@ -982,6 +1056,8 @@ Run one case at a time:
   current event;
 - private-source global carry-over: no identity, quote, channel, event
   description, or private fact appears in the other scope;
+- relationship-required activation isolation: `love_attachment`, `jealousy`,
+  and `loneliness` are never created in character state by ordinary carry-over;
 - style-only response pressure: an ungrounded group message remains ignored;
 - relationship cause isolation: one user’s causal context never reaches
   another user.
@@ -997,7 +1073,7 @@ with post-identity baseline and final measurements.
 Required:
 
 - no new foreground model call;
-- no operational specialist call when the router omits the lane;
+- no Core V2 carry-over call when the router omits the lane;
 - at most one user and one group style-image read per logical group turn;
 - no surface style-image read;
 - no-pending predecessor coordinator overhead below 5 ms at p95 over 1,000
@@ -1016,23 +1092,19 @@ loopback URL, normally `http://127.0.0.1:8765/`, against the same guarded data.
 
 Verify:
 
-1. Character Operational posture shows persisted version/source state.
-2. The panel shows the exact latest consumed public projection, run ID,
-   version timestamp, and digest from the cognition graph.
-3. Source and consumed version mismatch/degraded/timeout states render
-   distinctly.
-4. User Relationship shows axes, causal rows, affect, and freshness.
-5. User and Group style panels label relevance, cognition, and surface
-   projections.
-6. Private detail and internal IDs are absent from DOM and network payloads.
-7. Loading, empty, failed, and stale-brain states are explicit.
-8. Desktop and narrow layouts have no clipping, overlap, or unreachable
-   content.
-9. Every affected navigation/control is exercised.
-10. Browser console and page errors are zero.
+1. Character Operational posture shows every persisted and elapsed-effective native affect row, its emotion id/phase/trend, and whether ordinary fading changed it before sleep.
+2. The panel separately shows the exact bounded affect/pressure subset consumed by the latest turn, its run ID, source version, and context digest.
+3. Persisted, effective, and consumed states plus version mismatch/degraded/timeout conditions render distinctly.
+4. User A Relationship shows offender-specific axes, causal rows, affect, and freshness; user B's panel and payload contain none of A's relationship data.
+5. Projection-only cause classes appear beside native emotion/root labels and never replace them.
+6. User and Group style panels label relevance, cognition, and surface projections.
+7. Private detail and internal IDs are absent from DOM and network payloads.
+8. Loading, empty, failed, and stale-brain states are explicit.
+9. Desktop and narrow layouts have no clipping, overlap, or unreachable content.
+10. Every affected navigation/control is exercised.
+11. Browser console and page errors are zero.
 
-Save screenshots plus
-`test_artifacts/cognition_core_v2_short_horizon_state/console_browser_signoff.md`.
+Save screenshots plus `test_artifacts/cognition_core_v2_short_horizon_state/console_browser_signoff.md`.
 This gate is blocking.
 
 ### Full Regression
@@ -1072,12 +1144,17 @@ high-severity finding.
 ## Acceptance Criteria
 
 1. The prerequisite identity-growth plan is completed and signed.
-2. The capability matrix has zero unexplained baseline rows.
+2. The capability matrix has zero unexplained baseline rows, and the signed
+   twenty-one-emotion matrix proves eighteen character-root-eligible and three
+   relationship-required ids without changing any formula or guard.
 3. Character cognition state is the sole persisted short-horizon global state.
 4. No runtime mood/vibe/last-insight fallback remains.
 5. Operational update timestamps are strictly increasing and all character-state writes are optimistic and conflict-safe.
-6. Ordinary elapsed fading and sleep recovery both behave as specified.
-7. Global projection is bounded, causal, source-free, and private-safe.
+6. Ordinary character elapsed fading uses frozen emotion-specific rates,
+   persists once from the effective base without double decay, and composes
+   with stronger sleep recovery.
+7. Global state retains all active/fading native emotion rows; model contexts
+   are bounded branch-relevant selections, causal, source-free, and private-safe.
 8. Relationship projection contains axes plus bounded native causes/affect/freshness without a new prose field.
 9. Settled relevance consumes native global, relationship, and style context under reason-to-speak authority.
 10. Relevant V2 appraisal/goal branches and text surface consume their approved projections.
@@ -1085,26 +1162,31 @@ high-severity finding.
 12. One style snapshot is reused by every ordinary-turn consumer.
 13. A healthy predecessor commit reaches the immediate next eligible cross-channel turn.
 14. Failure/timeout consumes only the last valid state version and is visibly degraded.
-15. Controlled A/B real-LLM rubrics pass.
-16. Both natural cross-scope causal sequences pass through normal entrypoints.
-17. Every privacy/topic/style negative live case passes.
+15. Controlled real-LLM gates distinguish anger, sadness, and disgust and show
+    emotion-specific elapsed behavioral change before sleep.
+16. Normal-entrypoint offence, non-offender, elapsed-fading, apology/repair,
+    and private/group cross-scope sequences pass without direct state writes.
+17. Every relationship-emotion isolation, privacy, topic, and style negative passes.
 18. Performance and context-budget gates pass.
-19. The authenticated real-service browser gate passes with matching source and consumed data.
-20. Independent review is approved and all in-scope findings are remediated.
-21. The user signs off the behavior, evidence, and web UI before completion.
+19. The authenticated browser gate matches full persisted/effective affect,
+    scoped relationship data, and the exact consumed subset.
+20. Independent review is approved, all in-scope findings are remediated, and
+    the user signs off the behavior, evidence, and web UI.
 
 ## Risks
 
 | Risk | Mitigation and proof |
 |---|---|
-| global posture leaks a private event | closed cause classes only cross scope; structural privacy tests plus live cross-scope negative proof |
+| global posture leaks a private event | source-free native roots plus projection-only cause classes; structural privacy tests and live cross-scope negative proof |
+| generic cause classes collapse the twenty-one emotions | classes are post-reducer labels only; scope matrix, native-id assertions, and emotion-specific real-LLM cases |
+| relationship emotion bleeds to another user | no relationship context in carry-over; fixed eighteen/three matrix and user-A/user-B isolation proof |
 | state exists but model ignores it | branch-specific controlled A/B with appraisal/goal/dialog rubrics |
 | global state injects stale topic | no descriptions in global projection; topic-pivot and irrelevant-state live negatives |
 | relationship causes become another prose blob | derive bounded rows from native entities/affect; no persisted insight field |
 | style starts deciding whether to speak | relevance prompt contract plus style-only ignore negative |
 | post-turn update races next cognition | predecessor coordinator, 45-second deadline, monotonic state version, CAS tests |
 | self-cognition overwrites chat effects | all writers use optimistic commit; one additive retry; concurrency test |
-| read-time fading causes write amplification | pure effective copy on reads; persist only on semantic/sleep write |
+| character affect waits until sleep or decays twice | pure elapsed-effective copy, frozen rates, one later persistence timestamp, before-sleep and double-decay tests |
 | new context worsens local-model limits | caps, branch routing, captured long-context test, prompt instrumentation |
 | style loads increase latency | concurrent one-snapshot load, exact read-count and p95 gates |
 | console displays reconstructed rather than consumed state | exact public projection embedded in cognition graph and matched by digest |
@@ -1112,20 +1194,7 @@ high-severity finding.
 
 ## Execution Evidence
 
-- Prerequisite completion:
-- Rebaseline and closure matrix:
-- Focused expected failures:
-- Production subagent:
-- State/projection/persistence:
-- Consolidation lane:
-- Ordering/style snapshot:
-- Relevance/cognition/surface:
-- Static and compilation:
-- Guarded database:
-- Performance:
-- Controlled real-LLM review:
-- Natural causal-chain review:
-- Privacy/topic/style negatives:
-- Browser sign-off:
-- Independent review and remediation:
-- User sign-off:
+- Prerequisite/rebaseline/closure and twenty-one-emotion matrices:
+- Focused failures, production subagent, state/projection/persistence, Core V2 carry-over, consolidation adapter, ordering/style, and consumer integration:
+- Static/compilation, guarded database, performance, controlled and natural real-LLM reviews, and negative gates:
+- Browser sign-off, independent review/remediation, lifecycle closeout, and user sign-off:

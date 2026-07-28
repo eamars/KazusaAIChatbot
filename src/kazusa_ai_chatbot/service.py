@@ -81,6 +81,13 @@ from kazusa_ai_chatbot.conversation_progress import (
     load_progress_context,
     record_turn_progress,
 )
+from kazusa_ai_chatbot.character_identity_growth.runtime import (
+    load_latest_identity_for_episode,
+    snapshot_state_update,
+)
+from kazusa_ai_chatbot.character_identity_growth.runner import (
+    reconcile_identity_growth_post_commit,
+)
 from kazusa_ai_chatbot.internal_monologue_residue import (
     load_residue_context,
     record_completed_episode_residue,
@@ -103,14 +110,14 @@ from kazusa_ai_chatbot.db import (
     backfill_character_conversation_identity,
     check_database_connection,
     close_db,
-    compose_character_profile,
     db_bootstrap,
-    ensure_character_profile_seed,
+    ensure_operational_character_state,
+    ensure_seed_identity,
     issue_internal_action_latch,
     ensure_character_identity,
     apply_assistant_delivery_receipt,
+    get_current_identity,
     get_character_profile,
-    get_character_cognition_state,
     get_character_runtime_state,
     get_conversation_by_platform_message_id,
     get_conversation_history,
@@ -119,8 +126,9 @@ from kazusa_ai_chatbot.db import (
     query_active_commitment_memory_units_for_user,
     resolve_global_user_id,
     save_conversation,
-    split_character_profile_runtime_state,
+    set_conversation_source_episode_id,
     upsert_post_turn_lifecycle_record,
+    IdentityLedgerNotFoundError,
 )
 from kazusa_ai_chatbot.mcp_client import mcp_manager
 from kazusa_ai_chatbot.state import IMProcessState, MultiMediaDoc, DebugModes, ReplyContext
@@ -533,10 +541,9 @@ def _register_runtime_adapter_payload(
 def _active_character_name() -> str:
     """Return the validated display name owned by the active brain profile."""
 
-    raw_character_name = _static_character_profile["name"]
+    raw_character_name = _active_character_name_snapshot
     if not isinstance(raw_character_name, str):
         raise ValueError("character profile name must be a string")
-
     character_name = raw_character_name.strip()
     if not character_name:
         raise ValueError("character profile name is required")
@@ -820,7 +827,7 @@ async def _save_assistant_message(result: dict) -> None:
 
 # ── Lifespan ────────────────────────────────────────────────────────
 
-_static_character_profile: dict = {}
+_active_character_name_snapshot = ""
 _runtime_character_state: dict = {}
 _graph = None
 _adapter_registry: AdapterRegistry | None = None
@@ -1079,10 +1086,7 @@ async def _build_frontline_state(
     return_value = await _turn_settlement_coordinator.build_frontline_state(
         fragment,
     )
-    return_value["active_character_name"] = _static_character_profile.get(
-        "name",
-        "Character",
-    )
+    return_value["active_character_name"] = _active_character_name()
     queue_item = fragment.queue_item
     if isinstance(queue_item, QueuedChatItem):
         return_value["llm_trace_id"] = queue_item.llm_trace_id
@@ -1133,7 +1137,8 @@ async def _prepare_frontline_fragment(
     """Resolve identities and persist one message before frontline judgment."""
 
     req = item.request
-    character_name = _static_character_profile.get("name", "Character")
+    await _load_latest_character_profile_snapshot()
+    character_name = _active_character_name()
     character_global_user_id = await _ensure_character_global_identity(
         platform=req.platform,
         platform_bot_id=req.platform_bot_id,
@@ -1187,7 +1192,7 @@ async def _prepare_frontline_fragments(
     character_global_user_id = await _ensure_character_global_identity(
         platform=item.request.platform,
         platform_bot_id=item.request.platform_bot_id,
-        character_name=_static_character_profile.get("name", "Character"),
+        character_name=_active_character_name(),
     )
     for collapsed_item in sorted(
         item.collapsed_items,
@@ -1607,10 +1612,7 @@ def _settled_state_from_lease(
             if response_owner is not None
             else ""
         ),
-        "active_character_name": _static_character_profile.get(
-            "name",
-            "Character",
-        ),
+        "active_character_name": _active_character_name(),
         "assembled_fragments": fragment_rows,
         "media_descriptions": media_descriptions,
         "additional_media_present": additional_media_present,
@@ -2161,6 +2163,34 @@ async def _refresh_runtime_character_state() -> None:
     _runtime_character_state = runtime_state
 
 
+async def _load_latest_character_profile_snapshot() -> dict[str, object]:
+    """Load one current composed profile and refresh narrow process snapshots."""
+
+    character_profile = await get_character_profile(
+        character_id=CHARACTER_GLOBAL_USER_ID,
+    )
+    _adopt_character_profile_snapshot(character_profile)
+    return dict(character_profile)
+
+
+def _adopt_character_profile_snapshot(
+    character_profile: Mapping[str, object],
+) -> None:
+    """Refresh process snapshots from one transaction-checked episode profile."""
+
+    global _active_character_name_snapshot, _runtime_character_state
+
+    character_name = character_profile.get("name")
+    if not isinstance(character_name, str) or not character_name.strip():
+        raise ValueError("latest character identity requires a name")
+    _active_character_name_snapshot = character_name.strip()
+    _runtime_character_state = {
+        key: deepcopy(character_profile[key])
+        for key in ("cognition_state", "updated_at")
+        if key in character_profile
+    }
+
+
 async def _update_runtime_character_state_from_consolidation(
     consolidation_result: dict,
 ) -> None:
@@ -2197,14 +2227,10 @@ async def _release_queued_pipeline_handle(item: QueuedChatItem) -> None:
     await handle.__aexit__(None, None, None)
 
 
-def _current_character_profile_snapshot() -> dict:
-    """Return the current composed character profile for background workers."""
+async def _current_character_profile_snapshot() -> dict:
+    """Return a fresh latest-only profile for background workers."""
 
-    character_profile = compose_character_profile(
-        _static_character_profile,
-        _runtime_character_state,
-        CHARACTER_GLOBAL_USER_ID,
-    )
+    character_profile = await _load_latest_character_profile_snapshot()
     return character_profile
 
 
@@ -2559,7 +2585,7 @@ async def _deliver_accepted_task_result_episode(
         }
 
     try:
-        await _refresh_runtime_character_state()
+        character_profile = await _load_latest_character_profile_snapshot()
         user_profile = await get_user_profile(requester_global_user_id)
         character_name = _active_character_name()
         result_metadata = _accepted_task_result_metadata(episode)
@@ -2573,11 +2599,13 @@ async def _deliver_accepted_task_result_episode(
             platform_bot_id=source_platform_bot_id,
             character_name=character_name,
         )
-        character_profile = compose_character_profile(
-            _static_character_profile,
-            _runtime_character_state,
-            character_global_user_id,
-        )
+        if (
+            character_profile.get("global_user_id")
+            != character_global_user_id
+        ):
+            raise ValueError(
+                "latest character profile has inconsistent global identity"
+            )
         history = await get_conversation_history(
             platform=platform,
             platform_channel_id=platform_channel_id,
@@ -2600,6 +2628,18 @@ async def _deliver_accepted_task_result_episode(
         if not COGNITION_VISUAL_DIRECTIVES_ENABLED:
             debug_modes["no_visual_directives"] = True
         episode["origin_metadata"]["debug_modes"] = dict(debug_modes)
+        episode_id = str(episode["episode_id"])
+        episode_correlation_id = str(
+            episode["origin_metadata"].get("correlation_id", "")
+        ).strip() or episode_id
+        identity_snapshot = await load_latest_identity_for_episode(
+            episode_id=episode_id,
+            correlation_id=episode_correlation_id,
+            include_epistemic_core=False,
+        )
+        character_profile = identity_snapshot["character_profile"]
+        _adopt_character_profile_snapshot(character_profile)
+        character_name = _active_character_name()
         initial_state: IMProcessState = {
             "storage_timestamp_utc": episode["created_at"],
             "local_time_context": _episode_local_time_context(episode),
@@ -2659,6 +2699,11 @@ async def _deliver_accepted_task_result_episode(
                 )
             ),
         }
+        initial_state.update(snapshot_state_update(
+            identity_snapshot,
+            episode_id=episode_id,
+            include_epistemic_core=False,
+        ))
         progress_update = await load_conversation_episode_state(initial_state)
         initial_state.update(progress_update)
         result = await persona_supervisor2(initial_state)
@@ -4798,7 +4843,8 @@ async def _process_queued_chat_item(
     """
 
     req = item.request
-    character_name = _static_character_profile.get("name", "Character")
+    character_profile = await _load_latest_character_profile_snapshot()
+    character_name = _active_character_name()
     correlation_id = _chat_correlation_id(req)
     llm_trace_id = item.llm_trace_id or llm_tracing.build_trace_id()
     item.llm_trace_id = llm_trace_id
@@ -5044,12 +5090,15 @@ async def _process_queued_chat_item(
         is_collapsed_turn = bool(item.collapsed_items)
         active_turn_platform_message_ids = _active_turn_platform_message_ids(item)
         active_turn_conversation_row_ids = _active_turn_conversation_row_ids(item)
-        await _refresh_runtime_character_state()
-        character_profile = compose_character_profile(
-            _static_character_profile,
-            _runtime_character_state,
-            character_global_user_id,
-        )
+        character_profile = await _load_latest_character_profile_snapshot()
+        character_name = _active_character_name()
+        if (
+            character_profile.get("global_user_id")
+            != character_global_user_id
+        ):
+            raise ValueError(
+                "latest character profile has inconsistent global identity"
+            )
 
         logger.debug(f'Chat request: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"} user={req.platform_user_id} global_user={global_user_id} content_type={req.content_type} attachments={len(message_envelope["attachments"])} media_attachments={len(multimedia_input)} history_wide={len(chat_history_wide)} history_recent={len(chat_history_recent)} reply_context={log_preview(reply_context)} debug_modes={active_flags} collapsed={is_collapsed_turn} collapsed_count={len(item.collapsed_items)} content={log_preview(user_input)}')
 
@@ -5106,6 +5155,29 @@ async def _process_queued_chat_item(
             media_description_rows=media_description_rows,
         )
         stages_reached.append("episode_built")
+        clean_episode_row_ids = list(dict.fromkeys(
+            str(row_id).strip()
+            for row_id in active_turn_conversation_row_ids
+            if str(row_id).strip()
+        ))
+        if clean_episode_row_ids:
+            linked_row_count = await set_conversation_source_episode_id(
+                row_ids=clean_episode_row_ids,
+                source_episode_id=episode["episode_id"],
+            )
+            if linked_row_count != len(clean_episode_row_ids):
+                raise RuntimeError(
+                    "settled episode lineage did not match every "
+                    "conversation row"
+                )
+        identity_snapshot = await load_latest_identity_for_episode(
+            episode_id=episode["episode_id"],
+            correlation_id=correlation_id,
+            include_epistemic_core=False,
+        )
+        character_profile = identity_snapshot["character_profile"]
+        _adopt_character_profile_snapshot(character_profile)
+        character_name = _active_character_name()
 
         initial_state: IMProcessState = {
             "storage_timestamp_utc": item.storage_timestamp_utc,
@@ -5182,6 +5254,11 @@ async def _process_queued_chat_item(
                 )
             ),
         }
+        initial_state.update(snapshot_state_update(
+            identity_snapshot,
+            episode_id=episode["episode_id"],
+            include_epistemic_core=False,
+        ))
 
         original_initial_state = deepcopy(initial_state)
         cognition_attempt_count = 0
@@ -5898,29 +5975,33 @@ async def _hydrate_media_descriptor_cache() -> int:
 
 
 async def _load_startup_character_profile() -> tuple[dict, dict]:
-    """Load native character state, seeding a clean database when needed."""
+    """Load max identity and operational state, seeding a clean ledger."""
 
-    character_profile = await get_character_profile()
-    if not character_profile.get("name"):
+    await ensure_operational_character_state()
+    try:
+        revision = await get_current_identity(
+            character_id=CHARACTER_GLOBAL_USER_ID,
+        )
+    except IdentityLedgerNotFoundError:
         profile_seed = load_packaged_character_profile_seed()
-        seed_result = await ensure_character_profile_seed(profile_seed)
+        await ensure_seed_identity(
+            character_id=CHARACTER_GLOBAL_USER_ID,
+            seed=profile_seed,
+        )
         logger.info(
-            f"Packaged character profile seed {seed_result}: "
+            "Packaged character identity revision zero inserted: "
             f"{profile_seed['name']}"
         )
-        character_profile = await get_character_profile()
-
-    if not character_profile.get("name"):
-        raise RuntimeError(
-            "Native character profile bootstrap produced no singleton name"
+        revision = await get_current_identity(
+            character_id=CHARACTER_GLOBAL_USER_ID,
         )
-    await get_character_cognition_state()
-    return split_character_profile_runtime_state(character_profile)
+    runtime_state = await get_character_runtime_state()
+    return dict(revision["effective_identity"]), runtime_state
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _static_character_profile, _runtime_character_state
+    global _runtime_character_state
     global _graph, _adapter_registry
     global _calendar_worker_handle
     global _reflection_worker_handle, _self_cognition_worker_handle
@@ -5942,11 +6023,24 @@ async def lifespan(app: FastAPI):
         )
 
         # 2. Seed a clean database or validate its native character singleton
-        (
-            _static_character_profile,
-            _runtime_character_state,
-        ) = await _load_startup_character_profile()
-        await _refresh_runtime_character_state()
+        startup_identity, _runtime_character_state = (
+            await _load_startup_character_profile()
+        )
+        _adopt_character_profile_snapshot({
+            **startup_identity,
+            **_runtime_character_state,
+            "global_user_id": CHARACTER_GLOBAL_USER_ID,
+        })
+        post_commit_result = (
+            await reconcile_identity_growth_post_commit(
+                character_id=CHARACTER_GLOBAL_USER_ID,
+            )
+        )
+        if post_commit_result["failed_count"]:
+            raise RuntimeError(
+                "identity post-commit startup reconciliation failed"
+            )
+        await _load_latest_character_profile_snapshot()
 
         # 3. Hydrate persistent media descriptor cache
         media_cache_started_at = time.perf_counter()
@@ -6269,6 +6363,7 @@ async def register_runtime_adapter_endpoint(req: RuntimeAdapterRegistrationReque
         Confirmation payload describing the registered callback.
     """
 
+    await _load_latest_character_profile_snapshot()
     return_value = _register_runtime_adapter_payload(
         req,
         status="registered",
@@ -6287,6 +6382,7 @@ async def runtime_adapter_heartbeat_endpoint(req: RuntimeAdapterRegistrationRequ
         Confirmation payload describing the refreshed callback.
     """
 
+    await _load_latest_character_profile_snapshot()
     return_value = _register_runtime_adapter_payload(
         req,
         status="heartbeat_ok",

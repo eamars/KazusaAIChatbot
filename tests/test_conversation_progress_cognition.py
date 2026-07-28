@@ -32,7 +32,11 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
     build_cognition_input_from_global_state,
 )
 from llm_test_helpers import make_llm_call_config
-from tests.cognition_core_v2_test_helpers import canonical_episode
+from tests.cognition_core_v2_test_helpers import (
+    canonical_character_identity,
+    canonical_episode,
+    canonical_identity_context,
+)
 
 
 NOW = "2026-07-15T00:00:00Z"
@@ -103,15 +107,16 @@ def _progress() -> dict[str, Any]:
 def _character_profile() -> dict[str, Any]:
     """Build the exact profile fields consumed by V2 cognition."""
 
-    return {
-        "name": "Kazusa",
-        "personality_brief": {
-            "logic": "Advance the active thread with fresh moves.",
-            "defense": "Use direct language that advances the selected stance.",
-            "quirks": "Prefer one concrete continuation.",
-            "taboos": "Keep attention on active and newly opened material.",
-        },
+    profile = canonical_character_identity(marker="progress")
+    profile["personality_brief"] = {
+        "mbti": "test",
+        "logic": "Advance the active thread with fresh moves.",
+        "tempo": "measured",
+        "defense": "Use direct language that advances the selected stance.",
+        "quirks": "Prefer one concrete continuation.",
+        "taboos": "Keep attention on active and newly opened material.",
     }
+    return profile
 
 
 def _payload() -> dict[str, Any]:
@@ -175,6 +180,10 @@ async def test_goal_branch_receives_conversation_progress_before_surface() -> No
     projection = project_state_for_prompt(
         payload["mutable_state"],
         character_constraints=payload["character_constraints"],
+        character_identity_context=payload.get(
+            "character_identity_context",
+            canonical_identity_context(),
+        ),
         evidence=payload["evidence"],
     )
     context = facade._branch_context(

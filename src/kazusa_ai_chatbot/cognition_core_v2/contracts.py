@@ -582,6 +582,7 @@ class CognitionCoreInputV2(TypedDict):
     state_scope: Literal["user", "character"]
     mutable_state: dict[str, Any]
     character_constraints: CharacterConstraintSnapshotV2
+    character_identity_context: dict[str, dict[str, object]]
     relationship_context: NotRequired[RelationshipStateV2]
     evidence: list[CognitionEvidenceV2]
     direct_facts: list[DirectFactV2]
@@ -752,6 +753,7 @@ def validate_cognition_core_input(
             "state_scope",
             "mutable_state",
             "character_constraints",
+            "character_identity_context",
             "evidence",
             "direct_facts",
             "available_actions",
@@ -796,6 +798,9 @@ def validate_cognition_core_input(
             episode=episode,
         )
     _validate_character_constraints(payload["character_constraints"])
+    _validate_character_identity_context(
+        payload["character_identity_context"]
+    )
     _validate_evidence_rows(payload["evidence"])
     if not isinstance(payload["direct_facts"], list):
         raise CognitionContractError("direct_facts must be a list")
@@ -2074,6 +2079,53 @@ def _validate_character_constraints(value: Any) -> None:
             personality[field_name],
             f"personality_judgment.{field_name}",
             maximum=180,
+        )
+
+
+def _validate_character_identity_context(value: Any) -> None:
+    """Validate the exact latest-identity appraisal partitions."""
+
+    expected_families = {
+        "moral_identity",
+        "existential_drive",
+        "relationship_social",
+        "event_agency",
+        "goal_threat_outcome",
+        "epistemic_comparison_memory",
+    }
+    if not isinstance(value, Mapping) or set(value) != expected_families:
+        raise CognitionContractError(
+            "character identity context fields are not exact"
+        )
+    expected_categories = {
+        "moral_identity": {
+            "core",
+            "personality",
+            "boundaries",
+            "self_image",
+        },
+        "existential_drive": {
+            "core",
+            "personality",
+            "self_image",
+        },
+        "relationship_social": {"personality", "boundaries"},
+        "event_agency": {"personality", "boundaries"},
+        "goal_threat_outcome": {"personality", "boundaries"},
+    }
+    for family, expected in expected_categories.items():
+        projection = value[family]
+        if not isinstance(projection, Mapping) or set(projection) != expected:
+            raise CognitionContractError(
+                f"character identity {family} projection is invalid"
+            )
+    epistemic = value["epistemic_comparison_memory"]
+    if (
+        not isinstance(epistemic, Mapping)
+        or set(epistemic) not in (set(), {"core"})
+    ):
+        raise CognitionContractError(
+            "character identity epistemic projection is invalid"
         )
 
 

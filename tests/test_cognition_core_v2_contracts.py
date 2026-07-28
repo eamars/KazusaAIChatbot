@@ -44,6 +44,7 @@ from llm_test_helpers import make_llm_call_config
 from tests.cognition_core_v2_test_helpers import (
     canonical_cognition_output,
     canonical_episode,
+    canonical_identity_context,
 )
 
 
@@ -173,6 +174,7 @@ def _input() -> dict[str, object]:
                 "taboos": "preserve character agency",
             },
         },
+        "character_identity_context": canonical_identity_context(),
         "evidence": [],
         "direct_facts": [],
         "available_actions": [],

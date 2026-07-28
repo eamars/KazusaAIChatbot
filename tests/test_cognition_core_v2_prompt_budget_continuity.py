@@ -61,7 +61,10 @@ from kazusa_ai_chatbot.cognition_core_v2.state_models import (
 from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
     project_state_for_prompt,
 )
-from tests.cognition_core_v2_test_helpers import canonical_episode
+from tests.cognition_core_v2_test_helpers import (
+    canonical_episode,
+    canonical_identity_context,
+)
 
 
 FIXTURE_PATH = (
@@ -251,6 +254,7 @@ def _production_appraisal_context() -> tuple[
     projection = project_state_for_prompt(
         state,
         character_constraints=_character_constraints(),
+        character_identity_context=canonical_identity_context(),
         evidence=evidence,
     )
     questions = plan_semantic_questions(
@@ -469,6 +473,7 @@ def _maximum_valid_cognition_input(scope: str) -> dict[str, Any]:
         "state_scope": scope,
         "mutable_state": _maximum_prompt_state(scope),
         "character_constraints": _maximum_character_constraints(),
+        "character_identity_context": canonical_identity_context(),
         "evidence": _maximum_evidence(),
         "direct_facts": [],
         "available_actions": [],
@@ -502,6 +507,7 @@ def _maximum_appraisal_context(
     projection = project_state_for_prompt(
         state,
         character_constraints=payload["character_constraints"],
+        character_identity_context=payload["character_identity_context"],
         evidence=evidence,
     )
     questions = plan_semantic_questions(
@@ -528,6 +534,7 @@ def _maximum_goal_context() -> tuple[
     projection = project_state_for_prompt(
         state,
         character_constraints=payload["character_constraints"],
+        character_identity_context=payload["character_identity_context"],
         evidence=evidence,
     )
     appraisal_results = [

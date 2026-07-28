@@ -214,7 +214,7 @@ class ServiceConfigApplyRequest(StrictModel):
 
     reason: str = Field(min_length=1, max_length=240)
     expected_version: int | None = None
-    values: dict[str, Any] = Field(default_factory=dict, max_length=32)
+    values: dict[str, Any] = Field(default_factory=dict, max_length=96)
 
 
 class ServiceConfigResetRequest(StrictModel):

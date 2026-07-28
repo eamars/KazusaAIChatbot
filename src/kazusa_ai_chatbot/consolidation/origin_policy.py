@@ -11,6 +11,7 @@ from kazusa_ai_chatbot.consolidation.origin import (
 WritePolicyKey = Literal[
     "user_memory_units",
     "group_channel_style_image",
+    "character_identity_growth",
     "character_self_guidance",
     "cache_invalidation",
 ]
@@ -28,6 +29,7 @@ class ConsolidationWritePolicy(TypedDict):
 
     user_memory_units: WritePolicyDecision
     group_channel_style_image: WritePolicyDecision
+    character_identity_growth: WritePolicyDecision
     character_self_guidance: WritePolicyDecision
     cache_invalidation: WritePolicyDecision
 
@@ -111,6 +113,7 @@ def build_consolidation_write_policy(
     policy: ConsolidationWritePolicy = {
         "user_memory_units": {"allowed": allowed, "reason": reason},
         "group_channel_style_image": {"allowed": allowed, "reason": reason},
+        "character_identity_growth": {"allowed": allowed, "reason": reason},
         "character_self_guidance": {"allowed": allowed, "reason": reason},
         "cache_invalidation": {"allowed": allowed, "reason": reason},
     }

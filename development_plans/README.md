@@ -50,8 +50,9 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
-| [cognition_core_v2_character_identity_growth_bigbang_plan.md](active/bugfix/cognition_core_v2_character_identity_growth_bigbang_plan.md) | High-risk big-bang plan for versioned global character identity, self-image, growth, and privacy-safe cross-scope carry-over | draft |
+| [cognition_core_v2_character_identity_growth_bigbang_plan.md](active/bugfix/cognition_core_v2_character_identity_growth_bigbang_plan.md) | High-risk big-bang plan for versioned global character identity, self-image, growth, and privacy-safe cross-scope carry-over | in_progress |
 | [cognition_core_v2_short_horizon_global_state_composition_bigbang_plan.md](active/bugfix/cognition_core_v2_short_horizon_global_state_composition_bigbang_plan.md) | Post-identity V2 plan for transient global posture, causal relationship context, scoped style composition, and runtime/UI proof | draft |
+| [conversation_progress_v2_long_thread_continuation_bigbang_plan.md](active/bugfix/conversation_progress_v2_long_thread_continuation_bigbang_plan.md) | High-risk in-place conversation-progress V2 plan for logical-turn history, source-backed event continuity, bounded compaction, and conditional retrieval | draft |
 | [rag2_public_output_contract_leak_bugfix_plan.md](active/bugfix/rag2_public_output_contract_leak_bugfix_plan.md) | Large RAG2 prompt/evidence contract bugfix plan | draft |
 
 ## Reference Documents

@@ -1,4 +1,4 @@
-"""Focused tests for the native character-profile seed boundary."""
+"""Focused tests for the revision-zero character identity seed boundary."""
 
 from __future__ import annotations
 
@@ -10,60 +10,87 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from kazusa_ai_chatbot.character_identity_growth import models
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     build_character_production_state,
 )
 from kazusa_ai_chatbot.db import character as character_module
 
 
-RUNTIME_OWNED_PROFILE_FIELDS = (
+FORBIDDEN_PROFILE_FIELDS = (
     "_id",
     "global_user_id",
-    "self_image",
     "cognition_state",
     "updated_at",
     "mood",
     "global_vibe",
     "reflection_summary",
+    "tone",
+    "speech_patterns",
 )
 
 
 def _valid_seed_payload(name: str = "Test Character") -> dict[str, object]:
-    """Build the smallest valid static profile used by seed tests."""
+    """Build one complete generic effective-identity seed."""
 
-    boundary_profile = {
-        "self_integrity": 0.8,
-        "control_sensitivity": 0.6,
-        "relational_override": 0.4,
-        "control_intimacy_misread": 0.3,
-        "authority_skepticism": 0.7,
-        "compliance_strategy": "resist",
-        "boundary_recovery": "rebound",
-    }
-    linguistic_texture_profile = {
-        "fragmentation": 0.2,
-        "hesitation_density": 0.2,
-        "counter_questioning": 0.4,
-        "softener_density": 0.3,
-        "formalism_avoidance": 0.8,
-        "abstraction_reframing": 0.5,
-        "direct_assertion": 0.7,
-        "emotional_leakage": 0.4,
-        "rhythmic_bounce": 0.5,
-        "self_deprecation": 0.1,
-    }
     return {
         "name": name,
-        "personality_brief": {"core": "observant and direct"},
-        "boundary_profile": boundary_profile,
-        "linguistic_texture_profile": linguistic_texture_profile,
+        "description": "A deliberate observer learning through experience.",
+        "gender": "unspecified",
+        "age": 24,
+        "birthday": "January 1",
+        "backstory": "They value evidence, agency, and durable self-knowledge.",
+        "personality_brief": {
+            "mbti": "INTJ",
+            "logic": "Tests assumptions against observed outcomes.",
+            "tempo": "Measured and concise.",
+            "defense": "Creates distance before reconsidering.",
+            "quirks": "Pauses to compare present choices with earlier ones.",
+            "taboos": "Rejects coerced identity claims.",
+        },
+        "boundary_profile": {
+            "self_integrity": 0.8,
+            "control_sensitivity": 0.6,
+            "relational_override": 0.4,
+            "control_intimacy_misread": 0.3,
+            "authority_skepticism": 0.7,
+            "compliance_strategy": "resist",
+            "boundary_recovery": "rebound",
+        },
+        "linguistic_texture_profile": {
+            "fragmentation": 0.2,
+            "hesitation_density": 0.2,
+            "counter_questioning": 0.4,
+            "softener_density": 0.3,
+            "formalism_avoidance": 0.8,
+            "abstraction_reframing": 0.5,
+            "direct_assertion": 0.7,
+            "emotional_leakage": 0.4,
+            "rhythmic_bounce": 0.5,
+            "self_deprecation": 0.1,
+        },
+        "self_image": {
+            "self_concept": (
+                "I am a deliberate observer whose choices can revise "
+                "earlier assumptions."
+            ),
+            "current_growth_edges": [
+                "Distinguish useful caution from avoidant distance.",
+            ],
+        },
+        "visual_characterization": (
+            "A composed adult with attentive posture and practical clothing."
+        ),
     }
 
 
 def _write_seed(path: Path, payload: dict[str, object]) -> Path:
-    """Write one UTF-8 profile fixture and return its absolute path."""
+    """Write one UTF-8 profile fixture and return its path."""
 
-    path.write_text(json.dumps(payload), encoding="utf-8")
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False),
+        encoding="utf-8",
+    )
     return path
 
 
@@ -91,7 +118,7 @@ def test_profile_module_imports_before_database_package() -> None:
 
 
 def test_packaged_profile_matches_repository_example() -> None:
-    """The versioned package profile must contain only the public example."""
+    """The versioned package profile must match the public example."""
 
     from kazusa_ai_chatbot.character_profile import (
         load_packaged_character_profile_seed,
@@ -103,9 +130,8 @@ def test_packaged_profile_matches_repository_example() -> None:
             encoding="utf-8",
         )
     )
-    seed = load_packaged_character_profile_seed()
 
-    assert seed == expected_seed
+    assert load_packaged_character_profile_seed() == expected_seed
 
 
 def test_deployment_artifacts_bind_only_packaged_example_seed() -> None:
@@ -129,8 +155,37 @@ def test_deployment_artifacts_bind_only_packaged_example_seed() -> None:
     assert "CHARACTER_PROFILE_PATH" not in dockerfile
 
 
-def test_profile_loader_returns_validated_static_seed(tmp_path: Path) -> None:
-    """The maintenance loader should return validated static seed data."""
+def test_every_repository_profile_is_a_complete_canonical_identity() -> None:
+    """Each selectable profile must validate as one closed revision-zero body."""
+
+    from kazusa_ai_chatbot.character_profile import load_character_profile_seed
+
+    repository_root = Path(__file__).resolve().parents[1]
+    profile_paths = sorted(
+        (repository_root / "personalities").glob("*.json")
+    )
+    profile_paths.extend(
+        sorted(
+            (
+                repository_root
+                / "src"
+                / "kazusa_ai_chatbot"
+                / "character_profiles"
+            ).glob("*.json")
+        )
+    )
+
+    assert profile_paths
+    for profile_path in profile_paths:
+        seed = load_character_profile_seed(profile_path)
+        assert frozenset(seed) == models.TOP_LEVEL_IDENTITY_KEYS
+        assert seed["self_image"]["self_concept"].strip()
+        assert len(seed["self_image"]["current_growth_edges"]) <= 5
+        assert seed["visual_characterization"].strip()
+
+
+def test_profile_loader_returns_validated_full_identity(tmp_path: Path) -> None:
+    """The maintenance loader should return one complete identity snapshot."""
 
     from kazusa_ai_chatbot.character_profile import load_character_profile_seed
 
@@ -141,54 +196,44 @@ def test_profile_loader_returns_validated_static_seed(tmp_path: Path) -> None:
 
     seed = load_character_profile_seed(profile_path)
 
+    assert frozenset(seed) == models.TOP_LEVEL_IDENTITY_KEYS
     assert seed["name"] == "Test Character"
-    assert "cognition_state" not in seed
-    assert "updated_at" not in seed
+    assert seed["self_image"]["self_concept"]
+    assert seed["visual_characterization"]
 
 
-def test_profile_loader_rejects_runtime_owned_fields(tmp_path: Path) -> None:
-    """Static profile files must not contain runtime-owned singleton fields."""
-
-    from kazusa_ai_chatbot.character_profile import load_character_profile_seed
-
-    payload = _valid_seed_payload()
-    payload["cognition_state"] = {"state_scope": "character"}
-    profile_path = _write_seed(tmp_path / "profile.json", payload)
-
-    with pytest.raises(ValueError, match="cognition_state"):
-        load_character_profile_seed(profile_path)
-
-
-@pytest.mark.parametrize("field_name", RUNTIME_OWNED_PROFILE_FIELDS)
-def test_profile_loader_rejects_every_runtime_owned_field(
+@pytest.mark.parametrize("field_name", FORBIDDEN_PROFILE_FIELDS)
+def test_profile_loader_rejects_nonidentity_fields(
     tmp_path: Path,
     field_name: str,
 ) -> None:
-    """Every mutable singleton field must stay outside static seed files."""
+    """Operational, retired, and duplicate fields stay outside identity."""
 
     from kazusa_ai_chatbot.character_profile import load_character_profile_seed
 
     payload = _valid_seed_payload()
-    payload[field_name] = "runtime-owned"
+    payload[field_name] = "forbidden"
     profile_path = _write_seed(tmp_path / "profile.json", payload)
 
-    with pytest.raises(ValueError, match=field_name):
+    with pytest.raises(ValueError, match="unknown keys"):
         load_character_profile_seed(profile_path)
 
 
 @pytest.mark.parametrize(
     ("profile_name", "field_name"),
     [
+        ("personality_brief", "logic"),
         ("boundary_profile", "self_integrity"),
         ("linguistic_texture_profile", "fragmentation"),
+        ("self_image", "self_concept"),
     ],
 )
-def test_profile_loader_rejects_missing_required_profile_fields(
+def test_profile_loader_rejects_missing_required_identity_fields(
     tmp_path: Path,
     profile_name: str,
     field_name: str,
 ) -> None:
-    """Static seeds must include the complete boundary and language vectors."""
+    """Revision zero must contain every declared nested identity field."""
 
     from kazusa_ai_chatbot.character_profile import load_character_profile_seed
 
@@ -202,7 +247,7 @@ def test_profile_loader_rejects_missing_required_profile_fields(
 
 def test_profile_loader_accepts_relative_paths(
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Maintenance callers may provide a path relative to their directory."""
 
@@ -217,82 +262,67 @@ def test_profile_loader_accepts_relative_paths(
 
 
 @pytest.mark.asyncio
-async def test_profile_seed_insert_then_verify_preserves_runtime_state(
-    tmp_path: Path,
-    monkeypatch,
+async def test_operational_character_state_insert_then_verify(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Insert and repeat verification must preserve mutable state."""
-
-    from kazusa_ai_chatbot.character_profile import load_character_profile_seed
-    from kazusa_ai_chatbot.db.character import ensure_character_profile_seed
-
-    seed = _valid_seed_payload()
-    existing_runtime_state = build_character_production_state(
-        updated_at="2026-07-19T00:00:00Z",
-    )
+    """Clean startup creates only cognition state and its timestamp."""
 
     class _Collection:
-        def __init__(self, existing: dict[str, object] | None) -> None:
-            self.find_one = AsyncMock(return_value=existing)
-            self.insert_one = AsyncMock()
-            self.update_one = AsyncMock()
+        def __init__(self) -> None:
+            self.document: dict[str, object] | None = None
+            self.insert_one = AsyncMock(side_effect=self._insert)
+
+        async def find_one(self, *_args, **_kwargs):
+            return self.document
+
+        async def _insert(self, document: dict[str, object]):
+            self.document = dict(document)
 
     class _Database:
-        def __init__(self, existing: dict[str, object] | None) -> None:
-            self.character_state = _Collection(existing)
+        def __init__(self) -> None:
+            self.character_state = _Collection()
 
-    insert_db = _Database(None)
+    database = _Database()
     monkeypatch.setattr(
         character_module,
         "get_db",
-        AsyncMock(return_value=insert_db),
+        AsyncMock(return_value=database),
     )
-    seed_path = _write_seed(tmp_path / "profile.json", seed)
-    loaded_seed = load_character_profile_seed(seed_path)
-    insert_result = await ensure_character_profile_seed(loaded_seed)
 
-    assert insert_result == "inserted"
-    inserted_document = insert_db.character_state.insert_one.await_args.args[0]
-    assert inserted_document["_id"] == "global"
-    assert inserted_document["name"] == "Test Character"
-    assert inserted_document["cognition_state"]["state_scope"] == "character"
+    inserted = await character_module.ensure_operational_character_state()
+    verified = await character_module.ensure_operational_character_state()
 
-    verified_document = {
-        **seed,
-        "_id": "global",
-        "cognition_state": existing_runtime_state,
-        "updated_at": "2026-07-19T00:00:00+00:00",
-        "mood": {"label": "steady"},
+    assert inserted == "inserted"
+    assert verified == "verified"
+    assert frozenset(database.character_state.document) == {
+        "_id",
+        "cognition_state",
+        "updated_at",
     }
-    verify_db = _Database(verified_document)
-    monkeypatch.setattr(
-        character_module,
-        "get_db",
-        AsyncMock(return_value=verify_db),
+    assert (
+        database.character_state.document["cognition_state"]["state_scope"]
+        == "character"
     )
-
-    verify_result = await ensure_character_profile_seed(seed)
-
-    assert verify_result == "verified"
-    verify_db.character_state.insert_one.assert_not_awaited()
-    verify_db.character_state.update_one.assert_not_awaited()
-    assert verified_document["mood"] == {"label": "steady"}
 
 
 @pytest.mark.asyncio
-async def test_profile_seed_rejects_conflicting_existing_identity(monkeypatch) -> None:
-    """A different existing character identity must stop startup."""
+async def test_legacy_semantic_character_state_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Semantic singleton state must stop clean-cutover startup."""
 
-    from kazusa_ai_chatbot.db.character import ensure_character_profile_seed
+    document = {
+        "_id": "global",
+        "name": "Legacy Character",
+        "cognition_state": build_character_production_state(
+            updated_at="2026-07-19T00:00:00Z",
+        ),
+        "updated_at": "2026-07-19T00:00:00Z",
+    }
 
     class _Collection:
-        find_one = AsyncMock(return_value={
-            "_id": "global",
-            "name": "Another Character",
-            "cognition_state": build_character_production_state(
-                updated_at="2026-07-19T00:00:00Z",
-            ),
-        })
+        async def find_one(self, *_args, **_kwargs):
+            return document
 
     class _Database:
         character_state = _Collection()
@@ -303,35 +333,90 @@ async def test_profile_seed_rejects_conflicting_existing_identity(monkeypatch) -
         AsyncMock(return_value=_Database()),
     )
 
-    with pytest.raises(ValueError, match="name"):
-        await ensure_character_profile_seed(_valid_seed_payload())
+    with pytest.raises(
+        character_module.LegacyCharacterStateError,
+        match="clean target",
+    ):
+        await character_module.ensure_operational_character_state()
 
 
 @pytest.mark.asyncio
-async def test_startup_seeds_packaged_profile_only_when_singleton_absent(
-    monkeypatch,
+async def test_profile_facade_composes_latest_identity_and_runtime(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Clean startup should insert packaged state and then use the database."""
+    """The graph facade must compose max identity with operational state."""
+
+    identity = _valid_seed_payload()
+    cognition_state = build_character_production_state(
+        updated_at="2026-07-19T00:00:00Z",
+    )
+    monkeypatch.setattr(
+        character_module,
+        "get_current_identity",
+        AsyncMock(return_value={
+            "revision_number": 4,
+            "effective_identity": identity,
+        }),
+    )
+    monkeypatch.setattr(
+        character_module,
+        "get_character_runtime_state",
+        AsyncMock(return_value={
+            "cognition_state": cognition_state,
+            "updated_at": "2026-07-19T00:00:00Z",
+        }),
+    )
+
+    profile = await character_module.get_character_profile(
+        character_id="character-test",
+    )
+
+    assert profile["name"] == identity["name"]
+    assert profile["self_image"] == identity["self_image"]
+    assert profile["cognition_state"] == cognition_state
+    assert profile["global_user_id"] == "character-test"
+    assert "revision_number" not in profile
+
+
+@pytest.mark.asyncio
+async def test_clean_startup_seeds_revision_zero(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A clean startup should build operational state and revision zero."""
 
     from kazusa_ai_chatbot import service as service_module
+    from kazusa_ai_chatbot.db.character_identity_growth import (
+        IdentityLedgerNotFoundError,
+    )
 
     seed = _valid_seed_payload(name="Packaged Example")
-    stored_profile = {
-        **seed,
+    revision = {
+        "revision_number": 0,
+        "effective_identity": seed,
+    }
+    ensure_operational = AsyncMock(return_value="inserted")
+    get_current = AsyncMock(
+        side_effect=[IdentityLedgerNotFoundError("missing"), revision],
+    )
+    load_packaged_seed = MagicMock(return_value=seed)
+    ensure_seed = AsyncMock(return_value=revision)
+    runtime_state = {
         "cognition_state": build_character_production_state(
             updated_at="2026-07-26T00:00:00Z",
         ),
+        "updated_at": "2026-07-26T00:00:00Z",
     }
-    get_profile = AsyncMock(side_effect=[{}, stored_profile])
-    load_packaged_seed = MagicMock(return_value=seed)
-    ensure_seed = AsyncMock(return_value="inserted")
-    get_cognition_state = AsyncMock(
-        return_value=stored_profile["cognition_state"],
+    monkeypatch.setattr(
+        service_module,
+        "ensure_operational_character_state",
+        ensure_operational,
+        raising=False,
     )
     monkeypatch.setattr(
         service_module,
-        "get_character_profile",
-        get_profile,
+        "get_current_identity",
+        get_current,
+        raising=False,
     )
     monkeypatch.setattr(
         service_module,
@@ -341,65 +426,121 @@ async def test_startup_seeds_packaged_profile_only_when_singleton_absent(
     )
     monkeypatch.setattr(
         service_module,
-        "ensure_character_profile_seed",
+        "ensure_seed_identity",
         ensure_seed,
+        raising=False,
     )
     monkeypatch.setattr(
         service_module,
-        "get_character_cognition_state",
-        get_cognition_state,
+        "get_character_runtime_state",
+        AsyncMock(return_value=runtime_state),
+    )
+
+    static_profile, loaded_runtime = (
+        await service_module._load_startup_character_profile()
+    )
+
+    ensure_operational.assert_awaited_once_with()
+    load_packaged_seed.assert_called_once_with()
+    ensure_seed.assert_awaited_once_with(
+        character_id=service_module.CHARACTER_GLOBAL_USER_ID,
+        seed=seed,
+    )
+    assert get_current.await_count == 2
+    assert static_profile == seed
+    assert loaded_runtime == runtime_state
+
+
+@pytest.mark.asyncio
+async def test_restart_uses_existing_latest_revision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Restart must load max revision without reapplying a seed."""
+
+    from kazusa_ai_chatbot import service as service_module
+
+    identity = _valid_seed_payload(name="Grown Character")
+    revision = {
+        "revision_number": 7,
+        "effective_identity": identity,
+    }
+    cognition_state = build_character_production_state(
+        updated_at="2026-07-26T00:00:00Z",
+    )
+    ensure_operational = AsyncMock(return_value="verified")
+    load_packaged_seed = MagicMock()
+    ensure_seed = AsyncMock()
+    monkeypatch.setattr(
+        service_module,
+        "ensure_operational_character_state",
+        ensure_operational,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "get_current_identity",
+        AsyncMock(return_value=revision),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "load_packaged_character_profile_seed",
+        load_packaged_seed,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "ensure_seed_identity",
+        ensure_seed,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "get_character_runtime_state",
+        AsyncMock(return_value={
+            "cognition_state": cognition_state,
+            "updated_at": "2026-07-26T00:00:00Z",
+        }),
     )
 
     static_profile, runtime_state = (
         await service_module._load_startup_character_profile()
     )
 
-    load_packaged_seed.assert_called_once_with()
-    ensure_seed.assert_awaited_once_with(seed)
-    assert get_profile.await_count == 2
-    get_cognition_state.assert_awaited_once_with()
-    assert static_profile["name"] == "Packaged Example"
-    assert runtime_state["cognition_state"]["state_scope"] == "character"
+    ensure_operational.assert_awaited_once_with()
+    load_packaged_seed.assert_not_called()
+    ensure_seed.assert_not_awaited()
+    assert static_profile == identity
+    assert runtime_state["cognition_state"] == cognition_state
 
 
 @pytest.mark.asyncio
-async def test_startup_preserves_existing_database_profile(monkeypatch) -> None:
-    """An existing native singleton should remain the startup authority."""
+async def test_runtime_profile_snapshot_refreshes_latest_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Runtime profile reads should replace the prior revision completely."""
 
     from kazusa_ai_chatbot import service as service_module
 
-    stored_profile = {
-        **_valid_seed_payload(name="Existing Character"),
-        "cognition_state": build_character_production_state(
-            updated_at="2026-07-26T00:00:00Z",
-        ),
+    first_profile = {
+        **_valid_seed_payload(name="revision-old"),
+        "global_user_id": service_module.CHARACTER_GLOBAL_USER_ID,
     }
-    load_packaged_seed = MagicMock()
-    ensure_seed = AsyncMock()
+    latest_profile = {
+        **_valid_seed_payload(name="revision-new"),
+        "global_user_id": service_module.CHARACTER_GLOBAL_USER_ID,
+    }
+    get_profile = AsyncMock(side_effect=[first_profile, latest_profile])
     monkeypatch.setattr(
         service_module,
         "get_character_profile",
-        AsyncMock(return_value=stored_profile),
-    )
-    monkeypatch.setattr(
-        service_module,
-        "load_packaged_character_profile_seed",
-        load_packaged_seed,
-        raising=False,
-    )
-    monkeypatch.setattr(
-        service_module,
-        "ensure_character_profile_seed",
-        ensure_seed,
-    )
-    monkeypatch.setattr(
-        service_module,
-        "get_character_cognition_state",
-        AsyncMock(return_value=stored_profile["cognition_state"]),
+        get_profile,
     )
 
-    static_profile, _ = await service_module._load_startup_character_profile()
+    first = await service_module._load_latest_character_profile_snapshot()
+    latest = await service_module._load_latest_character_profile_snapshot()
 
-    load_packaged_seed.assert_not_called()
-    ensure_seed.assert_not_awaited()
-    assert static_profile["name"] == "Existing Character"
+    assert first["name"] == "revision-old"
+    assert latest["name"] == "revision-new"
+    assert service_module._active_character_name() == "revision-new"
+    assert get_profile.await_count == 2

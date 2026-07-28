@@ -86,7 +86,7 @@ class SelfCognitionWorkerHandle:
 def start_self_cognition_worker(
     *,
     is_primary_interaction_busy: Callable[[], bool],
-    character_profile_provider: Callable[[], dict[str, Any]],
+    character_profile_provider: Callable[[], Any],
     adapter_registry_provider: Callable[[], AdapterRegistry | None] | None = None,
     latest_cognition_graph_publisher: Callable[[dict[str, Any]], Any] | None = None,
     should_pause_for_affect_settling: Callable[..., Any] | None = None,
@@ -808,7 +808,7 @@ async def _self_cognition_worker_loop(
     *,
     stop_event: asyncio.Event,
     is_primary_interaction_busy: Callable[[], bool],
-    character_profile_provider: Callable[[], dict[str, Any]],
+    character_profile_provider: Callable[[], Any],
     adapter_registry_provider: Callable[[], AdapterRegistry | None] | None,
     latest_cognition_graph_publisher: Callable[[dict[str, Any]], Any] | None,
     should_pause_for_affect_settling: Callable[..., Any] | None = None,
@@ -818,7 +818,13 @@ async def _self_cognition_worker_loop(
 
     while not stop_event.is_set():
         try:
-            character_profile = character_profile_provider()
+            character_profile = await _call_maybe_async(
+                character_profile_provider,
+            )
+            if not isinstance(character_profile, dict):
+                raise TypeError(
+                    "character profile provider must return a dictionary"
+                )
             await run_self_cognition_worker_tick(
                 now=storage_utc_now(),
                 is_primary_interaction_busy=is_primary_interaction_busy,

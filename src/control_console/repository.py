@@ -11,6 +11,12 @@ from pymongo.errors import PyMongoError
 
 from control_console.redaction import redact_mapping
 from kazusa_ai_chatbot.calendar_scheduler import repository as calendar_repository
+from kazusa_ai_chatbot.character_identity_growth.projection import (
+    project_candidate_for_console,
+    project_growth_health_for_console,
+    project_growth_run_for_console,
+    project_identity_for_console,
+)
 from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
     project_numeric_band,
 )
@@ -19,7 +25,7 @@ from kazusa_ai_chatbot.conversation_progress import (
     load_progress_context as default_load_progress_context,
 )
 from kazusa_ai_chatbot.db import background_work_jobs as background_work_job_store
-from kazusa_ai_chatbot.db import global_character_growth as growth_store
+from kazusa_ai_chatbot.db import character_identity_growth as identity_store
 from kazusa_ai_chatbot.db.character import (
     get_character_profile as default_get_character_profile,
     get_character_runtime_state as default_get_character_runtime_state,
@@ -62,21 +68,16 @@ CHARACTER_PROFILE_FIELDS = (
     "gender",
     "age",
     "birthday",
-    "tone",
-    "speech_patterns",
     "backstory",
     "personality_brief",
     "boundary_profile",
     "linguistic_texture_profile",
+    "visual_characterization",
     "updated_at",
 )
 SELF_IMAGE_FIELDS = (
-    "summary",
-    "current_self_concept",
-    "historical_summary",
-    "recent_window",
-    "milestones",
-    "updated_at",
+    "self_concept",
+    "current_growth_edges",
 )
 CHARACTER_COGNITION_FIELDS = (
     "drives",
@@ -204,7 +205,10 @@ class ControlConsoleRepository:
         *,
         get_character_profile: AsyncHelper | None = None,
         get_character_runtime_state: AsyncHelper | None = None,
-        list_growth_traits: AsyncHelper | None = None,
+        list_identity_revisions: AsyncHelper | None = None,
+        list_identity_growth_candidates: AsyncHelper | None = None,
+        list_recent_identity_growth_runs: AsyncHelper | None = None,
+        build_identity_growth_health: AsyncHelper | None = None,
         query_user_memory_units: AsyncHelper | None = None,
         search_user_memory_units_by_keyword: AsyncHelper | None = None,
         build_interaction_style_context: AsyncHelper | None = None,
@@ -216,7 +220,6 @@ class ControlConsoleRepository:
         list_recent_background_work_jobs: AsyncHelper | None = None,
         load_progress_context: AsyncHelper | None = None,
         load_residue_context: AsyncHelper | None = None,
-        list_recent_global_character_growth_runs: AsyncHelper | None = None,
         list_recent_user_profiles: AsyncHelper | None = None,
         list_recent_group_summaries: AsyncHelper | None = None,
         list_group_review_windows: AsyncHelper | None = None,
@@ -225,7 +228,14 @@ class ControlConsoleRepository:
 
         self._get_character_profile = get_character_profile
         self._get_character_runtime_state = get_character_runtime_state
-        self._list_growth_traits = list_growth_traits
+        self._list_identity_revisions = list_identity_revisions
+        self._list_identity_growth_candidates = (
+            list_identity_growth_candidates
+        )
+        self._list_recent_identity_growth_runs = (
+            list_recent_identity_growth_runs
+        )
+        self._build_identity_growth_health = build_identity_growth_health
         self._query_user_memory_units = query_user_memory_units
         self._search_user_memory_units_by_keyword = search_user_memory_units_by_keyword
         self._build_interaction_style_context = build_interaction_style_context
@@ -239,9 +249,6 @@ class ControlConsoleRepository:
         self._list_recent_background_work_jobs = list_recent_background_work_jobs
         self._load_progress_context = load_progress_context
         self._load_residue_context = load_residue_context
-        self._list_recent_global_character_growth_runs = (
-            list_recent_global_character_growth_runs
-        )
         self._list_recent_user_profiles = list_recent_user_profiles
         self._list_recent_group_summaries = list_recent_group_summaries
         self._list_group_review_windows = list_group_review_windows
@@ -281,7 +288,7 @@ class ControlConsoleRepository:
             "status": "available",
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "character_name": character_name[:120],
-            "source": "character_state",
+            "source": "character_identity_revisions",
         }
         return identity
 
@@ -293,7 +300,7 @@ class ControlConsoleRepository:
     ) -> dict[str, Any]:
         """Return native profile, cognition, growth, and continuity state."""
 
-        timestamp = current_timestamp_utc or datetime.now(timezone.utc).isoformat()
+        _ = current_timestamp_utc
         identity: dict[str, Any] = {}
         profile: dict[str, Any] = {}
         profile_panel = _entity_panel(
@@ -335,7 +342,7 @@ class ControlConsoleRepository:
         self_image_panel = _entity_panel(
             status="unavailable",
             items=[],
-            reason="character runtime-state helper is unavailable",
+            reason="character identity profile is unavailable",
         )
         runtime_helper = (
             self._get_character_runtime_state
@@ -346,7 +353,6 @@ class ControlConsoleRepository:
         except REPOSITORY_HELPER_ERRORS as exc:
             reason = str(exc)[:160]
             runtime_panel["reason"] = reason
-            self_image_panel["reason"] = reason
         else:
             if isinstance(runtime_state, dict):
                 cognition_state = runtime_state.get("cognition_state")
@@ -363,43 +369,35 @@ class ControlConsoleRepository:
                         else "character cognition state is empty"
                     ),
                 )
-                self_image_items = _project_self_image(
-                    runtime_state.get("self_image")
-                )
-                self_image_panel = _entity_panel(
-                    status="available" if self_image_items else "empty",
-                    items=self_image_items[:limit],
-                    reason=(
-                        ""
-                        if self_image_items
-                        else "character self-image is not available"
-                    ),
-                )
             else:
                 runtime_panel["reason"] = (
                     "character runtime-state helper returned invalid data"
                 )
-                self_image_panel["reason"] = (
-                    "character runtime-state helper returned invalid data"
-                )
 
-        carry_over = await self._residue_panel(
-            trigger_scope={
-                "character_id": _character_id_from_profile(profile),
-                "platform": "",
-                "platform_channel_id": "",
-                "channel_type": "",
-                "global_user_id": "",
-            },
-            current_timestamp_utc=timestamp,
-            empty_reason="no character-global carry-over is loaded",
-        )
+        if profile_panel["status"] != "unavailable":
+            self_image_items = _project_self_image(profile.get("self_image"))
+            self_image_panel = _entity_panel(
+                status="available" if self_image_items else "empty",
+                items=self_image_items[:limit],
+                reason=(
+                    ""
+                    if self_image_items
+                    else "latest identity has no self-image"
+                ),
+            )
+        character_id = _character_id_from_profile(profile)
         panels = {
             "profile": profile_panel,
             "cognition_state": runtime_panel,
             "self_image": self_image_panel,
-            "growth": await self._character_growth_panel(limit=limit),
-            "carry_over": carry_over,
+            "growth": await self._character_identity_growth_panel(
+                character_id=character_id,
+                limit=limit,
+            ),
+            "carry_over": await self._character_identity_lineage_panel(
+                character_id=character_id,
+                limit=limit,
+            ),
         }
         envelope = _owner_entity_envelope(
             owner="character",
@@ -409,45 +407,56 @@ class ControlConsoleRepository:
         )
         return envelope
 
-    async def _character_growth_panel(self, *, limit: int) -> dict[str, Any]:
-        """Combine active traits with recent semantic growth outcomes."""
+    async def _character_identity_growth_panel(
+        self,
+        *,
+        character_id: str,
+        limit: int,
+    ) -> dict[str, Any]:
+        """Combine redacted candidate and routed-run outcomes."""
 
-        trait_helper = (
-            self._list_growth_traits
-            or growth_store.list_active_growth_traits
+        candidate_helper = (
+            self._list_identity_growth_candidates
+            or identity_store.list_identity_growth_candidates
         )
         run_helper = (
-            self._list_recent_global_character_growth_runs
-            or growth_store.list_recent_global_character_growth_runs
+            self._list_recent_identity_growth_runs
+            or identity_store.list_recent_identity_growth_runs
         )
         source_panels: dict[str, dict[str, Any]] = {}
         items: list[dict[str, Any]] = []
         reasons: list[str] = []
         try:
-            traits = await trait_helper(limit=12)
+            candidates = await candidate_helper(
+                character_id=character_id,
+                limit=limit,
+            )
         except REPOSITORY_HELPER_ERRORS as exc:
-            source_panels["traits"] = {"status": "unavailable"}
-            reasons.append(f"growth traits unavailable: {exc}")
+            source_panels["candidates"] = {"status": "unavailable"}
+            reasons.append(f"identity candidates unavailable: {exc}")
         else:
-            trait_items = [
-                _project_growth_trait(trait)
-                for trait in list(traits)[:12]
-                if isinstance(trait, dict)
+            candidate_items = [
+                project_candidate_for_console(candidate)
+                for candidate in list(candidates)[:limit]
+                if isinstance(candidate, dict)
             ]
-            items.extend(trait_items)
-            source_panels["traits"] = {
-                "status": "available" if trait_items else "empty"
+            items.extend(candidate_items)
+            source_panels["candidates"] = {
+                "status": "available" if candidate_items else "empty"
             }
 
         try:
-            runs = await run_helper(limit=1)
+            runs = await run_helper(
+                character_id=character_id,
+                limit=limit,
+            )
         except REPOSITORY_HELPER_ERRORS as exc:
             source_panels["runs"] = {"status": "unavailable"}
-            reasons.append(f"growth history unavailable: {exc}")
+            reasons.append(f"identity growth runs unavailable: {exc}")
         else:
             run_items = [
-                _project_global_growth_run(run)
-                for run in list(runs)[:1]
+                project_growth_run_for_console(run)
+                for run in list(runs)[:limit]
                 if isinstance(run, dict)
             ]
             items.extend(run_items)
@@ -458,23 +467,89 @@ class ControlConsoleRepository:
         status_value = _combined_panel_status(source_panels)
         reason = "; ".join(reasons)
         if status_value == "empty":
-            reason = "no active growth traits or recent growth outcomes"
-        panel = _entity_panel(
+            reason = "no identity candidates or routed growth runs"
+        return _entity_panel(
             status=status_value,
             items=items,
             reason=reason,
         )
-        for source_item, panel_item in zip(items, panel["items"], strict=True):
-            shadow_projection = source_item.get("shadow_projection")
-            if not isinstance(shadow_projection, dict):
-                continue
-            prompt_visible_now = shadow_projection.get("prompt_visible_now")
-            if not isinstance(prompt_visible_now, bool):
-                continue
-            projected_shadow = panel_item.get("shadow_projection")
-            if isinstance(projected_shadow, dict):
-                projected_shadow["prompt_visible_now"] = prompt_visible_now
-        return panel
+
+    async def _character_identity_lineage_panel(
+        self,
+        *,
+        character_id: str,
+        limit: int,
+    ) -> dict[str, Any]:
+        """Combine public health with immutable redacted revision history."""
+
+        revision_helper = (
+            self._list_identity_revisions
+            or identity_store.list_identity_revisions
+        )
+        health_helper = (
+            self._build_identity_growth_health
+            or identity_store.build_identity_growth_health
+        )
+        source_panels: dict[str, dict[str, Any]] = {}
+        items: list[dict[str, Any]] = []
+        reasons: list[str] = []
+        latest_revision_number: int | None = None
+
+        try:
+            health = await health_helper(character_id=character_id)
+        except REPOSITORY_HELPER_ERRORS as exc:
+            source_panels["health"] = {"status": "unavailable"}
+            reasons.append(f"identity health unavailable: {exc}")
+        else:
+            if not isinstance(health, dict):
+                source_panels["health"] = {"status": "unavailable"}
+                reasons.append("identity health helper returned invalid data")
+            else:
+                health_item = project_growth_health_for_console(health)
+                latest_revision_number = int(
+                    health_item["latest_revision_number"]
+                )
+                items.append(health_item)
+                source_panels["health"] = {"status": "available"}
+
+        try:
+            revisions = await revision_helper(
+                character_id=character_id,
+                limit=limit,
+            )
+        except REPOSITORY_HELPER_ERRORS as exc:
+            source_panels["revisions"] = {"status": "unavailable"}
+            reasons.append(f"identity revisions unavailable: {exc}")
+        else:
+            revision_items = [
+                project_identity_for_console(revision)
+                for revision in list(revisions)[:limit]
+                if isinstance(revision, dict)
+            ]
+            if latest_revision_number is None and revision_items:
+                latest_revision_number = max(
+                    int(item["revision_number"])
+                    for item in revision_items
+                )
+            for revision_item in revision_items:
+                revision_item["is_current"] = (
+                    revision_item["revision_number"]
+                    == latest_revision_number
+                )
+            items.extend(revision_items)
+            source_panels["revisions"] = {
+                "status": "available" if revision_items else "empty"
+            }
+
+        status_value = _combined_panel_status(source_panels)
+        reason = "; ".join(reasons)
+        if status_value == "empty":
+            reason = "no identity revision continuity is available"
+        return _entity_panel(
+            status=status_value,
+            items=items,
+            reason=reason,
+        )
 
     async def _resolve_platform_user_identity(
         self,
@@ -1811,7 +1886,7 @@ def _not_connected_identity(*, status: str, reason: str) -> dict[str, Any]:
         "status": status,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "character_name": "not connected",
-        "source": "character_state",
+        "source": "character_identity_revisions",
         "reason": str(reason)[:160],
     }
     return identity

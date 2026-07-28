@@ -1,4 +1,4 @@
-"""Worker integration tests for global character growth."""
+"""Worker integration tests for daily character identity growth."""
 
 from __future__ import annotations
 
@@ -11,17 +11,21 @@ from kazusa_ai_chatbot.reflection_cycle import worker as worker_module
 
 
 @pytest.mark.asyncio
-async def test_worker_runs_growth_after_global_reflection_promotion(
+async def test_worker_runs_identity_after_global_reflection_promotion(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The default-on worker should run growth after daily global promotion."""
+    """The default-on worker runs identity after daily global promotion."""
 
-    growth_pass = AsyncMock(return_value={"run_kind": "global_character_growth"})
+    growth_pass = AsyncMock(return_value={"status": "no_change"})
     _patch_due_reflection_tick(monkeypatch)
-    monkeypatch.setattr(worker_module, "GLOBAL_CHARACTER_GROWTH_PASS_ENABLED", True)
     monkeypatch.setattr(
         worker_module,
-        "run_global_character_growth_pass",
+        "CHARACTER_IDENTITY_GROWTH_ENABLED",
+        True,
+    )
+    monkeypatch.setattr(
+        worker_module,
+        "run_reflection_identity_growth_pass",
         growth_pass,
     )
 
@@ -30,26 +34,32 @@ async def test_worker_runs_growth_after_global_reflection_promotion(
         is_primary_interaction_busy=lambda: False,
     )
 
-    assert results[-1] == {"run_kind": "global_character_growth"}
+    assert results[-1] == {"status": "no_change"}
     growth_pass.assert_awaited_once_with(
         character_local_date="2026-05-05",
+        source_reflection_run_ids=["daily-run-1"],
         dry_run=False,
-        enable_trait_writes=True,
+        enable_revision_writes=True,
+        now=datetime(2026, 5, 5, 18, 0, tzinfo=timezone.utc),
     )
 
 
 @pytest.mark.asyncio
-async def test_worker_skips_growth_when_flag_disabled(
+async def test_worker_skips_identity_when_flag_disabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Rollback flag should stop the growth pass without stopping reflection."""
+    """The restart-applied flag stops identity while retaining reflection."""
 
-    growth_pass = AsyncMock()
+    growth_pass = AsyncMock(return_value={"status": "no_change"})
     _patch_due_reflection_tick(monkeypatch)
-    monkeypatch.setattr(worker_module, "GLOBAL_CHARACTER_GROWTH_PASS_ENABLED", False)
     monkeypatch.setattr(
         worker_module,
-        "run_global_character_growth_pass",
+        "CHARACTER_IDENTITY_GROWTH_ENABLED",
+        False,
+    )
+    monkeypatch.setattr(
+        worker_module,
+        "run_reflection_identity_growth_pass",
         growth_pass,
     )
 
@@ -68,17 +78,21 @@ async def test_worker_skips_growth_when_flag_disabled(
 
 
 @pytest.mark.asyncio
-async def test_worker_skips_growth_if_busy_after_promotion(
+async def test_worker_skips_identity_if_busy_after_promotion(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A new chat turn after promotion should defer the growth pass."""
+    """A new chat turn after promotion should defer the identity pass."""
 
     growth_pass = AsyncMock()
     _patch_due_reflection_tick(monkeypatch)
-    monkeypatch.setattr(worker_module, "GLOBAL_CHARACTER_GROWTH_PASS_ENABLED", True)
     monkeypatch.setattr(
         worker_module,
-        "run_global_character_growth_pass",
+        "CHARACTER_IDENTITY_GROWTH_ENABLED",
+        True,
+    )
+    monkeypatch.setattr(
+        worker_module,
+        "run_reflection_identity_growth_pass",
         growth_pass,
     )
     calls = {"count": 0}
@@ -96,17 +110,21 @@ async def test_worker_skips_growth_if_busy_after_promotion(
 
 
 @pytest.mark.asyncio
-async def test_worker_skips_growth_when_promotion_writes_no_memory(
+async def test_worker_runs_identity_when_promotion_writes_no_memory(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Growth should not spend an LLM call when promotion had no new memory."""
+    """Identity evaluation is independent of the memory mutation outcome."""
 
-    growth_pass = AsyncMock()
+    growth_pass = AsyncMock(return_value={"status": "no_change"})
     _patch_due_reflection_tick(monkeypatch)
-    monkeypatch.setattr(worker_module, "GLOBAL_CHARACTER_GROWTH_PASS_ENABLED", True)
     monkeypatch.setattr(
         worker_module,
-        "run_global_character_growth_pass",
+        "CHARACTER_IDENTITY_GROWTH_ENABLED",
+        True,
+    )
+    monkeypatch.setattr(
+        worker_module,
+        "run_reflection_identity_growth_pass",
         growth_pass,
     )
     monkeypatch.setattr(
@@ -125,8 +143,14 @@ async def test_worker_skips_growth_when_promotion_writes_no_memory(
         is_primary_interaction_busy=lambda: False,
     )
 
-    assert results[-1].run_kind == "daily_global_promotion"
-    growth_pass.assert_not_awaited()
+    assert results[-1] == {"status": "no_change"}
+    growth_pass.assert_awaited_once_with(
+        character_local_date="2026-05-05",
+        source_reflection_run_ids=["daily-run-1"],
+        dry_run=False,
+        enable_revision_writes=True,
+        now=datetime(2026, 5, 5, 18, 0, tzinfo=timezone.utc),
+    )
 
 
 def _patch_due_reflection_tick(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -165,4 +189,9 @@ def _patch_due_reflection_tick(monkeypatch: pytest.MonkeyPatch) -> None:
             dry_run=False,
             succeeded_count=1,
         )),
+    )
+    monkeypatch.setattr(
+        worker_module.repository,
+        "daily_channel_runs",
+        AsyncMock(return_value=[{"run_id": "daily-run-1"}]),
     )
