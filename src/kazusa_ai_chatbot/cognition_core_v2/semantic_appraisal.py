@@ -30,6 +30,10 @@ from kazusa_ai_chatbot.cognition_core_v2.semantic_source_planner import (
 from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
     V2_MODEL_TOTAL_ATTEMPTS,
 )
+from kazusa_ai_chatbot.cognition_core_v2.prompt_budget import (
+    PromptBudgetError,
+    fit_evidence_texts_to_budget,
+)
 from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
     PromptProjectionV2,
 )
@@ -40,7 +44,9 @@ from kazusa_ai_chatbot.utils import parse_llm_json_output
 
 
 SEMANTIC_APPRAISAL_ATTEMPT_LIMIT = V2_MODEL_TOTAL_ATTEMPTS
+SEMANTIC_APPRAISAL_PROMPT_CAP = 8000
 SEMANTIC_APPRAISAL_REPAIR_OUTPUT_CAP = 8000
+MIN_PROMPT_EVIDENCE_TEXT_CHARS = 96
 
 _PROPOSITION_SUBJECT_KINDS = {
     "goal_release": "goal",
@@ -72,6 +78,8 @@ role_assignments 和 semantic_value，并可选包含 object_handle。每条 rol
 包含 role 和 entity_handle。每个 delta 对象必须恰好包含 target_path、delta、
 evidence_handles 和 reason。所给 role handle 与 delta path 按原值使用；不输出 kind、handle、
 semantic_text、role_handles、path 或其他 proposition、delta 字段。
+question.permitted_delta_path_domains 的每一项给出 state_field、handles 和 axes。
+每个 target_path 必须从同一项中各取一个值，按 state_field.handle.axis 组合并原样输出。
 
 semantic_value 是一句简洁描述，目标长度 120 字符且上限 200 字符，其中不重复标准、约束或证据
 解释，也不使用数值；数值只放在 delta 字段。每条 delta reason 不超过 300 字符，explanation
@@ -131,7 +139,11 @@ async def appraise_semantic_question(
             "question_kind": question["question_kind"],
             "semantic_question": question["semantic_question"],
             "permitted_role_handles": question["permitted_role_handles"],
-            "permitted_delta_paths": question["permitted_delta_paths"],
+            "permitted_delta_path_domains": (
+                _compact_permitted_delta_path_domains(
+                    question["permitted_delta_paths"]
+                )
+            ),
             "permitted_proposition_kinds": list(
                 question_proposition_kinds(question["question_kind"])
             ),
@@ -321,6 +333,15 @@ def _appraisal_repair_messages(
             sort_keys=True,
         )),
     ]
+    dynamic_context_chars = sum(
+        len(str(message.content))
+        for message in messages
+        if not isinstance(message, SystemMessage)
+    )
+    if dynamic_context_chars > SEMANTIC_APPRAISAL_PROMPT_CAP:
+        raise CognitionContextLimitError(
+            "semantic appraisal repair context exceeds the contract cap"
+        )
     return messages
 
 
@@ -629,7 +650,7 @@ def _require_text(value: Any, maximum: int = 200) -> str:
 
 
 def _fit_appraisal_payload(payload: dict[str, Any]) -> str:
-    """Drop only supplemental projected context in reverse order before failing."""
+    """Fit one appraisal after reducing state, then evidence text."""
 
     supplemental_order = (
         "causal_candidates",
@@ -643,15 +664,20 @@ def _fit_appraisal_payload(payload: dict[str, Any]) -> str:
     )
     state = payload["state"]
     if not isinstance(state, Mapping):
-        raise CognitionContextLimitError(
+        raise ValueError(
             "semantic appraisal state projection is invalid"
+        )
+    evidence_rows = payload["evidence"]
+    if not isinstance(evidence_rows, list):
+        raise ValueError(
+            "semantic appraisal evidence projection is invalid"
         )
     projected_state = dict(state)
     while True:
         candidate = dict(payload)
         candidate["state"] = projected_state
         payload_text = json.dumps(candidate, ensure_ascii=False, sort_keys=True)
-        if len(payload_text) <= 8000:
+        if len(payload_text) <= SEMANTIC_APPRAISAL_PROMPT_CAP:
             return payload_text
         removed = False
         for key in supplemental_order:
@@ -664,10 +690,53 @@ def _fit_appraisal_payload(payload: dict[str, Any]) -> str:
                 projected_state.pop(key)
                 removed = True
                 break
-        if not removed:
+        if removed:
+            continue
+        try:
+            fitted_payload = fit_evidence_texts_to_budget(
+                candidate,
+                evidence_rows,
+                text_field="semantic_text",
+                maximum_chars=SEMANTIC_APPRAISAL_PROMPT_CAP,
+                minimum_text_chars=MIN_PROMPT_EVIDENCE_TEXT_CHARS,
+            )
+        except PromptBudgetError as exc:
             raise CognitionContextLimitError(
                 "required semantic appraisal context exceeds the contract cap"
-            )
+            ) from exc
+        return fitted_payload
+
+
+def _compact_permitted_delta_path_domains(
+    permitted_paths: Sequence[str],
+) -> list[dict[str, Any]]:
+    """Group exact path handles that expose an equal axis set."""
+
+    axes_by_field_and_handle: dict[str, dict[str, set[str]]] = {}
+    for path in permitted_paths:
+        pieces = path.split(".")
+        if len(pieces) != 3 or any(not piece for piece in pieces):
+            raise ValueError("semantic appraisal delta path is invalid")
+        state_field, handle, axis = pieces
+        axes_by_handle = axes_by_field_and_handle.setdefault(
+            state_field,
+            {},
+        )
+        axes_by_handle.setdefault(handle, set()).add(axis)
+
+    domains: list[dict[str, Any]] = []
+    for state_field in sorted(axes_by_field_and_handle):
+        handles_by_axes: dict[tuple[str, ...], list[str]] = {}
+        for handle, axes in axes_by_field_and_handle[state_field].items():
+            axis_set = tuple(sorted(axes))
+            handles_by_axes.setdefault(axis_set, []).append(handle)
+        for axes in sorted(handles_by_axes):
+            domains.append({
+                "state_field": state_field,
+                "handles": sorted(handles_by_axes[axes]),
+                "axes": list(axes),
+            })
+    return domains
 
 
 def _project_question_state(
@@ -697,14 +766,6 @@ def _project_question_state(
     ]
     if candidates:
         result["causal_candidates"] = candidates
-    evidence = [
-        dict(row)
-        for row in source.get("evidence", [])
-        if isinstance(row, Mapping)
-        and row.get("handle") in set(question["evidence_handles"])
-    ]
-    if evidence:
-        result["evidence"] = evidence
     roles = source.get("roles", {})
     if isinstance(roles, Mapping):
         selected_roles = {

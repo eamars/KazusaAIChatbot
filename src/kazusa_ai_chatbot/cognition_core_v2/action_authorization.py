@@ -210,9 +210,7 @@ async def authorize_action_requests(
     }
     prompt_text = json.dumps(prompt_payload, ensure_ascii=False, sort_keys=True)
     if len(prompt_text) > ACTION_AUTHORIZATION_PROMPT_CAP:
-        raise CognitionExecutionError(
-            "action-authorization prompt exceeds contract cap"
-        )
+        return []
     messages: list[BaseMessage] = [
         SystemMessage(content=ACTION_AUTHORIZATION_PROMPT),
         HumanMessage(content=prompt_text),
@@ -225,6 +223,7 @@ async def authorize_action_requests(
         stage_name="action_authorization",
         output_state_fields=["authorized_action_requests"],
         runtime_capability_limits=runtime_capability_limits,
+        prompt_cap=ACTION_AUTHORIZATION_PROMPT_CAP,
     )
     authorized_handles = {
         handle for handle, authorized in decisions.items() if authorized
@@ -244,11 +243,22 @@ async def invoke_semantic_authorizer(
     candidate_handles: list[str],
     stage_name: str,
     output_state_fields: list[str],
+    prompt_cap: int,
     runtime_capability_limits: Sequence[str] = (),
 ) -> dict[str, bool]:
     """Invoke one focused semantic authorizer with bounded shape repairs."""
 
     base_messages = list(messages)
+    base_prompt_chars = sum(
+        len(str(message.content))
+        for message in base_messages
+        if isinstance(message, HumanMessage)
+    )
+    if base_prompt_chars > prompt_cap:
+        return {
+            handle: False
+            for handle in candidate_handles
+        }
     current_messages = list(base_messages)
     for attempt_index in range(ACTION_AUTHORIZATION_ATTEMPT_LIMIT):
         started_at = perf_counter()
@@ -322,15 +332,21 @@ async def invoke_semantic_authorizer(
                     handle: False
                     for handle in candidate_handles
                 }
-            current_messages = [
-                *base_messages,
-                _authorization_repair_message(
-                    response_text=response_text,
-                    contract_error=str(exc),
-                    candidate_handles=candidate_handles,
-                    runtime_capability_limits=runtime_capability_limits,
-                ),
-            ]
+            repair_message = _authorization_repair_message(
+                response_text=response_text,
+                contract_error=str(exc),
+                candidate_handles=candidate_handles,
+                runtime_capability_limits=runtime_capability_limits,
+            )
+            if (
+                base_prompt_chars + len(str(repair_message.content))
+                > prompt_cap
+            ):
+                return {
+                    handle: False
+                    for handle in candidate_handles
+                }
+            current_messages = [*base_messages, repair_message]
             continue
         await _record_authorization_trace(
             config=config,

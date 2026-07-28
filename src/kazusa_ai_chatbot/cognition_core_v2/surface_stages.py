@@ -22,6 +22,7 @@ from kazusa_ai_chatbot.utils import parse_llm_json_output
 
 
 SURFACE_STAGE_ATTEMPT_LIMIT = V2_MODEL_TOTAL_ATTEMPTS
+SURFACE_STAGE_PROMPT_CAP = 24000
 SURFACE_STAGE_REPAIR_OUTPUT_CAP = 8000
 SURFACE_STAGE_REPAIR_PROMPT_CAP = 24000
 DELIVERY_PROFILE_FIELDS = (
@@ -271,7 +272,11 @@ async def _run_surface_stage(
 ) -> Any:
     """Run one surface owner with bounded parse, repair, and fail-closed handling."""
 
-    prompt_text = _surface_prompt_text(payload)
+    prompt_text = _surface_prompt_text(
+        payload,
+        stage_name=stage_name,
+        safe_checkpoint=safe_checkpoint,
+    )
     request_messages = [
         SystemMessage(content=system_prompt),
         HumanMessage(content=prompt_text),
@@ -304,6 +309,9 @@ async def _run_surface_stage(
                 payload=payload,
                 invalid_candidate="",
                 reason="上一轮模型调用未返回可用候选，请在相同语境下重新生成完整 JSON。",
+                stage_name=stage_name,
+                safe_checkpoint=safe_checkpoint,
+                attempt_count=attempt_index + 1,
             )
             continue
 
@@ -326,6 +334,9 @@ async def _run_surface_stage(
                 payload=payload,
                 invalid_candidate=str(response_text),
                 reason="上一份候选未通过当前阶段的字段、类型、长度或 JSON contract 校验。",
+                stage_name=stage_name,
+                safe_checkpoint=safe_checkpoint,
+                attempt_count=attempt_index + 1,
             )
 
     raise _surface_execution_error(
@@ -362,6 +373,9 @@ def _surface_repair_messages(
     payload: Mapping[str, Any],
     invalid_candidate: str,
     reason: str,
+    stage_name: str,
+    safe_checkpoint: str,
+    attempt_count: int,
 ) -> list[SystemMessage | HumanMessage]:
     """Build a bounded same-context repair request with Chinese instructions."""
 
@@ -388,6 +402,14 @@ def _surface_repair_messages(
             },
             ensure_ascii=False,
             sort_keys=True,
+        )
+    if len(prompt_text) > SURFACE_STAGE_REPAIR_PROMPT_CAP:
+        raise _surface_execution_error(
+            stage_name=stage_name,
+            error_code="context_limit",
+            attempt_count=attempt_count,
+            detail="surface repair prompt exceeds its aggregate cap",
+            safe_checkpoint=safe_checkpoint,
         )
     return [
         SystemMessage(content=_SURFACE_REPAIR_PROMPT),
@@ -516,16 +538,39 @@ def _validate_visual_result(value: object) -> str:
     )
 
 
-def _surface_prompt_text(payload: Mapping[str, Any]) -> str:
-    """Serialize one already-projected surface packet within the fixed cap."""
+def _surface_prompt_text(
+    payload: Mapping[str, Any],
+    *,
+    stage_name: str,
+    safe_checkpoint: str,
+) -> str:
+    """Serialize one projected surface packet or raise its typed cap failure.
+
+    Args:
+        payload: Prompt-safe semantic surface context.
+        stage_name: Surface owner used in typed failure metadata.
+        safe_checkpoint: Caller-owned state checkpoint for degradation.
+
+    Returns:
+        Deterministic JSON within the aggregate surface cap.
+
+    Raises:
+        CognitionExecutionError: If the projected aggregate exceeds the cap.
+    """
 
     prompt_text = json.dumps(
         {"surface": payload},
         ensure_ascii=False,
         sort_keys=True,
     )
-    if len(prompt_text) > 24000:
-        raise ValueError("surface stage prompt exceeds the contract cap")
+    if len(prompt_text) > SURFACE_STAGE_PROMPT_CAP:
+        raise _surface_execution_error(
+            stage_name=stage_name,
+            error_code="context_limit",
+            attempt_count=0,
+            detail="surface 阶段 prompt 超过有界上下文上限",
+            safe_checkpoint=safe_checkpoint,
+        )
     return prompt_text
 
 

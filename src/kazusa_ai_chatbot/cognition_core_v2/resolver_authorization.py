@@ -120,9 +120,7 @@ async def authorize_resolver_requests(
         sort_keys=True,
     )
     if len(prompt_text) > RESOLVER_AUTHORIZATION_PROMPT_CAP:
-        raise CognitionExecutionError(
-            "resolver-authorization prompt exceeds contract cap"
-        )
+        return []
     messages: list[BaseMessage] = [
         SystemMessage(content=RESOLVER_AUTHORIZATION_PROMPT),
         HumanMessage(content=prompt_text),
@@ -134,6 +132,7 @@ async def authorize_resolver_requests(
         candidate_handles=list(candidate_requests),
         stage_name="resolver_authorization",
         output_state_fields=["authorized_resolver_requests"],
+        prompt_cap=RESOLVER_AUTHORIZATION_PROMPT_CAP,
     )
     authorized_handles = {
         handle for handle, authorized in decisions.items() if authorized

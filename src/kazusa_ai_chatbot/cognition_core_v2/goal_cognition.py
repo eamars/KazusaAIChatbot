@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from time import perf_counter
 from typing import Any
 
@@ -24,11 +25,29 @@ from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
     V2_MODEL_TOTAL_ATTEMPTS,
     V2_VERIFIER_TOTAL_ATTEMPTS,
 )
+from kazusa_ai_chatbot.cognition_core_v2.prompt_budget import (
+    PromptBudgetError,
+    fit_evidence_texts_to_budget,
+)
 from kazusa_ai_chatbot.llm_interface import LLMCallConfig
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 
 
 GOAL_COGNITION_ATTEMPT_LIMIT = V2_MODEL_TOTAL_ATTEMPTS
+GOAL_COGNITION_PROMPT_CAP = 24000
+MIN_PROMPT_EVIDENCE_TEXT_CHARS = 96
+_GOAL_SUPPLEMENTAL_CONTEXT_ORDER = (
+    "causal_candidates",
+    "knowledge_gaps",
+    "events",
+    "threats",
+    "goals",
+    "affect",
+    "relationship",
+    "roles",
+    "appraisal_summaries",
+    "private_continuity_context",
+)
 
 
 GOAL_COGNITION_PROMPT = '''你是一个独立的目标认知分支。请为当前事件选择一个完整、有证据支持，
@@ -135,11 +154,43 @@ async def run_goal_cognition(
     role_summaries = semantic_context.get("role_summaries", {})
     if not isinstance(role_summaries, Mapping):
         role_summaries = {}
+    missing_role_summaries = set(role_bindings) - set(role_summaries)
+    if missing_role_summaries:
+        raise ValueError(
+            "goal cognition role bindings require matching summaries"
+        )
+    prompt_role_summaries = {
+        handle: role_summaries[handle]
+        for handle in sorted(role_bindings)
+    }
     prompt_context = {
         key: value
         for key, value in semantic_context.items()
         if not key.startswith("_")
+        and key not in {
+            "evidence",
+            "goal_projection",
+            "role_summaries",
+        }
     }
+    scene_context = prompt_context.get("scene_context")
+    if isinstance(scene_context, Mapping):
+        prompt_context["scene_context"] = {
+            key: value
+            for key, value in scene_context.items()
+            if key not in {
+                "character_role",
+                "current_user_role",
+            }
+        }
+    prompt_evidence = [
+        {
+            "handle": row["evidence_handle"],
+            "source_kind": row["evidence_ref"]["source_kind"],
+            "semantic_text": row["semantic_text"],
+        }
+        for row in evidence
+    ]
     prompt_payload = {
         "branch": {
             "goal_kind": definition.goal_kind,
@@ -150,20 +201,25 @@ async def run_goal_cognition(
             {"goal_kind": definition.goal_kind, "lifecycle": "active"},
         ),
         "semantic_context": prompt_context,
-        "evidence": [
-            {
-                "handle": row["evidence_handle"],
-                "source_kind": row["evidence_ref"]["source_kind"],
-                "semantic_text": row["semantic_text"],
-            }
-            for row in evidence
-        ],
-        "role_handles": sorted(role_summaries),
-        "role_summaries": dict(role_summaries),
+        "evidence": prompt_evidence,
+        "role_handles": sorted(role_bindings),
+        "role_summaries": prompt_role_summaries,
     }
-    prompt_text = json.dumps(prompt_payload, ensure_ascii=False, sort_keys=True)
-    if len(prompt_text) > 24000:
-        raise ValueError("goal cognition prompt exceeds the contract cap")
+    try:
+        prompt_text = _fit_goal_prompt_payload(
+            prompt_payload,
+            prompt_evidence,
+        )
+    except PromptBudgetError as exc:
+        raise CognitionExecutionError(
+            "required goal cognition context exceeds the aggregate cap",
+            error_code="goal_cognition_context_limit",
+            branch_id=definition.branch_id,
+            stage="goal_cognition",
+            attempt_count=0,
+            safe_checkpoint="pre_state_commit",
+            retryable=False,
+        ) from exc
     initial_messages: list[BaseMessage] = [
         SystemMessage(content=GOAL_COGNITION_PROMPT),
         HumanMessage(content=prompt_text),
@@ -267,6 +323,16 @@ async def run_goal_cognition(
                 ensure_ascii=False,
                 sort_keys=True,
             )
+            if len(repair_text) > GOAL_COGNITION_PROMPT_CAP:
+                raise CognitionExecutionError(
+                    "required goal repair context exceeds the aggregate cap",
+                    error_code="goal_cognition_repair_context_limit",
+                    branch_id=definition.branch_id,
+                    stage="goal_cognition",
+                    attempt_count=attempt_index + 1,
+                    safe_checkpoint="pre_state_commit",
+                    retryable=False,
+                ) from exc
             request_messages = [
                 SystemMessage(content=GOAL_COGNITION_REPAIR_PROMPT),
                 HumanMessage(content=repair_text),
@@ -318,6 +384,55 @@ async def run_goal_cognition(
     return bid
 
 
+def _fit_goal_prompt_payload(
+    payload: dict[str, Any],
+    evidence_rows: list[dict[str, Any]],
+) -> str:
+    """Fit projected goal context before reducing lower-priority evidence."""
+
+    semantic_context = payload["semantic_context"]
+    if not isinstance(semantic_context, Mapping):
+        raise ValueError("goal cognition semantic context is invalid")
+    projected_context = deepcopy(dict(semantic_context))
+    while True:
+        candidate = dict(payload)
+        candidate["semantic_context"] = projected_context
+        prompt_text = json.dumps(
+            candidate,
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        if len(prompt_text) <= GOAL_COGNITION_PROMPT_CAP:
+            return prompt_text
+
+        removed = False
+        for key in _GOAL_SUPPLEMENTAL_CONTEXT_ORDER:
+            if key not in projected_context:
+                continue
+            value = projected_context[key]
+            if isinstance(value, list):
+                if len(value) > 1:
+                    projected_context[key] = value[:-1]
+                else:
+                    projected_context.pop(key)
+                removed = True
+                break
+            projected_context.pop(key)
+            removed = True
+            break
+        if removed:
+            continue
+
+        fitted_prompt = fit_evidence_texts_to_budget(
+            candidate,
+            evidence_rows,
+            text_field="semantic_text",
+            maximum_chars=GOAL_COGNITION_PROMPT_CAP,
+            minimum_text_chars=MIN_PROMPT_EVIDENCE_TEXT_CHARS,
+        )
+        return fitted_prompt
+
+
 async def _enforce_required_selection_alignment(
     *,
     definition: BranchDefinition,
@@ -362,9 +477,7 @@ async def _enforce_required_selection_alignment(
             sort_keys=True,
         )
         if len(repair_text) > REQUIRED_SELECTION_REPAIR_PROMPT_CAP:
-            raise ValueError(
-                "required-selection repair prompt exceeds contract cap"
-            )
+            return latest_valid_draft
         messages = [
             SystemMessage(content=REQUIRED_SELECTION_REPAIR_PROMPT),
             HumanMessage(content=repair_text),
@@ -498,7 +611,7 @@ async def _verify_required_selection_bid(
     }
     prompt_text = json.dumps(payload, ensure_ascii=False, sort_keys=True)
     if len(prompt_text) > REQUIRED_SELECTION_VERIFIER_PROMPT_CAP:
-        raise ValueError("required-selection verifier prompt exceeds contract cap")
+        return None
     messages = [
         SystemMessage(content=REQUIRED_SELECTION_VERIFIER_PROMPT),
         HumanMessage(content=prompt_text),

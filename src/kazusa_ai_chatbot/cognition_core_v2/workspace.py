@@ -25,6 +25,7 @@ from kazusa_ai_chatbot.utils import parse_llm_json_output
 
 
 WORKSPACE_COLLAPSE_ATTEMPT_LIMIT = V2_MODEL_TOTAL_ATTEMPTS
+WORKSPACE_COLLAPSE_PROMPT_CAP = 24000
 WORKSPACE_COLLAPSE_REPAIR_OUTPUT_CAP = 4000
 
 
@@ -66,15 +67,16 @@ async def collapse_bids(
         }
     }
     prompt_text = json.dumps(prompt_payload, ensure_ascii=False, sort_keys=True)
-    if len(prompt_text) > 24000:
-        raise ValueError("workspace collapse prompt exceeds the contract cap")
     system_message = SystemMessage(content=COLLAPSE_PROMPT)
     request_messages = [
         system_message,
         HumanMessage(content=prompt_text),
     ]
     partition: dict[str, Any] | None = None
-    for attempt_index in range(WORKSPACE_COLLAPSE_ATTEMPT_LIMIT):
+    available_attempts = WORKSPACE_COLLAPSE_ATTEMPT_LIMIT
+    if len(prompt_text) > WORKSPACE_COLLAPSE_PROMPT_CAP:
+        available_attempts = 0
+    for attempt_index in range(available_attempts):
         try:
             response = await services.llm.ainvoke(
                 request_messages,
@@ -119,13 +121,16 @@ async def collapse_bids(
                     "invalid_candidate": invalid_candidate,
                 },
             }
+            repair_text = json.dumps(
+                repair_payload,
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+            if len(repair_text) > WORKSPACE_COLLAPSE_PROMPT_CAP:
+                break
             request_messages = [
                 system_message,
-                HumanMessage(content=json.dumps(
-                    repair_payload,
-                    ensure_ascii=False,
-                    sort_keys=True,
-                )),
+                HumanMessage(content=repair_text),
             ]
             continue
         break

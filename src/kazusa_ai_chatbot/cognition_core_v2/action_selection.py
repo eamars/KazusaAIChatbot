@@ -302,21 +302,21 @@ async def plan_actions(
     }
     prompt_text = json.dumps(prompt_payload, ensure_ascii=False, sort_keys=True)
     if len(prompt_text) > ACTION_PLANNING_PROMPT_CAP:
-        raise CognitionExecutionError("action-planning prompt exceeds contract cap")
-
-    messages: list[BaseMessage] = [
-        SystemMessage(content=ACTION_PLANNING_PROMPT),
-        HumanMessage(content=prompt_text),
-    ]
-    decision = await _invoke_action_planner(
-        services=services,
-        messages=messages,
-        bid_handles=bid_handles,
-        action_handles=action_handles,
-        resolver_handles=resolver_handles,
-        current_goal_progress=current_goal_progress,
-        runtime_capability_limits=runtime_capability_limits,
-    )
+        decision = _empty_action_plan_decision()
+    else:
+        messages: list[BaseMessage] = [
+            SystemMessage(content=ACTION_PLANNING_PROMPT),
+            HumanMessage(content=prompt_text),
+        ]
+        decision = await _invoke_action_planner(
+            services=services,
+            messages=messages,
+            bid_handles=bid_handles,
+            action_handles=action_handles,
+            resolver_handles=resolver_handles,
+            current_goal_progress=current_goal_progress,
+            runtime_capability_limits=runtime_capability_limits,
+        )
     authorized_action_rows = await authorize_action_requests(
         action_requests=decision["action_requests"],
         bid_handles=bid_handles,
@@ -397,6 +397,13 @@ async def _invoke_action_planner(
     """Invoke the semantic planner with bounded contract replacements."""
 
     base_messages = list(messages)
+    base_prompt_chars = sum(
+        len(str(message.content))
+        for message in base_messages
+        if isinstance(message, HumanMessage)
+    )
+    if base_prompt_chars > ACTION_PLANNING_PROMPT_CAP:
+        return _empty_action_plan_decision()
     current_messages = list(base_messages)
     for attempt_index in range(ACTION_PLANNING_ATTEMPT_LIMIT):
         started_at = perf_counter()
@@ -470,14 +477,17 @@ async def _invoke_action_planner(
                     f"Action planning dropped an unusable replacement: {exc}"
                 )
                 return _empty_action_plan_decision()
-            current_messages = [
-                *base_messages,
-                _action_planning_repair_message(
-                    response_text=response_text,
-                    contract_error=str(exc),
-                    runtime_capability_limits=runtime_capability_limits,
-                ),
-            ]
+            repair_message = _action_planning_repair_message(
+                response_text=response_text,
+                contract_error=str(exc),
+                runtime_capability_limits=runtime_capability_limits,
+            )
+            if (
+                base_prompt_chars + len(str(repair_message.content))
+                > ACTION_PLANNING_PROMPT_CAP
+            ):
+                return _empty_action_plan_decision()
+            current_messages = [*base_messages, repair_message]
             continue
 
         await _record_action_planning_trace(

@@ -1173,14 +1173,15 @@ async def _collect_appraisals(
     for question, result in zip(questions, collected, strict=True):
         if isinstance(result, BaseException):
             if isinstance(result, CognitionContextLimitError):
-                raise result
-            if (
+                error_code = "semantic_appraisal_context_limit"
+            elif (
                 not isinstance(result, CognitionExecutionError)
                 or result.stage != "semantic_appraisal"
                 or result.error_code not in _DEGRADABLE_APPRAISAL_ERROR_CODES
             ):
                 raise result
-            error_code = result.error_code
+            else:
+                error_code = result.error_code
             failures[question["question_id"]] = error_code
             warnings.append(f"semantic_appraisal_failed:{error_code}")
         else:

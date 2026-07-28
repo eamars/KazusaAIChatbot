@@ -39,7 +39,6 @@ long_term/todo.md
 | Document | Type | Status |
 |---|---|---|
 | [coding_agent_assessment_gap_phase_d_plan.md](active/short_term/coding_agent_assessment_gap_phase_d_plan.md) | High-risk coding-agent migration plan for a generic JSON action loop, persistent repository index, exploration-cap removal, and delete/rename | in progress |
-| [cognition_core_v2_stage_4_production_database_migration_plan.md](active/short_term/cognition_core_v2_stage_4_production_database_migration_plan.md) | Executable draft for read-only `kazusa_bot_core` discovery and isolated construction of native `kazusa_core_v2`; application configuration and cutover remain user-owned | draft |
 
 ## Supporting Experiment Records
 
@@ -51,6 +50,8 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
+| [cognition_core_v2_character_identity_growth_bigbang_plan.md](active/bugfix/cognition_core_v2_character_identity_growth_bigbang_plan.md) | High-risk big-bang plan for versioned global character identity, self-image, growth, and privacy-safe cross-scope carry-over | draft |
+| [cognition_core_v2_short_horizon_global_state_composition_bigbang_plan.md](active/bugfix/cognition_core_v2_short_horizon_global_state_composition_bigbang_plan.md) | Post-identity V2 plan for transient global posture, causal relationship context, scoped style composition, and runtime/UI proof | draft |
 | [rag2_public_output_contract_leak_bugfix_plan.md](active/bugfix/rag2_public_output_contract_leak_bugfix_plan.md) | Large RAG2 prompt/evidence contract bugfix plan | draft |
 
 ## Reference Documents
@@ -304,7 +305,7 @@ and that environment disposition remains recorded in the archived plans.
 | Outcome | Plans |
 |---|---|
 | Moved from active short-term to completed archive | `cognition_core_v2_stage_3_system_adoption_plan.md`, `cognition_core_v2_stage_3_execution_manifest.md`, `cognition_core_v2_stage_3_change_radius.md` |
-| Stage 4 handoff input | `cognition_core_v2_stage_4_production_database_migration_plan.md` is an executable draft for isolated target construction and requires separate authority for discovery, target writes, and later user-owned activation |
+| Stage 4 handoff input | `cognition_core_v2_stage_4_production_database_migration_plan.md` is approved as a one-off database migration; `kazusa_bot_core` stays read-only and later application activation remains user-owned |
 
 ### 2026-07-26 Cognition Core V2 transition-coherence completion
 
@@ -399,6 +400,12 @@ identity without rewriting historical conversation rows.
 |---|---|
 | Moved from active short-term to completed archive | `brain_owned_adapter_character_name_bigbang_plan.md` |
 
+### 2026-07-28 Cognition Core V2 Stage 4 invalidation
+
+| Outcome | Plan |
+|---|---|
+| Moved from active short-term to superseded archive | `cognition_core_v2_stage_4_production_database_migration_plan.md`; invalidated by user before execution |
+
 ## Archive
 
 Completed and superseded records live under `archive/`. Use them for historical
@@ -422,6 +429,7 @@ plans.
 | [cognition_core_v2_compositional_action_planning_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_compositional_action_planning_bugfix_plan.md) |
 | [cognition_core_v2_live_character_judgment_rebalance_plan.md](archive/completed/bugfix/cognition_core_v2_live_character_judgment_rebalance_plan.md) |
 | [cognition_core_v2_intra_turn_transition_coherence_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_intra_turn_transition_coherence_bugfix_plan.md) |
+| [cognition_core_v2_prompt_budget_and_failure_containment_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_prompt_budget_and_failure_containment_bugfix_plan.md) |
 | [cognition_core_v2_retry_exhaustion_continuity_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_retry_exhaustion_continuity_bugfix_plan.md) |
 | [asuna_private_r18_affinity_harness_plan.md](archive/completed/bugfix/asuna_private_r18_affinity_harness_plan.md) |
 | [real_history_personality_comparison_fixture_bugfix_plan.md](archive/completed/bugfix/real_history_personality_comparison_fixture_bugfix_plan.md) |
@@ -635,6 +643,7 @@ plans.
 | [character_reflection_cycle_stage1_plan.md](archive/superseded/character_reflection_cycle_stage1_plan.md) |
 | [conversation_graph_recent_context_plan.md](archive/superseded/conversation_graph_recent_context_plan.md) |
 | [cognition_preserving_goal_resolver_production_plan.md](archive/superseded/cognition_preserving_goal_resolver_production_plan.md) |
+| [cognition_core_v2_stage_4_production_database_migration_plan.md](archive/superseded/cognition_core_v2_stage_4_production_database_migration_plan.md) |
 | [dialog_visible_speech_and_semantic_fidelity_bugfix_plan.md](archive/superseded/dialog_visible_speech_and_semantic_fidelity_bugfix_plan.md) |
 | [graph_rag_recall_experiment_plan.md](archive/superseded/graph_rag_recall_experiment_plan.md) |
 | [goal_resolver_poc_plan.md](archive/superseded/goal_resolver_poc_plan.md) |

@@ -9,6 +9,7 @@ import pytest
 from langchain_core.messages import HumanMessage
 
 from kazusa_ai_chatbot.cognition_core_v2.action_authorization import (
+    ACTION_AUTHORIZATION_PROMPT_CAP,
     invoke_semantic_authorizer,
 )
 from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
@@ -1011,6 +1012,7 @@ async def test_authorizer_denies_after_bounded_exhaustion() -> None:
         candidate_handles=["c1", "c2"],
         stage_name="test_authorization",
         output_state_fields=["authorized_requests"],
+        prompt_cap=ACTION_AUTHORIZATION_PROMPT_CAP,
     )
 
     assert calls == 3
@@ -1053,6 +1055,7 @@ async def test_authorizer_recovers_on_third_attempt() -> None:
         candidate_handles=["c1", "c2"],
         stage_name="test_authorization",
         output_state_fields=["authorized_requests"],
+        prompt_cap=ACTION_AUTHORIZATION_PROMPT_CAP,
     )
 
     assert calls == 3

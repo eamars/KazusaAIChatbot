@@ -278,6 +278,48 @@ fallback remain execution errors. Recoverable and degraded outcomes follow the
 normal persistence and delivery path. Callers commit only validated replacement
 state.
 
+## Aggregate Prompt Budgets
+
+Each V2 model owner budgets its complete deterministic serialization rather
+than relying on independent producer-field limits. Semantic appraisal owns an
+8,000-character packet containing its question contract, one top-level
+semantic-evidence registry, and its authorized state projection. Exact
+`permitted_delta_paths` remain private validator authority; the model receives
+grouped `state_field`, `handles`, and `axes` domains and returns the same
+canonical `state_field.handle.axis` target path.
+
+Appraisal and goal cognition reduce supplemental projected state first. If the
+packet remains over its fixed cap, they retain every evidence row, handle,
+source kind, and source order while middle-truncating semantic text from the
+lowest-priority row backward. Both owners preserve at least 96 characters per
+reduced evidence text, or the complete original when it is shorter. Goal
+cognition owns the equivalent single-registry packet under its fixed
+24,000-character cap, with the current episode retaining highest source
+priority. Its goal projection and canonical role summaries are each serialized
+once; duplicate evidence, goal projection, role summaries, and scene role
+labels are absent from supplemental semantic context.
+
+Every initial attempt and every bounded repair or replacement attempt measures
+the aggregate dynamic message content before invoking its model. A repair that
+would cross the owner's existing cap consumes no additional model call and
+uses the same stage-owned continuation as an over-cap initial attempt.
+
+Pre-invocation cap exhaustion follows the outcome owned by each stage:
+
+- an irreducible appraisal family is omitted with typed diagnostics;
+- required-selection verification becomes unavailable, while repair retains
+  the latest structurally valid goal bid;
+- workspace collapse selects its stable first complete bid;
+- action planning returns a blocked empty proposal;
+- action and resolver authorization deny every candidate;
+- text-surface planning returns its validated degraded surface;
+- visual-surface planning raises its typed optional-stage failure.
+
+These dispositions consume zero model calls at the over-cap boundary and
+authorize no action or resolver side effect. Canonical input validation,
+persistent-state validation, reducer and commit invariants, and required owner
+failures continue through their typed unrecoverable paths.
+
 ## Testing Contract
 
 Run the focused V2 contract, state, emotion-lifecycle, failure, and reflection
