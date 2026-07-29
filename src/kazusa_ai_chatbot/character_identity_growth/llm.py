@@ -7,6 +7,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 import json
 import time
+import unicodedata
 
 import httpx
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -40,7 +41,29 @@ _IDENTITY_CONTRACT_REGENERATION_PROMPT_TEMPLATES = {
 The prior object failed the closed proposal contract. Return one complete
 replacement JSON object. Every proposed_changes item must copy the exact
 tagged patch shape: path, value_kind, and exactly one replacement field that
-matches value_kind. Include every required top-level key and no unknown key.
+matches value_kind. Re-evaluate the whole object from the original context;
+the rejected object is error evidence, not a template to repeat.
+
+Required top-level keys:
+{required_top_level_keys}
+
+Exact allowed evidence_ref_ids:
+{evidence_ref_ids}
+
+Exact allowed candidate_ids:
+{candidate_ids}
+
+Copy any cited identifier exactly from these lists. Use an empty list or null
+when the semantic decision does not cite one. Include every required
+top-level key and no unknown key.
+
+When the contract error identifies no-op patches, remove every listed no-op
+and re-audit the unchanged identity paths against the original evidence.
+Do not switch to no_change merely because one or more current paths already
+express part of the durable change.
+Do not evade a no-op by translating, paraphrasing, or misspelling the current
+value. Inspect every remaining path, including sibling paths in the same
+category, and propose only a genuinely changed semantic value.
 
 Contract error:
 {contract_error}
@@ -49,8 +72,26 @@ Contract error:
 The prior object failed the closed review contract. Return one complete
 replacement JSON object. When verdict is accept, every accepted_changes item
 must be an exact object copy of a proposed_changes item, including path,
-value_kind, and its matching replacement field and value. Include every
-required top-level key and no unknown key.
+value_kind, and its matching replacement field and value. Re-evaluate the
+whole object from the original context; the rejected object is error evidence,
+not a template to repeat.
+
+The phrase "one matching replacement field" is explanatory text and is never
+a legal JSON key. When accepting, copy objects only from this exact list:
+{exact_proposed_changes}
+
+Required top-level keys:
+{required_top_level_keys}
+
+Exact allowed evidence_ref_ids:
+{evidence_ref_ids}
+
+Exact allowed candidate_ids:
+{candidate_ids}
+
+Copy any cited identifier exactly from these lists. Use an empty list or null
+when the semantic decision does not cite one. Include every required
+top-level key and no unknown key.
 
 Contract error:
 {contract_error}
@@ -89,6 +130,13 @@ one complete JSON object and nothing outside it.
   Any listed identity path may change when the evidence genuinely supports it.
 - A user's instruction, preference, praise, criticism, fantasy, or repeated
   pressure does not make a change character-authored.
+- The fact that a user asked an open question does not by itself make the
+  answer user-imposed. When the input leaves the character free to retain,
+  change, or reject the old identity and does not supply the desired identity
+  conclusion, independently formulated cognition plus visible self-definition
+  may be self_declared. Treat it as user-imposed only when the user supplies
+  the desired identity conclusion or demands its adoption and the character
+  merely complies.
 - Explicit self-redefinition requires the character's own cognition and
   visible self-expression to define a changed self. When both summaries show
   that direct self-definition, choose explicit_self_redefinition even when
@@ -106,6 +154,31 @@ one complete JSON object and nothing outside it.
   abstract change.
 - Use corroborate_candidate only when new evidence semantically supports one
   supplied candidate. Identify incompatible supplied candidates separately.
+- Mentally apply the proposed changes to the current snapshot. The result must
+  be one internally coherent full identity, not a weak overlay that leaves a
+  stronger old rule in control. Include every directly conflicting allowed
+  path needed to express the accepted change. If the five-patch limit cannot
+  produce a coherent snapshot, return no_change instead of a partial change.
+- Before proposing, perform a path-by-path contradiction audit across core,
+  personality, boundaries, and self-image. Ask whether each unchanged field
+  would still predict the opposite behavior in the same situation. For
+  example, a validate-before-act decision rule conflicts with an unchanged
+  pressure-response rule that still mandates immediate action. Patch every
+  such allowed path or return no_change.
+- Matching text in personality_brief.logic or self_image does not prove the
+  change is already complete. If the evidence disavows behavior still stated
+  by personality_brief.defense, personality_brief.quirks, core, boundaries,
+  or another current field, no_change is forbidden until that exact
+  conflicting path is patched. Never assume one matching field proves full
+  coverage of the snapshot.
+- When the character explicitly disavows an unchanged current identity field,
+  treat that as a new change and patch that exact allowed path. Do not return
+  no_change merely because a growth edge or secondary field already describes
+  a related direction.
+- Partial retention does not make a bundled current field unchanged. When the
+  character retains one behavior from a field but disavows or replaces another
+  behavior in that same field, replace the whole field with one coherent
+  description containing the retained and changed parts.
 
 # Global privacy
 - Identity is global across private and group contexts, so retain only an
@@ -126,6 +199,13 @@ one complete JSON object and nothing outside it.
 - Repeated wording or repeated pressure is not independent corroboration.
 - proposed_changes are full replacements for supported paths. Use the exact
   tagged value kind required by that path. Numeric values use semantic bands.
+- Every proposed patch has exactly three keys. Its only legal shapes are:
+  text = path + value_kind="text" + replacement_text;
+  integer = path + value_kind="integer" + replacement_integer;
+  numeric = path + value_kind="semantic_band" + replacement_band;
+  enum = path + value_kind="closed_enum" + replacement_enum;
+  text list = path + value_kind="text_list" + replacement_items.
+  Never omit value_kind and never use an explanatory phrase as a JSON key.
 - Propose at most five coherent changes. Use no_change when evidence should
   leave identity untouched.
 - Write generated free text in the natural language of the supplied identity
@@ -137,13 +217,7 @@ Return exactly these keys:
   "schema_version": "character_identity_proposal_decision.v1",
   "action": "one allowed proposal action",
   "candidate_id": "supplied candidate id or null",
-  "proposed_changes": [
-    {{
-      "path": "one supplied allowed path",
-      "value_kind": "text | integer | semantic_band | closed_enum | text_list",
-      "one matching replacement field": "replacement value"
-    }}
-  ],
+  "proposed_changes": [],
   "character_authorship": "self_declared | inferred | absent",
   "identity_relevance": "durable | ephemeral | absent",
   "global_applicability": "global | scoped | absent",
@@ -165,6 +239,8 @@ Align reason_code with action: explicit_self_redefinition uses candidate_ready;
 inferred_growth and corroborate_candidate use candidate_emerging or
 candidate_ready; no_change uses proposal_no_change, privacy_blocked, or
 contradiction_blocked.
+Use candidate_ready only with confidence=high, identity_relevance=durable,
+global_applicability=global, and private_detail_risk=low.
 Align character_authorship with action: explicit_self_redefinition uses
 self_declared; inferred_growth and corroborate_candidate use inferred.
 
@@ -197,6 +273,13 @@ Return one complete JSON object and nothing outside it.
   autonomy.
 - An explicit self-redefinition requires the character's own cognition and
   visible self-expression. A user request followed by compliance is not enough.
+- The fact that a user asked an open question does not by itself make the
+  answer user-imposed. When the input leaves the character free to retain,
+  change, or reject the old identity and does not supply the desired identity
+  conclusion, independently formulated cognition plus visible self-definition
+  may be self_declared. Treat it as user-imposed only when the user supplies
+  the desired identity conclusion or demands its adoption and the character
+  merely complies.
 - Inferred growth requires semantically independent, durable character-owned
   evidence. Counts and repeated wording do not replace this judgment.
 - One coherent direction may be selected among competing candidates. Every
@@ -210,6 +293,25 @@ Return one complete JSON object and nothing outside it.
   generated summaries, not merely because the source topic involves intimacy.
 - If accepting, copy proposed_changes exactly. Do not improve, rewrite, add,
   remove, or normalize their semantic values.
+- Before accepting, mentally apply every proposed patch to the supplied current
+  identity. Reject the proposal when any unchanged identity field remains
+  directly incompatible with the proposed durable change or would predict the
+  opposite behavior. A growth edge or secondary descriptive field alone does
+  not override a conflicting core/personality/boundary/self-image rule.
+- Perform a path-by-path contradiction audit across every supplied core,
+  personality, boundary, and self-image field before accepting. A new
+  validate-before-act decision rule remains incoherent when an unchanged
+  pressure-response rule still mandates immediate action. Treat that conflict
+  as review_rejected instead of assuming one field silently outranks another.
+- For a proposed no_change, never assume one matching field proves full
+  coverage. In particular, matching personality_brief.logic or self_image
+  cannot hide disavowed behavior still stated in personality_brief.defense,
+  personality_brief.quirks, core, boundaries, or another current field. If
+  such a path remains, the proposal's no_change judgment is semantically
+  wrong and the review must reject it.
+- Confirm that a directly disavowed unchanged rule receives its own patch.
+  Reject no-change reasoning that relies only on the fact that a secondary
+  field already points in a similar direction.
 - If rejecting or returning no_change, accepted_change_kind is null and
   accepted_changes is empty.
 - Write generated free text in the natural language of the supplied identity
@@ -223,13 +325,7 @@ Return exactly these keys:
   "selected_candidate_id": "supplied selected candidate id or null",
   "rejected_candidate_ids": ["supplied incompatible candidate ids"],
   "accepted_change_kind": "explicit_self_redefinition | inferred_growth | null",
-  "accepted_changes": [
-    {
-      "path": "exact proposed path",
-      "value_kind": "exact proposed value kind",
-      "one matching replacement field": "exact proposed replacement value"
-    }
-  ],
+  "accepted_changes": [],
   "character_authorship": "self_declared | inferred | absent",
   "identity_relevance": "durable | ephemeral | absent",
   "coherence": "coherent | conflicting | absent",
@@ -250,6 +346,9 @@ Align reason_code with verdict: an accepted explicit self-redefinition uses
 candidate_ready; other acceptances use candidate_emerging or candidate_ready;
 no_change uses proposal_no_change; reject uses review_rejected,
 privacy_blocked, or contradiction_blocked.
+Use candidate_ready only with review_confidence=high,
+identity_relevance=durable, coherence=coherent,
+global_applicability=global, and private_detail_risk=low.
 For verdict=accept, character_authorship must match accepted_change_kind:
 self_declared for explicit_self_redefinition and inferred for inferred_growth.
 '''
@@ -305,6 +404,8 @@ class IdentityPromptBuildResult:
     candidate_count: int
     evidence_ref_ids: tuple[str, ...]
     candidate_ids: tuple[str, ...]
+    evidence_ref_aliases: tuple[tuple[str, str], ...]
+    candidate_aliases: tuple[tuple[str, str], ...]
 
 
 @dataclass(frozen=True)
@@ -419,23 +520,37 @@ async def propose_identity_growth(
     )
     evidence_ref_ids = set(prompt.evidence_ref_ids)
     candidate_ids = set(prompt.candidate_ids)
+    current_identity = proposal_input.get("current_identity")
+    if not isinstance(current_identity, Mapping):
+        raise ValueError("identity proposal input requires current_identity")
 
     def validate(
         parsed: Mapping[str, object],
     ) -> models.IdentityProposalDecisionV1:
-        return validate_identity_proposal_decision(
+        decision = validate_identity_proposal_decision(
             parsed,
             evidence_ref_ids=evidence_ref_ids,
             candidate_ids=candidate_ids,
         )
+        if decision["action"] != "no_change":
+            _require_non_noop_prompt_patches(
+                current_identity,
+                decision["proposed_changes"],
+            )
+        return decision
 
-    return await _run_identity_stage(
+    result = await _run_identity_stage(
         stage="proposal",
         prompt=prompt,
         expected_output_format=_PROPOSAL_EXPECTED_FORMAT,
         validator=validate,
         invoker=invoker or _identity_llm,
         trace_id=trace_id,
+    )
+    return _restore_identity_stage_result_handles(
+        result,
+        prompt=prompt,
+        stage="proposal",
     )
 
 
@@ -454,7 +569,8 @@ async def review_identity_growth(
     )
     evidence_ref_ids = set(prompt.evidence_ref_ids)
     candidate_ids = set(prompt.candidate_ids)
-    raw_proposal = review_input.get("proposal_decision")
+    prompt_payload = json.loads(prompt.human_prompt)
+    raw_proposal = prompt_payload.get("proposal_decision")
     if not isinstance(raw_proposal, Mapping):
         raise ValueError("identity review input requires proposal_decision")
 
@@ -468,13 +584,18 @@ async def review_identity_growth(
             candidate_ids=candidate_ids,
         )
 
-    return await _run_identity_stage(
+    result = await _run_identity_stage(
         stage="review",
         prompt=prompt,
         expected_output_format=_REVIEW_EXPECTED_FORMAT,
         validator=validate,
         invoker=invoker or _identity_llm,
         trace_id=trace_id,
+    )
+    return _restore_identity_stage_result_handles(
+        result,
+        prompt=prompt,
+        stage="review",
     )
 
 
@@ -492,7 +613,11 @@ def _build_bounded_prompt(
         or prompt_char_budget <= 0
     ):
         raise ValueError("identity prompt_char_budget must be positive")
-    bounded_payload = deepcopy(dict(payload))
+    (
+        bounded_payload,
+        evidence_ref_aliases,
+        candidate_aliases,
+    ) = _alias_prompt_handles(payload)
     raw_candidates = bounded_payload.get("current_candidates")
     if not isinstance(raw_candidates, list):
         raise ValueError("identity prompt current_candidates must be a list")
@@ -516,6 +641,12 @@ def _build_bounded_prompt(
                 candidate_count=len(raw_candidates),
                 evidence_ref_ids=tuple(sorted(evidence_ref_ids)),
                 candidate_ids=tuple(sorted(candidate_ids)),
+                evidence_ref_aliases=tuple(
+                    sorted(evidence_ref_aliases.items())
+                ),
+                candidate_aliases=tuple(
+                    sorted(candidate_aliases.items())
+                ),
             )
         removable_index = _last_removable_candidate_index(
             raw_candidates,
@@ -527,6 +658,199 @@ def _build_bounded_prompt(
         raise IdentityPromptBudgetError(
             "required identity and evidence exceed the prompt budget"
         )
+
+
+def _alias_prompt_handles(
+    payload: Mapping[str, object],
+) -> tuple[
+    dict[str, object],
+    dict[str, str],
+    dict[str, str],
+]:
+    """Replace repository identifiers with short prompt-local handles."""
+
+    aliased = deepcopy(dict(payload))
+    raw_cards = aliased.get("evidence_cards")
+    raw_candidates = aliased.get("current_candidates")
+    if not isinstance(raw_cards, list) or not isinstance(
+        raw_candidates,
+        list,
+    ):
+        raise ValueError("identity stage input requires cards and candidates")
+
+    evidence_source_to_alias: dict[str, str] = {}
+    evidence_alias_to_source: dict[str, str] = {}
+    for index, raw_card in enumerate(raw_cards, start=1):
+        source_id = _mapping_text(raw_card, "evidence_ref_id")
+        alias = f"evidence-{index}"
+        evidence_source_to_alias[source_id] = alias
+        evidence_alias_to_source[alias] = source_id
+        if not isinstance(raw_card, dict):
+            raise ValueError("identity evidence card must be mutable")
+        raw_card["evidence_ref_id"] = alias
+
+    candidate_source_to_alias: dict[str, str] = {}
+    candidate_alias_to_source: dict[str, str] = {}
+    for index, raw_candidate in enumerate(raw_candidates, start=1):
+        source_id = _mapping_text(raw_candidate, "candidate_id")
+        alias = f"candidate-{index}"
+        candidate_source_to_alias[source_id] = alias
+        candidate_alias_to_source[alias] = source_id
+        if not isinstance(raw_candidate, dict):
+            raise ValueError("identity candidate must be mutable")
+        raw_candidate["candidate_id"] = alias
+
+    raw_proposal = aliased.get("proposal_decision")
+    if isinstance(raw_proposal, dict):
+        raw_proposal["evidence_ref_ids"] = _alias_handle_list(
+            raw_proposal.get("evidence_ref_ids"),
+            source_to_alias=evidence_source_to_alias,
+            context="identity proposal evidence refs",
+        )
+        raw_proposal["candidate_id"] = _alias_optional_handle(
+            raw_proposal.get("candidate_id"),
+            source_to_alias=candidate_source_to_alias,
+            context="identity proposal candidate",
+        )
+        raw_proposal["contradiction_candidate_ids"] = _alias_handle_list(
+            raw_proposal.get("contradiction_candidate_ids"),
+            source_to_alias=candidate_source_to_alias,
+            context="identity proposal contradiction candidates",
+        )
+
+    return (
+        aliased,
+        evidence_alias_to_source,
+        candidate_alias_to_source,
+    )
+
+
+def _alias_handle_list(
+    value: object,
+    *,
+    source_to_alias: Mapping[str, str],
+    context: str,
+) -> list[str]:
+    """Translate a closed list of repository handles into prompt aliases."""
+
+    if not isinstance(value, list):
+        raise ValueError(f"{context} must be a list")
+    aliases: list[str] = []
+    for source_id in value:
+        if not isinstance(source_id, str):
+            raise ValueError(f"{context} entries must be text")
+        alias = source_to_alias.get(source_id)
+        if alias is None:
+            raise ValueError(f"{context} cites an unknown handle")
+        aliases.append(alias)
+    return aliases
+
+
+def _alias_optional_handle(
+    value: object,
+    *,
+    source_to_alias: Mapping[str, str],
+    context: str,
+) -> str | None:
+    """Translate one optional repository handle into a prompt alias."""
+
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"{context} must be text or null")
+    alias = source_to_alias.get(value)
+    if alias is None:
+        raise ValueError(f"{context} cites an unknown handle")
+    return alias
+
+
+def _restore_identity_stage_result_handles(
+    result: IdentityStageResult,
+    *,
+    prompt: IdentityPromptBuildResult,
+    stage: str,
+) -> IdentityStageResult:
+    """Restore validated prompt aliases to repository identifiers."""
+
+    decision = deepcopy(result.decision)
+    evidence_aliases = dict(prompt.evidence_ref_aliases)
+    candidate_aliases = dict(prompt.candidate_aliases)
+    if stage == "proposal":
+        decision["evidence_ref_ids"] = _restore_handle_list(
+            decision.get("evidence_ref_ids"),
+            alias_to_source=evidence_aliases,
+            context="identity proposal evidence refs",
+        )
+        decision["candidate_id"] = _restore_optional_handle(
+            decision.get("candidate_id"),
+            alias_to_source=candidate_aliases,
+            context="identity proposal candidate",
+        )
+        decision["contradiction_candidate_ids"] = _restore_handle_list(
+            decision.get("contradiction_candidate_ids"),
+            alias_to_source=candidate_aliases,
+            context="identity proposal contradiction candidates",
+        )
+    elif stage == "review":
+        decision["selected_candidate_id"] = _restore_optional_handle(
+            decision.get("selected_candidate_id"),
+            alias_to_source=candidate_aliases,
+            context="identity review selected candidate",
+        )
+        decision["rejected_candidate_ids"] = _restore_handle_list(
+            decision.get("rejected_candidate_ids"),
+            alias_to_source=candidate_aliases,
+            context="identity review rejected candidates",
+        )
+    else:
+        raise ValueError(f"unknown identity stage: {stage}")
+    return IdentityStageResult(
+        decision=decision,
+        attempt_count=result.attempt_count,
+        prompt_chars=result.prompt_chars,
+        output_chars=result.output_chars,
+        validation_error_codes=result.validation_error_codes,
+        trace_id=result.trace_id,
+    )
+
+
+def _restore_handle_list(
+    value: object,
+    *,
+    alias_to_source: Mapping[str, str],
+    context: str,
+) -> list[str]:
+    """Translate validated prompt aliases back to repository handles."""
+
+    if not isinstance(value, list):
+        raise ValueError(f"{context} must be a list")
+    source_ids: list[str] = []
+    for alias in value:
+        if not isinstance(alias, str):
+            raise ValueError(f"{context} entries must be text")
+        source_id = alias_to_source.get(alias)
+        if source_id is None:
+            raise ValueError(f"{context} cites an unknown prompt handle")
+        source_ids.append(source_id)
+    return source_ids
+
+
+def _restore_optional_handle(
+    value: object,
+    *,
+    alias_to_source: Mapping[str, str],
+    context: str,
+) -> str | None:
+    """Translate one optional prompt alias back to a repository handle."""
+
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"{context} must be text or null")
+    source_id = alias_to_source.get(value)
+    if source_id is None:
+        raise ValueError(f"{context} cites an unknown prompt handle")
+    return source_id
 
 
 def _protected_candidate_ids(payload: Mapping[str, object]) -> set[str]:
@@ -584,6 +908,91 @@ def _input_handles(
         for candidate in raw_candidates
     }
     return evidence_ref_ids, candidate_ids
+
+
+def _require_non_noop_prompt_patches(
+    current_identity: Mapping[str, object],
+    patches: list[models.IdentityPatchV1],
+) -> None:
+    """Reject replacements equal to the prompt-safe current value."""
+
+    no_op_paths: list[str] = []
+    replacement_fields = {
+        "text": "replacement_text",
+        "integer": "replacement_integer",
+        "semantic_band": "replacement_band",
+        "closed_enum": "replacement_enum",
+        "text_list": "replacement_items",
+    }
+    for patch in patches:
+        path = patch["path"]
+        current_value: object = current_identity
+        for part in path.split("."):
+            if not isinstance(current_value, Mapping):
+                raise ValueError(
+                    f"identity prompt path is unavailable: {path}"
+                )
+            current_value = current_value[part]
+        replacement_field = replacement_fields[patch["value_kind"]]
+        replacement_value = patch.get(replacement_field)
+        if _identity_prompt_values_match(
+            current_value,
+            replacement_value,
+            value_kind=patch["value_kind"],
+        ):
+            no_op_paths.append(path)
+    if no_op_paths:
+        raise ValueError(
+            f"identity patches are no-ops: {sorted(no_op_paths)}"
+        )
+
+
+def _identity_prompt_values_match(
+    current_value: object,
+    replacement_value: object,
+    *,
+    value_kind: str,
+) -> bool:
+    """Compare prompt values while ignoring text-only formatting drift."""
+
+    if value_kind == "text":
+        if not isinstance(current_value, str) or not isinstance(
+            replacement_value,
+            str,
+        ):
+            return current_value == replacement_value
+        return _identity_text_semantics_key(
+            current_value
+        ) == _identity_text_semantics_key(replacement_value)
+    if value_kind == "text_list":
+        if not isinstance(current_value, list) or not isinstance(
+            replacement_value,
+            list,
+        ):
+            return current_value == replacement_value
+        if not all(isinstance(item, str) for item in current_value):
+            return current_value == replacement_value
+        if not all(isinstance(item, str) for item in replacement_value):
+            return current_value == replacement_value
+        return [
+            _identity_text_semantics_key(item)
+            for item in current_value
+        ] == [
+            _identity_text_semantics_key(item)
+            for item in replacement_value
+        ]
+    return current_value == replacement_value
+
+
+def _identity_text_semantics_key(value: str) -> str:
+    """Remove whitespace and punctuation that cannot constitute growth."""
+
+    return "".join(
+        character
+        for character in value
+        if not character.isspace()
+        and not unicodedata.category(character).startswith("P")
+    )
 
 
 async def _run_identity_stage(
@@ -682,7 +1091,26 @@ async def _run_identity_stage(
             regeneration_prompt = (
                 _IDENTITY_CONTRACT_REGENERATION_PROMPT_TEMPLATES[
                     stage
-                ].format(contract_error=str(exc))
+                ].format(
+                    contract_error=str(exc),
+                    required_top_level_keys=json.dumps(
+                        sorted(
+                            json.loads(expected_output_format).keys()
+                        ),
+                        ensure_ascii=False,
+                    ),
+                    evidence_ref_ids=json.dumps(
+                        prompt.evidence_ref_ids,
+                        ensure_ascii=False,
+                    ),
+                    candidate_ids=json.dumps(
+                        prompt.candidate_ids,
+                        ensure_ascii=False,
+                    ),
+                    exact_proposed_changes=(
+                        _review_proposed_changes_json(prompt)
+                    ),
+                )
             )
             messages = [
                 messages[0],
@@ -716,6 +1144,26 @@ async def _run_identity_stage(
             trace_id=effective_trace_id,
         )
     raise AssertionError("identity stage attempt loop did not terminate")
+
+
+def _review_proposed_changes_json(
+    prompt: IdentityPromptBuildResult,
+) -> str:
+    """Render exact review-copy patch objects from the bounded prompt."""
+
+    payload = json.loads(prompt.human_prompt)
+    raw_proposal = payload.get("proposal_decision")
+    if not isinstance(raw_proposal, Mapping):
+        return "[]"
+    raw_changes = raw_proposal.get("proposed_changes")
+    if not isinstance(raw_changes, list):
+        return "[]"
+    return json.dumps(
+        raw_changes,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
 
 
 async def _record_trace_attempt(

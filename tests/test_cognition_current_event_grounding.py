@@ -32,6 +32,9 @@ from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
 from kazusa_ai_chatbot.cognition_core_v2.state_reducers import (
     apply_semantic_appraisals,
 )
+from kazusa_ai_chatbot.nodes import (
+    persona_supervisor2_cognition as cognition_connector,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
     build_cognition_input_from_global_state,
 )
@@ -303,6 +306,44 @@ def test_role_explicit_current_event_is_forwarded_without_reinterpretation() -> 
     assert payload["scene_context"]["semantic_scene"] == expected_meaning
     assert payload["scene_context"]["character_role"].startswith("当前角色")
     assert payload["scene_context"]["current_user_role"].startswith("当前用户")
+
+
+def test_episode_evidence_keeps_typed_dialog_projection_when_scene_wraps_it() -> None:
+    """Selection metadata remains a parseable typed cognition boundary."""
+
+    role_explicit_content = "当前用户要求当前角色在两个方案之间作出决定。"
+    response_operation = {
+        "operation": "当前角色选择一个方案",
+        "response_owner_role": "当前角色",
+        "selection_owner_role": "当前角色",
+        "selection_required": True,
+        "embedded_actor_role": "当前角色",
+        "embedded_target_role": "无",
+    }
+    episode = _episode()
+    episode["percepts"][0]["content"]["role_explicit_content"] = (
+        role_explicit_content
+    )
+    episode["percepts"][0]["content"]["response_operation"] = (
+        response_operation
+    )
+    episode["percepts"][0]["visibility"] = "internal"
+
+    evidence = cognition_connector._episode_evidence(
+        episode,
+        episode_id="episode-group-selection",
+        occurred_at=V2_TIMESTAMP,
+        fallback_text=(
+            "“测试群聊”群聊中正在讨论：方案选择。"
+            + cognition_connector._dialog_semantic_projection_text(episode)
+        ),
+    )
+
+    semantic_payload = json.loads(evidence[0]["semantic_text"])
+    assert semantic_payload == {
+        "response_operation": response_operation,
+        "role_explicit_content": role_explicit_content,
+    }
 
 
 @pytest.mark.asyncio

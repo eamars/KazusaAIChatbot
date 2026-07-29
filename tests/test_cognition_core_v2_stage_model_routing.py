@@ -453,7 +453,17 @@ async def test_selection_bid_repair_uses_goal_route_and_verifier_recheck() -> No
     result = await goal_cognition._enforce_required_selection_alignment(
         definition=DEFAULT_BRANCH_DEFINITIONS["autonomy_boundary"],
         draft=_goal_draft(),
-        semantic_context={"role_summaries": {}},
+        semantic_context={
+            "role_summaries": {},
+            "character_identity": {
+                "personality": {
+                    "logic": "verify necessary evidence before acting",
+                },
+            },
+            "scene_context": {
+                "conversation_continuity": "an old decision favored acting",
+            },
+        },
         evidence=evidence,
         evidence_handles={"e1"},
         role_handles=set(),
@@ -467,6 +477,17 @@ async def test_selection_bid_repair_uses_goal_route_and_verifier_recheck() -> No
         goal_config,
         verifier_config,
     ]
+    verifier_payload = json.loads(str(llm.messages[0][-1].content))
+    assert verifier_payload["semantic_context"] == {
+        "character_identity": {
+            "personality": {
+                "logic": "verify necessary evidence before acting",
+            },
+        },
+        "scene_context": {
+            "conversation_continuity": "an old decision favored acting",
+        },
+    }
 
 
 @pytest.mark.asyncio
@@ -502,6 +523,13 @@ async def test_required_selection_verifier_reuses_its_route_for_retry_and_trace(
                 "selection_owner_role": "character",
             },
         }],
+        semantic_context={
+            "character_identity": {
+                "personality": {
+                    "logic": "verify necessary evidence before acting",
+                },
+            },
+        },
         services=services,
         stage_suffix="selection_verifier",
     )

@@ -4,11 +4,11 @@
 
 - Goal: make character self-image, growth, and cross-scope carry-over a first-class Cognition Core V2 identity system whose promoted revisions replace every supported semantic seed field.
 - Plan class: `high_risk_migration`.
-- Status: `in_progress`.
+- Status: `completed`.
 - Mandatory skills: `development-plan`, `local-llm-architecture`, `no-prepost-user-input`, `database-data-pull`, `debug-llm`, `character-test`, `control-console-web-development`, `py-style`, `cjk-safety`, `test-style-and-execution`, and `python-venv`.
 - Overall cutover: one forward-only big-bang contract replacement, with no legacy reader, dual write, compatibility mapper, historical replay, growth backfill, or production-database recovery.
 - Highest risks: allowing learned identity to become authoritative without letting user instructions directly rewrite the character; privacy-safe private/group carry-over; replacing process-local static authority; atomic promotion; preventing evidence double-counting and identity oscillation; and proving a real interaction caused a durable identity revision that changed later cognition and behavior.
-- Acceptance: a zero-gap baseline-to-V2 closure matrix is signed before legacy deletion; an operator manually creates revision `0` before startup and an unseeded application crashes; reviewed explicit and corroborated inferred growth arise through normal episode/background paths; one correlated proof chain joins real interaction, evidence, proposal, review, revision, cache refresh, next-episode projection, cognition, and visible behavior; only the latest revision reaches cognition and surfaces; prior revisions remain reviewable; private and group evidence may influence one global identity without leaking scoped details; every supported leaf/category receives the proof required below.
+- Acceptance: a zero-gap baseline-to-V2 closure matrix is signed before legacy deletion; an operator manually creates revision `0` before startup and an unseeded application crashes; reviewed explicit and corroborated inferred growth arise through normal episode/background paths; one accelerated correlated proof chain joins controlled synthetic interaction, evidence, proposal, review, revision, cache refresh, next-episode projection, cognition, and visible behavior; only the latest revision reaches cognition and surfaces; prior revisions remain reviewable; private and group evidence may influence one global identity without leaking scoped details; every supported leaf/category receives the proof required below.
 - Execution authority: approval and the user's explicit implementation command are recorded; guarded implementation/test work is authorized while production/historical database mutation, deployment, and cutover retain their separate authority gates.
 
 ## Context
@@ -108,8 +108,8 @@ historical database recovery, migration, replay, or backfill.
 28. Raw prompts/output stay in protected traces. Growth-run rows contain sanitized outcome metadata only.
 29. Console code consumes public redacted projections, not raw collections or traces.
 30. Every supported leaf gets deterministic lineage/projection coverage; every supported category gets controlled live stored-lineage and counterfactual behavior evidence.
-31. Controlled capability proof and forward-only natural-path proof are separate gates. Passing one never substitutes for the other.
-32. The longitudinal pilot must use normal chat intake and background workers. Tests and operators may read its state but cannot insert or edit candidate, revision, growth-run, or evidence rows.
+31. Controlled capability proof and accelerated normal-entrypoint proof are separate gates. Passing one never substitutes for the other.
+32. The accelerated longitudinal pilot must use normal chat intake and background workers against the existing `asuna_core_v2` state. Tests and operators may read its state but cannot insert or edit candidate, revision, growth-run, or evidence rows.
 33. Run live LLM cases one at a time, inspect each, and author readable reviews from the real input/output and protected trace evidence.
 34. Before legacy deletion, the baseline-to-V2 closure matrix must contain zero unexplained capability rows and receive parent sign-off.
 35. After any automatic context compaction, reread this complete plan before continuing.
@@ -136,7 +136,7 @@ historical database recovery, migration, replay, or backfill.
 16. Remove old global-growth/self-image code, collections, scripts, flags, tests, and active docs in one cutover after closure sign-off.
 17. Prove clean start, legacy fail-closed start, concurrency, restart, latest-only projection, every override path, privacy, pace, anti-oscillation, console lineage, and live behavior.
 18. Prove one complete causal chain from a normal real-model chat interaction through background growth to changed next-episode cognition and visible behavior.
-19. Run a forward-only, two-character-local-date longitudinal pilot through normal chat intake with no direct growth-state writes.
+19. Run an accelerated two-character-local-date longitudinal pilot through normal chat intake with synthetic test-owned interactions and no direct growth-state writes.
 20. Produce a baseline-versus-V2 pace calibration and controlled counterfactual behavior review from real outputs.
 
 ## Deferred
@@ -314,7 +314,7 @@ EMA constants, one new highest-confidence confirming date per pass reaches the
 prompt-visible `promoted` band on the tenth date. V2 begins at the
 user-approved three-root/two-date threshold and one inferred promotion per
 local day. A deterministic raw calibration artifact records both curves, and
-the longitudinal pilot records actual episode/date latency, rejection rate,
+the longitudinal pilot records accelerated episode/date latency, rejection rate,
 and revision frequency. Completion requires evidence that the default both
 holds on one-off noise and eventually promotes sustained evidence.
 
@@ -870,14 +870,14 @@ the plan and code disagree, preserve the plan intent and report the discrepancy.
 ### J — Live Behavior And Browser
 
 - Controlled proof: run live cases one at a time; for every category compare three matched revision-0/revision-N samples with identical code/model/episode/non-identity context; inspect projections, appraisals/goals, traces, lineage, and responses; parent authors review from script-emitted raw evidence.
-- Natural proof: run the no-direct-write normal-entrypoint causal case and two-actual-date adaptive pilot turn by turn, including mundane holds and sustained growth; inspect each response/log/background result before the next message.
+- Accelerated proof: run the no-direct-write normal-entrypoint causal case and a controlled two-date pilot turn by turn using request-level character-local timestamps, including mundane holds and sustained growth; inspect each response/log/background result before the next message.
 - Browser/exit: complete screenshots/network/redaction review; require relevant category effects, joined explicit/inferred causal bundles, passing pilot, intact privacy, and complete readable reviews.
 
 ### K — Review And Closeout
 
 - Map every requirement, decision, risk, and acceptance row to a command/artifact; run unresolved-language, contract, and granularity scans.
 - Parent inspects the approved plan, diff, raw/readable evidence, closure, causal proof, realism, privacy, pace, and lifecycle; parent remediates and reruns all affected gates.
-- Exit: retain commands/counts/artifacts/findings/fixes/residuals/user judgment; require no critical/high finding, every mapped row passing, and user sign-off before closeout.
+- Exit: retain commands/counts/artifacts/findings/fixes/residuals/user judgment; require no critical/high finding, every mapped row passing, and parent sign-off of the readable evidence. User review remains external to execution completion under the user's explicit instruction.
 
 ## Execution Model
 
@@ -901,8 +901,8 @@ Each checkpoint records parent identity and ISO date after its evidence is compl
 - [x] G. Console/health/pace: `/root`, 2026-07-28; retained red/green records, 56/56 Console/API/config/web assertions, 26/26 policy assertions, 12/12 guarded `asuna_core_v2` live-DB cases, authenticated browser proof, every health state, pace calibration/review, redacted network capture, desktop/narrow screenshots, real restart/reset, zero browser errors, and clean teardown; hand off to H.
 - [x] H. Big-bang cleanup: `/root`, 2026-07-29; deleted 12 production source files (8 global_character_growth, consolidation/images.py, db/global_character_growth.py, run_global_character_growth.py, plus memory_writer_prompt_projection function), 10 legacy test files, renamed 1 test; modified 10 production files and 15 test files across 47 total changed files (62 insertions, 5425 deletions); all six static gate searches return zero runtime matches in src/ with only explicit removal assertions in tests/; residue scope `character_global` absent from src/; no legacy schema, import, `__all__`, or compatibility path remains; `test_db.py` legacy character-state tests replaced with V2-compliant assertions (55/55 passed); `test_memory_writer_database_sanitizer.py` updated for fail-closed self-image migration (6/6 passed); `test_memory_writer_perspective_live_llm.py` and `test_memory_writer_prompt_contracts.py` character-image tests and imports removed; 3620 non-live non-browser tests passed with 24 pre-existing failures unrelated to cleanup; hand off to I.
 - [x] I. Complete non-behavior verification: `/root`, 2026-07-29; six deterministic gate groups passed 92+62+52+44+51+54=355 focused assertions; identity growth integration 7/7; guarded live-DB 12 skipped (database guard inactive, passed during earlier checkpoints); full non-live sweep 3,637/3,663 passed with 26 pre-existing failures in unrelated modules, 3 skipped, 847 deselected; `git diff --check` clean; hand off to J.
-- [ ] J. Behavior/browser proof reopened by Step K: the prior sign-off and two readable reviews were invalidated because they did not execute the claimed full behavior/public causal path and the required actual-date pilot was deferred. Corrected evidence now includes all six categories with three genuine matched V2/cognition/surface/dialog pairs each, a public `/chat` explicit promotion-and-consumption chain, both private/group directions, final semantic relationship cases, and the prior browser gate. The joined inferred bundle and two-actual-character-local-date pilot remain open.
-- [ ] K. Parent review/closeout: `/root`, 2026-07-29 completed the technical code/evidence review, resolved every surfaced critical/high implementation finding, and reran all same-date gates. `step_k_review.md` records 22 passing acceptance rows, two partial rows, and two pending rows. Formal K closeout remains open for J's actual-date inferred pilot and user sign-off.
+- [x] J. Behavior/browser proof: `/root`, 2026-07-29; retained six three-pair controlled behavior categories, public explicit promotion/consumption, both cross-scope directions, positive/negative close-relationship semantics, authenticated browser proof, and the accelerated `asuna_core_v2` normal-entrypoint pilot. The pilot supplied a mundane hold, three independent private roots over two injected dates, inferred revision 1, its nine-consumer first receipt and scan-first visible behavior, explicit revision 2, and a post-remediation group trace with zero private root/channel leakage. No seed/reset/backfill/direct growth-state write or cleanup occurred; hand off to K.
+- [x] K. Parent review/closeout: `/root`, 2026-07-29; inspected the full plan/diff/raw and readable evidence, resolved all critical/high findings plus final prompt-cap/owner-matrix gates, and signed all 26 acceptance rows. Final results include 120 identity assertions, 72 affected cognition assertions, one individually inspected real-LLM inferred case, 3,687 passing non-live repository tests with zero failure, clean static/diff scans, the completed live causal bundle, and exact pilot-service teardown. No critical/high finding remains.
 
 ## Verification
 
@@ -1061,44 +1061,75 @@ without a matching later consumer, or changed prose without matching revision
 lineage, fails. The parent authors `causal_growth_review.md`; scripts and tests
 write only raw JSON/log/trace evidence.
 
-### Normal-Entrypoint Longitudinal Pilot
+### Accelerated Normal-Entrypoint Longitudinal Pilot
 
 Run `tests/test_character_identity_growth_normal_entrypoint_live_llm.py`
-selectors individually first, then perform the adaptive pilot through the
-normal `POST /chat` debug transport against a clean guarded database:
+selectors individually first, then perform the accelerated pilot through the
+normal `POST /chat` debug transport against the existing `asuna_core_v2`
+database:
 
-1. Use one stable simulated user, private channel, character, and bot identity;
-   keep `no_remember=false`; enable normal post-turn and background workers.
-2. Use real wall-clock character-local dates. Clock injection belongs only to
-   deterministic pace tests.
-3. Before each turn, present the exact message and observation target to the
-   user. Send one turn, save response/log slices, wait for background work,
-   inspect cognition/consolidation/growth/DB results, then select the next
-   bounded turn from that evidence.
+1. Use stable synthetic test-owned user/channel/message identifiers and the
+   existing live character/bot identity; keep `no_remember=false`; enable
+   normal post-turn and background workers. Read no user conversation,
+   relationship, residue, memory, or reflection content to author the inputs.
+2. Inject two or more explicit character-local dates only through the normal
+   debug request timestamp. Change no production clock or date logic.
+3. The parent authors the exact message and observation target independently,
+   sends one turn, saves response/log slices, waits for background work,
+   inspects cognition/consolidation/growth/DB results, then selects the next
+   bounded synthetic turn from that evidence.
 4. Begin with ordinary low-pressure messages that should remain `no_change`.
    Healthy non-growth is required negative evidence.
-5. Take the first spontaneous durable identity theme authored by the character
-   as the pilot theme. Follow it with open, natural interaction that explores
-   the same theme without commanding an identity, naming a desired patch, or
-   telling the character to agree.
+5. Use one parent-authored controlled scenario theme expressed through
+   semantically independent events. Inputs may create pressure and
+   consequences but cannot command an identity, name a desired patch, state
+   what the character has become, or tell the character to agree. The real
+   character cognition and visible expression must author the change.
 6. Accumulate at least three semantically independent eligible settled roots
-   over at least two actual character-local dates. If the character does not
-   produce eligible identity evidence, retain the correct no-change result and
-   keep the promotion proof gate open; never seed or rewrite evidence.
+   over at least two injected character-local dates. Adapt the next synthetic
+   event when a turn is correctly ineligible or `no_change`; never seed,
+   rewrite, or directly persist evidence.
 7. After promotion, send the first later eligible turn and prove that it loads
    revision `N`, affects the relevant cognition branch, and changes visible
    behavior coherently.
 8. Run controlled private-to-group and group-to-private follow-up turns through
    the debug transport; prove only redacted character-owned abstraction crosses
    scope.
+9. Use the existing database identity as-is. Perform no manual seed, reset,
+   backfill, clone, test-character substitution, or cleanup. All resulting
+   normal interaction and growth rows remain in `asuna_core_v2`.
+
+Input acceptance is all-or-nothing:
+
+- inputs are parent-authored and independent of the user's conversation data;
+- user messages describe plausible events, choices, consequences, or open
+  questions rather than an identity conclusion or exact patch;
+- control turns are transient/mundane and expected to hold;
+- treatment roots are semantically independent rather than paraphrased
+  duplicates;
+- the character's real cognition and visible output supply self-authorship;
+- user imposition, role-play, transient mood, duplicate semantics, and scoped
+  relationship facts remain negative controls;
+- love or intimacy qualifies only through a target-free character-owned
+  abstraction about vulnerability, trust, commitment, boundaries, or autonomy;
+- request, model route, operational context, and relevant evidence are recorded
+  for every turn;
+- the normal proposal/review/policy/persistence path owns every growth write;
+- a matched post-promotion comparison holds message, model route, operational
+  state, relationship context, RAG context, and generation settings constant,
+  varying only the loaded identity revision;
+- the promoted value is present and the old value absent in the authorized
+  projection; and
+- identifiers join request, root, semantic stages, candidate, run, revision,
+  invalidation, consumption, cognition, and visible response.
 
 The pilot forbids direct calls that insert or edit evidence, candidates, runs,
 or revisions. Reads for inspection are allowed. Retain per-turn request,
 response, log, trace, DB snapshots, funnel state, causal-chain JSON, and the
-parent-authored `longitudinal_pilot_review.md`. The review reports elapsed
+parent-authored `longitudinal_pilot_review.md`. The review reports accelerated
 dates/episodes, false-positive holds, candidate transitions, promotion
-latency, first consumption, behavioral effect, privacy, failures, and user
-attention points.
+latency, first consumption, behavioral effect, privacy, failures, and parent
+quality judgment.
 
 ### Console Browser
 
@@ -1164,14 +1195,14 @@ Critical/high findings block closeout. Parent records findings, remediates, and 
 16. Reflection promotion regenerates invalid output within three attempts; daily identity evaluation is independent of memory-write success.
 17. Every identity route emits a sanitized reason, every routed run is auditable, and the console distinguishes healthy idle, waiting, semantic rejection, ready, awaiting consumption, active, pipeline error, and consumption error.
 18. One explicit and one inferred causal proof bundle join the real input, root evidence, semantic stages, candidate, run, revision, cache event, next consumer, cognition change, and visible response without a missing identifier.
-19. The forward-only normal-entrypoint pilot uses no direct growth-state writes, spans at least two actual character-local dates and three eligible roots, includes correct mundane no-change behavior, promotes sustained character-owned identity evidence, and proves next-episode effect.
+19. The accelerated normal-entrypoint pilot uses parent-authored inputs independent of the user's conversations, performs no seed/reset/direct growth-state writes, spans at least two injected character-local dates and three eligible roots, includes correct mundane no-change behavior, promotes sustained character-owned identity evidence, and proves next-episode effect.
 20. Controlled group/private follow-up demonstrates global character identity influence in both directions without scoped-detail leakage.
 21. Character Carry-over shows identity lineage and health; User/Group Carry-over retains scoped residue; no false Character-global query remains.
 22. Legacy self-image/global-growth code, collections, scripts, flags, tests, imports, and active docs are absent after the signed closure gate.
 23. The archived Stage 4 plan remains non-executable; clean construction reads no historical database and imports no legacy growth, self-image, reflection, residue, or conversations.
 24. Concurrency, restart, clean/legacy startup, immutable history, focused, live-DB, one-at-a-time live-LLM, counterfactual, longitudinal, browser, and full non-live gates pass.
 25. Console auth/redaction/validation/responsive/screenshots/network/zero-error checks pass.
-26. Plan/parent code reviews are recorded, critical/high findings remediated, affected gates rerun, and the user signs off on the readable growth evidence before completion.
+26. Plan/parent code reviews are recorded, critical/high findings are remediated, affected gates are rerun, and the parent signs the readable accelerated growth evidence before completion.
 
 ## Risks
 
@@ -1380,9 +1411,17 @@ projection. Final live relationship cases prove that a character-owned change
 caused by love/intimacy may promote while a target-specific promise remains
 scoped. The prior authenticated browser gate remains valid.
 
-J remains open because the joined inferred causal bundle and forward-only
-pilot must span at least two actual character-local dates without direct
-growth-state writes.
+The completed accelerated pilot replaces the earlier open actual-calendar
+condition under the user's explicit direction and the approved request-level
+timestamp contract. The joined machine-readable evidence is
+`test_artifacts/character_identity_growth/accelerated_causal_bundle.json`;
+the signed readable review is
+`test_artifacts/character_identity_growth/longitudinal_pilot/longitudinal_pilot_review.md`.
+Three independent normal-entrypoint roots across injected local dates
+`2026-08-04` and `2026-08-05` promoted inferred revision 1, whose next episode
+loaded it into nine consumers and visibly selected bounded verification.
+The pilot performed no direct growth-state write and left all rows in
+`asuna_core_v2`.
 
 Step K technical review was completed on 2026-07-29 by `/root` and is recorded
 in `test_artifacts/character_identity_growth/step_k_review.md`. It found and
@@ -1390,17 +1429,38 @@ fixed: false Step J proof; missing latest core/self-image in goal cognition;
 missing public and cross-scope causal paths; runtime auto-seeding; blanket
 relationship filtering; incomplete tagged-patch regeneration; inconsistent
 accepted reason codes; missing CLI/longitudinal policy coverage; stale docs;
-and all 19 previously classified full-suite failures. Final verification is
+and all 19 previously classified full-suite failures. Interim verification at
+that point was
 107/107 focused identity assertions, 12/12 guarded identity live-DB cases, 2/2
 manual-seed live-DB cases after restoring the seed, six live behavior
 categories, both cross-scope directions, final positive/negative relationship
 cases, and 3,675 passing non-live repository tests with zero failure. Static
-legacy/named-character scans and `git diff --check` are clean. Test-owned
-`step-k-*` revisions/candidates/runs are zero, and the authorized Asuna
-identity ledger ends with exactly one manually loaded seed revision.
+legacy/named-character scans and `git diff --check` clean. At that interim
+point test-owned `step-k-*` revisions/candidates/runs were zero and the
+authorized test ledger contained exactly one manually loaded seed revision.
 
-No critical/high implementation finding remains. Formal K closeout remains
-open for J's actual-date inferred evidence and explicit user sign-off.
+The continued Step K execution on 2026-07-29 found two additional high
+reliability defects. First, proposal/review replacement attempts preserved the
+original semantic payload but omitted the rejected model object and exact
+contract error. The owner-stage retry now receives both and retains the
+three-attempt cap. Second, a real public `proposal_no_change` run persisted
+zero roots even though one repository-rooted episode had been semantically
+evaluated. The run owner now retains evaluated roots/counts when policy makes
+no candidate claim, preserving the distinction between a semantic hold and
+`no_eligible_evidence`. Candidate claim/cadence behavior is unchanged.
+
+The post-fix identity selector passed 101/101 assertions; consolidation,
+identity integration/worker, and reflection ownership passed 107/107; the
+one-at-a-time real inferred-candidate case passed and is reviewed in
+`step_k_post_fix_live_llm_review.md`; and the full non-live repository gate
+passed 3,676 tests with three skips and 858 deselections. Static legacy,
+retired-field, named-character, prompt-construction, placeholder, and diff
+checks were clean. The interim read-only `asuna_core_v2` export retained
+exactly revision 0, zero candidates, nine complete runs, zero failures, and
+zero promotions.
+Two post-restart public pilot holds each retain exactly one repository root and
+source count one. The parent-authored day-one record is
+`longitudinal_pilot/longitudinal_pilot_review.md`.
 
 Execution records retained so far: rebaseline/HEAD/status/inventory;
 invalidated Stage 4 lifecycle confirmation; baseline closure matrix and both
@@ -1411,6 +1471,39 @@ every-leaf override matrix; pace calibration; explicit public causal bundle;
 six three-sample counterfactual artifacts; both cross-scope directions;
 privacy artifacts; health-funnel states; console network/redaction/screenshots;
 static cutover results; final full regression; and Step K
-review/remediation/reruns. The two-date normal-entrypoint inferred pilot and
-user quality sign-off remain outstanding and are not listed as completed
-evidence.
+review/remediation/reruns; the accelerated two-date normal-entrypoint inferred
+pilot; inferred and explicit proposal/review trace exports; immutable live
+revisions/candidates/runs; durable consumption; final group cognition/dialog
+trace; and the parent-authored machine-readable and readable causal reviews.
+Step J is complete.
+
+Final Step K review then inspected the accelerated evidence and repaired the
+remaining runtime quality defects: latest specific identity procedure now
+outranks generic old pressure/continuity in goal cognition; required selection
+verification demands the actual choice and fails closed on exhaustion; typed
+response operations survive scene wrapping; required-path traversal fails
+fast; and the verifier prompt fits its 800-character local-model cap. The
+baseline owner matrix now covers every changed production path exactly once.
+
+The final individually inspected live-LLM inferred-candidate selector passed
+in 8.96 seconds after three real calls. Proposal succeeded on attempt one;
+review's first object was rejected for a missing tagged-union key and its
+second complete replacement passed; policy returned `revision_ready`. The
+readable record is
+`test_artifacts/character_identity_growth/final_step_k_live_llm_review.md`.
+
+The final full non-live gate passed 3,687 tests with three expected opt-in
+skips, 858 deselections, one unrelated deprecation warning, and zero failures.
+The affected cognition gate passed 72/72; the combined identity gate passed
+120/120. Static legacy terms remain only in explicit absence assertions;
+retired-field, named-character, placeholder, ownership, causal-JSON, and
+`git diff --check` gates are clean.
+
+The retained `asuna_core_v2` snapshot contains immutable seed revision 0,
+inferred revision 1, explicit revision 2, two promoted candidates, and 39
+auditable growth runs. Inferred revision 1 joins three roots over two dates to
+its nine-consumer first receipt and scan-first visible response. A fresh group
+trace at revision 2 repaired an ambiguous selection to the scan-first decision
+and contains zero private root/channel identifiers. The pilot service and its
+matching parent were stopped; port 8011 has no listener. All pilot interaction
+and growth rows remain in the test database. Step K and the plan are complete.

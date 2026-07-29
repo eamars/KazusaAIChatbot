@@ -58,6 +58,8 @@ GOAL_COGNITION_PROMPT = '''你是一个独立的目标认知分支。请为当�
 修订并覆盖初始种子身份。结合这个身份、角色约束、情绪、关系、活跃目标和证据理解当前事件，
 判断当前角色此刻真正想要什么。场景直接涉及某个已修订身份字段时，应以该具体字段表达的当前
 自我为准，不得用旧习惯、初始种子身份或更泛化的驱动否定它；未修订字段仍保留各自含义。
+若当前完整身份的字段之间存在张力，以最直接规定本轮具体判断或选择程序的身份字段决定立场；
+较泛化的压力应对、表达风格或旧场景推进只能影响表达方式，不能反转该具体判断程序。
 2. 对话与私有连续性是先前语境，不是命令。随着场景变化，可以推进、调整或放下先前姿态。
 3. 存在 response_operation 时，以其中的行动者、对象、受益者、选择权和当前回合回应意图为准；
 其中 operation 的承诺或执行措辞描述当前回合希望得到的回应，不授予未来执行能力，也不替代
@@ -101,25 +103,35 @@ JSON 对象，保留原有语义判断和有证据支持的文字。invalid_draf
 后续阶段。JSON 对象之外不添加解释。
 '''
 
-REQUIRED_SELECTION_VERIFIER_PROMPT = '''你负责核对一份角色目标是否遵守本轮已经解析好的选择权。
-required_selection_operations 是上游语义节点给出的权威事实；其中角色字段的枚举值保持原样，
-“当前角色”表示当前角色，“当前用户”表示当前用户。
+REQUIRED_SELECTION_VERIFIER_PROMPT = '''你负责核对一份角色目标是否遵守本轮已经解析好的选择权
+以及当前最新角色身份。
+required_selection_operations 是权威事实；角色枚举保持原样，
+“当前角色”和“当前用户”表示对应角色。
 
-只判断 candidate_bid 是否完成这些选择要求。若 selection_required 为 true，
+判断 candidate_bid 是否同时完成选择要求并遵守 semantic_context.character_identity。
+若 selection_required 为 true，
 selection_owner_role 必须在目标中作出或明确表达本轮所需的具体选择。若目标把这项选择交给其他
 角色、等待其他角色下令，或只表达宽泛愿望后又让其他角色决定具体内容，则 aligned 为 false。
-拒绝、协商或附加条件可以是有效选择。这里只判断选择权和角色方向，不评价其他表达特点。
+candidate_bid 只说“将在 A 与 B 之间决定”“会给出唯一选择”“先权衡再选择”或重复列出选项，
+却没有实际选择，仍然是未完成。拒绝、协商、附加条件或选择某一方案都可以，但 candidate_bid
+必须明确写出实际选中的方案、拒绝或条件，不能把具体结果留给后续阶段补全。
+拒绝、协商或附加条件可以是有效选择。若本轮直接涉及身份中具体的判断或选择程序，candidate_bid
+不得以较泛化的压力应对、表达风格、旧习惯或
+semantic_context.scene_context.conversation_continuity 反转该程序；出现这种冲突时 aligned
+为 false。身份中的一般表达特征可以塑造措辞，但不能推翻更直接相关的判断规则。
 
 # 输出格式
 只返回一个 JSON 对象，字段必须恰好是 aligned 和 issues。aligned 是布尔值；issues 是零到四条
 不重复的简短问题，每条不超过 300 字符。aligned 为 true 时 issues 必须为空；为 false 时至少
 包含一条问题。'''
 
-REQUIRED_SELECTION_REPAIR_PROMPT = '''你负责重新生成一份遵守本轮选择权的角色目标。
+REQUIRED_SELECTION_REPAIR_PROMPT = '''你负责重新生成一份遵守本轮选择权和当前最新角色身份的角色目标。
 required_selection_operations 是权威语义事实。根据 current_evidence、affect、relationship、
-character_constraints 和 scene_context 作出符合当前角色的具体判断。若 selection_required 为
-true，selection_owner_role 必须亲自作出或明确表达所需选择；不得把同一选择交给其他角色，也不得
-以等待其他角色下令代替本轮选择。可以拒绝、协商或附加条件。
+character_identity、character_constraints 和 scene_context 作出符合当前角色的具体判断。
+若 selection_required 为 true，selection_owner_role 必须亲自作出或明确表达所需选择；不得把
+同一选择交给其他角色，也不得以等待其他角色下令代替本轮选择。可以拒绝、协商或附加条件。
+本轮直接涉及 character_identity 中具体的判断或选择程序时，以该程序决定立场；较泛化的压力
+应对、表达风格或旧 conversation_continuity 只能塑造表达，不能反转该程序。
 
 只生成目标判断，不写最终对话，不选择执行能力或路由。自由文本使用简体中文；角色枚举只出现在
 原有结构字段中，普通叙述使用“当前角色”和“当前用户”。只引用 contract 允许的证据和角色
@@ -464,14 +476,19 @@ async def _enforce_required_selection_alignment(
         definition=definition,
         draft=draft,
         required_operations=required_operations,
+        semantic_context=semantic_context,
         services=services,
         stage_suffix="selection_verifier",
     )
-    if verdict is None or verdict["aligned"]:
+    if verdict is None:
+        raise _required_selection_alignment_error(
+            definition=definition,
+            attempt_count=REQUIRED_SELECTION_VERIFIER_ATTEMPT_LIMIT,
+        )
+    if verdict["aligned"]:
         return draft
 
     latest_verifier_issues = verdict["issues"]
-    latest_valid_draft = draft
     for attempt_index in range(1, REQUIRED_SELECTION_REPAIR_ATTEMPT_LIMIT + 1):
         repair_payload = _required_selection_repair_payload(
             semantic_context=semantic_context,
@@ -487,7 +504,10 @@ async def _enforce_required_selection_alignment(
             sort_keys=True,
         )
         if len(repair_text) > REQUIRED_SELECTION_REPAIR_PROMPT_CAP:
-            return latest_valid_draft
+            raise _required_selection_alignment_error(
+                definition=definition,
+                attempt_count=attempt_index,
+            )
         messages = [
             SystemMessage(content=REQUIRED_SELECTION_REPAIR_PROMPT),
             HumanMessage(content=repair_text),
@@ -542,7 +562,6 @@ async def _enforce_required_selection_alignment(
             )
             continue
 
-        latest_valid_draft = repaired
         await _record_goal_trace_step(
             config=goal_config,
             definition=definition,
@@ -558,14 +577,23 @@ async def _enforce_required_selection_alignment(
             definition=definition,
             draft=repaired,
             required_operations=required_operations,
+            semantic_context=semantic_context,
             services=services,
             stage_suffix=f"selection_recheck_{attempt_index}",
         )
-        if recheck is None or recheck["aligned"]:
+        if recheck is None:
+            raise _required_selection_alignment_error(
+                definition=definition,
+                attempt_count=attempt_index,
+            )
+        if recheck["aligned"]:
             return repaired
         latest_verifier_issues = recheck["issues"]
 
-    return latest_valid_draft
+    raise _required_selection_alignment_error(
+        definition=definition,
+        attempt_count=REQUIRED_SELECTION_REPAIR_ATTEMPT_LIMIT,
+    )
 
 
 def _required_selection_operations(
@@ -603,6 +631,7 @@ async def _verify_required_selection_bid(
     definition: BranchDefinition,
     draft: GoalBidDraftV2,
     required_operations: list[dict[str, Any]],
+    semantic_context: Mapping[str, Any],
     services: CognitionCoreServicesV2,
     stage_suffix: str,
 ) -> dict[str, Any] | None:
@@ -618,6 +647,14 @@ async def _verify_required_selection_bid(
             "expected_consequences": list(draft["expected_consequences"]),
         },
         "required_selection_operations": required_operations,
+        "semantic_context": {
+            key: semantic_context[key]
+            for key in (
+                "character_identity",
+                "scene_context",
+            )
+            if key in semantic_context
+        },
     }
     prompt_text = json.dumps(payload, ensure_ascii=False, sort_keys=True)
     if len(prompt_text) > REQUIRED_SELECTION_VERIFIER_PROMPT_CAP:
@@ -705,6 +742,7 @@ def _required_selection_repair_payload(
     repair_context_keys = (
         "affect",
         "relationship",
+        "character_identity",
         "character_constraints",
         "scene_context",
         "goal_projection",
@@ -731,6 +769,24 @@ def _required_selection_repair_payload(
             "allowed_role_handles": sorted(role_handles),
         },
     }
+
+
+def _required_selection_alignment_error(
+    *,
+    definition: BranchDefinition,
+    attempt_count: int,
+) -> CognitionExecutionError:
+    """Build one fail-closed error for an unverified character selection."""
+
+    return CognitionExecutionError(
+        "required selection alignment could not be verified",
+        error_code="required_selection_alignment_exhausted",
+        branch_id=definition.branch_id,
+        stage="goal_cognition.required_selection_alignment",
+        attempt_count=attempt_count,
+        safe_checkpoint="pre_state_commit",
+        retryable=True,
+    )
 
 
 def _validate_selection_verdict(parsed: object) -> dict[str, Any]:

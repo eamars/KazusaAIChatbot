@@ -1010,6 +1010,11 @@ async def test_required_selection_verifier_overflow_is_unavailable() -> None:
         definition=DEFAULT_BRANCH_DEFINITIONS["ordinary_response"],
         draft=_valid_goal_draft(),
         required_operations=required_operations,
+        semantic_context={
+            "character_identity": {
+                "personality": {"logic": "use current evidence"},
+            },
+        },
         services=SimpleNamespace(
             llm=llm,
             required_selection_verifier_config=object(),
@@ -1022,10 +1027,10 @@ async def test_required_selection_verifier_overflow_is_unavailable() -> None:
 
 
 @pytest.mark.asyncio
-async def test_required_selection_repair_overflow_keeps_latest_valid_draft(
+async def test_required_selection_repair_overflow_fails_closed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Repair preflight overflow retains LLM-owned semantics without a call."""
+    """Repair preflight overflow cannot accept a contradicted selection."""
 
     selection_operation = json.dumps({
         "role_explicit_content": "the current character must choose",
@@ -1050,23 +1055,29 @@ async def test_required_selection_repair_overflow_keeps_latest_valid_draft(
     llm = _NoCallLLM()
     draft = _valid_goal_draft()
 
-    result = await goal_cognition_module._enforce_required_selection_alignment(
-        definition=DEFAULT_BRANCH_DEFINITIONS["ordinary_response"],
-        draft=draft,
-        semantic_context={
-            "_role_bindings": {},
-            "role_summaries": {},
-        },
-        evidence=evidence,
-        evidence_handles={
-            row["evidence_handle"] for row in evidence
-        },
-        role_handles=set(),
-        services=SimpleNamespace(llm=llm),
-        goal_config=object(),
-    )
+    with pytest.raises(
+        CognitionExecutionError,
+        match="required selection alignment",
+    ):
+        await goal_cognition_module._enforce_required_selection_alignment(
+            definition=DEFAULT_BRANCH_DEFINITIONS["ordinary_response"],
+            draft=draft,
+            semantic_context={
+                "_role_bindings": {},
+                "role_summaries": {},
+                "character_identity": {
+                    "personality": {"logic": "use current evidence"},
+                },
+            },
+            evidence=evidence,
+            evidence_handles={
+                row["evidence_handle"] for row in evidence
+            },
+            role_handles=set(),
+            services=SimpleNamespace(llm=llm),
+            goal_config=object(),
+        )
 
-    assert result == draft
     assert verifier.await_count == 1
     assert llm.call_count == 0
 

@@ -1335,6 +1335,8 @@ def _episode_evidence(
         dialog_semantic_projection = _dialog_semantic_projection_text(
             episode,
         )
+        if dialog_semantic_projection is not None:
+            semantic_text = dialog_semantic_projection
     percepts = episode.get("percepts")
     if isinstance(percepts, list):
         for percept in percepts:

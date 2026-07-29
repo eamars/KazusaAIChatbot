@@ -36,6 +36,13 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--character-id", required=True)
     parser.add_argument("--base-url", default="http://127.0.0.1:8011")
     parser.add_argument(
+        "--local-timestamp",
+        help=(
+            "Explicit configured-local wall-clock timestamp for accelerated "
+            "test turns"
+        ),
+    )
+    parser.add_argument(
         "--channel-type",
         choices=("private", "group"),
         default="private",
@@ -48,9 +55,14 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _local_timestamp() -> str:
+def _local_timestamp(explicit_timestamp: str | None) -> str:
     """Return the current local wall-clock value expected by debug chat."""
 
+    if explicit_timestamp is not None:
+        parsed = datetime.fromisoformat(explicit_timestamp)
+        if parsed.tzinfo is not None:
+            raise ValueError("--local-timestamp must be timezone-naive")
+        return parsed.isoformat(sep=" ", timespec="microseconds")
     local_timestamp = datetime.now().astimezone().replace(
         tzinfo=None,
     ).isoformat(sep=" ", timespec="microseconds")
@@ -82,7 +94,7 @@ def _request_payload(args: argparse.Namespace) -> dict[str, object]:
         "channel_name": "Identity Growth Longitudinal Pilot",
         "content_type": "text",
         "message_envelope": message_envelope,
-        "local_timestamp": _local_timestamp(),
+        "local_timestamp": _local_timestamp(args.local_timestamp),
         "debug_modes": {
             "listen_only": False,
             "think_only": False,

@@ -471,6 +471,26 @@ def validate_identity_proposal_decision(
         context="identity proposal character_authorship",
         allowed_values=models.CHARACTER_AUTHORSHIP_VALUES,
     )
+    identity_relevance = _require_enum(
+        payload["identity_relevance"],
+        context="identity proposal identity_relevance",
+        allowed_values=models.IDENTITY_RELEVANCE_VALUES,
+    )
+    global_applicability = _require_enum(
+        payload["global_applicability"],
+        context="identity proposal global_applicability",
+        allowed_values=models.GLOBAL_APPLICABILITY_VALUES,
+    )
+    confidence = _require_enum(
+        payload["confidence"],
+        context="identity proposal confidence",
+        allowed_values=models.CONFIDENCE_VALUES,
+    )
+    private_detail_risk = _require_enum(
+        payload["private_detail_risk"],
+        context="identity proposal private_detail_risk",
+        allowed_values=models.PRIVATE_DETAIL_RISK_VALUES,
+    )
     if (
         action == "explicit_self_redefinition"
         and character_authorship != "self_declared"
@@ -514,37 +534,36 @@ def validate_identity_proposal_decision(
         raise ValueError(
             "identity proposal inferred reason_code is inconsistent"
         )
+    if reason_code == "candidate_ready" and (
+        confidence != "high"
+        or identity_relevance != "durable"
+        or global_applicability != "global"
+        or private_detail_risk != "low"
+    ):
+        raise ValueError(
+            "identity proposal candidate_ready requires high confidence, "
+            "durable global identity relevance, and low private-detail risk"
+        )
+    character_owned_abstraction = _require_bounded_text(
+        payload["character_owned_abstraction"],
+        context="identity proposal character_owned_abstraction",
+        max_chars=1200,
+    )
+    _reject_handle_leakage(
+        [character_owned_abstraction],
+        handles=evidence_ref_ids.union(candidate_ids),
+    )
     validated: dict[str, object] = {
         "schema_version": schema_version,
         "action": action,
         "candidate_id": candidate_id,
         "proposed_changes": patches,
         "character_authorship": character_authorship,
-        "identity_relevance": _require_enum(
-            payload["identity_relevance"],
-            context="identity proposal identity_relevance",
-            allowed_values=models.IDENTITY_RELEVANCE_VALUES,
-        ),
-        "global_applicability": _require_enum(
-            payload["global_applicability"],
-            context="identity proposal global_applicability",
-            allowed_values=models.GLOBAL_APPLICABILITY_VALUES,
-        ),
-        "confidence": _require_enum(
-            payload["confidence"],
-            context="identity proposal confidence",
-            allowed_values=models.CONFIDENCE_VALUES,
-        ),
-        "private_detail_risk": _require_enum(
-            payload["private_detail_risk"],
-            context="identity proposal private_detail_risk",
-            allowed_values=models.PRIVATE_DETAIL_RISK_VALUES,
-        ),
-        "character_owned_abstraction": _require_bounded_text(
-            payload["character_owned_abstraction"],
-            context="identity proposal character_owned_abstraction",
-            max_chars=1200,
-        ),
+        "identity_relevance": identity_relevance,
+        "global_applicability": global_applicability,
+        "confidence": confidence,
+        "private_detail_risk": private_detail_risk,
+        "character_owned_abstraction": character_owned_abstraction,
         "evidence_ref_ids": sorted(cited_evidence),
         "contradiction_candidate_ids": sorted(contradiction_ids),
         "reason_code": reason_code,
@@ -743,6 +762,31 @@ def validate_identity_review_decision(
         context="identity review character_authorship",
         allowed_values=models.CHARACTER_AUTHORSHIP_VALUES,
     )
+    identity_relevance = _require_enum(
+        payload["identity_relevance"],
+        context="identity review identity_relevance",
+        allowed_values=models.IDENTITY_RELEVANCE_VALUES,
+    )
+    coherence = _require_enum(
+        payload["coherence"],
+        context="identity review coherence",
+        allowed_values=models.REVIEW_COHERENCE_VALUES,
+    )
+    global_applicability = _require_enum(
+        payload["global_applicability"],
+        context="identity review global_applicability",
+        allowed_values=models.GLOBAL_APPLICABILITY_VALUES,
+    )
+    review_confidence = _require_enum(
+        payload["review_confidence"],
+        context="identity review review_confidence",
+        allowed_values=models.CONFIDENCE_VALUES,
+    )
+    private_detail_risk = _require_enum(
+        payload["private_detail_risk"],
+        context="identity review private_detail_risk",
+        allowed_values=models.PRIVATE_DETAIL_RISK_VALUES,
+    )
     if verdict == "no_change" and reason_code != "proposal_no_change":
         raise ValueError(
             "identity review no_change reason_code is inconsistent"
@@ -783,6 +827,18 @@ def validate_identity_review_decision(
             raise ValueError(
                 "identity review accepted authorship is inconsistent"
             )
+    if reason_code == "candidate_ready" and (
+        review_confidence != "high"
+        or identity_relevance != "durable"
+        or coherence != "coherent"
+        or global_applicability != "global"
+        or private_detail_risk != "low"
+    ):
+        raise ValueError(
+            "identity review candidate_ready requires high confidence, "
+            "durable coherent global identity relevance, and low "
+            "private-detail risk"
+        )
 
     validated: dict[str, object] = {
         "schema_version": schema_version,
@@ -792,31 +848,11 @@ def validate_identity_review_decision(
         "accepted_change_kind": accepted_change_kind,
         "accepted_changes": accepted_changes,
         "character_authorship": character_authorship,
-        "identity_relevance": _require_enum(
-            payload["identity_relevance"],
-            context="identity review identity_relevance",
-            allowed_values=models.IDENTITY_RELEVANCE_VALUES,
-        ),
-        "coherence": _require_enum(
-            payload["coherence"],
-            context="identity review coherence",
-            allowed_values=models.REVIEW_COHERENCE_VALUES,
-        ),
-        "global_applicability": _require_enum(
-            payload["global_applicability"],
-            context="identity review global_applicability",
-            allowed_values=models.GLOBAL_APPLICABILITY_VALUES,
-        ),
-        "review_confidence": _require_enum(
-            payload["review_confidence"],
-            context="identity review review_confidence",
-            allowed_values=models.CONFIDENCE_VALUES,
-        ),
-        "private_detail_risk": _require_enum(
-            payload["private_detail_risk"],
-            context="identity review private_detail_risk",
-            allowed_values=models.PRIVATE_DETAIL_RISK_VALUES,
-        ),
+        "identity_relevance": identity_relevance,
+        "coherence": coherence,
+        "global_applicability": global_applicability,
+        "review_confidence": review_confidence,
+        "private_detail_risk": private_detail_risk,
         "character_owned_summary": character_owned_summary,
         "privacy_safe_evidence_summaries": summaries,
         "reason_code": reason_code,
@@ -993,7 +1029,7 @@ def _reject_handle_leakage(
     })
     if leaked_handles:
         raise ValueError(
-            "identity review free text contains opaque input handles"
+            "identity generated free text contains opaque input handles"
         )
 
 

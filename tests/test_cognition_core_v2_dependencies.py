@@ -414,10 +414,10 @@ async def test_goal_bid_schema_exhaustion_is_typed_after_three_attempts() -> Non
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("final_aligned", [True, False])
-async def test_goal_bid_repairs_or_retains_required_selection(
+async def test_goal_bid_repairs_or_rejects_required_selection(
     final_aligned: bool,
 ) -> None:
-    """The newest valid bid survives the fixed selection-repair ledger."""
+    """Only a verifier-aligned repaired selection survives the fixed ledger."""
 
     delegated = {
         "intention": "请求当前用户继续下令",
@@ -497,7 +497,7 @@ async def test_goal_bid_repairs_or_retains_required_selection(
             "embedded_target_role": "当前角色",
         },
     }, ensure_ascii=False)
-    bid = await run_goal_cognition(
+    call = run_goal_cognition(
         DEFAULT_BRANCH_DEFINITIONS["ordinary_response"],
         {"scope": "user", "kind": "goal", "entity_id": "g1"},
         {
@@ -523,10 +523,23 @@ async def test_goal_bid_repairs_or_retains_required_selection(
             required_selection_verifier_config=object(),
         ),
     )
+    if final_aligned:
+        bid = await call
+    else:
+        with pytest.raises(
+            CognitionExecutionError,
+            match="required selection alignment",
+        ) as error_info:
+            await call
+        assert error_info.value.error_code == (
+            "required_selection_alignment_exhausted"
+        )
+        bid = None
 
     assert len(llm.messages) == 6
-    assert bid["intention"] == repaired_second["intention"]
-    assert bid["concrete_detail"] == repaired_second["concrete_detail"]
+    if bid is not None:
+        assert bid["intention"] == repaired_second["intention"]
+        assert bid["concrete_detail"] == repaired_second["concrete_detail"]
     repair_payload = json.loads(str(llm.messages[2][-1].content))
     repair_text = json.dumps(repair_payload, ensure_ascii=False)
     assert "candidate_bid" not in repair_payload
@@ -586,6 +599,16 @@ async def test_required_selection_verifier_recovers_on_third_attempt(
                 "selection_owner_role": "当前角色",
             },
         }],
+        semantic_context={
+            "character_identity": {
+                "personality": {
+                    "logic": "validate necessary evidence before acting",
+                },
+            },
+            "scene_context": {
+                "conversation_continuity": "an old choice acted immediately",
+            },
+        },
         services=SimpleNamespace(
             llm=llm,
             required_selection_verifier_config=object(),
@@ -625,6 +648,13 @@ async def test_required_selection_verifier_exhaustion_is_unavailable() -> None:
                 "selection_owner_role": "当前角色",
             },
         }],
+        semantic_context={
+            "character_identity": {
+                "personality": {
+                    "logic": "validate necessary evidence before acting",
+                },
+            },
+        },
         services=SimpleNamespace(
             llm=llm,
             required_selection_verifier_config=object(),
@@ -676,3 +706,13 @@ def test_required_branch_failure_cannot_collapse_to_silence() -> None:
     assert raised.value.safe_checkpoint == "pre_state_commit"
     assert raised.value.retryable is True
     assert raised.value.__cause__ is original_error
+
+
+def test_required_selection_verifier_demands_the_actual_selected_alternative(
+) -> None:
+    """A plan to choose later is not a completed character-owned choice."""
+
+    prompt = goal_module.REQUIRED_SELECTION_VERIFIER_PROMPT
+
+    assert "没有实际选择" in prompt
+    assert "必须明确写出实际选中的方案" in prompt

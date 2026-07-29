@@ -50,7 +50,6 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
-| [cognition_core_v2_character_identity_growth_bigbang_plan.md](active/bugfix/cognition_core_v2_character_identity_growth_bigbang_plan.md) | High-risk big-bang plan for versioned global character identity, self-image, growth, and privacy-safe cross-scope carry-over | in_progress |
 | [cognition_core_v2_short_horizon_global_state_composition_bigbang_plan.md](active/bugfix/cognition_core_v2_short_horizon_global_state_composition_bigbang_plan.md) | Post-identity V2 plan for transient global posture, causal relationship context, scoped style composition, and runtime/UI proof | draft |
 | [conversation_progress_v2_long_thread_continuation_bigbang_plan.md](active/bugfix/conversation_progress_v2_long_thread_continuation_bigbang_plan.md) | High-risk in-place conversation-progress V2 plan for logical-turn history, source-backed event continuity, bounded compaction, and conditional retrieval | draft |
 | [rag2_public_output_contract_leak_bugfix_plan.md](active/bugfix/rag2_public_output_contract_leak_bugfix_plan.md) | Large RAG2 prompt/evidence contract bugfix plan | draft |
@@ -427,6 +426,7 @@ plans.
 | [control_console_ui_e2e_acceptance_test_plan.md](archive/completed/bugfix/control_console_ui_e2e_acceptance_test_plan.md) |
 | [cognition_chain_responsibility_allocation_bugfix_plan.md](archive/completed/bugfix/cognition_chain_responsibility_allocation_bugfix_plan.md) |
 | [cognition_core_v2_baseline_regression_hardening_plan.md](archive/completed/bugfix/cognition_core_v2_baseline_regression_hardening_plan.md) |
+| [cognition_core_v2_character_identity_growth_bigbang_plan.md](archive/completed/bugfix/cognition_core_v2_character_identity_growth_bigbang_plan.md) |
 | [cognition_core_v2_compositional_action_planning_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_compositional_action_planning_bugfix_plan.md) |
 | [cognition_core_v2_live_character_judgment_rebalance_plan.md](archive/completed/bugfix/cognition_core_v2_live_character_judgment_rebalance_plan.md) |
 | [cognition_core_v2_intra_turn_transition_coherence_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_intra_turn_transition_coherence_bugfix_plan.md) |
