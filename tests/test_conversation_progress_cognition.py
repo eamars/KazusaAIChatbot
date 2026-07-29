@@ -1,4 +1,4 @@
-"""V2 conversation-progress cognition and surface ownership tests."""
+"""Production connector ordering and surface-ownership tests."""
 
 from __future__ import annotations
 
@@ -28,6 +28,9 @@ from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
 from kazusa_ai_chatbot.cognition_core_v2.surface_stages import (
     CONTENT_PLAN_SYSTEM_PROMPT,
 )
+from kazusa_ai_chatbot.conversation_progress.projection import (
+    build_progress_prompt,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
     build_cognition_input_from_global_state,
 )
@@ -37,13 +40,13 @@ from tests.cognition_core_v2_test_helpers import (
     canonical_episode,
     canonical_identity_context,
 )
+from tests.conversation_progress_v2_helpers import event, packet
 
-
-NOW = "2026-07-15T00:00:00Z"
+NOW = '2026-07-15T00:00:00Z'
 
 
 class _GoalCaptureLLM:
-    """Capture one goal prompt and return a complete speech bid."""
+    """Capture one goal prompt and cite the progress event handle."""
 
     def __init__(self) -> None:
         self.payload: dict[str, Any] = {}
@@ -55,146 +58,124 @@ class _GoalCaptureLLM:
         config: object,
     ) -> SimpleNamespace:
         del config
-        self.payload = json.loads(str(getattr(messages[-1], "content", "{}")))
+        self.payload = json.loads(str(getattr(messages[-1], 'content', '{}')))
         result = {
-            "intention": "advance the unresolved thread",
-            "desired_outcome": "answer the current blocker directly",
-            "concrete_detail": "avoid repeating reassurance",
-            "reason": "the conversation continuity names an open blocker",
-            "private_monologue": "I should address the missing point directly.",
-            "target_role_handles": [],
-            "evidence_handles": ["e1"],
-            "expected_consequences": ["the conversation advances"],
-            "confidence": "high",
+            'intention': 'advance without accidental reopening',
+            'desired_outcome': 'continue from the completed event',
+            'concrete_detail': 'choose a genuinely new next step',
+            'reason': 'the cited progress event is already completed',
+            'private_monologue': 'I should use the event instead of resetting.',
+            'target_role_handles': [],
+            'evidence_handles': ['e2'],
+            'expected_consequences': ['the conversation advances'],
+            'confidence': 'high',
         }
         return SimpleNamespace(content=json.dumps(result))
 
 
 def _progress() -> dict[str, Any]:
-    """Build a prompt-safe progress document plus ignored operational data."""
-
-    return {
-        "status": "active",
-        "episode_label": "slides help",
-        "continuity": "same_episode",
-        "turn_count": 8,
-        "conversation_mode": "task_support",
-        "episode_phase": "stuck_loop",
-        "topic_momentum": "stable",
-        "current_thread": "the missing third contribution point",
-        "user_goal": "finish the contribution slide",
-        "current_blocker": "the third point overlaps the second",
-        "user_state_updates": [],
-        "assistant_moves": ["reassurance"],
-        "overused_moves": ["reassurance"],
-        "open_loops": [{
-            "text": "provide a distinct third contribution",
-            "age_hint": "~5m ago",
-        }],
-        "resolved_threads": [],
-        "avoid_reopening": [{
-            "text": "do not restart the outline",
-            "age_hint": "~20m ago",
-        }],
-        "emotional_trajectory": "tired but still engaged",
-        "next_affordances": ["give one concrete distinct angle"],
-        "progression_guidance": "address the missing point directly",
-        "platform_channel_id": "SECRET_CHANNEL_ID",
-        "source_row_ids": ["SECRET_ROW_ID"],
-    }
+    active = packet(events=[event(
+        event_id='completed_action',
+        summary='the participant completed the selected action',
+        state='completed',
+        retention='decision_critical',
+    )])
+    active['current_thread'] = 'select a new continuation'
+    active['current_blocker'] = 'avoid presenting completed work as new'
+    active['overused_moves'] = ['resetting to the completed action']
+    active['episode_narrative'] = (
+        'The selected action is complete and a new choice is unresolved.'
+    )
+    return build_progress_prompt(
+        active_packet=active,
+        interaction_logical_turns=[],
+    )
 
 
 def _character_profile() -> dict[str, Any]:
-    """Build the exact profile fields consumed by V2 cognition."""
-
-    profile = canonical_character_identity(marker="progress")
-    profile["personality_brief"] = {
-        "mbti": "test",
-        "logic": "Advance the active thread with fresh moves.",
-        "tempo": "measured",
-        "defense": "Use direct language that advances the selected stance.",
-        "quirks": "Prefer one concrete continuation.",
-        "taboos": "Keep attention on active and newly opened material.",
+    profile = canonical_character_identity(marker='progress')
+    profile['personality_brief'] = {
+        'mbti': 'test',
+        'logic': 'Advance the active thread with fresh moves.',
+        'tempo': 'measured',
+        'defense': 'Use direct language that advances the selected stance.',
+        'quirks': 'Prefer one concrete continuation.',
+        'taboos': 'Keep attention on active and newly opened material.',
     }
     return profile
 
 
 def _payload() -> dict[str, Any]:
-    """Build a V2 connector payload carrying bounded continuity."""
-
     character_state = build_character_production_state(updated_at=NOW)
     return build_cognition_input_from_global_state(
         {
-            "cognitive_episode": canonical_episode(
-                episode_id="conversation-progress",
-                content="What should the missing third point be?",
-                current_global_user_id="progress-user",
+            'cognitive_episode': canonical_episode(
+                episode_id='conversation-progress',
+                content='What should happen next?',
+                current_global_user_id='progress-user',
             ),
-            "global_user_id": "progress-user",
-            "user_input": "What should the missing third point be?",
-            "decontextualized_input": "The participant asks for the missing point.",
-            "conversation_progress": _progress(),
-            "user_multimedia_input": [],
-            "rag_result": {"memory_evidence": []},
-            "character_profile": _character_profile(),
+            'global_user_id': 'progress-user',
+            'user_input': 'What should happen next?',
+            'decontextualized_input': 'The participant asks for the next step.',
+            'conversation_progress': _progress(),
+            'user_multimedia_input': [],
+            'rag_result': {'memory_evidence': []},
+            'character_profile': _character_profile(),
         },
         mutable_state=build_acquaintance_user_state(
-            global_user_id="progress-user",
+            global_user_id='progress-user',
             updated_at=NOW,
         ),
         character_state=character_state,
     )
 
 
-def test_content_plan_owns_visible_conversation_progression() -> None:
-    """Topic and progression wording remain in the semantic surface stage."""
-
+def test_content_plan_remains_visible_wording_owner():
     prompt = CONTENT_PLAN_SYSTEM_PROMPT.casefold()
-
-    assert "实际会说出或发送的内容" in prompt
-    assert "角色判断" in prompt
-    assert "这个场景" in prompt
-    assert "最终对话由 dialog 渲染器生成" in prompt
-    assert "本阶段输出规划字段" in prompt
+    assert '实际会说出或发送的内容' in prompt
+    assert '最终对话由 dialog 渲染器生成' in prompt
 
 
-def test_connector_projects_allowlisted_bounded_conversation_progress() -> None:
-    """Continuity reaches SceneContextV2 without operational identifiers."""
+def test_connector_places_progress_after_episode_before_rag():
+    payload = _payload()
+    kinds = [
+        row['evidence_ref']['source_kind']
+        for row in payload['evidence']
+    ]
+    assert kinds[:2] == ['episode', 'conversation_evidence']
+    assert payload['evidence'][1]['evidence_handle'] == 'e2'
+    assert 'state=completed' in payload['evidence'][1]['semantic_text']
 
-    scene_context = _payload()["scene_context"]
-    scene = scene_context["conversation_continuity"]
 
-    assert "missing third contribution point" in scene
-    assert "避免重复: reassurance" in scene
-    assert len(scene) <= 500
-    assert "SECRET_CHANNEL_ID" not in scene
-    assert "SECRET_ROW_ID" not in scene
-    assert "turn_count" not in scene
+def test_connector_projects_bounded_scene_without_source_ids():
+    scene = _payload()['scene_context']['conversation_continuity']
+    assert 'select a new continuation' in scene
+    assert 'completed_action' not in scene
+    assert 'row_source_1' not in scene
+    assert len(scene) <= 2200
 
 
 @pytest.mark.asyncio
-async def test_goal_branch_receives_conversation_progress_before_surface() -> None:
-    """Cognition consumes continuity before selecting the visible response goal."""
-
+async def test_goal_branch_can_cite_completed_progress_event_before_surface():
     payload = _payload()
     projection = project_state_for_prompt(
-        payload["mutable_state"],
-        character_constraints=payload["character_constraints"],
+        payload['mutable_state'],
+        character_constraints=payload['character_constraints'],
         character_identity_context=payload.get(
-            "character_identity_context",
+            'character_identity_context',
             canonical_identity_context(),
         ),
-        evidence=payload["evidence"],
+        evidence=payload['evidence'],
     )
     context = facade._branch_context(
         projection,
-        payload["mutable_state"],
-        payload["evidence"],
-        scene_context=payload["scene_context"],
-        private_continuity_context=payload["private_continuity_context"],
+        payload['mutable_state'],
+        payload['evidence'],
+        scene_context=payload['scene_context'],
+        private_continuity_context=payload['private_continuity_context'],
     )
     llm = _GoalCaptureLLM()
-    config = make_llm_call_config("conversation_progress_goal")
+    config = make_llm_call_config('conversation_progress_goal')
     services = CognitionCoreServicesV2(
         llm=llm,
         appraisal_event_agency_config=config,
@@ -205,28 +186,23 @@ async def test_goal_branch_receives_conversation_progress_before_surface() -> No
         appraisal_existential_drive_config=config,
         goal_ordinary_response_config=config,
         goal_active_branch_config=config,
-        required_selection_verifier_config=config,
         workspace_collapse_config=config,
         action_planning_config=config,
         action_authorization_config=config,
         resolver_authorization_config=config,
     )
-
     bid = await run_goal_cognition(
-        DEFAULT_BRANCH_DEFINITIONS["ordinary_response"],
+        DEFAULT_BRANCH_DEFINITIONS['ordinary_response'],
         {
-            "scope": "user",
-            "kind": "goal",
-            "entity_id": "goal:ordinary-response",
+            'scope': 'user',
+            'kind': 'goal',
+            'entity_id': 'goal:ordinary-response',
         },
         context,
-        payload["evidence"],
+        payload['evidence'],
         services,
     )
-
-    conversation_continuity = llm.payload["semantic_context"]["scene_context"][
-        "conversation_continuity"
-    ]
-    assert "the third point overlaps the second" in conversation_continuity
-    assert llm.payload["evidence"][0]["source_kind"] == "episode"
-    assert bid["concrete_detail"] == "avoid repeating reassurance"
+    assert bid['evidence_handles'] == ['e2']
+    assert llm.payload['evidence'][1]['source_kind'] == (
+        'conversation_evidence'
+    )

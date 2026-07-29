@@ -260,6 +260,40 @@ def test_goal_bid_rejects_route_and_capability_authority() -> None:
         )
 
 
+def test_goal_bid_evidence_limit_matches_the_nine_handle_prompt_packet() -> None:
+    """All nine projected evidence handles remain valid as one goal bid."""
+
+    evidence_handles = [f"e{index}" for index in range(1, 10)]
+    draft = {
+        "intention": "continue the active conversation",
+        "desired_outcome": "preserve every relevant constraint",
+        "concrete_detail": "use the complete projected evidence packet",
+        "reason": "all projected evidence remains relevant",
+        "private_monologue": "I should account for the full packet.",
+        "target_role_handles": [],
+        "evidence_handles": evidence_handles,
+        "expected_consequences": ["the continuation stays consistent"],
+        "confidence": "high",
+    }
+
+    validated = validate_goal_bid_draft(
+        draft,
+        evidence_handles=set(evidence_handles),
+        role_handles=set(),
+    )
+
+    assert validated["evidence_handles"] == evidence_handles
+    with pytest.raises(ValueError, match="evidence handles are invalid"):
+        validate_goal_bid_draft(
+            {
+                **draft,
+                "evidence_handles": [*evidence_handles, "e10"],
+            },
+            evidence_handles={*evidence_handles, "e10"},
+            role_handles=set(),
+        )
+
+
 @pytest.mark.asyncio
 async def test_goal_bid_gets_one_bounded_schema_repair(
     monkeypatch: pytest.MonkeyPatch,
@@ -413,57 +447,27 @@ async def test_goal_bid_schema_exhaustion_is_typed_after_three_attempts() -> Non
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("final_aligned", [True, False])
-async def test_goal_bid_repairs_or_rejects_required_selection(
-    final_aligned: bool,
-) -> None:
-    """Only a verifier-aligned repaired selection survives the fixed ledger."""
+async def test_required_selection_regenerates_with_the_same_producer() -> None:
+    """Retry only structural production without a semantic evaluator."""
 
-    delegated = {
-        "intention": "请求当前用户继续下令",
-        "desired_outcome": "让当前用户决定下一步",
-        "concrete_detail": "当前角色等待当前用户给出具体动作要求",
-        "reason": "先前状态偏向顺从",
-        "private_monologue": "我只想等他命令我。",
+    selected = {
+        "selection_kind": "choice",
+        "selection": "当前角色选择让当前用户继续抱紧她。",
+        "reason": "当前输入把选择权交给当前角色。",
+        "private_monologue": "我现在直接作出自己的选择。",
         "target_role_handles": [],
-        "evidence_handles": ["e1"],
-        "expected_consequences": ["当前用户接管选择"],
+        "evidence_handles": ["e1", "e2"],
+        "conversation_evidence_relations": [{
+            "evidence_handle": "e2",
+            "relation": "excluded",
+        }],
+        "expected_consequences": ["当前用户得到一个明确选择。"],
         "confidence": "high",
-    }
-    repaired = {
-        "intention": "告诉当前用户希望他继续抱紧当前角色",
-        "desired_outcome": "由当前角色完成本轮具体选择",
-        "concrete_detail": "当前角色选择让当前用户继续抱紧当前角色",
-        "reason": "当前输入要求当前角色亲自表达愿望",
-        "private_monologue": "我想让他继续抱紧我。",
-        "target_role_handles": [],
-        "evidence_handles": ["e1"],
-        "expected_consequences": ["当前用户得到明确的下一步动作"],
-        "confidence": "high",
-    }
-    repaired_second = {
-        **repaired,
-        "intention": "明确告诉当前用户由当前角色作出选择",
-        "concrete_detail": "当前角色明确选择一个可执行的下一步动作",
     }
     responses = [
-        delegated,
-        {
-            "aligned": False,
-            "issues": ["目标把本轮选择交给了当前用户。"],
-        },
-        repaired,
-        {
-            "aligned": False,
-            "issues": ["目标仍然没有给出本轮具体选择。"],
-        },
-        repaired_second,
-        {
-            "aligned": final_aligned,
-            "issues": [] if final_aligned else [
-                "目标仍然没有给出本轮具体选择。"
-            ],
-        },
+        {"selection": ""},
+        {**selected, "conversation_evidence_relations": []},
+        selected,
     ]
 
     class _LLM:
@@ -497,186 +501,108 @@ async def test_goal_bid_repairs_or_rejects_required_selection(
             "embedded_target_role": "当前角色",
         },
     }, ensure_ascii=False)
-    call = run_goal_cognition(
+    evidence = [{
+        "evidence_handle": "e1",
+        "evidence_ref": {
+            "source_kind": "episode",
+            "source_id": "episode-1",
+            "occurred_at": "2026-07-15T00:00:00Z",
+            "semantic_summary": semantic_text,
+        },
+        "semantic_text": semantic_text,
+        "visible_to": ["q:event_agency"],
+    }, {
+        "evidence_handle": "e2",
+        "evidence_ref": {
+            "source_kind": "conversation_evidence",
+            "source_id": "conversation-progress-event:completed-event",
+            "occurred_at": "2026-07-15T00:00:00Z",
+            "semantic_summary": "此前选择已经完成。",
+        },
+        "semantic_text": "此前选择已经完成。",
+        "visible_to": ["q:event_agency"],
+    }]
+
+    bid = await run_goal_cognition(
         DEFAULT_BRANCH_DEFINITIONS["ordinary_response"],
         {"scope": "user", "kind": "goal", "entity_id": "g1"},
-        {
-            "_role_bindings": {},
-            "role_summaries": {},
-            "affect": [{"emotion": "love_attachment"}],
-            "private_continuity_context": "这段旧残留推动当前角色交出选择权。",
-        },
-        [{
-            "evidence_handle": "e1",
-            "evidence_ref": {
-                "source_kind": "episode",
-                "source_id": "episode-1",
-                "occurred_at": "2026-07-15T00:00:00Z",
-                "semantic_summary": semantic_text,
-            },
-            "semantic_text": semantic_text,
-            "visible_to": ["q:event_agency"],
-        }],
+        {"_role_bindings": {}, "role_summaries": {}},
+        evidence,
         SimpleNamespace(
             llm=llm,
             goal_ordinary_response_config=object(),
-            required_selection_verifier_config=object(),
         ),
     )
-    if final_aligned:
-        bid = await call
-    else:
-        with pytest.raises(
-            CognitionExecutionError,
-            match="required selection alignment",
-        ) as error_info:
-            await call
-        assert error_info.value.error_code == (
-            "required_selection_alignment_exhausted"
-        )
-        bid = None
 
-    assert len(llm.messages) == 6
-    if bid is not None:
-        assert bid["intention"] == repaired_second["intention"]
-        assert bid["concrete_detail"] == repaired_second["concrete_detail"]
-    repair_payload = json.loads(str(llm.messages[2][-1].content))
-    repair_text = json.dumps(repair_payload, ensure_ascii=False)
-    assert "candidate_bid" not in repair_payload
-    assert "private_continuity_context" not in repair_text
-    second_repair_payload = json.loads(str(llm.messages[4][-1].content))
-    assert second_repair_payload["verified_issues"] == [
-        "目标仍然没有给出本轮具体选择。"
-    ]
+    assert len(llm.messages) == 3
+    assert all(
+        message_set[0].content == goal_module.REQUIRED_SELECTION_GOAL_PROMPT
+        for message_set in llm.messages
+    )
+    assert bid["intention"] == selected["selection"]
+    assert bid["desired_outcome"] == selected["selection"]
+    assert bid["concrete_detail"] == selected["selection"]
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failure_kind", ["provider", "contract"])
-async def test_required_selection_verifier_recovers_on_third_attempt(
-    failure_kind: str,
-) -> None:
-    """Provider and contract failures receive three verifier opportunities."""
-
-    class _VerifierLLM:
-        def __init__(self) -> None:
-            self.call_count = 0
-
-        async def ainvoke(
-            self,
-            messages: list[object],
-            *,
-            config: object,
-        ) -> SimpleNamespace:
-            del messages, config
-            self.call_count += 1
-            if self.call_count < 3:
-                if failure_kind == "provider":
-                    raise RuntimeError("selection verifier unavailable")
-                return SimpleNamespace(
-                    content='{"aligned": "yes", "issues": []}',
-                )
-            return SimpleNamespace(
-                content='{"aligned": true, "issues": []}',
-            )
-
-    llm = _VerifierLLM()
-    verdict = await goal_module._verify_required_selection_bid(
-        definition=DEFAULT_BRANCH_DEFINITIONS["ordinary_response"],
-        draft={
-            "intention": "state one selected response",
-            "desired_outcome": "preserve selection ownership",
-            "concrete_detail": "the character makes the selection",
-            "reason": "the typed operation assigns selection ownership",
-            "private_monologue": "I will make this choice.",
-            "target_role_handles": [],
-            "evidence_handles": ["e1"],
-            "expected_consequences": ["the user receives one decision"],
-            "confidence": "high",
-        },
-        required_operations=[{
-            "response_operation": {
-                "selection_required": True,
-                "selection_owner_role": "当前角色",
-            },
-        }],
-        semantic_context={
-            "character_identity": {
-                "personality": {
-                    "logic": "validate necessary evidence before acting",
-                },
-            },
-            "scene_context": {
-                "conversation_continuity": "an old choice acted immediately",
-            },
-        },
-        services=SimpleNamespace(
-            llm=llm,
-            required_selection_verifier_config=object(),
-        ),
-        stage_suffix="selection_verifier",
-    )
-
-    assert goal_module.REQUIRED_SELECTION_VERIFIER_ATTEMPT_LIMIT == 3
-    assert llm.call_count == 3
-    assert verdict == {"aligned": True, "issues": []}
-
-
-@pytest.mark.asyncio
-async def test_required_selection_verifier_exhaustion_is_unavailable() -> None:
-    """Three malformed verifier results retain the valid candidate as degraded."""
+async def test_required_selection_structure_exhaustion_is_typed() -> None:
+    """Fail before state commit after bounded producer-only attempts."""
 
     llm = MagicMock()
     llm.ainvoke = AsyncMock(return_value=SimpleNamespace(
-        content='{"aligned": "yes", "issues": []}',
+        content='{"selection": ""}',
     ))
-    verdict = await goal_module._verify_required_selection_bid(
-        definition=DEFAULT_BRANCH_DEFINITIONS["ordinary_response"],
-        draft={
-            "intention": "state one selected response",
-            "desired_outcome": "preserve selection ownership",
-            "concrete_detail": "the character makes the selection",
-            "reason": "the typed operation assigns selection ownership",
-            "private_monologue": "I will make this choice.",
-            "target_role_handles": [],
-            "evidence_handles": ["e1"],
-            "expected_consequences": ["the user receives one decision"],
-            "confidence": "high",
+    semantic_text = json.dumps({
+        "role_explicit_content": "当前角色必须作出一个选择。",
+        "response_operation": {
+            "operation": "当前角色选择一个动作",
+            "response_owner_role": "当前角色",
+            "selection_owner_role": "当前角色",
+            "selection_required": True,
+            "embedded_actor_role": "当前角色",
+            "embedded_target_role": "当前用户",
         },
-        required_operations=[{
-            "response_operation": {
-                "selection_required": True,
-                "selection_owner_role": "当前角色",
-            },
-        }],
-        semantic_context={
-            "character_identity": {
-                "personality": {
-                    "logic": "validate necessary evidence before acting",
+    }, ensure_ascii=False)
+
+    with pytest.raises(CognitionExecutionError) as error_info:
+        await run_goal_cognition(
+            DEFAULT_BRANCH_DEFINITIONS["ordinary_response"],
+            {"scope": "user", "kind": "goal", "entity_id": "g1"},
+            {"_role_bindings": {}, "role_summaries": {}},
+            [{
+                "evidence_handle": "e1",
+                "evidence_ref": {
+                    "source_kind": "episode",
+                    "source_id": "episode-1",
+                    "occurred_at": "2026-07-15T00:00:00Z",
+                    "semantic_summary": semantic_text,
                 },
-            },
-        },
-        services=SimpleNamespace(
-            llm=llm,
-            required_selection_verifier_config=object(),
-        ),
-        stage_suffix="selection_verifier",
-    )
+                "semantic_text": semantic_text,
+                "visible_to": ["q:event_agency"],
+            }],
+            SimpleNamespace(
+                llm=llm,
+                goal_ordinary_response_config=object(),
+            ),
+        )
 
     assert llm.ainvoke.await_count == 3
-    assert verdict is None
+    assert error_info.value.error_code == "goal_bid_structure_exhausted"
+    assert error_info.value.stage == "goal_cognition"
+    assert error_info.value.safe_checkpoint == "pre_state_commit"
 
 
 def test_required_branch_failure_cannot_collapse_to_silence() -> None:
     """A required cognition failure remains an execution failure."""
 
-    original_error = ValueError("goal bid remains misaligned")
+    original_error = ValueError("selection goal structure remains invalid")
     execution = ParallelExecutionResult(
         failed_branch_ids={"ordinary_response"},
         failure_records={
             "ordinary_response": BranchFailure(
                 branch_id="ordinary_response",
-                error_code="required_selection_alignment_exhausted",
-                stage="goal_cognition.required_selection_alignment",
+                error_code="goal_bid_structure_exhausted",
+                stage="goal_cognition",
                 attempt_count=3,
                 safe_checkpoint="pre_state_commit",
                 retryable=True,
@@ -695,24 +621,35 @@ def test_required_branch_failure_cannot_collapse_to_silence() -> None:
             [DEFAULT_BRANCH_DEFINITIONS["ordinary_response"]],
         )
 
-    assert raised.value.error_code == (
-        "required_selection_alignment_exhausted"
-    )
+    assert raised.value.error_code == "goal_bid_structure_exhausted"
     assert raised.value.branch_id == "ordinary_response"
-    assert raised.value.stage == (
-        "goal_cognition.required_selection_alignment"
-    )
+    assert raised.value.stage == "goal_cognition"
     assert raised.value.attempt_count == 3
     assert raised.value.safe_checkpoint == "pre_state_commit"
     assert raised.value.retryable is True
     assert raised.value.__cause__ is original_error
 
 
-def test_required_selection_verifier_demands_the_actual_selected_alternative(
-) -> None:
-    """A plan to choose later is not a completed character-owned choice."""
+def test_required_selection_producer_demands_one_actual_selection() -> None:
+    """Keep the authoritative choice inside the producing cognition call."""
 
-    prompt = goal_module.REQUIRED_SELECTION_VERIFIER_PROMPT
+    prompt = goal_module.REQUIRED_SELECTION_GOAL_PROMPT
 
-    assert "没有实际选择" in prompt
-    assert "必须明确写出实际选中的方案" in prompt
+    assert "唯一权威选择内容" in prompt
+    assert "不得只说以后决定" in prompt
+    assert '"selection": ""' in prompt
+
+
+def test_required_selection_producer_accounts_for_terminal_evidence() -> None:
+    """Require direct evidence accounting without a second semantic owner."""
+
+    prompt = goal_module.REQUIRED_SELECTION_GOAL_PROMPT
+
+    assert '同义表达、部件与整体' in prompt
+    assert '引用终态证据不会自动许可重选' in prompt
+    assert (
+        '对 `conversation_progress_event_handles` '
+        '中每个活跃进度事件句柄恰好输出一条关系'
+    ) in prompt
+    assert not hasattr(goal_module, 'REQUIRED_SELECTION_VERIFIER_PROMPT')
+    assert not hasattr(goal_module, 'REQUIRED_SELECTION_REPAIR_PROMPT')

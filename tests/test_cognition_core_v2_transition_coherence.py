@@ -771,7 +771,7 @@ async def test_progress_receives_only_accepted_surface_semantics(
     monkeypatch.setattr(
         post_turn,
         "_validated_episode_trace",
-        lambda state, *, logger: {},
+        lambda state, *, logger: {"settled_at": NOW},
     )
     monkeypatch.setattr(
         post_turn,
@@ -796,8 +796,17 @@ async def test_progress_receives_only_accepted_surface_semantics(
         "global_user_id": "current-user",
         "storage_timestamp_utc": NOW,
         "conversation_episode_state": None,
+        "conversation_progress_turn_outcome": "visible_response",
         "decontextualized_input": "We are accomplices.",
         "chat_history_recent": [],
+        "interaction_logical_turns": [],
+        "active_turn_conversation_row_ids": ["row-current"],
+        "active_turn_conversation_source_refs": [{
+            "ref_kind": "conversation_row",
+            "ref_id": "row-current",
+            "occurred_at": NOW,
+        }],
+        "llm_trace_id": "trace-current",
         "logical_stance": "accept",
         "character_intent": "confirm shared participation",
     }

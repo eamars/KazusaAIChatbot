@@ -1,122 +1,89 @@
-"""V2 conversation-history boundary tests."""
+"""Bounded logical-history and prompt projection policy tests."""
 
-import json
-from copy import deepcopy
-from types import SimpleNamespace
+from __future__ import annotations
 
-import pytest
-
-from kazusa_ai_chatbot.cognition_core_v2 import run_text_surface_planning
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
-    CognitionContractError,
-    TextSurfaceServicesV2,
-    validate_text_surface_input,
+from kazusa_ai_chatbot.conversation_progress.history import (
+    project_logical_turns_for_prompt,
+    select_recent_logical_turns,
 )
-from llm_test_helpers import make_llm_call_config
-from tests.cognition_core_v2_test_helpers import canonical_episode
+from kazusa_ai_chatbot.conversation_progress.policy import (
+    AMBIENT_LOGICAL_TURN_LIMIT,
+    AMBIENT_ROW_SCAN_LIMIT,
+    INTERACTION_LOGICAL_TURN_LIMIT,
+    INTERACTION_ROW_SCAN_LIMIT,
+    MAX_AMBIENT_PROMPT_CHARS,
+    MAX_INTERACTION_RECORDER_CHARS,
+    MAX_LOGICAL_TURN_TEXT_CHARS,
+)
+from tests.conversation_progress_v2_helpers import logical_turn
 
 
-class _PromptCaptureLLM:
-    """Capture public L3 prompts and return the exact surface-stage shape."""
+def _turn(index: int, text: str = 'bounded text') -> dict:
+    """Build one source-distinct logical turn."""
 
-    def __init__(self) -> None:
-        self.prompts: list[str] = []
-
-    async def ainvoke(
-        self,
-        messages: list[object],
-        *,
-        config: object,
-    ) -> SimpleNamespace:
-        self.prompts.append(str(getattr(messages[-1], "content", "")))
-        stage_name = getattr(config, "stage_name", "")
-        if stage_name == "history_content":
-            result = {
-                "content_plan": "bounded",
-                "content_requirements": ["preserve the current addressee"],
-                "delivery_profile": {
-                    "lexical_register": "plain",
-                    "sentence_shape": "concise",
-                    "rhythm": "steady",
-                    "hesitation": "light",
-                    "punctuation": "restrained",
-                },
-            }
-        elif stage_name == "history_preference":
-            result = {
-                "visible_boundaries": ["bounded"],
-                "addressee_plan": ["bounded"],
-            }
-        else:
-            raise AssertionError("unexpected text-surface stage")
-        return SimpleNamespace(content=json.dumps(result))
-
-
-def _surface_payload() -> dict[str, object]:
-    """Build one canonical public L3 packet with private history metadata."""
-
-    episode = canonical_episode(
-        episode_id="history-policy",
-        content="visible current-turn grounding",
+    turn = logical_turn(
+        turn_id=f'row:row-{index}',
+        row_id=f'row-{index}',
+        trace_id=f'trace-{index}',
     )
-    episode["percepts"].append({
-        "schema_version": "percept.v1",
-        "percept_kind": "history_summary",
-        "source_kind": "system_event",
-        "source_id": "history-summary:current-turn",
-        "content": {"semantic_summary": "bounded semantic history summary"},
-        "observed_at": episode["created_at"],
-    })
-    return {
-        "schema_version": "text_surface_input.v2",
-        "episode": episode,
-        "intention": {
-            "route": "speech",
-            "intention": "acknowledge the current turn",
-            "target_roles": [],
-            "reason": "the current percept is visible",
-        },
-        "goal_resolution": "answerable_now",
-        "supporting_bids": [],
-        "expression_policy": {
-            "visibility": "visible",
-            "emotional_tone": "calm",
-            "intensity": "restrained",
-            "directness": "balanced",
-        },
-        "semantic_affect": [],
-        "permitted_action_results": [],
-        "interaction_style_context": "brief and natural",
-        "character_expression_context": {
-            "tempo": "steady",
-            "linguistic_texture": "Concise clauses with light hesitation.",
-        },
-        "visual_character_context": "reserved, analytical, and warm",
-    }
+    turn['occurred_at'] = f'2026-07-28T09:{index:02d}:00+00:00'
+    turn['fragments'] = [text]
+    return turn
 
 
-@pytest.mark.asyncio
-async def test_surface_episode_allows_only_semantic_history_summaries() -> None:
-    """Canonical validation precedes prompt-safe visible-percept projection."""
+def test_history_caps_match_approved_contract():
+    assert AMBIENT_ROW_SCAN_LIMIT == 48
+    assert INTERACTION_ROW_SCAN_LIMIT == 128
+    assert AMBIENT_LOGICAL_TURN_LIMIT == 6
+    assert INTERACTION_LOGICAL_TURN_LIMIT == 10
+    assert MAX_LOGICAL_TURN_TEXT_CHARS == 600
+    assert MAX_AMBIENT_PROMPT_CHARS == 1200
+    assert MAX_INTERACTION_RECORDER_CHARS == 2000
 
-    invalid_payload = deepcopy(_surface_payload())
-    invalid_payload["episode"] = {
-        "episode_summary": "retired semantic episode projection"
-    }
-    with pytest.raises(CognitionContractError):
-        validate_text_surface_input(invalid_payload)
 
-    llm = _PromptCaptureLLM()
-    services = TextSurfaceServicesV2(
-        llm=llm,
-        content_plan_config=make_llm_call_config("history_content"),
-        preference_config=make_llm_call_config("history_preference"),
+def test_newest_ten_interaction_turns_preserve_chronology():
+    turns = [_turn(index) for index in range(20)]
+
+    selected = select_recent_logical_turns(
+        turns,
+        limit=INTERACTION_LOGICAL_TURN_LIMIT,
     )
-    await run_text_surface_planning(_surface_payload(), services)
 
-    rendered = "\n".join(llm.prompts)
-    assert "visible current-turn grounding" in rendered
-    assert "bounded semantic history summary" in rendered
-    assert "RAW_HISTORY_SENTINEL" not in rendered
-    assert "PRIVATE_HISTORY_SENTINEL" not in rendered
-    assert "PRIVATE_MONOLOGUE_SENTINEL" not in rendered
+    assert [turn['turn_id'] for turn in selected] == [
+        f'row:row-{index}' for index in range(10, 20)
+    ]
+
+
+def test_prompt_projection_keeps_complete_newest_turns_within_budget():
+    turns = [
+        _turn(index, text=str(index) * 500)
+        for index in range(10)
+    ]
+
+    lines = project_logical_turns_for_prompt(
+        turns,
+        maximum_chars=MAX_AMBIENT_PROMPT_CHARS,
+    )
+
+    assert len('\n'.join(lines)) <= MAX_AMBIENT_PROMPT_CHARS
+    assert all(len(line) <= MAX_LOGICAL_TURN_TEXT_CHARS for line in lines)
+    assert lines[-1].endswith('9' * (len(lines[-1].split(': ', 1)[1])))
+
+
+def test_prompt_projection_never_exposes_protected_row_or_trace_ids():
+    lines = project_logical_turns_for_prompt(
+        [_turn(1, text='ordinary content')],
+        maximum_chars=MAX_AMBIENT_PROMPT_CHARS,
+    )
+
+    rendered = '\n'.join(lines)
+    assert 'row-1' not in rendered
+    assert 'trace-1' not in rendered
+    assert 'ordinary content' in rendered
+
+
+def test_zero_turn_limit_returns_empty_without_partial_turns():
+    assert select_recent_logical_turns(
+        [_turn(1)],
+        limit=0,
+    ) == []

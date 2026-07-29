@@ -7,9 +7,13 @@ from collections.abc import Awaitable, Callable
 
 from kazusa_ai_chatbot.channel_scene_projection import usable_channel_label
 from kazusa_ai_chatbot.chat_input_queue import QueuedChatItem
+from kazusa_ai_chatbot.conversation_progress import (
+    ConversationProgressSourceRefV2,
+)
 from kazusa_ai_chatbot.message_envelope import MessageEnvelope
 from kazusa_ai_chatbot.message_envelope import validate_semantic_storage_fields
 from kazusa_ai_chatbot.state import ReplyContext
+from kazusa_ai_chatbot.time_boundary import parse_storage_utc_datetime
 
 from .contracts import ChatRequest
 
@@ -196,6 +200,44 @@ def active_turn_conversation_row_ids(item: QueuedChatItem) -> list[str]:
         active_ids.append(row_id)
 
     return active_ids
+
+
+def active_turn_conversation_source_refs(
+    item: QueuedChatItem,
+) -> list[ConversationProgressSourceRefV2]:
+    """Preserve each active conversation row's exact storage timestamp.
+
+    Args:
+        item: Surviving queued item that will run through the chat graph.
+
+    Returns:
+        Canonical row references from the survivor and collapsed follow-ups,
+        deduplicated in arrival order.
+    """
+
+    timestamps_by_row_id: dict[str, str] = {}
+    source_refs: list[ConversationProgressSourceRefV2] = []
+    for queued_item in [item, *item.collapsed_items]:
+        row_id = str(queued_item.conversation_row_id or "").strip()
+        if not row_id:
+            continue
+        occurred_at = str(queued_item.storage_timestamp_utc or "").strip()
+        parse_storage_utc_datetime(occurred_at)
+        prior_timestamp = timestamps_by_row_id.get(row_id)
+        if prior_timestamp is not None:
+            if prior_timestamp != occurred_at:
+                raise ValueError(
+                    "one conversation row has conflicting timestamps"
+                )
+            continue
+        timestamps_by_row_id[row_id] = occurred_at
+        source_refs.append({
+            "ref_kind": "conversation_row",
+            "ref_id": row_id,
+            "occurred_at": occurred_at,
+        })
+
+    return source_refs
 
 
 async def save_user_message_from_item(

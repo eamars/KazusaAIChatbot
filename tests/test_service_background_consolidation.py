@@ -133,6 +133,16 @@ def _consolidation_state() -> dict:
         "rag_result": {},
         "decontextualized_input": "please remember this",
         "chat_history_recent": [],
+        "interaction_logical_turns": [],
+        "active_turn_conversation_row_ids": ["conversation-row-1"],
+        "active_turn_conversation_source_refs": [{
+            "ref_kind": "conversation_row",
+            "ref_id": "conversation-row-1",
+            "occurred_at": "2026-04-24T18:00:00+00:00",
+        }],
+        "llm_trace_id": "trace-background-consolidation",
+        "conversation_episode_state": None,
+        "conversation_progress_turn_outcome": "visible_response",
     }
     return return_value
 
@@ -207,6 +217,7 @@ def _graph_result(consolidation_state: Mapping | dict | None = None) -> dict:
 
     return_value = {
         "should_respond": True,
+        "response_action": "proceed",
         "use_reply_feature": False,
         "final_dialog": ["ok"],
         "future_promises": [],
@@ -1732,6 +1743,11 @@ async def test_progress_background_passes_character_boundary_profile(monkeypatch
     record_input = record_turn_progress.await_args.kwargs["record_input"]
     assert record_input["character_name"] == "Character"
     assert record_input["boundary_profile"] == boundary_profile
+    assert record_input["current_turn_source_refs"][0] == {
+        "ref_kind": "conversation_row",
+        "ref_id": "conversation-row-1",
+        "occurred_at": "2026-04-24T18:00:00+00:00",
+    }
 
 
 @pytest.mark.asyncio
@@ -1781,16 +1797,25 @@ async def test_build_graph_preserves_consolidation_state_from_supervisor(monkeyp
         AsyncMock(return_value={
             "episode_state": None,
             "conversation_progress": {
-                "status": "new_episode",
-                "episode_label": "",
+                "schema_version": "conversation_progress_prompt.v2",
+                "episode_state_id": "",
+                "status": "empty",
                 "continuity": "sharp_transition",
                 "turn_count": 0,
-                "user_state_updates": [],
-                "assistant_moves": [],
+                "current_thread": "",
+                "character_stance": "",
+                "user_goal": "",
+                "current_blocker": "",
+                "emotional_trajectory": "",
+                "episode_narrative": "",
+                "events": [],
                 "overused_moves": [],
-                "open_loops": [],
-                "progression_guidance": "",
+                "interaction_logical_turns": [],
+                "compacted_block_refs": [],
             },
+            "ambient_logical_turns": [],
+            "interaction_logical_turns": [],
+            "diagnostics": {},
             "source": "empty",
         }),
     )
@@ -1853,16 +1878,25 @@ async def test_build_graph_preserves_persona_no_response(monkeypatch):
         AsyncMock(return_value={
             "episode_state": None,
             "conversation_progress": {
-                "status": "new_episode",
-                "episode_label": "",
+                "schema_version": "conversation_progress_prompt.v2",
+                "episode_state_id": "",
+                "status": "empty",
                 "continuity": "sharp_transition",
                 "turn_count": 0,
-                "user_state_updates": [],
-                "assistant_moves": [],
+                "current_thread": "",
+                "character_stance": "",
+                "user_goal": "",
+                "current_blocker": "",
+                "emotional_trajectory": "",
+                "episode_narrative": "",
+                "events": [],
                 "overused_moves": [],
-                "open_loops": [],
-                "progression_guidance": "",
+                "interaction_logical_turns": [],
+                "compacted_block_refs": [],
             },
+            "ambient_logical_turns": [],
+            "interaction_logical_turns": [],
+            "diagnostics": {},
             "source": "empty",
         }),
     )

@@ -1417,6 +1417,8 @@ def _persona_state_for_input(
             },
         },
         "chat_history_wide": [],
+        "ambient_logical_turns": [],
+        "interaction_logical_turns": [],
         "reply_context": {},
         "indirect_speech_context": "",
         "channel_topic": "debug",

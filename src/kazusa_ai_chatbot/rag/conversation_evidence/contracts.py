@@ -30,6 +30,19 @@ class _ActiveTurnExclusionCounts(TypedDict):
     conversation_row_id: int
     platform_message_id: int
 
+
+class ConversationProgressBlockProjection(TypedDict):
+    """Exact active-block row exposed by the conversation search worker."""
+
+    source_kind: str
+    block_id: str
+    narrative: str
+    events: list[dict[str, object]]
+    source_started_at: str
+    source_ended_at: str
+    covered_turn_refs: list[str]
+    score: float
+
 def _clip_text(value: object, *, limit: int = 1000) -> str:
     """Return compact prompt-facing text.
 

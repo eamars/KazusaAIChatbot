@@ -1,303 +1,392 @@
-"""Projection from stored episode state to prompt-facing progress."""
+"""Bounded scene and cognition-evidence projections."""
 
 from __future__ import annotations
 
-import logging
-from datetime import timedelta
+from collections.abc import Sequence
+from copy import deepcopy
 
-from kazusa_ai_chatbot.conversation_progress.models import ConversationProgressPromptDoc
-from kazusa_ai_chatbot.conversation_progress.policy import (
-    ASSISTANT_MOVES_LIMIT,
-    AVOID_REOPENING_LIMIT,
-    MAX_ENTRY_CHARS,
-    MAX_GUIDANCE_CHARS,
-    MAX_LABEL_CHARS,
-    MAX_MOVE_CHARS,
-    MAX_OBLIGATION_CHARS,
-    MAX_THREAD_CHARS,
-    NEXT_AFFORDANCES_LIMIT,
-    OPEN_LOOPS_LIMIT,
-    INTERACTION_OBLIGATIONS_LIMIT,
-    OVERUSED_MOVES_LIMIT,
-    RESOLVED_THREADS_LIMIT,
-    USER_STATE_UPDATES_LIMIT,
-    cap_text,
-    empty_progress_prompt_doc,
-    enforce_progress_prompt_budget,
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    EVIDENCE_SOURCE_QUESTION_IDS,
+    CognitionEvidenceV2,
 )
-from kazusa_ai_chatbot.db.schemas import (
-    ConversationEpisodeEntryDoc,
-    ConversationEpisodeStateDoc,
-    ConversationInteractionObligationDoc,
+from kazusa_ai_chatbot.conversation_progress.models import (
+    ConversationLogicalTurnV1,
+    ConversationProgressEventV2,
+    ConversationProgressPromptV2,
+    ConversationProgressStateV2,
+)
+from kazusa_ai_chatbot.conversation_progress.policy import (
+    MAX_CONTINUATION_CHARS,
+    MAX_PROGRESS_EVIDENCE_CHARS,
+    MAX_PROGRESS_EVIDENCE_ROWS,
+    MAX_PROGRESS_SCENE_CHARS,
+    MAX_SCENE_LOGICAL_TURNS,
+    MAX_SCENE_NARRATIVE_CHARS,
+    MAX_SCENE_TURN_TEXT_CHARS,
 )
 from kazusa_ai_chatbot.time_boundary import parse_storage_utc_datetime
 
-logger = logging.getLogger(__name__)
 
-
-def age_hint(*, first_seen_at: str, current_timestamp_utc: str) -> str:
-    """Convert a first-seen timestamp into a compact relative-age label.
-
-    Args:
-        first_seen_at: ISO-8601 timestamp when the entry first appeared.
-        current_timestamp_utc: Storage UTC timestamp for the current turn.
-
-    Returns:
-        Human-facing relative age such as ``"just now"`` or ``"~3h ago"``.
-    """
-
-    first_seen = parse_storage_utc_datetime(first_seen_at)
-    current = parse_storage_utc_datetime(current_timestamp_utc)
-    delta = current - first_seen
-    if delta < timedelta(minutes=5):
-        return "just now"
-    if delta < timedelta(hours=1):
-        minutes = max(5, round(delta.total_seconds() / 60 / 5) * 5)
-        return_value = f"~{minutes}m ago"
-        return return_value
-    if delta < timedelta(hours=8):
-        hours = max(1, round(delta.total_seconds() / 3600))
-        return_value = f"~{hours}h ago"
-        return return_value
-    if first_seen.date() == current.date():
-        return "earlier today"
-    if (current.date() - first_seen.date()).days == 1:
-        return "yesterday"
-    return "earlier in this episode"
-
-
-def _project_entry(
+def empty_progress_prompt(
     *,
-    entry: ConversationEpisodeEntryDoc,
-    current_timestamp_utc: str,
-) -> dict[str, str] | None:
-    """Project one stored entry when its shape is prompt-safe.
+    interaction_logical_turns: Sequence[ConversationLogicalTurnV1],
+) -> ConversationProgressPromptV2:
+    """Build the stable prompt shape when no active packet exists."""
 
-    Args:
-        entry: Stored episode entry.
-        current_timestamp_utc: Current turn storage UTC timestamp for age
-            hints.
-
-    Returns:
-        Prompt-facing entry, or ``None`` for malformed legacy data.
-    """
-
-    text = entry.get("text")
-    first_seen_at = entry.get("first_seen_at")
-    if not isinstance(text, str) or not text.strip() or not isinstance(first_seen_at, str) or not first_seen_at.strip():
-        return None
-    try:
-        relative_age = age_hint(
-            first_seen_at=first_seen_at,
-            current_timestamp_utc=current_timestamp_utc,
-        )
-    except ValueError as exc:
-        logger.debug(f"Dropping progress entry with invalid first_seen_at: {exc}")
-        return None
-    return_value = {
-        "text": cap_text(text, MAX_ENTRY_CHARS),
-        "age_hint": relative_age,
+    return {
+        'schema_version': 'conversation_progress_prompt.v2',
+        'episode_state_id': '',
+        'status': 'empty',
+        'continuity': 'sharp_transition',
+        'turn_count': 0,
+        'current_thread': '',
+        'character_stance': '',
+        'user_goal': '',
+        'current_blocker': '',
+        'emotional_trajectory': '',
+        'episode_narrative': '',
+        'events': [],
+        'overused_moves': [],
+        'interaction_logical_turns': [
+            deepcopy(turn) for turn in interaction_logical_turns
+        ],
+        'compacted_block_refs': [],
     }
-    return return_value
 
 
-def _project_entries(
+def build_progress_prompt(
     *,
-    entries: list[ConversationEpisodeEntryDoc],
-    current_timestamp_utc: str,
-    limit: int,
-) -> list[dict[str, str]]:
-    result: list[dict[str, str]] = []
-    for entry in entries:
-        projected = _project_entry(
-            entry=entry,
-            current_timestamp_utc=current_timestamp_utc,
+    active_packet: ConversationProgressStateV2 | None,
+    interaction_logical_turns: Sequence[ConversationLogicalTurnV1],
+) -> ConversationProgressPromptV2:
+    """Project one active packet into bounded prompt-facing continuation."""
+
+    if active_packet is None:
+        return empty_progress_prompt(
+            interaction_logical_turns=interaction_logical_turns,
         )
-        if projected is None:
-            continue
-        result.append(projected)
-        if len(result) >= limit:
-            break
-    return result
+    events = _ordered_events(active_packet['events'])[
+        :MAX_PROGRESS_EVIDENCE_ROWS
+    ]
+    return {
+        'schema_version': 'conversation_progress_prompt.v2',
+        'episode_state_id': active_packet['episode_state_id'],
+        'status': active_packet['status'],
+        'continuity': active_packet['continuity'],
+        'turn_count': active_packet['turn_count'],
+        'current_thread': active_packet['current_thread'],
+        'character_stance': active_packet['character_stance'],
+        'user_goal': active_packet['user_goal'],
+        'current_blocker': active_packet['current_blocker'],
+        'emotional_trajectory': active_packet['emotional_trajectory'],
+        'episode_narrative': active_packet['episode_narrative'],
+        'events': [deepcopy(event) for event in events],
+        'overused_moves': list(active_packet['overused_moves']),
+        'interaction_logical_turns': [
+            deepcopy(turn) for turn in interaction_logical_turns
+        ],
+        'compacted_block_refs': list(
+            active_packet['compacted_block_refs']
+        ),
+    }
 
 
-def _project_obligations(
-    *,
-    obligations: list[ConversationInteractionObligationDoc],
-    current_timestamp_utc: str,
-) -> list[dict[str, str]]:
-    """Project stored obligation roles with bounded semantic text and age."""
+def project_conversation_progress_scene(
+    progress: ConversationProgressPromptV2,
+) -> str:
+    """Render the required-first scene projection within 2,200 characters."""
 
-    result: list[dict[str, str]] = []
-    for obligation in obligations:
-        first_seen_at = obligation.get("first_seen_at")
-        actor = obligation.get("actor")
-        action = obligation.get("action")
-        if (
-            not isinstance(first_seen_at, str)
-            or not first_seen_at.strip()
-            or not isinstance(actor, str)
-            or not actor.strip()
-            or not isinstance(action, str)
-            or not action.strip()
-        ):
-            continue
-        try:
-            relative_age = age_hint(
-                first_seen_at=first_seen_at,
-                current_timestamp_utc=current_timestamp_utc,
-            )
-        except ValueError as exc:
-            logger.debug(
-                f"Dropping obligation with invalid first_seen_at: {exc}"
-            )
-            continue
-        result.append({
-            "actor": cap_text(actor, MAX_OBLIGATION_CHARS),
-            "action": cap_text(action, MAX_OBLIGATION_CHARS),
-            "beneficiary": cap_text(
-                obligation.get("beneficiary", ""),
-                MAX_OBLIGATION_CHARS,
+    lines: list[str] = []
+    _append_line(
+        lines,
+        'Current thread',
+        progress['current_thread'],
+        maximum_chars=MAX_PROGRESS_SCENE_CHARS,
+        permit_truncation=True,
+    )
+    _append_line(
+        lines,
+        'Character stance',
+        progress['character_stance'],
+        maximum_chars=MAX_PROGRESS_SCENE_CHARS,
+        permit_truncation=True,
+    )
+    _append_line(
+        lines,
+        'Episode narrative',
+        progress['episode_narrative'][:MAX_SCENE_NARRATIVE_CHARS],
+        maximum_chars=MAX_PROGRESS_SCENE_CHARS,
+        permit_truncation=True,
+    )
+
+    recent_turns = progress['interaction_logical_turns'][
+        -MAX_SCENE_LOGICAL_TURNS:
+    ]
+    for turn in recent_turns:
+        speaker = turn['display_name'] or turn['role']
+        turn_text = ' '.join(turn['fragments'])
+        bounded_text = turn_text[:MAX_SCENE_TURN_TEXT_CHARS].rstrip()
+        _append_line(
+            lines,
+            f'Recent interaction ({speaker})',
+            bounded_text,
+            maximum_chars=MAX_PROGRESS_SCENE_CHARS,
+            permit_truncation=True,
+        )
+
+    _append_line(
+        lines,
+        'User goal',
+        progress['user_goal'],
+        maximum_chars=MAX_PROGRESS_SCENE_CHARS,
+        permit_truncation=False,
+    )
+    _append_line(
+        lines,
+        'Current blocker',
+        progress['current_blocker'],
+        maximum_chars=MAX_PROGRESS_SCENE_CHARS,
+        permit_truncation=False,
+    )
+    _append_line(
+        lines,
+        'Emotional trajectory',
+        progress['emotional_trajectory'],
+        maximum_chars=MAX_PROGRESS_SCENE_CHARS,
+        permit_truncation=False,
+    )
+    _append_list_line(
+        lines,
+        'Overused moves',
+        progress['overused_moves'],
+        maximum_chars=MAX_PROGRESS_SCENE_CHARS,
+    )
+    scene = '\n'.join(lines)
+    if len(scene) > MAX_PROGRESS_SCENE_CHARS:
+        raise ValueError('conversation progress scene exceeds its hard cap')
+    return scene
+
+
+def project_conversation_progress_evidence(
+    progress: ConversationProgressPromptV2,
+    occurred_at: str,
+) -> list[CognitionEvidenceV2]:
+    """Project model-labelled events into ordered citeable cognition evidence."""
+
+    if not isinstance(occurred_at, str) or not occurred_at:
+        raise ValueError('conversation progress evidence occurred_at is required')
+    selected_events = _ordered_events(progress['events'])[
+        :MAX_PROGRESS_EVIDENCE_ROWS
+    ]
+    if not selected_events:
+        return []
+    base_budget, extra_chars = divmod(
+        MAX_PROGRESS_EVIDENCE_CHARS,
+        len(selected_events),
+    )
+    evidence: list[CognitionEvidenceV2] = []
+    for index, event in enumerate(selected_events):
+        row_budget = base_budget + (1 if index < extra_chars else 0)
+        semantic_text = _bounded_event_semantic_text(
+            event,
+            maximum_chars=row_budget,
+        )
+        evidence.append({
+            'evidence_handle': '',
+            'evidence_ref': {
+                'source_kind': 'conversation_evidence',
+                'source_id': f'conversation-progress-event:{event["event_id"]}',
+                'occurred_at': occurred_at,
+                'semantic_summary': event['semantic_summary'],
+            },
+            'semantic_text': semantic_text,
+            'visible_to': list(
+                EVIDENCE_SOURCE_QUESTION_IDS['conversation_evidence']
             ),
-            "precondition": cap_text(
-                obligation.get("precondition", ""),
-                MAX_OBLIGATION_CHARS,
-            ),
-            "expected_outcome": cap_text(
-                obligation.get("expected_outcome", ""),
-                MAX_OBLIGATION_CHARS,
-            ),
-            "status": obligation["status"],
-            "source_kind": obligation["source_kind"],
-            "age_hint": relative_age,
         })
-        if len(result) >= INTERACTION_OBLIGATIONS_LIMIT:
-            break
-    return result
+    used_chars = sum(len(row['semantic_text']) for row in evidence)
+    if used_chars > MAX_PROGRESS_EVIDENCE_CHARS:
+        raise ValueError('conversation progress evidence exceeds its hard cap')
+    return evidence
 
 
-def _project_string_list(*, values: list, limit: int, max_chars: int) -> list[str]:
-    """Project only clean string list items.
+def continuation_projection_chars(
+    progress: ConversationProgressPromptV2,
+    occurred_at: str,
+) -> tuple[int, int]:
+    """Return scene and evidence character counts after final projection."""
 
-    Args:
-        values: Stored list value.
-        limit: Maximum number of items to project.
-        max_chars: Maximum characters per projected item.
-
-    Returns:
-        Prompt-safe clean string list.
-    """
-
-    result: list[str] = []
-    for text_value in values:
-        if not isinstance(text_value, str) or not text_value.strip():
-            continue
-        result.append(cap_text(text_value, max_chars))
-        if len(result) >= limit:
-            break
-    return result
+    scene = project_conversation_progress_scene(progress)
+    evidence = project_conversation_progress_evidence(progress, occurred_at)
+    evidence_chars = sum(len(row['semantic_text']) for row in evidence)
+    if len(scene) + evidence_chars > MAX_CONTINUATION_CHARS:
+        raise ValueError('combined continuation projection exceeds its hard cap')
+    return len(scene), evidence_chars
 
 
-def project_prompt_doc(
+def _ordered_events(
+    events: Sequence[ConversationProgressEventV2],
+) -> list[ConversationProgressEventV2]:
+    """Apply the approved semantic-label priority with stable tie breaking."""
+
+    return sorted(
+        events,
+        key=lambda event: (
+            _event_tier(event),
+            -parse_storage_utc_datetime(event['updated_at']).timestamp(),
+            event['event_id'],
+        ),
+    )
+
+
+def _event_tier(event: ConversationProgressEventV2) -> int:
+    """Map exact model-owned state labels to the approved selection tier."""
+
+    if event['retention'] == 'decision_critical':
+        return 0
+    if (
+        event['retention'] == 'active_scene'
+        and event['state'] in {'open', 'in_progress'}
+    ):
+        return 1
+    if event['retention'] == 'active_scene':
+        return 2
+    return 3
+
+
+def _event_semantic_text(event: ConversationProgressEventV2) -> str:
+    """Render one event snapshot without performing semantic inference."""
+
+    parts = [
+        event['semantic_summary'],
+        f'state={event["state"]}',
+        f'retention={event["retention"]}',
+    ]
+    for label, field_name in (
+        ('actor', 'actor'),
+        ('action', 'action'),
+        ('object', 'object'),
+        ('beneficiary', 'beneficiary'),
+        ('precondition', 'precondition'),
+        ('outcome', 'outcome'),
+    ):
+        value = event[field_name]
+        if value:
+            parts.append(f'{label}={value}')
+    return '; '.join(parts)
+
+
+def _bounded_event_semantic_text(
+    event: ConversationProgressEventV2,
     *,
-    document: ConversationEpisodeStateDoc | None,
-    current_timestamp_utc: str,
-) -> ConversationProgressPromptDoc:
-    """Project a stored episode document into the prompt-facing shape.
+    maximum_chars: int,
+) -> str:
+    """Fit one event fairly while preserving its decision identity."""
 
-    Args:
-        document: Stored episode-state document or ``None``.
-        current_timestamp_utc: Current turn storage UTC timestamp for age
-            hints.
+    full_text = _event_semantic_text(event)
+    if len(full_text) <= maximum_chars:
+        return full_text
 
-    Returns:
-        Compact progress payload safe to place in a HumanMessage.
-    """
+    required_values = [
+        event['semantic_summary'],
+        event['actor'],
+        event['action'],
+        event['object'],
+    ]
+    value_limits = [
+        min(48, len(required_values[0])),
+        min(16, len(required_values[1])),
+        min(16, len(required_values[2])),
+        min(24, len(required_values[3])),
+    ]
 
-    if document is None:
-        return_value = empty_progress_prompt_doc()
-        return return_value
+    def _render_required() -> str:
+        return '; '.join([
+            required_values[0][:value_limits[0]],
+            f'state={event["state"]}',
+            f'retention={event["retention"]}',
+            f'actor={required_values[1][:value_limits[1]]}',
+            f'action={required_values[2][:value_limits[2]]}',
+            f'object={required_values[3][:value_limits[3]]}',
+        ])
 
-    if document["continuity"] == "sharp_transition":
-        return_value = {
-            "status": "new_episode",
-            "episode_label": cap_text(document.get("episode_label", ""), MAX_LABEL_CHARS),
-            "continuity": "sharp_transition",
-            "turn_count": int(document["turn_count"]),
-            "conversation_mode": "",
-            "episode_phase": "",
-            "topic_momentum": "sharp_break",
-            "current_thread": "",
-            "user_goal": "",
-            "current_blocker": "",
-            "user_state_updates": [],
-            "assistant_moves": [],
-            "overused_moves": [],
-            "open_loops": [],
-            "interaction_obligations": _project_obligations(
-                obligations=document.get("interaction_obligations", []),
-                current_timestamp_utc=current_timestamp_utc,
-            ),
-            "resolved_threads": [],
-            "avoid_reopening": [],
-            "emotional_trajectory": "",
-            "next_affordances": [],
-            "progression_guidance": "",
-        }
-        return return_value
+    semantic_text = _render_required()
+    if len(semantic_text) > maximum_chars:
+        raise ValueError(
+            'conversation progress evidence row cannot preserve identity'
+        )
 
-    prompt_doc: ConversationProgressPromptDoc = {
-        "status": cap_text(document["status"], MAX_LABEL_CHARS),
-        "episode_label": cap_text(document["episode_label"], MAX_LABEL_CHARS),
-        "continuity": cap_text(document["continuity"], MAX_LABEL_CHARS),
-        "turn_count": int(document["turn_count"]),
-        "conversation_mode": cap_text(document.get("conversation_mode", ""), MAX_LABEL_CHARS),
-        "episode_phase": cap_text(document.get("episode_phase", ""), MAX_LABEL_CHARS),
-        "topic_momentum": cap_text(document.get("topic_momentum", ""), MAX_LABEL_CHARS),
-        "current_thread": cap_text(document.get("current_thread", ""), MAX_THREAD_CHARS),
-        "user_goal": cap_text(document.get("user_goal", ""), MAX_THREAD_CHARS),
-        "current_blocker": cap_text(document.get("current_blocker", ""), MAX_THREAD_CHARS),
-        "user_state_updates": _project_entries(
-            entries=document.get("user_state_updates", []),
-            current_timestamp_utc=current_timestamp_utc,
-            limit=USER_STATE_UPDATES_LIMIT,
-        ),
-        "assistant_moves": _project_string_list(
-            values=document.get("assistant_moves", []),
-            limit=ASSISTANT_MOVES_LIMIT,
-            max_chars=MAX_MOVE_CHARS,
-        ),
-        "overused_moves": _project_string_list(
-            values=document.get("overused_moves", []),
-            limit=OVERUSED_MOVES_LIMIT,
-            max_chars=MAX_MOVE_CHARS,
-        ),
-        "open_loops": _project_entries(
-            entries=document.get("open_loops", []),
-            current_timestamp_utc=current_timestamp_utc,
-            limit=OPEN_LOOPS_LIMIT,
-        ),
-        "interaction_obligations": _project_obligations(
-            obligations=document.get("interaction_obligations", []),
-            current_timestamp_utc=current_timestamp_utc,
-        ),
-        "resolved_threads": _project_entries(
-            entries=document.get("resolved_threads", []),
-            current_timestamp_utc=current_timestamp_utc,
-            limit=RESOLVED_THREADS_LIMIT,
-        ),
-        "avoid_reopening": _project_entries(
-            entries=document.get("avoid_reopening", []),
-            current_timestamp_utc=current_timestamp_utc,
-            limit=AVOID_REOPENING_LIMIT,
-        ),
-        "emotional_trajectory": cap_text(document.get("emotional_trajectory", ""), MAX_THREAD_CHARS),
-        "next_affordances": _project_string_list(
-            values=document.get("next_affordances", []),
-            limit=NEXT_AFFORDANCES_LIMIT,
-            max_chars=MAX_ENTRY_CHARS,
-        ),
-        "progression_guidance": cap_text(document.get("progression_guidance", ""), MAX_GUIDANCE_CHARS),
-    }
-    return_value = enforce_progress_prompt_budget(prompt_doc)
-    return return_value
+    while len(semantic_text) < maximum_chars:
+        expanded = False
+        for index, value in enumerate(required_values):
+            if value_limits[index] >= len(value):
+                continue
+            value_limits[index] += 1
+            candidate = _render_required()
+            if len(candidate) > maximum_chars:
+                value_limits[index] -= 1
+                continue
+            semantic_text = candidate
+            expanded = True
+        if not expanded:
+            break
+
+    for label, field_name in (
+        ('outcome', 'outcome'),
+        ('beneficiary', 'beneficiary'),
+        ('precondition', 'precondition'),
+    ):
+        value = event[field_name]
+        if not value:
+            continue
+        prefix = f'; {label}='
+        remaining_chars = maximum_chars - len(semantic_text)
+        if remaining_chars <= len(prefix):
+            continue
+        bounded_value = value[:remaining_chars - len(prefix)].rstrip()
+        if bounded_value:
+            semantic_text += prefix + bounded_value
+    return semantic_text
+
+
+def _append_line(
+    lines: list[str],
+    label: str,
+    value: str,
+    *,
+    maximum_chars: int,
+    permit_truncation: bool,
+) -> None:
+    """Append one labelled line if it fits the aggregate scene budget."""
+
+    if not value:
+        return
+    prefix = f'{label}: '
+    used_chars = len('\n'.join(lines))
+    separator_chars = 1 if lines else 0
+    remaining = maximum_chars - used_chars - separator_chars
+    line = prefix + value
+    if len(line) <= remaining:
+        lines.append(line)
+        return
+    if not permit_truncation or remaining <= len(prefix):
+        return
+    lines.append((prefix + value[:remaining - len(prefix)]).rstrip())
+
+
+def _append_list_line(
+    lines: list[str],
+    label: str,
+    values: Sequence[str],
+    *,
+    maximum_chars: int,
+) -> None:
+    """Append an optional list only when its complete line fits."""
+
+    _append_line(
+        lines,
+        label,
+        '; '.join(values),
+        maximum_chars=maximum_chars,
+        permit_truncation=False,
+    )

@@ -21,14 +21,20 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     ResolverPendingResolutionV1,
     ResolverPendingResumeV1,
 )
-from kazusa_ai_chatbot.conversation_progress import ConversationProgressPromptDoc
+from kazusa_ai_chatbot.conversation_progress import (
+    ConversationLogicalTurnV1,
+    ConversationProgressLoadDiagnosticsV2,
+    ConversationProgressPromptV2,
+    ConversationProgressSourceRefV2,
+    ConversationProgressStateV2,
+)
 from kazusa_ai_chatbot.state import (
     DebugModes,
     MultiMediaDoc,
     ReplyContext,
     keep_false,
 )
-from kazusa_ai_chatbot.db import CharacterProfileDoc, ConversationEpisodeStateDoc, UserProfileDoc
+from kazusa_ai_chatbot.db import CharacterProfileDoc, UserProfileDoc
 from kazusa_ai_chatbot.message_envelope import PromptMessageContext
 from kazusa_ai_chatbot.time_boundary import LocalTimeContextDoc
 
@@ -78,6 +84,9 @@ class GlobalPersonaState(TypedDict):
     platform_message_id: str
     active_turn_platform_message_ids: NotRequired[list[str]]
     active_turn_conversation_row_ids: NotRequired[list[str]]
+    active_turn_conversation_source_refs: NotRequired[
+        list[ConversationProgressSourceRefV2]
+    ]
     platform_user_id: str
     global_user_id: str
     user_name: str
@@ -89,8 +98,13 @@ class GlobalPersonaState(TypedDict):
     indirect_speech_context: str
     channel_topic: str
     scope_users: NotRequired[list[ScopeUser]]
-    conversation_episode_state: NotRequired[ConversationEpisodeStateDoc | None]
-    conversation_progress: NotRequired[ConversationProgressPromptDoc]
+    conversation_episode_state: NotRequired[ConversationProgressStateV2 | None]
+    conversation_progress: NotRequired[ConversationProgressPromptV2]
+    ambient_logical_turns: NotRequired[list[ConversationLogicalTurnV1]]
+    interaction_logical_turns: NotRequired[list[ConversationLogicalTurnV1]]
+    conversation_progress_diagnostics: NotRequired[
+        ConversationProgressLoadDiagnosticsV2
+    ]
     promoted_reflection_context: NotRequired[dict]
     internal_monologue_residue_context: NotRequired[str]
     past_dialog_cognition_context: NotRequired[str]
@@ -183,7 +197,12 @@ class CognitionState(TypedDict):
     reply_context: ReplyContext
     indirect_speech_context: str
     channel_topic: str
-    conversation_progress: NotRequired[ConversationProgressPromptDoc]
+    conversation_progress: NotRequired[ConversationProgressPromptV2]
+    ambient_logical_turns: NotRequired[list[ConversationLogicalTurnV1]]
+    interaction_logical_turns: NotRequired[list[ConversationLogicalTurnV1]]
+    conversation_progress_diagnostics: NotRequired[
+        ConversationProgressLoadDiagnosticsV2
+    ]
     promoted_reflection_context: NotRequired[dict]
     internal_monologue_residue_context: NotRequired[str]
     past_dialog_cognition_context: NotRequired[str]

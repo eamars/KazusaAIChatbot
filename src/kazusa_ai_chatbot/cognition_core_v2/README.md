@@ -63,18 +63,18 @@ model owner:
 | Existential and drive appraisal | `appraisal_existential_drive_config` | `COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE` |
 | Ordinary-response goal | `goal_ordinary_response_config` | `COGNITION_LLM_GOAL_ORDINARY_RESPONSE` |
 | Active persistent-goal branches | `goal_active_branch_config` | `COGNITION_LLM_GOAL_ACTIVE_BRANCH` |
-| Required-selection verification | `required_selection_verifier_config` | `COGNITION_LLM_REQUIRED_SELECTION_VERIFIER` |
 | Workspace collapse | `workspace_collapse_config` | `COGNITION_LLM_WORKSPACE_COLLAPSE` |
 | Action planning and goal resolution | `action_planning_config` | `COGNITION_LLM_ACTION_PLANNING` |
 | Action authorization | `action_authorization_config` | `COGNITION_LLM_ACTION_AUTHORIZATION` |
 | Resolver authorization | `resolver_authorization_config` | `COGNITION_LLM_RESOLVER_AUTHORIZATION` |
 
 Every initial call, provider retry, structural replacement, and trace row uses
-the config selected by that semantic owner. Required-selection verification
-has its own route, while a replacement bid returns to the goal route that
-produced the bid. Stage routes are complete required environment bundles and
-have no route inheritance or fallback. The generic `COGNITION_LLM` route
-continues to serve cognition callers outside this Core V2 boundary.
+the config selected by that semantic owner. A typed required-selection turn
+uses a specialized producer prompt on the already selected ordinary or active
+goal route; it replaces that branch's generic goal call and adds no evaluator
+route. Stage routes are complete required environment bundles and have no route
+inheritance or fallback. The generic `COGNITION_LLM` route continues to serve
+cognition callers outside this Core V2 boundary.
 
 The existing first wave remains unchanged: six appraisal families, the
 ordinary-response goal, and dependency-ready active-goal branches can submit
@@ -127,15 +127,22 @@ strict. A still-failed required branch requests the existing clean graph retry
 and then raises an execution error rather than becoming an empty workspace and
 character silence. Every goal attempt is eligible for the protected turn trace.
 
-When upstream episode evidence carries a typed required selection, a focused
-goal-level check verifies that the owning role makes or explicitly expresses
-that choice before action planning. Provider or contract failure receives up
-to three verifier attempts; exhaustion marks the check unavailable and retains
-the newest structurally valid bid as degraded. A negative semantic verdict may
-produce up to two replacement bids from typed operations, current evidence,
-affect, relationship, character constraints, and scene context without the
-rejected bid or private continuity prose. Each replacement is rechecked by the
-same bounded owner. Ordinary turns add no selection check.
+When upstream episode evidence carries a typed required selection, deterministic
+routing selects one specialized goal producer instead of the generic goal
+producer. That producing call emits one authoritative `selection`, its
+selection kind, reason, role/evidence handles, and exactly one semantic relation
+for every supplied active conversation-progress event handle. Those mandatory
+handles use the code-owned `conversation-progress-event:` provenance and are
+bounded to eight; RAG conversation-history rows remain visible and optionally
+citeable without entering the mandatory relation domain. Deterministic
+validation owns exact fields, bounds, handle coverage, and mapping the one
+selection into the existing complete bid. The goal LLM owns the actual choice
+and the evidence relations. Structural failures retry the same producing
+prompt under the existing bounded goal contract. Required-selection parsing
+uses deterministic cleanup only, so malformed output cannot invoke the shared
+JSON-repair model. There is no semantic verifier, negative verdict,
+evaluator-authored replacement, or recheck. Ordinary turns keep the ordinary
+goal producer.
 
 Action planning treats local-model output as a bounded proposal rather than an
 execution precondition. It canonicalizes the known envelope, keeps usable
@@ -314,8 +321,8 @@ uses the same stage-owned continuation as an over-cap initial attempt.
 Pre-invocation cap exhaustion follows the outcome owned by each stage:
 
 - an irreducible appraisal family is omitted with typed diagnostics;
-- required-selection verification becomes unavailable, while repair retains
-  the latest structurally valid goal bid;
+- an irreducible required-selection producer fails at the pre-state-commit
+  boundary with no model call;
 - workspace collapse selects its stable first complete bid;
 - action planning returns a blocked empty proposal;
 - action and resolver authorization deny every candidate;

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
+import math
+from collections.abc import Mapping
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -27,6 +29,8 @@ from kazusa_ai_chatbot.config import (
     RAG_SUBAGENT_LLM_THINKING_ENABLED,
 )
 from kazusa_ai_chatbot.db import get_conversation_history
+from kazusa_ai_chatbot.conversation_progress import ConversationProgressScope
+from kazusa_ai_chatbot.db import search_conversation_progress_blocks
 from kazusa_ai_chatbot.rag.memory_retrieval_tools import (
     conversation_message_payload,
     search_conversation,
@@ -304,7 +308,10 @@ async def _generator(task: str, context: dict[str, Any], feedback: str) -> dict[
     return return_value
 
 
-async def _tool(args: dict[str, Any]) -> object:
+async def _tool(
+    args: dict[str, Any],
+    context: dict[str, Any],
+) -> object:
     """Execute `search_conversation` exactly once and return the result.
 
     Args:
@@ -314,7 +321,10 @@ async def _tool(args: dict[str, Any]) -> object:
         Tool result or an error dict on invalid arguments.
     """
     try:
-        return_value = await run_hybrid_conversation_search(args)
+        return_value = await run_hybrid_conversation_search(
+            args,
+            context=context,
+        )
         return return_value
     except (TypeError, ValueError, ValidationError) as exc:
         logger.info(f'conversation_search_agent invalid args: {exc}')
@@ -325,6 +335,7 @@ async def _tool(args: dict[str, Any]) -> object:
 async def run_hybrid_conversation_search(
     args: dict[str, Any],
     *,
+    context: dict[str, Any] | None = None,
     semantic_only_floor: float = RAG_HYBRID_SEMANTIC_ONLY_SCORE_FLOOR,
     selected_limit: int = RAG_SEARCH_SELECTED_LIMIT,
     neighbor_seed_limit: int = RAG_HYBRID_NEIGHBOR_SEED_LIMIT,
@@ -375,7 +386,161 @@ async def run_hybrid_conversation_search(
             source="conversation",
         )
     rows = _rows_from_candidates(candidates)
+    block_rows = await _active_progress_block_rows(
+        args=args,
+        context=context or {},
+    )
+    rows = _merge_active_progress_block_rows(
+        rows,
+        block_rows,
+        selected_limit=selected_limit,
+    )
     return rows
+
+
+async def _active_progress_block_rows(
+    *,
+    args: dict[str, Any],
+    context: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Search exact active packet block refs for this selected resolver task."""
+
+    progress = context.get('conversation_progress')
+    packet = context.get('conversation_episode_state')
+    if not isinstance(progress, Mapping) or not isinstance(packet, Mapping):
+        return []
+    block_ids = progress.get('compacted_block_refs')
+    if not isinstance(block_ids, list) or not block_ids:
+        return []
+    if (
+        packet.get('schema_version') != 'conversation_progress.v2'
+        or packet.get('status') != 'active'
+        or progress.get('episode_state_id') != packet.get('episode_state_id')
+        or block_ids != packet.get('compacted_block_refs')
+    ):
+        return []
+    search_query = text_or_empty(args.get('search_query'))
+    episode_state_id = text_or_empty(packet.get('episode_state_id'))
+    platform = text_or_empty(packet.get('platform'))
+    global_user_id = text_or_empty(packet.get('global_user_id'))
+    if not search_query or not episode_state_id or not platform or not global_user_id:
+        return []
+    scope = ConversationProgressScope(
+        platform=platform,
+        platform_channel_id=text_or_empty(packet.get('platform_channel_id')),
+        global_user_id=global_user_id,
+    )
+    results = await search_conversation_progress_blocks(
+        query=search_query,
+        scope=scope,
+        episode_state_id=episode_state_id,
+        active_block_ids=[
+            block_id
+            for block_id in block_ids
+            if isinstance(block_id, str) and block_id
+        ],
+        limit=3,
+    )
+    rows: list[dict[str, Any]] = []
+    for result in results:
+        row = dict(result)
+        row['methods'] = ['semantic:conversation_progress_block']
+        rows.append(row)
+    return rows
+
+
+def _merge_active_progress_block_rows(
+    conversation_rows: list[dict[str, Any]],
+    block_rows: list[dict[str, Any]],
+    *,
+    selected_limit: int,
+) -> list[dict[str, Any]]:
+    """Merge two semantic sources by score with stable source coverage."""
+
+    if selected_limit <= 0:
+        return []
+    if not block_rows:
+        return conversation_rows[:selected_limit]
+    combined = [*conversation_rows, *block_rows]
+    combined.sort(
+        key=lambda row: (
+            -_numeric_score(row.get('score')),
+            0 if row.get('source_kind') == 'conversation_progress_block' else 1,
+            text_or_empty(row.get('block_id')),
+            text_or_empty(row.get('conversation_row_id')),
+        )
+    )
+    selected: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    source_kinds: set[str] = set()
+    for row in combined:
+        if row.get('source_kind') == 'conversation_progress_block':
+            identity = ('block', text_or_empty(row.get('block_id')))
+        else:
+            identity = (
+                'conversation',
+                text_or_empty(
+                    row.get('conversation_row_id')
+                    or row.get('platform_message_id')
+                    or row.get('_id')
+                ),
+            )
+        if not identity[1] or identity in seen:
+            continue
+        seen.add(identity)
+        selected.append(row)
+        source_kinds.add(identity[0])
+        if len(selected) >= selected_limit:
+            break
+    if selected_limit > 1 and conversation_rows and block_rows:
+        for required_kind, candidates in (
+            ('conversation', conversation_rows),
+            ('block', block_rows),
+        ):
+            if required_kind in source_kinds:
+                continue
+            replacement = next(
+                (
+                    row
+                    for row in candidates
+                    if (
+                        required_kind,
+                        text_or_empty(
+                            row.get('block_id')
+                            if required_kind == 'block'
+                            else (
+                                row.get('conversation_row_id')
+                                or row.get('platform_message_id')
+                                or row.get('_id')
+                            )
+                        ),
+                    ) not in seen
+                ),
+                None,
+            )
+            if replacement is None:
+                continue
+            selected[-1] = replacement
+            source_kinds.add(required_kind)
+    selected.sort(
+        key=lambda row: (
+            -_numeric_score(row.get('score')),
+            0 if row.get('source_kind') == 'conversation_progress_block' else 1,
+            text_or_empty(row.get('block_id')),
+            text_or_empty(row.get('conversation_row_id')),
+        )
+    )
+    return selected
+
+
+def _numeric_score(value: object) -> float:
+    """Return one finite retrieval score or a stable zero fallback."""
+
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        score = float(value)
+        if math.isfinite(score):
+            return score
+    return 0.0
 
 
 def _semantic_tool_args(args: dict[str, Any]) -> dict[str, Any]:
@@ -775,15 +940,17 @@ class ConversationSearchAgent(BaseRAGHelperAgent):
             Dict with resolved (bool), result (last tool result), and attempts count.
         """
         cache_key = build_conversation_search_cache_key(task, context)
-        cached = await self.read_cache(cache_key)
-        if cached is not None:
-            return_value = self.with_cache_status(
-                {"resolved": True, "result": cached, "attempts": 0},
-                hit=True,
-                reason="hit",
-                cache_key=cache_key,
-            )
-            return return_value
+        active_progress_blocks = _has_active_progress_blocks(context)
+        if not active_progress_blocks:
+            cached = await self.read_cache(cache_key)
+            if cached is not None:
+                return_value = self.with_cache_status(
+                    {"resolved": True, "result": cached, "attempts": 0},
+                    hit=True,
+                    reason="hit",
+                    cache_key=cache_key,
+                )
+                return return_value
 
         feedback = ""
         result = None
@@ -796,12 +963,16 @@ class ConversationSearchAgent(BaseRAGHelperAgent):
             args = await _generator(task, context, feedback)
             args = _apply_runtime_constraints(args, task, context)
             args = _apply_context_top_k(args, context)
-            result = await _tool(args)
+            result = await _tool(args, context)
             resolved, feedback = await _judge(task, result, context)
             if resolved:
                 break
 
-        if resolved and is_closed_historical_range(args):
+        if (
+            resolved
+            and not active_progress_blocks
+            and is_closed_historical_range(args)
+        ):
             await self.write_cache(
                 cache_key=cache_key,
                 result=result,
@@ -812,6 +983,8 @@ class ConversationSearchAgent(BaseRAGHelperAgent):
 
         if cache_stored:
             cache_reason = "miss_stored"
+        elif active_progress_blocks:
+            cache_reason = "miss_active_progress_blocks"
         elif resolved:
             cache_reason = "miss_open_conversation_range"
         else:
@@ -828,6 +1001,23 @@ class ConversationSearchAgent(BaseRAGHelperAgent):
             cache_key=cache_key,
         )
         return return_value
+
+
+def _has_active_progress_blocks(context: Mapping[str, object]) -> bool:
+    """Return whether this worker context routes active block references."""
+
+    progress = context.get('conversation_progress')
+    packet = context.get('conversation_episode_state')
+    if not isinstance(progress, Mapping) or not isinstance(packet, Mapping):
+        return False
+    block_ids = progress.get('compacted_block_refs')
+    return bool(
+        packet.get('schema_version') == 'conversation_progress.v2'
+        and packet.get('status') == 'active'
+        and isinstance(block_ids, list)
+        and block_ids
+        and block_ids == packet.get('compacted_block_refs')
+    )
 
 
 async def _test_main() -> None:

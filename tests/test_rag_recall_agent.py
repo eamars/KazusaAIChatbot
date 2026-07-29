@@ -8,6 +8,7 @@ from kazusa_ai_chatbot.db.schemas import UserMemoryUnitStatus, UserMemoryUnitTyp
 from kazusa_ai_chatbot.rag.recall import RecallAgent
 from kazusa_ai_chatbot.rag.recall import agent as recall_agent_module
 from kazusa_ai_chatbot.rag.recall.collectors import commitments as commitments_module
+from kazusa_ai_chatbot.rag.recall.collectors import progress as progress_module
 from kazusa_ai_chatbot.rag.recall.collectors import (
     calendar_runs as calendar_runs_module,
 )
@@ -30,13 +31,23 @@ def _base_context(**overrides: object) -> dict:
         "global_user_id": "user-1",
         "current_timestamp_utc": "2026-05-02T00:00:00+00:00",
         "conversation_progress": {
+            "schema_version": "conversation_progress_prompt.v2",
+            "episode_state_id": "episode-1",
             "status": "active",
             "continuity": "same_episode",
+            "turn_count": 12,
             "current_thread": "User will pick up the character at 9:30 for the roller coaster plan.",
-            "open_loops": [{"text": "Go to the amusement park today."}],
-            "resolved_threads": [{"text": "Pickup time is 9:30."}],
-            "next_affordances": ["Confirm pickup details."],
-            "progression_guidance": "Continue the appointment setup.",
+            "character_stance": "The character accepted the pickup plan.",
+            "user_goal": "Go to the amusement park.",
+            "current_blocker": "",
+            "emotional_trajectory": "The plan is settled.",
+            "episode_narrative": "Pickup time is 9:30.",
+            "events": [{
+                "semantic_summary": "Pickup time is 9:30.",
+            }],
+            "overused_moves": [],
+            "interaction_logical_turns": [],
+            "compacted_block_refs": [],
         },
         "conversation_episode_state": {
             "updated_at": "2026-05-01T23:00:00+00:00",
@@ -46,6 +57,22 @@ def _base_context(**overrides: object) -> dict:
     }
     context.update(overrides)
     return context
+
+
+def test_progress_collector_ignores_deleted_v1_fields() -> None:
+    """The big-bang V2 collector has no hidden legacy vocabulary."""
+
+    legacy_only_progress = {
+        "status": "active",
+        "continuity": "same_episode",
+        "current_thread": "legacy shared-name thread",
+        "open_loops": [{"text": "legacy open loop"}],
+        "resolved_threads": [{"text": "legacy resolved thread"}],
+        "user_state_updates": [{"text": "legacy user state"}],
+        "assistant_moves": ["legacy assistant move"],
+    }
+
+    assert progress_module._progress_entries(legacy_only_progress) == []
 
 
 async def _empty_active_commitments(
@@ -793,13 +820,21 @@ async def test_recall_output_caps(monkeypatch) -> None:
         "Recall: retrieve active_episode_agreement relevant to today's appointment",
         _base_context(
             conversation_progress={
+                "schema_version": "conversation_progress_prompt.v2",
+                "episode_state_id": "episode-1",
                 "status": "active",
                 "continuity": "same_episode",
+                "turn_count": 12,
                 "current_thread": long_text,
-                "open_loops": [{"text": long_text}],
-                "resolved_threads": [{"text": long_text}],
-                "next_affordances": [long_text],
-                "progression_guidance": long_text,
+                "character_stance": long_text,
+                "user_goal": long_text,
+                "current_blocker": long_text,
+                "emotional_trajectory": long_text,
+                "episode_narrative": long_text,
+                "events": [{"semantic_summary": long_text}],
+                "overused_moves": [],
+                "interaction_logical_turns": [],
+                "compacted_block_refs": [],
             }
         ),
     )

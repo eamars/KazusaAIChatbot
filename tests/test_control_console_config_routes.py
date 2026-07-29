@@ -12,7 +12,6 @@ COGNITION_CORE_V2_ROUTES = (
     "COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE",
     "COGNITION_LLM_GOAL_ORDINARY_RESPONSE",
     "COGNITION_LLM_GOAL_ACTIVE_BRANCH",
-    "COGNITION_LLM_REQUIRED_SELECTION_VERIFIER",
     "COGNITION_LLM_WORKSPACE_COLLAPSE",
     "COGNITION_LLM_ACTION_PLANNING",
     "COGNITION_LLM_ACTION_AUTHORIZATION",
@@ -226,13 +225,13 @@ def test_brain_model_route_api_applies_and_resets_selected_route(
     snapshot = snapshot_response.json()
     assert snapshot["service_id"] == "brain"
     assert snapshot["service_state"]["actual_state"] == "running"
-    assert len(snapshot["routes"]) == 26
+    assert len(snapshot["routes"]) == 25
     core_routes = [
         route
         for route in snapshot["routes"]
         if route["group"] == "Cognition Core V2"
     ]
-    assert len(core_routes) == 13
+    assert len(core_routes) == 12
     assert "test-key" not in snapshot_response.text
 
     missing_csrf = client.put(

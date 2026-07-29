@@ -313,6 +313,90 @@ async def get_conversation_history(
     return return_value
 
 
+async def get_ambient_conversation_history(
+    *,
+    platform: str,
+    platform_channel_id: str,
+    excluded_row_ids: list[str],
+    limit: int,
+) -> list[ConversationMessageDoc]:
+    """Fetch the newest bounded channel rows for ambient context."""
+
+    if limit <= 0:
+        raise ValueError('ambient conversation history limit must be positive')
+    query: dict[str, Any] = {
+        'platform': platform,
+        'platform_channel_id': platform_channel_id,
+    }
+    excluded_object_ids = _object_ids_from_row_ids(excluded_row_ids)
+    if excluded_object_ids:
+        query['_id'] = {'$nin': excluded_object_ids}
+    db = await get_db()
+    cursor = (
+        db.conversation_history
+        .find(query, projection={'embedding': 0})
+        .sort('timestamp', -1)
+        .limit(limit)
+    )
+    docs = await cursor.to_list(length=limit)
+    docs.reverse()
+    return docs
+
+
+async def get_participant_conversation_history(
+    *,
+    platform: str,
+    platform_channel_id: str,
+    current_global_user_id: str,
+    platform_bot_id: str,
+    excluded_row_ids: list[str],
+    limit: int,
+) -> list[ConversationMessageDoc]:
+    """Fetch the newest bounded user/bot interaction rows, oldest first."""
+
+    if not current_global_user_id:
+        raise ValueError('current_global_user_id is required')
+    if not platform_bot_id:
+        raise ValueError('platform_bot_id is required')
+    if limit <= 0:
+        raise ValueError(
+            'participant conversation history limit must be positive'
+        )
+    query: dict[str, Any] = {
+        'platform': platform,
+        'platform_channel_id': platform_channel_id,
+        '$or': [
+            {
+                'role': 'user',
+                'global_user_id': current_global_user_id,
+            },
+            {
+                'role': 'assistant',
+                'platform_user_id': platform_bot_id,
+                'broadcast': True,
+            },
+            {
+                'role': 'assistant',
+                'platform_user_id': platform_bot_id,
+                'addressed_to_global_user_ids': current_global_user_id,
+            },
+        ],
+    }
+    excluded_object_ids = _object_ids_from_row_ids(excluded_row_ids)
+    if excluded_object_ids:
+        query['_id'] = {'$nin': excluded_object_ids}
+    db = await get_db()
+    cursor = (
+        db.conversation_history
+        .find(query, projection={'embedding': 0})
+        .sort('timestamp', -1)
+        .limit(limit)
+    )
+    docs = await cursor.to_list(length=limit)
+    docs.reverse()
+    return docs
+
+
 async def get_latest_private_channel_for_user(
     *,
     platform: str,

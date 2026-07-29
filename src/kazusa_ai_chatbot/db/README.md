@@ -142,7 +142,11 @@ The runtime facade exports helpers for:
   `get_text_embedding(...)`, `get_text_embeddings_batch(...)`,
   `enable_vector_index(...)`;
 - conversation history: save, recent-history retrieval, semantic/keyword
-  search, aggregation by user, and attachment-description repair;
+  search, participant-scoped logical-turn input, aggregation by user, and
+  attachment-description repair;
+- conversation progress: active V2 packet reads and guarded replacement,
+  compacted-block insertion and same-scope graph reads, expiry refresh, and
+  scoped block search;
 - reflection conversation reads and reflection-run persistence;
 - user identity, platform-account linking, relationship_state, display-name search, and
   relationship insight updates;
@@ -452,9 +456,48 @@ later visible burst. Historical action-attempt rows are not migrated.
 
 ### `conversation_episode_state`
 
-Stores short-lived conversation-progress state keyed by platform, channel, and
-user. The collection is operational working memory, not durable identity memory.
-Writes are guarded so stale background records preserve newer episode progress.
+Stores one short-lived active `conversation_progress.v2` packet keyed by
+platform, channel, and user. The packet contains bounded scene facts, validated
+active events with exact source lineage, recent logical-turn refs, and root refs
+into `conversation_episode_blocks`. It is operational working memory, not
+durable identity memory or future-response guidance.
+
+Every stored V2 event has a non-empty actor, action, and object identity in
+addition to its self-contained summary. Later reconciliation may update the
+summary, outcome, lifecycle, relevance, and lineage while preserving those
+stable definition fields.
+
+Conversation-progress code maps validated semantic lifecycle and relevance
+observations into persisted enums before calling the database helper. Database
+code validates the exact packet shape and owns guarded replacement, active
+scope selection, physical expiry, and stale-write rejection. A stale
+background write cannot replace a newer active packet.
+
+Migration audit classifies a row as `already_v2` only after this same canonical
+packet validator accepts the complete document after excluding MongoDB `_id`.
+A V2 version label on a legacy-shaped or otherwise malformed row is reported
+as `malformed` and cannot bypass reviewed cutover.
+
+### `conversation_episode_blocks`
+
+Stores source-backed compacted event blocks produced deterministically when an
+active V2 packet exceeds its event capacity. Each block is scoped to the same
+platform, channel, and user as its packet and carries a stable content-derived
+identity, exact archived event facts and source refs, child-block lineage,
+supersession state, embedding text, and physical expiry.
+
+The active packet retains at most eight root block refs. Conversation-progress
+graph reads expand those roots only within the same scope, with a maximum
+depth of eight and at most 128 reachable blocks. Retrieval searches the
+reachable block ids rather than treating roots as the complete archive.
+Expiry refresh covers every reachable block so a live thread cannot leave
+source-bearing descendants to expire behind an active root.
+
+Block insertion is idempotent and precedes the guarded packet replacement.
+Compaction, hierarchy construction, root selection, and source preservation
+belong to conversation-progress code; the database package owns collection
+access, indexes, scoped graph reads, search mechanics, expiry updates, and
+backend error translation.
 
 ### `rag_cache2_persistent`
 
@@ -510,6 +553,8 @@ current collections and indexes, including the three character identity
 growth collections, `user_memory_units`, reflection-run indexes,
 interaction-style indexes,
 calendar schedule/run indexes, historical scheduled-event migration indexes,
+self-contained V2 conversation-progress active/block indexes and BSON
+physical-expiry TTL indexes,
 self-cognition action-attempt indexes, self-cognition group-review
 reviewed-window indexes, and other runtime indexes required by the facade.
 

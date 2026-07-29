@@ -178,12 +178,6 @@ def _services() -> CognitionCoreServicesV2:
             temperature=0.18,
             **profile_m,
         ),
-        required_selection_verifier_config=_config(
-            stage_name="required_selection_verifier",
-            route_name="COGNITION_LLM_REQUIRED_SELECTION_VERIFIER",
-            temperature=0.19,
-            **profile_d,
-        ),
         workspace_collapse_config=_config(
             stage_name="workspace_collapse",
             route_name="COGNITION_LLM_WORKSPACE_COLLAPSE",

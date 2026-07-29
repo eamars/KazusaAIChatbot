@@ -60,8 +60,13 @@ def test_overview_cognition_graph_updates_from_latest_brain_run(
             assert "Latest conversation cognition" in run_summary.inner_text()
             assert "run-live" not in run_summary.inner_text()
             run_reference = run_summary.locator(".graph-run-reference")
-            run_reference.evaluate("element => { element.open = true; }")
-            assert "run-live" in run_reference.inner_text()
+            run_reference_text = run_reference.evaluate(
+                """element => {
+                  element.open = true;
+                  return element.innerText;
+                }"""
+            )
+            assert "run-live" in run_reference_text
             dependency_panel = page.locator(
                 "#overview-cognition-graph .graph-dependency-panel"
             )
@@ -137,7 +142,11 @@ def test_overview_cognition_graph_updates_from_latest_brain_run(
             )
             page.locator("[data-page-link='overview']").click()
             page.wait_for_function(
-                "() => document.querySelector('#overview-cognition-status')?.textContent === 'completed'"
+                """() => (
+                  document.querySelector(
+                    '#overview-cognition-graph .cognition-graph-shell'
+                  )?.dataset.graphRunId === 'run-complete'
+                )"""
             )
             completed_summary = page.locator(
                 "#overview-cognition-graph .graph-run-summary"
@@ -149,8 +158,13 @@ def test_overview_cognition_graph_updates_from_latest_brain_run(
             completed_reference = completed_summary.locator(
                 ".graph-run-reference"
             )
-            completed_reference.evaluate("element => { element.open = true; }")
-            assert "run-complete" in completed_reference.inner_text()
+            completed_reference_text = completed_reference.evaluate(
+                """element => {
+                  element.open = true;
+                  return element.innerText;
+                }"""
+            )
+            assert "run-complete" in completed_reference_text
             assert "Final node detail" in page.locator(
                 "#overview-cognition-graph .graph-inspector"
             ).inner_text()

@@ -320,6 +320,56 @@ def test_parse_llm_json_output_accepts_markdown_fenced_raw_output():
     }
 
 
+def test_parse_llm_json_output_repairs_heading_prefixed_key_token():
+    """Preserve a visible key after a provider injects a heading marker."""
+
+    raw_output = '''{
+  "actor": "current user",
+##  beneficiary": "current character",
+  "outcome": "accepted"
+}'''
+
+    result = parse_llm_json_output(
+        raw_output,
+        deterministic_only=True,
+    )
+
+    assert result == {
+        "actor": "current user",
+        "beneficiary": "current character",
+        "outcome": "accepted",
+    }
+
+
+def test_parse_llm_json_output_uses_latest_fenced_object(monkeypatch):
+    """Use the final complete object when one response contains draft blocks."""
+
+    def _unexpected_repair(_broken_string: str, *, expected_output_format=None):
+        del expected_output_format
+        raise AssertionError("deterministic transport cleanup must be enough")
+
+    monkeypatch.setattr(utils_module, "parse_json_with_llm", _unexpected_repair)
+    raw_output = """```json
+{"answer": "draft"}
+```
+
+Wait, I need to provide the full valid JSON.
+
+```json
+{"answer": "final", "complete": true}
+```"""
+
+    result = parse_llm_json_output(
+        raw_output,
+        deterministic_only=True,
+    )
+
+    assert result == {
+        "answer": "final",
+        "complete": True,
+    }
+
+
 def test_parse_llm_json_output_returns_empty_dict_for_repaired_list(monkeypatch):
     """Non-object repair results should fail closed to an empty object."""
 

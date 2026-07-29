@@ -171,8 +171,6 @@ COGNITION_GRAPH_NESTED_DETAIL_KEYS = frozenset(
         "resolved_threads",
         "avoid_reopening",
         "overused_moves",
-        "next_affordances",
-        "progression_guidance",
         "current_goal",
         "progress_note",
         "goal",

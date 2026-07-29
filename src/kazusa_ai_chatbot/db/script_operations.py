@@ -5,8 +5,16 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta, timezone
+import hashlib
+import json
+from pathlib import Path
 import re
 from typing import Any
+from uuid import uuid4
+
+from bson import json_util
+from bson.json_util import RELAXED_JSON_OPTIONS
+from pymongo.errors import PyMongoError
 
 from kazusa_ai_chatbot.config import AUDIT_LOG_TTL_DAYS, DEBUG_LOG_TTL_DAYS
 from kazusa_ai_chatbot.db._client import (
@@ -29,7 +37,11 @@ from kazusa_ai_chatbot.logging_retention import (
 )
 from kazusa_ai_chatbot.db.memory import memory_embedding_source_text
 from kazusa_ai_chatbot.db.user_memory_units import _semantic_text
-from kazusa_ai_chatbot.time_boundary import storage_utc_now
+from kazusa_ai_chatbot.time_boundary import (
+    parse_storage_utc_datetime,
+    storage_utc_now,
+)
+from kazusa_ai_chatbot.conversation_progress.policy import storage_expiry
 
 
 DERIVED_EMBEDDING_FIELD = "embedding"
@@ -1819,3 +1831,532 @@ def _user_state_sort_spec(collection_name: str) -> list[tuple[str, int]]:
     }
     return_value = sort_specs[collection_name]
     return return_value
+
+
+CONVERSATION_PROGRESS_MIGRATION_COLLECTION = 'conversation_episode_state'
+CONVERSATION_PROGRESS_DRY_RUN_VERSION = (
+    'conversation_progress_v2_migration_dry_run.v1'
+)
+CONVERSATION_PROGRESS_APPLY_VERSION = (
+    'conversation_progress_v2_migration_apply.v1'
+)
+CONVERSATION_PROGRESS_RESTORE_VERSION = (
+    'conversation_progress_v2_migration_restore.v1'
+)
+_CONVERSATION_PROGRESS_DRIFT_FIELDS = (
+    'platform',
+    'platform_channel_id',
+    'global_user_id',
+    'turn_count',
+    'updated_at',
+    'status',
+)
+
+
+def classify_conversation_progress_migration_row(
+    row: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Classify one progress row without inferring any V1 semantics."""
+
+    schema_present = 'schema_version' in row
+    schema_version = row.get('schema_version')
+    scope_valid = all(
+        isinstance(row.get(field_name), str)
+        and bool(str(row[field_name]).strip())
+        for field_name in (
+            'platform',
+            'global_user_id',
+        )
+    ) and isinstance(row.get('platform_channel_id'), str)
+    turn_count = row.get('turn_count')
+    turn_count_valid = (
+        isinstance(turn_count, int)
+        and not isinstance(turn_count, bool)
+        and turn_count >= 0
+    )
+    timestamps_valid = all(
+        _valid_migration_timestamp(row.get(field_name))
+        for field_name in ('created_at', 'updated_at', 'expires_at')
+    )
+    status_valid = (
+        isinstance(row.get('status'), str)
+        and bool(str(row['status']).strip())
+    )
+    v2_contract_valid = (
+        schema_version == 'conversation_progress.v2'
+        and _valid_conversation_progress_v2_packet(row)
+    )
+    if v2_contract_valid:
+        classification = 'already_v2'
+    elif (
+        schema_version in {None, 'conversation_progress.v1'}
+        and
+        scope_valid
+        and turn_count_valid
+        and timestamps_valid
+        and status_valid
+    ):
+        classification = 'v1_eligible'
+    else:
+        classification = 'malformed'
+    return {
+        '_id': str(row.get('_id', '')),
+        'classification': classification,
+        'schema_present': schema_present,
+        'schema_version': schema_version,
+        'scope_valid': scope_valid,
+        'turn_count_valid': turn_count_valid,
+        'timestamps_valid': timestamps_valid,
+        'status_valid': status_valid,
+        'v2_contract_valid': v2_contract_valid,
+        'drift': {
+            field_name: row.get(field_name)
+            for field_name in _CONVERSATION_PROGRESS_DRIFT_FIELDS
+        },
+    }
+
+
+def _valid_conversation_progress_v2_packet(
+    row: Mapping[str, Any],
+) -> bool:
+    """Apply the canonical runtime validator to a labelled V2 row."""
+
+    from kazusa_ai_chatbot.conversation_progress import (
+        validate_active_packet,
+    )
+
+    candidate = {
+        field_name: value
+        for field_name, value in row.items()
+        if field_name != '_id'
+    }
+    try:
+        validate_active_packet(candidate)
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
+def build_conversation_progress_v2_dry_run_report(
+    *,
+    rows: Sequence[Mapping[str, Any]],
+    generated_at: str,
+    backup_path: str,
+    backup_sha256: str,
+) -> dict[str, Any]:
+    """Build the read-only audit report linked to one complete backup."""
+
+    classified_rows = [
+        classify_conversation_progress_migration_row(row)
+        for row in rows
+    ]
+    counts = {
+        'total': len(classified_rows),
+        'v1_eligible': 0,
+        'already_v2': 0,
+        'malformed': 0,
+    }
+    for row in classified_rows:
+        counts[row['classification']] += 1
+    return {
+        'schema_version': CONVERSATION_PROGRESS_DRY_RUN_VERSION,
+        'generated_at': generated_at,
+        'collection': CONVERSATION_PROGRESS_MIGRATION_COLLECTION,
+        'backup_path': backup_path,
+        'backup_sha256': backup_sha256,
+        'backup_row_count': len(rows),
+        'writes_performed': 0,
+        'counts': counts,
+        'rows': classified_rows,
+    }
+
+
+async def dry_run_conversation_progress_v2_migration(
+    *,
+    backup_output: Path,
+    report_output: Path,
+    generated_at: str,
+) -> dict[str, Any]:
+    """Export every row and write a zero-write V2 migration report."""
+
+    db = await get_db()
+    rows = await db[
+        CONVERSATION_PROGRESS_MIGRATION_COLLECTION
+    ].find({}).to_list(length=None)
+    backup_payload = {
+        'schema_version': 'conversation_progress_v1_backup.v1',
+        'generated_at': generated_at,
+        'collection': CONVERSATION_PROGRESS_MIGRATION_COLLECTION,
+        'rows': rows,
+    }
+    backup_text = json_util.dumps(
+        backup_payload,
+        json_options=RELAXED_JSON_OPTIONS,
+        sort_keys=True,
+        indent=2,
+    )
+    backup_bytes = backup_text.encode('utf-8')
+    backup_sha256 = hashlib.sha256(backup_bytes).hexdigest()
+    report = build_conversation_progress_v2_dry_run_report(
+        rows=rows,
+        generated_at=generated_at,
+        backup_path=str(backup_output),
+        backup_sha256=backup_sha256,
+    )
+    backup_output.parent.mkdir(parents=True, exist_ok=True)
+    report_output.parent.mkdir(parents=True, exist_ok=True)
+    backup_output.write_bytes(backup_bytes)
+    report_output.write_text(
+        json.dumps(
+            report,
+            ensure_ascii=False,
+            sort_keys=True,
+            indent=2,
+        ),
+        encoding='utf-8',
+    )
+    return report
+
+
+async def audit_conversation_progress_v2_rows(
+    *,
+    output: Path,
+    generated_at: str,
+) -> dict[str, Any]:
+    """Write a read-only schema/lifecycle audit without a backup artifact."""
+
+    db = await get_db()
+    rows = await db[
+        CONVERSATION_PROGRESS_MIGRATION_COLLECTION
+    ].find({}).to_list(length=None)
+    classified = [
+        classify_conversation_progress_migration_row(row)
+        for row in rows
+    ]
+    report = {
+        'schema_version': 'conversation_progress_v2_audit.v1',
+        'generated_at': generated_at,
+        'collection': CONVERSATION_PROGRESS_MIGRATION_COLLECTION,
+        'writes_performed': 0,
+        'rows': classified,
+    }
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(
+        json.dumps(report, ensure_ascii=False, sort_keys=True, indent=2),
+        encoding='utf-8',
+    )
+    return report
+
+
+async def apply_conversation_progress_v2_migration(
+    *,
+    dry_run_input: Path,
+    backup_input: Path,
+    output: Path,
+    applied_at: str,
+) -> dict[str, Any]:
+    """Replace drift-matched V1 rows with exact closed V2 tombstones."""
+
+    dry_run = _load_json_object(dry_run_input)
+    if dry_run.get('schema_version') != CONVERSATION_PROGRESS_DRY_RUN_VERSION:
+        raise ValueError('migration dry-run schema is invalid')
+    backup_bytes = backup_input.read_bytes()
+    backup_sha256 = hashlib.sha256(backup_bytes).hexdigest()
+    if backup_sha256 != dry_run.get('backup_sha256'):
+        raise ValueError('migration backup digest does not match dry-run')
+    backup = json_util.loads(backup_bytes.decode('utf-8'))
+    if not isinstance(backup, Mapping):
+        raise ValueError('migration backup must be an object')
+    backup_rows = backup.get('rows')
+    if not isinstance(backup_rows, list):
+        raise ValueError('migration backup rows must be a list')
+    if len(backup_rows) != dry_run.get('backup_row_count'):
+        raise ValueError('migration backup row count does not match dry-run')
+    dry_rows = dry_run.get('rows')
+    if not isinstance(dry_rows, list):
+        raise ValueError('migration dry-run rows must be a list')
+    dry_by_id = {
+        str(row.get('_id', '')): row
+        for row in dry_rows
+        if isinstance(row, Mapping)
+    }
+    db = await get_db()
+    collection = db[CONVERSATION_PROGRESS_MIGRATION_COLLECTION]
+    counts = {
+        'changed': 0,
+        'drift_skipped': 0,
+        'already_v2': 0,
+        'malformed': 0,
+        'blocked': 0,
+        'failed': 0,
+    }
+    applied_rows: list[dict[str, str]] = []
+    for backup_row in backup_rows:
+        if not isinstance(backup_row, Mapping):
+            counts['malformed'] += 1
+            continue
+        row_id = str(backup_row.get('_id', ''))
+        dry_row = dry_by_id.get(row_id)
+        if dry_row is None:
+            counts['blocked'] += 1
+            continue
+        classification = dry_row.get('classification')
+        if classification == 'already_v2':
+            counts['already_v2'] += 1
+            continue
+        if classification != 'v1_eligible':
+            counts['malformed'] += 1
+            continue
+        try:
+            current = await collection.find_one({'_id': backup_row['_id']})
+            if current is None or not _migration_row_matches_dry_run(
+                current,
+                dry_row,
+            ):
+                counts['drift_skipped'] += 1
+                continue
+            tombstone = build_conversation_progress_v2_tombstone(
+                source_row=current,
+                applied_at=applied_at,
+            )
+            result = await collection.replace_one(
+                _migration_drift_filter(current, dry_row),
+                tombstone,
+                upsert=False,
+            )
+        except PyMongoError:
+            counts['failed'] += 1
+            continue
+        if result.modified_count != 1:
+            counts['drift_skipped'] += 1
+            continue
+        counts['changed'] += 1
+        applied_rows.append({
+            '_id': row_id,
+            'tombstone_sha256': _extended_json_sha256(tombstone),
+        })
+    report = {
+        'schema_version': CONVERSATION_PROGRESS_APPLY_VERSION,
+        'applied_at': applied_at,
+        'collection': CONVERSATION_PROGRESS_MIGRATION_COLLECTION,
+        'dry_run_path': str(dry_run_input),
+        'backup_path': str(backup_input),
+        'backup_sha256': backup_sha256,
+        'counts': counts,
+        'applied_rows': applied_rows,
+        'unrelated_collection_writes': 0,
+        'conversation_history_deletes': 0,
+    }
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(
+        json.dumps(report, ensure_ascii=False, sort_keys=True, indent=2),
+        encoding='utf-8',
+    )
+    return report
+
+
+async def restore_conversation_progress_v1_backup(
+    *,
+    apply_input: Path,
+    backup_input: Path,
+    output: Path,
+    restored_at: str,
+) -> dict[str, Any]:
+    """Restore only rows still equal to their exact applied tombstone."""
+
+    apply_report = _load_json_object(apply_input)
+    if apply_report.get('schema_version') != CONVERSATION_PROGRESS_APPLY_VERSION:
+        raise ValueError('migration apply report schema is invalid')
+    backup_bytes = backup_input.read_bytes()
+    backup_sha256 = hashlib.sha256(backup_bytes).hexdigest()
+    if backup_sha256 != apply_report.get('backup_sha256'):
+        raise ValueError('restore backup digest does not match apply report')
+    backup = json_util.loads(backup_bytes.decode('utf-8'))
+    if not isinstance(backup, Mapping) or not isinstance(
+        backup.get('rows'),
+        list,
+    ):
+        raise ValueError('restore backup shape is invalid')
+    backup_by_id = {
+        str(row.get('_id', '')): row
+        for row in backup['rows']
+        if isinstance(row, Mapping)
+    }
+    applied_rows = apply_report.get('applied_rows')
+    if not isinstance(applied_rows, list):
+        raise ValueError('apply report applied_rows is invalid')
+    db = await get_db()
+    collection = db[CONVERSATION_PROGRESS_MIGRATION_COLLECTION]
+    counts = {
+        'restored': 0,
+        'drift_skipped': 0,
+        'active_v2_skipped': 0,
+        'missing_backup': 0,
+        'failed': 0,
+    }
+    for applied_row in applied_rows:
+        if not isinstance(applied_row, Mapping):
+            counts['drift_skipped'] += 1
+            continue
+        row_id = str(applied_row.get('_id', ''))
+        backup_row = backup_by_id.get(row_id)
+        if backup_row is None:
+            counts['missing_backup'] += 1
+            continue
+        try:
+            current = await collection.find_one({'_id': backup_row['_id']})
+        except PyMongoError:
+            counts['failed'] += 1
+            continue
+        if current is None:
+            counts['drift_skipped'] += 1
+            continue
+        if (
+            current.get('schema_version') == 'conversation_progress.v2'
+            and current.get('status') == 'active'
+            and isinstance(current.get('turn_count'), int)
+            and current['turn_count'] >= 1
+        ):
+            counts['active_v2_skipped'] += 1
+            continue
+        if _extended_json_sha256(current) != applied_row.get(
+            'tombstone_sha256'
+        ):
+            counts['drift_skipped'] += 1
+            continue
+        try:
+            result = await collection.replace_one(
+                dict(current),
+                dict(backup_row),
+                upsert=False,
+            )
+        except PyMongoError:
+            counts['failed'] += 1
+            continue
+        if result.modified_count == 1:
+            counts['restored'] += 1
+        else:
+            counts['drift_skipped'] += 1
+    report = {
+        'schema_version': CONVERSATION_PROGRESS_RESTORE_VERSION,
+        'restored_at': restored_at,
+        'collection': CONVERSATION_PROGRESS_MIGRATION_COLLECTION,
+        'apply_path': str(apply_input),
+        'backup_path': str(backup_input),
+        'counts': counts,
+        'unrelated_collection_writes': 0,
+    }
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(
+        json.dumps(report, ensure_ascii=False, sort_keys=True, indent=2),
+        encoding='utf-8',
+    )
+    return report
+
+
+def build_conversation_progress_v2_tombstone(
+    *,
+    source_row: Mapping[str, Any],
+    applied_at: str,
+) -> dict[str, Any]:
+    """Build an exact closed V2 reset row with the same MongoDB identifier."""
+
+    expires_at, purge_after = storage_expiry(applied_at)
+    return {
+        '_id': source_row['_id'],
+        'schema_version': 'conversation_progress.v2',
+        'episode_state_id': uuid4().hex,
+        'platform': source_row['platform'],
+        'platform_channel_id': source_row['platform_channel_id'],
+        'global_user_id': source_row['global_user_id'],
+        'status': 'closed',
+        'continuity': 'sharp_transition',
+        'turn_count': 0,
+        'episode_narrative': '',
+        'current_thread': '',
+        'character_stance': '',
+        'user_goal': '',
+        'current_blocker': '',
+        'emotional_trajectory': '',
+        'events': [],
+        'overused_moves': [],
+        'recent_turn_refs': [],
+        'compacted_block_refs': [],
+        'created_at': applied_at,
+        'updated_at': applied_at,
+        'expires_at': expires_at,
+        'purge_after': purge_after,
+    }
+
+
+def _migration_row_matches_dry_run(
+    current: Mapping[str, Any],
+    dry_row: Mapping[str, Any],
+) -> bool:
+    """Match every approved drift field plus schema presence/value."""
+
+    drift = dry_row.get('drift')
+    if not isinstance(drift, Mapping):
+        return False
+    if any(
+        current.get(field_name) != drift.get(field_name)
+        for field_name in _CONVERSATION_PROGRESS_DRIFT_FIELDS
+    ):
+        return False
+    schema_present = dry_row.get('schema_present') is True
+    if schema_present != ('schema_version' in current):
+        return False
+    return current.get('schema_version') == dry_row.get('schema_version')
+
+
+def _valid_migration_timestamp(value: object) -> bool:
+    """Return whether one migration timestamp is canonical storage UTC."""
+
+    if not isinstance(value, str) or not value:
+        return False
+    try:
+        parse_storage_utc_datetime(value)
+    except ValueError:
+        return False
+    return True
+
+
+def _migration_drift_filter(
+    current: Mapping[str, Any],
+    dry_row: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Build the atomic exact-match filter for one reviewed row."""
+
+    filter_doc = {
+        '_id': current['_id'],
+        **{
+            field_name: current.get(field_name)
+            for field_name in _CONVERSATION_PROGRESS_DRIFT_FIELDS
+        },
+    }
+    if dry_row.get('schema_present') is True:
+        filter_doc['schema_version'] = dry_row.get('schema_version')
+    else:
+        filter_doc['schema_version'] = {'$exists': False}
+    return filter_doc
+
+
+def _extended_json_sha256(value: Mapping[str, Any]) -> str:
+    """Digest one complete MongoDB document using canonical Extended JSON."""
+
+    encoded = json_util.dumps(
+        dict(value),
+        json_options=RELAXED_JSON_OPTIONS,
+        sort_keys=True,
+        separators=(',', ':'),
+    ).encode('utf-8')
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _load_json_object(path: Path) -> dict[str, Any]:
+    """Load one UTF-8 JSON object and reject every other root shape."""
+
+    value = json.loads(path.read_text(encoding='utf-8'))
+    if not isinstance(value, dict):
+        raise ValueError(f'{path} must contain a JSON object')
+    return value

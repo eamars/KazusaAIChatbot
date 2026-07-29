@@ -84,11 +84,6 @@ from kazusa_ai_chatbot.config import (
     COGNITION_LLM_GOAL_ORDINARY_RESPONSE_MAX_COMPLETION_TOKENS,
     COGNITION_LLM_GOAL_ORDINARY_RESPONSE_MODEL,
     COGNITION_LLM_GOAL_ORDINARY_RESPONSE_THINKING_ENABLED,
-    COGNITION_LLM_REQUIRED_SELECTION_VERIFIER_API_KEY,
-    COGNITION_LLM_REQUIRED_SELECTION_VERIFIER_BASE_URL,
-    COGNITION_LLM_REQUIRED_SELECTION_VERIFIER_MAX_COMPLETION_TOKENS,
-    COGNITION_LLM_REQUIRED_SELECTION_VERIFIER_MODEL,
-    COGNITION_LLM_REQUIRED_SELECTION_VERIFIER_THINKING_ENABLED,
     COGNITION_LLM_RESOLVER_AUTHORIZATION_API_KEY,
     COGNITION_LLM_RESOLVER_AUTHORIZATION_BASE_URL,
     COGNITION_LLM_RESOLVER_AUTHORIZATION_MAX_COMPLETION_TOKENS,
@@ -135,6 +130,10 @@ from kazusa_ai_chatbot.character_identity_growth.projection import (
 from kazusa_ai_chatbot.character_identity_growth.runtime import (
     load_latest_identity_for_episode,
     snapshot_state_update,
+)
+from kazusa_ai_chatbot.conversation_progress import (
+    project_conversation_progress_evidence,
+    project_conversation_progress_scene,
 )
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     ALLOWED_RESOLVER_CAPABILITIES,
@@ -317,23 +316,6 @@ _goal_active_branch_config = LLMCallConfig(
         enabled=COGNITION_LLM_GOAL_ACTIVE_BRANCH_THINKING_ENABLED
     ),
 )
-_required_selection_verifier_config = LLMCallConfig(
-    stage_name="cognition_core_v2.required_selection_verifier",
-    route_name="COGNITION_LLM_REQUIRED_SELECTION_VERIFIER",
-    base_url=COGNITION_LLM_REQUIRED_SELECTION_VERIFIER_BASE_URL,
-    api_key=COGNITION_LLM_REQUIRED_SELECTION_VERIFIER_API_KEY,
-    model=COGNITION_LLM_REQUIRED_SELECTION_VERIFIER_MODEL,
-    temperature=0.1,
-    top_p=0.7,
-    top_k=None,
-    max_completion_tokens=(
-        COGNITION_LLM_REQUIRED_SELECTION_VERIFIER_MAX_COMPLETION_TOKENS
-    ),
-    presence_penalty=None,
-    thinking=LLMThinkingConfig(
-        enabled=COGNITION_LLM_REQUIRED_SELECTION_VERIFIER_THINKING_ENABLED
-    ),
-)
 _workspace_collapse_config = LLMCallConfig(
     stage_name="cognition_core_v2.workspace_collapse",
     route_name="COGNITION_LLM_WORKSPACE_COLLAPSE",
@@ -421,9 +403,6 @@ def build_cognition_core_services() -> CognitionCoreServicesV2:
         appraisal_existential_drive_config=_appraisal_existential_drive_config,
         goal_ordinary_response_config=_goal_ordinary_response_config,
         goal_active_branch_config=_goal_active_branch_config,
-        required_selection_verifier_config=(
-            _required_selection_verifier_config
-        ),
         workspace_collapse_config=_workspace_collapse_config,
         action_planning_config=_action_planning_config,
         action_authorization_config=_action_authorization_config,
@@ -519,6 +498,21 @@ def build_cognition_input_from_global_state(
         episode_id,
         timestamp,
     ))
+    conversation_progress = state.get("conversation_progress")
+    if conversation_progress is None:
+        conversation_continuity = ""
+    elif not isinstance(conversation_progress, dict):
+        raise CognitionExecutionError(
+            "conversation progress must be a V2 prompt mapping"
+        )
+    else:
+        conversation_continuity = project_conversation_progress_scene(
+            conversation_progress,
+        )
+        evidence.extend(project_conversation_progress_evidence(
+            conversation_progress,
+            timestamp,
+        ))
     evidence.extend(_rag_evidence(state.get("rag_result"), timestamp))
     evidence.extend(_promoted_reflection_evidence(
         state.get("promoted_reflection_context"),
@@ -583,9 +577,7 @@ def build_cognition_input_from_global_state(
             "character_role": character_role,
             "current_user_role": current_user_role,
             "semantic_scene": semantic_text[:500],
-            "conversation_continuity": _conversation_progress_text(
-                state.get("conversation_progress")
-            )[:1000],
+            "conversation_continuity": conversation_continuity,
             "semantic_temporal_context": "immediate",
         },
     }
@@ -1759,95 +1751,6 @@ def _dialog_semantic_projection_text(
         ensure_ascii=False,
         sort_keys=True,
     )
-
-
-def _conversation_progress_text(value: object) -> str:
-    """Render only prompt-safe semantic fields from conversation progress."""
-
-    if not isinstance(value, Mapping):
-        return ""
-    scalar_labels = (
-        ("continuity", "连续性"),
-        ("current_thread", "当前话题线"),
-        ("user_goal", "用户目标"),
-        ("current_blocker", "当前阻碍"),
-        ("emotional_trajectory", "情绪轨迹"),
-        ("progression_guidance", "推进指引"),
-    )
-    list_labels = (
-        ("overused_moves", "避免重复"),
-        ("next_affordances", "下一步可行互动"),
-    )
-    loop_labels = (
-        ("open_loops", "未闭合事项"),
-        ("avoid_reopening", "避免重新打开"),
-    )
-    obligation_label = "互动义务"
-    obligation_fields = {
-        "actor": "行动者",
-        "action": "动作",
-        "beneficiary": "受益者",
-        "precondition": "前置条件",
-        "expected_outcome": "预期结果",
-        "status": "状态",
-        "source_kind": "来源类型",
-        "age_hint": "时间提示",
-    }
-    fragments: list[str] = []
-    for field_name, label in scalar_labels:
-        text = _text(value.get(field_name))
-        if text:
-            fragments.append(f"{label}: {text}")
-    for field_name, label in list_labels:
-        rows = value.get(field_name)
-        if isinstance(rows, list):
-            texts = [_text(row) for row in rows if _text(row)]
-            if texts:
-                fragments.append(f"{label}: {', '.join(texts)}")
-    for field_name, label in loop_labels:
-        rows = value.get(field_name)
-        if not isinstance(rows, list):
-            continue
-        texts = [
-            _text(row.get("text"))
-            for row in rows
-            if isinstance(row, Mapping) and _text(row.get("text"))
-        ]
-        if texts:
-            fragments.append(f"{label}: {', '.join(texts)}")
-    obligations = value.get("interaction_obligations")
-    if isinstance(obligations, list):
-        obligation_texts = []
-        for obligation in obligations:
-            if not isinstance(obligation, Mapping):
-                continue
-            actor = _text(obligation.get("actor"))
-            action = _text(obligation.get("action"))
-            if not actor or not action:
-                continue
-            details = [
-                f"{obligation_fields['actor']}={actor}",
-                f"{obligation_fields['action']}={action}",
-            ]
-            for field_name in (
-                "beneficiary",
-                "precondition",
-                "expected_outcome",
-                "status",
-                "source_kind",
-                "age_hint",
-            ):
-                detail = _text(obligation.get(field_name))
-                if detail:
-                    details.append(
-                        f"{obligation_fields[field_name]}={detail}"
-                    )
-            obligation_texts.append(", ".join(details))
-        if obligation_texts:
-            fragments.append(
-                f"{obligation_label}: {' | '.join(obligation_texts)}"
-            )
-    return "; ".join(fragments)
 
 
 def _v2_timestamp(value: str) -> str:

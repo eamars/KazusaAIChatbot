@@ -29,7 +29,14 @@ from kazusa_ai_chatbot.cognition_core_v2.state_reducers import (
     create_deterministic_goals,
 )
 from kazusa_ai_chatbot.consolidation import core as consolidation_core
-from kazusa_ai_chatbot.conversation_progress import recorder as progress_recorder
+from kazusa_ai_chatbot.conversation_progress.delta_merge import (
+    event_handle_map,
+    source_handle_map,
+    validate_event_observation_batch,
+)
+from kazusa_ai_chatbot.conversation_progress.projection import (
+    build_progress_prompt,
+)
 from kazusa_ai_chatbot.internal_monologue_residue import recorder as residue_recorder
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_generator
@@ -38,6 +45,13 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
 )
 from kazusa_ai_chatbot.time_boundary import (
     local_time_context_from_storage_utc,
+)
+from tests.conversation_progress_v2_helpers import (
+    event,
+    event_observation_batch,
+    new_event_observation,
+    packet,
+    record_input,
 )
 
 
@@ -215,47 +229,70 @@ def test_relationship_connection_tracks_a_current_closeness_gap() -> None:
 
 
 def _progress_payload() -> dict[str, object]:
-    """Build one recorder response with an actor-preserving obligation."""
+    """Build one V2 prompt packet with an actor-preserving obligation."""
 
-    return {
-        "status": "active",
-        "episode_label": "shared reward",
-        "continuity": "same_episode",
-        "conversation_mode": "playful exchange",
-        "episode_phase": "waiting for the user's choice",
-        "topic_momentum": "moving toward a choice",
+    obligation = event(
+        event_id="reward-obligation",
+        summary="the character owes the reward selected by the user",
+        state="open",
+        retention="decision_critical",
+    )
+    obligation.update({
+        "is_obligation": True,
+        "actor": "the character",
+        "action": "provide the reward selected by the user",
+        "beneficiary": "the user",
+        "precondition": "the user selects one reward",
+        "outcome": "",
+    })
+    active_packet = packet(turn_count=5, events=[obligation])
+    active_packet.update({
+        "episode_narrative": (
+            "the character offered a choice and must provide the reward "
+            "selected by the user"
+        ),
         "current_thread": "the user may choose a reward",
+        "character_stance": "warm and playful",
         "user_goal": "choose a reward",
-        "current_blocker": "",
-        "user_state_updates": [],
-        "assistant_moves": ["offered a choice"],
-        "overused_moves": [],
-        "open_loops": ["reward choice remains open"],
-        "interaction_obligations": [{
-            "actor": "the character",
-            "action": "provide the reward selected by the user",
-            "beneficiary": "the user",
-            "precondition": "the user selects one reward",
-            "expected_outcome": "the selected reward is provided",
-            "status": "active",
-            "source_kind": "assistant_response",
-        }],
-        "resolved_threads": [],
-        "avoid_reopening": [],
         "emotional_trajectory": "warm and playful",
-        "next_affordances": ["wait for the user's selection"],
-        "progression_guidance": "do not swap who owes the reward",
-    }
+    })
+    return build_progress_prompt(
+        active_packet=active_packet,
+        interaction_logical_turns=[],
+    )
 
 
 def test_progress_recorder_preserves_obligation_roles_and_source() -> None:
     """Generated surface content cannot become an unlabeled user debt."""
 
-    validated = progress_recorder.validate_recorder_output(_progress_payload())
+    obligation_change = new_event_observation(
+        summary="the character owes the reward selected by the user",
+        relevance="decision",
+        actor="the character",
+        action="provide",
+        object_="the reward selected by the user",
+    )
+    obligation_change.update({
+        "is_obligation": True,
+        "beneficiary": "the user",
+        "precondition": "the user selects one reward",
+        "outcome": "",
+    })
 
-    assert validated["interaction_obligations"] == [
-        _progress_payload()["interaction_obligations"][0]
-    ]
+    submitted = record_input()
+    validated = validate_event_observation_batch(
+        event_observation_batch(new_events=[obligation_change]),
+        record_input=submitted,
+        supplied_event_handles=set(event_handle_map(submitted)),
+        supplied_source_handles=set(source_handle_map(submitted)),
+    )
+    obligation = validated[0]
+
+    assert obligation["actor"] == "the character"
+    assert obligation["action"] == "provide"
+    assert obligation["object"] == "the reward selected by the user"
+    assert obligation["beneficiary"] == "the user"
+    assert obligation["source_refs"][0]["ref_id"] == "row_source_1"
 
 
 def _episode(user_input: str = "Current request") -> dict[str, object]:
@@ -312,10 +349,7 @@ def test_connector_separates_current_event_continuity_and_private_residue() -> N
         "user_multimedia_input": [],
         "rag_result": {"memory_evidence": []},
         "character_profile": character_profile,
-        "conversation_progress": {
-            **_progress_payload(),
-            "turn_count": 5,
-        },
+        "conversation_progress": _progress_payload(),
         "internal_monologue_residue_context": (
             "I still care about answering without swapping roles."
         ),

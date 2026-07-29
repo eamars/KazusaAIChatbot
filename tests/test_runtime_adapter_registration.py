@@ -1872,7 +1872,7 @@ async def test_napcat_operational_response_is_sent_without_normal_receipt():
         "messages": ["operational notice"],
         "content_type": "operational_error",
         "operational_error": {
-            "error_code": "required_selection_alignment_exhausted",
+            "error_code": "goal_bid_structure_exhausted",
             "status": "exhausted",
             "retryable": True,
             "exhausted": True,
@@ -1880,7 +1880,7 @@ async def test_napcat_operational_response_is_sent_without_normal_receipt():
             "correlation_id": "chat:qq:correlation:message",
             "trace_id": "trace-1",
             "branch_id": "ordinary_response",
-            "stage": "goal_cognition.required_selection_alignment",
+            "stage": "goal_cognition",
         },
         "delivery_tracking_id": "",
     }))

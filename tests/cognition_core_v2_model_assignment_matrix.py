@@ -115,7 +115,6 @@ FACTOR_SERVICE_FIELDS = {
         "workspace_collapse_config",
     ),
     "action_planning_config": (
-        "required_selection_verifier_config",
         "action_planning_config",
         "action_authorization_config",
         "resolver_authorization_config",
@@ -129,7 +128,6 @@ CONFIGURED_PROFILE_SERVICE_FIELDS = {
     "D": (
         "appraisal_event_agency_config",
         "goal_ordinary_response_config",
-        "required_selection_verifier_config",
         "workspace_collapse_config",
         "action_planning_config",
         "action_authorization_config",

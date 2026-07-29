@@ -149,7 +149,6 @@ def _core_services(llm: _ScriptedLLM) -> CognitionCoreServicesV2:
         ),
         goal_ordinary_response_config=make_llm_call_config("v2_goal"),
         goal_active_branch_config=make_llm_call_config("v2_goal"),
-        required_selection_verifier_config=make_llm_call_config("v2_route"),
         workspace_collapse_config=make_llm_call_config("v2_collapse"),
         action_planning_config=make_llm_call_config("v2_route"),
         action_authorization_config=make_llm_call_config("v2_route"),

@@ -1,139 +1,182 @@
-"""Tests for conversation episode state repository helpers."""
+"""Active V2 packet read and guarded replacement contracts."""
 
 from __future__ import annotations
 
+from copy import deepcopy
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from pymongo.errors import DuplicateKeyError
 
 from kazusa_ai_chatbot.conversation_progress import repository
-from kazusa_ai_chatbot.conversation_progress.models import ConversationProgressScope
-
-
-def test_preserve_first_seen_entries_keeps_llm_returned_text_timestamp() -> None:
-    """Exact recorder-returned text keeps its original first_seen_at."""
-
-    entries = repository.preserve_first_seen_entries(
-        prior_entries=[
-            {"text": "user has an unresolved draft outline", "first_seen_at": "2026-04-28T01:00:00+00:00"},
-        ],
-        new_texts=[
-            "user has an unresolved draft outline",
-            "user is worried about the introduction",
-        ],
-        current_timestamp_utc="2026-04-28T04:00:00+00:00",
-        limit=8,
-    )
-
-    assert entries == [
-        {"text": "user has an unresolved draft outline", "first_seen_at": "2026-04-28T01:00:00+00:00"},
-        {"text": "user is worried about the introduction", "first_seen_at": "2026-04-28T04:00:00+00:00"},
-    ]
-
-
-def test_build_episode_state_doc_caps_lists_and_increments_turn_count() -> None:
-    """Built documents are capped and advance from the prior turn count."""
-
-    scope = ConversationProgressScope("qq", "channel-1", "user-1")
-    document = repository.build_episode_state_doc(
-        scope=scope,
-        storage_timestamp_utc="2026-04-28T04:00:00+00:00",
-        prior_episode_state={
-            "episode_state_id": "episode-1",
-            "turn_count": 3,
-            "created_at": "2026-04-28T01:00:00+00:00",
-            "user_state_updates": [],
-            "open_loops": [],
-        },
-        recorder_output={
-            "status": "active",
-            "episode_label": "draft_help",
-            "continuity": "same_episode",
-            "user_state_updates": [f"state {index}" for index in range(12)],
-            "assistant_moves": [f"move {index}" for index in range(12)],
-            "overused_moves": [f"overused {index}" for index in range(12)],
-            "open_loops": [f"loop {index}" for index in range(12)],
-            "interaction_obligations": [],
-            "progression_guidance": "answer the missing outline point",
-        },
-        last_user_input="what about the third point?",
-    )
-
-    assert document["turn_count"] == 4
-    assert document["episode_state_id"] == "episode-1"
-    assert document["created_at"] == "2026-04-28T01:00:00+00:00"
-    assert len(document["user_state_updates"]) == 8
-    assert len(document["assistant_moves"]) == 8
-    assert len(document["overused_moves"]) == 5
-    assert len(document["open_loops"]) == 5
-    assert document["expires_at"] == "2026-04-30T04:00:00+00:00"
+from kazusa_ai_chatbot.db import conversation_progress as progress_db
+from tests.conversation_progress_v2_helpers import SCOPE, packet
 
 
 @pytest.mark.asyncio
-async def test_load_episode_state_queries_by_scope_without_mongo_id(monkeypatch) -> None:
-    """The repository loads by platform/channel/user and excludes _id."""
-
+async def test_db_read_uses_exact_v2_active_scope(monkeypatch):
     collection = MagicMock()
-    collection.find_one = AsyncMock(return_value=None)
-    db = {repository.COLLECTION_NAME: collection}
+    collection.find_one = AsyncMock(return_value=packet())
     monkeypatch.setattr(
-        "kazusa_ai_chatbot.db.conversation_progress.get_db",
-        AsyncMock(return_value=db),
+        progress_db,
+        'get_db',
+        AsyncMock(return_value={
+            'conversation_episode_state': collection,
+        }),
     )
 
-    await repository.load_episode_state(
-        scope=ConversationProgressScope("qq", "channel-1", "user-1"),
+    result = await progress_db.load_active_episode_state(
+        scope=SCOPE,
+        current_timestamp_utc='2026-07-28T09:30:00+00:00',
     )
 
     collection.find_one.assert_awaited_once_with(
         {
-            "platform": "qq",
-            "platform_channel_id": "channel-1",
-            "global_user_id": "user-1",
+            'platform': 'qq',
+            'platform_channel_id': 'channel_test',
+            'global_user_id': 'user_test',
+            'schema_version': 'conversation_progress.v2',
+            'status': 'active',
         },
-        projection={"_id": 0},
+        projection={'_id': 0},
     )
+    assert result == packet()
 
 
 @pytest.mark.asyncio
-async def test_upsert_episode_state_uses_turn_count_guard(monkeypatch) -> None:
-    """Writes include a strict turn_count freshness guard."""
-
-    update_result = MagicMock(upserted_id=None, modified_count=1)
+@pytest.mark.parametrize(
+    'expires_at',
+    [
+        '2026-07-28T09:30:00+00:00',
+        '2026-07-28T09:29:59+00:00',
+        'invalid',
+        None,
+    ],
+)
+async def test_db_read_excludes_expired_or_invalid_lifecycle(
+    monkeypatch,
+    expires_at,
+):
+    document = packet()
+    document['expires_at'] = expires_at
     collection = MagicMock()
-    collection.update_one = AsyncMock(return_value=update_result)
-    db = {repository.COLLECTION_NAME: collection}
+    collection.find_one = AsyncMock(return_value=document)
     monkeypatch.setattr(
-        "kazusa_ai_chatbot.db.conversation_progress.get_db",
-        AsyncMock(return_value=db),
+        progress_db,
+        'get_db',
+        AsyncMock(return_value={
+            'conversation_episode_state': collection,
+        }),
     )
 
-    written = await repository.upsert_episode_state_guarded(
-        document={
-            "episode_state_id": "episode-1",
-            "platform": "qq",
-            "platform_channel_id": "channel-1",
-            "global_user_id": "user-1",
-            "status": "active",
-            "episode_label": "draft_help",
-            "continuity": "same_episode",
-            "user_state_updates": [],
-            "assistant_moves": [],
-            "overused_moves": [],
-            "open_loops": [],
-            "progression_guidance": "",
-            "turn_count": 2,
-            "last_user_input": "hello",
-            "created_at": "2026-04-28T04:00:00+00:00",
-            "updated_at": "2026-04-28T04:00:00+00:00",
-            "expires_at": "2026-04-30T04:00:00+00:00",
-        },
+    result = await progress_db.load_active_episode_state(
+        scope=SCOPE,
+        current_timestamp_utc='2026-07-28T09:30:00+00:00',
+    )
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_repository_rejects_malformed_v2_after_db_read(monkeypatch):
+    malformed = packet()
+    malformed['events'] = [{'not': 'an event'}]
+    monkeypatch.setattr(
+        repository,
+        'load_active_episode_state',
+        AsyncMock(return_value=malformed),
+    )
+
+    result = await repository.load_active_packet(
+        scope=SCOPE,
+        current_timestamp_utc='2026-07-28T09:30:00+00:00',
+    )
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_guarded_replacement_accepts_newer_or_invalid_lifecycle(
+    monkeypatch,
+):
+    collection = MagicMock()
+    collection.replace_one = AsyncMock(return_value=SimpleNamespace(
+        upserted_id=None,
+        modified_count=1,
+    ))
+    monkeypatch.setattr(
+        progress_db,
+        'get_db',
+        AsyncMock(return_value={
+            'conversation_episode_state': collection,
+        }),
+    )
+    document = packet(turn_count=2)
+
+    written = await progress_db.replace_episode_state_guarded(
+        document=document,
     )
 
     assert written is True
-    filter_arg = collection.update_one.call_args[0][0]
-    assert filter_arg["platform"] == "qq"
-    assert filter_arg["$or"] == [
-        {"turn_count": {"$lt": 2}},
-        {"turn_count": {"$exists": False}},
-    ]
+    query, replacement = collection.replace_one.await_args.args
+    assert replacement == document
+    assert query['platform'] == 'qq'
+    assert query['platform_channel_id'] == 'channel_test'
+    assert query['global_user_id'] == 'user_test'
+    assert {'turn_count': {'$lt': 2}} in query['$or']
+    assert {
+        'schema_version': {'$ne': 'conversation_progress.v2'}
+    } in query['$or']
+    assert {'status': {'$ne': 'active'}} in query['$or']
+    assert {'expires_at': {'$exists': False}} in query['$or']
+    assert collection.replace_one.await_args.kwargs == {'upsert': True}
+
+
+@pytest.mark.asyncio
+async def test_closed_tombstone_can_be_replaced_by_fresh_turn_one(
+    monkeypatch,
+):
+    collection = MagicMock()
+    collection.replace_one = AsyncMock(return_value=SimpleNamespace(
+        upserted_id=None,
+        modified_count=1,
+    ))
+    monkeypatch.setattr(
+        progress_db,
+        'get_db',
+        AsyncMock(return_value={
+            'conversation_episode_state': collection,
+        }),
+    )
+
+    written = await progress_db.replace_episode_state_guarded(
+        document=packet(turn_count=1),
+    )
+
+    query = collection.replace_one.await_args.args[0]
+    assert written is True
+    assert {'status': {'$ne': 'active'}} in query['$or']
+
+
+@pytest.mark.asyncio
+async def test_duplicate_scope_on_newer_active_packet_is_lost_write(
+    monkeypatch,
+):
+    collection = MagicMock()
+    collection.replace_one = AsyncMock(
+        side_effect=DuplicateKeyError('newer active row won'),
+    )
+    monkeypatch.setattr(
+        progress_db,
+        'get_db',
+        AsyncMock(return_value={
+            'conversation_episode_state': collection,
+        }),
+    )
+
+    written = await progress_db.replace_episode_state_guarded(
+        document=deepcopy(packet(turn_count=2)),
+    )
+
+    assert written is False

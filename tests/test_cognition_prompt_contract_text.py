@@ -16,8 +16,9 @@ from kazusa_ai_chatbot.cognition_core_v2.action_selection import (
 from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
     GOAL_COGNITION_PROMPT,
     GOAL_COGNITION_REPAIR_PROMPT,
-    REQUIRED_SELECTION_REPAIR_PROMPT,
-    REQUIRED_SELECTION_VERIFIER_PROMPT,
+    MAX_GOAL_BID_EVIDENCE_HANDLES,
+    MAX_GOAL_BID_ROLE_HANDLES,
+    REQUIRED_SELECTION_GOAL_PROMPT,
 )
 from kazusa_ai_chatbot.cognition_core_v2.resolver_authorization import (
     RESOLVER_AUTHORIZATION_PROMPT,
@@ -74,8 +75,7 @@ def _branch_modified_prompt_fragments() -> tuple[str, ...]:
         ACTION_PLANNING_PROMPT,
         GOAL_COGNITION_PROMPT,
         GOAL_COGNITION_REPAIR_PROMPT,
-        REQUIRED_SELECTION_VERIFIER_PROMPT,
-        REQUIRED_SELECTION_REPAIR_PROMPT,
+        REQUIRED_SELECTION_GOAL_PROMPT,
         RESOLVER_AUTHORIZATION_PROMPT,
         SEMANTIC_APPRAISAL_PROMPT,
         CONTENT_PLAN_SYSTEM_PROMPT,
@@ -197,8 +197,20 @@ def test_goal_prompt_requires_complete_grounded_bid() -> None:
         "evidence handle",
         "完整、有证据支持",
         "不写最终对话",
+        "每个元素必须逐个等于一个已提供的 handle",
+        "不得使用范围、通配符、组合写法或 source ID",
+        "`evidence_handles` 最多九项",
+        "`target_role_handles` 最多八项",
     ):
         assert required_text in prompt
+
+    repair_prompt = " ".join(GOAL_COGNITION_REPAIR_PROMPT.split())
+    assert MAX_GOAL_BID_EVIDENCE_HANDLES == 9
+    assert MAX_GOAL_BID_ROLE_HANDLES == 8
+    assert "每个元素必须逐个等于一个允许的 handle" in repair_prompt
+    assert "不得使用范围、通配符、 组合写法或 source ID" in repair_prompt
+    assert "`evidence_handles` 最多九项" in repair_prompt
+    assert "`target_role_handles` 最多八项" in repair_prompt
 
 
 def test_goal_prompt_owns_current_judgment_and_roles() -> None:
@@ -224,6 +236,21 @@ def test_goal_prompt_uses_latest_identity_as_current_authority() -> None:
     assert "最新且权威的角色身份" in prompt
     assert "覆盖初始种子身份" in prompt
     assert "不得用旧习惯" in prompt
+
+
+def test_goal_prompt_prioritizes_current_episode_over_stale_progress() -> None:
+    """Current direct evidence advances semantically matching old events."""
+
+    prompt = " ".join(GOAL_COGNITION_PROMPT.split())
+
+    for required_text in (
+        "当前 episode 比进度更新",
+        "部件与整体",
+        "不要要求逐字相同",
+        "优先于旧事件状态",
+        "引用相关约束并推进",
+    ):
+        assert required_text in prompt
 
 
 def test_goal_prompt_treats_physical_requests_as_verbal_stance() -> None:

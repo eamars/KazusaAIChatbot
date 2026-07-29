@@ -30,6 +30,9 @@ from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_l3_surface as l3_module
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 from tests.cognition_core_v2_test_helpers import canonical_episode
+from tests.conversation_progress_v2_helpers import (
+    record_input as progress_record_input,
+)
 from tests.llm_trace import write_llm_trace
 
 
@@ -767,29 +770,60 @@ async def test_live_progress_records_only_the_accepted_coherent_turn(
         monkeypatch,
     )
     accepted_surface = pipeline["accepted_surface"]
-    record_input: ConversationProgressRecordInput = {
-        "scope": ConversationProgressScope(
-            "debug",
-            "transition-coherence",
-            "redacted-user",
-        ),
-        "storage_timestamp_utc": "2026-07-25T12:23:32+00:00",
-        "character_name": "杏山千纱",
-        "prior_episode_state": None,
-        "decontextualized_input": _CAPTURED_ACCOMPLICE_INPUT,
-        "chat_history_recent": [],
-        "content_plan": {
-            "semantic_content": accepted_surface["content_plan"],
-            "surface_intent": accepted_surface["selected_surface_intent"],
+    record_input: ConversationProgressRecordInput = (
+        progress_record_input()
+    )
+    record_input["scope"] = ConversationProgressScope(
+        "debug",
+        "transition-coherence",
+        "redacted-user",
+    )
+    record_input["storage_timestamp_utc"] = (
+        "2026-07-25T12:23:32+00:00"
+    )
+    record_input["character_name"] = "杏山千纱"
+    record_input["prior_episode_state"] = None
+    record_input["decontextualized_input"] = _CAPTURED_ACCOMPLICE_INPUT
+    record_input["interaction_logical_turns"][0].update({
+        "turn_id": "row:transition-coherence-input",
+        "occurred_at": record_input["storage_timestamp_utc"],
+        "fragments": [_CAPTURED_ACCOMPLICE_INPUT],
+        "conversation_row_ids": ["transition-coherence-input"],
+    })
+    record_input["current_turn_source_refs"] = [
+        {
+            "ref_kind": "conversation_row",
+            "ref_id": "transition-coherence-input",
+            "occurred_at": record_input["storage_timestamp_utc"],
         },
-        "logical_stance": "CONFIRM",
-        "character_intent": "BANTER",
-        "final_dialog": pipeline["final_dialog"],
-        "boundary_profile": _BOUNDARY_PROFILE,
+        {
+            "ref_kind": "llm_trace",
+            "ref_id": "transition-coherence-response",
+            "occurred_at": record_input["storage_timestamp_utc"],
+        },
+    ]
+    record_input["content_plan"] = {
+        "semantic_content": accepted_surface["content_plan"],
+        "surface_intent": accepted_surface["selected_surface_intent"],
     }
-    recorder_capture = _CapturingLLM(recorder._recorder_llm)
-    monkeypatch.setattr(recorder, "_recorder_llm", recorder_capture)
+    record_input["logical_stance"] = "CONFIRM"
+    record_input["character_intent"] = "BANTER"
+    record_input["final_dialog"] = pipeline["final_dialog"]
+    record_input["boundary_profile"] = _BOUNDARY_PROFILE
+    scene_capture = _CapturingLLM(recorder._scene_recorder_llm)
+    event_capture = _CapturingLLM(recorder._event_recorder_llm)
+    monkeypatch.setattr(
+        recorder,
+        "_scene_recorder_llm",
+        scene_capture,
+    )
+    monkeypatch.setattr(
+        recorder,
+        "_event_recorder_llm",
+        event_capture,
+    )
     progress_output = await recorder.record_with_llm(record_input)
+    progress_output_payload = asdict(progress_output)
     trace_record_input = {
         **record_input,
         "scope": asdict(record_input["scope"]),
@@ -807,8 +841,17 @@ async def test_live_progress_records_only_the_accepted_coherent_turn(
             "accepted_surface": accepted_surface,
             "accepted_dialog": pipeline["final_dialog"],
             "record_input": trace_record_input,
-            "progress_model_calls": recorder_capture.calls,
-            "progress_output": progress_output,
+            "progress_model_calls": [
+                *(
+                    {"owner": "scene", **call}
+                    for call in scene_capture.calls
+                ),
+                *(
+                    {"owner": "event", **call}
+                    for call in event_capture.calls
+                ),
+            ],
+            "progress_output": progress_output_payload,
             "manual_transition_review": {
                 "opening_stance": "",
                 "transition_or_reason": "",
@@ -827,7 +870,7 @@ async def test_live_progress_records_only_the_accepted_coherent_turn(
         "accepted_surface": accepted_surface,
         "accepted_dialog": pipeline["final_dialog"],
         "record_input": trace_record_input,
-        "progress_output": progress_output,
+        "progress_output": progress_output_payload,
     }, ensure_ascii=True, indent=2))
 
     assert record_input["final_dialog"] == pipeline["final_dialog"]

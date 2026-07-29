@@ -1,288 +1,690 @@
-"""MongoDB persistence helpers for conversation progress."""
+"""Validated active-packet and compacted-block persistence orchestration."""
 
 from __future__ import annotations
 
-import logging
-import uuid
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from copy import deepcopy
+from dataclasses import dataclass
+from datetime import datetime
+from typing import cast
+from uuid import uuid4
 
-from kazusa_ai_chatbot.conversation_progress.models import ConversationProgressScope
+from kazusa_ai_chatbot.conversation_progress.compaction import (
+    ConversationCompactionContractError,
+    apply_compaction_to_packet,
+    block_embedding_text,
+    build_compaction_plan,
+    create_block_from_plan,
+    validate_block,
+)
+from kazusa_ai_chatbot.conversation_progress.delta_merge import (
+    ConversationProgressContractError,
+    apply_delta,
+)
+from kazusa_ai_chatbot.conversation_progress.models import (
+    ConversationEpisodeBlockV1,
+    ConversationProgressEventV2,
+    ConversationProgressRecordInput,
+    ConversationProgressRecorderDeltaV2,
+    ConversationProgressScope,
+    ConversationProgressStateV2,
+)
 from kazusa_ai_chatbot.conversation_progress.policy import (
-    ASSISTANT_MOVES_LIMIT,
-    AVOID_REOPENING_LIMIT,
-    COLLECTION_NAME as COLLECTION_NAME,
-    MAX_ENTRY_CHARS,
-    MAX_GUIDANCE_CHARS,
-    MAX_LABEL_CHARS,
+    MAX_ACTIVE_BLOCK_REFS,
+    MAX_ACTIVE_EVENTS,
+    MAX_ACTIVE_PACKET_CHARS,
+    MAX_BLOCK_GRAPH_DEPTH,
+    MAX_EPISODE_NARRATIVE_CHARS,
+    MAX_EVENT_OUTCOME_CHARS,
+    MAX_EVENT_ROLE_CHARS,
+    MAX_EVENT_SOURCE_REFS,
+    MAX_EVENT_SUMMARY_CHARS,
     MAX_MOVE_CHARS,
-    MAX_OBLIGATION_CHARS,
-    MAX_THREAD_CHARS,
-    NEXT_AFFORDANCES_LIMIT,
-    OPEN_LOOPS_LIMIT,
-    INTERACTION_OBLIGATIONS_LIMIT,
-    OVERUSED_MOVES_LIMIT,
-    RESOLVED_THREADS_LIMIT,
-    USER_STATE_UPDATES_LIMIT,
-    cap_text,
-    expires_at_for,
+    MAX_RECENT_TURN_REFS,
+    MAX_REACHABLE_BLOCK_REFS,
+    MAX_THREAD_FIELD_CHARS,
+    VALID_CONTINUITY,
+    VALID_EVENT_RETENTIONS,
+    VALID_EVENT_STATES,
+    VALID_SOURCE_REF_KINDS,
+    VALID_STATUS,
+    canonical_json_chars,
 )
+from kazusa_ai_chatbot.db import get_document_text_embedding
 from kazusa_ai_chatbot.db.conversation_progress import (
-    load_episode_state as _db_load_episode_state,
-    upsert_episode_state_guarded as _db_upsert_episode_state_guarded,
+    load_active_episode_state,
+    replace_episode_state_guarded,
 )
-from kazusa_ai_chatbot.db.schemas import (
-    ConversationEpisodeEntryDoc,
-    ConversationEpisodeStateDoc,
-    ConversationInteractionObligationDoc,
+from kazusa_ai_chatbot.db.conversation_progress_blocks import (
+    insert_conversation_progress_block,
+    load_conversation_progress_block_graph,
+    supersede_conversation_progress_blocks,
+    touch_conversation_progress_blocks,
 )
+from kazusa_ai_chatbot.time_boundary import parse_storage_utc_datetime
 
-logger = logging.getLogger(__name__)
+EmbedBlock = Callable[[str], Awaitable[list[float]]]
+
+_PACKET_FIELDS = {
+    'schema_version',
+    'episode_state_id',
+    'platform',
+    'platform_channel_id',
+    'global_user_id',
+    'status',
+    'continuity',
+    'turn_count',
+    'episode_narrative',
+    'current_thread',
+    'character_stance',
+    'user_goal',
+    'current_blocker',
+    'emotional_trajectory',
+    'events',
+    'overused_moves',
+    'recent_turn_refs',
+    'compacted_block_refs',
+    'created_at',
+    'updated_at',
+    'expires_at',
+    'purge_after',
+}
+_EVENT_FIELDS = {
+    'event_id',
+    'semantic_summary',
+    'is_obligation',
+    'actor',
+    'action',
+    'object',
+    'beneficiary',
+    'precondition',
+    'state',
+    'outcome',
+    'retention',
+    'source_refs',
+    'first_seen_at',
+    'updated_at',
+}
+_SOURCE_REF_FIELDS = {'ref_kind', 'ref_id', 'occurred_at'}
 
 
-async def load_episode_state(
+@dataclass(frozen=True)
+class PreparedProgressWrite:
+    """Validated packet plus the optional immutable block written before it."""
+
+    packet: ConversationProgressStateV2
+    block: ConversationEpisodeBlockV1 | None
+    source_block_ids: list[str]
+    protected_block_ids: list[str]
+
+
+@dataclass(frozen=True)
+class ProgressWriteResult:
+    """Atomic-boundary persistence disposition."""
+
+    written: bool
+    block_inserted: bool
+    disposition: str
+
+
+async def load_active_packet(
     *,
     scope: ConversationProgressScope,
-) -> ConversationEpisodeStateDoc | None:
-    """Load one episode-state document by scope.
-
-    Args:
-        scope: Platform/channel/user scope.
-
-    Returns:
-        Stored document without MongoDB ``_id``, or ``None``.
-    """
-
-    doc = await _db_load_episode_state(scope=scope)
-    return doc
-
-
-def _cap_strings(values: list[str], limit: int, max_chars: int) -> list[str]:
-    result: list[str] = []
-    for value in values:
-        if not isinstance(value, str):
-            raise TypeError("string list values must be strings")
-        if not value.strip():
-            continue
-        result.append(cap_text(value, max_chars))
-        if len(result) >= limit:
-            break
-    return result
-
-
-def preserve_first_seen_entries(
-    *,
-    prior_entries: list[ConversationEpisodeEntryDoc],
-    new_texts: list[str],
     current_timestamp_utc: str,
-    limit: int,
-) -> list[ConversationEpisodeEntryDoc]:
-    """Attach first-seen metadata to recorder-returned entry text.
+) -> ConversationProgressStateV2 | None:
+    """Load and fully validate one active packet from the DB boundary."""
 
-    Args:
-        prior_entries: Existing stored entries from the previous state.
-        new_texts: Recorder-returned text values for this turn.
-        current_timestamp_utc: Storage UTC timestamp to stamp on newly seen
-            entries.
-        limit: Maximum number of entries to keep.
-
-    Returns:
-        Stored entry documents with preserved or newly stamped ``first_seen_at``.
-    """
-
-    prior_first_seen: dict[str, str] = {}
-    for entry in prior_entries:
-        text = entry.get("text")
-        first_seen_at = entry.get("first_seen_at")
-        if isinstance(text, str) and text.strip() and isinstance(first_seen_at, str) and first_seen_at.strip():
-            prior_first_seen[text.strip()] = first_seen_at.strip()
-
-    entries: list[ConversationEpisodeEntryDoc] = []
-    for text_value in new_texts:
-        if not isinstance(text_value, str):
-            raise TypeError("entry text values must be strings")
-        if not text_value.strip():
-            continue
-        text = cap_text(text_value, MAX_ENTRY_CHARS)
-        if not text:
-            continue
-        entries.append({
-            "text": text,
-            "first_seen_at": prior_first_seen.get(text, current_timestamp_utc),
-        })
-        if len(entries) >= limit:
-            break
-    return entries
-
-
-def preserve_first_seen_obligations(
-    *,
-    prior_obligations: list[ConversationInteractionObligationDoc],
-    new_obligations: list[dict],
-    current_timestamp_utc: str,
-) -> list[ConversationInteractionObligationDoc]:
-    """Attach first-seen metadata without changing obligation semantics."""
-
-    identity_fields = (
-        "actor",
-        "action",
-        "beneficiary",
-        "precondition",
-        "expected_outcome",
-        "source_kind",
+    packet = await load_active_episode_state(
+        scope=scope,
+        current_timestamp_utc=current_timestamp_utc,
     )
-    prior_first_seen = {
-        tuple(obligation[field] for field in identity_fields): obligation[
-            "first_seen_at"
-        ]
-        for obligation in prior_obligations
-        if all(field in obligation for field in (*identity_fields, "first_seen_at"))
-    }
-    result: list[ConversationInteractionObligationDoc] = []
-    for obligation in new_obligations[:INTERACTION_OBLIGATIONS_LIMIT]:
-        capped = {
-            field: cap_text(obligation[field], MAX_OBLIGATION_CHARS)
-            for field in identity_fields[:-1]
-        }
-        capped["source_kind"] = obligation["source_kind"]
-        identity = tuple(capped[field] for field in identity_fields)
-        result.append({
-            **capped,
-            "status": obligation["status"],
-            "first_seen_at": prior_first_seen.get(
-                identity,
-                current_timestamp_utc,
+    if packet is None:
+        return None
+    try:
+        return validate_active_packet(packet)
+    except ValueError:
+        return None
+
+
+async def load_referenced_blocks(
+    *,
+    active_packet: ConversationProgressStateV2 | None,
+) -> list[ConversationEpisodeBlockV1]:
+    """Load and validate the full graph protected by active block roots."""
+
+    if active_packet is None or not active_packet['compacted_block_refs']:
+        return []
+    try:
+        documents = await load_conversation_progress_block_graph(
+            root_block_ids=active_packet['compacted_block_refs'],
+            scope=ConversationProgressScope(
+                platform=active_packet['platform'],
+                platform_channel_id=active_packet['platform_channel_id'],
+                global_user_id=active_packet['global_user_id'],
             ),
+            episode_state_id=active_packet['episode_state_id'],
+        )
+    except ValueError as exc:
+        raise ConversationCompactionContractError(
+            'protected conversation progress block graph is invalid'
+        ) from exc
+    return [validate_block(document) for document in documents]
+
+
+def prepare_progress_write(
+    *,
+    record_input: ConversationProgressRecordInput,
+    delta: ConversationProgressRecorderDeltaV2,
+    active_blocks: Sequence[ConversationEpisodeBlockV1] = (),
+) -> PreparedProgressWrite:
+    """Apply one semantic delta and deterministic compaction plan."""
+
+    prior_packet = record_input['prior_episode_state']
+    episode_state_id = (
+        prior_packet['episode_state_id']
+        if prior_packet is not None
+        else uuid4().hex
+    )
+    packet = apply_delta(
+        prior_packet=prior_packet,
+        delta=delta,
+        record_input=record_input,
+        episode_state_id=episode_state_id,
+    )
+    protected_block_ids = _protected_block_ids(
+        active_packet=packet,
+        active_blocks=active_blocks,
+    )
+    block: ConversationEpisodeBlockV1 | None = None
+    source_block_ids: list[str] = []
+    compaction_plan = build_compaction_plan(
+        active_packet=packet,
+        active_blocks=active_blocks,
+    )
+    if (
+        compaction_plan is not None
+        and len(protected_block_ids) < MAX_REACHABLE_BLOCK_REFS
+    ):
+        block = create_block_from_plan(
+            compaction_plan=compaction_plan,
+            active_packet=packet,
+            active_blocks=active_blocks,
+        )
+        packet = apply_compaction_to_packet(
+            active_packet=packet,
+            compaction_plan=compaction_plan,
+            block_id=block['block_id'],
+        )
+        source_block_ids = list(compaction_plan['source_block_ids'])
+        protected_block_ids = _protected_block_ids(
+            active_packet=packet,
+            active_blocks=[*active_blocks, block],
+        )
+    validate_active_packet(packet)
+    return PreparedProgressWrite(
+        packet=packet,
+        block=block,
+        source_block_ids=source_block_ids,
+        protected_block_ids=protected_block_ids,
+    )
+
+
+async def persist_progress_write(
+    prepared: PreparedProgressWrite,
+    *,
+    embed_block: EmbedBlock = get_document_text_embedding,
+) -> ProgressWriteResult:
+    """Insert a block, guarded-replace the packet, then finalize lineage."""
+
+    block_inserted = False
+    persisted_block = prepared.block
+    if persisted_block is not None:
+        persisted_block = deepcopy(persisted_block)
+        persisted_block['embedding'] = await embed_block(
+            block_embedding_text(persisted_block)
+        )
+        validate_block(persisted_block)
+        block_inserted = await insert_conversation_progress_block(
+            document=persisted_block,
+        )
+
+    written = await replace_episode_state_guarded(
+        document=prepared.packet,
+    )
+    if not written:
+        return ProgressWriteResult(
+            written=False,
+            block_inserted=block_inserted,
+            disposition='lost_guarded_write',
+        )
+
+    if prepared.source_block_ids and persisted_block is not None:
+        await supersede_conversation_progress_blocks(
+            source_block_ids=prepared.source_block_ids,
+            superseded_by_block_id=persisted_block['block_id'],
+        )
+    await touch_conversation_progress_blocks(
+        block_ids=prepared.protected_block_ids,
+        expires_at=prepared.packet['expires_at'],
+        purge_after=prepared.packet['purge_after'],
+    )
+    return ProgressWriteResult(
+        written=True,
+        block_inserted=block_inserted,
+        disposition='written',
+    )
+
+
+def _protected_block_ids(
+    *,
+    active_packet: ConversationProgressStateV2,
+    active_blocks: Sequence[ConversationEpisodeBlockV1],
+) -> list[str]:
+    """Validate and order the complete graph protected by packet roots."""
+
+    by_id: dict[str, ConversationEpisodeBlockV1] = {}
+    for raw_block in active_blocks:
+        block = validate_block(raw_block)
+        block_id = block['block_id']
+        if block_id in by_id:
+            raise ConversationCompactionContractError(
+                'active block graph contains duplicate block IDs'
+            )
+        if (
+            block['episode_state_id'] != active_packet['episode_state_id']
+            or block['platform'] != active_packet['platform']
+            or (
+                block['platform_channel_id']
+                != active_packet['platform_channel_id']
+            )
+            or block['global_user_id'] != active_packet['global_user_id']
+        ):
+            raise ConversationCompactionContractError(
+                'active block graph crosses packet scope'
+            )
+        by_id[block_id] = block
+
+    ordered_ids: list[str] = []
+    pending_ids = list(active_packet['compacted_block_refs'])
+    parent_by_id = {
+        block_id: ''
+        for block_id in pending_ids
+    }
+    depth = 0
+    while pending_ids:
+        if depth > MAX_BLOCK_GRAPH_DEPTH:
+            raise ConversationCompactionContractError(
+                'active block graph exceeds its depth cap'
+            )
+        next_ids: list[str] = []
+        for block_id in pending_ids:
+            if block_id in ordered_ids:
+                raise ConversationCompactionContractError(
+                    'active block graph is cyclic or has shared children'
+                )
+            block = by_id.get(block_id)
+            if block is None:
+                raise ConversationCompactionContractError(
+                    'active packet references a missing compaction block'
+                )
+            expected_parent = parent_by_id[block_id]
+            actual_parent = block['superseded_by_block_id']
+            if expected_parent:
+                if actual_parent not in {'', expected_parent}:
+                    raise ConversationCompactionContractError(
+                        'active child block lineage is invalid'
+                    )
+            elif actual_parent:
+                raise ConversationCompactionContractError(
+                    'active root block is already superseded'
+                )
+            ordered_ids.append(block_id)
+            for source_block_id in block['source_block_ids']:
+                if source_block_id in parent_by_id:
+                    raise ConversationCompactionContractError(
+                        'active block graph is cyclic or has shared children'
+                    )
+                parent_by_id[source_block_id] = block_id
+                next_ids.append(source_block_id)
+        if len(ordered_ids) + len(next_ids) > MAX_REACHABLE_BLOCK_REFS:
+            raise ConversationCompactionContractError(
+                'active block graph exceeds its node cap'
+            )
+        pending_ids = next_ids
+        depth += 1
+    if set(ordered_ids) != set(by_id):
+        raise ConversationCompactionContractError(
+            'active block input contains unreferenced blocks'
+        )
+    return ordered_ids
+
+
+def validate_active_packet(
+    value: object,
+) -> ConversationProgressStateV2:
+    """Validate the exact stored V2 packet and its final hard size."""
+
+    if not isinstance(value, Mapping) or set(value) != _PACKET_FIELDS:
+        raise ConversationProgressContractError(
+            'active packet fields are not exact'
+        )
+    if value['schema_version'] != 'conversation_progress.v2':
+        raise ConversationProgressContractError(
+            'active packet schema_version is invalid'
+        )
+    for field_name in ('episode_state_id', 'platform', 'global_user_id'):
+        _bounded_text(
+            value[field_name],
+            MAX_ACTIVE_PACKET_CHARS,
+            field_name,
+            required=True,
+        )
+    _bounded_text(
+        value['platform_channel_id'],
+        MAX_ACTIVE_PACKET_CHARS,
+        'platform_channel_id',
+    )
+    status = _enum_text(value['status'], VALID_STATUS, 'status')
+    _enum_text(value['continuity'], VALID_CONTINUITY, 'continuity')
+    turn_count = value['turn_count']
+    if (
+        not isinstance(turn_count, int)
+        or isinstance(turn_count, bool)
+        or turn_count < 0
+        or (status == 'active' and turn_count < 1)
+    ):
+        raise ConversationProgressContractError(
+            'active packet turn_count is invalid'
+        )
+    _bounded_text(
+        value['episode_narrative'],
+        MAX_EPISODE_NARRATIVE_CHARS,
+        'episode_narrative',
+    )
+    for field_name in (
+        'current_thread',
+        'character_stance',
+        'user_goal',
+        'current_blocker',
+        'emotional_trajectory',
+    ):
+        _bounded_text(
+            value[field_name],
+            MAX_THREAD_FIELD_CHARS,
+            field_name,
+        )
+    events = value['events']
+    if not isinstance(events, list) or len(events) > MAX_ACTIVE_EVENTS:
+        raise ConversationProgressContractError(
+            'active packet events exceeds its hard cap'
+        )
+    validated_events = [_validate_stored_event(event) for event in events]
+    event_ids = [event['event_id'] for event in validated_events]
+    if len(event_ids) != len(set(event_ids)):
+        raise ConversationProgressContractError(
+            'active packet event IDs are duplicated'
+        )
+    _bounded_unique_text_list(
+        value['overused_moves'],
+        maximum_items=8,
+        maximum_chars=MAX_MOVE_CHARS,
+        field_name='overused_moves',
+    )
+    _bounded_unique_text_list(
+        value['recent_turn_refs'],
+        maximum_items=MAX_RECENT_TURN_REFS,
+        maximum_chars=MAX_ACTIVE_PACKET_CHARS,
+        field_name='recent_turn_refs',
+    )
+    _bounded_unique_text_list(
+        value['compacted_block_refs'],
+        maximum_items=MAX_ACTIVE_BLOCK_REFS,
+        maximum_chars=MAX_ACTIVE_PACKET_CHARS,
+        field_name='compacted_block_refs',
+    )
+    for field_name in ('created_at', 'updated_at', 'expires_at'):
+        timestamp = _bounded_text(
+            value[field_name],
+            MAX_ACTIVE_PACKET_CHARS,
+            field_name,
+            required=True,
+        )
+        parse_storage_utc_datetime(timestamp)
+    if not isinstance(value['purge_after'], datetime):
+        raise ConversationProgressContractError(
+            'active packet purge_after must be a BSON datetime'
+        )
+    if canonical_json_chars(value) > MAX_ACTIVE_PACKET_CHARS:
+        raise ConversationProgressContractError(
+            'active packet exceeds its hard character cap'
+        )
+    return deepcopy(value)  # type: ignore[return-value]
+
+
+def _validate_stored_event(
+    value: object,
+) -> ConversationProgressEventV2:
+    """Validate one stored event including code-owned lifecycle metadata."""
+
+    if not isinstance(value, Mapping) or set(value) != _EVENT_FIELDS:
+        raise ConversationProgressContractError(
+            'stored event fields are not exact'
+        )
+    event_id = _bounded_text(
+        value['event_id'],
+        MAX_ACTIVE_PACKET_CHARS,
+        'event_id',
+        required=True,
+    )
+    semantic_summary = _bounded_text(
+        value['semantic_summary'],
+        MAX_EVENT_SUMMARY_CHARS,
+        'semantic_summary',
+        required=True,
+    )
+    is_obligation = value['is_obligation']
+    if not isinstance(is_obligation, bool):
+        raise ConversationProgressContractError(
+            'stored event is_obligation must be boolean'
+        )
+    actor = _bounded_text(
+        value['actor'],
+        MAX_EVENT_ROLE_CHARS,
+        'actor',
+    )
+    action = _bounded_text(
+        value['action'],
+        MAX_EVENT_ROLE_CHARS,
+        'action',
+        required=True,
+    )
+    event_object = _bounded_text(
+        value['object'],
+        MAX_EVENT_ROLE_CHARS,
+        'object',
+        required=True,
+    )
+    beneficiary = _bounded_text(
+        value['beneficiary'],
+        MAX_EVENT_ROLE_CHARS,
+        'beneficiary',
+    )
+    precondition = _bounded_text(
+        value['precondition'],
+        MAX_EVENT_ROLE_CHARS,
+        'precondition',
+    )
+    if not actor:
+        raise ConversationProgressContractError(
+            'stored event requires actor, action, and object'
+        )
+    state = _enum_text(value['state'], VALID_EVENT_STATES, 'state')
+    outcome = _bounded_text(
+        value['outcome'],
+        MAX_EVENT_OUTCOME_CHARS,
+        'outcome',
+    )
+    retention = _enum_text(
+        value['retention'],
+        VALID_EVENT_RETENTIONS,
+        'retention',
+    )
+    source_refs = _validate_stored_source_refs(value['source_refs'])
+    first_seen_at = _bounded_text(
+        value['first_seen_at'],
+        MAX_ACTIVE_PACKET_CHARS,
+        'first_seen_at',
+        required=True,
+    )
+    updated_at = _bounded_text(
+        value['updated_at'],
+        MAX_ACTIVE_PACKET_CHARS,
+        'updated_at',
+        required=True,
+    )
+    parse_storage_utc_datetime(first_seen_at)
+    parse_storage_utc_datetime(updated_at)
+    return {
+        'event_id': event_id,
+        'semantic_summary': semantic_summary,
+        'is_obligation': is_obligation,
+        'actor': actor,
+        'action': action,
+        'object': event_object,
+        'beneficiary': beneficiary,
+        'precondition': precondition,
+        'state': state,
+        'outcome': outcome,
+        'retention': retention,
+        'source_refs': source_refs,
+        'first_seen_at': first_seen_at,
+        'updated_at': updated_at,
+    }
+
+
+def _validate_stored_source_refs(
+    value: object,
+) -> list[dict[str, str]]:
+    """Validate stored source refs without an external allowlist."""
+
+    if (
+        not isinstance(value, list)
+        or not value
+        or len(value) > MAX_EVENT_SOURCE_REFS
+    ):
+        raise ConversationProgressContractError(
+            'stored event source_refs must be non-empty within its cap'
+        )
+    refs: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for raw_ref in value:
+        if not isinstance(raw_ref, Mapping) or set(raw_ref) != _SOURCE_REF_FIELDS:
+            raise ConversationProgressContractError(
+                'stored source ref fields are not exact'
+            )
+        ref_kind = _enum_text(
+            raw_ref['ref_kind'],
+            VALID_SOURCE_REF_KINDS,
+            'ref_kind',
+        )
+        ref_id = _bounded_text(
+            raw_ref['ref_id'],
+            MAX_ACTIVE_PACKET_CHARS,
+            'ref_id',
+            required=True,
+        )
+        occurred_at = _bounded_text(
+            raw_ref['occurred_at'],
+            MAX_ACTIVE_PACKET_CHARS,
+            'occurred_at',
+            required=True,
+        )
+        parse_storage_utc_datetime(occurred_at)
+        identity = (ref_kind, ref_id)
+        if identity in seen:
+            raise ConversationProgressContractError(
+                'stored event source_refs contains a duplicate'
+            )
+        seen.add(identity)
+        refs.append({
+            'ref_kind': ref_kind,
+            'ref_id': ref_id,
+            'occurred_at': occurred_at,
         })
+    return refs
+
+
+def _bounded_unique_text_list(
+    value: object,
+    *,
+    maximum_items: int,
+    maximum_chars: int,
+    field_name: str,
+) -> list[str]:
+    """Validate one exact, unique string list."""
+
+    if not isinstance(value, list):
+        raise ConversationProgressContractError(
+            f'{field_name} must be a list'
+        )
+    if len(value) > maximum_items:
+        raise ConversationProgressContractError(
+            f'{field_name} exceeds its item cap'
+        )
+    result: list[str] = []
+    for item in value:
+        text = _bounded_text(
+            item,
+            maximum_chars,
+            field_name,
+            required=True,
+        )
+        if text in result:
+            raise ConversationProgressContractError(
+                f'{field_name} contains a duplicate'
+            )
+        result.append(text)
     return result
 
 
-def _string_or_generated_id(value: object) -> str:
-    """Return an existing string id or a new generated episode id.
+def _enum_text(
+    value: object,
+    choices: frozenset[str],
+    field_name: str,
+) -> str:
+    """Validate one exact string enum."""
 
-    Args:
-        value: Existing episode-state id candidate.
-
-    Returns:
-        Existing non-empty string id, or a generated UUID hex string.
-    """
-
-    if value is None:
-        return uuid.uuid4().hex
-    if not isinstance(value, str):
-        raise TypeError("episode_state_id must be a string")
-    text = value.strip()
-    if not text:
-        return uuid.uuid4().hex
+    text = _bounded_text(
+        value,
+        MAX_ACTIVE_PACKET_CHARS,
+        field_name,
+        required=True,
+    )
+    if text not in choices:
+        raise ConversationProgressContractError(
+            f'{field_name} is invalid'
+        )
     return text
 
 
-def build_episode_state_doc(
+def _bounded_text(
+    value: object,
+    maximum_chars: int,
+    field_name: str,
     *,
-    scope: ConversationProgressScope,
-    storage_timestamp_utc: str,
-    prior_episode_state: ConversationEpisodeStateDoc | None,
-    recorder_output: dict,
-    last_user_input: str,
-) -> ConversationEpisodeStateDoc:
-    """Build a capped persisted episode-state document from recorder output.
+    required: bool = False,
+) -> str:
+    """Validate one bounded stripped string."""
 
-    Args:
-        scope: Platform/channel/user scope.
-        storage_timestamp_utc: Current turn storage UTC timestamp.
-        prior_episode_state: Prior stored state, if any.
-        recorder_output: Validated recorder JSON.
-        last_user_input: Current decontextualized user input.
-
-    Returns:
-        Full episode-state document ready for guarded upsert.
-    """
-
-    prior_state = prior_episode_state or {}
-    next_turn_count = int(prior_state.get("turn_count", 0)) + 1
-    created_at_value = prior_state.get("created_at", storage_timestamp_utc)
-    if not isinstance(created_at_value, str):
-        raise TypeError("created_at must be a string")
-    created_at = created_at_value
-    return_value = {
-        "episode_state_id": _string_or_generated_id(prior_state.get("episode_state_id")),
-        "platform": scope.platform,
-        "platform_channel_id": scope.platform_channel_id,
-        "global_user_id": scope.global_user_id,
-        "status": recorder_output["status"],
-        "episode_label": cap_text(recorder_output["episode_label"], MAX_LABEL_CHARS),
-        "continuity": recorder_output["continuity"],
-        "conversation_mode": cap_text(recorder_output.get("conversation_mode", ""), MAX_LABEL_CHARS),
-        "episode_phase": cap_text(recorder_output.get("episode_phase", ""), MAX_LABEL_CHARS),
-        "topic_momentum": cap_text(recorder_output.get("topic_momentum", ""), MAX_LABEL_CHARS),
-        "current_thread": cap_text(recorder_output.get("current_thread", ""), MAX_THREAD_CHARS),
-        "user_goal": cap_text(recorder_output.get("user_goal", ""), MAX_THREAD_CHARS),
-        "current_blocker": cap_text(recorder_output.get("current_blocker", ""), MAX_THREAD_CHARS),
-        "user_state_updates": preserve_first_seen_entries(
-            prior_entries=prior_state.get("user_state_updates", []),
-            new_texts=recorder_output["user_state_updates"],
-            current_timestamp_utc=storage_timestamp_utc,
-            limit=USER_STATE_UPDATES_LIMIT,
-        ),
-        "assistant_moves": _cap_strings(
-            recorder_output["assistant_moves"],
-            ASSISTANT_MOVES_LIMIT,
-            MAX_MOVE_CHARS,
-        ),
-        "overused_moves": _cap_strings(
-            recorder_output["overused_moves"],
-            OVERUSED_MOVES_LIMIT,
-            MAX_MOVE_CHARS,
-        ),
-        "open_loops": preserve_first_seen_entries(
-            prior_entries=prior_state.get("open_loops", []),
-            new_texts=recorder_output["open_loops"],
-            current_timestamp_utc=storage_timestamp_utc,
-            limit=OPEN_LOOPS_LIMIT,
-        ),
-        "interaction_obligations": preserve_first_seen_obligations(
-            prior_obligations=prior_state.get("interaction_obligations", []),
-            new_obligations=recorder_output["interaction_obligations"],
-            current_timestamp_utc=storage_timestamp_utc,
-        ),
-        "resolved_threads": preserve_first_seen_entries(
-            prior_entries=prior_state.get("resolved_threads", []),
-            new_texts=recorder_output.get("resolved_threads", []),
-            current_timestamp_utc=storage_timestamp_utc,
-            limit=RESOLVED_THREADS_LIMIT,
-        ),
-        "avoid_reopening": preserve_first_seen_entries(
-            prior_entries=prior_state.get("avoid_reopening", []),
-            new_texts=recorder_output.get("avoid_reopening", []),
-            current_timestamp_utc=storage_timestamp_utc,
-            limit=AVOID_REOPENING_LIMIT,
-        ),
-        "emotional_trajectory": cap_text(recorder_output.get("emotional_trajectory", ""), MAX_THREAD_CHARS),
-        "next_affordances": _cap_strings(
-            recorder_output.get("next_affordances", []),
-            NEXT_AFFORDANCES_LIMIT,
-            MAX_ENTRY_CHARS,
-        ),
-        "progression_guidance": cap_text(recorder_output["progression_guidance"], MAX_GUIDANCE_CHARS),
-        "turn_count": next_turn_count,
-        "last_user_input": last_user_input,
-        "created_at": created_at,
-        "updated_at": storage_timestamp_utc,
-        "expires_at": expires_at_for(storage_timestamp_utc),
-    }
-    return return_value
-
-
-async def upsert_episode_state_guarded(
-    *,
-    document: ConversationEpisodeStateDoc,
-) -> bool:
-    """Persist one episode document if its turn count is strictly newer.
-
-    Args:
-        document: Full episode-state document to persist.
-
-    Returns:
-        True when MongoDB accepted the write; false for stale writes.
-    """
-
-    return_value = await _db_upsert_episode_state_guarded(document=document)
-    return return_value
+    if not isinstance(value, str):
+        raise ConversationProgressContractError(
+            f'{field_name} must be a string'
+        )
+    text = value.strip()
+    if required and not text:
+        raise ConversationProgressContractError(f'{field_name} is required')
+    if len(text) > maximum_chars:
+        raise ConversationProgressContractError(
+            f'{field_name} exceeds its character cap'
+        )
+    return text

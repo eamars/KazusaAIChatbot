@@ -35,6 +35,33 @@ class _CapturingLLM:
         return response
 
 
+def _logical_turns(history_rows: list[dict]) -> list[dict[str, object]]:
+    """Project row-shaped test evidence into complete logical turns."""
+
+    turns: list[dict[str, object]] = []
+    for index, row in enumerate(history_rows, start=1):
+        role = str(row.get("role", "user"))
+        turns.append({
+            "turn_id": f"test-turn-{index}",
+            "role": role,
+            "occurred_at": str(row.get("timestamp", f"t{index}")),
+            "display_name": str(
+                row.get("display_name", row.get("name", role))
+            ),
+            "fragments": [str(row.get("body_text", ""))],
+            "conversation_row_ids": [f"test-row-{index}"],
+            "llm_trace_id": "",
+            "platform_user_id": str(row.get("platform_user_id", "")),
+            "global_user_id": str(row.get("global_user_id", "")),
+            "addressed_to_global_user_ids": list(
+                row.get("addressed_to_global_user_ids", [])
+            ),
+            "broadcast": bool(row.get("broadcast", False)),
+            "reply_context": dict(row.get("reply_context", {})),
+        })
+    return turns
+
+
 def _base_state() -> dict:
     """Build a minimal decontextualizer state fixture.
 
@@ -63,10 +90,10 @@ def _base_state() -> dict:
             "addressed_to_global_user_ids": [],
             "broadcast": True,
         },
-        "chat_history_recent": [
+        "ambient_logical_turns": _logical_turns([
             {"role": "user", "body_text": "晚上好"},
             {"role": "assistant", "body_text": "晚上好。"},
-        ],
+        ]),
         "channel_topic": "",
         "indirect_speech_context": "",
         "reply_context": {},
@@ -173,7 +200,7 @@ async def test_decontextualizer_projects_chat_history_as_transcript_lines(
             'aliases': [],
         }
     ]
-    state['chat_history_recent'] = [
+    state['ambient_logical_turns'] = _logical_turns([
         {
             'role': 'user',
             'display_name': '蚝爹油',
@@ -192,7 +219,7 @@ async def test_decontextualizer_projects_chat_history_as_transcript_lines(
                 'reply_to_platform_user_id': '3768713357',
             },
         },
-    ]
+    ])
 
     await call_msg_decontextualizer(state)
 
@@ -295,6 +322,9 @@ async def _run_live_case(ensure_live_llm: None, case_id: str, state: dict) -> tu
     """
 
     del ensure_live_llm
+    history_rows = state.pop("chat_history_recent", None)
+    if isinstance(history_rows, list):
+        state["ambient_logical_turns"] = _logical_turns(history_rows)
     started_at = perf_counter()
     result = await call_msg_decontextualizer(state)
     duration_seconds = perf_counter() - started_at

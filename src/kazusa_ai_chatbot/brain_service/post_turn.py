@@ -32,6 +32,7 @@ from kazusa_ai_chatbot.brain_service.outbound import (
 )
 from kazusa_ai_chatbot.db.schemas import PostTurnLifecycleRecordV1
 from kazusa_ai_chatbot.logging_retention import expiry_from_storage_iso
+from kazusa_ai_chatbot.time_boundary import parse_storage_utc_datetime
 from kazusa_ai_chatbot.utils import log_preview
 
 if TYPE_CHECKING:
@@ -727,11 +728,11 @@ async def run_conversation_progress_record_background(
     if trace is None:
         return
     final_dialog = _visible_trace_dialog(trace)
-    if not final_dialog:
-        logger.debug(
-            "Conversation progress skipped: settled trace has no visible text"
+    turn_outcome = state.get("conversation_progress_turn_outcome")
+    if turn_outcome not in {"visible_response", "cognition_silence"}:
+        raise ValueError(
+            "conversation_progress_turn_outcome is required for recording"
         )
-        return
 
     character_profile = state["character_profile"]
     boundary_profile = character_profile["boundary_profile"]
@@ -751,13 +752,73 @@ async def run_conversation_progress_record_background(
         platform_channel_id=state["platform_channel_id"],
         global_user_id=state["global_user_id"],
     )
+    source_timestamp = state["storage_timestamp_utc"]
+    active_row_ids = state.get("active_turn_conversation_row_ids")
+    if not isinstance(active_row_ids, list):
+        raise TypeError(
+            "active_turn_conversation_row_ids must be a list"
+        )
+    normalized_active_row_ids: list[str] = []
+    for row_id in active_row_ids:
+        if not isinstance(row_id, str) or not row_id.strip():
+            raise ValueError(
+                "active_turn_conversation_row_ids contains an invalid ID"
+            )
+        normalized_active_row_ids.append(row_id.strip())
+    raw_source_refs = state.get("active_turn_conversation_source_refs")
+    if not isinstance(raw_source_refs, list):
+        raise TypeError(
+            "active_turn_conversation_source_refs must be a list"
+        )
+    current_turn_source_refs = []
+    for raw_ref in raw_source_refs:
+        if not isinstance(raw_ref, Mapping) or set(raw_ref) != {
+            "ref_kind",
+            "ref_id",
+            "occurred_at",
+        }:
+            raise ValueError(
+                "active turn conversation source ref fields are invalid"
+            )
+        if raw_ref["ref_kind"] != "conversation_row":
+            raise ValueError(
+                "active turn source refs must contain conversation rows"
+            )
+        ref_id = raw_ref["ref_id"]
+        occurred_at = raw_ref["occurred_at"]
+        if not isinstance(ref_id, str) or not ref_id.strip():
+            raise ValueError("active turn source ref ID is required")
+        if not isinstance(occurred_at, str) or not occurred_at.strip():
+            raise ValueError("active turn source ref timestamp is required")
+        parse_storage_utc_datetime(occurred_at)
+        current_turn_source_refs.append({
+            "ref_kind": "conversation_row",
+            "ref_id": ref_id.strip(),
+            "occurred_at": occurred_at,
+        })
+    if [
+        ref["ref_id"] for ref in current_turn_source_refs
+    ] != normalized_active_row_ids:
+        raise ValueError(
+            "active turn row IDs and exact source refs must match"
+        )
+    llm_trace_id = state.get("llm_trace_id")
+    if not isinstance(llm_trace_id, str) or not llm_trace_id:
+        raise ValueError("llm_trace_id is required for progress recording")
+    current_turn_source_refs.append({
+        "ref_kind": "llm_trace",
+        "ref_id": llm_trace_id,
+        "occurred_at": trace["settled_at"],
+    })
     record_input: ConversationProgressRecordInput = {
         "scope": scope,
-        "storage_timestamp_utc": state["storage_timestamp_utc"],
+        "storage_timestamp_utc": source_timestamp,
         "character_name": character_profile["name"],
         "prior_episode_state": state.get("conversation_episode_state"),
         "decontextualized_input": state["decontextualized_input"],
-        "chat_history_recent": state["chat_history_recent"],
+        "interaction_logical_turns": state["interaction_logical_turns"],
+        "current_turn_source_refs": current_turn_source_refs,
+        "turn_outcome": turn_outcome,
         "content_plan": content_plan,
         "logical_stance": state["logical_stance"],
         "character_intent": state["character_intent"],
@@ -769,7 +830,13 @@ async def run_conversation_progress_record_background(
         "character_name": record_input["character_name"],
         "prior_episode_state": record_input["prior_episode_state"],
         "decontextualized_input": record_input["decontextualized_input"],
-        "chat_history_recent": record_input["chat_history_recent"],
+        "interaction_logical_turns": record_input[
+            "interaction_logical_turns"
+        ],
+        "current_turn_source_refs": record_input[
+            "current_turn_source_refs"
+        ],
+        "turn_outcome": record_input["turn_outcome"],
         "content_plan": record_input["content_plan"],
         "logical_stance": record_input["logical_stance"],
         "character_intent": record_input["character_intent"],

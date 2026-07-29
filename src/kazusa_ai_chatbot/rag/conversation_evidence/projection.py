@@ -306,17 +306,44 @@ def _plain_message_rows(value: object) -> list[dict[str, Any]]:
 
 def _message_projection(rows: list[dict[str, Any]]) -> _ConversationProjection:
     """Project typed conversation message rows into summaries and refs."""
-    transcript_lines = project_conversation_history_for_llm(rows)
+    message_rows = [
+        row
+        for row in rows
+        if row.get('source_kind') != 'conversation_progress_block'
+    ]
+    block_rows = [
+        row
+        for row in rows
+        if row.get('source_kind') == 'conversation_progress_block'
+    ]
+    transcript_lines = project_conversation_history_for_llm(message_rows)
     summaries: list[str] = []
     projected_rows: list[dict[str, Any]] = []
-    for row, line in zip(rows, transcript_lines):
+    for row, line in zip(message_rows, transcript_lines):
         summary = _clip_text(line, limit=RAG_CONVERSATION_EVIDENCE_TEXT_LIMIT)
         if not summary:
             continue
         summaries.append(summary)
         projected_rows.append(_projection_row(row, summary))
-    packets = _conversation_packets(projected_rows)
-    resolved_refs = _refs_from_message_rows(rows)
+    block_packets: list[dict[str, Any]] = []
+    for row in block_rows:
+        summary = _progress_block_summary(row)
+        if not summary:
+            continue
+        summaries.append(summary)
+        projected_row = _progress_block_projection_row(row, summary)
+        projected_rows.append(projected_row)
+        block_packets.append({
+            'summary': summary,
+            'seed': projected_row,
+            'relations': [],
+            'relation_types': [],
+        })
+    packets = [*block_packets, *_conversation_packets(projected_rows)]
+    resolved_refs = [
+        *_refs_from_message_rows(message_rows),
+        *_refs_from_progress_blocks(block_rows),
+    ]
     projection: _ConversationProjection = {
         "summaries": summaries,
         "rows": projected_rows,
@@ -375,6 +402,72 @@ def _projection_row(row: dict[str, Any], summary: str) -> dict[str, Any]:
         ),
     }
     return projected_row
+
+
+def _progress_block_summary(row: dict[str, Any]) -> str:
+    """Render one active block narrative, event state, and source span."""
+
+    narrative = text_or_empty(row.get('narrative'))
+    if not narrative:
+        return ''
+    event_parts: list[str] = []
+    events = row.get('events')
+    if isinstance(events, list):
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            semantic_summary = text_or_empty(event.get('semantic_summary'))
+            state = text_or_empty(event.get('state'))
+            if semantic_summary:
+                event_parts.append(
+                    f'{semantic_summary} (state={state})'
+                )
+    source_started_at = text_or_empty(row.get('source_started_at'))
+    source_ended_at = text_or_empty(row.get('source_ended_at'))
+    parts = [narrative]
+    if event_parts:
+        parts.append('events: ' + '; '.join(event_parts))
+    if source_started_at or source_ended_at:
+        parts.append(
+            f'source range: {source_started_at} to {source_ended_at}'
+        )
+    return _clip_text(
+        '; '.join(parts),
+        limit=RAG_CONVERSATION_EVIDENCE_TEXT_LIMIT,
+    )
+
+
+def _progress_block_projection_row(
+    row: dict[str, Any],
+    summary: str,
+) -> dict[str, Any]:
+    """Build prompt-safe row provenance for one active progress block."""
+
+    score_value = row.get('score')
+    if isinstance(score_value, (int, float)) and not isinstance(
+        score_value,
+        bool,
+    ):
+        score: float | None = float(score_value)
+    else:
+        score = None
+    return {
+        'source_kind': 'conversation_progress_block',
+        'block_id': text_or_empty(row.get('block_id')),
+        'summary': summary,
+        'timestamp': text_or_empty(row.get('source_ended_at')),
+        'display_name': '',
+        'platform_message_id': '',
+        'conversation_row_id': '',
+        'methods': ['semantic:conversation_progress_block'],
+        'score': score,
+        'relation_to_seed': '',
+        'seed_platform_message_id': '',
+        'seed_conversation_row_id': '',
+        'seed_timestamp': '',
+        'reply_parent_summary': '',
+        'reply_parent_display_name': '',
+    }
 
 def _conversation_packets(
     rows: list[dict[str, Any]],
@@ -498,6 +591,8 @@ def _packet_has_keyword_support(packet: dict[str, Any]) -> bool:
     if not isinstance(seed, dict):
         return_value = False
         return return_value
+    if seed.get('source_kind') == 'conversation_progress_block':
+        return True
 
     methods = seed.get("methods")
     if not isinstance(methods, list):
@@ -559,6 +654,10 @@ def _packet_summary(
 def _conversation_projection_source(row: dict[str, Any]) -> str:
     """Build a compact source label for a projected conversation row."""
 
+    block_id = text_or_empty(row.get('block_id'))
+    if row.get('source_kind') == 'conversation_progress_block' and block_id:
+        return f'conversation_progress_block:{block_id}'
+
     platform_message_id = text_or_empty(row.get("platform_message_id"))
     if platform_message_id:
         source = f"conversation:platform_message_id:{platform_message_id}"
@@ -614,6 +713,50 @@ def _refs_from_message_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             text_limit=RAG_CONVERSATION_EVIDENCE_TEXT_LIMIT,
         )
         refs.extend(_url_refs_from_text(reference_text))
+    return refs
+
+
+def _refs_from_progress_blocks(
+    rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Retain block IDs and event source refs in protected RAG trace data."""
+
+    refs: list[dict[str, Any]] = []
+    for row in rows:
+        block_id = text_or_empty(row.get('block_id'))
+        if block_id:
+            refs.append({
+                'ref_type': 'conversation_progress_block',
+                'block_id': block_id,
+                'source_started_at': text_or_empty(
+                    row.get('source_started_at')
+                ),
+                'source_ended_at': text_or_empty(
+                    row.get('source_ended_at')
+                ),
+            })
+        events = row.get('events')
+        if not isinstance(events, list):
+            continue
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            source_refs = event.get('source_refs')
+            if not isinstance(source_refs, list):
+                continue
+            for source_ref in source_refs:
+                if not isinstance(source_ref, dict):
+                    continue
+                refs.append({
+                    'ref_type': 'conversation_progress_source',
+                    'block_id': block_id,
+                    'event_id': text_or_empty(event.get('event_id')),
+                    'ref_kind': text_or_empty(source_ref.get('ref_kind')),
+                    'ref_id': text_or_empty(source_ref.get('ref_id')),
+                    'occurred_at': text_or_empty(
+                        source_ref.get('occurred_at')
+                    ),
+                })
     return refs
 
 

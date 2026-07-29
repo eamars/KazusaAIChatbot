@@ -10,6 +10,10 @@ import logging
 from kazusa_ai_chatbot.config import (
     MEDIA_DESCRIPTOR_CACHE_MAX_PERSISTENT_ENTRIES,
 )
+from kazusa_ai_chatbot.conversation_progress.policy import (
+    BLOCK_COLLECTION_NAME,
+    BLOCK_VECTOR_INDEX_NAME,
+)
 from kazusa_ai_chatbot.db._client import enable_vector_index, get_db
 from kazusa_ai_chatbot.background_work.models import (
     BACKGROUND_WORK_JOBS_COLLECTION,
@@ -104,6 +108,7 @@ async def db_bootstrap() -> None:
         INTERNAL_MONOLOGUE_RESIDUE_COLLECTION,
         INTERNAL_ACTION_LATCHES_COLLECTION,
         POST_TURN_LIFECYCLE_RECORDS_COLLECTION,
+        BLOCK_COLLECTION_NAME,
     ]
     for name in required_collections:
         if name not in existing:
@@ -231,9 +236,70 @@ async def db_bootstrap() -> None:
         name="conversation_episode_scope_unique",
     )
     await db.conversation_episode_state.create_index(
-        "expires_at",
+        "purge_after",
         expireAfterSeconds=0,
-        name="conversation_episode_expires_at_ttl",
+        name="conversation_episode_purge_after_ttl",
+    )
+    await db.conversation_history.create_index(
+        [
+            ("platform", 1),
+            ("platform_channel_id", 1),
+            ("role", 1),
+            ("global_user_id", 1),
+            ("timestamp", -1),
+        ],
+        name="conversation_history_participant_user_v1",
+    )
+    await db.conversation_history.create_index(
+        [
+            ("platform", 1),
+            ("platform_channel_id", 1),
+            ("role", 1),
+            ("platform_user_id", 1),
+            ("addressed_to_global_user_ids", 1),
+            ("timestamp", -1),
+        ],
+        name="conversation_history_participant_assistant_addressed_v1",
+    )
+    await db.conversation_history.create_index(
+        [
+            ("platform", 1),
+            ("platform_channel_id", 1),
+            ("role", 1),
+            ("platform_user_id", 1),
+            ("broadcast", 1),
+            ("timestamp", -1),
+        ],
+        name="conversation_history_participant_assistant_broadcast_v1",
+    )
+    await db[BLOCK_COLLECTION_NAME].create_index(
+        "block_id",
+        unique=True,
+        name="conversation_episode_block_id_unique",
+    )
+    await db[BLOCK_COLLECTION_NAME].create_index(
+        [
+            ("platform", 1),
+            ("platform_channel_id", 1),
+            ("global_user_id", 1),
+            ("episode_state_id", 1),
+            ("source_turn_count", 1),
+        ],
+        name="conversation_episode_block_scope_turn_v1",
+    )
+    await db[BLOCK_COLLECTION_NAME].create_index(
+        [
+            ("episode_state_id", 1),
+            ("superseded_by_block_id", 1),
+            ("level", 1),
+            ("source_ended_at", 1),
+        ],
+        name="conversation_episode_block_active_lineage_v1",
+    )
+    await db[BLOCK_COLLECTION_NAME].create_index(
+        "purge_after",
+        expireAfterSeconds=0,
+        name="conversation_episode_block_purge_after_ttl",
     )
     await db.memory.create_index(
         "memory_name", name="memory_name_idx",
@@ -294,6 +360,7 @@ async def db_bootstrap() -> None:
         ("conversation_history", CONVERSATION_VECTOR_INDEX_NAME, "embedding"),
         ("memory",               "memory_vector_index",              "embedding"),
         ("user_memory_units",     "user_memory_units_vector",         "embedding"),
+        (BLOCK_COLLECTION_NAME, BLOCK_VECTOR_INDEX_NAME, "embedding"),
     ):
         try:
             filter_paths = None
@@ -310,6 +377,15 @@ async def db_bootstrap() -> None:
                 ]
             if collection == "user_memory_units":
                 filter_paths = ["global_user_id", "unit_type", "status"]
+            if collection == BLOCK_COLLECTION_NAME:
+                filter_paths = [
+                    "platform",
+                    "platform_channel_id",
+                    "global_user_id",
+                    "episode_state_id",
+                    "block_id",
+                    "superseded_by_block_id",
+                ]
             await enable_vector_index(collection, index_name, path=path, filter_paths=filter_paths)
         except Exception as exc:
             logger.exception(

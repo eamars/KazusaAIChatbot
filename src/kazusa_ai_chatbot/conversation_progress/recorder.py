@@ -1,218 +1,123 @@
-"""LLM recorder for short-term conversation progress."""
+"""Independent scene and event producers for conversation continuity."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
-from typing import Any
+from collections.abc import Mapping
+from copy import deepcopy
+from dataclasses import dataclass
 
+import httpx
 from langchain_core.messages import HumanMessage, SystemMessage
+from openai import OpenAIError
 
 from kazusa_ai_chatbot.config import (
-
     CONSOLIDATION_LLM_API_KEY,
     CONSOLIDATION_LLM_BASE_URL,
-    CONSOLIDATION_LLM_MODEL,
     CONSOLIDATION_LLM_MAX_COMPLETION_TOKENS,
+    CONSOLIDATION_LLM_MODEL,
     CONSOLIDATION_LLM_THINKING_ENABLED,
 )
-from kazusa_ai_chatbot.conversation_progress.models import ConversationProgressRecordInput
+from kazusa_ai_chatbot.conversation_progress.delta_merge import (
+    ConversationProgressContractError,
+    compose_recorder_delta,
+    event_handle_map,
+    normalize_event_observation_bounds,
+    normalize_scene_observation_bounds,
+    source_handle_map,
+    validate_event_observation_batch,
+    validate_scene_observation,
+)
+from kazusa_ai_chatbot.conversation_progress.models import (
+    ConversationLogicalTurnV1,
+    ConversationProgressEventUpdateV2,
+    ConversationProgressEventV2,
+    ConversationProgressRecordInput,
+    ConversationProgressRecorderDeltaV2,
+    ConversationProgressSceneUpdateV2,
+)
 from kazusa_ai_chatbot.conversation_progress.policy import (
-    INTERACTION_OBLIGATIONS_LIMIT,
-    MAX_OBLIGATION_CHARS,
-    VALID_CONTINUITY,
-    VALID_OBLIGATION_SOURCES,
-    VALID_OBLIGATION_STATUSES,
-    VALID_STATUS,
+    MAX_EPISODE_NARRATIVE_CHARS,
+    MAX_INTERACTION_RECORDER_CHARS,
+    MAX_RECORDER_HUMAN_PAYLOAD_CHARS,
+    MAX_SCENE_RECORDER_HUMAN_PAYLOAD_CHARS,
+    MAX_THREAD_FIELD_CHARS,
 )
-from kazusa_ai_chatbot.db.schemas import ConversationEpisodeStateDoc
-from kazusa_ai_chatbot.nodes.boundary_profile import (
-    get_boundary_recovery_description,
-    get_relationship_priority_description,
-    get_self_integrity_description,
-)
-from kazusa_ai_chatbot.conversation_history_prompt_projection import (
-    project_conversation_history_for_llm,
-)
-from kazusa_ai_chatbot.time_boundary import format_storage_utc_for_llm
-from kazusa_ai_chatbot.utils import log_preview, parse_llm_json_output
-
 from kazusa_ai_chatbot.llm_interface import (
     LLInterface,
     LLMCallConfig,
     LLMThinkingConfig,
 )
+from kazusa_ai_chatbot.time_boundary import format_storage_utc_for_llm
+from kazusa_ai_chatbot.utils import log_preview, parse_llm_json_output
+
 logger = logging.getLogger(__name__)
 
-_RECORDER_PROMPT = '''\
-你负责整理 {character_name} 刚结束的一轮对话，把它压成下一轮可以直接使用的短期进度。
-它不是长期记忆、复盘记录，也不是下一轮台词草稿；只保留会影响下一轮衔接的内容。
 
-# 任务
-输出一份短小、稳定、几天后仍能看懂的 JSON。
-宁可少记，也不要把旧的、不确定的、相对时间的事项污染到下一轮。
-不生成下一轮台词，不写日记，不复制完整回复，不写长期记忆。
+_SCENE_RECORDER_PROMPT = '''\
+你是角色短期对话连续性的场景观察者。你的唯一任务是描述本轮实际回应结束后已经成立的场景事实。
+事件识别、事件生命周期、来源、存储、容量、压缩和下一轮目标都由其他边界负责。
 
-# 阅读顺序
-先看本轮实际发出的内容，再决定旧进度还能不能用：
-1. `final_dialog` 和 `content_plan`：这一轮最后说了什么、回复前的内容计划是什么。
-2. `decontextualized_input`：用户这一轮真正想表达什么。
-3. `logical_stance` 和 `character_intent`：这一轮大致是什么态度。
-4. `chat_history_recent`：附近几句是谁说的、怎么接上的。
-5. `prior_episode_state`：旧进度只当参考，不当待办清单。
-6. `character_boundary_profile`：只用来把握节奏和边界感，不能拿来编事实。
-
-# 字段写法
-- 自由文本默认用简体中文；字段名、枚举值、ID、URL、代码、命令保持原样。
-- 用户项目名、产品名、文件名、频道名等专名可以保留；后续提及时优先保留完整专名，或改成“该项目/这个项目”等中性指称，不要截成“这个/该 + 末尾类名”。
-- 本轮人设名是「{character_name}」。自由文本确实需要点名时使用「{character_name}」；不需要点名时优先使用无主语动作标签。
-- 不把机器端标签、内部枚举名或字段名当作说话人名字写进自由文本。
-- `continuity` 写 `same_episode`、`related_shift` 或 `sharp_transition`。同一话题附近才用 `same_episode`；明显换题用 `sharp_transition`。
-- `status` 写 `active`、`suspended` 或 `closed`。本轮已经收束的片段用 `closed`，暂时放下但可能回来再谈的片段用 `suspended`。
-- `episode_phase` 写 80 字以内的简短语义描述，说明本轮在局部片段中的阶段，不要当固定枚举选择。
-- `topic_momentum` 写 80 字以内的简短语义描述，说明话题推进、转向或破裂的状态，不要当固定枚举选择。
-- `episode_label` 写一个短标签。
-- `conversation_mode` 写 80 字以内的简短中文描述；它不是固定枚举，不要照抄旧状态里的 `task_support`、`playful_banter`、`casual_chat` 这类英文标签。
-- `current_thread` 写本轮正在谈什么，不要夹带已经失效的旧承诺。
-- `user_goal` 和 `current_blocker` 只有本轮明确存在时才写；没有就写空字符串。
-- `user_state_updates` 写本轮之后仍有用的用户状态观察。
-- `assistant_moves` 写本轮已经做过的话语动作标签。
-- `overused_moves` 写下一轮应避免重复的动作。
-- `open_loops` 只写本轮明确提出或本轮重新确认的未闭合事项；没有就写 `[]`。
-- `interaction_obligations` 只写有明确责任方向的互动义务，并保留谁行动、行动内容、受益者、条件、预期结果、状态和来源。普通话题悬念继续写入 `open_loops`，不要混入义务。
-- `interaction_obligations.actor` 和 `action` 必须明确且非空；不要把回复里由角色提出的奖励、选择或建议改写成用户欠角色的义务。
-- `interaction_obligations.status` 只能写 `active`、`resolved` 或 `superseded`；`source_kind` 只能写 `user_input`、`assistant_response` 或 `mutual_exchange`。
-- 义务仍然欠着、触发条件仍有效且本轮没有完成或替换证据时，状态写 `active`。
-- 本轮有明确证据表明行动已经完成、受益者已经收到结果，或双方明确取消且没有替代义务时，状态写 `resolved`；本轮保留这一项用于阻止下一轮重新打开，之后无新作用时可删除。
-- 本轮明确用新的行动、条件、受益者或预期结果替换旧义务时，这不是普通 `resolved`：必须把旧项写成 `superseded`，同时把替代项另写为 `active`。两项都保留在本轮 `interaction_obligations`，不能只把旧项放进 `resolved_threads`；不能仅因换题或措辞变化就推断替换。
-- `resolved` 和 `superseded` 都必须由本轮输入、实际回复或附近对话中的明确证据支持；没有证据时维持原状态或删除无用旧项，不猜测完成。
-- 明确替换示例：旧项是“{character_name}在 2026-05-15 发送文字笔记”，本轮双方明确改成“{character_name}在 2026-05-16 发送语音总结”，则 `interaction_obligations` 必须同时输出两项：旧文字笔记项完整保留原 actor、action、beneficiary、precondition、expected_outcome、source_kind 并把 status 改为 `superseded`；新语音总结项 status 写 `active`。只输出新项或只把旧项写进 `resolved_threads` 都不符合契约。
-- `resolved_threads` 写本轮已经处理完、收束或答复过的事项。
-- `avoid_reopening` 写除非用户主动重开，否则下一轮不要拖回来的旧事项或已闭合事项。
-- `emotional_trajectory` 写本轮局部情绪或张力的一行变化。
-- `next_affordances` 写下一轮自然可接的动作，不要写成完整台词。
-- `progression_guidance` 写一条短推进建议。
-- 除 `interaction_obligations` 外，所有输出列表都只能放普通字符串，不能放对象、嵌套数组，也不能出现 `text`、`label`、`reason`、`first_seen_at` 这类子字段。
-- `interaction_obligations` 最多六项；每项只能包含规定字段，不能输出 `first_seen_at` 或 `age_hint`。
-
-# 时间规则
-- `current_turn_timestamp` 是这次记录时的本地时间。
-- 本轮新出现的时间如果会影响承诺、安排、奖励、考核、提醒、等待条件或下一步行动，必须写成绝对本地日期或日期时间，例如 `YYYY-MM-DD` 或 `YYYY-MM-DD HH:MM`。
-- 只能靠“今天”“明天”“稍后”“饭后”等上下文才看得懂的项目，不适合留到下一轮；能锚定就写绝对时间，不能锚定就删掉时间成分或整项删除。
-- 旧状态里的相对日期、相对时段、先后条件、事件后条件不要修复、不要猜、不要滚到当前日期之后；除非本轮重新确认且证据足够锚定，否则直接删除。
-- 历史原话可以含有相对时间，但本记录不是历史引用库；不要把旧原话复制进有效字段。
-- 本轮用户、`content_plan` 或 `final_dialog` 没有正向重申的旧时间性未闭合事项，默认删除。
-- 本轮回应如果是在降低压力、放下旧安排或避免继续追问，就不要把旧时间性事项重新写成有效未闭合事项。
-- 不要把“今天上午休息确认”原样写进 `current_thread`；改成“上午休息确认”，或在确有必要时写“2026-05-10 上午休息确认”。
-- 不要把“下周二香料笔记”直接写进 `avoid_reopening`；改成“旧香料笔记安排不要主动重提”，或锚定成绝对日期。
-- 不要看到旧状态里有“明天测试”，就改写成当前日期的下一天测试。
-- 不要在本轮没有重新确认晚餐或游戏时，把旧的“饭后游戏”继续写成待处理事项。
-- 如果本轮只是在降压，不要在 `resolved_threads` 里复述“今晚游戏与明天考核”。
-- 这类旧事项通常直接删掉；必要时只在 `avoid_reopening` 里写无日期的“旧条件不要主动重提”。
+# 输入语义
+- `semantic_context.character_name` 是当前角色的准确名字。
+- `semantic_context.current_local_time` 是本轮语义判断使用的当地时间，不是来源时间戳。
+- `prior_scene` 是上一份已验证场景；为空表示这是第一份场景。
+- `recent_turns` 是按时间排列的近期完整对话轮；`speaker_kind` 区分用户与角色，
+  `speaker_name` 给出可用于事实描述的名字。
+- `accepted_turn.current_input` 是当前用户输入。
+- `accepted_turn.final_dialog` 是角色实际发出的回应。
+- `accepted_turn.content_plan`、`logical_stance` 和 `character_intent` 只解释该实际回应的语义。
 
 # 生成步骤
-1. 先判断本轮真正推进、收束、转向或中断了什么。
-2. 选择 `continuity` 和 `status`；把 `conversation_mode`、`episode_phase` 和 `topic_momentum` 写成 80 字以内的简短中文描述。
-3. 对旧状态逐项检查：无时间依赖且仍有用的可以继承；含相对时间、相对顺序或旧压力的默认删除。
-4. 对每项旧 `interaction_obligations` 检查本轮证据：继续欠着写 `active`，明确完成或取消写 `resolved`，明确被新义务替换则旧项写 `superseded` 且新增替代项为 `active`。
-5. 只保留仍然有用的目标、阻塞点、用户状态、未闭合事项、已处理事项和不要重提提醒。
-6. 检查列表字段：`interaction_obligations` 输出规定对象，其余列表只能输出字符串；没有内容就输出 `[]`。
-7. 缺失的单值字段写空字符串。
-8. 只返回合法 JSON；不要解释，不要代码块围栏，不要注释，不要额外字段。
+1. 只根据已经发生的输入和实际回应更新场景。
+2. `scene_relation` 报告相对先前场景的关系：
+   - `same`：同一场景继续。
+   - `related`：相关转移，仍承接先前事实。
+   - `new`：明显转场。
+3. `episode_change` 只报告整段互动变化：
+   - `none`：没有新的暂停、结束或恢复。
+   - `paused`：整段互动明确暂停。
+   - `finished`：整段互动明确结束。
+   - `resumed`：先前暂停或结束的互动明确恢复。
+4. 场景字段只写已成立事实。不得提出下一步行动、候选选择、未来目标或台词。
+5. `overused_moves` 只记录本轮证据已经显示的重复回应模式。
+6. 描述当前角色时，只能使用 `semantic_context.character_name` 的准确名字，或省略主语。
+   不得用 assistant、bot、AI、角色等机器身份标签替代这个名字。
+7. 对依赖今天、明天、下周等相对时间的约定、期限、计划或其他可执行事实，
+   使用 `semantic_context.current_local_time` 换算为 `YYYY-MM-DD` 或
+   `YYYY-MM-DD HH:MM`。无法唯一换算时省略该时间依赖事实，不保留相对时间表达。
 
-# 输入格式
-`prior_episode_state` 可能为 `null`；非 `null` 时，列表字段已经是字符串数组，不是带 `text` 或 `first_seen_at` 的对象数组。
-{{
-    "current_turn_timestamp": "本轮记录时的本地时间，YYYY-MM-DD HH:MM",
-    "prior_episode_state": {{
-        "status": "active",
-        "episode_label": "上一轮短标签",
-        "continuity": "same_episode",
-        "conversation_mode": "上一轮简短描述",
-        "episode_phase": "上一轮局部阶段描述",
-        "topic_momentum": "上一轮话题推进状态描述",
-        "current_thread": "上一轮当前话题",
-        "user_goal": "上一轮用户目标，或空字符串",
-        "current_blocker": "上一轮阻塞点，或空字符串",
-        "user_state_updates": ["旧观察文本"],
-        "assistant_moves": ["旧动作标签"],
-        "overused_moves": ["旧重复动作标签"],
-        "open_loops": ["旧未闭合事项文本"],
-        "interaction_obligations": [{{
-            "actor": "承担行动的一方",
-            "action": "明确行动",
-            "beneficiary": "受益者或空字符串",
-            "precondition": "触发条件或空字符串",
-            "expected_outcome": "预期结果或空字符串",
-            "status": "active",
-            "source_kind": "user_input"
-        }}],
-        "resolved_threads": ["旧已处理事项文本"],
-        "avoid_reopening": ["旧不要主动重提事项文本"],
-        "emotional_trajectory": "上一轮情绪走向",
-        "next_affordances": ["旧下一步动作文本"],
-        "progression_guidance": "上一轮短推进指令",
-        "created_at": "可选 UTC 时间",
-        "updated_at": "可选 UTC 时间",
-        "expires_at": "可选 UTC 时间"
-    }},
-    "decontextualized_input": "用户本轮消息经去上下文化后的内容",
-    "chat_history_recent": [
-        "[YYYY-MM-DD HH:MM] 用户显示名或 {character_name}: 消息文本"
-    ],
-    "content_plan": {{"semantic_content": "刚结束回复前的内容计划"}},
-    "logical_stance": "CONFIRM | REFUSE | TENTATIVE | DIVERGE | CHALLENGE",
-    "character_intent": "PROVIDE | BANTAR | REJECT | EVADE | CONFRONT | DISMISS | CLARIFY",
-    "final_dialog": ["本轮最终实际发出的回复文本"],
-    "character_boundary_profile": {{
-        "boundary_recovery_description": "边界恢复节奏描述",
-        "self_integrity_description": "自我定义稳定性描述",
-        "relationship_priority_description": "关系优先级描述"
-    }}
-}}
+# 字段约束
+- `episode_narrative` 最多 900 字。
+- 其余场景文本字段最多 240 字。
+- 自由文本使用简体中文；专名、代码和输入原文保持原样。
 
 # 输出格式
-请务必返回合法的 JSON 字符串，仅包含以下字段：
-{{
-    "continuity": "same_episode",
-    "status": "active",
-    "episode_label": "短语义标签",
-    "conversation_mode": "任务协助",
-    "episode_phase": "正在展开回答",
-    "topic_momentum": "沿当前问题推进",
-    "current_thread": "当前话题",
-    "user_goal": "",
-    "current_blocker": "",
-    "user_state_updates": ["观察1", "..."],
-    "assistant_moves": ["标签1", "..."],
-    "overused_moves": ["标签1", "..."],
-    "open_loops": ["事项1", "..."],
-    "interaction_obligations": [{{
-        "actor": "承担行动的一方",
-        "action": "明确行动",
-        "beneficiary": "受益者或空字符串",
-        "precondition": "触发条件或空字符串",
-        "expected_outcome": "预期结果或空字符串",
-        "status": "active",
-        "source_kind": "assistant_response"
-    }}],
-    "resolved_threads": ["事项1", "..."],
-    "avoid_reopening": ["事项1", "..."],
-    "emotional_trajectory": "一行情绪走向",
-    "next_affordances": ["动作1", "..."],
-    "progression_guidance": "给下一轮的一条短推进指令"
-}}
+只返回一个严格 JSON 对象，不要代码围栏、解释、注释或额外字段：
+{
+  "schema_version": "conversation_progress_scene_observation.v2",
+  "scene_relation": "same",
+  "episode_change": "none",
+  "episode_narrative": "",
+  "current_thread": "",
+  "character_stance": "",
+  "user_goal": "",
+  "current_blocker": "",
+  "emotional_trajectory": "",
+  "overused_moves": []
+}
 '''
 
-_llm_interface = LLInterface()
-_recorder_llm = LLInterface()
-_recorder_llm_config = LLMCallConfig(
-    stage_name=__name__,
-    route_name="CONSOLIDATION_LLM",
+_scene_recorder_llm = LLInterface()
+_scene_recorder_llm_config = LLMCallConfig(
+    stage_name=f'{__name__}.scene',
+    route_name='CONSOLIDATION_LLM',
     base_url=CONSOLIDATION_LLM_BASE_URL,
     api_key=CONSOLIDATION_LLM_API_KEY,
     model=CONSOLIDATION_LLM_MODEL,
-    temperature=0.2,
+    temperature=0.0,
     top_p=0.75,
     top_k=None,
     max_completion_tokens=CONSOLIDATION_LLM_MAX_COMPLETION_TOKENS,
@@ -223,328 +128,871 @@ _recorder_llm_config = LLMCallConfig(
 )
 
 
-def _render_recorder_prompt(character_name: str) -> str:
-    """Render recorder prompt with exact active character identity."""
+class ConversationProgressSceneOutputError(
+    ConversationProgressContractError,
+):
+    """The scene producer failed its one-attempt contract."""
 
-    rendered_prompt = _RECORDER_PROMPT.format(character_name=character_name)
-    return rendered_prompt
+
+@dataclass(frozen=True)
+class _SceneInvocation:
+    """Validated scene output and per-owner telemetry."""
+
+    scene: ConversationProgressSceneUpdateV2
+    human_payload_chars: int
+    provider_usage: dict[str, object]
+    bound_normalizations: tuple[dict[str, object], ...]
 
 
-async def record_with_llm(record_input: ConversationProgressRecordInput) -> dict:
-    """Call the recorder LLM for one completed turn.
+async def _record_scene(
+    record_input: ConversationProgressRecordInput,
+) -> _SceneInvocation:
+    """Invoke the scene-only producer once."""
 
-    Args:
-        record_input: Current turn and prior episode-state payload.
+    payload = build_scene_recorder_human_payload(record_input)
+    human_json = _serialize_payload(payload)
+    payload_chars = len(human_json)
+    if payload_chars > MAX_SCENE_RECORDER_HUMAN_PAYLOAD_CHARS:
+        raise ConversationProgressContextLimitError(
+            'required scene-recorder context exceeds its hard character cap',
+            owner='scene',
+        )
+    response = await _invoke_owner(
+        llm=_scene_recorder_llm,
+        config=_scene_recorder_llm_config,
+        prompt=_SCENE_RECORDER_PROMPT,
+        human_json=human_json,
+        error_type=ConversationProgressSceneOutputError,
+        owner='scene',
+    )
+    normalizations: tuple[dict[str, object], ...] = ()
+    try:
+        parsed = parse_llm_json_output(
+            response.content,
+            deterministic_only=True,
+        )
+        parsed, normalizations = normalize_scene_observation_bounds(parsed)
+        scene = validate_scene_observation(
+            parsed,
+            record_input=record_input,
+        )
+    except (TypeError, ValueError) as exc:
+        raise ConversationProgressSceneOutputError(
+            f'scene semantic output is invalid: {exc}'
+        ) from exc
+    return _SceneInvocation(
+        scene=scene,
+        human_payload_chars=payload_chars,
+        provider_usage=_provider_usage(response),
+        bound_normalizations=normalizations,
+    )
 
-    Returns:
-        Validated recorder output.
-    """
 
-    boundary_profile = record_input["boundary_profile"]
-    self_integrity = float(boundary_profile["self_integrity"])
-    relationship_priority = float(boundary_profile["relational_override"])
-    character_boundary_profile = {
-        "boundary_recovery_description": get_boundary_recovery_description(
-            boundary_profile["boundary_recovery"],
+_EVENT_RECORDER_PROMPT = '''\
+你是角色短期连续性的事件核对者。你的唯一任务是逐项核对既有事件，并报告本轮新成立的独立事件。
+场景摘要、整段互动状态、未来目标、存储、来源对象、时间、容量和压缩都由其他边界负责。
+
+# 输入语义
+- `semantic_context.character_name` 是当前角色的准确名字。
+- `semantic_context.current_local_time` 是本轮语义判断使用的当地时间，不是来源时间戳。
+- `prior_events` 中每个 `event_handle` 只在本次输入内指向一个具体既有事件。
+- 每个既有事件的 `lifecycle_fact` 和 `relevance_fact` 是普通语义描述。
+- `source_turns` 中每个 `source_handle` 指向一段可引用证据；`speaker_kind`
+  区分用户与角色，`speaker_name` 给出可用于事实描述的名字。
+- `accepted_turn.current_input` 是当前用户输入，固定句柄是 `current_input`。
+- `accepted_turn.final_dialog` 是角色实际发出的回应，固定句柄是 `current_response`。
+- 当前用户输入对用户作出的选择、拒绝、纠正和承诺，以及用户对自己执行事项的
+  明确完成或停止声明具有最高权威。
+
+# 核对步骤
+1. 对 `prior_events` 中每个句柄恰好输出一行，并保持输入顺序：
+   - 本轮没有改变该事件时，输出 `observation="unchanged"`。
+   - 本轮改变该事件时，输出 `observation="changed"` 和完整变化事实。
+   不得省略、重复或发明既有句柄。
+2. 既有事件变化只更新摘要、结果、生命周期、相关性和来源。行动者、动作、对象、受益者、
+   前提和义务方向由程序从已验证定义中保留。
+3. 新事件只写入 `new_events`。每个新事件必须能独立完成、拒绝或被替代，并明确填写：
+   - `actor`：行动者；
+   - `action`：动作或决定；
+   - `object`：被处理、选择、评价或作用的具体事项；
+   - `beneficiary`：受益者，不适用时为空；
+   - `precondition`：成立前提，不适用时为空。
+   同一具体动作和对象内的方式、强度、阶段或反应变化更新原事件；
+   转向另一个可独立完成的动作或对象时另建新事件。
+4. `semantic_summary` 必须脱离上下文也能区分具体事件，不能只写序号、代词或此前事项。
+5. 每个变化或新事件引用一个或多个已提供的 `source_turn_handles`。
+6. `lifecycle_change` 只报告本轮变化：
+   - `none`：既有状态不变；新事件尚未开始。
+   - `began`：具体事件已经开始。
+   - `concluded`：具体事件已完成、明确停止或得到确定结论。
+   - `declined`：具体事件被明确拒绝。
+   - `replaced`：具体事件被另一事项替代。
+   - `reopened`：当前证据明确重开一个先前终结的既有事件。
+   生命周期按每个具体事件判断，不按整段互动、总体目标、满意度或奖励是否完成判断。
+   当前用户明确声明自己已经完成或停止与某个既有事件匹配的动作时，
+   该事件写 `concluded`；总体满意度、奖励条件或整段互动继续不改变这个完成事实。
+   既有事件已经得到明确结果或评价，且实际回应转向另一个可独立完成的事件时，
+   前者写 `concluded`；整段互动继续不延长前者生命周期。
+   只有暂定且仍会在同一个具体事件尝试中变化的评价不算 `concluded`。
+7. `relevance` 只报告当前语义作用：
+   - `decision`：仍直接约束当前判断或区分已处理与未处理事项。
+   - `scene`：帮助理解当前场景，但不直接约束判断。
+   - `history`：仅为短期背景。
+   终结状态本身不等于 `history`。当前轮要求选择或开始下一个事项，且某个已终结
+   既有事件的结果用于区分已处理与未处理选项时，该事件仍写 `decision`。
+8. 只报告已经成立的事实。不得提出下一步行动、候选选择、未来目标或台词。
+9. 描述当前角色时，只能使用 `semantic_context.character_name` 的准确名字，或省略主语。
+   不得用 assistant、bot、AI、角色等机器身份标签替代这个 `actor` 名字。
+10. 对依赖今天、明天、下周等相对时间的约定、期限、计划或其他可执行事实，
+    使用 `semantic_context.current_local_time` 换算为 `YYYY-MM-DD` 或
+    `YYYY-MM-DD HH:MM`。无法唯一换算时不建立该时间依赖事件，不保留相对时间表达。
+
+# 输出格式
+顶层对象必须完整包含且仅包含 `schema_version`、`existing_events` 和 `new_events` 三个字段。
+两个数组即使为空也必须显式输出；没有新事件时必须原样输出 `"new_events": []`。
+只返回一个严格 JSON 对象，不要代码围栏、解释、注释或额外字段。
+未变化的既有事件必须完整包含且仅包含 `event_handle` 和 `observation`，严格为：
+{
+  "event_handle": "e1",
+  "observation": "unchanged"
+}
+变化的既有事件必须完整包含且仅包含 `event_handle`、`observation`、`semantic_summary`、
+`outcome`、`lifecycle_change`、`relevance` 和 `source_turn_handles`；
+所有字段都必须显式输出，允许为空的文本也写空字符串：
+{
+  "event_handle": "e1",
+  "observation": "changed",
+  "semantic_summary": "",
+  "outcome": "",
+  "lifecycle_change": "none",
+  "relevance": "scene",
+  "source_turn_handles": ["current_input"]
+}
+新事件严格为：
+{
+  "semantic_summary": "",
+  "is_obligation": false,
+  "actor": "",
+  "action": "",
+  "object": "",
+  "beneficiary": "",
+  "precondition": "",
+  "outcome": "",
+  "lifecycle_change": "none",
+  "relevance": "scene",
+  "source_turn_handles": ["current_input"]
+}
+顶层严格为：
+{
+  "schema_version": "conversation_progress_event_observation_batch.v2",
+  "existing_events": [],
+  "new_events": []
+}
+
+# 返回前检查
+1. 顶层恰好包含 `schema_version`、`existing_events` 和 `new_events`。
+2. `existing_events` 和 `new_events` 每次都输出为数组；没有项目也输出 `[]`。
+3. `observation="unchanged"` 行恰好包含 `event_handle` 和 `observation`。
+4. 两个数组和顶层对象全部闭合后才结束输出。
+'''
+
+_event_recorder_llm = LLInterface()
+_event_recorder_llm_config = LLMCallConfig(
+    stage_name=f'{__name__}.events',
+    route_name='CONSOLIDATION_LLM',
+    base_url=CONSOLIDATION_LLM_BASE_URL,
+    api_key=CONSOLIDATION_LLM_API_KEY,
+    model=CONSOLIDATION_LLM_MODEL,
+    temperature=0.0,
+    top_p=0.75,
+    top_k=None,
+    max_completion_tokens=CONSOLIDATION_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=CONSOLIDATION_LLM_THINKING_ENABLED,
+    ),
+)
+
+
+class ConversationProgressEventOutputError(
+    ConversationProgressContractError,
+):
+    """The event producer failed its one-attempt contract."""
+
+
+@dataclass(frozen=True)
+class _EventRecorderContext:
+    """Model payload and exact private coverage domains."""
+
+    payload: dict[str, object]
+    event_handles: frozenset[str]
+    source_handles: frozenset[str]
+
+
+@dataclass(frozen=True)
+class _EventInvocation:
+    """Validated event output and per-owner telemetry."""
+
+    event_updates: tuple[ConversationProgressEventUpdateV2, ...]
+    human_payload_chars: int
+    provider_usage: dict[str, object]
+    bound_normalizations: tuple[dict[str, object], ...]
+
+
+async def _record_events(
+    record_input: ConversationProgressRecordInput,
+) -> _EventInvocation:
+    """Invoke the exact-coverage event producer once."""
+
+    context = build_event_recorder_context(record_input)
+    human_json = _serialize_payload(context.payload)
+    payload_chars = len(human_json)
+    if payload_chars > MAX_RECORDER_HUMAN_PAYLOAD_CHARS:
+        raise ConversationProgressContextLimitError(
+            'required event-recorder context exceeds its hard character cap',
+            owner='event',
+        )
+    response = await _invoke_owner(
+        llm=_event_recorder_llm,
+        config=_event_recorder_llm_config,
+        prompt=_EVENT_RECORDER_PROMPT,
+        human_json=human_json,
+        error_type=ConversationProgressEventOutputError,
+        owner='event',
+    )
+    normalizations: tuple[dict[str, object], ...] = ()
+    try:
+        parsed = parse_llm_json_output(
+            response.content,
+            deterministic_only=True,
+        )
+        parsed, normalizations = normalize_event_observation_bounds(parsed)
+        updates = validate_event_observation_batch(
+            parsed,
+            record_input=record_input,
+            supplied_event_handles=set(context.event_handles),
+            supplied_source_handles=set(context.source_handles),
+        )
+    except (TypeError, ValueError) as exc:
+        raise ConversationProgressEventOutputError(
+            f'event semantic output is invalid: {exc}'
+        ) from exc
+    return _EventInvocation(
+        event_updates=tuple(updates),
+        human_payload_chars=payload_chars,
+        provider_usage=_provider_usage(response),
+        bound_normalizations=normalizations,
+    )
+
+
+class ConversationProgressContextLimitError(ValueError):
+    """Required semantic recorder context exceeds an approved hard cap."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        owner: str,
+        recorder_call_count: int = 0,
+        event_attempt_count: int = 0,
+        scene_attempt_count: int = 0,
+        event_disposition: str = 'not_called',
+        scene_disposition: str = 'not_called',
+    ) -> None:
+        """Retain exact producer-attempt telemetry on a preflight failure."""
+
+        super().__init__(message)
+        self.owner = owner
+        self.recorder_call_count = recorder_call_count
+        self.event_attempt_count = event_attempt_count
+        self.scene_attempt_count = scene_attempt_count
+        self.event_disposition = event_disposition
+        self.scene_disposition = scene_disposition
+
+
+class ConversationProgressRecorderOutputError(
+    ConversationProgressContractError,
+):
+    """Authoritative event reconciliation failed closed."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        recorder_call_count: int,
+        event_attempt_count: int,
+        scene_attempt_count: int,
+        event_disposition: str,
+        scene_disposition: str,
+    ) -> None:
+        """Retain exact producer-attempt telemetry on event failure."""
+
+        super().__init__(message)
+        self.recorder_call_count = recorder_call_count
+        self.event_attempt_count = event_attempt_count
+        self.scene_attempt_count = scene_attempt_count
+        self.event_disposition = event_disposition
+        self.scene_disposition = scene_disposition
+
+
+@dataclass(frozen=True)
+class RecorderInvocationResult:
+    """Combined validated observations with per-owner telemetry."""
+
+    delta: ConversationProgressRecorderDeltaV2
+    recorder_call_count: int
+    event_attempt_count: int
+    scene_attempt_count: int
+    event_disposition: str
+    scene_disposition: str
+    event_human_payload_chars: int
+    scene_human_payload_chars: int
+    provider_usage: dict[str, object]
+    bound_normalizations: tuple[dict[str, object], ...] = ()
+
+
+async def record_with_llm(
+    record_input: ConversationProgressRecordInput,
+) -> RecorderInvocationResult:
+    """Run the two independent post-turn producers concurrently."""
+
+    scene_result, event_result = await asyncio.gather(
+        _record_scene(record_input),
+        _record_events(record_input),
+        return_exceptions=True,
+    )
+    (
+        scene,
+        scene_disposition,
+        scene_attempt_count,
+        scene_payload_chars,
+        scene_usage,
+        scene_normalizations,
+    ) = _resolve_scene_result(
+        record_input=record_input,
+        scene_result=scene_result,
+    )
+    if isinstance(event_result, ConversationProgressEventOutputError):
+        raise ConversationProgressRecorderOutputError(
+            str(event_result),
+            recorder_call_count=scene_attempt_count + 1,
+            event_attempt_count=1,
+            scene_attempt_count=scene_attempt_count,
+            event_disposition='failed_contract_or_provider',
+            scene_disposition=scene_disposition,
+        ) from event_result
+    if isinstance(event_result, ConversationProgressContextLimitError):
+        raise ConversationProgressContextLimitError(
+            str(event_result),
+            owner='event',
+            recorder_call_count=scene_attempt_count,
+            event_attempt_count=0,
+            scene_attempt_count=scene_attempt_count,
+            event_disposition='context_limit',
+            scene_disposition=scene_disposition,
+        ) from event_result
+    if isinstance(event_result, BaseException):
+        raise event_result
+
+    delta = compose_recorder_delta(
+        scene_observation=scene,
+        event_updates=event_result.event_updates,
+    )
+    normalizations = tuple([
+        *(
+            {
+                **normalization,
+                'owner': 'scene',
+            }
+            for normalization in scene_normalizations
         ),
-        "self_integrity_description": get_self_integrity_description(
-            self_integrity,
+        *(
+            {
+                **normalization,
+                'owner': 'event',
+            }
+            for normalization in event_result.bound_normalizations
         ),
-        "relationship_priority_description": get_relationship_priority_description(
-            relationship_priority,
-        ),
+    ])
+    return RecorderInvocationResult(
+        delta=delta,
+        recorder_call_count=scene_attempt_count + 1,
+        event_attempt_count=1,
+        scene_attempt_count=scene_attempt_count,
+        event_disposition='accepted',
+        scene_disposition=scene_disposition,
+        event_human_payload_chars=event_result.human_payload_chars,
+        scene_human_payload_chars=scene_payload_chars,
+        provider_usage={
+            'event': event_result.provider_usage,
+            'scene': scene_usage,
+        },
+        bound_normalizations=normalizations,
+    )
+
+
+def build_event_recorder_context(
+    record_input: ConversationProgressRecordInput,
+) -> _EventRecorderContext:
+    """Fit event-only context and retain the exact supplied handle domains."""
+
+    prior_event_map = event_handle_map(record_input)
+    authoritative_event_handles = tuple(prior_event_map)
+    source_map = source_handle_map(record_input)
+    prior_events = [
+        _prior_event_projection(handle, event)
+        for handle, event in prior_event_map.items()
+    ]
+    source_turns = [
+        _recorder_turn_projection(
+            turn,
+            source_handle=f't{index}',
+            character_name=record_input['character_name'],
+        )
+        for index, turn in enumerate(
+            record_input['interaction_logical_turns'],
+            start=1,
+        )
+        if f't{index}' in source_map
+    ]
+    payload: dict[str, object] = {
+        'semantic_context': _recorder_semantic_context(record_input),
+        'prior_events': prior_events,
+        'source_turns': source_turns,
+        'accepted_turn': {
+            'current_input': {
+                'source_handle': (
+                    'current_input'
+                    if 'current_input' in source_map
+                    else ''
+                ),
+                'text': record_input['decontextualized_input'],
+            },
+            'turn_outcome': record_input['turn_outcome'],
+            'final_dialog': {
+                'source_handle': (
+                    'current_response'
+                    if 'current_response' in source_map
+                    else ''
+                ),
+                'fragments': list(record_input['final_dialog']),
+            },
+        },
     }
-    character_name = record_input["character_name"]
-    human_payload = {
-        "current_turn_timestamp": format_storage_utc_for_llm(
-            record_input["storage_timestamp_utc"]
-        ),
-        "prior_episode_state": build_recorder_prior_state(
-            record_input["prior_episode_state"],
-        ),
-        "decontextualized_input": record_input["decontextualized_input"],
-        "chat_history_recent": project_conversation_history_for_llm(
-            record_input["chat_history_recent"],
-            character_name=character_name,
-        ),
-        "content_plan": record_input["content_plan"],
-        "logical_stance": record_input["logical_stance"],
-        "character_intent": record_input["character_intent"],
-        "final_dialog": record_input["final_dialog"],
-        "character_boundary_profile": character_boundary_profile,
+    _fit_event_payload(payload)
+    projected_prior_events = payload['prior_events']
+    if not isinstance(projected_prior_events, list):
+        raise ConversationProgressContractError(
+            'event payload must preserve the complete prior-event ledger'
+        )
+    projected_event_handles: list[str] = []
+    for row in projected_prior_events:
+        if not isinstance(row, Mapping):
+            raise ConversationProgressContractError(
+                'event payload must preserve the complete prior-event ledger'
+            )
+        handle = row.get('event_handle')
+        if not isinstance(handle, str):
+            raise ConversationProgressContractError(
+                'event payload must preserve the complete prior-event ledger'
+            )
+        projected_event_handles.append(handle)
+    if tuple(projected_event_handles) != authoritative_event_handles:
+        raise ConversationProgressContractError(
+            'event payload must preserve the complete prior-event ledger'
+        )
+    supplied_sources = {
+        str(row['source_handle'])
+        for row in payload['source_turns']
+        if isinstance(row, Mapping)
     }
-    scope = record_input["scope"]
-    channel_label = scope.platform_channel_id or "<dm>"
-    log_context = (
-        f"platform={scope.platform} "
-        f"channel={channel_label} "
-        f"user={scope.global_user_id}"
+    accepted_turn = payload['accepted_turn']
+    if not isinstance(accepted_turn, Mapping):
+        raise TypeError('accepted_turn must be a mapping')
+    for field_name in ('current_input', 'final_dialog'):
+        value = accepted_turn[field_name]
+        if not isinstance(value, Mapping):
+            raise TypeError(f'accepted_turn.{field_name} must be a mapping')
+        handle = value['source_handle']
+        if isinstance(handle, str) and handle:
+            supplied_sources.add(handle)
+    return _EventRecorderContext(
+        payload=payload,
+        event_handles=frozenset(authoritative_event_handles),
+        source_handles=frozenset(supplied_sources),
     )
 
-    logger.debug(
-        f"Conversation progress recorder input: "
-        f"{log_context} payload={log_preview(human_payload)}"
-    )
-    system_prompt = SystemMessage(
-        content=_render_recorder_prompt(character_name),
-    )
-    human_message = HumanMessage(
-        content=json.dumps(human_payload, ensure_ascii=False),
-    )
-    response = await _recorder_llm.ainvoke([system_prompt, human_message], config=_recorder_llm_config)
-    parsed = parse_llm_json_output(response.content)
-    validated = validate_recorder_output(parsed)
-    logger.info(
-        f"Conversation progress recorder parsed: "
-        f"{log_context} validated={log_preview(validated)}"
-    )
-    logger.debug(
-        f"Conversation progress recorder parsed detail: "
-        f"{log_context} parsed={log_preview(parsed)}"
-    )
-    return validated
 
+def build_scene_recorder_human_payload(
+    record_input: ConversationProgressRecordInput,
+) -> dict[str, object]:
+    """Build bounded scene-only dynamic context."""
 
-def render_recorder_prompt(character_name: str) -> str:
-    """Return the recorder system prompt for render checks.
-
-    Args:
-        character_name: Exact active character name to render.
-
-    Returns:
-        Recorder prompt text.
-    """
-
-    rendered_prompt = _render_recorder_prompt(character_name)
-    return rendered_prompt
-
-
-_ENTRY_LIST_FIELDS = (
-    "user_state_updates",
-    "open_loops",
-    "resolved_threads",
-    "avoid_reopening",
-)
-
-_STRING_LIST_FIELDS = (
-    "assistant_moves",
-    "overused_moves",
-    "next_affordances",
-)
-
-_RECORDER_PRIOR_SCALAR_FIELDS = (
-    "status",
-    "episode_label",
-    "continuity",
-    "conversation_mode",
-    "episode_phase",
-    "topic_momentum",
-    "current_thread",
-    "user_goal",
-    "current_blocker",
-    "emotional_trajectory",
-    "progression_guidance",
-    "turn_count",
-    "last_user_input",
-    "created_at",
-    "updated_at",
-    "expires_at",
-)
-
-_OBLIGATION_FIELDS = (
-    "actor",
-    "action",
-    "beneficiary",
-    "precondition",
-    "expected_outcome",
-    "status",
-    "source_kind",
-)
-
-
-def _require_string(value: Any, field_name: str, *, default: str = "") -> str:
-    if value is None:
-        return default
-    if not isinstance(value, str):
-        raise ValueError(f"{field_name} must be a string")
-    return_value = value.strip()
-    return return_value
-
-
-def _string_list(value: Any, field_name: str) -> list[str]:
-    if value is None:
-        return_value: list[str] = []
-        return return_value
-    if isinstance(value, str):
-        value = [value]
-    if not isinstance(value, list):
-        raise ValueError(f"{field_name} must be a list")
-    result: list[str] = []
-    for item in value:
-        if not isinstance(item, str):
-            raise ValueError(f"{field_name} items must be strings")
-        text = item.strip()
-        if not text:
-            continue
-        result.append(text)
-    return result
-
-
-def _obligation_list(value: Any) -> list[dict[str, str]]:
-    """Validate exact recorder-owned obligation rows and deterministic bounds."""
-
-    if not isinstance(value, list):
-        raise ValueError("interaction_obligations must be a list")
-    if len(value) > INTERACTION_OBLIGATIONS_LIMIT:
-        raise ValueError("interaction_obligations exceeds its item limit")
-    result: list[dict[str, str]] = []
-    for item in value:
-        if not isinstance(item, dict) or set(item) != set(_OBLIGATION_FIELDS):
-            raise ValueError("interaction obligation fields must be exact")
-        obligation = {
-            field: _require_string(item[field], field)
-            for field in _OBLIGATION_FIELDS
+    prior_packet = record_input['prior_episode_state']
+    prior_scene: dict[str, object] | None = None
+    if prior_packet is not None:
+        prior_scene = {
+            'episode_progress_fact': _prior_episode_progress_fact(
+                prior_packet['status']
+            ),
+            'scene_relation_fact': _prior_scene_relation_fact(
+                prior_packet['continuity']
+            ),
+            'episode_narrative': prior_packet['episode_narrative'],
+            'current_thread': prior_packet['current_thread'],
+            'character_stance': prior_packet['character_stance'],
+            'user_goal': prior_packet['user_goal'],
+            'current_blocker': prior_packet['current_blocker'],
+            'emotional_trajectory': prior_packet['emotional_trajectory'],
+            'overused_moves': list(prior_packet['overused_moves']),
         }
-        if not obligation["actor"] or not obligation["action"]:
-            raise ValueError("interaction obligation actor and action are required")
-        if any(
-            len(obligation[field]) > MAX_OBLIGATION_CHARS
-            for field in _OBLIGATION_FIELDS[:5]
-        ):
-            raise ValueError("interaction obligation text exceeds its limit")
-        if obligation["status"] not in VALID_OBLIGATION_STATUSES:
-            raise ValueError("interaction obligation status is invalid")
-        if obligation["source_kind"] not in VALID_OBLIGATION_SOURCES:
-            raise ValueError("interaction obligation source_kind is invalid")
-        result.append(obligation)
-    return result
-
-
-def _prior_entry_texts(prior_episode_state: ConversationEpisodeStateDoc, field_name: str) -> list[str]:
-    values = prior_episode_state.get(field_name, [])
-    if not isinstance(values, list):
-        return_value = []
-        return return_value
-    result: list[str] = []
-    for entry in values:
-        if not isinstance(entry, dict):
-            continue
-        text = entry.get("text")
-        if isinstance(text, str) and text.strip():
-            result.append(text.strip())
-    return result
-
-
-def _prior_string_list(prior_episode_state: ConversationEpisodeStateDoc, field_name: str) -> list[str]:
-    values = prior_episode_state.get(field_name, [])
-    if not isinstance(values, list):
-        return_value = []
-        return return_value
-    return_value = [item.strip() for item in values if isinstance(item, str) and item.strip()]
-    return return_value
-
-
-def _prior_obligations(
-    prior_episode_state: ConversationEpisodeStateDoc,
-) -> list[dict[str, str]]:
-    """Project stored obligations into the recorder contract without metadata."""
-
-    result: list[dict[str, str]] = []
-    for obligation in prior_episode_state.get("interaction_obligations", []):
-        if not isinstance(obligation, dict):
-            continue
-        if not all(field in obligation for field in _OBLIGATION_FIELDS):
-            continue
-        result.append({field: obligation[field] for field in _OBLIGATION_FIELDS})
-    return result
-
-
-def build_recorder_prior_state(
-    prior_episode_state: ConversationEpisodeStateDoc | None,
-) -> dict | None:
-    """Build recorder-facing prior state with text-only copyable lists.
-
-    Args:
-        prior_episode_state: Stored episode state from the previous turn.
-
-    Returns:
-        Native prior-state object for the recorder LLM, or ``None``.
-    """
-
-    if prior_episode_state is None:
-        return None
-
-    result: dict = {}
-    for field_name in _RECORDER_PRIOR_SCALAR_FIELDS:
-        if field_name in prior_episode_state:
-            result[field_name] = prior_episode_state[field_name]
-    for field_name in _ENTRY_LIST_FIELDS:
-        result[field_name] = _prior_entry_texts(prior_episode_state, field_name)
-    for field_name in _STRING_LIST_FIELDS:
-        result[field_name] = _prior_string_list(prior_episode_state, field_name)
-    result["interaction_obligations"] = _prior_obligations(prior_episode_state)
-    return result
-
-
-def validate_recorder_output(payload: dict) -> dict:
-    """Validate and normalize recorder JSON.
-
-    Args:
-        payload: Parsed LLM JSON object.
-
-    Returns:
-        Normalized recorder output.
-
-    Raises:
-        ValueError: If the payload violates the recorder contract.
-    """
-
-    continuity = _require_string(payload.get("continuity", ""), "continuity")
-    status = _require_string(payload.get("status", ""), "status")
-    # `new_episode` is prompt-facing lifecycle vocabulary. If the recorder copies
-    # it into continuity, persist canonical `sharp_transition` instead.
-    if continuity == "new_episode":
-        continuity = "sharp_transition"
-    if continuity not in VALID_CONTINUITY:
-        raise ValueError(f"invalid continuity: {continuity}")
-    if status not in VALID_STATUS:
-        raise ValueError(f"invalid status: {status}")
-    return_value = {
-        "continuity": continuity,
-        "status": status,
-        "episode_label": _require_string(payload.get("episode_label", ""), "episode_label"),
-        "conversation_mode": _require_string(
-            payload.get("conversation_mode", ""),
-            "conversation_mode",
-        ),
-        "episode_phase": _require_string(
-            payload.get("episode_phase", ""),
-            "episode_phase",
-        ),
-        "topic_momentum": _require_string(
-            payload.get("topic_momentum", ""),
-            "topic_momentum",
-        ),
-        "current_thread": _require_string(payload.get("current_thread", ""), "current_thread"),
-        "user_goal": _require_string(payload.get("user_goal", ""), "user_goal"),
-        "current_blocker": _require_string(payload.get("current_blocker", ""), "current_blocker"),
-        "user_state_updates": _string_list(payload.get("user_state_updates", []), "user_state_updates"),
-        "assistant_moves": _string_list(payload.get("assistant_moves", []), "assistant_moves"),
-        "overused_moves": _string_list(payload.get("overused_moves", []), "overused_moves"),
-        "open_loops": _string_list(payload.get("open_loops", []), "open_loops"),
-        "interaction_obligations": _obligation_list(
-            payload.get("interaction_obligations", []),
-        ),
-        "resolved_threads": _string_list(payload.get("resolved_threads", []), "resolved_threads"),
-        "avoid_reopening": _string_list(payload.get("avoid_reopening", []), "avoid_reopening"),
-        "emotional_trajectory": _require_string(
-            payload.get("emotional_trajectory", ""),
-            "emotional_trajectory",
-        ),
-        "next_affordances": _string_list(payload.get("next_affordances", []), "next_affordances"),
-        "progression_guidance": _require_string(
-            payload.get("progression_guidance", ""),
-            "progression_guidance",
-        ),
+    recent_turns = [
+        _recorder_turn_projection(
+            turn,
+            source_handle=f't{index}',
+            character_name=record_input['character_name'],
+        )
+        for index, turn in enumerate(
+            record_input['interaction_logical_turns'][-4:],
+            start=1,
+        )
+    ]
+    payload: dict[str, object] = {
+        'semantic_context': _recorder_semantic_context(record_input),
+        'prior_scene': prior_scene,
+        'recent_turns': recent_turns,
+        'accepted_turn': {
+            'current_input': record_input['decontextualized_input'][
+                :MAX_INTERACTION_RECORDER_CHARS
+            ],
+            'turn_outcome': record_input['turn_outcome'],
+            'content_plan': dict(record_input['content_plan']),
+            'logical_stance': record_input['logical_stance'],
+            'character_intent': record_input['character_intent'],
+            'final_dialog': list(record_input['final_dialog']),
+        },
     }
-    return return_value
+    projected_turns = payload['recent_turns']
+    if not isinstance(projected_turns, list):
+        raise TypeError('scene recent_turns must be a list')
+    while (
+        _payload_chars(payload) > MAX_SCENE_RECORDER_HUMAN_PAYLOAD_CHARS
+        and projected_turns
+    ):
+        projected_turns.pop(0)
+    if _payload_chars(payload) > MAX_SCENE_RECORDER_HUMAN_PAYLOAD_CHARS:
+        raise ConversationProgressContextLimitError(
+            'required scene-recorder context exceeds its hard character cap',
+            owner='scene',
+        )
+    return payload
+
+
+def render_scene_recorder_prompt() -> str:
+    """Return the static scene-owner prompt for inspection."""
+
+    return _SCENE_RECORDER_PROMPT
+
+
+def render_event_recorder_prompt() -> str:
+    """Return the static event-owner prompt for inspection."""
+
+    return _EVENT_RECORDER_PROMPT
+
+
+def _fit_event_payload(
+    payload: dict[str, object],
+) -> None:
+    """Drop older turn text while retaining the complete prior ledger."""
+
+    if _payload_chars(payload) <= MAX_RECORDER_HUMAN_PAYLOAD_CHARS:
+        return
+    source_turns = payload['source_turns']
+    if not isinstance(source_turns, list):
+        raise TypeError('event source_turns must be a list')
+    while (
+        _payload_chars(payload) > MAX_RECORDER_HUMAN_PAYLOAD_CHARS
+        and source_turns
+    ):
+        source_turns.pop(0)
+    if _payload_chars(payload) > MAX_RECORDER_HUMAN_PAYLOAD_CHARS:
+        raise ConversationProgressContextLimitError(
+            'required event-recorder context exceeds its hard character cap',
+            owner='event',
+        )
+
+
+def _prior_event_projection(
+    event_handle: str,
+    event: ConversationProgressEventV2,
+) -> dict[str, object]:
+    """Project one prior event without storage identity or timestamps."""
+
+    return {
+        'event_handle': event_handle,
+        'semantic_summary': event['semantic_summary'],
+        'is_obligation': event['is_obligation'],
+        'actor': event['actor'],
+        'action': event['action'],
+        'object': event['object'],
+        'beneficiary': event['beneficiary'],
+        'precondition': event['precondition'],
+        'outcome': event['outcome'],
+        'lifecycle_fact': _prior_lifecycle_fact(event['state']),
+        'relevance_fact': _prior_relevance_fact(event['retention']),
+    }
+
+
+def _recorder_turn_projection(
+    turn: ConversationLogicalTurnV1,
+    *,
+    source_handle: str,
+    character_name: str,
+) -> dict[str, object]:
+    """Project one logical turn as semantic text and a short handle."""
+
+    joined_text = ' '.join(turn['fragments'])
+    role = turn['role']
+    if role == 'assistant':
+        speaker_kind = 'character'
+        speaker_name = character_name
+    elif role == 'user':
+        speaker_kind = 'user'
+        speaker_name = turn['display_name'].strip() or 'current user'
+    else:
+        raise ValueError('recorder logical-turn role is invalid')
+    return {
+        'source_handle': source_handle,
+        'speaker_kind': speaker_kind,
+        'speaker_name': speaker_name,
+        'text': joined_text[:MAX_INTERACTION_RECORDER_CHARS].rstrip(),
+    }
+
+
+def _recorder_semantic_context(
+    record_input: ConversationProgressRecordInput,
+) -> dict[str, str]:
+    """Project identity and clock context without exposing source metadata."""
+
+    character_name = record_input['character_name']
+    if not isinstance(character_name, str) or not character_name.strip():
+        raise ValueError('recorder character_name is required')
+    current_local_time = format_storage_utc_for_llm(
+        record_input['storage_timestamp_utc']
+    )
+    if not current_local_time:
+        raise ValueError('recorder semantic current_local_time is required')
+    return {
+        'character_name': character_name.strip(),
+        'current_local_time': current_local_time,
+    }
+
+
+def _preserved_or_initial_scene(
+    record_input: ConversationProgressRecordInput,
+) -> ConversationProgressSceneUpdateV2:
+    """Preserve validated scene facts or seed them from accepted semantics."""
+
+    prior_packet = record_input['prior_episode_state']
+    if prior_packet is not None:
+        return {
+            'continuity': prior_packet['continuity'],
+            'status': prior_packet['status'],
+            'episode_narrative': prior_packet['episode_narrative'],
+            'current_thread': prior_packet['current_thread'],
+            'character_stance': prior_packet['character_stance'],
+            'user_goal': prior_packet['user_goal'],
+            'current_blocker': prior_packet['current_blocker'],
+            'emotional_trajectory': prior_packet['emotional_trajectory'],
+            'overused_moves': list(prior_packet['overused_moves']),
+        }
+    content_plan = record_input['content_plan']
+    semantic_content = content_plan['semantic_content']
+    current_input = record_input['decontextualized_input']
+    logical_stance = record_input['logical_stance']
+    for field_name, value in (
+        ('content_plan.semantic_content', semantic_content),
+        ('decontextualized_input', current_input),
+        ('logical_stance', logical_stance),
+    ):
+        if not isinstance(value, str):
+            raise TypeError(f'{field_name} must be text')
+    narrative = semantic_content or current_input
+    return {
+        'continuity': 'same_episode',
+        'status': 'active',
+        'episode_narrative': narrative[:MAX_EPISODE_NARRATIVE_CHARS],
+        'current_thread': current_input[:MAX_THREAD_FIELD_CHARS],
+        'character_stance': logical_stance[:MAX_THREAD_FIELD_CHARS],
+        'user_goal': current_input[:MAX_THREAD_FIELD_CHARS],
+        'current_blocker': '',
+        'emotional_trajectory': '',
+        'overused_moves': [],
+    }
+
+
+def _resolve_scene_result(
+    *,
+    record_input: ConversationProgressRecordInput,
+    scene_result: _SceneInvocation | BaseException,
+) -> tuple[
+    ConversationProgressSceneUpdateV2,
+    str,
+    int,
+    int,
+    dict[str, object],
+    tuple[dict[str, object], ...],
+]:
+    """Resolve the lower-authority scene lane and exact call telemetry."""
+
+    if isinstance(scene_result, ConversationProgressSceneOutputError):
+        attempt_count = 1
+    elif isinstance(scene_result, ConversationProgressContextLimitError):
+        attempt_count = 0
+    elif isinstance(scene_result, BaseException):
+        raise scene_result
+    else:
+        return (
+            scene_result.scene,
+            'accepted',
+            1,
+            scene_result.human_payload_chars,
+            scene_result.provider_usage,
+            scene_result.bound_normalizations,
+        )
+
+    scene = _preserved_or_initial_scene(record_input)
+    disposition = (
+        'preserved_prior'
+        if record_input['prior_episode_state'] is not None
+        else 'initialized_from_accepted_turn'
+    )
+    logger.warning(
+        'Conversation progress scene observer degraded: '
+        f'disposition={disposition} '
+        f'error={type(scene_result).__name__}'
+    )
+    return (
+        scene,
+        disposition,
+        attempt_count,
+        0,
+        {'status': 'unavailable'},
+        (),
+    )
+
+
+async def _invoke_owner(
+    *,
+    llm: LLInterface,
+    config: LLMCallConfig,
+    prompt: str,
+    human_json: str,
+    error_type: type[ConversationProgressContractError],
+    owner: str,
+) -> object:
+    """Invoke one producer and translate only known provider failures."""
+
+    messages = [
+        SystemMessage(content=prompt),
+        HumanMessage(content=human_json),
+    ]
+    try:
+        response = await llm.ainvoke(messages, config=config)
+    except (
+        OpenAIError,
+        httpx.HTTPError,
+        ConnectionError,
+        OSError,
+        RuntimeError,
+        TimeoutError,
+    ) as exc:
+        raise error_type(f'{owner} provider call failed') from exc
+    logger.debug(
+        f'Conversation progress {owner} input: chars={len(human_json)} '
+        f'payload={log_preview(human_json)}'
+    )
+    return response
+
+
+def _prior_episode_progress_fact(status: str) -> str:
+    """Translate persisted episode status into plain model context."""
+
+    return {
+        'active': '这一段互动仍在继续',
+        'suspended': '这一段互动已经暂停，等待明确恢复',
+        'closed': '这一段互动已经结束',
+    }[status]
+
+
+def _prior_scene_relation_fact(continuity: str) -> str:
+    """Translate persisted continuity into plain model context."""
+
+    return {
+        'same_episode': '上一轮仍在同一段场景中',
+        'related_shift': '上一轮发生了相关转移',
+        'sharp_transition': '上一轮发生了明显转场',
+    }[continuity]
+
+
+def _prior_lifecycle_fact(state: str) -> str:
+    """Translate one persisted lifecycle enum into plain model context."""
+
+    return {
+        'open': '尚未开始，仍待处理',
+        'in_progress': '已经开始，尚未得到确定结论',
+        'completed': '已经完成或得到确定结论',
+        'rejected': '已经明确拒绝',
+        'superseded': '已经被另一事项替代',
+    }[state]
+
+
+def _prior_relevance_fact(retention: str) -> str:
+    """Translate one persisted retention enum into plain model context."""
+
+    return {
+        'decision_critical': '仍直接约束当前判断',
+        'active_scene': '仍帮助理解当前场景',
+        'background': '只作为短期背景',
+    }[retention]
+
+
+def _serialize_payload(payload: Mapping[str, object]) -> str:
+    """Serialize one model payload deterministically."""
+
+    return json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        default=_json_default,
+    )
+
+
+def _payload_chars(payload: Mapping[str, object]) -> int:
+    """Measure one dynamic payload after final normalization."""
+
+    return len(_serialize_payload(payload))
+
+
+def _provider_usage(response: object) -> dict[str, object]:
+    """Extract provider token telemetry when exposed."""
+
+    usage = getattr(response, 'usage_metadata', None)
+    if isinstance(usage, Mapping):
+        return dict(usage)
+    response_metadata = getattr(response, 'response_metadata', None)
+    if isinstance(response_metadata, Mapping):
+        token_usage = response_metadata.get('token_usage')
+        if isinstance(token_usage, Mapping):
+            return dict(token_usage)
+    return {'status': 'unavailable'}
+
+
+def _json_default(value: object) -> object:
+    """Render supported dynamic payload values."""
+
+    if hasattr(value, 'isoformat'):
+        return value.isoformat()
+    raise TypeError(
+        f'unsupported recorder payload value: {type(value).__name__}'
+    )

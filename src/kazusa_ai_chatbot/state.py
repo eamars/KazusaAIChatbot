@@ -3,8 +3,13 @@ from __future__ import annotations
 from typing import Annotated, Any, Literal, NotRequired, TypedDict
 
 from kazusa_ai_chatbot.cognition_episode import CognitiveEpisodeV1
-from kazusa_ai_chatbot.conversation_progress import ConversationProgressPromptDoc
-from kazusa_ai_chatbot.db.schemas import ConversationEpisodeStateDoc
+from kazusa_ai_chatbot.conversation_progress import (
+    ConversationLogicalTurnV1,
+    ConversationProgressLoadDiagnosticsV2,
+    ConversationProgressPromptV2,
+    ConversationProgressSourceRefV2,
+    ConversationProgressStateV2,
+)
 from kazusa_ai_chatbot.message_envelope import MessageEnvelope, PromptMessageContext
 from kazusa_ai_chatbot.time_boundary import LocalTimeContextDoc
 
@@ -83,6 +88,9 @@ class IMProcessState(TypedDict):
     platform_message_id: str     # Original platform message ID when available
     active_turn_platform_message_ids: NotRequired[list[str]]
     active_turn_conversation_row_ids: NotRequired[list[str]]
+    active_turn_conversation_source_refs: NotRequired[
+        list[ConversationProgressSourceRefV2]
+    ]
     platform_user_id: str        # Original platform user ID (e.g. Discord snowflake)
     global_user_id: str          # Internal UUID4 from user_profiles collection
 
@@ -141,8 +149,13 @@ class IMProcessState(TypedDict):
     use_reply_feature: Annotated[bool, keep_true]
     channel_topic: str
     indirect_speech_context: str  # Only populated for Situation B (user talks about the character to others)
-    conversation_episode_state: NotRequired[ConversationEpisodeStateDoc | None]
-    conversation_progress: NotRequired[ConversationProgressPromptDoc]
+    conversation_episode_state: NotRequired[ConversationProgressStateV2 | None]
+    conversation_progress: NotRequired[ConversationProgressPromptV2]
+    ambient_logical_turns: NotRequired[list[ConversationLogicalTurnV1]]
+    interaction_logical_turns: NotRequired[list[ConversationLogicalTurnV1]]
+    conversation_progress_diagnostics: NotRequired[
+        ConversationProgressLoadDiagnosticsV2
+    ]
     promoted_reflection_context: NotRequired[dict]
     internal_monologue_residue_context: NotRequired[str]
     past_dialog_cognition_context: NotRequired[str]

@@ -112,7 +112,6 @@ HOWTO. One working-style configuration looks like this:
 | `COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE` | `local-model`            | `http://localhost:1234/v1` |
 | `COGNITION_LLM_GOAL_ORDINARY_RESPONSE` | `local-model`                 | `http://localhost:1234/v1` |
 | `COGNITION_LLM_GOAL_ACTIVE_BRANCH` | `local-model`                      | `http://localhost:1234/v1` |
-| `COGNITION_LLM_REQUIRED_SELECTION_VERIFIER` | `local-model`             | `http://localhost:1234/v1` |
 | `COGNITION_LLM_WORKSPACE_COLLAPSE` | `local-model`                       | `http://localhost:1234/v1` |
 | `COGNITION_LLM_ACTION_PLANNING` | `local-model`                          | `http://localhost:1234/v1` |
 | `COGNITION_LLM_ACTION_AUTHORIZATION` | `local-model`                     | `http://localhost:1234/v1` |

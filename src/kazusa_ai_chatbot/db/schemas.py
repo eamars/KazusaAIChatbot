@@ -7,6 +7,7 @@ function signatures across the ``db.*`` submodules. Schemas use
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal, TypedDict
 
 from kazusa_ai_chatbot.character_identity_growth.models import (
@@ -107,61 +108,98 @@ class ConversationMessageDoc(TypedDict, total=False):
     embedding: list[float]     # Dense vector (on text content only)
 
 
-class ConversationEpisodeEntryDoc(TypedDict, total=False):
-    """One short-term episode entry with first-seen metadata."""
+class ConversationProgressSourceRefDoc(TypedDict):
+    """Source-lineage alias stored inside one progress event."""
 
-    text: str
-    first_seen_at: str
+    ref_kind: Literal['conversation_row', 'llm_trace']
+    ref_id: str
+    occurred_at: str
 
 
-class ConversationInteractionObligationDoc(TypedDict, total=False):
-    """One actor-preserving interaction obligation with lifecycle metadata."""
+class ConversationProgressEventDoc(TypedDict):
+    """Exact stored semantic event snapshot."""
 
+    event_id: str
+    semantic_summary: str
+    is_obligation: bool
     actor: str
     action: str
+    object: str
     beneficiary: str
     precondition: str
-    expected_outcome: str
-    status: Literal["active", "resolved", "superseded"]
-    source_kind: Literal[
-        "user_input",
-        "assistant_response",
-        "mutual_exchange",
+    state: Literal[
+        'open',
+        'in_progress',
+        'completed',
+        'rejected',
+        'superseded',
     ]
+    outcome: str
+    retention: Literal[
+        'decision_critical',
+        'active_scene',
+        'background',
+    ]
+    source_refs: list[ConversationProgressSourceRefDoc]
     first_seen_at: str
+    updated_at: str
 
 
-class ConversationEpisodeStateDoc(TypedDict, total=False):
-    """Short-lived operational progress state for one user/channel episode."""
+class ConversationEpisodeStateDoc(TypedDict):
+    """Exact V2 document in ``conversation_episode_state``."""
 
+    schema_version: Literal['conversation_progress.v2']
     episode_state_id: str
     platform: str
     platform_channel_id: str
     global_user_id: str
-    status: str
-    episode_label: str
-    continuity: str
-    conversation_mode: str
-    episode_phase: str
-    topic_momentum: str
+    status: Literal['active', 'suspended', 'closed']
+    continuity: Literal[
+        'same_episode',
+        'related_shift',
+        'sharp_transition',
+    ]
+    turn_count: int
+    episode_narrative: str
     current_thread: str
+    character_stance: str
     user_goal: str
     current_blocker: str
-    user_state_updates: list[ConversationEpisodeEntryDoc]
-    assistant_moves: list[str]
-    overused_moves: list[str]
-    open_loops: list[ConversationEpisodeEntryDoc]
-    interaction_obligations: list[ConversationInteractionObligationDoc]
-    resolved_threads: list[ConversationEpisodeEntryDoc]
-    avoid_reopening: list[ConversationEpisodeEntryDoc]
     emotional_trajectory: str
-    next_affordances: list[str]
-    progression_guidance: str
-    turn_count: int
-    last_user_input: str
+    events: list[ConversationProgressEventDoc]
+    overused_moves: list[str]
+    recent_turn_refs: list[str]
+    compacted_block_refs: list[str]
     created_at: str
     updated_at: str
     expires_at: str
+    purge_after: datetime
+
+
+class ConversationEpisodeBlockDoc(TypedDict):
+    """Exact compacted document in ``conversation_episode_blocks``."""
+
+    schema_version: Literal['conversation_progress_block.v1']
+    block_id: str
+    episode_state_id: str
+    platform: str
+    platform_channel_id: str
+    global_user_id: str
+    level: int
+    source_turn_count: int
+    covered_turn_refs: list[str]
+    source_block_ids: list[str]
+    narrative: str
+    events: list[ConversationProgressEventDoc]
+    semantic_keys: list[str]
+    source_started_at: str
+    source_ended_at: str
+    content_hash: str
+    superseded_by_block_id: str
+    embedding: list[float]
+    created_at: str
+    expires_at: str
+    purge_after: datetime
 
 
 class InternalMonologueResidueSourceRefDoc(TypedDict, total=False):

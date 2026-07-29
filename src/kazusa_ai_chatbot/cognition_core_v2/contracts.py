@@ -716,7 +716,6 @@ class CognitionCoreServicesV2:
     appraisal_existential_drive_config: LLMCallConfig
     goal_ordinary_response_config: LLMCallConfig
     goal_active_branch_config: LLMCallConfig
-    required_selection_verifier_config: LLMCallConfig
     workspace_collapse_config: LLMCallConfig
     action_planning_config: LLMCallConfig
     action_authorization_config: LLMCallConfig
@@ -2207,7 +2206,7 @@ def _validate_scene_context(value: Any) -> None:
     _require_bounded_text(
         value["conversation_continuity"],
         "scene context.conversation_continuity",
-        maximum=1000,
+        maximum=2200,
     )
 
 

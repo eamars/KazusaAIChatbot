@@ -149,7 +149,7 @@ intention, admitted/supporting bids, semantic affect and relationship
 projections, action requests, resolver requests, progress, expression policy,
 diagnostics, and bounded residue.
 
-The connector constructs thirteen independent required Core V2 route
+The connector constructs twelve independent required Core V2 route
 bindings:
 
 ```text
@@ -161,7 +161,6 @@ COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY
 COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE
 COGNITION_LLM_GOAL_ORDINARY_RESPONSE
 COGNITION_LLM_GOAL_ACTIVE_BRANCH
-COGNITION_LLM_REQUIRED_SELECTION_VERIFIER
 COGNITION_LLM_WORKSPACE_COLLAPSE
 COGNITION_LLM_ACTION_PLANNING
 COGNITION_LLM_ACTION_AUTHORIZATION
@@ -306,18 +305,18 @@ back to candidate two, then candidate one. Only zero usable candidates is
 unrecoverable. The persona graph follows the normal post-turn path with the
 selected dialog and retained valid surface.
 
-Before this dialog boundary, a typed character-owned required selection also
-activates one focused goal-level check. It prevents private continuity or a
-general submissive posture from delegating the current character's required
-choice to the user. Dialog's corresponding focused check reads the canonical
-nested `percept.content.response_operation` and owns only explicit
-selection-owner transfer and actor/target reversal. Semantic completeness,
-brevity, and specificity remain with semantic fidelity and the L3 surface
-owner. A character-owned desire, request, or imperative can name the selected
-action, and speaking or sending content counts as an action when the typed
-operation requires it. A rejected goal is regenerated from clean
-typed/current context and rechecked; turns without the structural flag add no
-call.
+Before this dialog boundary, a typed character-owned required selection routes
+the selected goal branch to one specialized producer in place of its generic
+goal prompt. The producer emits one authoritative selection and accounts for
+every supplied conversation-evidence handle. Structural retries reuse that
+same goal owner; no semantic evaluator or replacement owner is added. Dialog's
+corresponding focused check reads the canonical nested
+`percept.content.response_operation` and owns only explicit selection-owner
+transfer and actor/target reversal. Semantic completeness, brevity, and
+specificity remain with semantic fidelity and the L3 surface owner. A
+character-owned desire, request, or imperative can name the selected action,
+and speaking or sending content counts as an action when the typed operation
+requires it. Turns without the structural flag use the generic goal producer.
 
 Dialog does not receive raw V2 mutable state, private branch payloads,
 suppressed bids, persistent handles, relationship scalars, or obsolete

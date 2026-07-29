@@ -70,10 +70,6 @@ STAGE_ROUTES = (
         "COGNITION_LLM_GOAL_ACTIVE_BRANCH",
     ),
     (
-        "required_selection_verifier_config",
-        "COGNITION_LLM_REQUIRED_SELECTION_VERIFIER",
-    ),
-    (
         "workspace_collapse_config",
         "COGNITION_LLM_WORKSPACE_COLLAPSE",
     ),
@@ -179,9 +175,6 @@ def _services(llm: _CapturingInvoker) -> CognitionCoreServicesV2:
         goal_active_branch_config=_config(
             "COGNITION_LLM_GOAL_ACTIVE_BRANCH"
         ),
-        required_selection_verifier_config=_config(
-            "COGNITION_LLM_REQUIRED_SELECTION_VERIFIER"
-        ),
         workspace_collapse_config=_config(
             "COGNITION_LLM_WORKSPACE_COLLAPSE"
         ),
@@ -210,6 +203,22 @@ def _goal_draft() -> dict[str, object]:
         "target_role_handles": [],
         "evidence_handles": [],
         "expected_consequences": ["the interaction advances"],
+        "confidence": "high",
+    }
+
+
+def _selection_goal_draft() -> dict[str, object]:
+    """Build one authoritative required-selection producer response."""
+
+    return {
+        "selection_kind": "choice",
+        "selection": "choose one concrete current action",
+        "reason": "the typed operation gives the character selection ownership",
+        "private_monologue": "I will make this choice directly.",
+        "target_role_handles": [],
+        "evidence_handles": ["e1"],
+        "conversation_evidence_relations": [],
+        "expected_consequences": ["the user receives one concrete choice"],
         "confidence": "high",
     }
 
@@ -418,20 +427,28 @@ async def test_goal_branches_reuse_their_own_route_for_repairs_and_trace(
 
 
 @pytest.mark.asyncio
-async def test_selection_bid_repair_uses_goal_route_and_verifier_recheck() -> None:
-    """Selection regeneration stays goal-owned while rechecks use verifier."""
+async def test_selection_producer_retry_reuses_goal_route_and_trace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Structural retries stay on the one producing goal route."""
 
+    trace_recorder = AsyncMock()
+    monkeypatch.setattr(
+        goal_cognition.llm_tracing,
+        "record_llm_trace_step",
+        trace_recorder,
+    )
+    monkeypatch.setattr(
+        goal_cognition.llm_tracing,
+        "current_trace_id",
+        lambda: "trace-selection-routing",
+    )
     llm = _CapturingInvoker([
-        {
-            "aligned": False,
-            "issues": ["The candidate delegates the character-owned choice."],
-        },
-        _goal_draft(),
-        {"aligned": True, "issues": []},
+        {"selection": ""},
+        _selection_goal_draft(),
     ])
     services = _services(llm)
-    goal_config = services.goal_active_branch_config
-    verifier_config = services.required_selection_verifier_config
+    expected_config = services.goal_active_branch_config
     evidence = [{
         "evidence_handle": "e1",
         "evidence_ref": {
@@ -450,96 +467,37 @@ async def test_selection_bid_repair_uses_goal_route_and_verifier_recheck() -> No
         "visible_to": ["q:event_agency"],
     }]
 
-    result = await goal_cognition._enforce_required_selection_alignment(
-        definition=DEFAULT_BRANCH_DEFINITIONS["autonomy_boundary"],
-        draft=_goal_draft(),
-        semantic_context={
-            "role_summaries": {},
-            "character_identity": {
-                "personality": {
-                    "logic": "verify necessary evidence before acting",
-                },
-            },
-            "scene_context": {
-                "conversation_continuity": "an old decision favored acting",
-            },
-        },
-        evidence=evidence,
-        evidence_handles={"e1"},
-        role_handles=set(),
-        services=services,
-        goal_config=goal_config,
+    result = await goal_cognition.run_goal_cognition(
+        DEFAULT_BRANCH_DEFINITIONS["autonomy_boundary"],
+        {"scope": "user", "kind": "goal", "entity_id": "g1"},
+        {"_role_bindings": {}, "role_summaries": {}},
+        evidence,
+        services,
     )
 
-    assert result == _goal_draft()
-    assert llm.configs == [
-        verifier_config,
-        goal_config,
-        verifier_config,
-    ]
-    verifier_payload = json.loads(str(llm.messages[0][-1].content))
-    assert verifier_payload["semantic_context"] == {
-        "character_identity": {
-            "personality": {
-                "logic": "verify necessary evidence before acting",
-            },
-        },
-        "scene_context": {
-            "conversation_continuity": "an old decision favored acting",
-        },
-    }
-
-
-@pytest.mark.asyncio
-async def test_required_selection_verifier_reuses_its_route_for_retry_and_trace(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Verifier retries and protected traces use the verifier route."""
-
-    trace_recorder = AsyncMock()
-    monkeypatch.setattr(
-        goal_cognition.llm_tracing,
-        "record_llm_trace_step",
-        trace_recorder,
-    )
-    monkeypatch.setattr(
-        goal_cognition.llm_tracing,
-        "current_trace_id",
-        lambda: "trace-selection-routing",
-    )
-    llm = _CapturingInvoker([
-        {"aligned": "yes", "issues": []},
-        {"aligned": True, "issues": []},
-    ])
-    services = _services(llm)
-    expected_config = services.required_selection_verifier_config
-
-    verdict = await goal_cognition._verify_required_selection_bid(
-        definition=DEFAULT_BRANCH_DEFINITIONS["ordinary_response"],
-        draft=_goal_draft(),
-        required_operations=[{
-            "response_operation": {
-                "selection_required": True,
-                "selection_owner_role": "character",
-            },
-        }],
-        semantic_context={
-            "character_identity": {
-                "personality": {
-                    "logic": "verify necessary evidence before acting",
-                },
-            },
-        },
-        services=services,
-        stage_suffix="selection_verifier",
-    )
-
-    assert verdict == {"aligned": True, "issues": []}
+    assert result["intention"] == _selection_goal_draft()["selection"]
     assert llm.configs == [expected_config, expected_config]
+    assert all(
+        messages[0].content == goal_cognition.REQUIRED_SELECTION_GOAL_PROMPT
+        for messages in llm.messages
+    )
     assert [
         call.kwargs["route_name"]
         for call in trace_recorder.await_args_list
     ] == [expected_config.route_name, expected_config.route_name]
+
+
+def test_required_selection_has_no_independent_model_route() -> None:
+    """Keep selection production on the selected goal branch route."""
+
+    service_fields = {
+        field.name for field in fields(CognitionCoreServicesV2)
+    }
+    assert "required_selection_verifier_config" not in service_fields
+    assert all(
+        route_name != "COGNITION_LLM_REQUIRED_SELECTION_VERIFIER"
+        for _field_name, route_name in STAGE_ROUTES
+    )
 
 
 @pytest.mark.asyncio

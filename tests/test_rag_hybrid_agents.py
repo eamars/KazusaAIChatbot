@@ -97,7 +97,8 @@ async def test_conversation_search_tool_fuses_semantic_and_keyword_rows(
             "literal_anchors": ["GPU"],
             "platform_channel_id": "channel-1",
             "top_k": 20,
-        }
+        },
+        {},
     )
 
     assert semantic_tool.calls[0]["search_query"] == "GPU market-share discussion"

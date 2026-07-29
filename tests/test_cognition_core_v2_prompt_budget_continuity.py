@@ -843,6 +843,84 @@ def test_goal_exact_cap_and_cap_plus_one_are_distinct() -> None:
         )
 
 
+def test_required_selection_budget_preserves_mandatory_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fail before a call instead of erasing required selection facts."""
+
+    required_operation_text = "required operation " + ("R" * 300)
+    required_progress_text = (
+        "completed event; actor=user; action=finish; object=prior choice; "
+        + ("P" * 300)
+    )
+    optional_text = "O" * 1000
+
+    def _payload() -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        evidence_rows = [{
+            "handle": "e1",
+            "source_kind": "episode",
+            "semantic_text": required_operation_text,
+        }, {
+            "handle": "e2",
+            "source_kind": "conversation_evidence",
+            "semantic_text": required_progress_text,
+        }, {
+            "handle": "e3",
+            "source_kind": "conversation_evidence",
+            "semantic_text": optional_text,
+        }]
+        return {
+            "branch": {},
+            "goal": {},
+            "semantic_context": {},
+            "evidence": evidence_rows,
+            "role_handles": [],
+            "role_summaries": {},
+            "required_selection_operations": [{
+                "evidence_handle": "e1",
+            }],
+            "conversation_progress_event_handles": ["e2"],
+        }, evidence_rows
+
+    payload, evidence_rows = _payload()
+    serialized_chars = len(json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+    ))
+    optional_floor = goal_cognition_module.MIN_PROMPT_EVIDENCE_TEXT_CHARS
+    optional_reduction = len(optional_text) - optional_floor
+    exact_optional_floor = serialized_chars - optional_reduction
+    monkeypatch.setattr(
+        goal_cognition_module,
+        "GOAL_COGNITION_PROMPT_CAP",
+        exact_optional_floor,
+    )
+
+    fitted = goal_cognition_module._fit_goal_prompt_payload(
+        payload,
+        evidence_rows,
+    )
+    fitted_evidence = json.loads(fitted)["evidence"]
+
+    assert fitted_evidence[0]["semantic_text"] == required_operation_text
+    assert fitted_evidence[1]["semantic_text"] == required_progress_text
+    assert len(fitted_evidence[2]["semantic_text"]) == optional_floor
+
+    payload, evidence_rows = _payload()
+    monkeypatch.setattr(
+        goal_cognition_module,
+        "GOAL_COGNITION_PROMPT_CAP",
+        exact_optional_floor - 1,
+    )
+
+    with pytest.raises(PromptBudgetError):
+        goal_cognition_module._fit_goal_prompt_payload(
+            payload,
+            evidence_rows,
+        )
+
+
 @pytest.mark.parametrize(
     ("payload", "message"),
     [
@@ -990,48 +1068,17 @@ async def test_goal_prompt_fits_maximum_evidence_without_duplication() -> None:
 
 
 @pytest.mark.asyncio
-async def test_required_selection_verifier_overflow_is_unavailable() -> None:
-    """Verifier preflight overflow consumes no model call and returns unknown."""
-
-    llm = _NoCallLLM()
-    required_operations = [
-        {
-            "role_explicit_content": f"selection context {index} " + ("x" * 400),
-            "response_operation": {
-                "operation": f"make selection {index} " + ("y" * 400),
-                "selection_required": True,
-                "selection_owner_role": "current character",
-            },
-        }
-        for index in range(1, 17)
-    ]
-
-    verdict = await goal_cognition_module._verify_required_selection_bid(
-        definition=DEFAULT_BRANCH_DEFINITIONS["ordinary_response"],
-        draft=_valid_goal_draft(),
-        required_operations=required_operations,
-        semantic_context={
-            "character_identity": {
-                "personality": {"logic": "use current evidence"},
-            },
-        },
-        services=SimpleNamespace(
-            llm=llm,
-            required_selection_verifier_config=object(),
-        ),
-        stage_suffix="selection_verifier",
-    )
-
-    assert verdict is None
-    assert llm.call_count == 0
-
-
-@pytest.mark.asyncio
-async def test_required_selection_repair_overflow_fails_closed(
+async def test_required_selection_producer_overflow_fails_before_call(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Repair preflight overflow cannot accept a contradicted selection."""
+    """Selection production honors the same aggregate preflight cap."""
 
+    llm = _NoCallLLM()
+    monkeypatch.setattr(
+        goal_cognition_module,
+        "GOAL_COGNITION_PROMPT_CAP",
+        1,
+    )
     selection_operation = json.dumps({
         "role_explicit_content": "the current character must choose",
         "response_operation": {
@@ -1040,46 +1087,52 @@ async def test_required_selection_repair_overflow_fails_closed(
             "selection_owner_role": "current character",
         },
     })
-    evidence = _maximum_evidence()
-    evidence[0]["evidence_ref"]["source_kind"] = "episode"
-    evidence[0]["semantic_text"] = selection_operation
-    verifier = AsyncMock(return_value={
-        "aligned": False,
-        "issues": ["the current bid delegates the required selection"],
-    })
-    monkeypatch.setattr(
-        goal_cognition_module,
-        "_verify_required_selection_bid",
-        verifier,
-    )
-    llm = _NoCallLLM()
-    draft = _valid_goal_draft()
+    evidence = [{
+        "evidence_handle": "e1",
+        "evidence_ref": {
+            "source_kind": "episode",
+            "source_id": "episode-1",
+            "occurred_at": "2026-07-15T00:00:00Z",
+            "semantic_summary": selection_operation,
+        },
+        "semantic_text": selection_operation,
+        "visible_to": ["q:event_agency"],
+    }]
 
-    with pytest.raises(
-        CognitionExecutionError,
-        match="required selection alignment",
-    ):
-        await goal_cognition_module._enforce_required_selection_alignment(
-            definition=DEFAULT_BRANCH_DEFINITIONS["ordinary_response"],
-            draft=draft,
-            semantic_context={
+    with pytest.raises(CognitionExecutionError) as error_info:
+        await goal_cognition_module.run_goal_cognition(
+            DEFAULT_BRANCH_DEFINITIONS["ordinary_response"],
+            {"scope": "user", "kind": "goal", "entity_id": "goal:test"},
+            {
                 "_role_bindings": {},
                 "role_summaries": {},
-                "character_identity": {
-                    "personality": {"logic": "use current evidence"},
-                },
             },
-            evidence=evidence,
-            evidence_handles={
-                row["evidence_handle"] for row in evidence
-            },
-            role_handles=set(),
-            services=SimpleNamespace(llm=llm),
-            goal_config=object(),
+            evidence,
+            SimpleNamespace(
+                llm=llm,
+                goal_ordinary_response_config=object(),
+            ),
         )
 
-    assert verifier.await_count == 1
+    assert error_info.value.error_code == "goal_cognition_context_limit"
     assert llm.call_count == 0
+
+
+def test_required_selection_has_no_semantic_repair_surface() -> None:
+    """Keep evaluator and replacement ownership absent from the module."""
+
+    assert not hasattr(
+        goal_cognition_module,
+        "_verify_required_selection_bid",
+    )
+    assert not hasattr(
+        goal_cognition_module,
+        "_enforce_required_selection_alignment",
+    )
+    assert not hasattr(
+        goal_cognition_module,
+        "REQUIRED_SELECTION_REPAIR_PROMPT",
+    )
 
 
 @pytest.mark.asyncio

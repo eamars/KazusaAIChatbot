@@ -675,6 +675,40 @@ async def test_active_turn_conversation_row_ids_skip_empty_and_dedupe() -> None:
 
 
 @pytest.mark.asyncio
+async def test_active_turn_source_refs_preserve_each_row_timestamp() -> None:
+    """Collapsed input lineage keeps each persisted row's own UTC time."""
+
+    survivor = _item(
+        1,
+        storage_timestamp_utc='2026-04-29T00:00:01+00:00',
+    )
+    collapsed = _item(
+        2,
+        storage_timestamp_utc='2026-04-29T00:00:09+00:00',
+    )
+    survivor.conversation_row_id = 'row-1'
+    collapsed.conversation_row_id = 'row-2'
+    survivor.collapsed_items = [collapsed]
+
+    source_refs = brain_intake.active_turn_conversation_source_refs(
+        survivor
+    )
+
+    assert source_refs == [
+        {
+            'ref_kind': 'conversation_row',
+            'ref_id': 'row-1',
+            'occurred_at': '2026-04-29T00:00:01+00:00',
+        },
+        {
+            'ref_kind': 'conversation_row',
+            'ref_id': 'row-2',
+            'occurred_at': '2026-04-29T00:00:09+00:00',
+        },
+    ]
+
+
+@pytest.mark.asyncio
 async def test_active_three_message_burst_is_not_threshold_pruned() -> None:
     """Every active message survives regardless of address metadata."""
 
@@ -1294,10 +1328,10 @@ async def test_precommit_cognition_failure_retries_once_then_succeeds(
             self.call_count += 1
             if self.call_count == 1:
                 raise service_module.CognitionExecutionError(
-                    "selection alignment exhausted",
-                    error_code="required_selection_alignment_exhausted",
+                    "selection goal structure exhausted",
+                    error_code="goal_bid_structure_exhausted",
                     branch_id="ordinary_response",
-                    stage="goal_cognition.required_selection_alignment",
+                    stage="goal_cognition",
                     attempt_count=3,
                     safe_checkpoint="pre_state_commit",
                     retryable=True,
@@ -1448,10 +1482,10 @@ async def test_precommit_cognition_retry_exhaustion_returns_operational_error(
         async def ainvoke(self, _state):
             self.call_count += 1
             raise service_module.CognitionExecutionError(
-                "selection alignment exhausted",
-                error_code="required_selection_alignment_exhausted",
+                "selection goal structure exhausted",
+                error_code="goal_bid_structure_exhausted",
                 branch_id="ordinary_response",
-                stage="goal_cognition.required_selection_alignment",
+                stage="goal_cognition",
                 attempt_count=3,
                 safe_checkpoint="pre_state_commit",
                 retryable=True,
@@ -1498,7 +1532,7 @@ async def test_precommit_cognition_retry_exhaustion_returns_operational_error(
     assert response.delivery_tracking_id == ""
     assert response.operational_error is not None
     assert response.operational_error.error_code == (
-        "required_selection_alignment_exhausted"
+        "goal_bid_structure_exhausted"
     )
     assert response.operational_error.status == "exhausted"
     assert response.operational_error.attempt_count == 3
@@ -2391,6 +2425,18 @@ async def test_worker_saves_collapsed_messages_before_graph(monkeypatch) -> None
     assert captured_state["active_turn_conversation_row_ids"] == [
         "row-1",
         "row-2",
+    ]
+    assert captured_state["active_turn_conversation_source_refs"] == [
+        {
+            "ref_kind": "conversation_row",
+            "ref_id": "row-1",
+            "occurred_at": first.storage_timestamp_utc,
+        },
+        {
+            "ref_kind": "conversation_row",
+            "ref_id": "row-2",
+            "occurred_at": second.storage_timestamp_utc,
+        },
     ]
     assert first.conversation_row_id == "row-1"
     assert second.conversation_row_id == "row-2"

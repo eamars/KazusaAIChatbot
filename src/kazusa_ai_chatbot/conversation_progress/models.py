@@ -1,106 +1,368 @@
-"""Public type contracts for the conversation-progress module."""
+"""Canonical public contracts for short-term conversation progress."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, TypedDict
-
-from kazusa_ai_chatbot.db.schemas import BoundaryProfileDoc, ConversationEpisodeStateDoc
+from datetime import datetime
+from typing import Literal, NotRequired, TypedDict
 
 
 @dataclass(frozen=True)
 class ConversationProgressScope:
-    """Stable per-user/channel scope for short-term conversation progress.
-
-    Args:
-        platform: Runtime platform key, such as ``"qq"`` or ``"discord"``.
-        platform_channel_id: Runtime channel/group/private-chat id.
-        global_user_id: Internal user UUID for the current speaker.
-    """
+    """Stable per-user/channel scope for short-term conversation progress."""
 
     platform: str
     platform_channel_id: str
     global_user_id: str
 
 
-class ConversationProgressEntry(TypedDict):
-    """Prompt-facing entry with relative age."""
+class ConversationLogicalTurnV1(TypedDict):
+    """One complete speaker turn assembled from canonical conversation rows."""
 
-    text: str
-    age_hint: str
+    turn_id: str
+    role: Literal['user', 'assistant']
+    occurred_at: str
+    display_name: str
+    fragments: list[str]
+    conversation_row_ids: list[str]
+    llm_trace_id: str
+    platform_user_id: str
+    global_user_id: str
+    addressed_to_global_user_ids: list[str]
+    broadcast: bool
+    reply_context: dict[str, object]
 
 
-class ConversationProgressObligation(TypedDict):
-    """Prompt-facing interaction obligation with explicit semantic roles."""
+class ConversationProgressSourceRefV2(TypedDict):
+    """Source-lineage reference for one progress event."""
 
+    ref_kind: Literal['conversation_row', 'llm_trace']
+    ref_id: str
+    occurred_at: str
+
+
+class ConversationProgressEventV2(TypedDict):
+    """One model-authored semantic event with code-owned lifecycle metadata."""
+
+    event_id: str
+    semantic_summary: str
+    is_obligation: bool
     actor: str
     action: str
+    object: str
     beneficiary: str
     precondition: str
-    expected_outcome: str
-    status: Literal["active", "resolved", "superseded"]
-    source_kind: Literal[
-        "user_input",
-        "assistant_response",
-        "mutual_exchange",
+    state: Literal[
+        'open',
+        'in_progress',
+        'completed',
+        'rejected',
+        'superseded',
     ]
-    age_hint: str
+    outcome: str
+    retention: Literal[
+        'decision_critical',
+        'active_scene',
+        'background',
+    ]
+    source_refs: list[ConversationProgressSourceRefV2]
+    first_seen_at: str
+    updated_at: str
 
 
-class ConversationProgressPromptDoc(TypedDict):
-    """Compact prompt-facing progress projection."""
+class ConversationProgressEventUpdateV2(TypedDict):
+    """Privately mapped event snapshot without code-owned timestamps."""
 
-    status: str
-    episode_label: str
-    continuity: str
-    turn_count: int
-    conversation_mode: str
-    episode_phase: str
-    topic_momentum: str
+    event_id: str
+    semantic_summary: str
+    is_obligation: bool
+    actor: str
+    action: str
+    object: str
+    beneficiary: str
+    precondition: str
+    state: Literal[
+        'open',
+        'in_progress',
+        'completed',
+        'rejected',
+        'superseded',
+    ]
+    outcome: str
+    retention: Literal[
+        'decision_critical',
+        'active_scene',
+        'background',
+    ]
+    source_refs: list[ConversationProgressSourceRefV2]
+
+
+class ConversationProgressExistingEventObservationV2(TypedDict):
+    """One explicit observation for a supplied prior event handle."""
+
+    event_handle: str
+    observation: Literal['unchanged', 'changed']
+    semantic_summary: NotRequired[str]
+    outcome: NotRequired[str]
+    lifecycle_change: NotRequired[Literal[
+        'none',
+        'began',
+        'concluded',
+        'declined',
+        'replaced',
+        'reopened',
+    ]]
+    relevance: NotRequired[Literal[
+        'decision',
+        'scene',
+        'history',
+    ]]
+    source_turn_handles: NotRequired[list[str]]
+
+
+class ConversationProgressNewEventObservationV2(TypedDict):
+    """One newly established event with concrete stable identity."""
+
+    semantic_summary: str
+    is_obligation: bool
+    actor: str
+    action: str
+    object: str
+    beneficiary: str
+    precondition: str
+    outcome: str
+    lifecycle_change: Literal[
+        'none',
+        'began',
+        'concluded',
+        'declined',
+        'replaced',
+    ]
+    relevance: Literal['decision', 'scene', 'history']
+    source_turn_handles: list[str]
+
+
+class ConversationProgressEventObservationBatchV2(TypedDict):
+    """Exact-coverage event reconciliation from the event specialist."""
+
+    schema_version: Literal[
+        'conversation_progress_event_observation_batch.v2'
+    ]
+    existing_events: list[ConversationProgressExistingEventObservationV2]
+    new_events: list[ConversationProgressNewEventObservationV2]
+
+
+class ConversationProgressSceneObservationV2(TypedDict):
+    """Scene-only facts from the independent scene specialist."""
+
+    schema_version: Literal['conversation_progress_scene_observation.v2']
+    scene_relation: Literal['same', 'related', 'new']
+    episode_change: Literal['none', 'paused', 'finished', 'resumed']
+    episode_narrative: str
     current_thread: str
+    character_stance: str
     user_goal: str
     current_blocker: str
-    user_state_updates: list[ConversationProgressEntry]
-    assistant_moves: list[str]
-    overused_moves: list[str]
-    open_loops: list[ConversationProgressEntry]
-    interaction_obligations: list[ConversationProgressObligation]
-    resolved_threads: list[ConversationProgressEntry]
-    avoid_reopening: list[ConversationProgressEntry]
     emotional_trajectory: str
-    next_affordances: list[str]
-    progression_guidance: str
+    overused_moves: list[str]
+
+
+class ConversationProgressSceneUpdateV2(TypedDict):
+    """Validated scene facts after deterministic enum mapping."""
+
+    continuity: Literal[
+        'same_episode',
+        'related_shift',
+        'sharp_transition',
+    ]
+    status: Literal['active', 'suspended', 'closed']
+    episode_narrative: str
+    current_thread: str
+    character_stance: str
+    user_goal: str
+    current_blocker: str
+    emotional_trajectory: str
+    overused_moves: list[str]
+
+
+class ConversationProgressStateV2(TypedDict):
+    """Replacement-written active episode packet."""
+
+    schema_version: Literal['conversation_progress.v2']
+    episode_state_id: str
+    platform: str
+    platform_channel_id: str
+    global_user_id: str
+    status: Literal['active', 'suspended', 'closed']
+    continuity: Literal[
+        'same_episode',
+        'related_shift',
+        'sharp_transition',
+    ]
+    turn_count: int
+    episode_narrative: str
+    current_thread: str
+    character_stance: str
+    user_goal: str
+    current_blocker: str
+    emotional_trajectory: str
+    events: list[ConversationProgressEventV2]
+    overused_moves: list[str]
+    recent_turn_refs: list[str]
+    compacted_block_refs: list[str]
+    created_at: str
+    updated_at: str
+    expires_at: str
+    purge_after: datetime
+
+
+class ConversationCompactionPlanV2(TypedDict):
+    """Code-owned structural selection for one immutable block."""
+
+    archive_event_ids: list[str]
+    covered_turn_refs: list[str]
+    source_block_ids: list[str]
+
+
+class ConversationProgressRecorderDeltaV2(TypedDict):
+    """Private validated delta applied by exact event ID."""
+
+    schema_version: Literal['conversation_progress_recorder_delta.v2']
+    continuity: Literal[
+        'same_episode',
+        'related_shift',
+        'sharp_transition',
+    ]
+    status: Literal['active', 'suspended', 'closed']
+    episode_narrative: str
+    current_thread: str
+    character_stance: str
+    user_goal: str
+    current_blocker: str
+    emotional_trajectory: str
+    event_updates: list[ConversationProgressEventUpdateV2]
+    overused_moves: list[str]
+
+
+class ConversationEpisodeBlockV1(TypedDict):
+    """Immutable compacted episode block with bounded mutable expiry fields."""
+
+    schema_version: Literal['conversation_progress_block.v1']
+    block_id: str
+    episode_state_id: str
+    platform: str
+    platform_channel_id: str
+    global_user_id: str
+    level: int
+    source_turn_count: int
+    covered_turn_refs: list[str]
+    source_block_ids: list[str]
+    narrative: str
+    events: list[ConversationProgressEventV2]
+    semantic_keys: list[str]
+    source_started_at: str
+    source_ended_at: str
+    content_hash: str
+    superseded_by_block_id: str
+    embedding: list[float]
+    created_at: str
+    expires_at: str
+    purge_after: datetime
+
+
+class ConversationProgressPromptV2(TypedDict):
+    """Bounded prompt-facing progress projection."""
+
+    schema_version: Literal['conversation_progress_prompt.v2']
+    episode_state_id: str
+    status: str
+    continuity: str
+    turn_count: int
+    current_thread: str
+    character_stance: str
+    user_goal: str
+    current_blocker: str
+    emotional_trajectory: str
+    episode_narrative: str
+    events: list[ConversationProgressEventV2]
+    overused_moves: list[str]
+    interaction_logical_turns: list[ConversationLogicalTurnV1]
+    compacted_block_refs: list[str]
+
+
+class ConversationProgressLoadDiagnosticsV2(TypedDict):
+    """Text-free diagnostic counters for load and record paths."""
+
+    schema_version: Literal['conversation_progress_diagnostics.v2']
+    ambient_rows_scanned: int
+    interaction_rows_scanned: int
+    ambient_turns_selected: int
+    interaction_turns_selected: int
+    incomplete_or_malformed_turn_count: int
+    packet_turn_count: int
+    active_event_count: int
+    decision_critical_event_count: int
+    block_ref_count: int
+    scene_chars: int
+    evidence_chars: int
+    compaction_requested: bool
+    compaction_level: int
+    recorder_call_count: int
+    event_attempt_count: int
+    scene_attempt_count: int
+    event_disposition: str
+    scene_disposition: str
+    write_disposition: str
 
 
 class ConversationProgressLoadResult(TypedDict):
-    """Result returned by ``load_progress_context``."""
+    """Result returned by the canonical load facade."""
 
-    episode_state: ConversationEpisodeStateDoc | None
-    conversation_progress: ConversationProgressPromptDoc
-    source: Literal["db", "cache", "empty"]
+    episode_state: ConversationProgressStateV2 | None
+    conversation_progress: ConversationProgressPromptV2
+    ambient_logical_turns: list[ConversationLogicalTurnV1]
+    interaction_logical_turns: list[ConversationLogicalTurnV1]
+    diagnostics: ConversationProgressLoadDiagnosticsV2
+    source: Literal['db', 'cache', 'empty']
 
 
 class ConversationProgressRecordInput(TypedDict):
-    """Input required to record one completed responsive turn."""
+    """Settled turn input for one post-turn recorder call."""
 
     scope: ConversationProgressScope
     storage_timestamp_utc: str
     character_name: str
-    prior_episode_state: ConversationEpisodeStateDoc | None
+    prior_episode_state: ConversationProgressStateV2 | None
     decontextualized_input: str
-    chat_history_recent: list[dict]
+    interaction_logical_turns: list[ConversationLogicalTurnV1]
+    current_turn_source_refs: list[ConversationProgressSourceRefV2]
+    turn_outcome: Literal['visible_response', 'cognition_silence']
     content_plan: dict[str, str]
     logical_stance: str
     character_intent: str
     final_dialog: list[str]
-    boundary_profile: BoundaryProfileDoc
+    boundary_profile: dict[str, object]
 
 
 class ConversationProgressRecordResult(TypedDict):
-    """Record result consumed by background telemetry."""
+    """Post-turn persistence outcome consumed by telemetry."""
 
     written: bool
     turn_count: int
     continuity: str
     status: str
     cache_updated: bool
+    diagnostics: ConversationProgressLoadDiagnosticsV2
+
+
+class ConversationProgressBlockSearchResultV1(TypedDict):
+    """Prompt-safe result from scoped active-block semantic search."""
+
+    source_kind: Literal['conversation_progress_block']
+    block_id: str
+    narrative: str
+    events: list[ConversationProgressEventV2]
+    source_started_at: str
+    source_ended_at: str
+    covered_turn_refs: list[str]
+    score: float

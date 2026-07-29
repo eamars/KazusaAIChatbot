@@ -17,8 +17,7 @@ from kazusa_ai_chatbot.cognition_core_v2.branch_activation import (
 )
 from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
     GOAL_COGNITION_PROMPT,
-    REQUIRED_SELECTION_REPAIR_PROMPT,
-    REQUIRED_SELECTION_VERIFIER_PROMPT,
+    REQUIRED_SELECTION_GOAL_PROMPT,
     run_goal_cognition,
 )
 from kazusa_ai_chatbot.cognition_core_v2.surface_stages import (
@@ -101,8 +100,7 @@ def test_live_character_prompts_fit_local_model_attention_caps() -> None:
     """Keep each semantic question bounded for the local dialog model."""
 
     assert len(GOAL_COGNITION_PROMPT) <= 2200
-    assert len(REQUIRED_SELECTION_VERIFIER_PROMPT) <= 800
-    assert len(REQUIRED_SELECTION_REPAIR_PROMPT) <= 900
+    assert len(REQUIRED_SELECTION_GOAL_PROMPT) <= 2400
     assert len(CONTENT_PLAN_SYSTEM_PROMPT) <= 2400
     assert len(PREFERENCE_SYSTEM_PROMPT) <= 1200
     assert len(dialog_module._V2_DIALOG_GENERATOR_PROMPT) <= 2700
@@ -240,8 +238,7 @@ def test_retired_blanket_suppression_is_absent() -> None:
 
     prompts = _normalized("\n".join((
         GOAL_COGNITION_PROMPT,
-        REQUIRED_SELECTION_VERIFIER_PROMPT,
-        REQUIRED_SELECTION_REPAIR_PROMPT,
+        REQUIRED_SELECTION_GOAL_PROMPT,
         CONTENT_PLAN_SYSTEM_PROMPT,
         dialog_module._V2_DIALOG_GENERATOR_PROMPT,
         getattr(dialog_module, "_V2_DIALOG_HARD_FAILURE_REPAIR_PROMPT", ""),
@@ -266,8 +263,7 @@ def test_runtime_prompts_contain_no_frozen_case_material() -> None:
 
     prompts = _normalized("\n".join((
         GOAL_COGNITION_PROMPT,
-        REQUIRED_SELECTION_VERIFIER_PROMPT,
-        REQUIRED_SELECTION_REPAIR_PROMPT,
+        REQUIRED_SELECTION_GOAL_PROMPT,
         CONTENT_PLAN_SYSTEM_PROMPT,
         PREFERENCE_SYSTEM_PROMPT,
         dialog_module._V2_DIALOG_GENERATOR_PROMPT,
@@ -409,7 +405,7 @@ async def _run_live_goal_case(
                 "relationship_and_affect_materially_influence_stance": True,
                 "prior_continuity_is_context_not_command": True,
             "character_agency_remains_visible": True,
-            "required_selection_alignment_checked": (
+            "required_selection_produced_directly": (
                 response_operation is not None
             ),
             },
@@ -452,11 +448,11 @@ async def test_live_goal_progresses_high_affinity_guarded_continuity() -> None:
 
 @pytest.mark.live_llm
 @pytest.mark.asyncio
-async def test_live_goal_repairs_private_selection_delegation() -> None:
-    """Strong submissive residue cannot transfer a character-owned choice."""
+async def test_live_goal_produces_private_required_selection() -> None:
+    """Strong submissive residue still receives one character-owned choice."""
 
     await _run_live_goal_case(
-        case_id="private_required_selection_alignment",
+        case_id="private_required_selection_production",
         current_event="我要亲口听你说你想让我做的下一步",
         relationship=(
             "双方长期高度亲密、信任且依恋，当前用户在亲密互动中处于主导位置。"

@@ -380,7 +380,6 @@ async def test_appraisal_prompt_excludes_current_event_provenance_ids() -> None:
         appraisal_existential_drive_config=config,
         goal_ordinary_response_config=config,
         goal_active_branch_config=config,
-        required_selection_verifier_config=config,
         workspace_collapse_config=config,
         action_planning_config=config,
         action_authorization_config=config,

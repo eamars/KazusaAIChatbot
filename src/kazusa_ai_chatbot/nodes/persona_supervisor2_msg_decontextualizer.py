@@ -25,8 +25,11 @@ from kazusa_ai_chatbot.config import (
     VISION_DESCRIPTOR_LLM_MAX_COMPLETION_TOKENS,
     VISION_DESCRIPTOR_LLM_THINKING_ENABLED,
 )
-from kazusa_ai_chatbot.conversation_history_prompt_projection import (
-    project_conversation_history_for_llm,
+from kazusa_ai_chatbot.conversation_progress import (
+    project_logical_turns_for_prompt,
+)
+from kazusa_ai_chatbot.conversation_progress.policy import (
+    MAX_AMBIENT_PROMPT_CHARS,
 )
 from kazusa_ai_chatbot.cognition_episode import (
     CognitiveEpisodeValidationError,
@@ -746,9 +749,9 @@ async def call_msg_decontextualizer(state: GlobalPersonaState) -> dict:
         "user_name": user_name,
         "platform_bot_id": state["platform_bot_id"],
         "prompt_message_context": state["prompt_message_context"],
-        "chat_history": project_conversation_history_for_llm(
-            state["chat_history_recent"],
-            character_name=character_name,
+        "chat_history": project_logical_turns_for_prompt(
+            state['ambient_logical_turns'],
+            maximum_chars=MAX_AMBIENT_PROMPT_CHARS,
         ),
         "channel_topic": project_channel_topic_text(
             channel_type=state.get("channel_type", ""),

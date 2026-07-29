@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from kazusa_ai_chatbot.rag.cache2_events import CacheDependency
@@ -191,6 +192,30 @@ def build_user_lookup_cache_key(display_name: str, context: dict[str, Any]) -> s
         },
     )
     return return_value
+
+
+def _active_progress_block_signature(
+    context: Mapping[str, object],
+) -> list[str]:
+    """Return exact active block refs for cache-key isolation and inspection."""
+
+    progress = context.get('conversation_progress')
+    packet = context.get('conversation_episode_state')
+    if not isinstance(progress, Mapping) or not isinstance(packet, Mapping):
+        return []
+    block_ids = progress.get('compacted_block_refs')
+    if (
+        packet.get('schema_version') != 'conversation_progress.v2'
+        or packet.get('status') != 'active'
+        or not isinstance(block_ids, list)
+        or block_ids != packet.get('compacted_block_refs')
+    ):
+        return []
+    return sorted(
+        block_id
+        for block_id in block_ids
+        if isinstance(block_id, str) and block_id
+    )
 
 
 def build_user_lookup_dependencies(
@@ -444,6 +469,9 @@ def _build_conversation_cache_key(
             "task": normalize_cache_text(task),
             "platform": scope["platform"],
             "platform_channel_id": scope["platform_channel_id"],
+            "active_progress_blocks": _active_progress_block_signature(
+                context
+            ),
         },
     )
     return return_value
@@ -576,6 +604,9 @@ def build_conversation_search_cache_key(task: str, context: dict[str, Any]) -> s
             "current_slot": normalize_cache_text(context.get("current_slot")),
             "platform": scope["platform"],
             "platform_channel_id": scope["platform_channel_id"],
+            "active_progress_blocks": _active_progress_block_signature(
+                context
+            ),
         },
     )
     return return_value

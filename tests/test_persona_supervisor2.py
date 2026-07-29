@@ -35,6 +35,33 @@ from tests.cognition_core_v2_test_helpers import canonical_episode
 NOW = "2026-07-14T00:00:00Z"
 
 
+def _logical_turn(
+    *,
+    turn_id: str,
+    role: str,
+    body_text: str,
+    platform_user_id: str,
+    global_user_id: str,
+    addressed_to_global_user_ids: list[str],
+) -> dict[str, object]:
+    """Build one complete logical turn for the persona boundary."""
+
+    return {
+        "turn_id": turn_id,
+        "role": role,
+        "occurred_at": NOW,
+        "display_name": global_user_id,
+        "fragments": [body_text],
+        "conversation_row_ids": [f"row-{turn_id}"],
+        "llm_trace_id": "",
+        "platform_user_id": platform_user_id,
+        "global_user_id": global_user_id,
+        "addressed_to_global_user_ids": addressed_to_global_user_ids,
+        "broadcast": False,
+        "reply_context": {},
+    }
+
+
 def test_decontextualizer_preserves_direct_imperative_roles() -> None:
     """A clear command keeps its implicit character subject and user pronouns."""
 
@@ -114,6 +141,13 @@ def _persona_state() -> dict[str, object]:
         "user_name": "Test User",
         "platform": "debug",
         "platform_message_id": "message-1",
+        "active_turn_platform_message_ids": ["message-1"],
+        "active_turn_conversation_row_ids": ["current-row-1"],
+        "active_turn_conversation_source_refs": [{
+            "ref_kind": "conversation_row",
+            "ref_id": "current-row-1",
+            "occurred_at": NOW,
+        }],
         "platform_user_id": "platform-user-1",
         "global_user_id": "user-1",
         "user_input": "hello",
@@ -154,6 +188,8 @@ def _persona_state() -> dict[str, object]:
         "channel_name": "",
         "chat_history_wide": [],
         "chat_history_recent": [],
+        "ambient_logical_turns": [],
+        "interaction_logical_turns": [],
         "reply_context": {},
         "should_respond": True,
         "indirect_speech_context": "",
@@ -885,6 +921,13 @@ async def test_persona_supervisor_returns_dialog_and_consolidation_snapshot(
     assert result["cognition_state_committed"] is True
     assert result["consolidation_state"]["decontextualized_input"] == "hello"
     assert result["consolidation_state"]["final_dialog"] == ["Hello."]
+    assert result["consolidation_state"][
+        "active_turn_conversation_source_refs"
+    ] == [{
+        "ref_kind": "conversation_row",
+        "ref_id": "current-row-1",
+        "occurred_at": NOW,
+    }]
     decontextualizer.assert_awaited_once()
     resolver.assert_awaited_once()
 
@@ -917,40 +960,38 @@ async def test_persona_supervisor_scopes_history_before_cognition(
     """Cognition sees only the current user's interaction history."""
 
     state = _persona_state()
-    state["chat_history_wide"] = [
-        {
-            "role": "user",
-            "platform_user_id": "platform-user-1",
-            "global_user_id": "user-1",
-            "body_text": "current user context",
-            "addressed_to_global_user_ids": ["character-1"],
-            "broadcast": False,
-            "mentions": [],
-            "reply_context": {},
-            "timestamp": NOW,
-        },
-        {
-            "role": "assistant",
-            "platform_user_id": "debug-bot",
-            "global_user_id": "character-1",
-            "body_text": "current user reply",
-            "addressed_to_global_user_ids": ["user-1"],
-            "broadcast": False,
-            "mentions": [],
-            "reply_context": {},
-            "timestamp": NOW,
-        },
-        {
-            "role": "user",
-            "platform_user_id": "platform-user-2",
-            "global_user_id": "user-2",
-            "body_text": "other user private context",
-            "addressed_to_global_user_ids": ["character-1"],
-            "broadcast": False,
-            "mentions": [],
-            "reply_context": {},
-            "timestamp": NOW,
-        },
+    current_user_turn = _logical_turn(
+        turn_id="current-user",
+        role="user",
+        body_text="current user context",
+        platform_user_id="platform-user-1",
+        global_user_id="user-1",
+        addressed_to_global_user_ids=["character-1"],
+    )
+    current_user_reply = _logical_turn(
+        turn_id="current-reply",
+        role="assistant",
+        body_text="current user reply",
+        platform_user_id="debug-bot",
+        global_user_id="character-1",
+        addressed_to_global_user_ids=["user-1"],
+    )
+    other_user_turn = _logical_turn(
+        turn_id="other-user",
+        role="user",
+        body_text="other user private context",
+        platform_user_id="platform-user-2",
+        global_user_id="user-2",
+        addressed_to_global_user_ids=["character-1"],
+    )
+    state["ambient_logical_turns"] = [
+        current_user_turn,
+        current_user_reply,
+        other_user_turn,
+    ]
+    state["interaction_logical_turns"] = [
+        current_user_turn,
+        current_user_reply,
     ]
     decontextualizer, resolver, _ = _patch_persona_graph_stages(
         monkeypatch,
@@ -960,8 +1001,11 @@ async def test_persona_supervisor_scopes_history_before_cognition(
     await persona_module.persona_supervisor2(state)
 
     decontextualizer_text = [
-        row["body_text"]
-        for row in decontextualizer.await_args.args[0]["chat_history_recent"]
+        fragment
+        for turn in decontextualizer.await_args.args[0][
+            "ambient_logical_turns"
+        ]
+        for fragment in turn["fragments"]
     ]
     resolver_text = [
         row["body_text"]

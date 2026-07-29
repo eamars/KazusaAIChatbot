@@ -34,6 +34,33 @@ _TARGET_PLATFORM_USER_ID = '673225019'
 _BOT_PLATFORM_USER_ID = '3768713357'
 
 
+def _logical_turns(history_rows: list[dict]) -> list[dict[str, object]]:
+    """Project row-shaped test evidence into complete logical turns."""
+
+    turns: list[dict[str, object]] = []
+    for index, row in enumerate(history_rows, start=1):
+        role = str(row.get('role', 'user'))
+        turns.append({
+            'turn_id': f'test-turn-{index}',
+            'role': role,
+            'occurred_at': str(row.get('timestamp', f't{index}')),
+            'display_name': str(
+                row.get('display_name', row.get('name', role))
+            ),
+            'fragments': [str(row.get('body_text', ''))],
+            'conversation_row_ids': [f'test-row-{index}'],
+            'llm_trace_id': '',
+            'platform_user_id': str(row.get('platform_user_id', '')),
+            'global_user_id': str(row.get('global_user_id', '')),
+            'addressed_to_global_user_ids': list(
+                row.get('addressed_to_global_user_ids', [])
+            ),
+            'broadcast': bool(row.get('broadcast', False)),
+            'reply_context': dict(row.get('reply_context', {})),
+        })
+    return turns
+
+
 def _base_state():
     """Minimal GlobalPersonaState for testing call_msg_decontextualizer."""
     return {
@@ -59,9 +86,9 @@ def _base_state():
             "addressed_to_global_user_ids": [],
             "broadcast": True,
         },
-        "chat_history_recent": [
+        "ambient_logical_turns": _logical_turns([
             {"name": "<speaker>", "user_id": "u1", "body_text": "The person mentioned earlier is cooking", "role": "user", "timestamp": "t1"},
-        ],
+        ]),
         "channel_type": "group",
         "channel_name": "",
         "channel_topic": "general chat",
@@ -115,6 +142,7 @@ def _multimedia_state() -> dict:
         "channel_name": "general",
         "chat_history_wide": [],
         "chat_history_recent": [],
+        "ambient_logical_turns": [],
         "reply_context": {},
         "debug_modes": {},
     }
@@ -504,7 +532,7 @@ def _qq_failure_state(chat_history_recent: list[dict]) -> dict:
                 'addressed_to_global_user_ids': [_TARGET_GLOBAL_USER_ID],
                 'broadcast': False,
             },
-            'chat_history_recent': chat_history_recent,
+            'ambient_logical_turns': _logical_turns(chat_history_recent),
             'channel_topic': '',
             'indirect_speech_context': '',
             'reply_context': {},
@@ -1045,11 +1073,11 @@ async def test_decontextualizer_forwards_reply_context_to_llm():
     state.update(
         {
             "user_input": "是的",
-            "chat_history_recent": [
+            "ambient_logical_turns": _logical_turns([
                 {"role": "assistant", "body_text": "你是想让我怎么定义你呀？是想要一个具体的评价，还是仅仅在随口试探……唔。"},
                 {"role": "user", "body_text": "要 active character 的具体评价"},
                 {"role": "assistant", "body_text": "评价这种事……你是说，要我说明白对你的看法吗？唔……突然问这些，感觉胸口闷闷的。"},
-            ],
+            ]),
             "message_envelope": {
                 "body_text": "是的",
                 "raw_wire_text": "是的",

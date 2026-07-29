@@ -88,7 +88,6 @@ _CORE_STAGE_CONFIG_FIELDS = (
     "appraisal_existential_drive_config",
     "goal_ordinary_response_config",
     "goal_active_branch_config",
-    "required_selection_verifier_config",
     "workspace_collapse_config",
     "action_planning_config",
     "action_authorization_config",

@@ -30,6 +30,29 @@ from kazusa_ai_chatbot.llm_interface import (
 logger = logging.getLogger(__name__)
 
 _IMAGE_DESCRIPTION_ELLIPSIS = "..."
+_HEADING_PREFIXED_JSON_KEY = re.compile(
+    r'(?m)^([ \t]*)#{1,6}[ \t]+([A-Za-z_][A-Za-z0-9_]*)"[ \t]*:'
+)
+_FENCED_JSON_OBJECT = re.compile(
+    r"```(?:json)?[ \t]*\r?\n?(.*?)```",
+    flags=re.IGNORECASE | re.DOTALL,
+)
+
+
+def _deterministic_json_candidates(raw_output: str) -> tuple[str, ...]:
+    """Return transport candidates with the newest fenced object first."""
+
+    fenced_objects = [
+        match.group(1).strip()
+        for match in _FENCED_JSON_OBJECT.finditer(raw_output)
+        if match.group(1).lstrip().startswith("{")
+    ]
+    if not fenced_objects:
+        return (raw_output,)
+
+    candidates = [*reversed(fenced_objects), raw_output]
+    return_value = tuple(candidates)
+    return return_value
 
 
 def _is_image_attachment(attachment: dict) -> bool:
@@ -513,46 +536,46 @@ def parse_llm_json_output(
         return return_value
 
     decoded_json_dict = {}
-    
-    try:
-        # Strip markdown fences and clean up
-        raw = raw_output.strip().strip("```").strip("json")
+    deterministic_error: Exception | None = None
+    deterministic_object_found = False
 
-        # Use repair_json which handles both valid and broken JSON
-        decoded_json_dict = repair_json(raw, return_objects=True)            
-    except Exception as exc:
+    for candidate in _deterministic_json_candidates(raw_output):
+        raw = candidate.strip().removeprefix("```json")
+        raw = raw.removeprefix("```").removesuffix("```").strip()
+        raw = _HEADING_PREFIXED_JSON_KEY.sub(
+            r'\1"\2":',
+            raw,
+        )
+
+        try:
+            candidate_result = repair_json(raw, return_objects=True)
+        except Exception as exc:
+            deterministic_error = exc
+            continue
+
+        if isinstance(candidate_result, dict):
+            decoded_json_dict = candidate_result
+            deterministic_object_found = True
+            break
+
+    if not deterministic_object_found:
         if deterministic_only:
-            logger.warning(f"Deterministic JSON parsing failed: {exc}")
-            return_value = {}
+            if deterministic_error is not None:
+                logger.warning(
+                    "Deterministic JSON parsing failed: %s",
+                    deterministic_error,
+                )
+            return_value = decoded_json_dict
             return return_value
 
-        logger.exception(
-            f"repair_json failed; falling back to LLM JSON repair: {exc}"
-        )
         try:
             decoded_json_dict = parse_json_with_llm(
                 raw_output,
                 expected_output_format=expected_output_format,
             )
-        except Exception as repair_exc:
-            logger.exception(f"LLM JSON repair failed: {repair_exc}")
+        except Exception as exc:
+            logger.exception(f"LLM JSON repair failed: {exc}")
             decoded_json_dict = {}
-
-    else:
-        # repair_json failed to do the work. Now try the LLM approach
-        if not isinstance(decoded_json_dict, dict):
-            if deterministic_only:
-                return_value = {}
-                return return_value
-
-            try:
-                decoded_json_dict = parse_json_with_llm(
-                    raw_output,
-                    expected_output_format=expected_output_format,
-                )
-            except Exception as exc:
-                logger.exception(f"LLM JSON repair failed: {exc}")
-                decoded_json_dict = {}
 
     if not isinstance(decoded_json_dict, dict):
         logger.error(

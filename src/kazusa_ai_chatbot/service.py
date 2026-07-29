@@ -75,8 +75,10 @@ from kazusa_ai_chatbot.cognition_episode import (
 )
 from kazusa_ai_chatbot.conversation_progress import (
     ConversationProgressScope,
+    ConversationProgressSourceRefV2,
     load_progress_context,
     record_turn_progress,
+    select_recordable_turn_outcome,
 )
 from kazusa_ai_chatbot.character_identity_growth.runtime import (
     load_latest_identity_for_episode,
@@ -578,6 +580,10 @@ async def load_conversation_episode_state(state: IMProcessState) -> dict:
     load_result = await load_progress_context(
         scope=scope,
         current_timestamp_utc=state["storage_timestamp_utc"],
+        platform_bot_id=state["platform_bot_id"],
+        active_turn_conversation_row_ids=list(
+            state.get("active_turn_conversation_row_ids", [])
+        ),
     )
     progress = load_result["conversation_progress"]
     logger.info(
@@ -616,6 +622,11 @@ async def load_conversation_episode_state(state: IMProcessState) -> dict:
     return_value = {
         "conversation_episode_state": load_result["episode_state"],
         "conversation_progress": load_result["conversation_progress"],
+        "ambient_logical_turns": load_result["ambient_logical_turns"],
+        "interaction_logical_turns": load_result[
+            "interaction_logical_turns"
+        ],
+        "conversation_progress_diagnostics": load_result["diagnostics"],
         "internal_monologue_residue_context": (
             residue_result["internal_monologue_residue_context"]
         ),
@@ -2656,6 +2667,7 @@ async def _deliver_accepted_task_result_episode(
                     [],
                 )
             ),
+            "active_turn_conversation_source_refs": [],
             "platform_user_id": requester_platform_user_id,
             "global_user_id": requester_global_user_id,
             "user_name": requester_display_name,
@@ -2814,6 +2826,15 @@ def _active_turn_conversation_row_ids(item: QueuedChatItem) -> list[str]:
     """
 
     return_value = brain_intake.active_turn_conversation_row_ids(item)
+    return return_value
+
+
+def _active_turn_conversation_source_refs(
+    item: QueuedChatItem,
+) -> list[ConversationProgressSourceRefV2]:
+    """Build exact row lineage for one survivor and its collapsed inputs."""
+
+    return_value = brain_intake.active_turn_conversation_source_refs(item)
     return return_value
 
 
@@ -3805,8 +3826,6 @@ _GRAPH_PROGRESS_FIELDS = frozenset(
         "resolved_threads",
         "avoid_reopening",
         "overused_moves",
-        "next_affordances",
-        "progression_guidance",
         "current_goal",
         "progress_note",
         "goal",
@@ -5086,6 +5105,9 @@ async def _process_queued_chat_item(
         is_collapsed_turn = bool(item.collapsed_items)
         active_turn_platform_message_ids = _active_turn_platform_message_ids(item)
         active_turn_conversation_row_ids = _active_turn_conversation_row_ids(item)
+        active_turn_conversation_source_refs = (
+            _active_turn_conversation_source_refs(item)
+        )
         character_profile = await _load_latest_character_profile_snapshot()
         character_name = _active_character_name()
         if (
@@ -5183,6 +5205,9 @@ async def _process_queued_chat_item(
             "platform_message_id": req.platform_message_id,
             "active_turn_platform_message_ids": active_turn_platform_message_ids,
             "active_turn_conversation_row_ids": active_turn_conversation_row_ids,
+            "active_turn_conversation_source_refs": (
+                active_turn_conversation_source_refs
+            ),
             "platform_user_id": req.platform_user_id,
             "global_user_id": global_user_id,
             "user_name": req.display_name,
@@ -5455,10 +5480,32 @@ async def _process_queued_chat_item(
             and bool(consolidation_state)
         )
         is_consolidatable = has_consolidatable_output(settled_trace)
-        should_record_progress = bool(final_dialog) and has_consolidation_state
+        raw_cognition_output = result.get("cognition_core_output")
+        cognition_output = (
+            raw_cognition_output
+            if isinstance(raw_cognition_output, Mapping)
+            else None
+        )
+        progress_turn_outcome = select_recordable_turn_outcome(
+            final_dialog=final_dialog,
+            episode_trace=settled_trace,
+            cognition_output=cognition_output,
+            relevance_approved=result.get("response_action") == "proceed",
+            consolidatable=is_consolidatable,
+            listen_only=bool(debug_modes.get("listen_only")),
+            pruned=False,
+        )
+        should_record_progress = (
+            progress_turn_outcome is not None
+            and has_consolidation_state
+        )
+        if consolidation_state_dict is not None:
+            consolidation_state_dict[
+                "conversation_progress_turn_outcome"
+            ] = progress_turn_outcome
         if should_record_progress:
             logger.debug(f'Background conversation progress recorder queued: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"}')
-        elif not final_dialog:
+        elif progress_turn_outcome is None:
             logger.info(f'Background conversation progress recorder skipped: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"} should_respond={result["should_respond"]} final_dialog_count=0')
         else:
             logger.warning(f'Background conversation progress recorder skipped: unexpected consolidation_state type={type(consolidation_state).__name__}')

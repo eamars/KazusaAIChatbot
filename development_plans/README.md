@@ -51,8 +51,9 @@ long_term/todo.md
 | Document | Type | Status |
 |---|---|---|
 | [cognition_core_v2_short_horizon_global_state_composition_bigbang_plan.md](active/bugfix/cognition_core_v2_short_horizon_global_state_composition_bigbang_plan.md) | Post-identity V2 plan for transient global posture, causal relationship context, scoped style composition, and runtime/UI proof | draft |
-| [conversation_progress_v2_long_thread_continuation_bigbang_plan.md](active/bugfix/conversation_progress_v2_long_thread_continuation_bigbang_plan.md) | High-risk in-place conversation-progress V2 plan for logical-turn history, source-backed event continuity, bounded compaction, and conditional retrieval | draft |
+| [conversation_progress_v2_final_signoff_plan.md](active/bugfix/conversation_progress_v2_final_signoff_plan.md) | Focused Conversation Progress V2 semantic-evidence and maximum-turn final sign-off plan | in_progress |
 | [rag2_public_output_contract_leak_bugfix_plan.md](active/bugfix/rag2_public_output_contract_leak_bugfix_plan.md) | Large RAG2 prompt/evidence contract bugfix plan | draft |
+| [relevance_evidence_grounded_admission_over_sensitivity_bugfix_plan.md](active/bugfix/relevance_evidence_grounded_admission_over_sensitivity_bugfix_plan.md) | Evidence-grounded recipient and character-state relevance admission bugfix plan | draft |
 
 ## Reference Documents
 
@@ -406,6 +407,19 @@ identity without rewriting historical conversation rows.
 |---|---|
 | Moved from active short-term to superseded archive | `cognition_core_v2_stage_4_production_database_migration_plan.md`; invalidated by user before execution |
 
+### 2026-07-30 Conversation Progress V2 closeout replacement
+
+The user replaced the long in-progress implementation plan with a focused
+final-signoff contract. Historical implementation detail remains preserved in
+the superseded record. The active successor requires a human-readable semantic
+proof of the original failure and an explicitly qualified maximum-turn
+projection without requiring raw-data review.
+
+| Outcome | Plans |
+|---|---|
+| Moved from active bugfix to superseded archive | `conversation_progress_v2_long_thread_continuation_bigbang_plan.md` |
+| Added to active bugfix | `conversation_progress_v2_final_signoff_plan.md` |
+
 ## Archive
 
 Completed and superseded records live under `archive/`. Use them for historical
@@ -643,6 +657,7 @@ plans.
 |---|
 | [character_reflection_cycle_stage1_plan.md](archive/superseded/character_reflection_cycle_stage1_plan.md) |
 | [conversation_graph_recent_context_plan.md](archive/superseded/conversation_graph_recent_context_plan.md) |
+| [conversation_progress_v2_long_thread_continuation_bigbang_plan.md](archive/superseded/conversation_progress_v2_long_thread_continuation_bigbang_plan.md) |
 | [cognition_preserving_goal_resolver_production_plan.md](archive/superseded/cognition_preserving_goal_resolver_production_plan.md) |
 | [cognition_core_v2_stage_4_production_database_migration_plan.md](archive/superseded/cognition_core_v2_stage_4_production_database_migration_plan.md) |
 | [dialog_visible_speech_and_semantic_fidelity_bugfix_plan.md](archive/superseded/dialog_visible_speech_and_semantic_fidelity_bugfix_plan.md) |

@@ -163,14 +163,6 @@ _ROUTES: tuple[BrainModelRouteDescriptor, ...] = (
         fallback_backed=False,
     ),
     BrainModelRouteDescriptor(
-        route_key="COGNITION_LLM_REQUIRED_SELECTION_VERIFIER",
-        env_prefix="COGNITION_LLM_REQUIRED_SELECTION_VERIFIER",
-        label="Required-selection verifier",
-        group="Cognition Core V2",
-        required=True,
-        fallback_backed=False,
-    ),
-    BrainModelRouteDescriptor(
         route_key="COGNITION_LLM_WORKSPACE_COLLAPSE",
         env_prefix="COGNITION_LLM_WORKSPACE_COLLAPSE",
         label="Workspace collapse",

@@ -16,10 +16,6 @@
       "total_attempt_limit": 3,
       "exhausted_disposition": "retry_graph"
     },
-    "required_selection_alignment": {
-      "total_attempt_limit": 3,
-      "exhausted_disposition": "accepted_degraded"
-    },
     "workspace_collapse": {
       "total_attempt_limit": 3,
       "exhausted_disposition": "accepted_degraded"

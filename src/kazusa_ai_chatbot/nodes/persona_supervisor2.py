@@ -24,9 +24,11 @@ from kazusa_ai_chatbot.accepted_task import (
     load_open_coding_run_contexts_for_scope,
 )
 from kazusa_ai_chatbot.config import (
-    CHAT_HISTORY_RECENT_LIMIT,
     COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS,
     COGNITION_RESOLVER_MAX_CYCLES,
+)
+from kazusa_ai_chatbot.conversation_progress import (
+    logical_turns_as_history_rows,
 )
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionExecutionError,
@@ -74,7 +76,6 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import (
 from kazusa_ai_chatbot.state import IMProcessState
 from kazusa_ai_chatbot.time_boundary import format_storage_utc_history_for_llm
 from kazusa_ai_chatbot.utils import (
-    build_interaction_history_recent,
     text_or_empty,
 )
 
@@ -707,23 +708,22 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         Dialog output and the persona-state snapshot used by background tasks.
     """
 
-    recent_channel_history_for_decontextualizer = format_storage_utc_history_for_llm(
-        state["chat_history_wide"]
-    )[-CHAT_HISTORY_RECENT_LIMIT:]
+    ambient_logical_turns = state['ambient_logical_turns']
+    interaction_logical_turns = state['interaction_logical_turns']
+    ambient_history = logical_turns_as_history_rows(
+        ambient_logical_turns
+    )
     scope_users = _build_scope_users(
         state,
-        recent_channel_history_for_decontextualizer,
+        ambient_history,
     )
-    raw_interaction_wide = build_interaction_history_recent(
-        state["chat_history_wide"],
-        state["platform_user_id"],
-        state["platform_bot_id"],
-        state["global_user_id"],
+    raw_interaction_wide = logical_turns_as_history_rows(
+        interaction_logical_turns
     )
     interaction_history_wide = format_storage_utc_history_for_llm(
         raw_interaction_wide
     )
-    interaction_history_recent = interaction_history_wide[-CHAT_HISTORY_RECENT_LIMIT:]
+    interaction_history_recent = list(interaction_history_wide)
 
     async def stage_0_msg_decontextualizer(
         persona_state: GlobalPersonaState,
@@ -731,8 +731,8 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         """Run decontextualization with recent channel history and identities."""
 
         decontextualizer_state = dict(persona_state)
-        decontextualizer_state["chat_history_recent"] = (
-            recent_channel_history_for_decontextualizer
+        decontextualizer_state['ambient_logical_turns'] = (
+            ambient_logical_turns
         )
         result = await call_msg_decontextualizer(decontextualizer_state)
         return_value = result
@@ -797,6 +797,15 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         "channel_type": state["channel_type"],
         "channel_name": state.get("channel_name", ""),
         "platform_message_id": state["platform_message_id"],
+        "active_turn_platform_message_ids": list(
+            state.get("active_turn_platform_message_ids", [])
+        ),
+        "active_turn_conversation_row_ids": list(
+            state.get("active_turn_conversation_row_ids", [])
+        ),
+        "active_turn_conversation_source_refs": list(
+            state.get("active_turn_conversation_source_refs", [])
+        ),
         "platform_user_id": state["platform_user_id"],
         "global_user_id": state["global_user_id"],
         "user_name": state["user_name"],
@@ -810,6 +819,11 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         "scope_users": scope_users,
         "conversation_episode_state": state.get("conversation_episode_state"),
         "conversation_progress": state.get("conversation_progress"),
+        "ambient_logical_turns": ambient_logical_turns,
+        "interaction_logical_turns": interaction_logical_turns,
+        "conversation_progress_diagnostics": state.get(
+            "conversation_progress_diagnostics"
+        ),
         "promoted_reflection_context": state.get("promoted_reflection_context"),
         "internal_monologue_residue_context": state.get(
             "internal_monologue_residue_context",
