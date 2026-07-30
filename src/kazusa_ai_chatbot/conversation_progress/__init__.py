@@ -1,8 +1,10 @@
 """Canonical public facade for short-term conversation continuation."""
 
 from kazusa_ai_chatbot.conversation_progress.history import (
+    assemble_logical_turns,
     logical_turns_as_history_rows,
     project_logical_turns_for_prompt,
+    select_recent_logical_turns,
 )
 from kazusa_ai_chatbot.conversation_progress.models import (
     ConversationLogicalTurnV1,
@@ -40,12 +42,14 @@ __all__ = [
     'ConversationProgressScope',
     'ConversationProgressSourceRefV2',
     'ConversationProgressStateV2',
+    'assemble_logical_turns',
     'load_progress_context',
     'logical_turns_as_history_rows',
     'project_conversation_progress_evidence',
     'project_conversation_progress_scene',
     'project_logical_turns_for_prompt',
     'record_turn_progress',
+    'select_recent_logical_turns',
     'select_recordable_turn_outcome',
     'validate_active_packet',
 ]

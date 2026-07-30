@@ -76,8 +76,11 @@ from kazusa_ai_chatbot.cognition_episode import (
 from kazusa_ai_chatbot.conversation_progress import (
     ConversationProgressScope,
     ConversationProgressSourceRefV2,
+    assemble_logical_turns,
     load_progress_context,
+    logical_turns_as_history_rows,
     record_turn_progress,
+    select_recent_logical_turns,
     select_recordable_turn_outcome,
 )
 from kazusa_ai_chatbot.character_identity_growth.runtime import (
@@ -117,6 +120,7 @@ from kazusa_ai_chatbot.db import (
     get_current_identity,
     get_character_profile,
     get_character_runtime_state,
+    get_ambient_conversation_history,
     get_conversation_by_platform_message_id,
     get_conversation_history,
     get_user_profile,
@@ -248,6 +252,8 @@ MILLISECONDS_PER_SECOND = 1000
 SERVICE_COMPONENT = "brain_service"
 CONVERSATION_HISTORY_COLLECTION = "conversation_history"
 COGNITION_SAFE_RETRY_LIMIT = 1
+SETTLED_RELEVANCE_HISTORY_SCAN_LIMIT = 48
+SETTLED_RELEVANCE_LOGICAL_TURN_LIMIT = 10
 OPERATIONAL_RETRY_NOTICE = (
     "The character could not complete this turn because its response path "
     "exhausted a safe internal retry. Please try again."
@@ -1558,42 +1564,28 @@ def _settled_state_from_lease(
         if lease.fragments
         else ""
     )
-    earliest_active_index = -1
-    latest_active_index = -1
-    external_history: list[tuple[int, dict]] = []
-    for history_index, row in enumerate(history):
-        is_active_row = (
-            row.get("platform_message_id") in active_platform_message_ids
-            or str(row.get("_id", "")) in active_conversation_row_ids
-        )
-        if is_active_row:
-            if earliest_active_index < 0:
-                earliest_active_index = history_index
-            latest_active_index = history_index
-            continue
-        external_history.append((history_index, row))
-    recent_external_history = external_history[-10:]
-    fresh_history = trim_history_dict([
-        row for _history_index, row in recent_external_history
-    ])
-    for projected_row, (history_index, _source_row) in zip(
-        fresh_history,
-        recent_external_history,
-        strict=True,
-    ):
-        if latest_active_index < 0:
-            temporal_relation = _history_relation_from_timestamp(
+    external_history = [
+        row
+        for row in history
+        if row.get("platform_message_id") not in active_platform_message_ids
+    ]
+    logical_turns = assemble_logical_turns(
+        rows=external_history,
+        excluded_row_ids=list(active_conversation_row_ids),
+    )
+    recent_logical_turns = select_recent_logical_turns(
+        logical_turns,
+        limit=SETTLED_RELEVANCE_LOGICAL_TURN_LIMIT,
+    )
+    fresh_history = logical_turns_as_history_rows(recent_logical_turns)
+    for projected_row in fresh_history:
+        projected_row["turn_temporal_relation"] = (
+            _history_relation_from_timestamp(
                 row_timestamp=projected_row.get("timestamp"),
                 earliest_active_timestamp=earliest_active_timestamp,
                 latest_active_timestamp=latest_active_timestamp,
             )
-        elif history_index > latest_active_index:
-            temporal_relation = "after_active_turn"
-        elif history_index > earliest_active_index:
-            temporal_relation = "during_active_turn"
-        else:
-            temporal_relation = "before_active_turn"
-        projected_row["turn_temporal_relation"] = temporal_relation
+        )
     leader = lease.fragments[0] if lease.fragments else None
     response_owner = next(
         (
@@ -1889,10 +1881,16 @@ async def _process_settlement_lease(
         prepared_media, additional_media_present = await _prepare_settled_media(
             lease,
         )
-        history = await get_conversation_history(
+        active_row_ids = [
+            fragment.conversation_row_id
+            for fragment in lease.fragments
+            if fragment.conversation_row_id
+        ]
+        history = await get_ambient_conversation_history(
             platform=response_owner.request.platform,
             platform_channel_id=response_owner.request.platform_channel_id,
-            limit=CONVERSATION_HISTORY_LIMIT,
+            excluded_row_ids=active_row_ids,
+            limit=SETTLED_RELEVANCE_HISTORY_SCAN_LIMIT,
         )
         settled_state = _settled_state_from_lease(
             lease,

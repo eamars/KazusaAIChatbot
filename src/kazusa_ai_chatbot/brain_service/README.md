@@ -204,15 +204,19 @@ prompt and exposes only candidate-supported actions; returned slot and evidence
 refs must exist in the exact capped projection shown to the model. A complete
 canonical-name occurrence is exposed only as provenance for LLM judgment;
 pronouns, single glyphs, and name prefixes do not create character-address
-evidence. Settled fresh history maps production identities to reserved
-character/current-author relations and stable bounded `participant_n` handles
-before it reaches the model. Conversation row order also marks each
-external history row as before, after, or unknown relative to the active turn;
-when the bounded history window has evicted the active row, persisted server
-timestamps retain that relation, while missing or equal timestamps remain
-unknown. Rows between active fragments are `during_active_turn` and may resolve
-requests expressed in earlier fragments; after-turn rows may resolve the whole
-assembled request. The settled projection
+evidence. Settled fresh history uses one embedding-excluded read of the newest
+48 channel rows. Active rows are excluded before the existing Conversation
+Progress contract assembles complete logical turns, selects the newest ten,
+and projects one history row per turn in chronological order. Complete
+assistant fragments sharing one response trace and complete logical indexes
+occupy one slot; separate traces remain separate even when they address the
+same participant. Persisted canonical timestamps mark each projected turn as
+before, during, after, or unknown relative to the active turn. Rows during
+active fragments may resolve requests expressed in earlier fragments;
+after-turn rows may resolve the whole assembled request. Settled fresh history
+maps production identities to reserved character/current-author relations and
+stable bounded `participant_n` handles before it reaches the model. The settled
+projection
 labels the assembled author as the current human and repeats only the bounded
 final fragment to make recipient correction salient without another model
 call. The first assessment may choose one bounded `wait`; the hard-deadline
@@ -225,9 +229,10 @@ with an empty response after attachment; only the response owner receives the
 assembled turn's visible response. A settled native-reply request reaches the
 adapter only when that response owner is also the effective latest fragment;
 otherwise the visible response is delivered without a misleading quote.
-Fresh settled history excludes active-turn rows. The opening/newest four-image
-budget is shared across reassessments, with overflow exposed to the settled
-fail-closed judgment.
+Fresh settled history excludes active-turn rows and retains the newest whole
+logical turns under its exact 6,000-character compact-JSON sub-budget. The
+opening/newest four-image budget is shared across reassessments, with overflow
+exposed to the settled fail-closed judgment.
 Group burst pruning and group pre-relevance coalescing are not part of the
 active queue contract. A claimable `proceed` is the only path into the existing
 cognition and dialog graph.

@@ -1067,10 +1067,20 @@ async def test_first_settled_contract_failure_uses_bounded_wait(
         "_prepare_settled_media",
         AsyncMock(return_value=([], False)),
     )
+    ambient_history = AsyncMock(return_value=[])
+    monkeypatch.setattr(
+        service_module,
+        "get_ambient_conversation_history",
+        ambient_history,
+    )
     monkeypatch.setattr(
         service_module,
         "get_conversation_history",
-        AsyncMock(return_value=[]),
+        AsyncMock(
+            side_effect=AssertionError(
+                "settled relevance must use ambient history"
+            )
+        ),
     )
     monkeypatch.setattr(
         service_module,
@@ -1085,6 +1095,12 @@ async def test_first_settled_contract_failure_uses_bounded_wait(
     assert applied_decision["response_action"] == "wait"
     coordinator.complete_failed_assessment.assert_not_awaited()
     assert item.future.done() is False
+    ambient_history.assert_awaited_once_with(
+        platform="qq",
+        platform_channel_id="chan-1",
+        excluded_row_ids=["row-1"],
+        limit=48,
+    )
 
 
 @pytest.mark.asyncio
@@ -1137,7 +1153,7 @@ async def test_final_settled_contract_failure_returns_operational_error(
     )
     monkeypatch.setattr(
         service_module,
-        "get_conversation_history",
+        "get_ambient_conversation_history",
         AsyncMock(return_value=[]),
     )
     monkeypatch.setattr(
@@ -1564,7 +1580,10 @@ async def test_settled_fresh_history_excludes_active_turn_fragments(
             "updated_at": character_profile["updated_at"],
         },
     )
-    item = _item(1)
+    item = _item(
+        1,
+        storage_timestamp_utc="2026-07-16T00:00:05+00:00",
+    )
     fragment = PersistedChatFragment(
         arrival_sequence=1,
         scope=("qq", "chan-1", "group"),
@@ -1578,7 +1597,10 @@ async def test_settled_fresh_history_excludes_active_turn_fragments(
         semantic_target_labels=("character",),
         queue_item=item,
     )
-    second_item = _item(2)
+    second_item = _item(
+        2,
+        storage_timestamp_utc="2026-07-16T00:00:07+00:00",
+    )
     second_fragment = PersistedChatFragment(
         arrival_sequence=2,
         scope=("qq", "chan-1", "group"),
@@ -1609,50 +1631,106 @@ async def test_settled_fresh_history_excludes_active_turn_fragments(
         "mentions": [],
         "broadcast": False,
         "attachments": [],
-        "timestamp": "2026-07-16T00:00:00+00:00",
     }
     state = service_module._settled_state_from_lease(
         lease,
         history=[
+            *[
+                {
+                    **common,
+                    "_id": f"row-older-{index}",
+                    "platform_message_id": f"message-older-{index}",
+                    "body_text": f"older context {index}",
+                    "timestamp": (
+                        f"2026-07-15T23:59:{50 + index:02d}+00:00"
+                    ),
+                }
+                for index in range(1, 10)
+            ],
             {
                 **common,
                 "_id": "row-active",
                 "platform_message_id": "message-active",
                 "body_text": "active request",
+                "timestamp": "2026-07-16T00:00:05+00:00",
             },
             {
                 **common,
                 "_id": "row-other",
                 "platform_message_id": "message-other",
                 "body_text": "another participant answered",
+                "timestamp": "2026-07-16T00:00:06+00:00",
             },
             {
                 **common,
                 "_id": "row-active-2",
                 "platform_message_id": "message-active-2",
                 "body_text": "active follow-up",
+                "timestamp": "2026-07-16T00:00:07+00:00",
             },
             {
                 **common,
-                "_id": "row-after",
-                "platform_message_id": "message-after",
-                "body_text": "later context",
+                "_id": "row-character-1",
+                "role": "assistant",
+                "platform_user_id": "bot-1",
+                "global_user_id": CHARACTER_GLOBAL_USER_ID,
+                "display_name": "Test Character",
+                "platform_message_id": "message-character-1",
+                "body_text": "first character fragment",
+                "addressed_to_global_user_ids": ["global-user-1"],
+                "llm_trace_id": "trace-character-1",
+                "logical_message_index": 0,
+                "timestamp": "2026-07-16T00:00:08+00:00",
+            },
+            {
+                **common,
+                "_id": "row-character-2",
+                "role": "assistant",
+                "platform_user_id": "bot-1",
+                "global_user_id": CHARACTER_GLOBAL_USER_ID,
+                "display_name": "Test Character",
+                "platform_message_id": "message-character-2",
+                "body_text": "second character fragment",
+                "addressed_to_global_user_ids": ["global-user-1"],
+                "llm_trace_id": "trace-character-1",
+                "logical_message_index": 1,
+                "timestamp": "2026-07-16T00:00:09+00:00",
+            },
+            {
+                **common,
+                "_id": "row-character-3",
+                "role": "assistant",
+                "platform_user_id": "bot-1",
+                "global_user_id": CHARACTER_GLOBAL_USER_ID,
+                "display_name": "Test Character",
+                "platform_message_id": "message-character-3",
+                "body_text": "independent character response",
+                "addressed_to_global_user_ids": ["global-user-1"],
+                "llm_trace_id": "trace-character-2",
+                "logical_message_index": 0,
+                "timestamp": "2026-07-16T00:00:10+00:00",
             },
         ],
     )
 
-    assert [row["platform_message_id"] for row in state["fresh_history"]] == [
-        "message-other",
-        "message-after",
+    assert len(state["fresh_history"]) == 10
+    assert state["fresh_history"][0]["body_text"] == "older context 3"
+    assert [row["body_text"] for row in state["fresh_history"][-3:]] == [
+        "another participant answered",
+        "first character fragment\nsecond character fragment",
+        "independent character response",
     ]
-    assert state["fresh_history"][0]["turn_temporal_relation"] == (
+    assert state["fresh_history"][-3]["turn_temporal_relation"] == (
         "during_active_turn"
     )
-    assert state["fresh_history"][1]["turn_temporal_relation"] == (
+    assert state["fresh_history"][-2]["turn_temporal_relation"] == (
+        "after_active_turn"
+    )
+    assert state["fresh_history"][-1]["turn_temporal_relation"] == (
         "after_active_turn"
     )
     assert state["relationship_context"] == "direct participant"
-    assert state["group_attention"] == "medium_noise"
+    assert state["group_attention"] == "chaotic_noise"
     assert state["conversation_scope"] == "group"
     assert state["active_character_name"] == "Test Character"
     assert state["current_author_global_user_id"] == "global-user-1"
@@ -1745,18 +1823,21 @@ async def test_settled_history_uses_timestamps_when_active_row_is_outside_window
         history=[
             {
                 **common,
+                "_id": "row-before",
                 "platform_message_id": "message-before",
                 "body_text": "earlier context",
                 "timestamp": "2026-07-16T00:00:04+00:00",
             },
             {
                 **common,
+                "_id": "row-during",
                 "platform_message_id": "message-during",
                 "body_text": "intervening answer",
                 "timestamp": "2026-07-16T00:00:06+00:00",
             },
             {
                 **common,
+                "_id": "row-after",
                 "platform_message_id": "message-after",
                 "body_text": "later context",
                 "timestamp": "2026-07-16T00:00:08+00:00",
@@ -2243,6 +2324,11 @@ async def test_dropped_message_never_invokes_graph(monkeypatch) -> None:
     save_conversation = AsyncMock()
     monkeypatch.setattr(service_module, "save_conversation", save_conversation)
     _patch_common_dependencies(monkeypatch, _Graph())
+    monkeypatch.setattr(
+        service_module,
+        "get_ambient_conversation_history",
+        AsyncMock(return_value=[]),
+    )
 
     dropped = _item(1, listen_only=True)
     tagged = _item(

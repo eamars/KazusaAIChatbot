@@ -49,7 +49,7 @@ _GROUP_ATTENTION_CHAOTIC = "chaotic_noise"
 _ACTIVE_WINDOW_SECONDS = 180
 _ACTIVE_WINDOW_MAX_MESSAGES = 10
 _FRAGMENT_TOTAL_CHARS = 6000
-_HISTORY_TOTAL_CHARS = 4000
+_HISTORY_TOTAL_CHARS = 6000
 _CONTEXT_TOTAL_CHARS = 2000
 _MAX_STABLE_PARTICIPANTS = 8
 
@@ -795,7 +795,15 @@ def _history_reply_summary(
 
 
 def _project_history(state: SettledRelevanceState) -> list[dict[str, Any]]:
-    """Project at most ten fresh history rows under their character cap."""
+    """Project the newest whole history rows under their character cap.
+
+    Args:
+        state: Settled relevance input containing canonical fresh history and
+            participant identity bindings.
+
+    Returns:
+        Chronological prompt-safe rows that fit the exact history sub-budget.
+    """
 
     history = state.get("fresh_history")
     if history is None:
@@ -811,45 +819,50 @@ def _project_history(state: SettledRelevanceState) -> list[dict[str, Any]]:
         for item in list(history)[-10:]
         if isinstance(item, Mapping)
     ]
-    participant_handles = _participant_handle_bindings(
-        selected_history,
-        state,
-    )
-    projected: list[dict[str, Any]] = []
-    remaining = _HISTORY_TOTAL_CHARS
-    for item in selected_history:
-        if remaining <= 0:
-            continue
-        body = item.get("body_text") or item.get("content", "")
-        turn_relation = (
-            item.get("turn_temporal_relation")
-            or item.get("turn_relation")
+    while selected_history:
+        participant_handles = _participant_handle_bindings(
+            selected_history,
+            state,
         )
-        row = {
-            "speaker_relation": _history_speaker_relation(
-                item,
-                state,
-                participant_handles,
-            ),
-            "body_text": _clip_text(body, min(500, remaining)),
-            "target_summary": _history_target_summary(
-                item,
-                state,
-                participant_handles,
-            ),
-            "reply_summary": _history_reply_summary(
-                item,
-                state,
-                participant_handles,
-            ),
-            "turn_relation": _clip_text(
-                turn_relation,
-                40,
-            ) or "unknown",
-        }
-        projected.append(row)
-        remaining -= len(json.dumps(row, ensure_ascii=False))
-    return_value = projected
+        projected: list[dict[str, Any]] = []
+        for item in selected_history:
+            body = item.get("body_text") or item.get("content", "")
+            turn_relation = (
+                item.get("turn_temporal_relation")
+                or item.get("turn_relation")
+            )
+            projected.append({
+                "speaker_relation": _history_speaker_relation(
+                    item,
+                    state,
+                    participant_handles,
+                ),
+                "body_text": _clip_text(body, 500),
+                "target_summary": _history_target_summary(
+                    item,
+                    state,
+                    participant_handles,
+                ),
+                "reply_summary": _history_reply_summary(
+                    item,
+                    state,
+                    participant_handles,
+                ),
+                "turn_relation": _clip_text(
+                    turn_relation,
+                    40,
+                ) or "unknown",
+            })
+        compact_history = json.dumps(
+            projected,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        if len(compact_history) <= _HISTORY_TOTAL_CHARS:
+            return_value = projected
+            return return_value
+        selected_history.pop(0)
+    return_value = []
     return return_value
 
 

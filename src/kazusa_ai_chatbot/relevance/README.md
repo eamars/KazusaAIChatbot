@@ -53,9 +53,17 @@ continuity, explicit-group-invitation, and message/state-intersection judgment.
 Pronouns, numerals, canonical-name prefixes, and the generic current-message
 item do not establish character address.
 
-Settled input keeps active fragments separate from external fresh history and
-includes bounded participant/target/reply relations, active state,
-relationship, group-attention, bot-continuity, and media-overflow descriptors.
+Settled input keeps active fragments separate from external fresh history. The
+service scans at most 48 embedding-excluded channel rows, removes active-turn
+rows, assembles complete logical turns through the Conversation Progress
+contract, and retains the newest ten turns in chronological order. One
+complete fragmented assistant response therefore occupies one history slot,
+while separate response traces remain separate. The relevance projection keeps
+the newest whole turns under an exact 6,000-character compact-JSON budget,
+renumbers participant handles after eviction, and includes bounded
+participant/target/reply relations, active state, relationship,
+group-attention, bot-continuity, and media-overflow descriptors. The existing
+16,000-character settled-input hard cap remains authoritative.
 A decision
 that depends on undescribed retained media fails closed instead of inferring
 from a partial image subset.

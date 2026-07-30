@@ -274,7 +274,12 @@ an 8,000-character rendered-input cap; settled relevance uses a 512-token
 completion cap, thinking disabled, and a 16,000-character cap. Both stages
 parse JSON deterministically and never call the JSON-repair LLM. They share one
 FIFO relevance executor with one in-flight call; settlement timers hold no
-model slot.
+model slot. Settled history uses one embedding-excluded scan of at most 48
+channel rows, excludes active-turn rows, collapses complete assistant response
+fragments through the canonical logical-turn contract, and retains the newest
+ten logical turns. Its history projection keeps the newest whole turns under an
+exact 6,000-character compact-JSON sub-budget before the unchanged
+16,000-character settled-input cap is applied.
 
 ## Relevance Turn Settlement
 

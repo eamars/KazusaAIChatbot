@@ -735,6 +735,53 @@ def test_settled_history_projects_production_participant_relations() -> None:
     ]
 
 
+def test_settled_history_budget_keeps_newest_whole_rows() -> None:
+    """History fitting is exact, role-neutral, and newest-first."""
+
+    assert relevance_module._HISTORY_TOTAL_CHARS == 6000
+    state = _base_state()
+    state["fresh_history"] = [
+        {
+            "role": "user",
+            "platform_user_id": f"platform-{index}",
+            "global_user_id": f"global-{index}",
+            "body_text": f"history-{index} " + "x" * 600,
+            "addressed_to_global_user_ids": [],
+            "broadcast": False,
+            "reply_context": {},
+            "turn_temporal_relation": "before_active_turn",
+        }
+        for index in range(10)
+    ]
+
+    projected = relevance_module._project_history(state)
+    compact = json.dumps(
+        projected,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+    assert len(compact) <= 6000
+    assert projected[-1]["body_text"].startswith("history-9 ")
+    assert not projected[0]["body_text"].startswith("history-0 ")
+    assert projected[0]["speaker_relation"] == "participant_1"
+    assert all(len(row["body_text"]) <= 500 for row in projected)
+
+    messages = build_settled_relevance_messages(state)
+    payload = json.loads(messages[1].content)
+    history_refs = [
+        item["ref"]
+        for item in payload["interaction_evidence"]
+        if item["kind"] == "history_context"
+    ]
+
+    assert payload["fresh_history"] == projected
+    assert history_refs == [
+        f"history_{index}"
+        for index in range(1, len(projected) + 1)
+    ]
+
+
 def test_settled_worst_case_projection_remains_valid_json() -> None:
     """Fallback projection preserves a valid bounded semantic payload."""
 
