@@ -199,6 +199,153 @@ async def test_first_cycle_prewarm_uses_shared_persistent_memory_worker(
 
 
 @pytest.mark.asyncio
+async def test_first_cycle_prewarm_searches_content_after_character_mention(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The active-character address must not become the memory search task."""
+
+    state = _minimal_persona_state()
+    state["decontextualized_input"] = '@一之濑明日奈 #napcat'
+    state["prompt_message_context"]["body_text"] = '@一之濑明日奈 #napcat'
+    state["prompt_message_context"]["mentions"] = [{
+        "global_user_id": "character-1",
+        "display_name": "一之濑明日奈",
+        "entity_kind": "bot",
+    }]
+    calls = _patch_persistent_memory_worker(
+        monkeypatch,
+        {
+            "resolved": False,
+            "result": [],
+            "attempts": 1,
+        },
+    )
+
+    await capabilities.run_first_cycle_shared_memory_prewarm(state)
+
+    assert len(calls) == 1
+    assert calls[0]["task"] == "#napcat"
+
+
+@pytest.mark.asyncio
+async def test_first_cycle_prewarm_skips_character_mention_only_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A character address without content has no memory retrieval target."""
+
+    state = _minimal_persona_state()
+    state["decontextualized_input"] = '@一之濑明日奈'
+    state["prompt_message_context"]["body_text"] = '@一之濑明日奈'
+    state["prompt_message_context"]["mentions"] = [{
+        "global_user_id": "character-1",
+        "display_name": "一之濑明日奈",
+        "entity_kind": "bot",
+    }]
+    calls = _patch_persistent_memory_worker(
+        monkeypatch,
+        {
+            "resolved": True,
+            "result": [{
+                "content": "Character-name memory must not be selected.",
+                "source_system": "memory",
+            }],
+            "attempts": 1,
+        },
+    )
+
+    rag_result = await capabilities.run_first_cycle_shared_memory_prewarm(state)
+
+    assert calls == []
+    assert rag_result == _empty_result()
+
+
+@pytest.mark.asyncio
+async def test_first_cycle_prewarm_preserves_non_character_mention(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Another participant's mention remains authored retrieval content."""
+
+    state = _minimal_persona_state()
+    state["decontextualized_input"] = '@爱音 之前说了什么'
+    state["prompt_message_context"]["body_text"] = '@爱音 之前说了什么'
+    state["prompt_message_context"]["mentions"] = [{
+        "global_user_id": "user-2",
+        "display_name": "爱音",
+        "entity_kind": "user",
+    }]
+    calls = _patch_persistent_memory_worker(
+        monkeypatch,
+        {
+            "resolved": False,
+            "result": [],
+            "attempts": 1,
+        },
+    )
+
+    await capabilities.run_first_cycle_shared_memory_prewarm(state)
+
+    assert len(calls) == 1
+    assert calls[0]["task"] == '@爱音 之前说了什么'
+
+
+@pytest.mark.asyncio
+async def test_first_cycle_prewarm_preserves_plain_character_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A plain character name remains a legitimate retrieval subject."""
+
+    state = _minimal_persona_state()
+    state["decontextualized_input"] = '一之濑明日奈喜欢什么'
+    state["prompt_message_context"]["body_text"] = '一之濑明日奈喜欢什么'
+    calls = _patch_persistent_memory_worker(
+        monkeypatch,
+        {
+            "resolved": False,
+            "result": [],
+            "attempts": 1,
+        },
+    )
+
+    await capabilities.run_first_cycle_shared_memory_prewarm(state)
+
+    assert len(calls) == 1
+    assert calls[0]["task"] == '一之濑明日奈喜欢什么'
+
+
+@pytest.mark.asyncio
+async def test_first_cycle_prewarm_removes_only_exact_character_mention(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A longer authored literal must survive before the exact bot mention."""
+
+    state = _minimal_persona_state()
+    state["decontextualized_input"] = (
+        '@一之濑明日奈-archive @一之濑明日奈 #napcat'
+    )
+    state["prompt_message_context"]["body_text"] = (
+        '@一之濑明日奈-archive @一之濑明日奈 #napcat'
+    )
+    state["prompt_message_context"]["mentions"] = [{
+        "global_user_id": "character-1",
+        "display_name": "一之濑明日奈",
+        "entity_kind": "bot",
+    }]
+    calls = _patch_persistent_memory_worker(
+        monkeypatch,
+        {
+            "resolved": False,
+            "result": [],
+            "attempts": 1,
+        },
+    )
+
+    await capabilities.run_first_cycle_shared_memory_prewarm(state)
+
+    assert len(calls) == 1
+    assert calls[0]["task"] == '@一之濑明日奈-archive  #napcat'
+
+
+@pytest.mark.asyncio
 async def test_first_cycle_prewarm_projects_memory_without_answer_or_user_units(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

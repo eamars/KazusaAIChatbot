@@ -50,6 +50,13 @@ excludes scoped user-memory units, and creates no resolver observation. Empty
 or failed retrieval preserves the base RAG payload. Later cycles reuse the
 merged state and do not repeat prewarm.
 
+The prewarm task starts from `decontextualized_input` and removes each readable
+`@display_name` token backed by a typed `bot` mention once. Plain character
+names and `user`, `platform_role`, `channel`, `everyone`, and `unknown`
+mentions remain part of the task. When only bot-addressing whitespace remains,
+prewarm returns the canonical empty projected RAG payload before constructing
+the request or starting the persistent-memory worker.
+
 `CognitionCoreOutputV2.goal_resolution` remains the semantic owner’s answerability
 decision. It answers whether the accepted user goal is sufficient to answer now;
 it does not mirror a source-specific RAG `resolved` field. When the decision is

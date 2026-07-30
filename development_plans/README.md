@@ -432,6 +432,17 @@ independent review remediation completed before user sign-off.
 |---|---|
 | Moved from active bugfix to completed archive | `cognition_core_v2_p0_context_reconnection_bugfix_plan.md` |
 
+### 2026-07-31 Cognition Core V2 prewarm mention-content completion
+
+Cycle-zero shared-memory prewarm now removes only exact typed active-character
+mention tokens from its retrieval task, searches the remaining authored
+content, and skips retrieval for mention-only turns. Focused and connector
+regressions plus independent review completed before archival.
+
+| Outcome | Plans |
+|---|---|
+| Moved from active bugfix to completed archive | `cognition_core_v2_prewarm_mention_content_query_bugfix_plan.md` |
+
 ## Archive
 
 Completed and superseded records live under `archive/`. Use them for historical
@@ -456,6 +467,7 @@ plans.
 | [cognition_core_v2_compositional_action_planning_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_compositional_action_planning_bugfix_plan.md) |
 | [cognition_core_v2_live_character_judgment_rebalance_plan.md](archive/completed/bugfix/cognition_core_v2_live_character_judgment_rebalance_plan.md) |
 | [cognition_core_v2_p0_context_reconnection_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_p0_context_reconnection_bugfix_plan.md) |
+| [cognition_core_v2_prewarm_mention_content_query_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_prewarm_mention_content_query_bugfix_plan.md) |
 | [cognition_core_v2_intra_turn_transition_coherence_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_intra_turn_transition_coherence_bugfix_plan.md) |
 | [cognition_core_v2_prompt_budget_and_failure_containment_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_prompt_budget_and_failure_containment_bugfix_plan.md) |
 | [cognition_core_v2_retry_exhaustion_continuity_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_retry_exhaustion_continuity_bugfix_plan.md) |
