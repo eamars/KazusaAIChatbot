@@ -117,25 +117,18 @@ REQUIRED_SELECTION_GOAL_PROMPT = '''你负责在本轮选择权属于当前角�
 
 # 判断步骤
 1. `required_selection_operations` 是当前输入已经解析出的权威选择权事实。保持行动者、对象、
-   受益者、选择拥有者和回应拥有者的方向。
-2. 结合当前证据、角色身份、约束、情绪、关系和场景，判断当前角色此刻真正选择什么。
-3. `selection` 是唯一权威选择内容，必须直接写出一个具体选择、拒绝、协商结果或条件。
+   受益者、选择拥有者和回应拥有者的方向，并在 `evidence_handles` 引用其中每个
+   `evidence_handle`。
+2. `conversation_progress_constraints` 是既有对话进度的权威连续性约束。在
+   `evidence_handles` 引用其中每个 `evidence_handle`，并让选择符合其 `semantic_text`。
+   `completed`、`rejected`、`superseded` 等终态事实会约束本轮选择；只有当前输入明确要求重开
+   或重复时，才重新选择旧事项。当前 episode 的直接事实比旧进度更新。
+3. `supporting_evidence` 只提供可选支持。只能引用输入提供的 handle，每个 handle 必须逐个
+   等于输入值。
+4. 结合角色身份、约束、情绪、关系和场景，作出一个属于当前角色的选择。`selection` 是唯一
+   权威选择内容，必须直接写出一个具体选择、拒绝、协商结果或条件。
    不得只说以后决定、列举候选、把决定交给其他角色，或要求后续阶段补全。
-4. 对 `conversation_progress_event_handles` 中每个活跃进度事件句柄恰好输出一条关系：
-   `conversation_evidence_relations` 的句柄集合必须与该列表完全相等。即使其他 evidence 的
-   `source_kind` 是 `conversation_evidence`，也不得把它加入此关系数组。若该列表为空，
-   必须输出空数组 `[]`。列表非空时，每行只能有 `evidence_handle` 与 `relation` 两个字段；
-   句柄字段名必须是 `evidence_handle`，不得简写成 `handle`。
-   - `excluded`：该既有事项已处理或当前事实使它不应作为本轮新选择。
-   - `reopened`：当前输入明确要求重开该既有事项，且本轮选择确实重开它。
-   - `supports`：该事项支持本轮选择，但不是被重新选择的旧事项。
-   - `unrelated`：该事项与本轮选择无关。
-   当前 episode 事实比旧进度更新。结合 actor、action、object、结果、同义表达、部件与整体
-   判断同一事项。引用终态证据不会自动许可重选。
-5. `evidence_handles` 必须包含每个 required selection operation 的 handle，以及全部
-   conversation progress event handle。RAG 对话历史仍可作为可选证据。每个 handle
-   必须逐个等于输入提供值。
-6. 本阶段不选择执行能力或路由，不写最终对话。`selection`、`reason` 和
+5. 本阶段不选择执行能力或路由，不写最终对话。`selection`、`reason` 和
    `private_monologue` 使用简体中文；专名、代码、URL 和输入原文保持原样。
 
 # 输出格式
@@ -147,7 +140,6 @@ REQUIRED_SELECTION_GOAL_PROMPT = '''你负责在本轮选择权属于当前角�
   "private_monologue": "",
   "target_role_handles": [],
   "evidence_handles": [],
-  "conversation_evidence_relations": [],
   "expected_consequences": [""],
   "confidence": "high"
 }
@@ -157,19 +149,13 @@ REQUIRED_SELECTION_GOAL_PROMPT = '''你负责在本轮选择权属于当前角�
 
 def _required_selection_regeneration_prompt(
     validation_error: str,
-    conversation_progress_event_handles: set[str],
+    required_evidence_handles: set[str],
 ) -> str:
     """Return same-producer feedback for one complete structural regeneration."""
 
     feedback = json.dumps(
         {
-            'allowed_conversation_progress_event_handles': sorted(
-                conversation_progress_event_handles
-            ),
-            'required_relation_fields': [
-                'evidence_handle',
-                'relation',
-            ],
+            'required_evidence_handles': sorted(required_evidence_handles),
             'validation_error': validation_error[:500],
         },
         ensure_ascii=False,
@@ -194,20 +180,27 @@ async def run_goal_cognition(
 ) -> ActionBidV2:
     """Run one goal branch and map its draft to a complete deterministic bid."""
 
-    if definition.branch_id == "ordinary_response":
+    required_operations = _required_selection_operations(evidence)
+    selection_required = bool(required_operations)
+    if selection_required or definition.branch_id == "ordinary_response":
         goal_config = services.goal_ordinary_response_config
     else:
         goal_config = services.goal_active_branch_config
     evidence_handles = [row["evidence_handle"] for row in evidence]
-    required_operations = _required_selection_operations(evidence)
     required_operation_handles = {
         operation['evidence_handle']
         for operation in required_operations
     }
-    conversation_progress_event_handles = (
-        _conversation_progress_event_handles(evidence)
+    conversation_progress_constraints = (
+        _conversation_progress_constraints(evidence)
     )
-    selection_required = bool(required_operations)
+    conversation_progress_handles = {
+        constraint['evidence_handle']
+        for constraint in conversation_progress_constraints
+    }
+    required_evidence_handles = (
+        required_operation_handles | conversation_progress_handles
+    )
     role_bindings = semantic_context.get("_role_bindings", {})
     if not isinstance(role_bindings, Mapping):
         role_bindings = {}
@@ -268,7 +261,6 @@ async def run_goal_cognition(
             {"goal_kind": definition.goal_kind, "lifecycle": "active"},
         ),
         "semantic_context": prompt_context,
-        "evidence": prompt_evidence,
         "role_handles": sorted(role_bindings),
         "role_summaries": prompt_role_summaries,
     }
@@ -276,13 +268,29 @@ async def run_goal_cognition(
         prompt_payload['required_selection_operations'] = (
             required_operations
         )
-        prompt_payload['conversation_progress_event_handles'] = sorted(
-            conversation_progress_event_handles
+        prompt_payload['conversation_progress_constraints'] = (
+            conversation_progress_constraints
         )
+        prompt_payload['supporting_evidence'] = [
+            row
+            for row in prompt_evidence
+            if row['handle'] not in required_evidence_handles
+        ]
+    else:
+        prompt_payload['evidence'] = prompt_evidence
+    initial_system_prompt = (
+        REQUIRED_SELECTION_GOAL_PROMPT
+        if selection_required
+        else GOAL_COGNITION_PROMPT
+    )
     try:
         prompt_text = _fit_goal_prompt_payload(
             prompt_payload,
-            prompt_evidence,
+            system_prompt=(
+                initial_system_prompt
+                if selection_required
+                else ''
+            ),
         )
     except PromptBudgetError as exc:
         raise CognitionExecutionError(
@@ -295,11 +303,7 @@ async def run_goal_cognition(
             retryable=False,
         ) from exc
     initial_messages: list[BaseMessage] = [
-        SystemMessage(content=(
-            REQUIRED_SELECTION_GOAL_PROMPT
-            if selection_required
-            else GOAL_COGNITION_PROMPT
-        )),
+        SystemMessage(content=initial_system_prompt),
         HumanMessage(content=prompt_text),
     ]
     validation_args = {
@@ -370,8 +374,8 @@ async def run_goal_cognition(
                     evidence_handles=set(evidence_handles),
                     role_handles=set(role_bindings),
                     required_operation_handles=required_operation_handles,
-                    conversation_progress_event_handles=(
-                        conversation_progress_event_handles
+                    conversation_progress_handles=(
+                        conversation_progress_handles
                     ),
                 )
                 draft = _selection_goal_draft_to_goal_bid(
@@ -405,14 +409,33 @@ async def run_goal_cognition(
                     retryable=True,
                 ) from exc
             if selection_required:
+                regeneration_system_prompt = (
+                    _required_selection_regeneration_prompt(
+                        str(exc),
+                        required_evidence_handles,
+                    )
+                )
+                try:
+                    regeneration_prompt_text = _fit_goal_prompt_payload(
+                        prompt_payload,
+                        system_prompt=regeneration_system_prompt,
+                    )
+                except PromptBudgetError as budget_exc:
+                    raise CognitionExecutionError(
+                        (
+                            'required goal regeneration context exceeds '
+                            'the aggregate cap'
+                        ),
+                        error_code='goal_cognition_repair_context_limit',
+                        branch_id=definition.branch_id,
+                        stage='goal_cognition',
+                        attempt_count=attempt_index + 1,
+                        safe_checkpoint='pre_state_commit',
+                        retryable=False,
+                    ) from budget_exc
                 request_messages = [
-                    SystemMessage(content=(
-                        _required_selection_regeneration_prompt(
-                            str(exc),
-                            conversation_progress_event_handles,
-                        )
-                    )),
-                    HumanMessage(content=prompt_text),
+                    SystemMessage(content=regeneration_system_prompt),
+                    HumanMessage(content=regeneration_prompt_text),
                 ]
                 continue
             repair_payload = {
@@ -496,10 +519,16 @@ async def run_goal_cognition(
 
 def _fit_goal_prompt_payload(
     payload: dict[str, Any],
-    evidence_rows: list[dict[str, Any]],
+    *,
+    system_prompt: str,
 ) -> str:
     """Fit context without truncating required-selection evidence."""
 
+    payload_cap = GOAL_COGNITION_PROMPT_CAP - len(system_prompt)
+    if payload_cap <= 0:
+        raise PromptBudgetError(
+            'goal cognition system prompt exceeds the aggregate cap'
+        )
     semantic_context = payload["semantic_context"]
     if not isinstance(semantic_context, Mapping):
         raise ValueError("goal cognition semantic context is invalid")
@@ -512,7 +541,7 @@ def _fit_goal_prompt_payload(
             ensure_ascii=False,
             sort_keys=True,
         )
-        if len(prompt_text) <= GOAL_COGNITION_PROMPT_CAP:
+        if len(prompt_text) <= payload_cap:
             return prompt_text
 
         removed = False
@@ -533,67 +562,22 @@ def _fit_goal_prompt_payload(
         if removed:
             continue
 
-        fittable_evidence = _fittable_goal_evidence(
-            payload,
-            evidence_rows,
+        evidence_key = (
+            'supporting_evidence'
+            if 'required_selection_operations' in payload
+            else 'evidence'
         )
+        fittable_evidence = payload[evidence_key]
+        if not isinstance(fittable_evidence, list):
+            raise TypeError('goal cognition evidence must be a list')
         fitted_prompt = fit_evidence_texts_to_budget(
             candidate,
             fittable_evidence,
             text_field="semantic_text",
-            maximum_chars=GOAL_COGNITION_PROMPT_CAP,
+            maximum_chars=payload_cap,
             minimum_text_chars=MIN_PROMPT_EVIDENCE_TEXT_CHARS,
         )
         return fitted_prompt
-
-
-def _fittable_goal_evidence(
-    payload: Mapping[str, Any],
-    evidence_rows: Sequence[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    """Exclude mandatory selection facts from outer-budget truncation."""
-
-    if "required_selection_operations" not in payload:
-        return list(evidence_rows)
-
-    required_operations = payload["required_selection_operations"]
-    progress_handles = payload.get("conversation_progress_event_handles")
-    if not isinstance(required_operations, list):
-        raise TypeError("required selection operations must be a list")
-    if not isinstance(progress_handles, list):
-        raise TypeError(
-            "conversation progress event handles must be a list"
-        )
-
-    protected_handles: set[str] = set()
-    for operation in required_operations:
-        if not isinstance(operation, Mapping):
-            raise TypeError("required selection operation must be an object")
-        handle = operation.get("evidence_handle")
-        if not isinstance(handle, str) or not handle:
-            raise ValueError(
-                "required selection operation evidence handle is invalid"
-            )
-        protected_handles.add(handle)
-    for handle in progress_handles:
-        if not isinstance(handle, str) or not handle:
-            raise ValueError(
-                "conversation progress event handle is invalid"
-            )
-        protected_handles.add(handle)
-
-    available_handles: set[str] = set()
-    fittable_rows: list[dict[str, Any]] = []
-    for row in evidence_rows:
-        handle = row.get("handle")
-        if not isinstance(handle, str) or not handle:
-            raise ValueError("goal evidence handle is invalid")
-        available_handles.add(handle)
-        if handle not in protected_handles:
-            fittable_rows.append(row)
-    if not protected_handles.issubset(available_handles):
-        raise ValueError("required selection evidence is unavailable")
-    return fittable_rows
 
 
 def _required_selection_operations(
@@ -627,12 +611,12 @@ def _required_selection_operations(
     return operations
 
 
-def _conversation_progress_event_handles(
+def _conversation_progress_constraints(
     evidence: Sequence[CognitionEvidenceV2],
-) -> set[str]:
-    """Return the bounded active-progress relation domain by provenance."""
+) -> list[dict[str, str]]:
+    """Project active conversation progress as mandatory continuity context."""
 
-    handles: set[str] = set()
+    constraints: list[dict[str, str]] = []
     for row in evidence:
         evidence_ref = row["evidence_ref"]
         if evidence_ref["source_kind"] != "conversation_evidence":
@@ -642,8 +626,11 @@ def _conversation_progress_event_handles(
             _CONVERSATION_PROGRESS_EVENT_SOURCE_PREFIX
         ):
             continue
-        handles.add(row["evidence_handle"])
-    return handles
+        constraints.append({
+            'evidence_handle': row['evidence_handle'],
+            'semantic_text': row['semantic_text'],
+        })
+    return constraints
 
 
 def validate_selection_goal_draft(
@@ -652,7 +639,7 @@ def validate_selection_goal_draft(
     evidence_handles: set[str],
     role_handles: set[str],
     required_operation_handles: set[str],
-    conversation_progress_event_handles: set[str],
+    conversation_progress_handles: set[str],
 ) -> dict[str, Any]:
     """Validate one authoritative selection and exact continuity coverage."""
 
@@ -665,7 +652,6 @@ def validate_selection_goal_draft(
         "private_monologue",
         "target_role_handles",
         "evidence_handles",
-        "conversation_evidence_relations",
         "expected_consequences",
         "confidence",
     }
@@ -695,55 +681,17 @@ def validate_selection_goal_draft(
         parsed["evidence_handles"],
         evidence_handles,
         "evidence",
-        maximum_handles=MAX_GOAL_BID_EVIDENCE_HANDLES,
+        maximum_handles=max(
+            MAX_GOAL_BID_EVIDENCE_HANDLES,
+            len(required_operation_handles | conversation_progress_handles),
+        ),
     )
     required_citations = (
-        required_operation_handles | conversation_progress_event_handles
+        required_operation_handles | conversation_progress_handles
     )
     if not required_citations.issubset(cited_evidence):
         raise ValueError(
             "selection goal lacks required evidence coverage"
-        )
-    relations = parsed["conversation_evidence_relations"]
-    if not isinstance(relations, list):
-        raise ValueError(
-            "selection goal lacks exact conversation evidence coverage"
-        )
-    normalized_relations: list[dict[str, str]] = []
-    seen_relation_handles: set[str] = set()
-    for relation_row in relations:
-        if (
-            not isinstance(relation_row, Mapping)
-            or set(relation_row) != {"evidence_handle", "relation"}
-        ):
-            raise ValueError(
-                "selection goal relation fields are not exact"
-            )
-        handle = relation_row["evidence_handle"]
-        relation = relation_row["relation"]
-        if (
-            not isinstance(handle, str)
-            or handle in seen_relation_handles
-            or handle not in conversation_progress_event_handles
-        ):
-            raise ValueError(
-                "selection goal lacks exact conversation evidence coverage"
-            )
-        if relation not in {
-            "excluded",
-            "reopened",
-            "supports",
-            "unrelated",
-        }:
-            raise ValueError("selection goal relation is invalid")
-        seen_relation_handles.add(handle)
-        normalized_relations.append({
-            "evidence_handle": handle,
-            "relation": relation,
-        })
-    if seen_relation_handles != conversation_progress_event_handles:
-        raise ValueError(
-            "selection goal lacks exact conversation evidence coverage"
         )
     consequences = parsed["expected_consequences"]
     if not isinstance(consequences, list) or not 1 <= len(consequences) <= 8:
@@ -753,7 +701,6 @@ def validate_selection_goal_draft(
     result = dict(parsed)
     result["target_role_handles"] = target_roles
     result["evidence_handles"] = cited_evidence
-    result["conversation_evidence_relations"] = normalized_relations
     result["expected_consequences"] = list(consequences)
     return result
 

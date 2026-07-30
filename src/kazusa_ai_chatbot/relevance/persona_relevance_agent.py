@@ -128,7 +128,8 @@ _SETTLED_SYSTEM_PROMPT_COMMON = '''你是具备角色语境的 settled relevance
   recipient_relation 使用 character，并引用 continuity_1。
 - character_state_evidence 是当前活跃或受压的角色状态候选，不是自动参与许可。只有当前消息与
   某一候选存在具体语义交集，而且发言能推进、保护、解决或调查该状态时，才能引用它。
-- 只引用 payload 中实际存在的 ref。每类 ref 最多三个且不得重复。
+- 只引用 payload 中实际存在的 ref。interaction_evidence_refs 和
+  character_state_refs 每个列表合计最多 3 个 ref，且不得重复。只选择足以支持判断的最少 ref。
 
 # 接收者与准入依据
 - recipient_relation 记录消息实际指向 character、group、current_author、other_participant、
@@ -243,7 +244,9 @@ rejected_output 是仅供修复参考的上一次结果。重新判断 semantic_
 contract 列出的一个值。返回字段必须恰好是 semantic_disposition、recipient_relation、
 admission_basis、interaction_evidence_refs、character_state_refs、reason_to_respond、
 use_reply_feature、channel_topic、indirect_speech_context。所有 ref 必须来自 settled_evidence
-中的 interaction_evidence 或 character_state_evidence。只返回一个 JSON 对象，不添加解释。
+中的 interaction_evidence 或 character_state_evidence。interaction_evidence_refs 和
+character_state_refs 每个列表合计最多 3 个 ref；只保留足以支持判断的最少 ref。只返回一个
+JSON 对象，不添加解释。
 semantic_disposition 为 recipient_withdrawn 时，admission_basis 必须为 none；保留最新实际
 recipient_relation，并引用支持该接收者的 target、reply 或 message evidence。
 允许的 semantic_disposition：{semantic_dispositions}
@@ -1284,18 +1287,23 @@ def _validate_authoritative_settled_decision(
 
     if not isinstance(raw, Mapping):
         raise ValueError("authoritative settled output must be an object")
-    required = {
+    required_decision_fields = {
         "semantic_disposition",
-        "recipient_relation",
-        "admission_basis",
-        "interaction_evidence_refs",
-        "character_state_refs",
         "reason_to_respond",
         "use_reply_feature",
         "channel_topic",
         "indirect_speech_context",
     }
-    if set(raw) != required:
+    assessment_fields = {
+        "recipient_relation",
+        "admission_basis",
+        "interaction_evidence_refs",
+        "character_state_refs",
+    }
+    if (
+        not required_decision_fields.issubset(raw)
+        or set(raw) - required_decision_fields - assessment_fields
+    ):
         raise ValueError("authoritative settled output fields are not exact")
     semantic_disposition = raw["semantic_disposition"]
     if semantic_disposition not in available_dispositions:
@@ -1422,6 +1430,15 @@ def _parse_authoritative_settled_response(
             available_dispositions=available_dispositions,
         )
         decision = _decision_from_authoritative_disposition(authoritative)
+    except ValueError as exc:
+        logger.warning(f"Invalid authoritative settled output: {exc}")
+        raise SettledRelevanceContractError(
+            "authoritative settled output failed its contract",
+            validation_reason=str(exc),
+        ) from exc
+
+    parse_status = "succeeded"
+    try:
         assessment = validate_participation_assessment(
             parsed_output,
             interaction_evidence=model_payload["interaction_evidence"],
@@ -1434,12 +1451,12 @@ def _parse_authoritative_settled_response(
             use_reply_feature=decision["use_reply_feature"],
         )
     except ValueError as exc:
-        logger.warning(f"Invalid authoritative settled output: {exc}")
-        raise SettledRelevanceContractError(
-            "authoritative settled output failed its contract",
-            validation_reason=str(exc),
-        ) from exc
-    return decision, assessment, "succeeded"
+        logger.warning(
+            f"Discarding invalid authoritative settled evidence: {exc}"
+        )
+        assessment = _authoritative_settled_assessment(model_payload)
+        parse_status = "normalized"
+    return decision, assessment, parse_status
 
 
 def _authoritative_settled_assessment(

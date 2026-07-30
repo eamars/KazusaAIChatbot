@@ -132,6 +132,10 @@ needs.
 Cognition Core V2. Core V2 uses the thirteen independent stage routes above;
 each route owns a complete endpoint, credential, model, completion-budget, and
 thinking bundle with no route inheritance or fallback.
+Typed required-selection goal turns deliberately use
+`COGNITION_LLM_GOAL_ORDINARY_RESPONSE` for every branch, so configure that
+route with the denser goal model. Active persistent-goal turns without a typed
+required selection continue to use `COGNITION_LLM_GOAL_ACTIVE_BRANCH`.
 
 Code-reading uses separate required routes for PM decisions and programmer
 workers. Final synthesis intentionally reuses `CODING_AGENT_PM_LLM`; there is

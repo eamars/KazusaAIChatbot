@@ -255,6 +255,12 @@ outside Cognition Core V2. Core V2 requires all thirteen complete
 `BASE_URL`, `API_KEY`, `MODEL`, `MAX_COMPLETION_TOKENS`, and
 `THINKING_ENABLED` values directly; stage routes have no inheritance or
 fallback.
+Typed required-selection goal turns use the
+`COGNITION_LLM_GOAL_ORDINARY_RESPONSE` bundle for every cognition branch.
+Configure this route with the denser goal model; for example, a deployment may
+assign its 31B dense model here while retaining a 26B model on
+`COGNITION_LLM_GOAL_ACTIVE_BRANCH` for active branches that do not require a
+character-owned selection.
 Route-specific variables replace the retired generic `LLM_BASE_URL`,
 `LLM_API_KEY`, and `LLM_MODEL` settings. Missing required route variables stop
 config loading. Chat routes also accept route-specific

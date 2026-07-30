@@ -325,10 +325,6 @@ def _selection_goal_draft() -> dict[str, object]:
         'private_monologue': 'I want a genuinely different choice.',
         'target_role_handles': [],
         'evidence_handles': ['e1', 'e2'],
-        'conversation_evidence_relations': [{
-            'evidence_handle': 'e2',
-            'relation': 'excluded',
-        }],
         'expected_consequences': [
             'the current user receives one concrete new choice',
         ],
@@ -340,53 +336,31 @@ def test_selection_goal_contract_rejects_missing_evidence_coverage() -> None:
     """A producer cannot silently ignore one supplied continuity event."""
 
     candidate = _selection_goal_draft()
-    candidate['conversation_evidence_relations'] = []
+    candidate['evidence_handles'] = ['e1']
 
-    with pytest.raises(ValueError, match='exact conversation evidence'):
+    with pytest.raises(ValueError, match='required evidence coverage'):
         goal_cognition.validate_selection_goal_draft(
             candidate,
             evidence_handles={'e1', 'e2'},
             role_handles=set(),
             required_operation_handles={'e1'},
-            conversation_progress_event_handles={'e2'},
+            conversation_progress_handles={'e2'},
         )
 
 
-@pytest.mark.parametrize(
-    'relations',
-    [
-        [
-            {'evidence_handle': 'e2', 'relation': 'excluded'},
-            {'evidence_handle': 'e2', 'relation': 'supports'},
-        ],
-        [{'evidence_handle': 'e3', 'relation': 'excluded'}],
-        [{
-            'evidence_handle': 'e2',
-            'relation': 'excluded',
-            'explanation': 'extra semantic evaluator field',
-        }],
-    ],
-    ids=[
-        'duplicate-relation-handle',
-        'unknown-relation-handle',
-        'extra-relation-field',
-    ],
-)
-def test_selection_goal_rejects_relation_domain_mutations(
-    relations: list[dict[str, str]],
-) -> None:
-    """Reject relation mutations without repairing the producer's choice."""
+def test_selection_goal_rejects_retired_relation_field() -> None:
+    """Reject the removed relation vocabulary in the exact producer schema."""
 
     candidate = _selection_goal_draft()
-    candidate['conversation_evidence_relations'] = relations
+    candidate['conversation_evidence_relations'] = []
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='fields are not exact'):
         goal_cognition.validate_selection_goal_draft(
             candidate,
             evidence_handles={'e1', 'e2'},
             role_handles=set(),
             required_operation_handles={'e1'},
-            conversation_progress_event_handles={'e2'},
+            conversation_progress_handles={'e2'},
         )
 
 
@@ -402,8 +376,31 @@ def test_selection_goal_rejects_missing_mandatory_citation() -> None:
             evidence_handles={'e1', 'e2'},
             role_handles=set(),
             required_operation_handles={'e1'},
-            conversation_progress_event_handles={'e2'},
+            conversation_progress_handles={'e2'},
         )
+
+
+def test_selection_goal_accepts_ten_mandatory_citations() -> None:
+    """Mandatory coverage expands beyond the generic optional-citation cap."""
+
+    mandatory_handles = {f'e{index}' for index in range(1, 11)}
+    candidate = _selection_goal_draft()
+    candidate['evidence_handles'] = sorted(
+        mandatory_handles,
+        key=lambda handle: int(handle[1:]),
+    )
+
+    validated = goal_cognition.validate_selection_goal_draft(
+        candidate,
+        evidence_handles=mandatory_handles,
+        role_handles=set(),
+        required_operation_handles={'e1', 'e2'},
+        conversation_progress_handles={
+            f'e{index}' for index in range(3, 11)
+        },
+    )
+
+    assert set(validated['evidence_handles']) == mandatory_handles
 
 
 @pytest.mark.asyncio
@@ -444,7 +441,18 @@ async def test_selection_goal_uses_one_producer_and_zero_semantic_verifiers(
 
     assert len(llm.calls) == 1
     producer_prompt = str(llm.calls[0][0].content)
-    assert 'conversation_evidence_relations' in producer_prompt
+    producer_payload = json.loads(str(llm.calls[0][1].content))
+    assert 'conversation_evidence_relations' not in producer_prompt
+    assert [
+        row['evidence_handle']
+        for row in producer_payload['required_selection_operations']
+    ] == ['e1']
+    assert producer_payload['conversation_progress_constraints'] == [{
+        'evidence_handle': 'e2',
+        'semantic_text': _terminal_conversation_evidence()['semantic_text'],
+    }]
+    assert producer_payload['supporting_evidence'] == []
+    assert 'evidence' not in producer_payload
     assert 'candidate_bid' not in producer_prompt
     assert bid['intention'] == 'choose the current character palm'
     assert bid['desired_outcome'] == bid['intention']
@@ -512,20 +520,13 @@ async def test_selection_json_failure_returns_to_same_producer(
 
 
 @pytest.mark.asyncio
-async def test_selection_exact_relations_exclude_rag_conversation_rows(
+async def test_selection_mandatory_citations_exclude_rag_conversation_rows(
 ) -> None:
-    """Keep the mandatory relation domain within the nine-citation cap."""
+    """Keep mandatory citations within the nine-citation cap."""
 
     progress_handles = [f'e{index}' for index in range(2, 10)]
     selection_draft = _selection_goal_draft()
     selection_draft['evidence_handles'] = ['e1', *progress_handles]
-    selection_draft['conversation_evidence_relations'] = [
-        {
-            'evidence_handle': handle,
-            'relation': 'excluded',
-        }
-        for handle in progress_handles
-    ]
     progress_rows: list[dict[str, object]] = []
     for handle in progress_handles:
         row = _terminal_conversation_evidence()

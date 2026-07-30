@@ -457,16 +457,12 @@ async def test_required_selection_regenerates_with_the_same_producer() -> None:
         "private_monologue": "我现在直接作出自己的选择。",
         "target_role_handles": [],
         "evidence_handles": ["e1", "e2"],
-        "conversation_evidence_relations": [{
-            "evidence_handle": "e2",
-            "relation": "excluded",
-        }],
         "expected_consequences": ["当前用户得到一个明确选择。"],
         "confidence": "high",
     }
     responses = [
         {"selection": ""},
-        {**selected, "conversation_evidence_relations": []},
+        {**selected, "unknown_field": "invalid"},
         selected,
     ]
 
@@ -545,7 +541,7 @@ async def test_required_selection_regenerates_with_the_same_producer() -> None:
         )
         for message_set in llm.messages[1:]
     )
-    assert '"allowed_conversation_progress_event_handles": ["e2"]' in (
+    assert '"required_evidence_handles": ["e1", "e2"]' in (
         llm.messages[1][0].content
     )
     assert 'validation_error' in llm.messages[1][0].content
@@ -557,7 +553,7 @@ async def test_required_selection_regenerates_with_the_same_producer() -> None:
 @pytest.mark.asyncio
 async def test_required_selection_regeneration_excludes_optional_conversation(
 ) -> None:
-    """Give the same producer the exact empty relation domain after failure."""
+    """Keep optional conversation handles out of mandatory retry feedback."""
 
     valid_selection = {
         'selection_kind': 'choice',
@@ -566,16 +562,12 @@ async def test_required_selection_regeneration_excludes_optional_conversation(
         'private_monologue': '我现在直接说出自己的选择。',
         'target_role_handles': [],
         'evidence_handles': ['e1', 'e2'],
-        'conversation_evidence_relations': [],
         'expected_consequences': ['当前用户得到一个明确选择。'],
         'confidence': 'high',
     }
     invalid_selection = {
         **valid_selection,
-        'conversation_evidence_relations': [{
-            'handle': 'e2',
-            'relation': 'unrelated',
-        }],
+        'unknown_field': 'invalid',
     }
 
     class _LLM:
@@ -650,16 +642,9 @@ async def test_required_selection_regeneration_excludes_optional_conversation(
     assert regeneration_prompt.startswith(
         goal_module.REQUIRED_SELECTION_GOAL_PROMPT
     )
-    assert '"allowed_conversation_progress_event_handles": []' in (
-        regeneration_prompt
-    )
-    assert '"required_relation_fields": ["evidence_handle", "relation"]' in (
-        regeneration_prompt
-    )
-    assert (
-        'selection goal relation fields are not exact'
-        in regeneration_prompt
-    )
+    assert '"required_evidence_handles": ["e1"]' in regeneration_prompt
+    assert 'selection goal draft fields are not exact' in regeneration_prompt
+    assert 'conversation_evidence_relations' not in regeneration_prompt
     assert bid['intention'] == valid_selection['selection']
 
 
@@ -754,7 +739,8 @@ def test_required_selection_producer_demands_one_actual_selection() -> None:
 
     prompt = goal_module.REQUIRED_SELECTION_GOAL_PROMPT
 
-    assert "唯一权威选择内容" in prompt
+    assert '`selection` 是唯一' in prompt
+    assert '权威选择内容' in prompt
     assert "不得只说以后决定" in prompt
     assert '"selection": ""' in prompt
 
@@ -764,18 +750,11 @@ def test_required_selection_producer_accounts_for_terminal_evidence() -> None:
 
     prompt = goal_module.REQUIRED_SELECTION_GOAL_PROMPT
 
-    assert '同义表达、部件与整体' in prompt
-    assert '引用终态证据不会自动许可重选' in prompt
-    assert (
-        '对 `conversation_progress_event_handles` '
-        '中每个活跃进度事件句柄恰好输出一条关系'
-    ) in prompt
-    assert '句柄集合必须与该列表完全相等' in prompt
-    assert '也不得把它加入此关系数组' in prompt
-    assert '若该列表为空' in prompt
-    assert '每行只能有 `evidence_handle` 与 `relation` 两个字段' in prompt
-    assert '不得简写成 `handle`' in prompt
-    assert '"conversation_evidence_relations": []' in prompt
-    assert '"evidence_handle": "e2"' not in prompt
+    assert '`conversation_progress_constraints`' in prompt
+    assert '`evidence_handles` 引用其中每个 `evidence_handle`' in prompt
+    assert '`completed`、`rejected`、`superseded`' in prompt
+    assert '只有当前输入明确要求重开' in prompt
+    assert '`supporting_evidence` 只提供可选支持' in prompt
+    assert 'conversation_evidence_relations' not in prompt
     assert not hasattr(goal_module, 'REQUIRED_SELECTION_VERIFIER_PROMPT')
     assert not hasattr(goal_module, 'REQUIRED_SELECTION_REPAIR_PROMPT')

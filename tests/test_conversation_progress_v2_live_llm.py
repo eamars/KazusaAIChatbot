@@ -1131,38 +1131,46 @@ async def test_live_original_failure_progress_semantic_handoff(
 
     progress_handle = progress_row["evidence_handle"]
     episode_handle = episode_row["evidence_handle"]
-    if progress_handle not in goal_capture.payload[
-        "conversation_progress_event_handles"
-    ]:
+    progress_constraints = {
+        row["evidence_handle"]: row["semantic_text"]
+        for row in goal_capture.payload[
+            "conversation_progress_constraints"
+        ]
+    }
+    if progress_handle not in progress_constraints:
         raise AssertionError(
             "serialized goal input lost the completed-event handle"
         )
-    required_operation_handles = {
-        row["evidence_handle"]
+    required_operations = {
+        row["evidence_handle"]: row
         for row in goal_capture.payload["required_selection_operations"]
     }
-    if episode_handle not in required_operation_handles:
+    if episode_handle not in required_operations:
         raise AssertionError(
             "serialized goal input lost the current selection operation"
         )
-    serialized_rows = {
-        row["handle"]: row["semantic_text"]
-        for row in goal_capture.payload["evidence"]
-    }
-    if serialized_rows[progress_handle] != progress_text:
+    if progress_constraints[progress_handle] != progress_text:
         raise AssertionError(
             "serialized goal input changed completed-event semantics"
         )
-    if serialized_rows[episode_handle] != episode_row["semantic_text"]:
+    expected_operation = json.loads(
+        episode_row["semantic_text"]
+    )["response_operation"]
+    if (
+        required_operations[episode_handle]["response_operation"]
+        != expected_operation
+    ):
         raise AssertionError(
             "serialized goal input changed the current transition"
         )
     if len(goal_capture.human_payload) > GOAL_COGNITION_PROMPT_CAP:
         raise AssertionError("serialized goal input exceeded its hard cap")
-    if "conversation_evidence_relations" not in goal_capture.system_prompt:
+    if "conversation_progress_constraints" not in goal_capture.system_prompt:
         raise AssertionError(
             "serialized goal input did not use the required-selection owner"
         )
+    if "conversation_evidence_relations" in goal_capture.system_prompt:
+        raise AssertionError("serialized goal input retained retired relations")
 
     trace_path = write_llm_trace(
         "test_live_original_failure_progress_semantic_handoff",

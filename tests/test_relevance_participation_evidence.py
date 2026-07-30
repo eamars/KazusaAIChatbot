@@ -339,38 +339,85 @@ def test_state_salience_preserves_other_recipient_without_reply_anchor() -> None
     assert assessment == raw
 
 
-def test_invented_or_duplicate_evidence_refs_fail_closed() -> None:
-    """Reject references that do not identify one visible evidence item."""
+def test_evidence_refs_discard_bad_entries_and_truncate() -> None:
+    """Keep the first three usable unique refs from model evidence."""
 
-    interaction_evidence = [{
-        "ref": "name_1",
-        "kind": "canonical_name_span",
-        "summary": "一之濑明日奈",
-    }]
-    invented = {
+    interaction_evidence = [
+        {
+            "ref": "target_character",
+            "kind": "typed_character_target",
+            "summary": "typed target identifies the character",
+        },
+        {
+            "ref": "reply_character",
+            "kind": "typed_character_reply",
+            "summary": "typed reply identifies the character",
+        },
+        {
+            "ref": "name_1",
+            "kind": "canonical_name_span",
+            "summary": "一之濑明日奈",
+        },
+        {
+            "ref": "message_1",
+            "kind": "current_message",
+            "summary": "我说了有奖励么？",
+        },
+    ]
+    raw = {
         "recipient_relation": "character",
         "admission_basis": "interaction_relevance",
-        "interaction_evidence_refs": ["name_2"],
-        "character_state_refs": [],
+        "interaction_evidence_refs": [
+            7,
+            "",
+            "invented",
+            "target_character",
+            "target_character",
+            "reply_character",
+            "name_1",
+            "message_1",
+        ],
+        "character_state_refs": "not-a-list",
     }
-    duplicated = {
+
+    assessment = validate_participation_assessment(
+        raw,
+        interaction_evidence=interaction_evidence,
+        character_state_evidence=[],
+        stage="frontline",
+        action="start",
+        append_target="none",
+        use_reply_feature=False,
+    )
+
+    assert assessment["interaction_evidence_refs"] == [
+        "target_character",
+        "reply_character",
+        "name_1",
+    ]
+    assert assessment["character_state_refs"] == []
+
+
+def test_assessment_without_usable_grounding_fails_closed() -> None:
+    """A normalized empty list cannot invent participation grounding."""
+
+    raw = {
         "recipient_relation": "character",
         "admission_basis": "interaction_relevance",
-        "interaction_evidence_refs": ["name_1", "name_1"],
+        "interaction_evidence_refs": ["invented"],
         "character_state_refs": [],
     }
 
-    for raw in (invented, duplicated):
-        with pytest.raises(ValueError):
-            validate_participation_assessment(
-                raw,
-                interaction_evidence=interaction_evidence,
-                character_state_evidence=[],
-                stage="frontline",
-                action="start",
-                append_target="none",
-                use_reply_feature=False,
-            )
+    with pytest.raises(ValueError, match="positive evidence"):
+        validate_participation_assessment(
+            raw,
+            interaction_evidence=[],
+            character_state_evidence=[],
+            stage="frontline",
+            action="start",
+            append_target="none",
+            use_reply_feature=False,
+        )
 
 
 def test_wrong_kind_and_incomplete_assessments_fail_closed() -> None:
