@@ -1134,7 +1134,7 @@ async def test_live_original_failure_progress_semantic_handoff(
     progress_constraints = {
         row["evidence_handle"]: row["semantic_text"]
         for row in goal_capture.payload[
-            "conversation_progress_constraints"
+            "conversation_progress_evidence"
         ]
     }
     if progress_handle not in progress_constraints:
@@ -1165,7 +1165,7 @@ async def test_live_original_failure_progress_semantic_handoff(
         )
     if len(goal_capture.human_payload) > GOAL_COGNITION_PROMPT_CAP:
         raise AssertionError("serialized goal input exceeded its hard cap")
-    if "conversation_progress_constraints" not in goal_capture.system_prompt:
+    if "conversation_progress_evidence" not in goal_capture.system_prompt:
         raise AssertionError(
             "serialized goal input did not use the required-selection owner"
         )

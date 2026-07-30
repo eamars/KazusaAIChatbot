@@ -997,7 +997,7 @@ def test_required_selection_budget_preserves_mandatory_evidence(
                 "evidence_handle": "e1",
                 "role_explicit_content": required_operation_text,
             }],
-            "conversation_progress_constraints": [{
+            "conversation_progress_evidence": [{
                 "evidence_handle": "e2",
                 "semantic_text": required_progress_text,
             }],
@@ -1029,7 +1029,7 @@ def test_required_selection_budget_preserves_mandatory_evidence(
     assert fitted_payload["required_selection_operations"][0][
         "role_explicit_content"
     ] == required_operation_text
-    assert fitted_payload["conversation_progress_constraints"][0][
+    assert fitted_payload["conversation_progress_evidence"][0][
         "semantic_text"
     ] == required_progress_text
     assert len(
@@ -1063,7 +1063,7 @@ def test_required_selection_regeneration_feedback_counts_toward_cap() -> None:
             "evidence_handle": "e1",
             "role_explicit_content": "required operation",
         }],
-        "conversation_progress_constraints": [{
+        "conversation_progress_evidence": [{
             "evidence_handle": "e2",
             "semantic_text": "completed prior event",
         }],
@@ -1079,7 +1079,8 @@ def test_required_selection_regeneration_feedback_counts_toward_cap() -> None:
     regeneration_system_prompt = (
         goal_cognition_module._required_selection_regeneration_prompt(
             "selection goal draft fields are not exact",
-            {"e1", "e2"},
+            {"e1"},
+            {"e1", "e2", "e3"},
         )
     )
 

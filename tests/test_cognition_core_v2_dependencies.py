@@ -541,7 +541,10 @@ async def test_required_selection_regenerates_with_the_same_producer() -> None:
         )
         for message_set in llm.messages[1:]
     )
-    assert '"required_evidence_handles": ["e1", "e2"]' in (
+    assert '"required_evidence_handles": ["e1"]' in (
+        llm.messages[1][0].content
+    )
+    assert '"allowed_evidence_handles": ["e1", "e2"]' in (
         llm.messages[1][0].content
     )
     assert 'validation_error' in llm.messages[1][0].content
@@ -643,6 +646,9 @@ async def test_required_selection_regeneration_excludes_optional_conversation(
         goal_module.REQUIRED_SELECTION_GOAL_PROMPT
     )
     assert '"required_evidence_handles": ["e1"]' in regeneration_prompt
+    assert '"allowed_evidence_handles": ["e1", "e2"]' in (
+        regeneration_prompt
+    )
     assert 'selection goal draft fields are not exact' in regeneration_prompt
     assert 'conversation_evidence_relations' not in regeneration_prompt
     assert bid['intention'] == valid_selection['selection']
@@ -745,16 +751,21 @@ def test_required_selection_producer_demands_one_actual_selection() -> None:
     assert '"selection": ""' in prompt
 
 
-def test_required_selection_producer_accounts_for_terminal_evidence() -> None:
-    """Require direct evidence accounting without a second semantic owner."""
+def test_required_selection_producer_selects_relevant_progress_evidence(
+) -> None:
+    """Keep progress relevance with the producing semantic owner."""
 
     prompt = goal_module.REQUIRED_SELECTION_GOAL_PROMPT
 
-    assert '`conversation_progress_constraints`' in prompt
-    assert '`evidence_handles` 引用其中每个 `evidence_handle`' in prompt
-    assert '`completed`、`rejected`、`superseded`' in prompt
+    assert '`conversation_progress_evidence`' in prompt
+    assert '引用其中会实质约束本轮选择的' in prompt
+    assert '不引用与当前选择无关的历史' in prompt
+    assert '`completed`' in prompt
+    assert '`rejected`' in prompt
+    assert '`superseded`' in prompt
     assert '只有当前输入明确要求重开' in prompt
     assert '`supporting_evidence` 只提供可选支持' in prompt
+    assert '`semantic_context` 中出现的 handle' in prompt
     assert 'conversation_evidence_relations' not in prompt
     assert not hasattr(goal_module, 'REQUIRED_SELECTION_VERIFIER_PROMPT')
     assert not hasattr(goal_module, 'REQUIRED_SELECTION_REPAIR_PROMPT')

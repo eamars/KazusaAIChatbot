@@ -332,20 +332,21 @@ def _selection_goal_draft() -> dict[str, object]:
     }
 
 
-def test_selection_goal_contract_rejects_missing_evidence_coverage() -> None:
-    """A producer cannot silently ignore one supplied continuity event."""
+def test_selection_goal_accepts_uncited_unrelated_progress_evidence() -> None:
+    """The producer may leave unrelated progress evidence uncited."""
 
     candidate = _selection_goal_draft()
     candidate['evidence_handles'] = ['e1']
 
-    with pytest.raises(ValueError, match='required evidence coverage'):
-        goal_cognition.validate_selection_goal_draft(
-            candidate,
-            evidence_handles={'e1', 'e2'},
-            role_handles=set(),
-            required_operation_handles={'e1'},
-            conversation_progress_handles={'e2'},
-        )
+    validated = goal_cognition.validate_selection_goal_draft(
+        candidate,
+        evidence_handles={'e1', 'e2'},
+        role_handles=set(),
+        required_evidence_handles={'e1'},
+        maximum_evidence_handles=9,
+    )
+
+    assert validated['evidence_handles'] == ['e1']
 
 
 def test_selection_goal_rejects_retired_relation_field() -> None:
@@ -359,48 +360,46 @@ def test_selection_goal_rejects_retired_relation_field() -> None:
             candidate,
             evidence_handles={'e1', 'e2'},
             role_handles=set(),
-            required_operation_handles={'e1'},
-            conversation_progress_handles={'e2'},
+            required_evidence_handles={'e1'},
+            maximum_evidence_handles=9,
         )
 
 
 def test_selection_goal_rejects_missing_mandatory_citation() -> None:
-    """Keep required operation and progress-event citations explicit."""
+    """Keep the typed required-operation citation explicit."""
 
     candidate = _selection_goal_draft()
-    candidate['evidence_handles'] = ['e1']
+    candidate['evidence_handles'] = ['e2']
 
     with pytest.raises(ValueError, match='required evidence coverage'):
         goal_cognition.validate_selection_goal_draft(
             candidate,
             evidence_handles={'e1', 'e2'},
             role_handles=set(),
-            required_operation_handles={'e1'},
-            conversation_progress_handles={'e2'},
+            required_evidence_handles={'e1'},
+            maximum_evidence_handles=9,
         )
 
 
-def test_selection_goal_accepts_ten_mandatory_citations() -> None:
-    """Mandatory coverage expands beyond the generic optional-citation cap."""
+def test_selection_goal_accepts_ten_relevant_citations() -> None:
+    """Relevant progress can expand the operation-only citation cap."""
 
-    mandatory_handles = {f'e{index}' for index in range(1, 11)}
+    evidence_handles = {f'e{index}' for index in range(1, 11)}
     candidate = _selection_goal_draft()
     candidate['evidence_handles'] = sorted(
-        mandatory_handles,
+        evidence_handles,
         key=lambda handle: int(handle[1:]),
     )
 
     validated = goal_cognition.validate_selection_goal_draft(
         candidate,
-        evidence_handles=mandatory_handles,
+        evidence_handles=evidence_handles,
         role_handles=set(),
-        required_operation_handles={'e1', 'e2'},
-        conversation_progress_handles={
-            f'e{index}' for index in range(3, 11)
-        },
+        required_evidence_handles={'e1', 'e2'},
+        maximum_evidence_handles=10,
     )
 
-    assert set(validated['evidence_handles']) == mandatory_handles
+    assert set(validated['evidence_handles']) == evidence_handles
 
 
 @pytest.mark.asyncio
@@ -447,7 +446,7 @@ async def test_selection_goal_uses_one_producer_and_zero_semantic_verifiers(
         row['evidence_handle']
         for row in producer_payload['required_selection_operations']
     ] == ['e1']
-    assert producer_payload['conversation_progress_constraints'] == [{
+    assert producer_payload['conversation_progress_evidence'] == [{
         'evidence_handle': 'e2',
         'semantic_text': _terminal_conversation_evidence()['semantic_text'],
     }]
@@ -520,9 +519,9 @@ async def test_selection_json_failure_returns_to_same_producer(
 
 
 @pytest.mark.asyncio
-async def test_selection_mandatory_citations_exclude_rag_conversation_rows(
+async def test_selection_capacity_preserves_progress_before_optional_rows(
 ) -> None:
-    """Keep mandatory citations within the nine-citation cap."""
+    """Size the citation cap from required and progress evidence lanes."""
 
     progress_handles = [f'e{index}' for index in range(2, 10)]
     selection_draft = _selection_goal_draft()

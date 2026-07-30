@@ -536,14 +536,14 @@ async def test_source_faithful_regression_projects_key_details_to_cognition(
         <= GOAL_COGNITION_PROMPT_CAP
     )
     assert goal_capture.payload[
-        "conversation_progress_constraints"
+        "conversation_progress_evidence"
     ] == [{
         "evidence_handle": progress_handle,
         "semantic_text": projected_text,
     }]
     assert "evidence" not in goal_capture.payload
     prompt_event = goal_capture.payload[
-        "conversation_progress_constraints"
+        "conversation_progress_evidence"
     ][0]
     assert prompt_event["semantic_text"] == projected_text
 

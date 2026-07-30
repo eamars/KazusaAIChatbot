@@ -146,19 +146,22 @@ character silence. Every goal attempt is eligible for the protected turn trace.
 When upstream episode evidence carries a typed required selection, deterministic
 routing selects one specialized goal producer instead of the generic goal
 producer. Deterministic code partitions its input into authoritative required
-operations, mandatory conversation-progress constraints, and optional
-supporting evidence. The producing call emits one authoritative `selection`,
-its selection kind, reason, role/evidence handles, consequences, and
-confidence. It must cite every required operation and progress constraint.
-Completed, rejected, and superseded constraints remain model-visible and may
-be reopened only when the current input explicitly requests it. RAG
-conversation-history rows remain optionally citeable supporting evidence.
+operations, complete model-visible conversation-progress evidence, and
+optional supporting evidence. The producing call emits one authoritative
+`selection`, its selection kind, reason, role/evidence handles, consequences,
+and confidence. It must cite every required operation. The goal LLM cites only
+progress rows that materially constrain the current choice and leaves
+unrelated history uncited. Completed, rejected, and superseded progress remains
+model-visible and may be reopened only when the current input explicitly
+requests it. RAG conversation-history rows remain optionally citeable
+supporting evidence.
 Deterministic validation owns exact fields, bounds, provenance partitioning,
-mandatory handle coverage, and mapping the one selection into the existing
-complete bid. The goal LLM owns the actual choice, with no discarded relation
-matrix. Structural failures retry the same producing prompt under the existing
-bounded goal contract, with the validation error and exact required evidence
-handle set attached to each complete regeneration. Required-selection parsing
+required-operation handle coverage, and mapping the one selection into the
+existing complete bid. The goal LLM owns progress relevance and the actual
+choice, with no discarded relation matrix. Structural failures retry the same
+producing prompt under the existing bounded goal contract, with the validation
+error plus exact required and allowed evidence handle sets attached to each
+complete regeneration. Required-selection parsing
 uses deterministic cleanup only, so malformed output cannot invoke the shared
 JSON-repair model. There is no semantic verifier, negative verdict,
 evaluator-authored replacement, or recheck. Ordinary turns keep the ordinary

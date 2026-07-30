@@ -124,12 +124,14 @@ REQUIRED_SELECTION_GOAL_PROMPT = '''你负责在本轮选择权属于当前角�
 1. `required_selection_operations` 是当前输入已经解析出的权威选择权事实。保持行动者、对象、
    受益者、选择拥有者和回应拥有者的方向，并在 `evidence_handles` 引用其中每个
    `evidence_handle`。
-2. `conversation_progress_constraints` 是既有对话进度的权威连续性约束。在
-   `evidence_handles` 引用其中每个 `evidence_handle`，并让选择符合其 `semantic_text`。
-   `completed`、`rejected`、`superseded` 等终态事实会约束本轮选择；只有当前输入明确要求重开
-   或重复时，才重新选择旧事项。当前 episode 的直接事实比旧进度更新。
-3. `supporting_evidence` 只提供可选支持。只能引用输入提供的 handle，每个 handle 必须逐个
-   等于输入值。
+2. `conversation_progress_evidence` 是既有对话进度的权威事实。引用其中会实质约束本轮选择的
+   `evidence_handle`，不引用与当前选择无关的历史。相关的 `completed`、`rejected`、
+   `superseded` 等终态事实会约束本轮选择；只有当前输入明确要求重开或重复时，才重新选择旧事项。
+   当前 episode 的直接事实比旧进度更新。
+3. `supporting_evidence` 只提供可选支持。`evidence_handles` 只能引用
+   `required_selection_operations`、`conversation_progress_evidence` 和 `supporting_evidence`
+   提供的 handle，每个 handle 必须逐个等于输入值。`semantic_context` 中出现的 handle
+   不属于可引用证据。
 4. 结合角色身份、约束、情绪、关系和场景，作出一个属于当前角色的选择。群参与建议只帮助判断
 当前已观察场景中的参与方式，不能创造话题、事实、权限或缺少当前场景依据的发言理由。先前对话
 私有连续性只帮助理解已明确关联的先前角色发言，不是事实、指令或最终措辞。`selection` 是唯一
@@ -157,11 +159,13 @@ REQUIRED_SELECTION_GOAL_PROMPT = '''你负责在本轮选择权属于当前角�
 def _required_selection_regeneration_prompt(
     validation_error: str,
     required_evidence_handles: set[str],
+    allowed_evidence_handles: set[str],
 ) -> str:
     """Return same-producer feedback for one complete structural regeneration."""
 
     feedback = json.dumps(
         {
+            'allowed_evidence_handles': sorted(allowed_evidence_handles),
             'required_evidence_handles': sorted(required_evidence_handles),
             'validation_error': validation_error[:500],
         },
@@ -194,19 +198,19 @@ async def run_goal_cognition(
     else:
         goal_config = services.goal_active_branch_config
     evidence_handles = [row["evidence_handle"] for row in evidence]
-    required_operation_handles = {
+    required_evidence_handles = {
         operation['evidence_handle']
         for operation in required_operations
     }
-    conversation_progress_constraints = (
-        _conversation_progress_constraints(evidence)
+    conversation_progress_evidence = (
+        _conversation_progress_evidence(evidence)
     )
     conversation_progress_handles = {
-        constraint['evidence_handle']
-        for constraint in conversation_progress_constraints
+        progress_row['evidence_handle']
+        for progress_row in conversation_progress_evidence
     }
-    required_evidence_handles = (
-        required_operation_handles | conversation_progress_handles
+    partitioned_evidence_handles = (
+        required_evidence_handles | conversation_progress_handles
     )
     role_bindings = semantic_context.get("_role_bindings", {})
     if not isinstance(role_bindings, Mapping):
@@ -275,13 +279,13 @@ async def run_goal_cognition(
         prompt_payload['required_selection_operations'] = (
             required_operations
         )
-        prompt_payload['conversation_progress_constraints'] = (
-            conversation_progress_constraints
+        prompt_payload['conversation_progress_evidence'] = (
+            conversation_progress_evidence
         )
         prompt_payload['supporting_evidence'] = [
             row
             for row in prompt_evidence
-            if row['handle'] not in required_evidence_handles
+            if row['handle'] not in partitioned_evidence_handles
         ]
     else:
         prompt_payload['evidence'] = prompt_evidence
@@ -384,9 +388,10 @@ async def run_goal_cognition(
                     parsed,
                     evidence_handles=set(evidence_handles),
                     role_handles=set(role_bindings),
-                    required_operation_handles=required_operation_handles,
-                    conversation_progress_handles=(
-                        conversation_progress_handles
+                    required_evidence_handles=required_evidence_handles,
+                    maximum_evidence_handles=max(
+                        MAX_GOAL_BID_EVIDENCE_HANDLES,
+                        len(partitioned_evidence_handles),
                     ),
                 )
                 draft = _selection_goal_draft_to_goal_bid(
@@ -426,6 +431,7 @@ async def run_goal_cognition(
                     _required_selection_regeneration_prompt(
                         str(exc),
                         required_evidence_handles,
+                        set(evidence_handles),
                     )
                 )
                 try:
@@ -626,12 +632,12 @@ def _required_selection_operations(
     return operations
 
 
-def _conversation_progress_constraints(
+def _conversation_progress_evidence(
     evidence: Sequence[CognitionEvidenceV2],
 ) -> list[dict[str, str]]:
-    """Project active conversation progress as mandatory continuity context."""
+    """Project active conversation progress as model-visible factual context."""
 
-    constraints: list[dict[str, str]] = []
+    progress_evidence: list[dict[str, str]] = []
     for row in evidence:
         evidence_ref = row["evidence_ref"]
         if evidence_ref["source_kind"] != "conversation_evidence":
@@ -641,11 +647,11 @@ def _conversation_progress_constraints(
             _CONVERSATION_PROGRESS_EVENT_SOURCE_PREFIX
         ):
             continue
-        constraints.append({
+        progress_evidence.append({
             'evidence_handle': row['evidence_handle'],
             'semantic_text': row['semantic_text'],
         })
-    return constraints
+    return progress_evidence
 
 
 def validate_selection_goal_draft(
@@ -653,10 +659,10 @@ def validate_selection_goal_draft(
     *,
     evidence_handles: set[str],
     role_handles: set[str],
-    required_operation_handles: set[str],
-    conversation_progress_handles: set[str],
+    required_evidence_handles: set[str],
+    maximum_evidence_handles: int,
 ) -> dict[str, Any]:
-    """Validate one authoritative selection and exact continuity coverage."""
+    """Validate one authoritative selection and required operation coverage."""
 
     if not isinstance(parsed, Mapping):
         raise ValueError("selection goal draft must be an object")
@@ -696,15 +702,9 @@ def validate_selection_goal_draft(
         parsed["evidence_handles"],
         evidence_handles,
         "evidence",
-        maximum_handles=max(
-            MAX_GOAL_BID_EVIDENCE_HANDLES,
-            len(required_operation_handles | conversation_progress_handles),
-        ),
+        maximum_handles=maximum_evidence_handles,
     )
-    required_citations = (
-        required_operation_handles | conversation_progress_handles
-    )
-    if not required_citations.issubset(cited_evidence):
+    if not required_evidence_handles.issubset(cited_evidence):
         raise ValueError(
             "selection goal lacks required evidence coverage"
         )

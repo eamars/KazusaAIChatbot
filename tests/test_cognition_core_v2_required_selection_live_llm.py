@@ -18,6 +18,7 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionExecutionError,
 )
 from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
+    MAX_GOAL_BID_EVIDENCE_HANDLES,
     run_goal_cognition,
     validate_selection_goal_draft,
 )
@@ -104,11 +105,20 @@ def _add_contract_diagnostics(
     *,
     evidence: list[dict[str, Any]],
     role_handles: set[str],
-    progress_handles: set[str],
 ) -> None:
     """Attach canonical parse and strict-validation evidence to live calls."""
 
     operation_handles = _required_operation_handles(evidence)
+    progress_handles = {
+        row['evidence_handle']
+        for row in evidence
+        if (
+            row['evidence_ref']['source_kind'] == 'conversation_evidence'
+            and row['evidence_ref']['source_id'].startswith(
+                'conversation-progress-event:'
+            )
+        )
+    }
     evidence_handles = {
         row['evidence_handle']
         for row in evidence
@@ -130,8 +140,11 @@ def _add_contract_diagnostics(
                     parsed,
                     evidence_handles=evidence_handles,
                     role_handles=role_handles,
-                    required_operation_handles=operation_handles,
-                    conversation_progress_handles=progress_handles,
+                    required_evidence_handles=operation_handles,
+                    maximum_evidence_handles=max(
+                        MAX_GOAL_BID_EVIDENCE_HANDLES,
+                        len(operation_handles | progress_handles),
+                    ),
                 )
             except (AttributeError, KeyError, TypeError, ValueError) as exc:
                 validation_error = f'{type(exc).__name__}: {exc}'
@@ -264,7 +277,6 @@ async def _run_live_required_selection_case(
         capturing_llm.calls,
         evidence=evidence,
         role_handles=set(semantic_context['_role_bindings']),
-        progress_handles=set(expected_progress_handles),
     )
     trace_path = write_llm_trace(
         _TRACE_SUITE,
@@ -282,7 +294,7 @@ async def _run_live_required_selection_case(
             'failure': failure,
             'behavior_contract': (
                 'Produce one concrete character-owned selection, cite every '
-                'required operation and conversation-progress constraint, '
+                'required operation, cite only materially relevant progress, '
                 'and use the configured dense goal route.'
             ),
         },
@@ -424,7 +436,7 @@ def _third_party_reply_case_args() -> dict[str, Any]:
 @pytest.mark.live_llm
 @pytest.mark.asyncio
 async def test_live_required_selection_with_empty_progress_domain() -> None:
-    """A choice with no progress constraints must cite its operation."""
+    """A choice with no progress evidence must cite its operation."""
 
     bid, failure, _, trace_path = await _run_live_required_selection_case(
         case_id='empty_progress_domain',
@@ -499,8 +511,8 @@ async def test_live_required_selection_ignores_internal_evidence_row() -> None:
 
 @pytest.mark.live_llm
 @pytest.mark.asyncio
-async def test_live_required_selection_covers_one_progress_event() -> None:
-    """One active progress constraint must be cited."""
+async def test_live_required_selection_accepts_one_progress_event() -> None:
+    """One progress row stays visible without becoming mandatory."""
 
     progress_row = {
         'evidence_handle': 'e2',
@@ -520,17 +532,17 @@ async def test_live_required_selection_covers_one_progress_event() -> None:
     )
 
     assert failure is None, (
-        f'active progress event lacked exact coverage; trace={trace_path}'
+        f'active progress evidence broke selection output; trace={trace_path}'
     )
     assert bid is not None
-    assert {'e1', 'e2'}.issubset(bid['evidence_handles'])
+    assert 'e1' in bid['evidence_handles']
 
 
 @pytest.mark.live_llm
 @pytest.mark.asyncio
 async def test_live_required_selection_separates_progress_and_optional_rows(
 ) -> None:
-    """Only provenance-owned progress enters the mandatory constraint lane."""
+    """Progress and optional history remain distinct evidence lanes."""
 
     progress_row = {
         'evidence_handle': 'e2',
@@ -564,14 +576,14 @@ async def test_live_required_selection_separates_progress_and_optional_rows(
         f'optional row contaminated active progress coverage; trace={trace_path}'
     )
     assert bid is not None
-    assert {'e1', 'e2'}.issubset(bid['evidence_handles'])
+    assert 'e1' in bid['evidence_handles']
 
 
 @pytest.mark.live_llm
 @pytest.mark.asyncio
 async def test_live_autonomy_selection_separates_progress_and_optional_rows(
 ) -> None:
-    """An active branch must keep optional history out of progress constraints."""
+    """An active branch keeps progress separate from optional history."""
 
     progress_row = {
         'evidence_handle': 'e2',
@@ -606,7 +618,7 @@ async def test_live_autonomy_selection_separates_progress_and_optional_rows(
         f'active-branch selection contract exhausted; trace={trace_path}'
     )
     assert bid is not None
-    assert {'e1', 'e2'}.issubset(bid['evidence_handles'])
+    assert 'e1' in bid['evidence_handles']
 
 
 @pytest.mark.live_llm
@@ -674,7 +686,7 @@ async def test_live_autonomy_selection_with_multiple_required_operations(
         f'active-branch multi-operation contract exhausted; trace={trace_path}'
     )
     assert bid is not None
-    assert {'e1', 'e2', 'e3'}.issubset(bid['evidence_handles'])
+    assert {'e1', 'e2'}.issubset(bid['evidence_handles'])
 
 
 @pytest.mark.live_llm
@@ -710,7 +722,7 @@ async def test_live_autonomy_selection_with_empty_progress_domain() -> None:
 @pytest.mark.live_llm
 @pytest.mark.asyncio
 async def test_live_autonomy_selection_with_maximum_evidence_rows() -> None:
-    """Dense selection must isolate one progress constraint under pressure."""
+    """Dense selection keeps progress evidence available under pressure."""
 
     progress_row = {
         'evidence_handle': 'e2',
@@ -756,7 +768,7 @@ async def test_live_autonomy_selection_with_maximum_evidence_rows() -> None:
         f'dense maximum-evidence contract exhausted; trace={trace_path}'
     )
     assert bid is not None
-    assert {'e1', 'e2'}.issubset(bid['evidence_handles'])
+    assert 'e1' in bid['evidence_handles']
 
 
 @pytest.mark.live_llm
@@ -809,7 +821,7 @@ async def test_live_autonomy_selection_with_progress_alias_collisions(
         f'dense alias-collision contract exhausted; trace={trace_path}'
     )
     assert bid is not None
-    assert {'e1', 'e2'}.issubset(bid['evidence_handles'])
+    assert 'e1' in bid['evidence_handles']
 
 
 @pytest.mark.live_llm
@@ -896,7 +908,7 @@ async def test_live_autonomy_selection_with_exact_production_scene(
         f'dense exact-production contract exhausted; trace={trace_path}'
     )
     assert bid is not None
-    assert {'e1', 'e2'}.issubset(bid['evidence_handles'])
+    assert 'e1' in bid['evidence_handles']
 
 
 @pytest.mark.live_llm
@@ -984,9 +996,7 @@ async def test_live_autonomy_selection_with_multiple_progress_events(
         f'dense production-state contract exhausted; trace={trace_path}'
     )
     assert bid is not None
-    assert {'e1', 'e2', 'e3', 'e4', 'e5'}.issubset(
-        bid['evidence_handles']
-    )
+    assert 'e1' in bid['evidence_handles']
 
 
 @pytest.mark.live_llm
@@ -1071,14 +1081,14 @@ async def test_live_relationship_selection_with_production_state() -> None:
         f'trace={trace_path}'
     )
     assert bid is not None
-    assert {'e1', 'e2'}.issubset(bid['evidence_handles'])
+    assert 'e1' in bid['evidence_handles']
 
 
 @pytest.mark.live_llm
 @pytest.mark.asyncio
-async def test_live_autonomy_selection_with_compound_mandatory_pressure(
+async def test_live_autonomy_selection_with_compound_evidence_pressure(
 ) -> None:
-    """Combine required operations and progress constraints at the row cap."""
+    """Keep two operations mandatory while progress remains model-selected."""
 
     profile_export = json.loads(_PRODUCTION_PROFILE_EXPORT.read_text(
         encoding='utf-8',
@@ -1167,7 +1177,7 @@ async def test_live_autonomy_selection_with_compound_mandatory_pressure(
         })
 
     bid, failure, _, trace_path = await _run_live_required_selection_case(
-        case_id='autonomy_compound_mandatory_pressure',
+        case_id='autonomy_compound_evidence_pressure',
         branch_id='autonomy_boundary',
         extra_evidence=[
             second_operation_row,
@@ -1178,20 +1188,20 @@ async def test_live_autonomy_selection_with_compound_mandatory_pressure(
     )
 
     assert failure is None, (
-        f'compound mandatory evidence exhausted the selection contract; '
+        f'compound evidence exhausted the selection contract; '
         f'trace={trace_path}'
     )
     assert bid is not None
-    assert {'e1', 'e2', 'e3', 'e4', 'e5', 'e6'}.issubset(
+    assert {'e1', 'e2'}.issubset(
         bid['evidence_handles']
     )
 
 
 @pytest.mark.live_llm
 @pytest.mark.asyncio
-async def test_live_autonomy_selection_with_ten_mandatory_citations(
+async def test_live_autonomy_selection_with_ten_visible_evidence_rows(
 ) -> None:
-    """Cite two operations and eight progress constraints in one selection."""
+    """Cite two operations while eight progress rows remain visible."""
 
     second_operation_text = json.dumps({
         'role_explicit_content': '当前用户还要求当前角色明确说明自己的互动边界。',
@@ -1239,7 +1249,7 @@ async def test_live_autonomy_selection_with_ten_mandatory_citations(
         })
 
     bid, failure, _, trace_path = await _run_live_required_selection_case(
-        case_id='autonomy_ten_mandatory_citations',
+        case_id='autonomy_ten_visible_evidence_rows',
         branch_id='autonomy_boundary',
         extra_evidence=[second_operation_row, *progress_rows],
         semantic_context_updates={
@@ -1253,13 +1263,11 @@ async def test_live_autonomy_selection_with_ten_mandatory_citations(
     )
 
     assert failure is None, (
-        f'ten mandatory citations exhausted the selection contract; '
+        f'ten visible evidence rows exhausted the selection contract; '
         f'trace={trace_path}'
     )
     assert bid is not None
-    assert set(bid['evidence_handles']) == {
-        f'e{index}' for index in range(1, 11)
-    }
+    assert {'e1', 'e2'}.issubset(bid['evidence_handles'])
 
 
 @pytest.mark.live_llm
@@ -1450,9 +1458,7 @@ async def test_live_third_party_reply_ordinary_selection_contract_pressure(
         f'ordinary third-party contract exhausted; trace={trace_path}'
     )
     assert bid is not None
-    assert {
-        f'e{index}' for index in range(1, 7)
-    }.issubset(bid['evidence_handles'])
+    assert 'e1' in bid['evidence_handles']
 
 
 @pytest.mark.live_llm
@@ -1476,9 +1482,7 @@ async def test_live_third_party_reply_autonomy_selection_contract_pressure(
         f'autonomy third-party contract exhausted; trace={trace_path}'
     )
     assert bid is not None
-    assert {
-        f'e{index}' for index in range(1, 7)
-    }.issubset(bid['evidence_handles'])
+    assert 'e1' in bid['evidence_handles']
 
 
 @pytest.mark.live_llm
@@ -1513,6 +1517,4 @@ async def test_live_parallel_third_party_reply_selection_contract_pressure(
             f'parallel third-party contract exhausted; trace={trace_path}'
         )
         assert bid is not None
-        assert {
-            f'e{index}' for index in range(1, 7)
-        }.issubset(bid['evidence_handles'])
+        assert 'e1' in bid['evidence_handles']

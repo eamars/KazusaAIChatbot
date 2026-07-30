@@ -195,9 +195,12 @@ later selected event identities.
 
 For a required-selection cognition call, the outer 24,000-character goal
 fitter preserves the required operation and every active progress-event
-evidence row intact. It reduces optional evidence first and fails before the
-model call when the mandatory facts cannot fit; retaining a handle while
-truncating away its event identity is not an accepted projection.
+evidence row intact and model-visible. It reduces optional evidence first and
+fails before the model call when those complete facts cannot fit; retaining a
+handle while truncating away its event identity is not an accepted projection.
+Required operation citations remain mandatory. Cognition cites only progress
+rows that materially constrain the current choice and leaves unrelated history
+uncited.
 
 V2 consumers, including Recall's active-progress collector, read only scene
 fields and `events[].semantic_summary`; deleted V1 list fields have no runtime
