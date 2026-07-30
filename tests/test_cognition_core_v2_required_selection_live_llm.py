@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
 import json
 from pathlib import Path
@@ -76,6 +77,10 @@ async def _run_live_required_selection_case(
     extra_evidence: list[dict[str, Any]],
     branch_id: str = 'ordinary_response',
     semantic_context_updates: dict[str, Any] | None = None,
+    role_explicit_content: str = (
+        '当前用户要求当前角色亲口说出希望当前用户执行的下一步。'
+    ),
+    response_operation: dict[str, Any] | None = None,
 ) -> tuple[
     dict[str, Any] | None,
     dict[str, Any] | None,
@@ -88,18 +93,18 @@ async def _run_live_required_selection_case(
     capturing_llm = _CapturingLLM(production_services.llm)
     services = replace(production_services, llm=capturing_llm)
     expected_config = production_services.goal_ordinary_response_config
-    semantic_text = json.dumps({
-        'role_explicit_content': (
-            '当前用户要求当前角色亲口说出希望当前用户执行的下一步。'
-        ),
-        'response_operation': {
+    if response_operation is None:
+        response_operation = {
             'operation': '当前角色选择并告诉当前用户下一步',
             'response_owner_role': '当前角色',
             'selection_owner_role': '当前角色',
             'selection_required': True,
             'embedded_actor_role': '当前用户',
             'embedded_target_role': '当前角色',
-        },
+        }
+    semantic_text = json.dumps({
+        'role_explicit_content': role_explicit_content,
+        'response_operation': response_operation,
     }, ensure_ascii=False)
     evidence = [{
         'evidence_handle': 'e1',
@@ -1055,3 +1060,170 @@ async def test_live_autonomy_selection_with_ten_mandatory_citations(
     assert set(bid['evidence_handles']) == {
         f'e{index}' for index in range(1, 11)
     }
+
+
+@pytest.mark.live_llm
+@pytest.mark.asyncio
+async def test_live_autonomy_food_choice_with_stale_goal_pressure() -> None:
+    """Probe a current food choice against an unrelated active autonomy goal."""
+
+    profile_export = json.loads(_PRODUCTION_PROFILE_EXPORT.read_text(
+        encoding='utf-8',
+    ))
+    character_export = json.loads(_PRODUCTION_CHARACTER_EXPORT.read_text(
+        encoding='utf-8',
+    ))
+    cognition_state = profile_export['profile']['cognition_state']
+    character_state = character_export['character_state']
+    progress_rows = []
+    for index, summary in enumerate([
+        '当前角色此前要求当前用户交代刚才脑补的内容，该事项仍未完成。',
+        '当前用户现在用邀请当前角色吃 KFC 的问题转入新的当前话题。',
+        '当前角色需要回答是否想吃 KFC，同时自行判断是否继续旧话题。',
+    ], start=2):
+        progress_rows.append({
+            'evidence_handle': f'e{index}',
+            'evidence_ref': {
+                'source_kind': 'conversation_evidence',
+                'source_id': (
+                    f'conversation-progress-event:food-choice-{index}'
+                ),
+                'occurred_at': '2026-07-30T05:47:49.896672Z',
+                'semantic_summary': summary,
+            },
+            'semantic_text': summary,
+            'visible_to': ['q:relationship_social'],
+        })
+
+    bid, failure, model_calls, trace_path = (
+        await _run_live_required_selection_case(
+            case_id='autonomy_food_choice_stale_goal_pressure',
+            branch_id='autonomy_boundary',
+            extra_evidence=progress_rows,
+            role_explicit_content='当前用户询问当前角色是否想吃 KFC。',
+            response_operation={
+                'operation': '当前角色选择是否接受当前用户的 KFC 邀请',
+                'response_owner_role': '当前角色',
+                'selection_owner_role': '当前角色',
+                'selection_required': True,
+                'embedded_actor_role': '当前用户',
+                'embedded_target_role': '当前角色',
+            },
+            semantic_context_updates={
+                'current_event': '@当前角色 你想吃 KFC 么？',
+                'private_continuity_context': (
+                    '当前角色此前持续追问当前用户脑补了什么，'
+                    '当前用户现在改为询问是否想吃 KFC。'
+                ),
+                'character_identity': {
+                    'description': character_state['description'],
+                    'personality_brief': character_state[
+                        'personality_brief'
+                    ],
+                    'boundary_profile': character_state['boundary_profile'],
+                    'self_image': character_state['self_image'],
+                    'backstory': character_state['backstory'],
+                },
+                'goal_projection': cognition_state['goals'][0],
+                'events': cognition_state['active_events'],
+                'goals': cognition_state['goals'],
+                'relationship': cognition_state['relationship'],
+                'affect': cognition_state['affect_activations'],
+            },
+        )
+    )
+
+    assert model_calls, (
+        f'food-choice probe made no model call; trace={trace_path}'
+    )
+    assert (bid is None) != (failure is None), (
+        f'food-choice probe returned an invalid disposition; trace={trace_path}'
+    )
+
+
+@pytest.mark.live_llm
+@pytest.mark.asyncio
+async def test_live_parallel_food_choice_selection_contract_pressure() -> None:
+    """Run competing food-choice selections with production concurrency."""
+
+    profile_export = json.loads(_PRODUCTION_PROFILE_EXPORT.read_text(
+        encoding='utf-8',
+    ))
+    character_export = json.loads(_PRODUCTION_CHARACTER_EXPORT.read_text(
+        encoding='utf-8',
+    ))
+    cognition_state = profile_export['profile']['cognition_state']
+    character_state = character_export['character_state']
+    progress_rows = []
+    for index, summary in enumerate([
+        '当前角色此前要求当前用户交代刚才脑补的内容，该事项仍未完成。',
+        '当前用户现在用邀请当前角色吃 KFC 的问题转入新的当前话题。',
+        '当前角色需要回答是否想吃 KFC，同时自行判断是否继续旧话题。',
+    ], start=2):
+        progress_rows.append({
+            'evidence_handle': f'e{index}',
+            'evidence_ref': {
+                'source_kind': 'conversation_evidence',
+                'source_id': (
+                    f'conversation-progress-event:parallel-food-{index}'
+                ),
+                'occurred_at': '2026-07-30T05:47:49.896672Z',
+                'semantic_summary': summary,
+            },
+            'semantic_text': summary,
+            'visible_to': ['q:relationship_social'],
+        })
+    common_args = {
+        'extra_evidence': progress_rows,
+        'role_explicit_content': '当前用户询问当前角色是否想吃 KFC。',
+        'response_operation': {
+            'operation': '当前角色选择是否接受当前用户的 KFC 邀请',
+            'response_owner_role': '当前角色',
+            'selection_owner_role': '当前角色',
+            'selection_required': True,
+            'embedded_actor_role': '当前用户',
+            'embedded_target_role': '当前角色',
+        },
+        'semantic_context_updates': {
+            'current_event': '@当前角色 你想吃 KFC 么？',
+            'private_continuity_context': (
+                '当前角色此前持续追问当前用户脑补了什么，'
+                '当前用户现在改为询问是否想吃 KFC。'
+            ),
+            'character_identity': {
+                'description': character_state['description'],
+                'personality_brief': character_state['personality_brief'],
+                'boundary_profile': character_state['boundary_profile'],
+                'self_image': character_state['self_image'],
+                'backstory': character_state['backstory'],
+            },
+            'goal_projection': cognition_state['goals'][0],
+            'goals': cognition_state['goals'],
+            'relationship': cognition_state['relationship'],
+        },
+    }
+    autonomy_result, ordinary_result = await asyncio.gather(
+        _run_live_required_selection_case(
+            case_id='parallel_food_choice_autonomy',
+            branch_id='autonomy_boundary',
+            **common_args,
+        ),
+        _run_live_required_selection_case(
+            case_id='parallel_food_choice_ordinary',
+            branch_id='ordinary_response',
+            **common_args,
+        ),
+    )
+
+    for bid, failure, model_calls, trace_path in (
+        autonomy_result,
+        ordinary_result,
+    ):
+        assert model_calls, (
+            f'parallel food-choice branch made no model call; '
+            f'trace={trace_path}'
+        )
+        assert (bid is None) != (failure is None), (
+            f'parallel branch returned an invalid disposition; '
+            f'trace={trace_path}'
+        )
