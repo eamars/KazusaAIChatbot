@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Literal
@@ -255,12 +256,32 @@ async def run_first_cycle_shared_memory_prewarm(
     """
 
     empty_rag_result = _empty_projected_rag_result(state)
+    prewarm_task = state["decontextualized_input"]
+    prompt_message_context = state["prompt_message_context"]
+    for mention in prompt_message_context["mentions"]:
+        if not isinstance(mention, Mapping):
+            continue
+        if mention.get("entity_kind") != "bot":
+            continue
+        display_name = mention.get("display_name")
+        if not isinstance(display_name, str) or not display_name.strip():
+            continue
+        mention_token = f"@{display_name.strip()}"
+        mention_pattern = re.compile(
+            rf"(?<!\S){re.escape(mention_token)}(?!\S)"
+        )
+        prewarm_task = mention_pattern.sub("", prewarm_task, count=1)
+    prewarm_task = prewarm_task.strip()
+    if not prewarm_task:
+        return_value = empty_rag_result
+        return return_value
+
     rag_request = build_text_chat_rag_request(
         episode=state["cognitive_episode"],
-        decontextualized_input=state["decontextualized_input"],
+        decontextualized_input=prewarm_task,
         character_profile=state["character_profile"],
         user_profile=state["user_profile"],
-        prompt_message_context=state["prompt_message_context"],
+        prompt_message_context=prompt_message_context,
         channel_topic=state["channel_topic"],
         chat_history_recent=state["chat_history_recent"],
         chat_history_wide=state["chat_history_wide"],
