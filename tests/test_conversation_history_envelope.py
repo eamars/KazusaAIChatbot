@@ -11,6 +11,38 @@ from kazusa_ai_chatbot.message_envelope import INLINE_ATTACHMENT_BYTE_LIMIT
 
 
 @pytest.mark.asyncio
+async def test_save_conversation_rejects_prompt_empty_row(
+    monkeypatch,
+) -> None:
+    """Conversation storage must reject rows with no text or attachment."""
+
+    get_db = AsyncMock()
+    monkeypatch.setattr(conversation_module, "get_db", get_db)
+
+    with pytest.raises(
+        ValueError,
+        match="body_text or a storable attachment",
+    ):
+        await conversation_module.save_conversation({
+            "platform": "qq",
+            "platform_channel_id": "chan-1",
+            "role": "user",
+            "platform_user_id": "platform-user",
+            "global_user_id": "user-1",
+            "display_name": "User",
+            "body_text": "",
+            "raw_wire_text": "",
+            "addressed_to_global_user_ids": [],
+            "mentions": [],
+            "broadcast": False,
+            "attachments": [],
+            "timestamp": "2026-04-30T00:00:00+00:00",
+        })
+
+    get_db.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_save_conversation_writes_typed_fields_and_embedding_source(
     monkeypatch,
 ) -> None:

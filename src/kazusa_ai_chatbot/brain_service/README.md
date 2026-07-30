@@ -593,6 +593,8 @@ execution. If that row is not committed, the request fails closed and no
 visible reply is released. Discarded, listen-only, and private-coalesced
 inputs retain their persisted source rows. A settled turn is not allowed to
 run on any fragment whose source row was not committed.
+An envelope with neither authored `body_text` nor attachments completes with
+an empty response before queue admission and creates no conversation row.
 
 For visible assistant output, the brain writes one assistant row per logical
 `ChatResponse.messages` item before returning `ChatResponse` to the adapter.

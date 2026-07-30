@@ -269,6 +269,9 @@ Primary owners:
 Semantic search uses `body_text` plus attachment descriptions as the embedding
 source. `raw_wire_text` and `channel_name` remain audit/source-preparation
 metadata outside embedding text.
+`save_conversation(...)` requires a string `body_text` field and rejects a row
+when that text is blank after attachment storage policy leaves no storable
+attachment.
 
 ### `user_profiles`
 

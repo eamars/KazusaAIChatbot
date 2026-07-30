@@ -140,6 +140,49 @@ def test_nonboundary_gapped_assistant_candidate_falls_back_per_row():
     )
 
 
+def test_attachment_only_row_uses_stored_description():
+    """Attachment descriptions make authored-empty rows prompt-usable."""
+
+    row = deepcopy(build_adjacent_history()[4])
+    row['body_text'] = ''
+    row['attachments'] = [{
+        'media_type': 'image/jpeg',
+        'description': 'a desk with handwritten notes',
+        'storage_shape': 'url_only',
+    }]
+
+    result = assemble_logical_turns_with_diagnostics(
+        rows=[row],
+        excluded_row_ids=[],
+    )
+
+    assert result.turns[0]['fragments'] == [
+        '<image>a desk with handwritten notes</image>',
+    ]
+    assert result.incomplete_or_malformed_turn_count == 0
+
+
+def test_prompt_empty_history_row_is_dropped_with_diagnostic():
+    """A legacy row with no usable text must not poison later history."""
+
+    history = build_adjacent_history()
+    rows = deepcopy([history[4], history[14], history[15]])
+    rows[1]['body_text'] = ''
+    rows[1]['attachments'] = []
+
+    result = assemble_logical_turns_with_diagnostics(
+        rows=rows,
+        excluded_row_ids=[],
+    )
+
+    assert len(result.turns) == 2
+    assert all(
+        rows[1]['_id'] not in turn['conversation_row_ids']
+        for turn in result.turns
+    )
+    assert result.incomplete_or_malformed_turn_count == 1
+
+
 def test_newest_complete_turn_caps_preserve_chronology():
     turns = assemble_logical_turns(
         rows=build_adjacent_history(),

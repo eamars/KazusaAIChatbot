@@ -252,6 +252,10 @@ events, subject to the independent packet character cap.
 Structural and contract failures are typed and fail closed. Invalid semantic
 output, unknown handles, unsupported values, missing exact block references,
 or unsafe compaction candidates cannot enter persistence or cognition.
+History rows project authored `body_text` together with stored image
+descriptions. A legacy row that has neither source is omitted from logical-turn
+assembly and increments `incomplete_or_malformed_turn_count`, so one unusable
+row cannot block the current chat turn.
 
 Diagnostics contain counts, sizes, compaction level, exact recorder call and
 per-owner attempt counts, scene/event dispositions, and write disposition.

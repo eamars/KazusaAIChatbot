@@ -14,6 +14,7 @@ from kazusa_ai_chatbot.conversation_progress.policy import (
     MAX_LOGICAL_TURN_TEXT_CHARS,
 )
 from kazusa_ai_chatbot.time_boundary import parse_storage_utc_datetime
+from kazusa_ai_chatbot.utils import project_text_with_image_blocks
 
 
 @dataclass(frozen=True)
@@ -42,22 +43,27 @@ def assemble_logical_turns_with_diagnostics(
     rows: Sequence[Mapping[str, object]],
     excluded_row_ids: Sequence[str],
 ) -> LogicalTurnAssembly:
-    """Assemble rows while reporting dropped or malformed assistant groups."""
+    """Assemble rows while reporting unusable rows and malformed groups."""
 
     excluded = set(excluded_row_ids)
+    eligible_rows: list[tuple[int, Mapping[str, object]]] = []
+    malformed_count = 0
+    for source_index, row in enumerate(rows):
+        if _row_id(row) in excluded:
+            continue
+        if not _conversation_row_text(row):
+            malformed_count += 1
+            continue
+        eligible_rows.append((source_index, row))
+
     ordered_rows = sorted(
-        (
-            (source_index, row)
-            for source_index, row in enumerate(rows)
-            if _row_id(row) not in excluded
-        ),
+        eligible_rows,
         key=lambda item: (
             _timestamp(item[1]),
             item[0],
         ),
     )
     turns: list[ConversationLogicalTurnV1] = []
-    malformed_count = 0
     row_index = 0
     while row_index < len(ordered_rows):
         source_index, row = ordered_rows[row_index]
@@ -229,7 +235,7 @@ def _grouped_assistant_turn(
         'role': 'assistant',
         'occurred_at': _required_text(first, 'timestamp'),
         'display_name': _optional_text(first, 'display_name'),
-        'fragments': [_required_text(row, 'body_text') for row in rows],
+        'fragments': [_conversation_row_text(row) for row in rows],
         'conversation_row_ids': [_row_id(row) for row in rows],
         'llm_trace_id': trace_id,
         'platform_user_id': _optional_text(first, 'platform_user_id'),
@@ -254,7 +260,7 @@ def _single_row_turn(
         'role': _role(row),
         'occurred_at': _required_text(row, 'timestamp'),
         'display_name': _optional_text(row, 'display_name'),
-        'fragments': [_required_text(row, 'body_text')],
+        'fragments': [_conversation_row_text(row)],
         'conversation_row_ids': [row_id],
         'llm_trace_id': _optional_text(row, 'llm_trace_id'),
         'platform_user_id': _optional_text(row, 'platform_user_id'),
@@ -319,6 +325,21 @@ def _optional_text(row: Mapping[str, object], field_name: str) -> str:
     if not isinstance(value, str):
         raise ValueError(f'conversation history row {field_name} must be text')
     return value.strip()
+
+
+def _conversation_row_text(row: Mapping[str, object]) -> str:
+    """Project authored text and stored image descriptions for one row."""
+
+    body_text = row.get('body_text')
+    if not isinstance(body_text, str):
+        return_value = ''
+        return return_value
+    projected_text = project_text_with_image_blocks(
+        body_text.strip(),
+        row.get('attachments'),
+    )
+    return_value = projected_text.strip()
+    return return_value
 
 
 def _timestamp(row: Mapping[str, object]) -> str:

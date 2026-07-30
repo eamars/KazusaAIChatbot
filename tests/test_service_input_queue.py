@@ -2657,55 +2657,23 @@ async def test_worker_derives_graph_input_from_message_envelope(monkeypatch) -> 
 
 
 @pytest.mark.asyncio
-async def test_worker_skips_graph_for_empty_no_content_turn(monkeypatch) -> None:
-    """Empty turns without prompt-usable media should persist and stop."""
+async def test_enqueue_skips_empty_no_content_turn(monkeypatch) -> None:
+    """Empty turns without attachments should stop before queue persistence."""
 
     await _reset_queue_state()
-    saved_docs = []
-
-    class _Graph:
-        """Expose a mock graph call for no-content assertions."""
-
-        def __init__(self):
-            self.ainvoke = AsyncMock(return_value={
-                "should_respond": False,
-                "use_reply_feature": False,
-                "final_dialog": [],
-                "future_promises": [],
-                "consolidation_state": None,
-            })
-
-    async def _save_conversation(doc):
-        saved_docs.append(doc)
-        return_value = f"row-{doc['platform_message_id']}"
-        return return_value
-
-    graph = _Graph()
-    monkeypatch.setattr(service_module, "save_conversation", _save_conversation)
-    _patch_common_dependencies(monkeypatch, graph)
-
+    enqueue = AsyncMock()
+    monkeypatch.setattr(service_module._chat_input_queue, "enqueue", enqueue)
     item = _item(
         1,
         channel_type="private",
         platform_user_id="user-1",
         content="",
     )
-    service_module._chat_input_queue.extend_for_test([item])
 
-    service_module._ensure_chat_input_worker_started()
-    await service_module._chat_input_queue.notify_for_test()
+    response = await service_module._enqueue_chat_request(item.request)
 
-    response = await asyncio.wait_for(item.future, timeout=1.0)
-
-    assert response.messages == []
-    assert saved_docs[0]["body_text"] == ""
-    graph.ainvoke.assert_not_awaited()
-    pipeline_event = service_module.event_logging.record_pipeline_turn_event
-    pipeline_event.assert_awaited_once()
-    event_kwargs = pipeline_event.await_args.kwargs
-    assert event_kwargs["status"] == "completed"
-    assert event_kwargs["final_outcome"] == "no_content"
-    assert event_kwargs["severity"] == "info"
+    assert response == service_module.ChatResponse()
+    enqueue.assert_not_awaited()
 
     await _reset_queue_state()
 

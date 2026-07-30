@@ -709,8 +709,6 @@ async def save_conversation(doc: ConversationMessageDoc) -> str:
     Returns:
         MongoDB row ID string for the committed conversation-history row.
     """
-    db = await get_db()
-
     if "content" in doc:
         raise KeyError("content")
 
@@ -725,12 +723,20 @@ async def save_conversation(doc: ConversationMessageDoc) -> str:
         if required_key not in doc:
             raise KeyError(required_key)
     doc["attachments"] = _safe_attachment_docs(doc["attachments"])
+    body_text = doc["body_text"]
+    if not isinstance(body_text, str):
+        raise TypeError("conversation body_text must be a string")
+    if not body_text.strip() and not doc["attachments"]:
+        raise ValueError(
+            "conversation message requires body_text or a storable attachment"
+        )
 
     if "embedding" not in doc or not doc.get("embedding"):
         doc["embedding"] = await get_document_text_embedding(
             _embedding_source_text(doc)
         )
 
+    db = await get_db()
     insert_result = await db.conversation_history.insert_one(doc)
     inserted_id_str = str(insert_result.inserted_id)
     invalidation_event = CacheInvalidationEvent(

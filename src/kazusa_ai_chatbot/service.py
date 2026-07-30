@@ -410,7 +410,7 @@ def _operational_failure_metadata(
         retryable = False
         branch_id = ""
     elif isinstance(exc, ValueError):
-        error_code = "model_contract_invalid"
+        error_code = "internal_invariant"
         stage = "service.graph"
         failure_attempt_count = 1
         retryable = False
@@ -429,6 +429,28 @@ def _operational_failure_metadata(
         branch_id,
     )
     return return_value
+
+
+def _pipeline_failure_marker(
+    exception: BaseException,
+    *,
+    error_code: str,
+) -> str:
+    """Label graph failures by their typed semantic owner."""
+
+    cognition_failure = isinstance(
+        exception,
+        (
+            CognitionContextLimitError,
+            CognitionExecutionError,
+            CognitionContractError,
+        ),
+    )
+    failure_kind = (
+        "cognition_failure" if cognition_failure else "graph_failure"
+    )
+    marker = f"{failure_kind}:{error_code}"
+    return marker
 
 
 def _is_visual_surface_failure(exception: BaseException) -> bool:
@@ -5341,7 +5363,18 @@ async def _process_queued_chat_item(
                     if response.operational_error is not None
                     else "internal_invariant"
                 )
-                stages_reached.append(f"cognition_failure:{failure_code}")
+                failure_stage = (
+                    response.operational_error.stage
+                    if response.operational_error is not None
+                    and response.operational_error.stage
+                    else "service.graph"
+                )
+                stages_reached.append(
+                    _pipeline_failure_marker(
+                        exc,
+                        error_code=failure_code,
+                    )
+                )
                 try:
                     settled_trace = await _settle_runtime_episode_trace(
                         episode=episode,
@@ -5351,7 +5384,7 @@ async def _process_queued_chat_item(
                                 "schema_version": (
                                     "episode_attempt_diagnostic.v1"
                                 ),
-                                "stage": "cognition",
+                                "stage": failure_stage,
                                 "error_code": failure_code,
                                 "attempt_count": cognition_attempt_count,
                                 "safe_checkpoint": str(
@@ -5852,6 +5885,13 @@ async def _enqueue_chat_request(req: ChatRequest) -> ChatResponse:
     Returns:
         Chat response produced by the worker or drop/collapse policy.
     """
+
+    if (
+        not req.message_envelope.body_text.strip()
+        and not req.message_envelope.attachments
+    ):
+        response = ChatResponse()
+        return response
 
     scope = PipelineScope(
         platform=req.platform,

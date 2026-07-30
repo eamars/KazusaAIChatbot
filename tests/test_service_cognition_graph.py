@@ -465,6 +465,28 @@ def test_service_projects_zero_candidate_dialog_failure_metadata() -> None:
     assert "private producer failure" not in repr(graph)
 
 
+def test_generic_value_error_is_an_internal_graph_failure() -> None:
+    """Untyped runtime validation failures are not model-contract failures."""
+
+    from kazusa_ai_chatbot import service
+
+    failure = ValueError('conversation history row body_text is required')
+
+    metadata = service._operational_failure_metadata(failure)
+    assert metadata == (
+        'internal_invariant',
+        'service.graph',
+        1,
+        False,
+        '',
+    )
+    marker = service._pipeline_failure_marker(
+        failure,
+        error_code='internal_invariant',
+    )
+    assert marker == 'graph_failure:internal_invariant'
+
+
 def test_response_graph_marks_missing_and_malformed_native_telemetry() -> None:
     """Native V2 output cannot appear complete without valid telemetry."""
 
