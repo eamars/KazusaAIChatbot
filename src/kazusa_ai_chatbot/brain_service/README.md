@@ -177,6 +177,15 @@ character-level
 `ignore/proceed/wait` judgment; deterministic code applies the validated action
 and never rewrites a valid semantic choice.
 
+For group chat, both relevance stages admit only through one of two semantic
+bases: grounded interaction relevance, or a concrete intersection with bounded
+active character state. The service copies the same already loaded
+process-local native cognition-state snapshot into frontline and settled input;
+relevance performs no additional state read. Recipient identity remains
+separate from the admission basis, so active-state salience can admit speech
+about another participant without converting that participant into the
+character or requesting a native reply anchor.
+
 An invalid authoritative first assessment consumes the existing one-time wait
 boundary and is reassessed at the hard deadline. A sole hard-deadline
 disposition is deterministic. Repeated invalid multi-option settlement becomes
@@ -185,16 +194,19 @@ recording a semantic `ignore`, completes the response owner with an operational
 response, and leaves stale newer turn versions intact.
 
 The model-facing intake projection carries typed private/group scope, runtime
-character identity, semantic target/reply labels, and only eligible
-same-author/same-channel candidates. A present reply with unresolved author is
-`unknown_participant`. Explicit-third-party and unresolved-reply discards do
-not become later preludes. Latest bot dialog is continuity evidence only within
-the 180-second active scene and is never an append slot. Frontline renders a
-scope-specific prompt and exposes only candidate-supported actions; returned
-slot labels must exist in the exact capped projection shown to the model.
-Settled fresh history
-maps production identities to character, current-author, and other-participant
-relations before it reaches the model. Conversation row order also marks each
+character identity, semantic target/reply labels, bounded interaction and
+active-state evidence, and only eligible same-author/same-channel candidates.
+A present reply with unresolved author is `unknown_participant`.
+Explicit-third-party and unresolved-reply discards do not become later
+preludes. Latest bot dialog is continuity evidence only within the 180-second
+active scene and is never an append slot. Frontline renders a scope-specific
+prompt and exposes only candidate-supported actions; returned slot and evidence
+refs must exist in the exact capped projection shown to the model. A complete
+canonical-name occurrence is exposed only as provenance for LLM judgment;
+pronouns, single glyphs, and name prefixes do not create character-address
+evidence. Settled fresh history maps production identities to reserved
+character/current-author relations and stable bounded `participant_n` handles
+before it reaches the model. Conversation row order also marks each
 external history row as before, after, or unknown relative to the active turn;
 when the bounded history window has evicted the active row, persisted server
 timestamps retain that relation, while missing or equal timestamps remain

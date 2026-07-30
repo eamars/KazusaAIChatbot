@@ -8,12 +8,18 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from kazusa_ai_chatbot.cognition_core_v2 import (
+    build_character_production_state,
+)
 from kazusa_ai_chatbot.relevance.frontline_relevance_agent import (
     FRONTLINE_RELEVANCE_MAX_COMPLETION_TOKENS,
     FRONTLINE_RELEVANCE_MAX_INPUT_CHARS,
     build_frontline_messages,
     frontline_relevance_agent,
     validate_frontline_decision,
+)
+from kazusa_ai_chatbot.relevance.participation_evidence import (
+    validate_participation_assessment,
 )
 
 
@@ -55,9 +61,26 @@ def _frontline_state() -> dict:
             },
         ],
         "latest_bot_continuity": "The character answered the same image topic.",
+        "character_cognition_state": build_character_production_state(
+            updated_at="2026-07-16T00:00:00Z",
+        ),
         "identity_sentinel": "platform-user-raw-123",
         "timestamp_sentinel": "2026-07-16T00:00:00Z",
     }
+
+
+def _active_goal_state(description: str) -> dict:
+    """Build one active native character goal for relevance tests."""
+
+    state = build_character_production_state(
+        updated_at="2026-07-16T00:00:00Z",
+    )
+    state["goals"] = [{
+        "description": description,
+        "status": "pursuing",
+        "salience": 80,
+    }]
+    return state
 
 
 def test_frontline_decision_has_closed_enums_and_bounded_cards() -> None:
@@ -217,6 +240,50 @@ def test_frontline_worst_case_projection_remains_valid_json() -> None:
     json.loads(messages[1].content)
 
 
+def test_frontline_cap_drops_weakest_state_and_invalidates_its_ref(
+    monkeypatch,
+) -> None:
+    """Cap fitting retains stronger state and rejects a removed state ref."""
+
+    state = _frontline_state()
+    state["character_cognition_state"]["goals"] = [
+        {
+            "description": f"active goal {index} " + "x" * 120,
+            "status": "pursuing",
+            "salience": 90 - index,
+        }
+        for index in range(6)
+    ]
+    baseline_messages = build_frontline_messages(state)
+    monkeypatch.setattr(
+        frontline_module,
+        "FRONTLINE_RELEVANCE_MAX_INPUT_CHARS",
+        sum(len(message.content) for message in baseline_messages) - 1,
+    )
+
+    messages = build_frontline_messages(state)
+    payload = json.loads(messages[1].content)
+
+    assert [
+        item["ref"] for item in payload["character_state_evidence"]
+    ] == ["state_1", "state_2", "state_3", "state_4", "state_5"]
+    with pytest.raises(ValueError, match="unavailable ref"):
+        validate_participation_assessment(
+            {
+                "recipient_relation": "character",
+                "admission_basis": "character_state_salience",
+                "interaction_evidence_refs": ["target_character"],
+                "character_state_refs": ["state_6"],
+            },
+            interaction_evidence=payload["interaction_evidence"],
+            character_state_evidence=payload["character_state_evidence"],
+            stage="frontline",
+            action="start",
+            append_target="none",
+            use_reply_feature=False,
+        )
+
+
 def test_frontline_route_has_exact_completion_and_thinking_budget() -> None:
     """The configured fast route must stay within the approved call envelope."""
 
@@ -238,6 +305,10 @@ async def test_frontline_agent_uses_structural_parser_and_returns_decision(
         "intake_action": "start",
         "append_target": "none",
         "prelude_targets": [],
+        "recipient_relation": "character",
+        "admission_basis": "interaction_relevance",
+        "interaction_evidence_refs": ["target_character"],
+        "character_state_refs": [],
         "reason": "direct request",
     })
     llm = frontline_module._frontline_relevance_agent_llm
@@ -248,6 +319,12 @@ async def test_frontline_agent_uses_structural_parser_and_returns_decision(
 
     assert result["intake_action"] == "start"
     assert result["append_target"] == "none"
+    assert set(result) == {
+        "intake_action",
+        "append_target",
+        "prelude_targets",
+        "reason",
+    }
     invoke.assert_awaited_once()
     assert invoke.await_args.kwargs["config"] is (
         frontline_module._frontline_relevance_agent_llm_config
@@ -348,6 +425,10 @@ async def test_frontline_does_not_recheck_untargeted_discard(
         "intake_action": "discard",
         "append_target": "none",
         "prelude_targets": [],
+        "recipient_relation": "unknown",
+        "admission_basis": "none",
+        "interaction_evidence_refs": [],
+        "character_state_refs": [],
         "reason": "not addressed to the character",
     })
     invoke = AsyncMock(return_value=response)
@@ -365,6 +446,129 @@ async def test_frontline_does_not_recheck_untargeted_discard(
 
     assert result["intake_action"] == "discard"
     invoke.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_frontline_incident_rejects_message_only_character_claim(
+    monkeypatch,
+) -> None:
+    """The captured pronoun and incidental glyph cannot ground admission."""
+
+    response = MagicMock()
+    response.content = json.dumps({
+        "intake_action": "start",
+        "append_target": "none",
+        "prelude_targets": [],
+        "recipient_relation": "character",
+        "admission_basis": "interaction_relevance",
+        "interaction_evidence_refs": ["message_1"],
+        "character_state_refs": [],
+        "reason": "the pronoun addresses the character",
+    })
+    monkeypatch.setattr(
+        frontline_module._frontline_relevance_agent_llm,
+        "ainvoke",
+        AsyncMock(return_value=response),
+    )
+    state = _frontline_state()
+    state["active_character_name"] = "一之濑明日奈"
+    state["current_message"] = {
+        "body_text": "直接找你一换一是吧",
+        "semantic_target_labels": [],
+        "reply_target_label": "none",
+        "media_labels": [],
+    }
+    state["open_turns"] = []
+    state["recent_preludes"] = []
+    state["latest_bot_continuity"] = ""
+
+    result = await frontline_relevance_agent(state)
+
+    assert result["intake_action"] == "discard"
+    assert result["reason"] == "invalid frontline output"
+
+
+@pytest.mark.asyncio
+async def test_frontline_quoted_canonical_name_remains_model_judged(
+    monkeypatch,
+) -> None:
+    """A full-name candidate does not deterministically force admission."""
+
+    response = MagicMock()
+    response.content = json.dumps({
+        "intake_action": "discard",
+        "append_target": "none",
+        "prelude_targets": [],
+        "recipient_relation": "unknown",
+        "admission_basis": "none",
+        "interaction_evidence_refs": ["name_1", "message_1"],
+        "character_state_refs": [],
+        "reason": "the name is quoted rather than used as an address",
+    })
+    invoke = AsyncMock(return_value=response)
+    monkeypatch.setattr(
+        frontline_module._frontline_relevance_agent_llm,
+        "ainvoke",
+        invoke,
+    )
+    state = _frontline_state()
+    state["active_character_name"] = "一之濑明日奈"
+    state["current_message"] = {
+        "body_text": '小林说“一之濑明日奈”只是书里的名字',
+        "semantic_target_labels": [],
+        "reply_target_label": "none",
+        "media_labels": [],
+    }
+    state["open_turns"] = []
+    state["recent_preludes"] = []
+    state["latest_bot_continuity"] = ""
+
+    result = await frontline_relevance_agent(state)
+
+    assert result["intake_action"] == "discard"
+    invoke.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_frontline_state_salience_preserves_other_recipient(
+    monkeypatch,
+) -> None:
+    """Active-state relevance admits speech without changing its recipient."""
+
+    response = MagicMock()
+    response.content = json.dumps({
+        "intake_action": "start",
+        "append_target": "none",
+        "prelude_targets": [],
+        "recipient_relation": "other_participant",
+        "admission_basis": "character_state_salience",
+        "interaction_evidence_refs": ["target_other", "message_1"],
+        "character_state_refs": ["state_1"],
+        "reason": "the warning intersects an active safety goal",
+    })
+    monkeypatch.setattr(
+        frontline_module._frontline_relevance_agent_llm,
+        "ainvoke",
+        AsyncMock(return_value=response),
+    )
+    state = _frontline_state()
+    state["current_message"] = {
+        "body_text": "Alex, the current challenge will put you in danger.",
+        "semantic_target_labels": ["other_participant"],
+        "reply_target_label": "other_participant",
+        "media_labels": [],
+    }
+    state["character_cognition_state"] = _active_goal_state(
+        "Prevent the current challenge from harming a participant.",
+    )
+    state["open_turns"] = []
+    state["recent_preludes"] = []
+    state["latest_bot_continuity"] = ""
+
+    result = await frontline_relevance_agent(state)
+
+    assert result["intake_action"] == "start"
+    assert "recipient_relation" not in result
 
 
 @pytest.mark.asyncio

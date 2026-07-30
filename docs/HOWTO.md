@@ -283,6 +283,16 @@ frontline route receives bounded message evidence, typed target/reply labels,
 open-turn descriptors, and silent same-author preludes. It returns
 `discard`, `start`, or `append`.
 
+Both relevance stages also receive bounded interaction evidence and a bounded
+projection of the same process-local native character cognition state. Group
+admission uses exactly two semantic bases: interaction relevance grounded by
+supplied target/reply/broadcast, complete-name, continuity, open-turn, or
+history evidence; or a concrete message intersection with supplied active
+character state. Generic helpfulness, emotionality, and topic interest do not
+establish either basis. Evidence refs are validated against the final
+cap-fitted payload, and the internal recipient/basis assessment is removed from
+the unchanged public decision.
+
 Group turns use a six-second quiet window and a ten-second hard deadline.
 Settled turns are ordered globally by eligibility and arrival sequence. The
 settled route returns `ignore`, `proceed`, or one bounded `wait` extension;
@@ -828,6 +838,12 @@ messages have no queue-threshold semantic pruning before frontline.
 Adapters own platform-specific reply detection. The brain projects typed target
 and reply evidence into frontline semantic labels; raw reply identifiers do not
 act as queue-level protection or routing signals.
+
+The service reuses its already loaded native character-state snapshot for both
+relevance calls and performs no relevance-specific database read. Settled
+history uses stable bounded participant handles instead of raw ids. A
+state-salience decision may retain another participant as the actual recipient;
+in that case `use_reply_feature` remains false.
 
 Group turns become eligible after six quiet seconds and close at ten seconds
 from the opening enqueue time. Inputs enqueued before the hard boundary are
