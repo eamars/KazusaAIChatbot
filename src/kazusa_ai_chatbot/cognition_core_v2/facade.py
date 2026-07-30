@@ -24,6 +24,7 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionContextLimitError,
     CognitionExecutionError,
     CognitionObservabilityV2,
+    GroupEngagementActionContextV2,
     SemanticAppraisalResultV2,
     validate_cognition_core_input,
     validate_cognition_core_output,
@@ -159,6 +160,12 @@ async def run_cognition(
         payload["evidence"],
         scene_context=payload["scene_context"],
         private_continuity_context=payload["private_continuity_context"],
+        past_dialog_cognition_context=payload[
+            "past_dialog_cognition_context"
+        ],
+        group_engagement_action_context=payload[
+            "group_engagement_action_context"
+        ],
         runtime_capability_limits=payload.get(
             "runtime_capability_limits",
             [],
@@ -283,6 +290,12 @@ async def run_cognition(
                 private_continuity_context=payload[
                     "private_continuity_context"
                 ],
+                past_dialog_cognition_context=payload[
+                    "past_dialog_cognition_context"
+                ],
+                group_engagement_action_context=payload[
+                    "group_engagement_action_context"
+                ],
                 runtime_capability_limits=payload.get(
                     "runtime_capability_limits",
                     [],
@@ -321,6 +334,9 @@ async def run_cognition(
             available_actions=payload["available_actions"],
             available_resolvers=payload["available_resolver_capabilities"],
             resolver_context=payload["resolver_context"],
+            group_engagement_action_context=payload[
+                "group_engagement_action_context"
+            ],
             runtime_capability_limits=payload.get(
                 "runtime_capability_limits",
                 [],
@@ -653,10 +669,19 @@ def _branch_context(
     *,
     scene_context: Mapping[str, Any],
     private_continuity_context: str,
+    past_dialog_cognition_context: str = "",
+    group_engagement_action_context: (
+        GroupEngagementActionContextV2 | None
+    ) = None,
     runtime_capability_limits: Sequence[str] = (),
 ) -> dict[str, Any]:
     """Build semantic branch context and retain handle bindings privately."""
 
+    if group_engagement_action_context is None:
+        group_engagement_action_context = {
+            "engagement_guidelines": [],
+            "confidence": "",
+        }
     context = dict(projection.payload)
     role_bindings: dict[str, dict[str, str]] = {}
     role_summaries: dict[str, str] = {}
@@ -699,6 +724,15 @@ def _branch_context(
     ]
     context["scene_context"] = dict(scene_context)
     context["private_continuity_context"] = private_continuity_context
+    context["past_dialog_cognition_context"] = (
+        past_dialog_cognition_context
+    )
+    context["group_engagement_action_context"] = {
+        "engagement_guidelines": list(
+            group_engagement_action_context["engagement_guidelines"]
+        ),
+        "confidence": group_engagement_action_context["confidence"],
+    }
     if runtime_capability_limits:
         context["runtime_capability_limits"] = list(
             runtime_capability_limits

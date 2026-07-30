@@ -420,6 +420,18 @@ projection without requiring raw-data review.
 | Moved from active bugfix to superseded archive | `conversation_progress_v2_long_thread_continuation_bigbang_plan.md` |
 | Added to active bugfix | `conversation_progress_v2_final_signoff_plan.md` |
 
+### 2026-07-31 Cognition Core V2 P0 context reconnection completion
+
+The native V2 conversation graph again consumes cycle-zero globally shared
+memory evidence, private past-dialog residual at goal cognition only, and
+bounded group-engagement guidance for eligible self-cognition goal/action
+judgment. Focused and broader regressions, one-at-a-time live traces, and
+independent review remediation completed before user sign-off.
+
+| Outcome | Plans |
+|---|---|
+| Moved from active bugfix to completed archive | `cognition_core_v2_p0_context_reconnection_bugfix_plan.md` |
+
 ## Archive
 
 Completed and superseded records live under `archive/`. Use them for historical
@@ -443,6 +455,7 @@ plans.
 | [cognition_core_v2_character_identity_growth_bigbang_plan.md](archive/completed/bugfix/cognition_core_v2_character_identity_growth_bigbang_plan.md) |
 | [cognition_core_v2_compositional_action_planning_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_compositional_action_planning_bugfix_plan.md) |
 | [cognition_core_v2_live_character_judgment_rebalance_plan.md](archive/completed/bugfix/cognition_core_v2_live_character_judgment_rebalance_plan.md) |
+| [cognition_core_v2_p0_context_reconnection_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_p0_context_reconnection_bugfix_plan.md) |
 | [cognition_core_v2_intra_turn_transition_coherence_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_intra_turn_transition_coherence_bugfix_plan.md) |
 | [cognition_core_v2_prompt_budget_and_failure_containment_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_prompt_budget_and_failure_containment_bugfix_plan.md) |
 | [cognition_core_v2_retry_exhaustion_continuity_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_retry_exhaustion_continuity_bugfix_plan.md) |

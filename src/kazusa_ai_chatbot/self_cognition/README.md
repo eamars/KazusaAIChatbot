@@ -179,10 +179,13 @@ as cognition-scene topic.
 Ambient group review keeps `target_scope.user_id=None`: the semantic target is
 the observed group scene, not a fabricated latest speaker. The delivery target
 remains the source group channel. Before V2 goal and route selection,
-targetless group review may load bounded group-channel engagement guidance so the
-character can judge whether the current scene gives enough reason to speak.
-This guidance is evidence only; it is not a response-ratio control, a command
-to speak, or a deterministic silence rule.
+canonical targetless group review loads bounded group-channel engagement
+guidance once at resolver cycle zero. The lookup overlaps independent cognition
+state preparation, and later cycles reuse the exact projected value without
+another style read. Goal cognition and action planning may use it to judge how
+to participate in the currently observed scene. The guidance is advisory
+context, not evidence, a response-ratio control, permission, route authority,
+a command to speak, a new topic, or a deterministic silence rule.
 
 Group review also attaches bounded participant context during source
 collection under `conversation_progress.participant_context`. This context is

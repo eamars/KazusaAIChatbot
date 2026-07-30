@@ -40,6 +40,16 @@ CognitionCoreInputV2
 The loop carries the latest in-memory V2 output forward. It does not reload or
 write cognition state between cycles. The caller commits only the final output.
 
+Before the first V2 input is built, the persona connector may start the
+shared-memory prewarm owned by `capabilities.py`. This happens only at resolver
+cycle zero for `user_message` and `internal_thought` episodes. The task overlaps
+identity and mutable-state preparation, then joins before evidence mapping.
+Only confirmed shared `memory` rows are merged into
+`rag_result.memory_evidence`; the prewarm leaves `rag_result.answer` empty,
+excludes scoped user-memory units, and creates no resolver observation. Empty
+or failed retrieval preserves the base RAG payload. Later cycles reuse the
+merged state and do not repeat prewarm.
+
 `CognitionCoreOutputV2.goal_resolution` remains the semantic owner’s answerability
 decision. It answers whether the accepted user goal is sufficient to answer now;
 it does not mirror a source-specific RAG `resolved` field. When the decision is

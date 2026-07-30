@@ -185,6 +185,174 @@ def test_persona_connector_maps_one_native_user_scope() -> None:
     }
 
 
+def test_connector_maps_private_residual_and_bounded_group_guidance() -> None:
+    """The connector preserves separate V2 carriers for both context lanes."""
+
+    state = _global_state()
+    state["past_dialog_cognition_context"] = "PAST_DIALOG_SENTINEL"
+    state["group_engagement_action_context"] = {
+        "engagement_guidelines": ["GROUP_ENGAGEMENT_SENTINEL"],
+        "confidence": "medium",
+    }
+
+    payload = connector.build_cognition_input_from_global_state(
+        state,
+        mutable_state=build_acquaintance_user_state(
+            global_user_id="user-1",
+            updated_at=NOW,
+        ),
+    )
+
+    assert payload["past_dialog_cognition_context"] == (
+        "PAST_DIALOG_SENTINEL"
+    )
+    assert payload["group_engagement_action_context"] == {
+        "engagement_guidelines": ["GROUP_ENGAGEMENT_SENTINEL"],
+        "confidence": "medium",
+    }
+
+
+@pytest.mark.asyncio
+async def test_group_self_cognition_loads_engagement_context_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Eligible group self-cognition loads guidance before V2 judgment."""
+
+    state = _global_state()
+    state["channel_type"] = "group"
+    episode = state["cognitive_episode"]
+    assert isinstance(episode, dict)
+    episode["trigger_source"] = "self_cognition"
+    target_scope = episode["target_scope"]
+    assert isinstance(target_scope, dict)
+    target_scope["channel_type"] = "group"
+    target_scope["current_global_user_id"] = None
+    target_scope["current_platform_user_id"] = None
+    state["global_user_id"] = ""
+    state["character_identity_epistemic_core_included"] = True
+    percepts = episode["percepts"]
+    assert isinstance(percepts, list)
+    percept_content = percepts[0]["content"]
+    assert isinstance(percept_content, dict)
+    percept_content["semantic_text"] = (
+        "Rain makes the street reflections easier to photograph."
+    )
+    state["resolver_state"] = {
+        "cycle_index": 0,
+        "observations": [],
+    }
+    group_context = {
+        "engagement_guidelines": ["GROUP_ENGAGEMENT_SENTINEL"],
+        "confidence": "high",
+    }
+    load_group = AsyncMock(return_value=group_context)
+    cognition_output = {
+        **_core_output(),
+        "intention": {
+            "route": "silence",
+            "intention": "observe the group scene privately",
+            "target_roles": [],
+            "reason": "the current scene does not require visible speech",
+        },
+        "state_update": {
+            "state_scope": "character",
+            "owner_key": "character:global",
+            "replacement_state": build_character_production_state(
+                updated_at=NOW,
+            ),
+            "comparison_results": [],
+            "changed_paths": [],
+        },
+    }
+    run_cognition = AsyncMock(return_value=cognition_output)
+    monkeypatch.setattr(
+        connector,
+        "build_group_engagement_action_context",
+        load_group,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        connector,
+        "get_character_cognition_state",
+        AsyncMock(return_value=build_character_production_state(
+            updated_at=NOW,
+        )),
+    )
+    monkeypatch.setattr(connector, "run_cognition", run_cognition)
+
+    update = await connector.call_cognition_subgraph(state, commit=False)
+
+    load_group.assert_awaited_once_with(
+        channel_type="group",
+        platform="debug",
+        platform_channel_id="channel-1",
+    )
+    cognition_input = run_cognition.await_args.args[0]
+    assert cognition_input["group_engagement_action_context"] == group_context
+    assert (
+        "Rain makes the street reflections easier to photograph."
+        in cognition_input["evidence"][0]["semantic_text"]
+    )
+    assert update["group_engagement_action_context"] == group_context
+
+    later_state = dict(state)
+    later_state.update(update)
+    later_state["resolver_state"] = {
+        "cycle_index": 1,
+        "observations": [],
+    }
+    later_update = await connector.call_cognition_subgraph(
+        later_state,
+        commit=False,
+    )
+
+    load_group.assert_awaited_once()
+    later_input = run_cognition.await_args_list[1].args[0]
+    assert later_input["group_engagement_action_context"] == group_context
+    assert later_update["group_engagement_action_context"] == group_context
+
+
+@pytest.mark.asyncio
+async def test_user_turn_skips_group_engagement_database_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An ordinary user turn receives empty guidance without a group read."""
+
+    load_group = AsyncMock()
+    run_cognition = AsyncMock(return_value=_core_output())
+    monkeypatch.setattr(
+        connector,
+        "build_group_engagement_action_context",
+        load_group,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        connector,
+        "get_user_cognition_state",
+        AsyncMock(return_value=build_acquaintance_user_state(
+            global_user_id="user-1",
+            updated_at=NOW,
+        )),
+    )
+    monkeypatch.setattr(
+        connector,
+        "get_character_cognition_state",
+        AsyncMock(return_value=build_character_production_state(
+            updated_at=NOW,
+        )),
+    )
+    monkeypatch.setattr(connector, "run_cognition", run_cognition)
+
+    await connector.call_cognition_subgraph(_global_state(), commit=False)
+
+    load_group.assert_not_awaited()
+    cognition_input = run_cognition.await_args.args[0]
+    assert cognition_input["group_engagement_action_context"] == {
+        "engagement_guidelines": [],
+        "confidence": "",
+    }
+
+
 def test_connector_rejects_overlong_personality_judgment() -> None:
     """The connector preserves the exact bounded personality contract."""
 

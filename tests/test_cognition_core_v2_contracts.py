@@ -28,6 +28,9 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CollapsedIntentionV2,
     EVIDENCE_SOURCE_QUESTION_IDS,
     EventComparisonResultV2,
+    GROUP_ENGAGEMENT_CONFIDENCE_MAX_CHARS,
+    GROUP_ENGAGEMENT_GUIDELINE_MAX_CHARS,
+    L3_INTERACTION_STYLE_GUIDELINES_PER_FIELD_LIMIT,
     TextSurfaceServicesV2,
     VisualSurfaceServicesV2,
     validate_cognition_core_input,
@@ -510,6 +513,89 @@ def test_evidence_visibility_matches_its_source_question_ids() -> None:
 
     validate_cognition_core_input(payload)
     payload["evidence"][0]["visible_to"] = ["cognition", "surface"]
+    with pytest.raises(CognitionContractError):
+        validate_cognition_core_input(payload)
+
+
+def test_private_and_group_contexts_have_exact_bounded_contracts() -> None:
+    """Validate the two restored V2 context lanes without widening input."""
+
+    payload = _input()
+    payload["past_dialog_cognition_context"] = "PAST_DIALOG_SENTINEL"
+    payload["group_engagement_action_context"] = {
+        "engagement_guidelines": ["Join only from an observed social beat."],
+        "confidence": "high",
+    }
+
+    validated = validate_cognition_core_input(payload)
+
+    assert validated["past_dialog_cognition_context"] == (
+        "PAST_DIALOG_SENTINEL"
+    )
+    assert validated["group_engagement_action_context"] == {
+        "engagement_guidelines": [
+            "Join only from an observed social beat."
+        ],
+        "confidence": "high",
+    }
+
+    payload["past_dialog_cognition_context"] = "p" * 1801
+    with pytest.raises(CognitionContractError):
+        validate_cognition_core_input(payload)
+
+
+@pytest.mark.parametrize(
+    "group_context",
+    [
+        [],
+        {
+            "engagement_guidelines": "not-a-list",
+            "confidence": "",
+        },
+        {
+            "engagement_guidelines": [""],
+            "confidence": "",
+        },
+        {
+            "engagement_guidelines": [
+                "g" * (GROUP_ENGAGEMENT_GUIDELINE_MAX_CHARS + 1)
+            ],
+            "confidence": "high",
+        },
+        {
+            "engagement_guidelines": ["bounded"]
+            * (L3_INTERACTION_STYLE_GUIDELINES_PER_FIELD_LIMIT + 1),
+            "confidence": "high",
+        },
+        {
+            "engagement_guidelines": ["bounded"],
+            "confidence": (
+                "c" * (GROUP_ENGAGEMENT_CONFIDENCE_MAX_CHARS + 1)
+            ),
+        },
+        {
+            "engagement_guidelines": [],
+            "confidence": "high",
+        },
+    ],
+)
+def test_group_context_rejects_every_invalid_shape_and_bound(
+    group_context: object,
+) -> None:
+    """Reject every malformed advisory group-context boundary."""
+
+    payload = _input()
+    payload["group_engagement_action_context"] = group_context
+
+    with pytest.raises(CognitionContractError):
+        validate_cognition_core_input(payload)
+
+    payload = _input()
+    payload["group_engagement_action_context"] = {
+        "engagement_guidelines": ["bounded"],
+        "confidence": "high",
+        "unexpected": "forbidden",
+    }
     with pytest.raises(CognitionContractError):
         validate_cognition_core_input(payload)
 

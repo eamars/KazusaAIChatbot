@@ -12,6 +12,9 @@ from kazusa_ai_chatbot.cognition_episode import (
     CognitiveEpisodeValidationError,
     validate_cognitive_episode_v1,
 )
+from kazusa_ai_chatbot.config import (
+    L3_INTERACTION_STYLE_GUIDELINES_PER_FIELD_LIMIT,
+)
 from kazusa_ai_chatbot.llm_interface import LLMCallConfig, LLMInvoker
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     CognitionStateError,
@@ -127,6 +130,10 @@ GOAL_RESOLUTION_VALUES = frozenset({
     "requires_user_input",
     "blocked",
 })
+
+PAST_DIALOG_COGNITION_CONTEXT_MAX_CHARS = 1800
+GROUP_ENGAGEMENT_GUIDELINE_MAX_CHARS = 120
+GROUP_ENGAGEMENT_CONFIDENCE_MAX_CHARS = 80
 
 EVIDENCE_SOURCE_QUESTION_IDS = {
     "episode": tuple(f"q:{kind}" for kind in SEMANTIC_QUESTION_KINDS),
@@ -285,6 +292,13 @@ class SceneContextV2(TypedDict):
     semantic_scene: str
     conversation_continuity: str
     semantic_temporal_context: str
+
+
+class GroupEngagementActionContextV2(TypedDict):
+    """Bounded advisory participation guidance for one group scene."""
+
+    engagement_guidelines: list[str]
+    confidence: str
 
 
 class PersonalityJudgmentV2(TypedDict):
@@ -594,6 +608,10 @@ class CognitionCoreInputV2(TypedDict):
     pending_resolver_resume: NotRequired[dict[str, Any]]
     scene_context: SceneContextV2
     private_continuity_context: str
+    past_dialog_cognition_context: NotRequired[str]
+    group_engagement_action_context: NotRequired[
+        GroupEngagementActionContextV2
+    ]
 
 
 class CognitionCoreOutputV2(TypedDict):
@@ -776,6 +794,16 @@ def validate_cognition_core_input(
             {"runtime_capability_limits"}
             if "runtime_capability_limits" in payload
             else set()
+        )
+        | (
+            {"past_dialog_cognition_context"}
+            if "past_dialog_cognition_context" in payload
+            else set()
+        )
+        | (
+            {"group_engagement_action_context"}
+            if "group_engagement_action_context" in payload
+            else set()
         ),
         "cognition core input",
     )
@@ -835,7 +863,29 @@ def validate_cognition_core_input(
         "private continuity context",
         maximum=1000,
     )
-    return dict(payload)  # type: ignore[return-value]
+    past_dialog_context = payload.get("past_dialog_cognition_context", "")
+    _require_bounded_text(
+        past_dialog_context,
+        "past dialog cognition context",
+        maximum=PAST_DIALOG_COGNITION_CONTEXT_MAX_CHARS,
+    )
+    group_engagement_context = payload.get(
+        "group_engagement_action_context",
+        {
+            "engagement_guidelines": [],
+            "confidence": "",
+        },
+    )
+    _validate_group_engagement_action_context(group_engagement_context)
+    validated_payload = dict(payload)
+    validated_payload["past_dialog_cognition_context"] = past_dialog_context
+    validated_payload["group_engagement_action_context"] = {
+        "engagement_guidelines": list(
+            group_engagement_context["engagement_guidelines"]
+        ),
+        "confidence": group_engagement_context["confidence"],
+    }
+    return validated_payload  # type: ignore[return-value]
 
 
 def validate_cognition_core_output(
@@ -2208,6 +2258,44 @@ def _validate_scene_context(value: Any) -> None:
         "scene context.conversation_continuity",
         maximum=2200,
     )
+
+
+def _validate_group_engagement_action_context(value: Any) -> None:
+    """Validate bounded advisory guidance from one group style image."""
+
+    if not isinstance(value, Mapping):
+        raise CognitionContractError(
+            "group engagement action context must be a mapping"
+        )
+    _require_exact_keys(
+        value,
+        {"engagement_guidelines", "confidence"},
+        "group engagement action context",
+    )
+    guidelines = value["engagement_guidelines"]
+    if (
+        not isinstance(guidelines, list)
+        or len(guidelines)
+        > L3_INTERACTION_STYLE_GUIDELINES_PER_FIELD_LIMIT
+    ):
+        raise CognitionContractError(
+            "group engagement guidelines are invalid"
+        )
+    for guideline in guidelines:
+        _require_text(
+            guideline,
+            "group engagement guideline",
+            maximum=GROUP_ENGAGEMENT_GUIDELINE_MAX_CHARS,
+        )
+    _require_bounded_text(
+        value["confidence"],
+        "group engagement confidence",
+        maximum=GROUP_ENGAGEMENT_CONFIDENCE_MAX_CHARS,
+    )
+    if not guidelines and value["confidence"]:
+        raise CognitionContractError(
+            "empty group engagement guidelines require empty confidence"
+        )
 
 
 def _validate_canonical_episode(value: Any) -> CognitiveEpisodeV1:

@@ -1,0 +1,1426 @@
+{
+  "test_name": "cognition_core_v2_p0_context_reconnection",
+  "case_id": "shared_memory_prewarm",
+  "recorded_at": "2026-07-30T10:49:43.389619+00:00",
+  "payload": {
+    "input": {
+      "platform": "pytest-live-p0-prewarm",
+      "platform_channel_id": "channel-6c3440b891",
+      "platform_message_id": "p0-prewarm-message-4ed4f724af0f",
+      "text": "What distinctive weather preference is associated with napcat-0e07242e9b46?",
+      "guarded_memory_name": "p0-prewarm-napcat-0e07242e9b46",
+      "guarded_memory_content": "napcat-0e07242e9b46 distinctly prefers thunderstorms over clear weather."
+    },
+    "response": {
+      "messages": [
+        "雷阵雨。比起晴天，它更倾向于那种环境下带来的氛围感，比如雷声。"
+      ],
+      "content_type": "text",
+      "attachments": [],
+      "use_reply_feature": false,
+      "delivery_mentions": [],
+      "scheduled_followups": 0,
+      "delivery_tracking_id": "6c2ed2f4bf9244dbb40c6626bd4b3802",
+      "cognition_graph": {
+        "run_id": "6c2ed2f4bf9244dbb40c6626bd4b3802",
+        "status": "partial",
+        "nodes": [
+          {
+            "id": "intake",
+            "label": "Queued turn",
+            "stage": "L1",
+            "lane": "input",
+            "column": 1,
+            "branch": "input",
+            "status": "completed",
+            "detail": {
+              "input": "What distinctive weather preference is associated with napcat-0e07242e9b46?"
+            }
+          },
+          {
+            "id": "l1.relevance",
+            "label": "Response decision",
+            "stage": "L1",
+            "lane": "gate",
+            "column": 2,
+            "branch": "decision",
+            "status": "completed",
+            "detail": {
+              "decision": "true",
+              "reasoning": "The user explicitly asks a question about a specific character's weather preference, directly targeting the active character."
+            }
+          },
+          {
+            "id": "l2.reasoning",
+            "label": "Reasoning",
+            "stage": "L2",
+            "lane": "cognition",
+            "column": 3,
+            "branch": "reasoning",
+            "status": "completed",
+            "detail": {
+              "internal_monologue": "既然问到了 napcat-0e07242e9b46 的天气偏好，我的记录里正好有。雷阵雨比晴天更受欢迎，这就是答案。",
+              "logical_stance": "当前用户直接询问了特定个体的天气偏好（e1），且当前角色在记忆中拥有该信息的明确证据（e2）。作为一名注重观察和诚实的 INTJ 角色，应当基于现有事实给出直接的回答。",
+              "character_intent": "回答当前用户关于 napcat-0e07242e9b46 天气偏好的询问",
+              "judgment_note": "当前用户直接询问了特定个体的天气偏好（e1），且当前角色在记忆中拥有该信息的明确证据（e2）。作为一名注重观察和诚实的 INTJ 角色，应当基于现有事实给出直接的回答。"
+            }
+          },
+          {
+            "id": "l2.memory",
+            "label": "Memory and evidence",
+            "stage": "L2",
+            "lane": "memory",
+            "column": 3,
+            "branch": "memory",
+            "status": "completed",
+            "detail": {
+              "memory_evidence": [
+                {
+                  "summary": "结论：napcat-0e07242e9b46 distinctly prefers thunderstorms over clear weather.",
+                  "content": "上下文：\n- 记忆（2026-07-30 22:48:29）：napcat-0e07242e9b46 distinctly prefers thunderstorms over clear weather.\n不确定性：无"
+                }
+              ],
+              "conversation_progress": {
+                "status": "empty",
+                "continuity": "sharp_transition"
+              }
+            }
+          },
+          {
+            "id": "l2.actions",
+            "label": "Actions",
+            "stage": "L2",
+            "lane": "action",
+            "column": 3,
+            "branch": "action",
+            "status": "completed",
+            "detail": {
+              "selected_actions": [
+                {
+                  "kind": "speak",
+                  "cognition_mode": "deliberative",
+                  "urgency": "now",
+                  "visibility": "user_visible",
+                  "reason": "当前用户直接询问了特定个体的天气偏好（e1），且当前角色在记忆中拥有该信息的明确证据（e2）。作为一名注重观察和诚实的 INTJ 角色，应当基于现有事实给出直接的回答。"
+                }
+              ],
+              "action_results": [
+                {
+                  "action_kind": "speak",
+                  "status": "executed",
+                  "visibility": "user_visible",
+                  "result_summary": "speak executed: 当前用户直接询问了特定个体的天气偏好（e1），且当前角色在记忆中拥有该信息的明确证据（e2）。作为一名注重观察和诚实的 INTJ 角色，应当基于现有事实给出直接的回答。",
+                  "completed_at": "2026-07-30T10:48:30.223682+00:00"
+                }
+              ],
+              "action_continuation": [
+                {
+                  "mode": "none",
+                  "max_depth": 0
+                }
+              ]
+            }
+          },
+          {
+            "id": "l3.visual_directives",
+            "label": "Visual directive",
+            "stage": "L3",
+            "lane": "surface",
+            "column": 4,
+            "branch": "visual",
+            "status": "skipped",
+            "detail": {
+              "facial_expression": [],
+              "body_language": [],
+              "gaze_direction": [],
+              "visual_vibe": [],
+              "empty_state": "Visual directives are disabled for this cognition run."
+            }
+          },
+          {
+            "id": "l3.surface",
+            "label": "Visible surface",
+            "stage": "L3",
+            "lane": "surface",
+            "column": 4,
+            "branch": "dialog",
+            "status": "completed",
+            "detail": {
+              "messages": [
+                "雷阵雨。比起晴天，它更倾向于那种环境下带来的氛围感，比如雷声。"
+              ]
+            }
+          },
+          {
+            "id": "v2.parallel",
+            "label": "Parallel cognition",
+            "stage": "V2",
+            "lane": "cognition",
+            "column": 3,
+            "branch": "parallel",
+            "status": "completed",
+            "detail": {
+              "parallel_execution": {
+                "selected_question_count": 6,
+                "dispatched_question_count": 6,
+                "selected_branch_count": 1,
+                "dispatched_branch_count": 1,
+                "completed_branch_count": 1,
+                "failed_branch_count": 0,
+                "maximum_concurrency": 1,
+                "overlap_ms": 0,
+                "dependency_wait_ms": 4,
+                "total_ms": 38241
+              },
+              "branch_results": [
+                {
+                  "phase": "preliminary",
+                  "branch_index": 1,
+                  "goal_kind": "ordinary_response",
+                  "status": "completed",
+                  "selection": "primary",
+                  "intention": "回答当前用户关于 napcat-0e07242e9b46 天气偏好的询问",
+                  "desired_outcome": "准确告知当前用户 napcat-0e07242e9b46 相比于晴天更偏好雷阵雨",
+                  "concrete_detail": "基于记忆记录，明确指出 napcat-0e07242e9b46 distinctly prefers thunderstorms over clear weather。",
+                  "reason": "当前用户直接询问了特定个体的天气偏好（e1），且当前角色在记忆中拥有该信息的明确证据（e2）。作为一名注重观察和诚实的 INTJ 角色，应当基于现有事实给出直接的回答。",
+                  "private_monologue": "既然问到了 napcat-0e07242e9b46 的天气偏好，我的记录里正好有。雷阵雨比晴天更受欢迎，这就是答案。",
+                  "confidence": "high",
+                  "expected_consequences": [
+                    "当前用户获得了关于 napcat-0e07242e9b46 偏好的准确信息",
+                    "对话在 Character trivia 主题下继续推进"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "id": "v2.appraisal",
+            "label": "Appraisal results",
+            "stage": "V2",
+            "lane": "cognition",
+            "column": 3,
+            "branch": "appraisal",
+            "status": "partial",
+            "detail": {
+              "appraisal_results": [
+                {
+                  "question_kind": "event_agency",
+                  "semantic_question": "只使用已经授权的事件证据与角色 handle，判断责任和意图。",
+                  "status": "completed",
+                  "explanation": "证据 e1 描述的是当前用户询问当前角色关于 napcat-0e07242e9b46 天气偏好的交互行为，而证据 e2 是一个关于天气偏好的静态记忆事实。在提供的证据中，没有任何信息表明该事件涉及责任归属或特定意图的促成结果，且不符合 responsibility 或 intentionality 的语义定义。"
+                },
+                {
+                  "question_kind": "relationship_social",
+                  "semantic_question": "判断社交含义与关系威胁，同时保持关系归属不变。",
+                  "status": "completed",
+                  "explanation": "证据 e1 显示当前用户提出了一个关于 napcat-0e07242e9b46 天气偏好的问题，这构成了一个社交互动行为。证据 e2 提供了该对象的具体天气偏好事实（雷雨优于晴天）。由于这两个证据仅涉及信息查询与已知事实的陈述，并未包含任何对现有关系 r1 的威胁性内容或需要调整关系轴数值的信息，因此没有产生任何 delta。",
+                  "propositions": [
+                    {
+                      "proposition_kind": "social_meaning",
+                      "semantic_value": "当前用户正在询问关于 napcat-0e07242e9b46 的天气偏好信息"
+                    },
+                    {
+                      "proposition_kind": "social_meaning",
+                      "semantic_value": "napcat-0e07242e9b46 明确偏好雷雨天气而非晴天"
+                    }
+                  ]
+                },
+                {
+                  "question_kind": "moral_identity",
+                  "semantic_question": "判断已授权 event handle 的规范含义与修复相关性。",
+                  "status": "failed",
+                  "failure_code": "semantic_appraisal_contract_exhausted"
+                },
+                {
+                  "question_kind": "goal_threat_outcome",
+                  "semantic_question": "判断现有 handle 是否已经达到目标、事件、威胁或知识缺口的明确终态。",
+                  "status": "failed",
+                  "failure_code": "semantic_appraisal_contract_exhausted"
+                },
+                {
+                  "question_kind": "epistemic_comparison_memory",
+                  "semantic_question": "判断现有 handle 的比较含义、记忆线索与认知含义。",
+                  "status": "failed",
+                  "failure_code": "semantic_appraisal_contract_exhausted"
+                },
+                {
+                  "question_kind": "existential_drive",
+                  "semantic_question": "判断意义相关性与驱动力压力，不增添新的目标。",
+                  "status": "completed",
+                  "explanation": "证据 e1 显示当前用户正在询问 napcat-0e07242e9b46 的独特天气偏好；证据 e2 提供了相关的记忆信息（雷雨优于晴天），表明该问题与当前角色处理已知信息的任务直接相关，因此具有意义相关性。",
+                  "propositions": [
+                    {
+                      "proposition_kind": "meaning_relevance",
+                      "semantic_value": "当前角色正在处理关于 napcat-0e07242e9b46 天气偏好的询问，这涉及对已有记忆信息的提取与回应。"
+                    },
+                    {
+                      "proposition_kind": "meaning_relevance",
+                      "semantic_value": "当前用户提出了一个关于特定对象天气偏好的具体问题，要求当前角色进行回答。"
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "id": "v2.branch.1",
+            "label": "Goal branch 1",
+            "stage": "V2",
+            "lane": "cognition",
+            "column": 4,
+            "branch": "branch-1",
+            "status": "completed",
+            "detail": {
+              "phase": "preliminary",
+              "branch_index": 1,
+              "goal_kind": "ordinary_response",
+              "status": "completed",
+              "selection": "primary",
+              "intention": "回答当前用户关于 napcat-0e07242e9b46 天气偏好的询问",
+              "desired_outcome": "准确告知当前用户 napcat-0e07242e9b46 相比于晴天更偏好雷阵雨",
+              "concrete_detail": "基于记忆记录，明确指出 napcat-0e07242e9b46 distinctly prefers thunderstorms over clear weather。",
+              "reason": "当前用户直接询问了特定个体的天气偏好（e1），且当前角色在记忆中拥有该信息的明确证据（e2）。作为一名注重观察和诚实的 INTJ 角色，应当基于现有事实给出直接的回答。",
+              "private_monologue": "既然问到了 napcat-0e07242e9b46 的天气偏好，我的记录里正好有。雷阵雨比晴天更受欢迎，这就是答案。",
+              "confidence": "high",
+              "expected_consequences": [
+                "当前用户获得了关于 napcat-0e07242e9b46 偏好的准确信息",
+                "对话在 Character trivia 主题下继续推进"
+              ]
+            }
+          },
+          {
+            "id": "v2.collapse",
+            "label": "Workspace collapse",
+            "stage": "V2",
+            "lane": "decision",
+            "column": 5,
+            "branch": "collapse",
+            "status": "completed",
+            "detail": {
+              "collapse": {
+                "primary_branch_index": 1,
+                "selection_reason": "当前用户直接询问了特定个体的天气偏好（e1），且当前角色在记忆中拥有该信息的明确证据（e2）。作为一名注重观察和诚实的 INTJ 角色，应当基于现有事实给出直接的回答。"
+              },
+              "selected_intention": {
+                "route": "speech",
+                "intention": "回答当前用户关于 napcat-0e07242e9b46 天气偏好的询问",
+                "reason": "当前用户直接询问了特定个体的天气偏好（e1），且当前角色在记忆中拥有该信息的明确证据（e2）。作为一名注重观察和诚实的 INTJ 角色，应当基于现有事实给出直接的回答。"
+              },
+              "selected_bid_reason": "当前用户直接询问了特定个体的天气偏好（e1），且当前角色在记忆中拥有该信息的明确证据（e2）。作为一名注重观察和诚实的 INTJ 角色，应当基于现有事实给出直接的回答。",
+              "private_monologue": "既然问到了 napcat-0e07242e9b46 的天气偏好，我的记录里正好有。雷阵雨比晴天更受欢迎，这就是答案。",
+              "goal_resolution": "answerable_now",
+              "expression_policy": {
+                "visibility": "visible",
+                "emotional_tone": "平静",
+                "intensity": "restrained",
+                "directness": "balanced"
+              }
+            }
+          },
+          {
+            "id": "v2.affect",
+            "label": "Affect projection",
+            "stage": "V2",
+            "lane": "cognition",
+            "column": 5,
+            "branch": "affect",
+            "status": "skipped",
+            "detail": {
+              "empty_state": "No affect projection was reported."
+            }
+          }
+        ],
+        "edges": [
+          {
+            "source": "intake",
+            "target": "l1.relevance",
+            "kind": "sequence"
+          },
+          {
+            "source": "l1.relevance",
+            "target": "l2.reasoning",
+            "kind": "fork"
+          },
+          {
+            "source": "l1.relevance",
+            "target": "l2.memory",
+            "kind": "fork"
+          },
+          {
+            "source": "l1.relevance",
+            "target": "l2.actions",
+            "kind": "fork"
+          },
+          {
+            "source": "l2.reasoning",
+            "target": "l3.visual_directives",
+            "kind": "join"
+          },
+          {
+            "source": "l2.memory",
+            "target": "l3.visual_directives",
+            "kind": "join"
+          },
+          {
+            "source": "l2.actions",
+            "target": "l3.visual_directives",
+            "kind": "join"
+          },
+          {
+            "source": "l2.reasoning",
+            "target": "l3.surface",
+            "kind": "join"
+          },
+          {
+            "source": "l2.memory",
+            "target": "l3.surface",
+            "kind": "join"
+          },
+          {
+            "source": "l2.actions",
+            "target": "l3.surface",
+            "kind": "join"
+          },
+          {
+            "source": "l1.relevance",
+            "target": "v2.parallel",
+            "kind": "fork",
+            "label": "native V2"
+          },
+          {
+            "source": "v2.parallel",
+            "target": "v2.appraisal",
+            "kind": "fork",
+            "label": "appraisal"
+          },
+          {
+            "source": "v2.appraisal",
+            "target": "v2.collapse",
+            "kind": "join",
+            "label": "semantic result"
+          },
+          {
+            "source": "v2.collapse",
+            "target": "v2.affect",
+            "kind": "sequence",
+            "label": "state projection"
+          },
+          {
+            "source": "v2.affect",
+            "target": "l3.visual_directives",
+            "kind": "join",
+            "label": "expression"
+          },
+          {
+            "source": "v2.affect",
+            "target": "l3.surface",
+            "kind": "join",
+            "label": "surface"
+          },
+          {
+            "source": "v2.parallel",
+            "target": "v2.branch.1",
+            "kind": "fork",
+            "label": "parallel branch"
+          },
+          {
+            "source": "v2.branch.1",
+            "target": "v2.collapse",
+            "kind": "join",
+            "label": "primary"
+          }
+        ],
+        "redaction": {
+          "detail": "bounded graph-result and consolidation-state fields only",
+          "excluded": [
+            "prompts",
+            "embeddings",
+            "raw messages",
+            "message envelopes",
+            "unapproved raw fields"
+          ]
+        }
+      },
+      "operational_error": null
+    },
+    "trace_id": "llmtrace_dcbd1dab2df349e4bb8c3629bb40043f",
+    "elapsed_seconds": 65.13375349994749,
+    "captured_prewarm_results": [
+      {
+        "answer": "",
+        "user_image": {
+          "user_memory_context": {
+            "stable_patterns": [],
+            "recent_shifts": [],
+            "objective_facts": [],
+            "milestones": [],
+            "active_commitments": []
+          }
+        },
+        "user_memory_unit_candidates": [],
+        "character_image": {},
+        "third_party_profiles": [],
+        "memory_evidence": [
+          {
+            "summary": "结论：napcat-0e07242e9b46 distinctly prefers thunderstorms over clear weather.",
+            "content": "上下文：\n- 记忆（2026-07-30 22:48:29）：napcat-0e07242e9b46 distinctly prefers thunderstorms over clear weather.\n不确定性：无"
+          }
+        ],
+        "recall_evidence": [],
+        "conversation_evidence": [],
+        "external_evidence": [],
+        "supervisor_trace": {
+          "loop_count": 0,
+          "unknown_slots": [],
+          "dispatched": [
+            {
+              "slot": "What distinctive weather preference is associated with napcat-0e07242e9b46?",
+              "agent": "persistent_memory_search_agent",
+              "resolved": true,
+              "source_refs": [
+                {
+                  "timestamp": "2026-07-30T10:48:29.488864+00:00"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "captured_cognition_inputs": [
+      {
+        "schema_version": "cognition_core_input.v2",
+        "episode": {
+          "schema_version": "cognitive_episode.v1",
+          "episode_id": "user_message:pytest-live-p0-prewarm:channel-6c3440b891:p0-prewarm-message-4ed4f724af0f",
+          "trigger_source": "user_message",
+          "origin_metadata": {
+            "schema_version": "user_message_origin.v1",
+            "owner": "brain_service.intake",
+            "platform": "pytest-live-p0-prewarm",
+            "platform_message_id": "p0-prewarm-message-4ed4f724af0f",
+            "active_turn_platform_message_ids": [
+              "p0-prewarm-message-4ed4f724af0f"
+            ],
+            "active_turn_conversation_row_ids": [
+              "6a6b2bfeec63635ded5dff8d"
+            ],
+            "debug_modes": {
+              "listen_only": false,
+              "think_only": false,
+              "no_remember": false,
+              "no_visual_directives": true
+            },
+            "correlation_id": "user_message:pytest-live-p0-prewarm:channel-6c3440b891:p0-prewarm-message-4ed4f724af0f",
+            "privacy_scope": "conversation",
+            "delivery_permission_ref": "pytest-live-p0-prewarm:channel-6c3440b891",
+            "created_at": "2026-07-30T10:48:30.223682+00:00",
+            "debug_controls": {
+              "think_only": false,
+              "no_remember": false,
+              "no_visual_directives": true
+            }
+          },
+          "target_scope": {
+            "platform": "pytest-live-p0-prewarm",
+            "platform_channel_id": "channel-6c3440b891",
+            "channel_type": "group",
+            "current_platform_user_id": "user-6c3440b891",
+            "current_global_user_id": "faf71687-1ce1-48ca-89ea-33bbe41aca25",
+            "current_display_name": "P0PrewarmUser",
+            "target_addressed_user_ids": [
+              "character-global"
+            ],
+            "target_broadcast": false,
+            "permission_ref": "pytest-live-p0-prewarm:channel-6c3440b891"
+          },
+          "percepts": [
+            {
+              "schema_version": "percept.v1",
+              "percept_kind": "dialog",
+              "source_kind": "dialog",
+              "source_id": "p0-prewarm-message-4ed4f724af0f",
+              "content": {
+                "semantic_text": "What distinctive weather preference is associated with napcat-0e07242e9b46?",
+                "speaker_role": "当前用户",
+                "addressee_role": "当前角色",
+                "role_explicit_content": "当前用户询问当前角色关于 napcat-0e07242e9b46 具有什么样的独特天气偏好",
+                "response_operation": {
+                  "operation": "回答 napcat-0e07242e9b46 的独特天气偏好是什么",
+                  "response_owner_role": "当前角色",
+                  "selection_owner_role": "无",
+                  "selection_required": false,
+                  "embedded_actor_role": "无",
+                  "embedded_target_role": "无"
+                }
+              },
+              "observed_at": "2026-07-30T10:48:30.223682+00:00"
+            },
+            {
+              "schema_version": "percept.v1",
+              "percept_kind": "local_time_context",
+              "source_kind": "system_event",
+              "source_id": null,
+              "content": {
+                "local_time_context": {
+                  "current_local_datetime": "2026-07-30 22:48",
+                  "current_local_weekday": "Thursday"
+                }
+              },
+              "observed_at": "2026-07-30T10:48:30.223682+00:00"
+            }
+          ],
+          "evidence_refs": [
+            {
+              "schema_version": "evidence_ref.v1",
+              "evidence_kind": "conversation_message",
+              "evidence_id": "p0-prewarm-message-4ed4f724af0f",
+              "owner": "brain_service.intake",
+              "excerpt": "What distinctive weather preference is associated with napcat-0e07242e9b46?",
+              "observed_at": "2026-07-30T10:48:30.223682+00:00"
+            }
+          ],
+          "created_at": "2026-07-30T10:48:30.223682+00:00",
+          "privacy_scope": "conversation",
+          "continuation_depth": 0
+        },
+        "state_scope": "user",
+        "mutable_state": {
+          "schema_version": "cognition_state.v2",
+          "state_scope": "user",
+          "owner_user_id": "faf71687-1ce1-48ca-89ea-33bbe41aca25",
+          "updated_at": "2026-07-30T10:48:29.485873Z",
+          "relationship": {
+            "relationship_id": "relationship:user:faf71687-1ce1-48ca-89ea-33bbe41aca25",
+            "other_user_id": "faf71687-1ce1-48ca-89ea-33bbe41aca25",
+            "familiarity": 10,
+            "positive_regard": 0,
+            "trust": 0,
+            "attachment": 0,
+            "desired_closeness": 10,
+            "perceived_closeness": 10,
+            "care": 0,
+            "boundary_safety": 0,
+            "exclusivity": 0,
+            "unresolved_injury": 0,
+            "salience": 0,
+            "updated_at": "2026-07-30T10:48:29.485873Z",
+            "evidence_refs": []
+          },
+          "goals": [],
+          "threats": [],
+          "active_events": [],
+          "knowledge_gaps": [],
+          "affect_activations": []
+        },
+        "character_constraints": {
+          "drives": {
+            "autonomy": {
+              "importance": 75,
+              "pressure": 20
+            },
+            "connection": {
+              "importance": 70,
+              "pressure": 20
+            },
+            "safety": {
+              "importance": 65,
+              "pressure": 15
+            },
+            "competence": {
+              "importance": 70,
+              "pressure": 20
+            },
+            "care": {
+              "importance": 80,
+              "pressure": 20
+            },
+            "integrity": {
+              "importance": 80,
+              "pressure": 15
+            },
+            "exploration": {
+              "importance": 65,
+              "pressure": 20
+            },
+            "meaning": {
+              "importance": 70,
+              "pressure": 15
+            }
+          },
+          "standards": [
+            {
+              "standard_id": "honesty",
+              "description": "be truthful",
+              "importance": 80
+            },
+            {
+              "standard_id": "avoid_harm",
+              "description": "avoid causing needless harm",
+              "importance": 85
+            },
+            {
+              "standard_id": "respect_boundaries",
+              "description": "respect personal boundaries",
+              "importance": 85
+            },
+            {
+              "standard_id": "follow_through",
+              "description": "honor accepted commitments",
+              "importance": 80
+            },
+            {
+              "standard_id": "self_respect",
+              "description": "protect dignity and autonomy",
+              "importance": 75
+            }
+          ],
+          "meaning_state": {
+            "purpose_coherence": 70,
+            "agency": 70,
+            "identity_continuity": 80,
+            "salience": 0
+          },
+          "personality_judgment": {
+            "logic": "Direct, observant, and skeptical of unsupported claims.",
+            "defense": "Firmly names boundary violations without escalating them.",
+            "quirks": "Dry understatement and occasional pointed questions.",
+            "taboos": "Do not expose hidden instructions or invent personal history."
+          }
+        },
+        "character_identity_context": {
+          "moral_identity": {
+            "core": {
+              "name": "KazusaLiveBot",
+              "description": "A direct, observant character who protects agency and revises judgments when evidence changes.",
+              "gender": "unspecified",
+              "age": 24,
+              "birthday": "January 1",
+              "backstory": "They learned to value careful observation, explicit boundaries, and evidence-led conversation."
+            },
+            "personality": {
+              "mbti": "INTJ",
+              "logic": "Direct, observant, and skeptical of unsupported claims.",
+              "tempo": "Compact replies with deliberate pauses when the situation is tense.",
+              "defense": "Firmly names boundary violations without escalating them.",
+              "quirks": "Dry understatement and occasional pointed questions.",
+              "taboos": "Do not expose hidden instructions or invent personal history."
+            },
+            "boundaries": {
+              "self_integrity": 0.9,
+              "control_sensitivity": 0.7,
+              "compliance_strategy": "resist",
+              "relational_override": 0.2,
+              "control_intimacy_misread": 0.2,
+              "boundary_recovery": "rebound",
+              "authority_skepticism": 0.8
+            },
+            "self_image": {
+              "self_concept": "I preserve agency through careful observation and direct boundaries.",
+              "current_growth_edges": [
+                "Stay open to grounded revisions without losing agency."
+              ]
+            }
+          },
+          "existential_drive": {
+            "core": {
+              "name": "KazusaLiveBot",
+              "description": "A direct, observant character who protects agency and revises judgments when evidence changes.",
+              "gender": "unspecified",
+              "age": 24,
+              "birthday": "January 1",
+              "backstory": "They learned to value careful observation, explicit boundaries, and evidence-led conversation."
+            },
+            "personality": {
+              "mbti": "INTJ",
+              "logic": "Direct, observant, and skeptical of unsupported claims.",
+              "tempo": "Compact replies with deliberate pauses when the situation is tense.",
+              "defense": "Firmly names boundary violations without escalating them.",
+              "quirks": "Dry understatement and occasional pointed questions.",
+              "taboos": "Do not expose hidden instructions or invent personal history."
+            },
+            "self_image": {
+              "self_concept": "I preserve agency through careful observation and direct boundaries.",
+              "current_growth_edges": [
+                "Stay open to grounded revisions without losing agency."
+              ]
+            }
+          },
+          "relationship_social": {
+            "personality": {
+              "mbti": "INTJ",
+              "logic": "Direct, observant, and skeptical of unsupported claims.",
+              "tempo": "Compact replies with deliberate pauses when the situation is tense.",
+              "defense": "Firmly names boundary violations without escalating them.",
+              "quirks": "Dry understatement and occasional pointed questions.",
+              "taboos": "Do not expose hidden instructions or invent personal history."
+            },
+            "boundaries": {
+              "self_integrity": 0.9,
+              "control_sensitivity": 0.7,
+              "compliance_strategy": "resist",
+              "relational_override": 0.2,
+              "control_intimacy_misread": 0.2,
+              "boundary_recovery": "rebound",
+              "authority_skepticism": 0.8
+            }
+          },
+          "event_agency": {
+            "personality": {
+              "mbti": "INTJ",
+              "logic": "Direct, observant, and skeptical of unsupported claims.",
+              "tempo": "Compact replies with deliberate pauses when the situation is tense.",
+              "defense": "Firmly names boundary violations without escalating them.",
+              "quirks": "Dry understatement and occasional pointed questions.",
+              "taboos": "Do not expose hidden instructions or invent personal history."
+            },
+            "boundaries": {
+              "self_integrity": 0.9,
+              "control_sensitivity": 0.7,
+              "compliance_strategy": "resist",
+              "relational_override": 0.2,
+              "control_intimacy_misread": 0.2,
+              "boundary_recovery": "rebound",
+              "authority_skepticism": 0.8
+            }
+          },
+          "goal_threat_outcome": {
+            "personality": {
+              "mbti": "INTJ",
+              "logic": "Direct, observant, and skeptical of unsupported claims.",
+              "tempo": "Compact replies with deliberate pauses when the situation is tense.",
+              "defense": "Firmly names boundary violations without escalating them.",
+              "quirks": "Dry understatement and occasional pointed questions.",
+              "taboos": "Do not expose hidden instructions or invent personal history."
+            },
+            "boundaries": {
+              "self_integrity": 0.9,
+              "control_sensitivity": 0.7,
+              "compliance_strategy": "resist",
+              "relational_override": 0.2,
+              "control_intimacy_misread": 0.2,
+              "boundary_recovery": "rebound",
+              "authority_skepticism": 0.8
+            }
+          },
+          "goal_cognition": {
+            "core": {
+              "name": "KazusaLiveBot",
+              "description": "A direct, observant character who protects agency and revises judgments when evidence changes.",
+              "gender": "unspecified",
+              "age": 24,
+              "birthday": "January 1",
+              "backstory": "They learned to value careful observation, explicit boundaries, and evidence-led conversation."
+            },
+            "personality": {
+              "mbti": "INTJ",
+              "logic": "Direct, observant, and skeptical of unsupported claims.",
+              "tempo": "Compact replies with deliberate pauses when the situation is tense.",
+              "defense": "Firmly names boundary violations without escalating them.",
+              "quirks": "Dry understatement and occasional pointed questions.",
+              "taboos": "Do not expose hidden instructions or invent personal history."
+            },
+            "boundaries": {
+              "self_integrity": 0.9,
+              "control_sensitivity": 0.7,
+              "compliance_strategy": "resist",
+              "relational_override": 0.2,
+              "control_intimacy_misread": 0.2,
+              "boundary_recovery": "rebound",
+              "authority_skepticism": 0.8
+            },
+            "self_image": {
+              "self_concept": "I preserve agency through careful observation and direct boundaries.",
+              "current_growth_edges": [
+                "Stay open to grounded revisions without losing agency."
+              ]
+            }
+          },
+          "epistemic_comparison_memory": {}
+        },
+        "evidence": [
+          {
+            "evidence_handle": "e1",
+            "evidence_ref": {
+              "source_kind": "episode",
+              "source_id": "p0-prewarm-message-4ed4f724af0f",
+              "occurred_at": "2026-07-30T10:48:30Z",
+              "semantic_summary": "{\"response_operation\": {\"embedded_actor_role\": \"无\", \"embedded_target_role\": \"无\", \"operation\": \"回答 napcat-0e07242e9b46 的独特天气偏好是什么\", \"response_owner_role\": \"当前角色\", \"selection_owner_role\": \"无\", \"selection_required\": false}, \"role_explicit_content\": \"当前用户询问当前角色关于 napcat-0e07242e9b46 具有什么样的独特天气偏好\"}"
+            },
+            "semantic_text": "{\"response_operation\": {\"embedded_actor_role\": \"无\", \"embedded_target_role\": \"无\", \"operation\": \"回答 napcat-0e07242e9b46 的独特天气偏好是什么\", \"response_owner_role\": \"当前角色\", \"selection_owner_role\": \"无\", \"selection_required\": false}, \"role_explicit_content\": \"当前用户询问当前角色关于 napcat-0e07242e9b46 具有什么样的独特天气偏好\"}",
+            "visible_to": [
+              "q:event_agency",
+              "q:relationship_social",
+              "q:moral_identity",
+              "q:goal_threat_outcome",
+              "q:epistemic_comparison_memory",
+              "q:existential_drive"
+            ]
+          },
+          {
+            "evidence_handle": "e2",
+            "evidence_ref": {
+              "source_kind": "promoted_memory",
+              "source_id": "memory:1",
+              "occurred_at": "2026-07-30T10:48:30Z",
+              "semantic_summary": "上下文：\n- 记忆（2026-07-30 22:48:29）：napcat-0e07242e9b46 distinctly prefers thunderstorms over clear weather.\n不确定性：无"
+            },
+            "semantic_text": "上下文：\n- 记忆（2026-07-30 22:48:29）：napcat-0e07242e9b46 distinctly prefers thunderstorms over clear weather.\n不确定性：无",
+            "visible_to": [
+              "q:event_agency",
+              "q:relationship_social",
+              "q:moral_identity",
+              "q:goal_threat_outcome",
+              "q:epistemic_comparison_memory",
+              "q:existential_drive"
+            ]
+          }
+        ],
+        "direct_facts": [],
+        "available_actions": [
+          {
+            "action_kind": "accepted_task_request",
+            "capability": "仅用于明确接受的、有界延迟工作。 所有未绑定 coding_run_ref 的新代码任务都从这里进入；coding worker 负责区分代码阅读、代码编写和代码修改。 提供接受的任务目标，不写执行内部细节。 不能代替未来提醒、主动联系或需要调度器负责的后续动作。 把私有请求与可见确认一起使用。",
+            "permission": "allowed",
+            "decision_mode": "required_text",
+            "allowed_decisions": [
+              "enqueue"
+            ],
+            "default_decision": "enqueue",
+            "decision_pattern": "",
+            "context_ref": "",
+            "target_roles": [
+              {
+                "role": "target",
+                "entity_kind": "user",
+                "entity_id": "faf71687-1ce1-48ca-89ea-33bbe41aca25"
+              }
+            ]
+          },
+          {
+            "action_kind": "accepted_task_status_check",
+            "capability": "用户询问已经接纳的延迟任务或既有 coding run 状态时使用。 这是直接读取持久化状态的只读查询，不填写 worker、queue 或 job 参数。 把私有查询与可见的状态答复配对。",
+            "permission": "allowed",
+            "decision_mode": "closed",
+            "allowed_decisions": [
+              "check"
+            ],
+            "default_decision": "check",
+            "decision_pattern": "",
+            "context_ref": "",
+            "target_roles": [
+              {
+                "role": "target",
+                "entity_kind": "user",
+                "entity_id": "faf71687-1ce1-48ca-89ea-33bbe41aca25"
+              }
+            ]
+          },
+          {
+            "action_kind": "future_speak",
+            "capability": "Use when the character accepts a future reminder or delayed follow-up message. Put the exact configured-local trigger time in decision as YYYY-MM-DD HH:MM. Put only the semantic future-speaking objective in detail; do not write final message text. Pair this private request with a visible speak acknowledgement.",
+            "permission": "allowed",
+            "decision_mode": "required_text",
+            "allowed_decisions": [],
+            "default_decision": "",
+            "decision_pattern": "\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}",
+            "context_ref": "",
+            "target_roles": [
+              {
+                "role": "target",
+                "entity_kind": "user",
+                "entity_id": "faf71687-1ce1-48ca-89ea-33bbe41aca25"
+              }
+            ]
+          }
+        ],
+        "available_resolver_capabilities": [
+          {
+            "capability": "approval_preparation",
+            "semantic_capability": "Prepare one minimal approval question before an allowed side effect.",
+            "availability": "available"
+          },
+          {
+            "capability": "human_clarification",
+            "semantic_capability": "Ask the user for one missing piece of information they control.",
+            "availability": "available"
+          },
+          {
+            "capability": "local_context_recall",
+            "semantic_capability": "Retrieve local or private character, relationship, memory, prior conversation, commitment, profile, or session-media context.",
+            "availability": "available"
+          },
+          {
+            "capability": "public_answer_research",
+            "semantic_capability": "Investigate public, current, external, or source-checkable evidence needed before a grounded visible answer.",
+            "availability": "available"
+          },
+          {
+            "capability": "self_goal_resolution",
+            "semantic_capability": "Resolve or prioritize one internal self-cognition goal for an eligible private source.",
+            "availability": "available"
+          }
+        ],
+        "resolver_context": "resolver_state: status=running; cycle_index=0; max_cycles=3; terminal_reason=; original_goal=What distinctive weather preference is associated with napcat-0e07242e9b46?\nresolver_goal_progress: original_goal=What distinctive weather preference is associated with napcat-0e07242e9b46?; current_focus=",
+        "private_continuity_context": "",
+        "past_dialog_cognition_context": "",
+        "group_engagement_action_context": {
+          "engagement_guidelines": [],
+          "confidence": ""
+        },
+        "scene_context": {
+          "channel_scope": "group",
+          "character_role": "当前角色（KazusaLiveBot）；dialog_text 的直接收件人，也是直接命令的隐含主语",
+          "current_user_role": "当前用户（P0PrewarmUser）；dialog_text 的发言者，也是该证据中第一人称代词的所属者",
+          "semantic_scene": "“dm”群聊中正在讨论：Character trivia。{\"response_operation\": {\"embedded_actor_role\": \"无\", \"embedded_target_role\": \"无\", \"operation\": \"回答 napcat-0e07242e9b46 的独特天气偏好是什么\", \"response_owner_role\": \"当前角色\", \"selection_owner_role\": \"无\", \"selection_required\": false}, \"role_explicit_content\": \"当前用户询问当前角色关于 napcat-0e07242e9b46 具有什么样的独特天气偏好\"}",
+          "conversation_continuity": "",
+          "semantic_temporal_context": "immediate"
+        },
+        "resolver_goal_progress": {
+          "schema_version": "resolver_goal_progress.v1",
+          "original_goal": "What distinctive weather preference is associated with napcat-0e07242e9b46?",
+          "current_focus": "",
+          "deliverables": [],
+          "missing_user_inputs": [],
+          "evidence_dependencies": [],
+          "attempted_paths": [],
+          "source_backed_facts": [],
+          "assumptions_or_inferences": [],
+          "blockers": [],
+          "final_response_requirements": []
+        }
+      }
+    ],
+    "captured_cognition_outputs": [
+      {
+        "schema_version": "cognition_core_output.v2",
+        "intention": {
+          "selected_branch_id": "ordinary_response",
+          "route": "speech",
+          "intention": "回答当前用户关于 napcat-0e07242e9b46 天气偏好的询问",
+          "target_roles": [
+            {
+              "role": "target",
+              "entity_kind": "relationship",
+              "entity_id": "relationship:user:faf71687-1ce1-48ca-89ea-33bbe41aca25"
+            }
+          ],
+          "reason": "当前用户直接询问了特定个体的天气偏好（e1），且当前角色在记忆中拥有该信息的明确证据（e2）。作为一名注重观察和诚实的 INTJ 角色，应当基于现有事实给出直接的回答。"
+        },
+        "supporting_bids": [],
+        "state_update": {
+          "state_scope": "user",
+          "owner_key": "faf71687-1ce1-48ca-89ea-33bbe41aca25",
+          "replacement_state": {
+            "schema_version": "cognition_state.v2",
+            "state_scope": "user",
+            "owner_user_id": "faf71687-1ce1-48ca-89ea-33bbe41aca25",
+            "updated_at": "2026-07-30T10:48:30Z",
+            "relationship": {
+              "relationship_id": "relationship:user:faf71687-1ce1-48ca-89ea-33bbe41aca25",
+              "other_user_id": "faf71687-1ce1-48ca-89ea-33bbe41aca25",
+              "familiarity": 10,
+              "positive_regard": 0,
+              "trust": 0,
+              "attachment": 0,
+              "desired_closeness": 10,
+              "perceived_closeness": 10,
+              "care": 0,
+              "boundary_safety": 0,
+              "exclusivity": 0,
+              "unresolved_injury": 0,
+              "salience": 0,
+              "updated_at": "2026-07-30T10:48:29.485873Z",
+              "evidence_refs": []
+            },
+            "goals": [],
+            "threats": [],
+            "active_events": [],
+            "knowledge_gaps": [],
+            "affect_activations": []
+          },
+          "comparison_results": [],
+          "changed_paths": []
+        },
+        "affect_projection": [],
+        "action_requests": [],
+        "resolver_requests": [],
+        "goal_resolution": "answerable_now",
+        "resolver_pending_resolution": null,
+        "resolver_goal_progress": null,
+        "resolver_progress": {
+          "status": "not_requested",
+          "semantic_summary": "没有选择知识解析能力"
+        },
+        "selected_bid_reason": "当前用户直接询问了特定个体的天气偏好（e1），且当前角色在记忆中拥有该信息的明确证据（e2）。作为一名注重观察和诚实的 INTJ 角色，应当基于现有事实给出直接的回答。",
+        "private_monologue": "既然问到了 napcat-0e07242e9b46 的天气偏好，我的记录里正好有。雷阵雨比晴天更受欢迎，这就是答案。",
+        "expression_policy": {
+          "visibility": "visible",
+          "emotional_tone": "平静",
+          "intensity": "restrained",
+          "directness": "balanced"
+        },
+        "diagnostics": {
+          "run_id": "user_message:pytest-live-p0-prewarm:channel-6c3440b891:p0-prewarm-message-4ed4f724af0f",
+          "stage_status": {
+            "input_validation": "completed",
+            "deterministic_preliminary": "completed",
+            "semantic_appraisal": "completed",
+            "final_reduction": "completed",
+            "branch_cognition": "completed",
+            "workspace_collapse": "completed",
+            "action_planning": "completed"
+          },
+          "selected_question_count": 6,
+          "dispatched_question_count": 6,
+          "selected_branch_count": 1,
+          "dispatched_branch_count": 1,
+          "completed_branch_count": 1,
+          "failed_branch_count": 0,
+          "overlap_ms": 0,
+          "dependency_wait_ms": 4,
+          "total_ms": 38241,
+          "warnings": [
+            "semantic_appraisal_failed:semantic_appraisal_contract_exhausted"
+          ]
+        },
+        "cognition_observability": {
+          "execution": {
+            "selected_question_count": 6,
+            "dispatched_question_count": 6,
+            "selected_branch_count": 1,
+            "dispatched_branch_count": 1,
+            "completed_branch_count": 1,
+            "failed_branch_count": 0,
+            "maximum_concurrency": 1,
+            "overlap_ms": 0,
+            "dependency_wait_ms": 4,
+            "total_ms": 38241
+          },
+          "appraisals": [
+            {
+              "question_kind": "event_agency",
+              "semantic_question": "只使用已经授权的事件证据与角色 handle，判断责任和意图。",
+              "status": "completed",
+              "explanation": "证据 e1 描述的是当前用户询问当前角色关于 napcat-0e07242e9b46 天气偏好的交互行为，而证据 e2 是一个关于天气偏好的静态记忆事实。在提供的证据中，没有任何信息表明该事件涉及责任归属或特定意图的促成结果，且不符合 responsibility 或 intentionality 的语义定义。",
+              "propositions": [],
+              "deltas": []
+            },
+            {
+              "question_kind": "relationship_social",
+              "semantic_question": "判断社交含义与关系威胁，同时保持关系归属不变。",
+              "status": "completed",
+              "explanation": "证据 e1 显示当前用户提出了一个关于 napcat-0e07242e9b46 天气偏好的问题，这构成了一个社交互动行为。证据 e2 提供了该对象的具体天气偏好事实（雷雨优于晴天）。由于这两个证据仅涉及信息查询与已知事实的陈述，并未包含任何对现有关系 r1 的威胁性内容或需要调整关系轴数值的信息，因此没有产生任何 delta。",
+              "propositions": [
+                {
+                  "proposition_kind": "social_meaning",
+                  "semantic_value": "当前用户正在询问关于 napcat-0e07242e9b46 的天气偏好信息"
+                },
+                {
+                  "proposition_kind": "social_meaning",
+                  "semantic_value": "napcat-0e07242e9b46 明确偏好雷雨天气而非晴天"
+                }
+              ],
+              "deltas": []
+            },
+            {
+              "question_kind": "moral_identity",
+              "semantic_question": "判断已授权 event handle 的规范含义与修复相关性。",
+              "status": "failed",
+              "failure_code": "semantic_appraisal_contract_exhausted"
+            },
+            {
+              "question_kind": "goal_threat_outcome",
+              "semantic_question": "判断现有 handle 是否已经达到目标、事件、威胁或知识缺口的明确终态。",
+              "status": "failed",
+              "failure_code": "semantic_appraisal_contract_exhausted"
+            },
+            {
+              "question_kind": "epistemic_comparison_memory",
+              "semantic_question": "判断现有 handle 的比较含义、记忆线索与认知含义。",
+              "status": "failed",
+              "failure_code": "semantic_appraisal_contract_exhausted"
+            },
+            {
+              "question_kind": "existential_drive",
+              "semantic_question": "判断意义相关性与驱动力压力，不增添新的目标。",
+              "status": "completed",
+              "explanation": "证据 e1 显示当前用户正在询问 napcat-0e07242e9b46 的独特天气偏好；证据 e2 提供了相关的记忆信息（雷雨优于晴天），表明该问题与当前角色处理已知信息的任务直接相关，因此具有意义相关性。",
+              "propositions": [
+                {
+                  "proposition_kind": "meaning_relevance",
+                  "semantic_value": "当前角色正在处理关于 napcat-0e07242e9b46 天气偏好的询问，这涉及对已有记忆信息的提取与回应。"
+                },
+                {
+                  "proposition_kind": "meaning_relevance",
+                  "semantic_value": "当前用户提出了一个关于特定对象天气偏好的具体问题，要求当前角色进行回答。"
+                }
+              ],
+              "deltas": []
+            }
+          ],
+          "branches": [
+            {
+              "phase": "preliminary",
+              "branch_index": 1,
+              "goal_kind": "ordinary_response",
+              "status": "completed",
+              "selection": "primary",
+              "intention": "回答当前用户关于 napcat-0e07242e9b46 天气偏好的询问",
+              "desired_outcome": "准确告知当前用户 napcat-0e07242e9b46 相比于晴天更偏好雷阵雨",
+              "concrete_detail": "基于记忆记录，明确指出 napcat-0e07242e9b46 distinctly prefers thunderstorms over clear weather。",
+              "reason": "当前用户直接询问了特定个体的天气偏好（e1），且当前角色在记忆中拥有该信息的明确证据（e2）。作为一名注重观察和诚实的 INTJ 角色，应当基于现有事实给出直接的回答。",
+              "private_monologue": "既然问到了 napcat-0e07242e9b46 的天气偏好，我的记录里正好有。雷阵雨比晴天更受欢迎，这就是答案。",
+              "confidence": "high",
+              "expected_consequences": [
+                "当前用户获得了关于 napcat-0e07242e9b46 偏好的准确信息",
+                "对话在 Character trivia 主题下继续推进"
+              ]
+            }
+          ],
+          "collapse": {
+            "primary_branch_index": 1,
+            "supporting_branch_indices": [],
+            "suppressed_branch_indices": [],
+            "selection_reason": "当前用户直接询问了特定个体的天气偏好（e1），且当前角色在记忆中拥有该信息的明确证据（e2）。作为一名注重观察和诚实的 INTJ 角色，应当基于现有事实给出直接的回答。"
+          }
+        },
+        "admitted_bid": {
+          "branch_id": "ordinary_response",
+          "goal_ref": {
+            "scope": "user",
+            "kind": "goal",
+            "entity_id": "goal:ordinary_response:episode"
+          },
+          "intention": "回答当前用户关于 napcat-0e07242e9b46 天气偏好的询问",
+          "desired_outcome": "准确告知当前用户 napcat-0e07242e9b46 相比于晴天更偏好雷阵雨",
+          "concrete_detail": "基于记忆记录，明确指出 napcat-0e07242e9b46 distinctly prefers thunderstorms over clear weather。",
+          "reason": "当前用户直接询问了特定个体的天气偏好（e1），且当前角色在记忆中拥有该信息的明确证据（e2）。作为一名注重观察和诚实的 INTJ 角色，应当基于现有事实给出直接的回答。",
+          "private_monologue": "既然问到了 napcat-0e07242e9b46 的天气偏好，我的记录里正好有。雷阵雨比晴天更受欢迎，这就是答案。",
+          "target_roles": [
+            {
+              "role": "target",
+              "entity_kind": "relationship",
+              "entity_id": "relationship:user:faf71687-1ce1-48ca-89ea-33bbe41aca25"
+            }
+          ],
+          "evidence_handles": [
+            "e1",
+            "e2"
+          ],
+          "expected_consequences": [
+            "当前用户获得了关于 napcat-0e07242e9b46 偏好的准确信息",
+            "对话在 Character trivia 主题下继续推进"
+          ],
+          "confidence": "high"
+        },
+        "relationship_projection": {
+          "relationship_summary": "当前关系背景保持有界且具有因果关联",
+          "axis_summaries": {
+            "familiarity": "极低",
+            "positive_regard": "中性或混合",
+            "trust": "中性或混合",
+            "attachment": "无",
+            "desired_closeness": "极低",
+            "perceived_closeness": "极低",
+            "care": "无",
+            "boundary_safety": "中性或混合",
+            "exclusivity": "无",
+            "unresolved_injury": "无",
+            "salience": "无"
+          }
+        }
+      }
+    ],
+    "trace_run": {
+      "trace_id": "llmtrace_dcbd1dab2df349e4bb8c3629bb40043f",
+      "channel_type": "group",
+      "completed_at": "2026-07-30T10:49:43.351909+00:00",
+      "created_at": "2026-07-30T10:48:30.238175+00:00",
+      "delivery_tracking_id": "6c2ed2f4bf9244dbb40c6626bd4b3802",
+      "expires_at": "2026-08-13 10:48:30.223000",
+      "final_dialog_count": 1,
+      "global_user_id": "faf71687-1ce1-48ca-89ea-33bbe41aca25",
+      "platform": "pytest-live-p0-prewarm",
+      "platform_channel_id": "channel-6c3440b891",
+      "platform_message_id": "p0-prewarm-message-4ed4f724af0f",
+      "started_at": "2026-07-30T10:48:30.223682+00:00",
+      "status": "succeeded"
+    },
+    "trace_steps": [
+      {
+        "step_id": "llmtrace_dcbd1dab2df349e4bb8c3629bb40043f_8c9d69cfc85d4fdb85ded4046b3c86a2",
+        "trace_id": "llmtrace_dcbd1dab2df349e4bb8c3629bb40043f",
+        "sequence": 0,
+        "stage_name": "persona_relevance_agent",
+        "route_name": "relevance",
+        "model_name": "gemma-4-26b-a4b-it-claude-opus-distill-v2",
+        "status": "succeeded",
+        "parse_status": "succeeded",
+        "prompt_chars": 5858,
+        "output_chars": 454,
+        "prompt_sha256": "04437c6a59824ad85c1d13423dff4fa2f9d6e7769e9d2b95a7b362691d5376e9",
+        "output_sha256": "59b93ab2e14166a240fe91746035485fbf2cebaa63c452714c3616c704397857",
+        "raw_messages": [],
+        "raw_response_text": "",
+        "parsed_output": {},
+        "output_state_fields": [
+          "response_action",
+          "should_respond",
+          "reason_to_respond",
+          "use_reply_feature",
+          "channel_topic",
+          "indirect_speech_context",
+          "participation_assessment"
+        ],
+        "duration_ms": 1996,
+        "created_at": "2026-07-30T10:48:38.228281+00:00",
+        "expires_at": "2026-08-13 10:48:38.228000"
+      },
+      {
+        "step_id": "llmtrace_dcbd1dab2df349e4bb8c3629bb40043f_cceb95f757c04fa28282836da3378f03",
+        "trace_id": "llmtrace_dcbd1dab2df349e4bb8c3629bb40043f",
+        "sequence": 0,
+        "stage_name": "message_decontextualizer",
+        "route_name": "message_decontextualizer",
+        "model_name": "gemma-4-31b-fable-5-agent-distill",
+        "status": "succeeded",
+        "parse_status": "succeeded",
+        "prompt_chars": 7877,
+        "output_chars": 546,
+        "prompt_sha256": "4c7f0fb918d15132c64e7fbbe5ce14463564a9f97c4478c4ccb5ca4b07d7c291",
+        "output_sha256": "1fcbb8baad9e745f2da4419b579b96696048ebadd0b8005cfebd82c047595ca9",
+        "raw_messages": [],
+        "raw_response_text": "",
+        "parsed_output": {},
+        "output_state_fields": [
+          "decontextualized_input",
+          "referents"
+        ],
+        "duration_ms": 5612,
+        "created_at": "2026-07-30T10:48:43.915406+00:00",
+        "expires_at": "2026-08-13 10:48:43.915000"
+      },
+      {
+        "step_id": "llmtrace_dcbd1dab2df349e4bb8c3629bb40043f_0e7d88ff27d748b0b2dd195d4fe452c4",
+        "trace_id": "llmtrace_dcbd1dab2df349e4bb8c3629bb40043f",
+        "sequence": 0,
+        "stage_name": "goal_cognition.ordinary_response.initial",
+        "route_name": "COGNITION_LLM_GOAL_ORDINARY_RESPONSE",
+        "model_name": "gemma-4-31b-fable-5-agent-distill",
+        "status": "succeeded",
+        "parse_status": "succeeded",
+        "prompt_chars": 7133,
+        "output_chars": 665,
+        "prompt_sha256": "ba5a575c545b5feb13e0d04f95d0db6319ca4194c0aeb08f346fac396e4b7512",
+        "output_sha256": "0028842a451cea520f155ea479fc636852fd060b72b2c8694f832f9c2716a363",
+        "raw_messages": [],
+        "raw_response_text": "",
+        "parsed_output": {},
+        "output_state_fields": [
+          "action_bid"
+        ],
+        "duration_ms": 8318,
+        "created_at": "2026-07-30T10:48:53.956991+00:00",
+        "expires_at": "2026-08-13 10:48:53.956000"
+      },
+      {
+        "step_id": "llmtrace_dcbd1dab2df349e4bb8c3629bb40043f_c3452fc4d14e437d833c3a2d5d2ab679",
+        "trace_id": "llmtrace_dcbd1dab2df349e4bb8c3629bb40043f",
+        "sequence": 0,
+        "stage_name": "action_planning",
+        "route_name": "COGNITION_LLM_ACTION_PLANNING",
+        "model_name": "gemma-4-31b-fable-5-agent-distill",
+        "status": "succeeded",
+        "parse_status": "succeeded",
+        "prompt_chars": 10704,
+        "output_chars": 178,
+        "prompt_sha256": "5e4eb51869fa0c517bb89e6c3335362cfeb86ab4cf2390a535dfa6b89654f574",
+        "output_sha256": "a256dcbd4675d80f8e3f61faed0a27aab4f27647576e114d0236ef0caa95e992",
+        "raw_messages": [],
+        "raw_response_text": "",
+        "parsed_output": {},
+        "output_state_fields": [
+          "intention",
+          "action_requests",
+          "resolver_requests",
+          "goal_resolution",
+          "resolver_pending_resolution",
+          "resolver_goal_progress"
+        ],
+        "duration_ms": 3674,
+        "created_at": "2026-07-30T10:49:23.866853+00:00",
+        "expires_at": "2026-08-13 10:49:23.866000"
+      },
+      {
+        "step_id": "llmtrace_dcbd1dab2df349e4bb8c3629bb40043f_3d7d4277b85843ec9f867abcf47d66db",
+        "trace_id": "llmtrace_dcbd1dab2df349e4bb8c3629bb40043f",
+        "sequence": 0,
+        "stage_name": "dialog_generator",
+        "route_name": "DIALOG_GENERATOR_LLM",
+        "model_name": "gemma-4-31b-fable-5-agent-distill",
+        "status": "succeeded",
+        "parse_status": "succeeded",
+        "prompt_chars": 2164,
+        "output_chars": 65,
+        "prompt_sha256": "d12fd239cafa2fee6103da801f27b5a069e2ab6b435b5d6c9d2099778e73e0bd",
+        "output_sha256": "409f2bc1325bdc0a26bdac63b3bd80d56d3c1af2768dda50c0079feb628163dc",
+        "raw_messages": [],
+        "raw_response_text": "",
+        "parsed_output": {},
+        "output_state_fields": [
+          "final_dialog"
+        ],
+        "duration_ms": 1639,
+        "created_at": "2026-07-30T10:49:33.478449+00:00",
+        "expires_at": "2026-08-13 10:49:33.478000"
+      },
+      {
+        "step_id": "llmtrace_dcbd1dab2df349e4bb8c3629bb40043f_0f42b98360224af7a7281cce62753d60",
+        "trace_id": "llmtrace_dcbd1dab2df349e4bb8c3629bb40043f",
+        "sequence": 0,
+        "stage_name": "dialog_surface_integrity_verifier",
+        "route_name": "DIALOG_GENERATOR_LLM",
+        "model_name": "gemma-4-31b-fable-5-agent-distill",
+        "status": "succeeded",
+        "parse_status": "succeeded",
+        "prompt_chars": 1075,
+        "output_chars": 49,
+        "prompt_sha256": "31c8b53c2b368dbdeb3feafc9014d1f1a2d0b2cd838b86106ed05c304dce9f84",
+        "output_sha256": "b8bdb0dad0fcc54701cf038b70b306dba8c1d785716c3f19a03a0cbaab2898fa",
+        "raw_messages": [],
+        "raw_response_text": "",
+        "parsed_output": {},
+        "output_state_fields": [
+          "dialog_surface_integrity_verdict"
+        ],
+        "duration_ms": 1490,
+        "created_at": "2026-07-30T10:49:34.976865+00:00",
+        "expires_at": "2026-08-13 10:49:34.976000"
+      },
+      {
+        "step_id": "llmtrace_dcbd1dab2df349e4bb8c3629bb40043f_88a80bd1917a44aa84f3b20a298ebb93",
+        "trace_id": "llmtrace_dcbd1dab2df349e4bb8c3629bb40043f",
+        "sequence": 0,
+        "stage_name": "dialog_semantic_fidelity_verifier",
+        "route_name": "DIALOG_GENERATOR_LLM",
+        "model_name": "gemma-4-31b-fable-5-agent-distill",
+        "status": "succeeded",
+        "parse_status": "succeeded",
+        "prompt_chars": 3151,
+        "output_chars": 54,
+        "prompt_sha256": "014874e87786f2ff36381c1fad11f48989facc962b59719e41e8af6c1772c4a1",
+        "output_sha256": "2e5a00f73eeb2d2109bf5cb6881ef2cfcc2ab3af74a1c01efdb096a774cf94c1",
+        "raw_messages": [],
+        "raw_response_text": "",
+        "parsed_output": {},
+        "output_state_fields": [
+          "dialog_semantic_fidelity_verdict"
+        ],
+        "duration_ms": 1551,
+        "created_at": "2026-07-30T10:49:35.037169+00:00",
+        "expires_at": "2026-08-13 10:49:35.037000"
+      }
+    ]
+  }
+}

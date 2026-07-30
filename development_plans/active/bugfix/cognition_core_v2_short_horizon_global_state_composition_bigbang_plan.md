@@ -22,7 +22,7 @@ different function:
 | mood: character affect carried between responses | `CharacterCognitionStateV2.affect_activations` has causal emotion, intensity, phase, trend, and sleep recovery | character affect is omitted from ordinary user-turn cognition and relevance; accepted user turns do not update it |
 | global vibe: slower cross-conversation posture | character drives, meaning, goals, threats, events, gaps, and affect already form a richer native state | the full operational state is neither projected nor composed into ordinary responses; non-sleep elapsed fading is absent |
 | last relationship insight: compact reason behind the current relationship stance | `RelationshipStateV2` preserves axes and evidence, while user cognition state preserves relationship-rooted events and affect | production relevance reads a field that native V2 no longer stores; the V2 relationship prompt and console expose axes without bounded causal context |
-| user/channel adaptation | user and group-channel interaction-style images already exist | production loads them only at the final text surface; settled relevance and V2 goal judgment do not receive one shared snapshot |
+| user/channel adaptation | user and group-channel interaction-style images already exist; the P0 context-reconnection fix restores bounded group engagement to eligible group self-cognition goal/action judgment | ordinary user relevance still lacks style, and production does not yet reuse one immutable snapshot across relevance, cognition, and surface |
 | operator visibility | the console exposes native state tables | it does not show the effective global projection consumed by a turn or the causal relationship projection |
 
 The target is functional supersession, not restoration of the strings `mood`, `global_vibe`, or `last_relationship_insight`. The concrete behavioral requirement is:
@@ -49,6 +49,29 @@ prior receipt -> bounded barrier -> one global/user/style load
 
 This follows `development_plans/active/bugfix/cognition_core_v2_character_identity_growth_bigbang_plan.md`. That plan owns durable identity/self-image/growth/revisions/lineage; this plan owns transient operational state and scoped runtime composition. Execution is blocked until the prerequisite is `completed`, signed, and rebaselined.
 
+### 2026-07-30 P0 Context-Reconnection Rebaseline
+
+`development_plans/archive/completed/bugfix/cognition_core_v2_p0_context_reconnection_bugfix_plan.md`
+restored the existing group-engagement producer to native V2 before this draft
+executes. The post-P0 baseline has:
+
+- one eligible cycle-zero group self-cognition load through
+  `build_group_engagement_action_context(...)`;
+- one exact `group_engagement_action_context` V2 carrier with bounded
+  `engagement_guidelines` and `confidence`;
+- goal cognition and action planning as its only cognition consumers;
+- exact empty context and zero group-style reads for ineligible events;
+- canonical self-cognition `content.semantic_text` as current-scene authority
+  ahead of fallback `text`; and
+- deterministic and live trace coverage for the producer-to-consumer edge.
+
+This plan must adopt that carrier and those consumer boundaries. Its future
+immutable `interaction_style_turn_snapshot.v1` replaces the direct connector
+load and supplies the existing group projection; it does not add a second
+group-engagement field, loader, vocabulary, or cognition consumer. Stage 1
+must rebaseline against the completed and user-signed P0 plan before any
+implementation.
+
 ## Mandatory Skills
 
 - `development-plan`, `local-llm-architecture`, and `no-prepost-user-input`: lifecycle, architecture, semantic ownership, budgets, routing, and reliability.
@@ -59,7 +82,9 @@ This follows `development_plans/active/bugfix/cognition_core_v2_character_identi
 ## Mandatory Rules
 
 1. Production changes remain blocked while this plan is `draft`.
-2. Execution remains blocked until the identity-growth plan is completed and signed off; reread its final target contracts before touching this plan.
+2. Execution remains blocked until the identity-growth plan and the P0
+   context-reconnection plan are completed and signed off; reread both final
+   target contracts before touching this plan.
 3. Rebaseline every file, symbol, test, and UI panel against the post-identity HEAD. A material contract conflict stops execution and requires a plan update.
 4. Use `venv\Scripts\python.exe`, `apply_patch`, and repo-relative quoted paths; check `git status --short`, root/subsystem docs, source, and tests before production edits; do not read `.env`.
 5. `CharacterCognitionStateV2` in the singleton operational character document is the sole persisted short-horizon global-state authority.
@@ -81,7 +106,7 @@ This follows `development_plans/active/bugfix/cognition_core_v2_character_identi
 21. Preserve all twenty-one emotion definitions, required-root guards, adjacent-emotion distinctions, begin/sustain/inactive thresholds, per-emotion decay rates, phase/trend rules, and retention thresholds. Sleep remains the stronger recovery path.
 22. Emotion globality is activation-instance ownership. The carry-over lane may derive the eighteen emotions whose guards accept character roots. `love_attachment`, `jealousy`, and `loneliness` remain relationship-required user-state activations.
 23. Closed cause classes are deterministic privacy-safe projection/UI labels only. They are absent from LLM appraisal input/output and persisted emotion authority.
-24. Load user and group interaction-style documents once per logical turn, in parallel where both apply, and reuse one immutable snapshot for relevance, cognition, surface, telemetry, and console comparison.
+24. Load user and group interaction-style documents once per logical turn, in parallel where both apply, and reuse one immutable snapshot for relevance, cognition, surface, telemetry, and console comparison. Populate the existing bounded `group_engagement_action_context` projection for goal/action consumers and retire its direct connector load in the same cutover.
 25. Style guidance stays source/consumer labeled and cannot override identity, boundaries, current evidence, relationship state, stance, topic, or reason to speak.
 26. Persist and expose every active/fading native affect row up to the frozen twenty-one-row bound. Prompt top-N limits never define state or console truth.
 27. Apply the Universal Bounded Boundary Policy below to every character/byte/cardinality/deadline/security guard reachable through normal private/group chat and accepted-task-result V2 paths. No raw `ValueError`, `PromptBudgetError`, `CognitionContextLimitError`, oversized payload, provider-output overflow, or receipt error may escape and crash the queue, worker, graph, or delivery pipeline.
@@ -108,8 +133,12 @@ This follows `development_plans/active/bugfix/cognition_core_v2_character_identi
 8. Add a consolidation target that routes settled episodes into one Core V2 state-only character carry-over stage.
 9. Apply accepted carry-over appraisals through the existing native V2 reducer to produce zero or one character-scoped `StateUpdateV2`, then commit through canonical optimistic persistence with episode idempotency.
 10. Add bounded predecessor ordering across normal chat and accepted background-task result paths.
-11. Load one user/group interaction-style snapshot before settled relevance and project it by consumer role.
-12. Carry the same state/style snapshot through Cognition Core V2 and L3 instead of reloading at the surface.
+11. Load one user/group interaction-style snapshot before settled relevance
+    and project it by consumer role, reusing the post-P0
+    `group_engagement_action_context` contract for eligible group
+    self-cognition.
+12. Carry the same state/style snapshot through Cognition Core V2 and L3
+    instead of reloading at the connector or surface.
 13. Wire branch-relevant global affect/pressure only into relevant appraisal/goal branches and expression; wire relationship causes into relationship/social relevance and appraisal.
 14. Preserve projected history and conversation progress as fast scene/topic authority, with explicit topic-pivot regression coverage.
 15. Expose full persisted/effective global affect, bounded pressures, latest consumed subset, version timestamp/digests, predecessor health, causal relationship context, and consumer-specific style projections in the control console.
@@ -326,7 +355,15 @@ emotion/pressure kind, qualitative band, lifecycle, trend, and freshness.
 
 ### Interaction-Style Composition
 
-`build_interaction_style_context(...)` becomes the immutable turn snapshot; group turns load user/group documents concurrently. Relevance receives up to three engagement rows/source after grounded participation evidence. Cognition gets up to two social and two engagement rows/source. Surface gets existing bounded speech/social/pacing/engagement projections; existing action consumers may reuse group engagement. Surface performs no DB reload.
+`build_interaction_style_context(...)` becomes the immutable turn snapshot;
+group turns load user/group documents concurrently. Relevance receives up to
+three engagement rows/source after grounded participation evidence. Cognition
+gets up to two social and two engagement rows/source. For eligible group
+self-cognition, its group engagement projection populates the existing exact
+`group_engagement_action_context` consumed by goal cognition and action
+planning. Surface gets existing bounded speech/social/pacing/engagement
+projections. The connector's post-P0 direct group loader and the surface DB
+reload are removed only when this one snapshot supplies those same consumers.
 
 ### Branch Routing
 
@@ -741,7 +778,8 @@ Stop for direction before adding persisted fields/collections; changing the emot
 
 ### Stage 1 — Post-Identity Rebaseline And Closure
 
-1. Confirm the prerequisite plan is completed and its execution evidence is signed.
+1. Confirm the identity-growth and P0 context-reconnection prerequisite plans
+   are completed and their execution evidence is signed.
 2. Require a clean post-identity worktree, then record `git status --short`,
    HEAD, Python version, mandatory-skill reads, and relevant docs/source/tests.
 3. Locate every character cognition-state reader/writer and every legacy runtime occurrence with `rg` and `git grep main`.

@@ -113,6 +113,21 @@ progressing, revising, or leaving that posture. Branch bids distinguish
 analytic `reason` from first-person `private_monologue`; public output exposes
 that distinction as `selected_bid_reason` and `private_monologue`.
 
+Trace-backed past-dialog continuity uses its own optional
+`past_dialog_cognition_context` carrier, capped at 1,800 characters. It reaches
+goal cognition only, separately from the 1,000-character internal-monologue
+`private_continuity_context`. It is weak private context for understanding an
+already-linked prior character dialog, not evidence, a command, selected
+stance, action-planning input, surface content, or dialog wording.
+
+Targetless group self-cognition may receive one exact
+`group_engagement_action_context` containing bounded
+`engagement_guidelines` and a semantic `confidence` descriptor. The same
+immutable advisory projection reaches goal cognition and action planning only.
+It helps judge participation in the currently observed group scene; it cannot
+create a topic, fact, relationship belief, permission, route, or unsupported
+reason to speak. Appraisal and workspace collapse receive no copy.
+
 For user dialog, the canonical percept may carry bounded
 `role_explicit_content` and structured `response_operation` values authored by
 the existing upstream decontextualizer LLM. The operation identifies the
@@ -317,6 +332,11 @@ cognition owns the equivalent single-registry packet under its fixed
 priority. Its goal projection and canonical role summaries are each serialized
 once; duplicate evidence, goal projection, role summaries, and scene role
 labels are absent from supplemental semantic context.
+Past-dialog and group-engagement contexts are supplemental and are removed in
+a stable order before required evidence text is reduced. Action planning uses
+the same fixed 24,000-character cap and replaces its optional group-engagement
+block with the exact empty shape before applying the existing over-cap
+disposition.
 
 Every bounded repair or replacement attempt measures its owner-defined dynamic
 content before invoking its model. Generic goal cognition retains its existing

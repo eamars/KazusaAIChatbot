@@ -34,6 +34,7 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionExecutionError,
     GOAL_RESOLUTION_VALUES,
     GoalResolutionV2,
+    GroupEngagementActionContextV2,
     ResolverAffordanceV2,
     ResolverCapabilityRequestV2,
     SelectedIntentionV2,
@@ -83,6 +84,9 @@ action、request、analysis 或 work 等泛化词不能证明能力匹配。编�
 使用 goal_resolution=answerable_now 并保持 resolver_requests=[]，让后续 surface 或已授权动作
 完成当前处理。如果缺少必要条件而无法直接处理，使用 goal_resolution=blocked 并保持
 resolver_requests=[]，不要把 resolver 请求伪装成定时动作。
+
+group_engagement_action_context 只是在当前已观察群场景中选择相容参与方式和语义请求的建议。
+它不是证据、权限、事实、话题、关系判断、route 权威或最终措辞，不能单独构成发言或能力请求理由。
 
 runtime_capability_limits 是确定性运行时提供的可信能力边界。若其中标记某项能力不可用，不能
 用另一项能力冒充该效果；其中 future_speak 是未来提醒和主动联系的唯一拥有者，不能用通用
@@ -201,6 +205,9 @@ async def plan_actions(
     available_actions: Sequence[ActionAffordanceV2],
     available_resolvers: Sequence[ResolverAffordanceV2],
     resolver_context: str,
+    group_engagement_action_context: (
+        GroupEngagementActionContextV2 | None
+    ) = None,
     runtime_capability_limits: Sequence[str] = (),
     services: CognitionCoreServicesV2,
     current_goal_progress: Mapping[str, Any] | None = None,
@@ -215,6 +222,8 @@ async def plan_actions(
         available_actions: Registry-derived executable action affordances.
         available_resolvers: Registry-derived resolver affordances.
         resolver_context: Bounded prompt-safe resolver recurrence projection.
+        group_engagement_action_context: Advisory observed-scene participation
+            guidance for group self-cognition.
         services: Injected LLM binding and action-planning configuration.
 
     Returns:
@@ -225,6 +234,11 @@ async def plan_actions(
         return_value = _silence_result()
         return return_value
 
+    if group_engagement_action_context is None:
+        group_engagement_action_context = {
+            "engagement_guidelines": [],
+            "confidence": "",
+        }
     bids = [primary_bid, *supporting_bids]
     bid_handles = {
         f"b{index}": bid for index, bid in enumerate(bids, start=1)
@@ -297,10 +311,29 @@ async def plan_actions(
             for handle, affordance in resolver_handles.items()
         },
         "resolver_context": resolver_context,
+        "group_engagement_action_context": {
+            "engagement_guidelines": list(
+                group_engagement_action_context[
+                    "engagement_guidelines"
+                ]
+            ),
+            "confidence": group_engagement_action_context["confidence"],
+        },
         "runtime_capability_limits": list(runtime_capability_limits),
         "current_resolver_goal_progress": current_goal_progress,
     }
     prompt_text = json.dumps(prompt_payload, ensure_ascii=False, sort_keys=True)
+    if len(prompt_text) > ACTION_PLANNING_PROMPT_CAP:
+        reduced_payload = dict(prompt_payload)
+        reduced_payload["group_engagement_action_context"] = {
+            "engagement_guidelines": [],
+            "confidence": "",
+        }
+        prompt_text = json.dumps(
+            reduced_payload,
+            ensure_ascii=False,
+            sort_keys=True,
+        )
     if len(prompt_text) > ACTION_PLANNING_PROMPT_CAP:
         decision = _empty_action_plan_decision()
     else:

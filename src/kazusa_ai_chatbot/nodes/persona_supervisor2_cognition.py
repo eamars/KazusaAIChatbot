@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import Mapping
@@ -109,6 +110,8 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionCoreServicesV2,
     CognitionExecutionError,
     EVIDENCE_SOURCE_QUESTION_IDS,
+    GroupEngagementActionContextV2,
+    PAST_DIALOG_COGNITION_CONTEXT_MAX_CHARS,
     ResolverAffordanceV2,
     validate_cognition_core_input,
 )
@@ -119,7 +122,9 @@ from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     validate_cognition_state,
 )
 from kazusa_ai_chatbot.cognition_resolver.capabilities import (
+    merge_shared_memory_prewarm_result,
     project_resolver_observation_for_cognition,
+    run_first_cycle_shared_memory_prewarm,
 )
 from kazusa_ai_chatbot.character_identity_growth.models import (
     TOP_LEVEL_IDENTITY_KEYS,
@@ -141,6 +146,7 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     RESOLVER_CAPABILITY_SEMANTICS,
 )
 from kazusa_ai_chatbot.db import (
+    build_group_engagement_action_context,
     get_character_cognition_state,
     get_user_cognition_state,
     replace_character_cognition_state,
@@ -572,6 +578,18 @@ def build_cognition_input_from_global_state(
         "private_continuity_context": _text(
             state.get("internal_monologue_residue_context")
         )[:1000],
+        "past_dialog_cognition_context": _text(
+            state.get("past_dialog_cognition_context")
+        )[:PAST_DIALOG_COGNITION_CONTEXT_MAX_CHARS],
+        "group_engagement_action_context": dict(
+            state.get(
+                "group_engagement_action_context",
+                {
+                    "engagement_guidelines": [],
+                    "confidence": "",
+                },
+            )
+        ),
         "scene_context": {
             "channel_scope": channel_scope,
             "character_role": character_role,
@@ -603,69 +621,160 @@ async def call_cognition_subgraph(
     """Run V2 cognition, commit its one replacement state, then expose projections."""
 
     episode = state.get("cognitive_episode")
-    caller = _scope_caller(episode)
-    target_user_id = state.get("global_user_id")
-    origin_scope = episode.get("origin_scope") if isinstance(episode, Mapping) else None
-    scope, owner = resolve_state_scope(
-        caller,
-        target_user_id,
-        origin_scope=tuple(origin_scope) if isinstance(origin_scope, list) else origin_scope,
-    )
     if not isinstance(episode, Mapping):
         raise CognitionExecutionError(
             "cognitive episode is required for identity resolution"
         )
-    episode_id = _text(episode.get("episode_id"))
-    if not episode_id:
-        raise CognitionExecutionError(
-            "cognitive episode_id is required for identity resolution"
-        )
-    include_epistemic_core = scope == "character"
-    if not _state_has_episode_identity_snapshot(
-        state,
-        episode_id=episode_id,
-        include_epistemic_core=include_epistemic_core,
+    try:
+        validate_cognitive_episode_v1(episode)
+    except CognitiveEpisodeValidationError as exc:
+        raise CognitionExecutionError(str(exc)) from exc
+    resolver_state = state.get("resolver_state")
+    is_cycle_zero = (
+        isinstance(resolver_state, Mapping)
+        and resolver_state.get("cycle_index") == 0
+    )
+    prewarm_task: asyncio.Task[dict[str, Any]] | None = None
+    group_engagement_task: asyncio.Task[dict[str, Any]] | None = None
+    group_self_cognition = _is_group_self_cognition_state(state)
+    if (
+        is_cycle_zero
+        and _supports_first_cycle_shared_memory_prewarm(state)
     ):
-        origin_metadata = episode.get("origin_metadata")
-        correlation_id = ""
-        if isinstance(origin_metadata, Mapping):
-            correlation_id = _text(origin_metadata.get("correlation_id"))
-        if not correlation_id:
-            correlation_id = _text(state.get("llm_trace_id")) or episode_id
-        identity_snapshot = await load_latest_identity_for_episode(
-            episode_id=episode_id,
-            correlation_id=correlation_id,
-            include_epistemic_core=include_epistemic_core,
+        prewarm_task = asyncio.create_task(
+            run_first_cycle_shared_memory_prewarm(state)
         )
-        resolved_state = dict(state)
-        resolved_state.update(snapshot_state_update(
-            identity_snapshot,
+    if is_cycle_zero and group_self_cognition:
+        group_engagement_task = asyncio.create_task(
+            build_group_engagement_action_context(
+                channel_type=state["channel_type"],
+                platform=state["platform"],
+                platform_channel_id=state["platform_channel_id"],
+            )
+        )
+    try:
+        caller = _scope_caller(episode)
+        target_user_id = state.get("global_user_id")
+        origin_scope = (
+            episode.get("origin_scope")
+            if isinstance(episode, Mapping)
+            else None
+        )
+        scope, owner = resolve_state_scope(
+            caller,
+            target_user_id,
+            origin_scope=(
+                tuple(origin_scope)
+                if isinstance(origin_scope, list)
+                else origin_scope
+            ),
+        )
+        episode_id = _text(episode.get("episode_id"))
+        if not episode_id:
+            raise CognitionExecutionError(
+                "cognitive episode_id is required for identity resolution"
+            )
+        include_epistemic_core = scope == "character"
+        if not _state_has_episode_identity_snapshot(
+            state,
             episode_id=episode_id,
             include_epistemic_core=include_epistemic_core,
-        ))
-        state = resolved_state  # type: ignore[assignment]
-    prior_update = state.get("cognition_state_update")
-    prior_replacement: Mapping[str, Any] | None = None
-    if isinstance(prior_update, Mapping):
-        replacement = prior_update.get("replacement_state")
-        if (
-            prior_update.get("state_scope") == scope
-            and prior_update.get("owner_key") == owner
-            and isinstance(replacement, Mapping)
         ):
-            prior_replacement = replacement
-    if scope == "character":
-        if prior_replacement is None:
-            mutable_state = await get_character_cognition_state()
+            origin_metadata = episode.get("origin_metadata")
+            correlation_id = ""
+            if isinstance(origin_metadata, Mapping):
+                correlation_id = _text(
+                    origin_metadata.get("correlation_id")
+                )
+            if not correlation_id:
+                correlation_id = (
+                    _text(state.get("llm_trace_id")) or episode_id
+                )
+            identity_snapshot = await load_latest_identity_for_episode(
+                episode_id=episode_id,
+                correlation_id=correlation_id,
+                include_epistemic_core=include_epistemic_core,
+            )
+            resolved_state = dict(state)
+            resolved_state.update(snapshot_state_update(
+                identity_snapshot,
+                episode_id=episode_id,
+                include_epistemic_core=include_epistemic_core,
+            ))
+            state = resolved_state  # type: ignore[assignment]
+        prior_update = state.get("cognition_state_update")
+        prior_replacement: Mapping[str, Any] | None = None
+        if isinstance(prior_update, Mapping):
+            replacement = prior_update.get("replacement_state")
+            if (
+                prior_update.get("state_scope") == scope
+                and prior_update.get("owner_key") == owner
+                and isinstance(replacement, Mapping)
+            ):
+                prior_replacement = replacement
+        if scope == "character":
+            if prior_replacement is None:
+                mutable_state = await get_character_cognition_state()
+            else:
+                mutable_state = prior_replacement
+            character_state = mutable_state
         else:
-            mutable_state = prior_replacement
-        character_state = mutable_state
-    else:
-        if prior_replacement is None:
-            mutable_state = await get_user_cognition_state(owner)
-        else:
-            mutable_state = prior_replacement
-        character_state = await get_character_cognition_state()
+            if prior_replacement is None:
+                mutable_state = await get_user_cognition_state(owner)
+            else:
+                mutable_state = prior_replacement
+            character_state = await get_character_cognition_state()
+    except (Exception, asyncio.CancelledError):
+        await _cancel_cognition_preparation_tasks(
+            prewarm_task,
+            group_engagement_task,
+        )
+        raise
+    try:
+        resolved_state = dict(state)
+        if prewarm_task is not None:
+            prewarm_rag_result = await prewarm_task
+            base_rag_result = state.get("rag_result")
+            if isinstance(base_rag_result, Mapping):
+                merge_base = dict(base_rag_result)
+            else:
+                merge_base = {}
+            merged_rag_result = merge_shared_memory_prewarm_result(
+                merge_base,
+                prewarm_rag_result,
+            )
+            if (
+                merged_rag_result is not merge_base
+                and "answer" not in merged_rag_result
+            ):
+                merged_rag_result["answer"] = ""
+            resolved_state["rag_result"] = merged_rag_result
+        empty_group_context: GroupEngagementActionContextV2 = {
+            "engagement_guidelines": [],
+            "confidence": "",
+        }
+        group_engagement_context: Mapping[str, Any] = empty_group_context
+        if group_self_cognition:
+            existing_group_context = state.get(
+                "group_engagement_action_context"
+            )
+            if isinstance(existing_group_context, Mapping):
+                group_engagement_context = existing_group_context
+        if group_engagement_task is not None:
+            group_engagement_context = await group_engagement_task
+        resolved_state["group_engagement_action_context"] = {
+            "engagement_guidelines": list(
+                group_engagement_context["engagement_guidelines"]
+            ),
+            "confidence": group_engagement_context["confidence"],
+        }
+    except (Exception, asyncio.CancelledError):
+        await _cancel_cognition_preparation_tasks(
+            prewarm_task,
+            group_engagement_task,
+        )
+        raise
+    state = resolved_state  # type: ignore[assignment]
     cognition_input = build_cognition_input_from_global_state(
         state,
         mutable_state=mutable_state,
@@ -687,6 +796,9 @@ async def call_cognition_subgraph(
     update["cognition_input"] = cognition_input
     update["cognition_core_output"] = output
     update["cognition_scope"] = output["state_update"]["state_scope"]
+    update["group_engagement_action_context"] = dict(
+        cognition_input["group_engagement_action_context"]
+    )
     update.update(_episode_identity_state_update(state))
     return update  # type: ignore[return-value]
 
@@ -1341,6 +1453,7 @@ def _episode_evidence(
             if isinstance(raw_content, Mapping):
                 content = _text(
                     raw_content.get("semantic_summary")
+                    or raw_content.get("semantic_text")
                     or raw_content.get("text")
                     or raw_content.get("objective")
                     or raw_content.get("artifact_text")
@@ -1772,6 +1885,76 @@ def _named_role_label(role_label: str, display_name: str) -> str:
     if display_name:
         return f"{role_label}（{display_name}）"
     return role_label
+
+
+def _supports_first_cycle_shared_memory_prewarm(
+    state: Mapping[str, Any],
+) -> bool:
+    """Return whether the episode can enter shared-memory prewarm.
+
+    Args:
+        state: Canonical graph state containing one cognitive episode.
+
+    Returns:
+        True for trigger sources admitted by the shared-memory helper.
+    """
+
+    episode = state.get("cognitive_episode")
+    if not isinstance(episode, Mapping):
+        return False
+    return episode.get("trigger_source") in {
+        "user_message",
+        "internal_thought",
+    }
+
+
+def _is_group_self_cognition_state(state: Mapping[str, Any]) -> bool:
+    """Return whether cognition observes a targetless group scene.
+
+    Args:
+        state: Canonical graph state with channel and episode scope.
+
+    Returns:
+        True only for targetless group self-cognition.
+    """
+
+    if state.get("channel_type") != "group":
+        return False
+    if _text(state.get("global_user_id")):
+        return False
+    episode = state.get("cognitive_episode")
+    if not isinstance(episode, Mapping) or not _is_self_cognition_episode(
+        episode
+    ):
+        return False
+    target_scope = episode.get("target_scope")
+    if not isinstance(target_scope, Mapping):
+        return False
+    return (
+        target_scope.get("channel_type") == "group"
+        and not _text(target_scope.get("current_global_user_id"))
+        and not _text(target_scope.get("current_platform_user_id"))
+    )
+
+
+async def _cancel_cognition_preparation_tasks(
+    *tasks: asyncio.Task[dict[str, Any]] | None,
+) -> None:
+    """Cancel and join every started cognition-preparation task.
+
+    Args:
+        tasks: Optional preparation tasks owned by one cognition invocation.
+
+    Returns:
+        None.
+    """
+
+    started_tasks = [task for task in tasks if task is not None]
+    for task in started_tasks:
+        if not task.done():
+            task.cancel()
+    if started_tasks:
+        await asyncio.gather(*started_tasks, return_exceptions=True)
 
 
 def _scope_caller(episode: Mapping[str, Any] | object) -> str:

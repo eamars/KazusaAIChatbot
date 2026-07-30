@@ -843,6 +843,124 @@ def test_goal_exact_cap_and_cap_plus_one_are_distinct() -> None:
         )
 
 
+def test_goal_budget_drops_restored_optional_context_before_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Private and group guidance cannot displace grounded episode evidence."""
+
+    evidence_text = "E" * 200
+    semantic_context = {
+        "past_dialog_cognition_context": "P" * 1800,
+        "group_engagement_action_context": {
+            "engagement_guidelines": ["G" * 120] * 5,
+            "confidence": "C" * 80,
+        },
+    }
+    payload = {
+        "branch": {},
+        "goal": {},
+        "semantic_context": semantic_context,
+        "evidence": [{
+            "handle": "e1",
+            "source_kind": "episode",
+            "semantic_text": evidence_text,
+        }],
+        "role_handles": [],
+        "role_summaries": {},
+    }
+    required_payload = {
+        **payload,
+        "semantic_context": {},
+    }
+    required_chars = len(json.dumps(
+        required_payload,
+        ensure_ascii=False,
+        sort_keys=True,
+    ))
+    monkeypatch.setattr(
+        goal_cognition_module,
+        "GOAL_COGNITION_PROMPT_CAP",
+        required_chars,
+    )
+
+    fitted = goal_cognition_module._fit_goal_prompt_payload(
+        payload,
+        system_prompt="",
+    )
+    fitted_payload = json.loads(fitted)
+
+    assert fitted_payload["semantic_context"] == {}
+    assert fitted_payload["evidence"][0]["semantic_text"] == evidence_text
+
+
+@pytest.mark.asyncio
+async def test_action_budget_drops_group_guidance_before_plan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Action planning drops valid advisory guidance before giving up."""
+
+    group_context = {
+        "engagement_guidelines": ["G" * 120] * 5,
+        "confidence": "C" * 80,
+    }
+    first_probe = _BoundaryProbeLLM()
+    call_kwargs = {
+        "primary_bid": _bid(),
+        "supporting_bids": [],
+        "episode": {
+            "trigger_source": "self_cognition",
+            "output_mode": "private_state",
+        },
+        "evidence": _maximum_evidence(1),
+        "available_actions": [],
+        "available_resolvers": [],
+        "resolver_context": "",
+        "group_engagement_action_context": group_context,
+    }
+
+    with pytest.raises(_BoundaryReached):
+        await action_selection_module.plan_actions(
+            **call_kwargs,
+            services=SimpleNamespace(
+                llm=first_probe,
+                action_planning_config=object(),
+            ),
+        )
+
+    full_payload = json.loads(first_probe.calls[0]["human_payload"])
+    reduced_payload = dict(full_payload)
+    reduced_payload["group_engagement_action_context"] = {
+        "engagement_guidelines": [],
+        "confidence": "",
+    }
+    reduced_chars = len(json.dumps(
+        reduced_payload,
+        ensure_ascii=False,
+        sort_keys=True,
+    ))
+    monkeypatch.setattr(
+        action_selection_module,
+        "ACTION_PLANNING_PROMPT_CAP",
+        reduced_chars,
+    )
+    reduced_probe = _BoundaryProbeLLM()
+
+    with pytest.raises(_BoundaryReached):
+        await action_selection_module.plan_actions(
+            **call_kwargs,
+            services=SimpleNamespace(
+                llm=reduced_probe,
+                action_planning_config=object(),
+            ),
+        )
+
+    actual_payload = json.loads(reduced_probe.calls[0]["human_payload"])
+    assert actual_payload["group_engagement_action_context"] == {
+        "engagement_guidelines": [],
+        "confidence": "",
+    }
+
+
 def test_required_selection_budget_preserves_mandatory_evidence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

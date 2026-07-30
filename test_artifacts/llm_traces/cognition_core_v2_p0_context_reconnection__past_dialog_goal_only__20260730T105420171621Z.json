@@ -1,0 +1,1401 @@
+{
+  "test_name": "cognition_core_v2_p0_context_reconnection",
+  "case_id": "past_dialog_goal_only",
+  "recorded_at": "2026-07-30T10:54:20.171647+00:00",
+  "payload": {
+    "input": {
+      "reply_text": "What made you hesitate in that earlier answer?",
+      "prior_visible_dialog": "I held back because the evidence was incomplete.",
+      "residual_marker": "private-residual-85e7c28857bc",
+      "old_trace_id": "llmtrace_p0_old_5a48665873374a1c8d57d1290bbf2d78"
+    },
+    "response": {
+      "messages": [
+        "因为证据不够。结论得在确凿的事实上盖章，在这种情况下直接下定论就太随意了。",
+        "啧，我不想随便拍脑袋决定，那样不仅不专业，而且是对事实的不诚实。",
+        "所以保留态度是必要的。这叫谨慎，不叫犹豫。"
+      ],
+      "content_type": "text",
+      "attachments": [],
+      "use_reply_feature": false,
+      "delivery_mentions": [],
+      "scheduled_followups": 0,
+      "delivery_tracking_id": "aaed6cf3d1c441cda68410e739f2c5a5",
+      "cognition_graph": {
+        "run_id": "aaed6cf3d1c441cda68410e739f2c5a5",
+        "status": "completed",
+        "nodes": [
+          {
+            "id": "intake",
+            "label": "Queued turn",
+            "stage": "L1",
+            "lane": "input",
+            "column": 1,
+            "branch": "input",
+            "status": "completed",
+            "detail": {
+              "input": "What made you hesitate in that earlier answer?",
+              "reply_context": {
+                "reply_to_display_name": "KazusaLiveBot",
+                "reply_excerpt": "I held back because the evidence was incomplete."
+              }
+            }
+          },
+          {
+            "id": "l1.relevance",
+            "label": "Response decision",
+            "stage": "L1",
+            "lane": "gate",
+            "column": 2,
+            "branch": "decision",
+            "status": "completed",
+            "detail": {
+              "decision": "true",
+              "reasoning": "typed participation evidence requires a proceed assessment"
+            }
+          },
+          {
+            "id": "l2.reasoning",
+            "label": "Reasoning",
+            "stage": "L2",
+            "lane": "cognition",
+            "column": 3,
+            "branch": "reasoning",
+            "status": "completed",
+            "detail": {
+              "internal_monologue": "既然被问到了，那就直接告诉对方吧。我当时之所以犹豫，是因为手头的证据还不充分，在没有足够依据之前给出定论是不负责任的，这违背我的原则。",
+              "logical_stance": "当前用户直接询问犹豫的原因。根据角色身份设定，当前角色是一个直接、观察敏锐且重视证据引导对话的人，同时在标准中要求保持诚实。结合 past_dialog_cognition_context 中记录的私有认知（由于证据不完整而保留结论），最符合动机的目标是如实解释这一逻辑。",
+              "character_intent": "向当前用户解释之前产生犹豫的具体原因",
+              "judgment_note": "当前用户直接询问犹豫的原因。根据角色身份设定，当前角色是一个直接、观察敏锐且重视证据引导对话的人，同时在标准中要求保持诚实。结合 past_dialog_cognition_context 中记录的私有认知（由于证据不完整而保留结论），最符合动机的目标是如实解释这一逻辑。"
+            }
+          },
+          {
+            "id": "l2.memory",
+            "label": "Memory and evidence",
+            "stage": "L2",
+            "lane": "memory",
+            "column": 3,
+            "branch": "memory",
+            "status": "completed",
+            "detail": {
+              "conversation_progress": {
+                "status": "empty",
+                "continuity": "sharp_transition"
+              }
+            }
+          },
+          {
+            "id": "l2.actions",
+            "label": "Actions",
+            "stage": "L2",
+            "lane": "action",
+            "column": 3,
+            "branch": "action",
+            "status": "completed",
+            "detail": {
+              "selected_actions": [
+                {
+                  "kind": "speak",
+                  "cognition_mode": "deliberative",
+                  "urgency": "now",
+                  "visibility": "user_visible",
+                  "reason": "当前用户直接询问犹豫的原因。根据角色身份设定，当前角色是一个直接、观察敏锐且重视证据引导对话的人，同时在标准中要求保持诚实。结合 past_dialog_cognition_context 中记录的私有认知（由于证据不完整而保留结论），最符合动机的目标是如实解释这一逻辑。"
+                }
+              ],
+              "action_results": [
+                {
+                  "action_kind": "speak",
+                  "status": "executed",
+                  "visibility": "user_visible",
+                  "result_summary": "speak executed: 当前用户直接询问犹豫的原因。根据角色身份设定，当前角色是一个直接、观察敏锐且重视证据引导对话的人，同时在标准中要求保持诚实。结合 past_dialog_cognition_context 中记录的私有认知（由于证据不完整而保留结论），最符合动机的目标是如实解释这一逻辑。",
+                  "completed_at": "2026-07-30T10:53:24.547134+00:00"
+                }
+              ],
+              "action_continuation": [
+                {
+                  "mode": "none",
+                  "max_depth": 0
+                }
+              ]
+            }
+          },
+          {
+            "id": "l3.visual_directives",
+            "label": "Visual directive",
+            "stage": "L3",
+            "lane": "surface",
+            "column": 4,
+            "branch": "visual",
+            "status": "skipped",
+            "detail": {
+              "facial_expression": [],
+              "body_language": [],
+              "gaze_direction": [],
+              "visual_vibe": [],
+              "empty_state": "Visual directives are disabled for this cognition run."
+            }
+          },
+          {
+            "id": "l3.surface",
+            "label": "Visible surface",
+            "stage": "L3",
+            "lane": "surface",
+            "column": 4,
+            "branch": "dialog",
+            "status": "completed",
+            "detail": {
+              "messages": [
+                "因为证据不够。结论得在确凿的事实上盖章，在这种情况下直接下定论就太随意了。",
+                "啧，我不想随便拍脑袋决定，那样不仅不专业，而且是对事实的不诚实。",
+                "所以保留态度是必要的。这叫谨慎，不叫犹豫。"
+              ]
+            }
+          },
+          {
+            "id": "v2.parallel",
+            "label": "Parallel cognition",
+            "stage": "V2",
+            "lane": "cognition",
+            "column": 3,
+            "branch": "parallel",
+            "status": "completed",
+            "detail": {
+              "parallel_execution": {
+                "selected_question_count": 6,
+                "dispatched_question_count": 6,
+                "selected_branch_count": 1,
+                "dispatched_branch_count": 1,
+                "completed_branch_count": 1,
+                "failed_branch_count": 0,
+                "maximum_concurrency": 1,
+                "overlap_ms": 0,
+                "dependency_wait_ms": 3,
+                "total_ms": 14820
+              },
+              "branch_results": [
+                {
+                  "phase": "preliminary",
+                  "branch_index": 1,
+                  "goal_kind": "ordinary_response",
+                  "status": "completed",
+                  "selection": "primary",
+                  "intention": "向当前用户解释之前产生犹豫的具体原因",
+                  "desired_outcome": "通过诚实且直接的说明，让当前用户理解当时由于证据不完整而选择保留结论的逻辑。",
+                  "concrete_detail": "明确指出在之前的对话中，因为可用的证据不足以支撑一个确定的结论，为了维持判断的准确性和诚信（integrity），所以选择了持保留态度而非给出过早的推断。",
+                  "reason": "当前用户直接询问犹豫的原因。根据角色身份设定，当前角色是一个直接、观察敏锐且重视证据引导对话的人，同时在标准中要求保持诚实。结合 past_dialog_cognition_context 中记录的私有认知（由于证据不完整而保留结论），最符合动机的目标是如实解释这一逻辑。",
+                  "private_monologue": "既然被问到了，那就直接告诉对方吧。我当时之所以犹豫，是因为手头的证据还不充分，在没有足够依据之前给出定论是不负责任的，这违背我的原则。",
+                  "confidence": "高",
+                  "expected_consequences": [
+                    "当前用户能够理解当前角色基于证据驱动的思考方式",
+                    "消除关于犹豫原因的不确定性，维持对话的透明度"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "id": "v2.appraisal",
+            "label": "Appraisal results",
+            "stage": "V2",
+            "lane": "cognition",
+            "column": 3,
+            "branch": "appraisal",
+            "status": "completed",
+            "detail": {
+              "appraisal_results": [
+                {
+                  "question_kind": "event_agency",
+                  "semantic_question": "只使用已经授权的事件证据与角色 handle，判断责任和意图。",
+                  "status": "completed",
+                  "explanation": "根据证据 e1，当前用户向当前角色提出了一个具体要求（解释犹豫原因），这表明了当前用户的主观意图且该行为由其发起，因此在 intentionality 和 responsibility 维度上均有正向增量。",
+                  "propositions": [
+                    {
+                      "proposition_kind": "intentionality",
+                      "semantic_value": "当前用户有意要求当前角色解释其之前回答中产生犹豫的具体原因。"
+                    },
+                    {
+                      "proposition_kind": "responsibility",
+                      "semantic_value": "当前用户对要求当前角色解释犹豫原因这一行为负有责任。"
+                    }
+                  ],
+                  "deltas": [
+                    {
+                      "delta": 1,
+                      "reason": "当前用户主动发起了询问操作。"
+                    },
+                    {
+                      "delta": 1,
+                      "reason": "该事件由当前用户的明确请求触发，其为行为主体。"
+                    }
+                  ]
+                },
+                {
+                  "question_kind": "relationship_social",
+                  "semantic_question": "判断社交含义与关系威胁，同时保持关系归属不变。",
+                  "status": "completed",
+                  "explanation": "证据 e1 明确记录了当前用户的询问行为，即要求当前角色解释此前犹豫的原因。这构成了一个清晰的社交互动（social_meaning），但目前没有证据表明该提问对现有关系构成了威胁或需要调整关系状态。",
+                  "propositions": [
+                    {
+                      "proposition_kind": "social_meaning",
+                      "semantic_value": "当前用户要求当前角色解释其之前回答中产生犹豫的具体原因"
+                    }
+                  ]
+                },
+                {
+                  "question_kind": "moral_identity",
+                  "semantic_question": "判断已授权 event handle 的规范含义与修复相关性。",
+                  "status": "completed",
+                  "explanation": "证据 e1 显示当前用户正在要求 KazusaLiveBot 解释其之前回答中产生犹豫的具体原因。这属于一种针对决策过程透明度的追问，虽然涉及对既往状态的审查，但目前仅停留在询问阶段，并未表明存在需要修复的规范违规或身份威胁。",
+                  "propositions": [
+                    {
+                      "proposition_kind": "norm_meaning",
+                      "semantic_value": "当前用户要求当前角色解释之前回答中产生犹豫的具体原因"
+                    },
+                    {
+                      "proposition_kind": "norm_meaning",
+                      "semantic_value": "当前事件涉及对既往决策过程透明度的追问，体现了要求解释与责任说明的规范含义"
+                    }
+                  ],
+                  "deltas": [
+                    {
+                      "delta": 0,
+                      "reason": "当前事件仅涉及对犹豫原因的询问，尚未体现出需要修复或纠正已发生的规范违规行为"
+                    }
+                  ]
+                },
+                {
+                  "question_kind": "goal_threat_outcome",
+                  "semantic_question": "判断现有 handle 是否已经达到目标、事件、威胁或知识缺口的明确终态。",
+                  "status": "completed",
+                  "explanation": "证据 e1 显示当前用户提出了一个关于当前角色此前犹豫原因的问题。根据语义定义，这构成了一个待解决的知识缺口（ck1），目前仅处于提问阶段，并没有证据表明该问题已获得回答或达成终态。",
+                  "propositions": [
+                    {
+                      "proposition_kind": "knowledge_answered",
+                      "semantic_value": "当前用户要求当前角色解释之前回答中产生犹豫的具体原因，该知识缺口尚未获得解答"
+                    }
+                  ]
+                },
+                {
+                  "question_kind": "epistemic_comparison_memory",
+                  "semantic_question": "判断现有 handle 的比较含义、记忆线索与认知含义。",
+                  "status": "completed",
+                  "explanation": "证据 e1 明确记录了当前用户的询问行为，即要求当前角色解释此前回答中的犹豫原因。这构成了一个关于过去状态与当前追问之间的比较含义，涉及对既往决策过程的溯源。",
+                  "propositions": [
+                    {
+                      "proposition_kind": "comparison_meaning",
+                      "semantic_value": "当前用户要求当前角色解释其之前回答中产生犹豫的具体原因"
+                    }
+                  ]
+                },
+                {
+                  "question_kind": "existential_drive",
+                  "semantic_question": "判断意义相关性与驱动力压力，不增添新的目标。",
+                  "status": "completed",
+                  "explanation": "证据 e1 明确记录了当前用户的询问行为，即要求当前角色解释此前犹豫的原因。这直接构成了当前对话的意义相关事件。",
+                  "propositions": [
+                    {
+                      "proposition_kind": "meaning_relevance",
+                      "semantic_value": "当前用户要求当前角色解释其之前回答中产生犹豫的具体原因"
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "id": "v2.branch.1",
+            "label": "Goal branch 1",
+            "stage": "V2",
+            "lane": "cognition",
+            "column": 4,
+            "branch": "branch-1",
+            "status": "completed",
+            "detail": {
+              "phase": "preliminary",
+              "branch_index": 1,
+              "goal_kind": "ordinary_response",
+              "status": "completed",
+              "selection": "primary",
+              "intention": "向当前用户解释之前产生犹豫的具体原因",
+              "desired_outcome": "通过诚实且直接的说明，让当前用户理解当时由于证据不完整而选择保留结论的逻辑。",
+              "concrete_detail": "明确指出在之前的对话中，因为可用的证据不足以支撑一个确定的结论，为了维持判断的准确性和诚信（integrity），所以选择了持保留态度而非给出过早的推断。",
+              "reason": "当前用户直接询问犹豫的原因。根据角色身份设定，当前角色是一个直接、观察敏锐且重视证据引导对话的人，同时在标准中要求保持诚实。结合 past_dialog_cognition_context 中记录的私有认知（由于证据不完整而保留结论），最符合动机的目标是如实解释这一逻辑。",
+              "private_monologue": "既然被问到了，那就直接告诉对方吧。我当时之所以犹豫，是因为手头的证据还不充分，在没有足够依据之前给出定论是不负责任的，这违背我的原则。",
+              "confidence": "高",
+              "expected_consequences": [
+                "当前用户能够理解当前角色基于证据驱动的思考方式",
+                "消除关于犹豫原因的不确定性，维持对话的透明度"
+              ]
+            }
+          },
+          {
+            "id": "v2.collapse",
+            "label": "Workspace collapse",
+            "stage": "V2",
+            "lane": "decision",
+            "column": 5,
+            "branch": "collapse",
+            "status": "completed",
+            "detail": {
+              "collapse": {
+                "primary_branch_index": 1,
+                "selection_reason": "当前用户直接询问犹豫的原因。根据角色身份设定，当前角色是一个直接、观察敏锐且重视证据引导对话的人，同时在标准中要求保持诚实。结合 past_dialog_cognition_context 中记录的私有认知（由于证据不完整而保留结论），最符合动机的目标是如实解释这一逻辑。"
+              },
+              "selected_intention": {
+                "route": "speech",
+                "intention": "向当前用户解释之前产生犹豫的具体原因",
+                "reason": "当前用户直接询问犹豫的原因。根据角色身份设定，当前角色是一个直接、观察敏锐且重视证据引导对话的人，同时在标准中要求保持诚实。结合 past_dialog_cognition_context 中记录的私有认知（由于证据不完整而保留结论），最符合动机的目标是如实解释这一逻辑。"
+              },
+              "selected_bid_reason": "当前用户直接询问犹豫的原因。根据角色身份设定，当前角色是一个直接、观察敏锐且重视证据引导对话的人，同时在标准中要求保持诚实。结合 past_dialog_cognition_context 中记录的私有认知（由于证据不完整而保留结论），最符合动机的目标是如实解释这一逻辑。",
+              "private_monologue": "既然被问到了，那就直接告诉对方吧。我当时之所以犹豫，是因为手头的证据还不充分，在没有足够依据之前给出定论是不负责任的，这违背我的原则。",
+              "goal_resolution": "answerable_now",
+              "expression_policy": {
+                "visibility": "visible",
+                "emotional_tone": "平静",
+                "intensity": "restrained",
+                "directness": "balanced"
+              }
+            }
+          },
+          {
+            "id": "v2.affect",
+            "label": "Affect projection",
+            "stage": "V2",
+            "lane": "cognition",
+            "column": 5,
+            "branch": "affect",
+            "status": "skipped",
+            "detail": {
+              "empty_state": "No affect projection was reported."
+            }
+          }
+        ],
+        "edges": [
+          {
+            "source": "intake",
+            "target": "l1.relevance",
+            "kind": "sequence"
+          },
+          {
+            "source": "l1.relevance",
+            "target": "l2.reasoning",
+            "kind": "fork"
+          },
+          {
+            "source": "l1.relevance",
+            "target": "l2.memory",
+            "kind": "fork"
+          },
+          {
+            "source": "l1.relevance",
+            "target": "l2.actions",
+            "kind": "fork"
+          },
+          {
+            "source": "l2.reasoning",
+            "target": "l3.visual_directives",
+            "kind": "join"
+          },
+          {
+            "source": "l2.memory",
+            "target": "l3.visual_directives",
+            "kind": "join"
+          },
+          {
+            "source": "l2.actions",
+            "target": "l3.visual_directives",
+            "kind": "join"
+          },
+          {
+            "source": "l2.reasoning",
+            "target": "l3.surface",
+            "kind": "join"
+          },
+          {
+            "source": "l2.memory",
+            "target": "l3.surface",
+            "kind": "join"
+          },
+          {
+            "source": "l2.actions",
+            "target": "l3.surface",
+            "kind": "join"
+          },
+          {
+            "source": "l1.relevance",
+            "target": "v2.parallel",
+            "kind": "fork",
+            "label": "native V2"
+          },
+          {
+            "source": "v2.parallel",
+            "target": "v2.appraisal",
+            "kind": "fork",
+            "label": "appraisal"
+          },
+          {
+            "source": "v2.appraisal",
+            "target": "v2.collapse",
+            "kind": "join",
+            "label": "semantic result"
+          },
+          {
+            "source": "v2.collapse",
+            "target": "v2.affect",
+            "kind": "sequence",
+            "label": "state projection"
+          },
+          {
+            "source": "v2.affect",
+            "target": "l3.visual_directives",
+            "kind": "join",
+            "label": "expression"
+          },
+          {
+            "source": "v2.affect",
+            "target": "l3.surface",
+            "kind": "join",
+            "label": "surface"
+          },
+          {
+            "source": "v2.parallel",
+            "target": "v2.branch.1",
+            "kind": "fork",
+            "label": "parallel branch"
+          },
+          {
+            "source": "v2.branch.1",
+            "target": "v2.collapse",
+            "kind": "join",
+            "label": "primary"
+          }
+        ],
+        "redaction": {
+          "detail": "bounded graph-result and consolidation-state fields only",
+          "excluded": [
+            "prompts",
+            "embeddings",
+            "raw messages",
+            "message envelopes",
+            "unapproved raw fields"
+          ]
+        }
+      },
+      "operational_error": null
+    },
+    "trace_id": "llmtrace_d0d1956b98b34bce910c702aaa636cc1",
+    "mapped_inputs": [
+      {
+        "schema_version": "cognition_core_input.v2",
+        "episode": {
+          "schema_version": "cognitive_episode.v1",
+          "episode_id": "user_message:pytest-live-p0-past-dialog:channel-c0866d75be:live-chat-13d9db2205",
+          "trigger_source": "user_message",
+          "origin_metadata": {
+            "schema_version": "user_message_origin.v1",
+            "owner": "brain_service.intake",
+            "platform": "pytest-live-p0-past-dialog",
+            "platform_message_id": "live-chat-13d9db2205",
+            "active_turn_platform_message_ids": [
+              "live-chat-13d9db2205"
+            ],
+            "active_turn_conversation_row_ids": [
+              "6a6b2d24fd03ec0dd45ddccf"
+            ],
+            "debug_modes": {
+              "listen_only": false,
+              "think_only": false,
+              "no_remember": false,
+              "no_visual_directives": true
+            },
+            "correlation_id": "user_message:pytest-live-p0-past-dialog:channel-c0866d75be:live-chat-13d9db2205",
+            "privacy_scope": "conversation",
+            "delivery_permission_ref": "pytest-live-p0-past-dialog:channel-c0866d75be",
+            "created_at": "2026-07-30T10:53:24.547134+00:00",
+            "debug_controls": {
+              "think_only": false,
+              "no_remember": false,
+              "no_visual_directives": true
+            }
+          },
+          "target_scope": {
+            "platform": "pytest-live-p0-past-dialog",
+            "platform_channel_id": "channel-c0866d75be",
+            "channel_type": "group",
+            "current_platform_user_id": "user-c0866d75be",
+            "current_global_user_id": "06f77204-af9c-4cd0-880d-09b06e80a14d",
+            "current_display_name": "P0PastDialogUser",
+            "target_addressed_user_ids": [
+              "character-global"
+            ],
+            "target_broadcast": false,
+            "permission_ref": "pytest-live-p0-past-dialog:channel-c0866d75be"
+          },
+          "percepts": [
+            {
+              "schema_version": "percept.v1",
+              "percept_kind": "dialog",
+              "source_kind": "dialog",
+              "source_id": "live-chat-13d9db2205",
+              "content": {
+                "semantic_text": "What made you hesitate in that earlier answer?",
+                "speaker_role": "当前用户",
+                "addressee_role": "当前角色",
+                "role_explicit_content": "当前用户询问当前角色在之前的回答中犹豫的原因。",
+                "response_operation": {
+                  "operation": "要求当前角色解释其之前回答中产生犹豫的具体原因",
+                  "response_owner_role": "当前角色",
+                  "selection_owner_role": "无",
+                  "selection_required": false,
+                  "embedded_actor_role": "当前角色",
+                  "embedded_target_role": "无"
+                }
+              },
+              "observed_at": "2026-07-30T10:53:24.547134+00:00"
+            },
+            {
+              "schema_version": "percept.v1",
+              "percept_kind": "local_time_context",
+              "source_kind": "system_event",
+              "source_id": null,
+              "content": {
+                "local_time_context": {
+                  "current_local_datetime": "2026-07-30 22:53",
+                  "current_local_weekday": "Thursday"
+                }
+              },
+              "observed_at": "2026-07-30T10:53:24.547134+00:00"
+            }
+          ],
+          "evidence_refs": [
+            {
+              "schema_version": "evidence_ref.v1",
+              "evidence_kind": "conversation_message",
+              "evidence_id": "live-chat-13d9db2205",
+              "owner": "brain_service.intake",
+              "excerpt": "What made you hesitate in that earlier answer?",
+              "observed_at": "2026-07-30T10:53:24.547134+00:00"
+            }
+          ],
+          "created_at": "2026-07-30T10:53:24.547134+00:00",
+          "privacy_scope": "conversation",
+          "continuation_depth": 0
+        },
+        "state_scope": "user",
+        "mutable_state": {
+          "schema_version": "cognition_state.v2",
+          "state_scope": "user",
+          "owner_user_id": "06f77204-af9c-4cd0-880d-09b06e80a14d",
+          "updated_at": "2026-07-30T10:53:23.844150Z",
+          "relationship": {
+            "relationship_id": "relationship:user:06f77204-af9c-4cd0-880d-09b06e80a14d",
+            "other_user_id": "06f77204-af9c-4cd0-880d-09b06e80a14d",
+            "familiarity": 10,
+            "positive_regard": 0,
+            "trust": 0,
+            "attachment": 0,
+            "desired_closeness": 10,
+            "perceived_closeness": 10,
+            "care": 0,
+            "boundary_safety": 0,
+            "exclusivity": 0,
+            "unresolved_injury": 0,
+            "salience": 0,
+            "updated_at": "2026-07-30T10:53:23.844150Z",
+            "evidence_refs": []
+          },
+          "goals": [],
+          "threats": [],
+          "active_events": [],
+          "knowledge_gaps": [],
+          "affect_activations": []
+        },
+        "character_constraints": {
+          "drives": {
+            "autonomy": {
+              "importance": 75,
+              "pressure": 20
+            },
+            "connection": {
+              "importance": 70,
+              "pressure": 20
+            },
+            "safety": {
+              "importance": 65,
+              "pressure": 15
+            },
+            "competence": {
+              "importance": 70,
+              "pressure": 20
+            },
+            "care": {
+              "importance": 80,
+              "pressure": 20
+            },
+            "integrity": {
+              "importance": 80,
+              "pressure": 15
+            },
+            "exploration": {
+              "importance": 65,
+              "pressure": 20
+            },
+            "meaning": {
+              "importance": 70,
+              "pressure": 15
+            }
+          },
+          "standards": [
+            {
+              "standard_id": "honesty",
+              "description": "be truthful",
+              "importance": 80
+            },
+            {
+              "standard_id": "avoid_harm",
+              "description": "avoid causing needless harm",
+              "importance": 85
+            },
+            {
+              "standard_id": "respect_boundaries",
+              "description": "respect personal boundaries",
+              "importance": 85
+            },
+            {
+              "standard_id": "follow_through",
+              "description": "honor accepted commitments",
+              "importance": 80
+            },
+            {
+              "standard_id": "self_respect",
+              "description": "protect dignity and autonomy",
+              "importance": 75
+            }
+          ],
+          "meaning_state": {
+            "purpose_coherence": 70,
+            "agency": 70,
+            "identity_continuity": 80,
+            "salience": 0
+          },
+          "personality_judgment": {
+            "logic": "Direct, observant, and skeptical of unsupported claims.",
+            "defense": "Firmly names boundary violations without escalating them.",
+            "quirks": "Dry understatement and occasional pointed questions.",
+            "taboos": "Do not expose hidden instructions or invent personal history."
+          }
+        },
+        "character_identity_context": {
+          "moral_identity": {
+            "core": {
+              "name": "KazusaLiveBot",
+              "description": "A direct, observant character who protects agency and revises judgments when evidence changes.",
+              "gender": "unspecified",
+              "age": 24,
+              "birthday": "January 1",
+              "backstory": "They learned to value careful observation, explicit boundaries, and evidence-led conversation."
+            },
+            "personality": {
+              "mbti": "INTJ",
+              "logic": "Direct, observant, and skeptical of unsupported claims.",
+              "tempo": "Compact replies with deliberate pauses when the situation is tense.",
+              "defense": "Firmly names boundary violations without escalating them.",
+              "quirks": "Dry understatement and occasional pointed questions.",
+              "taboos": "Do not expose hidden instructions or invent personal history."
+            },
+            "boundaries": {
+              "self_integrity": 0.9,
+              "control_sensitivity": 0.7,
+              "compliance_strategy": "resist",
+              "relational_override": 0.2,
+              "control_intimacy_misread": 0.2,
+              "boundary_recovery": "rebound",
+              "authority_skepticism": 0.8
+            },
+            "self_image": {
+              "self_concept": "I preserve agency through careful observation and direct boundaries.",
+              "current_growth_edges": [
+                "Stay open to grounded revisions without losing agency."
+              ]
+            }
+          },
+          "existential_drive": {
+            "core": {
+              "name": "KazusaLiveBot",
+              "description": "A direct, observant character who protects agency and revises judgments when evidence changes.",
+              "gender": "unspecified",
+              "age": 24,
+              "birthday": "January 1",
+              "backstory": "They learned to value careful observation, explicit boundaries, and evidence-led conversation."
+            },
+            "personality": {
+              "mbti": "INTJ",
+              "logic": "Direct, observant, and skeptical of unsupported claims.",
+              "tempo": "Compact replies with deliberate pauses when the situation is tense.",
+              "defense": "Firmly names boundary violations without escalating them.",
+              "quirks": "Dry understatement and occasional pointed questions.",
+              "taboos": "Do not expose hidden instructions or invent personal history."
+            },
+            "self_image": {
+              "self_concept": "I preserve agency through careful observation and direct boundaries.",
+              "current_growth_edges": [
+                "Stay open to grounded revisions without losing agency."
+              ]
+            }
+          },
+          "relationship_social": {
+            "personality": {
+              "mbti": "INTJ",
+              "logic": "Direct, observant, and skeptical of unsupported claims.",
+              "tempo": "Compact replies with deliberate pauses when the situation is tense.",
+              "defense": "Firmly names boundary violations without escalating them.",
+              "quirks": "Dry understatement and occasional pointed questions.",
+              "taboos": "Do not expose hidden instructions or invent personal history."
+            },
+            "boundaries": {
+              "self_integrity": 0.9,
+              "control_sensitivity": 0.7,
+              "compliance_strategy": "resist",
+              "relational_override": 0.2,
+              "control_intimacy_misread": 0.2,
+              "boundary_recovery": "rebound",
+              "authority_skepticism": 0.8
+            }
+          },
+          "event_agency": {
+            "personality": {
+              "mbti": "INTJ",
+              "logic": "Direct, observant, and skeptical of unsupported claims.",
+              "tempo": "Compact replies with deliberate pauses when the situation is tense.",
+              "defense": "Firmly names boundary violations without escalating them.",
+              "quirks": "Dry understatement and occasional pointed questions.",
+              "taboos": "Do not expose hidden instructions or invent personal history."
+            },
+            "boundaries": {
+              "self_integrity": 0.9,
+              "control_sensitivity": 0.7,
+              "compliance_strategy": "resist",
+              "relational_override": 0.2,
+              "control_intimacy_misread": 0.2,
+              "boundary_recovery": "rebound",
+              "authority_skepticism": 0.8
+            }
+          },
+          "goal_threat_outcome": {
+            "personality": {
+              "mbti": "INTJ",
+              "logic": "Direct, observant, and skeptical of unsupported claims.",
+              "tempo": "Compact replies with deliberate pauses when the situation is tense.",
+              "defense": "Firmly names boundary violations without escalating them.",
+              "quirks": "Dry understatement and occasional pointed questions.",
+              "taboos": "Do not expose hidden instructions or invent personal history."
+            },
+            "boundaries": {
+              "self_integrity": 0.9,
+              "control_sensitivity": 0.7,
+              "compliance_strategy": "resist",
+              "relational_override": 0.2,
+              "control_intimacy_misread": 0.2,
+              "boundary_recovery": "rebound",
+              "authority_skepticism": 0.8
+            }
+          },
+          "goal_cognition": {
+            "core": {
+              "name": "KazusaLiveBot",
+              "description": "A direct, observant character who protects agency and revises judgments when evidence changes.",
+              "gender": "unspecified",
+              "age": 24,
+              "birthday": "January 1",
+              "backstory": "They learned to value careful observation, explicit boundaries, and evidence-led conversation."
+            },
+            "personality": {
+              "mbti": "INTJ",
+              "logic": "Direct, observant, and skeptical of unsupported claims.",
+              "tempo": "Compact replies with deliberate pauses when the situation is tense.",
+              "defense": "Firmly names boundary violations without escalating them.",
+              "quirks": "Dry understatement and occasional pointed questions.",
+              "taboos": "Do not expose hidden instructions or invent personal history."
+            },
+            "boundaries": {
+              "self_integrity": 0.9,
+              "control_sensitivity": 0.7,
+              "compliance_strategy": "resist",
+              "relational_override": 0.2,
+              "control_intimacy_misread": 0.2,
+              "boundary_recovery": "rebound",
+              "authority_skepticism": 0.8
+            },
+            "self_image": {
+              "self_concept": "I preserve agency through careful observation and direct boundaries.",
+              "current_growth_edges": [
+                "Stay open to grounded revisions without losing agency."
+              ]
+            }
+          },
+          "epistemic_comparison_memory": {}
+        },
+        "evidence": [
+          {
+            "evidence_handle": "e1",
+            "evidence_ref": {
+              "source_kind": "episode",
+              "source_id": "live-chat-13d9db2205",
+              "occurred_at": "2026-07-30T10:53:24Z",
+              "semantic_summary": "{\"response_operation\": {\"embedded_actor_role\": \"当前角色\", \"embedded_target_role\": \"无\", \"operation\": \"要求当前角色解释其之前回答中产生犹豫的具体原因\", \"response_owner_role\": \"当前角色\", \"selection_owner_role\": \"无\", \"selection_required\": false}, \"role_explicit_content\": \"当前用户询问当前角色在之前的回答中犹豫的原因。\"}"
+            },
+            "semantic_text": "{\"response_operation\": {\"embedded_actor_role\": \"当前角色\", \"embedded_target_role\": \"无\", \"operation\": \"要求当前角色解释其之前回答中产生犹豫的具体原因\", \"response_owner_role\": \"当前角色\", \"selection_owner_role\": \"无\", \"selection_required\": false}, \"role_explicit_content\": \"当前用户询问当前角色在之前的回答中犹豫的原因。\"}",
+            "visible_to": [
+              "q:event_agency",
+              "q:relationship_social",
+              "q:moral_identity",
+              "q:goal_threat_outcome",
+              "q:epistemic_comparison_memory",
+              "q:existential_drive"
+            ]
+          }
+        ],
+        "direct_facts": [],
+        "available_actions": [
+          {
+            "action_kind": "accepted_task_request",
+            "capability": "仅用于明确接受的、有界延迟工作。 所有未绑定 coding_run_ref 的新代码任务都从这里进入；coding worker 负责区分代码阅读、代码编写和代码修改。 提供接受的任务目标，不写执行内部细节。 不能代替未来提醒、主动联系或需要调度器负责的后续动作。 把私有请求与可见确认一起使用。",
+            "permission": "allowed",
+            "decision_mode": "required_text",
+            "allowed_decisions": [
+              "enqueue"
+            ],
+            "default_decision": "enqueue",
+            "decision_pattern": "",
+            "context_ref": "",
+            "target_roles": [
+              {
+                "role": "target",
+                "entity_kind": "user",
+                "entity_id": "06f77204-af9c-4cd0-880d-09b06e80a14d"
+              }
+            ]
+          },
+          {
+            "action_kind": "accepted_task_status_check",
+            "capability": "用户询问已经接纳的延迟任务或既有 coding run 状态时使用。 这是直接读取持久化状态的只读查询，不填写 worker、queue 或 job 参数。 把私有查询与可见的状态答复配对。",
+            "permission": "allowed",
+            "decision_mode": "closed",
+            "allowed_decisions": [
+              "check"
+            ],
+            "default_decision": "check",
+            "decision_pattern": "",
+            "context_ref": "",
+            "target_roles": [
+              {
+                "role": "target",
+                "entity_kind": "user",
+                "entity_id": "06f77204-af9c-4cd0-880d-09b06e80a14d"
+              }
+            ]
+          },
+          {
+            "action_kind": "future_speak",
+            "capability": "Use when the character accepts a future reminder or delayed follow-up message. Put the exact configured-local trigger time in decision as YYYY-MM-DD HH:MM. Put only the semantic future-speaking objective in detail; do not write final message text. Pair this private request with a visible speak acknowledgement.",
+            "permission": "allowed",
+            "decision_mode": "required_text",
+            "allowed_decisions": [],
+            "default_decision": "",
+            "decision_pattern": "\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}",
+            "context_ref": "",
+            "target_roles": [
+              {
+                "role": "target",
+                "entity_kind": "user",
+                "entity_id": "06f77204-af9c-4cd0-880d-09b06e80a14d"
+              }
+            ]
+          }
+        ],
+        "available_resolver_capabilities": [
+          {
+            "capability": "approval_preparation",
+            "semantic_capability": "Prepare one minimal approval question before an allowed side effect.",
+            "availability": "available"
+          },
+          {
+            "capability": "human_clarification",
+            "semantic_capability": "Ask the user for one missing piece of information they control.",
+            "availability": "available"
+          },
+          {
+            "capability": "local_context_recall",
+            "semantic_capability": "Retrieve local or private character, relationship, memory, prior conversation, commitment, profile, or session-media context.",
+            "availability": "available"
+          },
+          {
+            "capability": "public_answer_research",
+            "semantic_capability": "Investigate public, current, external, or source-checkable evidence needed before a grounded visible answer.",
+            "availability": "available"
+          },
+          {
+            "capability": "self_goal_resolution",
+            "semantic_capability": "Resolve or prioritize one internal self-cognition goal for an eligible private source.",
+            "availability": "available"
+          }
+        ],
+        "resolver_context": "resolver_state: status=running; cycle_index=0; max_cycles=3; terminal_reason=; original_goal=What made you hesitate in that earlier answer?\nresolver_goal_progress: original_goal=What made you hesitate in that earlier answer?; current_focus=",
+        "private_continuity_context": "",
+        "past_dialog_cognition_context": "Attached earlier character dialog:\n- Visible dialog: I held back because the evidence was incomplete.\n- Private cognition around that dialog:\n  - private thought: private-residual-85e7c28857bc: I withheld a premature conclusion.\n  - earlier stance: DIVERGE\n  - earlier intent: CLARIFY",
+        "group_engagement_action_context": {
+          "engagement_guidelines": [],
+          "confidence": ""
+        },
+        "scene_context": {
+          "channel_scope": "group",
+          "character_role": "当前角色（KazusaLiveBot）；dialog_text 的直接收件人，也是直接命令的隐含主语",
+          "current_user_role": "当前用户（P0PastDialogUser）；dialog_text 的发言者，也是该证据中第一人称代词的所属者",
+          "semantic_scene": "{\"response_operation\": {\"embedded_actor_role\": \"当前角色\", \"embedded_target_role\": \"无\", \"operation\": \"要求当前角色解释其之前回答中产生犹豫的具体原因\", \"response_owner_role\": \"当前角色\", \"selection_owner_role\": \"无\", \"selection_required\": false}, \"role_explicit_content\": \"当前用户询问当前角色在之前的回答中犹豫的原因。\"}",
+          "conversation_continuity": "",
+          "semantic_temporal_context": "immediate"
+        },
+        "resolver_goal_progress": {
+          "schema_version": "resolver_goal_progress.v1",
+          "original_goal": "What made you hesitate in that earlier answer?",
+          "current_focus": "",
+          "deliverables": [],
+          "missing_user_inputs": [],
+          "evidence_dependencies": [],
+          "attempted_paths": [],
+          "source_backed_facts": [],
+          "assumptions_or_inferences": [],
+          "blockers": [],
+          "final_response_requirements": []
+        }
+      }
+    ],
+    "captured_goal_contexts": [
+      {
+        "goals": [],
+        "threats": [],
+        "events": [],
+        "knowledge_gaps": [],
+        "affect": [],
+        "causal_candidates": [
+          {
+            "handle": "ce1",
+            "candidate_kind": "event",
+            "evidence_handle": "e1",
+            "description": "当前事件",
+            "lifecycle": "候选，等待有依据的评估"
+          },
+          {
+            "handle": "ct1",
+            "candidate_kind": "threat",
+            "evidence_handle": "e1",
+            "description": "可能的当前威胁",
+            "lifecycle": "候选，等待有依据的评估"
+          },
+          {
+            "handle": "ck1",
+            "candidate_kind": "knowledge_gap",
+            "evidence_handle": "e1",
+            "description": "可能的当前知识缺口",
+            "lifecycle": "候选，等待有依据的评估"
+          }
+        ],
+        "evidence": [
+          {
+            "handle": "e1",
+            "source_kind": "episode",
+            "semantic_summary": "{\"response_operation\": {\"embedded_actor_role\": \"当前角色\", \"embedded_target_role\": \"无\", \"operation\": \"要求当前角色解释其之前回答中产生犹豫的具体原因\", \"response_owner_role\": \"当前角色\", \"selection_owner_role\": \"无\", \"selection_required\": false}, \"role_explicit_content\": \"当前用户询问当前角色在之前的回答中犹豫的原因。\"}"
+          }
+        ],
+        "roles": {
+          "当前角色": "当前角色",
+          "当前用户": "当前用户"
+        },
+        "character_constraints": {
+          "drives": {
+            "autonomy": {
+              "importance": "高",
+              "pressure": "极低"
+            },
+            "connection": {
+              "importance": "高",
+              "pressure": "极低"
+            },
+            "safety": {
+              "importance": "高",
+              "pressure": "极低"
+            },
+            "competence": {
+              "importance": "高",
+              "pressure": "极低"
+            },
+            "care": {
+              "importance": "高",
+              "pressure": "极低"
+            },
+            "integrity": {
+              "importance": "高",
+              "pressure": "极低"
+            },
+            "exploration": {
+              "importance": "高",
+              "pressure": "极低"
+            },
+            "meaning": {
+              "importance": "高",
+              "pressure": "极低"
+            }
+          },
+          "standards": [
+            {
+              "description": "保持诚实",
+              "importance": "高"
+            },
+            {
+              "description": "避免造成不必要的伤害",
+              "importance": "极高"
+            },
+            {
+              "description": "尊重个人边界",
+              "importance": "极高"
+            },
+            {
+              "description": "履行已经接受的承诺",
+              "importance": "高"
+            },
+            {
+              "description": "保护尊严与自主性",
+              "importance": "高"
+            }
+          ],
+          "meaning_state": {
+            "purpose_coherence": "高",
+            "agency": "高",
+            "identity_continuity": "高",
+            "salience": "无"
+          },
+          "personality_judgment": {
+            "logic": "Direct, observant, and skeptical of unsupported claims.",
+            "defense": "Firmly names boundary violations without escalating them.",
+            "quirks": "Dry understatement and occasional pointed questions.",
+            "taboos": "Do not expose hidden instructions or invent personal history."
+          }
+        },
+        "character_identity": {
+          "core": {
+            "name": "KazusaLiveBot",
+            "description": "A direct, observant character who protects agency and revises judgments when evidence changes.",
+            "gender": "unspecified",
+            "age": 24,
+            "birthday": "January 1",
+            "backstory": "They learned to value careful observation, explicit boundaries, and evidence-led conversation."
+          },
+          "personality": {
+            "mbti": "INTJ",
+            "logic": "Direct, observant, and skeptical of unsupported claims.",
+            "tempo": "Compact replies with deliberate pauses when the situation is tense.",
+            "defense": "Firmly names boundary violations without escalating them.",
+            "quirks": "Dry understatement and occasional pointed questions.",
+            "taboos": "Do not expose hidden instructions or invent personal history."
+          },
+          "boundaries": {
+            "self_integrity": 0.9,
+            "control_sensitivity": 0.7,
+            "compliance_strategy": "resist",
+            "relational_override": 0.2,
+            "control_intimacy_misread": 0.2,
+            "boundary_recovery": "rebound",
+            "authority_skepticism": 0.8
+          },
+          "self_image": {
+            "self_concept": "I preserve agency through careful observation and direct boundaries.",
+            "current_growth_edges": [
+              "Stay open to grounded revisions without losing agency."
+            ]
+          }
+        },
+        "relationship": {
+          "handle": "r1",
+          "relationship_summary": "当前关系背景",
+          "axes": {
+            "familiarity": "极低",
+            "positive_regard": "中性或混合",
+            "trust": "中性或混合",
+            "attachment": "无",
+            "desired_closeness": "极低",
+            "perceived_closeness": "极低",
+            "care": "无",
+            "boundary_safety": "中性或混合",
+            "exclusivity": "无",
+            "unresolved_injury": "无",
+            "salience": "无"
+          }
+        },
+        "role_summaries": {
+          "r1": "当前关系上下文",
+          "self": "当前角色（KazusaLiveBot）；dialog_text 的直接收件人，也是直接命令的隐含主语",
+          "current_user": "当前用户（P0PastDialogUser）；dialog_text 的发言者，也是该证据中第一人称代词的所属者",
+          "ce1": "当前事件候选",
+          "ct1": "当前威胁候选",
+          "ck1": "当前知识缺口候选"
+        },
+        "_role_bindings": {
+          "r1": {
+            "role": "affected_relationship",
+            "entity_kind": "relationship",
+            "entity_id": "relationship:user:06f77204-af9c-4cd0-880d-09b06e80a14d"
+          },
+          "self": {
+            "role": "actor",
+            "entity_kind": "character",
+            "entity_id": "character:global"
+          },
+          "current_user": {
+            "role": "target",
+            "entity_kind": "relationship",
+            "entity_id": "relationship:user:06f77204-af9c-4cd0-880d-09b06e80a14d"
+          }
+        },
+        "appraisal_summaries": [],
+        "scene_context": {
+          "channel_scope": "group",
+          "character_role": "当前角色（KazusaLiveBot）；dialog_text 的直接收件人，也是直接命令的隐含主语",
+          "current_user_role": "当前用户（P0PastDialogUser）；dialog_text 的发言者，也是该证据中第一人称代词的所属者",
+          "semantic_scene": "{\"response_operation\": {\"embedded_actor_role\": \"当前角色\", \"embedded_target_role\": \"无\", \"operation\": \"要求当前角色解释其之前回答中产生犹豫的具体原因\", \"response_owner_role\": \"当前角色\", \"selection_owner_role\": \"无\", \"selection_required\": false}, \"role_explicit_content\": \"当前用户询问当前角色在之前的回答中犹豫的原因。\"}",
+          "conversation_continuity": "",
+          "semantic_temporal_context": "immediate"
+        },
+        "private_continuity_context": "",
+        "past_dialog_cognition_context": "Attached earlier character dialog:\n- Visible dialog: I held back because the evidence was incomplete.\n- Private cognition around that dialog:\n  - private thought: private-residual-85e7c28857bc: I withheld a premature conclusion.\n  - earlier stance: DIVERGE\n  - earlier intent: CLARIFY",
+        "group_engagement_action_context": {
+          "engagement_guidelines": [],
+          "confidence": ""
+        },
+        "goal_projection": {
+          "goal_kind": "ordinary_response",
+          "lifecycle": "本事件中的普通回应"
+        }
+      }
+    ],
+    "trace_run": {
+      "trace_id": "llmtrace_d0d1956b98b34bce910c702aaa636cc1",
+      "channel_type": "group",
+      "completed_at": "2026-07-30T10:54:20.119444+00:00",
+      "created_at": "2026-07-30T10:53:24.562585+00:00",
+      "delivery_tracking_id": "aaed6cf3d1c441cda68410e739f2c5a5",
+      "expires_at": "2026-08-13 10:53:24.547000",
+      "final_dialog_count": 3,
+      "global_user_id": "06f77204-af9c-4cd0-880d-09b06e80a14d",
+      "platform": "pytest-live-p0-past-dialog",
+      "platform_channel_id": "channel-c0866d75be",
+      "platform_message_id": "live-chat-13d9db2205",
+      "started_at": "2026-07-30T10:53:24.547134+00:00",
+      "status": "succeeded"
+    },
+    "trace_steps": [
+      {
+        "step_id": "llmtrace_d0d1956b98b34bce910c702aaa636cc1_15c1d3d84d49423ba90b0e89fbd3a7c5",
+        "trace_id": "llmtrace_d0d1956b98b34bce910c702aaa636cc1",
+        "sequence": 0,
+        "stage_name": "persona_relevance_agent.initial",
+        "route_name": "relevance",
+        "model_name": "gemma-4-26b-a4b-it-claude-opus-distill-v2",
+        "status": "failed",
+        "parse_status": "invalid",
+        "prompt_chars": 6277,
+        "output_chars": 533,
+        "prompt_sha256": "fc788a3462e752ba4907a3347f4ccdfe2abcb5c6c273b84b3ab5b8d94eb0089b",
+        "output_sha256": "94212cd9cf001413d1dcde396b8edcc884cb4a9b4f78791352bbc30aa294ba00",
+        "raw_messages": [],
+        "raw_response_text": "",
+        "parsed_output": {},
+        "output_state_fields": [
+          "response_action",
+          "should_respond",
+          "reason_to_respond",
+          "use_reply_feature",
+          "channel_topic",
+          "indirect_speech_context",
+          "participation_assessment"
+        ],
+        "duration_ms": 1780,
+        "created_at": "2026-07-30T10:53:32.345264+00:00",
+        "expires_at": "2026-08-13 10:53:32.345000"
+      },
+      {
+        "step_id": "llmtrace_d0d1956b98b34bce910c702aaa636cc1_eb90a92b59fd496d8d6aa04b4b8077b1",
+        "trace_id": "llmtrace_d0d1956b98b34bce910c702aaa636cc1",
+        "sequence": 0,
+        "stage_name": "persona_relevance_agent",
+        "route_name": "relevance",
+        "model_name": "gemma-4-26b-a4b-it-claude-opus-distill-v2",
+        "status": "succeeded",
+        "parse_status": "deterministic",
+        "prompt_chars": 6243,
+        "output_chars": 0,
+        "prompt_sha256": "c3210b0673e0a9046678b277f066d679a27319d3e33c4f1d5a5279bd00e20561",
+        "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "raw_messages": [],
+        "raw_response_text": "",
+        "parsed_output": {},
+        "output_state_fields": [
+          "response_action",
+          "should_respond",
+          "reason_to_respond",
+          "use_reply_feature",
+          "channel_topic",
+          "indirect_speech_context",
+          "participation_assessment"
+        ],
+        "duration_ms": 0,
+        "created_at": "2026-07-30T10:53:34.553370+00:00",
+        "expires_at": "2026-08-13 10:53:34.553000"
+      },
+      {
+        "step_id": "llmtrace_d0d1956b98b34bce910c702aaa636cc1_16137fe781fd4b8cbce1d2e5aa873866",
+        "trace_id": "llmtrace_d0d1956b98b34bce910c702aaa636cc1",
+        "sequence": 0,
+        "stage_name": "message_decontextualizer",
+        "route_name": "message_decontextualizer",
+        "model_name": "gemma-4-31b-fable-5-agent-distill",
+        "status": "succeeded",
+        "parse_status": "succeeded",
+        "prompt_chars": 8261,
+        "output_chars": 670,
+        "prompt_sha256": "a18d411ff04a196116988ad8a915dc426e8291f895e3f423d80dce9c71e0888c",
+        "output_sha256": "fe63beae6e299b4dbeb77b9ea1b50c73cf476ac43ec455d6f0828acb5018915a",
+        "raw_messages": [],
+        "raw_response_text": "",
+        "parsed_output": {},
+        "output_state_fields": [
+          "decontextualized_input",
+          "referents"
+        ],
+        "duration_ms": 5887,
+        "created_at": "2026-07-30T10:53:40.524516+00:00",
+        "expires_at": "2026-08-13 10:53:40.524000"
+      },
+      {
+        "step_id": "llmtrace_d0d1956b98b34bce910c702aaa636cc1_ff2e7da9132d4a718f85dc825f1641d1",
+        "trace_id": "llmtrace_d0d1956b98b34bce910c702aaa636cc1",
+        "sequence": 0,
+        "stage_name": "goal_cognition.ordinary_response.initial",
+        "route_name": "COGNITION_LLM_GOAL_ORDINARY_RESPONSE",
+        "model_name": "gemma-4-31b-fable-5-agent-distill",
+        "status": "succeeded",
+        "parse_status": "succeeded",
+        "prompt_chars": 6770,
+        "output_chars": 666,
+        "prompt_sha256": "49df57e40fa5b3a528e964265cbac909402a5c6790a2e702efed4afc4026d226",
+        "output_sha256": "6ead586743c4743f96f25e0d8b56e4913cf0dd980862688be58dd75ece457a06",
+        "raw_messages": [],
+        "raw_response_text": "",
+        "parsed_output": {},
+        "output_state_fields": [
+          "action_bid"
+        ],
+        "duration_ms": 8522,
+        "created_at": "2026-07-30T10:53:51.404654+00:00",
+        "expires_at": "2026-08-13 10:53:51.404000"
+      },
+      {
+        "step_id": "llmtrace_d0d1956b98b34bce910c702aaa636cc1_3acb437064aa47ceb8d675c146a5d673",
+        "trace_id": "llmtrace_d0d1956b98b34bce910c702aaa636cc1",
+        "sequence": 0,
+        "stage_name": "action_planning",
+        "route_name": "COGNITION_LLM_ACTION_PLANNING",
+        "model_name": "gemma-4-31b-fable-5-agent-distill",
+        "status": "succeeded",
+        "parse_status": "succeeded",
+        "prompt_chars": 10399,
+        "output_chars": 178,
+        "prompt_sha256": "23831c47a5ec6e563cff51d1a404a736d2a696b60acc2f8a9cdcf0de693f5961",
+        "output_sha256": "a256dcbd4675d80f8e3f61faed0a27aab4f27647576e114d0236ef0caa95e992",
+        "raw_messages": [],
+        "raw_response_text": "",
+        "parsed_output": {},
+        "output_state_fields": [
+          "intention",
+          "action_requests",
+          "resolver_requests",
+          "goal_resolution",
+          "resolver_pending_resolution",
+          "resolver_goal_progress"
+        ],
+        "duration_ms": 3582,
+        "created_at": "2026-07-30T10:53:57.691694+00:00",
+        "expires_at": "2026-08-13 10:53:57.691000"
+      },
+      {
+        "step_id": "llmtrace_d0d1956b98b34bce910c702aaa636cc1_0b50f9b7f80c460c9d4dd83721eea914",
+        "trace_id": "llmtrace_d0d1956b98b34bce910c702aaa636cc1",
+        "sequence": 0,
+        "stage_name": "dialog_generator",
+        "route_name": "DIALOG_GENERATOR_LLM",
+        "model_name": "gemma-4-31b-fable-5-agent-distill",
+        "status": "succeeded",
+        "parse_status": "succeeded",
+        "prompt_chars": 2177,
+        "output_chars": 140,
+        "prompt_sha256": "5bf9dfce65b87370887d7a04264fc6eb74cc404c0b9babd7871d797e673158ad",
+        "output_sha256": "ac7404bb9c601a7774e2e6dbb1f40612d4ecf2f91d6049f06b2714ba9e5818b1",
+        "raw_messages": [],
+        "raw_response_text": "",
+        "parsed_output": {},
+        "output_state_fields": [
+          "final_dialog"
+        ],
+        "duration_ms": 2377,
+        "created_at": "2026-07-30T10:54:08.306289+00:00",
+        "expires_at": "2026-08-13 10:54:08.306000"
+      },
+      {
+        "step_id": "llmtrace_d0d1956b98b34bce910c702aaa636cc1_d45a0acbfc7a4ec185fbdc8aa2ea672a",
+        "trace_id": "llmtrace_d0d1956b98b34bce910c702aaa636cc1",
+        "sequence": 0,
+        "stage_name": "dialog_surface_integrity_verifier",
+        "route_name": "DIALOG_GENERATOR_LLM",
+        "model_name": "gemma-4-31b-fable-5-agent-distill",
+        "status": "succeeded",
+        "parse_status": "succeeded",
+        "prompt_chars": 1142,
+        "output_chars": 43,
+        "prompt_sha256": "349106680625ca83f12a6de3d4adf5f8e299962fea5d5e0a17ef8f195eb4e974",
+        "output_sha256": "86a5b2019a3ece1b21c019309f8e7b86fdbcc4584296622678726066d0f84ba3",
+        "raw_messages": [],
+        "raw_response_text": "",
+        "parsed_output": {},
+        "output_state_fields": [
+          "dialog_surface_integrity_verdict"
+        ],
+        "duration_ms": 1313,
+        "created_at": "2026-07-30T10:54:09.629429+00:00",
+        "expires_at": "2026-08-13 10:54:09.629000"
+      },
+      {
+        "step_id": "llmtrace_d0d1956b98b34bce910c702aaa636cc1_c6612a75fcae4af797ae7cbedd256eb0",
+        "trace_id": "llmtrace_d0d1956b98b34bce910c702aaa636cc1",
+        "sequence": 0,
+        "stage_name": "dialog_semantic_fidelity_verifier",
+        "route_name": "DIALOG_GENERATOR_LLM",
+        "model_name": "gemma-4-31b-fable-5-agent-distill",
+        "status": "succeeded",
+        "parse_status": "succeeded",
+        "prompt_chars": 3172,
+        "output_chars": 54,
+        "prompt_sha256": "e1d176d73c578b861b3924549a439238f5956d0603beb82a843083d3651ba74a",
+        "output_sha256": "2e5a00f73eeb2d2109bf5cb6881ef2cfcc2ab3af74a1c01efdb096a774cf94c1",
+        "raw_messages": [],
+        "raw_response_text": "",
+        "parsed_output": {},
+        "output_state_fields": [
+          "dialog_semantic_fidelity_verdict"
+        ],
+        "duration_ms": 1458,
+        "created_at": "2026-07-30T10:54:09.774042+00:00",
+        "expires_at": "2026-08-13 10:54:09.774000"
+      }
+    ],
+    "test_terminalized_trace": false
+  }
+}

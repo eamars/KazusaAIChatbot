@@ -241,6 +241,77 @@ def _input(
     }
 
 
+@pytest.mark.asyncio
+async def test_private_residual_and_group_guidance_reach_only_owned_stages(
+) -> None:
+    """Goal and action stages receive only their authorized restored context."""
+
+    payload = _input()
+    payload["past_dialog_cognition_context"] = "PAST_DIALOG_PRIVATE_SENTINEL"
+    payload["group_engagement_action_context"] = {
+        "engagement_guidelines": ["GROUP_ENGAGEMENT_SENTINEL"],
+        "confidence": "high",
+    }
+    llm = _ScriptedLLM()
+
+    await run_cognition(payload, _core_services(llm))
+
+    rendered_calls = [json.loads(call) for call in llm.human_calls]
+    goal_calls = [
+        call for call in rendered_calls
+        if "semantic_context" in call and "branch" in call
+    ]
+    action_calls = [
+        call for call in rendered_calls
+        if "action_handles" in call and "resolver_handles" in call
+    ]
+    appraisal_calls = [
+        call for call in rendered_calls
+        if "question" in call
+    ]
+    workspace_calls = [
+        call for call in rendered_calls
+        if "bids" in call and "primary_bid_handle" not in call
+        and "action_handles" not in call
+    ]
+
+    assert goal_calls
+    assert action_calls
+    for call in goal_calls:
+        context = call["semantic_context"]
+        assert context["past_dialog_cognition_context"] == (
+            "PAST_DIALOG_PRIVATE_SENTINEL"
+        )
+        assert context["group_engagement_action_context"] == {
+            "engagement_guidelines": ["GROUP_ENGAGEMENT_SENTINEL"],
+            "confidence": "high",
+        }
+    assert action_calls[0]["group_engagement_action_context"] == {
+        "engagement_guidelines": ["GROUP_ENGAGEMENT_SENTINEL"],
+        "confidence": "high",
+    }
+    assert "PAST_DIALOG_PRIVATE_SENTINEL" not in json.dumps(
+        action_calls,
+        ensure_ascii=False,
+    )
+    assert "PAST_DIALOG_PRIVATE_SENTINEL" not in json.dumps(
+        appraisal_calls,
+        ensure_ascii=False,
+    )
+    assert "GROUP_ENGAGEMENT_SENTINEL" not in json.dumps(
+        appraisal_calls,
+        ensure_ascii=False,
+    )
+    assert "PAST_DIALOG_PRIVATE_SENTINEL" not in json.dumps(
+        workspace_calls,
+        ensure_ascii=False,
+    )
+    assert "GROUP_ENGAGEMENT_SENTINEL" not in json.dumps(
+        workspace_calls,
+        ensure_ascii=False,
+    )
+
+
 async def _prepare_db_user(
     live_db: object,
     request: pytest.FixtureRequest,

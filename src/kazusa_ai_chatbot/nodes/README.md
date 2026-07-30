@@ -64,7 +64,10 @@ Inside `persona_supervisor2`, the live persona graph is:
 ```text
 stage_0_msg_decontextualizer
   -> stage_1_goal_resolver
+       start eligible cycle-zero shared-memory prewarm
+       start eligible targetless group engagement projection
        load one mutable user or character V2 state
+       join preparation tasks before native V2 input construction
        build CognitionCoreInputV2
        run V2 cognition without an intermediate commit
        optionally execute one cognition-selected resolver capability
@@ -134,7 +137,23 @@ contract. Its input includes:
 - typed episode, media, RAG, resolver, and permitted action-result evidence;
 - direct facts with trusted provenance;
 - available action and resolver affordances; and
-- a bounded semantic scene description.
+- a bounded semantic scene description;
+- distinct private past-dialog continuity for goal cognition only; and
+- exact advisory group-engagement guidance for eligible targetless group
+  self-cognition.
+
+At resolver cycle zero, `user_message` and `internal_thought` episodes start
+the existing shared-memory prewarm before independent identity and mutable-state
+preparation. Its confirmed shared rows merge only into
+`rag_result.memory_evidence` before V2 evidence mapping. Empty results preserve
+the base RAG payload, and later resolver cycles reuse that state without
+another lookup.
+
+Canonical targetless group self-cognition starts one group-channel engagement
+projection in the same preparation window. Goal cognition and action planning
+receive the same bounded advisory value; appraisal, workspace collapse,
+surface planning, and dialog do not. Ordinary user turns and other ineligible
+episodes receive the exact empty value without a group style database read.
 
 When Stage 0 supplied a valid semantic projection, the connector forwards its
 `role_explicit_content` and `response_operation` unchanged as current episode
@@ -377,8 +396,9 @@ actions, deliver messages, schedule work, or reopen cognition.
 - Resolver observations and RAG rows remain evidence, never final stance.
 - A non-speech route produces no visible dialog.
 - Surface planning occurs after the final state commit.
-- Interaction-style context is surface-only and does not affect cognition route
-  selection.
+- General user/group interaction-style composition remains surface-only. The
+  exact group-engagement projection is limited to eligible group
+  self-cognition goal and action judgment and has no route authority.
 - Dialog owns wording and cannot mutate cognition state or action requests.
 
 ## Public Entrypoints
