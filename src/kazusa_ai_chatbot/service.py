@@ -1116,6 +1116,9 @@ async def _build_frontline_state(
         fragment,
     )
     return_value["active_character_name"] = _active_character_name()
+    return_value["character_cognition_state"] = deepcopy(
+        _runtime_character_state["cognition_state"]
+    )
     queue_item = fragment.queue_item
     if isinstance(queue_item, QueuedChatItem):
         return_value["llm_trace_id"] = queue_item.llm_trace_id
@@ -1642,6 +1645,9 @@ def _settled_state_from_lease(
             else ""
         ),
         "active_character_name": _active_character_name(),
+        "character_cognition_state": deepcopy(
+            _runtime_character_state["cognition_state"]
+        ),
         "assembled_fragments": fragment_rows,
         "media_descriptions": media_descriptions,
         "additional_media_present": additional_media_present,

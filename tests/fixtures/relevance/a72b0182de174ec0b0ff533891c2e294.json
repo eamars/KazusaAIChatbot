@@ -1,0 +1,49 @@
+{
+  "schema_version": "relevance_incident_fixture.v1",
+  "case_id": "a72b0182de174ec0b0ff533891c2e294",
+  "source_kind": "captured_failure_decision_slice",
+  "active_character_name": "一之濑明日奈",
+  "current_message": {
+    "body_text": "直接找你一换一是吧",
+    "semantic_target_labels": [
+      "none"
+    ],
+    "reply_target_label": "none",
+    "media_labels": []
+  },
+  "open_turns": [],
+  "recent_preludes": [],
+  "latest_bot_continuity": "",
+  "relevant_history": [],
+  "matching_character_state": [],
+  "expected_frontline_action": "discard",
+  "expected_settled_action": "ignore",
+  "captured_trace": {
+    "frontline_prompt_sha256": "58349a1122ee473bf76c5230e9faeac65018a79872051db80f095fddf10b2c82",
+    "frontline_output_sha256": "40d769a4ea0fddce3cd41034d2e38adda9a76187e8f76e7d93adc6c2f7d654b9",
+    "frontline_output": {
+      "intake_action": "start",
+      "append_target": "none",
+      "prelude_targets": [],
+      "reason": "明确使用角色规范名称称呼"
+    },
+    "settled_input_sha256": "b00bf9441f1fa125369493f8c1dd7c6beb8773f92545ecadb1fca45b79e056da"
+  },
+  "counterfactuals": [
+    {
+      "case_id": "replace_numeral",
+      "body_text": "直接找你二换一是吧",
+      "expected_frontline_action": "discard"
+    },
+    {
+      "case_id": "remove_pronoun",
+      "body_text": "直接找一换一是吧",
+      "expected_frontline_action": "discard"
+    },
+    {
+      "case_id": "complete_canonical_name",
+      "body_text": "一之濑明日奈，你觉得要一换一吗？",
+      "expected_frontline_action": "start"
+    }
+  ]
+}

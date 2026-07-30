@@ -240,18 +240,17 @@ def _patch_common_dependencies(monkeypatch, graph) -> None:
         "_active_character_name_snapshot",
         "Test Character",
     )
+    character_profile = canonical_service_character_profile(
+        marker="input-queue",
+        global_user_id=CHARACTER_GLOBAL_USER_ID,
+    )
     monkeypatch.setattr(
         service_module,
         "_runtime_character_state",
         {
-            "mood": "old mood",
-            "vibe_check": "old vibe",
-            "character_reflection": "old reflection",
+            "cognition_state": character_profile["cognition_state"],
+            "updated_at": character_profile["updated_at"],
         },
-    )
-    character_profile = canonical_service_character_profile(
-        marker="input-queue",
-        global_user_id=CHARACTER_GLOBAL_USER_ID,
     )
     identity_snapshot = canonical_episode_identity_snapshot(
         marker="input-queue",
@@ -1548,10 +1547,22 @@ async def test_settled_fresh_history_excludes_active_turn_fragments(
 ) -> None:
     """Only external rows can act as fresh-history scene evidence."""
 
+    character_profile = canonical_service_character_profile(
+        marker="settled-relevance",
+        global_user_id=CHARACTER_GLOBAL_USER_ID,
+    )
     monkeypatch.setattr(
         service_module,
         "_active_character_name_snapshot",
         "Test Character",
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_runtime_character_state",
+        {
+            "cognition_state": character_profile["cognition_state"],
+            "updated_at": character_profile["updated_at"],
+        },
     )
     item = _item(1)
     fragment = PersistedChatFragment(
@@ -1648,6 +1659,9 @@ async def test_settled_fresh_history_excludes_active_turn_fragments(
     assert state["current_author_platform_user_id"] == "user-1"
     assert state["character_global_user_id"] == CHARACTER_GLOBAL_USER_ID
     assert state["platform_bot_id"] == "bot-1"
+    assert state["character_cognition_state"] == (
+        character_profile["cognition_state"]
+    )
 
 
 @pytest.mark.asyncio
@@ -1656,10 +1670,22 @@ async def test_settled_history_uses_timestamps_when_active_row_is_outside_window
 ) -> None:
     """Intervening rows stay ordered when a busy group evicts the anchor."""
 
+    character_profile = canonical_service_character_profile(
+        marker="settled-clipped-history",
+        global_user_id=CHARACTER_GLOBAL_USER_ID,
+    )
     monkeypatch.setattr(
         service_module,
         "_active_character_name_snapshot",
         "Test Character",
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_runtime_character_state",
+        {
+            "cognition_state": character_profile["cognition_state"],
+            "updated_at": character_profile["updated_at"],
+        },
     )
     item = _item(
         1,
@@ -2522,6 +2548,12 @@ async def test_private_frontline_sees_complete_coalesced_logical_input(
     assert captured_frontline_state["conversation_scope"] == "private"
     assert captured_frontline_state["active_character_name"] == (
         "Test Character"
+    )
+    character_profile = await (
+        service_module._load_latest_character_profile_snapshot()
+    )
+    assert captured_frontline_state["character_cognition_state"] == (
+        character_profile["cognition_state"]
     )
 
     await _reset_queue_state()
