@@ -535,13 +535,132 @@ async def test_required_selection_regenerates_with_the_same_producer() -> None:
     )
 
     assert len(llm.messages) == 3
-    assert all(
-        message_set[0].content == goal_module.REQUIRED_SELECTION_GOAL_PROMPT
-        for message_set in llm.messages
+    assert (
+        llm.messages[0][0].content
+        == goal_module.REQUIRED_SELECTION_GOAL_PROMPT
     )
+    assert all(
+        message_set[0].content.startswith(
+            goal_module.REQUIRED_SELECTION_GOAL_PROMPT
+        )
+        for message_set in llm.messages[1:]
+    )
+    assert '"allowed_conversation_progress_event_handles": ["e2"]' in (
+        llm.messages[1][0].content
+    )
+    assert 'validation_error' in llm.messages[1][0].content
     assert bid["intention"] == selected["selection"]
     assert bid["desired_outcome"] == selected["selection"]
     assert bid["concrete_detail"] == selected["selection"]
+
+
+@pytest.mark.asyncio
+async def test_required_selection_regeneration_excludes_optional_conversation(
+) -> None:
+    """Give the same producer the exact empty relation domain after failure."""
+
+    valid_selection = {
+        'selection_kind': 'choice',
+        'selection': '当前角色选择让当前用户陪她去散步。',
+        'reason': '当前角色根据关系和此刻感受作出具体选择。',
+        'private_monologue': '我现在直接说出自己的选择。',
+        'target_role_handles': [],
+        'evidence_handles': ['e1', 'e2'],
+        'conversation_evidence_relations': [],
+        'expected_consequences': ['当前用户得到一个明确选择。'],
+        'confidence': 'high',
+    }
+    invalid_selection = {
+        **valid_selection,
+        'conversation_evidence_relations': [{
+            'handle': 'e2',
+            'relation': 'unrelated',
+        }],
+    }
+
+    class _LLM:
+        def __init__(self) -> None:
+            self.messages: list[list[object]] = []
+
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config: object,
+        ) -> SimpleNamespace:
+            del config
+            self.messages.append(messages)
+            response = (
+                invalid_selection
+                if len(self.messages) == 1
+                else valid_selection
+            )
+            return SimpleNamespace(content=json.dumps(
+                response,
+                ensure_ascii=False,
+            ))
+
+    llm = _LLM()
+    semantic_text = json.dumps({
+        'role_explicit_content': '当前用户要求当前角色亲口说出自己的选择。',
+        'response_operation': {
+            'operation': '当前角色选择并告诉当前用户下一步',
+            'response_owner_role': '当前角色',
+            'selection_owner_role': '当前角色',
+            'selection_required': True,
+            'embedded_actor_role': '当前用户',
+            'embedded_target_role': '当前角色',
+        },
+    }, ensure_ascii=False)
+    evidence = [{
+        'evidence_handle': 'e1',
+        'evidence_ref': {
+            'source_kind': 'episode',
+            'source_id': 'episode-1',
+            'occurred_at': '2026-07-30T00:00:00Z',
+            'semantic_summary': semantic_text,
+        },
+        'semantic_text': semantic_text,
+        'visible_to': ['q:event_agency'],
+    }, {
+        'evidence_handle': 'e2',
+        'evidence_ref': {
+            'source_kind': 'conversation_evidence',
+            'source_id': 'conversation-history:prior-turn',
+            'occurred_at': '2026-07-29T23:59:00Z',
+            'semantic_summary': '此前聊过昨晚发生的事情。',
+        },
+        'semantic_text': '此前聊过昨晚发生的事情。',
+        'visible_to': ['q:event_agency'],
+    }]
+
+    bid = await run_goal_cognition(
+        DEFAULT_BRANCH_DEFINITIONS['ordinary_response'],
+        {'scope': 'user', 'kind': 'goal', 'entity_id': 'g1'},
+        {'_role_bindings': {}, 'role_summaries': {}},
+        evidence,
+        SimpleNamespace(
+            llm=llm,
+            goal_ordinary_response_config=object(),
+        ),
+    )
+
+    assert len(llm.messages) == 2
+    regeneration_prompt = llm.messages[1][0].content
+    assert regeneration_prompt.startswith(
+        goal_module.REQUIRED_SELECTION_GOAL_PROMPT
+    )
+    assert '"allowed_conversation_progress_event_handles": []' in (
+        regeneration_prompt
+    )
+    assert '"required_relation_fields": ["evidence_handle", "relation"]' in (
+        regeneration_prompt
+    )
+    assert (
+        'selection goal relation fields are not exact'
+        in regeneration_prompt
+    )
+    assert bid['intention'] == valid_selection['selection']
 
 
 @pytest.mark.asyncio
@@ -651,5 +770,12 @@ def test_required_selection_producer_accounts_for_terminal_evidence() -> None:
         '对 `conversation_progress_event_handles` '
         '中每个活跃进度事件句柄恰好输出一条关系'
     ) in prompt
+    assert '句柄集合必须与该列表完全相等' in prompt
+    assert '也不得把它加入此关系数组' in prompt
+    assert '若该列表为空' in prompt
+    assert '每行只能有 `evidence_handle` 与 `relation` 两个字段' in prompt
+    assert '不得简写成 `handle`' in prompt
+    assert '"conversation_evidence_relations": []' in prompt
+    assert '"evidence_handle": "e2"' not in prompt
     assert not hasattr(goal_module, 'REQUIRED_SELECTION_VERIFIER_PROMPT')
     assert not hasattr(goal_module, 'REQUIRED_SELECTION_REPAIR_PROMPT')

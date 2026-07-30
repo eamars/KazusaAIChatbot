@@ -122,6 +122,10 @@ REQUIRED_SELECTION_GOAL_PROMPT = '''你负责在本轮选择权属于当前角�
 3. `selection` 是唯一权威选择内容，必须直接写出一个具体选择、拒绝、协商结果或条件。
    不得只说以后决定、列举候选、把决定交给其他角色，或要求后续阶段补全。
 4. 对 `conversation_progress_event_handles` 中每个活跃进度事件句柄恰好输出一条关系：
+   `conversation_evidence_relations` 的句柄集合必须与该列表完全相等。即使其他 evidence 的
+   `source_kind` 是 `conversation_evidence`，也不得把它加入此关系数组。若该列表为空，
+   必须输出空数组 `[]`。列表非空时，每行只能有 `evidence_handle` 与 `relation` 两个字段；
+   句柄字段名必须是 `evidence_handle`，不得简写成 `handle`。
    - `excluded`：该既有事项已处理或当前事实使它不应作为本轮新选择。
    - `reopened`：当前输入明确要求重开该既有事项，且本轮选择确实重开它。
    - `supports`：该事项支持本轮选择，但不是被重新选择的旧事项。
@@ -143,17 +147,42 @@ REQUIRED_SELECTION_GOAL_PROMPT = '''你负责在本轮选择权属于当前角�
   "private_monologue": "",
   "target_role_handles": [],
   "evidence_handles": [],
-  "conversation_evidence_relations": [
-    {
-      "evidence_handle": "e2",
-      "relation": "excluded"
-    }
-  ],
+  "conversation_evidence_relations": [],
   "expected_consequences": [""],
   "confidence": "high"
 }
 `selection_kind` 只能是 `choice`、`refusal`、`condition` 或 `negotiation`。
 '''
+
+
+def _required_selection_regeneration_prompt(
+    validation_error: str,
+    conversation_progress_event_handles: set[str],
+) -> str:
+    """Return same-producer feedback for one complete structural regeneration."""
+
+    feedback = json.dumps(
+        {
+            'allowed_conversation_progress_event_handles': sorted(
+                conversation_progress_event_handles
+            ),
+            'required_relation_fields': [
+                'evidence_handle',
+                'relation',
+            ],
+            'validation_error': validation_error[:500],
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    return (
+        REQUIRED_SELECTION_GOAL_PROMPT
+        + '\n# 结构重生成反馈\n'
+        + '上一候选未通过结构契约。依据下方反馈，使用同一输入完整重生成一份候选；'
+        + '保持角色的语义判断职责，并严格修正字段与句柄集合。\n'
+        + feedback
+        + '\n'
+    )
 
 
 async def run_goal_cognition(
@@ -376,7 +405,15 @@ async def run_goal_cognition(
                     retryable=True,
                 ) from exc
             if selection_required:
-                request_messages = initial_messages
+                request_messages = [
+                    SystemMessage(content=(
+                        _required_selection_regeneration_prompt(
+                            str(exc),
+                            conversation_progress_event_handles,
+                        )
+                    )),
+                    HumanMessage(content=prompt_text),
+                ]
                 continue
             repair_payload = {
                 "contract": {

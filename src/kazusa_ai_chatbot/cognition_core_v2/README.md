@@ -138,11 +138,12 @@ citeable without entering the mandatory relation domain. Deterministic
 validation owns exact fields, bounds, handle coverage, and mapping the one
 selection into the existing complete bid. The goal LLM owns the actual choice
 and the evidence relations. Structural failures retry the same producing
-prompt under the existing bounded goal contract. Required-selection parsing
-uses deterministic cleanup only, so malformed output cannot invoke the shared
-JSON-repair model. There is no semantic verifier, negative verdict,
-evaluator-authored replacement, or recheck. Ordinary turns keep the ordinary
-goal producer.
+prompt under the existing bounded goal contract, with the validation error and
+exact allowed conversation-progress handle domain attached to each complete
+regeneration. Required-selection parsing uses deterministic cleanup only, so
+malformed output cannot invoke the shared JSON-repair model. There is no
+semantic verifier, negative verdict, evaluator-authored replacement, or
+recheck. Ordinary turns keep the ordinary goal producer.
 
 Action planning treats local-model output as a bounded proposal rather than an
 execution precondition. It canonicalizes the known envelope, keeps usable
