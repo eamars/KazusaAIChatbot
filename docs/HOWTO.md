@@ -814,6 +814,19 @@ prompt/output hashes, character counts, parse status, and state handoff fields.
 `full` additionally stores raw prompt messages, raw response text, and parsed
 output in protected trace collections. `off` skips trace row writes.
 
+For Cognition Core V2, both `metadata` and `full` also promote failed,
+recovered, partial, and degraded invocations into one protected failure
+capsule. Clean invocations create no capsule row. The capsule preserves the
+raw pre-validation entrypoint input and ordered model attempts, excludes API
+keys, uses `DEBUG_LOG_TTL_DAYS`, and is written asynchronously so capture
+failure cannot replace or delay cognition behavior.
+
+`scripts.export_llm_trace` keeps the original `llm_trace_steps` array and adds
+`cognition_failure_capsules`, grouped by each
+`cognition_invocation_id`, for self-contained replay input. Pass
+`--cognition-invocation-id <id>` with `--trace-id` to select one safe-retry
+invocation while retaining the compatible trace-level fields.
+
 Apply or inspect logging retention for existing rows:
 
 ```bash

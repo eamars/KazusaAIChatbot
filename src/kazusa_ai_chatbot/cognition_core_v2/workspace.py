@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping, Sequence
+from time import perf_counter
 from typing import Any
 
 import httpx
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from openai import OpenAIError
 
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
@@ -21,6 +22,7 @@ from kazusa_ai_chatbot.cognition_core_v2.branch_activation import (
 from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
     V2_MODEL_TOTAL_ATTEMPTS,
 )
+from kazusa_ai_chatbot.llm_tracing import failure_capsule
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 
 
@@ -77,6 +79,12 @@ async def collapse_bids(
     if len(prompt_text) > WORKSPACE_COLLAPSE_PROMPT_CAP:
         available_attempts = 0
     for attempt_index in range(available_attempts):
+        started_at = perf_counter()
+        stage_name = (
+            "workspace_collapse"
+            if attempt_index == 0
+            else "workspace_collapse.repair"
+        )
         try:
             response = await services.llm.ainvoke(
                 request_messages,
@@ -89,7 +97,19 @@ async def collapse_bids(
             OSError,
             RuntimeError,
             TimeoutError,
-        ):
+        ) as exc:
+            _record_workspace_trace(
+                services=services,
+                messages=request_messages,
+                response_text="",
+                parsed_output={},
+                parse_status="provider_error",
+                status="failed",
+                started_at=started_at,
+                stage_name=stage_name,
+                attempt_index=attempt_index + 1,
+                validation_error=str(exc),
+            )
             if attempt_index + 1 >= WORKSPACE_COLLAPSE_ATTEMPT_LIMIT:
                 break
             request_messages = [
@@ -97,13 +117,29 @@ async def collapse_bids(
                 HumanMessage(content=prompt_text),
             ]
             continue
-
         response_text = str(getattr(response, "content", ""))
         parsed: object = {}
         try:
-            parsed = parse_llm_json_output(response_text)
+            parsed = parse_llm_json_output(
+                response_text,
+                repair_trace_hook=(
+                    failure_capsule.append_json_repair_attempt
+                ),
+            )
             partition = _validate_partition(parsed, set(handles))
         except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            _record_workspace_trace(
+                services=services,
+                messages=request_messages,
+                response_text=response_text,
+                parsed_output=parsed,
+                parse_status="contract_error",
+                status="failed",
+                started_at=started_at,
+                stage_name=stage_name,
+                attempt_index=attempt_index + 1,
+                validation_error=str(exc),
+            )
             if attempt_index + 1 >= WORKSPACE_COLLAPSE_ATTEMPT_LIMIT:
                 break
             invalid_candidate = response_text
@@ -133,6 +169,18 @@ async def collapse_bids(
                 HumanMessage(content=repair_text),
             ]
             continue
+        _record_workspace_trace(
+            services=services,
+            messages=request_messages,
+            response_text=response_text,
+            parsed_output=parsed,
+            parse_status="succeeded",
+            status="succeeded",
+            started_at=started_at,
+            stage_name=stage_name,
+            attempt_index=attempt_index + 1,
+            validation_error="",
+        )
         break
 
     if partition is None:
@@ -171,6 +219,36 @@ async def collapse_bids(
         "competing_bids": suppressed,
     }
     return result
+
+
+def _record_workspace_trace(
+    *,
+    services: CognitionCoreServicesV2,
+    messages: Sequence[BaseMessage],
+    response_text: str,
+    parsed_output: object,
+    parse_status: str,
+    status: str,
+    started_at: float,
+    stage_name: str,
+    attempt_index: int,
+    validation_error: str,
+) -> None:
+    """Preserve one protected workspace-collapse model boundary."""
+
+    config = services.workspace_collapse_config
+    failure_capsule.append_model_attempt(
+        stage_name=stage_name,
+        messages=messages,
+        response_text=response_text,
+        parsed_output=parsed_output,
+        parse_status=parse_status,
+        status=status,
+        config=config,
+        attempt_index=attempt_index,
+        validation_error=validation_error,
+        started_at=started_at,
+    )
 
 
 def _validate_partition(parsed: object, handles: set[str]) -> dict[str, Any]:

@@ -5,11 +5,15 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import Callable
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 
+import httpx
 from json_repair import repair_json
 from langchain_core.messages import HumanMessage, SystemMessage
+from openai import OpenAIError
 
 from kazusa_ai_chatbot.config import (
     JSON_REPAIR_LLM_API_KEY,
@@ -27,7 +31,10 @@ from kazusa_ai_chatbot.llm_interface import (
     LLMCallConfig,
     LLMThinkingConfig,
 )
+
 logger = logging.getLogger(__name__)
+
+JsonRepairTraceHook = Callable[..., None]
 
 _IMAGE_DESCRIPTION_ELLIPSIS = "..."
 _HEADING_PREFIXED_JSON_KEY = re.compile(
@@ -463,6 +470,7 @@ def parse_json_with_llm(
     broken_string: str,
     *,
     expected_output_format: str | None = None,
+    repair_trace_hook: JsonRepairTraceHook | None = None,
 ) -> dict:
     """Repair malformed JSON text by asking the configured JSON-repair LLM.
 
@@ -470,6 +478,8 @@ def parse_json_with_llm(
         broken_string: Raw malformed JSON-like text returned by an LLM.
         expected_output_format: Optional target output contract shown to the
             original LLM.
+        repair_trace_hook: Optional protected trace callback for the repair
+            model attempt.
 
     Returns:
         Parsed JSON object from the repaired response, or ``{}`` if repair does
@@ -489,23 +499,66 @@ def parse_json_with_llm(
             ensure_ascii=False,
         )
     )
-    response = _parse_json_with_llm.invoke([system_prompt, human_message], config=_parse_json_with_llm_config)
+    request_messages = [system_prompt, human_message]
+    started_at = perf_counter()
+    try:
+        response = _parse_json_with_llm.invoke(
+            request_messages,
+            config=_parse_json_with_llm_config,
+        )
+    except (
+        OpenAIError,
+        httpx.HTTPError,
+        ConnectionError,
+        OSError,
+        RuntimeError,
+        TimeoutError,
+    ) as exc:
+        if repair_trace_hook is not None:
+            repair_trace_hook(
+                messages=request_messages,
+                response_text="",
+                parsed_output={},
+                parse_status="provider_error",
+                status="failed",
+                config=_parse_json_with_llm_config,
+                validation_error=str(exc),
+                started_at=started_at,
+            )
+        raise
 
     # Strip the markdown fence just in case
     json_string = response.content.strip().strip("```").strip("json")
 
     # Use repair_json which handles both valid and broken JSON
+    validation_error = ""
     try:
         decoded_json_dict = repair_json(json_string, return_objects=True)
     except Exception as exc:
         logger.exception(f"LLM JSON repair response could not be parsed: {exc}")
         decoded_json_dict = {}
+        validation_error = str(exc)
 
     if not isinstance(decoded_json_dict, dict):
         logger.error(
             f"LLM JSON repair returned non-object output: {decoded_json_dict}"
         )
+        validation_error = "LLM JSON repair returned non-object output"
         decoded_json_dict = {}
+
+    parse_status = "succeeded" if not validation_error else "contract_error"
+    status = "succeeded" if not validation_error else "failed"
+    if repair_trace_hook is not None:
+        repair_trace_hook(
+            messages=request_messages,
+            response_text=response.content,
+            parsed_output=decoded_json_dict,
+            parse_status=parse_status,
+            status=status,
+            config=_parse_json_with_llm_config,
+            validation_error=validation_error,
+            started_at=started_at,
+        )
 
     return_value = decoded_json_dict
     return return_value
@@ -516,6 +569,7 @@ def parse_llm_json_output(
     *,
     expected_output_format: str | None = None,
     deterministic_only: bool = False,
+    repair_trace_hook: JsonRepairTraceHook | None = None,
 ) -> dict:
     """Parse LLM JSON output, handling markdown fences and malformed JSON.
     
@@ -525,6 +579,8 @@ def parse_llm_json_output(
             original LLM, used only by the LLM repair fallback.
         deterministic_only: Whether malformed output must fail closed without
             calling the JSON-repair LLM.
+        repair_trace_hook: Optional protected trace callback for a repair-model
+            attempt.
         
     Returns:
         Parsed JSON object as dict, or empty dict if parsing fails
@@ -569,10 +625,17 @@ def parse_llm_json_output(
             return return_value
 
         try:
-            decoded_json_dict = parse_json_with_llm(
-                raw_output,
-                expected_output_format=expected_output_format,
-            )
+            if repair_trace_hook is None:
+                decoded_json_dict = parse_json_with_llm(
+                    raw_output,
+                    expected_output_format=expected_output_format,
+                )
+            else:
+                decoded_json_dict = parse_json_with_llm(
+                    raw_output,
+                    expected_output_format=expected_output_format,
+                    repair_trace_hook=repair_trace_hook,
+                )
         except Exception as exc:
             logger.exception(f"LLM JSON repair failed: {exc}")
             decoded_json_dict = {}

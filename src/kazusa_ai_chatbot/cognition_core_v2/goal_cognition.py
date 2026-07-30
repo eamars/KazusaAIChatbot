@@ -354,6 +354,8 @@ async def run_goal_cognition(
                 parse_status="provider_error",
                 status="failed",
                 started_at=started_at,
+                attempt_index=attempt_index + 1,
+                validation_error=str(exc),
             )
             if attempt_index + 1 >= GOAL_COGNITION_ATTEMPT_LIMIT:
                 raise CognitionExecutionError(
@@ -367,13 +369,15 @@ async def run_goal_cognition(
                 ) from exc
             request_messages = initial_messages
             continue
-
         response_text = str(getattr(response, "content", ""))
         parsed: object = {}
         try:
             parsed = parse_llm_json_output(
                 response_text,
                 deterministic_only=selection_required,
+                repair_trace_hook=(
+                    llm_tracing.failure_capsule.append_json_repair_attempt
+                ),
             )
             if selection_required:
                 selection_draft = validate_selection_goal_draft(
@@ -404,6 +408,8 @@ async def run_goal_cognition(
                 parse_status="contract_error",
                 status="failed",
                 started_at=started_at,
+                attempt_index=attempt_index + 1,
+                validation_error=str(exc),
             )
             if attempt_index + 1 >= GOAL_COGNITION_ATTEMPT_LIMIT:
                 raise CognitionExecutionError(
@@ -499,6 +505,8 @@ async def run_goal_cognition(
             parse_status="succeeded",
             status="succeeded",
             started_at=started_at,
+            attempt_index=attempt_index + 1,
+            validation_error="",
         )
         break
 
@@ -748,6 +756,8 @@ async def _record_goal_trace_step(
     parse_status: str,
     status: str,
     started_at: float,
+    attempt_index: int,
+    validation_error: str,
 ) -> None:
     """Preserve one protected goal-generation or repair model boundary."""
 
@@ -768,6 +778,11 @@ async def _record_goal_trace_step(
         status=status,
         duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
         output_state_fields=["action_bid"],
+        call_config=config,
+        branch_id=definition.branch_id,
+        attempt_index=attempt_index,
+        validation_error=validation_error,
+        attempt_started_at=started_at,
     )
 
 

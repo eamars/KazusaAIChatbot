@@ -440,6 +440,11 @@ async def _invoke_action_planner(
     current_messages = list(base_messages)
     for attempt_index in range(ACTION_PLANNING_ATTEMPT_LIMIT):
         started_at = perf_counter()
+        stage_name = (
+            "action_planning"
+            if attempt_index == 0
+            else "action_planning.repair"
+        )
         try:
             response = await services.llm.ainvoke(
                 current_messages,
@@ -453,11 +458,6 @@ async def _invoke_action_planner(
             RuntimeError,
             TimeoutError,
         ) as exc:
-            stage_name = (
-                "action_planning"
-                if attempt_index == 0
-                else "action_planning.repair"
-            )
             await _record_action_planning_trace(
                 services=services,
                 messages=current_messages,
@@ -467,6 +467,8 @@ async def _invoke_action_planner(
                 status="failed",
                 started_at=started_at,
                 stage_name=stage_name,
+                attempt_index=attempt_index + 1,
+                validation_error=str(exc),
             )
             if attempt_index + 1 >= ACTION_PLANNING_ATTEMPT_LIMIT:
                 logger.warning(
@@ -477,16 +479,15 @@ async def _invoke_action_planner(
                 return empty_decision
             current_messages = list(base_messages)
             continue
-
         response_text = str(getattr(response, "content", ""))
         parsed: object = {}
-        stage_name = (
-            "action_planning"
-            if attempt_index == 0
-            else "action_planning.repair"
-        )
         try:
-            parsed = parse_llm_json_output(response_text)
+            parsed = parse_llm_json_output(
+                response_text,
+                repair_trace_hook=(
+                    llm_tracing.failure_capsule.append_json_repair_attempt
+                ),
+            )
             decision = _validate_action_plan_decision(
                 parsed,
                 bid_handles=bid_handles,
@@ -504,6 +505,8 @@ async def _invoke_action_planner(
                 status="failed",
                 started_at=started_at,
                 stage_name=stage_name,
+                attempt_index=attempt_index + 1,
+                validation_error=str(exc),
             )
             if attempt_index + 1 >= ACTION_PLANNING_ATTEMPT_LIMIT:
                 logger.warning(
@@ -532,6 +535,8 @@ async def _invoke_action_planner(
             status="succeeded",
             started_at=started_at,
             stage_name=stage_name,
+            attempt_index=attempt_index + 1,
+            validation_error="",
         )
         return decision
 
@@ -934,6 +939,8 @@ async def _record_action_planning_trace(
     status: str,
     started_at: float,
     stage_name: str,
+    attempt_index: int,
+    validation_error: str,
 ) -> None:
     """Preserve the protected action-planning model boundary."""
 
@@ -960,6 +967,10 @@ async def _record_action_planning_trace(
             "resolver_pending_resolution",
             "resolver_goal_progress",
         ],
+        call_config=config,
+        attempt_index=attempt_index,
+        validation_error=validation_error,
+        attempt_started_at=started_at,
     )
 
 

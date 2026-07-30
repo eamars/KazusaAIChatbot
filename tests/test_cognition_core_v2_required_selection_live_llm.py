@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 from dataclasses import replace
 import json
 from pathlib import Path
@@ -18,10 +19,12 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
 )
 from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
     run_goal_cognition,
+    validate_selection_goal_draft,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
     build_cognition_core_services,
 )
+from kazusa_ai_chatbot.utils import parse_llm_json_output
 from tests.llm_trace import write_llm_trace
 
 
@@ -31,6 +34,10 @@ _PRODUCTION_PROFILE_EXPORT = Path(
 )
 _PRODUCTION_CHARACTER_EXPORT = Path(
     'test_artifacts/diagnostics/character_state_for_efa8a644_reproduction.json'
+)
+_THIRD_PARTY_FAILURE_EXPORT = Path(
+    'test_artifacts/diagnostics/'
+    'chat_qq_ch_1f677493d7a52025_1634535291'
 )
 
 
@@ -69,6 +76,68 @@ class _CapturingLLM:
             'raw_output': str(response.content),
         })
         return response
+
+
+def _required_operation_handles(
+    evidence: list[dict[str, Any]],
+) -> set[str]:
+    """Identify typed required-selection rows for live trace diagnostics."""
+
+    required_handles = set()
+    for row in evidence:
+        try:
+            payload = json.loads(row['semantic_text'])
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, Mapping):
+            continue
+        response_operation = payload.get('response_operation')
+        if not isinstance(response_operation, Mapping):
+            continue
+        if response_operation.get('selection_required') is True:
+            required_handles.add(row['evidence_handle'])
+    return required_handles
+
+
+def _add_contract_diagnostics(
+    calls: list[dict[str, Any]],
+    *,
+    evidence: list[dict[str, Any]],
+    role_handles: set[str],
+    progress_handles: set[str],
+) -> None:
+    """Attach canonical parse and strict-validation evidence to live calls."""
+
+    operation_handles = _required_operation_handles(evidence)
+    evidence_handles = {
+        row['evidence_handle']
+        for row in evidence
+    }
+    for call in calls:
+        parsed: object = {}
+        parse_error = ''
+        validation_error = ''
+        try:
+            parsed = parse_llm_json_output(
+                call['raw_output'],
+                deterministic_only=True,
+            )
+        except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            parse_error = f'{type(exc).__name__}: {exc}'
+        if not parse_error:
+            try:
+                validate_selection_goal_draft(
+                    parsed,
+                    evidence_handles=evidence_handles,
+                    role_handles=role_handles,
+                    required_operation_handles=operation_handles,
+                    conversation_progress_handles=progress_handles,
+                )
+            except (AttributeError, KeyError, TypeError, ValueError) as exc:
+                validation_error = f'{type(exc).__name__}: {exc}'
+        call['parsed_output'] = parsed
+        call['parse_error'] = parse_error
+        call['validation_error'] = validation_error
 
 
 async def _run_live_required_selection_case(
@@ -191,6 +260,12 @@ async def _run_live_required_selection_case(
             ),
         }
 
+    _add_contract_diagnostics(
+        capturing_llm.calls,
+        evidence=evidence,
+        role_handles=set(semantic_context['_role_bindings']),
+        progress_handles=set(expected_progress_handles),
+    )
     trace_path = write_llm_trace(
         _TRACE_SUITE,
         case_id,
@@ -219,6 +294,131 @@ async def _run_live_required_selection_case(
     ), f'required selection used the wrong model route; trace={trace_path}'
     result = bid, failure, capturing_llm.calls, trace_path
     return result
+
+
+def _third_party_reply_case_args() -> dict[str, Any]:
+    """Build the captured third-party reply and autonomy-pressure input."""
+
+    character_export = json.loads(
+        (_THIRD_PARTY_FAILURE_EXPORT / 'character_state.json').read_text(
+            encoding='utf-8',
+        )
+    )
+    profile_export = json.loads(
+        (_THIRD_PARTY_FAILURE_EXPORT / 'user_profile.json').read_text(
+            encoding='utf-8',
+        )
+    )
+    character_state = character_export['character_state']
+    cognition_state = profile_export['profile']['cognition_state']
+    progress_summaries = [
+        '当前用户与当前角色正在共同推进捉弄第三方的恶作剧计划。',
+        '当前角色此前已经自主接受并参与该恶作剧计划。',
+        '当前角色已经在群聊中发出约定指令并等待第三方反应。',
+        '第三方刚表示自己会去练琴，不再参与当前用户与角色的互动。',
+        '当前用户现在邀请当前角色用更大胆的举动让第三方吃惊。',
+    ]
+    progress_rows = []
+    for index, summary in enumerate(progress_summaries, start=2):
+        progress_rows.append({
+            'evidence_handle': f'e{index}',
+            'evidence_ref': {
+                'source_kind': 'conversation_evidence',
+                'source_id': (
+                    f'conversation-progress-event:third-party-{index}'
+                ),
+                'occurred_at': '2026-07-30T09:31:48.505985Z',
+                'semantic_summary': summary,
+            },
+            'semantic_text': summary,
+            'visible_to': [
+                'q:event_agency',
+                'q:relationship_social',
+            ],
+        })
+    supporting_summaries = [
+        '当前用户与当前角色之间关系亲近，常以共同玩笑表达默契。',
+        '第三方此前发现了两人的恶作剧，并明确表示自己不想参与。',
+        '当前角色近期对恶作剧感到兴奋，但仍保有是否继续的选择权。',
+    ]
+    supporting_rows = []
+    for index, summary in enumerate(supporting_summaries, start=7):
+        supporting_rows.append({
+            'evidence_handle': f'e{index}',
+            'evidence_ref': {
+                'source_kind': 'conversation_evidence',
+                'source_id': f'conversation-history:third-party-{index}',
+                'occurred_at': '2026-07-30T09:30:00Z',
+                'semantic_summary': summary,
+            },
+            'semantic_text': summary,
+            'visible_to': [
+                'q:event_agency',
+                'q:relationship_social',
+            ],
+        })
+    case_args = {
+        'extra_evidence': [*progress_rows, *supporting_rows],
+        'role_explicit_content': (
+            '当前用户邀请当前角色对刚刚表示退出互动的第三方做出大胆举动。'
+        ),
+        'response_operation': {
+            'operation': (
+                '当前角色选择是否以及如何回应针对第三方的恶作剧邀请'
+            ),
+            'response_owner_role': '当前角色',
+            'selection_owner_role': '当前角色',
+            'selection_required': True,
+            'embedded_actor_role': '当前角色',
+            'embedded_target_role': '第三方',
+        },
+        'semantic_context_updates': {
+            'current_event': (
+                '@当前角色 你看，她果然往这里看了。快来快来，'
+                '用你的大胆吓她一跳吧。引用第三方：'
+                '我还是乖乖练琴吧，你们搞你们的，我不管了。'
+            ),
+            'private_continuity_context': (
+                '当前角色与当前用户此前共同策划恶作剧并已执行第一步；'
+                '第三方刚明确退出，当前用户又邀请角色升级举动。'
+            ),
+            'character_identity': {
+                'description': character_state['description'],
+                'personality_brief': character_state['personality_brief'],
+                'boundary_profile': character_state['boundary_profile'],
+                'self_image': character_state['self_image'],
+                'backstory': character_state['backstory'],
+            },
+            'goal_projection': cognition_state['goals'][0],
+            'events': cognition_state['active_events'],
+            'goals': cognition_state['goals'],
+            'relationship': cognition_state['relationship'],
+            'affect': cognition_state['affect_activations'],
+            '_role_bindings': {
+                'current_user': {
+                    'role': 'requester',
+                    'entity_kind': 'user',
+                    'entity_id': 'user-1',
+                },
+                'self': {
+                    'role': 'selection_owner',
+                    'entity_kind': 'character',
+                    'entity_id': 'character-1',
+                },
+                'third_party': {
+                    'role': 'target',
+                    'entity_kind': 'user',
+                    'entity_id': 'user-2',
+                },
+            },
+            'role_summaries': {
+                'current_user': '邀请当前角色升级恶作剧的当前用户',
+                'self': '拥有是否继续以及如何回应选择权的当前角色',
+                'third_party': '刚表示退出互动并准备去练琴的第三方',
+            },
+        },
+    }
+    return case_args
 
 
 @pytest.mark.live_llm
@@ -1227,3 +1427,92 @@ async def test_live_parallel_food_choice_selection_contract_pressure() -> None:
             f'parallel branch returned an invalid disposition; '
             f'trace={trace_path}'
         )
+
+
+@pytest.mark.live_llm
+@pytest.mark.asyncio
+async def test_live_third_party_reply_ordinary_selection_contract_pressure(
+) -> None:
+    """Probe ordinary selection under third-party and progress pressure."""
+
+    bid, failure, model_calls, trace_path = (
+        await _run_live_required_selection_case(
+            case_id='third_party_reply_ordinary_contract_pressure',
+            branch_id='ordinary_response',
+            **_third_party_reply_case_args(),
+        )
+    )
+
+    assert model_calls, (
+        f'ordinary third-party probe made no model call; trace={trace_path}'
+    )
+    assert failure is None, (
+        f'ordinary third-party contract exhausted; trace={trace_path}'
+    )
+    assert bid is not None
+    assert {
+        f'e{index}' for index in range(1, 7)
+    }.issubset(bid['evidence_handles'])
+
+
+@pytest.mark.live_llm
+@pytest.mark.asyncio
+async def test_live_third_party_reply_autonomy_selection_contract_pressure(
+) -> None:
+    """Probe autonomy selection under third-party and progress pressure."""
+
+    bid, failure, model_calls, trace_path = (
+        await _run_live_required_selection_case(
+            case_id='third_party_reply_autonomy_contract_pressure',
+            branch_id='autonomy_boundary',
+            **_third_party_reply_case_args(),
+        )
+    )
+
+    assert model_calls, (
+        f'autonomy third-party probe made no model call; trace={trace_path}'
+    )
+    assert failure is None, (
+        f'autonomy third-party contract exhausted; trace={trace_path}'
+    )
+    assert bid is not None
+    assert {
+        f'e{index}' for index in range(1, 7)
+    }.issubset(bid['evidence_handles'])
+
+
+@pytest.mark.live_llm
+@pytest.mark.asyncio
+async def test_live_parallel_third_party_reply_selection_contract_pressure(
+) -> None:
+    """Run both third-party selection owners with production concurrency."""
+
+    case_args = _third_party_reply_case_args()
+    autonomy_result, ordinary_result = await asyncio.gather(
+        _run_live_required_selection_case(
+            case_id='parallel_third_party_reply_autonomy',
+            branch_id='autonomy_boundary',
+            **case_args,
+        ),
+        _run_live_required_selection_case(
+            case_id='parallel_third_party_reply_ordinary',
+            branch_id='ordinary_response',
+            **case_args,
+        ),
+    )
+
+    for bid, failure, model_calls, trace_path in (
+        autonomy_result,
+        ordinary_result,
+    ):
+        assert model_calls, (
+            f'parallel third-party branch made no model call; '
+            f'trace={trace_path}'
+        )
+        assert failure is None, (
+            f'parallel third-party contract exhausted; trace={trace_path}'
+        )
+        assert bid is not None
+        assert {
+            f'e{index}' for index in range(1, 7)
+        }.issubset(bid['evidence_handles'])

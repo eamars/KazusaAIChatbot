@@ -54,6 +54,7 @@ long_term/todo.md
 | [conversation_progress_v2_final_signoff_plan.md](active/bugfix/conversation_progress_v2_final_signoff_plan.md) | Focused Conversation Progress V2 semantic-evidence and maximum-turn final sign-off plan | in_progress |
 | [rag2_public_output_contract_leak_bugfix_plan.md](active/bugfix/rag2_public_output_contract_leak_bugfix_plan.md) | Large RAG2 prompt/evidence contract bugfix plan | draft |
 | [relevance_evidence_grounded_admission_over_sensitivity_bugfix_plan.md](active/bugfix/relevance_evidence_grounded_admission_over_sensitivity_bugfix_plan.md) | Evidence-grounded recipient and character-state relevance admission bugfix plan | in progress |
+| [required_selection_partial_recovery_bugfix_plan.md](active/bugfix/required_selection_partial_recovery_bugfix_plan.md) | Reproduction-gated required-selection structural and complete-sibling-bid recovery bugfix plan | draft |
 
 ## Reference Documents
 
@@ -454,6 +455,7 @@ plans.
 | [cognition_core_v2_baseline_regression_hardening_plan.md](archive/completed/bugfix/cognition_core_v2_baseline_regression_hardening_plan.md) |
 | [cognition_core_v2_character_identity_growth_bigbang_plan.md](archive/completed/bugfix/cognition_core_v2_character_identity_growth_bigbang_plan.md) |
 | [cognition_core_v2_compositional_action_planning_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_compositional_action_planning_bugfix_plan.md) |
+| [cognition_core_v2_failure_capsule_plan.md](archive/completed/bugfix/cognition_core_v2_failure_capsule_plan.md) |
 | [cognition_core_v2_live_character_judgment_rebalance_plan.md](archive/completed/bugfix/cognition_core_v2_live_character_judgment_rebalance_plan.md) |
 | [cognition_core_v2_p0_context_reconnection_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_p0_context_reconnection_bugfix_plan.md) |
 | [cognition_core_v2_intra_turn_transition_coherence_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_intra_turn_transition_coherence_bugfix_plan.md) |

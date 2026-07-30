@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import Mapping
 from typing import Any
 
+from kazusa_ai_chatbot import llm_tracing
 from kazusa_ai_chatbot.cognition_episode import project_model_visible_percepts
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionExecutionError,
@@ -27,11 +28,49 @@ from kazusa_ai_chatbot.cognition_core_v2.surface_stages import (
 from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
     validate_prompt_projection,
 )
+from kazusa_ai_chatbot.llm_tracing import failure_capsule
 
 
 async def run_text_surface_planning(
     input_payload: TextSurfaceInputV2,
     services: TextSurfaceServicesV2,
+) -> TextSurfaceOutputV2:
+    """Run text planning with failure-only protected replay capture."""
+
+    session = failure_capsule.begin_failure_capsule(
+        trace_id=llm_tracing.current_trace_id(),
+        entrypoint="run_text_surface_planning",
+        input_payload=input_payload,
+    )
+    try:
+        output = await _run_text_surface_planning(
+            input_payload,
+            services,
+            session=session,
+        )
+    except Exception as exc:
+        failure_capsule.mark_failure(
+            session,
+            failure_kind="terminal_failure",
+            stage_name="run_text_surface_planning",
+            details={},
+        )
+        failure_capsule.finish_failure_capsule(
+            session,
+            outcome="terminal_failure",
+            exception=exc,
+        )
+        raise
+
+    failure_capsule.finish_failure_capsule(session, outcome=None)
+    return output
+
+
+async def _run_text_surface_planning(
+    input_payload: TextSurfaceInputV2,
+    services: TextSurfaceServicesV2,
+    *,
+    session: failure_capsule.FailureCapsuleSession | None,
 ) -> TextSurfaceOutputV2:
     """Run two bounded text-surface stages after cognition is committed."""
 
@@ -59,6 +98,17 @@ async def run_text_surface_planning(
         isinstance(stage_result, CognitionExecutionError)
         for stage_result in stage_results
     ):
+        failed_stages = []
+        if isinstance(content_result, CognitionExecutionError):
+            failed_stages.append("content_plan")
+        if isinstance(preference, CognitionExecutionError):
+            failed_stages.append("preference")
+        failure_capsule.mark_failure(
+            session,
+            failure_kind="degraded_surface",
+            stage_name="run_text_surface_planning",
+            details={"failed_stages": failed_stages},
+        )
         degraded_output = build_degraded_text_surface(payload)
         return degraded_output
     content_plan, content_requirements, delivery_profile = content_result
@@ -143,6 +193,46 @@ async def repair_text_surface_planning(
     verified_hard_issues: list[str],
     services: TextSurfaceServicesV2,
 ) -> TextSurfaceOutputV2:
+    """Repair text planning with exact multi-argument failure capture."""
+
+    capsule_input = {
+        "input_payload": input_payload,
+        "verified_hard_issues": verified_hard_issues,
+    }
+    session = failure_capsule.begin_failure_capsule(
+        trace_id=llm_tracing.current_trace_id(),
+        entrypoint="repair_text_surface_planning",
+        input_payload=capsule_input,
+    )
+    try:
+        output = await _repair_text_surface_planning(
+            input_payload,
+            verified_hard_issues,
+            services,
+        )
+    except Exception as exc:
+        failure_capsule.mark_failure(
+            session,
+            failure_kind="terminal_failure",
+            stage_name="repair_text_surface_planning",
+            details={},
+        )
+        failure_capsule.finish_failure_capsule(
+            session,
+            outcome="terminal_failure",
+            exception=exc,
+        )
+        raise
+
+    failure_capsule.finish_failure_capsule(session, outcome=None)
+    return output
+
+
+async def _repair_text_surface_planning(
+    input_payload: TextSurfaceInputV2,
+    verified_hard_issues: list[str],
+    services: TextSurfaceServicesV2,
+) -> TextSurfaceOutputV2:
     """Replace every producer-owned field from canonical cognition truth.
 
     Args:
@@ -210,6 +300,37 @@ async def repair_text_surface_planning(
 
 
 async def run_visual_surface_planning(
+    input_payload: TextSurfaceInputV2,
+    services: VisualSurfaceServicesV2,
+) -> VisualSurfaceOutputV2:
+    """Run visual planning with failure-only protected replay capture."""
+
+    session = failure_capsule.begin_failure_capsule(
+        trace_id=llm_tracing.current_trace_id(),
+        entrypoint="run_visual_surface_planning",
+        input_payload=input_payload,
+    )
+    try:
+        output = await _run_visual_surface_planning(input_payload, services)
+    except Exception as exc:
+        failure_capsule.mark_failure(
+            session,
+            failure_kind="terminal_failure",
+            stage_name="run_visual_surface_planning",
+            details={},
+        )
+        failure_capsule.finish_failure_capsule(
+            session,
+            outcome="terminal_failure",
+            exception=exc,
+        )
+        raise
+
+    failure_capsule.finish_failure_capsule(session, outcome=None)
+    return output
+
+
+async def _run_visual_surface_planning(
     input_payload: TextSurfaceInputV2,
     services: VisualSurfaceServicesV2,
 ) -> VisualSurfaceOutputV2:

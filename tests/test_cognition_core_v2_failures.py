@@ -2,10 +2,20 @@
 
 from __future__ import annotations
 
+import asyncio
 from copy import deepcopy
+from typing import Any, cast
+from unittest.mock import AsyncMock
 
 import pytest
 
+import kazusa_ai_chatbot.cognition_core_v2.facade as facade_module
+import kazusa_ai_chatbot.cognition_core_v2.surface as surface_module
+import kazusa_ai_chatbot.llm_tracing as tracing
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    CognitionExecutionError,
+)
+from kazusa_ai_chatbot.llm_tracing import failure_capsule
 from kazusa_ai_chatbot.cognition_core_v2.semantic_appraisal import (
     validate_semantic_appraisal_result,
 )
@@ -31,6 +41,7 @@ from kazusa_ai_chatbot.cognition_core_v2.transition_guards import (
     transition_knowledge_gap,
     transition_threat,
 )
+from tests.cognition_core_v2_test_helpers import canonical_episode
 
 
 def _evidence(source_kind: str = "action_result") -> dict[str, str]:
@@ -122,6 +133,304 @@ def _appraisal_handle_refs(
             "entity_id": f"candidate:event:{evidence_handle}",
         }
     return refs
+
+
+def _surface_input() -> dict[str, object]:
+    """Build one valid surface input for failure-capsule integration."""
+
+    return {
+        "schema_version": "text_surface_input.v2",
+        "episode": canonical_episode(content="Preserve this exact input."),
+        "intention": {
+            "route": "speech",
+            "intention": "answer the current request",
+            "target_roles": [],
+            "reason": "the current request expects an answer",
+        },
+        "goal_resolution": "answerable_now",
+        "supporting_bids": [],
+        "expression_policy": {
+            "visibility": "visible",
+            "emotional_tone": "neutral",
+            "intensity": "restrained",
+            "directness": "balanced",
+        },
+        "semantic_affect": [],
+        "permitted_action_results": [],
+        "interaction_style_context": "brief and clear",
+        "character_expression_context": {
+            "tempo": "steady",
+            "linguistic_texture": "Concise clauses.",
+        },
+        "visual_character_context": "reserved and attentive",
+    }
+
+
+@pytest.mark.asyncio
+async def test_run_cognition_capsule_preserves_original_exception(
+    monkeypatch,
+) -> None:
+    """Terminal capture re-raises the exact cognition exception object."""
+
+    written: list[dict[str, Any]] = []
+    persisted = asyncio.Event()
+    expected = CognitionExecutionError("original cognition failure")
+
+    def reject_input(payload: object) -> None:
+        del payload
+        raise expected
+
+    async def insert_step(document: dict[str, Any]) -> str:
+        written.append(document)
+        persisted.set()
+        return str(document["step_id"])
+
+    monkeypatch.setattr(tracing, "LLM_TRACE_CAPTURE_MODE", "metadata")
+    monkeypatch.setattr(
+        failure_capsule,
+        "LLM_TRACE_CAPTURE_MODE",
+        "metadata",
+    )
+    monkeypatch.setattr(
+        facade_module,
+        "validate_cognition_core_input",
+        reject_input,
+    )
+    monkeypatch.setattr(tracing.db_llm_tracing, "insert_trace_step", insert_step)
+    trace_token = tracing.bind_trace_id("trace-terminal")
+    input_payload = {
+        "schema_version": "cognition_core_input.v2",
+        "nested": {"value": "before"},
+    }
+    try:
+        with pytest.raises(CognitionExecutionError) as exc_info:
+            await facade_module.run_cognition(
+                cast(Any, input_payload),
+                cast(Any, None),
+            )
+    finally:
+        tracing.reset_trace_id(trace_token)
+    input_payload["nested"]["value"] = "after"
+    await asyncio.wait_for(persisted.wait(), timeout=1)
+
+    assert exc_info.value is expected
+    assert len(written) == 1
+    capsule = written[0]["capsule"]
+    assert capsule["input_payload"]["nested"]["value"] == "before"
+    assert capsule["outcome"] == "terminal_failure"
+    assert capsule["exception"] == {
+        "type": "CognitionExecutionError",
+        "message": "original cognition failure",
+    }
+
+
+@pytest.mark.asyncio
+async def test_degraded_text_surface_schedules_partial_failure_capsule(
+    monkeypatch,
+) -> None:
+    """Recovered surface failure returns its fallback and promotes evidence."""
+
+    written: list[dict[str, Any]] = []
+    persisted = asyncio.Event()
+
+    async def fail_content(payload: object, services: object) -> None:
+        del payload
+        del services
+        raise CognitionExecutionError("content stage exhausted")
+
+    async def preference(
+        payload: object,
+        services: object,
+    ) -> tuple[list[str], list[str]]:
+        del payload
+        del services
+        return [], []
+
+    async def insert_step(document: dict[str, Any]) -> str:
+        written.append(document)
+        persisted.set()
+        return str(document["step_id"])
+
+    monkeypatch.setattr(tracing, "LLM_TRACE_CAPTURE_MODE", "metadata")
+    monkeypatch.setattr(
+        failure_capsule,
+        "LLM_TRACE_CAPTURE_MODE",
+        "metadata",
+    )
+    monkeypatch.setattr(
+        surface_module,
+        "run_content_plan_stage",
+        fail_content,
+    )
+    monkeypatch.setattr(
+        surface_module,
+        "run_preference_stage",
+        preference,
+    )
+    monkeypatch.setattr(tracing.db_llm_tracing, "insert_trace_step", insert_step)
+    trace_token = tracing.bind_trace_id("trace-partial-surface")
+    input_payload = _surface_input()
+    try:
+        output = await surface_module.run_text_surface_planning(
+            cast(Any, input_payload),
+            cast(Any, None),
+        )
+    finally:
+        tracing.reset_trace_id(trace_token)
+    await asyncio.wait_for(persisted.wait(), timeout=1)
+
+    assert output == surface_module.build_degraded_text_surface(input_payload)
+    assert len(written) == 1
+    capsule = written[0]["capsule"]
+    assert capsule["entrypoint"] == "run_text_surface_planning"
+    assert capsule["outcome"] == "partial_failure"
+    assert capsule["failure_events"] == [{
+        "failure_kind": "degraded_surface",
+        "stage_name": "run_text_surface_planning",
+        "details": {
+            "failed_stages": ["content_plan"],
+        },
+    }]
+
+
+@pytest.mark.asyncio
+async def test_clean_text_surface_output_has_no_capsule_write(
+    monkeypatch,
+) -> None:
+    """A successful first attempt returns normally without capsule storage."""
+
+    insert_step = AsyncMock()
+
+    async def content(
+        payload: object,
+        services: object,
+    ) -> tuple[str, list[str], dict[str, str]]:
+        del payload
+        del services
+        return (
+            "answer the current request",
+            ["preserve current meaning"],
+            {
+                "lexical_register": "plain",
+                "sentence_shape": "concise",
+                "rhythm": "steady",
+                "hesitation": "light",
+                "punctuation": "restrained",
+            },
+        )
+
+    async def preference(
+        payload: object,
+        services: object,
+    ) -> tuple[list[str], list[str]]:
+        del payload
+        del services
+        return [], []
+
+    monkeypatch.setattr(tracing, "LLM_TRACE_CAPTURE_MODE", "metadata")
+    monkeypatch.setattr(
+        failure_capsule,
+        "LLM_TRACE_CAPTURE_MODE",
+        "metadata",
+    )
+    monkeypatch.setattr(
+        surface_module,
+        "run_content_plan_stage",
+        content,
+    )
+    monkeypatch.setattr(
+        surface_module,
+        "run_preference_stage",
+        preference,
+    )
+    monkeypatch.setattr(tracing.db_llm_tracing, "insert_trace_step", insert_step)
+    trace_token = tracing.bind_trace_id("trace-clean-surface")
+    try:
+        output = await surface_module.run_text_surface_planning(
+            cast(Any, _surface_input()),
+            cast(Any, None),
+        )
+    finally:
+        tracing.reset_trace_id(trace_token)
+    await asyncio.sleep(0)
+
+    assert output["content_plan"] == "answer the current request"
+    assert output["content_requirements"] == ["preserve current meaning"]
+    insert_step.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "entrypoint",
+    [
+        "repair_text_surface_planning",
+        "run_visual_surface_planning",
+    ],
+)
+async def test_remaining_surface_entrypoints_capture_terminal_failure(
+    monkeypatch,
+    entrypoint: str,
+) -> None:
+    """Repair and visual entrypoints capture before input validation."""
+
+    written: list[dict[str, Any]] = []
+    persisted = asyncio.Event()
+    expected = ValueError(f"{entrypoint} input failed")
+
+    def reject_input(payload: object) -> None:
+        del payload
+        raise expected
+
+    async def insert_step(document: dict[str, Any]) -> str:
+        written.append(document)
+        persisted.set()
+        return str(document["step_id"])
+
+    monkeypatch.setattr(tracing, "LLM_TRACE_CAPTURE_MODE", "metadata")
+    monkeypatch.setattr(
+        failure_capsule,
+        "LLM_TRACE_CAPTURE_MODE",
+        "metadata",
+    )
+    monkeypatch.setattr(
+        surface_module,
+        "validate_text_surface_input",
+        reject_input,
+    )
+    monkeypatch.setattr(tracing.db_llm_tracing, "insert_trace_step", insert_step)
+    trace_token = tracing.bind_trace_id(f"trace-{entrypoint}")
+    repair_input = {"exact": "repair input"}
+    verified_issues = ["preserve the verified issue"]
+    visual_input = {"exact": "visual input"}
+    try:
+        with pytest.raises(ValueError) as exc_info:
+            if entrypoint == "repair_text_surface_planning":
+                await surface_module.repair_text_surface_planning(
+                    cast(Any, repair_input),
+                    verified_issues,
+                    cast(Any, None),
+                )
+            else:
+                await surface_module.run_visual_surface_planning(
+                    cast(Any, visual_input),
+                    cast(Any, None),
+                )
+    finally:
+        tracing.reset_trace_id(trace_token)
+    await asyncio.wait_for(persisted.wait(), timeout=1)
+
+    assert exc_info.value is expected
+    assert len(written) == 1
+    capsule = written[0]["capsule"]
+    assert capsule["entrypoint"] == entrypoint
+    assert capsule["outcome"] == "terminal_failure"
+    if entrypoint == "repair_text_surface_planning":
+        assert capsule["input_payload"] == {
+            "input_payload": repair_input,
+            "verified_hard_issues": verified_issues,
+        }
+    else:
+        assert capsule["input_payload"] == visual_input
 
 
 def test_unsupported_appraisal_can_select_no_evidence() -> None:

@@ -50,6 +50,14 @@ sanitized event-log exports.
 - `full`: stores raw prompt messages, raw response text, and parsed output in
   protected trace collections.
 
+While `metadata` or `full` capture is enabled, Cognition Core V2 keeps one
+invocation-local exact-input and model-attempt buffer. A clean invocation
+discards that buffer without a capsule write. A terminal, recovered, partial,
+or degraded invocation schedules one protected `llm_trace_steps` row with
+`capture_reason="cognition_failure_capsule"`. The row contains the raw public
+entrypoint input, ordered attempts, concrete validation errors, and the final
+failure disposition. Model configuration excludes API keys.
+
 Past-dialog cognition residual can only use selected `parsed_output` fields
 from protected full-capture trace steps. Metadata-mode trace steps
 intentionally store empty parsed output for this purpose, so a past dialog with
@@ -67,12 +75,22 @@ Trace storage must preserve the distinction between protected trace payloads
 and sanitized audit/event-log payloads. Event-log rows may reference trace ids;
 they must not duplicate protected trace bodies.
 
+Failure capsules reuse the trace-step collection, indexes, and
+`DEBUG_LOG_TTL_DAYS` expiry. Their `cognition_invocation_id` distinguishes safe
+retries and concurrent Cognition V2 calls under the same turn trace.
+
 ## Failure Behavior
 
 Trace capture must not be required for normal chat delivery. Capture failures
 should degrade diagnostics and be visible through operational logging or
 event-log metadata, but they must not expose raw prompts or outputs through
 fallback public paths.
+
+Cognition failure-capsule persistence is scheduled in the background and is
+never awaited by the response path. Snapshot, scheduling, and persistence
+failures emit sanitized warnings containing no protected input, model output,
+API key, or exception message. The original cognition output or exception
+continues unchanged.
 
 ## Testing Contract
 

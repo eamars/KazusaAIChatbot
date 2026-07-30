@@ -9,7 +9,12 @@ from copy import deepcopy
 from typing import Any
 
 import httpx
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+)
 from openai import OpenAIError
 
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
@@ -40,6 +45,8 @@ from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
 from kazusa_ai_chatbot.cognition_core_v2.state_reducers import (
     apply_semantic_appraisals,
 )
+from kazusa_ai_chatbot.llm_interface import LLMCallConfig
+from kazusa_ai_chatbot.llm_tracing import failure_capsule
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 
 
@@ -202,6 +209,18 @@ async def appraise_semantic_question(
             TimeoutError,
         ) as exc:
             ended_at = time.perf_counter()
+            _record_semantic_appraisal_trace(
+                config=config,
+                question=question,
+                messages=request_messages,
+                response_text="",
+                parsed_output={},
+                parse_status="provider_error",
+                status="failed",
+                started_at=started_at,
+                attempt_index=attempt_index + 1,
+                validation_error=str(exc),
+            )
             capture_validation_stage(
                 stage_id=stage_id,
                 config=config,
@@ -225,10 +244,14 @@ async def appraise_semantic_question(
                 ) from exc
             request_messages = [system_message, human_message]
             continue
-
         raw_output = getattr(response, "content", "")
         try:
-            parsed_output = parse_llm_json_output(raw_output)
+            parsed_output = parse_llm_json_output(
+                raw_output,
+                repair_trace_hook=(
+                    failure_capsule.append_json_repair_attempt
+                ),
+            )
             result = validate_semantic_appraisal_result(
                 parsed_output,
                 question,
@@ -244,6 +267,18 @@ async def appraise_semantic_question(
             )
         except (AttributeError, KeyError, TypeError, ValueError) as exc:
             ended_at = time.perf_counter()
+            _record_semantic_appraisal_trace(
+                config=config,
+                question=question,
+                messages=request_messages,
+                response_text=str(raw_output),
+                parsed_output=parsed_output,
+                parse_status="contract_error",
+                status="failed",
+                started_at=started_at,
+                attempt_index=attempt_index + 1,
+                validation_error=str(exc),
+            )
             capture_validation_stage(
                 stage_id=stage_id,
                 config=config,
@@ -274,6 +309,18 @@ async def appraise_semantic_question(
             continue
 
         ended_at = time.perf_counter()
+        _record_semantic_appraisal_trace(
+            config=config,
+            question=question,
+            messages=request_messages,
+            response_text=str(raw_output),
+            parsed_output=parsed_output,
+            parse_status="succeeded",
+            status="succeeded",
+            started_at=started_at,
+            attempt_index=attempt_index + 1,
+            validation_error="",
+        )
         capture_validation_stage(
             stage_id=stage_id,
             config=config,
@@ -288,6 +335,39 @@ async def appraise_semantic_question(
         return result
 
     raise AssertionError("semantic appraisal attempt loop did not terminate")
+
+
+def _record_semantic_appraisal_trace(
+    *,
+    config: LLMCallConfig,
+    question: SemanticQuestionV2,
+    messages: Sequence[BaseMessage],
+    response_text: str,
+    parsed_output: object,
+    parse_status: str,
+    status: str,
+    started_at: float,
+    attempt_index: int,
+    validation_error: str,
+) -> None:
+    """Preserve one protected semantic-appraisal model boundary."""
+
+    stage_name = f"semantic_appraisal.{question['question_id']}"
+    if attempt_index > 1:
+        stage_name = f"{stage_name}.repair"
+    failure_capsule.append_model_attempt(
+        stage_name=stage_name,
+        messages=messages,
+        response_text=response_text,
+        parsed_output=parsed_output,
+        parse_status=parse_status,
+        status=status,
+        config=config,
+        branch_id=question["question_id"],
+        attempt_index=attempt_index,
+        validation_error=validation_error,
+        started_at=started_at,
+    )
 
 
 def _appraisal_repair_messages(

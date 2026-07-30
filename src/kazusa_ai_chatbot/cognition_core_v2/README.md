@@ -312,6 +312,21 @@ fallback remain execution errors. Recoverable and degraded outcomes follow the
 normal persistence and delivery path. Callers commit only validated replacement
 state.
 
+All four public entrypoints capture their raw arguments before validation in a
+ContextVar-isolated protected failure buffer. `repair_text_surface_planning`
+captures both the raw surface input and `verified_hard_issues`; the other
+entrypoints capture their raw input payload. Clean runs discard the buffer.
+Terminal exceptions, failed appraisals or branches, recovered model attempts,
+and degraded surfaces schedule one failure capsule without delaying or
+changing the returned output or raised exception.
+
+The direct V2 model owners—semantic appraisal, goal cognition, workspace
+collapse, action planning, semantic authorization, and generic surface
+stages—record every provider and contract attempt with its one-based attempt
+index, non-secret call configuration, exact messages and response, parsed
+output, and concrete error. The canonical JSON-repair fallback records its own
+model call into the active capsule without changing parser or retry behavior.
+
 ## Aggregate Prompt Budgets
 
 Each V2 model owner budgets its complete deterministic serialization rather

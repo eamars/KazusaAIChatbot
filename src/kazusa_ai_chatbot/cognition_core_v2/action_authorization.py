@@ -290,6 +290,8 @@ async def invoke_semantic_authorizer(
                 started_at=started_at,
                 stage_name=current_stage_name,
                 output_state_fields=output_state_fields,
+                attempt_index=attempt_index + 1,
+                validation_error=str(exc),
             )
             if attempt_index + 1 >= ACTION_AUTHORIZATION_ATTEMPT_LIMIT:
                 logger.warning(
@@ -302,11 +304,15 @@ async def invoke_semantic_authorizer(
                 }
             current_messages = list(base_messages)
             continue
-
         response_text = str(getattr(response, "content", ""))
         parsed: object = {}
         try:
-            parsed = parse_llm_json_output(response_text)
+            parsed = parse_llm_json_output(
+                response_text,
+                repair_trace_hook=(
+                    llm_tracing.failure_capsule.append_json_repair_attempt
+                ),
+            )
             decisions = _validate_authorization_decisions(
                 parsed,
                 candidate_handles=candidate_handles,
@@ -322,6 +328,8 @@ async def invoke_semantic_authorizer(
                 started_at=started_at,
                 stage_name=current_stage_name,
                 output_state_fields=output_state_fields,
+                attempt_index=attempt_index + 1,
+                validation_error=str(exc),
             )
             if attempt_index + 1 >= ACTION_AUTHORIZATION_ATTEMPT_LIMIT:
                 logger.warning(
@@ -358,6 +366,8 @@ async def invoke_semantic_authorizer(
             started_at=started_at,
             stage_name=current_stage_name,
             output_state_fields=output_state_fields,
+            attempt_index=attempt_index + 1,
+            validation_error="",
         )
         return decisions
     raise AssertionError("action-authorization attempt loop did not terminate")
@@ -431,6 +441,8 @@ async def _record_authorization_trace(
     started_at: float,
     stage_name: str,
     output_state_fields: list[str],
+    attempt_index: int,
+    validation_error: str,
 ) -> None:
     """Preserve one protected semantic authorization model boundary."""
 
@@ -449,4 +461,8 @@ async def _record_authorization_trace(
         status=status,
         duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
         output_state_fields=output_state_fields,
+        call_config=config,
+        attempt_index=attempt_index,
+        validation_error=validation_error,
+        attempt_started_at=started_at,
     )

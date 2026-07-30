@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Mapping
+from time import perf_counter
 from typing import Any
 
 import httpx
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from openai import OpenAIError
 
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
@@ -18,6 +19,8 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
 from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
     V2_MODEL_TOTAL_ATTEMPTS,
 )
+from kazusa_ai_chatbot.llm_interface import LLMCallConfig
+from kazusa_ai_chatbot.llm_tracing import failure_capsule
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 
 
@@ -265,7 +268,7 @@ async def _run_surface_stage(
     payload: Mapping[str, Any],
     system_prompt: str,
     llm: Any,
-    config: Any,
+    config: LLMCallConfig,
     stage_name: str,
     validator: Callable[[object], Any],
     safe_checkpoint: str,
@@ -283,6 +286,12 @@ async def _run_surface_stage(
     ]
     last_error: Exception | None = None
     for attempt_index in range(SURFACE_STAGE_ATTEMPT_LIMIT):
+        started_at = perf_counter()
+        trace_stage_name = (
+            f"surface.{stage_name}"
+            if attempt_index == 0
+            else f"surface.{stage_name}.repair"
+        )
         try:
             response = await llm.ainvoke(
                 request_messages,
@@ -297,6 +306,19 @@ async def _run_surface_stage(
             TimeoutError,
         ) as exc:
             last_error = exc
+            _record_surface_trace(
+                config=config,
+                messages=request_messages,
+                response_text="",
+                parsed_output={},
+                parse_status="provider_error",
+                status="failed",
+                started_at=started_at,
+                stage_name=trace_stage_name,
+                branch_id=stage_name,
+                attempt_index=attempt_index + 1,
+                validation_error=str(exc),
+            )
             if attempt_index + 1 >= SURFACE_STAGE_ATTEMPT_LIMIT:
                 raise _surface_execution_error(
                     stage_name=stage_name,
@@ -314,14 +336,32 @@ async def _run_surface_stage(
                 attempt_count=attempt_index + 1,
             )
             continue
-
         parsed: object = {}
-        response_text = getattr(response, "content", "")
+        response_content = getattr(response, "content", "")
+        response_text = str(response_content)
         try:
-            parsed = parse_llm_json_output(response_text)
-            return validator(parsed)
+            parsed = parse_llm_json_output(
+                response_content,
+                repair_trace_hook=(
+                    failure_capsule.append_json_repair_attempt
+                ),
+            )
+            validated_result = validator(parsed)
         except (AttributeError, KeyError, TypeError, ValueError) as exc:
             last_error = exc
+            _record_surface_trace(
+                config=config,
+                messages=request_messages,
+                response_text=response_text,
+                parsed_output=parsed,
+                parse_status="contract_error",
+                status="failed",
+                started_at=started_at,
+                stage_name=trace_stage_name,
+                branch_id=stage_name,
+                attempt_index=attempt_index + 1,
+                validation_error=str(exc),
+            )
             if attempt_index + 1 >= SURFACE_STAGE_ATTEMPT_LIMIT:
                 raise _surface_execution_error(
                     stage_name=stage_name,
@@ -338,6 +378,22 @@ async def _run_surface_stage(
                 safe_checkpoint=safe_checkpoint,
                 attempt_count=attempt_index + 1,
             )
+            continue
+
+        _record_surface_trace(
+            config=config,
+            messages=request_messages,
+            response_text=response_text,
+            parsed_output=parsed,
+            parse_status="succeeded",
+            status="succeeded",
+            started_at=started_at,
+            stage_name=trace_stage_name,
+            branch_id=stage_name,
+            attempt_index=attempt_index + 1,
+            validation_error="",
+        )
+        return validated_result
 
     raise _surface_execution_error(
         stage_name=stage_name,
@@ -345,6 +401,37 @@ async def _run_surface_stage(
         attempt_count=SURFACE_STAGE_ATTEMPT_LIMIT,
         detail=f"surface 阶段执行失败: {last_error}",
         safe_checkpoint=safe_checkpoint,
+    )
+
+
+def _record_surface_trace(
+    *,
+    config: LLMCallConfig,
+    messages: list[BaseMessage],
+    response_text: str,
+    parsed_output: object,
+    parse_status: str,
+    status: str,
+    started_at: float,
+    stage_name: str,
+    branch_id: str,
+    attempt_index: int,
+    validation_error: str,
+) -> None:
+    """Preserve one protected surface-owner model boundary."""
+
+    failure_capsule.append_model_attempt(
+        stage_name=stage_name,
+        messages=messages,
+        response_text=response_text,
+        parsed_output=parsed_output,
+        parse_status=parse_status,
+        status=status,
+        config=config,
+        branch_id=branch_id,
+        attempt_index=attempt_index,
+        validation_error=validation_error,
+        started_at=started_at,
     )
 
 

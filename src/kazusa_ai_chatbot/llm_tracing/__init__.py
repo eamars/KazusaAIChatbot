@@ -15,6 +15,8 @@ from langchain_core.messages import BaseMessage
 
 from kazusa_ai_chatbot.config import DEBUG_LOG_TTL_DAYS, LLM_TRACE_CAPTURE_MODE
 from kazusa_ai_chatbot.db import llm_tracing as db_llm_tracing
+from kazusa_ai_chatbot.llm_interface import LLMCallConfig
+from kazusa_ai_chatbot.llm_tracing import failure_capsule
 from kazusa_ai_chatbot.logging_retention import expiry_from_storage_iso
 from kazusa_ai_chatbot.time_boundary import storage_utc_now_iso
 
@@ -215,9 +217,29 @@ async def record_llm_trace_step(
     duration_ms: int,
     output_state_fields: Sequence[str],
     sequence: int = 0,
+    call_config: LLMCallConfig | None = None,
+    branch_id: str = "",
+    attempt_index: int = 0,
+    validation_error: str = "",
+    attempt_started_at: float | None = None,
 ) -> LLMTraceWriteResult:
     """Record one LLM stage prompt/response trace."""
 
+    failure_capsule.append_model_attempt(
+        stage_name=stage_name,
+        messages=messages,
+        response_text=response_text,
+        parsed_output=parsed_output,
+        parse_status=parse_status,
+        status=status,
+        config=call_config,
+        route_name=route_name,
+        model_name=model_name,
+        branch_id=branch_id,
+        attempt_index=attempt_index,
+        validation_error=validation_error,
+        started_at=attempt_started_at,
+    )
     if not trace_id:
         return _write_result(
             accepted=False,

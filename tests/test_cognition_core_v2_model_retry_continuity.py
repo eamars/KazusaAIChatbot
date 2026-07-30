@@ -700,6 +700,49 @@ async def test_visual_surface_owner_exhausts_after_three_attempts() -> None:
 
 
 @pytest.mark.asyncio
+async def test_surface_non_string_content_keeps_contract_retry_behavior() -> None:
+    """Tracing must not make a non-string provider candidate acceptable."""
+
+    surface = importlib.import_module(
+        "kazusa_ai_chatbot.cognition_core_v2.surface"
+    )
+
+    class _VisualLLM:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config: object,
+        ) -> SimpleNamespace:
+            del messages, config
+            self.calls += 1
+            if self.calls == 1:
+                return SimpleNamespace(
+                    content={"visual_directives": "wrong transport type"},
+                )
+            return SimpleNamespace(
+                content='{"visual_directives": "validated retry"}',
+            )
+
+    llm = _VisualLLM()
+    services = SimpleNamespace(
+        llm=llm,
+        visual_config=SimpleNamespace(stage_name="visual"),
+    )
+
+    output = await surface.run_visual_surface_planning(
+        _surface_input(),
+        services,
+    )
+
+    assert output["visual_directives"] == "validated retry"
+    assert llm.calls == 2
+
+
+@pytest.mark.asyncio
 async def test_unexpected_text_surface_failure_remains_unrecoverable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -9,6 +9,7 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any
 
+from kazusa_ai_chatbot import llm_tracing
 from kazusa_ai_chatbot.cognition_core_v2.action_selection import plan_actions
 from kazusa_ai_chatbot.cognition_core_v2.branch_activation import (
     select_final_branches,
@@ -72,6 +73,7 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     validate_resolver_pending_resolution,
     validate_resolver_pending_resume,
 )
+from kazusa_ai_chatbot.llm_tracing import failure_capsule
 from kazusa_ai_chatbot.time_boundary import parse_storage_utc_datetime
 
 
@@ -94,6 +96,38 @@ def _deduplicate_diagnostics_warnings(
 
 
 async def run_cognition(
+    input_payload: CognitionCoreInputV2,
+    services: CognitionCoreServicesV2,
+) -> CognitionCoreOutputV2:
+    """Run cognition with failure-only protected replay capture."""
+
+    session = failure_capsule.begin_failure_capsule(
+        trace_id=llm_tracing.current_trace_id(),
+        entrypoint="run_cognition",
+        input_payload=input_payload,
+    )
+    try:
+        output = await _run_cognition(input_payload, services)
+    except Exception as exc:
+        failure_capsule.mark_failure(
+            session,
+            failure_kind="terminal_failure",
+            stage_name="run_cognition",
+            details={},
+        )
+        failure_capsule.finish_failure_capsule(
+            session,
+            outcome="terminal_failure",
+            exception=exc,
+        )
+        raise
+
+    _mark_cognition_partial_failures(session, output)
+    failure_capsule.finish_failure_capsule(session, outcome=None)
+    return output
+
+
+async def _run_cognition(
     input_payload: CognitionCoreInputV2,
     services: CognitionCoreServicesV2,
 ) -> CognitionCoreOutputV2:
@@ -503,6 +537,48 @@ async def run_cognition(
         },
     )
     return validate_cognition_core_output(output)
+
+
+def _mark_cognition_partial_failures(
+    session: failure_capsule.FailureCapsuleSession | None,
+    output: CognitionCoreOutputV2,
+) -> None:
+    """Mark surfaced appraisal and branch failures from validated output."""
+
+    observability = output["cognition_observability"]
+    failed_appraisals = [
+        {
+            "question_kind": appraisal["question_kind"],
+            "failure_code": appraisal.get("failure_code", ""),
+        }
+        for appraisal in observability["appraisals"]
+        if appraisal["status"] == "failed"
+    ]
+    if failed_appraisals:
+        failure_capsule.mark_failure(
+            session,
+            failure_kind="failed_appraisal",
+            stage_name="semantic_appraisal",
+            details={"appraisals": failed_appraisals},
+        )
+
+    failed_branches = [
+        {
+            "phase": branch["phase"],
+            "branch_index": branch["branch_index"],
+            "goal_kind": branch["goal_kind"],
+            "failure_code": branch.get("failure_code", ""),
+        }
+        for branch in observability["branches"]
+        if branch["status"] == "failed"
+    ]
+    if failed_branches:
+        failure_capsule.mark_failure(
+            session,
+            failure_kind="failed_branch",
+            stage_name="goal_cognition",
+            details={"branches": failed_branches},
+        )
 
 
 def _raise_for_failed_required_branches(
