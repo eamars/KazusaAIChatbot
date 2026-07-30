@@ -6,7 +6,7 @@
   one fragmented character response occupies one history slot and recent human
   input remains visible.
 - Plan class: `large`.
-- Status: `in_progress`.
+- Status: `completed`.
 - Mandatory skills: `development-plan`, `local-llm-architecture`, `py-style`,
   `cjk-safety`, `test-style-and-execution`, and `debug-llm`.
 - Overall cutover strategy: big-bang replacement of the settled-relevance
@@ -414,14 +414,15 @@ to rebuild all citable evidence after outer-cap reductions.
   - Handoff: independent reviewer starts Stage 4 after plan reread.
   - Sign-off: parent agent / 2026-07-30, with user-approved unrelated
     exceptions recorded in `Execution Evidence`.
-- [ ] Stage 4 - independent code review and lifecycle sign-off complete.
+- [x] Stage 4 - independent code review and lifecycle sign-off complete.
   - Covers: implementation steps 8-9 and `Independent Code Review`.
   - Verify: no unresolved review finding; affected gates rerun after fixes;
     user approval recorded.
   - Evidence: reviewer identity, findings, fixes, reruns, residual risks, user
     decision, archive path, and registry update recorded.
   - Handoff: complete.
-  - Sign-off: `<agent/date>` after verification and evidence.
+  - Sign-off: parent agent / 2026-07-30 after independent review and explicit
+    user final sign-off.
 
 ## Verification
 
@@ -668,5 +669,6 @@ Stage 4 independent review evidence recorded on 2026-07-30:
 - final independent review outcome: `APPROVED`, with no remaining finding;
 - residual risks are limited to the user-approved live-model history-use
   quality exception and the two unchanged unrelated full-suite failures; and
-- lifecycle completion, archive move, and registry transition await explicit
-  final user sign-off.
+- the user provided explicit final sign-off; the plan was marked completed,
+  moved to `archive/completed/bugfix/`, and transitioned from the active
+  registry to the completed bugfix registry.

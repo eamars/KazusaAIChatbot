@@ -54,7 +54,6 @@ long_term/todo.md
 | [conversation_progress_v2_final_signoff_plan.md](active/bugfix/conversation_progress_v2_final_signoff_plan.md) | Focused Conversation Progress V2 semantic-evidence and maximum-turn final sign-off plan | in_progress |
 | [rag2_public_output_contract_leak_bugfix_plan.md](active/bugfix/rag2_public_output_contract_leak_bugfix_plan.md) | Large RAG2 prompt/evidence contract bugfix plan | draft |
 | [relevance_evidence_grounded_admission_over_sensitivity_bugfix_plan.md](active/bugfix/relevance_evidence_grounded_admission_over_sensitivity_bugfix_plan.md) | Evidence-grounded recipient and character-state relevance admission bugfix plan | in progress |
-| [settled_relevance_logical_history_projection_bugfix_plan.md](active/bugfix/settled_relevance_logical_history_projection_bugfix_plan.md) | Settled-relevance logical-turn intake and deterministic newest-history fitting bugfix plan | in_progress |
 
 ## Reference Documents
 
@@ -490,6 +489,7 @@ plans.
 | [resolver_image_only_empty_input_bugfix_plan.md](archive/completed/bugfix/resolver_image_only_empty_input_bugfix_plan.md) |
 | [runtime_prompt_chinese_and_dialog_surface_guidance_plan.md](archive/completed/bugfix/runtime_prompt_chinese_and_dialog_surface_guidance_plan.md) |
 | [semantic_appraisal_terminal_transition_reliability_plan.md](archive/completed/bugfix/semantic_appraisal_terminal_transition_reliability_plan.md) |
+| [settled_relevance_logical_history_projection_bugfix_plan.md](archive/completed/bugfix/settled_relevance_logical_history_projection_bugfix_plan.md) |
 | [self_cognition_background_context_budget_bugfix_plan.md](archive/completed/bugfix/self_cognition_background_context_budget_bugfix_plan.md) |
 | [self_cognition_group_digest_context_evidence_bugfix_plan.md](archive/completed/bugfix/self_cognition_group_digest_context_evidence_bugfix_plan.md) |
 | [self_cognition_character_global_id_config_bugfix_plan.md](archive/completed/bugfix/self_cognition_character_global_id_config_bugfix_plan.md) |
