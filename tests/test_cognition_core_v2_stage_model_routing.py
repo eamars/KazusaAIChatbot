@@ -217,7 +217,6 @@ def _selection_goal_draft() -> dict[str, object]:
         "private_monologue": "I will make this choice directly.",
         "target_role_handles": [],
         "evidence_handles": ["e1"],
-        "conversation_evidence_relations": [],
         "expected_consequences": ["the user receives one concrete choice"],
         "confidence": "high",
     }
@@ -448,7 +447,7 @@ async def test_selection_producer_retry_reuses_goal_route_and_trace(
         _selection_goal_draft(),
     ])
     services = _services(llm)
-    expected_config = services.goal_active_branch_config
+    expected_config = services.goal_ordinary_response_config
     evidence = [{
         "evidence_handle": "e1",
         "evidence_ref": {
@@ -477,9 +476,12 @@ async def test_selection_producer_retry_reuses_goal_route_and_trace(
 
     assert result["intention"] == _selection_goal_draft()["selection"]
     assert llm.configs == [expected_config, expected_config]
-    assert all(
-        messages[0].content == goal_cognition.REQUIRED_SELECTION_GOAL_PROMPT
-        for messages in llm.messages
+    assert (
+        llm.messages[0][0].content
+        == goal_cognition.REQUIRED_SELECTION_GOAL_PROMPT
+    )
+    assert llm.messages[1][0].content.startswith(
+        goal_cognition.REQUIRED_SELECTION_GOAL_PROMPT
     )
     assert [
         call.kwargs["route_name"]
@@ -488,7 +490,7 @@ async def test_selection_producer_retry_reuses_goal_route_and_trace(
 
 
 def test_required_selection_has_no_independent_model_route() -> None:
-    """Keep selection production on the selected goal branch route."""
+    """Keep selection production on the existing dense ordinary-goal route."""
 
     service_fields = {
         field.name for field in fields(CognitionCoreServicesV2)

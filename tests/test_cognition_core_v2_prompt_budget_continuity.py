@@ -831,7 +831,7 @@ def test_goal_exact_cap_and_cap_plus_one_are_distinct() -> None:
 
     fitted = goal_cognition_module._fit_goal_prompt_payload(
         payload,
-        evidence_rows,
+        system_prompt="",
     )
 
     assert len(fitted) == 24000
@@ -839,7 +839,7 @@ def test_goal_exact_cap_and_cap_plus_one_are_distinct() -> None:
     with pytest.raises(PromptBudgetError):
         goal_cognition_module._fit_goal_prompt_payload(
             payload,
-            evidence_rows,
+            system_prompt="",
         )
 
 
@@ -855,7 +855,7 @@ def test_required_selection_budget_preserves_mandatory_evidence(
     )
     optional_text = "O" * 1000
 
-    def _payload() -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    def _payload() -> dict[str, Any]:
         evidence_rows = [{
             "handle": "e1",
             "source_kind": "episode",
@@ -873,16 +873,20 @@ def test_required_selection_budget_preserves_mandatory_evidence(
             "branch": {},
             "goal": {},
             "semantic_context": {},
-            "evidence": evidence_rows,
             "role_handles": [],
             "role_summaries": {},
             "required_selection_operations": [{
                 "evidence_handle": "e1",
+                "role_explicit_content": required_operation_text,
             }],
-            "conversation_progress_event_handles": ["e2"],
-        }, evidence_rows
+            "conversation_progress_constraints": [{
+                "evidence_handle": "e2",
+                "semantic_text": required_progress_text,
+            }],
+            "supporting_evidence": [evidence_rows[2]],
+        }
 
-    payload, evidence_rows = _payload()
+    payload = _payload()
     serialized_chars = len(json.dumps(
         payload,
         ensure_ascii=False,
@@ -891,34 +895,94 @@ def test_required_selection_budget_preserves_mandatory_evidence(
     optional_floor = goal_cognition_module.MIN_PROMPT_EVIDENCE_TEXT_CHARS
     optional_reduction = len(optional_text) - optional_floor
     exact_optional_floor = serialized_chars - optional_reduction
+    system_prompt = goal_cognition_module.REQUIRED_SELECTION_GOAL_PROMPT
     monkeypatch.setattr(
         goal_cognition_module,
         "GOAL_COGNITION_PROMPT_CAP",
-        exact_optional_floor,
+        len(system_prompt) + exact_optional_floor,
     )
 
     fitted = goal_cognition_module._fit_goal_prompt_payload(
         payload,
-        evidence_rows,
+        system_prompt=system_prompt,
     )
-    fitted_evidence = json.loads(fitted)["evidence"]
+    fitted_payload = json.loads(fitted)
 
-    assert fitted_evidence[0]["semantic_text"] == required_operation_text
-    assert fitted_evidence[1]["semantic_text"] == required_progress_text
-    assert len(fitted_evidence[2]["semantic_text"]) == optional_floor
+    assert fitted_payload["required_selection_operations"][0][
+        "role_explicit_content"
+    ] == required_operation_text
+    assert fitted_payload["conversation_progress_constraints"][0][
+        "semantic_text"
+    ] == required_progress_text
+    assert len(
+        fitted_payload["supporting_evidence"][0]["semantic_text"]
+    ) == optional_floor
 
-    payload, evidence_rows = _payload()
+    payload = _payload()
     monkeypatch.setattr(
         goal_cognition_module,
         "GOAL_COGNITION_PROMPT_CAP",
-        exact_optional_floor - 1,
+        len(system_prompt) + exact_optional_floor - 1,
     )
 
     with pytest.raises(PromptBudgetError):
         goal_cognition_module._fit_goal_prompt_payload(
             payload,
-            evidence_rows,
+            system_prompt=system_prompt,
         )
+
+
+def test_required_selection_regeneration_feedback_counts_toward_cap() -> None:
+    """Fit replacement feedback and payload inside one aggregate budget."""
+
+    payload = {
+        "branch": {},
+        "goal": {},
+        "semantic_context": {},
+        "role_handles": [],
+        "role_summaries": {},
+        "required_selection_operations": [{
+            "evidence_handle": "e1",
+            "role_explicit_content": "required operation",
+        }],
+        "conversation_progress_constraints": [{
+            "evidence_handle": "e2",
+            "semantic_text": "completed prior event",
+        }],
+        "supporting_evidence": [{
+            "handle": "e3",
+            "source_kind": "conversation_evidence",
+            "semantic_text": "S" * 30000,
+        }],
+    }
+    initial_system_prompt = (
+        goal_cognition_module.REQUIRED_SELECTION_GOAL_PROMPT
+    )
+    regeneration_system_prompt = (
+        goal_cognition_module._required_selection_regeneration_prompt(
+            "selection goal draft fields are not exact",
+            {"e1", "e2"},
+        )
+    )
+
+    initial_payload = goal_cognition_module._fit_goal_prompt_payload(
+        payload,
+        system_prompt=initial_system_prompt,
+    )
+    regeneration_payload = goal_cognition_module._fit_goal_prompt_payload(
+        payload,
+        system_prompt=regeneration_system_prompt,
+    )
+
+    assert (
+        len(initial_system_prompt) + len(initial_payload)
+        <= goal_cognition_module.GOAL_COGNITION_PROMPT_CAP
+    )
+    assert (
+        len(regeneration_system_prompt) + len(regeneration_payload)
+        <= goal_cognition_module.GOAL_COGNITION_PROMPT_CAP
+    )
+    assert len(regeneration_payload) < len(initial_payload)
 
 
 @pytest.mark.parametrize(
