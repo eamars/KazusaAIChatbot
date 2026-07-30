@@ -354,18 +354,17 @@ def _patch_chat_dependencies(
         "_active_character_name_snapshot",
         "Character",
     )
+    character_profile = canonical_service_character_profile(
+        marker="background-consolidation",
+        global_user_id=service_module.CHARACTER_GLOBAL_USER_ID,
+    )
     monkeypatch.setattr(
         service_module,
         "_runtime_character_state",
         {
-            "mood": "old mood",
-            "vibe_check": "old vibe",
-            "character_reflection": "old reflection",
+            "cognition_state": character_profile["cognition_state"],
+            "updated_at": character_profile["updated_at"],
         },
-    )
-    character_profile = canonical_service_character_profile(
-        marker="background-consolidation",
-        global_user_id=service_module.CHARACTER_GLOBAL_USER_ID,
     )
     identity_snapshot = canonical_episode_identity_snapshot(
         marker="background-consolidation",

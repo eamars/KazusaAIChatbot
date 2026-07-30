@@ -53,7 +53,7 @@ long_term/todo.md
 | [cognition_core_v2_short_horizon_global_state_composition_bigbang_plan.md](active/bugfix/cognition_core_v2_short_horizon_global_state_composition_bigbang_plan.md) | Post-identity V2 plan for transient global posture, causal relationship context, scoped style composition, and runtime/UI proof | draft |
 | [conversation_progress_v2_final_signoff_plan.md](active/bugfix/conversation_progress_v2_final_signoff_plan.md) | Focused Conversation Progress V2 semantic-evidence and maximum-turn final sign-off plan | in_progress |
 | [rag2_public_output_contract_leak_bugfix_plan.md](active/bugfix/rag2_public_output_contract_leak_bugfix_plan.md) | Large RAG2 prompt/evidence contract bugfix plan | draft |
-| [relevance_evidence_grounded_admission_over_sensitivity_bugfix_plan.md](active/bugfix/relevance_evidence_grounded_admission_over_sensitivity_bugfix_plan.md) | Evidence-grounded recipient and character-state relevance admission bugfix plan | draft |
+| [relevance_evidence_grounded_admission_over_sensitivity_bugfix_plan.md](active/bugfix/relevance_evidence_grounded_admission_over_sensitivity_bugfix_plan.md) | Evidence-grounded recipient and character-state relevance admission bugfix plan | in progress |
 
 ## Reference Documents
 

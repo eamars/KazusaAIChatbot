@@ -12,6 +12,7 @@
   deterministic lifecycle, ordering, deadlines, and cognition claims
 - Public entrypoint: `kazusa_ai_chatbot.relevance`
 - Primary implementation files:
+  - `participation_evidence.py`
   - `frontline_relevance_agent.py`
   - `persona_relevance_agent.py`
 
@@ -27,7 +28,14 @@ with `ignore`, `proceed`, or `wait`. Both agents use the existing
 `RELEVANCE_AGENT_LLM` route and keep their stage-local prompt and completion
 budgets next to their handlers. Both receive canonical `group|private` scope
 and the active character name. Group participation requires character-grounded
-listener evidence; answerability or helpfulness alone is insufficient.
+interaction evidence or a concrete intersection with supplied active character
+state. Interaction relevance includes typed character target/reply, a typed or
+explicit whole-group invitation, complete canonical-name address, or grounded
+open-turn/bot/history continuity. Character-state salience requires the current
+message to materially intersect a supplied active-state item such that speaking
+could advance, protect, resolve, or investigate it. Answerability, helpfulness,
+emotionality, topic popularity, and stable personality traits alone are
+insufficient.
 Frontline uses separate static group and private prompt branches so the local
 model never carries both scope policies in one call. Its output contract also
 removes `append` when no open slot exists and requires an empty prelude list
@@ -37,9 +45,18 @@ An open turn containing only a direct character summon or an explicitly
 unfinished setup remains incomplete; the next same-author message that
 naturally supplies its missing request or content appends even when its own
 typed target and reply labels are `none`.
+Both stages receive bounded interaction evidence and a bounded projection of
+the same process-local native character cognition-state snapshot. Deterministic
+code exposes typed protocol facts, a contiguous complete-name candidate, active
+state candidates, and evidence provenance; the relevance LLM owns recipient,
+continuity, explicit-group-invitation, and message/state-intersection judgment.
+Pronouns, numerals, canonical-name prefixes, and the generic current-message
+item do not establish character address.
+
 Settled input keeps active fragments separate from external fresh history and
-includes bounded participant/target/reply relations, mood, relationship,
-group-attention, bot-continuity, and media-overflow descriptors. A decision
+includes bounded participant/target/reply relations, active state,
+relationship, group-attention, bot-continuity, and media-overflow descriptors.
+A decision
 that depends on undescribed retained media fails closed instead of inferring
 from a partial image subset.
 
@@ -71,14 +88,22 @@ Runtime callers import the public functions and validation types from
 The frontline handler additionally validates append and prelude references
 against the exact candidate slots present after prompt-cap fitting. This is
 structural validation; it never reclassifies a valid semantic action.
+Both handlers also validate model-only `recipient_relation`,
+`admission_basis`, `interaction_evidence_refs`, and `character_state_refs`
+against the exact cap-fitted payload. Unsupported, duplicate, invented,
+wrong-kind, or dropped refs fail closed. The validated assessment is retained
+only in protected trace diagnostics and is stripped before returning the
+unchanged public decisions.
 
 The public facade exposes contract helpers and decision types. Prompt
 constants, LLM instances, route configs, projections, trace details, and other
 implementation state remain private to the two agent modules.
 
 An unresolved present reply uses `unknown_participant`, distinct from `none`.
-Fresh-history rows expose only `character|current_author|other_participant`
-speaker relations plus semantic target, reply, and turn-temporal summaries.
+Fresh-history rows reserve `character` and `current_author`, assign stable
+`participant_1` through `participant_8` handles oldest-first to other resolved
+humans, and reuse those handles across speaker, target, reply, and evidence
+summaries. Raw platform/global identities never enter the model payload.
 The first settled assessment renders `ignore|proceed|wait`; the hard-deadline
 assessment renders only `ignore|proceed`.
 For authoritative participation, deterministic code derives the available
@@ -95,7 +120,10 @@ The settled agent also treats `use_reply_feature` as a semantic request for a
 native visual anchor. It requests an anchor only for a proceeding group turn
 where anchoring the effective latest fragment materially clarifies a specific
 character-directed message or speaker. Private turns, whole-group invitations,
-and non-proceed actions do not request one. Delivery feasibility and the
+state-salience admissions whose actual recipient is not the character, and
+non-proceed actions do not request one. The actual recipient remains independent
+from the reason to speak, so state salience may admit a turn while retaining a
+participant or unknown recipient. Delivery feasibility and the
 executable quote target remain outside this package.
 
 ## Ownership Boundaries
@@ -106,6 +134,10 @@ slot-to-ID mapping, media cache mutation, response delivery, or cognition
 claims. They receive semantic labels and bounded descriptors rather than raw
 platform identifiers, operational timestamps, futures, handles, or queue
 telemetry.
+
+`kazusa_ai_chatbot.service` copies the already loaded native
+`cognition_state.v2` snapshot into both relevance inputs. Relevance performs no
+database, retrieval, embedding, or cache call to obtain state.
 
 `brain_service.turn_settlement` owns the deterministic pending-turn lifecycle,
 FIFO relevance work, prompt-safe candidate/prelude slots, enqueue-time deadline

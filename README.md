@@ -186,6 +186,12 @@ owns open-slot projection, bounded silent-prelude promotion, enqueue-time
 deadlines, and the pre-deadline ingress barrier. One response owner receives
 the assembled reply; appended request futures complete silently. A valid
 `proceed` is atomically claimed before persona preparation and cognition run.
+For group chat, admission requires either evidence-grounded interaction
+relevance—such as typed addressing, an explicit group invitation, complete-name
+address, or grounded continuity—or a concrete intersection with bounded active
+character state. Relevance owns that semantic judgment. Recipient identity is
+kept separate from the reason to speak, allowing a believable state-driven
+interjection without treating another participant as the character.
 Coalesced private fragments are shown to frontline as one logical input. The
 four-image description budget is shared across reassessments, and omitted
 media is explicit so settled relevance can fail closed before cognition.

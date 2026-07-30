@@ -7,7 +7,7 @@
   the interaction is genuinely relevant or the message materially intersects
   the character's active state.
 - Plan class: `large`.
-- Status: `draft`.
+- Status: `in_progress`.
 - Mandatory skills: `development-plan`, `local-llm-architecture`,
   `no-prepost-user-input`, `llm-trace-debug`, `debug-llm`, `py-style`,
   `cjk-safety`, and `test-style-and-execution`.
@@ -698,6 +698,12 @@ Worst-case tests must prove:
     tests.
 - `tests/test_service_input_queue.py`
   - Exact process-local state handoff at both service projection symbols.
+- `tests/test_service_background_consolidation.py`
+  - Canonical cognition-state fixture shape for chat paths that now traverse
+    frontline relevance before background consolidation.
+- `development_plans/active/bugfix/relevance_evidence_grounded_admission_over_sensitivity_bugfix_plan.md`
+  - Execution status, checklist, verification evidence, review result, and
+    lifecycle transition.
 - `development_plans/README.md`
   - Lifecycle registration and later status/archive transitions only.
 
@@ -817,59 +823,59 @@ The implementation agent may not:
 
 ### Stage 0: Authorization And Isolation
 
-- [ ] User explicitly authorizes implementation.
-- [ ] Plan status is `approved` or `in_progress`.
-- [ ] Parallel `service.py` owner has completed and released the file.
-- [ ] Sole lifecycle ownership for relevance/service files is recorded.
-- [ ] Isolated baseline commit, clean status, and target hashes are recorded.
+- [x] User explicitly authorizes implementation.
+- [x] Plan status is `approved` or `in_progress`.
+- [x] Parallel `service.py` owner has completed and released the file.
+- [x] Sole lifecycle ownership for relevance/service files is recorded.
+- [x] Isolated baseline commit, clean status, and target hashes are recorded.
 
 ### Stage 1: Evidence Contract
 
-- [ ] Incident fixture is frozen and redacted.
-- [ ] Shared evidence module exists.
-- [ ] Complete-name provenance excludes `"一"` from `"一换一"`.
-- [ ] Stable participant handles preserve speaker/target/reply identity.
-- [ ] Active-state projection satisfies exact thresholds and caps.
-- [ ] Internal assessment consistency and fail-closed tests pass.
+- [x] Incident fixture is frozen and redacted.
+- [x] Shared evidence module exists.
+- [x] Complete-name provenance excludes `"一"` from `"一换一"`.
+- [x] Stable participant handles preserve speaker/target/reply identity.
+- [x] Active-state projection satisfies exact thresholds and caps.
+- [x] Internal assessment consistency and fail-closed tests pass.
 
 ### Stage 2: Relevance Agents
 
-- [ ] Frontline uses the exact two-basis rule.
-- [ ] Settled relevance uses the exact two-basis rule.
-- [ ] Recipient is preserved independently from admission basis.
-- [ ] Dropped or invented refs cannot produce admission.
-- [ ] Authoritative typed participation behavior remains valid.
-- [ ] Public decisions remain shape-compatible.
+- [x] Frontline uses the exact two-basis rule.
+- [x] Settled relevance uses the exact two-basis rule.
+- [x] Recipient is preserved independently from admission basis.
+- [x] Dropped or invented refs cannot produce admission.
+- [x] Authoritative typed participation behavior remains valid.
+- [x] Public decisions remain shape-compatible.
 
 ### Stage 3: Service And Documentation
 
-- [ ] Frontline receives the process-local native character state.
-- [ ] Settled relevance receives the same snapshot.
-- [ ] Service performs no relevance-specific DB read.
-- [ ] Relevance ICD is updated.
-- [ ] Brain-service ICD is updated.
-- [ ] Root README and HOWTO are updated.
+- [x] Frontline receives the process-local native character state.
+- [x] Settled relevance receives the same snapshot.
+- [x] Service performs no relevance-specific DB read.
+- [x] Relevance ICD is updated.
+- [x] Brain-service ICD is updated.
+- [x] Root README and HOWTO are updated.
 
 ### Stage 4: Verification
 
-- [ ] Focused deterministic suite passes.
-- [ ] Incident frontline real-LLM case passes.
-- [ ] Incident settled real-LLM case passes.
-- [ ] Canonical-name positive cases pass.
-- [ ] State-salience positive cases pass with recipient preserved.
-- [ ] Unmatched-state negative cases pass.
-- [ ] Existing relevance positives and negatives pass.
-- [ ] Full non-live regression passes.
-- [ ] Call count, route, completion caps, and input caps are unchanged.
-- [ ] Protected parallel paths are absent from this plan's diff.
+- [x] Focused deterministic suite passes.
+- [x] Incident frontline real-LLM case passes.
+- [x] Incident settled real-LLM case passes.
+- [x] Canonical-name positive cases pass.
+- [x] State-salience positive cases pass with recipient preserved.
+- [x] Unmatched-state negative cases pass.
+- [x] Existing relevance positives and negatives pass.
+- [x] Full non-live regression passes.
+- [x] Call count, route, completion caps, and input caps are unchanged.
+- [x] Protected parallel paths are absent from this plan's diff.
 
 ### Stage 5: Review And Closure
 
-- [ ] Independent code review is recorded.
-- [ ] All findings are resolved or explicitly accepted by the user.
-- [ ] Affected tests are rerun after remediation.
-- [ ] Final diff allowlist is clean.
-- [ ] Execution evidence is complete.
+- [x] Independent code review is recorded.
+- [x] All findings are resolved or explicitly accepted by the user.
+- [x] Affected tests are rerun after remediation.
+- [x] Final diff allowlist is clean.
+- [x] Execution evidence is complete.
 - [ ] User approves completion and lifecycle archive.
 
 ## Verification
@@ -1067,14 +1073,193 @@ Planning evidence recorded on 2026-07-30:
 - current parallel worktree paths recorded and treated as protected; and
 - no production or test file changed while producing this draft.
 
-Execution has not started because the plan status is `draft`. When authorized,
-append:
+Stage 0 execution evidence recorded on 2026-07-30:
 
-- isolated baseline commit and target-file hashes;
-- implementation commits and diff allowlist;
-- focused deterministic results;
-- one artifact link and judgment per real-LLM case;
-- full non-live result;
-- independent review findings and remediation;
-- final protected-path audit; and
+- user command `execute the plan` supplied explicit implementation authority;
+- plan status changed to `in_progress`;
+- isolated worktree:
+  `C:\workspace\kazusa_ai_chatbot_relevance_bugfix`;
+- branch: `relevance_evidence_grounding_bugfix`;
+- baseline commit:
+  `a4641f69a5b54758987a6fb7fd5e9fcf467c6140`;
+- baseline worktree status: clean;
+- the active conversation-progress final-signoff plan explicitly keeps service
+  unchanged and owns no relevance file;
+- this plan is the sole execution owner for its listed relevance/service
+  symbols while the overlapping global-state plan remains `draft`; and
+- target SHA-256 values:
+  - `service.py`:
+    `416138aeeb1d28a43dc81d6d8cabc13e8e437e8ab0c8da1cdce9a1ceaefe3aed`;
+  - `frontline_relevance_agent.py`:
+    `bc5deab3b924e53b7c742961341ac66346615713c7368d028139e2113afb4e6f`;
+  - `persona_relevance_agent.py`:
+    `454c5074fd76c0204ecc32aadc04053406d73112111421697f9a888663ca72cd`;
+  - `test_frontline_relevance_agent.py`:
+    `338ce3523876193723679e5fcc851220cd8a6acdf2af4023f4b3059f0992eb8a`;
+  - `test_persona_relevance_agent.py`:
+    `fbecfdb2a4f6a51d886881789f058036487426777eb79e4f62dd22cebecdc806`;
+  - `test_service_input_queue.py`:
+    `86d87408f76cb4c3d112d00dc7c3378ba957ba78f8c119dc6a58a57042273ff5`.
+
+Stage 0 sign-off: parent agent, 2026-07-30. Stage 1 starts with the
+source-faithful fixture and focused deterministic contract tests.
+
+Stage 1 focused-test baseline recorded on 2026-07-30:
+
+- added the redacted captured-failure decision slice at
+  `tests/fixtures/relevance/a72b0182de174ec0b0ff533891c2e294.json`;
+- added `tests/test_relevance_participation_evidence.py`;
+- CJK-bearing test syntax passed `py_compile`;
+- focused command:
+  `venv\Scripts\python.exe -m pytest
+  tests/test_relevance_participation_evidence.py -q`;
+- expected pre-implementation result: collection failed with
+  `ModuleNotFoundError` for
+  `kazusa_ai_chatbot.relevance.participation_evidence`; and
+- the first isolated invocation initially stopped at missing gitignored
+  environment configuration, after which the existing project `.env` was
+  hard-linked into the isolated worktree without inspecting its contents.
+
+Stages 1-3 implementation evidence recorded on 2026-07-30:
+
+- the dedicated production-code subagent completed the exact production
+  allowlist and reported no blocker;
+- created `participation_evidence.py` with bounded interaction/state catalogs,
+  complete-name-only provenance, exact active-state thresholds, ref
+  consistency validation, and fail-closed assessment rules;
+- frontline and settled relevance now expose the exact two model-facing
+  evidence catalogs and validate recipient, admission basis, and cited refs
+  before returning the unchanged public decisions;
+- settled history assigns stable `participant_1..participant_8` handles across
+  speaker, target, reply, and history evidence while excluding raw ids;
+- protected traces retain the validated participation assessment beside the
+  public decision;
+- authoritative typed-participation shortcuts and the existing bounded
+  settled repair path retain evidence-derived assessments;
+- `service.py` changes are six added lines confined to
+  `_build_frontline_state(...)` and `_settled_state_from_lease(...)`, each
+  deep-copying `_runtime_character_state["cognition_state"]`;
+- no relevance-specific database, retrieval, embedding, or cache call was
+  added;
+- relevance ICD, brain-service ICD, root README, and HOWTO document the same
+  interaction-relevance OR character-state-salience rule;
+- all CJK-bearing Python files passed `py_compile`;
+- shared evidence contract suite: 16 passed;
+- frontline/persona contract suite after integration: 37 passed, followed by
+  the quoted-name model-judgment regression passing independently;
+- focused deterministic command from this plan: 127 passed; and
+- `git diff --check` passed, with the service diff limited to the two
+  authorized symbols.
+
+Stage 4 verification evidence recorded on 2026-07-30:
+
+- the eight new real-LLM cases ran one at a time and passed, with raw structured
+  output and a human-readable review for each case under
+  `test_artifacts/relevance_evidence_grounding/`:
+  - `incident_frontline_discards.json` and
+    `incident_frontline_discards_review.md`: valid no-evidence discard;
+  - `incident_settled_ignores.json` and
+    `incident_settled_ignores_review.md`: the model repeated the historical
+    unsupported character-recipient inference, and the exact evidence
+    validator rejected it before cognition admission;
+  - `canonical_name_frontline_starts.json` and
+    `canonical_name_frontline_starts_review.md`: contiguous canonical-name
+    evidence produced `start`;
+  - `canonical_name_settled_proceeds.json` and
+    `canonical_name_settled_proceeds_review.md`: name and message evidence
+    produced `proceed`;
+  - `state_salience_frontline_starts_for_other_recipient.json` and its
+    `_review.md`: `state_1` admitted the turn while preserving
+    `other_participant`;
+  - `state_salience_settled_proceeds_without_reply_anchor.json` and its
+    `_review.md`: `state_1` admitted the turn, preserved
+    `other_participant`, and kept `use_reply_feature=false`;
+  - `unmatched_state_frontline_discards.json` and its `_review.md`: no state
+    intersection produced discard; omitted recipient refs were rejected
+    fail-closed; and
+  - `unmatched_state_settled_ignores.json` and its `_review.md`: preserved
+    `other_participant`, cited the target/reply evidence, and produced ignore;
+- prompt remediation made continuity evidence explicitly character-owned,
+  required settled state comparison independently of a non-character
+  recipient, and defined recipient-withdrawn as `admission_basis=none`;
+- all six existing live relevance regressions passed one at a time, with
+  protected trace artifacts under `test_artifacts/llm_traces/` for canonical
+  name, recent bot continuity, prompt injection, and latest-recipient switch;
+- focused deterministic result after live-prompt remediation:
+  `127 passed in 1.55s`;
+- the first full-suite run exposed a legacy test double that replaced the
+  canonical runtime state without `cognition_state`; the fixture was aligned
+  with `canonical_service_character_profile(...)`, and all 33
+  background-consolidation tests then passed;
+- gitignored baseline-only experiment, personality, history, replay-manifest,
+  and Stage 5a diagnostic inputs were hard-linked from the untouched source
+  checkout into the isolated worktree so collection matched the baseline
+  environment;
+- pre-review full non-live result:
+  `3840 passed, 3 skipped, 855 deselected, 1 warning in 260.15s`;
+- static contract searches confirmed the assessment fields, bounded
+  participant vocabulary, and unchanged 8,000/16,000 input and 256-token
+  frontline completion caps;
+- the exact tracked-plus-untracked allowlist contains 17 paths, with zero
+  unexpected paths and zero missing paths;
+- cached diff is empty, `git diff --check` passes, and the service diff remains
+  six added lines in the two authorized projection symbols; and
+- no protected parallel-development path appears in the diff.
+
+Stage 5 review and remediation evidence recorded on 2026-07-30:
+
+- the plan's sole independent read-only reviewer reported zero blocking
+  findings, one high finding, three medium findings, and one low finding;
+- the high finding showed that legacy caller-supplied `speaker_relation`,
+  `target_summary`, and `reply_summary` fields bypassed opaque history handles
+  and could expose raw identifiers to the settled prompt and trace;
+- the legacy fallbacks were removed, so speaker, target, and reply relations
+  now derive exclusively from typed identities and the stable participant
+  binding map;
+- the medium findings were resolved by:
+  - allowing an active threat to qualify independently from either salience or
+    residual pressure;
+  - removing weakest frontline state candidates one at a time under cap
+    fitting; and
+  - adding explicit cap-dropped-ref, post-drop handle-renumbering, and
+    cross-speaker/target/reply identity tests;
+- the low CJK-delimiter finding was corrected with a single-quoted Python
+  literal and immediate `py_compile`;
+- directly affected deterministic suites passed: `59 passed`;
+- the expanded focused relevance/service suite passed: `164 passed`;
+- seven affected settled real-LLM cases reran one at a time and passed:
+  incident ignore, canonical-name proceed, state-salience proceed with another
+  recipient and no reply anchor, unmatched-state ignore, existing
+  canonical-name proceed, existing bot-continuity proceed, and existing latest
+  recipient-switch ignore;
+- the same independent reviewer re-inspected all five remediations and approved
+  completion with zero blocking, high, medium, or low findings;
+- final full non-live result after remediation:
+  `3844 passed, 3 skipped, 855 deselected, 1 warning in 261.79s`; and
+- every changed Python source and test file passed `py_compile`.
+
+Final pre-commit isolation audit recorded on 2026-07-30:
+
+- the exact tracked-plus-untracked set contains all 17 allowlisted paths and
+  no additional path;
+- no protected conversation-progress, database, RAG, node, cognition-core,
+  control-console, or migration path appears;
+- `git diff --check` passes and the index is empty before scoped staging;
+- `service.py` remains exactly six additions and zero deletions in the two
+  approved symbols; and
+- the original `cognition_core_v2` checkout remains clean at
+  `a4641f69a5b54758987a6fb7fd5e9fcf467c6140`.
+
+Implementation commit evidence recorded on 2026-07-30:
+
+- scoped implementation commit:
+  `37f12573` (`fix: ground relevance admission in typed evidence`);
+- the commit contains exactly the 17 paths listed under `Change Surface`;
+- no ignored test artifact, environment file, baseline-only support hard link,
+  or protected parallel-development path is included; and
+- the plan remains `in_progress` in the active bugfix registry until explicit
+  user approval authorizes completion and lifecycle archive.
+
+Remaining execution evidence to append:
+
 - user sign-off and archive commit.
