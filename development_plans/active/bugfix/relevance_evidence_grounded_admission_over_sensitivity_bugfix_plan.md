@@ -875,7 +875,7 @@ The implementation agent may not:
 - [x] All findings are resolved or explicitly accepted by the user.
 - [x] Affected tests are rerun after remediation.
 - [x] Final diff allowlist is clean.
-- [ ] Execution evidence is complete.
+- [x] Execution evidence is complete.
 - [ ] User approves completion and lifecycle archive.
 
 ## Verification
@@ -1250,7 +1250,16 @@ Final pre-commit isolation audit recorded on 2026-07-30:
 - the original `cognition_core_v2` checkout remains clean at
   `a4641f69a5b54758987a6fb7fd5e9fcf467c6140`.
 
+Implementation commit evidence recorded on 2026-07-30:
+
+- scoped implementation commit:
+  `37f12573` (`fix: ground relevance admission in typed evidence`);
+- the commit contains exactly the 17 paths listed under `Change Surface`;
+- no ignored test artifact, environment file, baseline-only support hard link,
+  or protected parallel-development path is included; and
+- the plan remains `in_progress` in the active bugfix registry until explicit
+  user approval authorizes completion and lifecycle archive.
+
 Remaining execution evidence to append:
 
-- implementation commits and diff allowlist;
 - user sign-off and archive commit.
