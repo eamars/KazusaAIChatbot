@@ -656,25 +656,29 @@ def project_character_state_evidence(
     return return_value
 
 
-def _validated_refs(
+def _normalized_refs(
     value: object,
     *,
-    field_name: str,
     available: Mapping[str, Mapping[str, Any]],
 ) -> list[str]:
-    """Validate one bounded unique evidence-reference list."""
+    """Discard unusable model refs and retain a bounded unique list."""
 
     if not isinstance(value, list):
-        raise ValueError(f"{field_name} must be a list")
-    if len(value) > _MAX_ASSESSMENT_REFS:
-        raise ValueError(f"{field_name} exceeds its cap")
-    if any(not isinstance(ref, str) or not ref for ref in value):
-        raise ValueError(f"{field_name} contains an invalid ref")
-    if len(set(value)) != len(value):
-        raise ValueError(f"{field_name} contains duplicate refs")
-    if any(ref not in available for ref in value):
-        raise ValueError(f"{field_name} contains an unavailable ref")
-    return_value = list(value)
+        return_value: list[str] = []
+        return return_value
+
+    return_value = []
+    for ref in value:
+        if (
+            not isinstance(ref, str)
+            or not ref
+            or ref not in available
+            or ref in return_value
+        ):
+            continue
+        return_value.append(ref)
+        if len(return_value) == _MAX_ASSESSMENT_REFS:
+            break
     return return_value
 
 
@@ -905,14 +909,12 @@ def validate_participation_assessment(
         character_state_evidence,
         catalog_name="character-state evidence",
     )
-    interaction_refs = _validated_refs(
+    interaction_refs = _normalized_refs(
         raw.get("interaction_evidence_refs"),
-        field_name="interaction_evidence_refs",
         available=interaction_map,
     )
-    state_refs = _validated_refs(
+    state_refs = _normalized_refs(
         raw.get("character_state_refs"),
-        field_name="character_state_refs",
         available=state_map,
     )
 

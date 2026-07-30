@@ -267,7 +267,7 @@ def test_frontline_cap_drops_weakest_state_and_invalidates_its_ref(
     assert [
         item["ref"] for item in payload["character_state_evidence"]
     ] == ["state_1", "state_2", "state_3", "state_4", "state_5"]
-    with pytest.raises(ValueError, match="unavailable ref"):
+    with pytest.raises(ValueError, match="requires state evidence"):
         validate_participation_assessment(
             {
                 "recipient_relation": "character",

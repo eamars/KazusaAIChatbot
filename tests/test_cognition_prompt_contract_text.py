@@ -68,6 +68,7 @@ def _branch_modified_prompt_fragments() -> tuple[str, ...]:
         persona_relevance_agent._SETTLED_WAIT_ACTION_CONTRACT,
         persona_relevance_agent._SETTLED_FINAL_ACTION_CONTRACT,
         persona_relevance_agent._SETTLED_AUTHORITATIVE_ACTION_CONTRACT,
+        persona_relevance_agent._SETTLED_AUTHORITATIVE_REPAIR_PROMPT,
         *persona_relevance_agent._AUTHORITATIVE_DISPOSITION_GUIDANCE.values(),
     )
     return (
@@ -140,6 +141,22 @@ def test_branch_modified_runtime_prompts_use_chinese_instructions() -> None:
         candidate_handles=["c1"],
     ).content))
     assert "已截断" in bounded_authorization["invalid_response"]
+
+
+def test_settled_evidence_prompts_state_the_total_reference_cap() -> None:
+    """Expose the deterministic three-ref list cap to both model attempts."""
+
+    expected_contract = "每个列表合计最多 3 个 ref"
+
+    assert expected_contract in (
+        persona_relevance_agent._SETTLED_SYSTEM_PROMPT_COMMON
+    )
+    assert expected_contract in (
+        persona_relevance_agent._SETTLED_AUTHORITATIVE_REPAIR_PROMPT
+    )
+    assert expected_contract in (
+        frontline_relevance_agent._FRONTLINE_SYSTEM_PROMPT_COMMON
+    )
 
 
 def test_text_prompts_organically_favor_spoken_or_typed_dialog() -> None:

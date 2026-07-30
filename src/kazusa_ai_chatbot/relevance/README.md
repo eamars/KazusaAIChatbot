@@ -88,10 +88,14 @@ Runtime callers import the public functions and validation types from
 The frontline handler additionally validates append and prelude references
 against the exact candidate slots present after prompt-cap fitting. This is
 structural validation; it never reclassifies a valid semantic action.
-Both handlers also validate model-only `recipient_relation`,
+Both handlers also process model-only `recipient_relation`,
 `admission_basis`, `interaction_evidence_refs`, and `character_state_refs`
-against the exact cap-fitted payload. Unsupported, duplicate, invented,
-wrong-kind, or dropped refs fail closed. The validated assessment is retained
+against the exact cap-fitted payload. Model reference lists discard invalid,
+invented, unavailable, and duplicate entries, then retain at most the first
+three usable references. A normal semantic result that loses required
+grounding still fails closed. An already-authoritative settled turn instead
+uses deterministic typed participation grounding, so malformed diagnostic
+evidence cannot terminate the pipeline. The resulting assessment is retained
 only in protected trace diagnostics and is stripped before returning the
 unchanged public decisions.
 

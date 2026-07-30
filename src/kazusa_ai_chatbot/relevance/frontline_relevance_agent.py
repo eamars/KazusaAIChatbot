@@ -67,7 +67,8 @@ _FRONTLINE_SYSTEM_PROMPT_COMMON = '''你是角色大脑的简洁前线 intake �
   recipient_relation 使用 character，并引用 continuity_1。
 - character_state_evidence 是当前活跃或受压的角色状态候选，不是自动参与许可。只有当前消息与
   某一候选存在具体语义交集，而且发言能推进、保护、解决或调查该状态时，才能引用它。
-- 只引用 payload 中实际存在的 ref。每类 ref 最多三个且不得重复。
+- 只引用 payload 中实际存在的 ref。interaction_evidence_refs 和
+  character_state_refs 每个列表合计最多 3 个 ref，且不得重复。只选择足以支持判断的最少 ref。
 
 # 接收者与参与依据
 - recipient_relation 记录消息实际指向 character、group、current_author、other_participant、

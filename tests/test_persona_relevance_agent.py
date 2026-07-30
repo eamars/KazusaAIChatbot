@@ -304,6 +304,42 @@ async def test_relevance_agent_maps_available_already_resolved_in_one_call() -> 
 
 
 @pytest.mark.asyncio
+async def test_authoritative_bad_evidence_does_not_trigger_repair() -> None:
+    """Sanitize model evidence while preserving its valid disposition."""
+
+    response = _llm_response(json.dumps({
+        "semantic_disposition": "proceed",
+        "recipient_relation": "character",
+        "admission_basis": "interaction_relevance",
+        "interaction_evidence_refs": [
+            7,
+            "invented",
+            "target_character",
+            "target_character",
+            "message_1",
+        ],
+        "character_state_refs": "not-a-list",
+        "reason_to_respond": "the direct question still needs an answer",
+        "use_reply_feature": True,
+        "channel_topic": "reward question",
+        "indirect_speech_context": "",
+    }))
+    state = _base_state()
+    state["fresh_history"] = [
+        _character_history_row("An unrelated later message.")
+    ]
+
+    with patch.object(relevance_module, "_relevance_agent_llm") as mock_llm:
+        mock_llm.ainvoke = AsyncMock(return_value=response)
+        result = await relevance_agent(state)
+
+    assert result["response_action"] == "proceed"
+    assert result["should_respond"] is True
+    assert result["use_reply_feature"] is True
+    mock_llm.ainvoke.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_relevance_agent_rejects_unavailable_resolved_disposition() -> None:
     """One invalid disposition may be repaired by the same semantic owner."""
 
@@ -818,7 +854,7 @@ def test_settled_cap_renumbers_handles_and_invalidates_removed_ref(
     assert payload["fresh_history"][0]["speaker_relation"] == "participant_1"
     assert "history_9" in interaction_refs
     assert "history_10" not in interaction_refs
-    with pytest.raises(ValueError, match="unavailable ref"):
+    with pytest.raises(ValueError, match="positive evidence"):
         validate_participation_assessment(
             {
                 "recipient_relation": "character",
