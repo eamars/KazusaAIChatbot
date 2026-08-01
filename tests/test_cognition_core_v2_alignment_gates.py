@@ -168,9 +168,7 @@ def test_each_question_receives_only_family_local_handles_and_state() -> None:
         by_kind["event_agency"],
     )
 
-    assert [row["handle"] for row in event_state["causal_candidates"]] == [
-        "ce1"
-    ]
+    assert "causal_candidates" not in event_state
     assert "relationship" not in event_state
     assert "character_constraints" not in event_state
 

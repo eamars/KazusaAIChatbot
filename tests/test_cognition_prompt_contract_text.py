@@ -203,6 +203,15 @@ def test_semantic_appraisal_prompt_limits_model_authority() -> None:
         "persistence route",
     ):
         assert forbidden_text not in SEMANTIC_APPRAISAL_PROMPT
+    for required_contract in (
+        'proposition 和 delta 各自只能是一个对象或 null',
+        '不能使用数组，也不能列举多个候选',
+        '不要输出 explanation、selected_evidence_handles、selected_role_handles、propositions',
+        'delta 必须是 -40 到 40（含边界）的 JSON 整数',
+        'question.candidate_origin_evidence',
+        '来源 evidence handle',
+    ):
+        assert required_contract in SEMANTIC_APPRAISAL_PROMPT
 
 
 def test_goal_prompt_requires_complete_grounded_bid() -> None:

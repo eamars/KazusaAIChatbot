@@ -55,7 +55,7 @@ async def test_build_trace_export_groups_failure_capsules(monkeypatch):
         "sequence": 1,
     }
     capsule = {
-        "schema_version": "cognition_failure_capsule.v1",
+        "schema_version": "cognition_failure_capsule.v2",
         "trace_id": "trace-1",
         "cognition_invocation_id": "invocation-1",
         "entrypoint": "run_cognition",
@@ -98,14 +98,14 @@ async def test_build_trace_export_groups_failure_capsules(monkeypatch):
 @pytest.mark.asyncio
 async def test_build_trace_export_selects_one_cognition_invocation(monkeypatch):
     first_capsule = {
-        "schema_version": "cognition_failure_capsule.v1",
+        "schema_version": "cognition_failure_capsule.v2",
         "trace_id": "trace-1",
         "cognition_invocation_id": "invocation-1",
         "input_payload": {"value": "first"},
         "attempts": [{"attempt_index": 1}],
     }
     second_capsule = {
-        "schema_version": "cognition_failure_capsule.v1",
+        "schema_version": "cognition_failure_capsule.v2",
         "trace_id": "trace-1",
         "cognition_invocation_id": "invocation-2",
         "input_payload": {"value": "second"},

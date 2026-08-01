@@ -14,9 +14,11 @@ event identity, retention, and activation-cache recomputation. Emotion rows are
 derived projections: every activation retains typed roots, phase, trend, score,
 cause status, and timestamps.
 
-Evidence retention is deterministic and bounded: relationship state keeps the
-newest eight unique rows, while causal entities keep their first/root row and
-newest seven unique rows. A terminal meaning may repeat idempotently only in
+Evidence retention is deterministic and bounded. During one accepted appraisal
+batch, each target retains every source cited by that batch before historical
+rows fill the remaining capacity. Outside that batch, relationship state keeps
+the newest eight unique rows, while causal entities keep their first/root row
+and newest seven unique rows. A terminal meaning may repeat idempotently only in
 the appraisal batch that produced that terminal transition; later batches
 still observe strict terminal immutability. `relationship_connection` is owned
 by the typed desired-versus-perceived closeness gap and is satisfied when that
@@ -77,12 +79,15 @@ active-goal route. Stage routes are complete required environment bundles and
 have no route inheritance or fallback. The generic `COGNITION_LLM` route
 continues to serve cognition callers outside this Core V2 boundary.
 
-The existing first wave remains unchanged: six appraisal families, the
+The first wave contains six appraisal families, the
 ordinary-response goal, and dependency-ready active-goal branches can submit
 up to twenty model tasks concurrently. Final dependency-ready goal work,
 workspace collapse, action planning, and the applicable authorization stage
-remain ordered after that wave. Routing changes endpoint ownership only; model
-call count, prompts, schemas, attempt caps, and DAG edges stay unchanged.
+remain ordered after that wave. The six appraisal routes use a code-owned
+8,192-token completion default. Each family runs at most eight serial
+micro-appraisal items on its existing route. Each item keeps one normal call
+and one bounded replacement attempt, with an 8,000-character initial dynamic
+payload and a separate 10,000-character repair payload.
 
 Goal, threat, and outcome appraisal uses affirmative entity-specific terminal
 assertions: `goal_completed`, `event_completed`, `threat_resolved`,
@@ -90,7 +95,15 @@ assertions: `goal_completed`, `event_completed`, `threat_resolved`,
 supersession. `outcome_pending` records an explicit nonterminal observation
 without state mutation or candidate materialization. The payload maps subject,
 object, role-assignment entity, and evidence fields to their exact handle
-domains. It also maps the structured `self` and `current_user` handles to their
+domains. Persistent events use `ev1..evN`, evidence uses `e1..eN`, and current
+candidate events, threats, and knowledge gaps use `ceN`, `ctN`, and `ckN`.
+The retained question maps every permitted candidate to its exact origin
+evidence; any structured use of that candidate must cite that evidence. The
+model-facing item uses singular nullable `proposition` and `delta` fields.
+Deterministic code accumulates at most eight accepted items, derives selected
+handles and explanation metadata from actual structured content, and treats an
+empty or exact-repeat item as bounded termination. It also maps the structured
+`self` and `current_user` handles to their
 Chinese semantic-text references so role fields and prose use the same actor
 roots without sharing representations. Structural validation binds each
 terminal kind to its exact entity kind. A valid assertion atomically
@@ -99,7 +112,9 @@ including when the assertion first materializes a causal candidate. Terminal
 candidates bypass the nonterminal salience-pruning path. After all same-batch
 numeric observations are reduced, the accepted terminal assertions reassert
 their canonical axes without repeating or weakening the guarded transition.
-Every candidate is trial-reduced inside the appraisal's existing attempt cap.
+Role-signature event matching reuses only active events; exact canonical event
+IDs remain authoritative across statuses. Every candidate is trial-reduced
+inside its micro item's attempt cap.
 Final reduction validates each added appraisal by replaying the bounded
 accepted prefix from the original state, so handle composition is preserved
 and one residual rejection is omitted without discarding other appraisal
@@ -308,7 +323,9 @@ typed output validation run in one inspectable call.
 ## Failure Behavior
 
 Every recoverable V2 producer and verifier has at least three total local
-attempts, while existing longer semantic ledgers keep their cap. The outcome
+attempts except semantic appraisal. Each appraisal micro item has one initial
+call plus at most one complete-replacement attempt, and each family has at most
+eight items. Existing longer semantic ledgers keep their cap. The outcome
 ladder is `accepted`, `recovered`, `accepted_degraded`, then `unrecoverable`.
 Appraisal and optional visual exhaustion are omitted; decontextualization keeps
 the normalized original input; workspace keeps the highest-priority complete

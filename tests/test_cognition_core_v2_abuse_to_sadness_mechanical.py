@@ -183,7 +183,7 @@ def test_negative_abuse_outcome_reaches_sadness_mechanically() -> None:
         "visible_to": ["q:goal_threat_outcome"],
     }]
     handle_to_ref = {
-        "e1": {
+        "ev1": {
             "scope": "user",
             "kind": "event",
             "entity_id": str(event["entity_id"]),
@@ -195,7 +195,7 @@ def test_negative_abuse_outcome_reaches_sadness_mechanically() -> None:
         "selected_role_handles": ["e1"],
         "propositions": [],
         "deltas": [{
-            "target_path": "active_events.e1.outcome_impact",
+            "target_path": "active_events.ev1.outcome_impact",
             "delta": outcome_delta,
             "evidence_handles": ["e1"],
             "reason": reason,

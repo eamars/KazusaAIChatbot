@@ -85,14 +85,10 @@ class _ScriptedLLM:
             result = {"visual_directives": "bounded visual directives"}
         elif "selected_evidence_handles" in system:
             question = payload["question"]
-            roles = question["permitted_role_handles"]
             result = {
                 "question_id": question["question_id"],
-                "selected_evidence_handles": ["e1"],
-                "selected_role_handles": roles[:1],
-                "propositions": [],
-                "deltas": [],
-                "explanation": "the evidence is accepted without a new delta",
+                "proposition": None,
+                "delta": None,
             }
         elif "private_monologue" in system:
             result = {
@@ -643,11 +639,11 @@ async def test_test_database_accepted_task_result_smoke(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("recover_on_third", [True, False])
+@pytest.mark.parametrize("recover_on_second", [True, False])
 async def test_appraisal_retry_or_omission_preserves_cognition(
-    recover_on_third: bool,
+    recover_on_second: bool,
 ) -> None:
-    """One appraisal can recover or omit after three bounded attempts."""
+    """One appraisal can recover or omit after two bounded attempts."""
 
     class _AppraisalFailureLLM(_ScriptedLLM):
         def __init__(self) -> None:
@@ -668,19 +664,12 @@ async def test_appraisal_retry_or_omission_preserves_cognition(
                 and question.get("question_id") == "q:event_agency"
             ):
                 self.target_calls += 1
-                if not recover_on_third or self.target_calls < 3:
+                if not recover_on_second or self.target_calls < 2:
                     return SimpleNamespace(content='{"invalid": true}')
                 result = {
                     "question_id": question["question_id"],
-                    "selected_evidence_handles": ["e1"],
-                    "selected_role_handles": (
-                        question["permitted_role_handles"][:1]
-                    ),
-                    "propositions": [],
-                    "deltas": [],
-                    "explanation": (
-                        "the evidence is accepted without a new delta"
-                    ),
+                    "proposition": None,
+                    "delta": None,
                 }
                 return SimpleNamespace(
                     content=json.dumps(result, ensure_ascii=False),
@@ -692,7 +681,7 @@ async def test_appraisal_retry_or_omission_preserves_cognition(
     output = await run_cognition(_input(), _core_services(llm))
 
     assert output["schema_version"] == "cognition_core_output.v2"
-    assert llm.target_calls == 3
+    assert llm.target_calls == 2
 
 
 @pytest.mark.asyncio

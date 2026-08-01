@@ -515,6 +515,7 @@ plans.
 | [cognition_core_v2_intra_turn_transition_coherence_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_intra_turn_transition_coherence_bugfix_plan.md) |
 | [cognition_core_v2_prompt_budget_and_failure_containment_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_prompt_budget_and_failure_containment_bugfix_plan.md) |
 | [cognition_core_v2_retry_exhaustion_continuity_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_retry_exhaustion_continuity_bugfix_plan.md) |
+| [cognition_core_v2_semantic_appraisal_partial_failure_mitigation_plan.md](archive/completed/bugfix/cognition_core_v2_semantic_appraisal_partial_failure_mitigation_plan.md) |
 | [asuna_private_r18_affinity_harness_plan.md](archive/completed/bugfix/asuna_private_r18_affinity_harness_plan.md) |
 | [real_history_personality_comparison_fixture_bugfix_plan.md](archive/completed/bugfix/real_history_personality_comparison_fixture_bugfix_plan.md) |
 | [cognition_silence_short_circuit_and_dialog_evaluator_quality_plan.md](archive/completed/bugfix/cognition_silence_short_circuit_and_dialog_evaluator_quality_plan.md) |

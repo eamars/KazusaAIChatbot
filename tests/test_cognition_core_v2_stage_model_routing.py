@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock
 from langchain_core.messages import HumanMessage
 import pytest
 
+from kazusa_ai_chatbot import config as config_module
 from kazusa_ai_chatbot.cognition_core_v2 import action_authorization
 from kazusa_ai_chatbot.cognition_core_v2 import action_selection
 from kazusa_ai_chatbot.cognition_core_v2 import goal_cognition
@@ -97,6 +98,16 @@ APPRAISAL_CONFIG_FIELDS = {
     ),
     "existential_drive": "appraisal_existential_drive_config",
 }
+
+
+def test_appraisal_routes_share_the_calibrated_completion_default() -> None:
+    """The six bounded appraisal schemas use the calibrated code default."""
+
+    assert getattr(
+        config_module,
+        "SEMANTIC_APPRAISAL_DEFAULT_MAX_COMPLETION_TOKENS",
+        None,
+    ) == 8192
 
 
 class _CapturingInvoker:
@@ -336,11 +347,8 @@ async def test_each_appraisal_family_reuses_its_route_for_repair_and_trace(
         question_id = f"q:{question_kind}"
         valid_response = {
             "question_id": question_id,
-            "selected_evidence_handles": [],
-            "selected_role_handles": [],
-            "propositions": [],
-            "deltas": [],
-            "explanation": "No supported semantic change is required.",
+            "proposition": None,
+            "delta": None,
         }
         llm = _CapturingInvoker([
             {"invalid": "shape"},

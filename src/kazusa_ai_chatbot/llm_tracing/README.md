@@ -56,7 +56,10 @@ discards that buffer without a capsule write. A terminal, recovered, partial,
 or degraded invocation schedules one protected `llm_trace_steps` row with
 `capture_reason="cognition_failure_capsule"`. The row contains the raw public
 entrypoint input, ordered attempts, concrete validation errors, and the final
-failure disposition. Model configuration excludes API keys.
+failure disposition. `cognition_failure_capsule.v2` failure events may include
+an outermost-first exception cause chain capped at four entries. Every cause
+message passes through the protected session's secret redaction before
+persistence. Model configuration excludes API keys.
 
 Past-dialog cognition residual can only use selected `parsed_output` fields
 from protected full-capture trace steps. Metadata-mode trace steps

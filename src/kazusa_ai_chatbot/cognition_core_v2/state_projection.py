@@ -166,7 +166,7 @@ def project_state_for_prompt(
     for field_name, prompt_name, prefix in (
         ("goals", "goals", "g"),
         ("threats", "threats", "t"),
-        ("active_events", "events", "e"),
+        ("active_events", "events", "ev"),
         ("knowledge_gaps", "knowledge_gaps", "k"),
     ):
         for index, entity in enumerate(state[field_name], start=1):

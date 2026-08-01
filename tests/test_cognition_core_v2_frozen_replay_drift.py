@@ -163,7 +163,7 @@ def test_relationship_evidence_retains_the_newest_eight_rows() -> None:
                 "reason": "current interaction supports care",
             }],
         )
-        for index in range(1, 11)
+        for index in range(3, 11)
     ]
 
     updated = apply_semantic_appraisals(

@@ -15,6 +15,7 @@ from kazusa_ai_chatbot.cognition_core_v2.semantic_appraisal import (
     validate_semantic_appraisal_result,
 )
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+    CognitionStateError,
     build_acquaintance_user_state,
     build_character_production_state,
 )
@@ -23,6 +24,8 @@ from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
 )
 from kazusa_ai_chatbot.cognition_core_v2.state_reducers import (
     _apply_proposition_transition,
+    _matching_event,
+    _retain_current_batch_evidence,
     apply_semantic_appraisals,
 )
 from tests.test_cognition_core_v2_stage_model_routing import (
@@ -355,6 +358,32 @@ def test_candidate_terminal_assertions_use_the_same_atomic_fsm(
     assert updated[field_name][0] | expected == updated[field_name][0]
 
 
+def test_role_matching_does_not_reuse_a_resolved_historical_event() -> None:
+    """A distinct candidate can share roles with a resolved prior event."""
+
+    role_refs = [{
+        "role": "experiencer",
+        "entity_kind": "relationship",
+        "entity_id": "relationship:user:fixture",
+    }]
+    resolved = {
+        "entity_id": "event:resolved",
+        "status": "resolved",
+        "role_refs": role_refs,
+    }
+    incoming = {
+        "entity_id": "event:new",
+        "status": "active",
+        "role_refs": role_refs,
+    }
+
+    assert _matching_event({"active_events": [resolved]}, incoming) is None
+    assert _matching_event(
+        {"active_events": [resolved]},
+        {**incoming, "entity_id": "event:resolved"},
+    ) is resolved
+
+
 @pytest.mark.parametrize(
     ("kind", "entity_kind", "field_name", "axis_deltas", "expected"),
     [
@@ -525,17 +554,19 @@ async def test_appraisal_retries_a_reducer_incompatible_candidate() -> None:
         state,
         projection.handle_to_ref,
     )[0]
-    invalid = _terminal_result(
-        _proposition(
+    invalid = {
+        "question_id": question["question_id"],
+        "proposition": _proposition(
             "goal_supersession",
             "g1",
             object_handle="g2",
-        )
-    )
+        ),
+        "delta": None,
+    }
     replacement = {
-        **_terminal_result(_proposition("goal_release", "g1")),
-        "selected_evidence_handles": [],
-        "propositions": [],
+        "question_id": question["question_id"],
+        "proposition": None,
+        "delta": None,
     }
     llm = _CapturingInvoker([invalid, replacement])
 
@@ -666,3 +697,152 @@ def test_final_reduction_preserves_cross_appraisal_composition() -> None:
     assert len(updated["active_events"]) == 1
     assert updated["active_events"][0]["outcome_impact"] == 30
     assert updated["active_events"][0]["salience"] == 30
+
+
+def test_relationship_reduction_pins_all_current_batch_evidence() -> None:
+    """Current delta provenance survives before historical retention fills."""
+
+    state = build_acquaintance_user_state(
+        global_user_id="retention-user",
+        updated_at=_TIMESTAMP,
+    )
+    historical_ids = [
+        "old-1",
+        "old-2",
+        "shared-current",
+        "old-4",
+        "old-5",
+        "old-6",
+        "old-7",
+        "old-8",
+    ]
+    state["relationship"]["evidence_refs"] = [
+        {
+            "source_kind": "episode",
+            "source_id": source_id,
+            "occurred_at": _TIMESTAMP,
+            "semantic_summary": f"Historical evidence {source_id}.",
+        }
+        for source_id in historical_ids
+    ]
+    source_ids = {
+        "e1": "new-1",
+        "e2": "new-2",
+        "e3": "new-3",
+        "e8": "shared-current",
+    }
+    evidence = [
+        {
+            "evidence_handle": handle,
+            "evidence_ref": {
+                "source_kind": "episode",
+                "source_id": source_id,
+                "occurred_at": _TIMESTAMP,
+                "semantic_summary": f"Current evidence {source_id}.",
+            },
+            "semantic_text": f"Current evidence {source_id}.",
+            "visible_to": ["q:relationship_social"],
+        }
+        for handle, source_id in source_ids.items()
+    ]
+    result = {
+        "question_id": "q:relationship_social",
+        "selected_evidence_handles": list(source_ids),
+        "selected_role_handles": ["r1"],
+        "propositions": [],
+        "deltas": [
+            {
+                "target_path": "relationship.r1.trust",
+                "delta": 5,
+                "evidence_handles": ["e2", "e3"],
+                "reason": "Current privacy evidence supports trust.",
+            },
+            {
+                "target_path": "relationship.r1.desired_closeness",
+                "delta": 5,
+                "evidence_handles": ["e1", "e8"],
+                "reason": "Current commitment evidence supports closeness.",
+            },
+        ],
+        "explanation": "The current relationship evidence supports both deltas.",
+    }
+
+    updated = apply_semantic_appraisals(
+        state,
+        [result],
+        evidence,
+        {
+            "r1": {
+                "scope": "user",
+                "kind": "relationship",
+                "entity_id": state["relationship"]["relationship_id"],
+            }
+        },
+    )
+
+    retained_ids = {
+        row["source_id"]
+        for row in updated["relationship"]["evidence_refs"]
+    }
+    assert len(updated["relationship"]["evidence_refs"]) == 8
+    assert set(source_ids.values()) <= retained_ids
+    assert updated["relationship"]["trust"] == 5
+    assert updated["relationship"]["desired_closeness"] == 15
+
+
+def test_causal_retention_preserves_primary_and_current_evidence() -> None:
+    """A causal root remains first while current provenance is pinned."""
+
+    historical = [
+        {
+            "source_kind": "episode",
+            "source_id": f"historical-{index}",
+            "occurred_at": _TIMESTAMP,
+            "semantic_summary": f"Historical evidence {index}.",
+        }
+        for index in range(1, 9)
+    ]
+    current = [
+        {
+            "source_kind": "episode",
+            "source_id": f"current-{index}",
+            "occurred_at": _TIMESTAMP,
+            "semantic_summary": f"Current evidence {index}.",
+        }
+        for index in range(1, 3)
+    ]
+    target = {"entity_id": "goal:retention", "evidence_refs": historical}
+
+    _retain_current_batch_evidence(target, current)
+
+    retained_ids = [row["source_id"] for row in target["evidence_refs"]]
+    assert len(retained_ids) == 8
+    assert retained_ids[0] == "historical-1"
+    assert {"current-1", "current-2"} <= set(retained_ids)
+
+
+def test_causal_retention_rejects_current_union_that_displaces_primary() -> None:
+    """A full current union fails closed when its causal root cannot fit."""
+
+    primary = {
+        "source_kind": "episode",
+        "source_id": "causal-root",
+        "occurred_at": _TIMESTAMP,
+        "semantic_summary": "The causal root evidence.",
+    }
+    current = [
+        {
+            "source_kind": "episode",
+            "source_id": f"current-{index}",
+            "occurred_at": _TIMESTAMP,
+            "semantic_summary": f"Current evidence {index}.",
+        }
+        for index in range(1, 9)
+    ]
+    target = {"entity_id": "goal:retention", "evidence_refs": [primary]}
+
+    with pytest.raises(
+        CognitionStateError,
+        match="current evidence exceeds retention capacity",
+    ):
+        _retain_current_batch_evidence(target, current)

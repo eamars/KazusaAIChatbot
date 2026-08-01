@@ -162,10 +162,11 @@ class _ValidGoalLLM:
 class _InvalidCandidateLLM:
     """Return one invalid object while retaining each attempted request."""
 
-    def __init__(self) -> None:
-        """Initialize an empty model-request ledger."""
+    def __init__(self, candidate_content: str = "{}") -> None:
+        """Initialize an empty model-request ledger and invalid response."""
 
         self.calls: list[list[str]] = []
+        self.candidate_content = candidate_content
 
     async def ainvoke(
         self,
@@ -180,7 +181,7 @@ class _InvalidCandidateLLM:
             str(getattr(message, "content", ""))
             for message in messages
         ])
-        return SimpleNamespace(content="{}")
+        return SimpleNamespace(content=self.candidate_content)
 
 
 def _fixture_document() -> dict[str, Any]:
@@ -786,6 +787,164 @@ async def test_each_maximum_appraisal_family_reaches_its_model_boundary(
     assert "permitted_delta_paths" not in prompt_payload["question"]
 
 
+@pytest.mark.asyncio
+async def test_appraisal_question_keeps_candidate_origin_contract() -> None:
+    """Candidate origins stay in the retained question, not removable state."""
+
+    state, evidence, projection, questions = _production_appraisal_context()
+    question = next(
+        item for item in questions if item["question_kind"] == "event_agency"
+    )
+    llm = _BoundaryProbeLLM()
+
+    with pytest.raises(_BoundaryReached):
+        await appraise_semantic_question(
+            question,
+            evidence,
+            projection,
+            _appraisal_services(llm),
+            validation_state=state,
+        )
+
+    prompt_payload = json.loads(llm.calls[0]["human_payload"])
+    origins = prompt_payload["question"]["candidate_origin_evidence"]
+    assert origins
+    assert set(origins.values()) <= set(question["evidence_handles"])
+    assert all(handle.startswith("ce") for handle in origins)
+    assert "causal_candidates" not in prompt_payload["state"]
+
+
+@pytest.mark.asyncio
+async def test_appraisal_accumulates_one_item_then_stops_on_empty() -> None:
+    """One accepted micro item is followed by one bounded terminator call."""
+
+    class _MicroAppraisalLLM:
+        def __init__(self) -> None:
+            self.payloads: list[dict[str, Any]] = []
+
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config: object,
+        ) -> SimpleNamespace:
+            del config
+            payload = json.loads(str(getattr(messages[1], "content", "")))
+            self.payloads.append(payload)
+            question_id = payload["question"]["question_id"]
+            if len(self.payloads) == 1:
+                result = {
+                    "question_id": question_id,
+                    "proposition": {
+                        "proposition_kind": "intentionality",
+                        "subject_handle": "current_user",
+                        "evidence_handles": ["e1"],
+                        "role_assignments": [{
+                            "role": "target",
+                            "entity_handle": "self",
+                        }],
+                        "semantic_value": "当前用户有意作出当前承诺。",
+                    },
+                    "delta": None,
+                }
+            else:
+                result = {
+                    "question_id": question_id,
+                    "proposition": None,
+                    "delta": None,
+                }
+            return SimpleNamespace(
+                content=json.dumps(result, ensure_ascii=False),
+            )
+
+    state, evidence, projection, questions = _production_appraisal_context()
+    question = next(
+        item for item in questions if item["question_kind"] == "event_agency"
+    )
+    llm = _MicroAppraisalLLM()
+
+    result = await appraise_semantic_question(
+        question,
+        evidence,
+        projection,
+        _appraisal_services(llm),
+        validation_state=state,
+    )
+
+    assert len(llm.payloads) == 2
+    assert len(result["propositions"]) == 1
+    assert result["deltas"] == []
+    assert result["selected_evidence_handles"] == ["e1"]
+    assert result["selected_role_handles"] == ["current_user", "self"]
+    assert llm.payloads[0]["question"]["micro_appraisal"] == {
+        "item_index": 1,
+        "maximum_items": 8,
+        "maximum_propositions": 1,
+        "maximum_deltas": 1,
+        "empty_lists_end_family": True,
+        "emitted_proposition_signatures": [],
+        "emitted_delta_paths": [],
+    }
+    assert llm.payloads[1]["question"]["micro_appraisal"][
+        "emitted_proposition_signatures"
+    ] == ["intentionality|current_user|"]
+
+
+def test_appraisal_suppresses_exact_repeats_as_no_progress() -> None:
+    """Repeated accepted components become an empty bounded terminator."""
+
+    proposition = {
+        "proposition_kind": "social_meaning",
+        "subject_handle": "current_user",
+        "evidence_handles": ["e1"],
+        "role_assignments": [],
+        "semantic_value": "The relationship meaning is already represented.",
+    }
+    delta = {
+        "target_path": "relationship.r1.trust",
+        "delta": 5,
+        "evidence_handles": ["e1"],
+        "reason": "The trust change is already represented.",
+    }
+    accepted = {
+        "question_id": "q:relationship_social",
+        "selected_evidence_handles": ["e1"],
+        "selected_role_handles": ["current_user", "r1"],
+        "propositions": [proposition],
+        "deltas": [delta],
+        "explanation": "The accepted item is already represented.",
+    }
+    repeated = deepcopy(accepted)
+
+    normalized = (
+        semantic_appraisal_module._suppress_emitted_appraisal_components(
+            repeated,
+            accepted,
+        )
+    )
+
+    assert normalized["propositions"] == []
+    assert normalized["deltas"] == []
+    assert normalized["selected_evidence_handles"] == []
+    assert normalized["selected_role_handles"] == []
+
+
+def test_persistent_event_handles_are_distinct_from_evidence_handles() -> None:
+    """Persistent events use evN while evidence keeps the eN namespace."""
+
+    _, evidence, projection, _ = _maximum_appraisal_context("event_agency")
+    persistent_event_handles = [
+        handle
+        for handle, ref in projection.handle_to_ref.items()
+        if ref["kind"] == "event"
+        and not ref["entity_id"].startswith("candidate:")
+    ]
+
+    assert persistent_event_handles
+    assert all(handle.startswith("ev") for handle in persistent_event_handles)
+    assert all(row["evidence_handle"].startswith("e") for row in evidence)
+
+
 def test_appraisal_exact_cap_and_cap_plus_one_are_distinct() -> None:
     """The appraisal owner accepts 8,000 and rejects irreducible 8,001."""
 
@@ -1187,7 +1346,10 @@ async def test_irreducible_appraisal_context_is_omitted_per_question() -> None:
     task = asyncio.create_task(_raise_context_limit())
     results, failures, warnings = await facade_module._collect_appraisals(
         [task],
-        [{"question_id": "q:epistemic_comparison_memory"}],
+        [{
+            "question_id": "q:epistemic_comparison_memory",
+            "question_kind": "epistemic_comparison_memory",
+        }],
     )
 
     assert results == []
@@ -1590,27 +1752,23 @@ async def test_resolver_authorization_overflow_denies_all_candidates() -> None:
 
 
 @pytest.mark.asyncio
-async def test_appraisal_repair_overflow_omits_before_second_call(
+async def test_appraisal_repair_uses_residual_budget_for_second_call(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A near-cap appraisal repair becomes typed family-local omission."""
+    """A near-cap canonical payload keeps a bounded second attempt reachable."""
 
     state, evidence, projection, questions = _production_appraisal_context()
     monkeypatch.setattr(
         semantic_appraisal_module,
-        "SEMANTIC_APPRAISAL_PROMPT_CAP",
-        100,
-    )
-    monkeypatch.setattr(
-        semantic_appraisal_module,
         "_fit_appraisal_payload",
-        lambda payload: "p" * 100,
+        lambda payload: "p" * 7900,
     )
-    llm = _InvalidCandidateLLM()
+    invalid_candidate = json.dumps({"padding": "x" * 5000})
+    llm = _InvalidCandidateLLM(invalid_candidate)
 
     with pytest.raises(
-        CognitionContextLimitError,
-        match="repair context",
+        CognitionExecutionError,
+        match="contract attempts exhausted",
     ):
         await appraise_semantic_question(
             questions[0],
@@ -1620,7 +1778,10 @@ async def test_appraisal_repair_overflow_omits_before_second_call(
             validation_state=state,
         )
 
-    assert len(llm.calls) == 1
+    assert len(llm.calls) == 2
+    repair_dynamic_chars = sum(len(content) for content in llm.calls[1][1:])
+    assert repair_dynamic_chars <= 10000
+    assert len(llm.calls[1][2]) < len(invalid_candidate)
 
 
 @pytest.mark.asyncio

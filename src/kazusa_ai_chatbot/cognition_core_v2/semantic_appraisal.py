@@ -32,9 +32,6 @@ from kazusa_ai_chatbot.cognition_core_v2.semantic_source_planner import (
     question_proposition_kind_semantics,
     question_proposition_kinds,
 )
-from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
-    V2_MODEL_TOTAL_ATTEMPTS,
-)
 from kazusa_ai_chatbot.cognition_core_v2.prompt_budget import (
     PromptBudgetError,
     fit_evidence_texts_to_budget,
@@ -50,10 +47,25 @@ from kazusa_ai_chatbot.llm_tracing import failure_capsule
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 
 
-SEMANTIC_APPRAISAL_ATTEMPT_LIMIT = V2_MODEL_TOTAL_ATTEMPTS
+SEMANTIC_APPRAISAL_ATTEMPT_LIMIT = 2
+SEMANTIC_APPRAISAL_ITEM_LIMIT = 8
 SEMANTIC_APPRAISAL_PROMPT_CAP = 8000
-SEMANTIC_APPRAISAL_REPAIR_OUTPUT_CAP = 8000
+SEMANTIC_APPRAISAL_REPAIR_PROMPT_CAP = 10000
+SEMANTIC_APPRAISAL_ITEM_EXPLANATION_LIMIT = 120
 MIN_PROMPT_EVIDENCE_TEXT_CHARS = 96
+_SEMANTIC_APPRAISAL_RESULT_FIELDS = {
+    "question_id",
+    "selected_evidence_handles",
+    "selected_role_handles",
+    "propositions",
+    "deltas",
+    "explanation",
+}
+_SEMANTIC_APPRAISAL_ITEM_FIELDS = {
+    "question_id",
+    "proposition",
+    "delta",
+}
 
 _PROPOSITION_SUBJECT_KINDS = {
     "goal_release": "goal",
@@ -70,15 +82,18 @@ SEMANTIC_APPRAISAL_PROMPT = '''你根据有界证据回答一个范围明确的�
 只使用本次 prompt 允许的 handle 和语义描述。动作选择、对话生成、emotion id、生命周期状态与
 事实补充不属于本阶段。只有在所给证据支持时，才返回语义命题和允许路径上的数值变化。
 每个 proposition_kind 都是其所给语义定义已经成立的肯定式断言。
+当前调用只生成一个 micro_appraisal item。proposition 和 delta 各自只能是一个对象或 null，
+不能使用数组，也不能列举多个候选。没有尚未输出的必要项目时，两者都返回 null 以结束循环。
 
 遵守每条证据的 source_kind。角色自己的反思或内部观察属于证据，不是当前用户的即时发言。
 生成的文字不复述来源包标题、时间戳、传输摘要、schema key 或运行元数据。新生成的自由文本使用
 简体中文；引用的用户原文、专有名词、代码、URL 以及必要的 schema 或 enum token 保持原样。
 
 # 输出格式
-只返回一个 JSON 对象，字段必须恰好是 question_id、selected_evidence_handles、
-selected_role_handles、propositions、deltas 和 explanation。每条 proposition 与 delta 都必须
-引用提供的 evidence handle；未知或缺少支持的含义直接省略。
+只返回一个 JSON 对象，字段必须恰好是 question_id、proposition 和 delta。
+proposition 与 delta 若不是 null，就必须引用提供的 evidence handle；未知或缺少支持的含义直接
+返回 null。不要输出 explanation、selected_evidence_handles、selected_role_handles、propositions
+或 deltas。
 
 每个 proposition 对象必须恰好包含 proposition_kind、subject_handle、evidence_handles、
 role_assignments 和 semantic_value，并可选包含 object_handle。每条 role assignment 必须恰好
@@ -87,14 +102,30 @@ evidence_handles 和 reason。所给 role handle 与 delta path 按原值使用�
 semantic_text、role_handles、path 或其他 proposition、delta 字段。
 question.permitted_delta_path_domains 的每一项给出 state_field、handles 和 axes。
 每个 target_path 必须从同一项中各取一个值，按 state_field.handle.axis 组合并原样输出。
+delta 必须是 -40 到 40（含边界）的 JSON 整数，例如 -5、0 或 12；不得使用字符串、小数、
+百分比或正负号小数比例。
 
 semantic_value 是一句简洁描述，目标长度 120 字符且上限 200 字符，其中不重复标准、约束或证据
-解释，也不使用数值；数值只放在 delta 字段。每条 delta reason 不超过 300 字符，explanation
-不超过 1000 字符。role 必须取以下固定 enum token：actor（行动者）、experiencer（体验者）、
+解释，也不使用数值；数值只放在 delta 字段。每条 delta reason 不超过 300 字符。role 必须取以下
+固定 enum token：actor（行动者）、experiencer（体验者）、
 target（对象）、object（客体）、affected_goal（受影响目标）或 affected_relationship（受影响关系）。
 r1、ce1、ct1、ck1 等实体 handle 放在 entity_handle，不能放在 role。当前角色和当前用户的内部
 角色句柄只用于结构化字段；中文自由文本使用“当前角色”“当前用户”或配置的角色名、用户显示名，
 不要把内部角色句柄或英文角色称谓写入中文自由文本。固定 schema key 和 enum token 仍按原值输出。
+ceN、ctN、ckN 表示候选事件、威胁或知识缺口，不是人物；人物的 actor、experiencer 或 target 使用
+self 或 current_user。无法从允许 handle 准确分配角色时，role_assignments 使用空数组。
+
+handle 域严格对应 question：subject_handle、object_handle 与 role_assignments[*].entity_handle
+只能使用 question.permitted_role_handles；proposition、delta 的 evidence_handles 只能使用
+question.evidence_handles；target_path
+只能使用 question.permitted_delta_path_domains 允许的 state_field.handle.axis 组合。持久 event handle
+使用 ev1..evN，evidence handle 使用 e1..eN，候选 event、threat、knowledge gap handle 分别使用
+ce1..ceN、ct1..ctN、ck1..ckN。question.candidate_origin_evidence 是允许的 candidate handle 到其
+来源 evidence handle 的唯一映射；任何 proposition、delta 的 target_path 或结构化 handle 使用
+ceN、ctN 或 ckN 时，该对象的 evidence_handles 必须包含对应的来源 evidence handle。
+输出前逐个对象检查：subject_handle、object_handle、role_assignments[*].entity_handle 或
+target_path 中每出现一个 ceN、ctN、ckN，就把映射值加入该对象的 evidence_handles；无法加入时省略
+该 candidate 或整个对象。
 '''
 
 
@@ -140,12 +171,24 @@ async def appraise_semantic_question(
         for row in evidence
         if row["evidence_handle"] in question["evidence_handles"]
     }
-    payload = {
+    allowed_evidence_handles = set(question["evidence_handles"])
+    candidate_origin_evidence = {
+        candidate_handle: origin_handle
+        for candidate_handle in question["permitted_role_handles"]
+        if (
+            origin_handle := _candidate_evidence_handle(
+                candidate_handle,
+                projection.handle_to_ref,
+            )
+        ) and origin_handle in allowed_evidence_handles
+    }
+    base_payload = {
         "question": {
             "question_id": question["question_id"],
             "question_kind": question["question_kind"],
             "semantic_question": question["semantic_question"],
             "permitted_role_handles": question["permitted_role_handles"],
+            "candidate_origin_evidence": candidate_origin_evidence,
             "permitted_delta_path_domains": (
                 _compact_permitted_delta_path_domains(
                     question["permitted_delta_paths"]
@@ -175,24 +218,97 @@ async def appraise_semantic_question(
                     "semantic_text_reference": '当前用户',
                 },
             },
-            "output_schema": {
-                "propositions": "有证据支持的 proposition 对象列表",
-                "deltas": "允许路径上的有符号整数 delta 列表",
-                "evidence_handles": "每条 proposition 和 delta 都必须引用这些 handle",
-            },
         },
         "evidence": list(evidence_by_handle.values()),
         "state": _project_question_state(projection, question),
     }
-    payload_text = _fit_appraisal_payload(payload)
     system_message = SystemMessage(content=SEMANTIC_APPRAISAL_PROMPT)
+    accepted_result: SemanticAppraisalResultV2 | None = None
+    for item_index in range(1, SEMANTIC_APPRAISAL_ITEM_LIMIT + 1):
+        emitted_paths = {
+            delta["target_path"]
+            for delta in (
+                accepted_result["deltas"] if accepted_result else []
+            )
+        }
+        item_question = deepcopy(dict(question))
+        item_question["permitted_delta_paths"] = [
+            path
+            for path in question["permitted_delta_paths"]
+            if path not in emitted_paths
+        ]
+        payload = deepcopy(base_payload)
+        payload["question"]["permitted_delta_path_domains"] = (
+            _compact_permitted_delta_path_domains(
+                item_question["permitted_delta_paths"]
+            )
+        )
+        payload["question"]["micro_appraisal"] = {
+            "item_index": item_index,
+            "maximum_items": SEMANTIC_APPRAISAL_ITEM_LIMIT,
+            "maximum_propositions": 1,
+            "maximum_deltas": 1,
+            "empty_lists_end_family": True,
+            "emitted_proposition_signatures": (
+                _emitted_proposition_signatures(accepted_result)
+            ),
+            "emitted_delta_paths": sorted(emitted_paths),
+        }
+        payload_text = _fit_appraisal_payload(payload)
+        item_result, merged_result = await _appraise_semantic_item(
+            question=question,
+            item_question=item_question,
+            evidence=evidence,
+            evidence_by_handle=evidence_by_handle,
+            projection=projection,
+            validation_state=validation_state,
+            accepted_result=accepted_result,
+            services=services,
+            config=config,
+            system_message=system_message,
+            payload_text=payload_text,
+            item_index=item_index,
+        )
+        if not item_result["propositions"] and not item_result["deltas"]:
+            final_result = (
+                accepted_result
+                if accepted_result is not None
+                else item_result
+            )
+            return final_result
+        accepted_result = merged_result
+
+    if accepted_result is None:
+        raise AssertionError("semantic appraisal item loop produced no result")
+    return accepted_result
+
+
+async def _appraise_semantic_item(
+    *,
+    question: SemanticQuestionV2,
+    item_question: SemanticQuestionV2,
+    evidence: Sequence[CognitionEvidenceV2],
+    evidence_by_handle: Mapping[str, Mapping[str, str]],
+    projection: PromptProjectionV2,
+    validation_state: Mapping[str, Any],
+    accepted_result: SemanticAppraisalResultV2 | None,
+    services: CognitionCoreServicesV2,
+    config: LLMCallConfig,
+    system_message: SystemMessage,
+    payload_text: str,
+    item_index: int,
+) -> tuple[SemanticAppraisalResultV2, SemanticAppraisalResultV2]:
+    """Generate and validate one bounded appraisal item."""
+
     human_message = HumanMessage(content=payload_text)
-    request_messages = [system_message, human_message]
+    request_messages: list[BaseMessage] = [system_message, human_message]
     for attempt_index in range(SEMANTIC_APPRAISAL_ATTEMPT_LIMIT):
         started_at = time.perf_counter()
         raw_output: str | None = None
         parsed_output: object | None = None
-        stage_id = f"semantic_appraisal:{question['question_id']}"
+        stage_id = (
+            f"semantic_appraisal:{question['question_id']}:item_{item_index}"
+        )
         if attempt_index:
             stage_id = f"{stage_id}:repair_{attempt_index}"
         try:
@@ -219,6 +335,7 @@ async def appraise_semantic_question(
                 status="failed",
                 started_at=started_at,
                 attempt_index=attempt_index + 1,
+                item_index=item_index,
                 validation_error=str(exc),
             )
             capture_validation_stage(
@@ -252,8 +369,28 @@ async def appraise_semantic_question(
                     failure_capsule.append_json_repair_attempt
                 ),
             )
+            parsed_output = _canonicalize_semantic_appraisal_item(parsed_output)
+            parsed_output = _suppress_emitted_appraisal_components(
+                parsed_output,
+                accepted_result,
+            )
             result = validate_semantic_appraisal_result(
                 parsed_output,
+                item_question,
+                set(evidence_by_handle),
+                projection.handle_to_ref,
+                maximum_propositions=1,
+                maximum_deltas=1,
+                maximum_explanation_chars=(
+                    SEMANTIC_APPRAISAL_ITEM_EXPLANATION_LIMIT
+                ),
+            )
+            merged_result = _merge_semantic_appraisal_item(
+                accepted_result,
+                result,
+            )
+            validate_semantic_appraisal_result(
+                merged_result,
                 question,
                 set(evidence_by_handle),
                 projection.handle_to_ref,
@@ -261,7 +398,7 @@ async def appraise_semantic_question(
             trial_state = deepcopy(dict(validation_state))
             apply_semantic_appraisals(
                 trial_state,
-                [result],
+                [merged_result],
                 evidence,
                 projection.handle_to_ref,
             )
@@ -277,6 +414,7 @@ async def appraise_semantic_question(
                 status="failed",
                 started_at=started_at,
                 attempt_index=attempt_index + 1,
+                item_index=item_index,
                 validation_error=str(exc),
             )
             capture_validation_stage(
@@ -319,6 +457,7 @@ async def appraise_semantic_question(
             status="succeeded",
             started_at=started_at,
             attempt_index=attempt_index + 1,
+            item_index=item_index,
             validation_error="",
         )
         capture_validation_stage(
@@ -332,9 +471,236 @@ async def appraise_semantic_question(
             started_at=started_at,
             ended_at=ended_at,
         )
-        return result
+        return result, merged_result
 
-    raise AssertionError("semantic appraisal attempt loop did not terminate")
+    raise AssertionError("semantic appraisal item attempt loop did not terminate")
+
+
+def _merge_semantic_appraisal_item(
+    accepted_result: SemanticAppraisalResultV2 | None,
+    item_result: SemanticAppraisalResultV2,
+) -> SemanticAppraisalResultV2:
+    """Merge one validated item into the bounded family result."""
+
+    if accepted_result is None:
+        merged_result = deepcopy(item_result)
+        return merged_result
+    prior_signatures = set(_emitted_proposition_signatures(accepted_result))
+    item_signatures = _emitted_proposition_signatures(item_result)
+    if any(signature in prior_signatures for signature in item_signatures):
+        raise ValueError("semantic appraisal proposition is duplicated")
+    return {
+        "question_id": accepted_result["question_id"],
+        "selected_evidence_handles": _ordered_handle_union(
+            accepted_result["selected_evidence_handles"],
+            item_result["selected_evidence_handles"],
+        ),
+        "selected_role_handles": _ordered_handle_union(
+            accepted_result["selected_role_handles"],
+            item_result["selected_role_handles"],
+        ),
+        "propositions": [
+            *deepcopy(accepted_result["propositions"]),
+            *deepcopy(item_result["propositions"]),
+        ],
+        "deltas": [
+            *deepcopy(accepted_result["deltas"]),
+            *deepcopy(item_result["deltas"]),
+        ],
+        "explanation": (
+            f"{accepted_result['explanation']} {item_result['explanation']}"
+        ),
+    }
+
+
+def _ordered_handle_union(
+    first: Sequence[str],
+    second: Sequence[str],
+) -> list[str]:
+    """Return one stable duplicate-free handle union."""
+
+    return list(dict.fromkeys([*first, *second]))
+
+
+def _derive_appraisal_selection_metadata(parsed: object) -> object:
+    """Derive provenance selections from the model's structured item fields."""
+
+    if (
+        not isinstance(parsed, Mapping)
+        or set(parsed) != _SEMANTIC_APPRAISAL_RESULT_FIELDS
+        or not isinstance(parsed["propositions"], list)
+        or not isinstance(parsed["deltas"], list)
+    ):
+        return parsed
+
+    selected_evidence: list[str] = []
+    selected_roles: list[str] = []
+    for proposition in parsed["propositions"]:
+        if not isinstance(proposition, Mapping):
+            continue
+        evidence = proposition.get("evidence_handles")
+        if isinstance(evidence, list):
+            selected_evidence.extend(
+                handle for handle in evidence if isinstance(handle, str)
+            )
+        for field in ("subject_handle", "object_handle"):
+            handle = proposition.get(field)
+            if isinstance(handle, str):
+                selected_roles.append(handle)
+        assignments = proposition.get("role_assignments")
+        if isinstance(assignments, list):
+            for assignment in assignments:
+                if not isinstance(assignment, Mapping):
+                    continue
+                handle = assignment.get("entity_handle")
+                if isinstance(handle, str):
+                    selected_roles.append(handle)
+
+    for delta in parsed["deltas"]:
+        if not isinstance(delta, Mapping):
+            continue
+        evidence = delta.get("evidence_handles")
+        if isinstance(evidence, list):
+            selected_evidence.extend(
+                handle for handle in evidence if isinstance(handle, str)
+            )
+        path = delta.get("target_path")
+        if isinstance(path, str) and len(path.split(".")) == 3:
+            selected_roles.append(path.split(".")[1])
+
+    normalized = deepcopy(dict(parsed))
+    normalized["selected_evidence_handles"] = _ordered_handle_union(
+        [],
+        selected_evidence,
+    )
+    normalized["selected_role_handles"] = _ordered_handle_union(
+        [],
+        selected_roles,
+    )
+    return normalized
+
+
+def _canonicalize_semantic_appraisal_item(parsed: object) -> object:
+    """Convert one singular model item into the public aggregate shape."""
+
+    if not isinstance(parsed, Mapping):
+        raise ValueError("semantic micro-appraisal must return an object")
+    if set(parsed) != _SEMANTIC_APPRAISAL_ITEM_FIELDS:
+        raise ValueError(
+            "semantic micro-appraisal fields must be exactly question_id, "
+            "proposition, and delta"
+        )
+    proposition = parsed["proposition"]
+    delta = parsed["delta"]
+    canonical = {
+        "question_id": parsed["question_id"],
+        "selected_evidence_handles": [],
+        "selected_role_handles": [],
+        "propositions": [] if proposition is None else [proposition],
+        "deltas": [] if delta is None else [delta],
+        "explanation": _derive_semantic_item_explanation(
+            proposition,
+            delta,
+        ),
+    }
+    canonical_result = _derive_appraisal_selection_metadata(canonical)
+    return canonical_result
+
+
+def _derive_semantic_item_explanation(
+    proposition: object,
+    delta: object,
+) -> str:
+    """Derive bounded audit text from the item's authored semantic fields."""
+
+    parts: list[str] = []
+    if isinstance(proposition, Mapping):
+        semantic_value = proposition.get("semantic_value")
+        if isinstance(semantic_value, str) and semantic_value:
+            parts.append(semantic_value)
+    if isinstance(delta, Mapping):
+        reason = delta.get("reason")
+        if isinstance(reason, str) and reason:
+            parts.append(reason)
+    if not parts:
+        if proposition is None and delta is None:
+            return "No additional supported semantic item."
+        return "Structured semantic item."
+    explanation = " ".join(dict.fromkeys(parts))
+    return explanation[:SEMANTIC_APPRAISAL_ITEM_EXPLANATION_LIMIT]
+
+
+def _suppress_emitted_appraisal_components(
+    parsed: object,
+    accepted_result: SemanticAppraisalResultV2 | None,
+) -> object:
+    """Remove exact accepted components so repetition terminates the loop."""
+
+    if (
+        accepted_result is None
+        or not isinstance(parsed, Mapping)
+        or set(parsed) != _SEMANTIC_APPRAISAL_RESULT_FIELDS
+        or not isinstance(parsed["propositions"], list)
+        or not isinstance(parsed["deltas"], list)
+    ):
+        return parsed
+
+    emitted_signatures = set(
+        _emitted_proposition_signatures(accepted_result)
+    )
+    emitted_paths = {
+        delta["target_path"] for delta in accepted_result["deltas"]
+    }
+    propositions = []
+    for proposition in parsed["propositions"]:
+        if isinstance(proposition, Mapping):
+            kind = proposition.get("proposition_kind")
+            subject = proposition.get("subject_handle")
+            object_handle = proposition.get("object_handle", "")
+            if all(
+                isinstance(value, str)
+                for value in (kind, subject, object_handle)
+            ):
+                signature = "|".join((kind, subject, object_handle))
+                if signature in emitted_signatures:
+                    continue
+        propositions.append(proposition)
+
+    deltas = []
+    for delta in parsed["deltas"]:
+        if (
+            isinstance(delta, Mapping)
+            and delta.get("target_path") in emitted_paths
+        ):
+            continue
+        deltas.append(delta)
+
+    normalized = deepcopy(dict(parsed))
+    normalized["propositions"] = propositions
+    normalized["deltas"] = deltas
+    normalized["explanation"] = _derive_semantic_item_explanation(
+        propositions[0] if propositions else None,
+        deltas[0] if deltas else None,
+    )
+    normalized_result = _derive_appraisal_selection_metadata(normalized)
+    return normalized_result
+
+
+def _emitted_proposition_signatures(
+    result: SemanticAppraisalResultV2 | None,
+) -> list[str]:
+    """Project emitted proposition identities for bounded loop exclusion."""
+
+    if result is None:
+        return []
+    return [
+        "|".join((
+            proposition["proposition_kind"],
+            proposition["subject_handle"],
+            proposition.get("object_handle", ""),
+        ))
+        for proposition in result["propositions"]
+    ]
 
 
 def _record_semantic_appraisal_trace(
@@ -348,11 +714,14 @@ def _record_semantic_appraisal_trace(
     status: str,
     started_at: float,
     attempt_index: int,
+    item_index: int,
     validation_error: str,
 ) -> None:
     """Preserve one protected semantic-appraisal model boundary."""
 
-    stage_name = f"semantic_appraisal.{question['question_id']}"
+    stage_name = (
+        f"semantic_appraisal.{question['question_id']}.item_{item_index}"
+    )
     if attempt_index > 1:
         stage_name = f"{stage_name}.repair"
     failure_capsule.append_model_attempt(
@@ -389,36 +758,59 @@ def _appraisal_repair_messages(
         A same-context message sequence requesting a complete replacement.
     """
 
-    if len(invalid_candidate) > SEMANTIC_APPRAISAL_REPAIR_OUTPUT_CAP:
-        half_cap = SEMANTIC_APPRAISAL_REPAIR_OUTPUT_CAP // 2
-        invalid_candidate = (
-            invalid_candidate[:half_cap]
-            + "\n... 已截断的不合格候选 ...\n"
-            + invalid_candidate[-half_cap:]
-        )
     repair_payload = {
         "repair_instruction": (
-            "请在相同语义问题和证据范围内返回完整替代对象，只修复 JSON、"
-            "字段、类型、handle 和 contract 约束。"
+            "请在相同语义问题和证据范围内返回一个完整替代 JSON 对象，只修复 JSON、"
+            "字段、类型、handle 和 contract 约束。顶层字段必须恰好是 question_id、"
+            "proposition 和 delta；proposition 和 delta 各自只能是一个对象或 null，"
+            "不得使用数组；不要输出 Markdown、解释段落或 JSON 以外的文字。"
         ),
-        "contract_error": contract_error[:500],
+        "contract_error": contract_error,
     }
+    repair_payload_text = json.dumps(
+        repair_payload,
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    residual_candidate_chars = (
+        SEMANTIC_APPRAISAL_REPAIR_PROMPT_CAP
+        - len(str(human_message.content))
+        - len(repair_payload_text)
+    )
+    if residual_candidate_chars < 0:
+        raise CognitionContextLimitError(
+            "semantic appraisal repair context exceeds the contract cap"
+        )
+    if len(invalid_candidate) > residual_candidate_chars:
+        truncation_marker = '\n... 已截断的不合格候选 ...\n'
+        if residual_candidate_chars <= len(truncation_marker):
+            invalid_candidate = invalid_candidate[:residual_candidate_chars]
+        else:
+            retained_chars = residual_candidate_chars - len(truncation_marker)
+            head_chars = (retained_chars + 1) // 2
+            tail_chars = retained_chars - head_chars
+            tail_text = (
+                invalid_candidate[-tail_chars:]
+                if tail_chars
+                else ""
+            )
+            invalid_candidate = (
+                invalid_candidate[:head_chars]
+                + truncation_marker
+                + tail_text
+            )
     messages = [
         system_message,
         human_message,
         AIMessage(content=invalid_candidate),
-        HumanMessage(content=json.dumps(
-            repair_payload,
-            ensure_ascii=False,
-            sort_keys=True,
-        )),
+        HumanMessage(content=repair_payload_text),
     ]
     dynamic_context_chars = sum(
         len(str(message.content))
         for message in messages
         if not isinstance(message, SystemMessage)
     )
-    if dynamic_context_chars > SEMANTIC_APPRAISAL_PROMPT_CAP:
+    if dynamic_context_chars > SEMANTIC_APPRAISAL_REPAIR_PROMPT_CAP:
         raise CognitionContextLimitError(
             "semantic appraisal repair context exceeds the contract cap"
         )
@@ -430,24 +822,35 @@ def validate_semantic_appraisal_result(
     question: SemanticQuestionV2,
     evidence_handles: set[str],
     handle_to_ref: Mapping[str, Mapping[str, str]],
+    *,
+    maximum_propositions: int = 8,
+    maximum_deltas: int = 8,
+    maximum_explanation_chars: int = 1000,
 ) -> SemanticAppraisalResultV2:
     """Validate one appraisal without interpreting its semantic prose."""
 
     _validate_question_handle_authority(question, handle_to_ref)
     if not isinstance(parsed, Mapping):
         raise ValueError("semantic appraisal must return an object")
-    required = {
-        "question_id",
-        "selected_evidence_handles",
-        "selected_role_handles",
-        "propositions",
-        "deltas",
-        "explanation",
-    }
-    if set(parsed) != required:
+    if set(parsed) != _SEMANTIC_APPRAISAL_RESULT_FIELDS:
         raise ValueError("semantic appraisal fields are not exact")
     if parsed["question_id"] != question["question_id"]:
         raise ValueError("semantic appraisal question id does not match")
+    if (
+        not isinstance(parsed["propositions"], list)
+        or len(parsed["propositions"]) > maximum_propositions
+    ):
+        raise ValueError("semantic propositions are invalid")
+    if (
+        not isinstance(parsed["deltas"], list)
+        or len(parsed["deltas"]) > maximum_deltas
+    ):
+        raise ValueError("semantic deltas are invalid")
+    _validate_all_candidate_evidence_bindings(
+        parsed["propositions"],
+        parsed["deltas"],
+        handle_to_ref,
+    )
     selected_evidence = _validate_handles(
         parsed["selected_evidence_handles"],
         evidence_handles,
@@ -461,8 +864,6 @@ def validate_semantic_appraisal_result(
         "selected roles",
         minimum=0,
     )
-    if not isinstance(parsed["propositions"], list) or len(parsed["propositions"]) > 8:
-        raise ValueError("semantic propositions are invalid")
     propositions = [
         _validate_proposition(
             row,
@@ -472,8 +873,6 @@ def validate_semantic_appraisal_result(
         )
         for row in parsed["propositions"]
     ]
-    if not isinstance(parsed["deltas"], list) or len(parsed["deltas"]) > 8:
-        raise ValueError("semantic deltas are invalid")
     deltas = [
         _validate_delta(
             row,
@@ -487,7 +886,10 @@ def validate_semantic_appraisal_result(
     if len(paths) != len(set(paths)):
         raise ValueError("one appraisal cannot duplicate a target path")
     explanation = parsed["explanation"]
-    if not isinstance(explanation, str) or not 1 <= len(explanation) <= 1000:
+    if (
+        not isinstance(explanation, str)
+        or not 1 <= len(explanation) <= maximum_explanation_chars
+    ):
         raise ValueError("semantic appraisal explanation is invalid")
     return {
         "question_id": question["question_id"],
@@ -622,14 +1024,19 @@ def _validate_delta(
         raise ValueError("semantic delta fields are not exact")
     path = value["target_path"]
     if path not in set(question["permitted_delta_paths"]):
-        raise ValueError("semantic delta path is not owned by question")
+        raise ValueError(
+            f"semantic delta path {path} is not owned by question"
+        )
     delta = value["delta"]
     if (
         isinstance(delta, bool)
         or not isinstance(delta, int)
         or not -40 <= delta <= 40
     ):
-        raise ValueError("semantic delta must be an integer in range")
+        raise ValueError(
+            "semantic delta must be a JSON integer from -40 through 40; "
+            f"received {type(delta).__name__}"
+        )
     cited = _validate_handles(
         value["evidence_handles"],
         evidence_handles,
@@ -659,7 +1066,9 @@ def _validate_handles(
     """Validate a bounded duplicate-free handle list."""
 
     if not isinstance(value, list) or not minimum <= len(value) <= 8:
-        raise ValueError(f"{label} handles are invalid")
+        raise ValueError(
+            f"{label} handles must contain between {minimum} and 8 items"
+        )
     if any(not isinstance(handle, str) or handle not in allowed for handle in value):
         raise ValueError(f"{label} contains an unknown handle")
     if len(value) != len(set(value)):
@@ -679,8 +1088,85 @@ def _validate_candidate_evidence_binding(
         evidence_handle = _candidate_evidence_handle(handle, handle_to_ref)
         if evidence_handle is not None and evidence_handle not in cited:
             raise ValueError(
-                "causal candidate must cite its originating evidence"
+                f"causal candidate {handle} must cite its originating "
+                f"evidence {evidence_handle}"
             )
+
+
+def _validate_all_candidate_evidence_bindings(
+    propositions: Sequence[Any],
+    deltas: Sequence[Any],
+    handle_to_ref: Mapping[str, Mapping[str, str]],
+) -> None:
+    """Report every missing candidate origin needed by one replacement."""
+
+    violations: set[tuple[str, str]] = set()
+    for proposition in propositions:
+        if not isinstance(proposition, Mapping):
+            continue
+        cited = proposition.get("evidence_handles")
+        if not isinstance(cited, list):
+            continue
+        handles = [
+            proposition.get("subject_handle"),
+            proposition.get("object_handle"),
+        ]
+        assignments = proposition.get("role_assignments")
+        if isinstance(assignments, list):
+            handles.extend(
+                assignment.get("entity_handle")
+                for assignment in assignments
+                if isinstance(assignment, Mapping)
+            )
+        _collect_missing_candidate_bindings(
+            handles,
+            cited,
+            handle_to_ref,
+            violations,
+        )
+    for delta in deltas:
+        if not isinstance(delta, Mapping):
+            continue
+        path = delta.get("target_path")
+        cited = delta.get("evidence_handles")
+        if not isinstance(path, str) or not isinstance(cited, list):
+            continue
+        pieces = path.split(".")
+        if len(pieces) != 3:
+            continue
+        _collect_missing_candidate_bindings(
+            [pieces[1]],
+            cited,
+            handle_to_ref,
+            violations,
+        )
+    if violations:
+        bindings = ", ".join(
+            f"{handle}->{evidence_handle}"
+            for handle, evidence_handle in sorted(violations)
+        )
+        raise ValueError(
+            "causal candidates must cite originating evidence: " + bindings
+        )
+
+
+def _collect_missing_candidate_bindings(
+    candidate_handles: Sequence[Any],
+    cited_evidence_handles: Sequence[Any],
+    handle_to_ref: Mapping[str, Mapping[str, str]],
+    violations: set[tuple[str, str]],
+) -> None:
+    """Collect missing candidate origins from one proposition or delta."""
+
+    cited = {
+        handle for handle in cited_evidence_handles if isinstance(handle, str)
+    }
+    for handle in candidate_handles:
+        if not isinstance(handle, str):
+            continue
+        evidence_handle = _candidate_evidence_handle(handle, handle_to_ref)
+        if evidence_handle is not None and evidence_handle not in cited:
+            violations.add((handle, evidence_handle))
 
 
 def _candidate_evidence_handle(
@@ -733,7 +1219,6 @@ def _fit_appraisal_payload(payload: dict[str, Any]) -> str:
     """Fit one appraisal after reducing state, then evidence text."""
 
     supplemental_order = (
-        "causal_candidates",
         "knowledge_gaps",
         "events",
         "threats",
@@ -837,15 +1322,6 @@ def _project_question_state(
         ]
         if selected:
             result[field_name] = selected
-    candidates = [
-        dict(row)
-        for row in source.get("causal_candidates", [])
-        if isinstance(row, Mapping)
-        and row.get("handle") in allowed
-        and row.get("evidence_handle") in set(question["evidence_handles"])
-    ]
-    if candidates:
-        result["causal_candidates"] = candidates
     roles = source.get("roles", {})
     if isinstance(roles, Mapping):
         selected_roles = {

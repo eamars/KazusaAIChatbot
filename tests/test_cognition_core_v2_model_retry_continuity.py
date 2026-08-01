@@ -224,8 +224,8 @@ def test_v2_attempt_record_validation_is_bounded_and_data_only() -> None:
             policy.validate_v2_attempt_record(invalid_record)
 
 
-def test_every_short_v2_owner_uses_three_total_attempts() -> None:
-    """One- and two-attempt owners share the approved failure-path minimum."""
+def test_appraisal_uses_two_attempts_while_other_short_owners_use_three() -> None:
+    """Appraisal keeps its local two-attempt contract beside other owners."""
 
     semantic_appraisal = importlib.import_module(
         "kazusa_ai_chatbot.cognition_core_v2.semantic_appraisal"
@@ -246,8 +246,7 @@ def test_every_short_v2_owner_uses_three_total_attempts() -> None:
         "kazusa_ai_chatbot.cognition_core_v2.surface_stages"
     )
 
-    limits = {
-        semantic_appraisal.SEMANTIC_APPRAISAL_ATTEMPT_LIMIT,
+    other_limits = {
         goal_cognition.GOAL_COGNITION_ATTEMPT_LIMIT,
         workspace.WORKSPACE_COLLAPSE_ATTEMPT_LIMIT,
         action_selection.ACTION_PLANNING_ATTEMPT_LIMIT,
@@ -259,7 +258,8 @@ def test_every_short_v2_owner_uses_three_total_attempts() -> None:
         dialog_module.DIALOG_GENERATOR_TOTAL_ATTEMPTS,
     }
 
-    assert limits == {3}
+    assert semantic_appraisal.SEMANTIC_APPRAISAL_ATTEMPT_LIMIT == 2
+    assert other_limits == {3}
 
 
 def test_degraded_text_surface_projects_only_validated_v2_truth() -> None:

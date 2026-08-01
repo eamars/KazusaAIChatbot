@@ -38,6 +38,7 @@ from kazusa_ai_chatbot.cognition_core_v2.transition_guards import (
 
 
 _ENTITY_FIELDS = ("goals", "threats", "active_events", "knowledge_gaps")
+MAX_EVIDENCE_REFS_PER_TARGET = 8
 
 
 def apply_semantic_appraisals(
@@ -630,19 +631,95 @@ def _retain_prompt_evidence(
 ) -> None:
     """Attach complete provenance to every mutable entity cited by appraisal."""
 
+    rows_by_target: dict[
+        str,
+        tuple[dict[str, Any], list[Mapping[str, Any]]],
+    ] = {}
     for result in results:
         for delta in result["deltas"]:
-            handles = set(delta["evidence_handles"])
             path = delta["target_path"].split(".")
             try:
                 target = _target_for_prompt_path(state, path, handle_to_ref)
             except CognitionStateError:
                 continue
             if "evidence_refs" in target:
-                _append_evidence_rows(
-                    target,
-                    [evidence_by_handle[handle] for handle in handles],
+                target_key = ".".join(path[:2])
+                _, rows = rows_by_target.setdefault(target_key, (target, []))
+                rows.extend(
+                    evidence_by_handle[handle]
+                    for handle in delta["evidence_handles"]
                 )
+    for target, rows in rows_by_target.values():
+        _retain_current_batch_evidence(target, rows)
+
+
+def _retain_current_batch_evidence(
+    target: dict[str, Any],
+    current_rows: Sequence[Mapping[str, Any]],
+) -> None:
+    """Pin cited batch evidence before retaining the newest historical rows.
+
+    Args:
+        target: Mutable relationship or causal entity receiving appraisal deltas.
+        current_rows: Complete evidence rows cited by accepted deltas for target.
+    """
+
+    pinned_rows: list[dict[str, Any]] = []
+    pinned_identities: set[tuple[str, str]] = set()
+    for row in current_rows:
+        identity = (row["source_kind"], row["source_id"])
+        if identity in pinned_identities:
+            continue
+        pinned_rows.append(deepcopy(dict(row)))
+        pinned_identities.add(identity)
+    preserve_primary = (
+        "relationship_id" not in target and bool(target["evidence_refs"])
+    )
+    primary_row = (
+        deepcopy(dict(target["evidence_refs"][0]))
+        if preserve_primary
+        else None
+    )
+    primary_identity = (
+        (primary_row["source_kind"], primary_row["source_id"])
+        if primary_row is not None
+        else None
+    )
+    required_count = len(pinned_rows)
+    if primary_identity is not None and primary_identity not in pinned_identities:
+        required_count += 1
+    if required_count > MAX_EVIDENCE_REFS_PER_TARGET:
+        raise CognitionStateError(
+            "semantic appraisal current evidence exceeds retention capacity"
+        )
+
+    historical_rows: list[dict[str, Any]] = []
+    historical_identities: set[tuple[str, str]] = set()
+    for row in target["evidence_refs"]:
+        identity = (row["source_kind"], row["source_id"])
+        if (
+            identity == primary_identity
+            or identity in pinned_identities
+            or identity in historical_identities
+        ):
+            continue
+        historical_rows.append(deepcopy(dict(row)))
+        historical_identities.add(identity)
+
+    retained_rows = [
+        row
+        for row in pinned_rows
+        if (row["source_kind"], row["source_id"]) != primary_identity
+    ]
+    if primary_row is not None:
+        retained_rows.insert(0, primary_row)
+    historical_capacity = MAX_EVIDENCE_REFS_PER_TARGET - len(retained_rows)
+    retained_historical = (
+        historical_rows[-historical_capacity:]
+        if historical_capacity > 0
+        else []
+    )
+    target["evidence_refs"] = [*retained_rows, *retained_historical]
 
 
 def _target_for_prompt_path(
@@ -1458,6 +1535,8 @@ def _matching_event(
             continue
         if entity.get("entity_id") == incoming.get("entity_id"):
             return entity
+        if entity.get("status") != "active":
+            continue
         if _compatible_event_roles(incoming, entity):
             return entity
     return None

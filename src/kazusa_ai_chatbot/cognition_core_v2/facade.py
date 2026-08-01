@@ -114,6 +114,7 @@ async def run_cognition(
             failure_kind="terminal_failure",
             stage_name="run_cognition",
             details={},
+            exception=exc,
         )
         failure_capsule.finish_failure_capsule(
             session,
@@ -1249,6 +1250,15 @@ def _reduce_appraisals_with_isolation(
         except CognitionStateError as exc:
             error_code = "semantic_appraisal_reduction_rejected"
             failures[result["question_id"]] = error_code
+            failure_capsule.mark_current_failure(
+                failure_kind="semantic_appraisal_reduction_failure",
+                stage_name="semantic_appraisal_reduction",
+                details={
+                    "question_id": result["question_id"],
+                    "failure_code": error_code,
+                },
+                exception=exc,
+            )
             capture_validation_event(
                 "semantic_appraisal_reduction",
                 {
@@ -1294,6 +1304,16 @@ async def _collect_appraisals(
                 raise result
             else:
                 error_code = result.error_code
+            failure_capsule.mark_current_failure(
+                failure_kind="semantic_appraisal_failure",
+                stage_name="semantic_appraisal",
+                details={
+                    "question_id": question["question_id"],
+                    "question_kind": question["question_kind"],
+                    "failure_code": error_code,
+                },
+                exception=result,
+            )
             failures[question["question_id"]] = error_code
             warnings.append(f"semantic_appraisal_failed:{error_code}")
         else:

@@ -161,6 +161,7 @@ async def test_failure_capsule_promotes_exact_input_and_attempt(monkeypatch):
         failure_kind="recovered_contract_error",
         stage_name="cognition_test_stage",
         details={"branch_id": "autonomy_boundary"},
+        exception=RuntimeError("repair cap after test-api-key validation"),
     )
     input_payload["nested"]["value"] = "after"
 
@@ -180,11 +181,16 @@ async def test_failure_capsule_promotes_exact_input_and_attempt(monkeypatch):
     assert capsule["cognition_invocation_id"] == invocation_id
     assert capsule["input_payload"]["nested"]["value"] == "before"
     assert capsule["input_sha256"]
+    assert capsule["schema_version"] == "cognition_failure_capsule.v2"
     assert capsule["outcome"] == "partial_failure"
     assert capsule["failure_events"] == [{
         "failure_kind": "recovered_contract_error",
         "stage_name": "cognition_test_stage",
         "details": {"branch_id": "autonomy_boundary"},
+        "cause_chain": [{
+            "type": "RuntimeError",
+            "message": "repair cap after [REDACTED] validation",
+        }],
     }]
     assert capsule["attempts"][0]["messages"] == [
         {"role": "system", "content": "exact system prompt"},
@@ -200,6 +206,58 @@ async def test_failure_capsule_promotes_exact_input_and_attempt(monkeypatch):
     assert capsule["attempts"][0]["config"]["base_url"] == config.base_url
     assert "api_key" not in capsule["attempts"][0]["config"]
     assert "test-api-key" not in repr(capsule_rows[0])
+
+
+def test_failure_cause_chain_is_truncated_to_four_entries() -> None:
+    """Protected cause chains retain only the four outermost exceptions."""
+
+    errors = [RuntimeError(f"level-{index}") for index in range(6)]
+    for current, cause in zip(errors[:-1], errors[1:], strict=True):
+        current.__cause__ = cause
+
+    cause_chain = failure_capsule._exception_cause_chain(errors[0], set())
+
+    assert cause_chain == [
+        {"type": "RuntimeError", "message": f"level-{index}"}
+        for index in range(4)
+    ]
+
+
+def test_failure_cause_chain_stops_on_a_cycle() -> None:
+    """Cyclic exception links terminate after each unique exception once."""
+
+    outer = RuntimeError("outer")
+    inner = ValueError("inner")
+    outer.__cause__ = inner
+    inner.__cause__ = outer
+
+    cause_chain = failure_capsule._exception_cause_chain(outer, set())
+
+    assert cause_chain == [
+        {"type": "RuntimeError", "message": "outer"},
+        {"type": "ValueError", "message": "inner"},
+    ]
+
+
+def test_failure_cause_chain_uses_redacted_context_fallback() -> None:
+    """Unsuppressed context is retained and protected secrets are redacted."""
+
+    outer = RuntimeError("outer failure")
+    inner = ValueError("context contains test-secret")
+    outer.__context__ = inner
+
+    cause_chain = failure_capsule._exception_cause_chain(
+        outer,
+        {"test-secret"},
+    )
+
+    assert cause_chain == [
+        {"type": "RuntimeError", "message": "outer failure"},
+        {
+            "type": "ValueError",
+            "message": "context contains [REDACTED]",
+        },
+    ]
 
 
 @pytest.mark.asyncio

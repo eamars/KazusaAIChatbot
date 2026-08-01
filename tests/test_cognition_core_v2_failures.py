@@ -13,6 +13,7 @@ import kazusa_ai_chatbot.cognition_core_v2.facade as facade_module
 import kazusa_ai_chatbot.cognition_core_v2.surface as surface_module
 import kazusa_ai_chatbot.llm_tracing as tracing
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    CognitionContextLimitError,
     CognitionExecutionError,
 )
 from kazusa_ai_chatbot.llm_tracing import failure_capsule
@@ -464,6 +465,72 @@ def test_unsupported_appraisal_can_select_no_evidence() -> None:
     assert result["deltas"] == []
 
 
+@pytest.mark.asyncio
+async def test_appraisal_collection_records_original_failure_cause(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A contained appraisal failure links its terminal and original causes."""
+
+    monkeypatch.setattr(
+        failure_capsule,
+        "LLM_TRACE_CAPTURE_MODE",
+        "metadata",
+    )
+    session = failure_capsule.begin_failure_capsule(
+        trace_id="trace-appraisal-cause",
+        entrypoint="run_cognition",
+        input_payload={"input": "bounded"},
+    )
+
+    async def fail_appraisal() -> None:
+        try:
+            raise ValueError("candidate origin evidence is missing")
+        except ValueError as exc:
+            raise CognitionContextLimitError(
+                "repair context exceeds the contract cap"
+            ) from exc
+
+    task = asyncio.create_task(fail_appraisal())
+    questions = [{
+        "question_id": "q:event_agency",
+        "question_kind": "event_agency",
+    }]
+    results, failures, warnings = await facade_module._collect_appraisals(
+        [task],
+        questions,
+    )
+
+    assert results == []
+    assert failures == {
+        "q:event_agency": "semantic_appraisal_context_limit"
+    }
+    assert warnings == [
+        "semantic_appraisal_failed:semantic_appraisal_context_limit"
+    ]
+    assert session is not None
+    assert session.failure_events == [{
+        "failure_kind": "semantic_appraisal_failure",
+        "stage_name": "semantic_appraisal",
+        "details": {
+            "question_id": "q:event_agency",
+            "question_kind": "event_agency",
+            "failure_code": "semantic_appraisal_context_limit",
+        },
+        "cause_chain": [
+            {
+                "type": "CognitionContextLimitError",
+                "message": "repair context exceeds the contract cap",
+            },
+            {
+                "type": "ValueError",
+                "message": "candidate origin evidence is missing",
+            },
+        ],
+    }]
+    session.failure_events.clear()
+    failure_capsule.finish_failure_capsule(session, outcome=None)
+
+
 def test_candidate_proposition_rejects_mismatched_evidence() -> None:
     """Keep a candidate proposition bound to its originating evidence row."""
 
@@ -471,33 +538,38 @@ def test_candidate_proposition_rejects_mismatched_evidence() -> None:
         "question_id": "q:event_agency",
         "question_kind": "event_agency",
         "semantic_question": "Assess responsibility and intentionality.",
-        "evidence_handles": ["e1", "e2"],
+        "evidence_handles": ["e1", "e2", "e3"],
         "permitted_role_handles": ["ce1", "ce2", "current_user", "self"],
         "permitted_delta_paths": ["active_events.ce1.intentionality"],
         "dependencies": [],
     }
     parsed = {
         "question_id": "q:event_agency",
-        "selected_evidence_handles": ["e2"],
-        "selected_role_handles": ["ce1"],
+        "selected_evidence_handles": ["e3"],
+        "selected_role_handles": ["ce1", "ce2"],
         "propositions": [{
             "proposition_kind": "intentionality",
             "subject_handle": "ce1",
-            "evidence_handles": ["e2"],
-            "role_assignments": [],
+            "evidence_handles": ["e3"],
+            "role_assignments": [{
+                "role": "target",
+                "entity_handle": "ce2",
+            }],
             "semantic_value": "The action appears deliberate.",
         }],
         "deltas": [],
         "explanation": "The second row does not own the first candidate.",
     }
 
-    with pytest.raises(ValueError, match="originating evidence"):
+    with pytest.raises(ValueError, match="originating evidence") as exc_info:
         validate_semantic_appraisal_result(
             parsed,
             question,
-            {"e1", "e2"},
-            _appraisal_handle_refs("e1", "e2"),
+            {"e1", "e2", "e3"},
+            _appraisal_handle_refs("e1", "e2", "e3"),
         )
+    assert "ce1->e1" in str(exc_info.value)
+    assert "ce2->e2" in str(exc_info.value)
 
 
 def test_candidate_delta_rejects_mismatched_evidence() -> None:

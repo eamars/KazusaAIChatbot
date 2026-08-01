@@ -78,10 +78,13 @@ _QUESTION_DESCRIPTIONS = {
         "只使用已经授权的事件证据与角色 handle，判断责任和意图。"
     ),
     "relationship_social": (
-        "判断社交含义与关系威胁，同时保持关系归属不变。"
+        "只判断当前角色与当前用户的 r1 社交含义与关系威胁，同时保持关系归属不变；"
+        "第三方互动本身不改变或威胁 r1 时省略。"
     ),
     "moral_identity": (
-        "判断已授权 event handle 的规范含义与修复相关性。"
+        "判断已授权 event handle 的规范含义与修复相关性；证据中的第三方没有允许的"
+        "人物 handle 时省略其 role assignment，不用 ceN 代替人物。delta axis 只使用 harm、"
+        "unfairness、repair_need、norm_violation、identity_threat 或 exposure。"
     ),
     "goal_threat_outcome": (
         "判断现有 handle 是否已经达到目标、事件、威胁或知识缺口的明确终态。"
@@ -409,11 +412,11 @@ def _permitted_role_handles(
     """Return only entity and role handles owned by one question family."""
 
     prefixes = {
-        "event_agency": ("e", "ce"),
+        "event_agency": ("ev", "ce"),
         "relationship_social": ("r", "ct"),
-        "moral_identity": ("e", "ce", "s"),
-        "goal_threat_outcome": ("g", "t", "e", "k", "ce", "ct", "ck"),
-        "epistemic_comparison_memory": ("e", "k", "ce", "ck"),
+        "moral_identity": ("ev", "ce", "s"),
+        "goal_threat_outcome": ("g", "t", "ev", "k", "ce", "ct", "ck"),
+        "epistemic_comparison_memory": ("ev", "k", "ce", "ck"),
         "existential_drive": ("d", "m"),
     }
     try:

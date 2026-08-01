@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 CapsuleOutcome = Literal["partial_failure", "terminal_failure"]
 FAILURE_CAPSULE_WRITE_TIMEOUT_SECONDS = 0.25
+MAX_FAILURE_CAUSE_CHAIN_ENTRIES = 4
 
 
 @dataclass
@@ -245,6 +246,7 @@ def mark_failure(
     failure_kind: str,
     stage_name: str,
     details: Mapping[str, object],
+    exception: BaseException | None = None,
 ) -> None:
     """Attach one producer-owned partial or terminal failure disposition.
 
@@ -253,6 +255,7 @@ def mark_failure(
         failure_kind: Stable failure category owned by the producing stage.
         stage_name: Stage or public entrypoint that observed the failure.
         details: Protected structured detail needed for replay and diagnosis.
+        exception: Original exception retained with its bounded cause chain.
     """
 
     if session is None or session.finished:
@@ -263,6 +266,11 @@ def mark_failure(
             "stage_name": stage_name,
             "details": _snapshot_value(details),
         }
+        if exception is not None:
+            failure_event["cause_chain"] = _exception_cause_chain(
+                exception,
+                session.secret_values,
+            )
     except Exception as exc:
         _warn_capture_failure("failure snapshot", exc)
         return
@@ -274,6 +282,7 @@ def mark_current_failure(
     failure_kind: str,
     stage_name: str,
     details: Mapping[str, object],
+    exception: BaseException | None = None,
 ) -> None:
     """Attach a failure disposition to the active invocation, if any."""
 
@@ -283,6 +292,7 @@ def mark_current_failure(
         failure_kind=failure_kind,
         stage_name=stage_name,
         details=details,
+        exception=exception,
     )
 
 
@@ -332,7 +342,7 @@ def finish_failure_capsule(
                 ),
             }
         capsule = {
-            "schema_version": "cognition_failure_capsule.v1",
+            "schema_version": "cognition_failure_capsule.v2",
             "trace_id": session.trace_id,
             "cognition_invocation_id": session.cognition_invocation_id,
             "entrypoint": session.entrypoint,
@@ -584,7 +594,44 @@ def _redact_value(value: object, secret_values: set[str]) -> object:
     return value
 
 
-def _redact_text(value: str, secret_values: set[str]) -> str:
+def _exception_cause_chain(
+    exception: BaseException,
+    secret_values: set[str],
+) -> list[dict[str, str]]:
+    """Build a bounded outermost-first redacted exception cause chain."""
+
+    cause_chain: list[dict[str, str]] = []
+    seen_exception_ids: set[int] = set()
+    current_exception: BaseException | None = exception
+    while (
+        current_exception is not None
+        and len(cause_chain) < MAX_FAILURE_CAUSE_CHAIN_ENTRIES
+    ):
+        exception_id = id(current_exception)
+        if exception_id in seen_exception_ids:
+            break
+        seen_exception_ids.add(exception_id)
+        cause_chain.append({
+            "type": current_exception.__class__.__name__,
+            "message": _redact_text(
+                str(current_exception),
+                secret_values,
+                placeholder="[REDACTED]",
+            ),
+        })
+        next_exception = current_exception.__cause__
+        if next_exception is None and not current_exception.__suppress_context__:
+            next_exception = current_exception.__context__
+        current_exception = next_exception
+    return cause_chain
+
+
+def _redact_text(
+    value: str,
+    secret_values: set[str],
+    *,
+    placeholder: str = "[REDACTED_API_KEY]",
+) -> str:
     """Replace configured route credentials without changing other evidence."""
 
     redacted_value = value
@@ -592,7 +639,7 @@ def _redact_text(value: str, secret_values: set[str]) -> str:
         if secret_value:
             redacted_value = redacted_value.replace(
                 secret_value,
-                "[REDACTED_API_KEY]",
+                placeholder,
             )
     return redacted_value
 
