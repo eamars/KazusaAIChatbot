@@ -46,6 +46,7 @@ from kazusa_ai_chatbot.db.user_memory_units import (
 )
 from kazusa_ai_chatbot.db.users import (
     find_user_profile_by_identifier as default_find_user_profile_by_identifier,
+    get_user_profile as default_get_user_profile,
     list_recent_user_profiles as default_list_recent_user_profiles,
 )
 from kazusa_ai_chatbot.internal_monologue_residue import (
@@ -213,6 +214,7 @@ class ControlConsoleRepository:
         search_user_memory_units_by_keyword: AsyncHelper | None = None,
         build_interaction_style_context: AsyncHelper | None = None,
         find_user_profile_by_identifier: AsyncHelper | None = None,
+        get_character_user_profile: AsyncHelper | None = None,
         collect_calendar_pending_runs: AsyncHelper | None = None,
         list_calendar_schedules: AsyncHelper | None = None,
         list_recent_calendar_runs: AsyncHelper | None = None,
@@ -240,6 +242,7 @@ class ControlConsoleRepository:
         self._search_user_memory_units_by_keyword = search_user_memory_units_by_keyword
         self._build_interaction_style_context = build_interaction_style_context
         self._find_user_profile_by_identifier = find_user_profile_by_identifier
+        self._get_character_user_profile = get_character_user_profile
         self._collect_calendar_pending_runs = collect_calendar_pending_runs
         self._list_calendar_schedules = list_calendar_schedules
         self._list_recent_calendar_runs = list_recent_calendar_runs
@@ -1642,10 +1645,25 @@ class ControlConsoleRepository:
             platform_channel_id=clean_platform_channel_id,
             global_user_id=clean_global_user_id,
         )
+        platform_bot_id = await self._active_character_platform_user_id(
+            platform=clean_platform,
+        )
+        if not platform_bot_id:
+            panel = _entity_panel(
+                status="unavailable",
+                items=[],
+                reason=(
+                    "active character has no registered platform account "
+                    f"for {clean_platform}"
+                ),
+            )
+            return panel
         try:
             result = await helper(
                 scope=scope,
                 current_timestamp_utc=current_timestamp_utc,
+                platform_bot_id=platform_bot_id,
+                active_turn_conversation_row_ids=[],
             )
         except REPOSITORY_HELPER_ERRORS as exc:
             panel = _entity_panel(
@@ -1767,6 +1785,56 @@ class ControlConsoleRepository:
             return character_id
         character_id = _character_id_from_profile({})
         return character_id
+
+    async def _active_character_platform_user_id(self, *, platform: str) -> str:
+        """Return the active character's native account id for a platform.
+
+        Args:
+            platform: Platform namespace whose character account is required.
+
+        Returns:
+            The registered native account id, or an empty string when the
+            character identity cannot be resolved for the platform.
+        """
+
+        profile_helper = (
+            self._get_character_profile or default_get_character_profile
+        )
+        user_profile_helper = (
+            self._get_character_user_profile or default_get_user_profile
+        )
+        try:
+            character_profile = await profile_helper()
+            if not isinstance(character_profile, dict):
+                return_value = ""
+                return return_value
+            character_id = _character_id_from_profile(character_profile)
+            user_profile = await user_profile_helper(character_id)
+        except APPLICATION_IDENTITY_ERRORS:
+            return_value = ""
+            return return_value
+
+        if not isinstance(user_profile, dict):
+            return_value = ""
+            return return_value
+        accounts = user_profile.get("platform_accounts")
+        if not isinstance(accounts, list):
+            return_value = ""
+            return return_value
+        for account in accounts:
+            if not isinstance(account, dict):
+                continue
+            if str(account.get("platform", "")).strip() != platform:
+                continue
+            platform_user_id = str(
+                account.get("platform_user_id", "")
+            ).strip()
+            if platform_user_id:
+                return_value = platform_user_id
+                return return_value
+
+        return_value = ""
+        return return_value
 
     async def lookup_interaction_style(
         self,

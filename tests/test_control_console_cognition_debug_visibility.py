@@ -620,12 +620,24 @@ async def test_user_entity_shows_scoped_progress_and_carry_over() -> None:
             ],
         }
 
-    async def load_progress_context(*, scope, current_timestamp_utc: str):
+    async def load_progress_context(
+        *,
+        scope,
+        current_timestamp_utc: str,
+        platform_bot_id: str,
+        active_turn_conversation_row_ids: list[str],
+    ):
+        assert platform_bot_id == "character-platform-user"
+        assert active_turn_conversation_row_ids == []
         progress_calls.append({
             "platform": scope.platform,
             "platform_channel_id": scope.platform_channel_id,
             "global_user_id": scope.global_user_id,
             "current_timestamp_utc": current_timestamp_utc,
+            "platform_bot_id": platform_bot_id,
+            "active_turn_conversation_row_ids": (
+                active_turn_conversation_row_ids
+            ),
         })
         return {
             "episode_state": {"last_user_input": "must-not-leak"},
@@ -644,6 +656,15 @@ async def test_user_entity_shows_scoped_progress_and_carry_over() -> None:
             "candidate_count": 2,
             "scope_order": ["user_thread"],
             "status": "loaded",
+        }
+
+    async def get_character_user_profile(global_user_id: str):
+        assert global_user_id == "character-1"
+        return {
+            "platform_accounts": [{
+                "platform": "qq",
+                "platform_user_id": "character-platform-user",
+            }],
         }
 
     async def query_user_memory_units(global_user_id: str, *, limit: int):
@@ -668,6 +689,7 @@ async def test_user_entity_shows_scoped_progress_and_carry_over() -> None:
             search_user_memory_units_by_keyword
         ),
         build_interaction_style_context=build_interaction_style_context,
+        get_character_user_profile=get_character_user_profile,
         load_progress_context=load_progress_context,
         load_residue_context=load_residue_context,
     )
@@ -688,6 +710,8 @@ async def test_user_entity_shows_scoped_progress_and_carry_over() -> None:
             "platform_channel_id": "group-1",
             "global_user_id": "global-user-1",
             "current_timestamp_utc": "2026-06-24T00:00:00+00:00",
+            "platform_bot_id": "character-platform-user",
+            "active_turn_conversation_row_ids": [],
         },
     ]
     assert residue_calls[0]["trigger_scope"] == {
@@ -741,15 +765,32 @@ async def test_group_entity_splits_group_residue_and_participant_progress() -> N
         assert platform == "qq"
         return {"global_user_id": "global-user-1"}
 
-    async def load_progress_context(*, scope, current_timestamp_utc: str):
+    async def load_progress_context(
+        *,
+        scope,
+        current_timestamp_utc: str,
+        platform_bot_id: str,
+        active_turn_conversation_row_ids: list[str],
+    ):
         assert scope.platform == "qq"
         assert scope.platform_channel_id == "group-1"
         assert scope.global_user_id == "global-user-1"
         assert current_timestamp_utc == "2026-06-24T00:00:00+00:00"
+        assert platform_bot_id == "character-platform-user"
+        assert active_turn_conversation_row_ids == []
         return {
             "episode_state": None,
             "conversation_progress": {"status": "active", "turn_count": 2},
             "source": "db",
+        }
+
+    async def get_character_user_profile(global_user_id: str):
+        assert global_user_id == "character-1"
+        return {
+            "platform_accounts": [{
+                "platform": "qq",
+                "platform_user_id": "character-platform-user",
+            }],
         }
 
     async def load_residue_context(*, trigger_scope, current_timestamp_utc: str):
@@ -801,6 +842,7 @@ async def test_group_entity_splits_group_residue_and_participant_progress() -> N
         list_recent_group_summaries=list_recent_group_summaries,
         list_group_review_windows=list_group_review_windows,
         build_interaction_style_context=build_interaction_style_context,
+        get_character_user_profile=get_character_user_profile,
         load_progress_context=load_progress_context,
         load_residue_context=load_residue_context,
     )

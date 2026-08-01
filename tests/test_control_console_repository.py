@@ -410,6 +410,15 @@ async def test_repository_projects_native_v2_character_and_user_state() -> None:
         _ = kwargs
         return {"source": "empty", "conversation_progress": {}}
 
+    async def get_character_user_profile(global_user_id: str):
+        assert global_user_id == "character-internal-secret"
+        return {
+            "platform_accounts": [{
+                "platform": "qq",
+                "platform_user_id": "character-platform-user",
+            }],
+        }
+
     async def load_residue_context(**kwargs):
         _ = kwargs
         return {
@@ -431,6 +440,7 @@ async def test_repository_projects_native_v2_character_and_user_state() -> None:
         query_user_memory_units=query_user_memory_units,
         search_user_memory_units_by_keyword=search_user_memory_units_by_keyword,
         build_interaction_style_context=build_interaction_style_context,
+        get_character_user_profile=get_character_user_profile,
         load_progress_context=load_progress_context,
         load_residue_context=load_residue_context,
     )
