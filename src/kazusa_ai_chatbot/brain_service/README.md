@@ -628,14 +628,14 @@ When an episode has no visible text surface, the brain returns an empty
 consolidated when private action results, calendar-triggered action results,
 private surface outputs, or private finalization exist.
 
-When L2d selects `accepted_task_request`, deterministic action execution first
-creates or reuses an accepted-task lifecycle row. New accepted tasks are then
-materialized into an internal `background_work_request`, queued durably before
-selected L3 text runs, and projected back to L3 as semantic accepted-task state.
-Status checks use `accepted_task_status_check` and never enqueue a worker job.
-Completed accepted-task-backed jobs later return as
-`tool_result` cognitive episodes. Background-work workers must
-not call adapters, dispatcher delivery, or cognition directly.
+When L2d selects `task_resolution_request`, deterministic resolver execution
+first runs the bounded inline task-resolution session. Budget exhaustion or an
+inline coding handover creates or reuses the accepted-task lifecycle row and
+materializes the same checkpoint into a `task_orchestrator` background job
+before selected L3 text runs. Status checks use `accepted_task_status_check`
+and never enqueue a worker job. Completed accepted-task-backed jobs later
+return as `tool_result` cognitive episodes. Background-work workers must not
+call adapters, dispatcher delivery, or cognition directly.
 
 Delivery receipt adapters may still need bounded `not_found` retry behavior
 for transport timing and cross-process delivery, but a non-empty

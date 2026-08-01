@@ -7,7 +7,7 @@
   the interaction is genuinely relevant or the message materially intersects
   the character's active state.
 - Plan class: `large`.
-- Status: `in_progress`.
+- Status: `completed`.
 - Mandatory skills: `development-plan`, `local-llm-architecture`,
   `no-prepost-user-input`, `llm-trace-debug`, `debug-llm`, `py-style`,
   `cjk-safety`, and `test-style-and-execution`.
@@ -876,7 +876,7 @@ The implementation agent may not:
 - [x] Affected tests are rerun after remediation.
 - [x] Final diff allowlist is clean.
 - [x] Execution evidence is complete.
-- [ ] User approves completion and lifecycle archive.
+- [x] User approves completion and lifecycle archive.
 
 ## Verification
 
@@ -1257,9 +1257,15 @@ Implementation commit evidence recorded on 2026-07-30:
 - the commit contains exactly the 17 paths listed under `Change Surface`;
 - no ignored test artifact, environment file, baseline-only support hard link,
   or protected parallel-development path is included; and
-- the plan remains `in_progress` in the active bugfix registry until explicit
-  user approval authorizes completion and lifecycle archive.
+- the plan remained `in_progress` in the active bugfix registry until explicit
+  user approval authorized completion and lifecycle archive.
 
-Remaining execution evidence to append:
+## Lifecycle Closure
 
-- user sign-off and archive commit.
+- User explicitly approved completion and lifecycle archive on 2026-08-01.
+- All acceptance criteria and execution gates are satisfied by the recorded
+  deterministic tests, one-at-a-time real-LLM artifacts, full non-live
+  regression, final allowlist audit, and independent review remediation.
+- Archived from `active/bugfix/` to `archive/completed/bugfix/` on 2026-08-01.
+- The implementation remains recorded by commit `37f12573`; no new scope was
+  added during closure.

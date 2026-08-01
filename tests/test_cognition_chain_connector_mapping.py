@@ -433,10 +433,10 @@ def test_connector_projects_runtime_owner_limits_into_cognition() -> None:
     )
 
 
-def test_connector_keeps_queue_intake_available_without_automatic_worker(
+def test_connector_keeps_inline_task_resolution_without_automatic_worker(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Queue-only runtime state must not block a generic accepted handover."""
+    """Worker degradation does not remove the inline resolver affordance."""
 
     monkeypatch.setattr(
         connector,
@@ -452,8 +452,8 @@ def test_connector_keeps_queue_intake_available_without_automatic_worker(
     assert snapshot["worker_status"]["background_work"] == "degraded"
     assert all("仓库代码读取 owner 不可用" not in item for item in limits)
     assert any(
-        row["action_kind"] == "accepted_task_request"
-        for row in connector._available_action_affordances(state)
+        row["capability"] == "task_resolution_request"
+        for row in connector._available_resolver_affordances(state)
     )
     assert all(
         row["action_kind"] != "accepted_coding_task_request"
@@ -461,15 +461,14 @@ def test_connector_keeps_queue_intake_available_without_automatic_worker(
     )
 
 
-def test_connector_projects_new_work_through_one_accepted_task_owner() -> None:
-    """New coding work must not compete with an unbound coding-run start."""
+def test_connector_projects_one_generic_task_resolution_owner() -> None:
+    """All generic task domains enter through one resolver capability."""
 
     resolvers = connector._available_resolver_affordances(_global_state())
     actions = connector._available_action_affordances(_global_state())
 
     assert {row["capability"] for row in resolvers} == {
-        "local_context_recall",
-        "public_answer_research",
+        "task_resolution_request",
         "human_clarification",
         "approval_preparation",
         "self_goal_resolution",
@@ -479,7 +478,6 @@ def test_connector_projects_new_work_through_one_accepted_task_owner() -> None:
     assert "apply_memory_lifecycle_update" not in action_kinds
     assert "background_work_request" not in action_kinds
     assert {
-        "accepted_task_request",
         "future_speak",
     } <= action_kinds
     assert "accepted_coding_task_request" not in action_kinds

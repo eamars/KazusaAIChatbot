@@ -1960,7 +1960,7 @@ def test_scheduled_future_cognition_starts_without_preloaded_rag(
         output = _silent_cognition_output()
         output["resolver_observations"] = [
             {
-                "capability_kind": "local_context_recall",
+                "capability_kind": "task_resolution_request",
             }
         ]
         return output

@@ -26,7 +26,7 @@ def test_resolver_observation_reenters_as_typed_evidence_only() -> None:
     evidence, direct_facts = project_resolver_observation_for_cognition(
         {
             "observation_id": "resolver-observation-1",
-            "capability": "local_context_recall",
+            "capability": "task_resolution_request",
             "semantic_summary": "A prior promise is relevant.",
             "replacement_state": {"forbidden": True},
         },

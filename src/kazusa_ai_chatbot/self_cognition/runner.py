@@ -1144,7 +1144,7 @@ def _resolver_evidence_call_count(cognition_output: dict[str, Any]) -> int:
         if not isinstance(observation, dict):
             continue
         capability_kind = observation.get("capability_kind")
-        if capability_kind in {"local_context_recall", "public_answer_research"}:
+        if capability_kind == "task_resolution_request":
             retrieval_count += 1
     return_value = retrieval_count
     return return_value

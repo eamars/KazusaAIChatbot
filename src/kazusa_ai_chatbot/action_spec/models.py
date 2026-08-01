@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Literal, NotRequired, TypedDict
+from typing import TYPE_CHECKING, Literal, NotRequired, TypedDict
 
-from kazusa_ai_chatbot.cognition_core_v2.contracts import RoleRefV2
+if TYPE_CHECKING:
+    from kazusa_ai_chatbot.cognition_core_v2.contracts import RoleRefV2
 
 ACTION_SPEC_VERSION = "action_spec.v1"
 ACTION_SOURCE_REF_VERSION = "action_source_ref.v1"

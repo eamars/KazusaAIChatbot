@@ -5,7 +5,7 @@
 - Goal: close Conversation Progress V2 through one readable semantic proof of
   the original failure and one explicit maximum-turn projection.
 - Plan class: `medium`.
-- Status: `in_progress`.
+- Status: `completed`.
 - Mandatory skills: `development-plan`, `local-llm-architecture`, `debug-llm`,
   `test-style-and-execution`, `py-style`, and `cjk-safety`.
 - Cutover: replace the prior long plan as the sole active closeout contract;
@@ -265,12 +265,13 @@ The capacity table must show:
   - Handoff: Stage 4.
   - Sign-off: `Codex/2026-07-30`; static, adjacent, full non-live, and
     human-readable semantic-report gates are GREEN.
-- [ ] Stage 4 — code review and user approval.
+- [x] Stage 4 — code review and user approval.
   - Covers: step 8 and `Independent Code Review`.
   - Verify: no unresolved review blocker; affected gates rerun after fixes.
   - Evidence: findings, remediation, residual risks, and user decision.
   - Handoff: complete and archive only after approval.
-  - Sign-off: `<agent/date>` after explicit user approval.
+  - Sign-off: `Codex/2026-08-01`; user explicitly approved completion and
+    lifecycle archive without requesting additional review work.
 
 ## Verification
 
@@ -374,7 +375,16 @@ This plan is complete only when:
 - Residual risks: local-model variance; upstream decontextualization is outside
   scope; capacity varies with fact volume, text size, expiry, and no-fact
   cycles; full-suite counts have no separate retained terminal transcript.
-- User decision: pending explicit approval.
+- User decision: explicit completion and lifecycle-archive approval recorded on
+  2026-08-01.
+
+## Lifecycle Closure
+
+- User explicitly approved completion and lifecycle archive on 2026-08-01.
+- The recorded implementation, verification, semantic report, and prior review
+  evidence are retained as historical execution evidence; no additional code
+  review or verification was performed for this closure request.
+- Archived from `active/bugfix/` to `archive/completed/bugfix/` on 2026-08-01.
 
 ## Risks
 

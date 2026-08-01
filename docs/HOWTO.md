@@ -148,6 +148,7 @@ COGNITION_VISUAL_DIRECTIVES_ENABLED=false
 COGNITION_TASK_WILLINGNESS_BOUNDARY_ENABLED=true
 COGNITION_RESOLVER_MAX_CYCLES=3
 COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS=120.0
+TASK_RESOLUTION_INLINE_BUDGET_SECONDS=30.0
 SELF_COGNITION_ENABLED=true
 CHARACTER_SLEEP_LOCAL_PERIOD=02:00-12:00
 
@@ -414,39 +415,44 @@ minus wake prep. The affect-settling module import fails if that due time is
 after sleep end plus wake defer grace.
 
 `BACKGROUND_WORK_WORKER_ENABLED` controls the internal background-work runtime.
-L2d sees delayed user work as accepted-task affordances:
-`accepted_task_request` creates or reuses an active accepted task, and
-`accepted_task_status_check` reports active task state without enqueueing new
-work. Deterministic execution maps new accepted tasks into the internal
-background-work queue after duplicate rejection and lifecycle persistence. The
-runtime router then chooses a worker and task without receiving adapter targets,
-job refs, tool arguments, or final visible text. The current text-artifact
-worker remains text-only. The current coding-agent worker handles accepted
-coding tasks through the coding-agent supervisor using
-`CODING_AGENT_WORKSPACE_ROOT`; it may return code-reading answers or
-review-only patch proposal artifacts for source-free writing or explicit
-existing-source modification requests. Existing-source modification proposals
-use read-only source evidence, deterministic File Agent source-owner planning,
-a modifying PM handoff, and structured programmer operations before
-review-only patch materialization. Neither worker applies patches, runs
-project commands, installs packages, processes attachments, or sends adapter
-text directly. `future_speak` is the
-deterministic delayed-message worker: it schedules a future cognition slot and
-stores only a semantic objective, not prewritten user-facing text. Completed
-accepted tasks re-enter the brain as the canonical `tool_result` cognition
-source, then use the existing dialog and delivery boundary for any visible
-result.
+L2d uses `task_resolution_request` when current evidence is insufficient for a
+generic local, public, coding, or text/computation task. The resolver runs a
+single bounded inline session using `TASK_RESOLUTION_INLINE_BUDGET_SECONDS`
+(default `30.0`, range `1.0` through `120.0`). Budget exhaustion persists the
+same checkpoint as an accepted task and queues `task_orchestrator`; lease or
+process retries resume the checkpoint and its counters.
 
-New worker types reuse the same lifecycle only after a reviewed capability and
-worker contract exists. The stable entry is accepted-task state plus an
-internal `background_work_request`; worker-local tool arguments, filesystem
-paths, shell commands, resolver internals, adapter ids, and final wording stay
-outside L2d and L3 prompts. A new worker must declare its semantic ownership,
-duplicate identity, permission and side-effect policy, bounded output contract,
-failure behavior, and verification before it is added to the worker registry.
-The queue supplies scheduling, duplicate rejection, execution, and result
-handoff mechanics; it does not by itself authorize repository edits, shell
-execution, web access, package installation, or direct adapter sends.
+The runtime accepts only `task_orchestrator` and deterministic `future_speak`
+jobs. The task orchestrator chooses one of the four declared specialists per
+dispatch and returns resolved or evidence-bearing partial results through the
+accepted-task result source. `future_speak` schedules a future cognition slot
+from an exact trigger time and a semantic objective. Workers do not send adapter
+text directly, call shared cognition, expose queue internals to L2d/L3, or
+grant repository, shell, package, filesystem, or external-tool authority.
+
+`accepted_task_status_check` reads existing scoped task state. Bound coding
+continuations use `accepted_coding_task_request` and a trusted
+`coding_run:<run_id>` reference; they remain closed to the public coding-run
+lifecycle and use `CODING_AGENT_WORKSPACE_ROOT` only as its configured trusted
+workspace boundary.
+
+### Offline background-task history cutover
+
+Stop every brain-service, background-worker, and delivery process that can
+write task history before destructive cutover. Then count, clear, and verify
+only the two approved collections:
+
+```powershell
+venv\Scripts\python.exe scripts\clear_background_task_history.py
+venv\Scripts\python.exe scripts\clear_background_task_history.py --execute --confirm DELETE_BACKGROUND_WORK_JOBS_AND_ACCEPTED_TASKS
+venv\Scripts\python.exe scripts\clear_background_task_history.py
+```
+
+The command targets only `background_work_jobs` and `accepted_tasks`. It prints
+before/deleted/remaining counts, emits no document contents, and fails if an
+executed deletion leaves either collection nonempty. Coding runs, calendar
+rows, conversations, memories, and all other collections remain outside this
+operation.
 
 The coding-agent direct API also exposes `apply_approved_patch(...)` for
 trusted callers that already have patch artifacts, a structured approval
@@ -492,8 +498,8 @@ without relying on background worker delivery, MongoDB run persistence, Phase
 Accepted durable coding work enters through L2d
 `accepted_coding_task_request`, not through direct API calls. Deterministic
 action execution validates a closed coding action, persists accepted-task
-state, queues `requested_worker="coding_agent"` with
-`coding_agent_worker_payload.v1`, and the worker maps that payload to the
+state, queues `requested_worker="task_orchestrator"` with a reviewed bound
+continuation payload, and the task orchestrator maps that payload to the frozen
 durable run APIs. Approval follow-ups require a prompt-safe
 `coding_run:<run_id>` reference. Revision and summary follow-ups preserve the
 same run id without applying or executing patches. Approval follow-ups can run

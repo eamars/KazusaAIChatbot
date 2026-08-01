@@ -390,7 +390,7 @@ def _valid_c07_handover_graph() -> dict[str, object]:
                 "job_id": "job-1",
                 "accepted_task_id": "task-1",
                 "source_message_id": "C07-current",
-                "task_brief": (
+                "semantic_objective": (
                     "Review https://github.com/eamars/KazusaAIChatbot"
                 ),
                 "attempt_count": 1,
@@ -398,31 +398,50 @@ def _valid_c07_handover_graph() -> dict[str, object]:
                 "status": "delivered",
                 "delivery_tracking_id": "background-delivery-1",
                 "delivered_conversation_message_id": "conversation-row-1",
-                "worker": "coding_agent",
+                "requested_worker": "task_orchestrator",
+                "worker_payload": {
+                    "schema_version": "task_orchestrator_worker_payload.v1",
+                    "operation": "resume_task_resolution",
+                    "checkpoint": {},
+                    "coding_request": None,
+                },
                 "failure_summary": "",
-                "result_summary": "coding_agent succeeded; code_reading",
+                "result_summary": "The coding specialist resolved the task.",
                 "artifact_text": "The repository uses a staged cognition graph.",
-                "worker_metadata": {
-                    "coding_operation": "code_reading",
-                    "worker_operation": "start",
-                    "coding_run_status": "completed",
-                    "objective_type": "read_only",
-                    "repository": {
-                        "owner": "eamars",
-                        "repo": "KazusaAIChatbot",
-                    },
-                    "evidence_refs": [{
-                        "path": "src/kazusa_ai_chatbot/service.py",
-                        "line_start": 1,
-                        "line_end": 20,
+                "task_resolution_result": {
+                    "schema_version": "task_resolution_result.v1",
+                    "status": "resolved",
+                    "prompt_safe_summary": (
+                        "The repository uses a staged cognition graph."
+                    ),
+                    "evidence": [{
+                        "schema_version": "task_resolution_evidence.v1",
+                        "evidence_id": "coding-evidence-1",
+                        "task_node_id": "node-1",
+                        "specialist": "coding",
+                        "summary": "The repository uses a staged cognition graph.",
+                        "provenance_refs": ["coding_run:run-1"],
+                        "limitations": [],
                     }],
+                    "completed_subgoals": ["Review the repository."],
+                    "remaining_needs": [],
+                    "checkpoint": {},
+                    "coding_run_context": {
+                        "schema_version": "coding_run_context.v1",
+                        "coding_run_ref": "coding_run:run-1",
+                        "status": "completed",
+                        "summary": "Repository analysis completed.",
+                        "limitations": [],
+                        "allowed_next_actions": [],
+                        "followup_open": False,
+                    },
                 },
             }],
             "accepted_tasks_before": [],
             "accepted_tasks_after": [{
                 "accepted_task_id": "task-1",
                 "executor_ref": "job-1",
-                "action_kind": "accepted_task_request",
+                "task_kind": "task_resolution",
                 "first_source_message_id": "C07-current",
                 "state": "delivered",
                 "delivery_tracking_id": "background-delivery-1",
@@ -527,7 +546,7 @@ def test_c07_execution_gates_require_structured_coding_reader_evidence() -> None
     ("failure_mode", "failed_gates"),
     [
         ("duplicate_job", ("c07_exact_handover",)),
-        ("wrong_repository", ("repository_map_evidence",)),
+        ("wrong_specialist", ("repository_map_evidence",)),
         ("empty_evidence", ("repository_map_evidence",)),
         ("unrelated_speech", ("result_speak_called",)),
         ("mismatched_delivery_id", ("c07_exact_handover",)),
@@ -555,13 +574,12 @@ def test_c07_execution_gates_reject_uncorrelated_or_incomplete_evidence(
         duplicate = deepcopy(handover["jobs_after"][0])
         duplicate["job_id"] = "job-2"
         handover["jobs_after"].append(duplicate)
-    elif failure_mode == "wrong_repository":
-        handover["jobs_after"][0]["worker_metadata"]["repository"] = {
-            "owner": "other",
-            "repo": "OtherRepository",
-        }
+    elif failure_mode == "wrong_specialist":
+        handover["jobs_after"][0]["task_resolution_result"]["evidence"][0][
+            "specialist"
+        ] = "public_research"
     elif failure_mode == "empty_evidence":
-        handover["jobs_after"][0]["worker_metadata"]["evidence_refs"] = [{}]
+        handover["jobs_after"][0]["task_resolution_result"]["evidence"] = []
     elif failure_mode == "unrelated_speech":
         handover["delivery_graph_results"][0]["cognitive_episode"] = {
             "percepts": [{
@@ -573,9 +591,9 @@ def test_c07_execution_gates_reject_uncorrelated_or_incomplete_evidence(
             "delivery_tracking_id"
         ] = "other-background-delivery"
     elif failure_mode == "blocked_partial_read":
-        handover["jobs_after"][0]["worker_metadata"][
-            "coding_run_status"
-        ] = "blocked"
+        result = handover["jobs_after"][0]["task_resolution_result"]
+        result["status"] = "needs_user_input"
+        result["coding_run_context"]["status"] = "blocked"
     elif failure_mode == "mismatched_surface_attempt":
         handover["delivery_graph_results"][0]["surface_outputs"][0][
             "action_attempt_id"

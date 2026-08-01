@@ -6,7 +6,7 @@
   `rag_result` fields while preserving trace diagnostics and the existing RAG2
   retrieval architecture.
 - Plan class: large
-- Status: draft
+- Status: superseded
 - Mandatory skills: `development-plan`, `local-llm-architecture`,
   `debug-llm`, `py-style`, `cjk-safety`, `test-style-and-execution`
 - Overall cutover strategy: bigbang for public output wording; compatible for
@@ -535,11 +535,12 @@ inside this plan's approved change surface.
 
 ## Execution Evidence
 
-Status: not started.
+- No implementation, code review, or verification was performed under this
+  plan.
+- User directed closure because the plan is no longer relevant on 2026-08-01.
 
-- Plan review: pending.
-- Focused deterministic tests before implementation: pending.
-- Production implementation evidence: pending.
-- Deterministic verification after implementation: pending.
-- Readable real-output debug-LLM validation: pending.
-- Independent code review: pending.
+## Lifecycle Closure
+
+- Closed as superseded by explicit user direction on 2026-08-01.
+- Archived from `active/bugfix/` to `archive/superseded/` on 2026-08-01.
+- No replacement scope or implementation action was added to this record.

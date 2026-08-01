@@ -334,7 +334,6 @@ async def test_runtime_limited_mixed_delayed_request_preserves_owner() -> None:
         bid=bid,
         actions=[
             _action("memory_lifecycle_update"),
-            _action("accepted_task_request"),
             _action("background_work_request"),
         ],
         runtime_capability_limits=[
@@ -348,7 +347,6 @@ async def test_runtime_limited_mixed_delayed_request_preserves_owner() -> None:
         row["action_kind"] for row in result["action_requests"]
     ]
     assert selected_actions == []
-    assert "accepted_task_request" not in selected_actions
     assert "background_work_request" not in selected_actions
 
 
@@ -373,7 +371,6 @@ async def test_unavailable_reminder_does_not_change_capability_owner() -> None:
         user_input=user_input,
         bid=bid,
         actions=[
-            _action("accepted_task_request"),
             _action("background_work_request"),
         ],
         runtime_capability_limits=[
@@ -427,7 +424,6 @@ async def test_captured_c18_bid_does_not_create_unowned_preference_work() -> Non
         bid=bid,
         actions=[_action(kind) for kind in (
             "memory_lifecycle_update",
-            "accepted_task_request",
             "accepted_coding_task_request",
             "accepted_task_status_check",
             "background_work_request",
@@ -786,7 +782,7 @@ async def test_unavailable_reminder_candidate_is_rejected_by_live_authorizer() -
         action_requests=action_rows,
         bid_handles={"b1": bid},
         evidence=evidence,
-        action_handles={"a1": _action("accepted_task_request")},
+        action_handles={"a1": _action("background_work_request")},
         runtime_capability_limits=runtime_limits,
         services=services,
     )
@@ -843,11 +839,11 @@ async def test_three_independent_private_actions_are_composable() -> None:
     }
 
 
-async def test_local_reference_selects_local_context_recall() -> None:
+async def test_local_reference_selects_task_resolution() -> None:
     """A private historical reference requests local evidence before speech."""
 
     result = await _run_case(
-        case_id="local_context_recall",
+        case_id="task_resolution_local_reference",
         user_input='我昨天让你叫我的那个昵称是什么？',
         bid=_bid(
             branch_id="epistemic_exploration",
@@ -859,14 +855,14 @@ async def test_local_reference_selects_local_context_recall() -> None:
             ),
         ),
         resolvers=[_resolver(
-            "local_context_recall",
+            "task_resolution_request",
             "retrieve bounded private conversation and memory evidence",
         )],
     )
 
     assert result["intention"]["route"] == "evidence"
     assert [row["capability"] for row in result["resolver_requests"]] == [
-        "local_context_recall",
+        "task_resolution_request",
     ]
 
 
@@ -916,12 +912,12 @@ async def test_satisfied_local_context_recurrence_returns_to_speech() -> None:
         user_input=user_input,
         bid=bid,
         resolvers=[_resolver(
-            "local_context_recall",
+            "task_resolution_request",
             "检索受限的私聊、群聊和持久记忆证据",
         )],
         evidence_rows=evidence_rows,
         resolver_context=(
-            "resolver_state: status=active; local_context_recall "
+            "resolver_state: status=active; task_resolution_request "
             "status=succeeded; omitted object resolved as the wet marks"
         ),
     )
@@ -967,7 +963,7 @@ async def test_initial_relationship_context_need_is_authorized() -> None:
         bid_handles={"b1": bid},
         evidence=evidence,
         resolver_handles={"r1": _resolver(
-            "local_context_recall",
+            "task_resolution_request",
             "检索受限的私聊、群聊和持久记忆证据",
         )},
         resolver_context="resolver_state: status=idle",
@@ -1038,7 +1034,7 @@ async def test_satisfied_relationship_context_retry_is_rejected() -> None:
     capturing_llm = _CapturingLLM(base_services.llm)
     services = replace(base_services, llm=capturing_llm)
     resolver_context = (
-        "resolver_state: status=active; local_context_recall status=succeeded; "
+        "resolver_state: status=active; task_resolution_request status=succeeded; "
         "relationship interaction and boundary evidence was projected"
     )
 
@@ -1047,7 +1043,7 @@ async def test_satisfied_relationship_context_retry_is_rejected() -> None:
         bid_handles={"b1": bid},
         evidence=evidence,
         resolver_handles={"r1": _resolver(
-            "local_context_recall",
+            "task_resolution_request",
             "检索受限的私聊、群聊和持久记忆证据",
         )},
         resolver_context=resolver_context,
@@ -1612,7 +1608,7 @@ async def test_c03_action_planning_selects_local_recall_from_connector_state() -
                     and [
                         row['capability']
                         for row in result['resolver_requests']
-                    ] == ['local_context_recall']
+                    ] == ['task_resolution_request']
                 ),
                 'reason': (
                     '当前证据缺少门禁卡位置，action_planning 必须保留本地上下文'
@@ -1633,7 +1629,7 @@ async def test_c03_action_planning_selects_local_recall_from_connector_state() -
     assert result['goal_resolution'] == 'requires_required_evidence'
     assert [
         row['capability'] for row in result['resolver_requests']
-    ] == ['local_context_recall']
+    ] == ['task_resolution_request']
 
 
 async def test_o04_action_planning_selects_local_recall_from_frozen_e2e_state() -> None:
@@ -1723,11 +1719,11 @@ async def test_o04_action_planning_selects_local_recall_from_frozen_e2e_state() 
             and result['intention']['route'] == 'evidence'
             and [
                 row['capability'] for row in result['resolver_requests']
-            ] == ['local_context_recall']
+            ] == ['task_resolution_request']
         ),
         'reason': (
             '当前用户要求回忆此前关于周五的具体承诺；已接纳目标明确要求历史事实，'
-            '因此 action_planning 应保留 local_context_recall。'
+            '因此 action_planning 应保留 task_resolution_request。'
         ),
     }
     written_trace = write_llm_trace(
@@ -1876,7 +1872,7 @@ async def _run_frozen_repository_action_planning_case(
             '冻结 runtime 中 repository-task owner 不可用；规划和授权应保留真实能力边界，'
             '形成 blocked、仅通过 human_clarification 请求用户提供可访问材料，或在无任何动作'
             '和 resolver 且明确表达当前限制时完成本轮限制说明；'
-            '不得以 public_answer_research 替代 coding reader。'
+            '应使用 task_resolution_request 处理 coding reader 需求。'
         ),
     }
     trace_path = write_llm_trace(
@@ -2817,7 +2813,7 @@ async def test_c07_resolver_authorization_rejects_repository_substitution() -> N
         'passed': authorized == [],
         'reason': (
             '指定 GitHub 仓库的源代码、目录和架构分析属于 coding reader；'
-            'public_answer_research 不拥有该结果。'
+            'task_resolution_request 统一拥有该证据需求。'
         ),
     }
     written_trace = write_llm_trace(

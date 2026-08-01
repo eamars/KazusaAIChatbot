@@ -736,9 +736,9 @@ def test_persistence_gates_require_persisted_rows_not_planner_proposals() -> Non
 
     proposal_only = {
         "cognition_core_output": {
-            "action_requests": [{
-                "kind": "accepted_task_request",
-                "summary": "整理 Markdown 文件",
+            "resolver_requests": [{
+                "capability_kind": "task_resolution_request",
+                "objective": "整理 Markdown 文件",
             }],
             "background_work_request": {
                 "summary": "整理 Markdown 文件",

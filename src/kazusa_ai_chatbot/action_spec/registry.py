@@ -19,22 +19,16 @@ APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY = "apply_memory_lifecycle_update"
 SPEAK_CAPABILITY = "speak"
 TRIGGER_FUTURE_COGNITION_CAPABILITY = "trigger_future_cognition"
 FUTURE_SPEAK_CAPABILITY = "future_speak"
-ACCEPTED_TASK_REQUEST_CAPABILITY = "accepted_task_request"
 ACCEPTED_TASK_STATUS_CHECK_CAPABILITY = "accepted_task_status_check"
 ACCEPTED_CODING_TASK_REQUEST_CAPABILITY = "accepted_coding_task_request"
-BACKGROUND_WORK_REQUEST_CAPABILITY = "background_work_request"
 _QUEUE_ONLY_CAPABILITIES = frozenset({
     TRIGGER_FUTURE_COGNITION_CAPABILITY,
     FUTURE_SPEAK_CAPABILITY,
-    ACCEPTED_TASK_REQUEST_CAPABILITY,
     ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
-    BACKGROUND_WORK_REQUEST_CAPABILITY,
 })
 _USER_MESSAGE_ONLY_CAPABILITIES = frozenset({
     FUTURE_SPEAK_CAPABILITY,
-    ACCEPTED_TASK_REQUEST_CAPABILITY,
     ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
-    BACKGROUND_WORK_REQUEST_CAPABILITY,
 })
 _AVAILABILITY_SNAPSHOT_TTL_SECONDS = 5
 
@@ -79,14 +73,12 @@ def build_initial_action_capabilities() -> dict[str, CapabilitySpecV1]:
         SPEAK_CAPABILITY: _speak_capability(),
         TRIGGER_FUTURE_COGNITION_CAPABILITY: _future_cognition_capability(),
         FUTURE_SPEAK_CAPABILITY: _future_speak_capability(),
-        ACCEPTED_TASK_REQUEST_CAPABILITY: _accepted_task_request_capability(),
         ACCEPTED_CODING_TASK_REQUEST_CAPABILITY: (
             _accepted_coding_task_capability()
         ),
         ACCEPTED_TASK_STATUS_CHECK_CAPABILITY: (
             _accepted_task_status_check_capability()
         ),
-        BACKGROUND_WORK_REQUEST_CAPABILITY: _background_work_capability(),
     }
     for capability in capabilities.values():
         validate_capability_spec(capability)
@@ -108,14 +100,10 @@ def project_prompt_affordances(
             projection.append(_future_cognition_projection())
         elif capability_kind == FUTURE_SPEAK_CAPABILITY:
             projection.append(_future_speak_projection())
-        elif capability_kind == ACCEPTED_TASK_REQUEST_CAPABILITY:
-            projection.append(_accepted_task_request_projection())
         elif capability_kind == ACCEPTED_CODING_TASK_REQUEST_CAPABILITY:
             projection.append(_accepted_coding_task_projection())
         elif capability_kind == ACCEPTED_TASK_STATUS_CHECK_CAPABILITY:
             projection.append(_accepted_task_status_check_projection())
-        elif capability_kind == BACKGROUND_WORK_REQUEST_CAPABILITY:
-            projection.append(_background_work_projection())
     return projection
 
 
@@ -153,11 +141,7 @@ def _probe_capability_availability(
 
     requested_work_kind = context.get("requested_work_kind")
     if (
-        capability_kind in {
-            ACCEPTED_TASK_REQUEST_CAPABILITY,
-            ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
-            BACKGROUND_WORK_REQUEST_CAPABILITY,
-        }
+        capability_kind == ACCEPTED_CODING_TASK_REQUEST_CAPABILITY
         and requested_work_kind == "unsupported"
     ):
         return {
@@ -333,9 +317,7 @@ def build_episode_affordances(
         latency_tier = "live"
         if capability_kind in {
             FUTURE_SPEAK_CAPABILITY,
-            ACCEPTED_TASK_REQUEST_CAPABILITY,
             ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
-            BACKGROUND_WORK_REQUEST_CAPABILITY,
         }:
             latency_tier = "background"
         if capability_kind == TRIGGER_FUTURE_COGNITION_CAPABILITY:
@@ -597,48 +579,6 @@ def _future_speak_capability() -> CapabilitySpecV1:
     return return_value
 
 
-def _background_work_capability() -> CapabilitySpecV1:
-    """Build the generic background-work request capability."""
-
-    return_value: CapabilitySpecV1 = {
-        "schema_version": "capability_spec.v1",
-        "capability_kind": BACKGROUND_WORK_REQUEST_CAPABILITY,
-        "category": "action",
-        "owner_module": "background_work",
-        "input_schema": {
-            "type": "object",
-            "required": [
-                "task_brief",
-                "requested_delivery",
-                "max_output_chars",
-            ],
-            "properties": {
-                "task_brief": {"type": "string"},
-                "requested_delivery": {
-                    "type": "string",
-                    "enum": ["send_result_when_done"],
-                },
-                "max_output_chars": {"type": "integer"},
-            },
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "status": {"type": "string"},
-                "queue_state": {"type": "string"},
-                "task_summary": {"type": "string"},
-            },
-        },
-        "handler_id": "background_work.enqueue.v1",
-        "lifecycle_hooks": ["validate", "enqueue_background_work"],
-        "permission_policy": "policy:background_work.enqueue.v1",
-        "rate_limit_policy": "policy:action.default_rate_limit.v1",
-        "audit_policy": "policy:action.audit.v1",
-        "prompt_projection_policy": "policy:prompt.action_safe.v1",
-    }
-    return return_value
-
-
 def _accepted_coding_task_capability() -> CapabilitySpecV1:
     """Build the accepted coding-task durable-run request capability."""
 
@@ -652,6 +592,7 @@ def _accepted_coding_task_capability() -> CapabilitySpecV1:
             "required": [
                 "task_brief",
                 "coding_action",
+                "coding_run_ref",
                 "requested_delivery",
                 "max_output_chars",
             ],
@@ -660,7 +601,6 @@ def _accepted_coding_task_capability() -> CapabilitySpecV1:
                 "coding_action": {
                     "type": "string",
                     "enum": [
-                        "start",
                         "revise_proposal",
                         "summarize",
                         "status",
@@ -670,7 +610,9 @@ def _accepted_coding_task_capability() -> CapabilitySpecV1:
                     ],
                 },
                 "coding_run_ref": {"type": "string"},
+                "revision_instruction": {"type": "string"},
                 "execution_request": {"type": "string"},
+                "approval_evidence": {"type": "object"},
                 "requested_delivery": {
                     "type": "string",
                     "enum": ["send_result_when_done"],
@@ -687,94 +629,12 @@ def _accepted_coding_task_capability() -> CapabilitySpecV1:
                 "coding_run_ref": {"type": "string"},
             },
         },
-        "handler_id": "background_work.accepted_coding_task.enqueue.v1",
+        "handler_id": "background_work.bound_coding_continuation.enqueue.v1",
         "lifecycle_hooks": ["validate", "enqueue_background_work"],
-        "permission_policy": "policy:background_work.accepted_coding_task.v1",
+        "permission_policy": "policy:background_work.coding_continuation.v1",
         "rate_limit_policy": "policy:action.default_rate_limit.v1",
         "audit_policy": "policy:action.audit.v1",
         "prompt_projection_policy": "policy:prompt.action_safe.v1",
-    }
-    return return_value
-
-
-def _accepted_task_request_capability() -> CapabilitySpecV1:
-    """Build the accepted-task durable request capability."""
-
-    return_value: CapabilitySpecV1 = {
-        "schema_version": "capability_spec.v1",
-        "capability_kind": ACCEPTED_TASK_REQUEST_CAPABILITY,
-        "category": "action",
-        "owner_module": "accepted_task",
-        "input_schema": {
-            "type": "object",
-            "required": [
-                "task_brief",
-                "requested_delivery",
-                "max_output_chars",
-            ],
-            "properties": {
-                "task_brief": {"type": "string"},
-                "requested_delivery": {
-                    "type": "string",
-                    "enum": ["send_result_when_done"],
-                },
-                "max_output_chars": {"type": "integer"},
-            },
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "status": {"type": "string"},
-                "accepted_task_id": {"type": "string"},
-            },
-        },
-        "handler_id": "accepted_task.request.v1",
-        "lifecycle_hooks": ["validate", "enqueue_accepted_task"],
-        "permission_policy": "policy:accepted_task.request.v1",
-        "rate_limit_policy": "policy:action.default_rate_limit.v1",
-        "audit_policy": "policy:action.audit.v1",
-        "prompt_projection_policy": "policy:prompt.action_safe.v1",
-    }
-    return return_value
-
-
-def _background_work_projection() -> dict[str, object]:
-    """Return prompt-safe accepted delayed-task affordance metadata."""
-
-    return_value = {
-        "capability": BACKGROUND_WORK_REQUEST_CAPABILITY,
-        "available": True,
-        "availability_context": "",
-        "visibility": "private",
-        "decision_mode": "closed",
-        "allowed_decisions": ["enqueue"],
-        "default_decision": "enqueue",
-        "decision_pattern": "",
-        "context_ref": "",
-        "semantic_input_summary": [
-            (
-                "Use only for explicitly accepted delayed work: bounded text, "
-                "code, or repository analysis produced out of turn."
-            ),
-            (
-                "Repository analysis stays here even with public evidence."
-            ),
-            (
-                "Never use for current-turn reasoning, local context recall, "
-                "reply preparation, rehearsal, or wording."
-            ),
-            (
-                "Never execute a physical action or generate, store, or later "
-                "present an action description."
-            ),
-            (
-                "Provide a task reason and detail without execution internals; "
-                "pair it with a visible acknowledgement."
-            ),
-        ],
-        "execution_boundary": (
-            "durable accepted-task lifecycle records the task before chat acknowledgement"
-        ),
     }
     return return_value
 
@@ -812,36 +672,8 @@ def _accepted_coding_task_projection() -> dict[str, object]:
             "把私有请求与可见确认配对。",
         ],
         "execution_boundary": (
-            "durable accepted-task lifecycle queues the coding-run worker"
+            "durable accepted-task lifecycle queues task_orchestrator"
         ),
-    }
-    return return_value
-
-
-def _accepted_task_request_projection() -> dict[str, object]:
-    """Return prompt-safe accepted-task request affordance metadata."""
-
-    return_value = {
-        "capability": ACCEPTED_TASK_REQUEST_CAPABILITY,
-        "available": True,
-        "availability_context": "",
-        "visibility": "private",
-        "decision_mode": "required_text",
-        "allowed_decisions": ["enqueue"],
-        "default_decision": "enqueue",
-        "decision_pattern": "",
-        "context_ref": "",
-        "semantic_input_summary": [
-            "仅用于明确接受的、有界延迟工作。",
-            (
-                "所有未绑定 coding_run_ref 的新代码任务都从这里进入；"
-                "coding worker 负责区分代码阅读、代码编写和代码修改。"
-            ),
-            "提供接受的任务目标，不写执行内部细节。",
-            "不能代替未来提醒、主动联系或需要调度器负责的后续动作。",
-            "把私有请求与可见确认一起使用。",
-        ],
-        "execution_boundary": "accepted-task lifecycle queues the durable worker",
     }
     return return_value
 

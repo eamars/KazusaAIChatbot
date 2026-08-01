@@ -1,12 +1,17 @@
-"""Typed contracts for generic background-work jobs."""
+"""Typed v2 persistence contracts for task-orchestrator background work."""
 
 from __future__ import annotations
 
 from typing import Literal, NotRequired, TypedDict
 
+
 BACKGROUND_WORK_JOBS_COLLECTION = "background_work_jobs"
+BACKGROUND_WORK_JOB_SCHEMA_VERSION = "background_work_job.v2"
 BACKGROUND_WORK_JOB_REF_OWNER = "background_work_job"
 BACKGROUND_WORK_REQUESTED_DELIVERY = "send_result_when_done"
+TASK_ORCHESTRATOR_WORKER = "task_orchestrator"
+FUTURE_SPEAK_WORKER = "future_speak"
+TASK_ORCHESTRATOR_WORKER_PAYLOAD_VERSION = "task_orchestrator_worker_payload.v1"
 
 BackgroundWorkJobStatus = Literal[
     "queued",
@@ -24,31 +29,41 @@ BackgroundWorkDeliveryState = Literal[
     "delivered",
     "failed",
 ]
-BackgroundWorkRouterAction = Literal[
-    "execute",
-    "reject",
-    "needs_user_input",
-    "stop",
+TaskOrchestratorOperation = Literal[
+    "resume_task_resolution",
+    "continue_bound_coding_run",
 ]
-BackgroundWorkWorkerStatus = Literal[
-    "succeeded",
-    "failed",
-    "needs_user_input",
-    "rejected",
-]
+BackgroundWorkRequestedWorker = Literal["task_orchestrator", "future_speak"]
+
+
+class TaskOrchestratorWorkerPayloadV1(TypedDict):
+    """Reviewed durable payload for the single generic task worker."""
+
+    schema_version: Literal["task_orchestrator_worker_payload.v1"]
+    operation: TaskOrchestratorOperation
+    checkpoint: dict[str, object] | None
+    coding_request: dict[str, object] | None
+
+
+class FutureSpeakWorkerPayloadV1(TypedDict):
+    """Deterministic future-speak scheduling payload kept outside task routing."""
+
+    trigger_at: str
+    continuation_objective: str
 
 
 class BackgroundWorkQueueRequest(TypedDict):
-    """Request to create one durable generic background-work job."""
+    """Request to persist one reviewed v2 background-work job."""
 
-    action_attempt_id: str
+    job_id: str
+    source_action_attempt_id: str
     idempotency_key: str
-    task_brief: str
-    source_context: NotRequired[str]
-    requested_worker: NotRequired[str]
-    worker_payload: NotRequired[dict[str, object]]
-    accepted_task_id: NotRequired[str]
-    task_identity_key: NotRequired[str]
+    accepted_task_id: str
+    task_identity_key: str
+    semantic_objective: str
+    requested_worker: BackgroundWorkRequestedWorker
+    worker_payload: TaskOrchestratorWorkerPayloadV1 | FutureSpeakWorkerPayloadV1
+    task_execution_context: NotRequired[dict[str, object]]
     source_platform: str
     source_channel_id: str
     source_channel_type: str
@@ -63,84 +78,43 @@ class BackgroundWorkQueueRequest(TypedDict):
     storage_timestamp_utc: str
 
 
-class BackgroundWorkQueueResult(TypedDict, total=False):
-    """Queue result with internal executor and semantic accepted-task fields."""
+class BackgroundWorkQueueResult(TypedDict):
+    """Prompt-safe confirmation that durable work exists."""
 
-    status: Literal["pending", "rejected", "failed"]
-    queue_state: str
+    status: Literal["pending", "failed"]
     job_id: str
     job_ref: str
-    task_summary: str
-    result_summary: str
-    operational_owner: Literal["background_work_job"]
-    acknowledgement_constraint: Literal[
-        "promise_allowed",
-        "progress_report_allowed",
-        "promise_forbidden_explain_failure",
-    ]
-    evidence_ref: NotRequired[dict[str, str]]
     accepted_task_id: str
     task_identity_key: str
-    accepted_task_state: Literal[
-        "scheduled",
-        "already_active",
-        "running",
-        "result_ready",
-        "delivered",
-        "failed",
-        "enqueue_failed",
-        "delivery_failed",
-    ]
     accepted_task_summary: str
-    wait_guidance: Literal["non_numeric_wait", "no_wait", "unavailable"]
-
-
-class BackgroundWorkRouterDecision(TypedDict):
-    """Route-only decision for one claimed background-work job."""
-
-    action: BackgroundWorkRouterAction
-    worker: str
-    reason: str
-
-
-class BackgroundWorkWorkerDecision(BackgroundWorkRouterDecision, total=False):
-    """Route decision plus deterministic context passed to a worker."""
-
-    task_brief: str
-    source_summary: str
-    worker_payload: dict[str, object]
-
-
-class BackgroundWorkResult(TypedDict):
-    """Prompt-safe worker result recorded on the durable job."""
-
-    status: BackgroundWorkWorkerStatus
-    worker: str
-    artifact_text: str
-    failure_summary: str
+    acknowledgement_constraint: Literal[
+        "promise_allowed",
+        "promise_forbidden_explain_failure",
+    ]
+    wait_guidance: Literal["non_numeric_wait", "unavailable"]
     result_summary: str
-    worker_metadata: dict[str, object]
+    accepted_task_state: NotRequired[str]
 
 
 class BackgroundWorkJobRef(TypedDict):
-    """Stable prompt-safe reference for one background-work job."""
+    """Stable prompt-safe reference for one durable job."""
 
     job_id: str
     job_ref: str
 
 
 class BackgroundWorkJobDoc(TypedDict, total=False):
-    """MongoDB document for one generic background-work job."""
+    """MongoDB document for one v2 task-orchestrator or future-speak job."""
 
-    schema_version: Literal["background_work_job.v1"]
+    schema_version: Literal["background_work_job.v2"]
     job_id: str
     idempotency_key: str
     source_action_attempt_id: str
     accepted_task_id: str
     task_identity_key: str
+    semantic_objective: str
     status: BackgroundWorkJobStatus
     delivery_state: BackgroundWorkDeliveryState
-    task_brief: str
     requested_delivery: Literal["send_result_when_done"]
     max_output_chars: int
     source_platform: str
@@ -158,18 +132,13 @@ class BackgroundWorkJobDoc(TypedDict, total=False):
     lease_expires_at: str | None
     attempt_count: int
     max_attempts: int
-    router_action: str
-    worker: str
-    routed_task: str
-    router_reason: str
-    source_context: str
-    requested_worker: str
+    requested_worker: BackgroundWorkRequestedWorker
     worker_payload: dict[str, object]
+    task_execution_context: dict[str, object]
+    task_resolution_result: dict[str, object]
     artifact_text: str
-    artifact_char_count: int
     failure_summary: str
     result_summary: str
-    worker_metadata: dict[str, object]
     completed_at: str
     delivery_attempt_count: int
     delivery_failure_summary: str
@@ -179,10 +148,9 @@ class BackgroundWorkJobDoc(TypedDict, total=False):
 
 
 def background_work_job_ref(job_id: str) -> str:
-    """Return the prompt-safe evidence id for one generic job."""
+    """Return the prompt-safe evidence id for one v2 background-work job."""
 
     clean_job_id = job_id.strip()
     if clean_job_id.startswith("background_work_job:"):
         return clean_job_id
-    return_value = f"background_work_job:{clean_job_id}"
-    return return_value
+    return f"background_work_job:{clean_job_id}"

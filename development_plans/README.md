@@ -51,9 +51,6 @@ long_term/todo.md
 | Document | Type | Status |
 |---|---|---|
 | [cognition_core_v2_short_horizon_global_state_composition_bigbang_plan.md](active/bugfix/cognition_core_v2_short_horizon_global_state_composition_bigbang_plan.md) | Post-identity V2 plan for transient global posture, causal relationship context, scoped style composition, and runtime/UI proof | draft |
-| [conversation_progress_v2_final_signoff_plan.md](active/bugfix/conversation_progress_v2_final_signoff_plan.md) | Focused Conversation Progress V2 semantic-evidence and maximum-turn final sign-off plan | in_progress |
-| [rag2_public_output_contract_leak_bugfix_plan.md](active/bugfix/rag2_public_output_contract_leak_bugfix_plan.md) | Large RAG2 prompt/evidence contract bugfix plan | draft |
-| [relevance_evidence_grounded_admission_over_sensitivity_bugfix_plan.md](active/bugfix/relevance_evidence_grounded_admission_over_sensitivity_bugfix_plan.md) | Evidence-grounded recipient and character-state relevance admission bugfix plan | in progress |
 | [required_selection_partial_recovery_bugfix_plan.md](active/bugfix/required_selection_partial_recovery_bugfix_plan.md) | Reproduction-gated required-selection structural and complete-sibling-bid recovery bugfix plan | draft |
 
 ## Reference Documents
@@ -444,6 +441,50 @@ regressions plus independent review completed before archival.
 |---|---|
 | Moved from active bugfix to completed archive | `cognition_core_v2_prewarm_mention_content_query_bugfix_plan.md` |
 
+### 2026-08-01 relevance evidence-grounded admission completion
+
+The relevance admission bugfix completed after evidence-grounded recipient and
+character-state validation, focused deterministic and one-at-a-time real-LLM
+verification, full non-live regression, independent review remediation, and
+explicit user sign-off.
+
+| Outcome | Plans |
+|---|---|
+| Moved from active bugfix to completed archive | `relevance_evidence_grounded_admission_over_sensitivity_bugfix_plan.md` |
+
+### 2026-08-01 Conversation Progress V2 final sign-off closure
+
+The Conversation Progress V2 final sign-off work completed with its recorded
+semantic handoff, maximum-turn projection, regression evidence, and explicit
+user approval to archive the plan.
+
+| Outcome | Plans |
+|---|---|
+| Moved from active bugfix to completed archive | `conversation_progress_v2_final_signoff_plan.md` |
+
+### 2026-08-01 RAG2 public-output contract plan closure
+
+The RAG2 public-output contract plan was closed as no longer relevant before
+execution, with no implementation, review, or verification action taken.
+
+| Outcome | Plans |
+|---|---|
+| Moved from active bugfix to superseded archive | `rag2_public_output_contract_leak_bugfix_plan.md` |
+
+### 2026-08-01 unified task-resolution orchestrator completion
+
+The approved big-bang migration completed with one model-facing
+`task_resolution_request`, one bounded resumable orchestrator over four
+specialists, v2 accepted-task/background-job persistence, deterministic
+future-speak retention, normal result-ready delivery, and exact offline
+task-history cutover. Focused, live-LLM, persona, guarded live-DB, production
+smoke, and independent-review remediation gates passed. The coding execution
+branch remained closed throughout verification.
+
+| Outcome | Plans |
+|---|---|
+| Moved from active short-term to completed archive | `unified_task_resolution_orchestrator_bigbang_plan.md` |
+
 ## Archive
 
 Completed and superseded records live under `archive/`. Use them for historical
@@ -459,6 +500,7 @@ plans.
 | [character_state_lane_integrity_plan.md](archive/completed/bugfix/character_state_lane_integrity_plan.md) |
 | [character_self_image_rolling_state_bugfix_plan.md](archive/completed/bugfix/character_self_image_rolling_state_bugfix_plan.md) |
 | [conversation_episode_state_lane_lifecycle_plan.md](archive/completed/bugfix/conversation_episode_state_lane_lifecycle_plan.md) |
+| [conversation_progress_v2_final_signoff_plan.md](archive/completed/bugfix/conversation_progress_v2_final_signoff_plan.md) |
 | [control_console_functional_remediation_plan.md](archive/completed/bugfix/control_console_functional_remediation_plan.md) |
 | [control_console_information_architecture_remediation_plan.md](archive/completed/bugfix/control_console_information_architecture_remediation_plan.md) |
 | [control_console_ui_e2e_acceptance_test_plan.md](archive/completed/bugfix/control_console_ui_e2e_acceptance_test_plan.md) |
@@ -510,6 +552,7 @@ plans.
 | [rag_conversation_evidence_current_episode_boundary_bugfix_plan.md](archive/completed/bugfix/rag_conversation_evidence_current_episode_boundary_bugfix_plan.md) |
 | [rag_retrieval_top_k_embedding_tuning_plan.md](archive/completed/bugfix/rag_retrieval_top_k_embedding_tuning_plan.md) |
 | [relevance_input_scope_robustness_bugfix_plan.md](archive/completed/bugfix/relevance_input_scope_robustness_bugfix_plan.md) |
+| [relevance_evidence_grounded_admission_over_sensitivity_bugfix_plan.md](archive/completed/bugfix/relevance_evidence_grounded_admission_over_sensitivity_bugfix_plan.md) |
 | [reflection_group_scene_digest_self_cognition_bugfix_plan.md](archive/completed/bugfix/reflection_group_scene_digest_self_cognition_bugfix_plan.md) |
 | [reflection_global_promotion_replay_bugfix_plan.md](archive/completed/bugfix/reflection_global_promotion_replay_bugfix_plan.md) |
 | [relevance_native_reply_anchor_guard_bugfix_plan.md](archive/completed/bugfix/relevance_native_reply_anchor_guard_bugfix_plan.md) |
@@ -670,6 +713,7 @@ plans.
 | [service_module_separation_stage1_plan.md](archive/completed/short_term/service_module_separation_stage1_plan.md) |
 | [typed_message_envelope_stage2_plan.md](archive/completed/short_term/typed_message_envelope_stage2_plan.md) |
 | [unconditional_shared_memory_prewarm_plan.md](archive/completed/short_term/unconditional_shared_memory_prewarm_plan.md) |
+| [unified_task_resolution_orchestrator_bigbang_plan.md](archive/completed/short_term/unified_task_resolution_orchestrator_bigbang_plan.md) |
 | [universal_calendar_scheduler_plan.md](archive/completed/short_term/universal_calendar_scheduler_plan.md) |
 | [universal_chat_history_llm_projection_plan.md](archive/completed/short_term/universal_chat_history_llm_projection_plan.md) |
 | [user_style_engagement_consumer_plan.md](archive/completed/short_term/user_style_engagement_consumer_plan.md) |
@@ -695,6 +739,7 @@ plans.
 | [self_cognition_reasoning_basis.md](archive/superseded/self_cognition_reasoning_basis.md) |
 | [self_cognition_tracking_icd.md](archive/superseded/self_cognition_tracking_icd.md) |
 | [rag_supervisor2_inner_loop_agents_plan.md](archive/superseded/rag_supervisor2_inner_loop_agents_plan.md) |
+| [rag2_public_output_contract_leak_bugfix_plan.md](archive/superseded/rag2_public_output_contract_leak_bugfix_plan.md) |
 | [short_circuit_early_stop_plan.md](archive/superseded/short_circuit_early_stop_plan.md) |
 | [coding_agent_phase2_code_writing_plan_superseded_20260623.md](archive/superseded/coding_agent_phase2_code_writing_plan_superseded_20260623.md) |
 | [visual_descriptor_seeded_reference_images_plan.md](archive/superseded/visual_descriptor_seeded_reference_images_plan.md) |

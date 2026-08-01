@@ -23,7 +23,6 @@ from kazusa_ai_chatbot.cognition_core_v2.resolver_authorization import (
 )
 from kazusa_ai_chatbot.action_spec.registry import (
     APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
-    BACKGROUND_WORK_REQUEST_CAPABILITY,
     SPEAK_CAPABILITY,
 )
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
@@ -89,11 +88,11 @@ group_engagement_action_context 只是在当前已观察群场景中选择相容
 它不是证据、权限、事实、话题、关系判断、route 权威或最终措辞，不能单独构成发言或能力请求理由。
 
 runtime_capability_limits 是确定性运行时提供的可信能力边界。若其中标记某项能力不可用，不能
-用另一项能力冒充该效果；其中 future_speak 是未来提醒和主动联系的唯一拥有者，不能用通用
-accepted_task_request 代替它。若限制同时说明 coding worker 尚未运行但绑定既有 coding_run_ref
+用另一项能力冒充该效果；其中 future_speak 是未来提醒和主动联系的唯一拥有者，不能用
+task_resolution_request 代替它。若限制同时说明 coding worker 尚未运行但绑定既有 coding_run_ref
 的生命周期动作可以记录并排队，则只在当前 affordance 明确绑定既有 run 且决定属于其
 allowed_next_actions 时选择该动作；结果保持待执行，后续 surface 不得表述 worker 已执行或完成。
-没有绑定既有 run 的 start 仍然需要可用的 coding owner。其他没有可用 owner 的动作保持
+没有绑定既有 run 的新代码或仓库工作应通过 task_resolution_request 提出。没有可用 owner 时保持
 action_requests=[]，并将 goal_resolution 设为 blocked。
 
 当用户询问已经持久化的 accepted task 或 coding run 当前状态时，优先使用
@@ -102,7 +101,7 @@ coding_run_context，不创建新的延迟任务，也不需要 coding worker。
 继续处理既有 run 的生命周期操作时，使用带 coding_run_ref 的
 accepted_coding_task_request；它适用于修改、验证、批准、取消、阻塞处理，以及可由 worker 执行的
 coding status。已有 run 的生命周期动作可以在 queue-only owner 下记录并排队，状态结果保持待执行。
-未绑定 coding_run_ref 的新代码工作统一使用 accepted_task_request，由 coding worker 判断阅读、编写
+未绑定 coding_run_ref 的新代码工作统一使用 task_resolution_request，由后续专属处理判断阅读、编写
 或修改类型。status 查询结果交给后续 surface 作为当前状态证据。
 当用户只是询问状态而没有明确提出取消、审核验证、修改或处理阻塞时，直接基于已有状态证据
 回答，或选择 accepted_task_status_check 的 check；既有 coding run 的生命周期动作只承载用户
@@ -115,19 +114,18 @@ goal_resolution=answerable_now 并保持 action_requests=[]。只有当 bid 自�
 
 memory_lifecycle_update 只用于已经明确存在的 active commitment lifecycle review。普通用户偏好、
 互动风格事实或“请记住我喜欢什么”由记忆与 consolidation 流程处理，不把它们包装成
-memory_lifecycle_update、accepted_task_request 或 background_work_request；如果本轮只是确认收到，
+memory_lifecycle_update 或 task_resolution_request；如果本轮只是确认收到，
 保持 action_requests=[]。当 runtime_capability_limits 表示后台任务能力不可用时，普通
-accepted_task_request 和 background_work_request 需要可用执行 owner；已绑定 coding_run_ref 且
+task_resolution_request 需要可用执行 owner；已绑定 coding_run_ref 且
 affordance 明确允许的 coding 生命周期动作可以按 queue-only 语义记录和排队，不能把排队结果说成已执行。
 
-所有未绑定 coding_run_ref 的新后台代码工作统一属于 accepted_task_request，包括只读仓库分析、
-项目架构评价、代码阅读、文件/函数定位、新代码方案和现有代码修改方案；该公开 owner 随后由
-accepted-task 生命周期交给内部 coding agent，由 worker 判断 code_reading、code_writing 或
-code_modifying。public_answer_research 只负责当前外部事实或一般公共资料，不承担仓库源代码分析。
+所有未绑定 coding_run_ref 的新后台代码工作统一属于 task_resolution_request，包括只读仓库分析、
+项目架构评价、代码阅读、文件/函数定位、新代码方案和现有代码修改方案；后续专属处理保留既有
+coding 生命周期。task_resolution_request 统一承载当前缺少的证据或有界工作，不让规划者选择专家。
 accepted_coding_task_request 只用于绑定既有 coding_run_ref 的验证、批准、取消、阻塞处理或其他
 持久化 run 生命周期。当仓库工作 owner 在 runtime_capability_limits 中不可用时，使用
 goal_resolution=blocked、action_requests=[]、resolver_requests=[]，把当前限制交给后续可见 surface；
-不要改用 public_answer_research，也不要留下 requires_required_evidence 与空请求的组合。
+不要改用其他 resolver，也不要留下 requires_required_evidence 与空请求的组合。
 规划者本轮的推理、记忆回想、回复准备、措辞排练或本轮即可完成的思考不构成 action request。
 先判断当前接纳目标的 goal_resolution：这是对“当前回应是否已经足够回答用户问题”的语义判断，
 不是对某个 RAG 来源是否 resolved 的复述。只能使用以下值：answerable_now（现在即可完成回答）、

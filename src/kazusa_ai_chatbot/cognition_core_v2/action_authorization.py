@@ -56,7 +56,7 @@ runtime_capability_limits 是确定性运行时提供的可信能力限制，与
 后续 surface 只能表达已记录或待执行，不能表达 worker 已执行或完成。没有绑定 run 的
 accepted_coding_task_request 不属于提供的生命周期 owner，必须拒绝。若某项能力不是所声明效果的
 拥有者，也必须拒绝替代关系；例如
-accepted_task_request 不能代替 future_speak 来安排未来提醒或主动联系。“告诉用户已经收到请求”
+accepted_coding_task_request 不能代替 future_speak 来安排未来提醒或主动联系。“告诉用户已经收到请求”
 是当前可见发言，不是有界延迟动作；不能因为这个即时确认目标就核准一个替代任务。只根据当前
 证据、候选的真实效果和可信运行限制做语义判断。
 
@@ -65,23 +65,23 @@ coding_run_context；它是即时的只读查询，不创建新任务，也不�
 任务或 coding run 的状态时，只要当前作用域存在对应记录，就核准这个查询并保留其状态证据。
 
 请按以下顺序判断每个候选：先找出它要产生的持久化或跨轮真实效果，再匹配该效果的唯一能力拥有者，
-最后核对该拥有者是否可用。accepted_task_request 只承载它自己能够完成的明确、有界延迟工作；如果
-候选的实际效果仍是未来提醒，即使语义目标同时写了“确认收到”或“说明当前不可用”，它仍然属于
-future_speak，不能作为 accepted_task_request 核准。没有可用动作拥有者时，当前 bid 的即时确认
-由可见发言阶段表达，动作授权结果保留为拒绝。
+最后核对该拥有者是否可用。future_speak 是未来提醒的唯一 owner；绑定既有 run 的
+accepted_coding_task_request 只承载该 run 的明确生命周期动作。如果候选的实际效果仍是未来提醒，
+即使语义目标同时写了“确认收到”或“说明当前不可用”，它仍然属于 future_speak，不能由 coding
+生命周期动作核准。没有可用动作拥有者时，当前 bid 的即时确认由可见发言阶段表达，动作授权结果
+保留为拒绝。
 
 memory_lifecycle_update 的真实效果是 active commitment lifecycle review，不是普通用户偏好或互动
 风格事实的保存；这类偏好由记忆与 consolidation 流程处理。runtime_capability_limits 中的后台
-任务不可用事实覆盖普通 accepted_task_request 和 background_work_request；已绑定既有 coding run
-且由 affordance 明确提供的生命周期 action 按 queue-only 语义核准，结果保持待执行。候选若只是
-把当前确认、普通偏好或没有绑定 run 的请求写成这些 action，授权结果应保持为拒绝。
+任务不可用事实覆盖新的 task_resolution_request；已绑定既有 coding run 且由 affordance 明确提供的
+生命周期 action 按 queue-only 语义核准，结果保持待执行。候选若只是把当前确认、普通偏好或没有
+绑定 run 的请求写成 coding 生命周期 action，授权结果应保持为拒绝。
 
-能力 owner 的正向对应关系是：accepted_task_request 负责明确接受的延迟文本、仓库分析和代码阅读
-结果，也负责所有未绑定 coding_run_ref 的新代码编写或修改任务；coding worker 在接收后判断阅读、
-编写或修改类型。accepted_coding_task_request 只负责绑定既有 coding_run_ref 的验证、批准、取消、
-阻塞处理或其他 run 生命周期。已有 run 的生命周期动作由其绑定的 coding run affordance 拥有；
-queue-only 时可以记录并排队，worker 执行结果仍保持待执行。public_answer_research 属于 resolver，
-不是这些 action 的替代 owner。
+能力 owner 的正向对应关系是：task_resolution_request 属于 resolver，用于未绑定 coding_run_ref 的
+新代码、仓库分析、代码阅读及其他有界证据工作；专属处理器再判断阅读、编写或修改类型。
+accepted_coding_task_request 只负责绑定既有 coding_run_ref 的验证、批准、取消、阻塞处理或其他 run
+生命周期。已有 run 的生命周期动作由其绑定的 coding run affordance 拥有；queue-only 时可以记录
+并排队，worker 执行结果仍保持待执行。resolver 不能代替 future_speak 的未来提醒 owner。
 
 # 输出格式
 只返回一个 JSON 对象，且字段必须恰好是 decisions。decisions 是一个 JSON 对象，键必须恰好

@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import os
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 import re
 import subprocess
 import sys
@@ -808,10 +808,10 @@ def _c07_exact_handover(
     if (
         job.get("accepted_task_id") != accepted_task_id
         or task.get("executor_ref") != job_id
-        or task.get("action_kind") != "accepted_task_request"
+        or task.get("task_kind") != "task_resolution"
         or task.get("first_source_message_id") != "C07-current"
         or job.get("source_message_id") != "C07-current"
-        or _KAZUSA_PROJECT_URL not in str(job.get("task_brief") or "")
+        or _KAZUSA_PROJECT_URL not in str(job.get("semantic_objective") or "")
         or job.get("attempt_count") != 1
         or job.get("delivery_attempt_count") != 1
         or job.get("status") != "delivered"
@@ -851,67 +851,56 @@ def _c07_exact_handover(
 def _successful_coding_reader_job(
     graph_result: Mapping[str, Any],
 ) -> Mapping[str, Any] | None:
-    """Return the completed and exactly linked C07 coding-reader job."""
+    """Return the completed and exactly linked C07 coding-specialist job."""
 
     linked_handover = _c07_exact_handover(graph_result)
     if linked_handover is None:
         return None
     _, job = linked_handover
-    worker_metadata = job.get("worker_metadata")
-    if not isinstance(worker_metadata, Mapping):
+    worker_payload = job.get("worker_payload")
+    resolution_result = job.get("task_resolution_result")
+    if not isinstance(worker_payload, Mapping) or not isinstance(
+        resolution_result,
+        Mapping,
+    ):
         return None
+    coding_context = resolution_result.get("coding_run_context")
     if (
-        job.get("worker") != "coding_agent"
-        or worker_metadata.get("coding_operation") != "code_reading"
-        or worker_metadata.get("worker_operation") != "start"
-        or worker_metadata.get("coding_run_status") != "completed"
-        or worker_metadata.get("objective_type") != "read_only"
+        job.get("requested_worker") != "task_orchestrator"
+        or worker_payload.get("operation") != "resume_task_resolution"
+        or resolution_result.get("status") not in {"resolved", "partial"}
+        or not isinstance(coding_context, Mapping)
+        or coding_context.get("status") != "completed"
         or str(job.get("failure_summary") or "").strip()
     ):
         return None
     return job
 
 
-def _valid_repository_evidence_ref(value: object) -> bool:
-    """Validate one repository-relative source evidence location."""
-
-    if not isinstance(value, Mapping):
-        return False
-    path = str(value.get("path") or "").strip().replace("\\", "/")
-    line_start = value.get("line_start")
-    line_end = value.get("line_end")
-    if (
-        not path
-        or PurePosixPath(path).is_absolute()
-        or ".." in PurePosixPath(path).parts
-        or not isinstance(line_start, int)
-        or not isinstance(line_end, int)
-    ):
-        return False
-    return 1 <= line_start <= line_end
-
-
 def _coding_reader_has_repository_evidence(
     graph_result: Mapping[str, Any],
 ) -> bool:
-    """Require a repository identity, source evidence, and visible artifact."""
+    """Require coding-run provenance and a visible resolved artifact."""
 
     job = _successful_coding_reader_job(graph_result)
     if job is None:
         return False
-    worker_metadata = job.get("worker_metadata")
-    if not isinstance(worker_metadata, Mapping):
+    resolution_result = job.get("task_resolution_result")
+    if not isinstance(resolution_result, Mapping):
         return False
-    repository = worker_metadata.get("repository")
-    evidence_refs = worker_metadata.get("evidence_refs")
+    evidence_rows = resolution_result.get("evidence")
     return (
-        isinstance(repository, Mapping)
-        and str(repository.get("owner") or "").casefold() == "eamars"
-        and repository.get("repo") == _KAZUSA_PROJECT_TOKEN
-        and isinstance(evidence_refs, list)
+        _KAZUSA_PROJECT_URL in str(job.get("semantic_objective") or "")
+        and isinstance(evidence_rows, list)
         and any(
-            _valid_repository_evidence_ref(row)
-            for row in evidence_refs
+            isinstance(row, Mapping)
+            and row.get("specialist") == "coding"
+            and isinstance(row.get("provenance_refs"), list)
+            and any(
+                str(ref).startswith("coding_run:")
+                for ref in row["provenance_refs"]
+            )
+            for row in evidence_rows
         )
         and bool(str(job.get("artifact_text") or "").strip())
     )

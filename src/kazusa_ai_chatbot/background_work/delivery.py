@@ -28,6 +28,7 @@ from kazusa_ai_chatbot.db.background_work_jobs import (
     mark_background_work_delivery_in_progress,
     recover_stale_background_work_delivery_in_progress,
 )
+from kazusa_ai_chatbot.db.errors import DatabaseOperationError
 from kazusa_ai_chatbot.time_boundary import storage_utc_now, storage_utc_now_iso
 
 BackgroundWorkCognitionDeliveryFunc = Callable[
@@ -63,63 +64,79 @@ async def run_background_work_delivery_tick(
             continue
         accepted_task_id = _accepted_task_id_from_job(marked_job)
         if accepted_task_id:
-            await mark_accepted_task_delivery_in_progress(
+            marked_task = await mark_accepted_task_delivery_in_progress(
                 accepted_task_id=accepted_task_id,
                 delivery_tracking_id=delivery_tracking_id,
                 updated_at=started_at,
             )
-        episode = build_result_ready_episode_from_job(marked_job)
-        if deliver_result_episode_func is None:
-            await mark_background_work_delivery_failed(
-                job_id=job["job_id"],
-                failure_summary="Result-ready cognition delivery is unavailable.",
-                failed_at=storage_utc_now_iso(),
-            )
-            if accepted_task_id:
-                await mark_accepted_task_delivery_failed(
-                    accepted_task_id=accepted_task_id,
+            if marked_task is None:
+                await _require_job_delivery_failed(
+                    job_id=job["job_id"],
                     failure_summary=(
-                        "Result-ready cognition delivery is unavailable."
+                        "Accepted-task delivery state is unavailable."
                     ),
                     failed_at=storage_utc_now_iso(),
                 )
+                failed_count += 1
+                continue
+        episode = build_result_ready_episode_from_job(marked_job)
+        if deliver_result_episode_func is None:
+            await _mark_delivery_retryable(
+                job_id=job["job_id"],
+                accepted_task_id=accepted_task_id,
+                failure_summary="Result-ready cognition delivery is unavailable.",
+                failed_at=storage_utc_now_iso(),
+            )
             failed_count += 1
             continue
         delivery_result = await deliver_result_episode_func(episode)
         if delivery_result.get("status") == "delivered":
             delivered_at = storage_utc_now_iso()
-            await mark_background_work_delivered(
-                job_id=job["job_id"],
-                delivered_conversation_message_id=str(
-                    delivery_result.get("conversation_message_id", ""),
-                ),
-                delivered_at=delivered_at,
-            )
             if accepted_task_id:
-                await mark_accepted_task_delivered(
+                delivered_task = await mark_accepted_task_delivered(
                     accepted_task_id=accepted_task_id,
                     delivered_conversation_message_id=str(
                         delivery_result.get("conversation_message_id", ""),
                     ),
                     delivered_at=delivered_at,
                 )
+                if delivered_task is None:
+                    await _require_job_delivery_failed(
+                        job_id=job["job_id"],
+                        failure_summary=(
+                            "Accepted-task delivery finalization failed."
+                        ),
+                        failed_at=delivered_at,
+                    )
+                    failed_count += 1
+                    continue
+            delivered_job = await mark_background_work_delivered(
+                job_id=job["job_id"],
+                delivered_conversation_message_id=str(
+                    delivery_result.get("conversation_message_id", ""),
+                ),
+                delivered_at=delivered_at,
+            )
+            if delivered_job is None:
+                await _require_job_delivery_failed(
+                    job_id=job["job_id"],
+                    failure_summary="Background delivery finalization failed.",
+                    failed_at=delivered_at,
+                )
+                failed_count += 1
+                continue
             delivered_count += 1
         else:
             failed_at = storage_utc_now_iso()
             failure_summary = str(
                 delivery_result.get("reason", "delivery failed"),
             )
-            await mark_background_work_delivery_failed(
+            await _mark_delivery_retryable(
                 job_id=job["job_id"],
+                accepted_task_id=accepted_task_id,
                 failure_summary=failure_summary,
                 failed_at=failed_at,
             )
-            if accepted_task_id:
-                await mark_accepted_task_delivery_failed(
-                    accepted_task_id=accepted_task_id,
-                    failure_summary=failure_summary,
-                    failed_at=failed_at,
-                )
             failed_count += 1
     result = {
         "processed_count": processed_count,
@@ -128,6 +145,51 @@ async def run_background_work_delivery_tick(
         "recovered_count": recovered_count,
     }
     return result
+
+
+async def _mark_delivery_retryable(
+    *,
+    job_id: str,
+    accepted_task_id: str,
+    failure_summary: str,
+    failed_at: str,
+) -> None:
+    """Return both sides of a claimed delivery to retryable state."""
+
+    if accepted_task_id:
+        failed_task = await mark_accepted_task_delivery_failed(
+            accepted_task_id=accepted_task_id,
+            failure_summary=failure_summary,
+            failed_at=failed_at,
+        )
+        if failed_task is None:
+            raise DatabaseOperationError(
+                "accepted-task delivery failure transition is missing"
+            )
+    await _require_job_delivery_failed(
+        job_id=job_id,
+        failure_summary=failure_summary,
+        failed_at=failed_at,
+    )
+
+
+async def _require_job_delivery_failed(
+    *,
+    job_id: str,
+    failure_summary: str,
+    failed_at: str,
+) -> None:
+    """Require the claimed job to remain visible for a later retry."""
+
+    failed_job = await mark_background_work_delivery_failed(
+        job_id=job_id,
+        failure_summary=failure_summary,
+        failed_at=failed_at,
+    )
+    if failed_job is None:
+        raise DatabaseOperationError(
+            "background-work delivery failure transition is missing"
+        )
 
 
 async def _recover_stale_delivery_attempts() -> int:

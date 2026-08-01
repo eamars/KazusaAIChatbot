@@ -17,3 +17,4 @@ def test_action_prompt_owns_semantic_selection_only() -> None:
     assert "decision" in prompt
     assert "task_willingness" not in prompt
     assert "raw media" not in prompt
+    assert "task_resolution_request" in prompt

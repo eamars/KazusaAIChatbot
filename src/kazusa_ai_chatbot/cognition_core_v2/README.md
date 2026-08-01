@@ -187,6 +187,13 @@ evidence, user-input, and technical-blocked decisions retain their existing
 typed paths. Deterministic code validates and enforces the decision without
 reclassifying it from keywords or adding another LLM stage.
 
+For generic evidence work, the planner has one resolver-facing semantic choice:
+`task_resolution_request`. The planner decides only whether current evidence is
+sufficient or that this capability is needed. It does not choose a specialist,
+an execution horizon, a queue worker, a timeout, a checkpoint, or tool
+parameters. The resolver owns inline execution and deterministic promotion;
+task resolution owns next-specialist selection inside its fixed session limits.
+
 The shared surface input receives semantic intention, bounded affect and
 relationship projections, complete-bid projections, permitted action results,
 interaction style, an exact tempo/linguistic-texture expression context, and a

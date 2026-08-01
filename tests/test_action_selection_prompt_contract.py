@@ -41,6 +41,21 @@ def test_action_prompt_excludes_retired_action_router_authority() -> None:
     assert "语义能力请求" in prompt
 
 
+def test_action_prompt_exposes_one_generic_task_resolution_capability() -> None:
+    """The planner judges evidence need without selecting execution mechanics."""
+
+    prompt = ACTION_PLANNING_PROMPT.casefold()
+
+    assert "task_resolution_request" in prompt
+    for forbidden in (
+        "text_artifact",
+        "inline_budget_seconds",
+        "requested_worker",
+        "lease",
+    ):
+        assert forbidden not in prompt
+
+
 def test_action_prompt_requires_grounded_out_of_turn_effect() -> None:
     """Planner reasoning cannot be converted into a durable action request."""
 

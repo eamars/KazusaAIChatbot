@@ -100,7 +100,7 @@ async def test_initial_missing_evidence_request_is_authorized() -> None:
         resolver_requests=[request],
         bid_handles={"b1": _bid()},
         evidence=[_evidence("e1", "The user refers to an earlier agreement.")],
-        resolver_handles={"r1": _resolver("local_context_recall")},
+        resolver_handles={"r1": _resolver("task_resolution_request")},
         resolver_context="resolver_status=idle",
         services=SimpleNamespace(
             llm=_LLM(),
@@ -111,7 +111,7 @@ async def test_initial_missing_evidence_request_is_authorized() -> None:
     assert result == [request]
     candidate = captured["candidates"]["c1"]
     assert candidate["semantic_capability"] == (
-        "retrieve evidence through local_context_recall"
+        "retrieve evidence through task_resolution_request"
     )
     assert candidate["current_evidence"][0]["handle"] == "e1"
 
@@ -151,9 +151,9 @@ async def test_satisfied_rephrased_request_is_rejected() -> None:
                 source_kind="resolver_observation",
             ),
         ],
-        resolver_handles={"r1": _resolver("local_context_recall")},
+        resolver_handles={"r1": _resolver("task_resolution_request")},
         resolver_context=(
-            "resolver_status=active; local_context_recall succeeded with "
+            "resolver_status=active; task_resolution_request succeeded with "
             "confirmed evidence"
         ),
         services=SimpleNamespace(

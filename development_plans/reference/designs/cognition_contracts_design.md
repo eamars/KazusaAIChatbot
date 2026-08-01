@@ -631,18 +631,16 @@ memory_lifecycle_update
 apply_memory_lifecycle_update
 trigger_future_cognition
 future_speak
-accepted_task_request
 accepted_coding_task_request
 accepted_task_status_check
-background_work_request
 ```
 
 This roster is complete for the Stage 3 native runtime. The registry is the
-declarative schema/permission/prompt/handler authority for all nine kinds.
-`apply_memory_lifecycle_update` is internal-only. Task, coding, status,
-background, and future-speech requests retain their typed lifecycle/queue/
-scheduler owners; registering them does not permit the cognition model to
-execute their effects directly. A tenth kind requires an approved plan and an
+declarative schema/permission/prompt/handler authority for all seven kinds.
+`apply_memory_lifecycle_update` is internal-only. Coding continuation, status,
+and future-speech requests retain their typed lifecycle, queue, and scheduler
+owners; registering them does not permit the cognition model to execute their
+effects directly. An eighth action kind requires an approved plan and an
 authoritative-reference amendment before runtime implementation.
 
 `send_message` is not cognition-visible vocabulary. Text output remains the
@@ -651,9 +649,11 @@ owning wording and adapter delivery for the current turn.
 
 The runtime roster does not expose web research, notes, image generation,
 motor actions, or arbitrary external tools as direct cognition actions.
-Supported accepted/background task requests may route bounded work to their
-registered owners, and `trigger_future_cognition` materializes scheduler-owned
-work without calling cognition directly.
+`task_resolution_request` is a resolver capability for generic bounded evidence
+work; it owns inline-first execution and durable checkpoint promotion outside
+the action registry. Retained future-speech and bound coding actions materialize
+only their declared lifecycle work, and `trigger_future_cognition` materializes
+scheduler-owned work without calling cognition directly.
 
 ## Contract 4: Affordance Registry
 
@@ -978,13 +978,8 @@ future_speak:
   cognition_mode: deliberative
   continuation: background_followup
 
-accepted_task_request:
-  owner: accepted_task_lifecycle
-  cognition_mode: deliberative
-  continuation: background_followup
-
 accepted_coding_task_request:
-  owner: accepted_task_coding
+  owner: background_work
   cognition_mode: deliberative
   continuation: background_followup
 
@@ -992,11 +987,6 @@ accepted_task_status_check:
   owner: accepted_task_repository
   cognition_mode: deliberative
   continuation: none
-
-background_work_request:
-  owner: background_work
-  cognition_mode: deliberative
-  continuation: background_followup
 ```
 
 All entries except internal-only `apply_memory_lifecycle_update` may be
@@ -1004,6 +994,20 @@ L2d-facing when the episode's `AffordanceSpecV1` marks them available or
 degraded. `send_message` is not a cognition-visible capability; delayed contact
 is expressed as future cognition so the character re-decides at execution
 time.
+
+### Generic Resolver Capability
+
+```text
+task_resolution_request:
+  owner: cognition_resolver -> task_resolution
+  cognition_mode: deliberative
+  continuation: inline_or_background_checkpoint
+```
+
+This is the only generic task-resolution capability. Cognition decides whether
+current evidence is sufficient; the bounded task orchestrator later chooses a
+specialist, while deterministic runtime code owns its budget, checkpoint, and
+durable job handoff.
 
 ### Deferred Action Capabilities
 

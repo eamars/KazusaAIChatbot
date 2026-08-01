@@ -1,7 +1,8 @@
 # Retired RAG 2 Helper Layer
 
 `kazusa_ai_chatbot.rag` is the helper-agent and Cache 2 layer for the retired
-RAG 2 retrieval system. Production `local_context_recall` is owned by
+RAG 2 retrieval system. Production local/private evidence is owned by the
+task-resolution local-context specialist through
 `kazusa_ai_chatbot.local_context_resolver` (RAG3). This package remains in the
 repository for historical coverage, reusable helper code, comparison tests,
 and source-level evidence experiments.
@@ -17,7 +18,8 @@ evidence means for Kazusa's stance, tone, and final response.
 ## System Boundary
 
 The live persona graph no longer reaches the retired RAG2 supervisor for
-`local_context_recall`. The production recall boundary is RAG3:
+local/private task-resolution evidence. The production recall boundary is
+RAG3:
 
 ```python
 from kazusa_ai_chatbot.nodes.persona_supervisor2 import run_rag_evidence_for_persona_state
@@ -204,7 +206,7 @@ persona_supervisor2
   -> stage_0_msg_decontextualizer
   -> stage_1_goal_resolver
        L1 -> L2 -> L2d cognition cycle
-       L2d selects `local_context_recall` only when local/private context is needed
+       task resolution selects its local-context specialist when local/private context is needed
        call_rag_supervisor(original_query, character_name, context)
        -> rag_initializer
             decomposes the query into ordered unknown_slots
@@ -624,12 +626,12 @@ RAG3 takes a different stage-level approach:
 ## Integration With Cognition
 
 The RAG2 supervisor is not called from the cognition resolver after the RAG3
-cutover. Production `local_context_recall` calls the local-context resolver.
-The first-cycle prewarm exception may call the retained shared persistent-memory
-worker directly, but it is not a full RAG supervisor run. Public, current, and
-external answer investigation is exposed to L2d as
-`public_answer_research` and handled by the complex task resolver, with
-web/source retrieval remaining an internal provider below that boundary.
+cutover. The task-resolution local-context specialist calls the local-context
+resolver. The first-cycle prewarm exception may call the retained shared
+persistent-memory worker directly, but it is not a full RAG supervisor run.
+The task-resolution public-research specialist handles public, current, and
+external investigation through the complex task resolver, with web/source
+retrieval remaining an internal provider below that boundary.
 
 Cognition reads `rag_result`, not raw RAG supervisor state. The intended division is:
 

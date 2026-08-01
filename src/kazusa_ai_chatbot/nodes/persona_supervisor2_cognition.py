@@ -17,7 +17,6 @@ from kazusa_ai_chatbot.action_spec.models import (
 from kazusa_ai_chatbot.action_spec.registry import (
     ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
     APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
-    BACKGROUND_WORK_REQUEST_CAPABILITY,
     MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     SPEAK_CAPABILITY,
     build_episode_affordances,
@@ -1045,7 +1044,6 @@ def _available_action_affordances(
         if capability_kind in {
             SPEAK_CAPABILITY,
             APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
-            BACKGROUND_WORK_REQUEST_CAPABILITY,
         }:
             continue
         if capability_kind not in availability_rows:

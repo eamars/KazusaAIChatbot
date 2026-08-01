@@ -16,15 +16,13 @@ EXPECTED_CAPABILITIES = {
     "speak",
     "trigger_future_cognition",
     "future_speak",
-    "accepted_task_request",
     "accepted_coding_task_request",
     "accepted_task_status_check",
-    "background_work_request",
 }
 
 
 def test_action_registry_contains_the_complete_native_roster() -> None:
-    """The declarative registry must own all nine supported capabilities."""
+    """The registry excludes the retired generic accepted-task action."""
 
     registry_module = importlib.import_module(
         "kazusa_ai_chatbot.action_spec.registry",

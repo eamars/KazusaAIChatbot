@@ -81,7 +81,8 @@ def test_subagent_interface_guide_covers_known_families() -> None:
         "ComplexTaskSubagentV1",
         "SUBAGENT",
         "background_work",
-        "BackgroundWorkWorkerDecision",
+        "task_orchestrator",
+        "background_work_job.v2",
         "WORKER",
         "not a shared runtime base class",
     )

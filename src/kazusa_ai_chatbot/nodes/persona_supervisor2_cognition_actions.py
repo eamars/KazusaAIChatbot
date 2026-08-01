@@ -12,10 +12,8 @@ from kazusa_ai_chatbot.action_spec.models import (
     validate_action_spec,
 )
 from kazusa_ai_chatbot.action_spec.registry import (
-    ACCEPTED_TASK_REQUEST_CAPABILITY,
     ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
     ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
-    BACKGROUND_WORK_REQUEST_CAPABILITY,
     FUTURE_SPEAK_CAPABILITY,
     MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     SPEAK_CAPABILITY,
@@ -36,10 +34,8 @@ ALLOWED_ACTION_CAPABILITIES = frozenset((
     SPEAK_CAPABILITY,
     TRIGGER_FUTURE_COGNITION_CAPABILITY,
     FUTURE_SPEAK_CAPABILITY,
-    ACCEPTED_TASK_REQUEST_CAPABILITY,
     ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
     ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
-    BACKGROUND_WORK_REQUEST_CAPABILITY,
 ))
 
 
@@ -133,28 +129,20 @@ def _materialize_action_request(
             continuation_objective=continuation_objective,
         )
     elif capability == FUTURE_SPEAK_CAPABILITY:
-        if not _can_create_delayed_task_from_source(state):
+        if not _can_create_delayed_task_from_source(
+            state,
+            capability=FUTURE_SPEAK_CAPABILITY,
+        ):
             logger.warning(
                 "L2d dropped future-speak request from non-user source"
             )
             return None
         action_spec = _build_future_speak_action_spec(request, state)
-    elif capability == ACCEPTED_TASK_REQUEST_CAPABILITY:
-        if not _can_create_delayed_task_from_source(state):
-            logger.warning(
-                "L2d dropped accepted-task request from non-user source"
-            )
-            return None
-        action_spec = _build_accepted_task_request_action_spec(request, state)
-    elif capability == BACKGROUND_WORK_REQUEST_CAPABILITY:
-        if not _can_create_delayed_task_from_source(state):
-            logger.warning(
-                "L2d dropped background-work request from non-user source"
-            )
-            return None
-        action_spec = _build_background_work_action_spec(request, state)
     elif capability == ACCEPTED_CODING_TASK_REQUEST_CAPABILITY:
-        if not _can_create_delayed_task_from_source(state):
+        if not _can_create_delayed_task_from_source(
+            state,
+            capability=ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
+        ):
             logger.warning(
                 "L2d dropped accepted coding-task request from non-user source"
             )
@@ -329,37 +317,6 @@ def _deterministic_work_seed(
     return work_seed
 
 
-def _build_background_work_action_spec(
-    request: ActionRequestV1,
-    state: CognitionState,
-) -> dict[str, object] | None:
-    """Build the generic background-work queue action."""
-
-    task_brief = _deterministic_work_seed(request, state)
-
-    action_spec = _build_action_spec(
-        kind=BACKGROUND_WORK_REQUEST_CAPABILITY,
-        source_refs=[_current_episode_source_ref()],
-        target={
-            "schema_version": "action_target.v1",
-            "target_kind": "current_user",
-            "target_id": None,
-            "owner": "background_work",
-            "scope": _background_work_target_scope(state),
-        },
-        params={
-            "task_brief": task_brief,
-            "requested_delivery": "send_result_when_done",
-            "max_output_chars": BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
-        },
-        urgency="background",
-        visibility="private",
-        deadline=None,
-        reason=request["reason"],
-    )
-    return action_spec
-
-
 def _build_future_speak_action_spec(
     request: ActionRequestV1,
     state: CognitionState,
@@ -394,35 +351,6 @@ def _build_future_speak_action_spec(
     return action_spec
 
 
-def _build_accepted_task_request_action_spec(
-    request: ActionRequestV1,
-    state: CognitionState,
-) -> dict[str, object]:
-    """Build the explicit accepted-task request capability envelope."""
-
-    task_brief = _deterministic_work_seed(request, state)
-    return _build_action_spec(
-        kind=ACCEPTED_TASK_REQUEST_CAPABILITY,
-        source_refs=[_current_episode_source_ref()],
-        target={
-            "schema_version": "action_target.v1",
-            "target_kind": "current_user",
-            "target_id": None,
-            "owner": "accepted_task",
-            "scope": _background_work_target_scope(state),
-        },
-        params={
-            "task_brief": task_brief,
-            "requested_delivery": "send_result_when_done",
-            "max_output_chars": BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
-        },
-        urgency="background",
-        visibility="private",
-        deadline=None,
-        reason=request["reason"],
-    )
-
-
 def _build_accepted_coding_task_action_spec(
     request: ActionRequestV1,
     state: CognitionState,
@@ -440,13 +368,26 @@ def _build_accepted_coding_task_action_spec(
         "max_output_chars": BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
     }
     coding_run_ref = _coding_run_ref_for_request(request, state, coding_action)
-    if coding_action != "start":
-        if not coding_run_ref:
+    if not coding_run_ref:
+        logger.warning(
+            "L2d dropped coding continuation outside current run affordances"
+        )
+        return None
+    params["coding_run_ref"] = coding_run_ref
+    if coding_action == "revise_proposal":
+        revision_instruction = _semantic_text(request, "detail")
+        if not revision_instruction:
             logger.warning(
-                "L2d dropped coding continuation outside current run affordances"
+                "L2d dropped coding revision without revision instruction"
             )
             return None
-        params["coding_run_ref"] = coding_run_ref
+        params["revision_instruction"] = revision_instruction
+    elif coding_action == "respond_to_blocker":
+        execution_request = _semantic_text(request, "execution_request")
+        if not execution_request:
+            execution_request = _semantic_text(request, "detail")
+        if execution_request:
+            params["execution_request"] = execution_request
     if coding_action == "approve_and_verify":
         approval_evidence = _approval_evidence_from_state(state)
         if approval_evidence is None:
@@ -598,7 +539,6 @@ def _coding_action_for_request(request: ActionRequestV1) -> str:
 
     decision = _semantic_text(request, "decision")
     if decision in (
-        "start",
         "revise_proposal",
         "summarize",
         "status",
@@ -834,12 +774,16 @@ def _is_scheduled_future_cognition_source(state: CognitionState) -> bool:
     return is_scheduled_source
 
 
-def _can_create_delayed_task_from_source(state: CognitionState) -> bool:
-    """Return whether this source may create a new accepted delayed task."""
+def _can_create_delayed_task_from_source(
+    state: CognitionState,
+    *,
+    capability: str,
+) -> bool:
+    """Return whether this source may create the requested durable action."""
 
     trigger_source = _trigger_source_for_scope(state)
     can_create = is_capability_allowed_for_source(
-        ACCEPTED_TASK_REQUEST_CAPABILITY,
+        capability,
         trigger_source,
     )
     return can_create

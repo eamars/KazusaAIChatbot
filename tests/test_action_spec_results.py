@@ -11,7 +11,6 @@ from kazusa_ai_chatbot.action_spec.evaluator import ActionSpecEvaluator
 from kazusa_ai_chatbot.action_spec.registry import (
     ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
     APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
-    BACKGROUND_WORK_REQUEST_CAPABILITY,
     MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
 )
 from kazusa_ai_chatbot.action_spec.results import (
@@ -113,58 +112,6 @@ def _memory_lifecycle_action_spec() -> dict:
     }
 
 
-def _background_work_action_spec() -> dict:
-    return {
-        "schema_version": "action_spec.v1",
-        "kind": BACKGROUND_WORK_REQUEST_CAPABILITY,
-        "cognition_mode": "deliberative",
-        "source_refs": [
-            {
-                "schema_version": "action_source_ref.v1",
-                "ref_kind": "cognitive_episode",
-                "ref_id": "episode-001",
-                "owner": "cognition_episode",
-                "relationship": "basis",
-                "evidence_refs": [],
-            }
-        ],
-        "target": {
-            "schema_version": "action_target.v1",
-            "target_kind": "current_user",
-            "target_id": None,
-            "owner": "background_work",
-            "scope": {
-                "source_platform": "debug",
-                "source_channel_id": "debug:user:test-user",
-                "source_channel_type": "private",
-                "source_message_id": "message-001",
-                "source_platform_bot_id": "debug-bot-001",
-                "source_character_name": "Test Character",
-                "source_trigger_source": "user_message",
-                "requester_global_user_id": "global-user-001",
-                "requester_platform_user_id": "debug-user-001",
-                "requester_display_name": "Test User",
-            },
-        },
-        "params": {
-            "task_brief": "Generate a Fibonacci function snippet.",
-            "requested_delivery": "send_result_when_done",
-            "max_output_chars": 3000,
-        },
-        "urgency": "background",
-        "visibility": "private",
-        "deadline": None,
-        "continuation": {
-            "schema_version": "action_continuation.v1",
-            "mode": "none",
-            "episode_type": None,
-            "max_depth": 0,
-            "include_result_as": None,
-        },
-        "reason": "The user requested bounded async text work.",
-    }
-
-
 def _accepted_task_status_check_action_spec() -> dict:
     return {
         "schema_version": "action_spec.v1",
@@ -260,51 +207,6 @@ def test_v2_surface_projection_preserves_action_lifecycle_authority(
     })
 
     assert result["status"] == surface_status
-
-
-def test_background_work_job_ref_projects_prompt_safe_job_ref() -> None:
-    """Queued background work should expose only prompt-safe job evidence."""
-
-    action_spec = _background_work_action_spec()
-    eval_result = {
-        "ok": True,
-        "action_spec": action_spec,
-        "capability": None,
-        "idempotency_key": "action_spec:v1:background-work-001",
-        "handler_owner": "background_work",
-        "errors": [],
-    }
-
-    job_ref = {
-        "schema_version": "evidence_ref.v1",
-        "evidence_kind": "system_event",
-        "evidence_id": "background_work_job:job-001",
-        "owner": "background_work_job",
-        "excerpt": "queued accepted task background work",
-        "observed_at": "2026-05-16T00:00:00+00:00",
-    }
-
-    result = build_action_result(
-        action_spec,
-        eval_result,
-        status="pending",
-        result_summary="Background work job queued.",
-        result_refs=[job_ref],
-    )
-
-    trace = _settled_trace(
-        action_specs=[action_spec],
-        action_results=[result],
-        surface_outputs=[],
-    )
-    projection = project_episode_trace_for_consolidation(trace)
-    serialized = json.dumps(projection, ensure_ascii=False)
-
-    assert result["result_refs"] == [job_ref]
-    assert projection["action_results"][0]["evidence_refs"] == [job_ref]
-    assert "params" not in serialized
-    assert "source_channel_id" not in serialized
-    assert "adapter" not in serialized.lower()
 
 
 def _settled_trace(
@@ -474,60 +376,6 @@ async def test_action_execution_rejects_malformed_spec_without_crashing() -> Non
         "semantic_result": results[0]["result_summary"],
         "target_roles": [],
     }
-
-
-@pytest.mark.asyncio
-async def test_background_work_execution_projects_accepted_task_fields_only(
-    monkeypatch,
-) -> None:
-    """Delayed-work action results should expose semantic task state only."""
-
-    async def enqueue_accepted_task(
-        action_spec: dict,
-        *,
-        storage_timestamp_utc: str,
-        action_attempt_id: str,
-        enqueue_background_work_func=None,
-    ) -> dict:
-        del action_spec, storage_timestamp_utc, action_attempt_id
-        del enqueue_background_work_func
-        return {
-            "status": "pending",
-            "accepted_task_state": "scheduled",
-            "accepted_task_summary": "Generate a Fibonacci function snippet.",
-            "acknowledgement_constraint": "promise_allowed",
-            "wait_guidance": "non_numeric_wait",
-            "result_summary": "Accepted task scheduled.",
-        }
-
-    monkeypatch.setattr(
-        execution_module,
-        "enqueue_background_work_action",
-        enqueue_accepted_task,
-    )
-
-    results = await execution_module.execute_action_specs_for_trace(
-        [_background_work_action_spec()],
-        storage_timestamp_utc="2026-05-16T00:00:00+00:00",
-    )
-
-    result = results[0]
-    assert result["status"] == "pending"
-    assert result["action_kind"] == BACKGROUND_WORK_REQUEST_CAPABILITY
-    assert result["accepted_task_state"] == "scheduled"
-    assert result["accepted_task_summary"] == (
-        "Generate a Fibonacci function snippet."
-    )
-    assert result["acknowledgement_constraint"] == "promise_allowed"
-    assert result["wait_guidance"] == "non_numeric_wait"
-    for forbidden in (
-        "queue_state",
-        "job_ref",
-        "operational_owner",
-        "worker",
-        "worker_metadata",
-    ):
-        assert forbidden not in result
 
 
 @pytest.mark.asyncio

@@ -119,9 +119,9 @@ coordination API and not through `/chat`-specific imports.
 - Every case enters the bounded cognition resolver and each resolver cycle
   invokes the shared V2 appraisal, state-reduction, goal-branch, bid-collapse,
   and route-selection flow.
-- If V2 cognition selects `local_context_recall`, the resolver invokes local
-  context resolution as a capability observation and feeds the projected result
-  into the next cognition cycle.
+- If V2 cognition selects `task_resolution_request`, the resolver runs the
+  bounded task-resolution session and feeds its prompt-safe evidence or
+  durable-continuation observation into the next cognition cycle.
 - Unsupported resolver requests return a bounded failed observation; they do
   not invoke an undeclared capability.
 - If V2 cognition selects the `speech` route, the V2 text-surface connector

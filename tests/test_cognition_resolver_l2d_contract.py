@@ -31,7 +31,7 @@ class _ResolverPlannerLLM:
             "resolver_requests": [{
                 "bid_handle": "b1",
                 "resolver_handle": "r1",
-                "semantic_goal": "obtain grounded local context",
+                "semantic_goal": "resolve the bounded evidence task",
                 "reason": "the admitted motive has an evidence gap",
             }],
             "goal_resolution": "requires_required_evidence",
@@ -48,8 +48,8 @@ async def test_v2_planner_returns_typed_resolver_request() -> None:
         "branch_id": "epistemic_exploration",
         "goal_ref": {"scope": "user", "kind": "goal", "entity_id": "g1"},
         "intention": "resolve the relevant knowledge gap",
-        "desired_outcome": "obtain grounded local context",
-        "concrete_detail": "retrieve only prompt-safe evidence",
+        "desired_outcome": "resolve the bounded evidence task",
+        "concrete_detail": "return only prompt-safe evidence",
         "reason": "the current evidence is incomplete",
         "private_monologue": "I need evidence before I decide.",
         "target_roles": [],
@@ -76,8 +76,8 @@ async def test_v2_planner_returns_typed_resolver_request() -> None:
         evidence=[],
         available_actions=[],
         available_resolvers=[{
-            "capability": "local_context_recall",
-            "semantic_capability": "recall relevant context",
+            "capability": "task_resolution_request",
+            "semantic_capability": "resolve a bounded task through specialists",
             "availability": "available",
         }],
         resolver_context="resolver_status=idle",
@@ -87,8 +87,8 @@ async def test_v2_planner_returns_typed_resolver_request() -> None:
     assert result["intention"]["route"] == "evidence"
     assert result["action_requests"] == []
     assert result["resolver_requests"] == [{
-        "capability": "local_context_recall",
-        "semantic_goal": "obtain grounded local context",
+        "capability": "task_resolution_request",
+        "semantic_goal": "resolve the bounded evidence task",
         "reason": "the admitted motive has an evidence gap",
         "evidence_handles": ["e1"],
     }]

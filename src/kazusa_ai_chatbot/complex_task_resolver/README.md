@@ -4,11 +4,9 @@
 
 - Owning package: `kazusa_ai_chatbot.complex_task_resolver`
 - Runtime role: public answer research specialist
-- L2d capability name: `public_answer_research`
-- Companion L2d recall capability: `local_context_recall`
-- Integration status: standalone module is implemented; L2d contract
-  integration must route only through declared public IO and remains gated by
-  a future explicit rollout plan and user command before broad live enablement.
+- L2d capability owner: `task_resolution_request`
+- Integration status: the task-resolution public-research specialist calls this
+  module only through its declared public IO.
 - Related docs: [Cognition Resolver ICD](../cognition_resolver/README.md),
   [RAG 2](../rag/README.md), [web_agent3 ICD](../rag/web_agent3/README.md),
   [Action Spec](../action_spec/README.md)
@@ -30,53 +28,36 @@ the original user goal is answered, partial, blocked, or worth retrying. L2d,
 cognition, and L3/dialog remain responsible for semantic judgment, whether to
 speak, and how visible text should be rendered.
 
-## L2d Boundary
+## Task-Resolution Specialist Boundary
 
-The agreed L2d-visible resolver capability for this module is:
+L2d sees one generic evidence-work capability,
+`task_resolution_request`. Its bounded task orchestrator may select this
+module when the active subgoal needs public, current, external, or
+source-bound answer investigation. The selection remains semantic: this module
+owns its public request/context/options mapping and internal source work.
 
-```text
-public_answer_research
-```
+Examples include public evidence retrieval, deterministic calculation over
+sourced numbers, comparison, feasibility review, conflict review, and
+synthesis. Local memory, relationship, profile, prior conversation, and
+private/contextual recall remain owned by the separate local-context specialist
+through `resolve_local_context(...)`.
 
-L2d should use `public_answer_research` when the original user goal needs
-public, current, external, or source-bound answer investigation, especially
-when several dependent steps are required before a reliable answer can be
-selected. Examples include public evidence retrieval, deterministic
-calculation over sourced numbers, comparison, feasibility review, conflict
-review, and synthesis.
-
-The companion L2d capability is:
-
-```text
-local_context_recall
-```
-
-`local_context_recall` is not owned by this package. It routes to RAG3 through
-`resolve_local_context(...)` and owns local memory,
-relationship, profile, prior conversation, and private/contextual recall.
-
-L2d should not use `public_answer_research` for:
+The task-resolution orchestrator should not select this specialist for:
 
 - a single missing fact that the current cognition cycle can already answer;
 - local memory, relationship, profile, or conversation recall, which belongs
-  to `local_context_recall`;
+  to the local-context specialist;
 - user-owned missing input, which belongs to `human_clarification`;
 - approval before a side effect, which belongs to `approval_preparation`;
 - private internal-source goal handling, which belongs to
   `self_goal_resolution`;
 - final visible wording, which belongs to `speak` and L3/dialog.
 
-When this boundary is enabled, the former L2d-visible `web_evidence` capability
-is collapsed into `public_answer_research`; WebAgent3 remains an internal
-evidence provider under the resolver. The former L2d-visible `rag_evidence`
-capability is represented by `local_context_recall`; the underlying RAG2
-package and entrypoint remain unchanged.
+WebAgent3 remains an internal evidence provider under this resolver. The
+retained RAG helper package remains outside this module and is not a
+task-resolution capability alias.
 
-Do not add `answer_investigation`, `web_evidence`, or `rag_evidence` as
-canonical runtime aliases for this boundary. The capability cutover is intended
-to be a single vocabulary change across caller, callee, tests, and ICD.
-
-Broad live enablement is still gated. Do not route dialog, adapters,
+Do not add capability aliases or route dialog, adapters,
 scheduler, coding-agent execution, filesystem work, shell work, database
 writes, or raw graph traces through this module.
 

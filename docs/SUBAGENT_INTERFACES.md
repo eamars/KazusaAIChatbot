@@ -5,7 +5,7 @@
 - Owning area: project documentation
 - Applies to: RAG3 local-context stage agents, retired RAG helper agents,
   `web_agent3` source subagents, `complex_task_resolver` resolver-local
-  subagents, and `background_work` workers
+  subagents, task-resolution specialists, and `background_work` workers
 - Source evidence: family-specific registries, protocols, and module ICDs
 - Change policy: harmonize documentation categories, not runtime interfaces
 
@@ -46,8 +46,8 @@ Every family-specific ICD should describe the relevant fields below:
 ## RAG Helper Agents
 
 RAG helper agents are retained source-level helper modules and historical
-coverage. Production `local_context_recall` uses the RAG3 local-context
-resolver described below.
+coverage. Production task resolution reaches the RAG3 local-context resolver
+through the specialist described below.
 
 | Field | Contract |
 |---|---|
@@ -134,20 +134,37 @@ Complex-task resolver subagents are internal to the resolver. External callers
 use the public resolver IO and must not provide alternate subagent rosters,
 prompt variants, graph paths, or expected answers.
 
+## Task-Resolution Specialists
+
+| Field | Contract |
+|---|---|
+| Owning package | `kazusa_ai_chatbot.task_resolution` |
+| Registry | Static map in `task_resolution.orchestrator.specialist_handler(...)`. |
+| Identifiers | `local_context`, `public_research`, `coding`, and `text_computation`. |
+| Entry functions | `resolve_with_local_context`, `resolve_with_public_research`, `resolve_with_coding`, and `resolve_with_text_computation`. |
+| Input | `TaskSpecialistRequestV1` and `TaskResolutionExecutionContextV1`. |
+| Output | Exactly one validated `TaskSpecialistResultV1`. |
+| Validation owner | Task-resolution contracts, checkpoint state, and the bounded orchestrator. |
+| Specialist choice | The orchestrator LLM chooses one compatible specialist and semantic subgoal; it does not choose low-level parameters. |
+| Side effects | Each specialist remains inside its declared public IO; coding continuations use only the frozen public coding-run boundary. |
+| Required tests | Contracts, state/counter behavior, specialist refusals, inline promotion, background resume, and focused real-LLM routing review. |
+
+Specialists return evidence, typed limitations, or a typed refusal. They do not
+write task checkpoints, choose delivery, send adapter text, or become a shared
+subagent abstraction for the existing family-local registries.
+
 ## Background Work Workers
 
 | Field | Contract |
 |---|---|
 | Owning package | `kazusa_ai_chatbot.background_work.subagent` |
-| Discovery | Explicit worker list in `discover_background_work_workers()`. |
-| Identifier | Module-level `WORKER`. |
-| Prompt description | Module-level `DESCRIPTION`. |
-| Entry function | `execute(decision, max_output_chars=...)`. |
-| Input | `BackgroundWorkWorkerDecision`. |
-| Output | `BackgroundWorkResult`. |
-| Validation owner | Background-work queue/runtime, router, worker-local validators, and accepted-task lifecycle. |
-| Enablement | Worker registry is explicit; current worker modules do not use `is_enabled()`. |
-| Side effects | Produce bounded worker result or schedule a durable follow-up path according to the worker contract. |
+| Discovery | Closed dispatch on `requested_worker`: `task_orchestrator` or `future_speak`. |
+| Entry functions | `execute_task_orchestrator_job(job, lease_owner=...)` and `execute_future_speak_job(job)`. |
+| Input | A claimed `background_work_job.v2` with its reviewed payload union. |
+| Output | A terminal task-resolution result or deterministic future-speak scheduling result. |
+| Validation owner | Background-work job validators, payload validator, accepted-task lifecycle, and worker-specific contracts. |
+| Enablement | Runtime configuration controls the worker loop; no dynamic worker discovery exists. |
+| Side effects | Resume a checkpoint or schedule a future cognition trigger according to the reviewed payload. |
 | Required tests | Background-work runtime tests, accepted-task integration tests, worker-specific tests, and result-handoff tests. |
 
 Workers must not send adapter text directly, call shared cognition directly,

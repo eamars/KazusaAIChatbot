@@ -9,8 +9,6 @@ from kazusa_ai_chatbot.action_spec.evaluator import ActionSpecEvaluator
 from kazusa_ai_chatbot.action_spec.execution import execute_action_specs_for_trace
 from kazusa_ai_chatbot.action_spec.registry import (
     ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
-    ACCEPTED_TASK_REQUEST_CAPABILITY,
-    BACKGROUND_WORK_REQUEST_CAPABILITY,
     FUTURE_SPEAK_CAPABILITY,
     SPEAK_CAPABILITY,
 )
@@ -319,8 +317,6 @@ async def _action_results_for_state(
         for spec in _selected_action_specs(state)
         if spec.get("kind") not in (
             ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
-            ACCEPTED_TASK_REQUEST_CAPABILITY,
-            BACKGROUND_WORK_REQUEST_CAPABILITY,
             FUTURE_SPEAK_CAPABILITY,
         )
         and _action_attempt_id_for_spec(spec) not in pre_surface_attempt_ids
@@ -348,8 +344,6 @@ async def _execute_pre_surface_action_results(
         if spec.get("kind") not in (
             SPEAK_CAPABILITY,
             ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
-            ACCEPTED_TASK_REQUEST_CAPABILITY,
-            BACKGROUND_WORK_REQUEST_CAPABILITY,
             FUTURE_SPEAK_CAPABILITY,
         )
     ]
@@ -381,8 +375,6 @@ async def stage_2a_background_work_enqueue(
         for spec in _selected_action_specs(state)
         if spec.get("kind") in (
             ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
-            ACCEPTED_TASK_REQUEST_CAPABILITY,
-            BACKGROUND_WORK_REQUEST_CAPABILITY,
             FUTURE_SPEAK_CAPABILITY,
         )
     ]
@@ -418,7 +410,7 @@ def _background_no_handoff_result(
 ) -> dict:
     """Build a prompt-safe rejection when no visible acknowledgement exists."""
 
-    action_kind = str(action_spec.get("kind", BACKGROUND_WORK_REQUEST_CAPABILITY))
+    action_kind = str(action_spec.get("kind", ""))
     action_attempt_id = _first_valid_action_attempt_id(state, action_kind)
     if action_attempt_id is None:
         action_attempt_id = ""

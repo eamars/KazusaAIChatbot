@@ -967,6 +967,12 @@ COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS = _bounded_float_from_env(
     minimum=1.0,
     maximum=180.0,
 )
+TASK_RESOLUTION_INLINE_BUDGET_SECONDS = _bounded_float_from_env(
+    "TASK_RESOLUTION_INLINE_BUDGET_SECONDS",
+    "30.0",
+    minimum=1.0,
+    maximum=120.0,
+)
 
 # Self-cognition runs by default as a background reasoning loop. Its runtime
 # output and persistence boundaries stay controlled by the self-cognition worker.

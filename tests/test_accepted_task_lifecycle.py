@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from copy import deepcopy
 from typing import Any
 
@@ -13,11 +15,9 @@ def _create_request(**overrides: object) -> dict[str, object]:
     """Return one semantic accepted-task creation request."""
 
     request: dict[str, object] = {
-        "action_kind": "future_speak",
-        "accepted_task_seed": "remind user to drink water",
-        "accepted_task_detail": "2026-05-16 10:00 drink water reminder",
+        "task_kind": "future_speak",
+        "semantic_objective": "2026-05-16 10:00 drink water reminder",
         "accepted_task_summary": "Remind the user to drink water.",
-        "source_context": "The user accepted a delayed reminder.",
         "requested_delivery": "send_result_when_done",
         "max_output_chars": 3000,
         "source_trigger_source": "user_message",
@@ -53,9 +53,32 @@ def test_identity_key_excludes_source_message_id() -> None:
             requester_global_user_id="global-user-002",
         ),
     )
+    other_objective_key = build_task_identity_key(
+        _create_request(
+            semantic_objective="2026-05-16 11:00 drink water reminder",
+        ),
+    )
 
     assert first_key == second_key
     assert first_key != other_user_key
+    assert first_key != other_objective_key
+
+
+def test_repository_module_imports_in_a_fresh_process() -> None:
+    """The repository module must not depend on prior lifecycle import order."""
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import kazusa_ai_chatbot.db.accepted_tasks",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 @pytest.mark.asyncio
@@ -77,6 +100,9 @@ async def test_create_or_return_active_claims_enqueueing_task(
     assert result["status"] == "created"
     task = result["task"]
     assert task["state"] == "enqueueing"
+    assert task["schema_version"] == "accepted_task.v2"
+    assert task["task_kind"] == "future_speak"
+    assert task["completion_status"] == "none"
     assert task["accepted_task_id"].startswith("task-")
     assert task["active_identity_key"] == task["task_identity_key"]
     assert task["first_source_message_id"] == "message-001"
@@ -117,10 +143,68 @@ async def test_create_or_return_active_rejects_duplicate_active_task(
 
 
 @pytest.mark.asyncio
+async def test_repository_rejects_v1_task_document() -> None:
+    """The big-bang persistence boundary accepts only v2 task rows."""
+
+    from kazusa_ai_chatbot.accepted_task import lifecycle
+    from kazusa_ai_chatbot.db import accepted_tasks as repository
+    from kazusa_ai_chatbot.db.errors import DatabaseOperationError
+
+    request = _create_request()
+    task = lifecycle._build_enqueueing_task_doc(
+        request,
+        task_identity_key=lifecycle.build_task_identity_key(request),
+    )
+    task["schema_version"] = "accepted_task.v1"
+
+    with pytest.raises(DatabaseOperationError, match="schema_version"):
+        await repository.insert_or_get_active_accepted_task(
+            task,
+            source_message_id="message-001",
+            observed_at="2026-05-15T21:00:00+00:00",
+        )
+
+
+@pytest.mark.asyncio
+async def test_v2_index_setup_replaces_conflicting_v1_named_index(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The big-bang startup drops the old action-kind index definition."""
+
+    from kazusa_ai_chatbot.accepted_task import lifecycle
+    from kazusa_ai_chatbot.db import accepted_tasks as repository
+
+    assert lifecycle is not None
+
+    fake_db = _FakeDb()
+    index_name = "accepted_task_open_coding_run_context_lookup"
+    fake_db.accepted_tasks.indexes[index_name] = {
+        "key": [
+            ("source_platform", 1),
+            ("source_channel_id", 1),
+            ("requester_global_user_id", 1),
+            ("action_kind", 1),
+            ("updated_at", -1),
+        ],
+        "partialFilterExpression": {
+            "coding_run_context.followup_open": True,
+        },
+    }
+    monkeypatch.setattr(repository, "get_db", _fake_get_db(fake_db))
+
+    await repository.ensure_accepted_task_indexes()
+
+    assert fake_db.accepted_tasks.dropped_indexes == [index_name]
+    replacement = fake_db.accepted_tasks.indexes[index_name]
+    assert ("task_kind", 1) in replacement["key"]
+    assert ("action_kind", 1) not in replacement["key"]
+
+
+@pytest.mark.asyncio
 async def test_mark_pending_records_internal_executor_ref(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Pending transition should happen only after the worker job exists."""
+    """Pending transition reserves the stable id before job insertion."""
 
     from kazusa_ai_chatbot.accepted_task import lifecycle
     from kazusa_ai_chatbot.db import accepted_tasks as repository
@@ -141,6 +225,21 @@ async def test_mark_pending_records_internal_executor_ref(
     assert pending["state"] == "pending"
     assert pending["executor_kind"] == "background_work"
     assert pending["executor_ref"] == "job-001"
+
+    repeated = await lifecycle.mark_accepted_task_pending(
+        accepted_task_id=created["task"]["accepted_task_id"],
+        executor_ref="job-001",
+        updated_at="2026-05-15T21:00:02+00:00",
+    )
+    assert repeated is not None
+    assert repeated["state"] == "pending"
+
+    conflicting = await lifecycle.mark_accepted_task_pending(
+        accepted_task_id=created["task"]["accepted_task_id"],
+        executor_ref="job-other",
+        updated_at="2026-05-15T21:00:03+00:00",
+    )
+    assert conflicting is None
 
 
 @pytest.mark.asyncio
@@ -294,6 +393,10 @@ async def test_recover_stale_delivery_in_progress_restores_retryable_state(
         executor_ref="background_work_job:job-001",
         updated_at="2026-05-16T09:00:01+00:00",
     )
+    await lifecycle.mark_accepted_task_running(
+        accepted_task_id=created["task"]["accepted_task_id"],
+        started_at="2026-05-16T09:00:01.500000+00:00",
+    )
     await lifecycle.mark_tool_result_ready(
         accepted_task_id=created["task"]["accepted_task_id"],
         artifact_text="Drink water.",
@@ -319,6 +422,130 @@ async def test_recover_stale_delivery_in_progress_restores_retryable_state(
     )
     assert task["updated_at"] == "2026-05-16T09:02:00+00:00"
     assert task["active_identity_key"] == task["task_identity_key"]
+
+
+@pytest.mark.asyncio
+async def test_terminal_transitions_require_running_and_delivery_claims(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Terminal task writes cannot skip pending, running, or delivery states."""
+
+    from kazusa_ai_chatbot.accepted_task import lifecycle
+    from kazusa_ai_chatbot.db import accepted_tasks as repository
+
+    fake_db = _FakeDb()
+    monkeypatch.setattr(repository, "get_db", _fake_get_db(fake_db))
+    created = await lifecycle.create_or_return_active_accepted_task(
+        _create_request(),
+    )
+    task_id = created["task"]["accepted_task_id"]
+    await lifecycle.mark_accepted_task_pending(
+        accepted_task_id=task_id,
+        executor_ref="job-001",
+        updated_at="2026-05-15T21:00:01+00:00",
+    )
+
+    premature_result = await lifecycle.mark_tool_result_ready(
+        accepted_task_id=task_id,
+        artifact_text="Result",
+        result_summary="Result is ready.",
+        completed_at="2026-05-15T21:00:02+00:00",
+    )
+    assert premature_result is None
+
+    await lifecycle.mark_accepted_task_running(
+        accepted_task_id=task_id,
+        started_at="2026-05-15T21:00:03+00:00",
+    )
+    premature_claim = await lifecycle.mark_accepted_task_delivery_in_progress(
+        accepted_task_id=task_id,
+        delivery_tracking_id="delivery-premature",
+        updated_at="2026-05-15T21:00:03.500000+00:00",
+    )
+    assert premature_claim is None
+    ready = await lifecycle.mark_tool_result_ready(
+        accepted_task_id=task_id,
+        artifact_text="Result",
+        result_summary="Result is ready.",
+        completed_at="2026-05-15T21:00:04+00:00",
+    )
+    assert ready is not None
+    premature_delivery = await lifecycle.mark_accepted_task_delivered(
+        accepted_task_id=task_id,
+        delivered_conversation_message_id="message-001",
+        delivered_at="2026-05-15T21:00:05+00:00",
+    )
+    assert premature_delivery is None
+
+    await lifecycle.mark_accepted_task_delivery_in_progress(
+        accepted_task_id=task_id,
+        delivery_tracking_id="delivery-001",
+        updated_at="2026-05-15T21:00:06+00:00",
+    )
+    delivered = await lifecycle.mark_accepted_task_delivered(
+        accepted_task_id=task_id,
+        delivered_conversation_message_id="message-001",
+        delivered_at="2026-05-15T21:00:07+00:00",
+    )
+    assert delivered is not None
+
+
+@pytest.mark.asyncio
+async def test_future_speak_completion_requires_running_future_speak_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Scheduler completion cannot terminalize another accepted-task kind."""
+
+    from kazusa_ai_chatbot.accepted_task import lifecycle
+    from kazusa_ai_chatbot.db import accepted_tasks as repository
+
+    fake_db = _FakeDb()
+    monkeypatch.setattr(repository, "get_db", _fake_get_db(fake_db))
+    future_request = _create_request()
+    future_request["task_kind"] = "future_speak"
+    future_request["semantic_objective"] = "Remind the user tomorrow."
+    future_request["accepted_task_summary"] = "Remind the user tomorrow."
+    future = await lifecycle.create_or_return_active_accepted_task(future_request)
+    future_id = future["task"]["accepted_task_id"]
+    await lifecycle.mark_accepted_task_pending(
+        accepted_task_id=future_id,
+        executor_ref="job-future",
+        updated_at="2026-05-15T21:00:01+00:00",
+    )
+    await lifecycle.mark_accepted_task_running(
+        accepted_task_id=future_id,
+        started_at="2026-05-15T21:00:02+00:00",
+    )
+
+    completed = await lifecycle.mark_future_speak_accepted_task_delivered(
+        accepted_task_id=future_id,
+        delivered_at="2026-05-15T21:00:03+00:00",
+    )
+    assert completed is not None
+    assert completed["state"] == "delivered"
+
+    task = await lifecycle.create_or_return_active_accepted_task(
+        _create_request(
+            task_kind="task_resolution",
+            semantic_objective="Resolve one bounded task.",
+            accepted_task_summary="Resolve one bounded task.",
+        )
+    )
+    task_id = task["task"]["accepted_task_id"]
+    await lifecycle.mark_accepted_task_pending(
+        accepted_task_id=task_id,
+        executor_ref="job-task",
+        updated_at="2026-05-15T21:00:04+00:00",
+    )
+    await lifecycle.mark_accepted_task_running(
+        accepted_task_id=task_id,
+        started_at="2026-05-15T21:00:05+00:00",
+    )
+    rejected = await lifecycle.mark_future_speak_accepted_task_delivered(
+        accepted_task_id=task_id,
+        delivered_at="2026-05-15T21:00:06+00:00",
+    )
+    assert rejected is None
 
 
 class _FakeInsertResult:
@@ -354,10 +581,32 @@ class _FakeCursor:
 class _FakeAcceptedTaskCollection:
     def __init__(self) -> None:
         self.documents: list[dict[str, Any]] = []
+        self.indexes: dict[str, dict[str, Any]] = {}
+        self.dropped_indexes: list[str] = []
 
     async def create_index(self, *args: object, **kwargs: object) -> str:
-        del args, kwargs
-        return "created"
+        keys = args[0]
+        if isinstance(keys, str):
+            normalized_keys = [(keys, 1)]
+        else:
+            normalized_keys = list(keys)
+        index_name = str(kwargs["name"])
+        self.indexes[index_name] = {
+            "key": normalized_keys,
+            **{
+                key: value
+                for key, value in kwargs.items()
+                if key not in {"name", "unique"}
+            },
+        }
+        return index_name
+
+    async def index_information(self) -> dict[str, dict[str, Any]]:
+        return deepcopy(self.indexes)
+
+    async def drop_index(self, index_name: str) -> None:
+        self.dropped_indexes.append(index_name)
+        self.indexes.pop(index_name, None)
 
     async def insert_one(self, document: dict[str, Any]) -> _FakeInsertResult:
         active_identity_key = document.get("active_identity_key")

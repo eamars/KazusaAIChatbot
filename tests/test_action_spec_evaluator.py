@@ -7,20 +7,14 @@ import json
 import pytest
 
 from kazusa_ai_chatbot.action_spec.evaluator import ActionSpecEvaluator
-from kazusa_ai_chatbot.action_spec.execution import (
-    execute_action_specs_for_trace,
-)
 from kazusa_ai_chatbot.action_spec.registry import (
     ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
-    ACCEPTED_TASK_REQUEST_CAPABILITY,
     ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
     APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
-    BACKGROUND_WORK_REQUEST_CAPABILITY,
     FUTURE_SPEAK_CAPABILITY,
     MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     SPEAK_CAPABILITY,
     TRIGGER_FUTURE_COGNITION_CAPABILITY,
-    build_runtime_capability_snapshot,
     build_initial_action_capabilities,
     project_prompt_affordances,
 )
@@ -157,17 +151,17 @@ def _action_spec(kind: str) -> dict:
     }
 
 
-def _background_work_action_spec() -> dict:
+def _accepted_task_status_action_spec() -> dict:
     return {
         "schema_version": "action_spec.v1",
-        "kind": BACKGROUND_WORK_REQUEST_CAPABILITY,
+        "kind": ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
         "cognition_mode": "deliberative",
         "source_refs": [_cognitive_source_ref()],
         "target": {
             "schema_version": "action_target.v1",
             "target_kind": "current_user",
             "target_id": None,
-            "owner": "background_work",
+            "owner": "accepted_task",
             "scope": {
                 "source_platform": "debug",
                 "source_channel_id": "debug:user:test-user",
@@ -183,16 +177,12 @@ def _background_work_action_spec() -> dict:
                 "requester_display_name": "Test User",
             },
         },
-        "params": {
-            "task_brief": "Generate a Fibonacci function snippet.",
-            "requested_delivery": "send_result_when_done",
-            "max_output_chars": 3000,
-        },
-        "urgency": "background",
+        "params": {},
+        "urgency": "now",
         "visibility": "private",
         "deadline": None,
         "continuation": _no_continuation(),
-        "reason": "The user requested bounded async text work.",
+        "reason": "The user asked how the active task is going.",
     }
 
 
@@ -202,10 +192,8 @@ def test_initial_registry_contains_only_approved_runtime_capabilities() -> None:
     capabilities = build_initial_action_capabilities()
 
     assert set(capabilities) == {
-        ACCEPTED_TASK_REQUEST_CAPABILITY,
         ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
         ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
-        BACKGROUND_WORK_REQUEST_CAPABILITY,
         FUTURE_SPEAK_CAPABILITY,
         MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
         APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
@@ -214,10 +202,6 @@ def test_initial_registry_contains_only_approved_runtime_capabilities() -> None:
     }
     assert (
         capabilities[ACCEPTED_CODING_TASK_REQUEST_CAPABILITY]["owner_module"]
-        == "background_work"
-    )
-    assert (
-        capabilities[BACKGROUND_WORK_REQUEST_CAPABILITY]["owner_module"]
         == "background_work"
     )
     assert (
@@ -242,32 +226,6 @@ def test_initial_registry_contains_only_approved_runtime_capabilities() -> None:
     assert "web_research" not in capabilities
     assert "schedule_self_check" not in capabilities
     assert "note_open_loop" not in capabilities
-
-
-def test_background_work_route_schema_matches_router_contract() -> None:
-    """L2d should see route-only async-work fields, not worker internals."""
-
-    capabilities = build_initial_action_capabilities()
-    capability = capabilities[BACKGROUND_WORK_REQUEST_CAPABILITY]
-    schema = capability["input_schema"]
-    properties = schema["properties"]
-
-    assert schema["required"] == [
-        "task_brief",
-        "requested_delivery",
-        "max_output_chars",
-    ]
-    assert properties["requested_delivery"]["enum"] == [
-        "send_result_when_done",
-    ]
-    assert "work_kind" not in properties
-    assert "worker" not in properties
-    assert "task_type" not in properties
-    assert "job_id" not in properties
-    assert "source_channel_id" not in properties
-    assert "adapter_id" not in properties
-    assert capability["category"] == "action"
-    assert capability["owner_module"] == "background_work"
 
 
 def test_memory_lifecycle_route_schema_matches_router_contract() -> None:
@@ -326,7 +284,6 @@ def test_prompt_affordance_projection_excludes_runtime_internals() -> None:
 
     assert "memory_lifecycle_update" in serialized
     assert "apply_memory_lifecycle_update" not in serialized
-    assert "background_work_request" in serialized
     assert "future_speak" in serialized
     assert "speak" in serialized
     assert "trigger_future_cognition" in serialized
@@ -374,26 +331,6 @@ def test_future_cognition_projection_requires_private_cognition_source() -> None
     assert future_cognition["allowed_decisions"] == ["schedule"]
 
 
-def test_background_work_projection_excludes_reply_preparation() -> None:
-    """Delayed work remains available without absorbing live-turn thought."""
-
-    projection = project_prompt_affordances(
-        build_initial_action_capabilities(),
-    )
-    background_work = next(
-        row
-        for row in projection
-        if row["capability"] == "background_work_request"
-    )
-    summary = " ".join(background_work["semantic_input_summary"]).casefold()
-
-    assert "explicitly accepted delayed work" in summary
-    assert "reply preparation" in summary
-    assert "local context recall" in summary
-    assert "physical action" in summary
-    assert "action description" in summary
-
-
 def test_prompt_affordances_declare_runtime_availability_requirements() -> None:
     """Registry metadata owns generic runtime eligibility and decisions."""
 
@@ -415,23 +352,6 @@ def test_prompt_affordances_declare_runtime_availability_requirements() -> None:
     assert lifecycle["default_decision"] == "active_commitment_lifecycle"
 
 
-def test_accepted_task_projection_cannot_replace_future_reminder_owner() -> None:
-    """Generic delayed work cannot impersonate the scheduler owner."""
-
-    projection = project_prompt_affordances(
-        build_initial_action_capabilities(),
-    )
-    accepted_task = next(
-        row
-        for row in projection
-        if row["capability"] == ACCEPTED_TASK_REQUEST_CAPABILITY
-    )
-    summary = " ".join(accepted_task["semantic_input_summary"])
-
-    assert "未来提醒" in summary
-    assert "不能代替" in summary
-
-
 def test_no_argument_action_affordances_use_closed_registry_verbs() -> None:
     """Planner decisions stay exact while semantic goals remain model-owned."""
 
@@ -442,7 +362,6 @@ def test_no_argument_action_affordances_use_closed_registry_verbs() -> None:
         )
     }
     expected = {
-        BACKGROUND_WORK_REQUEST_CAPABILITY: "enqueue",
         ACCEPTED_TASK_STATUS_CHECK_CAPABILITY: "check",
         TRIGGER_FUTURE_COGNITION_CAPABILITY: "schedule",
     }
@@ -545,100 +464,11 @@ def test_evaluator_accepts_private_future_cognition_trigger() -> None:
     assert result["handler_owner"] == "orchestrator"
 
 
-def test_background_work_request_validates_route_only_params() -> None:
-    """Generic background work validates before durable enqueue."""
-
-    evaluator = ActionSpecEvaluator(build_initial_action_capabilities())
-
-    result = evaluator.evaluate(_background_work_action_spec())
-
-    assert result["ok"] is True
-    assert result["handler_owner"] == "background_work"
-    assert result["action_spec"]["target"]["target_kind"] == "current_user"
-    assert result["action_spec"]["params"]["task_brief"] == (
-        "Generate a Fibonacci function snippet."
-    )
-    assert result["action_spec"]["params"]["max_output_chars"] == 3000
-    assert "work_kind" not in result["action_spec"]["params"]
-    assert "task_type" not in result["action_spec"]["params"]
-
-
-def test_background_work_request_rejects_non_user_message_source() -> None:
-    """Autonomous/result-ready sources must not create new delayed work."""
-
-    evaluator = ActionSpecEvaluator(build_initial_action_capabilities())
-    action_spec = _background_work_action_spec()
-    action_spec["target"]["scope"]["source_trigger_source"] = "internal_thought"
-
-    result = evaluator.evaluate(action_spec)
-
-    assert result["ok"] is False
-    assert any("source_trigger_source" in error for error in result["errors"])
-
-
-def test_background_work_request_rejects_worker_local_params() -> None:
-    """L2d-routed background work must not smuggle worker-local choices."""
-
-    evaluator = ActionSpecEvaluator(build_initial_action_capabilities())
-    action_spec = _background_work_action_spec()
-    action_spec["params"]["work_kind"] = "coding_snippet"
-
-    result = evaluator.evaluate(action_spec)
-
-    assert result["ok"] is False
-    assert any("worker-local" in error for error in result["errors"])
-
-
-@pytest.mark.asyncio
-async def test_action_execution_rechecks_runtime_availability_before_effects() -> None:
-    """An outage becomes a typed rejection before its handler runs."""
-
-    results = await execute_action_specs_for_trace(
-        [_background_work_action_spec()],
-        storage_timestamp_utc="2026-05-07T00:00:00+00:00",
-        availability_snapshot_factory=(
-            lambda _context: build_runtime_capability_snapshot(
-                route_health={"background_work": "down"},
-            )
-        ),
-    )
-
-    assert len(results) == 1
-    assert results[0]["status"] == "rejected"
-    assert "route_unavailable" in results[0]["result_summary"]
-
-
-@pytest.mark.parametrize(
-    "scope_field",
-    (
-        "source_channel_id",
-        "requester_global_user_id",
-    ),
-)
-def test_background_work_request_rejects_missing_delivery_target_scope(
-    scope_field: str,
-) -> None:
-    """Generic background-work enqueue must not acknowledge undeliverable jobs."""
-
-    evaluator = ActionSpecEvaluator(build_initial_action_capabilities())
-    action_spec = _background_work_action_spec()
-    del action_spec["target"]["scope"][scope_field]
-
-    result = evaluator.evaluate(action_spec)
-
-    assert result["ok"] is False
-    assert any(scope_field in error for error in result["errors"])
-
-
 def test_accepted_task_status_check_validates_without_queue_params() -> None:
     """Progress checks should bind accepted-task scope, not worker payloads."""
 
     evaluator = ActionSpecEvaluator(build_initial_action_capabilities())
-    action_spec = _background_work_action_spec()
-    action_spec["kind"] = ACCEPTED_TASK_STATUS_CHECK_CAPABILITY
-    action_spec["target"]["owner"] = "accepted_task"
-    action_spec["params"] = {}
-    action_spec["reason"] = "The user asked how the active task is going."
+    action_spec = _accepted_task_status_action_spec()
 
     result = evaluator.evaluate(action_spec)
 
@@ -663,24 +493,3 @@ def test_evaluator_validates_continuation_contract() -> None:
 
     assert result["ok"] is False
     assert any("episode_type" in error for error in result["errors"])
-
-
-def test_prompt_affordances_do_not_ask_l2d_for_background_task_brief() -> None:
-    """The background_work_request prompt affordance must not instruct the
-    model to emit task_brief. That field is deterministically materialized."""
-
-    capabilities = build_initial_action_capabilities()
-    affordances = project_prompt_affordances(capabilities)
-
-    bw_affordances = [
-        a for a in affordances
-        if a["capability"] == BACKGROUND_WORK_REQUEST_CAPABILITY
-    ]
-    assert len(bw_affordances) == 1
-
-    bw = bw_affordances[0]
-    serialized = repr(bw).lower()
-    assert "task_brief" not in serialized, (
-        "background_work_request affordance must not mention task_brief; "
-        "the trusted task_brief is built by deterministic materialization"
-    )

@@ -5,9 +5,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-import pytest
-
-
 def test_patch_apply_public_api_is_exported() -> None:
     """The top-level coding-agent package exposes the trusted apply boundary."""
 
@@ -20,80 +17,6 @@ def test_patch_apply_public_api_is_exported() -> None:
     assert isinstance(apply_approved_patch, Callable)
     assert "patch_artifacts" in CodingPatchApplyRequest.__annotations__
     assert "apply_workspace_ref" in CodingPatchApplyResponse.__annotations__
-
-
-@pytest.mark.asyncio
-async def test_background_metadata_preserves_code_modifying(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    """Background worker metadata must preserve the modifying operation."""
-
-    from kazusa_ai_chatbot.background_work.subagent import (
-        coding_agent as coding_worker,
-    )
-
-    async def decide_operation(
-        request: dict[str, object],
-    ) -> tuple[str, str]:
-        assert request["question"] == "Modify app.py."
-        return "code_modifying", "The request modifies an existing file."
-
-    async def start_run(
-        request: dict[str, object],
-    ) -> dict[str, object]:
-        assert request["objective_type"] == "propose_patch"
-        return {
-            "status": "awaiting_approval",
-            "run_id": "modify-run-001",
-            "objective_type": "propose_patch",
-            "answer_text": "Proposed a repository patch.",
-            "evidence": [],
-            "limitations": [],
-            "repository": {
-                "owner": "fixture",
-                "repo": "demo",
-            },
-            "changed_files": [{
-                "path": "app.py",
-                "change_type": "modify",
-                "summary": "Update app.",
-            }],
-            "trace_summary": ["modifying:succeeded"],
-            "allowed_next_actions": ["approve_and_verify"],
-        }
-
-    monkeypatch.setattr(
-        coding_worker,
-        "CODING_AGENT_WORKSPACE_ROOT",
-        str(tmp_path),
-    )
-    monkeypatch.setattr(
-        coding_worker,
-        "decide_background_coding_operation",
-        decide_operation,
-    )
-    monkeypatch.setattr(coding_worker, "start_coding_run", start_run)
-
-    result = await coding_worker.execute(
-        {
-            "task_brief": "Modify app.py.",
-            "source_summary": "The user accepted a modifying task.",
-        },
-        max_output_chars=1000,
-    )
-
-    assert result["worker_metadata"]["coding_operation"] == "code_modifying"
-    assert result["worker_metadata"]["worker_operation"] == "start"
-    assert result["worker_metadata"]["coding_run_status"] == "awaiting_approval"
-    assert result["worker_metadata"]["coding_run_ref"] == (
-        "coding_run:modify-run-001"
-    )
-    assert result["worker_metadata"]["changed_files"] == [{
-        "path": "app.py",
-        "change_type": "modify",
-        "summary": "Update app.",
-    }]
 
 
 def test_modifying_programmer_prompt_requires_requested_tests_docs() -> None:

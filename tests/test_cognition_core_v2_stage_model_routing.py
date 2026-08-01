@@ -664,7 +664,7 @@ async def test_resolver_authorization_reuses_its_route_for_repair_and_trace(
         bid_handles={"b1": {**_bid("ordinary_response"), "evidence_handles": ["e1"]}},
         evidence=[_evidence()],
         resolver_handles={"r1": {
-            "capability": "local_context_recall",
+            "capability": "task_resolution_request",
             "semantic_capability": "Retrieve relevant local context.",
             "availability": "available",
         }},

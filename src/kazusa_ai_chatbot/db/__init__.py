@@ -76,9 +76,6 @@ from kazusa_ai_chatbot.db.schemas import (
     build_memory_doc,
 )
 
-# ── Bootstrap ──────────────────────────────────────────────────────
-from kazusa_ai_chatbot.db.bootstrap import db_bootstrap
-
 # ── Conversation history ──────────────────────────────────────────
 from kazusa_ai_chatbot.db.conversation import (
     aggregate_conversation_by_user,
@@ -94,17 +91,6 @@ from kazusa_ai_chatbot.db.conversation import (
     search_conversation_history,
     set_conversation_source_episode_id,
     update_conversation_attachment_descriptions,
-)
-from kazusa_ai_chatbot.db.conversation_progress import (
-    load_active_episode_state,
-    replace_episode_state_guarded,
-)
-from kazusa_ai_chatbot.db.conversation_progress_blocks import (
-    insert_conversation_progress_block,
-    load_conversation_progress_block_graph,
-    search_conversation_progress_blocks,
-    supersede_conversation_progress_blocks,
-    touch_conversation_progress_blocks,
 )
 from kazusa_ai_chatbot.db.llm_tracing import (
     list_llm_trace_steps_for_trace_ids,
@@ -143,24 +129,6 @@ from kazusa_ai_chatbot.db.internal_monologue_residue import (
     list_internal_monologue_residue_rows,
 )
 
-# ── Users (identity + profile + cognition state) ──────────────────
-from kazusa_ai_chatbot.db.users import (
-    add_suspected_alias,
-    backfill_character_conversation_identity,
-    create_user_profile,
-    ensure_character_identity,
-    find_user_profile_by_identifier,
-    get_user_cognition_state,
-    get_user_profile,
-    link_platform_account,
-    list_users_by_relationship,
-    list_users_by_display_name,
-    list_recent_user_profiles,
-    resolve_global_user_id,
-    replace_user_cognition_state,
-    search_users_by_display_name,
-)
-
 from kazusa_ai_chatbot.db.user_memory_units import (
     build_user_memory_unit_doc,
     get_user_memory_unit_by_unit_id,
@@ -175,19 +143,6 @@ from kazusa_ai_chatbot.db.user_memory_units import (
     validate_user_memory_unit_semantics,
 )
 
-# ── Character state ───────────────────────────────────────────────
-from kazusa_ai_chatbot.db.character import (
-    LegacyCharacterStateError,
-    RUNTIME_CHARACTER_STATE_FIELDS,
-    compose_character_profile,
-    ensure_operational_character_state,
-    get_character_cognition_state,
-    get_character_profile,
-    get_character_runtime_state,
-    get_character_state,
-    replace_character_cognition_state,
-    split_character_profile_runtime_state,
-)
 from kazusa_ai_chatbot.db.character_identity_growth import (
     CANDIDATES_COLLECTION,
     GROWTH_COLLECTION_NAMES,
@@ -272,6 +227,57 @@ _LAZY_MEMORY_EXPORTS = {
     "search_memory",
 }
 
+_LAZY_DB_EXPORTS = {
+    "db_bootstrap": "kazusa_ai_chatbot.db.bootstrap",
+    "load_active_episode_state": "kazusa_ai_chatbot.db.conversation_progress",
+    "replace_episode_state_guarded": "kazusa_ai_chatbot.db.conversation_progress",
+    "insert_conversation_progress_block": (
+        "kazusa_ai_chatbot.db.conversation_progress_blocks"
+    ),
+    "load_conversation_progress_block_graph": (
+        "kazusa_ai_chatbot.db.conversation_progress_blocks"
+    ),
+    "search_conversation_progress_blocks": (
+        "kazusa_ai_chatbot.db.conversation_progress_blocks"
+    ),
+    "supersede_conversation_progress_blocks": (
+        "kazusa_ai_chatbot.db.conversation_progress_blocks"
+    ),
+    "touch_conversation_progress_blocks": (
+        "kazusa_ai_chatbot.db.conversation_progress_blocks"
+    ),
+}
+
+_LAZY_USER_EXPORTS = {
+    "add_suspected_alias",
+    "backfill_character_conversation_identity",
+    "create_user_profile",
+    "ensure_character_identity",
+    "find_user_profile_by_identifier",
+    "get_user_cognition_state",
+    "get_user_profile",
+    "link_platform_account",
+    "list_users_by_relationship",
+    "list_users_by_display_name",
+    "list_recent_user_profiles",
+    "resolve_global_user_id",
+    "replace_user_cognition_state",
+    "search_users_by_display_name",
+}
+
+_LAZY_CHARACTER_EXPORTS = {
+    "LegacyCharacterStateError",
+    "RUNTIME_CHARACTER_STATE_FIELDS",
+    "compose_character_profile",
+    "ensure_operational_character_state",
+    "get_character_cognition_state",
+    "get_character_profile",
+    "get_character_runtime_state",
+    "get_character_state",
+    "replace_character_cognition_state",
+    "split_character_profile_runtime_state",
+}
+
 
 def __getattr__(name: str) -> Any:
     """Resolve legacy memory helpers without creating import-time cycles.
@@ -283,6 +289,22 @@ def __getattr__(name: str) -> Any:
     if name in _LAZY_MEMORY_EXPORTS:
         memory_module = import_module("kazusa_ai_chatbot.db.memory")
         resolved_value = getattr(memory_module, name)
+        return resolved_value
+
+    module_name = _LAZY_DB_EXPORTS.get(name)
+    if module_name is not None:
+        module = import_module(module_name)
+        resolved_value = getattr(module, name)
+        return resolved_value
+
+    if name in _LAZY_USER_EXPORTS:
+        module = import_module("kazusa_ai_chatbot.db.users")
+        resolved_value = getattr(module, name)
+        return resolved_value
+
+    if name in _LAZY_CHARACTER_EXPORTS:
+        module = import_module("kazusa_ai_chatbot.db.character")
+        resolved_value = getattr(module, name)
         return resolved_value
 
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -1,35 +1,61 @@
-"""Public queue helpers for generic background-work requests."""
+"""Public v2 queue helpers for reviewed background-work payloads."""
 
 from __future__ import annotations
 
-from uuid import uuid4
-
+from collections.abc import Mapping
 from kazusa_ai_chatbot.background_work.models import (
     BACKGROUND_WORK_JOB_REF_OWNER,
+    BACKGROUND_WORK_JOB_SCHEMA_VERSION,
     BACKGROUND_WORK_REQUESTED_DELIVERY,
+    FUTURE_SPEAK_WORKER,
+    TASK_ORCHESTRATOR_WORKER,
+    TASK_ORCHESTRATOR_WORKER_PAYLOAD_VERSION,
     BackgroundWorkJobDoc,
     BackgroundWorkQueueRequest,
     BackgroundWorkQueueResult,
     background_work_job_ref,
 )
 from kazusa_ai_chatbot.config import (
-    BACKGROUND_WORK_INPUT_CHAR_LIMIT,
     BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
     BACKGROUND_WORK_WORKER_MAX_ATTEMPTS,
 )
 from kazusa_ai_chatbot.db.background_work_jobs import insert_background_work_job
+from kazusa_ai_chatbot.task_resolution.contracts import (
+    validate_task_resolution_checkpoint,
+    validate_task_resolution_execution_context,
+)
 from kazusa_ai_chatbot.time_boundary import normalize_storage_utc_iso
 
-_WORKER_LOCAL_QUEUE_FIELDS = frozenset((
-    "worker",
-    "work_kind",
-    "task_type",
-    "tool_args",
-    "artifact_text",
+
+_REQUIRED_TEXT_FIELDS = (
+    "job_id",
+    "source_action_attempt_id",
+    "idempotency_key",
+    "accepted_task_id",
+    "task_identity_key",
+    "semantic_objective",
+    "storage_timestamp_utc",
+    "source_platform",
+    "source_channel_type",
+    "source_message_id",
+    "source_platform_bot_id",
+    "source_character_name",
+    "requester_global_user_id",
+    "requester_platform_user_id",
+    "requester_display_name",
+)
+_BOUND_CODING_REQUEST_FIELDS = frozenset((
+    "workspace_root",
+    "run_id",
+    "action",
+    "revision_instruction",
+    "approval",
+    "execution_specs",
+    "execution_request",
+    "repair_attempt_limit",
+    "reason",
 ))
-_SUPPORTED_REQUESTED_WORKERS = frozenset(("future_speak", "coding_agent"))
-_SUPPORTED_CODING_AGENT_OPERATIONS = frozenset((
-    "start",
+_BOUND_CODING_ACTIONS = frozenset((
     "revise_proposal",
     "summarize",
     "status",
@@ -37,111 +63,264 @@ _SUPPORTED_CODING_AGENT_OPERATIONS = frozenset((
     "respond_to_blocker",
     "cancel",
 ))
+_PATCH_APPLY_APPROVAL_FIELDS = frozenset((
+    "approved",
+    "approved_by",
+    "approved_at",
+    "approval_reason",
+))
+_CODE_EXECUTION_SPEC_FIELDS = frozenset((
+    "tool",
+    "paths",
+    "pytest_selectors",
+    "timeout_seconds",
+))
 
 
 async def enqueue_background_work_request(
     request: BackgroundWorkQueueRequest,
 ) -> BackgroundWorkQueueResult:
-    """Validate and persist one generic background-work request."""
+    """Validate and persist one reviewed v2 background-work job."""
 
     _validate_queue_request(request)
     storage_timestamp_utc = normalize_storage_utc_iso(
         request["storage_timestamp_utc"],
     )
-    job_id = f"job-{uuid4().hex}"
+    job_id = request["job_id"].strip()
     job = _build_job_document(
         request,
         job_id=job_id,
         storage_timestamp_utc=storage_timestamp_utc,
     )
     stored_job = await insert_background_work_job(job)
-    result = _queue_result_from_job(
-        stored_job,
-        observed_at=storage_timestamp_utc,
-    )
-    return result
+    return _queue_result_from_job(stored_job)
 
 
 def _validate_queue_request(request: BackgroundWorkQueueRequest) -> None:
-    """Validate live-path queue semantics before persistence."""
+    """Validate v2 queue state before it reaches durable persistence."""
 
-    leaked_fields = sorted(
-        field_name for field_name in request if field_name in _WORKER_LOCAL_QUEUE_FIELDS
-    )
-    if leaked_fields:
-        raise ValueError(
-            "worker-local fields are not allowed in background work queue "
-            f"requests: {', '.join(leaked_fields)}"
-        )
-
-    for field_name in (
-        "action_attempt_id",
-        "idempotency_key",
-        "task_brief",
-        "storage_timestamp_utc",
-    ):
-        if not request[field_name].strip():
+    for field_name in _REQUIRED_TEXT_FIELDS:
+        value = request.get(field_name)
+        if not isinstance(value, str) or not value.strip():
             raise ValueError(f"{field_name} is required")
-
     if request["requested_delivery"] != BACKGROUND_WORK_REQUESTED_DELIVERY:
         raise ValueError("requested_delivery is not supported")
-    if len(request["task_brief"]) > BACKGROUND_WORK_INPUT_CHAR_LIMIT:
-        raise ValueError("task_brief exceeds background work input limit")
-    if request["max_output_chars"] > BACKGROUND_WORK_OUTPUT_CHAR_LIMIT:
+    max_output_chars = request.get("max_output_chars")
+    if not isinstance(max_output_chars, int) or max_output_chars < 1:
+        raise ValueError("max_output_chars must be a positive integer")
+    if max_output_chars > BACKGROUND_WORK_OUTPUT_CHAR_LIMIT:
         raise ValueError("max_output_chars exceeds configured output limit")
-    if request["max_output_chars"] < 1:
-        raise ValueError("max_output_chars must be positive")
-    _validate_requested_worker(request)
-
-
-def _validate_requested_worker(request: BackgroundWorkQueueRequest) -> None:
-    """Validate deterministic requested-worker handoffs."""
-
-    requested_worker = request.get("requested_worker", "")
-    if not requested_worker:
-        return
-    if requested_worker not in _SUPPORTED_REQUESTED_WORKERS:
-        raise ValueError("requested_worker is not supported")
+    requested_worker = request.get("requested_worker")
     worker_payload = request.get("worker_payload")
-    if not isinstance(worker_payload, dict):
-        raise ValueError("worker_payload is required for requested_worker")
-    if requested_worker == "coding_agent":
-        _validate_coding_agent_worker_payload(worker_payload)
+    if requested_worker == TASK_ORCHESTRATOR_WORKER:
+        _validate_task_orchestrator_payload(worker_payload, request)
+        return
+    if requested_worker == FUTURE_SPEAK_WORKER:
+        _validate_future_speak_payload(worker_payload)
+        return
+    raise ValueError("requested_worker is not supported")
 
 
-def _validate_coding_agent_worker_payload(
-    worker_payload: dict[str, object],
-) -> None:
-    """Validate the durable coding-run worker payload."""
+def validate_task_orchestrator_worker_payload(
+    value: object,
+) -> dict[str, object]:
+    """Validate the exact durable payload owned by task orchestration."""
 
-    if worker_payload.get("schema_version") != "coding_agent_worker_payload.v2":
-        raise ValueError("coding_agent worker_payload schema_version is invalid")
-    operation = worker_payload.get("operation")
-    if operation not in _SUPPORTED_CODING_AGENT_OPERATIONS:
-        raise ValueError("coding_agent worker_payload operation is unsupported")
-    task_brief = worker_payload.get("task_brief")
-    if not isinstance(task_brief, str) or not task_brief.strip():
-        raise ValueError("coding_agent worker_payload task_brief is required")
-    if operation in (
-        "revise_proposal",
-        "summarize",
-        "status",
-        "approve_and_verify",
-        "respond_to_blocker",
-        "cancel",
+    if not isinstance(value, Mapping):
+        raise ValueError("task_orchestrator worker_payload must be a mapping")
+    if set(value) != {
+        "schema_version",
+        "operation",
+        "checkpoint",
+        "coding_request",
+    }:
+        raise ValueError("task_orchestrator worker_payload fields are invalid")
+    if value.get("schema_version") != TASK_ORCHESTRATOR_WORKER_PAYLOAD_VERSION:
+        raise ValueError("task_orchestrator worker_payload schema_version is invalid")
+    operation = value.get("operation")
+    checkpoint = value.get("checkpoint")
+    coding_request = value.get("coding_request")
+    if operation == "resume_task_resolution":
+        if coding_request is not None:
+            raise ValueError("resume_task_resolution cannot contain coding_request")
+        validate_task_resolution_checkpoint(checkpoint)
+        return dict(value)
+    if operation == "continue_bound_coding_run":
+        if checkpoint is not None:
+            raise ValueError("continue_bound_coding_run cannot contain checkpoint")
+        _validate_bound_coding_request(coding_request)
+        return dict(value)
+    raise ValueError("task_orchestrator worker_payload operation is unsupported")
+
+
+def _validate_bound_coding_request(value: object) -> None:
+    """Validate the frozen public coding continuation request shape.
+
+    This worker boundary accepts only established coding-run actions and passes
+    the validated public request unchanged to the retained coding lifecycle.
+    """
+
+    if not isinstance(value, Mapping):
+        raise ValueError("continue_bound_coding_run requires coding_request")
+    request = dict(value)
+    unknown_fields = set(request) - _BOUND_CODING_REQUEST_FIELDS
+    if unknown_fields:
+        raise ValueError("coding_request contains unsupported fields")
+    for field_name in ("workspace_root", "run_id", "action"):
+        _require_non_empty_mapping_text(request, field_name, "coding_request")
+    action = str(request["action"])
+    if action not in _BOUND_CODING_ACTIONS:
+        raise ValueError("coding_request.action is unsupported")
+    _validate_optional_coding_texts(request)
+    _validate_optional_coding_execution_specs(request)
+    _validate_optional_repair_attempt_limit(request)
+    if action == "approve_and_verify":
+        _validate_patch_apply_approval(request.get("approval"))
+    elif "approval" in request:
+        raise ValueError("coding_request.approval is only valid for approval")
+    if action == "revise_proposal":
+        _require_non_empty_mapping_text(
+            request,
+            "revision_instruction",
+            "coding_request",
+        )
+
+
+def _validate_optional_coding_texts(request: Mapping[str, object]) -> None:
+    """Validate optional text fields exposed by the frozen coding request."""
+
+    for field_name in (
+        "revision_instruction",
+        "execution_request",
+        "reason",
     ):
-        coding_run_ref = worker_payload.get("coding_run_ref")
-        if (
-            not isinstance(coding_run_ref, str)
-            or not coding_run_ref.startswith("coding_run:")
-        ):
-            raise ValueError("coding_agent worker_payload coding_run_ref is required")
-    execution_request = worker_payload.get("execution_request")
-    if execution_request is not None and not isinstance(execution_request, str):
-        raise ValueError("coding_agent worker_payload execution_request is invalid")
-    execution_specs = worker_payload.get("execution_specs")
-    if execution_specs is not None and not isinstance(execution_specs, list):
-        raise ValueError("coding_agent worker_payload execution_specs is invalid")
+        if field_name not in request:
+            continue
+        _require_non_empty_mapping_text(request, field_name, "coding_request")
+
+
+def _validate_optional_coding_execution_specs(
+    request: Mapping[str, object],
+) -> None:
+    """Validate optional public execution specs without executing commands."""
+
+    if "execution_specs" not in request:
+        return
+    execution_specs = request["execution_specs"]
+    if not isinstance(execution_specs, list):
+        raise ValueError("coding_request.execution_specs must be a list")
+    for execution_spec in execution_specs:
+        if not isinstance(execution_spec, Mapping):
+            raise ValueError("coding_request.execution_specs must contain objects")
+        spec = dict(execution_spec)
+        if set(spec) - _CODE_EXECUTION_SPEC_FIELDS:
+            raise ValueError(
+                "coding_request.execution_specs contain unsupported fields"
+            )
+        if "tool" in spec:
+            _require_non_empty_mapping_text(
+                spec,
+                "tool",
+                "coding_request.execution_specs",
+            )
+        for list_field in ("paths", "pytest_selectors"):
+            if list_field not in spec:
+                continue
+            values = spec[list_field]
+            if (
+                not isinstance(values, list)
+                or any(
+                    not isinstance(item, str) or not item.strip()
+                    for item in values
+                )
+            ):
+                raise ValueError(
+                    f"coding_request.execution_specs.{list_field} is invalid"
+                )
+        if "timeout_seconds" in spec:
+            timeout_seconds = spec["timeout_seconds"]
+            if (
+                isinstance(timeout_seconds, bool)
+                or not isinstance(timeout_seconds, int)
+                or timeout_seconds < 1
+            ):
+                raise ValueError(
+                    "coding_request.execution_specs.timeout_seconds is invalid"
+                )
+
+
+def _validate_optional_repair_attempt_limit(
+    request: Mapping[str, object],
+) -> None:
+    """Validate the optional bounded repair-attempt integer."""
+
+    if "repair_attempt_limit" not in request:
+        return
+    repair_attempt_limit = request["repair_attempt_limit"]
+    if (
+        isinstance(repair_attempt_limit, bool)
+        or not isinstance(repair_attempt_limit, int)
+        or repair_attempt_limit < 1
+    ):
+        raise ValueError("coding_request.repair_attempt_limit is invalid")
+
+
+def _validate_patch_apply_approval(value: object) -> None:
+    """Require the public approval object before a coding mutation continues."""
+
+    if not isinstance(value, Mapping):
+        raise ValueError("coding_request.approval is required")
+    approval = dict(value)
+    if set(approval) != _PATCH_APPLY_APPROVAL_FIELDS:
+        raise ValueError("coding_request.approval fields are invalid")
+    if approval["approved"] is not True:
+        raise ValueError("coding_request.approval.approved must be true")
+    for field_name in ("approved_by", "approved_at", "approval_reason"):
+        _require_non_empty_mapping_text(
+            approval,
+            field_name,
+            "coding_request.approval",
+        )
+
+
+def _require_non_empty_mapping_text(
+    value: Mapping[str, object],
+    field_name: str,
+    label: str,
+) -> str:
+    """Return one required non-empty text value from a trusted mapping."""
+
+    field_value = value.get(field_name)
+    if not isinstance(field_value, str) or not field_value.strip():
+        raise ValueError(f"{label}.{field_name} is required")
+    text = field_value.strip()
+    return text
+
+
+def _validate_task_orchestrator_payload(
+    value: object,
+    request: BackgroundWorkQueueRequest,
+) -> None:
+    """Validate a task-resume payload and its persisted execution context."""
+
+    payload = validate_task_orchestrator_worker_payload(value)
+    if payload["operation"] != "resume_task_resolution":
+        return
+    execution_context = request.get("task_execution_context")
+    validate_task_resolution_execution_context(execution_context)
+
+
+def _validate_future_speak_payload(value: object) -> None:
+    """Validate the retained deterministic future-speak handoff."""
+
+    if not isinstance(value, Mapping):
+        raise ValueError("future_speak worker_payload must be a mapping")
+    if set(value) != {"trigger_at", "continuation_objective"}:
+        raise ValueError("future_speak worker_payload fields are invalid")
+    for field_name in ("trigger_at", "continuation_objective"):
+        field_value = value.get(field_name)
+        if not isinstance(field_value, str) or not field_value.strip():
+            raise ValueError(f"future_speak worker_payload {field_name} is required")
 
 
 def _build_job_document(
@@ -150,18 +329,23 @@ def _build_job_document(
     job_id: str,
     storage_timestamp_utc: str,
 ) -> BackgroundWorkJobDoc:
-    """Build the durable job row from a validated queue request."""
+    """Build one v2 durable row from validated queue material."""
 
+    task_execution_context = request.get("task_execution_context")
+    if isinstance(task_execution_context, Mapping):
+        context_projection = dict(task_execution_context)
+    else:
+        context_projection: dict[str, object] = {}
     job: BackgroundWorkJobDoc = {
-        "schema_version": "background_work_job.v1",
+        "schema_version": BACKGROUND_WORK_JOB_SCHEMA_VERSION,
         "job_id": job_id,
-        "idempotency_key": request["idempotency_key"],
-        "source_action_attempt_id": request["action_attempt_id"],
-        "accepted_task_id": request.get("accepted_task_id", "").strip(),
-        "task_identity_key": request.get("task_identity_key", "").strip(),
+        "idempotency_key": request["idempotency_key"].strip(),
+        "source_action_attempt_id": request["source_action_attempt_id"].strip(),
+        "accepted_task_id": request["accepted_task_id"].strip(),
+        "task_identity_key": request["task_identity_key"].strip(),
+        "semantic_objective": request["semantic_objective"].strip(),
         "status": "queued",
         "delivery_state": "queued",
-        "task_brief": request["task_brief"].strip(),
         "requested_delivery": request["requested_delivery"],
         "max_output_chars": int(request["max_output_chars"]),
         "source_platform": request["source_platform"].strip(),
@@ -171,9 +355,9 @@ def _build_job_document(
         "source_platform_bot_id": request["source_platform_bot_id"].strip(),
         "source_character_name": request["source_character_name"].strip(),
         "requester_global_user_id": request["requester_global_user_id"].strip(),
-        "requester_platform_user_id": (
-            request["requester_platform_user_id"].strip()
-        ),
+        "requester_platform_user_id": request[
+            "requester_platform_user_id"
+        ].strip(),
         "requester_display_name": request["requester_display_name"].strip(),
         "created_at": storage_timestamp_utc,
         "updated_at": storage_timestamp_utc,
@@ -181,18 +365,13 @@ def _build_job_document(
         "lease_expires_at": None,
         "attempt_count": 0,
         "max_attempts": BACKGROUND_WORK_WORKER_MAX_ATTEMPTS,
-        "router_action": "",
-        "worker": "",
-        "routed_task": "",
-        "router_reason": "",
-        "source_context": request.get("source_context", "").strip(),
-        "requested_worker": request.get("requested_worker", "").strip(),
-        "worker_payload": dict(request.get("worker_payload", {})),
+        "requested_worker": request["requested_worker"],
+        "worker_payload": dict(request["worker_payload"]),
+        "task_execution_context": context_projection,
+        "task_resolution_result": {},
         "artifact_text": "",
-        "artifact_char_count": 0,
         "failure_summary": "",
         "result_summary": "",
-        "worker_metadata": {},
         "completed_at": "",
         "delivery_attempt_count": 0,
         "delivery_failure_summary": "",
@@ -203,38 +382,27 @@ def _build_job_document(
     return job
 
 
-def _queue_result_from_job(
-    job: BackgroundWorkJobDoc,
-    *,
-    observed_at: str,
-) -> BackgroundWorkQueueResult:
-    """Project one durable job row into a prompt-safe pending result."""
+def _queue_result_from_job(job: BackgroundWorkJobDoc) -> BackgroundWorkQueueResult:
+    """Project durable creation into a queue-internal confirmation result."""
 
-    job_ref = background_work_job_ref(job["job_id"])
-    evidence_ref: dict[str, str] = {
-        "schema_version": "evidence_ref.v1",
-        "evidence_kind": "system_event",
-        "evidence_id": job_ref,
-        "owner": BACKGROUND_WORK_JOB_REF_OWNER,
-        "excerpt": "queued background work request",
-        "observed_at": observed_at,
-    }
-    result: BackgroundWorkQueueResult = {
+    job_id = _job_text(job, "job_id")
+    return {
         "status": "pending",
-        "queue_state": "queued",
-        "job_id": job["job_id"],
-        "job_ref": job_ref,
-        "task_summary": job["task_brief"],
-        "result_summary": "Background work job queued.",
-        "operational_owner": BACKGROUND_WORK_JOB_REF_OWNER,
+        "job_id": job_id,
+        "job_ref": background_work_job_ref(job_id),
+        "accepted_task_id": _job_text(job, "accepted_task_id"),
+        "task_identity_key": _job_text(job, "task_identity_key"),
+        "accepted_task_summary": _job_text(job, "semantic_objective"),
         "acknowledgement_constraint": "promise_allowed",
-        "evidence_ref": evidence_ref,
+        "wait_guidance": "non_numeric_wait",
+        "result_summary": "Accepted task continuation is durable.",
     }
-    accepted_task_id = job.get("accepted_task_id", "").strip()
-    if accepted_task_id:
-        result["accepted_task_id"] = accepted_task_id
-        result["task_identity_key"] = job.get("task_identity_key", "").strip()
-        result["accepted_task_state"] = "scheduled"
-        result["accepted_task_summary"] = job["task_brief"]
-        result["wait_guidance"] = "non_numeric_wait"
-    return result
+
+
+def _job_text(job: Mapping[str, object], field_name: str) -> str:
+    """Return one trusted job text field."""
+
+    value = job.get(field_name)
+    if not isinstance(value, str):
+        return ""
+    return value.strip()

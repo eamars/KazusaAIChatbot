@@ -252,7 +252,7 @@ async def test_answerable_now_drops_optional_resolver_request() -> None:
             "visible_to": ["q:relationship_social"],
         }],
         available_actions=[],
-        available_resolvers=[_resolver("local_context_recall")],
+        available_resolvers=[_resolver("task_resolution_request")],
         resolver_context="resolver_status=idle",
         services=SimpleNamespace(
             llm=_LLM(),
@@ -700,7 +700,7 @@ async def test_denied_required_resolver_closes_goal_without_progress() -> None:
             "visible_to": ["q:event_agency"],
         }],
         available_actions=[],
-        available_resolvers=[_resolver("public_answer_research")],
+        available_resolvers=[_resolver("task_resolution_request")],
         resolver_context="resolver_status=idle",
         services=SimpleNamespace(
             llm=llm,
@@ -800,7 +800,7 @@ def test_action_plan_caps_rows_and_drops_unknown_bids() -> None:
         response,
         bid_handles={"b1": _bid("ordinary_response")},
         action_handles={"a1": _action("background_work_request")},
-        resolver_handles={"r1": _resolver("local_context_recall")},
+        resolver_handles={"r1": _resolver("task_resolution_request")},
     )
 
     assert len(decision["action_requests"]) == 3
@@ -830,7 +830,7 @@ def test_action_plan_rejects_mixed_action_and_resolver_semantics() -> None:
             response,
             bid_handles={"b1": _bid("ordinary_response")},
             action_handles={"a1": _action("background_work_request")},
-            resolver_handles={"r1": _resolver("local_context_recall")},
+            resolver_handles={"r1": _resolver("task_resolution_request")},
         )
 
 
@@ -843,7 +843,7 @@ def test_action_plan_ignores_model_authored_route() -> None:
         response,
         bid_handles={"b1": _bid("ordinary_response")},
         action_handles={"a1": _action("background_work_request")},
-        resolver_handles={"r1": _resolver("local_context_recall")},
+        resolver_handles={"r1": _resolver("task_resolution_request")},
     )
 
     assert "route" not in decision
@@ -867,7 +867,7 @@ def test_action_plan_merges_semantic_goal_progress_delta() -> None:
         response,
         bid_handles={"b1": _bid("ordinary_response")},
         action_handles={},
-        resolver_handles={"r1": _resolver("local_context_recall")},
+        resolver_handles={"r1": _resolver("task_resolution_request")},
         current_goal_progress=_goal_progress(),
     )
 
@@ -951,7 +951,7 @@ def test_invalid_resolver_row_invalidates_valid_sibling() -> None:
             response,
             bid_handles={"b1": _bid("ordinary_response")},
             action_handles={},
-            resolver_handles={"r1": _resolver("local_context_recall")},
+            resolver_handles={"r1": _resolver("task_resolution_request")},
         )
 
 
@@ -963,7 +963,7 @@ def test_action_plan_strips_extra_resolver_fields() -> None:
         "resolver_handle": "r1",
         "semantic_goal": "recover the omitted local referent",
         "reason": "the current phrase is incomplete",
-        "capability": "local_context_recall",
+        "capability": "task_resolution_request",
         "priority": "now",
     }])
 
@@ -971,7 +971,7 @@ def test_action_plan_strips_extra_resolver_fields() -> None:
         response,
         bid_handles={"b1": _bid("ordinary_response")},
         action_handles={},
-        resolver_handles={"r1": _resolver("local_context_recall")},
+        resolver_handles={"r1": _resolver("task_resolution_request")},
     )
 
     assert decision["resolver_requests"] == [{

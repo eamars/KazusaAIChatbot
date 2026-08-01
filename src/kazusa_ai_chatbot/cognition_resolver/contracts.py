@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import re
 
-from typing import Literal, NotRequired, TypedDict
+from typing import TYPE_CHECKING, Literal, NotRequired, TypedDict
 
-from kazusa_ai_chatbot.action_spec.models import (
-    ActionSpecV1,
-    ActionValidationError,
-    EvidenceRefV1,
-    validate_evidence_ref,
-)
+if TYPE_CHECKING:
+    from kazusa_ai_chatbot.action_spec.models import (
+        ActionSpecV1,
+        EvidenceRefV1,
+    )
 
 RESOLVER_CYCLE_STATE_VERSION = "resolver_cycle_state.v1"
 RESOLVER_CAPABILITY_REQUEST_VERSION = "resolver_capability_request.v1"
@@ -35,8 +34,7 @@ MAX_RESOLVER_KNOWLEDGE_ITEMS = 8
 _RAW_MARKER_RE = re.compile(r"\braw-[A-Za-z0-9_-]+")
 
 ALLOWED_RESOLVER_CAPABILITIES = frozenset((
-    "local_context_recall",
-    "public_answer_research",
+    "task_resolution_request",
     "human_clarification",
     "approval_preparation",
     "self_goal_resolution",
@@ -48,13 +46,10 @@ RESOLVER_CAPABILITY_SEMANTICS = {
     "human_clarification": (
         "Ask the user for one missing piece of information they control."
     ),
-    "local_context_recall": (
-        "Retrieve local or private character, relationship, memory, prior "
-        "conversation, commitment, profile, or session-media context."
-    ),
-    "public_answer_research": (
-        "Investigate public, current, external, or source-checkable evidence "
-        "needed before a grounded visible answer."
+    "task_resolution_request": (
+        "Resolve one bounded semantic task when current evidence is "
+        "insufficient. The task-resolution session selects and coordinates "
+        "its own specialist evidence work."
     ),
     "self_goal_resolution": (
         "Resolve or prioritize one internal self-cognition goal for an "
@@ -107,8 +102,7 @@ class ResolverCapabilityRequestV1(TypedDict):
 
     schema_version: Literal["resolver_capability_request.v1"]
     capability_kind: Literal[
-        "local_context_recall",
-        "public_answer_research",
+        "task_resolution_request",
         "human_clarification",
         "approval_preparation",
         "self_goal_resolution",
@@ -912,6 +906,11 @@ def _clip_text(value: str, max_chars: int) -> str:
 
 def _normalize_evidence_refs(evidence_refs: list) -> list[EvidenceRefV1]:
     """Validate evidence refs and strip fields outside the public contract."""
+
+    from kazusa_ai_chatbot.action_spec.models import (
+        ActionValidationError,
+        validate_evidence_ref,
+    )
 
     normalized_refs: list[EvidenceRefV1] = []
     for evidence_ref in evidence_refs:

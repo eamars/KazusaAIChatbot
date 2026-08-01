@@ -105,7 +105,7 @@ def test_route_is_derived_from_protocol_and_validated_request_sets(
     """The model does not restate deterministic route shape."""
 
     actions = [_action("b1", "a1", "delayed work")] * action_count
-    resolvers = [{"capability": "local_context_recall"}] * resolver_count
+    resolvers = [{"capability": "task_resolution_request"}] * resolver_count
 
     result = derive_action_route(
         episode={"output_mode": output_mode},
@@ -197,7 +197,7 @@ async def test_action_authorization_receives_runtime_owner_limits() -> None:
         bid_handles={'b1': _bid()},
         evidence=[_evidence('明天下午三点提醒我交周报。')],
         action_handles={
-            'a1': _affordance('accepted_task_request'),
+            'a1': _affordance('future_speak'),
         },
         runtime_capability_limits=runtime_limits,
         services=SimpleNamespace(

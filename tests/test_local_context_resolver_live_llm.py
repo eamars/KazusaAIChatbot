@@ -368,7 +368,7 @@ async def _run_production_case(
     )
     request = {
         "schema_version": RESOLVER_CAPABILITY_REQUEST_VERSION,
-        "capability_kind": "local_context_recall",
+        "capability_kind": "task_resolution_request",
         "objective": objective,
         "reason": f"live LLM production review case {case_id}",
         "priority": "now",
@@ -399,7 +399,7 @@ async def _run_production_case(
     )
 
     assert observation["status"] == "succeeded"
-    assert observation["capability_kind"] == "local_context_recall"
+    assert observation["capability_kind"] == "task_resolution_request"
     assert isinstance(observation["rag_result"], dict)
     assert stage_traces
     assert len(stage_traces) <= max_total_llm_calls

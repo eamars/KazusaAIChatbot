@@ -1,13 +1,12 @@
-"""Typed contracts for accepted delayed-task lifecycle state."""
+"""Typed contracts for the v2 accepted-task lifecycle."""
 
 from __future__ import annotations
 
 from typing import Literal, NotRequired, TypedDict
 
-from kazusa_ai_chatbot.coding_agent.coding_run.models import CodingRunContextV1
 
 ACCEPTED_TASKS_COLLECTION = "accepted_tasks"
-ACCEPTED_TASK_SCHEMA_VERSION = "accepted_task.v1"
+ACCEPTED_TASK_SCHEMA_VERSION = "accepted_task.v2"
 ACCEPTED_TASK_REQUESTED_DELIVERY = "send_result_when_done"
 
 AcceptedTaskState = Literal[
@@ -24,7 +23,21 @@ AcceptedTaskState = Literal[
     "cancelled",
     "superseded",
 ]
-AcceptedTaskResultKind = Literal["none", "artifact", "failure"]
+AcceptedTaskKind = Literal[
+    "task_resolution",
+    "future_speak",
+    "coding_continuation",
+]
+AcceptedTaskCompletionStatus = Literal["none", "resolved", "partial", "failed"]
+AcceptedTaskResultKind = Literal[
+    "none",
+    "resolved",
+    "partial",
+    "needs_user_input",
+    "approval_required",
+    "unavailable",
+    "failed",
+]
 AcceptedTaskCreateStatus = Literal["created", "already_active"]
 AcceptedTaskStatusCheckStatus = Literal["active", "none"]
 
@@ -47,26 +60,22 @@ TERMINAL_ACCEPTED_TASK_STATES = (
 
 
 class AcceptedTaskIdentityMaterial(TypedDict):
-    """Stable material used to build an active accepted-task identity."""
+    """Stable duplicate identity from trusted scope and semantic objective."""
 
     source_platform: str
     source_channel_id: str
     source_channel_type: str
     requester_global_user_id: str
     requester_platform_user_id: str
-    action_kind: str
-    accepted_task_seed: str
-    accepted_task_detail: str
+    semantic_objective: str
 
 
 class AcceptedTaskCreateRequest(TypedDict):
-    """Request to create or resolve one accepted delayed user task."""
+    """Trusted request to create one task-resolution-backed lifecycle row."""
 
-    action_kind: str
-    accepted_task_seed: str
-    accepted_task_detail: str
+    task_kind: AcceptedTaskKind
+    semantic_objective: str
     accepted_task_summary: str
-    source_context: str
     requested_delivery: Literal["send_result_when_done"]
     max_output_chars: int
     source_trigger_source: str
@@ -83,7 +92,7 @@ class AcceptedTaskCreateRequest(TypedDict):
 
 
 class AcceptedTaskStatusCheckRequest(TypedDict, total=False):
-    """Trusted scope used to find an active accepted task."""
+    """Trusted scope used to find one active accepted task."""
 
     source_platform: str
     source_channel_id: str
@@ -93,23 +102,24 @@ class AcceptedTaskStatusCheckRequest(TypedDict, total=False):
 
 
 class AcceptedTaskDoc(TypedDict, total=False):
-    """MongoDB document for a user-facing accepted delayed task."""
+    """MongoDB document for one v2 user-facing accepted task."""
 
-    schema_version: Literal["accepted_task.v1"]
+    schema_version: Literal["accepted_task.v2"]
     accepted_task_id: str
     task_identity_key: str
     active_identity_key: str
     task_identity_material: AcceptedTaskIdentityMaterial
-    action_kind: str
+    task_kind: AcceptedTaskKind
+    semantic_objective: str
     first_source_message_id: str
     related_source_message_ids: list[str]
     source_trigger_source: str
     state: AcceptedTaskState
+    completion_status: AcceptedTaskCompletionStatus
     result_kind: AcceptedTaskResultKind
     executor_kind: Literal["background_work"]
     executor_ref: str
     accepted_task_summary: str
-    source_context: str
     requested_delivery: Literal["send_result_when_done"]
     max_output_chars: int
     source_platform: str
@@ -127,23 +137,24 @@ class AcceptedTaskDoc(TypedDict, total=False):
     delivered_at: str
     result_summary: str
     artifact_text: str
+    remaining_needs: list[str]
     failure_summary: str
     delivery_failure_summary: str
     delivery_tracking_id: str
     delivered_conversation_message_id: str
     last_progress_reported_at: str
-    coding_run_context: CodingRunContextV1
+    coding_run_context: dict[str, object]
 
 
 class AcceptedTaskCreateResult(TypedDict):
-    """Result of resolving an accepted task against active duplicates."""
+    """Result of active-duplicate resolution for one accepted task."""
 
     status: AcceptedTaskCreateStatus
     task: AcceptedTaskDoc
 
 
 class AcceptedTaskStatusResult(TypedDict):
-    """Result of checking active accepted-task state for a trusted scope."""
+    """Result of checking one trusted scope for active work."""
 
     status: AcceptedTaskStatusCheckStatus
     task: NotRequired[AcceptedTaskDoc]

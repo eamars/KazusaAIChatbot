@@ -1,6 +1,17 @@
 # Cognition Resolver ICD
 
-## Ownership
+## Document Control
+
+- Owning package: `kazusa_ai_chatbot.cognition_resolver`
+- Source of truth: resolver contracts, loop, capability executor, and tests
+- Document status: current V2 resolver recurrence contract
+
+## Purpose
+
+The cognition resolver owns bounded recurrence around Cognition Core V2 and
+projects source-owned observations into later cognition cycles.
+
+## Boundary
 
 The cognition resolver owns bounded recurrence around Cognition Core V2. Its
 live owner is `nodes.persona_supervisor2.stage_1_goal_resolver`; the idle owner
@@ -13,7 +24,7 @@ result. Cognition Core V2 remains the semantic decision owner. The connector
 commits the single final replacement state before L3, action execution, dialog,
 or worker delivery can proceed.
 
-## Canonical V2 Flow
+## Runtime Flow
 
 ```text
 CognitionCoreInputV2
@@ -64,7 +75,7 @@ it does not mirror a source-specific RAG `resolved` field. When the decision is
 and settles the episode without capability execution. The other typed decisions
 retain their required-evidence, user-input, or blocked paths.
 
-## Capability Boundary
+## Input And Output Contracts
 
 V2 requests contain only `capability`, `semantic_goal`, and
 `evidence_handles`. Capability handlers may perform their bounded retrieval or
@@ -81,7 +92,15 @@ An observation is evidence, never persona, intention, affect, relationship
 state, or final stance. Resolver code cannot write `replacement_state`, choose
 a goal branch, or rewrite an intention route.
 
-## Public V2 Entrypoints
+`task_resolution_request` is the single generic evidence-work capability. The
+resolver runs its session inline under the configured wall-clock budget. A
+resolved or evidence-bearing partial result becomes a prompt-safe observation
+for the next cognition cycle. When the budget expires, deterministic promotion
+persists the same checkpoint and a reviewed task-orchestrator job; the worker
+resumes it without resetting counters. The planner does not see specialists,
+queue state, or persistence mechanics.
+
+## Public Interfaces
 
 | Entrypoint | Owner | Purpose |
 | --- | --- | --- |
@@ -94,7 +113,7 @@ Pending human clarification and approval records remain deterministic ledger
 state owned by `pending.py`. When admitted to V2, they enter as typed evidence;
 they do not restore the retired V1 cognition-chain contract.
 
-## Diagnostics and Safety
+## Failure Behavior
 
 Resolver diagnostics are bounded and semantic. V2 telemetry may contain
 capability names, semantic goals, progress status, and a clipped progress
@@ -104,3 +123,16 @@ and platform identifiers.
 
 Human-readable traces under `test_artifacts/cognition_resolver/` are diagnostic
 artifacts only. They never become cognition input automatically.
+
+## Testing Contract
+
+Run cognition-resolver contract, loop, L2d, capability, task-resolution inline
+promotion, and result-delivery integration suites with the project virtual
+environment. Live LLM cases run one at a time with raw output inspected.
+
+## Forbidden Paths
+
+Do not choose a specialist, worker, timeout, checkpoint, delivery target, or
+low-level tool parameter from cognition. Do not make resolver observations into
+persona stance, mutate replacement state, send adapter text, or import
+coding-agent internals.

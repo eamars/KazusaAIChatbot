@@ -14,6 +14,7 @@ from tests.cognition_core_v2_test_helpers import (
     canonical_episode_identity_snapshot,
     canonical_service_character_profile,
 )
+from tests.test_background_work_jobs import _resume_queue_request
 
 
 
@@ -347,9 +348,11 @@ async def test_delivery_tick_syncs_accepted_task_delivery_state(
         "delivery_tracking_id": "delivery-001",
     })
     mark_job_delivered = AsyncMock(return_value={**job, "status": "delivered"})
-    mark_task_in_progress = AsyncMock()
-    mark_task_delivered = AsyncMock()
-    mark_task_failed = AsyncMock()
+    mark_task_in_progress = AsyncMock(return_value={
+        "state": "delivery_in_progress",
+    })
+    mark_task_delivered = AsyncMock(return_value={"state": "delivered"})
+    mark_task_failed = AsyncMock(return_value={"state": "delivery_retryable"})
     _patch_delivery_recovery(monkeypatch, delivery_module)
     deliver_episode = AsyncMock(return_value={
         "status": "delivered",
@@ -412,6 +415,184 @@ async def test_delivery_tick_syncs_accepted_task_delivery_state(
     mark_task_failed.assert_not_awaited()
     delivered_episode = deliver_episode.await_args.args[0]
     assert delivered_episode["trigger_source"] == "tool_result"
+
+
+@pytest.mark.asyncio
+async def test_delivery_tick_retries_job_when_accepted_task_claim_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A job cannot enter cognition delivery without its accepted-task claim."""
+
+    delivery_module = importlib.import_module(
+        "kazusa_ai_chatbot.background_work.delivery"
+    )
+    job = _accepted_task_completed_job()
+    job["delivery_state"] = "ready"
+    marked_job = {**job, "status": "delivery_in_progress"}
+    deliver_episode = AsyncMock()
+    mark_job_failed = AsyncMock(return_value={
+        **job,
+        "status": "delivery_failed",
+    })
+    _patch_delivery_recovery(monkeypatch, delivery_module)
+    monkeypatch.setattr(
+        delivery_module,
+        "find_deliverable_background_work_jobs",
+        AsyncMock(return_value=[job]),
+    )
+    monkeypatch.setattr(
+        delivery_module,
+        "mark_background_work_delivery_in_progress",
+        AsyncMock(return_value=marked_job),
+    )
+    monkeypatch.setattr(
+        delivery_module,
+        "mark_accepted_task_delivery_in_progress",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        delivery_module,
+        "mark_background_work_delivery_failed",
+        mark_job_failed,
+    )
+
+    result = await delivery_module.run_background_work_delivery_tick(
+        deliver_result_episode_func=deliver_episode,
+        limit=1,
+    )
+
+    assert result == {
+        "processed_count": 1,
+        "delivered_count": 0,
+        "failed_count": 1,
+        "recovered_count": 0,
+    }
+    deliver_episode.assert_not_awaited()
+    mark_job_failed.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_delivery_tick_retries_job_when_accepted_finalization_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing accepted-task terminal write cannot report job delivery."""
+
+    delivery_module = importlib.import_module(
+        "kazusa_ai_chatbot.background_work.delivery"
+    )
+    job = _accepted_task_completed_job()
+    job["delivery_state"] = "ready"
+    marked_job = {**job, "status": "delivery_in_progress"}
+    mark_job_delivered = AsyncMock()
+    mark_job_failed = AsyncMock(return_value={
+        **job,
+        "status": "delivery_failed",
+    })
+    _patch_delivery_recovery(monkeypatch, delivery_module)
+    monkeypatch.setattr(
+        delivery_module,
+        "find_deliverable_background_work_jobs",
+        AsyncMock(return_value=[job]),
+    )
+    monkeypatch.setattr(
+        delivery_module,
+        "mark_background_work_delivery_in_progress",
+        AsyncMock(return_value=marked_job),
+    )
+    monkeypatch.setattr(
+        delivery_module,
+        "mark_accepted_task_delivery_in_progress",
+        AsyncMock(return_value={"state": "delivery_in_progress"}),
+    )
+    monkeypatch.setattr(
+        delivery_module,
+        "mark_accepted_task_delivered",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        delivery_module,
+        "mark_background_work_delivered",
+        mark_job_delivered,
+    )
+    monkeypatch.setattr(
+        delivery_module,
+        "mark_background_work_delivery_failed",
+        mark_job_failed,
+    )
+
+    result = await delivery_module.run_background_work_delivery_tick(
+        deliver_result_episode_func=AsyncMock(return_value={
+            "status": "delivered",
+            "conversation_message_id": "conversation-001",
+        }),
+        limit=1,
+    )
+
+    assert result["delivered_count"] == 0
+    assert result["failed_count"] == 1
+    mark_job_delivered.assert_not_awaited()
+    mark_job_failed.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_delivery_tick_retries_job_when_job_finalization_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing job terminal write remains observable as retryable failure."""
+
+    delivery_module = importlib.import_module(
+        "kazusa_ai_chatbot.background_work.delivery"
+    )
+    job = _accepted_task_completed_job()
+    job["delivery_state"] = "ready"
+    marked_job = {**job, "status": "delivery_in_progress"}
+    mark_job_failed = AsyncMock(return_value={
+        **job,
+        "status": "delivery_failed",
+    })
+    _patch_delivery_recovery(monkeypatch, delivery_module)
+    monkeypatch.setattr(
+        delivery_module,
+        "find_deliverable_background_work_jobs",
+        AsyncMock(return_value=[job]),
+    )
+    monkeypatch.setattr(
+        delivery_module,
+        "mark_background_work_delivery_in_progress",
+        AsyncMock(return_value=marked_job),
+    )
+    monkeypatch.setattr(
+        delivery_module,
+        "mark_accepted_task_delivery_in_progress",
+        AsyncMock(return_value={"state": "delivery_in_progress"}),
+    )
+    monkeypatch.setattr(
+        delivery_module,
+        "mark_accepted_task_delivered",
+        AsyncMock(return_value={"state": "delivered"}),
+    )
+    monkeypatch.setattr(
+        delivery_module,
+        "mark_background_work_delivered",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        delivery_module,
+        "mark_background_work_delivery_failed",
+        mark_job_failed,
+    )
+
+    result = await delivery_module.run_background_work_delivery_tick(
+        deliver_result_episode_func=AsyncMock(return_value={
+            "status": "delivered",
+            "conversation_message_id": "conversation-001",
+        }),
+        limit=1,
+    )
+
+    assert result["delivered_count"] == 0
+    assert result["failed_count"] == 1
+    mark_job_failed.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -482,23 +663,7 @@ def test_delivery_failure_summary_initialized_empty() -> None:
 
     jobs = importlib.import_module("kazusa_ai_chatbot.background_work.jobs")
     build = getattr(jobs, "_build_job_document")
-    request = {
-        "action_attempt_id": "action_attempt:dfs-001",
-        "idempotency_key": "background_work:dfs-001",
-        "task_brief": "Test delivery failure field.",
-        "source_platform": "debug",
-        "source_channel_id": "debug:user:test",
-        "source_channel_type": "private",
-        "source_message_id": "message-001",
-        "source_platform_bot_id": "bot-001",
-        "source_character_name": "Test Character",
-        "requester_global_user_id": "global-user-001",
-        "requester_platform_user_id": "debug-user-001",
-        "requester_display_name": "Test User",
-        "requested_delivery": "send_result_when_done",
-        "max_output_chars": 3000,
-        "storage_timestamp_utc": "2026-06-06T00:00:00+00:00",
-    }
+    request = _resume_queue_request()
     job = build(
         request,
         job_id="job-dfs-001",
