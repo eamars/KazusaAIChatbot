@@ -527,6 +527,24 @@ async def test_workspace_collapse_reuses_its_route_for_repair() -> None:
     result = await collapse_bids(
         [_bid("ordinary_response"), _bid("autonomy_boundary")],
         services,
+        current_event=[{
+            "handle": "e1",
+            "source_kind": "episode",
+            "semantic_text": "the user made a current request",
+        }],
+        goal_context_by_ref={
+            "g1": {
+                "goal_handle": "g1",
+                "goal_kind": "autonomy_boundary",
+                "description": "preserve the current autonomy boundary",
+                "status": "pursuing",
+                "salience": 50,
+                "importance": 80,
+                "progress": 10,
+                "obstruction": 30,
+                "urgency": 60,
+            },
+        },
     )
 
     expected_config = services.workspace_collapse_config

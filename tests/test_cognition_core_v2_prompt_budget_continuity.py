@@ -558,10 +558,8 @@ def _maximum_goal_context() -> tuple[
         private_continuity_context=payload[
             "private_continuity_context"
         ],
-        runtime_capability_limits=payload[
-            "runtime_capability_limits"
-        ],
     )
+    assert "runtime_capability_limits" not in context
     context["goal_projection"] = {
         "goal_kind": "ordinary_response",
         "description": "g" * 500,
@@ -969,8 +967,8 @@ def test_appraisal_exact_cap_and_cap_plus_one_are_distinct() -> None:
         semantic_appraisal_module._fit_appraisal_payload(payload)
 
 
-def test_goal_exact_cap_and_cap_plus_one_are_distinct() -> None:
-    """The goal owner accepts 24,000 and rejects irreducible 24,001."""
+def test_goal_exact_aggregate_cap_and_cap_plus_one_are_distinct() -> None:
+    """The goal owner counts its system prompt inside the 24,000 cap."""
 
     evidence_rows = [{
         "handle": "e1",
@@ -986,19 +984,23 @@ def test_goal_exact_cap_and_cap_plus_one_are_distinct() -> None:
         "role_handles": [],
         "role_summaries": {},
     }
-    _pad_to_serialized_length(payload, semantic_context, 24000)
+    payload_cap = 24000 - len(goal_cognition_module.GOAL_COGNITION_PROMPT)
+    _pad_to_serialized_length(payload, semantic_context, payload_cap)
 
     fitted = goal_cognition_module._fit_goal_prompt_payload(
         payload,
-        system_prompt="",
+        system_prompt=goal_cognition_module.GOAL_COGNITION_PROMPT,
     )
 
-    assert len(fitted) == 24000
+    assert (
+        len(goal_cognition_module.GOAL_COGNITION_PROMPT) + len(fitted)
+        == 24000
+    )
     semantic_context["padding"] += "x"
     with pytest.raises(PromptBudgetError):
         goal_cognition_module._fit_goal_prompt_payload(
             payload,
-            system_prompt="",
+            system_prompt=goal_cognition_module.GOAL_COGNITION_PROMPT,
         )
 
 
@@ -1503,12 +1505,103 @@ async def test_workspace_preflight_overflow_uses_stable_fallback(
             llm=llm,
             workspace_collapse_config=object(),
         ),
+        current_event=[],
+        goal_context_by_ref={
+            "goal:social_care": {
+                "goal_handle": "goal:social_care",
+                "goal_kind": "social_care",
+                "description": "support the active social-care matter",
+                "status": "pursuing",
+                "salience": 40,
+                "importance": 70,
+                "progress": 20,
+                "obstruction": 0,
+                "urgency": 20,
+            },
+        },
     )
 
     assert result["primary_branch_id"] == "ordinary_response"
     assert result["supporting_bids"] == []
     assert result["suppressed_branch_ids"] == ["social_care"]
     assert llm.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_workspace_fits_matching_relevance_context_before_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Long matching context is fitted while every bid remains selectable."""
+
+    class _MatchingWorkspaceLLM:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config: object,
+        ) -> SimpleNamespace:
+            del config
+            self.calls.append(json.loads(str(messages[-1].content)))
+            return SimpleNamespace(content=json.dumps({
+                "primary_bid_handle": "b2",
+                "supporting_bid_handles": [],
+                "suppressed_bid_handles": ["b1"],
+            }))
+
+    monkeypatch.setattr(
+        workspace_module,
+        "WORKSPACE_COLLAPSE_PROMPT_CAP",
+        len(workspace_module.COLLAPSE_PROMPT) + 4000,
+    )
+    llm = _MatchingWorkspaceLLM()
+    matching_tail = "same concrete body boundary"
+    current_event = [{
+        "handle": "e1",
+        "source_kind": "episode",
+        "semantic_text": "current autonomy pressure " + "x" * 12000
+        + matching_tail,
+    }]
+    goal_context_by_ref = {
+        "goal:autonomy_boundary": {
+            "goal_handle": "goal:autonomy_boundary",
+            "goal_kind": "autonomy_boundary",
+            "description": "persistent autonomy goal " + "y" * 12000
+            + matching_tail,
+            "status": "pursuing",
+            "salience": 80,
+            "importance": 90,
+            "progress": 20,
+            "obstruction": 70,
+            "urgency": 80,
+        },
+    }
+
+    result = await workspace_module.collapse_bids(
+        [
+            _bid("ordinary_response"),
+            _bid("autonomy_boundary"),
+        ],
+        SimpleNamespace(
+            llm=llm,
+            workspace_collapse_config=object(),
+        ),
+        current_event=current_event,
+        goal_context_by_ref=goal_context_by_ref,
+    )
+
+    assert result["primary_branch_id"] == "autonomy_boundary"
+    assert len(llm.calls) == 1
+    fitted_payload = llm.calls[0]
+    assert set(fitted_payload["bids"]) == {"b1", "b2"}
+    assert "..." in fitted_payload["current_event"][0]["semantic_text"]
+    assert matching_tail in fitted_payload["current_event"][0]["semantic_text"]
+    persistent_goal = fitted_payload["bids"]["b2"]["persistent_goal"]
+    assert persistent_goal["goal_handle"] == "goal:autonomy_boundary"
+    assert "..." in persistent_goal["description"]
+    assert matching_tail in persistent_goal["description"]
 
 
 @pytest.mark.asyncio
@@ -1527,9 +1620,32 @@ async def test_workspace_repair_overflow_uses_fallback_before_second_call(
             bid["branch_id"]
         ),
     )
+    current_event: list[dict[str, str]] = []
+    goal_context_by_ref = {
+        "goal:social_care": {
+            "goal_handle": "goal:social_care",
+            "goal_kind": "social_care",
+            "description": "support the active social-care matter",
+            "status": "pursuing",
+            "salience": 40,
+            "importance": 70,
+            "progress": 20,
+            "obstruction": 0,
+            "urgency": 20,
+        },
+    }
     prompt_payload = {
+        "current_event": current_event,
         "bids": {
             f"b{index}": {
+                "branch_id": bid["branch_id"],
+                "persistent_goal": (
+                    None
+                    if bid["branch_id"] == "ordinary_response"
+                    else goal_context_by_ref[
+                        bid["goal_ref"]["entity_id"]
+                    ]
+                ),
                 "intention": bid["intention"],
                 "desired_outcome": bid["desired_outcome"],
                 "reason": bid["reason"],
@@ -1546,7 +1662,7 @@ async def test_workspace_repair_overflow_uses_fallback_before_second_call(
     monkeypatch.setattr(
         workspace_module,
         "WORKSPACE_COLLAPSE_PROMPT_CAP",
-        initial_chars,
+        len(workspace_module.COLLAPSE_PROMPT) + initial_chars,
     )
     llm = _InvalidCandidateLLM()
 
@@ -1556,6 +1672,8 @@ async def test_workspace_repair_overflow_uses_fallback_before_second_call(
             llm=llm,
             workspace_collapse_config=object(),
         ),
+        current_event=current_event,
+        goal_context_by_ref=goal_context_by_ref,
     )
 
     assert result["primary_branch_id"] == "ordinary_response"

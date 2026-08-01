@@ -73,18 +73,14 @@ operation 的措辞只描述本轮所需回应，不授予未来执行能力。s
 selection_owner_role 负责选择；其余情况连贯回应当前输入。保持行动者、对象、受益者与主语
 方向。结构化用户对话角色具有权威性：
 “当前用户”的第一人称指当前用户；“当前角色”表示当前角色，也是被直接称呼者和祈使句的隐含主语。
-4. 对身体或场景请求，文本表达角色的言语立场，不代表真实驱动身体或场景。只有完全匹配且
-status 为 executed 的 permitted result 能证明角色大脑完成了相应能力；其他状态保留原义。
-5. runtime_capability_limits 是可信的运行时能力边界，并决定目标候选的可达结果和未来执行能力。
-当它与 response_operation 中的未来执行或承诺措辞产生冲突时，能力边界优先；若某项能力不可用，
-选择“当前回合确认收到请求并说明真实限制”。所有目标字段共同表达该可达结果。未来执行承诺、
-“我会记得”或用其他能力替代不可用能力均不属于它。
-scene_context 已提供的持久化任务状态是可用证据，不等同于仓库读取。用户询问既有任务或
-coding run 状态时，依据所给状态继续，不重新索取已提供的 README、权限或其他材料。
-6. 只引用提供的 evidence handle。角色自己的反思和内部观察属于背景证据，不是当前用户的即时
-发言；省略运行元数据。`evidence_handles` 中每个元素必须逐个等于一个已提供的 handle；
-不得使用范围、通配符、组合写法或 source ID。缺少依据的目标角色保持为空，并给出一项
-对话层面的预期后果。
+4. 身体或场景请求只能形成言语立场。仅完全匹配且 status=executed 的 permitted result 证明相应能力已完成。
+5. 本阶段只决定语义目标，不判断工具、检索、resolver、worker、调度或运行时能力，也不承诺执行。
+缺事实时保留“取得所需证据后回应”，由后续专属阶段判断证据是否充分及取得方式；身份、性格、不熟悉或枯燥均不证明无法完成。
+提醒、主动联系、交付等须写成“由下游核验是否可安排”的未决请求。叙述字段禁用“承诺、我会、准时、记录、已安排、
+已生效、待执行”。仅当前证据支持真实价值、关系或边界冲突时可拒绝。scene_context 持久任务状态可直接使用。
+6. 只引用提供的 evidence handle。反思和内部观察是背景证据，不是当前用户发言；省略运行元数据。
+`evidence_handles` 中每个元素必须逐个等于一个已提供的 handle；不得使用范围、通配符、组合写法或
+source ID。无依据的目标角色留空，并给出一项对话预期后果。
 7. `conversation_evidence` 中标为 `retention=decision_critical` 的事件是明确的连续性约束。
 当前输入询问下一步、其他选择或要求作新选择时，引用所有会排除旧选项的相关
 decision_critical 事件。`completed`、`rejected`、`superseded` 不是新选项；仅在当前输入
@@ -101,7 +97,8 @@ URL 及 schema 或 enum token 保持原样。private_monologue 使用当前角�
 
 # 输出格式
 只返回一个 JSON 对象，字段必须恰好是 intention、desired_outcome、concrete_detail、reason、
-private_monologue、target_role_handles、evidence_handles、expected_consequences 和 confidence。
+private_monologue、target_role_handles、evidence_handles、expected_consequences 和
+confidence。
 五个叙述字段与 confidence 是字符串；两个 handle 字段是字符串数组；expected_consequences 是
 非空字符串数组。`evidence_handles` 最多九项，`target_role_handles` 最多八项；
 只能引用提供的 evidence handle。
@@ -129,7 +126,8 @@ REQUIRED_SELECTION_GOAL_PROMPT = '''你负责在本轮选择权属于当前角�
    `superseded` 等终态事实会约束本轮选择；只有当前输入明确要求重开或重复时，才重新选择旧事项。
    当前 episode 的直接事实比旧进度更新。
 3. `supporting_evidence` 只提供可选支持。`evidence_handles` 只能引用
-   `required_selection_operations`、`conversation_progress_evidence` 和 `supporting_evidence`
+   `required_selection_operations`、`conversation_progress_evidence` 和
+   `supporting_evidence`
    提供的 handle，每个 handle 必须逐个等于输入值。`semantic_context` 中出现的 handle
    不属于可引用证据。
 4. 结合角色身份、约束、情绪、关系和场景，作出一个属于当前角色的选择。群参与建议只帮助判断
@@ -297,11 +295,7 @@ async def run_goal_cognition(
     try:
         prompt_text = _fit_goal_prompt_payload(
             prompt_payload,
-            system_prompt=(
-                initial_system_prompt
-                if selection_required
-                else ''
-            ),
+            system_prompt=initial_system_prompt,
         )
     except PromptBudgetError as exc:
         raise CognitionExecutionError(

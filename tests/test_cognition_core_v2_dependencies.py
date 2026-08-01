@@ -43,15 +43,49 @@ def _bid(branch_id: str) -> dict[str, object]:
 
     return {
         "branch_id": branch_id,
-        "goal_ref": {"scope": "user", "kind": "goal", "entity_id": "g1"},
+        "goal_ref": {
+            "scope": "user",
+            "kind": "goal",
+            "entity_id": f"goal:{branch_id}",
+        },
         "intention": f"intention from {branch_id}",
         "desired_outcome": "grounded outcome",
         "concrete_detail": "bounded detail",
         "reason": "typed evidence supports this branch",
+        "private_monologue": "I should preserve the grounded current motive.",
         "target_roles": [],
         "evidence_handles": ["e1"],
         "expected_consequences": ["preserve continuity"],
         "confidence": "high",
+    }
+
+
+def _current_event() -> list[dict[str, str]]:
+    """Build one typed current-event projection for workspace tests."""
+
+    return [{
+        "handle": "e1",
+        "source_kind": "episode",
+        "semantic_text": "The current user asks for current hardware prices.",
+    }]
+
+
+def _goal_contexts(*branch_ids: str) -> dict[str, dict[str, object]]:
+    """Build bounded persistent-goal provenance keyed by bid goal ref."""
+
+    return {
+        f"goal:{branch_id}": {
+            "goal_handle": f"goal:{branch_id}",
+            "goal_kind": branch_id,
+            "description": f"persistent matter for {branch_id}",
+            "status": "pursuing",
+            "salience": 10,
+            "importance": 70,
+            "progress": 20,
+            "obstruction": 0,
+            "urgency": 10,
+        }
+        for branch_id in branch_ids
     }
 
 
@@ -184,7 +218,12 @@ async def test_collapse_copies_complete_bids_from_handle_partition() -> None:
     """Collapse output selects handles; code copies the complete internal bids."""
 
     class _LLM:
-        async def ainvoke(self, messages: list[object], *, config: object) -> SimpleNamespace:
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config: object,
+        ) -> SimpleNamespace:
             del messages, config
             return SimpleNamespace(
                 content=json.dumps({
@@ -199,7 +238,12 @@ async def test_collapse_copies_complete_bids_from_handle_partition() -> None:
         workspace_collapse_config=object(),
     )
 
-    result = await collapse_bids([_bid("first"), _bid("second")], services)
+    result = await collapse_bids(
+        [_bid("first"), _bid("second")],
+        services,
+        current_event=_current_event(),
+        goal_context_by_ref=_goal_contexts("first", "second"),
+    )
 
     assert result["primary_bid"]["branch_id"] == "first"
     assert result["supporting_bids"][0]["reason"] == _bid("second")["reason"]
@@ -229,12 +273,53 @@ async def test_collapse_assigns_handles_in_frozen_registry_order() -> None:
     result = await collapse_bids(
         [_bid("social_care"), _bid("autonomy_boundary")],
         SimpleNamespace(llm=_LLM(), workspace_collapse_config=object()),
+        current_event=_current_event(),
+        goal_context_by_ref=_goal_contexts(
+            "social_care",
+            "autonomy_boundary",
+        ),
     )
 
+    assert captured["current_event"] == _current_event()
+    assert captured["bids"]["b1"]["branch_id"] == "autonomy_boundary"
+    assert captured["bids"]["b1"]["persistent_goal"] == (
+        _goal_contexts("autonomy_boundary")["goal:autonomy_boundary"]
+    )
     assert captured["bids"]["b1"]["intention"] == (
         "intention from autonomy_boundary"
     )
     assert result["primary_branch_id"] == "autonomy_boundary"
+
+
+@pytest.mark.asyncio
+async def test_collapse_suppresses_an_unrelated_persistent_goal_bid() -> None:
+    """The model-authored partition can exclude a stale persistent motive."""
+
+    class _LLM:
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config: object,
+        ) -> SimpleNamespace:
+            del messages, config
+            response = {
+                "primary_bid_handle": "b1",
+                "supporting_bid_handles": [],
+                "suppressed_bid_handles": ["b2"],
+            }
+            return SimpleNamespace(content=json.dumps(response))
+
+    result = await collapse_bids(
+        [_bid("ordinary_response"), _bid("autonomy_boundary")],
+        SimpleNamespace(llm=_LLM(), workspace_collapse_config=object()),
+        current_event=_current_event(),
+        goal_context_by_ref=_goal_contexts("autonomy_boundary"),
+    )
+
+    assert result["primary_branch_id"] == "ordinary_response"
+    assert result["supporting_branch_ids"] == []
+    assert result["suppressed_branch_ids"] == ["autonomy_boundary"]
 
 
 def test_goal_bid_rejects_route_and_capability_authority() -> None:

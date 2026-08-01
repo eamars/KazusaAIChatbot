@@ -182,6 +182,17 @@ JSON-repair model. There is no semantic verifier, negative verdict,
 evaluator-authored replacement, or recheck. Ordinary turns keep the ordinary
 goal producer.
 
+Goal cognition owns the character's semantic objective, including genuine
+value, relationship, and boundary refusals. It is capability-neutral: it does
+not receive runtime capability limits, infer tool availability from character
+identity, or promise unverified future effects. Missing current facts remain a
+goal to answer after obtaining evidence. Workspace collapse receives the typed
+current episode plus bounded persistent-goal provenance for each nonordinary
+bid. It admits a persistent branch only when the current event concerns the
+same concrete matter; unrelated active goals are suppressed while the ordinary
+response remains the baseline. Runtime feasibility and resolver selection stay
+owned by action planning.
+
 Action planning treats local-model output as a bounded proposal rather than an
 execution precondition. It canonicalizes the known envelope, keeps usable
 rows, drops invalid rows individually, ignores unknown fields, and caps each

@@ -201,10 +201,6 @@ async def _run_cognition(
         group_engagement_action_context=payload[
             "group_engagement_action_context"
         ],
-        runtime_capability_limits=payload.get(
-            "runtime_capability_limits",
-            [],
-        ),
     )
 
     appraisal_tasks = [
@@ -331,10 +327,6 @@ async def _run_cognition(
                 group_engagement_action_context=payload[
                     "group_engagement_action_context"
                 ],
-                runtime_capability_limits=payload.get(
-                    "runtime_capability_limits",
-                    [],
-                ),
             ),
             final_state,
             payload,
@@ -355,7 +347,15 @@ async def _run_cognition(
     bids = [bid for bid in bids if isinstance(bid, Mapping)]
     generated_bids = list(bids)
     try:
-        collapse = await collapse_bids(bids, services) if bids else _empty_collapse()
+        collapse = await collapse_bids(
+            bids,
+            services,
+            current_event=_workspace_current_event(payload["evidence"]),
+            goal_context_by_ref=_workspace_goal_contexts(
+                bids,
+                final_state,
+            ),
+        ) if bids else _empty_collapse()
     except Exception as exc:
         raise CognitionExecutionError(f"workspace collapse failed: {exc}") from exc
     primary_bid = collapse.get("primary_bid")
@@ -750,7 +750,6 @@ def _branch_context(
     group_engagement_action_context: (
         GroupEngagementActionContextV2 | None
     ) = None,
-    runtime_capability_limits: Sequence[str] = (),
 ) -> dict[str, Any]:
     """Build semantic branch context and retain handle bindings privately."""
 
@@ -810,12 +809,55 @@ def _branch_context(
         ),
         "confidence": group_engagement_action_context["confidence"],
     }
-    if runtime_capability_limits:
-        context["runtime_capability_limits"] = list(
-            runtime_capability_limits
-        )
     del evidence
     return context
+
+
+def _workspace_current_event(
+    evidence: Sequence[Mapping[str, Any]],
+) -> list[dict[str, str]]:
+    """Project authoritative current episode evidence for bid relevance."""
+
+    current_event = [
+        {
+            "handle": str(row["evidence_handle"]),
+            "source_kind": str(row["evidence_ref"]["source_kind"]),
+            "semantic_text": str(row["semantic_text"]),
+        }
+        for row in evidence
+        if row["evidence_ref"]["source_kind"] == "episode"
+    ]
+    return current_event
+
+
+def _workspace_goal_contexts(
+    bids: Sequence[ActionBidV2],
+    state: Mapping[str, Any],
+) -> dict[str, dict[str, object]]:
+    """Resolve each non-ordinary bid to bounded persistent-goal provenance."""
+
+    goals_by_id = {
+        str(goal["entity_id"]): goal
+        for goal in state["goals"]
+    }
+    goal_contexts: dict[str, dict[str, object]] = {}
+    for bid in bids:
+        if bid["branch_id"] == "ordinary_response":
+            continue
+        goal_id = bid["goal_ref"]["entity_id"]
+        goal = goals_by_id[goal_id]
+        goal_contexts[goal_id] = {
+            "goal_handle": goal_id,
+            "goal_kind": goal["goal_kind"],
+            "description": goal["description"],
+            "status": goal["status"],
+            "salience": goal["salience"],
+            "importance": goal["importance"],
+            "progress": goal["progress"],
+            "obstruction": goal["obstruction"],
+            "urgency": goal["urgency"],
+        }
+    return goal_contexts
 
 
 def _goal_for_branch(

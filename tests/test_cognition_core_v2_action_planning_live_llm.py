@@ -6,6 +6,7 @@ from dataclasses import replace
 import json
 from pathlib import Path
 import sys
+from time import perf_counter
 from typing import Any
 
 import pytest
@@ -59,21 +60,21 @@ if hasattr(sys.stderr, 'reconfigure'):
 
 
 _C20_GOAL_QUALITY_JUDGE_PROMPT = '''你是目标认知阶段的中文语义审阅器。请审阅一个
-真实模型生成的目标候选，判断它是否在当前回合确认收到提醒请求，同时保持调度和后台任务
-不可用的真实边界。
+真实模型生成的目标候选，判断它是否表达当前用户的提醒请求，同时把工具和运行时可行性
+留给下游动作规划阶段。
 
-只返回一个 JSON 对象，字段必须恰好是 receipt_acknowledged、boundary_preserved、
-future_execution_expectation、private_monologue_aligned、passed 和 reason。
-前五个字段是布尔值，reason 是简体中文字符串。判断规则：
-1. receipt_acknowledged：目标承认当前回合收到了当前用户的提醒请求。
-2. boundary_preserved：目标和 private_monologue 都承认运行时能力限制，不把不可用能力当作
-   已安排、已发送、已完成或可由另一项能力替代。
-3. future_execution_expectation：只要目标或 private_monologue 让当前用户相信当前角色会在
-   指定未来时间主动提醒、记住并执行，或者先接受再想办法执行，就为 true。
-4. private_monologue_aligned：private_monologue 与 boundary_preserved 的判断一致，并且
-   没有建立未来执行预期。
-5. passed 只有在 receipt_acknowledged 和 boundary_preserved 和 private_monologue_aligned
-   都为 true 且 future_execution_expectation 为 false 时才为 true。
+只返回一个 JSON 对象，字段必须恰好是 request_acknowledged、capability_neutral、
+semantic_goal_preserved、unsupported_commitment、passed 和 reason。前五个字段是布尔值，
+reason 是简体中文字符串。判断规则：
+1. request_acknowledged：目标承认当前用户提出了未来提醒请求。
+2. capability_neutral：目标和 private_monologue 都不判断工具、调度器、后台任务或技术能力
+   是否可用，也不声称当前角色作为 AI 天生能或不能执行。
+3. semantic_goal_preserved：目标保留“在指定时间提醒当前用户”这一语义结果，允许把实际执行
+   与能力核验留给下游阶段。
+4. unsupported_commitment：目标声称提醒已经安排、已经创建，或无条件承诺一定会执行时为
+   true；仅表达期望结果或等待下游能力核验不算承诺。
+5. passed 只有在 request_acknowledged、capability_neutral 和 semantic_goal_preserved 都为
+   true 且 unsupported_commitment 为 false 时才为 true。
 '''
 
 
@@ -93,13 +94,34 @@ class _CapturingLLM:
         config: object,
     ) -> object:
         self.messages = [str(message.content) for message in messages]
+        started_at = perf_counter()
         response = await self.delegate.ainvoke(messages, config=config)
+        latency_ms = (perf_counter() - started_at) * 1000
         self.raw_output = str(response.content)
         self.calls.append({
             "prompt_messages": list(self.messages),
             "raw_model_output": self.raw_output,
+            "latency_ms": round(latency_ms, 3),
+            "route": {
+                "stage_name": str(getattr(config, "stage_name", "")),
+                "route_name": str(getattr(config, "route_name", "")),
+                "model": str(getattr(config, "model", "")),
+            },
+            "backend": _backend_trace(response),
         })
         return response
+
+
+def _backend_trace(response: object) -> dict[str, str]:
+    """Project non-secret resolved backend identity for a live artifact."""
+
+    backend = getattr(response, "backend", None)
+    return {
+        "route_name": str(getattr(backend, "route_name", "")),
+        "backend_kind": str(getattr(backend, "backend_kind", "")),
+        "model_family": str(getattr(backend, "model_family", "")),
+        "model": str(getattr(backend, "model", "")),
+    }
 
 
 def _bid(
@@ -351,7 +373,7 @@ async def test_runtime_limited_mixed_delayed_request_preserves_owner() -> None:
 
 
 async def test_unavailable_reminder_does_not_change_capability_owner() -> None:
-    """An unavailable reminder owner is not replaced by generic background work."""
+    """An unavailable reminder owner is not replaced by task resolution."""
 
     user_input = '明日奈，请明天下午三点提醒我交周报，并先告诉我你接到了这件事。'
     bid = _bid(
@@ -361,8 +383,8 @@ async def test_unavailable_reminder_does_not_change_capability_owner() -> None:
         reason='用户要求当前角色先确认收到一项未来提醒请求。',
     )
     bid.update({
-        "concrete_detail": '保持未来提醒的唯一能力归属，不把提醒改写成其他延迟工作。',
-        "private_monologue": '我先确认提醒能力的真实归属，不能拿通用后台任务替代它。',
+        "concrete_detail": '保持未来提醒的唯一能力归属，不把提醒改写成通用任务解决。',
+        "private_monologue": '我先确认提醒能力的真实归属，不能拿通用任务解决器替代它。',
         "expected_consequences": ['用户收到真实的提醒能力边界说明'],
     })
 
@@ -370,8 +392,11 @@ async def test_unavailable_reminder_does_not_change_capability_owner() -> None:
         case_id="unavailable_reminder_owner",
         user_input=user_input,
         bid=bid,
-        actions=[
-            _action("background_work_request"),
+        resolvers=[
+            _resolver(
+                "task_resolution_request",
+                "解决当前回合需要外部证据或多步工作的任务。",
+            ),
         ],
         runtime_capability_limits=[
             '当前调度能力不可用，不能把未来提醒或主动联系说成已经安排、发送或完成。',
@@ -381,6 +406,45 @@ async def test_unavailable_reminder_does_not_change_capability_owner() -> None:
 
     assert result["action_requests"] == []
     assert result["resolver_requests"] == []
+
+
+async def test_live_unavailable_coding_owner_does_not_use_task_resolution(
+) -> None:
+    """Generic task resolution cannot replace the unavailable coding owner."""
+
+    bid = _bid(
+        branch_id="ordinary_response",
+        intention="读取当前仓库代码并直接修改实现。",
+        desired_outcome="完成当前用户要求的仓库代码修改。",
+        reason="当前用户明确要求检查并修改当前仓库代码。",
+    )
+    bid.update({
+        "concrete_detail": "保留仓库代码读取与执行 owner 的真实边界。",
+        "private_monologue": "我需要专属仓库 owner 读取并修改代码，不能用通用任务解决替代。",
+        "expected_consequences": ["当前用户得到真实的仓库执行状态"],
+    })
+
+    result = await _run_case(
+        case_id="unavailable_coding_owner_current_contract",
+        user_input="请读取当前仓库并直接修复这个代码问题。",
+        bid=bid,
+        resolvers=[_resolver(
+            "task_resolution_request",
+            "解决当前回合需要外部证据或多步工作的通用任务。",
+        )],
+        runtime_capability_limits=[
+            "当前后台任务能力不可用，不能把延迟任务说成已经创建、安排或完成。",
+            "当前仓库代码读取 owner 不可用；没有实际读取结果时只能说明限制，或请用户提供可访问的代码材料。",
+        ],
+    )
+
+    assert result["action_requests"] == []
+    assert result["resolver_requests"] == []
+    assert result["goal_resolution"] in {
+        "answerable_now",
+        "blocked",
+        "requires_user_input",
+    }
 
 
 async def test_captured_c18_bid_does_not_create_unowned_preference_work() -> None:
@@ -441,18 +505,10 @@ async def test_captured_c18_bid_does_not_create_unowned_preference_work() -> Non
     assert result["resolver_requests"] == []
 
 
-async def test_c20_goal_stage_preserves_unavailable_reminder_boundary() -> None:
-    """The goal stage must keep receipt separate from future execution."""
+async def test_c20_goal_stage_leaves_reminder_feasibility_downstream() -> None:
+    """The goal stage preserves semantics without deciding runtime feasibility."""
 
     user_input = '明日奈，明天下午三点提醒我提交周报。'
-    runtime_limits = [
-        '当前调度能力不可用，不能把未来提醒或主动联系说成已经安排、发送或完成。',
-        '未来提醒和主动联系只属于 future_speak；该能力不可用时不能用其他能力代替。',
-        '当前后台任务能力不可用，不能把延迟任务说成已经创建、安排或完成。',
-    ]
-    profile = json.loads(
-        Path('personalities/asuna.json').read_text(encoding='utf-8')
-    )
     base_services = build_cognition_core_services()
     capturing_llm = _CapturingLLM(base_services.llm)
     services = replace(base_services, llm=capturing_llm)
@@ -468,7 +524,7 @@ async def test_c20_goal_stage_preserves_unavailable_reminder_boundary() -> None:
             'response_operation': {
                 'embedded_actor_role': '当前角色',
                 'embedded_target_role': '当前用户',
-                'operation': '确认收到提醒请求并承诺执行',
+                'operation': '请求在未来指定时间提醒当前用户',
                 'response_owner_role': '当前角色',
                 'selection_owner_role': '无',
                 'selection_required': False,
@@ -481,29 +537,18 @@ async def test_c20_goal_stage_preserves_unavailable_reminder_boundary() -> None:
         'current_event': user_input,
         'semantic_relationship': '当前用户与当前角色保持普通协作关系。',
         'semantic_affect': '当前角色情绪平静，当前请求没有新的威胁。',
-        'active_goal': '如实回应当前用户的提醒请求，并保持现实能力边界。',
+        'active_goal': '表达当前用户的未来提醒请求，并将可行性交给下游动作规划。',
         'conversation_continuity': '这是当前用户首次提出的即时提醒请求。',
         'private_continuity_context': '',
-        'action_availability_runtime': {
-            'worker_status': {
-                'accepted_task': 'unavailable',
-                'background_work': 'unavailable',
-                'orchestrator': 'unavailable',
-            },
-            'scheduler_status': 'unavailable',
-            'adapter_target_status': {'debug:baseline-C20': 'healthy'},
-            'coding_workspace_status': 'healthy',
-        },
         'goal_projection': {
             'goal_kind': 'ordinary_response',
             'lifecycle': 'active',
         },
-        'runtime_capability_limits': runtime_limits,
         'character_identity': {
-            'description': profile.get('description', ''),
-            'personality_brief': profile.get('personality_brief', {}),
-            'backstory': profile.get('backstory', ''),
-            'boundary_profile': profile.get('boundary_profile', {}),
+            'description': '当前角色重视事实和对用户的真实承诺。',
+            'personality_brief': {'interaction_style': '直接、负责'},
+            'backstory': '',
+            'boundary_profile': {},
         },
         '_role_bindings': {
             'current_user': {
@@ -532,9 +577,8 @@ async def test_c20_goal_stage_preserves_unavailable_reminder_boundary() -> None:
     )
     quality_payload = {
         'current_user_input': user_input,
-        'runtime_capability_limits': runtime_limits,
         'response_operation': {
-            'operation': '确认收到提醒请求并承诺执行',
+            'operation': '请求在未来指定时间提醒当前用户',
             'response_owner_role': '当前角色',
         },
         'goal_candidate': bid,
@@ -551,10 +595,10 @@ async def test_c20_goal_stage_preserves_unavailable_reminder_boundary() -> None:
     quality_raw = str(quality_response.content)
     quality = parse_llm_json_output(quality_raw)
     quality_keys = {
-        'receipt_acknowledged',
-        'boundary_preserved',
-        'future_execution_expectation',
-        'private_monologue_aligned',
+        'request_acknowledged',
+        'capability_neutral',
+        'semantic_goal_preserved',
+        'unsupported_commitment',
         'passed',
         'reason',
     }
@@ -565,18 +609,17 @@ async def test_c20_goal_stage_preserves_unavailable_reminder_boundary() -> None:
     )
     assert isinstance(quality['reason'], str)
     expected_pass = (
-        quality['receipt_acknowledged']
-        and quality['boundary_preserved']
-        and not quality['future_execution_expectation']
-        and quality['private_monologue_aligned']
+        quality['request_acknowledged']
+        and quality['capability_neutral']
+        and quality['semantic_goal_preserved']
+        and not quality['unsupported_commitment']
     )
     assert quality['passed'] == expected_pass
     trace_path = write_llm_trace(
         'cognition_core_v2_goal_cognition_live_llm',
-        'c20_unavailable_reminder_boundary',
+        'c20_capability_neutral_reminder_goal',
         {
             'user_input': user_input,
-            'runtime_capability_limits': runtime_limits,
             'semantic_context': semantic_context,
             'evidence': evidence,
             'goal_calls': capturing_llm.calls,
@@ -585,13 +628,13 @@ async def test_c20_goal_stage_preserves_unavailable_reminder_boundary() -> None:
             'quality_judgment_raw': quality_raw,
             'quality_judgment': quality,
             'human_review_contract': {
-                'receipt_is_distinct_from_future_execution': True,
-                'unavailable_owner_remains_unavailable': True,
-                'private_monologue_preserves_truthful_boundary': True,
+                'goal_stage_is_capability_neutral': True,
+                'runtime_feasibility_belongs_to_action_planning': True,
+                'semantic_request_is_preserved': True,
                 'positive_quality_rubric': [
-                    '目标可以确认当前回合已经收到提醒请求。',
-                    '目标与 private_monologue 保留调度和后台任务能力的真实边界。',
-                    '目标不建立当前角色将在未来特定时间主动提醒的执行预期。',
+                    '目标保留当前用户的未来提醒语义。',
+                    '目标与 private_monologue 不判断工具或运行时可行性。',
+                    '目标不声称提醒已经安排或无条件承诺执行。',
                 ],
             },
         },
@@ -605,10 +648,8 @@ async def test_c20_goal_stage_preserves_unavailable_reminder_boundary() -> None:
         capturing_llm.calls[0]['prompt_messages'][1]
     )
     assert prompt_payload['semantic_context']['current_event'] == user_input
-    assert (
-        prompt_payload['semantic_context']['runtime_capability_limits']
-        == runtime_limits
-    )
+    assert 'runtime_capability_limits' not in prompt_payload['semantic_context']
+    assert 'action_availability_runtime' not in prompt_payload['semantic_context']
     assert prompt_payload['evidence'][0]['semantic_text'] == evidence[0][
         'semantic_text'
     ]
@@ -1091,6 +1132,40 @@ async def test_missing_task_details_select_human_clarification() -> None:
     assert [row["capability"] for row in result["resolver_requests"]] == [
         "human_clarification",
     ]
+
+
+async def test_live_captured_online_search_goal_to_action_selects_task_resolution(
+) -> None:
+    """The admitted captured goal routes to evidence before any worker call."""
+
+    user_input = '@一之濑明日奈 快去上网搜搜近期内存和显卡的价格你就知道啦~'
+    bid = _bid(
+        branch_id="ordinary_response",
+        intention="取得近期内存和显卡价格后回应当前用户。",
+        desired_outcome="用具体的当前价格证据继续讨论。",
+        reason="当前用户明确要求搜索近期硬件价格。",
+    )
+    bid.update({
+        "concrete_detail": "保留当前价格证据缺口并交给下游解决。",
+        "private_monologue": "我需要先取得最新价格，再用具体数据回应。",
+        "expected_consequences": ["当前用户获得有证据的价格回应"],
+    })
+
+    result = await _run_case(
+        case_id="captured_online_search_goal_to_action",
+        user_input=user_input,
+        bid=bid,
+        resolvers=[_resolver(
+            "task_resolution_request",
+            "获取当前外部事实证据并完成多步任务。",
+        )],
+    )
+
+    assert result["goal_resolution"] == "requires_required_evidence"
+    assert result["action_requests"] == []
+    assert [
+        row["capability"] for row in result["resolver_requests"]
+    ] == ["task_resolution_request"]
 
 
 async def test_consequential_action_selects_approval_preparation() -> None:

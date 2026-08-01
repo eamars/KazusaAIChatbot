@@ -294,13 +294,13 @@ def test_action_planning_prompt_binds_goal_progress_shape() -> None:
     assert "所有新生成的语义内容使用简体中文" in ACTION_PLANNING_PROMPT
 
 
-def test_goal_cognition_prompt_binds_runtime_owner_limits() -> None:
-    """Cognition monologue must not promise an unavailable external effect."""
+def test_goal_cognition_prompt_keeps_runtime_feasibility_downstream() -> None:
+    """Goal cognition preserves evidence needs without judging runtime tools."""
 
-    assert "runtime_capability_limits" in GOAL_COGNITION_PROMPT
-    assert "能力边界优先" in GOAL_COGNITION_PROMPT
-    assert "当前回合确认收到请求并说明真实限制" in GOAL_COGNITION_PROMPT
-    assert "我会记得" in GOAL_COGNITION_PROMPT
+    assert "runtime_capability_limits" not in GOAL_COGNITION_PROMPT
+    assert "不判断工具、检索、resolver" in GOAL_COGNITION_PROMPT
+    assert "取得所需证据后回应" in GOAL_COGNITION_PROMPT
+    assert "后续专属阶段判断证据是否充分" in GOAL_COGNITION_PROMPT
 
 
 def test_action_planning_repair_message_repeats_nested_contract() -> None:

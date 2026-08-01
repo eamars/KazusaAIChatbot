@@ -865,6 +865,73 @@ def _workspace_bid(branch_id: str) -> dict[str, object]:
     }
 
 
+def test_workspace_current_event_projects_only_episode_evidence() -> None:
+    """Workspace relevance receives current episodes rather than RAG history."""
+
+    evidence = [
+        {
+            "evidence_handle": "e1",
+            "evidence_ref": {"source_kind": "episode"},
+            "semantic_text": "current request",
+        },
+        {
+            "evidence_handle": "e2",
+            "evidence_ref": {"source_kind": "memory"},
+            "semantic_text": "retrieved history",
+        },
+    ]
+
+    assert facade_module._workspace_current_event(evidence) == [{
+        "handle": "e1",
+        "source_kind": "episode",
+        "semantic_text": "current request",
+    }]
+
+
+def test_workspace_goal_contexts_bind_nonordinary_bid_provenance() -> None:
+    """Each persistent branch carries its exact current goal into collapse."""
+
+    goal = {
+        "entity_id": "autonomy_boundary",
+        "goal_kind": "autonomy_boundary",
+        "description": "protect one concrete current boundary",
+        "status": "active",
+        "salience": 0.8,
+        "importance": 0.9,
+        "progress": 0.2,
+        "obstruction": 0.7,
+        "urgency": 0.8,
+    }
+    result = facade_module._workspace_goal_contexts(
+        [
+            _workspace_bid("ordinary_response"),
+            _workspace_bid("autonomy_boundary"),
+        ],
+        {"goals": [goal]},
+    )
+
+    assert result == {
+        "autonomy_boundary": {
+            "goal_handle": "autonomy_boundary",
+            **{
+                key: value
+                for key, value in goal.items()
+                if key != "entity_id"
+            },
+        },
+    }
+
+
+def test_workspace_goal_contexts_fail_on_missing_provenance() -> None:
+    """A nonordinary branch without its persistent goal fails at the boundary."""
+
+    with pytest.raises(KeyError, match="autonomy_boundary"):
+        facade_module._workspace_goal_contexts(
+            [_workspace_bid("autonomy_boundary")],
+            {"goals": []},
+        )
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("recover_on_third", [True, False])
 async def test_workspace_retry_or_branch_order_fallback(
@@ -901,6 +968,24 @@ async def test_workspace_retry_or_branch_order_fallback(
             _workspace_bid("relationship_connection"),
         ],
         services,
+        current_event=[{
+            "handle": "e1",
+            "source_kind": "episode",
+            "semantic_text": "the user made a current request",
+        }],
+        goal_context_by_ref={
+            "relationship_connection": {
+                "goal_handle": "relationship_connection",
+                "goal_kind": "relationship_connection",
+                "description": "preserve the active relationship matter",
+                "status": "pursuing",
+                "salience": 40,
+                "importance": 70,
+                "progress": 20,
+                "obstruction": 0,
+                "urgency": 30,
+            },
+        },
     )
 
     expected_primary = (

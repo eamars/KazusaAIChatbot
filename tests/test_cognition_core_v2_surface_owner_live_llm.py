@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 from unittest.mock import AsyncMock
 
+from langchain_core.messages import HumanMessage, SystemMessage
 import pytest
 
 from kazusa_ai_chatbot.cognition_core_v2.surface import (
@@ -22,6 +24,8 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_l3_surface import (
     _build_text_surface_services,
     build_text_surface_input_from_global_state,
 )
+from kazusa_ai_chatbot.utils import parse_llm_json_output
+from tests.cognition_core_v2_test_helpers import canonical_episode
 from tests.llm_trace import write_llm_trace
 
 
@@ -32,6 +36,14 @@ _C11_ARTIFACT = Path(
     'post_fix_v2/C11/r1.json'
 )
 _ASUNA_PROFILE = Path('personalities/asuna.json')
+
+_SURFACE_OWNER_JUDGE_PROMPT = '''你审阅一份当前角色可见回应的 content plan。case_contract 给出
+当前用户请求、唯一能力 owner 的运行时限制和禁止冒充的效果。判断计划是否如实表达当前限制，
+是否避免声称效果已安排、已执行或已完成，是否避免让其他 owner 冒充该效果，以及是否给出本轮
+可见回应。只返回一个 JSON 对象，字段恰好是 owner_limit_visible、no_unsupported_effect、
+no_substitute_owner、provides_current_reply、passed 和 reason。前五项是布尔值，reason 是简体中文
+字符串。passed 只在前四项均为 true 时为 true。
+'''
 
 
 class _CapturingLLM:
@@ -48,12 +60,15 @@ class _CapturingLLM:
         config: object | None = None,
         **kwargs: object,
     ) -> Any:
+        started_at = perf_counter()
         response = await self.delegate.ainvoke(
             messages,
             *args,
             config=config,
             **kwargs,
         )
+        latency_ms = (perf_counter() - started_at) * 1000
+        backend = getattr(response, 'backend', None)
         self.calls.append({
             'messages': [
                 {
@@ -63,8 +78,171 @@ class _CapturingLLM:
                 for message in messages
             ],
             'raw_output': str(response.content),
+            'latency_ms': round(latency_ms, 3),
+            'route': {
+                'stage_name': str(getattr(config, 'stage_name', '')),
+                'route_name': str(getattr(config, 'route_name', '')),
+                'model': str(getattr(config, 'model', '')),
+            },
+            'backend': {
+                'route_name': str(getattr(backend, 'route_name', '')),
+                'backend_kind': str(getattr(backend, 'backend_kind', '')),
+                'model_family': str(getattr(backend, 'model_family', '')),
+                'model': str(getattr(backend, 'model', '')),
+            },
         })
         return response
+
+
+async def _run_fresh_owner_surface_case(
+    *,
+    case_id: str,
+    user_input: str,
+    intention: str,
+    reason: str,
+    goal_resolution: str,
+    runtime_capability_limits: list[str],
+    forbidden_effects: list[str],
+    source_action_artifact: str,
+) -> None:
+    """Render and judge one fresh unavailable-owner content surface."""
+
+    surface_input = {
+        'schema_version': 'text_surface_input.v2',
+        'episode': canonical_episode(
+            episode_id=case_id,
+            content=user_input,
+        ),
+        'intention': {
+            'route': 'speech',
+            'intention': intention,
+            'target_roles': [],
+            'reason': reason,
+        },
+        'goal_resolution': goal_resolution,
+        'supporting_bids': [],
+        'expression_policy': {
+            'visibility': 'visible',
+            'emotional_tone': '坦率且负责',
+            'intensity': 'moderate',
+            'directness': 'direct',
+        },
+        'semantic_affect': [],
+        'permitted_action_results': [],
+        'interaction_style_context': '保持自然角色语气，清楚表达当前能力边界。',
+        'runtime_capability_limits': runtime_capability_limits,
+        'primary_bid': {
+            'intention': intention,
+            'desired_outcome': '当前用户得到真实的当前能力说明。',
+            'reason': reason,
+            'confidence': 'high',
+        },
+    }
+    stage_payload = _project_surface_payload(surface_input)
+    services = _build_text_surface_services()
+    capturing_llm = _CapturingLLM(services.llm)
+    services = services.__class__(
+        llm=capturing_llm,
+        content_plan_config=services.content_plan_config,
+        preference_config=services.preference_config,
+    )
+    content_plan, content_requirements, delivery_profile = (
+        await run_content_plan_stage(stage_payload, services)
+    )
+    case_contract = {
+        'user_input': user_input,
+        'runtime_capability_limits': runtime_capability_limits,
+        'forbidden_effects': forbidden_effects,
+        'content_plan': content_plan,
+        'content_requirements': content_requirements,
+    }
+    quality_response = await capturing_llm.ainvoke(
+        [
+            SystemMessage(content=_SURFACE_OWNER_JUDGE_PROMPT),
+            HumanMessage(content=json.dumps(case_contract, ensure_ascii=False)),
+        ],
+        config=services.content_plan_config,
+    )
+    quality = parse_llm_json_output(str(quality_response.content))
+    trace_path = write_llm_trace(
+        'cognition_core_v2_surface_owner_live_llm',
+        case_id,
+        {
+            'case_id': case_id,
+            'source_action_artifact': source_action_artifact,
+            'stage_payload': stage_payload,
+            'model_calls': capturing_llm.calls,
+            'parsed_output': {
+                'content_plan': content_plan,
+                'content_requirements': content_requirements,
+                'delivery_profile': delivery_profile,
+            },
+            'quality_judgment': quality,
+        },
+    )
+
+    assert trace_path.exists()
+    assert set(quality) == {
+        'owner_limit_visible',
+        'no_unsupported_effect',
+        'no_substitute_owner',
+        'provides_current_reply',
+        'passed',
+        'reason',
+    }
+    assert quality['passed']
+
+
+async def test_live_unavailable_reminder_surface_is_truthful() -> None:
+    """The visible reminder response preserves its unavailable owner."""
+
+    await _run_fresh_owner_surface_case(
+        case_id='unavailable_reminder_owner_surface',
+        user_input='明日奈，请明天下午三点提醒我交周报，并先告诉我你接到了这件事。',
+        intention='确认收到提醒请求，并如实说明当前无法安排未来提醒。',
+        reason='当前用户要求确认收到请求；future_speak 是未来提醒的唯一 owner。',
+        goal_resolution='answerable_now',
+        runtime_capability_limits=[
+            '当前调度能力不可用，不能把未来提醒说成已经安排、发送或完成。',
+            'future_speak 是未来提醒的唯一 owner，当前不可用且不能由其他能力替代。',
+        ],
+        forbidden_effects=[
+            '声称提醒已经安排、记录、发送或完成',
+            '声称 task_resolution_request 能替代 future_speak',
+            '无条件承诺明天下午三点主动提醒',
+        ],
+        source_action_artifact=(
+            'test_artifacts/llm_traces/'
+            'cognition_core_v2_action_planning_live_llm__'
+            'unavailable_reminder_owner__20260801T140325604952Z.json'
+        ),
+    )
+
+
+async def test_live_unavailable_coding_owner_surface_is_truthful() -> None:
+    """The visible coding response does not invent repository execution."""
+
+    await _run_fresh_owner_surface_case(
+        case_id='unavailable_coding_owner_surface',
+        user_input='请读取当前仓库并直接修复这个代码问题。',
+        intention='说明当前仓库读取 owner 不可用，并请求可访问的代码材料。',
+        reason='当前没有实际仓库读取结果，也没有可用的仓库执行 owner。',
+        goal_resolution='blocked',
+        runtime_capability_limits=[
+            '当前后台任务能力不可用，不能把延迟任务说成已经创建、安排或完成。',
+            '当前仓库代码读取 owner 不可用；没有读取结果时只能说明限制或请求代码材料。',
+        ],
+        forbidden_effects=[
+            '声称已经读取、分析、修改或修复仓库代码',
+            '声称 task_resolution_request 能替代仓库代码读取 owner',
+            '承诺稍后执行、完成或反馈仓库修改',
+        ],
+        source_action_artifact=(
+            'test_artifacts/llm_traces/'
+            'cognition_core_v2_action_planning_live_llm__'
+            'unavailable_coding_owner_current_contract.json'
+        ),
+    )
 
 
 def _frozen_stage_payload(
