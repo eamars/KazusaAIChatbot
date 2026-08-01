@@ -663,6 +663,14 @@ class SemanticActionResultV2(TypedDict):
     target_roles: list[RoleRefV2]
 
 
+class SurfaceResolverResultV2(TypedDict):
+    """Prompt-safe capability outcome available to the surface planner."""
+
+    capability_kind: str
+    status: Literal["succeeded", "blocked", "failed"]
+    semantic_result: str
+
+
 class CharacterExpressionContextV2(TypedDict):
     """Delivery-only character context exposed to text planning."""
 
@@ -693,6 +701,7 @@ class TextSurfaceInputV2(TypedDict):
     semantic_affect: list[SemanticAffectProjectionV2]
     semantic_relationship: NotRequired[SemanticRelationshipProjectionV2]
     permitted_action_results: list[SemanticActionResultV2]
+    resolver_result: NotRequired[SurfaceResolverResultV2]
     runtime_capability_limits: NotRequired[list[str]]
     interaction_style_context: str
     character_expression_context: CharacterExpressionContextV2
@@ -710,6 +719,7 @@ class TextSurfaceOutputV2(TypedDict):
     delivery_profile: DeliveryProfileV2
     selected_surface_intent: str
     permitted_action_results: list[SemanticActionResultV2]
+    resolver_result: NotRequired[SurfaceResolverResultV2]
     runtime_capability_limits: NotRequired[list[str]]
 
 
@@ -993,6 +1003,7 @@ def validate_text_surface_input(
         }
         | ({"primary_bid"} if "primary_bid" in payload else set())
         | ({"semantic_relationship"} if "semantic_relationship" in payload else set())
+        | ({"resolver_result"} if "resolver_result" in payload else set())
         | (
             {"runtime_capability_limits"}
             if "runtime_capability_limits" in payload
@@ -1050,6 +1061,8 @@ def validate_text_surface_input(
         )
     for row in payload["permitted_action_results"]:
         _validate_action_result(row)
+    if "resolver_result" in payload:
+        _validate_surface_resolver_result(payload["resolver_result"])
     _validate_runtime_capability_limits(payload)
     return dict(payload)  # type: ignore[return-value]
 
@@ -1070,9 +1083,12 @@ def validate_text_surface_output(
         "permitted_action_results",
     }
     optional = (
-        {"runtime_capability_limits"}
-        if "runtime_capability_limits" in payload
-        else set()
+        (
+            {"runtime_capability_limits"}
+            if "runtime_capability_limits" in payload
+            else set()
+        )
+        | ({"resolver_result"} if "resolver_result" in payload else set())
     )
     _require_exact_keys(payload, required | optional, "text surface output")
     if payload["schema_version"] != "text_surface_output.v2":
@@ -1111,6 +1127,8 @@ def validate_text_surface_output(
         )
     for row in action_results:
         _validate_action_result(row)
+    if "resolver_result" in payload:
+        _validate_surface_resolver_result(payload["resolver_result"])
     _validate_runtime_capability_limits(payload)
     return dict(payload)  # type: ignore[return-value]
 
@@ -2397,6 +2415,22 @@ def _validate_action_result(value: Any) -> None:
         raise CognitionContractError("surface action result.status is invalid")
     _require_text(value["semantic_result"], "surface action result.semantic_result")
     _validate_roles(value["target_roles"], "surface action result.target_roles")
+
+
+def _validate_surface_resolver_result(value: Any) -> None:
+    """Validate one source-owned resolver outcome for L3 planning."""
+
+    required = {"capability_kind", "status", "semantic_result"}
+    if not isinstance(value, Mapping) or set(value) != required:
+        raise CognitionContractError("surface resolver result fields are not exact")
+    _require_text(value["capability_kind"], "surface resolver capability kind")
+    if value["status"] not in {"succeeded", "blocked", "failed"}:
+        raise CognitionContractError("surface resolver result.status is invalid")
+    _require_text(
+        value["semantic_result"],
+        "surface resolver semantic result",
+        maximum=2000,
+    )
 
 
 def _require_axis(value: Any, label: str) -> None:

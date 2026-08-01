@@ -47,7 +47,8 @@ JSON 对象，不添加解释、markdown 或额外字段。'''
 CONTENT_PLAN_SYSTEM_PROMPT = '''规划当前角色在这个场景中实际会说出或发送的内容，使其自然表达
 已经形成的角色判断。综合 selected intention、primary bid、supporting bid、visible episode、
 semantic affect、semantic relationship、expression policy、interaction style 和
-permitted_action_results。character_expression_context 提供 tempo 和 linguistic_texture，与这些
+permitted_action_results。resolver_result 提供本轮 resolver capability 的来源自有执行结果。
+character_expression_context 提供 tempo 和 linguistic_texture，与这些
 语境共同塑造句式、节奏和角色声音。runtime_capability_limits 提供运行时能力边界；按每项能力的
 真实状态表达已经发生的结果、当前限制、等待状态或下一步条件。
 
@@ -67,6 +68,9 @@ unavailable 和其他状态对应各自的真实限制。请求或目标候选�
 4. 按 permitted_action_results 的状态规划事实表述：executed 表达有界的完成结果；pending 或
 scheduled 表达已记录、已排队、待执行及相应条件；其他状态表达当前限制或下一步。让后续 worker
 结果保持开放。
+当 resolver_result.status=succeeded 且 semantic_result 明确任务已接纳并将继续执行时，表达已接纳、
+正在等待后续结果的真实状态；不得改写成 capability 不可用、任务失败或不会继续。此时 blocked 仅表示
+当前前台缺少最终答案，不覆盖已经成功接纳的后续工作。
 5. 以 selected intention 及 intention.reason 为语义锚点，阅读完整语境，分清角色是在回应请求
 本身，还是在回应提问的时机、突然程度或直接程度。可自由组合惊讶、害羞、防御、调侃、嘴硬、
 迟疑、温柔、热烈或其他符合角色的情绪与特征。这些表达可以先于明确决定出现，并与收尾共同组成
@@ -113,6 +117,7 @@ async def run_content_plan_stage(
 PREFERENCE_SYSTEM_PROMPT = '''识别当前角色判断和当前场景中真实存在的可见表达边界或称呼对象约束。
 以 selected intention、visible episode、projected bids、expression policy、semantic affect、
 semantic relationship、interaction style 和 permitted_action_results 为语境。
+resolver_result 是来源自有的 resolver 执行结果，按 status 和 semantic_result 原义保留。
 runtime_capability_limits 是可信的运行时能力边界，只用于保持表达与现实能力一致。
 
 每一条 visible_boundaries 都对应权威语境中明确生效的表达限制或细节范围；每一条
@@ -155,7 +160,7 @@ DIALOG_COMPLIANCE_REPAIR_SYSTEM_PROMPT = '''你负责在最终对话未通过硬
 完整的文本 surface 语义。surface 中的 episode、intention、goal_resolution、supporting bids、
 expression policy、semantic affect、semantic relationship、interaction style、
 character_expression_context、permitted_action_results 和 runtime_capability_limits 是本轮权威
-语境。
+语境。resolver_result 是本轮 resolver capability 的来源自有执行结果。
 
 surface.dialog_compliance_repair.verified_hard_issues 是已经确认的硬错误；
 
@@ -183,6 +188,7 @@ visible_boundaries 和 addressee_plan 仍各自取自权威语境中的具体来
 delivery_profile 表达。
 5. 按 permitted_action_results 和 runtime_capability_limits 的原义重建状态：executed 对应有界
 的完成效果，pending 或 scheduled 对应等待状态，其他 status 对应当前限制。
+resolver_result 明确任务已接纳并将继续执行时，保留该等待后续结果的事实，不得改写为任务失败。
 6. content_requirements 使用正向目标句式，描述回应应呈现的立场、情绪流动、角色特征、事实和
 互动推进；delivery_profile 用词语层次、句式、节奏、犹豫和标点实现这些语义选择，让角色声音
 保持鲜明。

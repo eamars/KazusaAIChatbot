@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Annotated, Any, Literal, TypedDict
 
 from langchain_core.messages import (
@@ -60,6 +61,12 @@ from kazusa_ai_chatbot.rag.web_agent3.constants import (
 )
 
 logger = logging.getLogger(__name__)
+
+_HTTP_URL_PATTERN = re.compile(
+    r"https?://[^\s\\)>\]}\"']+",
+    re.IGNORECASE,
+)
+_MAX_SOURCE_URLS = 8
 
 
 def _prompt_timestamp_for_llm(
@@ -169,6 +176,30 @@ def _observation_record(
         "result": result,
     }
     return record
+
+
+def _source_urls_from_observations(observations: object) -> list[str]:
+    """Project exact public URLs from executed source observations."""
+
+    if not isinstance(observations, list):
+        return []
+    source_urls: list[str] = []
+    for observation in observations:
+        if not isinstance(observation, dict):
+            continue
+        result_text = json.dumps(
+            observation.get("result", {}),
+            ensure_ascii=False,
+            default=str,
+        )
+        for match in _HTTP_URL_PATTERN.finditer(result_text):
+            source_url = match.group(0).rstrip(".,;:")
+            if source_url in source_urls:
+                continue
+            source_urls.append(source_url)
+            if len(source_urls) >= _MAX_SOURCE_URLS:
+                return source_urls
+    return source_urls
 
 
 _WEB_AGENT3_SOURCE_TOOLS_TEXT = "\n".join(
@@ -698,12 +729,20 @@ async def _run_subgraph(
         "knowledge_metadata": {},
     }
     result = await sub_graph.ainvoke(sub_state)
+    raw_metadata = result.get("knowledge_metadata", {})
+    if isinstance(raw_metadata, dict):
+        knowledge_metadata = dict(raw_metadata)
+    else:
+        knowledge_metadata = {}
+    source_urls = _source_urls_from_observations(result.get("observations"))
+    if source_urls:
+        knowledge_metadata["source_urls"] = source_urls
     return_value = {
         "status": result.get("final_status"),
         "reason": result.get("final_reason"),
         "response": result.get("final_response"),
         "is_empty_result": result.get("final_is_empty_result", False),
-        "knowledge_metadata": result.get("knowledge_metadata", {}),
+        "knowledge_metadata": knowledge_metadata,
     }
     return return_value
 

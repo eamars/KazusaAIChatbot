@@ -29,6 +29,7 @@ from kazusa_ai_chatbot.cognition_core_v2.surface import (
     run_text_surface_planning,
     run_visual_surface_planning,
 )
+from kazusa_ai_chatbot.cognition_resolver.state import validate_resolver_state
 from kazusa_ai_chatbot.db.interaction_style_images import (
     build_interaction_style_context,
 )
@@ -100,6 +101,9 @@ def build_text_surface_input_from_global_state(
     runtime_limits = build_runtime_capability_limits(state)
     if runtime_limits:
         payload["runtime_capability_limits"] = runtime_limits
+    resolver_result = _resolver_result(state)
+    if resolver_result is not None:
+        payload["resolver_result"] = resolver_result
     admitted = validated_output.get("admitted_bid")
     if isinstance(admitted, Mapping):
         payload["primary_bid"] = _surface_bid_projection(admitted)
@@ -422,3 +426,21 @@ def _action_results(state: Mapping[str, Any]) -> list[dict[str, Any]]:
             continue
         result.append(project_trace_action_result_v2(row))
     return result
+
+
+def _resolver_result(state: Mapping[str, Any]) -> dict[str, str] | None:
+    """Project the latest source-owned resolver outcome into L3."""
+
+    raw_resolver_state = state.get("resolver_state")
+    if not isinstance(raw_resolver_state, Mapping):
+        return None
+    resolver_state = validate_resolver_state(raw_resolver_state)
+    observations = resolver_state["observations"]
+    if not observations:
+        return None
+    observation = observations[-1]
+    return {
+        "capability_kind": observation["capability_kind"],
+        "status": observation["status"],
+        "semantic_result": observation["prompt_safe_summary"],
+    }

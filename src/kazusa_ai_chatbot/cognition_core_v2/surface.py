@@ -135,6 +135,8 @@ async def _run_text_surface_planning(
         output["runtime_capability_limits"] = list(
             payload["runtime_capability_limits"]
         )
+    if "resolver_result" in payload:
+        output["resolver_result"] = dict(payload["resolver_result"])
     validated_output = validate_text_surface_output(output)
     return validated_output
 
@@ -184,6 +186,8 @@ def build_degraded_text_surface(
         output["runtime_capability_limits"] = list(
             payload["runtime_capability_limits"]
         )
+    if "resolver_result" in payload:
+        output["resolver_result"] = dict(payload["resolver_result"])
     validated_output = validate_text_surface_output(output)
     return validated_output
 
@@ -295,6 +299,8 @@ async def _repair_text_surface_planning(
         output["runtime_capability_limits"] = list(
             payload["runtime_capability_limits"]
         )
+    if "resolver_result" in payload:
+        output["resolver_result"] = dict(payload["resolver_result"])
     validated_output = validate_text_surface_output(output)
     return validated_output
 
@@ -379,6 +385,8 @@ def _project_surface_payload(
         result["runtime_capability_limits"] = list(
             payload["runtime_capability_limits"]
         )
+    if "resolver_result" in payload:
+        result["resolver_result"] = dict(payload["resolver_result"])
     if "primary_bid" in payload:
         result["primary_bid"] = payload["primary_bid"]
     if "semantic_relationship" in payload:

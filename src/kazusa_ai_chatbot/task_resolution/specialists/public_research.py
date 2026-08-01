@@ -124,30 +124,51 @@ def _public_provenance_refs(packet: object) -> list[str]:
 
     if not isinstance(packet, Mapping):
         return []
-    raw_refs = packet.get("evidence_refs")
-    if not isinstance(raw_refs, list):
+    graph = packet.get("graph")
+    if not isinstance(graph, Mapping):
+        return []
+    nodes = graph.get("nodes")
+    if not isinstance(nodes, Mapping):
         return []
     provenance_refs: list[str] = []
-    for raw_ref in raw_refs[:8]:
-        if not isinstance(raw_ref, Mapping):
+    for raw_node in nodes.values():
+        if not isinstance(raw_node, Mapping):
             continue
-        evidence_id = raw_ref.get("evidence_id")
-        if not isinstance(evidence_id, str) or not evidence_id.strip():
+        raw_refs = raw_node.get("evidence_refs")
+        if not isinstance(raw_refs, list):
             continue
-        provenance_refs.append(f"public_research:{evidence_id.strip()}")
+        for raw_ref in raw_refs:
+            if not isinstance(raw_ref, Mapping):
+                continue
+            evidence_id = raw_ref.get("evidence_id")
+            if not isinstance(evidence_id, str) or not evidence_id.strip():
+                continue
+            normalized_id = evidence_id.strip()
+            if normalized_id.startswith(("http://", "https://")):
+                provenance_ref = normalized_id
+            else:
+                provenance_ref = f"public_research:{normalized_id}"
+            if provenance_ref not in provenance_refs:
+                provenance_refs.append(provenance_ref)
+            if len(provenance_refs) >= 8:
+                return provenance_refs
     return provenance_refs
 
 
 def _research_summary(projection: Mapping[str, object]) -> str:
     """Use the resolver's compact semantic summary as specialist evidence."""
 
+    summary_rows: list[str] = []
     investigation_summary = projection.get("investigation_summary")
     if isinstance(investigation_summary, str) and investigation_summary.strip():
-        return _bounded_text(investigation_summary)
+        summary_rows.append(investigation_summary.strip())
     known_items = _projection_text_items(projection, "knowledge_we_know_so_far")
-    if known_items:
-        return "; ".join(known_items)[:1200]
-    return ""
+    for known_item in known_items:
+        if known_item not in summary_rows:
+            summary_rows.append(known_item)
+    if not summary_rows:
+        return ""
+    return _bounded_text("\n".join(summary_rows))
 
 
 def _projection_text_items(

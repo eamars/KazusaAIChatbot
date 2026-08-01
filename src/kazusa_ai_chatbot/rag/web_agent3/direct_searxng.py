@@ -8,6 +8,7 @@ from typing import Any
 import httpx
 
 from kazusa_ai_chatbot.config import (
+    SEARXNG_SEARCH_ENGINES,
     SEARXNG_SEARCH_RESULT_LIMIT,
     SEARXNG_SEARCH_TIMEOUT_SECONDS,
     SEARXNG_URL,
@@ -89,6 +90,24 @@ def _format_search_results(payload: Mapping[str, Any]) -> str:
         rows.append(row_text)
 
     if not rows:
+        raw_unresponsive = payload.get("unresponsive_engines", [])
+        if isinstance(raw_unresponsive, list) and raw_unresponsive:
+            unresponsive_rows = [
+                ": ".join(str(value) for value in raw_row[:2])
+                for raw_row in raw_unresponsive
+                if isinstance(raw_row, list) and raw_row
+            ]
+            if unresponsive_rows:
+                unavailable_text = "; ".join(unresponsive_rows)
+                bounded_unavailable_text = _bounded_text(
+                    unavailable_text,
+                    limit=_SEARCH_ERROR_CHAR_LIMIT,
+                )
+                return_value = (
+                    "Error: SearXNG search engines unavailable: "
+                    f"{bounded_unavailable_text}"
+                )
+                return return_value
         return_value = "No results found."
         return return_value
 
@@ -129,6 +148,7 @@ async def web_search(
         "format": "json",
         "pageno": pageno,
         "safesearch": 0,
+        "engines": SEARXNG_SEARCH_ENGINES,
     }
     time_range_value = time_range.strip()
     if time_range_value:

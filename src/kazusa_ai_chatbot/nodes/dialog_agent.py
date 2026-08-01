@@ -12,6 +12,7 @@ Design intent:
 import asyncio
 import json
 import logging
+import re
 import time
 from typing import Any, NotRequired, TypedDict
 
@@ -76,6 +77,11 @@ DIALOG_VERIFIER_CONTRACT_ERROR_MAX_CHARS = 500
 DIALOG_SEMANTIC_AUTHORITY_MAX_CHARS = 11000
 DIALOG_CANDIDATE_MAX_CHARS = 12000
 DIALOG_SEMANTIC_PAYLOAD_MAX_CHARS = 50000
+_HTTP_URL_PATTERN = re.compile(
+    r"https?://[^\s\\)>\]}\"']+",
+    re.IGNORECASE,
+)
+_MAX_REQUIRED_SOURCE_URLS = 8
 DIALOG_STRING_VERDICT_FALSE_EXAMPLE = (
     '{"aligned": false, "issues": ["original issue text"]}'
 )
@@ -295,6 +301,7 @@ MAX_MERGED_VERIFIER_ISSUES = 8
 _V2_DIALOG_GENERATOR_PROMPT = '''你是当前角色的最终文字渲染器。把 text_surface_output_v2 转化为
 自然、鲜活、有角色辨识度，并且切合当前场景的聊天内容。上游认知负责角色判断；surface planning
 提供语义内容、真实边界、称呼安排、delivery profile 和 permitted action results。
+resolver_result 提供来源自有的 resolver capability 执行结果，与 action result 分开保留。
 
 # 渲染步骤
 1. selected_surface_intent 是本轮语义锚点；content_plan 和 content_requirements 展开所需事实、
@@ -312,11 +319,19 @@ visible_boundaries 和 delivery_profile，判断规划中的开场反应指向�
 4. 按 permitted_action_results 映射执行状态：executed 表达其有界的已完成效果；scheduled 与
 pending 表达已记录、已排队或等待对应 worker；failed 与 unavailable 表达当前限制和可行下一步；
 请求、意图或 content plan 表达角色的言语立场。
+resolver_result.status=succeeded 且 semantic_result 明确任务已接纳并继续工作时，可以表达已接纳、
+继续处理和等待后续结果，但不能声称最终结果已经完成。
 5. 按 runtime_capability_limits 表达可信的能力边界、等待状态和下一步条件。
 6. 存在 repair_context 时，以已替换并验证的 text_surface_output_v2 生成完整新回应，并逐项解决
 verified_hard_issues，同时保持角色声音和相容的创造性内容。
 7. 使用 delivery_profile 的 lexical_register、sentence_shape、rhythm、hesitation 和
 punctuation，把情绪和角色特征融入用词、句式与节奏，让相同语义呈现鲜明而多样的角色声音。
+8. payload 存在 required_source_urls 时，只能使用列表内的 URL，并至少逐字复制其中一个。根据
+content_plan 中实际呈现的事实选择直接相关来源；回应包含来自不同来源的实质性事实时，分别附上
+足以支撑这些事实的 exact URL，避免让单一链接看似支持全部不同主张。
+存在 required_source_urls 时，角色化展开只改变语气、节奏、互动和表达方式；产品规格、价格、库存、
+数量、时间、因果关系和其他可外部核查事实必须来自 content_plan 或 content_requirements，不添加
+权威 surface 未提供的新事实。
 
 新生成的对话使用简体中文；引文、专有名词、代码、URL 以及必要的 schema 或 enum token 保持原样。
 
@@ -340,10 +355,16 @@ content_requirements、delivery_profile 和完整规划。可自由组合惊讶�
 3. 逐项解决 repair_context.verified_hard_issues，并用新措辞体现重建后的完整 surface 语义。
 4. 按 permitted_action_results 映射执行状态：executed 表达其有界的已完成效果；scheduled 与
 pending 表达已记录、已排队或等待对应 worker；failed 与 unavailable 表达当前限制和可行下一步。
+resolver_result 按 status 和 semantic_result 原义表达；已成功接纳的后续工作不得改写为失败。
 5. 按 runtime_capability_limits 表达可信的能力边界、等待状态和下一步条件。
 6. 使用 delivery_profile 的五个维度实现用词、句形、节奏、犹豫和标点，让相同语义呈现鲜明而
 多样的角色声音。
 7. user_name 用于在合适时自然称呼当前用户。
+8. payload 存在 required_source_urls 时，只能使用列表内的 URL，并至少逐字复制其中一个。根据
+完整回应中的实质性事实逐字复制足够的直接相关 URL；不同来源的事实分别使用相应来源，避免用单一
+链接覆盖全部主张。
+存在 required_source_urls 时，不添加 text_surface_output_v2 未提供的产品规格、价格、库存、数量、
+时间、因果关系或其他可外部核查事实；角色创造性只用于表达方式和互动推进。
 
 新生成的对话使用简体中文；引文、专有名词、代码、URL 以及必要的 schema 或 enum token 保持原样。
 
@@ -395,6 +416,9 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
     current_visible_percepts = _current_visible_percepts(
         state["cognitive_episode"]
     )
+    required_source_urls = _completed_tool_result_source_urls(
+        current_visible_percepts
+    )
     llm_trace_id = state.get("llm_trace_id", "")
     candidate_ledger: list[
         tuple[list[str], TextSurfaceOutputV2]
@@ -432,11 +456,30 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
             repair_issues=remaining_issues,
             attempt_number=attempt_number,
             llm_trace_id=llm_trace_id,
+            required_source_urls=required_source_urls,
         )
         if not generated_dialog:
             remaining_issues = [
                 f"dialog_generator_{failure_kind or 'structure'}"
             ]
+            continue
+
+        source_url_issues = _dialog_source_url_issues(
+            generated_dialog,
+            required_source_urls=required_source_urls,
+        )
+        if source_url_issues:
+            remaining_issues = source_url_issues
+            await event_logging.record_model_contract_event(
+                component=DIALOG_COMPONENT,
+                stage_name="dialog_source_url_fidelity",
+                violation_kind="source_url_fidelity",
+                missing_fields=[],
+                invalid_fields=remaining_issues,
+                repair_used=attempt_number > 1,
+                status="retrying",
+                correlation_id=llm_trace_id,
+            )
             continue
 
         candidate_ledger.append((generated_dialog, surface_output))
@@ -495,6 +538,7 @@ async def _render_dialog_candidate(
     repair_issues: list[str],
     attempt_number: int,
     llm_trace_id: str,
+    required_source_urls: list[str] | None = None,
 ) -> tuple[list[str], str | None]:
     """Render one candidate in the shared three-opportunity dialog ledger.
 
@@ -504,6 +548,8 @@ async def _render_dialog_candidate(
         repair_issues: Typed bounded failures remaining from the prior round.
         attempt_number: One-based producer opportunity in the shared ledger.
         llm_trace_id: Correlation identifier for protected model evidence.
+        required_source_urls: Exact completed-evidence URLs that visible output
+            may preserve.
 
     Returns:
         A bounded dialog and no failure kind, or an empty dialog with the
@@ -513,6 +559,7 @@ async def _render_dialog_candidate(
     if not 1 <= attempt_number <= DIALOG_GENERATOR_TOTAL_ATTEMPTS:
         raise ValueError("dialog generator attempt number is invalid")
     validated_surface = validate_text_surface_output(surface_output)
+    source_urls = list(required_source_urls or [])
     if attempt_number == 1:
         system_message = SystemMessage(content=_V2_DIALOG_GENERATOR_PROMPT)
         payload: dict[str, Any] = {
@@ -536,6 +583,8 @@ async def _render_dialog_candidate(
             if attempt_number == 2
             else "dialog_generator_terminal"
         )
+    if source_urls:
+        payload["required_source_urls"] = source_urls
     human_message = HumanMessage(content=json.dumps(
         payload,
         ensure_ascii=False,
@@ -700,7 +749,8 @@ selected_surface_intent 是语义判定锚点，其他字段提供事实、理�
 当这些表达的对象是时机、直接程度、标签或情绪，且行动或关系极性与收尾一致时，整段属于 aligned；
 3. 角色自己的拒绝、协商或附加条件与 authoritative_surface_semantics 一致；
 4. 权威语义提供原因的实际立场变化具有清楚的因果承接；
-5. 合理虚构、相容未来、玩笑式条件、个性、反问和补充与权威语义及角色方向连贯；
+5. 合理虚构、相容未来、玩笑式条件、个性、反问和补充与权威语义及角色方向连贯；tool_result
+场景中的产品规格、价格、库存、数量、时间、因果关系和其他可外部核查事实不属于合理虚构；
 6. 笑话、双关、省略或多种合理角色读法仍支持权威语义。
 
 只有以下具有具体语义证据的情况将 aligned 标为 false：
@@ -710,6 +760,8 @@ selected_surface_intent 是语义判定锚点，其他字段提供事实、理�
 4. 不论位于同一消息或多条消息，候选对同一主体、同一行动或关系先明确拒绝或不愿，后明确接受或
 愿意，而权威语义没有支持变化的事实、动机、条件、让步或约束；
 5. 候选实际以权威语义未提供的新动机、条件或约束削弱、推迟或改变已选立场。
+6. 当前 percept 包含 tool_result 时，候选添加 authoritative_surface_semantics 未提供的产品规格、
+价格、库存、数量、时间、因果关系或其他可外部核查事实。
 
 结构化 role_explicit_content 和 response_operation 提供祈使句隐含主语的权威解析。并列动作覆盖度
 属于内容完整性检查；本阶段聚焦已表达动作的语义方向。hard_errors 必须引用候选原文，指出具体
@@ -1233,8 +1285,8 @@ async def _verify_dialog_role_direction(
     raise StateContractError("role direction verifier loop invariant failed")
 
 
-_V2_DIALOG_SURFACE_INTEGRITY_PROMPT = '''根据候选回应和精确的 permitted_action_results 核对
-能力执行事实。
+_V2_DIALOG_SURFACE_INTEGRITY_PROMPT = '''根据候选回应、精确的 permitted_action_results 和
+resolver_result 核对能力执行事实。
 
 以下情况将 aligned 标为 false：候选回应声称角色大脑已经完成某项系统、工具、平台或其他能力，
 但 permitted_action_results 中没有匹配的 executed 结果；或者结果为 scheduled 或 pending 时，
@@ -1242,6 +1294,11 @@ _V2_DIALOG_SURFACE_INTEGRITY_PROMPT = '''根据候选回应和精确的 permitte
 semantic_result 和 target_roles 约束。scheduled 或 pending 只支持已记录、已排队或等待对应
 worker；failed 或 unavailable 不支持成功声明。单纯的言语立场、请求、邀请，以及没有即时保证的
 未来、条件或假设事件都不等同于能力已经执行。
+
+resolver_result 是来源自有的 resolver capability 结果，不属于 permitted_action_results。
+当 status=succeeded 且 semantic_result 明确任务已接纳并将继续工作时，它支持候选表达任务已接纳、
+正在继续处理或等待后续结果；它不支持声称最终结果已经完成。不得仅因 permitted_action_results
+为空而把这种有来源的持续工作误判为 false_execution。
 
 payload 可以包含 externally completed tool result 的 completed_source_evidence。
 如果候选回应准确表达了该证据支持的事实，即使没有 executed action result，也按有依据处理。
@@ -1300,6 +1357,9 @@ async def _verify_dialog_surface_integrity(
             if percept.get("input_source") == "tool_result"
         ],
     }
+    resolver_result = surface_output.get("resolver_result")
+    if isinstance(resolver_result, dict):
+        payload["resolver_result"] = dict(resolver_result)
     runtime_limits = list(surface_output.get("runtime_capability_limits", []))
     if runtime_limits:
         payload["runtime_capability_limits"] = runtime_limits
@@ -1689,6 +1749,59 @@ async def dialog_agent(
         "text_surface_output_v2": accepted_surface,
     }
     return return_value
+
+
+def _completed_tool_result_source_urls(
+    current_visible_percepts: list[dict[str, Any]],
+) -> list[str]:
+    """Extract exact HTTP source tokens from completed tool-result evidence."""
+
+    source_urls: list[str] = []
+    for percept in current_visible_percepts:
+        if percept.get("input_source") != "tool_result":
+            continue
+        serialized_content = json.dumps(
+            percept.get("content", {}),
+            ensure_ascii=False,
+            default=str,
+        )
+        for match in _HTTP_URL_PATTERN.finditer(serialized_content):
+            source_url = match.group(0).rstrip(".,;:")
+            if source_url in source_urls:
+                continue
+            source_urls.append(source_url)
+            if len(source_urls) >= _MAX_REQUIRED_SOURCE_URLS:
+                return source_urls
+    return source_urls
+
+
+def _dialog_source_url_issues(
+    generated_dialog: list[str],
+    *,
+    required_source_urls: list[str],
+) -> list[str]:
+    """Validate immutable source URL tokens without judging dialog semantics."""
+
+    if not required_source_urls:
+        return []
+    candidate_text = "\n".join(generated_dialog)
+    candidate_urls = {
+        match.group(0).rstrip(".,;:")
+        for match in _HTTP_URL_PATTERN.finditer(candidate_text)
+    }
+    allowed_urls = set(required_source_urls)
+    unexpected_urls = sorted(candidate_urls - allowed_urls)
+    if unexpected_urls:
+        return [
+            "source_url_fidelity: candidate URL is absent from completed "
+            "tool evidence"
+        ]
+    if not candidate_urls & allowed_urls:
+        return [
+            "source_url_fidelity: include at least one exact "
+            "required_source_urls token"
+        ]
+    return []
 
 
 def _current_visible_percepts(

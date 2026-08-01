@@ -172,6 +172,7 @@ CODING_AGENT_WORKSPACE_ROOT=C:\workspace\kazusa_coding_agent
 
 # Direct web search and URL-reader behavior
 SEARXNG_URL=http://your-searxng-host:8080
+SEARXNG_SEARCH_ENGINES=yandex,360search,baidu,sogou
 SEARXNG_SEARCH_TIMEOUT_SECONDS=30
 SEARXNG_SEARCH_RESULT_LIMIT=10
 WEB_URL_READ_TIMEOUT_SECONDS=30
@@ -323,8 +324,9 @@ active character keeps a stable first-class identity across service runs.
 `web_read` is always available and can read HTTP(S) URLs directly from the
 Kazusa process. `SEARXNG_URL` enables `web_search`; when it is empty, the
 search source is not registered as an available web_agent3 source. When it is
-set, search uses the configured SearXNG `/search?format=json` endpoint
-directly. URL reads do not require SearXNG or MCP, and local/private HTTP(S)
+set, search uses the configured SearXNG `/search?format=json` endpoint and the
+comma-separated `SEARXNG_SEARCH_ENGINES` selection directly. URL reads do not
+require SearXNG or MCP, and local/private HTTP(S)
 resources reachable from the Kazusa process are allowed by default. URL reads
 always use browser-navigation headers, process-memory cookies, locally
 supported compression encodings, and common HTTP anti-bot challenge detection.

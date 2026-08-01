@@ -2234,6 +2234,41 @@ async def test_task_resolution_bounds_history_to_its_context_contract(
 
 
 @pytest.mark.asyncio
+async def test_task_resolution_bounds_decontextualized_summary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Result-ready text is bounded before task-resolution validation."""
+
+    captured: dict = {}
+
+    async def resolve_task_inline(
+        request: dict,
+        context: dict,
+        *,
+        inline_budget_seconds: float,
+    ) -> dict[str, object]:
+        del request, inline_budget_seconds
+        captured["context"] = context
+        return _task_result(summary="Bounded summary accepted.")
+
+    monkeypatch.setattr(
+        capabilities_module,
+        "resolve_task_inline",
+        resolve_task_inline,
+    )
+    state = _resolver_state()
+    state["decontextualized_input"] = "A" * 1300
+
+    observation = await capabilities_module.execute_resolver_capability_request(
+        _resolver_request(),
+        state,
+    )
+
+    assert captured["context"]["conversation_summary"] == "A" * 1200
+    assert observation["status"] == "succeeded"
+
+
+@pytest.mark.asyncio
 async def test_task_resolution_user_input_result_is_blocked(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

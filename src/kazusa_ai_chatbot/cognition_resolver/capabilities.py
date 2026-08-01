@@ -63,6 +63,7 @@ from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import (
     empty_user_memory_context,
 )
 from kazusa_ai_chatbot.task_resolution.contracts import (
+    MAX_TASK_RESOLUTION_TEXT_CHARS,
     MAX_TASK_RESOLUTION_TEXT_ITEMS,
     TASK_RESOLUTION_EXECUTION_CONTEXT_VERSION,
     TaskResolutionContractError,
@@ -517,7 +518,7 @@ def _task_resolution_execution_context_from_state(
         "persona_summary": _task_resolution_persona_summary(state),
         "conversation_summary": text_or_empty(
             state.get("decontextualized_input"),
-        ),
+        )[:MAX_TASK_RESOLUTION_TEXT_CHARS],
         "current_timestamp_utc": _required_state_text(
             state,
             "storage_timestamp_utc",

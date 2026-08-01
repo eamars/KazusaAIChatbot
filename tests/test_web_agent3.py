@@ -325,6 +325,7 @@ async def test_web_agent3_search_calls_direct_searxng_json_api(
             return response
 
     monkeypatch.setattr(direct_searxng, "SEARXNG_URL", "http://search.test")
+    monkeypatch.setattr(direct_searxng, "SEARXNG_SEARCH_ENGINES", "bing")
     monkeypatch.setattr(direct_searxng, "SEARXNG_SEARCH_TIMEOUT_SECONDS", 12.0)
     monkeypatch.setattr(direct_searxng, "SEARXNG_SEARCH_RESULT_LIMIT", 10)
     monkeypatch.setattr(direct_searxng.httpx, "AsyncClient", FakeSearchClient)
@@ -342,6 +343,7 @@ async def test_web_agent3_search_calls_direct_searxng_json_api(
             "q": "direct search",
             "format": "json",
             "pageno": 2,
+            "engines": "bing",
             "time_range": "month",
             "language": "en",
             "safesearch": 0,
@@ -387,6 +389,7 @@ async def test_web_agent3_search_omits_empty_optional_searxng_params(
             return response
 
     monkeypatch.setattr(direct_searxng, "SEARXNG_URL", "http://search.test")
+    monkeypatch.setattr(direct_searxng, "SEARXNG_SEARCH_ENGINES", "bing")
     monkeypatch.setattr(direct_searxng, "SEARXNG_SEARCH_TIMEOUT_SECONDS", 12.0)
     monkeypatch.setattr(direct_searxng.httpx, "AsyncClient", FakeSearchClient)
 
@@ -403,12 +406,52 @@ async def test_web_agent3_search_omits_empty_optional_searxng_params(
             "q": "direct search",
             "format": "json",
             "pageno": 1,
+            "engines": "bing",
             "safesearch": 0,
         },
         "headers": None,
         "kwargs": {"timeout": 12.0},
     }]
     assert result == "No results found."
+
+
+@pytest.mark.asyncio
+async def test_web_agent3_search_reports_unresponsive_engines(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An empty provider outage must remain distinct from no search matches."""
+
+    direct_searxng = importlib.import_module(
+        "kazusa_ai_chatbot.rag.web_agent3.direct_searxng"
+    )
+
+    class FakeSearchClient:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def get(self, url: str, *, params: dict):
+            del url, params
+            response = _FakeHTTPResponse(json_payload={
+                "results": [],
+                "unresponsive_engines": [["bing", "rate limited"]],
+            })
+            return response
+
+    monkeypatch.setattr(direct_searxng, "SEARXNG_URL", "http://search.test")
+    monkeypatch.setattr(direct_searxng, "SEARXNG_SEARCH_ENGINES", "bing")
+    monkeypatch.setattr(direct_searxng.httpx, "AsyncClient", FakeSearchClient)
+
+    result = await searxng_module.web_search.ainvoke({"query": "RTX 5090"})
+
+    assert result == (
+        "Error: SearXNG search engines unavailable: bing: rate limited"
+    )
 
 
 @pytest.mark.asyncio
@@ -1877,6 +1920,16 @@ async def test_web_agent3_run_subgraph_returns_expected_keys() -> None:
         "final_response": "Here are the results",
         "final_is_empty_result": False,
         "knowledge_metadata": {},
+        "observations": [{
+            "action": "search",
+            "source": "web_search",
+            "query": "search something",
+            "result": (
+                "Title: Product listing\n"
+                "URL: https://example.test/products/rtx-5090\n"
+                "Snippet: Current listing."
+            ),
+        }],
     }
 
     with patch("kazusa_ai_chatbot.rag.web_agent3.agent.StateGraph") as state_graph:
@@ -1922,7 +1975,11 @@ async def test_web_agent3_run_subgraph_returns_expected_keys() -> None:
         "reason": "found info",
         "response": "Here are the results",
         "is_empty_result": False,
-        "knowledge_metadata": {},
+        "knowledge_metadata": {
+            "source_urls": [
+                "https://example.test/products/rtx-5090",
+            ],
+        },
     }
 
 

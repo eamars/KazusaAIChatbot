@@ -85,6 +85,56 @@ async def test_public_research_no_evidence_is_incompatible(
 
 
 @pytest.mark.asyncio
+async def test_public_research_projects_graph_evidence_refs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Public research retains canonical source URLs from resolver nodes."""
+
+    module = importlib.import_module(
+        "kazusa_ai_chatbot.task_resolution.specialists.public_research"
+    )
+    source_url = "https://example.test/rtx5090"
+    packet = {
+        "graph": {
+            "nodes": {
+                "node-1": {
+                    "evidence_refs": [{
+                        "evidence_id": source_url,
+                    }],
+                },
+            },
+        },
+    }
+
+    async def resolve_complex_task(
+        resolver_request: dict[str, object],
+        resolver_context: dict[str, object],
+        resolver_options: dict[str, object],
+    ) -> dict[str, object]:
+        del resolver_request, resolver_context, resolver_options
+        return packet
+
+    monkeypatch.setattr(module, "resolve_complex_task", resolve_complex_task)
+    monkeypatch.setattr(
+        module,
+        "project_complex_task_packet",
+        lambda _packet: {
+            "investigation_summary": "Current retail evidence was found.",
+            "knowledge_we_know_so_far": [
+                "RTX 5090 is listed at $1,999 USD by Example Retailer.",
+            ],
+            "knowledge_still_lacking": [],
+        },
+    )
+
+    result = await module.resolve_with_public_research(_request(), _context())
+
+    assert result["status"] == "resolved"
+    assert result["evidence"][0]["provenance_refs"] == [source_url]
+    assert "$1,999 USD" in result["evidence"][0]["summary"]
+
+
+@pytest.mark.asyncio
 async def test_text_computation_refuses_unsupported_domain_before_generation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

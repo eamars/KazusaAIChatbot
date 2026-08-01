@@ -2806,6 +2806,24 @@ async def _deliver_accepted_task_result_episode(
     consolidation_state = result.get("consolidation_state")
     if isinstance(consolidation_state, dict):
         consolidation_state["episode_trace"] = settled_trace
+        raw_cognition_output = result.get("cognition_core_output")
+        cognition_output = (
+            raw_cognition_output
+            if isinstance(raw_cognition_output, Mapping)
+            else None
+        )
+        progress_turn_outcome = select_recordable_turn_outcome(
+            final_dialog=final_dialog,
+            episode_trace=settled_trace,
+            cognition_output=cognition_output,
+            relevance_approved=True,
+            consolidatable=has_consolidatable_output(settled_trace),
+            listen_only=False,
+            pruned=False,
+        )
+        consolidation_state["conversation_progress_turn_outcome"] = (
+            progress_turn_outcome
+        )
     if isinstance(consolidation_state, dict):
         await _run_accepted_task_result_post_turn(
             consolidation_state,

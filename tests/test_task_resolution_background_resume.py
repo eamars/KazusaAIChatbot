@@ -358,6 +358,81 @@ async def test_accepted_result_is_ready_before_job_releases_lease(
 
 
 @pytest.mark.asyncio
+async def test_completed_job_preserves_validated_evidence_for_delivery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A successful worker result must retain its evidence-bearing answer."""
+
+    worker = importlib.import_module("kazusa_ai_chatbot.background_work.worker")
+    checkpoint, snapshot = _recorded_checkpoint(status="resolved")
+    request = _resume_queue_request()
+    job = {
+        **request,
+        "schema_version": "background_work_job.v2",
+        "job_id": "job-evidence-delivery",
+        "max_output_chars": 3000,
+        "worker_payload": {
+            **request["worker_payload"],
+            "checkpoint": checkpoint,
+        },
+    }
+    mark_result = AsyncMock(return_value={"state": "result_ready"})
+    complete_job = AsyncMock(return_value={"status": "completed"})
+    monkeypatch.setattr(worker, "mark_tool_result_ready", mark_result)
+    monkeypatch.setattr(worker, "complete_background_work_job", complete_job)
+
+    await worker._complete_task_orchestrator_job(
+        job,
+        lease_owner="worker-evidence-test",
+        result=snapshot,
+    )
+
+    expected = (
+        "A public source resolved the requested fact.\n"
+        "Sources: https://example.com/source"
+    )
+    assert mark_result.await_args.kwargs["artifact_text"] == expected
+    assert mark_result.await_args.kwargs["result_summary"] == expected
+    assert complete_job.await_args.kwargs["artifact_text"] == expected
+    assert complete_job.await_args.kwargs["result_summary"] == expected
+
+
+def test_delivery_summary_prioritizes_latest_bounded_evidence() -> None:
+    """Newest distinct findings and their sources fit the delivery budget."""
+
+    worker = importlib.import_module("kazusa_ai_chatbot.background_work.worker")
+    result = {
+        "status": "partial",
+        "evidence": [
+            {
+                "summary": "Older research found no concrete price.",
+                "provenance_refs": ["https://old.example/source"],
+            },
+            {
+                "summary": "Older research found no concrete price.",
+                "provenance_refs": ["https://duplicate.example/source"],
+            },
+            {
+                "summary": "Latest result: RTX 5090 costs $2,499 USD.",
+                "provenance_refs": [
+                    f"https://latest.example/source-{index}"
+                    for index in range(10)
+                ],
+            },
+        ],
+        "remaining_needs": [],
+    }
+
+    summary = worker._task_result_delivery_summary(result)
+
+    assert summary.startswith("Latest result: RTX 5090 costs $2,499 USD.")
+    assert summary.count("Older research found no concrete price.") == 1
+    assert "https://latest.example/source-7" in summary
+    assert "https://latest.example/source-8" not in summary
+    assert "https://old.example/source" not in summary
+
+
+@pytest.mark.asyncio
 async def test_missing_accepted_task_blocks_job_completion(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

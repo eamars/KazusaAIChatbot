@@ -196,8 +196,6 @@ async def _complete_task_orchestrator_job(
     """Persist terminal task resolution and its accepted-task delivery state."""
 
     completed_at = storage_utc_now_iso()
-    summary = result["prompt_safe_summary"]
-    artifact_text = _bounded_artifact_text(job, summary)
     result_status = result["status"]
     if result_status not in {
         "resolved",
@@ -210,6 +208,8 @@ async def _complete_task_orchestrator_job(
         raise TaskResolutionContractError(
             "background task resolution must return a terminal result"
         )
+    summary = _task_result_delivery_summary(result)
+    artifact_text = _bounded_artifact_text(job, summary)
     accepted_task_id = _job_text(job, "accepted_task_id")
     if accepted_task_id:
         if result_status in {"resolved", "partial"}:
@@ -258,6 +258,39 @@ def _bounded_artifact_text(job: Mapping[str, object], summary: str) -> str:
         raise ValueError("background job max_output_chars is invalid")
     artifact_text = summary[:max_output_chars]
     return artifact_text
+
+
+def _task_result_delivery_summary(result: TaskResolutionResultV1) -> str:
+    """Project validated task evidence into prompt-safe delivery text."""
+
+    if result["status"] not in {"resolved", "partial"}:
+        return result["prompt_safe_summary"]
+
+    summary_rows: list[str] = []
+    source_urls: list[str] = []
+    for evidence in reversed(result["evidence"]):
+        evidence_summary = evidence["summary"].strip()
+        if evidence_summary and evidence_summary not in summary_rows:
+            summary_rows.append(evidence_summary)
+        for provenance_ref in evidence["provenance_refs"]:
+            if len(source_urls) >= 8:
+                break
+            if (
+                provenance_ref.startswith(("http://", "https://"))
+                and provenance_ref not in source_urls
+            ):
+                source_urls.append(provenance_ref)
+    if source_urls:
+        summary_rows.append(f"Sources: {' '.join(source_urls)}")
+    if result["status"] == "partial" and result["remaining_needs"]:
+        remaining_text = "; ".join(result["remaining_needs"])
+        summary_rows.append(f"Remaining limitations: {remaining_text}")
+    if not summary_rows:
+        raise TaskResolutionContractError(
+            "successful background task result is missing delivery evidence"
+        )
+    summary = "\n".join(summary_rows)
+    return summary
 
 
 def _job_text(job: Mapping[str, object], field_name: str) -> str:

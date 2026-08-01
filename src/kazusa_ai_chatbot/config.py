@@ -801,6 +801,10 @@ CHAT_HISTORY_RECENT_LIMIT = 5
 
 # Direct web search and URL reader settings.
 SEARXNG_URL = _optional_http_url_from_env("SEARXNG_URL", "")
+SEARXNG_SEARCH_ENGINES = _non_empty_string_from_env(
+    "SEARXNG_SEARCH_ENGINES",
+    "yandex,360search,baidu,sogou",
+)
 SEARXNG_SEARCH_TIMEOUT_SECONDS = _bounded_float_from_env(
     "SEARXNG_SEARCH_TIMEOUT_SECONDS",
     "30",

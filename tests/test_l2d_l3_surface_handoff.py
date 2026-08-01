@@ -9,6 +9,10 @@ import pytest
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionContractError,
 )
+from kazusa_ai_chatbot.cognition_resolver.state import (
+    append_observation,
+    new_resolver_state,
+)
 from kazusa_ai_chatbot.character_identity_growth.projection import (
     project_identity_for_surface,
 )
@@ -174,6 +178,55 @@ def test_l3_builder_projects_trace_status_into_exact_v2_action_result() -> None:
         "semantic_result": "The accepted task was scheduled.",
         "target_roles": [],
     }]
+
+
+def test_l3_builder_projects_latest_resolver_result_as_separate_authority() -> None:
+    """L3 receives capability truth without recasting it as an action result."""
+
+    state = _state()
+    resolver_state = new_resolver_state(
+        decontextualized_input="research current retail evidence",
+        max_cycles=3,
+    )
+    state["resolver_state"] = append_observation(
+        resolver_state,
+        {
+            "schema_version": "resolver_observation.v1",
+            "observation_id": "resolver-observation-scheduled-research",
+            "capability_kind": "task_resolution_request",
+            "request_objective": "research current retail evidence",
+            "request_reason": "current evidence is required",
+            "status": "succeeded",
+            "prompt_safe_summary": (
+                "The bounded task was accepted for continued work; its later "
+                "result will return through the normal conversation path."
+            ),
+            "evidence_refs": [],
+            "created_at_utc": "2026-07-14T00:00:00Z",
+        },
+    )
+
+    payload = l3_surface.build_text_surface_input_from_global_state(
+        state,
+        interaction_style_context="brief and natural",
+    )
+
+    assert payload["resolver_result"] == {
+        "capability_kind": "task_resolution_request",
+        "status": "succeeded",
+        "semantic_result": (
+            "The bounded task was accepted for continued work; its later "
+            "result will return through the normal conversation path."
+        ),
+    }
+    assert payload["permitted_action_results"] == []
+
+    from kazusa_ai_chatbot.cognition_core_v2.surface import (
+        build_degraded_text_surface,
+    )
+
+    degraded_output = build_degraded_text_surface(payload)
+    assert degraded_output["resolver_result"] == payload["resolver_result"]
 
 
 @pytest.mark.asyncio

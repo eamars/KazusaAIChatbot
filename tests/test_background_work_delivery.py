@@ -280,6 +280,10 @@ async def test_service_result_ready_delivery_uses_dispatcher_boundary(
     ensure_identity = service_module._ensure_character_global_identity
     assert ensure_identity.await_args.kwargs["character_name"] == "Current Character"
     post_turn.assert_awaited_once()
+    post_turn_state = post_turn.await_args.args[0]
+    assert post_turn_state["conversation_progress_turn_outcome"] == (
+        "visible_response"
+    )
 
 
 @pytest.mark.asyncio
@@ -320,6 +324,7 @@ async def test_accepted_task_result_post_turn_skips_consolidation(
         {
             "final_dialog": ["@Test User Here is the requested result."],
             "episode_trace": {},
+            "conversation_progress_turn_outcome": "visible_response",
         },
         visible_response_sent=True,
     )
