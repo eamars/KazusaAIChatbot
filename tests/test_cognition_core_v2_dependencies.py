@@ -702,6 +702,98 @@ async def test_required_selection_structure_exhaustion_is_typed() -> None:
     assert error_info.value.safe_checkpoint == "pre_state_commit"
 
 
+@pytest.mark.asyncio
+async def test_required_selection_invalid_evidence_degrades_after_exhaustion(
+) -> None:
+    """Continue with valid evidence after repeated invalid-handle output."""
+
+    selected = {
+        "selection_kind": "choice",
+        "selection": "The character accepts the current question.",
+        "reason": "The current input directly asks for the character's answer.",
+        "private_monologue": "I can answer the question directly.",
+        "target_role_handles": ["current_user"],
+        "evidence_handles": ["e1", "r1"],
+        "expected_consequences": ["The conversation continues."],
+        "confidence": "high",
+    }
+
+    class _LLM:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config: object,
+        ) -> SimpleNamespace:
+            del messages, config
+            self.calls += 1
+            return SimpleNamespace(
+                content=json.dumps(selected, ensure_ascii=False),
+            )
+
+    llm = _LLM()
+    semantic_text = json.dumps({
+        "role_explicit_content": "The character must answer.",
+        "response_operation": {
+            "operation": "The character answers the current question.",
+            "response_owner_role": "current character",
+            "selection_owner_role": "current character",
+            "selection_required": True,
+            "embedded_actor_role": "current user",
+            "embedded_target_role": "current character",
+        },
+    })
+
+    bid = await run_goal_cognition(
+        DEFAULT_BRANCH_DEFINITIONS["ordinary_response"],
+        {"scope": "user", "kind": "goal", "entity_id": "g1"},
+        {
+            "_role_bindings": {
+                "current_user": {
+                    "role": "target",
+                    "entity_kind": "user",
+                    "entity_id": "u1",
+                },
+                "r1": {
+                    "role": "target",
+                    "entity_kind": "relationship",
+                    "entity_id": "relationship:u1",
+                },
+            },
+            "role_summaries": {
+                "current_user": "The current user.",
+                "r1": "The current relationship.",
+            },
+        },
+        [{
+            "evidence_handle": "e1",
+            "evidence_ref": {
+                "source_kind": "episode",
+                "source_id": "episode-1",
+                "occurred_at": "2026-07-15T00:00:00Z",
+                "semantic_summary": semantic_text,
+            },
+            "semantic_text": semantic_text,
+            "visible_to": ["q:event_agency"],
+        }],
+        SimpleNamespace(
+            llm=llm,
+            goal_ordinary_response_config=object(),
+        ),
+    )
+
+    assert llm.calls == 3
+    assert bid["evidence_handles"] == ["e1"]
+    assert bid["target_roles"] == [{
+        "role": "target",
+        "entity_kind": "user",
+        "entity_id": "u1",
+    }]
+
+
 def test_required_branch_failure_cannot_collapse_to_silence() -> None:
     """A required cognition failure remains an execution failure."""
 

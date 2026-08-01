@@ -769,6 +769,60 @@ async def test_goal_structure_recovers_on_third_attempt() -> None:
 
 
 @pytest.mark.asyncio
+async def test_required_goal_invalid_evidence_reaches_action_planning(
+) -> None:
+    """A complete invalid-handle bid continues as a degraded cognition bid."""
+
+    class _GoalDegradedLLM(_ScriptedLLM):
+        def __init__(self) -> None:
+            super().__init__()
+            self.goal_calls = 0
+
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config: object,
+        ) -> SimpleNamespace:
+            if getattr(config, "stage_name", "") == "v2_goal":
+                self.goal_calls += 1
+                result = {
+                    "selection_kind": "choice",
+                    "selection": "acknowledge the grounded episode",
+                    "reason": "the episode supplies bounded evidence",
+                    "private_monologue": "I can answer this directly.",
+                    "target_role_handles": [],
+                    "evidence_handles": ["e1", "r1"],
+                    "expected_consequences": ["preserve continuity"],
+                    "confidence": "high",
+                }
+                return SimpleNamespace(
+                    content=json.dumps(result, ensure_ascii=False),
+                )
+            return await super().ainvoke(messages, config=config)
+
+    payload = _input()
+    payload["evidence"][0]["semantic_text"] = json.dumps({
+        "role_explicit_content": "The character must answer.",
+        "response_operation": {
+            "operation": "The character answers the current question.",
+            "response_owner_role": "current character",
+            "selection_owner_role": "current character",
+            "selection_required": True,
+            "embedded_actor_role": "current user",
+            "embedded_target_role": "current character",
+        },
+    })
+    llm = _GoalDegradedLLM()
+
+    output = await run_cognition(payload, _core_services(llm))
+
+    assert llm.goal_calls == 3
+    assert output["admitted_bid"]["branch_id"] == "ordinary_response"
+    assert output["admitted_bid"]["evidence_handles"] == ["e1"]
+
+
+@pytest.mark.asyncio
 async def test_required_goal_exhaustion_requests_clean_graph_retry() -> None:
     """A required zero-valid branch remains a typed pre-commit retry case."""
 

@@ -403,6 +403,21 @@ async def run_goal_cognition(
                     **validation_args,
                 )
         except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            degraded_draft = None
+            if (
+                selection_required
+                and attempt_index + 1 >= GOAL_COGNITION_ATTEMPT_LIMIT
+            ):
+                degraded_draft = _degraded_selection_goal_draft(
+                    parsed,
+                    evidence_handles=set(evidence_handles),
+                    role_handles=set(role_bindings),
+                    required_evidence_handles=required_evidence_handles,
+                    maximum_evidence_handles=max(
+                        MAX_GOAL_BID_EVIDENCE_HANDLES,
+                        len(partitioned_evidence_handles),
+                    ),
+                )
             await _record_goal_trace_step(
                 config=goal_config,
                 definition=definition,
@@ -410,12 +425,21 @@ async def run_goal_cognition(
                 messages=request_messages,
                 response_text=response_text,
                 parsed_output=parsed,
-                parse_status="contract_error",
-                status="failed",
+                parse_status=(
+                    "degraded" if degraded_draft is not None
+                    else "contract_error"
+                ),
+                status=(
+                    "degraded" if degraded_draft is not None
+                    else "failed"
+                ),
                 started_at=started_at,
                 attempt_index=attempt_index + 1,
                 validation_error=str(exc),
             )
+            if degraded_draft is not None:
+                draft = degraded_draft
+                break
             if attempt_index + 1 >= GOAL_COGNITION_ATTEMPT_LIMIT:
                 raise CognitionExecutionError(
                     "goal bid structure attempts exhausted",
@@ -718,6 +742,44 @@ def validate_selection_goal_draft(
     result["evidence_handles"] = cited_evidence
     result["expected_consequences"] = list(consequences)
     return result
+
+
+def _degraded_selection_goal_draft(
+    parsed: object,
+    *,
+    evidence_handles: set[str],
+    role_handles: set[str],
+    required_evidence_handles: set[str],
+    maximum_evidence_handles: int,
+) -> GoalBidDraftV2 | None:
+    """Project a complete selection after dropping invalid evidence handles."""
+
+    if not isinstance(parsed, Mapping):
+        return None
+    raw_evidence_handles = parsed.get("evidence_handles")
+    if not isinstance(raw_evidence_handles, list):
+        return None
+    filtered_evidence_handles = [
+        handle
+        for handle in raw_evidence_handles
+        if isinstance(handle, str) and handle in evidence_handles
+    ]
+    if filtered_evidence_handles == raw_evidence_handles:
+        return None
+    candidate = dict(parsed)
+    candidate["evidence_handles"] = filtered_evidence_handles
+    try:
+        validated = validate_selection_goal_draft(
+            candidate,
+            evidence_handles=evidence_handles,
+            role_handles=role_handles,
+            required_evidence_handles=required_evidence_handles,
+            maximum_evidence_handles=maximum_evidence_handles,
+        )
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return None
+    degraded_draft = _selection_goal_draft_to_goal_bid(validated)
+    return degraded_draft
 
 
 def _selection_goal_draft_to_goal_bid(

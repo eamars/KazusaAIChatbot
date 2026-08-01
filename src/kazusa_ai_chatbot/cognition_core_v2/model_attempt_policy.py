@@ -65,7 +65,7 @@ V2_MODEL_OWNER_POLICIES: dict[str, V2ModelOwnerPolicy] = {
     },
     "goal_bid_structure": {
         "total_attempt_limit": V2_MODEL_TOTAL_ATTEMPTS,
-        "exhausted_disposition": "retry_graph",
+        "exhausted_disposition": "accepted_degraded",
     },
     "workspace_collapse": {
         "total_attempt_limit": V2_MODEL_TOTAL_ATTEMPTS,

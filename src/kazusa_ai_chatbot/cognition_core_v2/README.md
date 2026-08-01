@@ -311,9 +311,13 @@ exhaustion projects a validated neutral surface from canonical V2 truth.
 Malformed canonical input, invalid persistent state, unsupported routes,
 unresolved required dependencies after the existing clean graph retry, failed
 commit or post-commit invariants, and total model unavailability with no owned
-fallback remain execution errors. Recoverable and degraded outcomes follow the
-normal persistence and delivery path. Callers commit only validated replacement
-state.
+fallback remain execution errors. Goal cognition may deliver a degraded
+selection after its local attempts are exhausted when the parsed candidate is
+complete and only contains invalid evidence handles; deterministic projection
+retains required valid evidence and drops the invalid references. Other goal
+contract failures remain execution errors. Recoverable and degraded outcomes
+follow the normal persistence and delivery path. Callers commit only validated
+replacement state.
 
 All four public entrypoints capture their raw arguments before validation in a
 ContextVar-isolated protected failure buffer. `repair_text_surface_planning`
