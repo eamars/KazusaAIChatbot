@@ -84,7 +84,7 @@ ordinary-response goal, and dependency-ready active-goal branches can submit
 up to twenty model tasks concurrently. Final dependency-ready goal work,
 workspace collapse, action planning, and the applicable authorization stage
 remain ordered after that wave. The six appraisal routes use a code-owned
-8,192-token completion default. Each family runs at most eight serial
+25,000-token completion default. Each family runs at most eight serial
 micro-appraisal items on its existing route. Each item keeps one normal call
 and one bounded replacement attempt, with an 8,000-character initial dynamic
 payload and a separate 10,000-character repair payload.

@@ -107,7 +107,7 @@ def test_appraisal_routes_share_the_calibrated_completion_default() -> None:
         config_module,
         "SEMANTIC_APPRAISAL_DEFAULT_MAX_COMPLETION_TOKENS",
         None,
-    ) == 8192
+    ) == 25_000
 
 
 class _CapturingInvoker:
