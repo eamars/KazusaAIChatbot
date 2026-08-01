@@ -63,6 +63,7 @@ from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import (
     empty_user_memory_context,
 )
 from kazusa_ai_chatbot.task_resolution.contracts import (
+    MAX_TASK_RESOLUTION_TEXT_ITEMS,
     TASK_RESOLUTION_EXECUTION_CONTEXT_VERSION,
     TaskResolutionContractError,
     TaskResolutionExecutionContextV1,
@@ -506,8 +507,12 @@ def _task_resolution_execution_context_from_state(
         ),
         "local_time_context": dict(state["local_time_context"]),
         "prompt_message_context": dict(state["prompt_message_context"]),
-        "chat_history_recent": _history_rows(state["chat_history_recent"]),
-        "chat_history_wide": _history_rows(state["chat_history_wide"]),
+        "chat_history_recent": _history_rows(state["chat_history_recent"])[
+            -MAX_TASK_RESOLUTION_TEXT_ITEMS:
+        ],
+        "chat_history_wide": _history_rows(state["chat_history_wide"])[
+            -MAX_TASK_RESOLUTION_TEXT_ITEMS:
+        ],
         "conversation_progress": progress_context,
         "persona_summary": _task_resolution_persona_summary(state),
         "conversation_summary": text_or_empty(

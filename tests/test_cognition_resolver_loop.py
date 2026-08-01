@@ -2193,6 +2193,47 @@ async def test_task_resolution_uses_objective_and_preserves_context(
 
 
 @pytest.mark.asyncio
+async def test_task_resolution_bounds_history_to_its_context_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Task resolution receives the newest eight interaction turns."""
+
+    captured: dict = {}
+
+    async def resolve_task_inline(
+        request: dict,
+        context: dict,
+        *,
+        inline_budget_seconds: float,
+    ) -> dict[str, object]:
+        captured["context"] = context
+        return _task_result(summary="Bounded history accepted.")
+
+    monkeypatch.setattr(
+        capabilities_module,
+        "resolve_task_inline",
+        resolve_task_inline,
+    )
+    state = _resolver_state()
+    history = [
+        {"role": "user", "body_text": f"turn-{index}"}
+        for index in range(10)
+    ]
+    state["chat_history_recent"] = history
+    state["chat_history_wide"] = history
+
+    observation = await capabilities_module.execute_resolver_capability_request(
+        _resolver_request(),
+        state,
+    )
+
+    expected_history = history[-8:]
+    assert captured["context"]["chat_history_recent"] == expected_history
+    assert captured["context"]["chat_history_wide"] == expected_history
+    assert observation["status"] == "succeeded"
+
+
+@pytest.mark.asyncio
 async def test_task_resolution_user_input_result_is_blocked(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
