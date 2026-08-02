@@ -8,23 +8,28 @@
 - Mandatory skills: `development-plan`, `local-llm-architecture`, `no-prepost-user-input`, `debug-llm`, `character-test`, `control-console-web-development`, `py-style`, `cjk-safety`, `test-style-and-execution`, and `python-venv`.
 - Overall cutover strategy: a forward-only V2 big-bang contract replacement after the character identity-growth plan completes, with no legacy prose-state restoration, compatibility mapper, dual read, dual write, channel-situation store, historical replay, or database backfill.
 - Highest-risk areas: preserving the frozen twenty-one-emotion semantics while extending character-scope elapsed evolution; deriving a global consequence without copying user-scoped relationship state; preventing the new operational route from competing with the router's four durable-task slots; keeping global state fresh across normal and accepted-task paths without leaking scoped detail; bounding every reachable input/output/security check without an uncaught pipeline failure; proving behavioral rather than prompt-only impact; preserving current-scene authority; and avoiding latency regression.
-- Acceptance criteria: a zero-gap capability matrix and twenty-one-emotion scope matrix are signed; a normal offence can produce separately derived offender-specific relationship injury and privacy-safe character-global affect; ordinary elapsed evolution changes the effective global emotion before sleep; the next eligible cross-channel turn consumes its committed state version without treating another user as the offender; current history and conversation progress remain scene authority; one interaction-style snapshot serves relevance, cognition, and surface; every direct V2-path limit resolves by bounded reduction, owner-local replacement, or a typed terminal disposition; controlled and natural real-LLM evidence demonstrates emotion-specific causal behavior and fading; and authenticated browser sign-off shows full persisted/effective affect, scoped relationship state, exact consumed context, and bounded/degraded health.
-- Execution authority: this draft authorizes documentation only. Production edits, database writes, live-service changes, and execution require plan approval plus an explicit implementation command.
+- Acceptance criteria: a zero-gap capability matrix and twenty-one-emotion scope matrix are signed; a normal offence can produce separately derived offender-specific relationship injury and privacy-safe character-global affect; ordinary elapsed evolution changes the effective global emotion before sleep; the next eligible cross-channel turn consumes its committed state version without treating another user as the offender; current history and conversation progress remain scene authority; one interaction-style snapshot serves relevance, cognition, and surface; every direct V2-path limit resolves by bounded reduction, owner-local replacement, or a typed terminal disposition; controlled and natural real-LLM evidence demonstrates emotion-specific causal behavior and fading; baseline-parity proof shows persisted global affect changes at least one decision (appraisal/goal/stance) AND visible speech like the main-branch mood/global-vibe path did; and authenticated browser sign-off shows full persisted/effective affect, scoped relationship state, exact consumed context, and bounded/degraded health.
+- Execution authority: the user approved this plan on 2026-08-02 with the explicit `Approve. Proceed` implementation command; this plan is `in_progress` in `development_plans/active/bugfix/` and production edits, database writes, live-service changes, and execution are authorized by that approval plus this plan's status.
 
 ## Context
 
-Current V2 persists native character state but omits its short-horizon affect
-and pressure from ordinary user relevance, appraisal/goal judgment, and
-speech. Accepted turns do not produce a separate character-scope carry-over,
-ordinary elapsed fading is absent, relationship projection lacks bounded
-causes, and relevance still reads retired prose fields. User/group style is
-loaded by separate consumers instead of one immutable turn snapshot.
+Gap (user-confirmed criterion): the main branch persisted `mood`,
+`global_vibe`, and `last_relationship_insight` and fed them into L1/L2/L2c2/L3
+and surface with explicit instructions to color first reactions, appraisal and
+goal judgment, tone (tense/relaxed/defensive/light), and closeness/aggression/
+care. Cognition V2 dropped these from the production cognition chain; only
+compatibility reads remain (`service.py` `character_mood`/
+`last_relationship_insight`, `persona_relevance_agent.py` `character_mood`),
+and the persisted native V2 affect is not yet consumed by relevance,
+appraisal/goal, or surface. Global character dynamics therefore no longer
+influence decisions or speech. This plan restores that influence through
+native V2 affect/pressure projections and one state-only carry-over.
 
 Required invariant: one user episode may update that user's relationship state
 and separately derive source-free character affect. A later user or channel
 may consume elapsed-effective character posture without receiving the earlier
 user's facts, identity, or blame. Current message/history/progress remain fact
-and topic authority. The implementation path is:
+and topic authority. Implementation path:
 
 ```text
 prior receipt -> bounded barrier -> one global/user/style load
@@ -37,10 +42,8 @@ prior receipt -> bounded barrier -> one global/user/style load
 ```
 
 Stage 1 rebaselines the completed identity-growth and P0 context-reconnection
-plans in `development_plans/archive/completed/bugfix/`. Identity growth remains
-durable authority. P0's exact `group_engagement_action_context` and its
-goal/action-only consumers remain canonical; the shared snapshot replaces only
-its loader.
+plans in `development_plans/archive/completed/bugfix/`; identity growth stays
+durable authority and the shared snapshot replaces only P0's loader.
 
 ## Mandatory Skills
 
@@ -103,6 +106,9 @@ its loader.
 8. Two-of-three applies only where stated. Structural, persistence, privacy, isolation, negative, browser, and regression cases pass individually.
 9. Scripts/tests emit raw evidence; the parent authors readable reviews after inspection.
 10. `anti_cheat_audit.md` records frozen/final test hashes, direct-write and bypass scans, A/B deltas, raw-evidence hashes, natural trace chains, and exceptions. Passing requires zero unexplained change or prohibited path.
+11. Baseline-parity anti-cheat: a behavioral case passes only when the SAME persisted global state can be shown to change both a decision (appraisal/goal/stance) and the visible dialog, and the consumed-context digest contains the rows that produced that change. Prompt-only differences, a static/inserted mood line, hardcoded emotion or expected-dialog literals, direct state seeding before entrypoint invocation, mocked consumption, and surface-only rewrites that leave decisions unchanged are invalid.
+12. No affect laundering: production code may not append global affect to dialog or surface without passing through the declared consumer projections and recorded context digest, and may not fabricate or duplicate affect rows to inflate influence. Full global state is never copied into a model prompt.
+13. Baseline anchors are mandatory: each controlled and natural review records the main-branch anchors it parallels (prompt/source lines and, where available, the conversation-history example), the exact consumed global-state rows, and the decision+dialog deltas, so the reviewer can verify v2 restores the baseline influence direction without inventing facts, topics, or reasons to speak.
 
 ## Must Do
 
@@ -130,6 +136,11 @@ its loader.
 18. Inventory every direct-path size/cardinality/deadline guard and prove its exact reduction, replacement, or typed terminal disposition, including frontline relevance, settled relevance, decontextualization, Core V2, dialog/surface, consolidation routing/carry-over, accepted-task post-turn, persistence, telemetry, and console rendering.
 19. Produce the anti-cheat audit and final closure manifest defined below;
     completion cannot rely on checklist state or prose claims.
+20. Prove baseline-parity behavior: at least one controlled and one natural
+    real-LLM chain show persisted global affect changing both a decision
+    (appraisal/goal/stance) and visible speech in the same influence direction
+    as the main-branch mood/global-vibe path, with baseline anchors and
+    consumed-context digests recorded.
 
 ## Deferred
 
@@ -765,7 +776,7 @@ Stop for direction before adding persisted fields/collections; changing the emot
 
 ## Progress Checklist
 
-- [x] Stage 1 — prerequisite and closure matrices signed. Covers steps 1-5; evidence: `test_artifacts/cognition_core_v2_short_horizon_state/rebaseline.md`, `baseline_to_v2_capability_closure.md`, and `emotion_scope_decay_matrix.md`; parent `/root`, 2026-08-02; handoff to Stage 2 recorded.
+- [x] Stage 1 — prerequisite and closure matrices signed. Covers steps 1-5; evidence: `test_artifacts/cognition_core_v2_short_horizon_state/rebaseline.md`, `baseline_to_v2_capability_closure.md`, and `emotion_scope_decay_matrix.md`; main-branch gap anchors recorded from `git grep main` (mood/global-vibe/relationship-insight producers and L1/L2/L2c2/L3/surface consumers) and read-only history probe `_history_probe.json`; parent `/root`, 2026-08-02; handoff to Stage 2 recorded.
 - [x] Stage 2 — focused test contract established and production subagent started. Covers steps 6-10; evidence: `test_artifacts/cognition_core_v2_short_horizon_state/focused_test_contract.json` and `production_subagent_brief.md`; frozen-test commit `3be764f911bdd6d8faecee6ff499ed1a9c72f812`; parent `/root`, 2026-08-02; handoff to Stage 3 is pending production verification.
 - [ ] Stage 3 — native versioning, fading, projection, receipt transaction, and exact writer conversion pass. Covers steps 11-14; retain focused output; reread, hand off, and sign `<parent/date>`.
 - [ ] Stage 4 — dedicated one-appraisal carry-over, reserved router slot, and direct accepted-task adapter pass. Covers steps 15-19; retain call/update/receipt/failure evidence; reread, hand off, and sign `<parent/date>`.
@@ -773,9 +784,9 @@ Stop for direction before adding persisted fields/collections; changing the emot
 - [ ] Stage 6 — relevance/cognition/surface and universal bounded boundaries pass. Covers steps 24-28; retain exact dispositions, sizes, attempts, contexts, and no-escape proof; reread, hand off, and sign `<parent/date>`.
 - [ ] Stage 7 — telemetry and console contracts pass. Covers steps 29-32; verify console unit/web/fake-service tests; retain redacted fixtures/render assertions; reread, hand off to Stage 8, and sign `<parent/date>`.
 - [ ] Stage 8 — deterministic, guarded-DB, and performance gates pass. Covers steps 33-35; run every listed gate and retain deterministic, database, performance, and initial anti-cheat evidence; reread, hand off to Stage 9, and sign `<parent/date>`.
-- [ ] Stage 9 — one-at-a-time real-LLM gates pass. Covers steps 36-39; verify offence/emotion/elapsed/repair/cross-scope/negative rubrics; retain raw artifacts, hashes, pair deltas, and the three readable reviews; reread, hand off to Stage 10, and sign `<parent/date>`.
+- [ ] Stage 9 — one-at-a-time real-LLM gates pass. Covers steps 36-39; verify offence/emotion/elapsed/repair/cross-scope/negative rubrics plus the baseline-parity decision+dialog rubric; retain raw artifacts, hashes, pair deltas, baseline anchors, consumed-context digests, and the four readable reviews (`controlled_ab_review.md`, `natural_causal_chain_review.md`, `baseline_parity_behavior_review.md`, `negative_live_llm_review.md`); reread, hand off to Stage 10, and sign `<parent/date>`.
 - [ ] Stage 10 — authenticated browser gate passes. Covers steps 40-42; verify all target states/layouts/controls, redaction, screenshots, and zero browser errors; retain browser sign-off; reread, hand off to Stage 11, and sign `<parent/date>`.
-- [ ] Stage 11 — independent review, anti-cheat audit, remediation, and closeout pass. Covers steps 43-46; verify review approval, reruns, manifest completeness, and explicit user approval; retain the named review/audit/manifest/sign-off artifacts; archive only after every final sign-off rule passes and sign `<parent/date>`.
+- [ ] Stage 11 — independent review, anti-cheat audit, remediation, and closeout pass. Covers steps 43-46; verify review approval, reruns, manifest completeness, baseline-parity gate, and explicit user approval; retain the named review/audit/manifest/sign-off artifacts; archive only after every final sign-off rule passes and sign `<parent/date>`.
 
 ## Verification
 
@@ -911,6 +922,15 @@ Rubric:
   goal selection in at least two of three pairs while axes remain identical;
 - style changes participation/expression in at least two of three pairs but
   never creates a response reason, topic, fact, or relationship claim;
+- every accepted behavioral case shows the change in BOTH the decision
+  (appraisal/goal/stance) and the visible dialog, with the consumed
+  global-state rows and context digest recorded; a case that changes only
+  prompt wording, only persisted state, or only surface wording fails;
+- baseline parity: each accepted case records its main-branch anchor (the
+  exact `git grep main` prompt/source line or conversation-history example it
+  parallels) and the v2 influence direction must match the baseline's
+  mood/global-vibe role (coloring appraisal/goal/tone/closeness without
+  inventing facts, topics, or reasons to speak);
 - no case is accepted solely because prompt text differs.
 
 Create:
@@ -949,7 +969,10 @@ normal chat intake
 -> matching console projection
 ```
 
-No direct operational-state write is allowed. Create:
+Every chain must also record its main-branch baseline anchor and the exact
+consumed global-state rows behind the decision and the dialog, proving the
+dialog change is attributable to persisted global affect, not to prompt text
+or a direct write. No direct operational-state write is allowed. Create:
 
 ```text
 test_artifacts/cognition_core_v2_short_horizon_state/natural_causal_chain_review.md
@@ -1113,6 +1136,7 @@ Final sign-off is an evidence review, not a checklist or test-count decision. Th
 | `performance_review.md` | baseline/final environment, samples, raw measurements, thresholds and dispositions |
 | `controlled_ab_review.md` | raw-evidence links, single-variable pair deltas, native state and behavioral rubric results |
 | `natural_causal_chain_review.md` | all six production-entrypoint chains from episode through persisted state to later dialog/console |
+| `baseline_parity_behavior_review.md` | main-branch anchors (prompt/source lines plus conversation-history examples), v2 decision+dialog deltas, consumed-context digests, and a pass/fail verdict for the baseline-parity gate |
 | `negative_live_llm_review.md` | every privacy, isolation, topic and style negative, all passing individually |
 | `anti_cheat_audit.md` | frozen-test comparison, bypass/direct-write scans, pair controls, trace provenance and raw hashes |
 | `console_browser_signoff.md` plus screenshots | all eleven browser checks on natural-proof data and zero console/page errors |
@@ -1125,20 +1149,21 @@ Final sign-off is an evidence review, not a checklist or test-count decision. Th
 
 - plan path/status, Stage 1 and final HEADs, changed-file inventory, and every stage signature/date;
 - model route/name/settings, prompt/code revision, guarded database, clock mode, host/runtime, and performance sample method;
-- exactly one Acceptance Criterion 1-22 row with evidence path/hash, command or case id, observed result, pass/fail, reviewer, and date;
+- exactly one Acceptance Criterion 1-23 row with evidence path/hash, command or case id, observed result, pass/fail, reviewer, and date;
 - every warning, replacement, failed attempt, exclusion, intervention, and residual risk with owner, relevance, disposition, and review status;
 - independent approval, user-sign-off reference, lifecycle update, and archive destination.
 
 Final passing rules:
 
 1. Every named artifact exists, is non-empty, and resolves to its cited raw hash; blanks, placeholders, missing rows, and prose-only evidence fail.
-2. All eleven stages and twenty-two acceptance criteria pass; unchecked evidence links or missing signatures invalidate a checked box.
+2. All eleven stages and twenty-three acceptance criteria pass; unchecked evidence links or missing signatures invalidate a checked box.
 3. Every required case runs. Skip, xfail, deselection, deletion, or weakened coverage fails. A warning is reviewed only when source, owner, relevance, disposition, and reviewer agreement are recorded.
 4. Every controlled, natural, negative, database, performance, browser, anti-cheat, and regression threshold passes; direct post-entrypoint mutation, prompt-only difference, mocked consumption, or rewritten raw output is invalid.
 5. Baseline/final performance uses comparable recorded model/settings, host/runtime, database mode, warm-up, samples, and input; material mismatch requires rerun.
 6. Independent review approves the exact final diff/audit after remediation and reruns; the severity rule above applies.
-7. The user reviews the manifest, behavior reviews, low residuals, and browser evidence, then explicitly approves behavior, evidence, and UI. Earlier commands and silence are not sign-off; rejection reopens the earliest affected stage.
-8. Only after rules 1-7 pass may the parent mark `completed`, update `development_plans/README.md`, and move the closed record to `development_plans/archive/completed/bugfix/`.
+7. The baseline-parity gate passes: `baseline_parity_behavior_review.md` proves at least one controlled and one natural case where persisted global affect changed both a decision (appraisal/goal/stance) and visible speech, with baseline anchors and consumed-context digests; prompt-only, static-mood-line, hardcoded-emotion, direct-seed, and surface-only changes are invalid.
+8. The user reviews the manifest, behavior reviews (including the baseline-parity review), low residuals, and browser evidence, then explicitly approves behavior, evidence, and UI. Earlier commands and silence are not sign-off; rejection reopens the earliest affected stage.
+9. Only after rules 1-8 pass may the parent mark `completed`, update `development_plans/README.md`, and move the closed record to `development_plans/archive/completed/bugfix/`.
 
 ## Acceptance Criteria
 
@@ -1176,6 +1201,12 @@ Final passing rules:
     scoped relationship data, exact consumed subset, and degraded/limit health.
 22. Independent review is approved, all in-scope findings are remediated, and
     the user signs off the behavior, evidence, and web UI.
+23. Baseline-parity behavior: controlled and natural real-LLM evidence proves
+    persisted global affect changes at least one decision (appraisal/goal/
+    stance) AND visible speech in the same influence direction as the main-
+    branch mood/global-vibe path, with baseline anchors and consumed-context
+    digests; prompt-only, static mood lines, hardcoded emotion/dialog, and
+    surface-only rewrites are invalid.
 
 ## Risks
 
@@ -1189,7 +1220,8 @@ Final passing rules:
 | latency/context regression | fixed caps, branch selection, one snapshot, read/call counts and p95 performance gates |
 | reconstructed console truth | exact consumed public projection and digest matched through browser/network evidence |
 | shortcut or scope drift | frozen tests, anti-cheat audit, independent diff/raw-evidence review and prerequisite rebaseline |
+| fake or prompt-only global-affect influence | baseline-parity behavior gate, decision+dialog deltas, consumed-context digests, baseline anchors, and anti-cheat rules 11-13 |
 
 ## Execution Evidence
 
-Execution appends dated command, count, hash, result, reviewer, and stage-signature rows only to the exact artifacts in `Final Sign-Off Contract`. Completion requires `final_closure_manifest.md` to resolve every Acceptance Criterion 1-22 row to those artifacts, `independent_code_review.md` to approve the final diff/audit, and `user_signoff.md` to record explicit final approval.
+Execution appends dated command, count, hash, result, reviewer, and stage-signature rows only to the exact artifacts in `Final Sign-Off Contract`. Completion requires `final_closure_manifest.md` to resolve every Acceptance Criterion 1-23 row to those artifacts, `baseline_parity_behavior_review.md` to pass the baseline-parity gate, `independent_code_review.md` to approve the final diff/audit, and `user_signoff.md` to record explicit final approval.
