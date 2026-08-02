@@ -4,7 +4,7 @@
 
 - Goal: close the V2 functional gaps formerly covered by mood, global vibe, and last relationship insight through native emotion-specific character carry-over, ordinary elapsed fading between sleep cycles, causal per-user relationship projection, and one role-based user/group interaction-style composition path.
 - Plan class: `high_risk_migration`.
-- Status: `draft`.
+- Status: `in_progress`.
 - Mandatory skills: `development-plan`, `local-llm-architecture`, `no-prepost-user-input`, `debug-llm`, `character-test`, `control-console-web-development`, `py-style`, `cjk-safety`, `test-style-and-execution`, and `python-venv`.
 - Overall cutover strategy: a forward-only V2 big-bang contract replacement after the character identity-growth plan completes, with no legacy prose-state restoration, compatibility mapper, dual read, dual write, channel-situation store, historical replay, or database backfill.
 - Highest-risk areas: preserving the frozen twenty-one-emotion semantics while extending character-scope elapsed evolution; deriving a global consequence without copying user-scoped relationship state; preventing the new operational route from competing with the router's four durable-task slots; keeping global state fresh across normal and accepted-task paths without leaking scoped detail; bounding every reachable input/output/security check without an uncaught pipeline failure; proving behavioral rather than prompt-only impact; preserving current-scene authority; and avoiding latency regression.
@@ -13,29 +13,18 @@
 
 ## Context
 
-The missing web labels exposed a pipeline gap rather than an isolated UI defect.
-The baseline fields were compact prose summaries, but each represented a
-different function:
+Current V2 persists native character state but omits its short-horizon affect
+and pressure from ordinary user relevance, appraisal/goal judgment, and
+speech. Accepted turns do not produce a separate character-scope carry-over,
+ordinary elapsed fading is absent, relationship projection lacks bounded
+causes, and relevance still reads retired prose fields. User/group style is
+loaded by separate consumers instead of one immutable turn snapshot.
 
-| Baseline function | Current V2 capability | Gap |
-|---|---|---|
-| mood: character affect carried between responses | `CharacterCognitionStateV2.affect_activations` has causal emotion, intensity, phase, trend, and sleep recovery | character affect is omitted from ordinary user-turn cognition and relevance; accepted user turns do not update it |
-| global vibe: slower cross-conversation posture | character drives, meaning, goals, threats, events, gaps, and affect already form a richer native state | the full operational state is neither projected nor composed into ordinary responses; non-sleep elapsed fading is absent |
-| last relationship insight: compact reason behind the current relationship stance | `RelationshipStateV2` preserves axes and evidence, while user cognition state preserves relationship-rooted events and affect | production relevance reads a field that native V2 no longer stores; the V2 relationship prompt and console expose axes without bounded causal context |
-| user/channel adaptation | user and group-channel interaction-style images already exist; the P0 context-reconnection fix restores bounded group engagement to eligible group self-cognition goal/action judgment | ordinary user relevance still lacks style, and production does not yet reuse one immutable snapshot across relevance, cognition, and surface |
-| operator visibility | the console exposes native state tables | it does not show the effective global projection consumed by a turn or the causal relationship projection |
-
-The target is functional supersession, not restoration of the strings `mood`, `global_vibe`, or `last_relationship_insight`. The concrete behavioral requirement is:
-
-```text
-user A offends Asuna
-  -> A's user state retains relationship injury
-  -> a separate source-free character update derives native global affect
-  -> a later user-B turn composes elapsed-effective global affect with B's
-     relationship and the current scene, without blaming B
-```
-
-The foreground user episode and post-turn character episode each keep one mutable scope and one `StateUpdateV2`; no user affect is copied. The target dependency chain is:
+Required invariant: one user episode may update that user's relationship state
+and separately derive source-free character affect. A later user or channel
+may consume elapsed-effective character posture without receiving the earlier
+user's facts, identity, or blame. Current message/history/progress remain fact
+and topic authority. The implementation path is:
 
 ```text
 prior receipt -> bounded barrier -> one global/user/style load
@@ -47,30 +36,11 @@ prior receipt -> bounded barrier -> one global/user/style load
 -> next eligible private/group turn consumes that version
 ```
 
-This follows `development_plans/active/bugfix/cognition_core_v2_character_identity_growth_bigbang_plan.md`. That plan owns durable identity/self-image/growth/revisions/lineage; this plan owns transient operational state and scoped runtime composition. Execution is blocked until the prerequisite is `completed`, signed, and rebaselined.
-
-### 2026-07-30 P0 Context-Reconnection Rebaseline
-
-`development_plans/archive/completed/bugfix/cognition_core_v2_p0_context_reconnection_bugfix_plan.md`
-restored the existing group-engagement producer to native V2 before this draft
-executes. The post-P0 baseline has:
-
-- one eligible cycle-zero group self-cognition load through
-  `build_group_engagement_action_context(...)`;
-- one exact `group_engagement_action_context` V2 carrier with bounded
-  `engagement_guidelines` and `confidence`;
-- goal cognition and action planning as its only cognition consumers;
-- exact empty context and zero group-style reads for ineligible events;
-- canonical self-cognition `content.semantic_text` as current-scene authority
-  ahead of fallback `text`; and
-- deterministic and live trace coverage for the producer-to-consumer edge.
-
-This plan must adopt that carrier and those consumer boundaries. Its future
-immutable `interaction_style_turn_snapshot.v1` replaces the direct connector
-load and supplies the existing group projection; it does not add a second
-group-engagement field, loader, vocabulary, or cognition consumer. Stage 1
-must rebaseline against the completed and user-signed P0 plan before any
-implementation.
+Stage 1 rebaselines the completed identity-growth and P0 context-reconnection
+plans in `development_plans/archive/completed/bugfix/`. Identity growth remains
+durable authority. P0's exact `group_engagement_action_context` and its
+goal/action-only consumers remain canonical; the shared snapshot replaces only
+its loader.
 
 ## Mandatory Skills
 
@@ -121,6 +91,19 @@ implementation.
 36. After context compaction and after each signed major stage, reread this complete plan.
 37. Complete independent code review, parent remediation, verification reruns, and lifecycle evidence before merge or completion.
 
+## Anti-Cheat Rules
+
+1. Schema success, prompt differences, mocks, and direct seeds are supporting evidence only. Behavioral acceptance requires the production entrypoint, persisted native reduction, consumed-context digest, relevant appraisal/goal, and visible dialog.
+2. Controlled A/B may seed only its declared pre-run variable. After entrypoint invocation, agents/tests may not create or repair operational state, receipts, cognition/context output, or dialog.
+3. Natural proofs use a clean guarded database, normal service paths, and only the declared clock seam; direct reducer, writer, carry-over, or console-repository substitution fails the proof.
+4. A/B pairs hold identity, message/history, database seed, model route/name/settings, prompt version, and code revision fixed; the review records the sole changed field.
+5. Production/prompt code may not contain fixture identifiers, expected dialog/emotion, test-only branches, force-pass flags, hidden fallbacks, or environment bypasses.
+6. The production subagent does not edit tests. Stage 2 freezes focused-test hashes. Later parent changes require the original assertion, plan-clause rationale, and retained pre/post output; weakening, deleting, skipping, xfail, or deselection fails the plan.
+7. Retain raw successful and failed calls, parse results, state versions, receipts, digests, and dialogs before authoring reviews. Summaries may not rewrite or omit contradictory evidence.
+8. Two-of-three applies only where stated. Structural, persistence, privacy, isolation, negative, browser, and regression cases pass individually.
+9. Scripts/tests emit raw evidence; the parent authors readable reviews after inspection.
+10. `anti_cheat_audit.md` records frozen/final test hashes, direct-write and bypass scans, A/B deltas, raw-evidence hashes, natural trace chains, and exceptions. Passing requires zero unexplained change or prohibited path.
+
 ## Must Do
 
 1. Produce a baseline-to-post-identity-V2 capability closure matrix covering every producer, persistence, fading, relevance, cognition, surface, self-cognition, style, ordering, privacy, telemetry, and UI dependency.
@@ -145,6 +128,8 @@ implementation.
 16. Prove offence-driven dual consequences, cross-user carry-over, relationship isolation, and emotion-specific elapsed fading with controlled A/B and normal-entrypoint real-LLM sequences.
 17. Measure LLM call counts, DB reads, prompt sizes, barrier overhead, routed update latency, and no-pending-turn latency against the post-identity baseline.
 18. Inventory every direct-path size/cardinality/deadline guard and prove its exact reduction, replacement, or typed terminal disposition, including frontline relevance, settled relevance, decontextualization, Core V2, dialog/surface, consolidation routing/carry-over, accepted-task post-turn, persistence, telemetry, and console rendering.
+19. Produce the anti-cheat audit and final closure manifest defined below;
+    completion cannot rely on checklist state or prose claims.
 
 ## Deferred
 
@@ -447,75 +432,28 @@ No historical migration/backfill/baseline import is permitted. Native `cognition
 
 ### Character Operational State View And Consumer Context
 
-```text
-character_operational_state_view.v1
-  source_updated_at: UTC timestamp
-  effective_at: UTC timestamp
-  source_digest: sha256 digest
-  view_digest: sha256 digest
-  affect: list[max 21]
-    emotion_id: existing EMOTION_IDS
-    intensity: existing qualitative band
-    phase: existing phase
-    trend: existing trend
-    primary_root_kind: goal | threat | event | knowledge_gap | drive | standard | meaning
-    cause_class: closed enum above
-    freshness: existing project_duration label
-  pressures: list[max 8]
-    pressure_kind: goal | threat | event | knowledge_gap | drive | meaning
-    salience: existing qualitative band
-    lifecycle: existing lifecycle label
-    cause_class: closed enum above
-    freshness: existing project_duration label
+| Contract | Exact fields and bounds |
+|---|---|
+| `character_operational_state_view.v1` | `source_updated_at`, `effective_at`, `source_digest`, `view_digest`; `affect` max 21 with existing emotion id/intensity/phase/trend, native root kind, closed cause class, freshness; `pressures` max 8 with native kind/salience/lifecycle, closed cause class, freshness |
+| `character_operational_context.v1` | source/effective timestamps, `view_digest`, `context_digest`, `consumer_role=settled_relevance|appraisal branch|goal|surface`; same affect max 3 and pressure max 4 row shapes |
 
-character_operational_context.v1
-  source_updated_at: UTC timestamp
-  effective_at: UTC timestamp
-  view_digest: sha256 digest
-  context_digest: sha256 digest
-  consumer_role: settled_relevance | appraisal branch id | goal | surface
-  affect: list[max 3]
-    same row shape as state view
-  pressures: list[max 4]
-    same row shape as state view
-```
-
-`source_digest` hashes the canonical persisted operational state.
-`view_digest` hashes the complete redacted state view excluding itself.
-`context_digest` hashes the exact consumer selection excluding itself. Neither
-digest is semantic evidence. All consumer contexts are selected from the
-canonical state view; they never re-read or reinterpret persistent state.
+`source_digest` hashes persisted state, `view_digest` the complete redacted
+view, and `context_digest` the exact selection, each excluding its own digest.
+They are audit fields, not semantic evidence. Consumers select from the one
+view and do not reload or reinterpret persistence.
 
 ### Relationship Operational Projection
 
-```text
-relationship_operational_context.v1
-  axes: existing qualitative relationship bands
-  causal_context: list[max 2]
-    entity_kind: goal | threat | event | knowledge_gap
-    semantic_summary: normalized, max 160 chars
-    salience: qualitative band
-    lifecycle: lifecycle label
-    freshness: duration label
-  affect: list[max 2]
-    emotion_id
-    intensity
-    phase
-    trend
-    freshness
-  relationship_freshness: duration label
-  evidence_freshness: duration label | "无证据"
-```
+`relationship_operational_context.v1` contains existing qualitative `axes`,
+`causal_context` max 2 (`entity_kind`, normalized `semantic_summary` max 160,
+salience, lifecycle, freshness), `affect` max 2 (emotion id, intensity, phase,
+trend, freshness), relationship freshness, and evidence freshness or `无证据`.
 
 ### Consolidation Route Decision
 
-```text
-consolidation_route_decision.v2
-  lane_tasks: existing closed durable task rows, max 4
-  character_operational_state_task: null | object
-    reason: normalized non-empty string, max 160 chars
-    source_keys: unique trusted source_view keys, 1..4
-```
+`consolidation_route_decision.v2` has exact required keys `lane_tasks` (existing
+closed durable rows, max 4) and nullable `character_operational_state_task`
+with normalized reason max 160 and 1-4 unique trusted source keys.
 
 Both top-level keys are required/exact; top-level or durable-task failure keeps the existing typed empty-route result. The operational slot is independently available only for settled non-reflection character responses; its invalid source/cardinality/shape becomes `null` plus a typed error while valid durable tasks continue.
 Operational source policy accepts only ref-complete `current_turn_user_message|assistant_final_dialog|internal_thought|episode_trace`; any RAG/reflection key rejects the operational task.
@@ -523,27 +461,10 @@ A validated `null` terminalizes `no_change`; malformed routing or a rejected non
 
 ### Character Carry-Over Decision
 
-```text
-character_carryover_decision.v1
-  schema_version: "character_carryover_decision.v1"
-  action: no_change | apply
-  reason_code:
-    no_lingering_effect | already_represented | transient_scene_only |
-    unsupported | lingering_character_effect
-  privacy_disposition: source_free | unsafe
-  semantic_appraisal: null | one SemanticAppraisalResultV2
-
-character_carryover_result.v2
-  schema_version: "character_carryover_result.v2"
-  decision: character_carryover_decision.v1
-  state_update: null | one character-scoped StateUpdateV2
-  disposition: no_change | apply | degraded
-  error_code:
-    null | input_limit | output_limit | contract_exhausted |
-    provider_exhausted | privacy_rejected | deadline_exceeded |
-    state_rejected
-  attempt_count: integer 0..3
-```
+| Contract | Exact fields |
+|---|---|
+| `character_carryover_decision.v1` | exact schema version; `action=no_change|apply`; `reason_code=no_lingering_effect|already_represented|transient_scene_only|unsupported|lingering_character_effect`; `privacy_disposition=source_free|unsafe`; nullable one `SemanticAppraisalResultV2` |
+| `character_carryover_result.v2` | exact schema version; decision; nullable one character `StateUpdateV2`; `disposition=no_change|apply|degraded`; `error_code=null|input_limit|output_limit|contract_exhausted|provider_exhausted|privacy_rejected|deadline_exceeded|state_rejected`; attempts 0-3 |
 
 `no_change` requires `semantic_appraisal=null`. `apply` requires
 `privacy_disposition=source_free`, exact question id, one to four propositions,
@@ -570,64 +491,21 @@ run_character_carryover_cognition(
 
 ### Interaction-Style Snapshot
 
-```text
-interaction_style_turn_snapshot.v1
-  user_style:
-    revision: int | 0
-    status: active | empty | missing | failed
-    overlay: existing sanitized overlay
-  group_channel_style:
-    revision: int | 0
-    status: active | empty | missing | failed
-    overlay: existing sanitized overlay | omitted for private
-  relevance_projection: source-labeled engagement rows
-  cognition_projection: source-labeled social/engagement rows
-  surface_projection: source-labeled existing L3 rows
-  snapshot_digest: sha256 digest
-```
-
-Prompt payloads omit document IDs, source reflection runs, platform/user/channel
-IDs, and storage timestamps.
+`interaction_style_turn_snapshot.v1` contains user and optional group revision,
+`active|empty|missing|failed` status, existing sanitized overlays, source-labeled
+relevance/cognition/surface projections, and `snapshot_digest`. Private turns
+omit group style. Prompt payloads omit document/reflection IDs, platform/user/
+channel IDs, and storage timestamps.
 
 ### Ordering Receipt
 
-```text
-character_operational_receipt.v1
-  source_episode_id: protected internal field
-  sequence: monotonic process-local integer
-  status: pending | no_change | committed | failed | timed_out
-  durable: bool
-  base_updated_at: UTC timestamp
-  committed_updated_at: UTC timestamp | none
-  registered_at: UTC timestamp
-  completed_at: UTC timestamp | none
-  lease_owner: protected bounded process id
-  lease_expires_at: UTC timestamp
-  attempt_count: integer 0..3
-  error_code:
-    none | route_invalid | source_policy_rejected | capacity_exceeded | input_limit | output_limit |
-    contract_exhausted | provider_exhausted | privacy_rejected |
-    deadline_exceeded | state_rejected | transaction_unavailable | persistence_failed |
-    version_conflict
-
-post_turn_lifecycle_record.v2
-  existing lifecycle_record_id/source_episode_id/delivery/action/status fields
-  character_operational_receipt: character_operational_receipt.v1
-  created_at: UTC timestamp
-  purge_after: configured audit TTL timestamp
-
-CharacterOperationalClaimV1
-  disposition: claimed | in_progress | terminal
-  receipt: character_operational_receipt.v1
-
-PredecessorTokenV1
-  source_episode_id: protected; sequence: process-local integer; registered_at: UTC
-
-PredecessorBarrierResultV1
-  status: healthy | degraded
-  watermark: integer
-  awaited_count: integer; timed_out_count: integer; wait_ms: non-negative integer
-```
+| Contract | Exact fields |
+|---|---|
+| `character_operational_receipt.v1` | protected episode id; sequence; `pending|no_change|committed|failed|timed_out`; durable; base/committed/registered/completed/lease timestamps; bounded lease owner; attempts 0-3; the declared route/source/capacity/input/output/contract/provider/privacy/deadline/state/transaction/persistence/version error enum |
+| `post_turn_lifecycle_record.v2` | existing lifecycle/delivery/action/status fields, embedded receipt, `created_at`, configured-TTL `purge_after` |
+| `CharacterOperationalClaimV1` | `claimed|in_progress|terminal` plus receipt |
+| `PredecessorTokenV1` | protected episode id, process sequence, registration time |
+| `PredecessorBarrierResultV1` | `healthy|degraded`, watermark, awaited/timed-out counts, non-negative wait ms |
 
 Public telemetry omits `source_episode_id` and exposes only status, version
 timestamps, duration, and bounded error code.
@@ -783,8 +661,10 @@ Stop for direction before adding persisted fields/collections; changing the emot
 2. Require a clean post-identity worktree, then record `git status --short`,
    HEAD, Python version, mandatory-skill reads, and relevant docs/source/tests.
 3. Locate every character cognition-state reader/writer and every legacy runtime occurrence with `rg` and `git grep main`.
-4. Create and sign the baseline-to-V2 capability closure artifact and the
-   twenty-one-emotion scope/decay matrix.
+4. Create and sign
+   `test_artifacts/cognition_core_v2_short_horizon_state/rebaseline.md`,
+   `baseline_to_v2_capability_closure.md`, and
+   `emotion_scope_decay_matrix.md`.
 5. Verify the post-identity forms of
    `persona_supervisor2_cognition._commit_cognition_state`,
    `affect_settling.run_daily_affect_settling`,
@@ -800,7 +680,9 @@ Stop for direction before adding persisted fields/collections; changing the emot
 8. Create persistence/ordering tests for lifecycle v2 claim, duplicate/live
    lease, terminal reuse, restart expiry, transaction atomicity, one CAS
    reapply, predecessor success/failure/timeout/capacity, and shutdown.
-9. Run each focused file and record expected failures.
+9. Run each focused file, record expected failures, and record the SHA-256 hash
+   of every focused test file in
+   `test_artifacts/cognition_core_v2_short_horizon_state/focused_test_contract.json`.
 10. Start one production-code subagent with the approved plan, mandatory skills, focused tests, and production-only ownership.
 
 ### Stage 3 — Native State, Projection, And Persistence
@@ -844,14 +726,18 @@ Stop for direction before adding persisted fields/collections; changing the emot
 
 33. Run focused files, affected regression suites, static greps, compilation, and guarded clean-database persistence/restart/concurrency tests.
 34. Record call/repair counts, reads, sizes, dispositions, barrier overhead, healthy/retry latency, and timeout release.
-35. Fix only behavior within approved contracts and rerun affected gates.
+35. Fix only behavior within approved contracts, rerun affected gates, and
+    begin `anti_cheat_audit.md` with the frozen-test comparison and direct-path
+    scans.
 
 ### Stage 9 — One-At-A-Time Real-LLM Verification
 
 36. Run each controlled emotion-specific A/B case separately and inspect protected traces.
 37. Run the offence-by-A to later-user-B sequence, controlled-clock elapsed-fading sequence, apology/repair sequence, and private/group cross-scope sequences through normal entrypoints without direct state writes.
 38. Run relationship-emotion isolation, privacy, stale-topic, irrelevant-state, and style-cannot-create-reason negative cases.
-39. Parent authors the emotion-scope, controlled, and natural causal reviews.
+39. Parent authors the controlled, natural, and negative reviews from retained
+    raw evidence and adds pair-delta and evidence-hash rows to the anti-cheat
+    audit.
 
 ### Stage 10 — Real-Service Browser Sign-Off
 
@@ -861,30 +747,35 @@ Stop for direction before adding persisted fields/collections; changing the emot
 
 ### Stage 11 — Review And Closeout
 
-43. Run the full affected regression command and final static scans.
-44. Start one independent review subagent with the plan, full diff, and evidence.
+43. Run the full affected regression command, final static scans, and complete
+    `anti_cheat_audit.md`.
+44. Start one independent review subagent with the plan, full diff, evidence,
+    and anti-cheat audit; record its report in
+    `test_artifacts/cognition_core_v2_short_horizon_state/independent_code_review.md`.
 45. Parent fixes in-scope findings and reruns every affected gate.
-46. Record review approval, residual risks, user sign-off, lifecycle status, and archive action.
+46. Complete `final_closure_manifest.md`, present it with the readable behavior
+    and browser evidence to the user, record explicit approval in
+    `user_signoff.md`, then update lifecycle status and archive the plan.
 
 ## Execution Model
 
 - Parent-led native subagent execution is mandatory; the parent owns tests, integration, all verification/evidence, remediation, and lifecycle.
-- One production subagent owns only approved production files after Stage 2; one later independent review subagent implements no fixes.
+- One production subagent receives the approved plan, frozen test hashes, and Anti-Cheat Rules, owns only approved production files after Stage 2, and cannot edit tests or evidence; one later independent review subagent independently checks the diff, hashes, raw evidence, and audit and implements no fixes.
 - If subagent capability is unavailable, stop before execution unless the user explicitly authorizes fallback execution.
 
 ## Progress Checklist
 
-- [ ] Stage 1 — prerequisite and closure matrices signed. Covers steps 1-5; verify status/HEAD/static inventory, zero unexplained closure rows, and all twenty-one scope/decay rows; retain rebaseline and both matrices; reread, hand off to Stage 2, and sign `<parent/date>`.
-- [ ] Stage 2 — focused test contract established and production subagent started. Covers steps 6-10; verify named expected failures; retain commands/failures/subagent brief; reread, hand off to Stage 3, and sign `<parent/date>`.
+- [ ] Stage 1 — prerequisite and closure matrices signed. Covers steps 1-5; verify status/HEAD/static inventory, zero unexplained closure rows, and all twenty-one scope/decay rows; retain the three named Stage 1 artifacts; reread, hand off to Stage 2, and sign `<parent/date>`.
+- [ ] Stage 2 — focused test contract established and production subagent started. Covers steps 6-10; verify named expected failures; retain commands/failures, `focused_test_contract.json`, and the subagent brief; reread, hand off to Stage 3, and sign `<parent/date>`.
 - [ ] Stage 3 — native versioning, fading, projection, receipt transaction, and exact writer conversion pass. Covers steps 11-14; retain focused output; reread, hand off, and sign `<parent/date>`.
 - [ ] Stage 4 — dedicated one-appraisal carry-over, reserved router slot, and direct accepted-task adapter pass. Covers steps 15-19; retain call/update/receipt/failure evidence; reread, hand off, and sign `<parent/date>`.
 - [ ] Stage 5 — durable/process ordering and one-snapshot handoff pass. Covers steps 20-23; retain restart/capacity/timeout/read evidence; reread, hand off, and sign `<parent/date>`.
 - [ ] Stage 6 — relevance/cognition/surface and universal bounded boundaries pass. Covers steps 24-28; retain exact dispositions, sizes, attempts, contexts, and no-escape proof; reread, hand off, and sign `<parent/date>`.
 - [ ] Stage 7 — telemetry and console contracts pass. Covers steps 29-32; verify console unit/web/fake-service tests; retain redacted fixtures/render assertions; reread, hand off to Stage 8, and sign `<parent/date>`.
-- [ ] Stage 8 — deterministic, guarded-DB, and performance gates pass. Covers steps 33-35; run every listed gate and retain output/performance review; reread, hand off to Stage 9, and sign `<parent/date>`.
-- [ ] Stage 9 — one-at-a-time real-LLM gates pass. Covers steps 36-39; verify offence/emotion/elapsed/repair/cross-scope/negative rubrics; retain protected artifacts and readable reviews; reread, hand off to Stage 10, and sign `<parent/date>`.
+- [ ] Stage 8 — deterministic, guarded-DB, and performance gates pass. Covers steps 33-35; run every listed gate and retain deterministic, database, performance, and initial anti-cheat evidence; reread, hand off to Stage 9, and sign `<parent/date>`.
+- [ ] Stage 9 — one-at-a-time real-LLM gates pass. Covers steps 36-39; verify offence/emotion/elapsed/repair/cross-scope/negative rubrics; retain raw artifacts, hashes, pair deltas, and the three readable reviews; reread, hand off to Stage 10, and sign `<parent/date>`.
 - [ ] Stage 10 — authenticated browser gate passes. Covers steps 40-42; verify all target states/layouts/controls, redaction, screenshots, and zero browser errors; retain browser sign-off; reread, hand off to Stage 11, and sign `<parent/date>`.
-- [ ] Stage 11 — independent review, remediation, and closeout pass. Covers steps 43-46; verify review approval/reruns/no unresolved findings; retain review/diff/lifecycle/user sign-off; archive only after evidence and sign `<parent/date>`.
+- [ ] Stage 11 — independent review, anti-cheat audit, remediation, and closeout pass. Covers steps 43-46; verify review approval, reruns, manifest completeness, and explicit user approval; retain the named review/audit/manifest/sign-off artifacts; archive only after every final sign-off rule passes and sign `<parent/date>`.
 
 ## Verification
 
@@ -944,6 +835,9 @@ venv\Scripts\python.exe -m pytest tests/test_control_console_repository.py tests
 Expected: all pass. Each new test file is first run before implementation and
 its expected failure is recorded.
 
+Record commands, counts, failures, fixes, and final results in
+`test_artifacts/cognition_core_v2_short_horizon_state/deterministic_verification.md`.
+
 ### Guarded Database And Ordering
 
 Use the test-style guarded live-database invocation, one file at a time.
@@ -976,6 +870,10 @@ Required proofs:
 - coordinator capacity overflow records `failed/capacity_exceeded` and cannot
   late-commit;
 - timeout releases by 45.5 seconds and exposes degraded health.
+
+Record database name guard, transaction capability, commands, counts, state
+versions, receipt transitions, restart results, and teardown scope in
+`test_artifacts/cognition_core_v2_short_horizon_state/guarded_database_and_ordering.md`.
 
 ### Controlled Real-LLM A/B
 
@@ -1076,6 +974,10 @@ Run one case at a time:
 
 All must pass; no majority threshold applies.
 
+Create
+`test_artifacts/cognition_core_v2_short_horizon_state/negative_live_llm_review.md`
+from the retained raw inputs, outputs, traces, state, and dialog.
+
 ### Performance Gates
 
 Create
@@ -1135,6 +1037,35 @@ Verify:
 Save screenshots plus `test_artifacts/cognition_core_v2_short_horizon_state/console_browser_signoff.md`.
 This gate is blocking.
 
+### Anti-Cheat Audit
+
+Create and pass
+`test_artifacts/cognition_core_v2_short_horizon_state/anti_cheat_audit.md`
+before the full regression and independent review. The audit must contain:
+
+- the Stage 1 HEAD and Stage 2 focused-test file hashes;
+- final hashes and diffs for every focused test, with a plan-clause rationale
+  and retained pre/post output for each parent-authored change;
+- `git diff --check` and a changed-file inventory proving the implementation
+  stayed inside `Change Surface`;
+- source and test scans for skip, xfail, deselection, force-pass/test-only
+  branches, fixture identifiers, expected dialog/emotion literals, direct
+  operational-state writes, and direct receipt/context/dialog construction;
+- for every controlled pair, the raw input/config hashes and a field-level
+  delta showing exactly one declared independent variable;
+- for every natural proof, correlated entrypoint, episode, receipt, state
+  version, context digest, appraisal/goal, dialog, and console identifiers;
+- SHA-256 hashes and paths for raw evidence used by each readable review;
+- every warning, retry, replacement, failed call, excluded case, and manual
+  intervention with its disposition.
+
+Passing requires zero unexplained test-contract change, zero skipped/xfail/
+deselected required case, zero prohibited production or direct-write path,
+complete single-variable A/B deltas, complete natural trace chains, and exact
+raw-evidence hashes. A missing row or artifact fails this gate. The independent
+reviewer rechecks the audit against source, test diff, and raw evidence rather
+than accepting the parent summary.
+
 ### Full Regression
 
 After every focused, database, live-LLM, performance, and browser gate passes,
@@ -1159,13 +1090,55 @@ foreach ($path in $changedPython) {
 }
 ```
 
-Expected: all pass with no deselected required case and no unreviewed warning.
+Expected: all pass with no deselected required case and no unreviewed warning; record the exact command, counts, warnings/dispositions, and output path in `test_artifacts/cognition_core_v2_short_horizon_state/full_regression.md`.
 
 ## Independent Code Review
 
 The independent reviewer receives the approved plan/prerequisite evidence, full diff/inventory, closure matrix, all test/browser/performance evidence, and controlled/natural causal reviews.
 
-Review architecture/LLM ownership, state/privacy, receipts/transactions/CAS, ordering/timeouts, universal boundaries, budgets, scene precedence, DB reads, error visibility, console redaction, test quality, and plan compliance. Parent fixes only within the approved surface; contract/enum/limit/owner/scope changes stop for approval. Completion permits no blocker or high-severity finding.
+Review architecture/LLM ownership, state/privacy, receipts/transactions/CAS, ordering/timeouts, universal boundaries, budgets, scene precedence, DB reads, error visibility, console redaction, test quality, anti-cheat evidence, and plan compliance. Parent fixes only within the approved surface; contract/enum/limit/owner/scope changes stop for approval. Completion permits no unresolved blocker/high finding and no unresolved medium finding involving correctness, behavior, privacy, persistence, ordering, performance, or evidence integrity. Low-severity residuals must be recorded in the closure manifest and explicitly accepted by the user.
+
+## Final Sign-Off Contract
+
+Final sign-off is an evidence review, not a checklist or test-count decision. The parent presents every artifact below from `test_artifacts/cognition_core_v2_short_horizon_state/`:
+
+| Artifact | Required proof |
+|---|---|
+| `rebaseline.md` | prerequisite sign-offs, clean Stage 1 HEAD, environment/tool versions, source/test inventory |
+| `baseline_to_v2_capability_closure.md` | every baseline producer/consumer row has one evidenced disposition; zero unexplained rows |
+| `emotion_scope_decay_matrix.md` | all twenty-one ids, eighteen/three ownership split, roots, formulas, guards, rates, dual-scope isolation |
+| `focused_test_contract.json` | Stage 2 paths and SHA-256 hashes before production implementation |
+| `deterministic_verification.md` | red/green focused commands, static gates, compilation, integration and regression counts |
+| `guarded_database_and_ordering.md` | database guard, receipts, transaction/CAS, idempotency, restart, fading, ordering and teardown proof |
+| `performance_review.md` | baseline/final environment, samples, raw measurements, thresholds and dispositions |
+| `controlled_ab_review.md` | raw-evidence links, single-variable pair deltas, native state and behavioral rubric results |
+| `natural_causal_chain_review.md` | all six production-entrypoint chains from episode through persisted state to later dialog/console |
+| `negative_live_llm_review.md` | every privacy, isolation, topic and style negative, all passing individually |
+| `anti_cheat_audit.md` | frozen-test comparison, bypass/direct-write scans, pair controls, trace provenance and raw hashes |
+| `console_browser_signoff.md` plus screenshots | all eleven browser checks on natural-proof data and zero console/page errors |
+| `full_regression.md` | exact final command, selected/passed/skipped/warning counts and warning dispositions |
+| `independent_code_review.md` | reviewer identity, diff baseline, findings, fixes, reruns, residuals and approval status |
+| `final_closure_manifest.md` | one-to-one acceptance-criterion index and final lifecycle decision |
+| `user_signoff.md` | exact user approval reference for behavior, evidence, UI and accepted low residuals |
+
+`final_closure_manifest.md` must contain:
+
+- plan path/status, Stage 1 and final HEADs, changed-file inventory, and every stage signature/date;
+- model route/name/settings, prompt/code revision, guarded database, clock mode, host/runtime, and performance sample method;
+- exactly one Acceptance Criterion 1-22 row with evidence path/hash, command or case id, observed result, pass/fail, reviewer, and date;
+- every warning, replacement, failed attempt, exclusion, intervention, and residual risk with owner, relevance, disposition, and review status;
+- independent approval, user-sign-off reference, lifecycle update, and archive destination.
+
+Final passing rules:
+
+1. Every named artifact exists, is non-empty, and resolves to its cited raw hash; blanks, placeholders, missing rows, and prose-only evidence fail.
+2. All eleven stages and twenty-two acceptance criteria pass; unchecked evidence links or missing signatures invalidate a checked box.
+3. Every required case runs. Skip, xfail, deselection, deletion, or weakened coverage fails. A warning is reviewed only when source, owner, relevance, disposition, and reviewer agreement are recorded.
+4. Every controlled, natural, negative, database, performance, browser, anti-cheat, and regression threshold passes; direct post-entrypoint mutation, prompt-only difference, mocked consumption, or rewritten raw output is invalid.
+5. Baseline/final performance uses comparable recorded model/settings, host/runtime, database mode, warm-up, samples, and input; material mismatch requires rerun.
+6. Independent review approves the exact final diff/audit after remediation and reruns; the severity rule above applies.
+7. The user reviews the manifest, behavior reviews, low residuals, and browser evidence, then explicitly approves behavior, evidence, and UI. Earlier commands and silence are not sign-off; rejection reopens the earliest affected stage.
+8. Only after rules 1-7 pass may the parent mark `completed`, update `development_plans/README.md`, and move the closed record to `development_plans/archive/completed/bugfix/`.
 
 ## Acceptance Criteria
 
@@ -1208,28 +1181,15 @@ Review architecture/LLM ownership, state/privacy, receipts/transactions/CAS, ord
 
 | Risk | Mitigation and proof |
 |---|---|
-| global posture leaks a private event | source-free native roots plus projection-only cause classes; structural privacy tests and live cross-scope negative proof |
-| generic cause classes collapse the twenty-one emotions | classes are post-reducer labels only; scope matrix, native-id assertions, and emotion-specific real-LLM cases |
-| relationship emotion bleeds to another user | no relationship context in carry-over; fixed eighteen/three matrix and user-A/user-B isolation proof |
-| state exists but model ignores it | branch-specific controlled A/B with appraisal/goal/dialog rubrics |
-| global state injects stale topic | no descriptions in global projection; topic-pivot and irrelevant-state live negatives |
-| relationship causes become another prose blob | derive bounded rows from native entities/affect; no persisted insight field |
-| style starts deciding whether to speak | relevance prompt contract plus style-only ignore negative |
-| operational task is starved by four durable tasks | independent nullable router slot and cardinality regression |
-| one question produces ambiguous multi-row authority | exactly one appraisal result with trusted id/path/handle validation |
-| duplicate/restart creates two updates | durable lifecycle receipt, unique episode index, lease, and atomic state/receipt transaction |
-| size/security guard crashes a live path | universal disposition matrix, bounded trace, parameterized no-escape test, and service-level proof |
-| post-turn update races next cognition | predecessor coordinator, 45-second deadline, monotonic state version, CAS tests |
-| self-cognition overwrites chat effects | all writers use optimistic commit; one additive retry; concurrency test |
-| character affect waits until sleep or decays twice | pure elapsed-effective copy, frozen rates, one later persistence timestamp, before-sleep and double-decay tests |
-| new context worsens local-model limits | caps, branch routing, captured long-context test, prompt instrumentation |
-| style loads increase latency | concurrent one-snapshot load, exact read-count and p95 gates |
-| console displays reconstructed rather than consumed state | exact public projection embedded in cognition graph and matched by digest |
-| scope overlaps identity-growth work | hard prerequisite, post-identity rebaseline, explicit ownership exclusions |
+| privacy or cross-user bleed | source-free global roots, scoped relationship projection, eighteen/three matrix, structural and live isolation negatives |
+| emotion/topic/style authority drift | native ids remain authoritative; current scene retains topic/reason authority; controlled and negative live gates |
+| duplicate, lost, or racing updates | durable receipt, transaction, monotonic CAS, predecessor deadline, restart/concurrency tests |
+| ambiguous or unsafe model output | one trusted appraisal, exact validation, bounded replacement, typed failure and no-escape tests |
+| double decay or sleep-only affect | pure elapsed-effective copy, frozen rates, once-only persistence and before-sleep proof |
+| latency/context regression | fixed caps, branch selection, one snapshot, read/call counts and p95 performance gates |
+| reconstructed console truth | exact consumed public projection and digest matched through browser/network evidence |
+| shortcut or scope drift | frozen tests, anti-cheat audit, independent diff/raw-evidence review and prerequisite rebaseline |
 
 ## Execution Evidence
 
-- Prerequisite/rebaseline/closure and twenty-one-emotion matrices:
-- Focused failures, production subagent, state/projection/persistence, Core V2 carry-over, consolidation adapter, ordering/style, and consumer integration:
-- Static/compilation, guarded database, performance, controlled and natural real-LLM reviews, and negative gates:
-- Browser sign-off, independent review/remediation, lifecycle closeout, and user sign-off:
+Execution appends dated command, count, hash, result, reviewer, and stage-signature rows only to the exact artifacts in `Final Sign-Off Contract`. Completion requires `final_closure_manifest.md` to resolve every Acceptance Criterion 1-22 row to those artifacts, `independent_code_review.md` to approve the final diff/audit, and `user_signoff.md` to record explicit final approval.
