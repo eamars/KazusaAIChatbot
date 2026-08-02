@@ -765,8 +765,8 @@ Stop for direction before adding persisted fields/collections; changing the emot
 
 ## Progress Checklist
 
-- [ ] Stage 1 — prerequisite and closure matrices signed. Covers steps 1-5; verify status/HEAD/static inventory, zero unexplained closure rows, and all twenty-one scope/decay rows; retain the three named Stage 1 artifacts; reread, hand off to Stage 2, and sign `<parent/date>`.
-- [ ] Stage 2 — focused test contract established and production subagent started. Covers steps 6-10; verify named expected failures; retain commands/failures, `focused_test_contract.json`, and the subagent brief; reread, hand off to Stage 3, and sign `<parent/date>`.
+- [x] Stage 1 — prerequisite and closure matrices signed. Covers steps 1-5; evidence: `test_artifacts/cognition_core_v2_short_horizon_state/rebaseline.md`, `baseline_to_v2_capability_closure.md`, and `emotion_scope_decay_matrix.md`; parent `/root`, 2026-08-02; handoff to Stage 2 recorded.
+- [x] Stage 2 — focused test contract established and production subagent started. Covers steps 6-10; evidence: `test_artifacts/cognition_core_v2_short_horizon_state/focused_test_contract.json` and `production_subagent_brief.md`; frozen-test commit `3be764f911bdd6d8faecee6ff499ed1a9c72f812`; parent `/root`, 2026-08-02; handoff to Stage 3 is pending production verification.
 - [ ] Stage 3 — native versioning, fading, projection, receipt transaction, and exact writer conversion pass. Covers steps 11-14; retain focused output; reread, hand off, and sign `<parent/date>`.
 - [ ] Stage 4 — dedicated one-appraisal carry-over, reserved router slot, and direct accepted-task adapter pass. Covers steps 15-19; retain call/update/receipt/failure evidence; reread, hand off, and sign `<parent/date>`.
 - [ ] Stage 5 — durable/process ordering and one-snapshot handoff pass. Covers steps 20-23; retain restart/capacity/timeout/read evidence; reread, hand off, and sign `<parent/date>`.
