@@ -19,7 +19,9 @@ from kazusa_ai_chatbot.character_identity_growth.projection import (
 )
 from kazusa_ai_chatbot.character_identity_growth.validation import (
     validate_identity_proposal_decision,
+    validate_identity_proposal_wire,
     validate_identity_review_decision,
+    validate_identity_review_wire,
 )
 
 
@@ -228,6 +230,79 @@ def _review(
     }
 
 
+def _proposal_wire(
+    *,
+    action: str = "inferred_growth",
+    candidate_index: int | None = None,
+    evidence_indices: tuple[int, ...] = (1,),
+    authorship: str = "inferred",
+    relevance: str = "durable",
+    applicability: str = "global",
+    confidence: str = "high",
+    privacy: str = "low",
+    contradiction_indices: tuple[int, ...] = (),
+    replacement: str = "I let earned trust temper defensive distance.",
+) -> dict[str, object]:
+    """Build one V2 model-facing proposal object."""
+
+    proposed_changes = [] if action == "no_change" else [{
+        "path": "self_image.self_concept",
+        "replacement": replacement,
+    }]
+    return {
+        "action": action,
+        "candidate_index": candidate_index,
+        "proposed_changes": proposed_changes,
+        "character_authorship": authorship,
+        "identity_relevance": relevance,
+        "global_applicability": applicability,
+        "confidence": confidence,
+        "private_detail_risk": privacy,
+        "character_owned_abstraction": (
+            "No durable identity change."
+            if action == "no_change"
+            else "Earned trust is changing defensive distance."
+        ),
+        "evidence_indices": list(evidence_indices),
+        "contradiction_candidate_indices": list(contradiction_indices),
+    }
+
+
+def _review_wire(
+    *,
+    verdict: str = "accept",
+    selected_candidate_index: int | None = None,
+    rejected_candidate_indices: tuple[int, ...] = (),
+    authorship: str = "inferred",
+    relevance: str = "durable",
+    coherence: str = "coherent",
+    applicability: str = "global",
+    confidence: str = "high",
+    privacy: str = "low",
+) -> dict[str, object]:
+    """Build one V2 model-facing review object."""
+
+    return {
+        "verdict": verdict,
+        "selected_candidate_index": selected_candidate_index,
+        "rejected_candidate_indices": list(rejected_candidate_indices),
+        "character_authorship": authorship,
+        "identity_relevance": relevance,
+        "coherence": coherence,
+        "global_applicability": applicability,
+        "review_confidence": confidence,
+        "private_detail_risk": privacy,
+        "character_owned_summary": (
+            "The evidence supports a character-owned identity change."
+        ),
+        "privacy_safe_evidence_summaries": (
+            ["Repeated choices show a durable shift."]
+            if verdict == "accept"
+            else []
+        ),
+    }
+
+
 def _candidate(
     *,
     candidate_id: str = "candidate-existing",
@@ -329,22 +404,22 @@ def test_prompt_input_rejects_card_provenance_mismatch() -> None:
 
 
 def test_proposal_and_review_contracts_are_closed() -> None:
-    """Unknown keys and review patch rewrites fail the stage contract."""
+    """Unknown V2 keys and model-owned review patch copies fail closed."""
 
-    proposal = _proposal()
+    proposal = _proposal_wire()
     proposal["unexpected"] = True
-    with pytest.raises(ValueError, match="unknown keys"):
-        validate_identity_proposal_decision(
+    with pytest.raises(ValueError, match="unknown_key"):
+        validate_identity_proposal_wire(
             proposal,
             evidence_ref_ids={"evidence-1"},
             candidate_ids=set(),
         )
 
-    valid_proposal = _proposal()
-    review = _review(valid_proposal)
+    valid_proposal = _proposal_wire()
+    review = _review_wire()
     review["accepted_changes"] = [_patch("A different model rewrite.")]
-    with pytest.raises(ValueError, match="exactly match"):
-        validate_identity_review_decision(
+    with pytest.raises(ValueError, match="unknown_key"):
+        validate_identity_review_wire(
             review,
             proposal=valid_proposal,
             evidence_ref_ids={"evidence-1"},
@@ -369,103 +444,49 @@ def test_proposal_generated_summary_cannot_leak_prompt_handles() -> None:
 
 
 def test_stage_reason_codes_match_their_semantic_disposition() -> None:
-    """Observability reason codes cannot contradict the stage decision."""
+    """Boundary-derived reasons follow the semantic dimensions only."""
 
-    invalid_proposal = _proposal(
-        action="explicit_self_redefinition",
-        authorship="self_declared",
-        reason_code="proposal_no_change",
-    )
-    with pytest.raises(ValueError, match="explicit reason_code"):
-        validate_identity_proposal_decision(
-            invalid_proposal,
-            evidence_ref_ids={"evidence-1"},
-            candidate_ids=set(),
-        )
-
-    invalid_authorship = _proposal(
-        action="inferred_growth",
-        authorship="self_declared",
-        reason_code="candidate_emerging",
-    )
-    with pytest.raises(ValueError, match="requires inferred authorship"):
-        validate_identity_proposal_decision(
+    invalid_authorship = _proposal_wire(authorship="self_declared")
+    with pytest.raises(ValueError, match="inferred"):
+        validate_identity_proposal_wire(
             invalid_authorship,
             evidence_ref_ids={"evidence-1"},
             candidate_ids=set(),
         )
 
-    proposal = _proposal(
+    medium_ready_proposal = _proposal_wire(
         action="explicit_self_redefinition",
         authorship="self_declared",
-        reason_code="candidate_ready",
+        confidence="medium",
     )
-    invalid_review = _review(
-        proposal,
-        change_kind="explicit_self_redefinition",
+    with pytest.raises(ValueError, match="high confidence"):
+        validate_identity_proposal_wire(
+            medium_ready_proposal,
+            evidence_ref_ids={"evidence-1"},
+            candidate_ids=set(),
+        )
+
+    proposal = _proposal_wire(
+        action="explicit_self_redefinition",
         authorship="self_declared",
-        reason_code="proposal_no_change",
     )
-    with pytest.raises(ValueError, match="accept reason_code"):
-        validate_identity_review_decision(
+    invalid_review = _review_wire(
+        authorship="self_declared",
+        confidence="medium",
+    )
+    with pytest.raises(ValueError, match="high confidence"):
+        validate_identity_review_wire(
             invalid_review,
             proposal=proposal,
             evidence_ref_ids={"evidence-1"},
             candidate_ids=set(),
         )
 
-    invalid_blocked_proposal = _proposal(
-        action="inferred_growth",
-        reason_code="privacy_blocked",
-    )
-    with pytest.raises(ValueError, match="inferred reason_code"):
-        validate_identity_proposal_decision(
-            invalid_blocked_proposal,
-            evidence_ref_ids={"evidence-1"},
-            candidate_ids=set(),
-        )
-
-    invalid_blocked_acceptance = _review(
-        _proposal(),
-        reason_code="contradiction_blocked",
-    )
-    with pytest.raises(ValueError, match="accept reason_code"):
-        validate_identity_review_decision(
-            invalid_blocked_acceptance,
-            proposal=_proposal(),
-            evidence_ref_ids={"evidence-1"},
-            candidate_ids=set(),
-        )
-
-    medium_ready_proposal = _proposal(
-        action="explicit_self_redefinition",
-        authorship="self_declared",
-        confidence="medium",
-        reason_code="candidate_ready",
-    )
-    with pytest.raises(ValueError, match="candidate_ready.*high confidence"):
-        validate_identity_proposal_decision(
-            medium_ready_proposal,
-            evidence_ref_ids={"evidence-1"},
-            candidate_ids=set(),
-        )
-
-    explicit_proposal = _proposal(
-        action="explicit_self_redefinition",
-        authorship="self_declared",
-        reason_code="candidate_ready",
-    )
-    medium_ready_review = _review(
-        explicit_proposal,
-        change_kind="explicit_self_redefinition",
-        authorship="self_declared",
-        confidence="medium",
-        reason_code="candidate_ready",
-    )
-    with pytest.raises(ValueError, match="candidate_ready.*high confidence"):
-        validate_identity_review_decision(
-            medium_ready_review,
-            proposal=explicit_proposal,
+    proposal_with_model_reason = _proposal_wire()
+    proposal_with_model_reason["reason_code"] = "candidate_ready"
+    with pytest.raises(ValueError, match="unknown_key"):
+        validate_identity_proposal_wire(
+            proposal_with_model_reason,
             evidence_ref_ids={"evidence-1"},
             candidate_ids=set(),
         )
@@ -976,14 +997,34 @@ class _SequenceLLM:
 
 
 @pytest.mark.asyncio
-async def test_proposal_stage_regenerates_full_output_with_same_context(
-) -> None:
-    """Contract failures receive at most three complete replacements."""
+async def test_v2_retry_resets_to_base_context_and_reports_all_violations() -> None:
+    """A semantic retry contains only base context plus bounded repair data."""
 
-    valid = _proposal()
+    invalid = {
+        "action": "inferred_growth",
+        "candidate_index": None,
+        "proposed_changes": [{
+            "path": "self_image.self_concept",
+            "replacement": _identity()["self_image"]["self_concept"],
+        }],
+        "character_authorship": "inferred",
+        "identity_relevance": "durable",
+        "global_applicability": "global",
+        "confidence": "high",
+        "private_detail_risk": "low",
+        "character_owned_abstraction": "The evidence supports a durable shift.",
+        "evidence_indices": [1],
+        "contradiction_candidate_indices": [],
+    }
+    valid = {
+        **invalid,
+        "proposed_changes": [{
+            "path": "self_image.self_concept",
+            "replacement": "I let earned trust temper defensive distance.",
+        }],
+    }
     fake = _SequenceLLM([
-        json.dumps({"schema_version": "wrong"}),
-        json.dumps({**valid, "unknown": "field"}),
+        json.dumps(invalid),
         json.dumps(valid),
     ])
     proposal_input = build_identity_proposal_input(
@@ -998,46 +1039,72 @@ async def test_proposal_stage_regenerates_full_output_with_same_context(
         invoker=fake,
     )
 
-    assert result.decision == valid
+    assert result.attempt_count == 2
+    assert len(fake.calls[0]) == 2
+    assert len(fake.calls[1]) == 3
+    assert fake.calls[1][1].content == fake.calls[0][1].content
+    assert fake.calls[1][2].content != json.dumps(invalid)
+    assert "violations" in fake.calls[1][2].content
+    assert len(fake.calls[1][2].content) <= 800
+    assert "semantic_noop" in fake.calls[1][2].content
+    assert "I revise myself through my own judgment." not in (
+        fake.calls[1][2].content
+    )
+    assert "proposal.semantic_noop" in result.validation_error_codes
+
+
+@pytest.mark.asyncio
+async def test_proposal_stage_regenerates_full_output_with_same_context(
+) -> None:
+    """Contract failures receive bounded replacements from immutable context."""
+
+    valid_wire = _proposal_wire()
+    expected = _proposal(reason_code="candidate_ready")
+    fake = _SequenceLLM([
+        json.dumps({}),
+        json.dumps({**valid_wire, "unknown": "field"}),
+        json.dumps(valid_wire),
+    ])
+    proposal_input = build_identity_proposal_input(
+        current_identity=_identity(),
+        evidence_refs=[_evidence_ref(1)],
+        evidence_cards=[_evidence_card(1)],
+        current_candidates=[],
+    )
+
+    result = await llm.propose_identity_growth(
+        proposal_input,
+        invoker=fake,
+    )
+
+    assert result.decision == expected
     assert result.attempt_count == 3
     assert len(fake.calls) == 3
-    human_payloads = [
-        messages[1].content
-        for messages in fake.calls
-    ]
-    assert len(set(human_payloads)) == 1
-    assert len(fake.calls[1]) == 4
-    assert fake.calls[1][2].content == json.dumps(
-        {"schema_version": "wrong"}
-    )
-    assert "Contract error:" in fake.calls[1][3].content
-    assert "missing required keys" in fake.calls[1][3].content
-    assert "action" in fake.calls[1][3].content
-    assert "Required top-level keys:" in fake.calls[1][3].content
-    assert '"evidence-1"' in fake.calls[1][3].content
-    assert "Copy any cited identifier exactly" in (
-        fake.calls[1][3].content
-    )
-    assert fake.calls[2][2].content == json.dumps(
-        {**valid, "unknown": "field"}
-    )
-    assert "unknown" in fake.calls[2][3].content
-    assert result.validation_error_codes == (
-        "proposal_contract_error",
-        "proposal_contract_error",
+    assert all(len(messages) == 3 for messages in fake.calls[1:])
+    assert fake.calls[1][1].content == fake.calls[0][1].content
+    assert fake.calls[2][1].content == fake.calls[0][1].content
+    assert '"violations"' in fake.calls[1][2].content
+    assert "missing_required_key" in fake.calls[1][2].content
+    assert "unknown_key" in fake.calls[2][2].content
+    assert json.dumps({}, ensure_ascii=False) not in fake.calls[1][2].content
+    assert "proposal.missing_required_key" in result.validation_error_codes
+    assert "proposal.unknown_key" in result.validation_error_codes
+    assert all(
+        "_error" not in code
+        for code in result.validation_error_codes
     )
 
 
 @pytest.mark.asyncio
 async def test_prompt_local_handles_restore_repository_identifiers() -> None:
-    """Semantic stages copy short aliases while policy receives source IDs."""
+    """Numeric prompt indices restore source evidence for policy consumers."""
 
     source_evidence_id = f"identity-evidence:{'a' * 64}"
     evidence_ref = _evidence_ref(1)
     evidence_ref["evidence_ref_id"] = source_evidence_id
     evidence_card = _evidence_card(1)
     evidence_card["evidence_ref_id"] = source_evidence_id
-    valid = _proposal()
+    valid = _proposal_wire()
     fake = _SequenceLLM([json.dumps(valid)])
     proposal_input = build_identity_proposal_input(
         current_identity=_identity(),
@@ -1053,13 +1120,13 @@ async def test_prompt_local_handles_restore_repository_identifiers() -> None:
 
     prompt_text = fake.calls[0][1].content
     assert source_evidence_id not in prompt_text
-    assert '"evidence_ref_id":"evidence-1"' in prompt_text
+    assert '"evidence_index":1' in prompt_text
     assert result.decision["evidence_ref_ids"] == [source_evidence_id]
 
 
 @pytest.mark.asyncio
 async def test_review_restores_prompt_local_candidate_handle() -> None:
-    """Review-selected candidate aliases resolve to repository identifiers."""
+    """Review-selected numeric indices resolve to repository identifiers."""
 
     source_candidate_id = f"identity-candidate:{'b' * 64}"
     candidate = _candidate(candidate_id=source_candidate_id)
@@ -1077,10 +1144,7 @@ async def test_review_restores_prompt_local_candidate_handle() -> None:
         proposal_input=proposal_input,
         proposal=proposal,
     )
-    valid_review = _review(
-        proposal,
-        selected_candidate_id="candidate-1",
-    )
+    valid_review = _review_wire(selected_candidate_index=1)
     fake = _SequenceLLM([json.dumps(valid_review)])
 
     result = await llm.review_identity_growth(
@@ -1090,7 +1154,7 @@ async def test_review_restores_prompt_local_candidate_handle() -> None:
 
     prompt_text = fake.calls[0][1].content
     assert source_candidate_id not in prompt_text
-    assert '"candidate_id":"candidate-1"' in prompt_text
+    assert '"candidate_index":1' in prompt_text
     assert (
         result.decision["selected_candidate_id"]
         == source_candidate_id
@@ -1100,13 +1164,13 @@ async def test_review_restores_prompt_local_candidate_handle() -> None:
 @pytest.mark.asyncio
 async def test_proposal_regenerates_a_patch_that_is_a_current_identity_no_op(
 ) -> None:
-    """A no-op patch is replaced by the semantic owner before review."""
+    """A no-op patch is reported as bounded semantic contract evidence."""
 
-    invalid = _proposal()
-    invalid["proposed_changes"][0]["replacement_text"] = (
-        _identity()["self_image"]["self_concept"]
+    invalid = _proposal_wire(
+        replacement=_identity()["self_image"]["self_concept"],
     )
-    valid = _proposal()
+    valid = _proposal_wire()
+    expected = _proposal(reason_code="candidate_ready")
     fake = _SequenceLLM([
         json.dumps(invalid),
         json.dumps(valid),
@@ -1123,12 +1187,12 @@ async def test_proposal_regenerates_a_patch_that_is_a_current_identity_no_op(
         invoker=fake,
     )
 
-    assert result.decision == valid
+    assert result.decision == expected
     assert result.attempt_count == 2
-    assert len(fake.calls[1]) == 4
-    assert "no-op" in fake.calls[1][3].content
-    assert "self_image.self_concept" in fake.calls[1][3].content
-    assert result.validation_error_codes == ("proposal_contract_error",)
+    assert len(fake.calls[1]) == 3
+    assert "semantic_noop" in fake.calls[1][2].content
+    assert "self_image.self_concept" in fake.calls[1][2].content
+    assert result.validation_error_codes == ("proposal.semantic_noop",)
 
 
 @pytest.mark.asyncio
@@ -1136,15 +1200,15 @@ async def test_proposal_regenerates_a_punctuation_only_identity_change(
 ) -> None:
     """Formatting-only text drift cannot create an identity revision."""
 
-    invalid = _proposal()
+    invalid = _proposal_wire()
     invalid["proposed_changes"] = [{
         "path": "personality_brief.defense",
-        "value_kind": "text",
-        "replacement_text": (
+        "replacement": (
             _identity()["personality_brief"]["defense"] + "。"
         ),
     }]
-    valid = _proposal()
+    valid = _proposal_wire()
+    expected = _proposal(reason_code="candidate_ready")
     fake = _SequenceLLM([
         json.dumps(invalid),
         json.dumps(valid),
@@ -1161,10 +1225,10 @@ async def test_proposal_regenerates_a_punctuation_only_identity_change(
         invoker=fake,
     )
 
-    assert result.decision == valid
+    assert result.decision == expected
     assert result.attempt_count == 2
-    assert "no-op" in fake.calls[1][3].content
-    assert "personality_brief.defense" in fake.calls[1][3].content
+    assert "semantic_noop" in fake.calls[1][2].content
+    assert "personality_brief.defense" in fake.calls[1][2].content
 
 
 @pytest.mark.asyncio
@@ -1172,20 +1236,18 @@ async def test_proposal_reports_every_no_op_before_regeneration() -> None:
     """One retry sees all current-value patches and can audit other paths."""
 
     identity = _identity()
-    invalid = _proposal()
+    invalid = _proposal_wire()
     invalid["proposed_changes"] = [
         {
             "path": "personality_brief.logic",
-            "value_kind": "text",
-            "replacement_text": identity["personality_brief"]["logic"],
+            "replacement": identity["personality_brief"]["logic"],
         },
         {
             "path": "self_image.self_concept",
-            "value_kind": "text",
-            "replacement_text": identity["self_image"]["self_concept"],
+            "replacement": identity["self_image"]["self_concept"],
         },
     ]
-    valid = _proposal()
+    valid = _proposal_wire()
     fake = _SequenceLLM([
         json.dumps(invalid),
         json.dumps(valid),
@@ -1202,22 +1264,21 @@ async def test_proposal_reports_every_no_op_before_regeneration() -> None:
         invoker=fake,
     )
 
-    repair_prompt = fake.calls[1][3].content
+    repair_prompt = fake.calls[1][2].content
     assert "personality_brief.logic" in repair_prompt
     assert "self_image.self_concept" in repair_prompt
-    assert "re-audit the unchanged identity paths" in repair_prompt
-    assert "translating, paraphrasing, or misspelling" in repair_prompt
-    assert result.decision == valid
+    assert "semantic_noop" in repair_prompt
+    assert result.decision == _proposal(reason_code="candidate_ready")
 
 
 @pytest.mark.asyncio
 async def test_review_regeneration_restores_complete_tagged_patches() -> None:
-    """A malformed accepted patch receives bounded structural guidance."""
+    """A model-owned review patch copy is rejected at the V2 boundary."""
 
     proposal = _proposal()
-    valid_review = _review(proposal)
+    valid_review = _review_wire()
     invalid_review = deepcopy(valid_review)
-    del invalid_review["accepted_changes"][0]["value_kind"]
+    invalid_review["accepted_changes"] = [_patch("A different rewrite.")]
     fake = _SequenceLLM([
         json.dumps(invalid_review),
         json.dumps(valid_review),
@@ -1238,24 +1299,17 @@ async def test_review_regeneration_restores_complete_tagged_patches() -> None:
         invoker=fake,
     )
 
-    assert result.decision == valid_review
+    assert result.decision == _review(
+        proposal,
+        reason_code="candidate_ready",
+    )
     assert result.attempt_count == 2
     assert len(fake.calls[0]) == 2
-    assert len(fake.calls[1]) == 4
-    assert fake.calls[1][2].content == json.dumps(invalid_review)
-    assert "Contract error:" in fake.calls[1][3].content
-    assert "value_kind" in fake.calls[1][3].content
-    assert "including path" in fake.calls[1][3].content
-    assert '"one matching replacement field"' in (
-        fake.calls[1][3].content
-    )
-    assert json.dumps(
-        proposal["proposed_changes"],
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ) in fake.calls[1][3].content
-    assert result.validation_error_codes == ("review_contract_error",)
+    assert len(fake.calls[1]) == 3
+    assert json.dumps(invalid_review) not in fake.calls[1][2].content
+    assert "unknown_key" in fake.calls[1][2].content
+    assert "accepted_changes" in fake.calls[1][2].content
+    assert result.validation_error_codes == ("review.unknown_key",)
 
 
 @pytest.mark.asyncio
@@ -1299,7 +1353,7 @@ async def test_malformed_json_uses_canonical_parser_before_regeneration(
 ) -> None:
     """Every raw attempt enters the shared JSON parsing boundary."""
 
-    valid = _proposal()
+    valid = _proposal_wire()
     fake = _SequenceLLM([
         "{not valid JSON",
         json.dumps(valid),
@@ -1369,7 +1423,10 @@ def test_prompt_budget_drops_older_candidates_before_current_evidence(
     payload = json.loads(constrained.human_prompt)
     assert len(payload["current_candidates"]) == 7
     assert payload["current_identity"] == proposal_input["current_identity"]
-    assert payload["evidence_cards"] == proposal_input["evidence_cards"]
+    assert payload["evidence_cards"][0]["evidence_index"] == 1
+    assert "evidence_ref_id" not in payload["evidence_cards"][0]
+    assert payload["current_candidates"][0]["candidate_index"] == 1
+    assert "candidate_id" not in payload["current_candidates"][0]
     assert constrained.prompt_chars <= constrained_budget
 
 
@@ -1407,13 +1464,13 @@ def test_review_budget_retains_proposal_referenced_candidates() -> None:
 
     payload = json.loads(constrained.human_prompt)
     retained_ids = {
-        candidate["candidate_id"]
+        candidate["candidate_index"]
         for candidate in payload["current_candidates"]
     }
     alias_to_source = dict(constrained.candidate_aliases)
     retained_source_ids = {
-        alias_to_source[candidate_id]
-        for candidate_id in retained_ids
+        alias_to_source[candidate_index]
+        for candidate_index in retained_ids
     }
     assert len(retained_ids) == 7
     assert {"candidate-6", "candidate-7"}.issubset(

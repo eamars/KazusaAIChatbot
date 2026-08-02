@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import json
+
+from kazusa_ai_chatbot.character_identity_growth import models
 from kazusa_ai_chatbot.character_identity_growth.llm import (
     IDENTITY_PROPOSAL_SYSTEM_PROMPT,
     IDENTITY_REVIEW_SYSTEM_PROMPT,
+    build_identity_review_prompt,
 )
 
 
@@ -94,6 +98,93 @@ def test_proposal_replaces_partially_disavowed_bundled_fields() -> None:
         normalized
     )
     assert "replace the whole field" in normalized
-    assert "Every proposed patch has exactly three keys" in normalized
-    assert 'value_kind="text"' in normalized
-    assert "Never omit value_kind" in normalized
+    assert "Each patch has exactly two keys: path plus replacement" in normalized
+    assert "Do not emit value_kind" in normalized
+
+
+def test_v2_system_prompts_exclude_model_owned_internal_metadata() -> None:
+    """The model sees semantic decisions while deterministic code owns metadata."""
+
+    proposal = " ".join(IDENTITY_PROPOSAL_SYSTEM_PROMPT.split())
+    review = " ".join(IDENTITY_REVIEW_SYSTEM_PROMPT.split())
+
+    assert '"candidate_index"' in proposal
+    assert '"evidence_indices"' in proposal
+    assert '"schema_version"' not in proposal
+    assert '"reason_code"' not in proposal
+    assert '"accepted_changes"' not in review
+    assert '"accepted_change_kind"' not in review
+    assert '"schema_version"' not in review
+    assert '"reason_code"' not in review
+
+
+def test_prompt_renderer_uses_numeric_indices_and_uniform_replacements() -> None:
+    """Rendered model context contains local indices and no repository handles."""
+
+    evidence_id = f"identity-evidence:{'a' * 64}"
+    candidate_id = f"identity-candidate:{'b' * 64}"
+    review_input = {
+        "schema_version": models.IDENTITY_REVIEW_INPUT_SCHEMA_VERSION,
+        "current_identity": {
+            "self_image": {
+                "self_concept": "I revise myself through judgment.",
+            },
+        },
+        "evidence_cards": [{
+            "schema_version": models.IDENTITY_EVIDENCE_CARD_SCHEMA_VERSION,
+            "evidence_ref_id": evidence_id,
+            "source_kind": "settled_episode",
+            "character_local_date": "2026-07-01",
+            "scope_kind": "private",
+            "decontextualized_event": "The character stayed present.",
+            "character_cognition_summary": "The character reconsidered withdrawal.",
+            "visible_self_expression_summary": "The character chose engagement.",
+        }],
+        "current_candidates": [{
+            "candidate_id": candidate_id,
+            "change_kind": "inferred_growth",
+            "semantic_summary": "Earned trust may reduce distance.",
+            "proposed_changes": [{
+                "path": "self_image.self_concept",
+                "value_kind": "text",
+                "replacement_text": "I let earned trust temper distance.",
+            }],
+        }],
+        "proposal_decision": {
+            "schema_version": models.IDENTITY_PROPOSAL_DECISION_SCHEMA_VERSION,
+            "action": "corroborate_candidate",
+            "candidate_id": candidate_id,
+            "proposed_changes": [{
+                "path": "self_image.self_concept",
+                "value_kind": "text",
+                "replacement_text": "I let earned trust temper distance.",
+            }],
+            "character_authorship": "inferred",
+            "identity_relevance": "durable",
+            "global_applicability": "global",
+            "confidence": "high",
+            "private_detail_risk": "low",
+            "character_owned_abstraction": "Earned trust changes distance.",
+            "evidence_ref_ids": [evidence_id],
+            "contradiction_candidate_ids": [],
+            "reason_code": "candidate_ready",
+        },
+    }
+
+    built = build_identity_review_prompt(review_input)
+    human = json.loads(built.human_prompt)
+
+    assert evidence_id not in built.system_prompt
+    assert evidence_id not in built.human_prompt
+    assert candidate_id not in built.system_prompt
+    assert candidate_id not in built.human_prompt
+    assert human["evidence_cards"][0]["evidence_index"] == 1
+    assert human["current_candidates"][0]["candidate_index"] == 1
+    assert "evidence_ref_id" not in human["evidence_cards"][0]
+    assert "candidate_id" not in human["current_candidates"][0]
+    assert "schema_version" not in human["evidence_cards"][0]
+    assert "schema_version" not in human["current_candidates"][0]
+    assert human["current_candidates"][0]["proposed_changes"] == [{
+        "path": "self_image.self_concept",
+        "replacement": "I let earned trust temper distance.",
+    }]

@@ -51,6 +51,8 @@ long_term/todo.md
 | Document | Type | Status |
 |---|---|---|
 | [cognition_core_v2_short_horizon_global_state_composition_bigbang_plan.md](active/bugfix/cognition_core_v2_short_horizon_global_state_composition_bigbang_plan.md) | Post-identity V2 plan for transient global posture, causal relationship context, scoped style composition, and runtime/UI proof | draft |
+| [character_identity_growth_contract_recovery_bugfix_plan.md](archive/completed/bugfix/character_identity_growth_contract_recovery_bugfix_plan.md) | Follow-up bugfix for identity-growth model contracts, provenance indices, review copying, and bounded retry recovery | completed |
+| [qq_group_public_scene_response_ordering_bugfix_plan.md](active/bugfix/qq_group_public_scene_response_ordering_bugfix_plan.md) | QQ multi-user public-scene composition and same-group response-ordering bugfix | approved |
 | [required_selection_partial_recovery_bugfix_plan.md](active/bugfix/required_selection_partial_recovery_bugfix_plan.md) | Reproduction-gated required-selection structural and complete-sibling-bid recovery bugfix plan | draft |
 
 ## Reference Documents

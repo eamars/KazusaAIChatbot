@@ -22,6 +22,48 @@ IDENTITY_REVIEW_DECISION_SCHEMA_VERSION = (
     "character_identity_review_decision.v1"
 )
 
+IDENTITY_PROPOSAL_WIRE_SCHEMA_VERSION = "character_identity_proposal_wire.v2"
+IDENTITY_REVIEW_WIRE_SCHEMA_VERSION = "character_identity_review_wire.v2"
+
+PROPOSAL_WIRE_KEYS = frozenset({
+    "action",
+    "candidate_index",
+    "proposed_changes",
+    "character_authorship",
+    "identity_relevance",
+    "global_applicability",
+    "confidence",
+    "private_detail_risk",
+    "character_owned_abstraction",
+    "evidence_indices",
+    "contradiction_candidate_indices",
+})
+REVIEW_WIRE_KEYS = frozenset({
+    "verdict",
+    "selected_candidate_index",
+    "rejected_candidate_indices",
+    "character_authorship",
+    "identity_relevance",
+    "coherence",
+    "global_applicability",
+    "review_confidence",
+    "private_detail_risk",
+    "character_owned_summary",
+    "privacy_safe_evidence_summaries",
+})
+IDENTITY_CONTRACT_VIOLATION_CODES = frozenset({
+    "malformed_json",
+    "missing_required_key",
+    "unknown_key",
+    "wrong_type",
+    "unsupported_value",
+    "invalid_index",
+    "invalid_provenance",
+    "semantic_noop",
+    "cross_field_inconsistency",
+    "handle_leakage",
+})
+
 TEXT_IDENTITY_PATHS = frozenset({
     "name",
     "description",
@@ -501,6 +543,38 @@ class IdentityEvidenceCardV1(TypedDict):
     decontextualized_event: str
     character_cognition_summary: str
     visible_self_expression_summary: str
+
+
+class IdentityProposalWireV2(TypedDict):
+    """Model-facing proposal judgment before deterministic mapping."""
+
+    action: ProposalAction
+    candidate_index: int | None
+    proposed_changes: list[dict[str, object]]
+    character_authorship: CharacterAuthorship
+    identity_relevance: IdentityRelevance
+    global_applicability: GlobalApplicability
+    confidence: Confidence
+    private_detail_risk: PrivateDetailRisk
+    character_owned_abstraction: str
+    evidence_indices: list[int]
+    contradiction_candidate_indices: list[int]
+
+
+class IdentityReviewWireV2(TypedDict):
+    """Model-facing independent review judgment before deterministic mapping."""
+
+    verdict: ReviewVerdict
+    selected_candidate_index: int | None
+    rejected_candidate_indices: list[int]
+    character_authorship: CharacterAuthorship
+    identity_relevance: IdentityRelevance
+    coherence: ReviewCoherence
+    global_applicability: GlobalApplicability
+    review_confidence: Confidence
+    private_detail_risk: PrivateDetailRisk
+    character_owned_summary: str
+    privacy_safe_evidence_summaries: list[str]
 
 
 class IdentityProposalDecisionV1(TypedDict):

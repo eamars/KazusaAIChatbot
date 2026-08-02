@@ -36,10 +36,20 @@ Missing identity fails before intake and before operational state is created.
 Proposal and independent review are separate background semantic stages on the
 consolidation model route. Their human payload contains a band-projected
 current identity, prompt-safe evidence cards, at most eight redacted current
-candidates, opaque handles, and the closed allowed path list. Each stage gets
-at most three complete-output attempts through the canonical JSON parser.
+candidates, numeric one-based row indices, and the closed allowed path list.
+Each stage gets at most three complete-output attempts through the canonical
+JSON parser.
 Prompt overflow removes optional older candidates before failing; it never
 truncates current identity or evidence.
+
+The model-facing proposal and review objects use the V2 wire boundary: they do
+not emit schema metadata, reason codes, typed replacement keys, or accepted
+patch copies. Proposal patches use one `path` plus one typed `replacement`, and
+provenance uses visible numeric row indices. The deterministic boundary maps
+validated V2 output into the existing internal V1 decision shapes, derives
+reason and change-kind fields, and copies accepted proposal patches only after
+independent review validation. Internal V1 fields remain private to policy,
+persistence, and downstream domain consumers.
 
 Deterministic policy validates paths, exact review/proposal patch equality,
 repository provenance, privacy-risk decisions, root/date cadence, daily caps,

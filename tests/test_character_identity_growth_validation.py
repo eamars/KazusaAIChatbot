@@ -7,12 +7,16 @@ from copy import deepcopy
 
 import pytest
 
+from kazusa_ai_chatbot.character_identity_growth import models
 from kazusa_ai_chatbot.character_identity_growth.identity import (
     apply_identity_patches,
 )
 from kazusa_ai_chatbot.character_identity_growth.validation import (
+    IdentityContractViolation,
     validate_effective_identity,
     validate_identity_patch,
+    validate_identity_proposal_wire,
+    validate_identity_review_wire,
 )
 
 
@@ -215,6 +219,264 @@ def test_rejects_duplicate_or_noop_patches() -> None:
         apply_identity_patches(identity, [duplicate, duplicate])
     with pytest.raises(ValueError, match="no-op"):
         apply_identity_patches(identity, [noop])
+
+
+def test_maps_v2_proposal_replacements_and_derives_reason_code() -> None:
+    """The model-facing proposal shape maps to the stable internal V1 shape."""
+
+    payload = {
+        "action": "corroborate_candidate",
+        "candidate_index": 2,
+        "proposed_changes": [{
+            "path": "self_image.self_concept",
+            "replacement": "I let earned trust temper defensive distance.",
+        }],
+        "character_authorship": "inferred",
+        "identity_relevance": "durable",
+        "global_applicability": "global",
+        "confidence": "high",
+        "private_detail_risk": "low",
+        "character_owned_abstraction": "Earned trust changes my distance.",
+        "evidence_indices": [1],
+        "contradiction_candidate_indices": [],
+    }
+
+    validated = validate_identity_proposal_wire(
+        payload,
+        evidence_ref_ids={"evidence-1", "evidence-2"},
+        candidate_ids={"candidate-1", "candidate-2"},
+    )
+
+    assert validated["schema_version"] == (
+        models.IDENTITY_PROPOSAL_DECISION_SCHEMA_VERSION
+    )
+    assert validated["candidate_id"] == "candidate-2"
+    assert validated["evidence_ref_ids"] == ["evidence-1"]
+    assert validated["proposed_changes"] == [{
+        "path": "self_image.self_concept",
+        "value_kind": "text",
+        "replacement_text": "I let earned trust temper defensive distance.",
+    }]
+    assert validated["reason_code"] == "candidate_ready"
+
+
+def test_v2_no_change_derives_privacy_reason_without_model_reason_field() -> None:
+    """No-change privacy decisions receive their reason at the boundary."""
+
+    payload = {
+        "action": "no_change",
+        "candidate_index": None,
+        "proposed_changes": [],
+        "character_authorship": "absent",
+        "identity_relevance": "absent",
+        "global_applicability": "absent",
+        "confidence": "high",
+        "private_detail_risk": "high",
+        "character_owned_abstraction": "The detail cannot be made global-safe.",
+        "evidence_indices": [1],
+        "contradiction_candidate_indices": [],
+    }
+
+    validated = validate_identity_proposal_wire(
+        payload,
+        evidence_ref_ids={"evidence-1"},
+        candidate_ids=set(),
+    )
+
+    assert validated["reason_code"] == "privacy_blocked"
+    assert validated["candidate_id"] is None
+    assert validated["proposed_changes"] == []
+
+
+def test_v2_review_copies_validated_proposal_changes() -> None:
+    """An accepted review cannot rewrite the proposal's semantic patch."""
+
+    proposal = {
+        "action": "inferred_growth",
+        "candidate_index": None,
+        "proposed_changes": [{
+            "path": "self_image.self_concept",
+            "replacement": "I let earned trust temper defensive distance.",
+        }],
+        "character_authorship": "inferred",
+        "identity_relevance": "durable",
+        "global_applicability": "global",
+        "confidence": "high",
+        "private_detail_risk": "low",
+        "character_owned_abstraction": "Earned trust changes my distance.",
+        "evidence_indices": [1],
+        "contradiction_candidate_indices": [],
+    }
+    review = {
+        "verdict": "accept",
+        "selected_candidate_index": None,
+        "rejected_candidate_indices": [],
+        "character_authorship": "inferred",
+        "identity_relevance": "durable",
+        "coherence": "coherent",
+        "global_applicability": "global",
+        "review_confidence": "high",
+        "private_detail_risk": "low",
+        "character_owned_summary": "The change is coherent and global-safe.",
+        "privacy_safe_evidence_summaries": [
+            "Independent choices support a durable shift."
+        ],
+    }
+
+    validated = validate_identity_review_wire(
+        review,
+        proposal=proposal,
+        evidence_ref_ids={"evidence-1"},
+        candidate_ids=set(),
+    )
+
+    assert validated["accepted_change_kind"] == "inferred_growth"
+    assert validated["accepted_changes"] == [{
+        "path": "self_image.self_concept",
+        "value_kind": "text",
+        "replacement_text": "I let earned trust temper defensive distance.",
+    }]
+    assert validated["reason_code"] == "candidate_ready"
+
+
+def test_v2_invalid_indices_report_bounded_typed_violations() -> None:
+    """A bad provenance index is recoverable contract evidence, not a crash string."""
+
+    payload = {
+        "action": "no_change",
+        "candidate_index": None,
+        "proposed_changes": [],
+        "character_authorship": "absent",
+        "identity_relevance": "absent",
+        "global_applicability": "absent",
+        "confidence": "medium",
+        "private_detail_risk": "low",
+        "character_owned_abstraction": "No durable change is supported.",
+        "evidence_indices": [2],
+        "contradiction_candidate_indices": [],
+    }
+
+    with pytest.raises(IdentityContractViolation) as error:
+        validate_identity_proposal_wire(
+            payload,
+            evidence_ref_ids={"evidence-1"},
+            candidate_ids=set(),
+        )
+
+    assert any(
+        violation["code"] == "invalid_index"
+        and violation["field"] == "evidence_indices[0]"
+        for violation in error.value.violations
+    )
+
+
+def test_v2_indices_follow_display_order_and_new_growth_has_no_candidate() -> None:
+    """Prompt row order, rather than lexical handle order, owns index meaning."""
+
+    corroboration = {
+        "action": "corroborate_candidate",
+        "candidate_index": 2,
+        "proposed_changes": [{
+            "path": "self_image.self_concept",
+            "replacement": "I let earned trust temper defensive distance.",
+        }],
+        "character_authorship": "inferred",
+        "identity_relevance": "durable",
+        "global_applicability": "global",
+        "confidence": "high",
+        "private_detail_risk": "low",
+        "character_owned_abstraction": "Earned trust changes my distance.",
+        "evidence_indices": [1],
+        "contradiction_candidate_indices": [],
+    }
+    validated = validate_identity_proposal_wire(
+        corroboration,
+        evidence_ref_ids=("evidence-displayed-first", "evidence-second"),
+        candidate_ids=("candidate-displayed-first", "candidate-selected"),
+    )
+
+    assert validated["candidate_id"] == "candidate-selected"
+    assert validated["evidence_ref_ids"] == ["evidence-displayed-first"]
+
+    inferred = deepcopy(corroboration)
+    inferred["action"] = "inferred_growth"
+    with pytest.raises(IdentityContractViolation, match="candidate_index"):
+        validate_identity_proposal_wire(
+            inferred,
+            evidence_ref_ids=("evidence-displayed-first",),
+            candidate_ids=("candidate-selected",),
+        )
+
+
+def test_v2_wire_boundary_rejects_v1_and_hybrid_payloads() -> None:
+    """Raw semantic-stage inputs cannot cross the V2 boundary in V1 form."""
+
+    payload = {
+        "action": "no_change",
+        "candidate_index": None,
+        "proposed_changes": [],
+        "character_authorship": "absent",
+        "identity_relevance": "absent",
+        "global_applicability": "absent",
+        "confidence": "high",
+        "private_detail_risk": "low",
+        "character_owned_abstraction": "No durable identity change.",
+        "evidence_indices": [],
+        "contradiction_candidate_indices": [],
+    }
+    v1_or_hybrid = {
+        **payload,
+        "schema_version": models.IDENTITY_PROPOSAL_DECISION_SCHEMA_VERSION,
+        "reason_code": "proposal_no_change",
+    }
+
+    with pytest.raises(IdentityContractViolation) as error:
+        validate_identity_proposal_wire(
+            v1_or_hybrid,
+            evidence_ref_ids=(),
+            candidate_ids=(),
+        )
+
+    assert {entry["code"] for entry in error.value.violations} == {
+        "unknown_key",
+    }
+
+    with pytest.raises(IdentityContractViolation) as empty_error:
+        validate_identity_proposal_wire(
+            {},
+            evidence_ref_ids=(),
+            candidate_ids=(),
+        )
+    assert len(empty_error.value.violations) == len(models.PROPOSAL_WIRE_KEYS)
+    assert {
+        entry["code"] for entry in empty_error.value.violations
+    } == {"missing_required_key"}
+
+    review = {
+        "verdict": "no_change",
+        "selected_candidate_index": None,
+        "rejected_candidate_indices": [],
+        "character_authorship": "absent",
+        "identity_relevance": "absent",
+        "coherence": "absent",
+        "global_applicability": "absent",
+        "review_confidence": "high",
+        "private_detail_risk": "low",
+        "character_owned_summary": "No durable identity change.",
+        "privacy_safe_evidence_summaries": [],
+        "schema_version": models.IDENTITY_REVIEW_DECISION_SCHEMA_VERSION,
+        "reason_code": "proposal_no_change",
+    }
+    with pytest.raises(IdentityContractViolation) as review_error:
+        validate_identity_review_wire(
+            review,
+            proposal=payload,
+            evidence_ref_ids=(),
+            candidate_ids=(),
+        )
+    assert {entry["code"] for entry in review_error.value.violations} == {
+        "unknown_key",
+    }
 
 
 def _identity() -> dict[str, object]:
