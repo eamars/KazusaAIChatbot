@@ -134,6 +134,7 @@ def _connector_payload() -> dict[str, Any]:
             "user_multimedia_input": [],
             "rag_result": {"memory_evidence": []},
             "character_profile": _character_profile(),
+            "public_group_scene": "",
         },
         mutable_state=build_acquaintance_user_state(
             global_user_id="secret-global-user-id",
@@ -177,6 +178,7 @@ def test_rag_recall_evidence_is_canonical_cognition_evidence() -> None:
             "decontextualized_input": CURRENT_EVENT_TEXT,
             "user_multimedia_input": [],
             "character_profile": _character_profile(),
+            "public_group_scene": "",
             "rag_result": {
                 "memory_evidence": [],
                 "conversation_evidence": [
@@ -226,6 +228,7 @@ def test_rag_conversation_mapping_is_canonical_cognition_evidence() -> None:
             "decontextualized_input": CURRENT_EVENT_TEXT,
             "user_multimedia_input": [],
             "character_profile": _character_profile(),
+            "public_group_scene": "",
             "rag_result": {
                 "memory_evidence": [],
                 "conversation_evidence": [{
@@ -284,6 +287,7 @@ def test_role_explicit_current_event_is_forwarded_without_reinterpretation() -> 
             "user_multimedia_input": [],
             "rag_result": {"memory_evidence": []},
             "character_profile": _character_profile(),
+            "public_group_scene": "",
         },
         mutable_state=build_acquaintance_user_state(
             global_user_id="secret-global-user-id",
