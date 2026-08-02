@@ -4573,6 +4573,12 @@ def _graph_memory_detail(state: Mapping[str, Any]) -> dict[str, Any]:
     if projected_progress not in (None, "", [], {}):
         detail["conversation_progress"] = projected_progress
 
+    public_group_scene = _graph_full_text(
+        state.get("public_group_scene")
+    )
+    if public_group_scene:
+        detail["public_group_scene"] = public_group_scene
+
     active_commitments = state.get("active_commitments")
     if active_commitments is None and isinstance(user_continuity, Mapping):
         active_commitments = user_continuity.get("active_commitments")

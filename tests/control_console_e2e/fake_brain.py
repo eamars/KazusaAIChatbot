@@ -256,7 +256,7 @@ def graph_snapshot(*, status: str, run_id: str) -> dict[str, Any]:
                 },
             },
             {
-                "id": "memory.lookup",
+                "id": "l2.memory",
                 "label": "Memory",
                 "stage": "Memory",
                 "lane": "memory",
@@ -268,6 +268,13 @@ def graph_snapshot(*, status: str, run_id: str) -> dict[str, Any]:
                     "memory_evidence": [
                         {"fact": "the operator wants useful detail"},
                     ],
+                    "conversation_progress": {
+                        "current_thread": "The operator's current thread.",
+                    },
+                    "public_group_scene": (
+                        "Participants: Ari, Operator\n"
+                        "At trigger: The current public group scene."
+                    ),
                 },
             },
             {
@@ -316,9 +323,9 @@ def graph_snapshot(*, status: str, run_id: str) -> dict[str, Any]:
         ],
         "edges": [
             {"source": "input.message", "target": "l2.reasoning", "kind": "fork"},
-            {"source": "input.message", "target": "memory.lookup", "kind": "fork"},
+            {"source": "input.message", "target": "l2.memory", "kind": "fork"},
             {"source": "l2.reasoning", "target": "decision.reply", "kind": "join"},
-            {"source": "memory.lookup", "target": "decision.reply", "kind": "join"},
+            {"source": "l2.memory", "target": "decision.reply", "kind": "join"},
             {"source": "decision.reply", "target": "l3.visual_directives", "kind": "fork"},
             {"source": "decision.reply", "target": "l3.surface", "kind": "fork"},
         ],

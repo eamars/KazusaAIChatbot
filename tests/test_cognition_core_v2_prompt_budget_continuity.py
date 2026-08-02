@@ -342,6 +342,7 @@ def _maximum_scene_context() -> dict[str, Any]:
         "character_role": "c" * 500,
         "current_user_role": "u" * 500,
         "semantic_scene": "s" * 500,
+        "public_group_scene": "",
         "conversation_continuity": "h" * 1000,
         "semantic_temporal_context": "t" * 500,
     }
@@ -1002,6 +1003,39 @@ def test_goal_exact_aggregate_cap_and_cap_plus_one_are_distinct() -> None:
             payload,
             system_prompt=goal_cognition_module.GOAL_COGNITION_PROMPT,
         )
+
+
+def test_goal_budget_retains_public_scene_and_private_continuity() -> None:
+    """The two scene lanes remain model-visible when the payload fits."""
+
+    payload = {
+        "branch": {},
+        "goal": {},
+        "semantic_context": {
+            "scene_context": {
+                "public_group_scene": "PUBLIC_SCENE_SENTINEL",
+                "conversation_continuity": "PRIVATE_CONTINUITY_SENTINEL",
+            },
+            "private_continuity_context": "PRIVATE_RESIDUE_SENTINEL",
+        },
+        "evidence": [],
+        "role_handles": [],
+        "role_summaries": {},
+    }
+
+    fitted = goal_cognition_module._fit_goal_prompt_payload(
+        payload,
+        system_prompt="",
+    )
+    fitted_payload = json.loads(fitted)
+
+    assert fitted_payload["semantic_context"]["scene_context"] == {
+        "public_group_scene": "PUBLIC_SCENE_SENTINEL",
+        "conversation_continuity": "PRIVATE_CONTINUITY_SENTINEL",
+    }
+    assert fitted_payload["semantic_context"][
+        "private_continuity_context"
+    ] == "PRIVATE_RESIDUE_SENTINEL"
 
 
 def test_goal_budget_drops_restored_optional_context_before_evidence(

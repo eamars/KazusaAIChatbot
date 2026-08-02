@@ -17,6 +17,7 @@ def test_overview_cognition_graph_updates_from_latest_brain_run(
     unused_tcp_port_factory,
     e2e_console,
     e2e_browser_page,
+    e2e_artifact_dir,
     e2e_summary_writer,
 ) -> None:
     """Verify Overview graph states, refresh, page switch, and SSE update."""
@@ -83,6 +84,25 @@ def test_overview_cognition_graph_updates_from_latest_brain_run(
             assert page.locator(
                 "#overview-cognition-graph .graph-latest-event"
             ).count() == 0
+            page.locator(
+                "#overview-cognition-graph [data-node-id='l2.memory']"
+            ).click()
+            memory_detail = page.locator(
+                "#overview-cognition-graph .graph-inspector"
+            )
+            memory_labels = memory_detail.locator(
+                ".graph-inspector-row > span"
+            ).all_text_contents()
+            assert memory_labels.index("Conversation progress") + 1 == (
+                memory_labels.index("Public group scene")
+            )
+            assert "The current public group scene." in (
+                memory_detail.inner_text()
+            )
+            l2_memory_screenshot = (
+                e2e_artifact_dir / "l2_memory_public_group_scene.png"
+            )
+            page.screenshot(path=str(l2_memory_screenshot), full_page=True)
             page.locator(
                 "#overview-self-cognition-graph [data-node-id='l3.visual_directives']"
             ).click()
@@ -208,6 +228,7 @@ def test_overview_cognition_graph_updates_from_latest_brain_run(
                         "stable inspector detail",
                         "graph stage no horizontal overflow",
                     ],
+                    "screenshot": str(l2_memory_screenshot),
                 },
             )
 

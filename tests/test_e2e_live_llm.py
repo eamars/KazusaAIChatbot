@@ -454,7 +454,9 @@ async def _seed_conversation(
     addressed_to_global_user_ids: list[str] | None = None,
     broadcast: bool | None = None,
     timestamp_utc: str | None = None,
-) -> None:
+) -> str:
+    """Persist one isolated conversation seed and return its row identifier."""
+
     if addressed_to_global_user_ids is None:
         if role == "user":
             addressed_to_global_user_ids = [brain_service.CHARACTER_GLOBAL_USER_ID]
@@ -464,7 +466,7 @@ async def _seed_conversation(
             addressed_to_global_user_ids = []
     if broadcast is None:
         broadcast = not addressed_to_global_user_ids
-    await save_conversation(
+    row_id = await save_conversation(
         {
             "platform": platform,
             "platform_channel_id": platform_channel_id,
@@ -485,6 +487,8 @@ async def _seed_conversation(
             "timestamp": timestamp_utc or datetime.now(timezone.utc).isoformat(),
         }
     )
+    return_value = row_id
+    return return_value
 
 
 async def _seed_memory(global_user_id: str, memory_name: str, content: str) -> None:

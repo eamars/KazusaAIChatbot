@@ -177,6 +177,12 @@ character-level
 `ignore/proceed/wait` judgment; deterministic code applies the validated action
 and never rewrites a valid semantic choice.
 
+The existing settlement worker remains sequential: it awaits one settled turn
+through cognition before requesting the next lease. Each persona turn reuses
+the loaded ambient lane for a transient bounded public group scene while the
+participant-scoped Conversation Progress V2 lane remains isolated. This adds
+no group claim, database read, or persisted group state.
+
 For group chat, both relevance stages admit only through one of two semantic
 bases: grounded interaction relevance, or a concrete intersection with bounded
 active character state. The service copies the same already loaded

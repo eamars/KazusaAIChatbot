@@ -467,6 +467,7 @@ async def test_source_faithful_regression_projects_key_details_to_cognition(
             "user_multimedia_input": [],
             "rag_result": {"memory_evidence": []},
             "character_profile": _character_profile(character_name),
+            "public_group_scene": "",
         },
         mutable_state=mutable_state,
         character_state=character_state,

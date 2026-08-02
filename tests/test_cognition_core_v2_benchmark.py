@@ -183,6 +183,7 @@ def _chain_input(case: dict[str, str]) -> dict[str, object]:
             "channel_scope": "private",
             "character_role": "companion",
             "semantic_scene": semantic_text,
+            "public_group_scene": "",
             "conversation_continuity": "Continue only the current benchmark case.",
             "semantic_temporal_context": "immediate",
         },

@@ -290,6 +290,7 @@ class SceneContextV2(TypedDict):
     character_role: str
     current_user_role: NotRequired[str]
     semantic_scene: str
+    public_group_scene: str
     conversation_continuity: str
     semantic_temporal_context: str
 
@@ -2260,6 +2261,7 @@ def _validate_scene_context(value: Any) -> None:
         "channel_scope",
         "character_role",
         "semantic_scene",
+        "public_group_scene",
         "conversation_continuity",
         "semantic_temporal_context",
     }
@@ -2269,8 +2271,17 @@ def _validate_scene_context(value: Any) -> None:
         raise CognitionContractError("scene context fields are not exact")
     if value["channel_scope"] not in {"private", "group", "internal"}:
         raise CognitionContractError("scene context channel_scope is invalid")
-    for field_name in required - {"channel_scope", "conversation_continuity"}:
+    for field_name in required - {
+        "channel_scope",
+        "conversation_continuity",
+        "public_group_scene",
+    }:
         _require_text(value[field_name], f"scene context.{field_name}")
+    _require_bounded_text(
+        value["public_group_scene"],
+        "scene context.public_group_scene",
+        maximum=1800,
+    )
     _require_bounded_text(
         value["conversation_continuity"],
         "scene context.conversation_continuity",

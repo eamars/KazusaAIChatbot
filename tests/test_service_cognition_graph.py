@@ -30,6 +30,10 @@ def _response_state(*, visual_directives: dict[str, object]) -> dict[str, object
             "current_goal": "answer the operator",
             "progress_note": "the requested inspection is in progress",
         },
+        "public_group_scene": (
+            "Participants: Ari, Operator\n"
+            "At trigger: Operator asks for the current public scene."
+        ),
         "rag_result": {
             "answer": "retrieval conclusion",
             "memory_evidence": [
@@ -251,6 +255,7 @@ def test_response_graph_contains_semantic_details_and_visual_directive(
     assert memory["active_commitments"][0]["fact"] == (
         "show the important information"
     )
+    assert memory["public_group_scene"].startswith("Participants: Ari")
 
     actions = _node(graph, "l2.actions")["detail"]
     assert actions["selected_actions"][0]["reason"] == (

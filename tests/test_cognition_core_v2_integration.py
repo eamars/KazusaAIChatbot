@@ -230,6 +230,7 @@ def _input(
             "channel_scope": "private",
             "character_role": "companion",
             "semantic_scene": "private evidence-grounded exchange",
+            "public_group_scene": "",
             "conversation_continuity": "Continue the current exchange.",
             "semantic_temporal_context": "immediate",
         },

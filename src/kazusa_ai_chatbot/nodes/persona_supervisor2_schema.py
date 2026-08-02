@@ -100,6 +100,7 @@ class GlobalPersonaState(TypedDict):
     scope_users: NotRequired[list[ScopeUser]]
     conversation_episode_state: NotRequired[ConversationProgressStateV2 | None]
     conversation_progress: NotRequired[ConversationProgressPromptV2]
+    public_group_scene: str
     ambient_logical_turns: NotRequired[list[ConversationLogicalTurnV1]]
     interaction_logical_turns: NotRequired[list[ConversationLogicalTurnV1]]
     conversation_progress_diagnostics: NotRequired[
@@ -198,6 +199,7 @@ class CognitionState(TypedDict):
     indirect_speech_context: str
     channel_topic: str
     conversation_progress: NotRequired[ConversationProgressPromptV2]
+    public_group_scene: str
     ambient_logical_turns: NotRequired[list[ConversationLogicalTurnV1]]
     interaction_logical_turns: NotRequired[list[ConversationLogicalTurnV1]]
     conversation_progress_diagnostics: NotRequired[

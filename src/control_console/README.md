@@ -131,9 +131,10 @@ Overview Latest, Debug cognition, and the latest self-cognition snapshot use
 the same `renderCognitionGraph` inspector. Its selected detail order is:
 
 `input`, `reply_context`; `decision`, `reasoning`; the four L2 reasoning fields;
-retrieval answer and evidence; continuity, progress, and commitments; selected
-actions, results, and continuation; the four visual-directive lists; and actual
-visible `messages`.
+retrieval answer and evidence; continuity, progress, public group scene, and
+commitments; selected actions, results, and continuation; the four
+visual-directive lists; and actual visible `messages`. The public group scene
+row is shown only when the bounded group-scene projection is present.
 
 The separate `l3.visual_directives` node carries
 `facial_expression`, `body_language`, `gaze_direction`, and `visual_vibe`.

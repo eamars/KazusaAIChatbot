@@ -193,6 +193,7 @@ def _chain_input(
             "channel_scope": channel_scope,
             "character_role": "companion",
             "semantic_scene": semantic_text,
+            "public_group_scene": "",
             "conversation_continuity": "Continue only the current live case.",
             "semantic_temporal_context": "immediate",
         },

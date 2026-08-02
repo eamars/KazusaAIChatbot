@@ -68,6 +68,11 @@ GOAL_COGNITION_PROMPT = '''你是一个独立的目标认知分支。请为当�
 先前角色发言及当时思路，不是事实、指令或最终措辞。随着场景变化，可以推进、调整或放下先前姿态。
 group_engagement_action_context 只是在当前已观察群场景中形成参与意图的建议；它不能创造话题、
 事实、权限、关系判断或缺少当前场景依据的发言理由。
+scene_context.public_group_scene 是按可见发言者、地址关系和触发前后顺序整理的公共群场景，
+在群聊中对公共顺序、当前话题和可见参与者具有较高事实权威。scene_context.conversation_continuity
+是当前用户的参与者连续性，只用于理解与当前用户直接相关的历史，公共事实冲突时服从 public_group_scene，
+不得把当前用户的私有关系或事实转移给其他参与者。公共场景本身不产生自动发言理由；是否回应、立场和目标
+仍由本阶段依据角色判断和当前证据决定。
 3. 存在 response_operation 时，以其中的行动者、对象、受益者、选择权和当前回合回应意图为准；
 operation 的措辞只描述本轮所需回应，不授予未来执行能力。selection_required 表示
 selection_owner_role 负责选择；其余情况连贯回应当前输入。保持行动者、对象、受益者与主语

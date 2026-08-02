@@ -993,6 +993,7 @@ def _build_frozen_cognition_input(
         "user_multimedia_input": media_rows,
         "rag_result": {},
         "character_profile": dict(character_profile),
+        "public_group_scene": "",
         "channel_name": str(source_row.get("channel_name", "")),
     }
     cognition_input = build_cognition_input_from_global_state(

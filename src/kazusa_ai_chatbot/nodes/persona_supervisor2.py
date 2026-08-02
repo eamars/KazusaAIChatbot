@@ -26,7 +26,9 @@ from kazusa_ai_chatbot.config import (
     COGNITION_RESOLVER_MAX_CYCLES,
 )
 from kazusa_ai_chatbot.conversation_progress import (
+    build_group_scene_context,
     logical_turns_as_history_rows,
+    project_group_scene_prompt,
 )
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionExecutionError,
@@ -709,6 +711,34 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         state,
         ambient_history,
     )
+    public_group_scene = ''
+    if state['channel_type'] == 'group':
+        try:
+            group_scene_context = build_group_scene_context(
+                ambient_logical_turns=ambient_logical_turns,
+                trigger_occurred_at=state['storage_timestamp_utc'],
+                trigger_speaker_name=state['user_name'],
+                trigger_body_text=state['prompt_message_context']['body_text'],
+                trigger_addressed_global_user_ids=(
+                    state['prompt_message_context'][
+                        'addressed_to_global_user_ids'
+                    ]
+                ),
+                trigger_reply_to_display_name=state['reply_context'].get(
+                    'reply_to_display_name',
+                    '',
+                ),
+                scope_users=scope_users,
+            )
+            public_group_scene = project_group_scene_prompt(
+                group_scene_context
+            )
+        except Exception as exc:
+            logger.exception(
+                f'Group public-scene projection failed; Cognition continues '
+                f'with an empty public scene: {exc}'
+            )
+            public_group_scene = ''
     raw_interaction_wide = logical_turns_as_history_rows(
         interaction_logical_turns
     )
@@ -809,6 +839,7 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         "indirect_speech_context": state["indirect_speech_context"],
         "channel_topic": state["channel_topic"],
         "scope_users": scope_users,
+        "public_group_scene": public_group_scene,
         "conversation_episode_state": state.get("conversation_episode_state"),
         "conversation_progress": state.get("conversation_progress"),
         "ambient_logical_turns": ambient_logical_turns,

@@ -904,6 +904,87 @@ async def test_persona_supervisor_scopes_history_before_cognition(
 
 
 @pytest.mark.asyncio
+async def test_persona_supervisor_projects_group_scene_alongside_user_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Group cognition receives public scene beside current-user history."""
+
+    state = _persona_state()
+    state["channel_type"] = "group"
+    state["prompt_message_context"]["body_text"] = "current group trigger"
+    state["ambient_logical_turns"] = [
+        _logical_turn(
+            turn_id="public-other",
+            role="user",
+            body_text="other participant public context",
+            platform_user_id="platform-user-2",
+            global_user_id="user-2",
+            addressed_to_global_user_ids=["character-1"],
+        ),
+    ]
+    state["interaction_logical_turns"] = []
+    _, resolver, _ = _patch_persona_graph_stages(
+        monkeypatch,
+        route="silence",
+    )
+
+    await persona_module.persona_supervisor2(state)
+
+    resolver_state = resolver.await_args.args[0]
+    assert "other participant public context" in (
+        resolver_state["public_group_scene"]
+    )
+    assert "current group trigger" in resolver_state["public_group_scene"]
+    assert resolver.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_persona_supervisor_degrades_when_group_scene_projection_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Projection failure keeps Cognition running with an empty public scene."""
+
+    state = _persona_state()
+    state['channel_type'] = 'group'
+    state['prompt_message_context']['body_text'] = 'current group trigger'
+    _, resolver, _ = _patch_persona_graph_stages(
+        monkeypatch,
+        route='silence',
+    )
+
+    def fail_group_scene_projection(*args: object, **kwargs: object) -> object:
+        raise ValueError('synthetic group scene projection failure')
+
+    monkeypatch.setattr(
+        persona_module,
+        'build_group_scene_context',
+        fail_group_scene_projection,
+    )
+
+    await persona_module.persona_supervisor2(state)
+
+    resolver_state = resolver.await_args.args[0]
+    assert resolver_state['public_group_scene'] == ''
+
+
+@pytest.mark.asyncio
+async def test_persona_supervisor_keeps_private_public_scene_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Private cognition receives the required empty public-scene field."""
+
+    _, resolver, _ = _patch_persona_graph_stages(
+        monkeypatch,
+        route="silence",
+    )
+
+    await persona_module.persona_supervisor2(_persona_state())
+
+    resolver_state = resolver.await_args.args[0]
+    assert resolver_state["public_group_scene"] == ""
+
+
+@pytest.mark.asyncio
 async def test_persona_supervisor_preserves_no_remember_for_service(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

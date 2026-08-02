@@ -518,6 +518,12 @@ def build_cognition_input_from_global_state(
             conversation_progress,
             timestamp,
         ))
+    if conversation_continuity:
+        conversation_continuity = (
+            'Current participant continuity:\n'
+            f'{conversation_continuity}'
+        )[:2200].rstrip()
+    public_group_scene = _text(state['public_group_scene'])[:1800]
     evidence.extend(_rag_evidence(state.get("rag_result"), timestamp))
     evidence.extend(_promoted_reflection_evidence(
         state.get("promoted_reflection_context"),
@@ -594,6 +600,7 @@ def build_cognition_input_from_global_state(
             "character_role": character_role,
             "current_user_role": current_user_role,
             "semantic_scene": semantic_text[:500],
+            "public_group_scene": public_group_scene,
             "conversation_continuity": conversation_continuity,
             "semantic_temporal_context": "immediate",
         },

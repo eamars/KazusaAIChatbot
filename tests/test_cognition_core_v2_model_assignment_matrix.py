@@ -618,6 +618,7 @@ async def test_sample_execution_is_db_free_blinded_and_input_immutable(
             "character_role": "active character",
             "current_user_role": "current user",
             "semantic_scene": "Test input.",
+            "public_group_scene": "",
             "conversation_continuity": "",
             "semantic_temporal_context": "immediate",
         },

@@ -132,6 +132,7 @@ def _global_state() -> dict[str, object]:
         "platform_channel_id": "channel-1",
         "channel_type": "dm",
         "channel_name": "",
+        "public_group_scene": "",
         "platform_message_id": "message-1",
         "platform_user_id": "platform-user-1",
         "global_user_id": "user-1",
@@ -171,6 +172,7 @@ def test_persona_connector_maps_one_native_user_scope() -> None:
         "channel-test"
     )
     assert payload["resolver_context"].startswith("resolver_state:")
+    assert payload["scene_context"]["public_group_scene"] == ""
     assert "dialog_text 的发言者" in payload["scene_context"][
         "current_user_role"
     ]
@@ -189,6 +191,7 @@ def test_connector_maps_private_residual_and_bounded_group_guidance() -> None:
     """The connector preserves separate V2 carriers for both context lanes."""
 
     state = _global_state()
+    state["public_group_scene"] = "GROUP_SCENE_SENTINEL"
     state["past_dialog_cognition_context"] = "PAST_DIALOG_SENTINEL"
     state["group_engagement_action_context"] = {
         "engagement_guidelines": ["GROUP_ENGAGEMENT_SENTINEL"],
@@ -210,6 +213,9 @@ def test_connector_maps_private_residual_and_bounded_group_guidance() -> None:
         "engagement_guidelines": ["GROUP_ENGAGEMENT_SENTINEL"],
         "confidence": "medium",
     }
+    assert payload["scene_context"]["public_group_scene"] == (
+        "GROUP_SCENE_SENTINEL"
+    )
 
 
 @pytest.mark.asyncio

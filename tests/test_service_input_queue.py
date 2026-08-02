@@ -464,6 +464,8 @@ async def test_settlement_worker_marks_active_model_work(
     task = asyncio.create_task(service_module._turn_settlement_worker())
     await entered.wait()
     assert observed_busy == [True]
+    await asyncio.sleep(0)
+    assert coordinator.calls == 1
     release.set()
     for _index in range(10):
         await asyncio.sleep(0)

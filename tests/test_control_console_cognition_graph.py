@@ -136,6 +136,13 @@ def test_cognition_graph_semantic_projection_preserves_full_approved_values() ->
                     "detail": {
                         "retrieval_answer": long_text,
                         "memory_evidence": evidence_rows,
+                        "conversation_progress": {
+                            "current_thread": "Current participant thread.",
+                        },
+                        "public_group_scene": (
+                            "Participants: Ari, Operator\n"
+                            "At trigger: The public group scene."
+                        ),
                         "supervisor_trace": ["trace must be excluded"],
                     },
                 },
@@ -166,6 +173,12 @@ def test_cognition_graph_semantic_projection_preserves_full_approved_values() ->
     assert len(memory_detail["memory_evidence"]) == 55
     assert memory_detail["memory_evidence"][0]["excerpt"] == long_text
     assert memory_detail["memory_evidence"][54]["fact"] == "fact-54"
+    assert memory_detail["conversation_progress"]["current_thread"] == (
+        "Current participant thread."
+    )
+    assert memory_detail["public_group_scene"].startswith(
+        "Participants: Ari"
+    )
     assert "prompt" not in repr(memory_detail)
     assert "embedding" not in repr(memory_detail)
     assert "supervisor_trace" not in memory_detail

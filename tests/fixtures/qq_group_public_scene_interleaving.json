@@ -1,0 +1,115 @@
+{
+  "trigger": {
+    "occurred_at": "2026-07-14T00:00:05Z",
+    "speaker_name": "C",
+    "body_text": "Which plan should we do first?",
+    "addressed_global_user_ids": ["character-1"],
+    "reply_to_display_name": ""
+  },
+  "scope_users": [
+    {"global_user_id": "user-a", "display_name": "A"},
+    {"global_user_id": "user-b", "display_name": "B"},
+    {"global_user_id": "user-c", "display_name": "C"},
+    {"global_user_id": "character-1", "display_name": "Asuna"}
+  ],
+  "ambient_logical_turns": [
+    {
+      "turn_id": "row-a1",
+      "role": "user",
+      "occurred_at": "2026-07-14T00:00:01Z",
+      "display_name": "A",
+      "fragments": ["I want the beach plan."],
+      "conversation_row_ids": ["row-a1"],
+      "llm_trace_id": "",
+      "platform_user_id": "platform-a",
+      "global_user_id": "user-a",
+      "addressed_to_global_user_ids": ["character-1"],
+      "broadcast": false,
+      "reply_context": {}
+    },
+    {
+      "turn_id": "row-b1",
+      "role": "user",
+      "occurred_at": "2026-07-14T00:00:02Z",
+      "display_name": "B",
+      "fragments": ["I have work on Saturday."],
+      "conversation_row_ids": ["row-b1"],
+      "llm_trace_id": "",
+      "platform_user_id": "platform-b",
+      "global_user_id": "user-b",
+      "addressed_to_global_user_ids": ["character-1"],
+      "broadcast": false,
+      "reply_context": {"reply_to_display_name": "A"}
+    },
+    {
+      "turn_id": "row-a2",
+      "role": "assistant",
+      "occurred_at": "2026-07-14T00:00:03Z",
+      "display_name": "Asuna",
+      "fragments": ["We can compare both plans."],
+      "conversation_row_ids": ["row-a2"],
+      "llm_trace_id": "trace-a2",
+      "platform_user_id": "bot",
+      "global_user_id": "character-1",
+      "addressed_to_global_user_ids": ["user-a", "user-b"],
+      "broadcast": true,
+      "reply_context": {}
+    },
+    {
+      "turn_id": "row-c1",
+      "role": "user",
+      "occurred_at": "2026-07-14T00:00:04Z",
+      "display_name": "C",
+      "fragments": ["Let us keep the options visible."],
+      "conversation_row_ids": ["row-c1"],
+      "llm_trace_id": "",
+      "platform_user_id": "platform-c",
+      "global_user_id": "user-c",
+      "addressed_to_global_user_ids": [],
+      "broadcast": true,
+      "reply_context": {}
+    },
+    {
+      "turn_id": "row-b2",
+      "role": "user",
+      "occurred_at": "2026-07-14T00:00:06Z",
+      "display_name": "B",
+      "fragments": ["I can cut the ingredients."],
+      "conversation_row_ids": ["row-b2"],
+      "llm_trace_id": "",
+      "platform_user_id": "platform-b",
+      "global_user_id": "user-b",
+      "addressed_to_global_user_ids": ["character-1"],
+      "broadcast": false,
+      "reply_context": {}
+    },
+    {
+      "turn_id": "row-a3",
+      "role": "user",
+      "occurred_at": "2026-07-14T00:00:07Z",
+      "display_name": "A",
+      "fragments": ["I can handle the rice."],
+      "conversation_row_ids": ["row-a3"],
+      "llm_trace_id": "",
+      "platform_user_id": "platform-a",
+      "global_user_id": "user-a",
+      "addressed_to_global_user_ids": ["character-1"],
+      "broadcast": false,
+      "reply_context": {}
+    },
+    {
+      "turn_id": "row-c2",
+      "role": "user",
+      "occurred_at": "2026-07-14T00:00:08Z",
+      "display_name": "C",
+      "fragments": ["I will bring the drinks."],
+      "conversation_row_ids": ["row-c2"],
+      "llm_trace_id": "",
+      "platform_user_id": "platform-c",
+      "global_user_id": "user-c",
+      "addressed_to_global_user_ids": [],
+      "broadcast": true,
+      "reply_context": {}
+    }
+  ]
+}

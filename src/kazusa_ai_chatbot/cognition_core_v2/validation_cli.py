@@ -265,6 +265,7 @@ def _build_benchmark_payload(case: dict[str, str]) -> dict[str, object]:
             "channel_scope": "internal",
             "character_role": "character",
             "semantic_scene": semantic_text,
+            "public_group_scene": "",
             "conversation_continuity": "",
             "semantic_temporal_context": "immediate",
         },

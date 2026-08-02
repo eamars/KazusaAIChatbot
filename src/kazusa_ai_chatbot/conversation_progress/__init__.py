@@ -8,6 +8,8 @@ from kazusa_ai_chatbot.conversation_progress.history import (
 )
 from kazusa_ai_chatbot.conversation_progress.models import (
     ConversationLogicalTurnV1,
+    GroupSceneContextV1,
+    GroupSceneTurnV1,
     ConversationProgressLoadDiagnosticsV2,
     ConversationProgressLoadResult,
     ConversationProgressPromptV2,
@@ -18,8 +20,10 @@ from kazusa_ai_chatbot.conversation_progress.models import (
     ConversationProgressStateV2,
 )
 from kazusa_ai_chatbot.conversation_progress.projection import (
+    build_group_scene_context,
     project_conversation_progress_evidence,
     project_conversation_progress_scene,
+    project_group_scene_prompt,
 )
 from kazusa_ai_chatbot.conversation_progress.runtime import (
     load_progress_context,
@@ -34,6 +38,8 @@ from kazusa_ai_chatbot.conversation_progress.silent_turn import (
 
 __all__ = [
     'ConversationLogicalTurnV1',
+    'GroupSceneContextV1',
+    'GroupSceneTurnV1',
     'ConversationProgressLoadDiagnosticsV2',
     'ConversationProgressLoadResult',
     'ConversationProgressPromptV2',
@@ -43,10 +49,12 @@ __all__ = [
     'ConversationProgressSourceRefV2',
     'ConversationProgressStateV2',
     'assemble_logical_turns',
+    'build_group_scene_context',
     'load_progress_context',
     'logical_turns_as_history_rows',
     'project_conversation_progress_evidence',
     'project_conversation_progress_scene',
+    'project_group_scene_prompt',
     'project_logical_turns_for_prompt',
     'record_turn_progress',
     'select_recent_logical_turns',

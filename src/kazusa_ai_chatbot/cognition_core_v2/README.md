@@ -120,8 +120,11 @@ accepted prefix from the original state, so handle composition is preserved
 and one residual rejection is omitted without discarding other appraisal
 results or the preliminary character response.
 
-Current-event scene text, public conversation continuity, and private residue
-continuity are separate inputs. Private continuity reaches goal-cognition
+Current-event scene text, the bounded public group scene, participant
+conversation continuity, and private residue continuity are separate inputs.
+In group chat, public scene order and visible participants are the authority
+for public facts; participant continuity remains scoped to the current user.
+Private continuity reaches goal-cognition
 branches only and remains non-binding prior context: each branch decides
 whether the current event, affect, relationship, and active goal call for
 progressing, revising, or leaving that posture. Branch bids distinguish

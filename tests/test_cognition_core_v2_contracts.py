@@ -186,6 +186,7 @@ def _input() -> dict[str, object]:
             "channel_scope": "private",
             "character_role": "companion",
             "semantic_scene": "quiet private greeting",
+            "public_group_scene": "",
             "conversation_continuity": "No unresolved public commitment.",
             "semantic_temporal_context": "immediate",
         },
@@ -540,6 +541,20 @@ def test_private_and_group_contexts_have_exact_bounded_contracts() -> None:
     }
 
     payload["past_dialog_cognition_context"] = "p" * 1801
+    with pytest.raises(CognitionContractError):
+        validate_cognition_core_input(payload)
+
+
+def test_scene_context_requires_bounded_public_group_scene() -> None:
+    """The public scene field is required and capped for every scope."""
+
+    payload = _input()
+    payload["scene_context"].pop("public_group_scene")
+    with pytest.raises(CognitionContractError):
+        validate_cognition_core_input(payload)
+
+    payload = _input()
+    payload["scene_context"]["public_group_scene"] = "p" * 1801
     with pytest.raises(CognitionContractError):
         validate_cognition_core_input(payload)
 

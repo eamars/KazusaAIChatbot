@@ -6,7 +6,7 @@
   current participant's continuity, while preserving the existing sequential
   settlement path.
 - Plan class: high_risk_migration
-- Status: approved
+- Status: completed
 - Mandatory skills: development-plan, local-llm-architecture, py-style,
   cjk-safety, test-style-and-execution, debug-llm, llm-trace-debug,
   character-test
@@ -15,10 +15,11 @@
   Conversation Progress V2.
 - Highest-risk areas: trigger-aware public ordering, identity redaction,
   prompt budget, participant-continuity precedence, and live group behavior.
-- Acceptance criteria: deterministic replay and inspected live cases show one
-  ordered public scene, participant packets remain isolated, private chat is
-  unchanged, and the common path adds no LLM call, database read, persistence
-  shape, or response-ordering mechanism.
+- Acceptance criteria: deterministic replay and the fixed binary live behavior
+  contract show one ordered public scene, participant packets remain isolated,
+  private chat is unchanged, and the common path adds no LLM call, database
+  read, persistence shape, or response-ordering mechanism. Final completion
+  requires the user's explicit sign-off on the prescribed evidence packet.
 
 ## Context
 
@@ -68,12 +69,22 @@ this completed contract before its own approval or execution.
   worktree changes and never read `.env`.
 - Use `venv\Scripts\python` for Python commands and `apply_patch` for manual
   edits.
-- After context compaction and after each major stage sign-off, reread this
-  complete plan before continuing.
-- Parent owns tests, verification, evidence, review remediation, lifecycle,
-  and sign-off. One production subagent owns production code, followed by one
-  independent review subagent. Native subagent unavailability stops execution
-  unless the user explicitly approves fallback execution.
+- After context compaction and after each major stage evidence checkpoint,
+  reread this complete plan before continuing.
+- Parent owns tests, verification, evidence, review remediation, and preparation
+  of the final evidence packet. One production subagent owns production code,
+  followed by one independent review subagent. Native subagent unavailability
+  stops execution unless the user explicitly approves fallback execution.
+- The implementation agent, parent agent, and review agent may report only
+  technical gate results. They cannot grant final sign-off, mark this plan
+  completed, update its registry status to completed, or archive it.
+- The user is the sole final sign-off authority. Until the user explicitly
+  accepts the final evidence packet, this plan remains `in_progress` and its
+  final lifecycle checkpoint remains unchecked.
+- Apply the live behavior contract in Verification as a binary rubric. Natural
+  wording may vary, but no agent may waive, reinterpret, substitute, or add a
+  behavior condition. Missing evidence and any unmet condition are failures;
+  `uncertain`, `partial`, and `accepted with caveat` are not valid results.
 - Keep `ConversationProgressScope` keyed by platform, channel, and current
   global user. Keep all progress storage and recording participant-scoped.
 - Public scene content is limited to bounded public message content, display
@@ -91,7 +102,10 @@ this completed contract before its own approval or execution.
   reason to respond.
 - Deterministic code owns projection, redaction, limits, persistence, and
   delivery. It does not keyword-gate, rewrite, suppress, retarget, or
-  regenerate model output.
+  regenerate model output. Public-scene limit overflow is a non-fatal
+  projection concern: it truncates or drops bounded context, and an optional
+  projection failure degrades to an empty public-scene field so Cognition can
+  continue with the remaining lanes.
 - Add no LLM call, database read, retry, feature flag, compatibility field,
   alternate scene path, or persisted group state.
 - Preserve the existing canonical JSON parser and bounded failure contracts.
@@ -120,9 +134,13 @@ this completed contract before its own approval or execution.
   changing settlement or service production code.
 - Add the named deterministic fixture, focused tests, guarded live tests, and
   one parent-authored Markdown quality review.
+- Classify every guarded live case against the fixed binary behavior contract
+  and assemble the prescribed final evidence packet.
 - Update the conversation-progress, brain-service, and Cognition Core V2
   READMEs with the two-lane ownership boundary.
 - Run every verification gate and record exact commands and outcomes.
+- Present the evidence packet to the user only after every technical gate
+  passes; retain `in_progress` status until the user explicitly signs off.
 
 ## Deferred
 
@@ -137,7 +155,7 @@ this completed contract before its own approval or execution.
 - Character-global state, relationship reducers, RAG, reflection, scheduler,
   memory lifecycle, Dialog contracts, adapter payloads, and control-console UI.
 - Private-chat behavior, dependency upgrades, compatibility shims, fallback
-  paths, and unrelated prompt refactors.
+  paths to an alternate public-scene source, and unrelated prompt refactors.
 
 ## Cutover Policy
 
@@ -264,6 +282,11 @@ Exact caps in `conversation_progress.policy`:
 | Addressed names per turn | 6 |
 | Rendered public scene | 1,800 characters |
 
+Use these exact constant names for the caps:
+`GROUP_SCENE_MAX_TURNS`, `GROUP_SCENE_MAX_VISIBLE_PARTICIPANTS`,
+`GROUP_SCENE_MAX_TURN_TEXT_CHARS`, `GROUP_SCENE_MAX_NAME_CHARS`,
+`GROUP_SCENE_MAX_ADDRESSED_NAMES`, and `GROUP_SCENE_MAX_RENDERED_CHARS`.
+
 Projection rules:
 
 - Validate `trigger_occurred_at` through the existing storage-time parser.
@@ -284,16 +307,20 @@ Projection rules:
   chronology. This always retains the trigger and newest visible public turn.
 - Derive `visible_participants` from retained speaker, address, and reply names
   in first-seen chronology. Apply the name and count caps.
-- Render semantic labels for before-trigger, trigger, and after-trigger turns.
-  Do not render schema names, timestamps, IDs, storage terms, or scene metadata.
+- Render exact semantic labels `Before trigger:`, `At trigger:`, and `After
+  trigger:` for before-trigger, trigger, and after-trigger turns. Do not render
+  schema names, timestamps, IDs, storage terms, or scene metadata.
 - If the render exceeds 1,800 characters, drop the oldest non-trigger turn,
   recompute participants, and repeat. If only the trigger remains, shorten its
-  text to the remaining budget. Fixed metadata caps must keep the trigger-only
-  render valid; otherwise raise `ValueError`.
+  text to the remaining budget. The projection returns a bounded string even
+  when an externally supplied transient context is oversized; it does not
+  propagate a limit-overflow exception.
 - `omitted_turn_count` equals the number of normalized ambient turns excluded
   by the six-turn and aggregate limits. It never counts the retained trigger.
-- A malformed ambient row remains owned by the existing logical-turn assembler
-  and never reaches this projection.
+- A malformed ambient row that unexpectedly reaches this projection is skipped
+  without inventing visible content, and the trigger remains eligible.
+- If an expected projection/input error still occurs at the persona boundary,
+  log the concrete error and continue with `public_group_scene=""`.
 
 ### Cognition scene contract
 
@@ -368,17 +395,30 @@ Cognition consumes it.
   into `SceneContextV2` and label participant continuity.
 - `src/kazusa_ai_chatbot/cognition_core_v2/contracts.py`: require and validate
   `scene_context.public_group_scene`.
+- `src/kazusa_ai_chatbot/cognition_core_v2/validation_cli.py`: supply the
+  required empty public-scene field in its internal validation payload.
 - `src/kazusa_ai_chatbot/cognition_core_v2/goal_cognition.py`: add the short
   scene-authority procedure without changing output or parser contracts.
 - `src/kazusa_ai_chatbot/brain_service/README.md`: document that the existing
   sequential settlement path hands group turns to the two context lanes.
 - `src/kazusa_ai_chatbot/cognition_core_v2/README.md`: document scene authority.
 - `tests/test_persona_supervisor2.py`: verify group build, private empty value,
-  and no extra I/O or model stage.
+  projection-error degradation, and no extra I/O or model stage.
+- `tests/test_e2e_live_llm.py`: return the seeded conversation-row ID so the
+  guarded direct graph harness can exclude its active trigger from ambient
+  history.
 - `tests/test_cognition_chain_connector_mapping.py`: verify exact scene handoff.
 - `tests/test_cognition_core_v2_contracts.py`: update exact scene keys and cap.
 - `tests/test_cognition_core_v2_prompt_budget_continuity.py`: verify fitting
   retains both public scene and participant continuity.
+- Existing Cognition input builders in
+  `tests/test_cognition_core_v2_benchmark.py`,
+  `tests/test_cognition_core_v2_alignment_gates.py`,
+  `tests/test_cognition_core_v2_integration.py`,
+  `tests/test_cognition_core_v2_model_assignment_matrix.py`,
+  `tests/test_cognition_core_v2_live_llm.py`, and
+  `tests/test_multi_source_cognition_stage_00_regression_baseline.py`: supply
+  the required empty public-scene field.
 - `tests/test_service_input_queue.py`: strengthen the existing worker test to
   prove a second lease is not requested while current processing is blocked.
 
@@ -429,6 +469,11 @@ Cognition consumes it.
   edit stops execution for a plan update and user approval.
 - Keep review fixes within the approved surface; contract or scope changes stop
   closeout.
+- Apply the fixed live criteria mechanically and record `pass` or `fail` for
+  every listed condition. A failed or missing condition blocks the evidence
+  packet from being submitted for user sign-off.
+- Agents have no discretion to alter the final sign-off authority or replace
+  explicit user acceptance with tests, review approval, or agent judgment.
 
 ## Implementation Order
 
@@ -461,7 +506,8 @@ Cognition consumes it.
    `SceneContextV2` validator and connector.
 10. Add the short goal-prompt authority procedure and run immediate syntax and
     prompt-render checks after the CJK-bearing edit.
-11. Rerun focused tests until the contract passes without changing its shape.
+11. Rerun focused tests until the contract and non-fatal overflow behavior pass
+    without changing the scene contract shape.
 
 ### Stage 3 — integration and documentation
 
@@ -488,18 +534,29 @@ Cognition consumes it.
 19. Present and record the exact fixed script and observation target, run one
     named case, save its raw evidence, inspect it, and then continue to the
     next case.
-20. Write the human-readable review from the raw artifacts and record behavior,
-    validation, uncertainty, and residual risk.
+20. Apply every fixed per-case and cross-case condition in Verification, record
+    only `pass` or `fail`, and write the human-readable review from the raw
+    artifacts.
 
-### Stage 6 — independent review and closeout
+### Stage 6 — independent technical review and evidence packet
 
 21. Run final static and deterministic gates and `git diff --check`.
 22. Start exactly one independent code-review subagent with the plan, full
     diff, commands, live evidence, and review artifact.
 23. Parent fixes only in-scope findings, reruns affected gates, and records
-    review approval and residual risks.
-24. Mark completed and archive only after all acceptance criteria pass and the
-    registry is synchronized.
+    the review's technical pass/fail result and residual risks.
+24. After every technical and behavior condition passes, assemble the exact
+    User Sign-off Evidence Packet defined in Verification.
+
+### Stage 7 — user sign-off and lifecycle closeout
+
+25. Present the complete evidence packet and the binary Acceptance Criteria
+    1–10 readiness matrix to the user.
+26. Leave this plan `in_progress` unless and until the user gives an explicit
+    affirmative instruction that accepts the presented packet as final sign-off.
+27. Only after that explicit user sign-off, mark the plan completed, synchronize
+    the registry, archive the plan, and record the user's sign-off in Execution
+    Evidence.
 
 ## Execution Model
 
@@ -507,39 +564,60 @@ Cognition consumes it.
 - Exactly one production-code subagent owns only production files in the
   Modify list and closes after reporting changed files, commands, and risks.
 - Parent owns test changes, verification, artifacts, review remediation,
-  evidence, registry, and sign-off; it may run integration work in parallel
+  evidence, and the sign-off packet; it may run integration work in parallel
   after the focused contract exists.
-- Exactly one later independent review subagent reviews and reports without
-  editing.
+- Exactly one later independent review subagent reviews and reports a technical
+  result without editing or granting final sign-off.
+- The user alone owns final sign-off. The parent performs lifecycle closeout
+  only after the user's explicit acceptance of the presented evidence packet.
 - Native subagent unavailability stops implementation unless the user
   explicitly authorizes fallback execution.
 
 ## Progress Checklist
 
-- [ ] Stage 1 — focused contract and existing ordering baseline recorded.
+- [x] Stage 1 — focused contract and existing ordering baseline recorded.
   - Covers steps 1–5; run the focused commands and record red/pass outcomes.
   - Handoff: production subagent receives the fixed contract.
-  - Sign-off: `<agent/date>` after evidence, then reread this plan.
-- [ ] Stage 2 — projection and Cognition contract implemented.
+  - Technical record: parent / 2026-08-02; baseline red/pass evidence is recorded below.
+- [x] Stage 2 — projection and Cognition contract implemented.
   - Covers steps 6–11; focused tests and syntax/render checks pass.
   - Handoff: parent completes integration and docs.
-  - Sign-off: `<agent/date>` after evidence, then reread this plan.
-- [ ] Stage 3 — integration and documentation complete.
+  - Technical record: DeepSeek V4 Flash production agent `019fc11f-63c7-7f40-bf03-b8d845c2e70b` / 2026-08-02; focused, syntax, prompt-render, and static gates pass.
+- [x] Stage 3 — integration and documentation complete.
   - Covers steps 12–14; deterministic integration and diff-boundary checks pass.
   - Handoff: Stage 4 verification.
-  - Sign-off: `<agent/date>` after evidence, then reread this plan.
-- [ ] Stage 4 — static, regression, and smoke gates pass.
+  - Technical record: parent / 2026-08-02; named integration batches, docs, call/read smoke, and protected-file diff gates pass.
+- [x] Stage 4 — static, regression, and smoke gates pass.
   - Covers steps 15–17; record every command and any baseline failure.
   - Handoff: guarded live cases.
-  - Sign-off: `<agent/date>` after evidence, then reread this plan.
-- [ ] Stage 5 — five guarded live cases inspected and review authored.
-  - Covers steps 18–20; record per-case artifacts and quality judgment.
+  - Technical record: parent / 2026-08-02; syntax, static, deterministic, regression, call/read, and smoke gates are recorded below.
+- [x] Stage 5 — five guarded live cases pass the fixed binary contract.
+  - Covers steps 18–20; record every condition, result, and artifact path.
   - Handoff: independent code review.
-  - Sign-off: `<agent/date>` after evidence, then reread this plan.
-- [ ] Stage 6 — independent code review approved and lifecycle closed.
-  - Covers steps 21–24; record findings, fixes, reruns, residual risks, and
-    reviewer approval before completion.
-  - Sign-off: `<parent/date>`.
+  - Technical record: parent / 2026-08-02; after the review remediation, all
+    five guarded cases passed one at a time with the Asuna identity overlay,
+    captured Cognition input, full protected traces for direct turns, and the
+    parent-authored binary review. Fresh artifacts and every listed condition
+    are recorded below.
+- [x] Stage 6 — independent technical review passes and evidence packet is ready.
+  - Covers steps 21–24; record findings, fixes, reruns, residual risks, the
+    technical result, and the complete packet.
+  - Handoff: present the packet to the user.
+  - Technical record: the original implementation review by reviewer
+    `019fc141-2ffa-76c3-8f72-f602fc343117` returned `PASS`. The later
+    non-fatal-limit follow-up was independently re-reviewed by
+    `019fc18f-b28e-7dd0-bc4c-37f76f6dde2c` and returned `PASS` after the
+    redundant-trigger renderer finding was fixed and all affected gates and
+    live evidence were rerun. The packet is ready for user presentation.
+- [x] Stage 7 — user explicitly signs off and lifecycle closes.
+  - Covers steps 25–27; this box may be checked only after the user explicitly
+    accepts the presented final evidence packet.
+  - Evidence: record the user's sign-off, completed registry update, and archive
+    path.
+  - Evidence record: user accepted the final evidence packet on 2026-08-02;
+    the registry was updated and this record was moved to
+    `development_plans/archive/completed/bugfix/`.
+  - Sign-off: user / 2026-08-02.
 
 ## Verification
 
@@ -668,8 +746,58 @@ test_artifacts/llm_debug/qq_group_public_scene/<case_id>/parsed_state.json
 
 Hard gates: guarded test DB confirmed, no exception, durable trace, no internal
 ID or cross-participant private fact, and target/address structure remains
-valid. Behavioral acceptance comes from the parent-authored review of public
-ordering, topic fit, character judgment, exclusivity, and justified silence.
+valid.
+
+### Fixed live behavior pass/fail contract
+
+The evaluated response is the assistant output caused by the final scripted
+turn. Earlier assistant outputs in the same case are evidence for target and
+continuity accuracy and must also satisfy the cross-case conditions below.
+Natural phrasing may vary. Each listed condition is binary and mandatory.
+
+| Case | Required behavior | Automatic failure |
+| --- | --- | --- |
+| `public_target_distinct` | The evaluated response keeps A's beach plan and B's work plan distinct and explicitly answers whether the immediately preceding assistant response addressed A, B, or both, consistently with that response artifact. | Swaps or merges the plans, names the wrong preceding target, or avoids the target question. |
+| `parallel_addresses` | The evaluated response coordinates one three-person scene containing A, B, and Asuna, assigns one preparation task to each participant, and assigns B a cutting task. | Omits a visible participant or their task, assigns B no cutting task, gives conflicting assignments, treats the exchange as unrelated one-to-one chats, or asserts an exclusive A–Asuna or B–Asuna arrangement. |
+| `public_topic_pivot` | The evaluated response treats the later outage notice as the immediate priority and addresses it before any return to the beach proposal. | Ignores or contradicts the outage pivot, or continues the beach plan as the current priority. |
+| `participant_branch_isolation` | The evaluated response distinguishes A's exclusive request from B and accurately says whether the immediately preceding assistant response was directed to A or to the group, consistently with that response artifact. | Transfers A's requested intimacy or relationship status to B/the group, denies the visible A/B distinction, or misstates the preceding response's target. |
+| `noise_only_silence` | The turn produces no visible assistant message: the returned visible message list is empty. | Any visible assistant message is produced. |
+
+Cross-case conditions:
+
+- Each of the first four cases has one non-empty evaluated response that
+  directly answers the final public turn.
+- Every assistant output preserves visible speaker, address, and chronological
+  ownership and introduces no cross-participant private fact.
+- Every evaluated response speaks as Asuna in first person to the group scene;
+  it does not describe itself as a system, context processor, log reader, or
+  transcript analyst and exposes no internal identifier or storage/schema term.
+- A case passes only when its hard gates, required behavior, and all cross-case
+  conditions pass and no automatic failure occurs. Missing response, request,
+  log, trace, parsed state, or preceding-response evidence is a failure.
+- The review records only `pass` or `fail` beside every condition. Any failure
+  blocks Stage 5 and prevents submission of the packet for user sign-off.
+
+### User Sign-off Evidence Packet
+
+The parent presents exactly one packet containing:
+
+1. Final changed-file list and diff boundary result.
+2. Every Verification command, exit result, and relevant output or artifact
+   path, including any documented unrelated baseline failure.
+3. One row for each Acceptance Criterion 1–10 with `pass` or `fail` and its
+   evidence; Criterion 11 is shown as pending user decision.
+4. One row per live case containing the exact evaluated response, any preceding
+   assistant response needed to verify target accuracy, every required and
+   cross-case condition with `pass` or `fail`, and links to all raw artifacts.
+5. The human-readable live review, independent technical review findings,
+   fixes, reruns, final technical result, and residual risks.
+6. A statement that the plan remains `in_progress` pending the user's explicit
+   final sign-off.
+
+The packet may be presented only when every Criterion 1–10 readiness result is
+`pass`. Its presentation is a request for the user's decision, not agent
+sign-off.
 
 ## Independent Plan Review
 
@@ -686,6 +814,10 @@ The 2026-08-02 fresh parent review resolved all blockers before retaining
 Review outcome: no open blocker or scope question remains. Implementation still
 requires the user's separate production command.
 
+The final behavior rubric, evidence packet, and exclusive user sign-off
+authority were subsequently fixed in this plan; they leave no sign-off choice
+for an implementation, parent, or review agent.
+
 ## Independent Code Review
 
 After all Verification gates pass, start one independent review subagent with
@@ -695,10 +827,16 @@ artifacts, parent-authored review, and Execution Evidence.
 The reviewer checks exact projection order/caps/redaction, scene-key and prompt
 budget contracts, participant persistence isolation, unchanged settlement and
 I/O owners, Python/CJK/test style, docs, live quality evidence, and plan scope.
-The reviewer reports only. Parent fixes in-scope findings and reruns affected
-gates; any contract or outside-file requirement stops closeout for approval.
+The reviewer reports only a technical `pass` or blocking findings. Parent fixes
+in-scope findings and reruns affected gates; any contract or outside-file
+requirement blocks packet readiness. Reviewer and parent results do not grant
+final sign-off.
 
 ## Acceptance Criteria
+
+Criteria 1–10 are mandatory technical prerequisites for presenting the evidence
+packet. Criterion 11 is the final completion gate, and only the user can satisfy
+it.
 
 1. `GroupSceneContextV1` merges the trigger with ambient turns in canonical
    timestamp order, applies the declared equal-timestamp tie rule, and labels
@@ -719,11 +857,15 @@ gates; any contract or outside-file requirement stops closeout for approval.
    path adds zero LLM calls and zero database reads.
 8. Syntax, focused, regression, static, call/read, and smoke gates pass with
    unrelated baseline failures explicitly recorded.
-9. Five isolated guarded live cases have complete raw artifacts and a
-   parent-authored review showing acceptable public grounding, target ownership,
-   branch isolation, topic pivot handling, and justified silence.
-10. Independent code review approves the final diff after all in-scope
-    findings and reruns are recorded.
+9. All five isolated guarded live cases have complete raw artifacts and every
+   condition in the Fixed live behavior pass/fail contract is recorded as
+   `pass` in the parent-authored review.
+10. Independent code review reports a technical `pass` after all in-scope
+    findings are fixed and affected gates are rerun.
+11. The complete User Sign-off Evidence Packet is presented to the user, and
+    the user gives an explicit affirmative instruction accepting that packet as
+    final sign-off. No implementation, parent, or review agent decision can
+    satisfy this criterion.
 
 ## Risks
 
@@ -748,11 +890,14 @@ gates; any contract or outside-file requirement stops closeout for approval.
   artifacts, and Change Surface agree.
 - Verification: exact syntax, focused, regression, static, call/read, smoke,
   guarded live, and independent-review gates are executable.
+- Sign-off: the binary live criteria, packet contents, and user's exclusive
+  final authority are fixed; no implementation-time interpretation remains.
 - Placeholder scan: no unresolved implementation choice remains.
 
 ## Execution Evidence
 
-This section remains empty until a separately authorized implementation run.
+This section records the separately authorized implementation run and its
+verification evidence. It does not constitute user sign-off.
 
 ### Pre-plan evidence carried forward
 
@@ -761,9 +906,102 @@ This section remains empty until a separately authorized implementation run.
 
 ### Stage evidence records
 
-- Stage 1:
-- Stage 2:
-- Stage 3:
-- Stage 4:
-- Stage 5:
-- Stage 6:
+- Stage 1: baseline recorded before production implementation. `py_compile`
+  passed for the parent-authored Python test and validation-payload edits.
+  `tests\\test_conversation_progress_group_scene.py` failed at collection with
+  the expected missing `build_group_scene_context` facade symbol.
+  `tests\\test_persona_supervisor2.py tests\\test_cognition_chain_connector_mapping.py`
+  reported the expected four missing `public_group_scene` handoff failures;
+  the existing tests otherwise passed. The Cognition contracts/prompt-budget
+  batch reported the expected missing scene-contract failures; the new budget
+  retention test passed. The strengthened
+  `test_settlement_worker_marks_active_model_work` baseline passed.
+- Stage 2: DeepSeek V4 Flash production agent `019fc11f-63c7-7f40-bf03-b8d845c2e70b`
+  audited the ten-file production surface and made no additional edits because
+  the existing implementation matched the exact plan contracts. Parent reran
+  the focused deterministic gates: projection 5/5, persona/connector 48/48,
+  Cognition contracts and prompt budget 71/71, and the settlement-worker
+  ordering test 1/1. The agent's syntax gate covered all ten production files
+  and passed; its CJK goal-prompt render check passed; static and smoke checks
+  passed, including the unchanged ordinary-response no-extra-LLM-call test.
+- Stage 3: Parent verified the named persona, connector, Cognition contract,
+  prompt-budget, service-worker, and Conversation Progress integration gates.
+  The Conversation Progress/runtime batch passed 46/46 and the
+  service/settlement/relevance batch passed 84/84. The ordinary response
+  no-extra-LLM-call test passed and the facade/service import smoke printed
+  `Kazusa Brain Service`. `git diff --check` passed, the forbidden group-state
+  scan returned no matches (expected exit 1), the protected production-file
+  diff was empty, and the parser scan showed only the canonical goal-stage
+  parser use. The conversation-progress, brain-service, and Cognition Core V2
+  README updates and the named fixture/live-test artifacts are present in the
+  scoped worktree.
+ - Stage 4: Parent ran the final syntax gate successfully for all 25 modified
+   Python files. Alignment and benchmark deterministic checks passed 9/9;
+   model-assignment and Stage-00 regression checks passed 13/13. The focused
+   projection, persona/connector, Cognition contract/prompt-budget, and
+   settlement batches passed 6/6, 48/48, 71/71, and 1/1. The affected
+   Conversation Progress/runtime batch passed 46/46 and the
+   service/settlement/relevance batch passed 84/84. The Cognition integration
+   batch passed 33 tests with one unrelated baseline failure at
+   `tests/test_cognition_current_event_grounding.py::test_appraisal_prompt_excludes_current_event_provenance_ids`;
+   the failure is the pre-existing capturing-LLM `KeyError: 'question'` and is
+   outside this plan's changed files. Static, call/read, service-import, and
+   `git diff --check` gates passed; the forbidden-state scan returned no
+   matches, the protected-file diff remained empty, and the parser scan showed
+   only the canonical goal-stage parser use.
+ - Stage 5: Parent reran the five required guarded cases one at a time with
+   `KAZUSA_TEST_DB_GUARD=1`, database `_test_kazusa_live_llm`, and full trace
+   capture. The first four cases used the direct graph seam with a test-only
+   Asuna identity overlay and a capture of the exact persona-to-Cognition
+   input; each log contains `character_name: Asuna` and
+   `scene_context.public_group_scene`. The 11 direct-turn protected exports
+   contain model routes, raw messages, raw responses, and parsed outputs. The
+   noise case used the real broadcast/no-address service path and returned an
+   empty visible list. The parent-authored review at
+   `test_artifacts/llm_debug/qq_group_public_scene_response_ordering_review.md`
+    records every fixed per-case and cross-case condition as `pass`, and every
+    listed artifact path exists.
+  - Stage 5 evidence-boundary correction: the direct live harness now passes
+    each seeded current-row ID as an active-turn exclusion before graph
+    invocation. The five guarded cases were rerun individually afterward:
+    `public_target_distinct` passed in 160.08s,
+    `parallel_addresses` passed in 176.90s,
+    `public_topic_pivot` passed in 159.67s,
+    `participant_branch_isolation` passed in 117.80s, and
+    `noise_only_silence` passed in 3.90s. Final artifacts show the trigger once
+    under `At trigger:` and no duplicated active message; the parent-authored
+    review was synchronized to these raw artifacts.
+  - Stage 6 review and remediation: independent reviewer
+   `019fc141-2ffa-76c3-8f72-f602fc343117` returned `BLOCKED` on the initial
+   evidence. Findings were: the live evidence used the wrong character
+   identity, four direct-case artifacts did not retain the exact Cognition
+   input/protected raw trace evidence, and required contract fields were read
+   through defaults. Parent fixed these in scope by adding the test-only Asuna
+   identity/capture seams and full protected exports, changing the two
+   production reads to direct required-field indexing, and adding missing-field
+   coverage. The affected fixture builders were then updated with the private
+   empty scene value; their complete regression batches passed. The fresh
+   technical re-review returned `PASS` with no blocking findings. Residual
+    risks are limited to the test-only Asuna identity overlay/guarded database
+    evidence boundary and the unrelated baseline appraisal-capturing failure.
+  - Resilience follow-up: the user required all public-scene policy-limit
+    overflow to remain non-fatal. Parent added deterministic tests for malformed
+    ambient-row skipping, oversized transient rendering, external turn-cap
+    enforcement, and persona continuation after projection failure. DeepSeek
+    production agent `019fc187-50d8-78c2-b35e-bd397c905c2d` changed only
+    `conversation_progress/projection.py` and `nodes/persona_supervisor2.py`.
+    Parent then removed the last cap-overflow raise, enforced the turn cap in
+    the renderer, and retained fail-open persona handling. The focused batch
+    passed 130/130, the adjacent runtime/service/settlement batch passed
+    130/130, syntax passed for the changed production and test files, and all
+    static/smoke gates passed. Independent reviewer
+    `019fc18f-b28e-7dd0-bc4c-37f76f6dde2c` found and blocked on redundant
+    trigger rows that could cause `StopIteration`; the parent fixed that
+    finding in scope, reran the focused 130-test batch, the adjacent 130-test
+    batch, syntax/static/smoke gates, and the five guarded live cases. The
+    reviewer then returned `PASS` with no remaining blocking finding.
+  - Stage 7 user sign-off: the user explicitly accepted the final evidence
+    packet on 2026-08-02 with: "I approve the evidence you supplied earlier so
+    you can close stage 7 and close the plan, then commit your changes now."
+    The plan status is completed and the closed record is archived at
+    `development_plans/archive/completed/bugfix/qq_group_public_scene_response_ordering_bugfix_plan.md`.

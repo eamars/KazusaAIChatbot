@@ -364,6 +364,12 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     assert "function cognitionGraphModel" in script.text
     assert "function cognitionGraphCurrentNode" in script.text
     assert "function cognitionGraphInspectorMarkup" in script.text
+    assert '["public_group_scene", "Public group scene"]' in script.text
+    assert script.text.index(
+        '["conversation_progress", "Conversation progress"]'
+    ) < script.text.index(
+        '["public_group_scene", "Public group scene"]'
+    )
     assert "function setCognitionGraphPinnedNode" in script.text
     assert "GRAPH_STALE_AFTER_MS = 10000" in script.text
     assert "Return to current" in script.text

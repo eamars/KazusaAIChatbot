@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import logging
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
@@ -10,12 +11,20 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionEvidenceV2,
 )
 from kazusa_ai_chatbot.conversation_progress.models import (
+    GroupSceneContextV1,
+    GroupSceneTurnV1,
     ConversationLogicalTurnV1,
     ConversationProgressEventV2,
     ConversationProgressPromptV2,
     ConversationProgressStateV2,
 )
 from kazusa_ai_chatbot.conversation_progress.policy import (
+    GROUP_SCENE_MAX_ADDRESSED_NAMES,
+    GROUP_SCENE_MAX_NAME_CHARS,
+    GROUP_SCENE_MAX_RENDERED_CHARS,
+    GROUP_SCENE_MAX_TURN_TEXT_CHARS,
+    GROUP_SCENE_MAX_TURNS,
+    GROUP_SCENE_MAX_VISIBLE_PARTICIPANTS,
     MAX_CONTINUATION_CHARS,
     MAX_PROGRESS_EVIDENCE_CHARS,
     MAX_PROGRESS_EVIDENCE_ROWS,
@@ -23,8 +32,431 @@ from kazusa_ai_chatbot.conversation_progress.policy import (
     MAX_SCENE_LOGICAL_TURNS,
     MAX_SCENE_NARRATIVE_CHARS,
     MAX_SCENE_TURN_TEXT_CHARS,
+    cap_text,
 )
 from kazusa_ai_chatbot.time_boundary import parse_storage_utc_datetime
+
+
+logger = logging.getLogger(__name__)
+
+
+def build_group_scene_context(
+    *,
+    ambient_logical_turns: Sequence[ConversationLogicalTurnV1],
+    trigger_occurred_at: str,
+    trigger_speaker_name: str,
+    trigger_body_text: str,
+    trigger_addressed_global_user_ids: Sequence[str],
+    trigger_reply_to_display_name: str,
+    scope_users: Sequence[Mapping[str, object]],
+) -> GroupSceneContextV1:
+    """Build one bounded chronological public scene without persistence."""
+
+    trigger_time = parse_storage_utc_datetime(trigger_occurred_at)
+    roster = _group_scene_roster(scope_users)
+    ambient: list[tuple[object, int, GroupSceneTurnV1]] = []
+    for index, turn in enumerate(ambient_logical_turns):
+        if not isinstance(turn, Mapping):
+            logger.warning(
+                f'Skipped malformed ambient group-scene row {index}: '
+                'row is not a mapping'
+            )
+            continue
+        required_fields = (
+            'role',
+            'display_name',
+            'fragments',
+            'addressed_to_global_user_ids',
+            'reply_context',
+        )
+        if any(field not in turn for field in required_fields):
+            logger.warning(
+                f'Skipped malformed ambient group-scene row {index}: '
+                'missing required projection field'
+            )
+            continue
+        occurred_at = turn.get('occurred_at')
+        if not isinstance(occurred_at, str):
+            logger.warning(
+                f'Skipped malformed ambient group-scene row {index}: '
+                'missing occurred_at'
+            )
+            continue
+        try:
+            occurred_time = parse_storage_utc_datetime(occurred_at)
+        except ValueError as exc:
+            logger.warning(
+                f'Skipped malformed ambient group-scene row {index}: '
+                f'invalid occurred_at: {exc}'
+            )
+            continue
+        ambient.append((
+            occurred_time,
+            index,
+            _normalize_group_scene_turn(
+                role=turn['role'],
+                speaker_name=turn['display_name'],
+                fragments=turn['fragments'],
+                addressed_global_user_ids=(
+                    turn['addressed_to_global_user_ids']
+                ),
+                reply_to_display_name=_reply_display_name(
+                    turn['reply_context']
+                ),
+                roster=roster,
+            ),
+        ))
+    ambient.sort(key=lambda item: (item[0], item[1]))
+
+    trigger = _normalize_group_scene_turn(
+        role='user',
+        speaker_name=trigger_speaker_name,
+        fragments=[trigger_body_text],
+        addressed_global_user_ids=trigger_addressed_global_user_ids,
+        reply_to_display_name=trigger_reply_to_display_name,
+        roster=roster,
+    )
+    merged: list[tuple[object, int, GroupSceneTurnV1]] = [
+        (occurred_time, 0, turn) for occurred_time, _, turn in ambient
+    ]
+    # A trigger follows all ambient turns at the same timestamp.
+    merged.append((trigger_time, 1, trigger))
+    merged.sort(key=lambda item: (item[0], item[1]))
+    trigger_position = next(
+        index for index, (_, kind, _) in enumerate(merged) if kind == 1
+    )
+    for index, (_, kind, turn) in enumerate(merged):
+        if kind == 1:
+            turn['scene_position'] = 'trigger'
+        elif index < trigger_position:
+            turn['scene_position'] = 'before_trigger'
+        else:
+            turn['scene_position'] = 'after_trigger'
+
+    selected_ambient = [item for item in merged if item[1] == 0][
+        -max(GROUP_SCENE_MAX_TURNS - 1, 0):
+    ]
+    selected = [item[2] for item in selected_ambient]
+    selected.append(trigger)
+    selected.sort(key=lambda turn: _group_scene_turn_order(turn, merged))
+
+    candidate_context = _fit_group_scene_turns(
+        selected,
+        total_ambient_count=len(ambient),
+    )
+    return candidate_context
+
+
+def project_group_scene_prompt(context: GroupSceneContextV1) -> str:
+    """Render one transient group scene within the hard render cap.
+
+    Oversized visible fields are capped deterministically. If the capped
+    scene still exceeds the budget, the oldest non-trigger turns are dropped
+    and the trigger text is shortened before rendering.
+    """
+
+    turns = [
+        _bounded_group_scene_turn(turn) for turn in context['turns']
+    ]
+    if not any(
+        turn['scene_position'] == 'trigger'
+        for turn in turns
+    ):
+        rendered = ''
+        return rendered
+    ambient_turn_count = sum(
+        1 for turn in turns if turn['scene_position'] != 'trigger'
+    )
+    fitted_context = _fit_group_scene_turns(
+        turns,
+        total_ambient_count=ambient_turn_count,
+    )
+    rendered = _render_group_scene(fitted_context)
+    if len(rendered) > GROUP_SCENE_MAX_RENDERED_CHARS:
+        rendered = rendered[:GROUP_SCENE_MAX_RENDERED_CHARS].rstrip()
+    return rendered
+
+
+def _group_scene_roster(
+    scope_users: Sequence[Mapping[str, object]],
+) -> dict[str, str]:
+    """Index the first visible name for each non-empty global user id."""
+
+    roster: dict[str, str] = {}
+    for index, row in enumerate(scope_users):
+        if not isinstance(row, Mapping):
+            logger.warning(
+                f'Skipped malformed group-scene roster row {index}: '
+                'row is not a mapping'
+            )
+            continue
+        global_user_id = row.get('global_user_id')
+        display_name = row.get('display_name')
+        if not isinstance(global_user_id, str) or not global_user_id:
+            continue
+        if not isinstance(display_name, str):
+            continue
+        bounded_name = _bounded_name(display_name)
+        if bounded_name and global_user_id not in roster:
+            roster[global_user_id] = bounded_name
+    return roster
+
+
+def _normalize_group_scene_turn(
+    *,
+    role: str,
+    speaker_name: object,
+    fragments: object,
+    addressed_global_user_ids: object,
+    reply_to_display_name: object,
+    roster: Mapping[str, str],
+) -> GroupSceneTurnV1:
+    """Strip and cap one ambient or trigger turn into visible fields."""
+
+    semantic_role = role if (
+        isinstance(role, str) and role in {'user', 'assistant'}
+    ) else 'user'
+    if not isinstance(speaker_name, str):
+        speaker_name = ''
+    bounded_speaker = _bounded_name(speaker_name) or semantic_role
+    if not isinstance(fragments, Sequence) or isinstance(fragments, str):
+        fragments = []
+    text = _bounded_text(' '.join(
+        fragment for fragment in fragments if isinstance(fragment, str)
+    ))
+    addressed_names: list[str] = []
+    if isinstance(addressed_global_user_ids, Sequence) and not isinstance(
+        addressed_global_user_ids,
+        str,
+    ):
+        for global_user_id in addressed_global_user_ids:
+            if not isinstance(global_user_id, str) or not global_user_id:
+                continue
+            name = roster.get(global_user_id, '')
+            if name and name not in addressed_names:
+                addressed_names.append(name)
+            if len(addressed_names) >= GROUP_SCENE_MAX_ADDRESSED_NAMES:
+                break
+    reply_name = (
+        _bounded_name(reply_to_display_name)
+        if isinstance(reply_to_display_name, str)
+        else ''
+    )
+    return {
+        'role': semantic_role,  # type: ignore[typeddict-item]
+        'speaker_name': bounded_speaker,
+        'text': text,
+        'addressed_names': addressed_names,
+        'reply_to_name': reply_name,
+        'scene_position': 'trigger',
+    }
+
+
+def _reply_display_name(value: object) -> object:
+    """Read only the visible reply display name from one turn context."""
+
+    if not isinstance(value, Mapping):
+        return ''
+    reply_name = value.get('reply_to_display_name', '')
+    return reply_name
+
+
+def _bounded_name(value: str) -> str:
+    """Apply the shared strip-and-cap policy to a visible name."""
+
+    return cap_text(value, GROUP_SCENE_MAX_NAME_CHARS)
+
+
+def _bounded_text(value: str) -> str:
+    """Apply the public turn text cap."""
+
+    return cap_text(value, GROUP_SCENE_MAX_TURN_TEXT_CHARS)
+
+
+def _bounded_group_scene_turn(turn: GroupSceneTurnV1) -> GroupSceneTurnV1:
+    """Cap one transient turn's visible fields before rendering."""
+
+    addressed_names: list[str] = []
+    for name in turn['addressed_names']:
+        bounded_name = _bounded_name(name)
+        if bounded_name and bounded_name not in addressed_names:
+            addressed_names.append(bounded_name)
+        if len(addressed_names) >= GROUP_SCENE_MAX_ADDRESSED_NAMES:
+            break
+    return {
+        'role': turn['role'],
+        'speaker_name': _bounded_name(turn['speaker_name']),
+        'text': _bounded_text(turn['text']),
+        'addressed_names': addressed_names,
+        'reply_to_name': _bounded_name(turn['reply_to_name']),
+        'scene_position': turn['scene_position'],
+    }
+
+
+def _fit_group_scene_turns(
+    turns: Sequence[GroupSceneTurnV1],
+    *,
+    total_ambient_count: int,
+) -> GroupSceneContextV1:
+    """Fit retained turns to the render cap while keeping the trigger."""
+
+    selected: list[GroupSceneTurnV1] = []
+    trigger_seen = False
+    for turn in turns:
+        if turn['scene_position'] == 'trigger':
+            if trigger_seen:
+                continue
+            trigger_seen = True
+        selected.append(turn)
+    if not trigger_seen:
+        empty_context = _group_scene_context(
+            [],
+            total_ambient_count=total_ambient_count,
+        )
+        return empty_context
+    maximum_ambient_turns = max(GROUP_SCENE_MAX_TURNS - 1, 0)
+    ambient_turns = [
+        turn for turn in selected if turn['scene_position'] != 'trigger'
+    ]
+    if len(ambient_turns) > maximum_ambient_turns:
+        retained_ambient = (
+            ambient_turns[-maximum_ambient_turns:]
+            if maximum_ambient_turns
+            else []
+        )
+        retained_ids = {id(turn) for turn in retained_ambient}
+        selected = [
+            turn for turn in selected
+            if (
+                turn['scene_position'] == 'trigger'
+                or id(turn) in retained_ids
+            )
+        ]
+    while len(selected) > 1:
+        candidate_context = _group_scene_context(
+            selected,
+            total_ambient_count=total_ambient_count,
+        )
+        if len(_render_group_scene(candidate_context)) <= (
+            GROUP_SCENE_MAX_RENDERED_CHARS
+        ):
+            return candidate_context
+        drop_index = next(
+            index for index, turn in enumerate(selected)
+            if turn['scene_position'] != 'trigger'
+        )
+        selected.pop(drop_index)
+        if len(selected) == 1 and selected[0]['scene_position'] == 'trigger':
+            break
+
+    candidate_context = _group_scene_context(
+        selected,
+        total_ambient_count=total_ambient_count,
+    )
+    rendered = _render_group_scene(candidate_context)
+    if len(rendered) > GROUP_SCENE_MAX_RENDERED_CHARS:
+        trigger_turn = next(
+            turn for turn in candidate_context['turns']
+            if turn['scene_position'] == 'trigger'
+        )
+        original_text = trigger_turn['text']
+        low, high = 0, len(original_text)
+        best = ''
+        while low <= high:
+            midpoint = (low + high) // 2
+            trigger_turn['text'] = original_text[:midpoint].rstrip()
+            if len(_render_group_scene(candidate_context)) <= (
+                GROUP_SCENE_MAX_RENDERED_CHARS
+            ):
+                best = trigger_turn['text']
+                low = midpoint + 1
+            else:
+                high = midpoint - 1
+        trigger_turn['text'] = best
+        rendered = _render_group_scene(candidate_context)
+        if len(rendered) > GROUP_SCENE_MAX_RENDERED_CHARS:
+            trigger_turn['text'] = ''
+    return candidate_context
+
+
+def _group_scene_turn_order(
+    turn: GroupSceneTurnV1,
+    merged: Sequence[tuple[object, int, GroupSceneTurnV1]],
+) -> tuple[int, int]:
+    """Return the original merged position for a selected turn."""
+
+    for index, (_, _, candidate) in enumerate(merged):
+        if candidate is turn:
+            return (index, 0)
+    return (len(merged), 0)
+
+
+def _group_scene_context(
+    turns: Sequence[GroupSceneTurnV1],
+    *,
+    total_ambient_count: int,
+) -> GroupSceneContextV1:
+    """Build the public context shape and recompute visible participants."""
+
+    visible_participants: list[str] = []
+    for turn in turns:
+        candidates = [
+            turn['speaker_name'],
+            *turn['addressed_names'],
+            turn['reply_to_name'],
+        ]
+        for name in candidates:
+            if name and name not in visible_participants:
+                visible_participants.append(name)
+            if len(visible_participants) >= (
+                GROUP_SCENE_MAX_VISIBLE_PARTICIPANTS
+            ):
+                break
+        if len(visible_participants) >= GROUP_SCENE_MAX_VISIBLE_PARTICIPANTS:
+            break
+    ambient_retained = sum(
+        1 for turn in turns if turn['scene_position'] != 'trigger'
+    )
+    return {
+        'schema_version': 'group_scene_context.v1',
+        'turns': [dict(turn) for turn in turns],
+        'visible_participants': visible_participants,
+        'omitted_turn_count': max(total_ambient_count - ambient_retained, 0),
+    }
+
+
+def _render_group_scene(context: GroupSceneContextV1) -> str:
+    """Render semantic public-scene text without transport metadata."""
+
+    lines: list[str] = []
+    if context['visible_participants']:
+        lines.append(
+            'Participants: ' + ', '.join(context['visible_participants'])
+        )
+    positions = (
+        ('before_trigger', 'Before trigger:'),
+        ('trigger', 'At trigger:'),
+        ('after_trigger', 'After trigger:'),
+    )
+    for position, label in positions:
+        rendered_turns: list[str] = []
+        for turn in context['turns']:
+            if turn['scene_position'] != position:
+                continue
+            suffixes: list[str] = []
+            if turn['addressed_names']:
+                suffixes.append(
+                    'to ' + ', '.join(turn['addressed_names'])
+                )
+            if turn['reply_to_name']:
+                suffixes.append('reply to ' + turn['reply_to_name'])
+            suffix = f" ({'; '.join(suffixes)})" if suffixes else ''
+            rendered_turns.append(
+                f"{turn['speaker_name']}: {turn['text']}{suffix}"
+            )
+        lines.append(f"{label} " + ' | '.join(rendered_turns))
+    rendered = '\n'.join(lines)
+    return rendered
 
 
 def empty_progress_prompt(

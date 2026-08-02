@@ -33,6 +33,30 @@ class ConversationLogicalTurnV1(TypedDict):
     reply_context: dict[str, object]
 
 
+class GroupSceneTurnV1(TypedDict):
+    """One transient, prompt-safe public turn in a group scene."""
+
+    role: Literal['user', 'assistant']
+    speaker_name: str
+    text: str
+    addressed_names: list[str]
+    reply_to_name: str
+    scene_position: Literal[
+        'before_trigger',
+        'trigger',
+        'after_trigger',
+    ]
+
+
+class GroupSceneContextV1(TypedDict):
+    """Transient bounded public-scene projection for group Cognition."""
+
+    schema_version: Literal['group_scene_context.v1']
+    turns: list[GroupSceneTurnV1]
+    visible_participants: list[str]
+    omitted_turn_count: int
+
+
 class ConversationProgressSourceRefV2(TypedDict):
     """Source-lineage reference for one progress event."""
 

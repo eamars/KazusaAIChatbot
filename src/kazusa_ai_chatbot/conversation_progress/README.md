@@ -61,6 +61,13 @@ required, and performs one guarded replacement write.
 by runtime and migration boundaries. A schema-version label alone never makes
 a packet valid.
 
+For group Cognition, the already-loaded ambient logical-turn lane is projected
+transiently into one bounded public scene. This projection carries visible
+speaker order, addresses, reply names, and the current trigger without adding
+storage or a group packet. `ConversationProgressScope` and every persisted V2
+packet remain keyed to the current platform, channel, and global user; that
+participant continuity is a separate lane from the public group scene.
+
 ## Runtime Flow
 
 ```text

@@ -287,6 +287,7 @@ def test_v2_input_rejects_scope_mismatch_before_any_model_call() -> None:
             "channel_scope": "internal",
             "character_role": "character",
             "semantic_scene": "test",
+            "public_group_scene": "",
             "conversation_continuity": "No unresolved public commitment.",
             "semantic_temporal_context": "now",
         },
