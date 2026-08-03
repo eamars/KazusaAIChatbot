@@ -479,6 +479,155 @@ async def test_goal_bid_gets_one_bounded_schema_repair(
 
 
 @pytest.mark.asyncio
+async def test_goal_bid_repair_replays_grounding_after_handle_failures() -> None:
+    """Every ordinary repair receives exact grounding and schema feedback."""
+
+    valid = {
+        "intention": "respond to the current relationship-sensitive request",
+        "desired_outcome": "keep the response aligned with current boundaries",
+        "concrete_detail": "answer from current evidence and relationship state",
+        "reason": "the current request requires a relational judgment",
+        "private_monologue": "I should answer according to my current boundary.",
+        "target_role_handles": ["r1"],
+        "evidence_handles": ["e1", "e5"],
+        "expected_consequences": ["the current user receives a clear stance"],
+        "confidence": "high",
+        "relational_willingness": {
+            "schema_version": "relational_willingness.v1",
+            "applicability": "relationship_sensitive",
+            "stance": "deflect",
+            "reason": '当前请求需要结合当前关系与角色边界作出判断',
+            "evidence_handles": ["e1", "e5"],
+        },
+    }
+    invalid_source_handles = {
+        **valid,
+        "evidence_handles": ["e1", "ev3", "ev21"],
+        "relational_willingness": {
+            **valid["relational_willingness"],
+            "evidence_handles": ["e5", "r1"],
+        },
+    }
+    missing_episode_coverage = {
+        **valid,
+        "relational_willingness": {
+            **valid["relational_willingness"],
+            "evidence_handles": ["e5"],
+        },
+    }
+    responses = [
+        invalid_source_handles,
+        missing_episode_coverage,
+        valid,
+    ]
+
+    class _LLM:
+        def __init__(self) -> None:
+            self.messages: list[list[object]] = []
+
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config: object,
+        ) -> SimpleNamespace:
+            del config
+            self.messages.append(messages)
+            response = responses[len(self.messages) - 1]
+            return SimpleNamespace(content=json.dumps(response))
+
+    llm = _LLM()
+    bid = await run_goal_cognition(
+        DEFAULT_BRANCH_DEFINITIONS["ordinary_response"],
+        {"scope": "user", "kind": "goal", "entity_id": "g1"},
+        {
+            "current_event": [{
+                "handle": "e1",
+                "source_kind": "episode",
+                "semantic_text": "the current user made a direct request",
+            }],
+            "relationship": {"relationship_summary": "current relationship"},
+            "_role_bindings": {"r1": {"role": "current_user"}},
+            "role_summaries": {"r1": "the current user"},
+        },
+        [{
+            "evidence_handle": "e1",
+            "evidence_ref": {
+                "source_kind": "episode",
+                "source_id": "episode-1",
+                "occurred_at": "2026-07-15T00:00:00Z",
+                "semantic_summary": "the current user made a direct request",
+            },
+            "semantic_text": "the current user made a direct request",
+            "visible_to": ["q:event_agency"],
+        }, {
+            "evidence_handle": "e5",
+            "evidence_ref": {
+                "source_kind": "conversation_evidence",
+                "source_id": "history-1",
+                "occurred_at": "2026-07-14T00:00:00Z",
+                "semantic_summary": "earlier relationship context",
+            },
+            "semantic_text": "earlier relationship context",
+            "visible_to": ["q:event_agency"],
+        }],
+        SimpleNamespace(
+            llm=llm,
+            goal_ordinary_response_config=object(),
+        ),
+    )
+
+    assert bid["relational_willingness"]["evidence_handles"] == [
+        "e1",
+        "e5",
+    ]
+    assert len(llm.messages) == 3
+    first_repair = json.loads(str(llm.messages[1][1].content))
+    second_repair = json.loads(str(llm.messages[2][1].content))
+    for message_set, repair_payload in zip(
+        llm.messages[1:],
+        (first_repair, second_repair),
+        strict=True,
+    ):
+        assert (
+            len(str(message_set[0].content))
+            + len(str(message_set[1].content))
+            <= goal_module.GOAL_COGNITION_PROMPT_CAP
+        )
+        assert repair_payload["evidence"] == [{
+            "handle": "e1",
+            "semantic_text": "the current user made a direct request",
+            "source_kind": "episode",
+        }, {
+            "handle": "e5",
+            "semantic_text": "earlier relationship context",
+            "source_kind": "conversation_evidence",
+        }]
+        feedback = repair_payload["repair_feedback"]
+        assert feedback["allowed_evidence_handles"] == ["e1", "e5"]
+        assert feedback["current_episode_evidence_handles"] == ["e1"]
+        assert feedback["allowed_role_handles"] == ["r1"]
+        relational_contract = feedback["relational_willingness_contract"]
+        assert relational_contract["required_fields"] == [
+            "schema_version",
+            "applicability",
+            "stance",
+            "reason",
+            "evidence_handles",
+        ]
+        assert relational_contract["current_episode_evidence_handles"] == [
+            "e1"
+        ]
+    assert "ev3" in first_repair["repair_feedback"]["invalid_draft"]
+    assert first_repair["repair_feedback"]["validation_error"] == (
+        "evidence handles are not permitted"
+    )
+    assert second_repair["repair_feedback"]["validation_error"] == (
+        "relational willingness must cite current episode evidence"
+    )
+
+
+@pytest.mark.asyncio
 async def test_goal_bid_schema_exhaustion_is_typed_after_three_attempts() -> None:
     """A required branch requests graph retry after its local attempt cap."""
 
@@ -635,18 +784,19 @@ async def test_required_selection_regenerates_with_the_same_producer() -> None:
         == goal_module.REQUIRED_SELECTION_GOAL_PROMPT
     )
     assert all(
-        message_set[0].content.startswith(
-            goal_module.REQUIRED_SELECTION_GOAL_PROMPT
-        )
+        message_set[0].content
+        == goal_module.REQUIRED_SELECTION_GOAL_REPAIR_PROMPT
         for message_set in llm.messages[1:]
     )
-    assert '"required_evidence_handles": ["e1"]' in (
-        llm.messages[1][0].content
+    repair_payload = json.loads(str(llm.messages[1][1].content))
+    repair_feedback = repair_payload["repair_feedback"]
+    assert repair_feedback["required_evidence_handles"] == ["e1"]
+    assert repair_feedback["allowed_evidence_handles"] == ["e1", "e2"]
+    assert repair_feedback["current_episode_evidence_handles"] == ["e1"]
+    assert "selection_kind" in repair_feedback["required_top_level_fields"]
+    assert "selection goal draft fields are not exact" in (
+        repair_feedback["validation_error"]
     )
-    assert '"allowed_evidence_handles": ["e1", "e2"]' in (
-        llm.messages[1][0].content
-    )
-    assert 'validation_error' in llm.messages[1][0].content
     assert bid["intention"] == selected["selection"]
     assert bid["desired_outcome"] == selected["selection"]
     assert bid["concrete_detail"] == selected["selection"]
@@ -747,17 +897,274 @@ async def test_required_selection_regeneration_excludes_optional_conversation(
     )
 
     assert len(llm.messages) == 2
-    regeneration_prompt = llm.messages[1][0].content
-    assert regeneration_prompt.startswith(
-        goal_module.REQUIRED_SELECTION_GOAL_PROMPT
+    assert (
+        llm.messages[1][0].content
+        == goal_module.REQUIRED_SELECTION_GOAL_REPAIR_PROMPT
     )
-    assert '"required_evidence_handles": ["e1"]' in regeneration_prompt
-    assert '"allowed_evidence_handles": ["e1", "e2"]' in (
-        regeneration_prompt
+    regeneration_payload = json.loads(str(llm.messages[1][1].content))
+    regeneration_feedback = regeneration_payload["repair_feedback"]
+    assert regeneration_feedback["required_evidence_handles"] == ["e1"]
+    assert regeneration_feedback["allowed_evidence_handles"] == [
+        "e1",
+        "e2",
+    ]
+    assert regeneration_feedback["current_episode_evidence_handles"] == [
+        "e1"
+    ]
+    assert "selection goal draft fields are not exact" in (
+        regeneration_feedback["validation_error"]
     )
-    assert 'selection goal draft fields are not exact' in regeneration_prompt
-    assert 'conversation_evidence_relations' not in regeneration_prompt
+    assert "conversation_evidence_relations" not in (
+        str(regeneration_payload)
+    )
     assert bid['intention'] == valid_selection['selection']
+
+
+@pytest.mark.asyncio
+async def test_required_selection_repair_replays_grounding_after_handle_failures(
+) -> None:
+    """Every selection repair receives exact grounding and schema feedback."""
+
+    selected = {
+        'selection_kind': 'choice',
+        'selection': 'The character makes the current choice directly.',
+        'reason': 'The current operation gives the character the choice.',
+        'private_monologue': 'I should make this choice from the current facts.',
+        'target_role_handles': ['r1'],
+        'evidence_handles': ['e1', 'e5'],
+        'expected_consequences': ['The current choice is communicated clearly.'],
+        'confidence': 'high',
+        'relational_willingness': {
+            'schema_version': 'relational_willingness.v1',
+            'applicability': 'relationship_sensitive',
+            'stance': 'deflect',
+            'reason': '当前选择需要结合关系和角色边界判断。',
+            'evidence_handles': ['e1', 'e5'],
+        },
+    }
+    invalid_source_handles = {
+        **selected,
+        'evidence_handles': ['e1', 'r1'],
+        'relational_willingness': {
+            **selected['relational_willingness'],
+            'evidence_handles': ['e5', 'r1'],
+        },
+    }
+    missing_episode_coverage = {
+        **selected,
+        'relational_willingness': {
+            **selected['relational_willingness'],
+            'evidence_handles': ['e5'],
+        },
+    }
+    responses = [
+        invalid_source_handles,
+        missing_episode_coverage,
+        selected,
+    ]
+
+    class _LLM:
+        def __init__(self) -> None:
+            self.messages: list[list[object]] = []
+
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config: object,
+        ) -> SimpleNamespace:
+            del config
+            self.messages.append(messages)
+            response = responses[len(self.messages) - 1]
+            return SimpleNamespace(content=json.dumps(
+                response,
+                ensure_ascii=False,
+            ))
+
+    llm = _LLM()
+    semantic_text = json.dumps({
+        'role_explicit_content': 'The character must make a choice.',
+        'response_operation': {
+            'operation': 'The character makes the current choice.',
+            'response_owner_role': 'current character',
+            'selection_owner_role': 'current character',
+            'selection_required': True,
+            'embedded_actor_role': 'current user',
+            'embedded_target_role': 'current character',
+        },
+    })
+    evidence = [{
+        'evidence_handle': 'e1',
+        'evidence_ref': {
+            'source_kind': 'episode',
+            'source_id': 'episode-1',
+            'occurred_at': '2026-07-15T00:00:00Z',
+            'semantic_summary': semantic_text,
+        },
+        'semantic_text': semantic_text,
+        'visible_to': ['q:event_agency'],
+    }, {
+        'evidence_handle': 'e5',
+        'evidence_ref': {
+            'source_kind': 'conversation_evidence',
+            'source_id': 'history-1',
+            'occurred_at': '2026-07-14T00:00:00Z',
+            'semantic_summary': 'Earlier relationship context.',
+        },
+        'semantic_text': 'Earlier relationship context.',
+        'visible_to': ['q:event_agency'],
+    }]
+
+    bid = await run_goal_cognition(
+        DEFAULT_BRANCH_DEFINITIONS['ordinary_response'],
+        {'scope': 'user', 'kind': 'goal', 'entity_id': 'g1'},
+        {
+            '_role_bindings': {
+                'r1': {
+                    'role': 'target',
+                    'entity_kind': 'relationship',
+                    'entity_id': 'relationship:u1',
+                },
+            },
+            'role_summaries': {'r1': 'The current relationship.'},
+        },
+        evidence,
+        SimpleNamespace(
+            llm=llm,
+            goal_ordinary_response_config=object(),
+        ),
+    )
+
+    assert len(llm.messages) == 3
+    assert bid['evidence_handles'] == ['e1', 'e5']
+    assert bid['relational_willingness']['evidence_handles'] == [
+        'e1',
+        'e5',
+    ]
+    for message_set in llm.messages[1:]:
+        assert (
+            message_set[0].content
+            == goal_module.REQUIRED_SELECTION_GOAL_REPAIR_PROMPT
+        )
+        repair_payload = json.loads(str(message_set[1].content))
+        feedback = repair_payload['repair_feedback']
+        assert repair_payload['required_selection_operations'][0][
+            'evidence_handle'
+        ] == 'e1'
+        assert feedback['allowed_evidence_handles'] == ['e1', 'e5']
+        assert feedback['required_evidence_handles'] == ['e1']
+        assert feedback['current_episode_evidence_handles'] == ['e1']
+        assert feedback['allowed_role_handles'] == ['r1']
+        assert feedback['role_handles_forbidden_in_evidence_handles'] == [
+            'r1'
+        ]
+        assert feedback['required_top_level_fields'][-1] == (
+            'relational_willingness'
+        )
+        relational_contract = feedback['relational_willingness_contract']
+        assert relational_contract['current_episode_evidence_handles'] == [
+            'e1'
+        ]
+    first_repair = json.loads(str(llm.messages[1][1].content))
+    second_repair = json.loads(str(llm.messages[2][1].content))
+    assert 'r1' in first_repair['repair_feedback']['invalid_draft']
+    assert first_repair['repair_feedback']['validation_error'] == (
+        'evidence handles are not permitted'
+    )
+    assert second_repair['repair_feedback']['validation_error'] == (
+        'relational willingness must cite current episode evidence'
+    )
+
+
+@pytest.mark.asyncio
+async def test_active_selection_repair_uses_the_same_grounding_contract(
+) -> None:
+    """Active required selections use producer repair without relation output."""
+
+    valid = {
+        'selection_kind': 'choice',
+        'selection': 'The character chooses the grounded next step.',
+        'reason': 'The current operation requires a concrete choice.',
+        'private_monologue': 'I should choose from the current evidence.',
+        'target_role_handles': ['r1'],
+        'evidence_handles': ['e1'],
+        'expected_consequences': ['The active goal receives a clear choice.'],
+        'confidence': 'high',
+    }
+    invalid = {
+        **valid,
+        'evidence_handles': ['r1'],
+    }
+
+    class _LLM:
+        def __init__(self) -> None:
+            self.messages: list[list[object]] = []
+
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config: object,
+        ) -> SimpleNamespace:
+            del config
+            self.messages.append(messages)
+            response = invalid if len(self.messages) == 1 else valid
+            return SimpleNamespace(content=json.dumps(response))
+
+    llm = _LLM()
+    semantic_text = json.dumps({
+        'role_explicit_content': 'The character must choose.',
+        'response_operation': {
+            'operation': 'The character chooses the next step.',
+            'response_owner_role': 'current character',
+            'selection_owner_role': 'current character',
+            'selection_required': True,
+            'embedded_actor_role': 'current user',
+            'embedded_target_role': 'current character',
+        },
+    })
+    bid = await run_goal_cognition(
+        DEFAULT_BRANCH_DEFINITIONS['autonomy_boundary'],
+        {'scope': 'user', 'kind': 'goal', 'entity_id': 'g1'},
+        {
+            '_role_bindings': {
+                'r1': {
+                    'role': 'target',
+                    'entity_kind': 'relationship',
+                    'entity_id': 'relationship:u1',
+                },
+            },
+            'role_summaries': {'r1': 'The current relationship.'},
+        },
+        [{
+            'evidence_handle': 'e1',
+            'evidence_ref': {
+                'source_kind': 'episode',
+                'source_id': 'episode-1',
+                'occurred_at': '2026-07-15T00:00:00Z',
+                'semantic_summary': semantic_text,
+            },
+            'semantic_text': semantic_text,
+            'visible_to': ['q:event_agency'],
+        }],
+        SimpleNamespace(
+            llm=llm,
+            goal_ordinary_response_config=object(),
+        ),
+    )
+
+    assert len(llm.messages) == 2
+    assert 'relational_willingness' not in bid
+    assert (
+        llm.messages[1][0].content
+        == goal_module.REQUIRED_SELECTION_GOAL_REPAIR_PROMPT
+    )
+    repair_payload = json.loads(str(llm.messages[1][1].content))
+    feedback = repair_payload['repair_feedback']
+    assert 'relational_willingness' not in feedback['required_top_level_fields']
+    assert 'relational_willingness_contract' not in feedback
+    assert feedback['required_evidence_handles'] == ['e1']
+    assert feedback['role_handles_forbidden_in_evidence_handles'] == ['r1']
 
 
 @pytest.mark.asyncio
@@ -973,4 +1380,4 @@ def test_required_selection_producer_selects_relevant_progress_evidence(
     assert '`semantic_context` 中出现的 handle' in prompt
     assert 'conversation_evidence_relations' not in prompt
     assert not hasattr(goal_module, 'REQUIRED_SELECTION_VERIFIER_PROMPT')
-    assert not hasattr(goal_module, 'REQUIRED_SELECTION_REPAIR_PROMPT')
+    assert hasattr(goal_module, 'REQUIRED_SELECTION_GOAL_REPAIR_PROMPT')

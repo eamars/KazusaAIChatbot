@@ -1282,19 +1282,42 @@ def test_required_selection_regeneration_feedback_counts_toward_cap() -> None:
         goal_cognition_module.REQUIRED_SELECTION_GOAL_PROMPT
     )
     regeneration_system_prompt = (
-        goal_cognition_module._required_selection_regeneration_prompt(
-            "selection goal draft fields are not exact",
-            {"e1"},
-            {"e1", "e2", "e3"},
-        )
+        goal_cognition_module.REQUIRED_SELECTION_GOAL_REPAIR_PROMPT
     )
+    repair_payload = dict(payload)
+    repair_payload["repair_feedback"] = {
+        "validation_error": "selection goal draft fields are not exact",
+        "required_top_level_fields": [
+            "selection_kind",
+            "selection",
+            "reason",
+            "private_monologue",
+            "target_role_handles",
+            "evidence_handles",
+            "expected_consequences",
+            "confidence",
+            "relational_willingness",
+        ],
+        "field_types": {
+            "selection_kind": "enum:choice|refusal|condition|negotiation",
+            "selection": "non_empty_string_max_500",
+        },
+        "allowed_evidence_handles": ["e1", "e2", "e3"],
+        "required_evidence_handles": ["e1"],
+        "current_episode_evidence_handles": ["e1"],
+        "allowed_role_handles": [],
+        "role_handles_forbidden_in_evidence_handles": [],
+        "max_evidence_handles": 9,
+        "max_role_handles": 8,
+        "invalid_draft": '{"evidence_handles":["r1"]}',
+    }
 
     initial_payload = goal_cognition_module._fit_goal_prompt_payload(
         payload,
         system_prompt=initial_system_prompt,
     )
     regeneration_payload = goal_cognition_module._fit_goal_prompt_payload(
-        payload,
+        repair_payload,
         system_prompt=regeneration_system_prompt,
     )
 
@@ -1306,7 +1329,13 @@ def test_required_selection_regeneration_feedback_counts_toward_cap() -> None:
         len(regeneration_system_prompt) + len(regeneration_payload)
         <= goal_cognition_module.GOAL_COGNITION_PROMPT_CAP
     )
-    assert len(regeneration_payload) < len(initial_payload)
+    assert len(regeneration_system_prompt) < len(initial_system_prompt)
+    assert len(regeneration_payload) > len(initial_payload)
+    fitted_repair_payload = json.loads(regeneration_payload)
+    assert (
+        fitted_repair_payload["repair_feedback"]["required_evidence_handles"]
+        == ["e1"]
+    )
 
 
 @pytest.mark.parametrize(
@@ -1509,8 +1538,8 @@ async def test_required_selection_producer_overflow_fails_before_call(
     assert llm.call_count == 0
 
 
-def test_required_selection_has_no_semantic_repair_surface() -> None:
-    """Keep evaluator and replacement ownership absent from the module."""
+def test_required_selection_has_only_producer_repair_surface() -> None:
+    """Keep structural repair with the producer, without a verifier stage."""
 
     assert not hasattr(
         goal_cognition_module,
@@ -1522,7 +1551,11 @@ def test_required_selection_has_no_semantic_repair_surface() -> None:
     )
     assert not hasattr(
         goal_cognition_module,
-        "REQUIRED_SELECTION_REPAIR_PROMPT",
+        "REQUIRED_SELECTION_VERIFIER_PROMPT",
+    )
+    assert hasattr(
+        goal_cognition_module,
+        "REQUIRED_SELECTION_GOAL_REPAIR_PROMPT",
     )
 
 

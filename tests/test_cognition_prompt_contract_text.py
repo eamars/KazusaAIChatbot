@@ -21,6 +21,7 @@ from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
     GOAL_COGNITION_REPAIR_PROMPT,
     MAX_GOAL_BID_EVIDENCE_HANDLES,
     MAX_GOAL_BID_ROLE_HANDLES,
+    REQUIRED_SELECTION_GOAL_REPAIR_PROMPT,
     REQUIRED_SELECTION_GOAL_PROMPT,
 )
 from kazusa_ai_chatbot.cognition_core_v2.resolver_authorization import (
@@ -79,6 +80,7 @@ def _branch_modified_prompt_fragments() -> tuple[str, ...]:
         ACTION_PLANNING_PROMPT,
         GOAL_COGNITION_PROMPT,
         GOAL_COGNITION_REPAIR_PROMPT,
+        REQUIRED_SELECTION_GOAL_REPAIR_PROMPT,
         REQUIRED_SELECTION_GOAL_PROMPT,
         RESOLVER_AUTHORIZATION_PROMPT,
         SEMANTIC_APPRAISAL_PROMPT,
@@ -282,6 +284,10 @@ def test_relational_willingness_prompt_contract_is_explicit_and_stable() -> None
     """Keep relationship-sensitive judgment in one ordinary goal contract."""
 
     goal_prompt = " ".join(GOAL_COGNITION_PROMPT.split())
+    repair_prompt = " ".join(GOAL_COGNITION_REPAIR_PROMPT.split())
+    selection_repair_prompt = " ".join(
+        REQUIRED_SELECTION_GOAL_REPAIR_PROMPT.split()
+    )
     selection_prompt = " ".join(REQUIRED_SELECTION_GOAL_PROMPT.split())
     surface_prompts = " ".join((
         CONTENT_PLAN_SYSTEM_PROMPT,
@@ -299,6 +305,14 @@ def test_relational_willingness_prompt_contract_is_explicit_and_stable() -> None
     assert "不把 compliance 当作意愿或同意" in goal_prompt
     assert "当 `branch.goal_kind` 为 `ordinary_response`" in goal_prompt
     assert "semantic_context.branch.goal_kind" not in goal_prompt
+    assert "relational_willingness_contract" in repair_prompt
+    assert "current_episode_evidence_handles" in repair_prompt
+    assert "角色 handle 不能放入 evidence_handles" in repair_prompt
+    assert "required_evidence_handles" in selection_repair_prompt
+    assert "role_handles_forbidden_in_evidence_handles" in (
+        selection_repair_prompt
+    )
+    assert "invalid_draft" in selection_repair_prompt
     assert "relational_willingness" in surface_prompts
 
 

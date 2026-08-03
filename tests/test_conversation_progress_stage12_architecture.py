@@ -468,7 +468,10 @@ async def test_selection_goal_uses_one_producer_and_zero_semantic_verifiers(
     assert bid['desired_outcome'] == bid['intention']
     assert bid['concrete_detail'] == bid['intention']
     assert not hasattr(goal_cognition, 'REQUIRED_SELECTION_VERIFIER_PROMPT')
-    assert not hasattr(goal_cognition, 'REQUIRED_SELECTION_REPAIR_PROMPT')
+    assert hasattr(
+        goal_cognition,
+        'REQUIRED_SELECTION_GOAL_REPAIR_PROMPT',
+    )
 
 
 @pytest.mark.asyncio
