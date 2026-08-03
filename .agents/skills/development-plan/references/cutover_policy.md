@@ -1,18 +1,23 @@
 # Cutover Policy Reference
 
-Use this reference when a development plan changes existing behavior, removes legacy paths, migrates data, or needs an explicit rollout/cutover strategy.
+Use this reference when a plan changes existing behavior, removes a legacy
+path, migrates data, or requires an explicit rollout strategy.
 
-## Strategy Definitions
+## Strategy definitions
 
-Use these definitions verbatim or close to verbatim:
+- **migration:** Move from old behavior to new behavior through explicit
+  transitional steps. Temporary coexistence and data movement are allowed only
+  where the plan specifies them. Remove old paths after verification.
+- **compatible:** Preserve old and new behavior together. Compatibility shims,
+  adapters, fallback paths, dual reads or writes, and old API or state shapes
+  are allowed only when the plan lists them.
+- **bigbang:** Replace old behavior in one cutover. Do not preserve a legacy
+  path, compatibility shape, or fallback unless the plan explicitly retains
+  it.
 
-- **migration:** Move from old behavior to new behavior through explicit transitional steps. Temporary coexistence is allowed only where the plan says so. Data migration or backfill may be required. Old paths are removed after migration is verified.
-- **compatible:** Preserve old and new behavior at the same time. Compatibility shims, adapters, fallback paths, dual reads/writes, or old API/state shapes are allowed only if explicitly listed.
-- **bigbang:** Replace old behavior with new behavior in one cutover. No compatibility shims, no adapters, no fallback to old behavior, no dual path, and no preservation of old state/API shapes unless explicitly listed as retained.
+## Policy matrix
 
-## Policy Matrix
-
-Use a table like this:
+When more than one area has a different policy, state it explicitly:
 
 ```md
 ## Cutover Policy
@@ -21,25 +26,22 @@ Overall strategy: bigbang
 
 | Area | Policy | Instruction |
 |---|---|---|
-| RAG supervisor entrypoint | bigbang | Replace RAG1 with RAG2 directly. No fallback. |
-| RAG state shape | bigbang | Remove `research_facts` and `research_metadata`. Do not preserve old state. |
-| MongoDB legacy collections | migration | Drop through the approved migration path. Do not delete ad hoc. |
-| Tests | bigbang | Delete obsolete RAG1 tests and create RAG2 replacement tests. |
+| Service entrypoint | bigbang | Replace the legacy entrypoint directly. |
+| Persisted state | migration | Convert through the approved migration phases. |
+| Public API | compatible | Preserve the listed old fields until the stated removal gate. |
+| Tests | bigbang | Replace tests for removed behavior with tests for the new contract. |
 ```
 
-If a local area policy conflicts with the overall strategy, the local area policy wins.
+An area-specific policy overrides the overall strategy for that area.
 
 ## Enforcement
 
-Include enforcement language:
-
-```md
-## Cutover Policy Enforcement
-
-- The responsible execution agent must follow the selected policy for each area.
-- The agent must not choose a more conservative strategy by default.
-- If an area is `bigbang`, delete or rewrite legacy references instead of preserving them.
-- If an area is `migration`, follow the exact migration phases and cleanup gates listed in this plan.
-- If an area is `compatible`, preserve only the compatibility surfaces explicitly listed in this plan.
-- Any change to a cutover policy requires user approval before implementation.
-```
+- The responsible agent follows the selected policy for each area.
+- A bigbang area removes or rewrites legacy references instead of preserving
+  them.
+- A migration area follows the exact migration phases and cleanup gates in the
+  plan.
+- A compatible area preserves only the explicitly listed compatibility
+  surfaces.
+- A cutover-policy change requires an approved plan amendment or user
+  decision before implementation.
