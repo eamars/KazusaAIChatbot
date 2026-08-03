@@ -107,6 +107,9 @@ def build_text_surface_input_from_global_state(
     relationship = validated_output.get("relationship_projection")
     if isinstance(relationship, Mapping):
         payload["semantic_relationship"] = dict(relationship)
+    relational_decision = validated_output.get("relational_willingness")
+    if isinstance(relational_decision, Mapping):
+        payload["relational_willingness"] = dict(relational_decision)
     return validate_text_surface_input(payload)
 
 

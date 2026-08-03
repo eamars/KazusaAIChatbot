@@ -94,6 +94,9 @@ async def test_cycle_zero_prewarm_reaches_v2_memory_evidence(
     assert [row["semantic_text"] for row in memory_rows] == [
         "PREWARM_MEMORY_SENTINEL"
     ]
+    assert [row["memory_scope"] for row in memory_rows] == [
+        "shared_character_or_world"
+    ]
     assert update["rag_result"]["answer"] == ""
     assert "PREWARM_MEMORY_SENTINEL" in repr(
         update["rag_result"]["memory_evidence"]

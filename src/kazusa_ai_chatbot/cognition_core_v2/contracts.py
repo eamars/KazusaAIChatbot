@@ -25,6 +25,9 @@ from kazusa_ai_chatbot.cognition_core_v2.state_models import (
 )
 
 
+_CJK_IDEOGRAPH_RE = re.compile(r"[\u4e00-\u9fff]")
+
+
 @dataclass(frozen=True)
 class EmotionDefinition:
     """Define a causal emotion family and its lifecycle semantics."""
@@ -135,6 +138,38 @@ GOAL_RESOLUTION_VALUES = frozenset({
 PAST_DIALOG_COGNITION_CONTEXT_MAX_CHARS = 1800
 GROUP_ENGAGEMENT_GUIDELINE_MAX_CHARS = 120
 GROUP_ENGAGEMENT_CONFIDENCE_MAX_CHARS = 80
+RELATIONAL_WILLINGNESS_SCHEMA_VERSION = "relational_willingness.v1"
+RELATIONAL_APPLICABILITY_VALUES = frozenset({
+    "not_relationship_sensitive",
+    "relationship_sensitive",
+})
+RELATIONAL_STANCE_VALUES = frozenset({
+    "not_applicable",
+    "reject",
+    "deflect",
+    "negotiate",
+    "conditional_accept",
+    "accept",
+})
+RELATIONAL_SENSITIVE_STANCES = (
+    "reject",
+    "deflect",
+    "negotiate",
+    "conditional_accept",
+    "accept",
+)
+RELATIONAL_NON_ACCEPTING_STANCES = frozenset({
+    "reject",
+    "deflect",
+    "negotiate",
+    "conditional_accept",
+})
+RELATIONAL_WILLINGNESS_MAX_REASON_CHARS = 300
+MAX_RELATIONAL_WILLINGNESS_EVIDENCE_HANDLES = 4
+MEMORY_SCOPE_VALUES = frozenset({
+    "current_user_continuity",
+    "shared_character_or_world",
+})
 
 EVIDENCE_SOURCE_QUESTION_IDS = {
     "episode": tuple(f"q:{kind}" for kind in SEMANTIC_QUESTION_KINDS),
@@ -249,6 +284,37 @@ class CognitionEvidenceV2(TypedDict):
     evidence_ref: EvidenceRefV2
     semantic_text: str
     visible_to: list[str]
+    memory_scope: NotRequired[
+        Literal[
+            "current_user_continuity",
+            "shared_character_or_world",
+        ]
+    ]
+
+
+class RelationalWillingnessV1(TypedDict):
+    """Transient current-turn relational-willingness decision.
+
+    The ordinary goal owner produces one exact decision per relationship-
+    sensitive turn. Deterministic stages validate, preserve, and copy the
+    decision; they never derive or rewrite the stance from prose.
+    """
+
+    schema_version: Literal["relational_willingness.v1"]
+    applicability: Literal[
+        "not_relationship_sensitive",
+        "relationship_sensitive",
+    ]
+    stance: Literal[
+        "not_applicable",
+        "reject",
+        "deflect",
+        "negotiate",
+        "conditional_accept",
+        "accept",
+    ]
+    reason: str
+    evidence_handles: list[str]
 
 
 class DirectFactV2(TypedDict):
@@ -415,6 +481,7 @@ class ActionBidV2(TypedDict):
     evidence_handles: list[str]
     expected_consequences: list[str]
     confidence: str
+    relational_willingness: NotRequired[RelationalWillingnessV1]
 
 
 class GoalBidDraftV2(TypedDict):
@@ -429,6 +496,7 @@ class GoalBidDraftV2(TypedDict):
     evidence_handles: list[str]
     expected_consequences: list[str]
     confidence: str
+    relational_willingness: NotRequired[RelationalWillingnessV1]
 
 
 class SelectedIntentionV2(TypedDict):
@@ -618,6 +686,7 @@ class CognitionObservabilityV2(TypedDict):
     appraisals: list[CognitionAppraisalObservationV2]
     branches: list[CognitionBranchObservationV2]
     collapse: CognitionCollapseObservationV2
+    relational_willingness: NotRequired[RelationalWillingnessV1]
 
 
 class CognitionCoreInputV2(TypedDict):
@@ -670,6 +739,7 @@ class CognitionCoreOutputV2(TypedDict):
     expression_policy: ExpressionPolicyV2
     diagnostics: CognitionDiagnosticsV2
     cognition_observability: NotRequired[CognitionObservabilityV2]
+    relational_willingness: NotRequired[RelationalWillingnessV1]
 
 
 class SurfaceBidProjectionV2(TypedDict):
@@ -741,6 +811,7 @@ class TextSurfaceInputV2(TypedDict):
     interaction_style_context: str
     character_expression_context: CharacterExpressionContextV2
     visual_character_context: str
+    relational_willingness: NotRequired[RelationalWillingnessV1]
 
 
 class TextSurfaceOutputV2(TypedDict):
@@ -983,6 +1054,11 @@ def validate_cognition_core_output(
             {"cognition_observability"}
             if "cognition_observability" in payload
             else set()
+        )
+        | (
+            {"relational_willingness"}
+            if "relational_willingness" in payload
+            else set()
         ),
         "cognition core output",
     )
@@ -1023,6 +1099,9 @@ def validate_cognition_core_output(
         _validate_relationship_projection(payload["relationship_projection"])
     if "cognition_observability" in payload:
         _validate_cognition_observability(payload["cognition_observability"])
+    if "relational_willingness" in payload:
+        validate_relational_willingness(payload["relational_willingness"])
+    _validate_relational_output_consistency(payload)
     _validate_diagnostics(payload["diagnostics"])
     _require_text(
         payload["selected_bid_reason"],
@@ -1059,6 +1138,11 @@ def validate_text_surface_input(
         | (
             {"runtime_capability_limits"}
             if "runtime_capability_limits" in payload
+            else set()
+        )
+        | (
+            {"relational_willingness"}
+            if "relational_willingness" in payload
             else set()
         ),
         "text surface input",
@@ -1115,6 +1199,8 @@ def validate_text_surface_input(
         _validate_action_result(row)
     if "resolver_result" in payload:
         _validate_surface_resolver_result(payload["resolver_result"])
+    if "relational_willingness" in payload:
+        validate_relational_willingness(payload["relational_willingness"])
     _validate_runtime_capability_limits(payload)
     return dict(payload)  # type: ignore[return-value]
 
@@ -1255,6 +1341,147 @@ def validate_visual_surface_output(
     return dict(payload)  # type: ignore[return-value]
 
 
+def _validate_relational_output_consistency(
+    payload: Mapping[str, Any],
+) -> None:
+    """Require the top-level decision to copy every admitted ordinary bid."""
+
+    ordinary_decisions: list[RelationalWillingnessV1] = []
+    admitted_bid = payload.get("admitted_bid")
+    if (
+        isinstance(admitted_bid, Mapping)
+        and admitted_bid.get("branch_id") == "ordinary_response"
+    ):
+        ordinary_decisions.append(admitted_bid["relational_willingness"])
+    supporting_bids = payload.get("supporting_bids")
+    if isinstance(supporting_bids, list):
+        for bid in supporting_bids:
+            if (
+                isinstance(bid, Mapping)
+                and bid.get("branch_id") == "ordinary_response"
+            ):
+                ordinary_decisions.append(bid["relational_willingness"])
+    if ordinary_decisions:
+        if "relational_willingness" not in payload:
+            raise CognitionContractError(
+                "cognition output is missing the ordinary relational decision"
+            )
+        for decision in ordinary_decisions:
+            if decision != payload["relational_willingness"]:
+                raise CognitionContractError(
+                    "cognition output relational decision is not exact"
+                )
+    elif "relational_willingness" in payload:
+        raise CognitionContractError(
+            "cognition output relational decision has no ordinary owner"
+        )
+
+
+def validate_relational_willingness(
+    value: object,
+    *,
+    evidence_handles: set[str] | None = None,
+    episode_handles: set[str] | None = None,
+) -> RelationalWillingnessV1:
+    """Validate one exact transient relational-willingness decision.
+
+    Args:
+        value: Candidate decision produced by the ordinary goal owner.
+        evidence_handles: Optional complete set of prompt-safe evidence handles
+            available to the producing call. Unknown handles are a structural
+            contract error when supplied.
+        episode_handles: Optional subset of evidence handles whose
+            ``evidence_ref.source_kind`` is ``episode``. When supplied, at
+            least one cited handle must come from the current episode.
+
+    Returns:
+        A shallow validated copy of the decision.
+
+    Raises:
+        CognitionContractError: When any exact field, pairing, bound, handle,
+            or coverage rule is violated.
+    """
+
+    if not isinstance(value, Mapping):
+        raise CognitionContractError(
+            "relational willingness must be an object"
+        )
+    required = {
+        "schema_version",
+        "applicability",
+        "stance",
+        "reason",
+        "evidence_handles",
+    }
+    _require_exact_keys(value, required, "relational willingness")
+    if value["schema_version"] != RELATIONAL_WILLINGNESS_SCHEMA_VERSION:
+        raise CognitionContractError(
+            "relational willingness schema is invalid"
+        )
+    applicability = value["applicability"]
+    if (
+        not isinstance(applicability, str)
+        or applicability not in RELATIONAL_APPLICABILITY_VALUES
+    ):
+        raise CognitionContractError(
+            "relational willingness applicability is invalid"
+        )
+    stance = value["stance"]
+    if not isinstance(stance, str) or stance not in RELATIONAL_STANCE_VALUES:
+        raise CognitionContractError(
+            "relational willingness stance is invalid"
+        )
+    if applicability == "not_relationship_sensitive":
+        if stance != "not_applicable":
+            raise CognitionContractError(
+                "non-sensitive relational willingness must be not_applicable"
+            )
+    elif stance == "not_applicable":
+        raise CognitionContractError(
+            "sensitive relational willingness requires an ordered stance"
+        )
+    _require_simplified_chinese_reason(
+        value["reason"],
+        "relational willingness.reason",
+        maximum=RELATIONAL_WILLINGNESS_MAX_REASON_CHARS,
+    )
+    handles = value["evidence_handles"]
+    if (
+        not isinstance(handles, list)
+        or not 1 <= len(handles)
+        <= MAX_RELATIONAL_WILLINGNESS_EVIDENCE_HANDLES
+    ):
+        raise CognitionContractError(
+            "relational willingness evidence handles must contain 1-4 items"
+        )
+    if any(
+        not isinstance(handle, str) or not handle.strip()
+        for handle in handles
+    ):
+        raise CognitionContractError(
+            "relational willingness evidence handles must be text"
+        )
+    if len(handles) != len(set(handles)):
+        raise CognitionContractError(
+            "relational willingness evidence handles are duplicated"
+        )
+    if evidence_handles is not None:
+        unknown_handles = [
+            handle for handle in handles if handle not in evidence_handles
+        ]
+        if unknown_handles:
+            raise CognitionContractError(
+                "relational willingness cites an unavailable evidence handle"
+            )
+    if episode_handles is not None and not set(handles).intersection(
+        episode_handles
+    ):
+        raise CognitionContractError(
+            "relational willingness must cite current episode evidence"
+        )
+    return dict(value)  # type: ignore[return-value]
+
+
 def _validate_persistent_state(state: Mapping[str, Any]) -> None:
     """Delegate exact native-state validation."""
 
@@ -1273,9 +1500,17 @@ def _validate_evidence_rows(rows: Any) -> None:
     for row in rows:
         if not isinstance(row, Mapping):
             raise CognitionContractError("evidence row must be a mapping")
+        required_row_fields = {
+            "evidence_handle",
+            "evidence_ref",
+            "semantic_text",
+            "visible_to",
+        }
+        if "memory_scope" in row:
+            required_row_fields.add("memory_scope")
         _require_exact_keys(
             row,
-            {"evidence_handle", "evidence_ref", "semantic_text", "visible_to"},
+            required_row_fields,
             "evidence row",
         )
         handle = row["evidence_handle"]
@@ -1302,6 +1537,22 @@ def _validate_evidence_rows(rows: Any) -> None:
         if len(row["visible_to"]) != len(set(row["visible_to"])):
             raise CognitionContractError("evidence visibility is duplicated")
         source_kind = row["evidence_ref"]["source_kind"]
+        if source_kind == "promoted_memory" and "memory_scope" not in row:
+            raise CognitionContractError(
+                "promoted memory evidence requires memory scope"
+            )
+        if "memory_scope" in row:
+            if source_kind != "promoted_memory":
+                raise CognitionContractError(
+                    "memory scope is only valid for promoted memory"
+                )
+            if (
+                not isinstance(row["memory_scope"], str)
+                or row["memory_scope"] not in MEMORY_SCOPE_VALUES
+            ):
+                raise CognitionContractError(
+                    "evidence memory scope is invalid"
+                )
         required_question_ids = set(EVIDENCE_SOURCE_QUESTION_IDS[source_kind])
         visibility = set(row["visible_to"])
         allowed = required_question_ids | set(GOAL_BRANCH_IDS)
@@ -1358,6 +1609,8 @@ def _validate_action_bid(value: Any) -> None:
         "expected_consequences",
         "confidence",
     }
+    if value.get("branch_id") == "ordinary_response":
+        required.add("relational_willingness")
     if set(value) != required:
         raise CognitionContractError("action bid fields are not exact")
     for field_name in (
@@ -1377,6 +1630,10 @@ def _validate_action_bid(value: Any) -> None:
         value["expected_consequences"],
         "action bid.expected_consequences",
     )
+    if "relational_willingness" in value:
+        validate_relational_willingness(value["relational_willingness"])
+
+
 def _validate_action_request(value: Any) -> None:
     """Validate one route-approved semantic action request."""
 
@@ -1519,6 +1776,8 @@ def _validate_cognition_observability(value: Any) -> None:
     """Validate the operator-safe semantic execution projection."""
 
     required = {"execution", "appraisals", "branches", "collapse"}
+    if isinstance(value, Mapping) and "relational_willingness" in value:
+        required.add("relational_willingness")
     if not isinstance(value, Mapping) or set(value) != required:
         raise CognitionContractError(
             "cognition observability fields are not exact"
@@ -1586,6 +1845,8 @@ def _validate_cognition_observability(value: Any) -> None:
         branch_indices=set(branch_indices),
         branches=branches,
     )
+    if "relational_willingness" in value:
+        validate_relational_willingness(value["relational_willingness"])
 
 
 def _validate_cognition_execution_observation(value: Any) -> None:
@@ -2807,6 +3068,23 @@ def _require_text(value: Any, label: str, maximum: int = 500) -> None:
 
     if not isinstance(value, str) or not value.strip() or len(value) > maximum:
         raise CognitionContractError(f"{label} is invalid")
+
+
+def _require_simplified_chinese_reason(
+    value: Any,
+    label: str,
+    maximum: int,
+) -> None:
+    """Require bounded non-empty Simplified Chinese semantic prose."""
+
+    if (
+        not isinstance(value, str)
+        or not value.strip()
+        or len(value) > maximum
+    ):
+        raise CognitionContractError(f"{label} is invalid")
+    if not _CJK_IDEOGRAPH_RE.search(value):
+        raise CognitionContractError(f"{label} must be Simplified Chinese")
 
 
 def _validate_pending_resolver_resume(value: object) -> None:

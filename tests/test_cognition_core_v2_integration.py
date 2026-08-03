@@ -50,9 +50,14 @@ NOW = "2026-07-14T00:00:00Z"
 class _ScriptedLLM:
     """Return exact contract-shaped responses for each V2 stage."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        relational_decision: dict[str, object] | None = None,
+    ) -> None:
         self.calls: list[str] = []
         self.human_calls: list[str] = []
+        self.relational_decision = relational_decision
 
     async def ainvoke(
         self,
@@ -101,6 +106,13 @@ class _ScriptedLLM:
                 "evidence_handles": ["e1"],
                 "expected_consequences": ["preserve continuity"],
                 "confidence": "high",
+                "relational_willingness": self.relational_decision or {
+                    "schema_version": "relational_willingness.v1",
+                    "applicability": "not_relationship_sensitive",
+                    "stance": "not_applicable",
+                    "reason": "当前回合证据不涉及关系许可判断",
+                    "evidence_handles": ["e1"],
+                },
             }
         elif "primary_bid_handle" in system:
             handles = sorted(payload["bids"])
@@ -376,8 +388,39 @@ async def test_v2_facade_commits_before_surface_and_preserves_complete_bid() -> 
     assert output["state_update"]["state_scope"] == "user"
     assert output["intention"]["route"] == "speech"
     assert output["admitted_bid"]["reason"] == "the episode supplies bounded evidence"
+    assert output["relational_willingness"] == {
+        "schema_version": "relational_willingness.v1",
+        "applicability": "not_relationship_sensitive",
+        "stance": "not_applicable",
+        "reason": "当前回合证据不涉及关系许可判断",
+        "evidence_handles": ["e1"],
+    }
+    assert output["admitted_bid"]["relational_willingness"] == (
+        output["relational_willingness"]
+    )
     assert output["diagnostics"]["completed_branch_count"] >= 1
     assert output["state_update"]["replacement_state"]["state_scope"] == "user"
+
+
+@pytest.mark.asyncio
+async def test_sensitive_collapse_observability_uses_fixed_preservation_reason() -> None:
+    """Sensitive collapse observability never copies model bid prose."""
+
+    decision = {
+        "schema_version": "relational_willingness.v1",
+        "applicability": "relationship_sensitive",
+        "stance": "reject",
+        "reason": "当前回合关系证据不支持该请求。",
+        "evidence_handles": ["e1"],
+    }
+    output = await run_cognition(
+        _input(),
+        _core_services(_ScriptedLLM(relational_decision=decision)),
+    )
+
+    assert output["cognition_observability"]["collapse"]["selection_reason"] == (
+        facade_module.AUTHORITATIVE_RELATIONAL_COLLAPSE_REASON
+    )
 
 
 @pytest.mark.asyncio
@@ -753,6 +796,13 @@ async def test_goal_structure_recovers_on_third_attempt() -> None:
                     "evidence_handles": ["e1"],
                     "expected_consequences": ["preserve continuity"],
                     "confidence": "high",
+                    "relational_willingness": {
+                        "schema_version": "relational_willingness.v1",
+                        "applicability": "not_relationship_sensitive",
+                        "stance": "not_applicable",
+                        "reason": '当前回合证据不涉及关系许可判断',
+                        "evidence_handles": ["e1"],
+                    },
                 }
                 return SimpleNamespace(
                     content=json.dumps(result, ensure_ascii=False),
@@ -794,6 +844,13 @@ async def test_required_goal_invalid_evidence_reaches_action_planning(
                     "evidence_handles": ["e1", "r1"],
                     "expected_consequences": ["preserve continuity"],
                     "confidence": "high",
+                    "relational_willingness": {
+                        "schema_version": "relational_willingness.v1",
+                        "applicability": "not_relationship_sensitive",
+                        "stance": "not_applicable",
+                        "reason": '当前回合证据不涉及关系许可判断',
+                        "evidence_handles": ["e1"],
+                    },
                 }
                 return SimpleNamespace(
                     content=json.dumps(result, ensure_ascii=False),

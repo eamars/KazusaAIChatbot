@@ -154,6 +154,13 @@ class _ValidGoalLLM:
             "evidence_handles": ["e1"],
             "expected_consequences": ["the current request receives an answer"],
             "confidence": "high",
+            "relational_willingness": {
+                "schema_version": "relational_willingness.v1",
+                "applicability": "not_relationship_sensitive",
+                "stance": "not_applicable",
+                "reason": '当前回合证据不涉及关系许可判断',
+                "evidence_handles": ["e1"],
+            },
         }
         response = SimpleNamespace(content=json.dumps(result))
         return response
@@ -295,6 +302,7 @@ def _maximum_evidence(count: int = 32) -> list[dict[str, Any]]:
                 "occurred_at": INCIDENT_TIMESTAMP,
                 "semantic_summary": semantic_text[:500],
             },
+            "memory_scope": "shared_character_or_world",
             "semantic_text": semantic_text,
             "visible_to": list(
                 EVIDENCE_SOURCE_QUESTION_IDS["promoted_memory"]
@@ -317,7 +325,7 @@ def _maximum_character_constraints() -> dict[str, Any]:
     constraints["standards"] = [
         {
             "standard_id": standard_ids[index % len(standard_ids)],
-            "description": f"{index:02d}" + ("s" * 498),
+            "description": f"{index:02d}" + ("s" * 420),
             "importance": 100,
         }
         for index in range(16)
@@ -533,6 +541,8 @@ def _maximum_goal_context() -> tuple[
     payload = _maximum_valid_cognition_input("character")
     state = payload["mutable_state"]
     evidence = payload["evidence"]
+    evidence[0]["evidence_ref"]["source_kind"] = "episode"
+    evidence[0]["visible_to"] = list(EVIDENCE_SOURCE_QUESTION_IDS["episode"])
     projection = project_state_for_prompt(
         state,
         character_constraints=payload["character_constraints"],

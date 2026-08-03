@@ -390,6 +390,14 @@ def canonical_cognition_output(
         },
     }
     if route == "speech":
+        relational_willingness = {
+            "schema_version": "relational_willingness.v1",
+            "applicability": "not_relationship_sensitive",
+            "stance": "not_applicable",
+            "reason": "当前回合证据不涉及关系许可判断",
+            "evidence_handles": ["e1"],
+        }
+        output["relational_willingness"] = relational_willingness
         output["admitted_bid"] = {
             "branch_id": "ordinary_response",
             "goal_ref": {
@@ -406,5 +414,6 @@ def canonical_cognition_output(
             "evidence_handles": ["e1"],
             "expected_consequences": ["preserve continuity"],
             "confidence": "high",
+            "relational_willingness": relational_willingness,
         }
     return output

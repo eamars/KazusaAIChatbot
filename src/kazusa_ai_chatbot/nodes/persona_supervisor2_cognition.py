@@ -1641,11 +1641,17 @@ def _rag_evidence(value: object, occurred_at: str) -> list[dict[str, Any]]:
         if not text:
             continue
 
+        memory_scope = (
+            "current_user_continuity"
+            if row.get("scope_type") == "user_continuity"
+            else "shared_character_or_world"
+        )
         evidence.append(_build_rag_evidence_row(
             text=text,
             source_kind="promoted_memory",
             source_id=str(row.get("id", f"memory:{index}")),
             occurred_at=occurred_at,
+            memory_scope=memory_scope,
         ))
 
     conversation_items = value.get("conversation_evidence")
@@ -1740,11 +1746,12 @@ def _build_rag_evidence_row(
     source_kind: str,
     source_id: str,
     occurred_at: str,
+    memory_scope: str | None = None,
 ) -> dict[str, Any]:
     """Build one bounded RAG evidence row with registered provenance."""
 
     semantic_text = text[:1000]
-    return {
+    row: dict[str, Any] = {
         "evidence_handle": "ev0",
         "evidence_ref": {
             "source_kind": source_kind,
@@ -1755,6 +1762,9 @@ def _build_rag_evidence_row(
         "semantic_text": semantic_text,
         "visible_to": list(EVIDENCE_SOURCE_QUESTION_IDS[source_kind]),
     }
+    if memory_scope is not None:
+        row["memory_scope"] = memory_scope
+    return row
 
 
 def _media_evidence(

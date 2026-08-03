@@ -26,6 +26,7 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionExecutionError,
     CognitionObservabilityV2,
     GroupEngagementActionContextV2,
+    RelationalWillingnessV1,
     SemanticAppraisalResultV2,
     validate_cognition_core_input,
     validate_cognition_core_output,
@@ -66,7 +67,10 @@ from kazusa_ai_chatbot.cognition_core_v2.state_reducers import (
     apply_state_update,
     create_deterministic_goals,
 )
-from kazusa_ai_chatbot.cognition_core_v2.workspace import collapse_bids
+from kazusa_ai_chatbot.cognition_core_v2.workspace import (
+    collapse_authoritative_relational_bid,
+    collapse_bids,
+)
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     RESOLVER_PENDING_RESOLUTION_VERSION,
     ResolverValidationError,
@@ -81,6 +85,9 @@ _DEGRADABLE_APPRAISAL_ERROR_CODES = frozenset({
     "semantic_appraisal_provider_exhausted",
     "semantic_appraisal_contract_exhausted",
 })
+AUTHORITATIVE_RELATIONAL_COLLAPSE_REASON = (
+    "authoritative_relational_willingness_preserved_ordinary_response"
+)
 
 
 def _deduplicate_diagnostics_warnings(
@@ -355,18 +362,31 @@ async def _run_cognition(
         bids.extend(final_execution.results.values())
     bids = [bid for bid in bids if isinstance(bid, Mapping)]
     generated_bids = list(bids)
-    try:
-        collapse = await collapse_bids(
+    relational_decision = _ordinary_relational_decision(bids)
+    if (
+        relational_decision is not None
+        and relational_decision["applicability"] == "relationship_sensitive"
+    ):
+        collapse = collapse_authoritative_relational_bid(
             bids,
-            services,
-            current_event=_workspace_current_event(payload["evidence"]),
-            goal_context_by_ref=_workspace_goal_contexts(
+            relational_decision,
+        )
+        warnings.append("authoritative_relational_willingness")
+    else:
+        try:
+            collapse = await collapse_bids(
                 bids,
-                final_state,
-            ),
-        ) if bids else _empty_collapse()
-    except Exception as exc:
-        raise CognitionExecutionError(f"workspace collapse failed: {exc}") from exc
+                services,
+                current_event=_workspace_current_event(payload["evidence"]),
+                goal_context_by_ref=_workspace_goal_contexts(
+                    bids,
+                    final_state,
+                ),
+            ) if bids else _empty_collapse()
+        except Exception as exc:
+            raise CognitionExecutionError(
+                f"workspace collapse failed: {exc}"
+            ) from exc
     primary_bid = collapse.get("primary_bid")
     supporting_bids = collapse.get("supporting_bids", [])
     try:
@@ -458,6 +478,7 @@ async def _run_cognition(
         collapse=collapse,
         selected_bid_reason=selected_bid_reason,
         diagnostics=diagnostics,
+        relational_willingness=relational_decision,
     )
     output: dict[str, Any] = {
         "schema_version": "cognition_core_output.v2",
@@ -492,6 +513,8 @@ async def _run_cognition(
         output["admitted_bid"] = admitted_bid
     if relationship is not None:
         output["relationship_projection"] = relationship
+    if relational_decision is not None:
+        output["relational_willingness"] = dict(relational_decision)
     all_branch_definitions = [
         *preliminary_branches,
         *new_branch_definitions,
@@ -996,6 +1019,20 @@ def _empty_collapse() -> dict[str, Any]:
     }
 
 
+def _ordinary_relational_decision(
+    bids: Sequence[ActionBidV2],
+) -> RelationalWillingnessV1 | None:
+    """Copy the validated ordinary relational decision from the bid set."""
+
+    for bid in bids:
+        if bid["branch_id"] != "ordinary_response":
+            continue
+        decision = bid.get("relational_willingness")
+        if isinstance(decision, Mapping):
+            return decision  # type: ignore[return-value]
+    return None
+
+
 def _build_cognition_observability(
     *,
     questions: Sequence[Mapping[str, Any]],
@@ -1008,6 +1045,7 @@ def _build_cognition_observability(
     collapse: Mapping[str, Any],
     selected_bid_reason: str,
     diagnostics: Mapping[str, Any],
+    relational_willingness: RelationalWillingnessV1 | None,
 ) -> CognitionObservabilityV2:
     """Build semantic branch evidence without exposing prompt-local handles."""
 
@@ -1137,6 +1175,12 @@ def _build_cognition_observability(
         for branch_id in collapse["suppressed_branch_ids"]
         if branch_id in index_by_branch_id
     ]
+    collapse_selection_reason = selected_bid_reason
+    if (
+        relational_willingness is not None
+        and relational_willingness["applicability"] == "relationship_sensitive"
+    ):
+        collapse_selection_reason = AUTHORITATIVE_RELATIONAL_COLLAPSE_REASON
     return_value: CognitionObservabilityV2 = {
         "execution": execution_observation,
         "appraisals": appraisals,
@@ -1145,9 +1189,13 @@ def _build_cognition_observability(
             "primary_branch_index": primary_index,
             "supporting_branch_indices": supporting_indices,
             "suppressed_branch_indices": suppressed_indices,
-            "selection_reason": selected_bid_reason,
+            "selection_reason": collapse_selection_reason,
         },
     }
+    if relational_willingness is not None:
+        return_value["relational_willingness"] = dict(
+            relational_willingness
+        )
     return return_value
 
 

@@ -80,6 +80,8 @@ scheduled 表达已记录、已排队、待执行及相应条件；其他状态�
 语义选择。content_requirements 使用正向目标句式，描述回应应呈现的立场、情绪流动、角色特征、
 事实和互动推进；delivery_profile 用词语层次、句式、节奏、犹豫与标点把这些语义实现为鲜明角色
 声音。
+7. relational_willingness 是已确认的关系许可判断；content_plan 与 content_requirements 须保持
+reject、deflect、negotiate、conditional_accept、accept 或 not_applicable 的原样立场。
 
 返回一份简洁计划、一到八条语义要求和完整 delivery_profile。语义要求保护选定含义、当前真实
 边界、角色方向和能力执行事实。当前用户的即时发言来自 visible percept；角色自己的反思和内部
@@ -117,6 +119,7 @@ async def run_content_plan_stage(
 PREFERENCE_SYSTEM_PROMPT = '''识别当前角色判断和当前场景中真实存在的可见表达边界或称呼对象约束。
 以 selected intention、visible episode、projected bids、expression policy、semantic affect、
 semantic relationship、interaction style 和 permitted_action_results 为语境。
+relational_willingness 保持已确认的关系许可立场。
 resolver_result 是来源自有的 resolver 执行结果，按 status 和 semantic_result 原义保留。
 runtime_capability_limits 是可信的运行时能力边界，只用于保持表达与现实能力一致。
 
@@ -171,6 +174,7 @@ surface.dialog_compliance_repair.verified_hard_issues 是已经确认的硬错�
 与特征。这些表达可以先于明确决定出现，并与收尾共同组成表达同一已选决定的角色化弧线。权威语境
 选择实际立场变化时，把支持变化的新事实、动机、条件、让步或约束及其因果连接写入 content_plan
 或 content_requirements。
+surface.relational_willingness 是已确认的关系许可判断，替代内容必须保持其立场。
 2. 修正每一项 verified_hard_issues，重新生成内容计划、语义要求和 delivery profile，并依据
 权威语境中的具体来源恢复可见边界和称呼安排。
 3. 保持结构化角色中的行动者、对象、受益者、回应所有者和选择所有者。当前角色可以拒绝、协商或

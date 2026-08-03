@@ -15,6 +15,7 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     ActionBidV2,
     CollapsedIntentionV2,
     CognitionCoreServicesV2,
+    RelationalWillingnessV1,
 )
 from kazusa_ai_chatbot.cognition_core_v2.branch_activation import (
     branch_order_key,
@@ -45,6 +46,69 @@ persistent_goal 与 current_event 是不同事项，必须抑制该候选，即�
 保持候选内容原样，不复制内容，也不增添细节。每个提供的 bid handle 必须在三个分区中恰好出现
 一次。
 '''
+
+
+def collapse_authoritative_relational_bid(
+    bids: Sequence[ActionBidV2],
+    decision: RelationalWillingnessV1,
+) -> CollapsedIntentionV2:
+    """Preserve the ordinary relational owner without semantic reinterpretation.
+
+    This deterministic collapse runs only when the ordinary goal owner declared
+    the turn relationship-sensitive. It makes that ordinary bid primary,
+    exposes no supporting bid, and places every other bid in ``competing_bids``.
+    It never reads user text, relationship axes, memory, or bid prose.
+
+    Args:
+        bids: Complete branch-owned candidates eligible for partition.
+        decision: Validated ordinary relational-willingness decision.
+
+    Returns:
+        The authoritative collapse envelope with the ordinary bid primary.
+
+    Raises:
+        ValueError: When no relationship-sensitive decision is supplied,
+            exactly one ordinary bid carrying the equal decision is missing, or
+            a competing ordinary bid is present.
+    """
+
+    if (
+        not isinstance(decision, Mapping)
+        or decision["applicability"] != "relationship_sensitive"
+    ):
+        raise ValueError(
+            "authoritative relational collapse requires a sensitive decision"
+        )
+    ordinary_bids = [
+        bid
+        for bid in bids
+        if bid["branch_id"] == "ordinary_response"
+    ]
+    if len(ordinary_bids) != 1:
+        raise ValueError(
+            "authoritative relational collapse requires exactly one ordinary bid"
+        )
+    ordinary_bid = ordinary_bids[0]
+    if ordinary_bid.get("relational_willingness") != dict(decision):
+        raise ValueError(
+            "authoritative relational collapse requires the equal decision"
+        )
+    competing_bids = [
+        bid
+        for bid in bids
+        if bid["branch_id"] != "ordinary_response"
+    ]
+    return_value: CollapsedIntentionV2 = {
+        "primary_branch_id": ordinary_bid["branch_id"],
+        "supporting_branch_ids": [],
+        "suppressed_branch_ids": [
+            bid["branch_id"] for bid in competing_bids
+        ],
+        "primary_bid": ordinary_bid,
+        "supporting_bids": [],
+        "competing_bids": list(competing_bids),
+    }
+    return return_value
 
 
 async def collapse_bids(

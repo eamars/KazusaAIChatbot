@@ -391,6 +391,10 @@ def _project_surface_payload(
         result["primary_bid"] = payload["primary_bid"]
     if "semantic_relationship" in payload:
         result["semantic_relationship"] = payload["semantic_relationship"]
+    if "relational_willingness" in payload:
+        result["relational_willingness"] = dict(
+            payload["relational_willingness"]
+        )
     return result
 
 

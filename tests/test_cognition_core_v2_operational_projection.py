@@ -10,6 +10,7 @@ from kazusa_ai_chatbot.cognition_core_v2.state_models import (
 )
 from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
     project_character_operational_state,
+    project_relationship_axis,
     project_relationship_context,
     select_character_operational_context,
 )
@@ -167,3 +168,14 @@ def test_projection_digests_change_when_native_state_changes() -> None:
     second = project_character_operational_state(changed, effective_at=LATER)
 
     assert first["view_digest"] != second["view_digest"]
+
+
+def test_relationship_axis_prompt_projection_is_domain_specific() -> None:
+    """Zero trust and zero boundary history retain different meanings."""
+
+    trust = project_relationship_axis("trust", 0)
+    boundary_safety = project_relationship_axis("boundary_safety", 0)
+
+    assert trust != boundary_safety
+    assert "中性或混合" not in trust
+    assert "中性或混合" not in boundary_safety

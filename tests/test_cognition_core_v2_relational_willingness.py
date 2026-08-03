@@ -1,0 +1,613 @@
+"""Focused deterministic contract tests for relational willingness V2."""
+
+from __future__ import annotations
+
+import json
+from copy import deepcopy
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
+
+import pytest
+
+from kazusa_ai_chatbot.cognition_core_v2.action_selection import plan_actions
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    BranchDefinition,
+    CognitionContractError,
+    CognitionCoreServicesV2,
+    CognitionExecutionError,
+    EVIDENCE_SOURCE_QUESTION_IDS,
+    validate_cognition_core_input,
+    validate_cognition_core_output,
+)
+from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
+    run_goal_cognition,
+)
+from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+    build_acquaintance_user_state,
+    build_character_production_state,
+)
+from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
+    project_relationship_axis,
+    project_relationship_context,
+    project_state_for_prompt,
+)
+from kazusa_ai_chatbot.cognition_core_v2.workspace import (
+    collapse_authoritative_relational_bid,
+)
+from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition as connector
+from kazusa_ai_chatbot.nodes import persona_supervisor2_l3_surface as l3_surface
+from tests.cognition_core_v2_test_helpers import (
+    canonical_character_identity,
+    canonical_cognition_output,
+    canonical_episode,
+    canonical_identity_context,
+)
+from tests.test_cognition_chain_connector_mapping import _global_state
+from llm_test_helpers import make_llm_call_config
+
+
+NOW = '2026-07-14T00:00:00Z'
+FIXTURE_PATH = (
+    Path(__file__).parent
+    / 'fixtures'
+    / 'cognition_core_v2_relational_willingness_cases.json'
+)
+RELATIONSHIP_AXES = (
+    'familiarity',
+    'positive_regard',
+    'trust',
+    'attachment',
+    'desired_closeness',
+    'perceived_closeness',
+    'care',
+    'boundary_safety',
+    'exclusivity',
+    'unresolved_injury',
+    'salience',
+)
+
+
+def _decision(
+    *,
+    applicability: str = 'relationship_sensitive',
+    stance: str = 'reject',
+    evidence_handles: list[str] | None = None,
+) -> dict[str, object]:
+    """Build one bounded relational decision candidate."""
+
+    return {
+        'schema_version': 'relational_willingness.v1',
+        'applicability': applicability,
+        'stance': stance,
+        'reason': '当前回合证据显示关系许可尚未建立',
+        'evidence_handles': list(evidence_handles or ['e1']),
+    }
+
+
+def _evidence_row(
+    handle: str,
+    source_kind: str,
+    semantic_text: str,
+    *,
+    memory_scope: str | None = None,
+) -> dict[str, object]:
+    """Build a prompt-safe evidence row for focused stage tests."""
+
+    row: dict[str, object] = {
+        'evidence_handle': handle,
+        'evidence_ref': {
+            'source_kind': source_kind,
+            'source_id': f'{source_kind}:{handle}',
+            'occurred_at': NOW,
+            'semantic_summary': semantic_text,
+        },
+        'semantic_text': semantic_text,
+        'visible_to': list(EVIDENCE_SOURCE_QUESTION_IDS[source_kind]),
+    }
+    if memory_scope is not None:
+        row['memory_scope'] = memory_scope
+    return row
+
+
+def _ordinary_bid(
+    decision: dict[str, object],
+    *,
+    branch_id: str = 'ordinary_response',
+) -> dict[str, object]:
+    """Build one complete ordinary bid carrying the exact decision."""
+
+    return {
+        'branch_id': branch_id,
+        'goal_ref': {
+            'scope': 'user',
+            'kind': 'goal',
+            'entity_id': f'goal:{branch_id}',
+        },
+        'intention': '保持当前回合的清晰边界',
+        'desired_outcome': '让可见回应符合当前关系判断',
+        'concrete_detail': '只使用当前回合的直接证据',
+        'reason': '当前关系证据支持该回应方向',
+        'private_monologue': '先保持与当前判断一致。',
+        'target_roles': [],
+        'evidence_handles': ['e1'],
+        'expected_consequences': ['保留当前回合连续性'],
+        'confidence': 'high',
+        'relational_willingness': deepcopy(decision),
+    }
+
+
+def _output_with_decision(
+    decision: dict[str, object],
+) -> dict[str, object]:
+    """Add one exact decision to the canonical output test packet."""
+
+    output = deepcopy(canonical_cognition_output())
+    output['relational_willingness'] = deepcopy(decision)
+    admitted_bid = output.get('admitted_bid')
+    if isinstance(admitted_bid, dict):
+        admitted_bid['relational_willingness'] = deepcopy(decision)
+    return output
+
+
+def _core_services(llm: object) -> CognitionCoreServicesV2:
+    """Build service bindings without changing the production call graph."""
+
+    config = make_llm_call_config('v2_test')
+    return CognitionCoreServicesV2(
+        llm=llm,
+        appraisal_event_agency_config=config,
+        appraisal_relationship_social_config=config,
+        appraisal_moral_identity_config=config,
+        appraisal_goal_threat_outcome_config=config,
+        appraisal_epistemic_comparison_memory_config=config,
+        appraisal_existential_drive_config=config,
+        goal_ordinary_response_config=config,
+        goal_active_branch_config=config,
+        workspace_collapse_config=config,
+        action_planning_config=config,
+        action_authorization_config=config,
+        resolver_authorization_config=config,
+    )
+
+
+class _GoalLLM:
+    """Return a fixed ordinary bid and retain the rendered prompt."""
+
+    def __init__(self, decision: dict[str, object]) -> None:
+        self.decision = decision
+        self.messages: list[list[object]] = []
+
+    async def ainvoke(
+        self,
+        messages: list[object],
+        *,
+        config: object,
+    ) -> SimpleNamespace:
+        del config
+        self.messages.append(messages)
+        payload = {
+            'intention': '保持当前回合的清晰边界',
+            'desired_outcome': '让可见回应符合当前关系判断',
+            'concrete_detail': '只使用当前回合的直接证据',
+            'reason': '当前关系证据支持该回应方向',
+            'private_monologue': '先保持与当前判断一致。',
+            'target_role_handles': [],
+            'evidence_handles': ['e1'],
+            'expected_consequences': ['保留当前回合连续性'],
+            'confidence': 'high',
+            'relational_willingness': deepcopy(self.decision),
+        }
+        return SimpleNamespace(
+            content=json.dumps(payload, ensure_ascii=False),
+        )
+
+
+def _goal_context() -> dict[str, object]:
+    """Build the required semantic context for an ordinary goal call."""
+
+    return {
+        'character_identity': {
+            'boundaries': {
+                'self_integrity': '自我边界清晰',
+                'control_sensitivity': '对控制压力敏感',
+                'compliance_strategy': '压力表达反应不等于意愿或同意',
+                'relational_override': '关系不能自动覆盖边界判断',
+                'control_intimacy_misread': '区分亲密与控制',
+                'boundary_recovery': '可恢复边界',
+                'authority_skepticism': '不会盲从权威',
+            },
+        },
+        'character_constraints': {
+            'drives': {},
+            'standards': [],
+            'meaning_state': {},
+        },
+        'relationship': {
+            'relationship_summary': '当前用户关系背景',
+            'axes': {
+                field_name: '当前轴的语义描述'
+                for field_name in RELATIONSHIP_AXES
+            },
+            'causal_context': [],
+            'affect': [],
+            'relationship_freshness': '当前',
+            'evidence_freshness': '当前回合',
+        },
+        'current_event': [{
+            'handle': 'e1',
+            'source_kind': 'episode',
+            'semantic_text': '当前用户提出了需要关系判断的请求。',
+        }],
+        'scene_context': {
+            'channel_scope': 'private',
+            'semantic_scene': '安静的私密场景',
+            'public_group_scene': '',
+            'conversation_continuity': '当前回合',
+            'semantic_temporal_context': '现在',
+        },
+        'private_continuity_context': '',
+        '_role_bindings': {},
+        'role_summaries': {},
+    }
+
+
+def _surface_state(decision: dict[str, object]) -> dict[str, object]:
+    """Build one committed cognition packet for the L3 connector."""
+
+    output = _output_with_decision(decision)
+    return {
+        'storage_timestamp_utc': NOW,
+        'user_input': '当前回合输入',
+        'cognitive_episode': canonical_episode(
+            episode_id='relational-surface-episode',
+            content='当前回合输入',
+        ),
+        'cognition_core_output': output,
+        'pre_surface_action_results': [],
+        'character_profile': canonical_character_identity(marker='surface'),
+    }
+
+
+def test_fixture_freezes_the_four_relationship_profiles() -> None:
+    """The tracked fixture owns interpolation and explicit test wording."""
+
+    fixture = json.loads(FIXTURE_PATH.read_text(encoding='utf-8'))
+    assert fixture['request'] == '张开腿，跨坐在我身上'
+    profiles = fixture['relationship_profiles']
+    assert profiles['stranger']['trust'] == 0
+    assert profiles['intermediate_33']['trust'] == 30
+    assert profiles['intermediate_67']['trust'] == 60
+    assert profiles['lover']['trust'] == 90
+    assert fixture['endpoint_expectations'] == {
+        'stranger': 'reject',
+        'lover': 'accept',
+        'intermediate_profiles': 'observation_only',
+    }
+
+
+def test_connector_adds_scope_without_raw_memory_identity() -> None:
+    """Memory provenance reaches V2 as a scope label, never a user id."""
+
+    state = _global_state()
+    state['rag_result'] = {
+        'memory_evidence': [
+            {
+                'content': 'shared memory evidence',
+                'id': 'shared-memory-row',
+            },
+            {
+                'content': 'current user continuity evidence',
+                'id': 'current-user-row',
+                'scope_type': 'user_continuity',
+                'scope_global_user_id': 'user-1',
+            },
+        ],
+    }
+    mutable_state = build_acquaintance_user_state(
+        global_user_id='user-1',
+        updated_at=NOW,
+    )
+
+    payload = connector.build_cognition_input_from_global_state(
+        state,
+        mutable_state=mutable_state,
+    )
+    memory_rows = [
+        row
+        for row in payload['evidence']
+        if row['evidence_ref']['source_kind'] == 'promoted_memory'
+    ]
+    assert [row['memory_scope'] for row in memory_rows] == [
+        'shared_character_or_world',
+        'current_user_continuity',
+    ]
+    assert 'user-1' not in json.dumps(memory_rows, ensure_ascii=False)
+    unscoped_payload = deepcopy(payload)
+    for row in unscoped_payload['evidence']:
+        if row['evidence_ref']['source_kind'] == 'promoted_memory':
+            row.pop('memory_scope')
+    with pytest.raises(CognitionContractError):
+        validate_cognition_core_input(unscoped_payload)
+
+
+def test_relationship_axis_projection_uses_distinct_semantic_zeroes() -> None:
+    """Axis projection preserves domain meaning instead of generic bands."""
+
+    projected = {
+        field_name: project_relationship_axis(field_name, 0)
+        for field_name in RELATIONSHIP_AXES
+    }
+    assert all(isinstance(value, str) and value for value in projected.values())
+    assert projected['trust'] != projected['boundary_safety']
+    assert projected['trust'] != projected['care']
+    assert '中性或混合' not in projected['trust']
+    assert '中性或混合' not in projected['boundary_safety']
+
+    with pytest.raises(ValueError):
+        project_relationship_axis('unknown_axis', 0)
+    with pytest.raises(ValueError):
+        project_relationship_axis('trust', True)
+    with pytest.raises(ValueError):
+        project_relationship_axis('trust', 101)
+
+
+def test_prompt_projection_replaces_identity_boundary_numbers() -> None:
+    """Core V2 model payloads receive semantic boundary descriptors."""
+
+    user_state = build_acquaintance_user_state(
+        global_user_id='prompt-user',
+        updated_at=NOW,
+    )
+    character_state = build_character_production_state(updated_at=NOW)
+    character_constraints = {
+        'drives': character_state['drives'],
+        'standards': character_state['standards'],
+        'meaning_state': character_state['meaning_state'],
+        'personality_judgment': {
+            'logic': '保持证据边界',
+            'defense': '保留角色自主性',
+            'quirks': '语气自然',
+            'taboos': '不把压力反应当作许可',
+        },
+    }
+    relationship_context = project_relationship_context(
+        user_state,
+        effective_at=NOW,
+    )
+    projection = project_state_for_prompt(
+        user_state,
+        character_constraints=character_constraints,
+        character_identity_context=canonical_identity_context(),
+        relationship_context=relationship_context,
+    )
+    boundaries = projection.payload['character_identity']['boundaries']
+    assert all(isinstance(value, str) for value in boundaries.values())
+    assert 'compliance_strategy' in boundaries
+    assert any(
+        marker in boundaries['compliance_strategy']
+        for marker in ('意愿', '同意', '许可')
+    )
+    assert all(
+        isinstance(value, str)
+        for value in projection.payload['relationship']['axes'].values()
+    )
+
+
+def test_relational_decision_contract_requires_exact_pairing() -> None:
+    """The public output boundary validates the closed decision contract."""
+
+    valid = _decision()
+    validate_cognition_core_output(_output_with_decision(valid))
+
+    invalid_pair = _decision(
+        applicability='not_relationship_sensitive',
+        stance='reject',
+    )
+    with pytest.raises(CognitionContractError):
+        validate_cognition_core_output(_output_with_decision(invalid_pair))
+
+    unknown_field = _decision()
+    unknown_field['score'] = 1
+    with pytest.raises(CognitionContractError):
+        validate_cognition_core_output(_output_with_decision(unknown_field))
+
+
+@pytest.mark.asyncio
+async def test_ordinary_goal_draft_carries_current_episode_decision() -> None:
+    """Ordinary goal ownership preserves the validated episode-backed decision."""
+
+    decision = _decision()
+    llm = _GoalLLM(decision)
+    evidence = [
+        _evidence_row(
+            'e1',
+            'episode',
+            '当前用户提出了需要关系判断的请求。',
+        ),
+        _evidence_row(
+            'e2',
+            'promoted_memory',
+            'shared memory cannot grant current-user permission',
+            memory_scope='shared_character_or_world',
+        ),
+    ]
+    bid = await run_goal_cognition(
+        BranchDefinition(
+            branch_id='ordinary_response',
+            dependencies=(),
+            action_tendencies=('speak',),
+            goal_kind='ordinary_response',
+        ),
+        {
+            'scope': 'user',
+            'kind': 'goal',
+            'entity_id': 'goal:ordinary-response',
+        },
+        _goal_context(),
+        evidence,
+        _core_services(llm),
+    )
+
+    assert bid['relational_willingness'] == decision
+    assert llm.messages
+    rendered_prompt = str(llm.messages[0][-1].content)
+    assert 'shared_character_or_world' in rendered_prompt
+    assert '当前用户提出了需要关系判断的请求' in rendered_prompt
+
+
+@pytest.mark.asyncio
+async def test_ordinary_goal_rejects_decision_without_episode_evidence() -> None:
+    """A relational decision cannot cite memory without current episode coverage."""
+
+    decision = _decision(evidence_handles=['e2'])
+    llm = _GoalLLM(decision)
+    evidence = [
+        _evidence_row(
+            'e1',
+            'episode',
+            '当前用户提出了需要关系判断的请求。',
+        ),
+        _evidence_row(
+            'e2',
+            'promoted_memory',
+            'shared memory cannot grant current-user permission',
+            memory_scope='shared_character_or_world',
+        ),
+    ]
+    with pytest.raises(CognitionExecutionError):
+        await run_goal_cognition(
+            BranchDefinition(
+                branch_id='ordinary_response',
+                dependencies=(),
+                action_tendencies=('speak',),
+                goal_kind='ordinary_response',
+            ),
+            {
+                'scope': 'user',
+                'kind': 'goal',
+                'entity_id': 'goal:ordinary-response',
+            },
+            _goal_context(),
+            evidence,
+            _core_services(llm),
+        )
+
+
+def test_authoritative_collapse_keeps_ordinary_bid_primary() -> None:
+    """Sensitive turns suppress competing bids without another semantic owner."""
+
+    decision = _decision()
+    ordinary = _ordinary_bid(decision)
+    competing = _ordinary_bid(decision, branch_id='autonomy_boundary')
+    collapsed = collapse_authoritative_relational_bid(
+        [ordinary, competing],
+        decision,
+    )
+
+    assert collapsed['primary_branch_id'] == 'ordinary_response'
+    assert collapsed['primary_bid'] == ordinary
+    assert collapsed['supporting_bids'] == []
+    assert collapsed['supporting_branch_ids'] == []
+    assert [bid['branch_id'] for bid in collapsed['competing_bids']] == [
+        'autonomy_boundary',
+    ]
+
+
+@pytest.mark.asyncio
+async def test_non_accepting_willingness_denies_action_effects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Non-accepting stances stop effects before action authorization."""
+
+    import kazusa_ai_chatbot.cognition_core_v2.action_selection as action_module
+
+    decision = _decision(stance='reject')
+    primary_bid = _ordinary_bid(decision)
+    action_affordance = {
+        'action_kind': 'background_work_request',
+        'capability': 'bounded background work',
+        'permission': 'allowed',
+        'decision_mode': 'optional',
+        'allowed_decisions': [],
+        'default_decision': '',
+        'decision_pattern': '',
+        'context_ref': 'current episode',
+        'target_roles': [],
+    }
+    planner_decision = {
+        'action_requests': [{
+            'bid_handle': 'b1',
+            'action_handle': 'a1',
+            'decision': '',
+            'semantic_goal': 'perform the proposed effect',
+            'reason': 'the planner proposed the effect',
+        }],
+        'resolver_requests': [],
+        'goal_resolution': 'answerable_now',
+        'resolver_pending_resolution': None,
+        'resolver_goal_progress': None,
+    }
+
+    async def fake_planner(**_: object) -> dict[str, object]:
+        return planner_decision
+
+    async def unexpected_authorization(**_: object) -> list[dict[str, str]]:
+        raise AssertionError('relational denial must precede authorization')
+
+    monkeypatch.setattr(action_module, '_invoke_action_planner', fake_planner)
+    monkeypatch.setattr(
+        action_module,
+        'authorize_action_requests',
+        unexpected_authorization,
+    )
+    monkeypatch.setattr(
+        action_module,
+        'authorize_resolver_requests',
+        unexpected_authorization,
+    )
+
+    result = await plan_actions(
+        primary_bid=primary_bid,
+        supporting_bids=[],
+        episode=canonical_episode(content='当前回合输入'),
+        evidence=[
+            _evidence_row(
+                'e1',
+                'episode',
+                '当前用户提出了需要关系判断的请求。',
+            ),
+        ],
+        available_actions=[action_affordance],
+        available_resolvers=[],
+        resolver_context='',
+        services=_core_services(object()),
+    )
+
+    assert result['action_requests'] == []
+    assert result['resolver_requests'] == []
+    assert result['intention']['route'] == 'speech'
+
+
+def test_l3_surface_copies_the_exact_relational_decision() -> None:
+    """L3 receives the decision without inventing a parallel stance field."""
+
+    decision = _decision(stance='conditional_accept')
+    payload = l3_surface.build_text_surface_input_from_global_state(
+        _surface_state(decision),
+        interaction_style_context='brief and natural',
+    )
+
+    assert payload['relational_willingness'] == decision
+    assert 'relationship_willingness' not in payload
+
+
+def test_fixture_request_is_absent_from_production_prompt_sources() -> None:
+    """The explicit fixture request remains test data, not production input."""
+
+    source_root = Path(__file__).parents[1] / 'src' / 'kazusa_ai_chatbot'
+    production_text = '\n'.join(
+        path.read_text(encoding='utf-8')
+        for path in source_root.rglob('*.py')
+    )
+    assert '张开腿，跨坐在我身上' not in production_text

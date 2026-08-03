@@ -196,6 +196,49 @@ same concrete matter; unrelated active goals are suppressed while the ordinary
 response remains the baseline. Runtime feasibility and resolver selection stay
 owned by action planning.
 
+## Current-Turn Relational Willingness
+
+The ordinary-response goal owner produces one exact transient
+`relational_willingness.v1` decision per turn. The decision pairs a
+relationship-sensitive applicability with one ordered stance (`reject`,
+`deflect`, `negotiate`, `conditional_accept`, or `accept`), or marks a request
+that is not relationship-sensitive with `not_relationship_sensitive/
+not_applicable`. The ordinary-response prompt, including its typed
+required-selection form, requires the field; typed selection on an active
+branch retains its existing output contract and does not re-decide relational
+willingness. A missing or invalid ordinary decision is a structural contract
+error that regenerates through the same goal owner and, after bounded
+attempts, fails closed before state commit. Deterministic code never derives,
+upgrades, or rewrites the stance from prose, relationship numbers, or memory
+text.
+
+The decision must cite at least one current-episode evidence handle.
+Promoted-memory evidence carries exactly one prompt-safe scope label:
+`shared_character_or_world` rows inform character or world context but cannot
+grant current-user trust, attachment, closeness, boundary safety, consent, or
+lover access; `current_user_continuity` rows explain history only and never
+override canonical native relationship state. No raw user id or relationship id
+reaches the model.
+
+Relationship axes and boundary profiles reach the model as domain-specific
+semantic descriptions. Zero trust means trust is unestablished, zero boundary
+safety means boundary history is unproven, and the compliance strategy is
+described as a pressure-response style that is not willingness or consent.
+Relationship appraisal receives one canonical `relationship` payload with the
+same axis semantics; no duplicate relationship alias is emitted.
+
+When the ordinary owner declares a turn `relationship_sensitive`, the workspace
+stage uses the deterministic authoritative collapse: the ordinary bid becomes
+primary, no supporting bid is exposed, every other bid is recorded as
+competing, and the preservation reason is recorded in diagnostics. No workspace
+model call runs on that path. Non-sensitive turns keep the existing
+model-authored collapse. Action planning receives the exact decision and
+deterministically denies action and resolver effects for `reject`, `deflect`,
+`negotiate`, and `conditional_accept`; only `accept` (and non-sensitive turns)
+enters the effect-authorization path. The same decision is copied into
+`TextSurfaceInputV2` so content and preference stages preserve the stance
+without re-deciding it.
+
 Action planning treats local-model output as a bounded proposal rather than an
 execution precondition. It canonicalizes the known envelope, keeps usable
 rows, drops invalid rows individually, ignores unknown fields, and caps each

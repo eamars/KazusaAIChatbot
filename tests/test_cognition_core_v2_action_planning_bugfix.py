@@ -298,9 +298,8 @@ def test_goal_cognition_prompt_keeps_runtime_feasibility_downstream() -> None:
     """Goal cognition preserves evidence needs without judging runtime tools."""
 
     assert "runtime_capability_limits" not in GOAL_COGNITION_PROMPT
-    assert "不判断工具、检索、resolver" in GOAL_COGNITION_PROMPT
+    assert "不判断工具、worker、调度或运行时能力" in GOAL_COGNITION_PROMPT
     assert "取得所需证据后回应" in GOAL_COGNITION_PROMPT
-    assert "后续专属阶段判断证据是否充分" in GOAL_COGNITION_PROMPT
 
 
 def test_action_planning_repair_message_repeats_nested_contract() -> None:

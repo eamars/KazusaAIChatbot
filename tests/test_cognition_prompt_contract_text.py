@@ -278,6 +278,30 @@ def test_goal_prompt_owns_current_judgment_and_roles() -> None:
     assert "对象" in prompt
 
 
+def test_relational_willingness_prompt_contract_is_explicit_and_stable() -> None:
+    """Keep relationship-sensitive judgment in one ordinary goal contract."""
+
+    goal_prompt = " ".join(GOAL_COGNITION_PROMPT.split())
+    selection_prompt = " ".join(REQUIRED_SELECTION_GOAL_PROMPT.split())
+    surface_prompts = " ".join((
+        CONTENT_PLAN_SYSTEM_PROMPT,
+        PREFERENCE_SYSTEM_PROMPT,
+    ))
+    for prompt in (goal_prompt, selection_prompt):
+        for required_text in (
+            "relational_willingness",
+            "relationship_sensitive",
+            "not_relationship_sensitive",
+            "conditional_accept",
+            "current_user_continuity",
+        ):
+            assert required_text in prompt
+    assert "不把 compliance 当作意愿或同意" in goal_prompt
+    assert "当 `branch.goal_kind` 为 `ordinary_response`" in goal_prompt
+    assert "semantic_context.branch.goal_kind" not in goal_prompt
+    assert "relational_willingness" in surface_prompts
+
+
 def test_goal_prompt_uses_latest_identity_as_current_authority() -> None:
     """Learned identity must shape goals instead of remaining appraisal data."""
 
@@ -310,14 +334,17 @@ def test_goal_prompt_treats_physical_requests_as_verbal_stance() -> None:
     prompt = GOAL_COGNITION_PROMPT
 
     assert "言语立场" in prompt
-    assert "status 为 executed" in prompt
-    assert "证明角色大脑完成" in prompt
+    assert "status=executed" in prompt
+    assert "证明相应能力已完成" in prompt
 
 
 def test_collapse_and_action_prompts_preserve_bid_ownership() -> None:
     """Prevent collapse and planning from rewriting admitted motives."""
 
-    assert "本次 prompt 内" in COLLAPSE_PROMPT
+    normalized_collapse_prompt = " ".join(COLLAPSE_PROMPT.split())
+    assert "每个提供的 bid handle 必须在三个分区中恰好出现 一次" in (
+        normalized_collapse_prompt
+    )
     assert "保持候选内容原样" in COLLAPSE_PROMPT
     assert "语义能力请求" in ACTION_PLANNING_PROMPT
     assert "不改写目标候选" in ACTION_PLANNING_PROMPT
@@ -369,9 +396,9 @@ def test_semantic_prompts_preserve_typed_source_ownership() -> None:
     ):
         normalized = " ".join(prompt.split())
         compact = "".join(prompt.split())
-        assert "角色自己" in compact
+        assert "当前角色" in compact
         assert "当前用户" in compact
-        assert "即时" in compact
+        assert "即时" in compact or "当前回合" in compact
         assert "发言" in compact
         assert "运行元数据" in normalized
 

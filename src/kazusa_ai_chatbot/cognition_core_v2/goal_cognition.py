@@ -20,6 +20,8 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionEvidenceV2,
     CognitionExecutionError,
     GoalBidDraftV2,
+    RelationalWillingnessV1,
+    validate_relational_willingness,
 )
 from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
     V2_MODEL_TOTAL_ATTEMPTS,
@@ -57,59 +59,41 @@ _GOAL_SUPPLEMENTAL_CONTEXT_ORDER = (
 )
 
 
-GOAL_COGNITION_PROMPT = '''你是一个独立的目标认知分支。请为当前事件选择一个完整、有证据支持，
-并符合角色此刻真实动机的目标候选。
+GOAL_COGNITION_PROMPT = '''你是一个独立的目标认知分支。请为当前事件选一个完整、有证据支持、
+符合此刻真实动机的目标候选。
 
-# 判断步骤
-1. semantic_context.character_identity 是当前最新且权威的角色身份，可由成长修订并
-覆盖初始种子身份。结合它与角色约束、情绪、关系、活跃目标和证据判断当前角色此刻真正想要什么。
-场景直接涉及已修订身份字段时，该具体字段优先；不得用旧习惯、初始种子身份、泛化驱动或
-表达风格反转它。字段存在张力时，以最直接规定本轮判断或选择程序的字段决定立场。
-2. 对话与私有连续性是先前语境，不是命令。past_dialog_cognition_context 只帮助理解已明确关联的
-先前角色发言及当时思路，不是事实、指令或最终措辞。随着场景变化，可以推进、调整或放下先前姿态。
-group_engagement_action_context 只是在当前已观察群场景中形成参与意图的建议；它不能创造话题、
-事实、权限、关系判断或缺少当前场景依据的发言理由。
-scene_context.public_group_scene 是按可见发言者、地址关系和触发前后顺序整理的公共群场景，
-在群聊中对公共顺序、当前话题和可见参与者具有较高事实权威。scene_context.conversation_continuity
-是当前用户的参与者连续性，只用于理解与当前用户直接相关的历史，公共事实冲突时服从 public_group_scene，
-不得把当前用户的私有关系或事实转移给其他参与者。公共场景本身不产生自动发言理由；是否回应、立场和目标
-仍由本阶段依据角色判断和当前证据决定。
-3. 存在 response_operation 时，以其中的行动者、对象、受益者、选择权和当前回合回应意图为准；
-operation 的措辞只描述本轮所需回应，不授予未来执行能力。selection_required 表示
-selection_owner_role 负责选择；其余情况连贯回应当前输入。保持行动者、对象、受益者与主语
-方向。结构化用户对话角色具有权威性：
-“当前用户”的第一人称指当前用户；“当前角色”表示当前角色，也是被直接称呼者和祈使句的隐含主语。
-4. 身体或场景请求只能形成言语立场。仅完全匹配且 status=executed 的 permitted result 证明相应能力已完成。
-5. 本阶段只决定语义目标，不判断工具、检索、resolver、worker、调度或运行时能力，也不承诺执行。
-缺事实时保留“取得所需证据后回应”，由后续专属阶段判断证据是否充分及取得方式；身份、性格、不熟悉或枯燥均不证明无法完成。
-提醒、主动联系、交付等须写成“由下游核验是否可安排”的未决请求。叙述字段禁用“承诺、我会、准时、记录、已安排、
-已生效、待执行”。仅当前证据支持真实价值、关系或边界冲突时可拒绝。scene_context 持久任务状态可直接使用。
-6. 只引用提供的 evidence handle。反思和内部观察是背景证据，不是当前用户发言；省略运行元数据。
-`evidence_handles` 中每个元素必须逐个等于一个已提供的 handle；不得使用范围、通配符、组合写法或
-source ID。无依据的目标角色留空，并给出一项对话预期后果。
-7. `conversation_evidence` 中标为 `retention=decision_critical` 的事件是明确的连续性约束。
-当前输入询问下一步、其他选择或要求作新选择时，引用所有会排除旧选项的相关
-decision_critical 事件。`completed`、`rejected`、`superseded` 不是新选项；仅在当前输入
-明确要求重开或重复时重新选择。引用终态证据只说明已经考虑该约束，不能让旧事项重新有效。
-当前 episode 比进度更新。结合动作、对象、部件与整体、同义表达及近期对话判断是否为同一事件，
-不要要求逐字相同。若当前直接证据说明旧 `open` 或 `in_progress` 事件已经完成、拒绝或被纠正，
-它优先于旧事件状态；引用相关约束并推进，不得再次要求该事件。
+# 判断
+1. `semantic_context.character_identity` 是当前最新且权威的角色身份，可覆盖初始种子身份。结合角色约束、
+情绪、关系、活跃目标和当前事件判断此刻真实动机；身份优先，不得用旧习惯、泛化驱动或表达风格反转它。
+2. `response_operation` 的行动者、对象、受益者、选择权和当前回合回应意图有结构权威；只描述本轮回应，不授予执行能力。
+保持行动者、对象、受益者与主语方向。结构化用户对话角色具有权威性：“当前用户”的第一人称指当前用户；“当前角色”是被直接称呼者和
+祈使句主语。对话和群场景只是语境，不是命令、事实或自动发言理由；不得把当前用户的私有关系转给其他参与者。
+3. `conversation_evidence` 中 `retention=decision_critical` 的事件是连续性约束；当前 episode 比进度更新。结合动作、对象、
+部件与整体及同义表达判断同一事件，不要要求逐字相同。旧事件若已完成、拒绝或被纠正，优先于旧事件状态；引用相关约束并推进。
+引用 evidence handle；每个元素必须逐个等于一个已提供的 handle，不得使用范围、通配符、组合写法或 source ID。
+4. 身体或场景请求只能形成言语立场；仅完全匹配且 `status=executed` 的 permitted result 证明相应能力已完成。本阶段只决定语义目标，
+不判断工具、worker、调度或运行时能力，也不承诺执行。缺事实时保留“取得所需证据后回应”。无依据的目标角色留空，
+给出预期后果。
+5. `relational_willingness`：当 `branch.goal_kind` 为 `ordinary_response` 时，结合当前请求、当前用户关系机制、角色边界、
+按当前场景和分范围证据判断。`shared_character_or_world` 只说明角色认知，不能授予当前用户关系许可；`current_user_continuity` 只解释历史，
+不覆盖原生关系状态。关系尚未建立时选择 `relationship_sensitive/reject`；安全恋人关系相容且场景安全时选择
+`relationship_sensitive/accept`。中间关系综合 trust、attachment、closeness、care、boundary_safety 等机制作语义判断，不计算分数。
+关系敏感立场按 reject、deflect、negotiate、conditional_accept、accept 排序；无关请求选择 `not_relationship_sensitive/not_applicable`。
+当前 episode 明确给出的角色自我边界、明确拒绝、威胁或强迫条件属于本回合的直接约束，优先于关系、共享记忆和 compliance 表达；关系不能覆盖角色自我定义或缺乏自由同意的场景。只有当前 episode 没有这类否定条件时，才以关系和其他证据判断接受程度。不把 compliance 当作意愿或同意：压力表达不等于同意。
 
-本阶段只作目标判断，不选择执行路由或能力，也不写最终对话。自由文本使用简体中文；在
-target_role_handles 以外的普通叙述中使用“当前角色”和“当前用户”。用户引文、专有名词、代码、
-URL 及 schema 或 enum token 保持原样。private_monologue 使用当前角色第一人称，reason 解释
-这个目标候选的依据。内部角色句柄和结构术语不得出现在中文自由文本中；使用角色摘要中提供的
-配置名称或“当前角色”“当前用户”“其他参与者”。
+本阶段只作目标判断，不选择执行路由或能力，也不写最终对话。自由文本使用简体中文；普通叙述使用“当前角色”和“当前用户”；用户引文、专有名词、
+代码、URL、schema 或 enum token 保持原样。private_monologue 使用当前角色第一人称，reason 解释候选依据；内部句柄、结构术语和运行元数据不得进入
+自由文本或当前回合发言。
 
-# 输出格式
-只返回一个 JSON 对象，字段必须恰好是 intention、desired_outcome、concrete_detail、reason、
-private_monologue、target_role_handles、evidence_handles、expected_consequences 和
-confidence。
-五个叙述字段与 confidence 是字符串；两个 handle 字段是字符串数组；expected_consequences 是
-非空字符串数组。`evidence_handles` 最多九项，`target_role_handles` 最多八项；
-只能引用提供的 evidence handle。
-不输出 target_roles、role_handles、semantic_text、动作细节、数值 confidence、route、
-action handle、resolver handle 或其他字段。
+只返回 JSON，字段恰好是 intention、desired_outcome、concrete_detail、reason、private_monologue、target_role_handles、
+evidence_handles、expected_consequences 和 confidence；`branch.goal_kind` 为 `ordinary_response` 时还含
+`relational_willingness`，其字段是
+schema_version（`relational_willingness.v1`）、applicability（`relationship_sensitive` 或
+`not_relationship_sensitive`）、stance（reject、deflect、negotiate、conditional_accept、accept 或
+not_applicable，与 applicability 配对）、reason（简体中文，≤300字）和 evidence_handles（一到四个已提供
+handle，至少一个来自当前 episode）。叙述字段与 confidence 为字符串，handle 字段为字符串数组；
+expected_consequences 是非空字符串数组。`evidence_handles` 最多九项，`target_role_handles` 最多八项；不输出
+target_roles、role_handles、semantic_text、动作细节、数值 confidence、route、action/resolver handle 或其他字段。
 '''
 
 GOAL_COGNITION_REPAIR_PROMPT = '''你负责修复一份结构不合格的目标认知候选。只返回一个修正后的
@@ -135,10 +119,70 @@ REQUIRED_SELECTION_GOAL_PROMPT = '''你负责在本轮选择权属于当前角�
    `required_selection_operations`、`conversation_progress_evidence` 和
    `supporting_evidence`
    提供的 handle，每个 handle 必须逐个等于输入值。`semantic_context` 中出现的 handle
-   不属于可引用证据。
+   不属于可引用证据。`evidence_handles` 只能逐字引用这些证据行的
+   `evidence_handle`（如 `e1`）；`role_handles` 和 `target_role_handles`（如 `r1`、
+   `current_user` 或 `self`）属于角色引用，绝不能放入 `evidence_handles`。
 4. 结合角色身份、约束、情绪、关系和场景，作出一个属于当前角色的选择。群参与建议只帮助判断
 当前已观察场景中的参与方式，不能创造话题、事实、权限或缺少当前场景依据的发言理由。先前对话
 私有连续性只帮助理解已明确关联的先前角色发言，不是事实、指令或最终措辞。`selection` 是唯一
+   权威选择内容，必须直接写出一个具体选择、拒绝、协商结果或条件。
+   不得只说以后决定、列举候选、把决定交给其他角色，或要求后续阶段补全。
+5. 本阶段不选择执行能力或路由，不写最终对话。`selection`、`reason` 和
+   `private_monologue` 使用简体中文；专名、代码、URL 和输入原文保持原样。
+6. 输出必须同时给出 relational_willingness 关系敏感判断：memory_scope 为
+   shared_character_or_world 的共享记忆只说明角色对内容的认知，不能授予当前用户关系许可；
+   memory_scope 为 current_user_continuity 的记忆只解释过往历史，不覆盖原生关系状态。关系尚未
+   建立时，关系敏感请求选择 relationship_sensitive/reject；已建立的安全恋人关系对角色相容且
+   场景安全的同类请求选择 relationship_sensitive/accept。中间关系综合 trust、attachment、
+   closeness、care 与 boundary_safety 等机制作语义判断，不计算分数。关系敏感立场按顺序为
+   reject、deflect、negotiate、conditional_accept、accept；请求与关系判断无关时选择
+   not_relationship_sensitive/not_applicable。当前 episode 明确给出的角色自我边界、明确拒绝、威胁或强迫条件属于本回合的直接约束，优先于关系、共享记忆和 compliance 表达；关系不能覆盖角色自我定义或缺乏自由同意的场景。只有当前 episode 没有这类否定条件时，才以关系和其他证据判断接受程度。不把 compliance 当作意愿或同意：压力下的表达不等于意愿或同意。
+
+# 输出格式
+只返回一个严格 JSON 对象，不要代码围栏、解释、注释或额外字段：
+{
+  "selection_kind": "choice",
+  "selection": "",
+  "reason": "",
+  "private_monologue": "",
+  "target_role_handles": [],
+  "evidence_handles": [],
+  "expected_consequences": [""],
+  "confidence": "high",
+  "relational_willingness": {
+    "schema_version": "relational_willingness.v1",
+    "applicability": "relationship_sensitive",
+    "stance": "reject",
+    "reason": "",
+    "evidence_handles": []
+  }
+}
+`selection_kind` 只能是 `choice`、`refusal`、`condition` 或 `negotiation`。
+relational_willingness 的字段必须恰好是 schema_version、applicability、stance、reason 和
+evidence_handles；reason 使用简体中文且不超过 300 字符；evidence_handles 是一到四个已提供
+handle，其中至少一个来自当前 episode 证据。
+'''
+
+_ACTIVE_REQUIRED_SELECTION_GOAL_PROMPT = '''你负责在本轮选择权属于当前角色时，直接产出角色的实际选择。
+这是目标认知判断，不是候选检查。你必须在这一份输出中完成选择、拒绝、协商或给出条件。
+
+# 判断步骤
+1. `required_selection_operations` 是当前输入已经解析出的权威选择权事实。保持行动者、对象、
+   受益者、选择拥有者和回应拥有者的方向，并在 `evidence_handles` 引用其中每个
+   `evidence_handle`。
+2. `conversation_progress_evidence` 是既有对话进度的权威事实。引用其中会实质约束本轮选择的
+   `evidence_handle`，不引用与当前选择无关的历史。相关的 `completed`、`rejected`、
+   `superseded` 等终态事实会约束本轮选择；只有当前输入明确要求重开或重复时，才重新选择旧事项。
+   当前 episode 的直接事实比旧进度更新。
+3. `supporting_evidence` 只提供可选支持。`evidence_handles` 只能引用
+   `required_selection_operations`、`conversation_progress_evidence` 和 `supporting_evidence`
+   提供的 handle，每个 handle 必须逐个等于输入值。`semantic_context` 中出现的 handle
+   不属于可引用证据。`evidence_handles` 只能逐字引用这些证据行的
+   `evidence_handle`（如 `e1`）；`role_handles` 和 `target_role_handles`（如 `r1`、
+   `current_user` 或 `self`）属于角色引用，绝不能放入 `evidence_handles`。
+4. 结合角色身份、约束、情绪、关系和场景，作出一个属于当前角色的选择。群参与建议只帮助判断
+   当前已观察场景中的参与方式，不能创造话题、事实、权限或缺少当前场景依据的发言理由。先前对话
+   私有连续性只帮助理解已明确关联的先前角色发言，不是事实、指令或最终措辞。`selection` 是唯一
    权威选择内容，必须直接写出一个具体选择、拒绝、协商结果或条件。
    不得只说以后决定、列举候选、把决定交给其他角色，或要求后续阶段补全。
 5. 本阶段不选择执行能力或路由，不写最终对话。`selection`、`reason` 和
@@ -164,6 +208,8 @@ def _required_selection_regeneration_prompt(
     validation_error: str,
     required_evidence_handles: set[str],
     allowed_evidence_handles: set[str],
+    *,
+    require_relational_willingness: bool = True,
 ) -> str:
     """Return same-producer feedback for one complete structural regeneration."""
 
@@ -176,8 +222,13 @@ def _required_selection_regeneration_prompt(
         ensure_ascii=False,
         sort_keys=True,
     )
-    return (
+    system_prompt = (
         REQUIRED_SELECTION_GOAL_PROMPT
+        if require_relational_willingness
+        else _ACTIVE_REQUIRED_SELECTION_GOAL_PROMPT
+    )
+    return (
+        system_prompt
         + '\n# 结构重生成反馈\n'
         + '上一候选未通过结构契约。依据下方反馈，使用同一输入完整重生成一份候选；'
         + '保持角色的语义判断职责，并严格修正字段与句柄集合。\n'
@@ -197,11 +248,19 @@ async def run_goal_cognition(
 
     required_operations = _required_selection_operations(evidence)
     selection_required = bool(required_operations)
+    require_relational_willingness = (
+        definition.branch_id == "ordinary_response"
+    )
     if selection_required or definition.branch_id == "ordinary_response":
         goal_config = services.goal_ordinary_response_config
     else:
         goal_config = services.goal_active_branch_config
     evidence_handles = [row["evidence_handle"] for row in evidence]
+    episode_evidence_handles = {
+        row["evidence_handle"]
+        for row in evidence
+        if row["evidence_ref"]["source_kind"] == "episode"
+    }
     required_evidence_handles = {
         operation['evidence_handle']
         for operation in required_operations
@@ -266,6 +325,9 @@ async def run_goal_cognition(
         }
         for row in evidence
     ]
+    for row, evidence_row in zip(prompt_evidence, evidence, strict=True):
+        if "memory_scope" in evidence_row:
+            row["memory_scope"] = evidence_row["memory_scope"]
     prompt_payload = {
         "branch": {
             "goal_kind": definition.goal_kind,
@@ -293,11 +355,14 @@ async def run_goal_cognition(
         ]
     else:
         prompt_payload['evidence'] = prompt_evidence
-    initial_system_prompt = (
-        REQUIRED_SELECTION_GOAL_PROMPT
-        if selection_required
-        else GOAL_COGNITION_PROMPT
-    )
+    if selection_required:
+        initial_system_prompt = (
+            REQUIRED_SELECTION_GOAL_PROMPT
+            if require_relational_willingness
+            else _ACTIVE_REQUIRED_SELECTION_GOAL_PROMPT
+        )
+    else:
+        initial_system_prompt = GOAL_COGNITION_PROMPT
     try:
         prompt_text = _fit_goal_prompt_payload(
             prompt_payload,
@@ -321,6 +386,9 @@ async def run_goal_cognition(
         "evidence_handles": set(evidence_handles),
         "role_handles": set(role_bindings),
     }
+    if definition.branch_id == "ordinary_response":
+        validation_args["require_relational_willingness"] = True
+        validation_args["episode_handles"] = episode_evidence_handles
     request_messages = initial_messages
     draft: GoalBidDraftV2 | None = None
     for attempt_index in range(GOAL_COGNITION_ATTEMPT_LIMIT):
@@ -389,13 +457,22 @@ async def run_goal_cognition(
                     evidence_handles=set(evidence_handles),
                     role_handles=set(role_bindings),
                     required_evidence_handles=required_evidence_handles,
+                    episode_handles=(
+                        episode_evidence_handles
+                        if require_relational_willingness
+                        else None
+                    ),
+                    require_relational_willingness=(
+                        require_relational_willingness
+                    ),
                     maximum_evidence_handles=max(
                         MAX_GOAL_BID_EVIDENCE_HANDLES,
                         len(partitioned_evidence_handles),
                     ),
                 )
                 draft = _selection_goal_draft_to_goal_bid(
-                    selection_draft
+                    selection_draft,
+                    branch_id=definition.branch_id,
                 )
             else:
                 draft = validate_goal_bid_draft(
@@ -413,6 +490,15 @@ async def run_goal_cognition(
                     evidence_handles=set(evidence_handles),
                     role_handles=set(role_bindings),
                     required_evidence_handles=required_evidence_handles,
+                    episode_handles=(
+                        episode_evidence_handles
+                        if require_relational_willingness
+                        else None
+                    ),
+                    branch_id=definition.branch_id,
+                    require_relational_willingness=(
+                        require_relational_willingness
+                    ),
                     maximum_evidence_handles=max(
                         MAX_GOAL_BID_EVIDENCE_HANDLES,
                         len(partitioned_evidence_handles),
@@ -456,6 +542,9 @@ async def run_goal_cognition(
                         str(exc),
                         required_evidence_handles,
                         set(evidence_handles),
+                        require_relational_willingness=(
+                            require_relational_willingness
+                        ),
                     )
                 )
                 try:
@@ -504,6 +593,10 @@ async def run_goal_cognition(
                 "validation_error": str(exc)[:500],
                 "invalid_draft": response_text[:8000],
             }
+            if definition.branch_id == "ordinary_response":
+                repair_payload["contract"]["required_fields"].append(
+                    "relational_willingness"
+                )
             repair_text = json.dumps(
                 repair_payload,
                 ensure_ascii=False,
@@ -559,6 +652,13 @@ async def run_goal_cognition(
         "expected_consequences": list(draft["expected_consequences"]),
         "confidence": draft["confidence"],
     }
+    if (
+        definition.branch_id == "ordinary_response"
+        and "relational_willingness" in draft
+    ):
+        bid["relational_willingness"] = dict(
+            draft["relational_willingness"]
+        )
     return bid
 
 
@@ -592,6 +692,12 @@ def _fit_goal_prompt_payload(
         removed = False
         for key in _GOAL_SUPPLEMENTAL_CONTEXT_ORDER:
             if key not in projected_context:
+                continue
+            if (
+                key == "relationship"
+                and payload.get("branch", {}).get("goal_kind")
+                == "ordinary_response"
+            ):
                 continue
             value = projected_context[key]
             if isinstance(value, list):
@@ -684,6 +790,8 @@ def validate_selection_goal_draft(
     evidence_handles: set[str],
     role_handles: set[str],
     required_evidence_handles: set[str],
+    episode_handles: set[str] | None = None,
+    require_relational_willingness: bool = False,
     maximum_evidence_handles: int,
 ) -> dict[str, Any]:
     """Validate one authoritative selection and required operation coverage."""
@@ -700,6 +808,8 @@ def validate_selection_goal_draft(
         "expected_consequences",
         "confidence",
     }
+    if require_relational_willingness:
+        required_fields.add("relational_willingness")
     if set(parsed) != required_fields:
         raise ValueError("selection goal draft fields are not exact")
     if parsed["selection_kind"] not in {
@@ -741,6 +851,13 @@ def validate_selection_goal_draft(
     result["target_role_handles"] = target_roles
     result["evidence_handles"] = cited_evidence
     result["expected_consequences"] = list(consequences)
+    if require_relational_willingness:
+        relational_decision = validate_relational_willingness(
+            parsed["relational_willingness"],
+            evidence_handles=evidence_handles,
+            episode_handles=episode_handles,
+        )
+        result["relational_willingness"] = relational_decision
     return result
 
 
@@ -750,6 +867,9 @@ def _degraded_selection_goal_draft(
     evidence_handles: set[str],
     role_handles: set[str],
     required_evidence_handles: set[str],
+    episode_handles: set[str] | None,
+    branch_id: str,
+    require_relational_willingness: bool,
     maximum_evidence_handles: int,
 ) -> GoalBidDraftV2 | None:
     """Project a complete selection after dropping invalid evidence handles."""
@@ -774,23 +894,30 @@ def _degraded_selection_goal_draft(
             evidence_handles=evidence_handles,
             role_handles=role_handles,
             required_evidence_handles=required_evidence_handles,
+            episode_handles=episode_handles,
+            require_relational_willingness=require_relational_willingness,
             maximum_evidence_handles=maximum_evidence_handles,
         )
     except (AttributeError, KeyError, TypeError, ValueError):
         return None
-    degraded_draft = _selection_goal_draft_to_goal_bid(validated)
+    degraded_draft = _selection_goal_draft_to_goal_bid(
+        validated,
+        branch_id=branch_id,
+    )
     return degraded_draft
 
 
 def _selection_goal_draft_to_goal_bid(
     selection_draft: Mapping[str, Any],
+    *,
+    branch_id: str,
 ) -> GoalBidDraftV2:
     """Map one authoritative selection string into the complete bid shape."""
 
     selection = selection_draft["selection"]
     if not isinstance(selection, str):
         raise TypeError("validated selection must be text")
-    return {
+    result: GoalBidDraftV2 = {
         "intention": selection,
         "desired_outcome": selection,
         "concrete_detail": selection,
@@ -805,6 +932,11 @@ def _selection_goal_draft_to_goal_bid(
         ),
         "confidence": selection_draft["confidence"],
     }
+    if branch_id == "ordinary_response":
+        result["relational_willingness"] = dict(
+            selection_draft["relational_willingness"]
+        )
+    return result
 
 
 async def _record_goal_trace_step(
@@ -853,6 +985,8 @@ def validate_goal_bid_draft(
     *,
     evidence_handles: set[str],
     role_handles: set[str],
+    require_relational_willingness: bool = False,
+    episode_handles: set[str] | None = None,
 ) -> GoalBidDraftV2:
     """Validate model-owned fields before any complete bid is constructed."""
 
@@ -869,6 +1003,8 @@ def validate_goal_bid_draft(
         "expected_consequences",
         "confidence",
     }
+    if require_relational_willingness:
+        required.add("relational_willingness")
     if set(parsed) != required:
         raise ValueError("goal bid draft fields are not exact")
     for field_name in (
@@ -897,10 +1033,18 @@ def validate_goal_bid_draft(
         raise ValueError("goal bid consequences are invalid")
     for consequence in consequences:
         _bounded_text(consequence, "consequence", 240)
+    if require_relational_willingness:
+        relational_decision = validate_relational_willingness(
+            parsed["relational_willingness"],
+            evidence_handles=evidence_handles,
+            episode_handles=episode_handles,
+        )
     result = dict(parsed)
     result["target_role_handles"] = target_roles
     result["evidence_handles"] = cited_evidence
     result["expected_consequences"] = consequences
+    if require_relational_willingness:
+        result["relational_willingness"] = relational_decision
     return result  # type: ignore[return-value]
 
 

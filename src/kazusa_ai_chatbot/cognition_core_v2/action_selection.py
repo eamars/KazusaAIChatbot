@@ -148,6 +148,11 @@ memory/context 为空或失败，也不能把直接自我报告改成 requires_r
 面对身体互动请求，通常由发言表达当前角色立场；只有另一个明确提供的能力确实具有不同且清晰的
 非身体效果时，才选择该能力。
 
+primary bid 携带 relational_willingness 时，它是已经确认的关系许可判断：reject、deflect、
+negotiate 或 conditional_accept 表示该关系敏感请求尚未被接受，只能由可见发言表达立场，
+action_requests 与 resolver_requests 必须保持为空；只有 accept 才可进入能力请求。请求与关系
+判断无关（not_relationship_sensitive/not_applicable）时维持一般规划。
+
 每项请求必须引用一个提供的 bid handle 和一个提供的 capability handle。action request 按
 affordance.decision_mode 填写 decision：
 - optional：使用 default_decision 或空字符串；
@@ -265,19 +270,24 @@ async def plan_actions(
             start=1,
         )
     }
+    projected_bids: dict[str, dict[str, object]] = {}
+    for handle, bid in bid_handles.items():
+        projected_bid: dict[str, object] = {
+            "intention": bid["intention"],
+            "desired_outcome": bid["desired_outcome"],
+            "concrete_detail": bid["concrete_detail"],
+            "reason": bid["reason"],
+            "expected_consequences": list(bid["expected_consequences"]),
+            "confidence": bid["confidence"],
+            "evidence_handles": list(bid["evidence_handles"]),
+        }
+        if "relational_willingness" in bid:
+            projected_bid["relational_willingness"] = (
+                bid["relational_willingness"]
+            )
+        projected_bids[handle] = projected_bid
     prompt_payload = {
-        "bids": {
-            handle: {
-                "intention": bid["intention"],
-                "desired_outcome": bid["desired_outcome"],
-                "concrete_detail": bid["concrete_detail"],
-                "reason": bid["reason"],
-                "expected_consequences": list(bid["expected_consequences"]),
-                "confidence": bid["confidence"],
-                "evidence_handles": list(bid["evidence_handles"]),
-            }
-            for handle, bid in bid_handles.items()
-        },
+        "bids": projected_bids,
         "episode": {
             "trigger_source": episode.get("trigger_source", ""),
             "output_mode": episode.get("output_mode", ""),
@@ -348,14 +358,34 @@ async def plan_actions(
             current_goal_progress=current_goal_progress,
             runtime_capability_limits=runtime_capability_limits,
         )
-    authorized_action_rows = await authorize_action_requests(
-        action_requests=decision["action_requests"],
-        bid_handles=bid_handles,
-        evidence=evidence,
-        action_handles=action_handles,
-        runtime_capability_limits=runtime_capability_limits,
-        services=services,
-    )
+    relational_decision = primary_bid.get("relational_willingness")
+    relational_permission_denied = False
+    if (
+        isinstance(relational_decision, Mapping)
+        and relational_decision["applicability"] == "relationship_sensitive"
+        and relational_decision["stance"] != "accept"
+    ):
+        relational_permission_denied = True
+        logger.warning(
+            f"Relational willingness denied action effects: "
+            f"{relational_decision['stance']}"
+        )
+        decision["action_requests"] = []
+        decision["resolver_requests"] = []
+        decision["goal_resolution"] = "answerable_now"
+        decision["resolver_pending_resolution"] = None
+        decision["resolver_goal_progress"] = None
+    if relational_permission_denied:
+        authorized_action_rows: list[dict[str, str]] = []
+    else:
+        authorized_action_rows = await authorize_action_requests(
+            action_requests=decision["action_requests"],
+            bid_handles=bid_handles,
+            evidence=evidence,
+            action_handles=action_handles,
+            runtime_capability_limits=runtime_capability_limits,
+            services=services,
+        )
     action_requests = _materialize_action_requests(
         authorized_action_rows,
         bid_handles,
@@ -363,7 +393,7 @@ async def plan_actions(
     )
     action_owner_denied = bool(decision["action_requests"]) and not action_requests
     goal_resolution = decision["goal_resolution"]
-    if goal_resolution == "answerable_now":
+    if relational_permission_denied or goal_resolution == "answerable_now":
         resolver_requests = []
     else:
         authorized_resolver_rows = await authorize_resolver_requests(

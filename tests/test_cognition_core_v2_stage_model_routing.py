@@ -218,6 +218,20 @@ def _goal_draft() -> dict[str, object]:
     }
 
 
+def _ordinary_goal_draft() -> dict[str, object]:
+    """Build one structurally valid ordinary-response goal result."""
+
+    draft = _goal_draft()
+    draft["relational_willingness"] = {
+        "schema_version": "relational_willingness.v1",
+        "applicability": "not_relationship_sensitive",
+        "stance": "not_applicable",
+        "reason": "当前回合证据不涉及关系许可判断",
+        "evidence_handles": ["e1"],
+    }
+    return draft
+
+
 def _selection_goal_draft() -> dict[str, object]:
     """Build one authoritative required-selection producer response."""
 
@@ -406,17 +420,23 @@ async def test_goal_branches_reuse_their_own_route_for_repairs_and_trace(
     )
 
     for branch_id, config_field in cases:
-        invalid_response = {**_goal_draft(), "unknown": "field"}
-        llm = _CapturingInvoker([invalid_response, _goal_draft()])
+        draft = (
+            _ordinary_goal_draft()
+            if branch_id == "ordinary_response"
+            else _goal_draft()
+        )
+        invalid_response = {**draft, "unknown": "field"}
+        llm = _CapturingInvoker([invalid_response, draft])
         services = _services(llm)
         expected_config = getattr(services, config_field)
         trace_start = trace_recorder.await_count
+        evidence = [_evidence()] if branch_id == "ordinary_response" else []
 
         result = await goal_cognition.run_goal_cognition(
             DEFAULT_BRANCH_DEFINITIONS[branch_id],
             {"scope": "user", "kind": "goal", "entity_id": "g1"},
             {"_role_bindings": {}, "role_summaries": {}},
-            [],
+            evidence,
             services,
         )
 
@@ -486,10 +506,10 @@ async def test_selection_producer_retry_reuses_goal_route_and_trace(
     assert llm.configs == [expected_config, expected_config]
     assert (
         llm.messages[0][0].content
-        == goal_cognition.REQUIRED_SELECTION_GOAL_PROMPT
+        == goal_cognition._ACTIVE_REQUIRED_SELECTION_GOAL_PROMPT
     )
     assert llm.messages[1][0].content.startswith(
-        goal_cognition.REQUIRED_SELECTION_GOAL_PROMPT
+        goal_cognition._ACTIVE_REQUIRED_SELECTION_GOAL_PROMPT
     )
     assert [
         call.kwargs["route_name"]

@@ -395,6 +395,13 @@ async def test_goal_bid_gets_one_bounded_schema_repair(
         "evidence_handles": ["e1"],
         "expected_consequences": ["the conversation continues"],
         "confidence": "high",
+        "relational_willingness": {
+            "schema_version": "relational_willingness.v1",
+            "applicability": "not_relationship_sensitive",
+            "stance": "not_applicable",
+            "reason": '当前回合证据不涉及关系许可判断',
+            "evidence_handles": ["e1"],
+        },
     }
     responses = [
         {**valid, "requested_route": "speech"},
@@ -544,6 +551,13 @@ async def test_required_selection_regenerates_with_the_same_producer() -> None:
         "evidence_handles": ["e1", "e2"],
         "expected_consequences": ["当前用户得到一个明确选择。"],
         "confidence": "high",
+        "relational_willingness": {
+            "schema_version": "relational_willingness.v1",
+            "applicability": "not_relationship_sensitive",
+            "stance": "not_applicable",
+            "reason": '当前回合证据不涉及关系许可判断',
+            "evidence_handles": ["e1"],
+        },
     }
     responses = [
         {"selection": ""},
@@ -652,6 +666,13 @@ async def test_required_selection_regeneration_excludes_optional_conversation(
         'evidence_handles': ['e1', 'e2'],
         'expected_consequences': ['当前用户得到一个明确选择。'],
         'confidence': 'high',
+        'relational_willingness': {
+            'schema_version': 'relational_willingness.v1',
+            'applicability': 'not_relationship_sensitive',
+            'stance': 'not_applicable',
+            'reason': '当前回合证据不涉及关系许可判断',
+            'evidence_handles': ['e1'],
+        },
     }
     invalid_selection = {
         **valid_selection,
@@ -801,6 +822,13 @@ async def test_required_selection_invalid_evidence_degrades_after_exhaustion(
         "evidence_handles": ["e1", "r1"],
         "expected_consequences": ["The conversation continues."],
         "confidence": "high",
+        "relational_willingness": {
+            "schema_version": "relational_willingness.v1",
+            "applicability": "not_relationship_sensitive",
+            "stance": "not_applicable",
+            "reason": '当前回合证据不涉及关系许可判断',
+            "evidence_handles": ["e1"],
+        },
     }
 
     class _LLM:

@@ -328,6 +328,7 @@ def test_l3_builder_projects_complete_supporting_bid_without_private_refs() -> N
         "concrete_detail": "the participant persisted with the task",
         "reason": "supporting evidence warrants recognition",
     })
+    supporting.pop("relational_willingness")
     output["supporting_bids"] = [supporting]
 
     payload = l3_surface.build_text_surface_input_from_global_state(
@@ -353,22 +354,13 @@ async def test_l3_surface_returns_semantic_plan_for_dialog() -> None:
         "_build_visual_surface_services",
         _visual_services,
     )
-    async def _style_context(**kwargs: object) -> dict[str, object]:
-        del kwargs
-        return {
-            "user_style": {
-                "speech_guidelines": [],
-                "social_guidelines": [],
-                "pacing_guidelines": [],
-                "engagement_guidelines": [],
-                "confidence": "",
-            },
-            "application_order": ["user_style"],
-        }
+    async def _style_context(state: object) -> str:
+        del state
+        return "brief and natural"
 
     monkeypatch.setattr(
         l3_surface,
-        "build_interaction_style_context",
+        "_load_interaction_style_context",
         _style_context,
     )
     try:

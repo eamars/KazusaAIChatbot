@@ -171,15 +171,18 @@ async def appraise_semantic_question(
         "existential_drive": services.appraisal_existential_drive_config,
     }
     config = config_by_question_kind[question["question_kind"]]
-    evidence_by_handle = {
-        row["evidence_handle"]: {
+    evidence_by_handle: dict[str, dict[str, str]] = {}
+    for row in evidence:
+        if row["evidence_handle"] not in question["evidence_handles"]:
+            continue
+        projected_row: dict[str, str] = {
             "handle": row["evidence_handle"],
             "semantic_text": row["semantic_text"],
             "source_kind": row["evidence_ref"]["source_kind"],
         }
-        for row in evidence
-        if row["evidence_handle"] in question["evidence_handles"]
-    }
+        if "memory_scope" in row:
+            projected_row["memory_scope"] = row["memory_scope"]
+        evidence_by_handle[row["evidence_handle"]] = projected_row
     allowed_evidence_handles = set(question["evidence_handles"])
     candidate_origin_evidence = {
         candidate_handle: origin_handle
@@ -1234,7 +1237,6 @@ def _fit_appraisal_payload(payload: dict[str, Any]) -> str:
         "goals",
         "affect",
         "relationship",
-        "relationship_operational_context",
         "character_operational_context",
         "roles",
     )
@@ -1248,6 +1250,12 @@ def _fit_appraisal_payload(payload: dict[str, Any]) -> str:
         raise ValueError(
             "semantic appraisal evidence projection is invalid"
         )
+    question = payload["question"]
+    question_kind = (
+        question.get("question_kind")
+        if isinstance(question, Mapping)
+        else None
+    )
     projected_state = dict(state)
     while True:
         candidate = dict(payload)
@@ -1257,6 +1265,11 @@ def _fit_appraisal_payload(payload: dict[str, Any]) -> str:
             return payload_text
         removed = False
         for key in supplemental_order:
+            if (
+                question_kind == "relationship_social"
+                and key == "relationship"
+            ):
+                continue
             value = projected_state.get(key)
             if isinstance(value, list) and value:
                 projected_state[key] = value[:-1]
@@ -1350,13 +1363,6 @@ def _project_question_state(
     )
     if operational_context is not None:
         result["character_operational_context"] = operational_context
-    if (
-        question["question_kind"] == "relationship_social"
-        and isinstance(source.get("relationship"), Mapping)
-    ):
-        result["relationship_operational_context"] = dict(
-            source["relationship"],
-        )
     constraints = _project_question_constraints(
         projection,
         source.get("character_constraints"),

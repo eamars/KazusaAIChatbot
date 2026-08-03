@@ -329,6 +329,13 @@ def _selection_goal_draft() -> dict[str, object]:
             'the current user receives one concrete new choice',
         ],
         'confidence': 'high',
+        'relational_willingness': {
+            'schema_version': 'relational_willingness.v1',
+            'applicability': 'not_relationship_sensitive',
+            'stance': 'not_applicable',
+            'reason': '当前回合证据不涉及关系许可判断',
+            'evidence_handles': ['e1'],
+        },
     }
 
 
@@ -343,6 +350,7 @@ def test_selection_goal_accepts_uncited_unrelated_progress_evidence() -> None:
         evidence_handles={'e1', 'e2'},
         role_handles=set(),
         required_evidence_handles={'e1'},
+        require_relational_willingness=True,
         maximum_evidence_handles=9,
     )
 
@@ -361,6 +369,7 @@ def test_selection_goal_rejects_retired_relation_field() -> None:
             evidence_handles={'e1', 'e2'},
             role_handles=set(),
             required_evidence_handles={'e1'},
+            require_relational_willingness=True,
             maximum_evidence_handles=9,
         )
 
@@ -377,6 +386,7 @@ def test_selection_goal_rejects_missing_mandatory_citation() -> None:
             evidence_handles={'e1', 'e2'},
             role_handles=set(),
             required_evidence_handles={'e1'},
+            require_relational_willingness=True,
             maximum_evidence_handles=9,
         )
 
@@ -396,6 +406,7 @@ def test_selection_goal_accepts_ten_relevant_citations() -> None:
         evidence_handles=evidence_handles,
         role_handles=set(),
         required_evidence_handles={'e1', 'e2'},
+        require_relational_willingness=True,
         maximum_evidence_handles=10,
     )
 

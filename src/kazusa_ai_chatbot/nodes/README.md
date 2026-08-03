@@ -199,6 +199,23 @@ handle bindings. Model-facing projections use semantic roles and qualitative
 bands. RAG evidence does not become persona, affect, or final stance merely by
 being retrieved.
 
+Promoted-memory evidence keeps its relationship scope after prewarm. The V2
+connector maps each `rag_result.memory_evidence` row to exactly one prompt-safe
+`memory_scope`: rows that already carry `scope_type=user_continuity` become
+`current_user_continuity`, and every other promoted-memory row (including
+cycle-zero shared prewarm rows) becomes `shared_character_or_world`. The raw
+user id and storage provenance stay behind the deterministic boundary. Shared
+character/world memory can inform what the character knows but cannot establish
+current-user relationship access; current-user continuity memory explains
+history without overriding the canonical native relationship state.
+
+The ordinary goal owner in Cognition Core V2 decides current-turn relational
+willingness. The connector passes the validated decision through the V2 output
+and the L3 surface input so workspace, action permission, content planning, and
+preference planning preserve the exact stance (`reject`, `deflect`,
+`negotiate`, `conditional_accept`, `accept`, or `not_applicable`) instead of
+re-deriving it from prose or relationship numbers.
+
 ## Action Ownership
 
 V2 goal branches may bid for speech, silence, private handling, an action, or

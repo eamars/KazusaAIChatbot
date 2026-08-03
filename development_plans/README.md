@@ -51,6 +51,7 @@ long_term/todo.md
 | Document | Type | Status |
 |---|---|---|
 | [control_console_web_availability_followup_plan.md](archive/completed/bugfix/control_console_web_availability_followup_plan.md) | Follow-up bugfix for Control Console operational projections and static asset availability | completed |
+| [cognition_core_v2_relational_willingness_gradient_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_relational_willingness_gradient_bugfix_plan.md) | Core V2 post-prewarm relational-willingness contract for stranger rejection, lover acceptance, scoped-memory authority, and an explicit intermediate gradient | completed |
 | [cognition_core_v2_short_horizon_global_state_composition_bigbang_plan.md](archive/completed/bugfix/cognition_core_v2_short_horizon_global_state_composition_bigbang_plan.md) | Post-identity V2 plan for transient global posture, causal relationship context, scoped style composition, and runtime/UI proof | completed |
 | [character_identity_growth_contract_recovery_bugfix_plan.md](archive/completed/bugfix/character_identity_growth_contract_recovery_bugfix_plan.md) | Follow-up bugfix for identity-growth model contracts, provenance indices, review copying, and bounded retry recovery | completed |
 | [qq_group_public_scene_response_ordering_bugfix_plan.md](archive/completed/bugfix/qq_group_public_scene_response_ordering_bugfix_plan.md) | QQ multi-user public-scene composition and same-group response-ordering bugfix | completed |

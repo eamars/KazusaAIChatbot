@@ -119,8 +119,18 @@ def test_state_projection_separates_user_state_and_character_constraints() -> No
     assert projection.payload["character_constraints"][
         "personality_judgment"
     ] == _constraints()["personality_judgment"]
-    assert projection.payload["character_identity"] == (
-        canonical_identity_context()["goal_cognition"]
+    raw_identity = canonical_identity_context()["goal_cognition"]
+    projected_identity = projection.payload["character_identity"]
+    assert projected_identity["core"] == raw_identity["core"]
+    assert projected_identity["personality"] == raw_identity["personality"]
+    assert projected_identity["self_image"] == raw_identity["self_image"]
+    assert projected_identity["boundaries"] != raw_identity["boundaries"]
+    assert all(
+        isinstance(value, str)
+        for value in projected_identity["boundaries"].values()
+    )
+    assert "不代表意愿或同意" in (
+        projected_identity["boundaries"]["compliance_strategy"]
     )
     assert set(projection.payload["character_identity"]) == {
         "core",

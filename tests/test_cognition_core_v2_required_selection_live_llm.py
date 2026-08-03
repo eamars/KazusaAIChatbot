@@ -105,6 +105,7 @@ def _add_contract_diagnostics(
     *,
     evidence: list[dict[str, Any]],
     role_handles: set[str],
+    require_relational_willingness: bool,
 ) -> None:
     """Attach canonical parse and strict-validation evidence to live calls."""
 
@@ -141,6 +142,9 @@ def _add_contract_diagnostics(
                     evidence_handles=evidence_handles,
                     role_handles=role_handles,
                     required_evidence_handles=operation_handles,
+                    require_relational_willingness=(
+                        require_relational_willingness
+                    ),
                     maximum_evidence_handles=max(
                         MAX_GOAL_BID_EVIDENCE_HANDLES,
                         len(operation_handles | progress_handles),
@@ -277,6 +281,7 @@ async def _run_live_required_selection_case(
         capturing_llm.calls,
         evidence=evidence,
         role_handles=set(semantic_context['_role_bindings']),
+        require_relational_willingness=(branch_id == 'ordinary_response'),
     )
     trace_path = write_llm_trace(
         _TRACE_SUITE,

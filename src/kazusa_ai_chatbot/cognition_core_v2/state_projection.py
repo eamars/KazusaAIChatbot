@@ -34,6 +34,24 @@ RAW_STATE_KEYS = frozenset({
 CHARACTER_OPERATIONAL_STATE_VIEW_SCHEMA = "character_operational_state_view.v1"
 CHARACTER_OPERATIONAL_CONTEXT_SCHEMA = "character_operational_context.v1"
 RELATIONSHIP_OPERATIONAL_CONTEXT_SCHEMA = "relationship_operational_context.v1"
+RELATIONSHIP_AXIS_FIELDS = (
+    "familiarity",
+    "positive_regard",
+    "trust",
+    "attachment",
+    "desired_closeness",
+    "perceived_closeness",
+    "care",
+    "boundary_safety",
+    "exclusivity",
+    "unresolved_injury",
+    "salience",
+)
+_SIGNED_RELATIONSHIP_AXES = frozenset({
+    "positive_regard",
+    "trust",
+    "boundary_safety",
+})
 MAX_CHARACTER_OPERATIONAL_AFFECT_ROWS = 21
 MAX_CHARACTER_OPERATIONAL_PRESSURE_ROWS = 8
 MAX_CONTEXT_AFFECT_ROWS = 3
@@ -110,6 +128,217 @@ def project_numeric_band(value: int, *, signed: bool = False) -> str:
     if value <= 80:
         return "高"
     return "极高"
+
+
+def project_relationship_axis(field_name: str, value: int) -> str:
+    """Return the domain-specific semantic meaning of one native axis.
+
+    Each axis keeps its own zero and band meanings so that unestablished
+    trust, unproven boundary history, and absent care are never conflated
+    with neutral permission. Values are validated against the native axis
+    range and never enter the model as numbers.
+
+    Args:
+        field_name: One of the eleven native relationship axis names.
+        value: Integer axis value inside the native range.
+
+    Returns:
+        A bounded Simplified Chinese semantic descriptor.
+
+    Raises:
+        ValueError: For an unknown axis, a Boolean, or an out-of-range value.
+    """
+
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError("relationship axis value must be an integer")
+    if field_name not in RELATIONSHIP_AXIS_FIELDS:
+        raise ValueError(f"unknown relationship axis: {field_name}")
+    if field_name in _SIGNED_RELATIONSHIP_AXES:
+        if not -100 <= value <= 100:
+            raise ValueError("relationship signed axis value is out of range")
+    elif not 0 <= value <= 100:
+        raise ValueError("relationship axis value is out of range")
+    descriptor = _RELATIONSHIP_AXIS_BANDS[field_name]
+    if value == 0:
+        return descriptor.zero
+    if field_name in _SIGNED_RELATIONSHIP_AXES:
+        if value <= -61:
+            return descriptor.strong_negative
+        if value <= -21:
+            return descriptor.negative
+        if value <= -1:
+            return descriptor.mild_negative
+        if value <= 20:
+            return descriptor.mild_positive
+        if value <= 40:
+            return descriptor.developing_positive
+        if value <= 60:
+            return descriptor.established_positive
+        if value <= 80:
+            return descriptor.strong_positive
+        return descriptor.very_strong_positive
+    if value <= 20:
+        return descriptor.emerging
+    if value <= 40:
+        return descriptor.low
+    if value <= 60:
+        return descriptor.medium
+    if value <= 80:
+        return descriptor.high
+    return descriptor.very_high
+
+
+class _AxisSemantics:
+    """Hold one axis' bounded semantic bands as stable model-facing text."""
+
+    def __init__(
+        self,
+        *,
+        zero: str,
+        emerging: str,
+        low: str,
+        medium: str,
+        high: str,
+        very_high: str,
+        strong_negative: str = "",
+        negative: str = "",
+        mild_negative: str = "",
+        mild_positive: str = "",
+        developing_positive: str = "",
+        established_positive: str = "",
+        strong_positive: str = "",
+        very_strong_positive: str = "",
+    ) -> None:
+        self.zero = zero
+        self.emerging = emerging
+        self.low = low
+        self.medium = medium
+        self.high = high
+        self.very_high = very_high
+        self.strong_negative = strong_negative
+        self.negative = negative
+        self.mild_negative = mild_negative
+        self.mild_positive = mild_positive
+        self.developing_positive = developing_positive
+        self.established_positive = established_positive
+        self.strong_positive = strong_positive
+        self.very_strong_positive = very_strong_positive
+
+
+_RELATIONSHIP_AXIS_BANDS: dict[str, _AxisSemantics] = {
+    "familiarity": _AxisSemantics(
+        zero="完全不认识",
+        emerging="几乎不认识，仅有浅淡印象",
+        low="只有有限的初步了解",
+        medium="有一定熟悉度",
+        high="比较熟悉",
+        very_high="非常熟悉",
+    ),
+    "positive_regard": _AxisSemantics(
+        zero="尚未形成明确好坏观感",
+        emerging="观感轻度正面",
+        low="正面观感正在形成",
+        medium="观感明显正面",
+        high="观感强烈正面",
+        very_high="观感非常强烈正面",
+        strong_negative="观感强烈负面",
+        negative="观感明显负面",
+        mild_negative="观感轻度负面",
+        mild_positive="观感轻度正面",
+        developing_positive="正面观感正在形成",
+        established_positive="观感明显正面",
+        strong_positive="观感强烈正面",
+        very_strong_positive="观感非常强烈正面",
+    ),
+    "trust": _AxisSemantics(
+        zero="信任尚未建立",
+        emerging="信任刚刚开始建立",
+        low="信任正在建立",
+        medium="已有相当信任",
+        high="高度信任",
+        very_high="非常深厚的信任",
+        strong_negative="信任被严重破坏",
+        negative="信任明显受损",
+        mild_negative="信任轻度受损",
+        mild_positive="信任刚刚开始建立",
+        developing_positive="信任正在建立",
+        established_positive="已有相当信任",
+        strong_positive="高度信任",
+        very_strong_positive="非常深厚的信任",
+    ),
+    "attachment": _AxisSemantics(
+        zero="尚未形成依恋",
+        emerging="依恋刚刚萌芽",
+        low="依恋正在形成",
+        medium="已有稳定依恋",
+        high="依恋深厚",
+        very_high="依恋非常深厚",
+    ),
+    "desired_closeness": _AxisSemantics(
+        zero="对更亲近没有任何愿望",
+        emerging="对更亲近几乎没有愿望",
+        low="有少量亲近愿望",
+        medium="明确希望更亲近",
+        high="强烈希望更亲近",
+        very_high="非常渴望更亲近",
+    ),
+    "perceived_closeness": _AxisSemantics(
+        zero="完全没有亲近感",
+        emerging="几乎没有亲近感",
+        low="亲近感较低",
+        medium="有中等亲近感",
+        high="亲近感较强",
+        very_high="非常亲近",
+    ),
+    "care": _AxisSemantics(
+        zero="尚未投入关心",
+        emerging="关心刚开始投入",
+        low="关心正在积累",
+        medium="已有实质关心",
+        high="关心深厚",
+        very_high="非常深厚的关心",
+    ),
+    "boundary_safety": _AxisSemantics(
+        zero="边界历史尚未建立",
+        emerging="边界相处刚刚开始",
+        low="边界相处正在建立",
+        medium="已有安全的边界相处",
+        high="边界相处很安全",
+        very_high="边界相处非常安全",
+        strong_negative="边界历史受到严重侵害",
+        negative="边界历史明显受损",
+        mild_negative="边界历史轻度受损",
+        mild_positive="边界相处刚刚开始",
+        developing_positive="边界相处正在建立",
+        established_positive="已有安全的边界相处",
+        strong_positive="边界相处很安全",
+        very_strong_positive="边界相处非常安全",
+    ),
+    "exclusivity": _AxisSemantics(
+        zero="没有任何排他性",
+        emerging="排他性很弱",
+        low="有少量排他倾向",
+        medium="明确排他",
+        high="排他性强烈",
+        very_high="完全排他",
+    ),
+    "unresolved_injury": _AxisSemantics(
+        zero="没有未化解的伤害",
+        emerging="几乎无未化解伤害",
+        low="有少量未化解伤害",
+        medium="有未化解的伤害",
+        high="有较重的未化解伤害",
+        very_high="有严重的未化解伤害",
+    ),
+    "salience": _AxisSemantics(
+        zero="当前关系没有浮现",
+        emerging="关系几乎不被注意",
+        low="关系关注度较低",
+        medium="关系处于中等关注",
+        high="关系当前显著",
+        very_high="关系当前非常突出",
+    ),
+}
 
 
 def project_duration(started_at: str, now: str) -> str:
@@ -286,29 +515,10 @@ def _project_relationship_prompt_context(
     """Project a relationship mapping into the established prompt-safe bands."""
 
     axes: dict[str, str] = {}
-    for field_name in (
-        "familiarity",
-        "positive_regard",
-        "trust",
-        "attachment",
-        "desired_closeness",
-        "perceived_closeness",
-        "care",
-        "boundary_safety",
-        "exclusivity",
-        "unresolved_injury",
-        "salience",
-    ):
+    for field_name in RELATIONSHIP_AXIS_FIELDS:
         value = relationship.get(field_name)
         if isinstance(value, int) and not isinstance(value, bool):
-            axes[field_name] = project_numeric_band(
-                value,
-                signed=field_name in {
-                    "positive_regard",
-                    "trust",
-                    "boundary_safety",
-                },
-            )
+            axes[field_name] = project_relationship_axis(field_name, value)
     context = {
         "relationship_summary": "当前关系背景",
         "axes": axes,
@@ -830,6 +1040,11 @@ def project_state_for_prompt(
     """
 
     handle_to_ref: dict[str, dict[str, str]] = {}
+    goal_identity = deepcopy(dict(character_identity_context["goal_cognition"]))
+    if isinstance(goal_identity.get("boundaries"), Mapping):
+        goal_identity["boundaries"] = _project_boundary_profile(
+            goal_identity["boundaries"],
+        )
     payload: dict[str, Any] = {
         "goals": [],
         "threats": [],
@@ -843,9 +1058,7 @@ def project_state_for_prompt(
             "当前用户": "当前用户",
         },
         "character_constraints": _project_constraints(character_constraints),
-        "character_identity": deepcopy(dict(
-            character_identity_context["goal_cognition"]
-        )),
+        "character_identity": goal_identity,
     }
     for field_name, prompt_name, prefix in (
         ("goals", "goals", "g"),
@@ -958,10 +1171,14 @@ def project_state_for_prompt(
                 "lifecycle": "候选，等待有依据的评估",
             })
     validate_prompt_projection(payload)
-    identity_by_question = {
-        question_kind: deepcopy(dict(context))
-        for question_kind, context in character_identity_context.items()
-    }
+    identity_by_question: dict[str, dict[str, object]] = {}
+    for question_kind, context in character_identity_context.items():
+        projected_context = deepcopy(dict(context))
+        if isinstance(projected_context.get("boundaries"), Mapping):
+            projected_context["boundaries"] = _project_boundary_profile(
+                projected_context["boundaries"],
+            )
+        identity_by_question[question_kind] = projected_context
     return PromptProjectionV2(
         payload=payload,
         handle_to_ref=handle_to_ref,
@@ -982,7 +1199,15 @@ def validate_prompt_projection(payload: Mapping[str, Any]) -> None:
                     and path[1] == "pressures"
                     and isinstance(path[2], int)
                 )
-                if key in RAW_STATE_KEYS and not is_semantic_pressure_kind:
+                is_relational_decision_schema = (
+                    key == "schema_version"
+                    and path == ("relational_willingness",)
+                )
+                if (
+                    key in RAW_STATE_KEYS
+                    and not is_semantic_pressure_kind
+                    and not is_relational_decision_schema
+                ):
                     raise ValueError(
                         f"raw state key leaked into prompt: {key}"
                     )
@@ -1072,14 +1297,7 @@ def project_operational_relationship_context(
     if not isinstance(axes, Mapping):
         raise ValueError("relationship operational axes must be a mapping")
     projected_axes = {
-        field_name: project_numeric_band(
-            value,
-            signed=field_name in {
-                "positive_regard",
-                "trust",
-                "boundary_safety",
-            },
-        )
+        field_name: project_relationship_axis(field_name, value)
         for field_name, value in axes.items()
     }
     return {
@@ -1147,6 +1365,90 @@ def _project_operational_character_context(
             if isinstance(row, Mapping)
         ],
     }
+
+
+def _project_boundary_profile(boundaries: Mapping[str, Any]) -> dict[str, str]:
+    """Translate one identity boundary profile into compact semantics.
+
+    Numeric boundary storage stays unchanged. The model receives only bounded
+    Chinese descriptions, and the compliance strategy explicitly states that
+    pressure response is not willingness or consent.
+    """
+
+    projected: dict[str, str] = {
+        "self_integrity": _boundary_float_semantic(
+            boundaries["self_integrity"],
+            "边界",
+        ),
+        "control_sensitivity": _boundary_float_semantic(
+            boundaries["control_sensitivity"],
+            "控制敏感",
+        ),
+        "compliance_strategy": _compliance_strategy_semantic(
+            boundaries["compliance_strategy"],
+        ),
+        "relational_override": _boundary_float_semantic(
+            boundaries["relational_override"],
+            "关系覆盖",
+        ),
+        "control_intimacy_misread": _boundary_float_semantic(
+            boundaries["control_intimacy_misread"],
+            "亲密误读",
+        ),
+        "boundary_recovery": _boundary_recovery_semantic(
+            boundaries["boundary_recovery"],
+        ),
+        "authority_skepticism": _boundary_float_semantic(
+            boundaries["authority_skepticism"],
+            "权威怀疑",
+        ),
+    }
+    return projected
+
+
+def _boundary_float_semantic(value: object, subject: str) -> str:
+    """Translate one 0.0..1.0 boundary float into a bounded descriptor."""
+
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("boundary float projection requires a number")
+    band = (
+        "弱"
+        if value < 0.2
+        else "偏弱" if value < 0.4
+        else "中" if value < 0.6
+        else "偏强" if value < 0.8
+        else "强"
+    )
+    return f"{subject}{band}"
+
+
+def _compliance_strategy_semantic(value: object) -> str:
+    """Describe pressure-response style without implying consent."""
+
+    compliance_labels = {
+        "resist": "压力下抵抗",
+        "evade": "压力下回避",
+        "comply": "压力下顺从",
+    }
+    label = compliance_labels.get(value)
+    if label is None:
+        raise ValueError("compliance strategy is invalid")
+    return f"{label}；不代表意愿或同意"
+
+
+def _boundary_recovery_semantic(value: object) -> str:
+    """Describe the stable recovery posture after a boundary event."""
+
+    recovery_labels = {
+        "rebound": "受损后快恢复",
+        "delayed_rebound": "受损后慢恢复",
+        "decay": "受损后逐渐弱化",
+        "detach": "受损后倾向抽离",
+    }
+    label = recovery_labels.get(value)
+    if label is None:
+        raise ValueError("boundary recovery is invalid")
+    return label
 
 
 def _project_constraints(constraints: Mapping[str, Any]) -> dict[str, Any]:
