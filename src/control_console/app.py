@@ -115,6 +115,17 @@ SAFE_KAZUSA_EVENT_PAYLOAD_FIELDS = (
 )
 
 
+class NoCacheStaticFiles(StaticFiles):
+    """Static file mount that requests browser cache revalidation."""
+
+    async def get_response(self, path: str, scope: Any) -> Response:
+        """Return the static response with a revalidation cache directive."""
+
+        response = await super().get_response(path, scope)
+        response.headers["cache-control"] = "no-cache, must-revalidate"
+        return response
+
+
 def create_app(
     *,
     settings: ControlConsoleSettings | None = None,
@@ -234,7 +245,11 @@ def create_app(
 
     app = FastAPI(title="Control Console", lifespan=lifespan)
     app.state.generated_operator_token = generated_operator_token
-    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+    app.mount(
+        "/static",
+        NoCacheStaticFiles(directory=STATIC_DIR),
+        name="static",
+    )
 
     def current_operator(request: Request) -> ControlConsoleOperator:
         """FastAPI dependency for authenticated operators."""
@@ -254,6 +269,7 @@ def create_app(
         path = STATIC_DIR / "index.html"
         html = path.read_text(encoding="utf-8")
         response = HTMLResponse(html)
+        response.headers["cache-control"] = "no-cache, must-revalidate"
         return response
 
     @app.get("/favicon.ico")

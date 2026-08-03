@@ -544,6 +544,41 @@ async def test_repository_projects_native_v2_character_and_user_state() -> None:
 
 
 @pytest.mark.asyncio
+async def test_repository_operational_panels_accept_console_utc_offset() -> None:
+    """Console UTC offsets should reach native V2 operational projections."""
+
+    from control_console.repository import (
+        _project_character_operational_posture,
+        _project_relationship_operational_panel,
+    )
+    from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+        build_acquaintance_user_state,
+        build_character_production_state,
+    )
+
+    updated_at = "2026-07-27T00:00:00Z"
+    character_panel = _project_character_operational_posture(
+        build_character_production_state(updated_at=updated_at),
+        effective_at="2026-07-27T00:00:01+00:00",
+        latest_context_consumption=None,
+    )
+    relationship_panel = _project_relationship_operational_panel(
+        build_acquaintance_user_state(
+            global_user_id="global-user-secret",
+            updated_at=updated_at,
+        ),
+        effective_at="2026-07-27T00:00:01+00:00",
+    )
+
+    assert character_panel["status"] == "available"
+    assert character_panel["items"][0]["effective"]["effective_at"] == (
+        "2026-07-27T00:00:01Z"
+    )
+    assert relationship_panel["status"] == "available"
+    assert relationship_panel["items"][0]["relationship_freshness"]
+
+
+@pytest.mark.asyncio
 async def test_repository_lists_safe_user_and_group_directories() -> None:
     """Owner pages should discover bounded users and groups from real owners."""
 

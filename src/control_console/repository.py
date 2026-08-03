@@ -2840,7 +2840,11 @@ def _project_character_operational_posture(
     effective_at: str,
     latest_context_consumption: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
-    """Project persisted/effective posture and exact latest consumption."""
+    """Project persisted/effective posture and exact latest consumption.
+
+    The console-supplied effective timestamp may carry a UTC +00:00 suffix;
+    it is converted to the terminal Z form required by the native parser.
+    """
 
     if not isinstance(cognition_state, Mapping):
         return _entity_panel(
@@ -2861,6 +2865,11 @@ def _project_character_operational_posture(
             items=[],
             reason="character operational state version is unavailable",
         )
+    native_effective_at = (
+        f"{effective_at[:-6]}Z"
+        if effective_at.endswith("+00:00")
+        else effective_at
+    )
     try:
         persisted_view = project_character_operational_state(
             cognition_state,
@@ -2868,7 +2877,7 @@ def _project_character_operational_posture(
         )
         effective_view = project_character_operational_state(
             cognition_state,
-            effective_at=effective_at,
+            effective_at=native_effective_at,
         )
     except (KeyError, ValueError):
         return _entity_panel(
@@ -2907,7 +2916,11 @@ def _project_relationship_operational_panel(
     *,
     effective_at: str,
 ) -> dict[str, Any]:
-    """Project current-user causal relationship context without identifiers."""
+    """Project current-user causal relationship context without identifiers.
+
+    The console-supplied effective timestamp may carry a UTC +00:00 suffix;
+    it is converted to the terminal Z form required by the native parser.
+    """
 
     if not isinstance(cognition_state, Mapping):
         return _entity_panel(
@@ -2921,10 +2934,15 @@ def _project_relationship_operational_panel(
             items=[],
             reason="native V2 relationship state is not user-scoped",
         )
+    native_effective_at = (
+        f"{effective_at[:-6]}Z"
+        if effective_at.endswith("+00:00")
+        else effective_at
+    )
     try:
         relationship_context = project_relationship_context(
             cognition_state,
-            effective_at=effective_at,
+            effective_at=native_effective_at,
         )
         public_context = project_operational_relationship_context(
             relationship_context,

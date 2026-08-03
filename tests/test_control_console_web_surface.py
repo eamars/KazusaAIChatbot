@@ -127,6 +127,7 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
 
     index = client.get("/")
     assert index.status_code == 200
+    assert index.headers["cache-control"] == "no-cache, must-revalidate"
     assert "<title>not connected</title>" in index.text
     assert '<body data-theme="bright" data-auth-state="locked">' in index.text
     assert 'id="brand-name">not connected</strong>' in index.text
@@ -168,6 +169,7 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     assert 'id="user-cognition-state-table"' in index.text
     assert 'id="user-memory-table"' in index.text
     assert 'id="user-style-table"' in index.text
+    assert index.text.count("relevance · cognition · surface") == 2
     assert 'id="user-conversation-progress-table"' in index.text
     assert 'id="user-carry-over-table"' in index.text
     assert '<select class="input" id="group-platform"' in index.text
@@ -292,6 +294,7 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
 
     script = client.get("/static/console.js")
     assert script.status_code == 200
+    assert script.headers["cache-control"] == "no-cache, must-revalidate"
     assert "resumeSession()" in script.text
     assert "/api/auth/session" in script.text
     assert "lockSession()" in script.text
@@ -421,6 +424,7 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
 
     stylesheet = client.get("/static/console.css")
     assert stylesheet.status_code == 200
+    assert stylesheet.headers["cache-control"] == "no-cache, must-revalidate"
     assert '.status-dot[data-state="conflict"]' in stylesheet.text
     assert ".cognition-graph" in stylesheet.text
     assert ".cognition-graph-shell" in stylesheet.text
