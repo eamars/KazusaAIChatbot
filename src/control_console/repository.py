@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import datetime, timezone
 from typing import Any
 
 from pymongo.errors import PyMongoError
 
-from control_console.redaction import redact_mapping
+from control_console.redaction import (
+    redact_character_operational_state_view,
+    redact_latest_context_consumption,
+    redact_mapping,
+    redact_operational_relationship_context,
+)
 from kazusa_ai_chatbot.calendar_scheduler import repository as calendar_repository
 from kazusa_ai_chatbot.character_identity_growth.projection import (
     project_candidate_for_console,
@@ -18,7 +23,10 @@ from kazusa_ai_chatbot.character_identity_growth.projection import (
     project_identity_for_console,
 )
 from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
+    project_character_operational_state,
     project_numeric_band,
+    project_operational_relationship_context,
+    project_relationship_context,
 )
 from kazusa_ai_chatbot.conversation_progress import (
     ConversationProgressScope,
@@ -299,11 +307,13 @@ class ControlConsoleRepository:
         self,
         *,
         current_timestamp_utc: str | None = None,
+        latest_context_consumption: Mapping[str, Any] | None = None,
+        include_operational_context: bool = False,
         limit: int = 25,
     ) -> dict[str, Any]:
         """Return native profile, cognition, growth, and continuity state."""
 
-        _ = current_timestamp_utc
+        timestamp = current_timestamp_utc or datetime.now(timezone.utc).isoformat()
         identity: dict[str, Any] = {}
         profile: dict[str, Any] = {}
         profile_panel = _entity_panel(
@@ -342,6 +352,7 @@ class ControlConsoleRepository:
             items=[],
             reason="character runtime-state helper is unavailable",
         )
+        runtime_cognition_state: Any = None
         self_image_panel = _entity_panel(
             status="unavailable",
             items=[],
@@ -359,6 +370,7 @@ class ControlConsoleRepository:
         else:
             if isinstance(runtime_state, dict):
                 cognition_state = runtime_state.get("cognition_state")
+                runtime_cognition_state = cognition_state
                 cognition_items = _project_cognition_state_items(
                     cognition_state,
                     fields=CHARACTER_COGNITION_FIELDS,
@@ -392,6 +404,16 @@ class ControlConsoleRepository:
         panels = {
             "profile": profile_panel,
             "cognition_state": runtime_panel,
+        }
+        if include_operational_context:
+            panels["operational_posture"] = (
+                _project_character_operational_posture(
+                    runtime_cognition_state,
+                    effective_at=timestamp,
+                    latest_context_consumption=latest_context_consumption,
+                )
+            )
+        panels.update({
             "self_image": self_image_panel,
             "growth": await self._character_identity_growth_panel(
                 character_id=character_id,
@@ -401,7 +423,7 @@ class ControlConsoleRepository:
                 character_id=character_id,
                 limit=limit,
             ),
-        }
+        })
         envelope = _owner_entity_envelope(
             owner="character",
             identity=identity,
@@ -724,6 +746,7 @@ class ControlConsoleRepository:
         channel_type: str = "",
         query: str,
         current_timestamp_utc: str | None = None,
+        include_operational_context: bool = False,
         limit: int,
     ) -> dict[str, Any]:
         """Return native V2 state for one platform-facing user account."""
@@ -771,6 +794,12 @@ class ControlConsoleRepository:
                     reason=resolution["reason"],
                 ),
             }
+            if include_operational_context:
+                panels["relationship_operational"] = _entity_panel(
+                    status=resolution["status"],
+                    items=[],
+                    reason=resolution["reason"],
+                )
             envelope = _owner_entity_envelope(
                 owner="user",
                 identity=resolution["identity"],
@@ -789,6 +818,14 @@ class ControlConsoleRepository:
         )
         cognition_state = profile.get("cognition_state")
         relationship_panel = _project_relationship_panel(cognition_state)
+        relationship_operational_panel = (
+            _project_relationship_operational_panel(
+                cognition_state,
+                effective_at=timestamp,
+            )
+            if include_operational_context
+            else None
+        )
         cognition_items = _project_cognition_state_items(
             cognition_state,
             fields=USER_COGNITION_FIELDS,
@@ -868,15 +905,25 @@ class ControlConsoleRepository:
             ),
             "carry_over": carry_over_panel,
         }
+        if relationship_operational_panel is not None:
+            panels["relationship_operational"] = relationship_operational_panel
+        required_panel_names = (
+            "profile",
+            "relationship",
+            "cognition_state",
+        )
+        if include_operational_context:
+            required_panel_names = (
+                "profile",
+                "relationship",
+                "relationship_operational",
+                "cognition_state",
+            )
         envelope = _owner_entity_envelope(
             owner="user",
             identity=identity,
             panels=panels,
-            required_panel_names=(
-                "profile",
-                "relationship",
-                "cognition_state",
-            ),
+            required_panel_names=required_panel_names,
         )
         return envelope
 
@@ -1907,6 +1954,9 @@ class ControlConsoleRepository:
             page["reason"] = str(exc)[:160]
             return page
 
+        if not isinstance(context, Mapping):
+            page["reason"] = "interaction-style helper returned invalid data"
+            return page
         items = _project_interaction_style_context(context, limit=limit)
         page = _style_lookup_page(
             status="available" if items else "empty",
@@ -2784,6 +2834,117 @@ def _project_relationship_panel(cognition_state: Any) -> dict[str, Any]:
     return panel
 
 
+def _project_character_operational_posture(
+    cognition_state: Any,
+    *,
+    effective_at: str,
+    latest_context_consumption: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Project persisted/effective posture and exact latest consumption."""
+
+    if not isinstance(cognition_state, Mapping):
+        return _entity_panel(
+            status="empty",
+            items=[],
+            reason="native character operational state is not available",
+        )
+    if cognition_state.get("state_scope") != "character":
+        return _entity_panel(
+            status="empty",
+            items=[],
+            reason="runtime cognition state is not character-scoped",
+        )
+    source_updated_at = cognition_state.get("updated_at")
+    if not isinstance(source_updated_at, str) or not source_updated_at.strip():
+        return _entity_panel(
+            status="unavailable",
+            items=[],
+            reason="character operational state version is unavailable",
+        )
+    try:
+        persisted_view = project_character_operational_state(
+            cognition_state,
+            effective_at=source_updated_at,
+        )
+        effective_view = project_character_operational_state(
+            cognition_state,
+            effective_at=effective_at,
+        )
+    except (KeyError, ValueError):
+        return _entity_panel(
+            status="unavailable",
+            items=[],
+            reason="character operational state projection is unavailable",
+        )
+    persisted = redact_character_operational_state_view(persisted_view)
+    effective = redact_character_operational_state_view(effective_view)
+    if not persisted or not effective:
+        return _entity_panel(
+            status="unavailable",
+            items=[],
+            reason="character operational state projection was redacted",
+        )
+    latest_source = (
+        latest_context_consumption
+        if isinstance(latest_context_consumption, Mapping)
+        else {"status": "not_reported"}
+    )
+    latest = redact_latest_context_consumption(latest_source)
+    item = {
+        "persisted": persisted,
+        "effective": effective,
+        "fading_changed": (
+            persisted["affect"] != effective["affect"]
+            or persisted["pressures"] != effective["pressures"]
+        ),
+        "latest_context": latest,
+    }
+    return _entity_panel(status="available", items=[item], reason="")
+
+
+def _project_relationship_operational_panel(
+    cognition_state: Any,
+    *,
+    effective_at: str,
+) -> dict[str, Any]:
+    """Project current-user causal relationship context without identifiers."""
+
+    if not isinstance(cognition_state, Mapping):
+        return _entity_panel(
+            status="empty",
+            items=[],
+            reason="user cognition state is not available",
+        )
+    if cognition_state.get("state_scope") != "user":
+        return _entity_panel(
+            status="empty",
+            items=[],
+            reason="native V2 relationship state is not user-scoped",
+        )
+    try:
+        relationship_context = project_relationship_context(
+            cognition_state,
+            effective_at=effective_at,
+        )
+        public_context = project_operational_relationship_context(
+            relationship_context,
+        )
+    except (KeyError, ValueError):
+        return _entity_panel(
+            status="unavailable",
+            items=[],
+            reason="native V2 relationship projection is unavailable",
+        )
+    projected = redact_operational_relationship_context(public_context)
+    if not projected:
+        return _entity_panel(
+            status="unavailable",
+            items=[],
+            reason="native V2 relationship projection was redacted",
+        )
+    return _entity_panel(status="available", items=[projected], reason="")
+
+
 def _project_user_directory_item(profile: dict[str, Any]) -> dict[str, Any]:
     """Project one user directory row without canonical or alias identities."""
 
@@ -2951,11 +3112,17 @@ def _lookup_redaction() -> dict[str, str]:
 
 
 def _project_interaction_style_context(
-    context: dict[str, Any],
+    context: Mapping[str, Any],
     *,
     limit: int,
 ) -> list[dict[str, Any]]:
-    """Project prompt-facing style context into redacted table rows."""
+    """Project role-labelled or legacy style context into redacted rows."""
+
+    if context.get("schema_version") == "interaction_style_turn_snapshot.v1":
+        return _project_role_labelled_interaction_style_context(
+            context,
+            limit=limit,
+        )
 
     application_order = context.get("application_order", [])
     if not isinstance(application_order, list):
@@ -2981,6 +3148,87 @@ def _project_interaction_style_context(
             if len(rows) >= limit:
                 return rows
     return rows
+
+
+def _project_role_labelled_interaction_style_context(
+    context: Mapping[str, Any],
+    *,
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Expose the exact relevance, cognition, and surface projections."""
+
+    rows: list[dict[str, Any]] = []
+    for consumer_role in ("relevance", "cognition", "surface"):
+        role_projection = context.get(consumer_role)
+        if not isinstance(role_projection, Mapping):
+            continue
+        for source_name in ("user", "group_channel"):
+            source_projection = role_projection.get(source_name)
+            if not isinstance(source_projection, Mapping):
+                continue
+            row = _project_interaction_style_role_row(
+                consumer_role=consumer_role,
+                source_name=source_name,
+                source_projection=source_projection,
+            )
+            if not row:
+                continue
+            rows.append(row)
+            if len(rows) >= limit:
+                return rows
+    return rows
+
+
+def _project_interaction_style_role_row(
+    *,
+    consumer_role: str,
+    source_name: str,
+    source_projection: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Project one declared source-role pair without image provenance."""
+
+    status = source_projection.get("status")
+    if not isinstance(status, str) or status not in {
+        "active",
+        "empty",
+        "missing",
+        "failed",
+    }:
+        return {}
+    revision = source_projection.get("revision")
+    if isinstance(revision, bool) or not isinstance(revision, int):
+        return {}
+    confidence = ""
+    guidance_source: Mapping[str, Any] = source_projection
+    if consumer_role == "surface":
+        overlay = source_projection.get("overlay")
+        if not isinstance(overlay, Mapping):
+            return {}
+        guidance_source = overlay
+    confidence_value = guidance_source.get("confidence")
+    if isinstance(confidence_value, str):
+        confidence = confidence_value
+    fields = (
+        ("engagement_guidelines",)
+        if consumer_role == "relevance"
+        else STYLE_GUIDELINE_FIELDS
+        if consumer_role == "surface"
+        else ("social_guidelines", "engagement_guidelines")
+    )
+    guidance = {
+        field_name: [item for item in field_value[:8] if isinstance(item, str)]
+        for field_name in fields
+        if isinstance((field_value := guidance_source.get(field_name)), list)
+    }
+    row = redact_mapping({
+        "consumer_role": consumer_role,
+        "source": source_name,
+        "status": status,
+        "revision": revision,
+        "confidence": confidence,
+        "guidance": guidance,
+    })
+    return row
 
 
 def _style_lookup_page(

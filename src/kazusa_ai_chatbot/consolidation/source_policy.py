@@ -47,6 +47,13 @@ _CHARACTER_IDENTITY_SOURCE_KINDS = frozenset(
         EPISODE_TRACE_SOURCE_KIND,
     )
 )
+_CHARACTER_OPERATIONAL_SOURCE_KEYS = frozenset({
+    "current_turn_user_message",
+    ASSISTANT_ACCEPTANCE_SOURCE_KIND,
+    INTERNAL_THOUGHT_SOURCE_KIND,
+    EPISODE_TRACE_SOURCE_KIND,
+})
+_CHARACTER_OPERATIONAL_SOURCE_LIMIT = 4
 
 
 def build_consolidation_source_views(
@@ -202,6 +209,52 @@ def source_refs_from_views(source_views: list[dict[str, Any]]) -> list[dict[str,
             if isinstance(raw_ref, Mapping):
                 source_refs.append(dict(raw_ref))
     return source_refs
+
+
+def validate_character_operational_sources(
+    source_views: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Validate bounded current-episode sources for operational carry-over.
+
+    The operational lane accepts only ref-complete current episode views. It
+    never routes RAG or reflection material into the character-global state.
+    """
+
+    if not source_views:
+        raise ValueError("character operational sources are required")
+    if len(source_views) > _CHARACTER_OPERATIONAL_SOURCE_LIMIT:
+        raise ValueError("character operational source limit exceeded")
+    validated_views: list[dict[str, Any]] = []
+    seen_source_keys: set[str] = set()
+    for source_view in source_views:
+        source_key = source_view.get("source_key")
+        source_kind = source_view.get("source_kind")
+        source_id = source_view.get("source_id")
+        occurred_at = source_view.get("occurred_at")
+        semantic_text = source_view.get("semantic_text")
+        if (
+            not isinstance(source_key, str)
+            or source_key not in _CHARACTER_OPERATIONAL_SOURCE_KEYS
+            or source_key in seen_source_keys
+            or not isinstance(source_kind, str)
+            or not source_kind.strip()
+            or not isinstance(source_id, str)
+            or not source_id.strip()
+            or not isinstance(occurred_at, str)
+            or not occurred_at.strip()
+            or not isinstance(semantic_text, str)
+            or not semantic_text.strip()
+        ):
+            raise ValueError("character operational source is invalid")
+        seen_source_keys.add(source_key)
+        validated_views.append({
+            "source_key": source_key,
+            "source_kind": source_kind,
+            "source_id": source_id,
+            "occurred_at": occurred_at,
+            "semantic_text": semantic_text,
+        })
+    return validated_views
 
 
 def _source_view(

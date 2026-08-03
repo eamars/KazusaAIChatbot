@@ -21,6 +21,9 @@ from kazusa_ai_chatbot.config import (
     SETTLED_RELEVANCE_MAX_COMPLETION_TOKENS,
     SETTLED_RELEVANCE_MAX_INPUT_CHARS,
 )
+from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
+    project_operational_relationship_context,
+)
 from kazusa_ai_chatbot.conversation_history_prompt_projection import (
     project_conversation_history_for_llm,
 )
@@ -870,9 +873,8 @@ def _project_history(state: SettledRelevanceState) -> list[dict[str, Any]]:
 
 
 def _project_context(state: SettledRelevanceState) -> dict[str, Any]:
-    """Project bounded scene, relationship, and attention descriptors."""
+    """Project bounded scene and native operational context."""
 
-    relationship_context = state.get("relationship_context", "")
     scene_context = state.get("scene_context", "")
     if not scene_context and state.get("conversation_scope") == "group":
         attention = build_group_attention_context(
@@ -885,10 +887,16 @@ def _project_context(state: SettledRelevanceState) -> dict[str, Any]:
         )
         scene_context = attention.get("group_attention", "")
 
+    character_context = _project_character_operational_context(
+        state.get("character_operational_context"),
+    )
+    relationship_context = _project_relationship_operational_context(
+        state.get("relationship_operational_context"),
+    )
     return_value = {
         "scene_context": _clip_text(scene_context, 600),
-        "relationship_context": _clip_text(relationship_context, 600),
-        "mood": _clip_text(state.get("character_mood"), 200),
+        "character_operational_context": character_context,
+        "relationship_operational_context": relationship_context,
         "group_attention": _clip_text(state.get("group_attention"), 100),
         "bot_continuity": _clip_text(state.get("bot_continuity"), 200),
         "engagement_guidelines": _string_list(
@@ -899,12 +907,46 @@ def _project_context(state: SettledRelevanceState) -> dict[str, Any]:
     context_json = json.dumps(return_value, ensure_ascii=False)
     if len(context_json) > _CONTEXT_TOTAL_CHARS:
         return_value["engagement_guidelines"] = []
-        return_value["relationship_context"] = _clip_text(
-            return_value["relationship_context"],
-            300,
-        )
+        operational_relationship_context = return_value[
+            "relationship_operational_context"
+        ]
+        if operational_relationship_context:
+            operational_relationship_context["causal_context"] = []
     return_value = return_value
     return return_value
+
+
+def _project_character_operational_context(value: object) -> dict[str, Any]:
+    """Keep the selected character posture rows without audit metadata."""
+
+    if not isinstance(value, Mapping):
+        return {}
+    affect = value.get("affect")
+    pressures = value.get("pressures")
+    return {
+        "affect": [
+            dict(row)
+            for row in affect
+            if isinstance(row, Mapping)
+        ] if isinstance(affect, list) else [],
+        "pressures": [
+            dict(row)
+            for row in pressures
+            if isinstance(row, Mapping)
+        ] if isinstance(pressures, list) else [],
+    }
+
+
+def _project_relationship_operational_context(value: object) -> dict[str, Any]:
+    """Project the current-user relationship without its durable id."""
+
+    if not isinstance(value, Mapping):
+        return {}
+    if value.get("schema_version") != "relationship_operational_context.v1":
+        return {}
+    projected = project_operational_relationship_context(value)
+    projected.pop("handle", None)
+    return projected
 
 
 def _settled_interaction_message(
@@ -1189,8 +1231,8 @@ def _build_settled_relevance_messages(
     if len(human_content) > available_human_chars:
         payload["scene_and_relationship"] = {
             "scene_context": "",
-            "relationship_context": "",
-            "mood": "",
+            "character_operational_context": {},
+            "relationship_operational_context": {},
             "group_attention": "",
             "bot_continuity": "",
             "engagement_guidelines": [],

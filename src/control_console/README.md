@@ -146,6 +146,15 @@ a scrollable region; generic console redaction remains in force for all other
 payloads. Prompts, raw model output, embeddings, message envelopes, target
 identifiers, handler metadata, and internal ids stay excluded.
 
+`l2.reasoning.detail.context_consumption` is a strict detail field with schema
+`cognition_context_consumption.v1`. The brain constructs it from the immutable
+turn snapshot and executed V2 cognition/L3 inputs. The console validates,
+redacts, transports, and renders that exact field; it does not reconstruct
+consumed state from a current database read. The payload contains bounded
+`settled_relevance`, `cognition`, `surface`, and `health` sections. It excludes
+episode and relationship ids, user/channel identifiers, entity handles, event
+descriptions, raw messages, evidence references, prompts, and private facts.
+
 The human-readable brain process log records the normalized visual directive
 after enabled validation using the same complete JSON rendering convention as
 visible dialog output. Protected LLM traces remain the diagnostic source for
@@ -198,8 +207,8 @@ worker, cache-agent, or audit-action detail.
 | Live logs | Bounded supervisor/stdout/stderr text and stream connection state | `GET /api/logs/stream` |
 | Debug chat | Request controls, current response/error, cognition graph, browser-session history | `POST /api/debug-chat` |
 | Event monitor | Structured events, filters, dynamic facets, duration/error/correlation detail | `GET /api/events` |
-| Character | Latest profile, native V2 cognition, current self-image, redacted growth candidates/outcomes, immutable identity lineage and health | `GET /api/entities/character` |
-| Users | Safe directory; profile, native V2 relationship/cognition, memory, style, progress, carry-over | plural user entity routes |
+| Character | Latest profile, native V2 cognition, persisted/effective operational posture, exact graph consumption, current self-image, redacted growth candidates/outcomes, immutable identity lineage and health | `GET /api/entities/character` |
+| Users | Safe directory; profile, native V2 relationship/cognition, causal relationship projection, memory, consumer-labelled style, progress, carry-over | plural user entity routes |
 | Groups | Activity directory; review, style, carry-over, participant progress | plural group entity routes |
 | Calendar | Counts, schedules, recent run outcomes, scoped cognition visibility | `GET /api/lookups/calendar` |
 | Background work | Queue counts, canonical jobs, worker aggregates, errors, delivery detail | `GET /api/lookups/background-work` |
@@ -214,6 +223,14 @@ Safe-field boundaries are fixed:
 - User relationship detail returns all eleven stored V2 axes with the exact
   numeric value and canonical semantic band, plus evidence count and update
   time. It does not calculate an affinity replacement.
+- Character operational posture exposes full persisted and elapsed-effective
+  native affect/pressure rows through the state-projection allowlist. Its
+  latest-consumption subsection uses only the graph-owned consumption field
+  and distinguishes reported, partial, degraded, stale, and unavailable data.
+- User causal relationship detail is current-user scoped and exposes only
+  public axes, bounded causal/affect rows, and freshness labels. User and
+  Group style panels label `relevance`, `cognition`, and `surface` source
+  projections without style-image provenance.
 - The group directory returns platform/channel label, last activity, message
   count, and participant count. Raw messages and participant ids are excluded.
 - Character self-image comes from the latest identity revision. Growth shows

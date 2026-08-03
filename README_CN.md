@@ -95,6 +95,7 @@ Kazusa 围绕 OpenAI 兼容接口设计，而不是绑定某一个托管供应�
 | `RAG_SUBAGENT_LLM` | `local-model` | `http://localhost:1234/v1` |
 | `WEB_SEARCH_LLM` | `local-model` | `http://localhost:1234/v1` |
 | `COGNITION_LLM` | `local-model` | `http://localhost:1234/v1` |
+| `COGNITION_LLM_CHARACTER_CARRYOVER` | `local-model` | `http://localhost:1234/v1` |
 | `COGNITION_LLM_APPRAISAL_EVENT_AGENCY` | `local-model` | `http://localhost:1234/v1` |
 | `COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL` | `local-model` | `http://localhost:1234/v1` |
 | `COGNITION_LLM_APPRAISAL_MORAL_IDENTITY` | `local-model` | `http://localhost:1234/v1` |
@@ -122,6 +123,8 @@ Kazusa 围绕 OpenAI 兼容接口设计，而不是绑定某一个托管供应�
 `COGNITION_LLM` 保留为 Cognition Core V2 边界之外调用方使用的通用认知路由。
 Core V2 使用上面的十三个独立阶段路由；每个路由都拥有完整的端点、凭据、模型、
 生成预算与 thinking 配置，不继承其他路由，也不使用回退路由。
+`COGNITION_LLM_CHARACTER_CARRYOVER` 是专用的仅状态后台运营延续路由，
+其最大生成预算为 8,192 tokens。
 
 代码代理使用独立的一等 PM 和 programmer 路由。最终综合有意复用
 `CODING_AGENT_PM_LLM`；没有单独的代码综合器路由。每个代码代理路由都必须配置
@@ -155,6 +158,20 @@ Kazusa 还需要一个 OpenAI 兼容的嵌入端点，用于历史对话、记�
 `[deterministic]` 节点负责校验或移动状态，`[worker]` 节点执行有边界的
 延迟工作。精确的子智能体命名和文档词汇见
 [子智能体接口指南](docs/SUBAGENT_INTERFACES.md)。
+
+### 短时运行状态与可观测性
+
+单例 `CharacterCognitionStateV2` 是唯一的角色全局短时状态。结算后的
+回合会先等待有界前序屏障，然后复用同一份不可变互动风格快照给相关性、
+V2 认知和 L3 表层；合格的后台整合可通过专用 carry-over 路径产生一条
+无来源身份的角色运行状态更新。当前消息、历史和会话进展仍然拥有事实和
+话题权威。
+
+最新认知图在 `l2.reasoning.detail.context_consumption` 中提供来源端拥有的
+`cognition_context_consumption.v1` 脱敏投影。它只记录有界的角色、关系和
+风格消费上下文以及类型化健康信息；不含来源 ID、原始消息、证据引用、
+提示词或私有事实。控制台直接渲染这份投影，并和持久化/按时间生效的角色
+姿态并列显示。
 
 ```mermaid
 flowchart TD

@@ -12,12 +12,17 @@ import httpx
 from pydantic import ValidationError
 
 from control_console.contracts import (
+    CognitionContextConsumption,
     CognitionRunGraphEdge,
     CognitionRunGraphNode,
     CognitionRunGraphSnapshot,
     ConsoleDebugChatRequest,
 )
-from control_console.redaction import redact_mapping, redact_value
+from control_console.redaction import (
+    redact_context_consumption,
+    redact_mapping,
+    redact_value,
+)
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
 
 COGNITION_GRAPH_DETAIL_KEYS = frozenset(
@@ -71,6 +76,7 @@ COGNITION_GRAPH_DETAIL_KEYS = frozenset(
         "empty_state",
         "failure",
         "failure_code",
+        "context_consumption",
     }
 )
 COGNITION_GRAPH_SCALAR_DETAIL_KEYS = frozenset(
@@ -643,7 +649,10 @@ def _project_node_detail(raw_detail: Any) -> dict[str, Any]:
             continue
         if raw_key not in COGNITION_GRAPH_DETAIL_KEYS:
             continue
-        if _cognition_graph_key_is_forbidden(raw_key):
+        if (
+            raw_key != "context_consumption"
+            and _cognition_graph_key_is_forbidden(raw_key)
+        ):
             continue
         projected_value = _project_cognition_graph_detail_value(
             raw_key,
@@ -675,6 +684,8 @@ def _project_cognition_graph_detail_value(
 ) -> Any:
     """Project one selected-detail field using its semantic shape."""
 
+    if field_name == "context_consumption":
+        return _project_context_consumption(value)
     if field_name in COGNITION_GRAPH_SCALAR_DETAIL_KEYS:
         return _project_cognition_graph_scalar(value)
     if field_name in COGNITION_GRAPH_TEXT_LIST_DETAIL_KEYS:
@@ -684,6 +695,21 @@ def _project_cognition_graph_detail_value(
     if field_name in COGNITION_GRAPH_ROW_DETAIL_KEYS:
         return _project_cognition_graph_rows(value)
     return None
+
+
+def _project_context_consumption(value: Any) -> dict[str, Any] | None:
+    """Validate the dedicated public context-consumption graph contract."""
+
+    if not isinstance(value, Mapping):
+        return None
+    redacted = redact_context_consumption(value)
+    if not redacted:
+        return None
+    try:
+        consumption = CognitionContextConsumption.model_validate(redacted)
+    except ValidationError:
+        return None
+    return consumption.model_dump(mode="json")
 
 
 def _project_cognition_graph_scalar(value: Any) -> Any:

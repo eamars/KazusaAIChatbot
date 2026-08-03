@@ -50,7 +50,7 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
-| [cognition_core_v2_short_horizon_global_state_composition_bigbang_plan.md](active/bugfix/cognition_core_v2_short_horizon_global_state_composition_bigbang_plan.md) | Post-identity V2 plan for transient global posture, causal relationship context, scoped style composition, and runtime/UI proof | in_progress |
+| [cognition_core_v2_short_horizon_global_state_composition_bigbang_plan.md](archive/completed/bugfix/cognition_core_v2_short_horizon_global_state_composition_bigbang_plan.md) | Post-identity V2 plan for transient global posture, causal relationship context, scoped style composition, and runtime/UI proof | completed |
 | [character_identity_growth_contract_recovery_bugfix_plan.md](archive/completed/bugfix/character_identity_growth_contract_recovery_bugfix_plan.md) | Follow-up bugfix for identity-growth model contracts, provenance indices, review copying, and bounded retry recovery | completed |
 | [qq_group_public_scene_response_ordering_bugfix_plan.md](archive/completed/bugfix/qq_group_public_scene_response_ordering_bugfix_plan.md) | QQ multi-user public-scene composition and same-group response-ordering bugfix | completed |
 | [required_selection_partial_recovery_bugfix_plan.md](active/bugfix/required_selection_partial_recovery_bugfix_plan.md) | Reproduction-gated required-selection structural and complete-sibling-bid recovery bugfix plan | draft |
@@ -487,6 +487,17 @@ branch remained closed throughout verification.
 |---|---|
 | Moved from active short-term to completed archive | `unified_task_resolution_orchestrator_bigbang_plan.md` |
 
+### 2026-08-03 Cognition Core V2 short-horizon state composition completion
+
+The post-identity V2 global-state composition plan completed after the final
+DeepSeek remediation, authoritative deterministic regression, independent
+review approval, explicit user acceptance of the documented local-model,
+behavioral, and guarded-database exceptions, and final Stage 11 closeout.
+
+| Outcome | Plan |
+|---|---|
+| Moved from active bugfix to completed archive | `cognition_core_v2_short_horizon_global_state_composition_bigbang_plan.md` |
+
 ## Archive
 
 Completed and superseded records live under `archive/`. Use them for historical
@@ -517,6 +528,7 @@ plans.
 | [cognition_core_v2_prewarm_mention_content_query_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_prewarm_mention_content_query_bugfix_plan.md) |
 | [cognition_core_v2_intra_turn_transition_coherence_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_intra_turn_transition_coherence_bugfix_plan.md) |
 | [cognition_core_v2_prompt_budget_and_failure_containment_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_prompt_budget_and_failure_containment_bugfix_plan.md) |
+| [cognition_core_v2_short_horizon_global_state_composition_bigbang_plan.md](archive/completed/bugfix/cognition_core_v2_short_horizon_global_state_composition_bigbang_plan.md) |
 | [cognition_core_v2_retry_exhaustion_continuity_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_retry_exhaustion_continuity_bugfix_plan.md) |
 | [cognition_core_v2_semantic_appraisal_partial_failure_mitigation_plan.md](archive/completed/bugfix/cognition_core_v2_semantic_appraisal_partial_failure_mitigation_plan.md) |
 | [asuna_private_r18_affinity_harness_plan.md](archive/completed/bugfix/asuna_private_r18_affinity_harness_plan.md) |

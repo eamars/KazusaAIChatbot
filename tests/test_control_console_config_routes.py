@@ -4,6 +4,7 @@ from __future__ import annotations
 
 
 COGNITION_CORE_V2_ROUTES = (
+    "COGNITION_LLM_CHARACTER_CARRYOVER",
     "COGNITION_LLM_APPRAISAL_EVENT_AGENCY",
     "COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL",
     "COGNITION_LLM_APPRAISAL_MORAL_IDENTITY",
@@ -160,6 +161,7 @@ def test_config_routes_require_auth_and_csrf(monkeypatch, tmp_path) -> None:
 
     from fastapi.testclient import TestClient
 
+    _route_environment(monkeypatch)
     from control_console.app import create_app
     from control_console.auth import hash_operator_token
     from control_console.settings import ControlConsoleSettings
@@ -225,13 +227,13 @@ def test_brain_model_route_api_applies_and_resets_selected_route(
     snapshot = snapshot_response.json()
     assert snapshot["service_id"] == "brain"
     assert snapshot["service_state"]["actual_state"] == "running"
-    assert len(snapshot["routes"]) == 25
+    assert len(snapshot["routes"]) == 26
     core_routes = [
         route
         for route in snapshot["routes"]
         if route["group"] == "Cognition Core V2"
     ]
-    assert len(core_routes) == 12
+    assert len(core_routes) == 13
     assert "test-key" not in snapshot_response.text
 
     missing_csrf = client.put(

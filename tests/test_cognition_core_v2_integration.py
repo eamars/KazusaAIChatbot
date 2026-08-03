@@ -603,6 +603,11 @@ async def test_test_database_self_cognition_smoke(live_db: object) -> None:
     """Verify character-scoped cognition persists and restores its singleton."""
 
     await seed_shared_documents(live_db)
+    snapshot_document = await live_db.character_state.find_one(
+        {"_id": "global"},
+    )
+    if snapshot_document is None:
+        raise AssertionError("the shared character-state seed is missing")
     snapshot = await get_character_cognition_state()
     try:
         output = await run_cognition(
@@ -621,7 +626,11 @@ async def test_test_database_self_cognition_smoke(live_db: object) -> None:
         assert output["state_update"]["state_scope"] == "character"
         assert reloaded == replacement
     finally:
-        await replace_character_cognition_state(snapshot)
+        await live_db.character_state.replace_one(
+            {"_id": "global"},
+            snapshot_document,
+            upsert=False,
+        )
 
 
 @pytest.mark.live_db

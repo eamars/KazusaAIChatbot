@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -1075,6 +1075,11 @@ def create_app(
         """Return the owner-oriented character inspection envelope."""
 
         lookup_query = ConsoleLookupQuery.model_validate({"limit": limit})
+        states = _all_service_states(app_supervisor, services)
+        latest_context_consumption = await _latest_context_consumption(
+            states=states,
+            kazusa_client=kazusa_client,
+        )
         audit_writer.write_event(
             event_type="lookup_view",
             operator_id=operator.operator_id,
@@ -1085,6 +1090,8 @@ def create_app(
         )
         payload = await repository.character_entity(
             current_timestamp_utc=datetime.now(timezone.utc).isoformat(),
+            latest_context_consumption=latest_context_consumption,
+            include_operational_context=True,
             limit=lookup_query.limit,
         )
         return payload
@@ -1146,6 +1153,7 @@ def create_app(
             channel_type=lookup_query.channel_type or "",
             query=lookup_query.query,
             current_timestamp_utc=datetime.now(timezone.utc).isoformat(),
+            include_operational_context=True,
             limit=lookup_query.limit,
         )
         return payload
@@ -2307,6 +2315,72 @@ async def _load_operational_sources(
         "latest_self_cognition_graph": latest_self_cognition_graph,
     }
     return sources
+
+
+async def _latest_context_consumption(
+    *,
+    states: list[Any],
+    kazusa_client: Any,
+) -> dict[str, Any]:
+    """Read the exact latest public graph consumption when Brain is live."""
+
+    brain_record = _service_state_record(states, service_id="brain")
+    brain_state = _service_actual_state(brain_record)
+    brain_error = _service_last_error_preview(brain_record)
+    if not _brain_http_available(
+        brain_state,
+        last_error_preview=brain_error,
+    ):
+        return {
+            "status": "stale",
+            "reason_code": "brain_unavailable",
+        }
+    try:
+        graph = await kazusa_client.get_latest_cognition_graph()
+    except (AttributeError, httpx.HTTPError):
+        return {
+            "status": "unavailable",
+            "reason_code": "latest_graph_unavailable",
+        }
+    context = _context_consumption_from_graph(graph)
+    run_id = getattr(graph, "run_id", None)
+    generated_at = getattr(graph, "generated_at", None)
+    payload: dict[str, Any] = {
+        "status": "not_reported",
+        "reason_code": "context_not_reported",
+    }
+    if isinstance(run_id, str) and run_id:
+        payload["run_id"] = run_id
+    if isinstance(generated_at, datetime):
+        payload["generated_at"] = generated_at.isoformat()
+    if not context:
+        return payload
+    context_status = context.get("status")
+    if isinstance(context_status, str):
+        payload["status"] = context_status
+    payload["context"] = context
+    payload.pop("reason_code")
+    return payload
+
+
+def _context_consumption_from_graph(graph: Any) -> dict[str, Any]:
+    """Extract the source-owned context payload without reconstructing it."""
+
+    raw_nodes = getattr(graph, "nodes", None)
+    if not isinstance(raw_nodes, list):
+        return {}
+    for node in raw_nodes:
+        node_id = getattr(node, "id", None)
+        detail = getattr(node, "detail", None)
+        if isinstance(node, Mapping):
+            node_id = node.get("id")
+            detail = node.get("detail")
+        if node_id != "l2.reasoning" or not isinstance(detail, Mapping):
+            continue
+        context = detail.get("context_consumption")
+        if isinstance(context, Mapping):
+            return dict(context)
+    return {}
 
 
 def _project_health_page(

@@ -631,7 +631,24 @@ async def stage_1_goal_resolver(state: GlobalPersonaState) -> dict:
     core_output = resolved_state.get("cognition_core_output")
     if not isinstance(core_output, Mapping):
         raise ValueError("V2 resolver completed without cognition_core_output")
-    await commit_cognition_output(core_output)  # type: ignore[arg-type]
+    state_update = core_output.get("state_update")
+    if (
+        isinstance(state_update, Mapping)
+        and state_update.get("state_scope") == "character"
+    ):
+        expected_character_updated_at = resolved_state.get(
+            "character_cognition_base_updated_at"
+        )
+        await commit_cognition_output(  # type: ignore[arg-type]
+            core_output,
+            expected_character_updated_at=(
+                expected_character_updated_at
+                if isinstance(expected_character_updated_at, str)
+                else None
+            ),
+        )
+    else:
+        await commit_cognition_output(core_output)  # type: ignore[arg-type]
     resolved_state["cognition_state_committed"] = True
     return_value = dict(resolved_state)
     return return_value
@@ -874,6 +891,12 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
     ):
         if identity_field in state:
             initial_persona_state[identity_field] = state[identity_field]
+    for turn_context_field in (
+        "interaction_style_context",
+        "settled_relevance_context_consumption",
+    ):
+        if turn_context_field in state:
+            initial_persona_state[turn_context_field] = state[turn_context_field]
     
     results = await persona_graph.ainvoke(initial_persona_state)
     

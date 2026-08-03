@@ -91,7 +91,7 @@ async def test_daily_sleep_recovery_persists_once_without_llm(monkeypatch):
         updated_at="2026-07-14T00:00:00Z",
     )
     persisted_docs: list[dict] = []
-    replace_state = AsyncMock()
+    compare_and_replace_state = AsyncMock(return_value=True)
     monkeypatch.setattr(
         affect_settling.repository,
         "reflection_run_by_id",
@@ -104,8 +104,8 @@ async def test_daily_sleep_recovery_persists_once_without_llm(monkeypatch):
     )
     monkeypatch.setattr(
         affect_settling.db,
-        "replace_character_cognition_state",
-        replace_state,
+        "compare_and_replace_character_cognition_state",
+        compare_and_replace_state,
     )
     monkeypatch.setattr(
         affect_settling.db,
@@ -125,7 +125,15 @@ async def test_daily_sleep_recovery_persists_once_without_llm(monkeypatch):
     )
 
     assert result.succeeded_count == 1
-    replace_state.assert_awaited_once()
+    compare_and_replace_state.assert_awaited_once()
+    assert (
+        compare_and_replace_state.await_args.kwargs["expected_updated_at"]
+        == state["updated_at"]
+    )
+    assert (
+        compare_and_replace_state.await_args.kwargs["replacement"]["updated_at"]
+        != state["updated_at"]
+    )
     assert persisted_docs[-1]["status"] == REFLECTION_STATUS_SUCCEEDED
     output = persisted_docs[-1]["output"]["sleep_recovery"]
     assert output["local_date_key"] == "2026-07-14"
@@ -136,7 +144,7 @@ async def test_daily_sleep_recovery_persists_once_without_llm(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_completed_local_date_reentry_does_not_mutate_state(monkeypatch):
-    replace_state = AsyncMock()
+    compare_and_replace_state = AsyncMock()
     monkeypatch.setattr(
         affect_settling.repository,
         "reflection_run_by_id",
@@ -147,8 +155,8 @@ async def test_completed_local_date_reentry_does_not_mutate_state(monkeypatch):
     )
     monkeypatch.setattr(
         affect_settling.db,
-        "replace_character_cognition_state",
-        replace_state,
+        "compare_and_replace_character_cognition_state",
+        compare_and_replace_state,
     )
 
     result = await affect_settling.run_daily_affect_settling(
@@ -158,4 +166,4 @@ async def test_completed_local_date_reentry_does_not_mutate_state(monkeypatch):
     )
 
     assert result.skipped_count == 1
-    replace_state.assert_not_awaited()
+    compare_and_replace_state.assert_not_awaited()

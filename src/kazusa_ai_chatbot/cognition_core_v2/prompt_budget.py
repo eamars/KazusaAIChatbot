@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from typing import Any
 
 
@@ -11,6 +12,71 @@ class PromptBudgetError(ValueError):
 
 
 def fit_evidence_texts_to_budget(
+    payload: dict[str, Any] | list[dict[str, Any]],
+    evidence_rows: list[dict[str, Any]] | None = None,
+    *,
+    text_field: str,
+    maximum_chars: int | None = None,
+    minimum_text_chars: int = 1,
+    budget: int | None = None,
+) -> str | list[dict[str, Any]]:
+    """Serialize or middle-truncate low-priority evidence until it fits.
+
+    Args:
+        payload: Complete prompt payload containing ``evidence_rows``, or an
+            ordered row list for standalone deterministic fitting.
+        evidence_rows: Ordered, caller-owned evidence rows inside ``payload``.
+        text_field: Semantic text field eligible for bounded truncation.
+        maximum_chars: Maximum serialized payload length for aggregate mode.
+        minimum_text_chars: Minimum retained text length for each evidence row.
+        budget: Maximum serialized row-list length for standalone mode.
+
+    Returns:
+        The maximally retained JSON serialization in aggregate mode, or a
+        copied fitted row list in standalone mode.
+
+    Raises:
+        PromptBudgetError: If required structure still exceeds the cap after
+            every evidence text reaches its permitted floor.
+    """
+
+    standalone_mode = isinstance(payload, list)
+    if standalone_mode:
+        if evidence_rows is not None or maximum_chars is not None or budget is None:
+            raise ValueError("standalone prompt fitting requires only budget")
+        copied_rows = deepcopy(payload)
+        standalone_payload = {"evidence": copied_rows}
+        fitted_serialization = _fit_payload_evidence_texts(
+            standalone_payload,
+            copied_rows,
+            text_field=text_field,
+            maximum_chars=budget,
+            minimum_text_chars=minimum_text_chars,
+        )
+        fitted_payload = json.loads(fitted_serialization)
+        fitted_rows = fitted_payload["evidence"]
+        return fitted_rows
+    if evidence_rows is None or maximum_chars is None or budget is not None:
+        raise ValueError(
+            "aggregate prompt fitting requires payload, rows, and maximum_chars"
+        )
+    if maximum_chars <= 0:
+        raise ValueError("maximum prompt characters must be positive")
+    if minimum_text_chars <= 0:
+        raise ValueError("minimum evidence text characters must be positive")
+    if not isinstance(payload, dict):
+        raise TypeError("aggregate prompt payload must be a mapping")
+    fitted_payload = _fit_payload_evidence_texts(
+        payload,
+        evidence_rows,
+        text_field=text_field,
+        maximum_chars=maximum_chars,
+        minimum_text_chars=minimum_text_chars,
+    )
+    return fitted_payload
+
+
+def _fit_payload_evidence_texts(
     payload: dict[str, Any],
     evidence_rows: list[dict[str, Any]],
     *,
@@ -18,27 +84,7 @@ def fit_evidence_texts_to_budget(
     maximum_chars: int,
     minimum_text_chars: int,
 ) -> str:
-    """Serialize or middle-truncate low-priority evidence until it fits.
-
-    Args:
-        payload: Complete prompt payload containing ``evidence_rows``.
-        evidence_rows: Ordered, caller-owned evidence rows inside ``payload``.
-        text_field: Semantic text field eligible for bounded truncation.
-        maximum_chars: Maximum serialized payload length.
-        minimum_text_chars: Minimum retained text length for each evidence row.
-
-    Returns:
-        The maximally retained deterministic JSON serialization within budget.
-
-    Raises:
-        PromptBudgetError: If required structure still exceeds the cap after
-            every evidence text reaches its permitted floor.
-    """
-
-    if maximum_chars <= 0:
-        raise ValueError("maximum prompt characters must be positive")
-    if minimum_text_chars <= 0:
-        raise ValueError("minimum evidence text characters must be positive")
+    """Serialize or middle-truncate ordered evidence within one fixed budget."""
 
     serialized_payload = json.dumps(
         payload,

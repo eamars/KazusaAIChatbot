@@ -110,6 +110,8 @@ class GlobalPersonaState(TypedDict):
     internal_monologue_residue_context: NotRequired[str]
     past_dialog_cognition_context: NotRequired[str]
     action_availability_runtime: NotRequired[dict[str, object]]
+    interaction_style_context: NotRequired[dict]
+    settled_relevance_context_consumption: NotRequired[dict]
 
     # Debug
     debug_modes: DebugModes
@@ -137,6 +139,7 @@ class GlobalPersonaState(TypedDict):
     goal_resolution: NotRequired[GoalResolutionV2]
     cognition_core_output: NotRequired[dict]
     cognition_state_update: NotRequired[dict]
+    character_cognition_base_updated_at: NotRequired[str]
     cognition_state_committed: NotRequired[bool]
     text_surface_input_v2: NotRequired[TextSurfaceInputV2]
     text_surface_output_v2: NotRequired[TextSurfaceOutputV2]
@@ -210,6 +213,7 @@ class CognitionState(TypedDict):
     past_dialog_cognition_context: NotRequired[str]
     action_availability_runtime: NotRequired[dict[str, object]]
     interaction_style_context: NotRequired[dict]
+    settled_relevance_context_consumption: NotRequired[dict]
     group_engagement_action_context: NotRequired[dict]
     action_selection_context: NotRequired[dict]
     coding_run_followup: NotRequired[dict]

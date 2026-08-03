@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -218,8 +218,34 @@ async def execute_dependency_graph(
             0,
             int((max(execution.ended_at.values()) - execution_started_at) * 1000),
         )
-        execution.overlap_ms = max(
-            0,
-            int((sum(durations) - execution.critical_path_ms / 1000) * 1000),
+        execution.overlap_ms = _overlap_duration_ms(
+            execution.started_at,
+            execution.ended_at,
         )
     return execution
+
+
+def _overlap_duration_ms(
+    started_at: Mapping[str, float],
+    ended_at: Mapping[str, float],
+) -> int:
+    """Measure wall-clock time with at least two active branch intervals."""
+
+    events: list[tuple[float, int]] = []
+    for branch_id, started in started_at.items():
+        ended = ended_at.get(branch_id)
+        if ended is None:
+            continue
+        events.extend(((started, 1), (ended, -1)))
+    if not events:
+        return 0
+    events.sort(key=lambda event: (event[0], event[1]))
+    active = 0
+    previous = events[0][0]
+    overlap_seconds = 0.0
+    for timestamp, delta in events:
+        if active > 1:
+            overlap_seconds += max(0.0, timestamp - previous)
+        active += delta
+        previous = timestamp
+    return max(0, int(overlap_seconds * 1000))

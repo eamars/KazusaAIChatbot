@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
+
+from kazusa_ai_chatbot.cognition_core_v2.state_reducers import (
+    apply_character_elapsed_decay,
+)
 
 
 RAW_STATE_KEYS = frozenset({
@@ -24,6 +30,43 @@ RAW_STATE_KEYS = frozenset({
     "scope",
     "kind",
 })
+
+CHARACTER_OPERATIONAL_STATE_VIEW_SCHEMA = "character_operational_state_view.v1"
+CHARACTER_OPERATIONAL_CONTEXT_SCHEMA = "character_operational_context.v1"
+RELATIONSHIP_OPERATIONAL_CONTEXT_SCHEMA = "relationship_operational_context.v1"
+MAX_CHARACTER_OPERATIONAL_AFFECT_ROWS = 21
+MAX_CHARACTER_OPERATIONAL_PRESSURE_ROWS = 8
+MAX_CONTEXT_AFFECT_ROWS = 3
+MAX_CONTEXT_PRESSURE_ROWS = 4
+MAX_CHARACTER_OPERATIONAL_CONTEXT_CHARS = 1200
+MAX_RELATIONSHIP_CAUSAL_ROWS = 2
+MAX_RELATIONSHIP_AFFECT_ROWS = 2
+MAX_RELATIONSHIP_CAUSAL_SUMMARY_CHARS = 160
+OPERATIONAL_PRESSURE_THRESHOLD = 40
+
+_CHARACTER_OPERATIONAL_CONSUMER_ROLES = frozenset({
+    "settled_relevance",
+    "appraisal branch",
+    "goal",
+    "surface",
+})
+_RELATIONSHIP_REQUIRED_EMOTION_IDS = frozenset({
+    "love_attachment",
+    "jealousy",
+    "loneliness",
+})
+_ENTITY_PRESSURE_STATUSES = {
+    "goals": {"pursuing", "blocked"},
+    "threats": {"active"},
+    "active_events": {"active"},
+    "knowledge_gaps": {"open", "reduced"},
+}
+_ENTITY_KIND_BY_FIELD = {
+    "goals": "goal",
+    "threats": "threat",
+    "active_events": "event",
+    "knowledge_gaps": "knowledge_gap",
+}
 
 
 @dataclass(frozen=True)
@@ -86,9 +129,161 @@ def project_duration(started_at: str, now: str) -> str:
 
 
 def project_relationship_context(
+    user_state: Mapping[str, Any],
+    *,
+    effective_at: str | None = None,
+) -> dict[str, Any]:
+    """Project current-user relationship state for its permitted consumer.
+
+    A complete user cognition state produces the canonical bounded operational
+    projection. Existing prompt-only callers may pass a relationship mapping;
+    they retain the established qualitative projection and do not receive
+    causal rows or raw operational values.
+    """
+
+    if user_state.get("state_scope") == "user":
+        if effective_at is None:
+            raise ValueError(
+                "relationship operational projection requires effective_at"
+            )
+        projected_context = _project_user_relationship_context(
+            user_state,
+            effective_at=effective_at,
+        )
+        return projected_context
+    if effective_at is not None:
+        raise ValueError(
+            "relationship mappings do not support an operational effective_at"
+        )
+    prompt_context = _project_relationship_prompt_context(user_state)
+    return prompt_context
+
+
+def project_character_operational_state(
+    state: Mapping[str, Any],
+    *,
+    effective_at: str,
+) -> dict[str, Any]:
+    """Build the complete redacted operational view from character state.
+
+    The persisted document remains untouched. Ordinary elapsed fading is
+    applied only to the in-memory effective view, while source and view hashes
+    retain auditable identities for the persisted source and redacted result.
+    """
+
+    if state["state_scope"] != "character":
+        raise ValueError(
+            "character operational projection requires character state"
+        )
+    source_updated_at = state["updated_at"]
+    elapsed_seconds = _elapsed_seconds(source_updated_at, effective_at)
+    if _has_complete_activation_rows(state["affect_activations"]):
+        effective_state = apply_character_elapsed_decay(
+            state,
+            elapsed_seconds=elapsed_seconds,
+        )
+    else:
+        effective_state = deepcopy(dict(state))
+    affect_rows = _project_character_affect_rows(
+        effective_state,
+        effective_at=effective_at,
+    )
+    pressure_rows = _project_character_pressure_rows(
+        effective_state,
+        effective_at=effective_at,
+    )
+    source_digest = _canonical_digest(dict(state))
+    view_without_digest = {
+        "schema_version": CHARACTER_OPERATIONAL_STATE_VIEW_SCHEMA,
+        "source_updated_at": source_updated_at,
+        "effective_at": effective_at,
+        "source_digest": source_digest,
+        "affect": affect_rows,
+        "pressures": pressure_rows,
+    }
+    view = {
+        **view_without_digest,
+        "view_digest": _canonical_digest(view_without_digest),
+    }
+    return view
+
+
+def select_character_operational_context(
+    state_view: Mapping[str, Any],
+    *,
+    consumer_role: str,
+) -> dict[str, Any]:
+    """Select one bounded model-facing context from a full operational view."""
+
+    if consumer_role not in _CHARACTER_OPERATIONAL_CONSUMER_ROLES:
+        raise ValueError(f"unsupported operational consumer role: {consumer_role}")
+    if state_view["schema_version"] != CHARACTER_OPERATIONAL_STATE_VIEW_SCHEMA:
+        raise ValueError("unsupported character operational state view")
+    affect_rows = [
+        deepcopy(dict(row))
+        for row in state_view["affect"][:MAX_CONTEXT_AFFECT_ROWS]
+        if isinstance(row, Mapping)
+    ]
+    pressure_limit = (
+        0
+        if consumer_role == "surface"
+        else MAX_CONTEXT_PRESSURE_ROWS
+    )
+    pressure_rows = [
+        deepcopy(dict(row))
+        for row in state_view["pressures"][:pressure_limit]
+        if isinstance(row, Mapping)
+    ]
+    context_without_digest = {
+        "schema_version": CHARACTER_OPERATIONAL_CONTEXT_SCHEMA,
+        "source_updated_at": state_view["source_updated_at"],
+        "effective_at": state_view["effective_at"],
+        "view_digest": state_view["view_digest"],
+        "consumer_role": consumer_role,
+        "affect": affect_rows,
+        "pressures": pressure_rows,
+    }
+    _fit_operational_context_to_budget(context_without_digest)
+    context = {
+        **context_without_digest,
+        "context_digest": _canonical_digest(context_without_digest),
+    }
+    return context
+
+
+def _has_complete_activation_rows(activations: Sequence[Any]) -> bool:
+    """Return whether every activation can undergo deterministic fading."""
+
+    return all(_is_complete_activation(activation) for activation in activations)
+
+
+def _is_complete_activation(activation: Any) -> bool:
+    """Return whether one activation has the lifecycle fields projection needs."""
+
+    required_fields = {
+        "emotion_id",
+        "primary_root",
+        "root_refs",
+        "phase",
+        "score",
+        "peak_score",
+        "trend",
+        "cause_status",
+        "started_at",
+        "updated_at",
+        "last_reinforced_at",
+    }
+    is_complete = (
+        isinstance(activation, Mapping)
+        and required_fields.issubset(activation)
+    )
+    return is_complete
+
+
+def _project_relationship_prompt_context(
     relationship: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Project native relationship axes into qualitative prompt context."""
+    """Project a relationship mapping into the established prompt-safe bands."""
 
     axes: dict[str, str] = {}
     for field_name in (
@@ -114,10 +309,498 @@ def project_relationship_context(
                     "boundary_safety",
                 },
             )
-    return {
+    context = {
         "relationship_summary": "当前关系背景",
         "axes": axes,
     }
+    return context
+
+
+def _project_user_relationship_context(
+    user_state: Mapping[str, Any],
+    *,
+    effective_at: str,
+) -> dict[str, Any]:
+    """Project one user's native relationship rows without cross-user state."""
+
+    relationship = user_state["relationship"]
+    relationship_id = relationship["relationship_id"]
+    axes = {
+        field_name: relationship[field_name]
+        for field_name in (
+            "familiarity",
+            "positive_regard",
+            "trust",
+            "attachment",
+            "desired_closeness",
+            "perceived_closeness",
+            "care",
+            "boundary_safety",
+            "exclusivity",
+            "unresolved_injury",
+            "salience",
+        )
+    }
+    causal_rows = _project_relationship_causal_rows(
+        user_state,
+        relationship_id=relationship_id,
+        effective_at=effective_at,
+    )
+    affect_rows = _project_relationship_affect_rows(
+        user_state,
+        relationship_id=relationship_id,
+        effective_at=effective_at,
+    )
+    relationship_context = {
+        "schema_version": RELATIONSHIP_OPERATIONAL_CONTEXT_SCHEMA,
+        "relationship_id": relationship_id,
+        "axes": axes,
+        "causal_context": causal_rows,
+        "affect": affect_rows,
+        "relationship_freshness": project_duration(
+            relationship["updated_at"],
+            effective_at,
+        ),
+        "evidence_freshness": _relationship_evidence_freshness(
+            relationship["evidence_refs"],
+            effective_at=effective_at,
+        ),
+    }
+    return relationship_context
+
+
+def _project_character_affect_rows(
+    state: Mapping[str, Any],
+    *,
+    effective_at: str,
+) -> list[dict[str, str]]:
+    """Project active character affect rows without root identifiers."""
+
+    sortable_rows: list[tuple[int, int, str, dict[str, str]]] = []
+    for activation in state["affect_activations"]:
+        if not _is_complete_activation(activation):
+            continue
+        emotion_id = activation["emotion_id"]
+        primary_root = activation["primary_root"]
+        if (
+            emotion_id in _RELATIONSHIP_REQUIRED_EMOTION_IDS
+            or not isinstance(primary_root, Mapping)
+            or primary_root["scope"] != "character"
+            or activation["phase"] not in {"active", "fading"}
+        ):
+            continue
+        score = activation["score"]
+        if isinstance(score, bool) or not isinstance(score, int):
+            continue
+        row = {
+            "emotion_id": emotion_id,
+            "intensity": project_numeric_band(score),
+            "phase": activation["phase"],
+            "trend": activation["trend"],
+            "root_kind": primary_root["kind"],
+            "cause_class": _activation_cause_class(
+                state,
+                primary_root,
+                emotion_id=emotion_id,
+            ),
+            "freshness": project_duration(
+                activation["updated_at"],
+                effective_at,
+            ),
+        }
+        phase_rank = 0 if activation["phase"] == "active" else 1
+        sortable_rows.append((
+            phase_rank,
+            -score,
+            activation["updated_at"],
+            row,
+        ))
+    sortable_rows.sort(key=lambda item: item[:3])
+    affect_rows = [
+        row
+        for _, _, _, row in sortable_rows[:MAX_CHARACTER_OPERATIONAL_AFFECT_ROWS]
+    ]
+    return affect_rows
+
+
+def _project_character_pressure_rows(
+    state: Mapping[str, Any],
+    *,
+    effective_at: str,
+) -> list[dict[str, str]]:
+    """Project eligible character pressure rows in stable urgency order."""
+
+    sortable_rows: list[tuple[int, str, dict[str, str]]] = []
+    for field_name, statuses in _ENTITY_PRESSURE_STATUSES.items():
+        entity_kind = _ENTITY_KIND_BY_FIELD[field_name]
+        for entity in state[field_name]:
+            if not isinstance(entity, Mapping):
+                continue
+            salience = entity["salience"]
+            if (
+                entity["status"] not in statuses
+                or isinstance(salience, bool)
+                or not isinstance(salience, int)
+                or salience < OPERATIONAL_PRESSURE_THRESHOLD
+            ):
+                continue
+            row = {
+                "kind": entity_kind,
+                "salience": project_numeric_band(salience),
+                "lifecycle": entity["status"],
+                "cause_class": _cause_class_for_entity(
+                    entity_kind,
+                    entity,
+                ),
+                "freshness": project_duration(
+                    entity["updated_at"],
+                    effective_at,
+                ),
+            }
+            sortable_rows.append((-salience, entity["updated_at"], row))
+    for drive_id, drive in state["drives"].items():
+        pressure = drive["pressure"]
+        if pressure < OPERATIONAL_PRESSURE_THRESHOLD:
+            continue
+        row = {
+            "kind": "drive",
+            "salience": project_numeric_band(pressure),
+            "lifecycle": "active",
+            "cause_class": _cause_class_for_drive(drive_id, pressure),
+            "freshness": project_duration(state["updated_at"], effective_at),
+        }
+        sortable_rows.append((-pressure, drive_id, row))
+    meaning = state["meaning_state"]
+    meaning_pressure = max(
+        0,
+        100 - min(meaning["purpose_coherence"], meaning["agency"]),
+    )
+    if meaning_pressure >= OPERATIONAL_PRESSURE_THRESHOLD:
+        row = {
+            "kind": "meaning",
+            "salience": project_numeric_band(meaning_pressure),
+            "lifecycle": "active",
+            "cause_class": "meaning_pressure",
+            "freshness": project_duration(state["updated_at"], effective_at),
+        }
+        sortable_rows.append((-meaning_pressure, "meaning", row))
+    sortable_rows.sort(key=lambda item: item[:2])
+    pressure_rows = [
+        row
+        for _, _, row in sortable_rows[:MAX_CHARACTER_OPERATIONAL_PRESSURE_ROWS]
+    ]
+    return pressure_rows
+
+
+def _project_relationship_causal_rows(
+    user_state: Mapping[str, Any],
+    *,
+    relationship_id: str,
+    effective_at: str,
+) -> list[dict[str, str]]:
+    """Select the two strongest native rows targeting one relationship."""
+
+    sortable_rows: list[tuple[int, str, dict[str, str]]] = []
+    for field_name, entity_kind in _ENTITY_KIND_BY_FIELD.items():
+        for entity in user_state[field_name]:
+            if (
+                not isinstance(entity, Mapping)
+                or not _targets_relationship(entity, relationship_id)
+            ):
+                continue
+            summary = _normalized_summary(entity["description"])
+            row = {
+                "entity_kind": entity_kind,
+                "semantic_summary": summary,
+                "salience": project_numeric_band(entity["salience"]),
+                "lifecycle": entity["status"],
+                "freshness": project_duration(entity["updated_at"], effective_at),
+            }
+            sortable_rows.append((
+                -entity["salience"],
+                entity["updated_at"],
+                row,
+            ))
+    sortable_rows.sort(key=lambda item: item[:2])
+    causal_rows = [
+        row
+        for _, _, row in sortable_rows[:MAX_RELATIONSHIP_CAUSAL_ROWS]
+    ]
+    return causal_rows
+
+
+def _project_relationship_affect_rows(
+    user_state: Mapping[str, Any],
+    *,
+    relationship_id: str,
+    effective_at: str,
+) -> list[dict[str, str]]:
+    """Select the two strongest affects rooted in one relationship."""
+
+    sortable_rows: list[tuple[int, str, dict[str, str]]] = []
+    for activation in user_state["affect_activations"]:
+        if not isinstance(activation, Mapping):
+            continue
+        root = activation["primary_root"]
+        if (
+            not isinstance(root, Mapping)
+            or root["kind"] != "relationship"
+            or root["entity_id"] != relationship_id
+            or activation["phase"] not in {"active", "fading"}
+        ):
+            continue
+        row = {
+            "emotion_id": activation["emotion_id"],
+            "intensity": project_numeric_band(activation["score"]),
+            "phase": activation["phase"],
+            "trend": activation["trend"],
+            "freshness": project_duration(
+                activation["updated_at"],
+                effective_at,
+            ),
+        }
+        sortable_rows.append((
+            -activation["score"],
+            activation["updated_at"],
+            row,
+        ))
+    sortable_rows.sort(key=lambda item: item[:2])
+    affect_rows = [
+        row
+        for _, _, row in sortable_rows[:MAX_RELATIONSHIP_AFFECT_ROWS]
+    ]
+    return affect_rows
+
+
+def _activation_cause_class(
+    state: Mapping[str, Any],
+    root: Mapping[str, Any],
+    *,
+    emotion_id: str,
+) -> str:
+    """Map one activation root to its closed source-free cause class."""
+
+    root_kind = root["kind"]
+    if root_kind == "meaning":
+        return "meaning_pressure"
+    if root_kind == "drive":
+        drive = state["drives"][root["entity_id"]]
+        return _cause_class_for_drive(root["entity_id"], drive["pressure"])
+    entity = _root_entity(state, root)
+    if entity is None:
+        return (
+            "connection_warmth"
+            if emotion_id in {"joy", "gratitude", "compassion_empathy"}
+            else "general_activation"
+        )
+    cause_class = _cause_class_for_entity(
+        root_kind,
+        entity,
+        emotion_id=emotion_id,
+    )
+    return cause_class
+
+
+def _cause_class_for_entity(
+    entity_kind: str,
+    entity: Mapping[str, Any],
+    *,
+    emotion_id: str | None = None,
+) -> str:
+    """Classify native pressure with the frozen first-match predicate order."""
+
+    if entity_kind == "threat":
+        return "safety_pressure"
+    if entity_kind == "knowledge_gap":
+        return "uncertainty_pressure"
+    if entity_kind == "goal":
+        goal_kind = entity["goal_kind"]
+        if goal_kind == "autonomy_boundary":
+            return "boundary_pressure"
+        if goal_kind == "moral_repair":
+            return "repair_pressure"
+        if goal_kind == "safety":
+            return "safety_pressure"
+        if goal_kind == "loss_recovery":
+            return "loss_pressure"
+        if goal_kind == "epistemic_exploration":
+            return "uncertainty_pressure"
+        if goal_kind == "meaning_reconstruction":
+            return "meaning_pressure"
+        if goal_kind == "self_improvement":
+            return "competence_pressure"
+        return "goal_pressure"
+    if entity_kind == "event":
+        if _event_axis_at_least(
+            entity,
+            ("unfairness", "norm_violation", "exposure", "identity_threat"),
+        ):
+            return "boundary_pressure"
+        if (
+            entity["repair_need"] >= OPERATIONAL_PRESSURE_THRESHOLD
+            and _event_axis_at_least(entity, ("harm", "norm_violation"))
+        ):
+            return "repair_pressure"
+        if entity["harm"] >= OPERATIONAL_PRESSURE_THRESHOLD:
+            return "safety_pressure"
+        if entity["temporal_loss"] >= OPERATIONAL_PRESSURE_THRESHOLD:
+            return "loss_pressure"
+        if entity["memory_warmth"] >= OPERATIONAL_PRESSURE_THRESHOLD:
+            return "connection_warmth"
+        if (
+            entity["expectation_mismatch"] >= OPERATIONAL_PRESSURE_THRESHOLD
+            and _has_group_or_third_party_role(entity)
+        ):
+            return "relationship_strain"
+    if emotion_id in {"joy", "gratitude", "compassion_empathy"}:
+        return "connection_warmth"
+    return "general_activation"
+
+
+def _cause_class_for_drive(drive_id: str, pressure: int) -> str:
+    """Map one active drive pressure to its closed operational class."""
+
+    if (
+        drive_id == "competence"
+        and pressure >= OPERATIONAL_PRESSURE_THRESHOLD
+    ):
+        return "competence_pressure"
+    return "goal_pressure"
+
+
+def _root_entity(
+    state: Mapping[str, Any],
+    root: Mapping[str, Any],
+) -> Mapping[str, Any] | None:
+    """Find the native entity referenced by one character activation root."""
+
+    field_name = {
+        "goal": "goals",
+        "threat": "threats",
+        "event": "active_events",
+        "knowledge_gap": "knowledge_gaps",
+    }.get(root["kind"])
+    if field_name is None:
+        return None
+    for entity in state[field_name]:
+        if entity["entity_id"] == root["entity_id"]:
+            matched_entity = entity
+            return matched_entity
+    return None
+
+
+def _event_axis_at_least(
+    entity: Mapping[str, Any],
+    field_names: tuple[str, ...],
+) -> bool:
+    """Return whether any frozen event axis reaches the projection threshold."""
+
+    return any(
+        entity[field_name] >= OPERATIONAL_PRESSURE_THRESHOLD
+        for field_name in field_names
+    )
+
+
+def _has_group_or_third_party_role(entity: Mapping[str, Any]) -> bool:
+    """Return whether an event's retained role is group or third-party scoped."""
+
+    return any(
+        isinstance(role_ref, Mapping)
+        and role_ref["entity_kind"] in {"group", "third_party"}
+        for role_ref in entity["role_refs"]
+    )
+
+
+def _targets_relationship(entity: Mapping[str, Any], relationship_id: str) -> bool:
+    """Return whether an entity keeps a relationship-scoped causal role."""
+
+    return any(
+        isinstance(role_ref, Mapping)
+        and role_ref["entity_kind"] == "relationship"
+        and role_ref["entity_id"] == relationship_id
+        for role_ref in entity["role_refs"]
+    )
+
+
+def _relationship_evidence_freshness(
+    evidence_refs: Sequence[Mapping[str, Any]],
+    *,
+    effective_at: str,
+) -> str:
+    """Return the latest relationship evidence age without exposing evidence."""
+
+    occurred_at_values = [
+        evidence_ref["occurred_at"]
+        for evidence_ref in evidence_refs
+        if isinstance(evidence_ref, Mapping)
+        and isinstance(evidence_ref.get("occurred_at"), str)
+    ]
+    if not occurred_at_values:
+        return "无证据"
+    latest_occurred_at = max(occurred_at_values)
+    freshness = project_duration(latest_occurred_at, effective_at)
+    return freshness
+
+
+def _normalized_summary(value: str) -> str:
+    """Normalize and bound one relationship-scoped causal summary."""
+
+    normalized = " ".join(value.split())
+    if len(normalized) <= MAX_RELATIONSHIP_CAUSAL_SUMMARY_CHARS:
+        return normalized
+    head_length = MAX_RELATIONSHIP_CAUSAL_SUMMARY_CHARS // 2
+    tail_length = MAX_RELATIONSHIP_CAUSAL_SUMMARY_CHARS - head_length - 1
+    summary = (
+        f"{normalized[:head_length]}…{normalized[-tail_length:]}"
+    )
+    return summary
+
+
+def _elapsed_seconds(source_updated_at: str, effective_at: str) -> int:
+    """Return non-negative elapsed UTC seconds for a read-time state view."""
+
+    elapsed = _parse_utc(effective_at) - _parse_utc(source_updated_at)
+    elapsed_seconds = max(0, int(elapsed.total_seconds()))
+    return elapsed_seconds
+
+
+def _canonical_digest(value: Mapping[str, Any]) -> str:
+    """Hash one redacted or persisted mapping with stable JSON serialization."""
+
+    serialized = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    digest = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+    return digest
+
+
+def _fit_operational_context_to_budget(context: dict[str, Any]) -> None:
+    """Remove lowest-priority selected rows until the fixed context cap fits."""
+
+    while _serialized_character_count(context) > MAX_CHARACTER_OPERATIONAL_CONTEXT_CHARS:
+        if context["pressures"]:
+            context["pressures"].pop()
+            continue
+        if context["affect"]:
+            context["affect"].pop()
+            continue
+        break
+
+
+def _serialized_character_count(value: Mapping[str, Any]) -> int:
+    """Measure the complete deterministic JSON representation for a context."""
+
+    serialized = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return len(serialized)
 
 
 def project_trend(previous: int, current: int) -> str:
@@ -137,6 +820,7 @@ def project_state_for_prompt(
     character_constraints: Mapping[str, Any],
     character_identity_context: Mapping[str, Mapping[str, object]],
     relationship_context: Mapping[str, Any] | None = None,
+    character_operational_context: Mapping[str, Any] | None = None,
     evidence: Sequence[Mapping[str, Any]] = (),
 ) -> PromptProjectionV2:
     """Project all prompt-visible state into semantic descriptors.
@@ -180,15 +864,35 @@ def project_state_for_prompt(
                 _project_entity(handle, entity, state["updated_at"])
             )
     relationship = state.get("relationship")
-    if relationship is None:
+    if (
+        isinstance(relationship_context, Mapping)
+        and relationship_context.get("schema_version")
+        == RELATIONSHIP_OPERATIONAL_CONTEXT_SCHEMA
+    ):
         relationship = relationship_context
     if isinstance(relationship, Mapping):
+        relationship_id = relationship.get("relationship_id")
+        if not isinstance(relationship_id, str) or not relationship_id:
+            raise ValueError("relationship projection requires relationship id")
         handle_to_ref["r1"] = {
             "scope": "user",
             "kind": "relationship",
-            "entity_id": relationship["relationship_id"],
+            "entity_id": relationship_id,
         }
-        payload["relationship"] = _project_relationship(relationship)
+        if relationship.get("schema_version") == (
+            RELATIONSHIP_OPERATIONAL_CONTEXT_SCHEMA
+        ):
+            payload["relationship"] = project_operational_relationship_context(
+                relationship,
+            )
+        else:
+            payload["relationship"] = _project_relationship(relationship)
+    if isinstance(character_operational_context, Mapping):
+        payload["character_operational_context"] = (
+            _project_operational_character_context(
+                character_operational_context,
+            )
+        )
     for activation in state["affect_activations"]:
         payload["affect"].append(_project_activation(activation, state))
     for index, drive_id in enumerate(state.get("drives", {}), start=1):
@@ -266,17 +970,26 @@ def project_state_for_prompt(
 
 
 def validate_prompt_projection(payload: Mapping[str, Any]) -> None:
-    """Reject raw state fields or private sentinel values in model payloads."""
+    """Reject raw state fields except canonical semantic pressure kinds."""
 
-    def visit(value: Any) -> None:
+    def visit(value: Any, path: tuple[object, ...] = ()) -> None:
         if isinstance(value, Mapping):
             for key, nested in value.items():
-                if key in RAW_STATE_KEYS:
-                    raise ValueError(f"raw state key leaked into prompt: {key}")
-                visit(nested)
+                is_semantic_pressure_kind = (
+                    key == "kind"
+                    and len(path) == 3
+                    and path[0] == "character_operational_context"
+                    and path[1] == "pressures"
+                    and isinstance(path[2], int)
+                )
+                if key in RAW_STATE_KEYS and not is_semantic_pressure_kind:
+                    raise ValueError(
+                        f"raw state key leaked into prompt: {key}"
+                    )
+                visit(nested, (*path, key))
         elif isinstance(value, list):
-            for nested in value:
-                visit(nested)
+            for index, nested in enumerate(value):
+                visit(nested, (*path, index))
 
     visit(payload)
 
@@ -347,6 +1060,92 @@ def _project_relationship(relationship: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "handle": "r1",
         **project_relationship_context(relationship),
+    }
+
+
+def project_operational_relationship_context(
+    relationship_context: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Project the canonical relationship context without its durable id."""
+
+    axes = relationship_context["axes"]
+    if not isinstance(axes, Mapping):
+        raise ValueError("relationship operational axes must be a mapping")
+    projected_axes = {
+        field_name: project_numeric_band(
+            value,
+            signed=field_name in {
+                "positive_regard",
+                "trust",
+                "boundary_safety",
+            },
+        )
+        for field_name, value in axes.items()
+    }
+    return {
+        "handle": "r1",
+        "axes": projected_axes,
+        "causal_context": [
+            dict(row)
+            for row in relationship_context["causal_context"]
+            if isinstance(row, Mapping)
+        ],
+        "affect": [
+            dict(row)
+            for row in relationship_context["affect"]
+            if isinstance(row, Mapping)
+        ],
+        "relationship_freshness": relationship_context[
+            "relationship_freshness"
+        ],
+        "evidence_freshness": relationship_context[
+            "evidence_freshness"
+        ],
+    }
+
+
+def _project_operational_character_context(
+    context: Mapping[str, Any],
+) -> dict[str, list[dict[str, str]]]:
+    """Strip audit metadata before a selected posture reaches a model."""
+
+    if context.get("schema_version") != CHARACTER_OPERATIONAL_CONTEXT_SCHEMA:
+        raise ValueError("unsupported character operational context schema")
+    affect = context.get("affect")
+    pressures = context.get("pressures")
+    if not isinstance(affect, list) or not isinstance(pressures, list):
+        raise ValueError("character operational context rows are invalid")
+    return {
+        "affect": [
+            {
+                field_name: row[field_name]
+                for field_name in (
+                    "emotion_id",
+                    "intensity",
+                    "phase",
+                    "trend",
+                    "root_kind",
+                    "cause_class",
+                    "freshness",
+                )
+            }
+            for row in affect
+            if isinstance(row, Mapping)
+        ],
+        "pressures": [
+            {
+                field_name: row[field_name]
+                for field_name in (
+                    "kind",
+                    "salience",
+                    "lifecycle",
+                    "cause_class",
+                    "freshness",
+                )
+            }
+            for row in pressures
+            if isinstance(row, Mapping)
+        ],
     }
 
 

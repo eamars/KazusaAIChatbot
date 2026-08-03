@@ -48,6 +48,7 @@ _GOAL_SUPPLEMENTAL_CONTEXT_ORDER = (
     "goals",
     "affect",
     "relationship",
+    "character_operational_context",
     "roles",
     "appraisal_summaries",
     "group_engagement_action_context",

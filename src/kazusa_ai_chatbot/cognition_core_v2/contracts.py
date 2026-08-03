@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from datetime import datetime
@@ -320,6 +321,36 @@ class CharacterConstraintSnapshotV2(TypedDict):
     personality_judgment: PersonalityJudgmentV2
 
 
+class CharacterOperationalContextV1(TypedDict):
+    """Bounded redacted character posture selected for one V2 consumer."""
+
+    schema_version: Literal["character_operational_context.v1"]
+    source_updated_at: str
+    effective_at: str
+    view_digest: str
+    context_digest: str
+    consumer_role: Literal[
+        "settled_relevance",
+        "appraisal branch",
+        "goal",
+        "surface",
+    ]
+    affect: list[dict[str, str]]
+    pressures: list[dict[str, str]]
+
+
+class RelationshipOperationalContextV1(TypedDict):
+    """Bounded current-user relationship projection for model consumption."""
+
+    schema_version: Literal["relationship_operational_context.v1"]
+    relationship_id: str
+    axes: dict[str, int]
+    causal_context: list[dict[str, str]]
+    affect: list[dict[str, str]]
+    relationship_freshness: str
+    evidence_freshness: str
+
+
 class SemanticQuestionV2(TypedDict):
     """One bounded semantic question owned by one appraisal family."""
 
@@ -598,7 +629,10 @@ class CognitionCoreInputV2(TypedDict):
     mutable_state: dict[str, Any]
     character_constraints: CharacterConstraintSnapshotV2
     character_identity_context: dict[str, dict[str, object]]
-    relationship_context: NotRequired[RelationshipStateV2]
+    character_operational_context: NotRequired[CharacterOperationalContextV1]
+    relationship_context: NotRequired[
+        RelationshipOperationalContextV1 | RelationshipStateV2
+    ]
     evidence: list[CognitionEvidenceV2]
     direct_facts: list[DirectFactV2]
     available_actions: list[ActionAffordanceV2]
@@ -790,6 +824,11 @@ def validate_cognition_core_input(
             "scene_context",
             "private_continuity_context",
         }
+        | (
+            {"character_operational_context"}
+            if "character_operational_context" in payload
+            else set()
+        )
         | ({"relationship_context"} if "relationship_context" in payload else set())
         | (
             {"resolver_goal_progress"}
@@ -828,13 +867,25 @@ def validate_cognition_core_input(
         raise CognitionContractError("mutable state scope does not match input")
     _validate_persistent_state(state)
     episode = _validate_canonical_episode(payload["episode"])
-    if "relationship_context" in payload:
-        _validate_relationship_context(
-            payload["relationship_context"],
-            scope=scope,
-            state=state,
-            episode=episode,
+    if "character_operational_context" in payload:
+        _validate_character_operational_context(
+            payload["character_operational_context"]
         )
+    if "relationship_context" in payload:
+        relationship_context = payload["relationship_context"]
+        if (
+            isinstance(relationship_context, Mapping)
+            and relationship_context.get("schema_version")
+            == "relationship_operational_context.v1"
+        ):
+            _validate_relationship_operational_context(relationship_context)
+        else:
+            _validate_relationship_context(
+                relationship_context,
+                scope=scope,
+                state=state,
+                episode=episode,
+            )
     _validate_character_constraints(payload["character_constraints"])
     _validate_character_identity_context(
         payload["character_identity_context"]
@@ -2375,6 +2426,282 @@ def _validate_relationship_context(
         )
     except CognitionStateError as exc:
         raise CognitionContractError(str(exc)) from exc
+
+
+def _validate_character_operational_context(value: Any) -> None:
+    """Validate one bounded redacted character operational selection."""
+
+    _require_exact_keys(
+        value,
+        {
+            "schema_version",
+            "source_updated_at",
+            "effective_at",
+            "view_digest",
+            "consumer_role",
+            "affect",
+            "pressures",
+            "context_digest",
+        },
+        "character operational context",
+    )
+    if value["schema_version"] != "character_operational_context.v1":
+        raise CognitionContractError(
+            "character operational context schema is invalid"
+        )
+    _require_utc_timestamp(
+        value["source_updated_at"],
+        "character operational context.source_updated_at",
+    )
+    _require_utc_timestamp(
+        value["effective_at"],
+        "character operational context.effective_at",
+    )
+    for field_name in ("view_digest", "context_digest"):
+        _require_text(
+            value[field_name],
+            f"character operational context.{field_name}",
+            maximum=128,
+        )
+    consumer_role = value["consumer_role"]
+    if consumer_role not in {
+        "settled_relevance",
+        "appraisal branch",
+        "goal",
+        "surface",
+    }:
+        raise CognitionContractError(
+            "character operational consumer role is invalid"
+        )
+    affect = value["affect"]
+    if not isinstance(affect, list) or len(affect) > 3:
+        raise CognitionContractError(
+            "character operational affect selection is invalid"
+        )
+    for row in affect:
+        _validate_character_operational_affect_row(row)
+    pressures = value["pressures"]
+    if (
+        not isinstance(pressures, list)
+        or len(pressures) > 4
+        or (consumer_role == "surface" and pressures)
+    ):
+        raise CognitionContractError(
+            "character operational pressure selection is invalid"
+        )
+    for row in pressures:
+        _validate_character_operational_pressure_row(row)
+    if _serialized_context_length(value) > 1200:
+        raise CognitionContractError("character operational context is oversized")
+
+
+def _validate_character_operational_affect_row(value: Any) -> None:
+    """Validate one source-free affect row in an operational context."""
+
+    _require_exact_keys(
+        value,
+        {
+            "emotion_id",
+            "intensity",
+            "phase",
+            "trend",
+            "root_kind",
+            "cause_class",
+            "freshness",
+        },
+        "character operational affect",
+    )
+    _require_text(value["emotion_id"], "character operational affect.emotion_id")
+    _require_text(value["intensity"], "character operational affect.intensity")
+    if value["phase"] not in {"active", "fading"}:
+        raise CognitionContractError("character operational affect phase is invalid")
+    _require_text(value["trend"], "character operational affect.trend")
+    if value["root_kind"] not in {
+        "goal",
+        "threat",
+        "event",
+        "knowledge_gap",
+        "drive",
+        "meaning",
+    }:
+        raise CognitionContractError(
+            "character operational affect root kind is invalid"
+        )
+    _validate_operational_cause_class(value["cause_class"])
+    _require_text(value["freshness"], "character operational affect.freshness")
+
+
+def _validate_character_operational_pressure_row(value: Any) -> None:
+    """Validate one source-free pressure row in an operational context."""
+
+    _require_exact_keys(
+        value,
+        {"kind", "salience", "lifecycle", "cause_class", "freshness"},
+        "character operational pressure",
+    )
+    if value["kind"] not in {
+        "goal",
+        "threat",
+        "event",
+        "knowledge_gap",
+        "drive",
+        "meaning",
+    }:
+        raise CognitionContractError(
+            "character operational pressure kind is invalid"
+        )
+    _require_text(value["salience"], "character operational pressure.salience")
+    _require_text(value["lifecycle"], "character operational pressure.lifecycle")
+    _validate_operational_cause_class(value["cause_class"])
+    _require_text(value["freshness"], "character operational pressure.freshness")
+
+
+def _validate_operational_cause_class(value: Any) -> None:
+    """Require one closed projection-only operational cause class."""
+
+    if value not in {
+        "safety_pressure",
+        "uncertainty_pressure",
+        "meaning_pressure",
+        "boundary_pressure",
+        "repair_pressure",
+        "loss_pressure",
+        "competence_pressure",
+        "connection_warmth",
+        "relationship_strain",
+        "goal_pressure",
+        "general_activation",
+    }:
+        raise CognitionContractError("operational cause class is invalid")
+
+
+def _validate_relationship_operational_context(value: Mapping[str, Any]) -> None:
+    """Validate the isolated bounded relationship projection."""
+
+    _require_exact_keys(
+        value,
+        {
+            "schema_version",
+            "relationship_id",
+            "axes",
+            "causal_context",
+            "affect",
+            "relationship_freshness",
+            "evidence_freshness",
+        },
+        "relationship operational context",
+    )
+    if value["schema_version"] != "relationship_operational_context.v1":
+        raise CognitionContractError(
+            "relationship operational context schema is invalid"
+        )
+    _require_text(
+        value["relationship_id"],
+        "relationship operational context.relationship_id",
+        maximum=200,
+    )
+    axes = value["axes"]
+    expected_axes = {
+        "familiarity",
+        "positive_regard",
+        "trust",
+        "attachment",
+        "desired_closeness",
+        "perceived_closeness",
+        "care",
+        "boundary_safety",
+        "exclusivity",
+        "unresolved_injury",
+        "salience",
+    }
+    if not isinstance(axes, Mapping) or set(axes) != expected_axes:
+        raise CognitionContractError("relationship operational axes are invalid")
+    for axis_name, axis_value in axes.items():
+        if axis_name in {"positive_regard", "trust", "boundary_safety"}:
+            if (
+                isinstance(axis_value, bool)
+                or not isinstance(axis_value, int)
+                or not -100 <= axis_value <= 100
+            ):
+                raise CognitionContractError(
+                    "relationship operational signed axis is invalid"
+                )
+        else:
+            _require_axis(axis_value, "relationship operational axis")
+    causal_context = value["causal_context"]
+    if not isinstance(causal_context, list) or len(causal_context) > 2:
+        raise CognitionContractError(
+            "relationship operational causal context is invalid"
+        )
+    for row in causal_context:
+        _require_exact_keys(
+            row,
+            {
+                "entity_kind",
+                "semantic_summary",
+                "salience",
+                "lifecycle",
+                "freshness",
+            },
+            "relationship operational causal row",
+        )
+        if row["entity_kind"] not in {
+            "goal",
+            "threat",
+            "event",
+            "knowledge_gap",
+        }:
+            raise CognitionContractError(
+                "relationship operational causal entity kind is invalid"
+            )
+        _require_text(
+            row["semantic_summary"],
+            "relationship operational causal summary",
+            maximum=160,
+        )
+        _require_text(row["salience"], "relationship operational causal salience")
+        _require_text(row["lifecycle"], "relationship operational causal lifecycle")
+        _require_text(row["freshness"], "relationship operational causal freshness")
+    affect = value["affect"]
+    if not isinstance(affect, list) or len(affect) > 2:
+        raise CognitionContractError("relationship operational affect is invalid")
+    for row in affect:
+        _require_exact_keys(
+            row,
+            {"emotion_id", "intensity", "phase", "trend", "freshness"},
+            "relationship operational affect row",
+        )
+        _require_text(row["emotion_id"], "relationship operational affect id")
+        _require_text(row["intensity"], "relationship operational affect intensity")
+        if row["phase"] not in {"active", "fading"}:
+            raise CognitionContractError(
+                "relationship operational affect phase is invalid"
+            )
+        _require_text(row["trend"], "relationship operational affect trend")
+        _require_text(row["freshness"], "relationship operational affect freshness")
+    _require_text(
+        value["relationship_freshness"],
+        "relationship operational relationship freshness",
+    )
+    _require_text(
+        value["evidence_freshness"],
+        "relationship operational evidence freshness",
+    )
+    if _serialized_context_length(value) > 900:
+        raise CognitionContractError("relationship operational context is oversized")
+
+
+def _serialized_context_length(value: Mapping[str, Any]) -> int:
+    """Measure one public projection with deterministic JSON encoding."""
+
+    return len(
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    )
 
 
 def _validate_surface_bid(value: Any) -> None:

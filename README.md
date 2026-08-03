@@ -104,6 +104,7 @@ HOWTO. One working-style configuration looks like this:
 | `RAG_SUBAGENT_LLM`         | `local-model`                            | `http://localhost:1234/v1` |
 | `WEB_SEARCH_LLM`           | `local-model`                            | `http://localhost:1234/v1` |
 | `COGNITION_LLM`            | `local-model`                            | `http://localhost:1234/v1` |
+| `COGNITION_LLM_CHARACTER_CARRYOVER` | `local-model`                     | `http://localhost:1234/v1` |
 | `COGNITION_LLM_APPRAISAL_EVENT_AGENCY` | `local-model`                | `http://localhost:1234/v1` |
 | `COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL` | `local-model`          | `http://localhost:1234/v1` |
 | `COGNITION_LLM_APPRAISAL_MORAL_IDENTITY` | `local-model`              | `http://localhost:1234/v1` |
@@ -132,6 +133,9 @@ needs.
 Cognition Core V2. Core V2 uses the thirteen independent stage routes above;
 each route owns a complete endpoint, credential, model, completion-budget, and
 thinking bundle with no route inheritance or fallback.
+`COGNITION_LLM_CHARACTER_CARRYOVER` is the dedicated state-only background
+operational carry-over route and has a maximum completion budget of 8,192
+tokens.
 Typed required-selection goal turns deliberately use
 `COGNITION_LLM_GOAL_ORDINARY_RESPONSE` for every branch, so configure that
 route with the denser goal model. Active persistent-goal turns without a typed
@@ -391,6 +395,24 @@ Kazusa's live response path is a cognition core, not a chatbot shell or a
 generic tool harness. Adapters normalize platform events into the typed service
 contract; the brain service owns queueing, identity, reply hydration, history,
 episode construction, and graph execution.
+
+### Short-horizon operational carry-over
+
+The singleton character `CharacterCognitionStateV2` is the only persistent
+short-horizon global posture. A settled turn first waits for the bounded
+predecessor barrier, then reuses one immutable interaction-style snapshot for
+relevance, V2 cognition, and L3 surface. Eligible background consolidation may
+derive one source-free character operational update through the dedicated
+carry-over route; current message, history, and conversation progress remain
+the authority for facts and topic.
+
+The latest cognition graph exposes only its source-owned,
+`cognition_context_consumption.v1` projection under
+`l2.reasoning.detail.context_consumption`. It records bounded consumed
+character/relationship/style selections and typed health without source ids,
+raw messages, evidence references, prompts, or private facts. The Control
+Console renders that payload directly alongside persisted and elapsed-effective
+character posture.
 
 The named specialist boxes are family-local subagents and workers, not one
 universal runtime abstraction. RAG3 resolves local context through

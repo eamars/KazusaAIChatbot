@@ -165,6 +165,9 @@ async def call_consolidation_subgraph(global_state: GlobalPersonaState):
         "new_facts": new_facts,
         "future_promises": future_promises,
         "consolidation_metadata": metadata,
+        "character_operational_work": packet[
+            "character_operational_work"
+        ],
     }
     return return_value
 

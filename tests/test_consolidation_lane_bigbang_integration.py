@@ -181,7 +181,8 @@ def test_router_rejects_retired_lane_output() -> None:
                         "reason": "legacy relationship update",
                         "source_keys": ["current_turn_user_message"],
                     }
-                ]
+                ],
+                "character_operational_state_task": None,
             },
             roster,
         )
@@ -204,7 +205,8 @@ async def test_native_user_memory_route_builds_auditable_write_intent(
                     "reason": "durable user preference",
                     "source_keys": ["current_turn_user_message"],
                 }
-            ]
+            ],
+            "character_operational_state_task": None,
         }
 
     monkeypatch.setattr(lane_router, "call_lane_router_llm", _fake_router)
@@ -245,7 +247,8 @@ async def test_identity_route_builds_root_linked_evaluation_intent(
                         "The character described the change as her own."
                     ),
                 },
-            }]
+            }],
+            "character_operational_state_task": None,
         }
 
     monkeypatch.setattr(lane_router, "call_lane_router_llm", _fake_router)
@@ -278,7 +281,10 @@ async def test_non_route_and_missing_evidence_are_sanitized(
 
     async def _no_route(*args: Any, **kwargs: Any) -> dict[str, Any]:
         del args, kwargs
-        return {"lane_tasks": []}
+        return {
+            "lane_tasks": [],
+            "character_operational_state_task": None,
+        }
 
     monkeypatch.setattr(lane_router, "call_lane_router_llm", _no_route)
     not_routed = await lane_router.run_consolidation_lane_pipeline(
@@ -298,7 +304,8 @@ async def test_non_route_and_missing_evidence_are_sanitized(
                     "character_cognition_summary": "",
                     "visible_self_expression_summary": "",
                 },
-            }]
+            }],
+            "character_operational_state_task": None,
         }
 
     monkeypatch.setattr(
@@ -344,7 +351,8 @@ async def test_native_guidance_route_runs_only_native_specialist(
                     "reason": "accepted character behavior guidance",
                     "source_keys": ["current_turn_user_message"],
                 }
-            ]
+            ],
+            "character_operational_state_task": None,
         }
 
     async def _fake_specialist(node_state: dict[str, Any]) -> dict[str, Any]:
@@ -394,7 +402,8 @@ async def test_guidance_reviewer_rejection_disables_persistence(
                 "lane": "character_self_guidance",
                 "reason": "candidate character behavior guidance",
                 "source_keys": ["current_turn_user_message"],
-            }]
+            }],
+            "character_operational_state_task": None,
         }
 
     specialist = AsyncMock(return_value={"character_self_guidance": {}})

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Mapping
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -15,7 +16,17 @@ from kazusa_ai_chatbot.action_spec.registry import (
     APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
 )
 from kazusa_ai_chatbot.brain_service import post_turn as post_turn_module
+from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+    build_character_production_state,
+)
+from kazusa_ai_chatbot.consolidation import (
+    character_operational_state as operational_state_module,
+)
+from kazusa_ai_chatbot.consolidation.character_operational_state import (
+    CharacterOperationalExecutionContext,
+)
 from kazusa_ai_chatbot.chat_input_queue import QueuedChatItem
+from kazusa_ai_chatbot.llm_tracing import failure_capsule
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
 from tests.cognition_core_v2_test_helpers import (
     canonical_episode_identity_snapshot,
@@ -2125,3 +2136,250 @@ async def test_chat_listen_only_drops_before_graph(monkeypatch):
     graph.ainvoke.assert_not_awaited()
     save_conversation.assert_awaited_once()
     await _reset_queue_state()
+
+
+@pytest.mark.asyncio
+async def test_operational_carryover_failure_persists_protected_capsule(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Background carry-over failures persist only inside the protected capsule."""
+
+    persisted = asyncio.Event()
+    written_rows: list[dict] = []
+    completed_receipts: list[dict] = []
+    now = "2026-08-02T00:00:00Z"
+
+    async def capture_insert_trace_step(document: dict) -> str:
+        written_rows.append(dict(document))
+        persisted.set()
+        return "step"
+
+    async def raising_carryover(**kwargs):
+        del kwargs
+        raise RuntimeError("provider boundary failure")
+
+    async def fake_completion(**kwargs):
+        return {
+            "status": kwargs["status"],
+            "error_code": kwargs["error_code"],
+        }
+
+    monkeypatch.setattr(failure_capsule, "LLM_TRACE_CAPTURE_MODE", "metadata")
+    monkeypatch.setattr(
+        failure_capsule.db_llm_tracing,
+        "insert_trace_step",
+        capture_insert_trace_step,
+    )
+    monkeypatch.setattr(
+        operational_state_module,
+        "run_character_carryover_cognition",
+        raising_carryover,
+    )
+    monkeypatch.setattr(
+        operational_state_module,
+        "_remaining_lease_seconds",
+        lambda context: 30.0,
+    )
+    monkeypatch.setattr(
+        operational_state_module,
+        "_complete_or_in_memory_failure",
+        fake_completion,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "complete_predecessor",
+        lambda token, receipt: completed_receipts.append(dict(receipt)),
+    )
+
+    context = CharacterOperationalExecutionContext(
+        claim={
+            "claim_status": "claimed",
+            "receipt": {"lease_expires_at": "2026-08-02T00:00:30Z"},
+        },
+        base_state=build_character_production_state(updated_at=now),
+        lease_owner="operational-test-lease",
+        registered_at=now,
+    )
+    settled_state = {
+        "character_operational_execution_context": context,
+        "character_operational_predecessor_token": {
+            "protected_episode_id": "episode:protected-capsule",
+            "process_sequence": 1,
+        },
+        "character_operational_episode_id": "episode:protected-capsule",
+        "character_operational_effective_at": now,
+        "llm_trace_id": "trace-background-consolidation",
+    }
+    consolidation_result = {
+        "character_operational_work": {
+            "status": "selected",
+            "evidence": [{
+                "source_key": "episode_trace",
+                "source_kind": "episode",
+                "source_id": "episode:protected-capsule",
+                "occurred_at": now,
+                "semantic_text": "closed operational event",
+            }],
+        },
+    }
+
+    with caplog.at_level(
+        logging.ERROR,
+        logger="kazusa_ai_chatbot.consolidation.character_operational_state",
+    ):
+        await service_module._run_operational_work_from_consolidation(
+            settled_state,
+            consolidation_result,
+        )
+
+    await asyncio.wait_for(persisted.wait(), timeout=1.0)
+
+    capsule_rows = [
+        row
+        for row in written_rows
+        if row.get("capture_reason") == "cognition_failure_capsule"
+    ]
+    assert len(capsule_rows) == 1
+    capsule = capsule_rows[0]["capsule"]
+    assert capsule["trace_id"] == "trace-background-consolidation"
+    assert capsule["entrypoint"] == "character_operational_carryover"
+    assert capsule["outcome"] == "partial_failure"
+    failure_kinds = [
+        event["failure_kind"]
+        for event in capsule["failure_events"]
+    ]
+    assert "carryover_execution_error" in failure_kinds
+    cause_chain = capsule["failure_events"][0]["cause_chain"]
+    assert cause_chain[0]["type"] == "RuntimeError"
+    assert cause_chain[0]["message"] == "provider boundary failure"
+    assert failure_capsule._CURRENT_SESSION.get() is None
+    assert "provider boundary failure" not in caplog.text
+    assert "transaction_failed" in caplog.text
+    assert "RuntimeError" in caplog.text
+    assert completed_receipts[0]["status"] == "failed"
+    assert completed_receipts[0]["error_code"] == "transaction_failed"
+
+
+@pytest.mark.asyncio
+async def test_accepted_task_operational_failure_persists_protected_capsule(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Accepted-task carry-over failures stay inside the protected capsule."""
+
+    persisted = asyncio.Event()
+    written_rows: list[dict] = []
+    completed_receipts: list[dict] = []
+    now = "2026-08-02T00:00:00Z"
+    trace_id = "trace-accepted-task-operational"
+
+    async def capture_insert_trace_step(document: dict) -> str:
+        written_rows.append(dict(document))
+        persisted.set()
+        return "step"
+
+    async def raising_carryover(**kwargs):
+        del kwargs
+        raise RuntimeError("provider boundary failure")
+
+    async def fake_completion(**kwargs):
+        return {
+            "status": kwargs["status"],
+            "error_code": kwargs["error_code"],
+        }
+
+    monkeypatch.setattr(failure_capsule, "LLM_TRACE_CAPTURE_MODE", "metadata")
+    monkeypatch.setattr(
+        failure_capsule.db_llm_tracing,
+        "insert_trace_step",
+        capture_insert_trace_step,
+    )
+    monkeypatch.setattr(
+        operational_state_module,
+        "run_character_carryover_cognition",
+        raising_carryover,
+    )
+    monkeypatch.setattr(
+        operational_state_module,
+        "_remaining_lease_seconds",
+        lambda context: 30.0,
+    )
+    monkeypatch.setattr(
+        operational_state_module,
+        "_complete_or_in_memory_failure",
+        fake_completion,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "complete_predecessor",
+        lambda token, receipt: completed_receipts.append(dict(receipt)),
+    )
+
+    context = CharacterOperationalExecutionContext(
+        claim={
+            "claim_status": "claimed",
+            "receipt": {"lease_expires_at": "2026-08-02T00:00:30Z"},
+        },
+        base_state=build_character_production_state(updated_at=now),
+        lease_owner="operational-test-lease",
+        registered_at=now,
+    )
+    token = {
+        "protected_episode_id": "episode:accepted-task-failure",
+        "process_sequence": 1,
+    }
+    episode = {
+        "schema_version": "cognitive_episode.v1",
+        "episode_id": "episode:accepted-task-failure",
+        "trigger_source": "tool_result",
+        "created_at": now,
+    }
+    settled_trace = {"settled_at": now}
+    operational_state = {
+        "llm_trace_id": trace_id,
+        "internal_monologue": "internal accepted-task thought",
+    }
+
+    with caplog.at_level(
+        logging.ERROR,
+        logger="kazusa_ai_chatbot.consolidation.character_operational_state",
+    ):
+        receipt = await service_module._run_accepted_task_operational_work(
+            context=context,
+            token=token,
+            episode=episode,
+            settled_trace=settled_trace,
+            final_dialog=["accepted task result"],
+            operational_state=operational_state,
+            effective_at=now,
+        )
+
+    await asyncio.wait_for(persisted.wait(), timeout=1.0)
+
+    capsule_rows = [
+        row
+        for row in written_rows
+        if row.get("capture_reason") == "cognition_failure_capsule"
+    ]
+    assert len(capsule_rows) == 1
+    capsule = capsule_rows[0]["capsule"]
+    assert capsule["trace_id"] == trace_id
+    assert capsule["entrypoint"] == "character_operational_carryover"
+    assert capsule["outcome"] == "partial_failure"
+    failure_kinds = [
+        event["failure_kind"]
+        for event in capsule["failure_events"]
+    ]
+    assert "carryover_execution_error" in failure_kinds
+    cause_chain = capsule["failure_events"][0]["cause_chain"]
+    assert cause_chain[0]["type"] == "RuntimeError"
+    assert cause_chain[0]["message"] == "provider boundary failure"
+    assert failure_capsule._CURRENT_SESSION.get() is None
+    assert "provider boundary failure" not in caplog.text
+    assert "transaction_failed" in caplog.text
+    assert "RuntimeError" in caplog.text
+    assert receipt["status"] == "failed"
+    assert receipt["error_code"] == "transaction_failed"
+    assert completed_receipts[0]["status"] == "failed"
+    assert completed_receipts[0]["error_code"] == "transaction_failed"

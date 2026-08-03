@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from copy import deepcopy
+from typing import Any
 
 from pymongo.errors import DuplicateKeyError
 
@@ -170,6 +171,67 @@ async def replace_character_cognition_state(state: dict) -> None:
         )
 
 
+async def compare_and_replace_character_cognition_state(
+    *,
+    expected_updated_at: str,
+    replacement: Mapping[str, object],
+) -> bool:
+    """Atomically replace character cognition state at one known version.
+
+    The nested cognition timestamp is the sole optimistic version token. A
+    replacement must advance it strictly so a successful compare-and-set can
+    never make an older operational posture visible again.
+    """
+
+    db = await get_db()
+    return await _compare_and_replace_character_cognition_state_in_session(
+        db=db,
+        session=None,
+        expected_updated_at=expected_updated_at,
+        replacement=replacement,
+    )
+
+
+async def _compare_and_replace_character_cognition_state_in_session(
+    *,
+    db: Any,
+    session: Any,
+    expected_updated_at: str,
+    replacement: Mapping[str, object],
+) -> bool:
+    """Apply the canonical character CAS through an optional DB session."""
+
+    expected_timestamp = _validate_updated_at(expected_updated_at)
+    validated_state = validate_cognition_state(replacement)
+    if validated_state["state_scope"] != "character":
+        raise ValueError("character cognition state must be character-scoped")
+    replacement_timestamp = _validate_updated_at(validated_state["updated_at"])
+    if (
+        parse_storage_utc_datetime(replacement_timestamp)
+        <= parse_storage_utc_datetime(expected_timestamp)
+    ):
+        raise ValueError(
+            "character cognition replacement updated_at must strictly advance"
+        )
+    update_kwargs: dict[str, Any] = {"upsert": False}
+    if session is not None:
+        update_kwargs["session"] = session
+    result = await db.character_state.update_one(
+        {
+            "_id": "global",
+            "cognition_state.updated_at": expected_timestamp,
+        },
+        {
+            "$set": {
+                "cognition_state": validated_state,
+                "updated_at": replacement_timestamp,
+            }
+        },
+        **update_kwargs,
+    )
+    return result.matched_count == 1
+
+
 def _validate_operational_character_state_document(
     raw_document: Mapping[str, object],
 ) -> dict[str, object]:
@@ -223,6 +285,7 @@ __all__ = [
     "LegacyCharacterStateError",
     "RUNTIME_CHARACTER_STATE_FIELDS",
     "compose_character_profile",
+    "compare_and_replace_character_cognition_state",
     "ensure_operational_character_state",
     "get_character_cognition_state",
     "get_character_profile",

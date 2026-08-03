@@ -50,6 +50,11 @@ WEB_SEARCH_LLM_MODEL=your-chat-model
 COGNITION_LLM_BASE_URL=http://localhost:1234/v1
 COGNITION_LLM_API_KEY=lm-studio
 COGNITION_LLM_MODEL=your-chat-model
+COGNITION_LLM_CHARACTER_CARRYOVER_BASE_URL=http://localhost:1234/v1
+COGNITION_LLM_CHARACTER_CARRYOVER_API_KEY=lm-studio
+COGNITION_LLM_CHARACTER_CARRYOVER_MODEL=your-chat-model
+COGNITION_LLM_CHARACTER_CARRYOVER_MAX_COMPLETION_TOKENS=8192
+COGNITION_LLM_CHARACTER_CARRYOVER_THINKING_ENABLED=false
 COGNITION_LLM_APPRAISAL_EVENT_AGENCY_BASE_URL=http://localhost:1234/v1
 COGNITION_LLM_APPRAISAL_EVENT_AGENCY_API_KEY=lm-studio
 COGNITION_LLM_APPRAISAL_EVENT_AGENCY_MODEL=your-chat-model
@@ -257,6 +262,8 @@ outside Cognition Core V2. Core V2 requires all thirteen complete
 `BASE_URL`, `API_KEY`, `MODEL`, `MAX_COMPLETION_TOKENS`, and
 `THINKING_ENABLED` values directly; stage routes have no inheritance or
 fallback.
+`COGNITION_LLM_CHARACTER_CARRYOVER` is the state-only background operational
+carry-over route; its completion-token setting is capped at 8,192.
 Typed required-selection goal turns use the
 `COGNITION_LLM_GOAL_ORDINARY_RESPONSE` bundle for every cognition branch.
 Configure this route with the denser goal model; for example, a deployment may
@@ -385,6 +392,23 @@ disabled. An enabled empty result is shown as completed with an explicit empty
 state. Long approved text and ordered lists are available through the
 scrollable inspector; prompts, raw model output, embeddings, message
 envelopes, and operational identifiers remain excluded.
+
+The `l2.reasoning.detail.context_consumption` graph field is the only latest
+turn-consumption source used by the Character operational-posture panel. Its
+schema is `cognition_context_consumption.v1`; the brain creates it from the
+immutable turn snapshot and actual V2 cognition/L3 inputs, and the console
+only transports and renders it. The projection includes bounded consumed
+character posture, current-user relationship bands, source-labelled style
+roles, and typed predecessor/stage/attempt health. It excludes user/channel
+identifiers, relationship ids, raw text, evidence references, prompts, and
+private facts. When the brain is unavailable, stale, or did not emit the
+field, the panel states that status rather than reconstructing a substitute.
+
+The Character page additionally shows all persisted and elapsed-effective
+native affect/pressure rows, source and view digests, and whether ordinary
+fading changed the effective view. The User page adds a current-user causal
+relationship projection, and User/Group style panels label relevance,
+cognition, and surface consumers.
 
 The brain process log prints the complete normalized visual directive only
 after successful enabled validation. The protected LLM trace remains separate

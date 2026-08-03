@@ -120,6 +120,11 @@ from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     resolve_state_scope,
     validate_cognition_state,
 )
+from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
+    project_character_operational_state,
+    project_relationship_context,
+    select_character_operational_context,
+)
 from kazusa_ai_chatbot.cognition_resolver.capabilities import (
     merge_shared_memory_prewarm_result,
     project_resolver_observation_for_cognition,
@@ -146,9 +151,9 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
 )
 from kazusa_ai_chatbot.db import (
     build_group_engagement_action_context,
+    compare_and_replace_character_cognition_state,
     get_character_cognition_state,
     get_user_cognition_state,
-    replace_character_cognition_state,
     replace_user_cognition_state,
 )
 from kazusa_ai_chatbot.llm_interface import (
@@ -447,6 +452,20 @@ def build_cognition_input_from_global_state(
             updated_at=timestamp,
         )
     selected_mutable_state = validate_cognition_state(selected_mutable_state)
+    character_operational_view = project_character_operational_state(
+        selected_character_state,
+        effective_at=timestamp,
+    )
+    character_operational_context = select_character_operational_context(
+        character_operational_view,
+        consumer_role="appraisal branch",
+    )
+    relationship_operational_context: dict[str, Any] | None = None
+    if selected_mutable_state["state_scope"] == "user":
+        relationship_operational_context = project_relationship_context(
+            selected_mutable_state,
+            effective_at=timestamp,
+        )
     character_profile = state.get("character_profile")
     if not isinstance(character_profile, Mapping):
         raise CognitionExecutionError(
@@ -575,6 +594,7 @@ def build_cognition_input_from_global_state(
         "mutable_state": dict(selected_mutable_state),
         "character_constraints": constraints,
         "character_identity_context": character_identity_context,
+        "character_operational_context": character_operational_context,
         "evidence": evidence[:32],
         "direct_facts": _typed_direct_facts(state.get("direct_facts")),
         "available_actions": _available_action_affordances(state),
@@ -605,6 +625,8 @@ def build_cognition_input_from_global_state(
             "semantic_temporal_context": "immediate",
         },
     }
+    if relationship_operational_context is not None:
+        payload["relationship_context"] = relationship_operational_context
     runtime_limits = build_runtime_capability_limits(state)
     if runtime_limits:
         payload["runtime_capability_limits"] = runtime_limits
@@ -641,7 +663,6 @@ async def call_cognition_subgraph(
         and resolver_state.get("cycle_index") == 0
     )
     prewarm_task: asyncio.Task[dict[str, Any]] | None = None
-    group_engagement_task: asyncio.Task[dict[str, Any]] | None = None
     group_self_cognition = _is_group_self_cognition_state(state)
     if (
         is_cycle_zero
@@ -649,14 +670,6 @@ async def call_cognition_subgraph(
     ):
         prewarm_task = asyncio.create_task(
             run_first_cycle_shared_memory_prewarm(state)
-        )
-    if is_cycle_zero and group_self_cognition:
-        group_engagement_task = asyncio.create_task(
-            build_group_engagement_action_context(
-                channel_type=state["channel_type"],
-                platform=state["platform"],
-                platform_channel_id=state["platform_channel_id"],
-            )
         )
     try:
         caller = _scope_caller(episode)
@@ -710,6 +723,7 @@ async def call_cognition_subgraph(
             state = resolved_state  # type: ignore[assignment]
         prior_update = state.get("cognition_state_update")
         prior_replacement: Mapping[str, Any] | None = None
+        character_base_updated_at: str | None = None
         if isinstance(prior_update, Mapping):
             replacement = prior_update.get("replacement_state")
             if (
@@ -721,8 +735,14 @@ async def call_cognition_subgraph(
         if scope == "character":
             if prior_replacement is None:
                 mutable_state = await get_character_cognition_state()
+                character_base_updated_at = _character_state_updated_at(
+                    mutable_state,
+                )
             else:
                 mutable_state = prior_replacement
+                character_base_updated_at = _character_state_base_updated_at(
+                    state,
+                )
             character_state = mutable_state
         else:
             if prior_replacement is None:
@@ -733,7 +753,7 @@ async def call_cognition_subgraph(
     except (Exception, asyncio.CancelledError):
         await _cancel_cognition_preparation_tasks(
             prewarm_task,
-            group_engagement_task,
+            None,
         )
         raise
     try:
@@ -761,13 +781,30 @@ async def call_cognition_subgraph(
         }
         group_engagement_context: Mapping[str, Any] = empty_group_context
         if group_self_cognition:
-            existing_group_context = state.get(
-                "group_engagement_action_context"
-            )
-            if isinstance(existing_group_context, Mapping):
+            style_snapshot = state.get("interaction_style_context")
+            if isinstance(style_snapshot, Mapping):
+                existing_group_context = style_snapshot.get(
+                    "group_engagement_action_context"
+                )
+                if not isinstance(existing_group_context, Mapping):
+                    raise CognitionExecutionError(
+                        "group engagement snapshot projection is required"
+                    )
                 group_engagement_context = existing_group_context
-        if group_engagement_task is not None:
-            group_engagement_context = await group_engagement_task
+            else:
+                existing_group_context = state.get(
+                    "group_engagement_action_context"
+                )
+                if isinstance(existing_group_context, Mapping):
+                    group_engagement_context = existing_group_context
+                else:
+                    group_engagement_context = (
+                        await build_group_engagement_action_context(
+                            channel_type=state["channel_type"],
+                            platform=state["platform"],
+                            platform_channel_id=state["platform_channel_id"],
+                        )
+                    )
         resolved_state["group_engagement_action_context"] = {
             "engagement_guidelines": list(
                 group_engagement_context["engagement_guidelines"]
@@ -777,7 +814,7 @@ async def call_cognition_subgraph(
     except (Exception, asyncio.CancelledError):
         await _cancel_cognition_preparation_tasks(
             prewarm_task,
-            group_engagement_task,
+            None,
         )
         raise
     state = resolved_state  # type: ignore[assignment]
@@ -797,8 +834,15 @@ async def call_cognition_subgraph(
     finally:
         llm_tracing.reset_trace_id(trace_token)
     if commit:
-        await _commit_cognition_state(output)
+        await _commit_cognition_state(
+            output,
+            expected_character_updated_at=character_base_updated_at,
+        )
     update = _project_output_to_global_state(output, state)
+    if character_base_updated_at is not None:
+        update["character_cognition_base_updated_at"] = (
+            character_base_updated_at
+        )
     update["cognition_input"] = cognition_input
     update["cognition_core_output"] = output
     update["cognition_scope"] = output["state_update"]["state_scope"]
@@ -868,13 +912,44 @@ def _episode_identity_state_update(
     }
 
 
-async def commit_cognition_output(output: CognitionCoreOutputV2) -> None:
+def _character_state_updated_at(state: Mapping[str, Any]) -> str:
+    """Return the validated optimistic version for a character-state read."""
+
+    validated_state = validate_cognition_state(state)
+    if validated_state["state_scope"] != "character":
+        raise CognitionExecutionError("character state version has wrong scope")
+    return validated_state["updated_at"]
+
+
+def _character_state_base_updated_at(state: Mapping[str, Any]) -> str:
+    """Return the original persisted character version across resolver cycles."""
+
+    value = state.get("character_cognition_base_updated_at")
+    if not isinstance(value, str) or not value.strip():
+        raise CognitionExecutionError(
+            "character state recurrence is missing its base version"
+        )
+    return value.strip()
+
+
+async def commit_cognition_output(
+    output: CognitionCoreOutputV2,
+    *,
+    expected_character_updated_at: str | None = None,
+) -> None:
     """Commit one already-validated V2 result at the final episode boundary."""
 
-    await _commit_cognition_state(output)
+    await _commit_cognition_state(
+        output,
+        expected_character_updated_at=expected_character_updated_at,
+    )
 
 
-async def _commit_cognition_state(output: CognitionCoreOutputV2) -> None:
+async def _commit_cognition_state(
+    output: CognitionCoreOutputV2,
+    *,
+    expected_character_updated_at: str | None = None,
+) -> None:
     """Commit the validated replacement before any downstream surface/action work."""
 
     state_update = output["state_update"]
@@ -886,7 +961,18 @@ async def _commit_cognition_state(output: CognitionCoreOutputV2) -> None:
                 replacement,
             )
         else:
-            await replace_character_cognition_state(replacement)
+            if not expected_character_updated_at:
+                raise CognitionExecutionError(
+                    "character state commit requires its base version"
+                )
+            committed = await compare_and_replace_character_cognition_state(
+                expected_updated_at=expected_character_updated_at,
+                replacement=replacement,
+            )
+            if not committed:
+                raise CognitionExecutionError(
+                    "character state commit encountered a version conflict"
+                )
     except Exception:
         await _record_state_commit_event(output, succeeded=False)
         raise

@@ -13,6 +13,9 @@ from kazusa_ai_chatbot.cognition_core_v2.action_selection import (
     ACTION_PLANNING_PROMPT,
     _action_planning_repair_message,
 )
+from kazusa_ai_chatbot.cognition_core_v2.character_carryover import (
+    CHARACTER_CARRYOVER_PROMPT,
+)
 from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
     GOAL_COGNITION_PROMPT,
     GOAL_COGNITION_REPAIR_PROMPT,
@@ -194,6 +197,11 @@ def test_semantic_appraisal_prompt_limits_model_authority() -> None:
         "允许的 handle",
         "propositions",
         "deltas",
+        "蓄意阻碍、明确伤害或边界侵害",
+        "harm，以及有支持时的 unfairness 和 intentionality",
+        "负向 outcome_impact 或 temporal_loss",
+        "contamination_risk 或 norm_violation",
+        "不得因此增添情绪、归因类别、未给出的角色或事实",
     ):
         assert required_text in SEMANTIC_APPRAISAL_PROMPT
     for forbidden_text in (
@@ -212,6 +220,23 @@ def test_semantic_appraisal_prompt_limits_model_authority() -> None:
         '来源 evidence handle',
     ):
         assert required_contract in SEMANTIC_APPRAISAL_PROMPT
+
+
+def test_character_carryover_prompt_maps_observable_effects_to_event_axes() -> None:
+    """Keep carry-over appraisal grounded in the existing event-axis contract."""
+
+    prompt = " ".join(CHARACTER_CARRYOVER_PROMPT.split())
+
+    for required_text in (
+        "deliberate obstruction, imposed harm, or a violated boundary",
+        "harm and, when supported, unfairness and/or intentionality",
+        "enduring irreversible loss",
+        "negative outcome_impact",
+        "contamination or rejection of a basic norm",
+        "contamination_risk and/or norm_violation",
+        "not an emotion, cause class, inferred actor, or added fact",
+    ):
+        assert required_text in prompt
 
 
 def test_goal_prompt_requires_complete_grounded_bid() -> None:

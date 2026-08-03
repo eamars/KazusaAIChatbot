@@ -86,12 +86,17 @@ def test_definition_root_and_decay_rate_are_unchanged(emotion_id: str) -> None:
     assert definition.decay_rate_per_hour == expected_rate
 
 
-def test_relationship_required_rows_have_only_relationship_native_causes() -> None:
-    """Prevent relationship emotions from entering character carry-over."""
+def test_relationship_required_rows_retain_native_causal_kinds() -> None:
+    """Keep relationship ownership while preserving each frozen guard."""
 
+    expected_causal_kinds = {
+        "love_attachment": ("relationship",),
+        "jealousy": ("threat", "relationship"),
+        "loneliness": ("relationship",),
+    }
     for emotion_id in RELATIONSHIP_REQUIRED:
         assert EMOTION_DEFINITIONS[emotion_id].causal_entity_kinds == (
-            "relationship",
+            expected_causal_kinds[emotion_id]
         )
 
 

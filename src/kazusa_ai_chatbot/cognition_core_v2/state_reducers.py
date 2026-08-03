@@ -39,6 +39,7 @@ from kazusa_ai_chatbot.cognition_core_v2.transition_guards import (
 
 _ENTITY_FIELDS = ("goals", "threats", "active_events", "knowledge_gaps")
 MAX_EVIDENCE_REFS_PER_TARGET = 8
+CHARACTER_ELAPSED_SALIENCE_RATE_PER_HOUR = 4
 
 
 def apply_semantic_appraisals(
@@ -207,7 +208,13 @@ def _materialize_proposition_root(
     subject_id = subject_ref["entity_id"]
     candidate_subject = subject_id.startswith("candidate:")
     if candidate_subject:
-        candidate_evidence_handle = subject_id.rsplit(":", maxsplit=1)[-1]
+        candidate_parts = subject_id.split(":", maxsplit=2)
+        candidate_evidence_handle = (
+            candidate_parts[2]
+            if len(candidate_parts) == 3
+            and candidate_parts[1] in {"event", "threat", "knowledge_gap"}
+            else ""
+        )
         if candidate_evidence_handle not in evidence_handles:
             raise CognitionStateError(
                 "causal candidate evidence does not match its source"
@@ -820,6 +827,55 @@ def apply_elapsed_decay(
     return updated_state
 
 
+def apply_character_elapsed_decay(
+    state: Mapping[str, Any],
+    *,
+    elapsed_seconds: int,
+) -> dict[str, Any]:
+    """Return an effective character state after ordinary elapsed fading.
+
+    The returned state remains an in-memory view. Its ``updated_at`` token and
+    every persisted entity timestamp remain unchanged until a later semantic
+    write commits the evolved base through the character compare-and-set
+    owner.
+    """
+
+    if elapsed_seconds < 0:
+        raise ValueError("elapsed_seconds must be non-negative")
+    if state["state_scope"] != "character":
+        raise CognitionStateError(
+            "character elapsed decay requires character cognition scope"
+        )
+
+    updated_state = deepcopy(dict(state))
+    salience_amount = floor(
+        elapsed_seconds * CHARACTER_ELAPSED_SALIENCE_RATE_PER_HOUR / 3600
+    )
+    for field_name in _ENTITY_FIELDS:
+        for entity in _mapping_values(updated_state[field_name]):
+            minimum = 25 if _has_unresolved_pressure(entity) else 0
+            entity["salience"] = max(
+                minimum,
+                entity["salience"] - salience_amount,
+            )
+
+    retained_activations: list[dict[str, Any]] = []
+    for activation in _mapping_values(updated_state["affect_activations"]):
+        definition = EMOTION_DEFINITIONS[activation["emotion_id"]]
+        activation_amount = floor(
+            elapsed_seconds * definition.decay_rate_per_hour / 3600
+        )
+        activation["score"] = max(
+            0,
+            activation["score"] - activation_amount,
+        )
+        _update_activation_lifecycle(activation, updated_state)
+        if activation["score"] > 10:
+            retained_activations.append(activation)
+    updated_state["affect_activations"] = retained_activations
+    return updated_state
+
+
 def apply_sleep_recovery(
     state: Mapping[str, Any],
     *,
@@ -890,11 +946,10 @@ def apply_state_update(
             rate_per_hour=4,
         )
     else:
-        if elapsed_seconds != 0:
-            raise CognitionStateError(
-                "character elapsed evolution requires sleep recovery"
-            )
-        updated_state = deepcopy(dict(state))
+        updated_state = apply_character_elapsed_decay(
+            state,
+            elapsed_seconds=elapsed_seconds,
+        )
     accepted_transitions = [deepcopy(dict(row)) for row in transition_contexts]
     for producer, fact in direct_facts:
         prior_fact_state = updated_state

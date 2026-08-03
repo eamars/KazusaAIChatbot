@@ -1086,6 +1086,7 @@ function cognitionGraphInspectorRows(node) {
     ["selected_actions", "Selected actions"],
     ["action_results", "Action results"],
     ["action_continuation", "Action continuation"],
+    ["context_consumption", "Context consumption"],
     ["facial_expression", "Facial expression"],
     ["body_language", "Body language"],
     ["gaze_direction", "Gaze direction"],
@@ -1178,7 +1179,8 @@ function cognitionGraphFirstSemanticValue(detail) {
     "active_commitments",
     "selected_actions",
     "action_results",
-    "action_continuation",
+  "action_continuation",
+    "context_consumption",
     "facial_expression",
     "body_language",
     "gaze_direction",
@@ -2910,6 +2912,88 @@ function renderCognitionStatePanel(target, panel, emptyText) {
   setHtml(target, populatedMarkup + emptyMarkup);
 }
 
+function renderCharacterOperationalPosturePanel(target, panel) {
+  const items = panelItems(panel);
+  if (!items.length) {
+    renderPanelState(target, {
+      status: panel?.status || "empty",
+      reason: panelEmptyText(panel, "No native character operational posture is available."),
+    });
+    return;
+  }
+  const posture = items[0] || {};
+  const latest = posture.latest_context || {};
+  const context = latest.context || {};
+  const health = context.health || {};
+  const sections = [
+    renderOperationalPostureView("Persisted posture", posture.persisted || {}, false),
+    renderOperationalPostureView("Elapsed-effective posture", posture.effective || {}, Boolean(posture.fading_changed)),
+    renderOperationalConsumption(latest, context),
+    renderOperationalHealth(health),
+  ].filter(Boolean);
+  setHtml(target, sections.join(""));
+}
+
+function renderOperationalPostureView(title, view, fadingChanged) {
+  if (!view || typeof view !== "object" || !Object.keys(view).length) return "";
+  const affect = Array.isArray(view.affect) ? view.affect : [];
+  const pressures = Array.isArray(view.pressures) ? view.pressures : [];
+  return `
+    <section class="operational-posture-section">
+      <div class="trait-header">
+        <div><h4>${escapeHtml(title)}</h4><span class="detail-muted">source ${escapeHtml(formatLookupValue(view.source_updated_at))} · effective ${escapeHtml(formatLookupValue(view.effective_at))}</span></div>
+        <span class="${badgeClass(fadingChanged ? "partial" : "available")}">${escapeHtml(fadingChanged ? "ordinary fading changed" : "unchanged")}</span>
+      </div>
+      ${detailChipRow([["source digest", view.source_digest], ["view digest", view.view_digest]])}
+      ${renderOperationalRows("Native affect", affect, "No active or fading affect rows.")}
+      ${renderOperationalRows("Pressure", pressures, "No bounded pressure rows.")}
+    </section>
+  `;
+}
+
+function renderOperationalRows(title, rows, emptyText) {
+  if (!rows.length) {
+    return `<section class="detail-section"><h5>${escapeHtml(title)}</h5><p class="detail-muted">${escapeHtml(emptyText)}</p></section>`;
+  }
+  const fields = [...new Set(rows.flatMap((row) => Object.keys(row || {})))];
+  return `
+    <section class="detail-section">
+      <h5>${escapeHtml(title)}</h5>
+      <div class="table-wrap"><table><thead><tr>${fields.map((field) => `<th>${escapeHtml(formatLookupLabel(field))}</th>`).join("")}</tr></thead><tbody>
+        ${rows.map((row) => `<tr>${fields.map((field) => `<td>${escapeHtml(formatLookupValue(row?.[field]))}</td>`).join("")}</tr>`).join("")}
+      </tbody></table></div>
+    </section>
+  `;
+}
+
+function renderOperationalConsumption(latest, context) {
+  const status = latest.status || context.status || "not_reported";
+  const stages = [
+    ["Settled relevance", context.settled_relevance],
+    ["Cognition", context.cognition],
+    ["Surface", context.surface],
+  ].filter(([, stage]) => stage && typeof stage === "object" && Object.keys(stage).length);
+  return `
+    <section class="operational-posture-section">
+      <div class="trait-header"><div><h4>Latest consumed context</h4><span class="detail-muted">Source-owned graph projection; no console reconstruction.</span></div><span class="${badgeClass(status)}">${escapeHtml(formatLookupLabel(status))}</span></div>
+      ${detailChipRow([["run", latest.run_id], ["generated", latest.generated_at], ["reason", latest.reason_code]])}
+      ${stages.length ? stages.map(([label, stage]) => `
+        <section class="detail-section"><h5>${escapeHtml(label)}</h5>${renderDetailGrid(Object.entries(stage))}</section>
+      `).join("") : `<p class="detail-muted">${escapeHtml(latest.reason_code ? formatLookupLabel(latest.reason_code) : "The latest graph has not reported consumed context.")}</p>`}
+    </section>
+  `;
+}
+
+function renderOperationalHealth(health) {
+  if (!health || typeof health !== "object" || !Object.keys(health).length) return "";
+  return `
+    <section class="operational-posture-section">
+      <h4>Predecessor and stage health</h4>
+      ${renderDetailGrid(Object.entries(health))}
+    </section>
+  `;
+}
+
 function cognitionValueIsEmpty(value) {
   if (Array.isArray(value)) return value.length === 0;
   if (value && typeof value === "object") return Object.keys(value).length === 0;
@@ -2974,13 +3058,52 @@ function renderRelationshipPanel(panel) {
   setHtml("#user-relationship-table", `${axisRows}<tr><td colspan="3"><span class="table-meta">${escapeHtml(meta)}</span></td></tr>`);
 }
 
+function renderRelationshipOperationalPanel(panel) {
+  const items = panelItems(panel);
+  if (!items.length) {
+    renderPanelState("#user-relationship-operational-table", {
+      status: panel?.status || "empty",
+      reason: panelEmptyText(panel, "No causal relationship context is available."),
+    });
+    return;
+  }
+  const context = items[0] || {};
+  const axes = context.axes && typeof context.axes === "object"
+    ? Object.entries(context.axes)
+    : [];
+  const causalRows = Array.isArray(context.causal_context) ? context.causal_context : [];
+  const affectRows = Array.isArray(context.affect) ? context.affect : [];
+  setHtml("#user-relationship-operational-table", `
+    <section class="operational-posture-section">
+      <div class="detail-section"><h5>Relationship axes</h5>${axes.length ? renderDetailGrid(axes) : '<p class="detail-muted">No projected axes.</p>'}</div>
+      ${renderOperationalRows("Causal rows", causalRows, "No causal rows are active.")}
+      ${renderOperationalRows("Relationship affect", affectRows, "No relationship-rooted affect rows are active.")}
+      ${detailChipRow([["relationship freshness", context.relationship_freshness], ["evidence freshness", context.evidence_freshness]])}
+    </section>
+  `);
+}
+
 function renderStylePanel(target, panel, scopeLabel) {
-  renderPanelCards(target, panel, (items) => items.map((item, index) => renderRecordCard(item, {
-    title: item.field || item.scope || `${scopeLabel} ${index + 1}`,
-    hiddenKeys: ["field", "scope", "guidelines", "confidence"],
-    body: item.guidelines || "",
-    chips: [["scope", item.scope], ["confidence", item.confidence]],
-  })), `No ${scopeLabel} guidance is available.`);
+  renderPanelCards(target, panel, (items) => items.map((item, index) => {
+    if (item.consumer_role) {
+      const guidance = item.guidance && typeof item.guidance === "object"
+        ? Object.entries(item.guidance)
+        : [];
+      return `
+        <article class="record-card">
+          <div class="record-card-header"><h4>${escapeHtml(`${formatLookupLabel(item.consumer_role)} · ${formatLookupLabel(item.source || scopeLabel)}`)}</h4><span class="${badgeClass(item.status || "")}">${escapeHtml(formatLookupLabel(item.status || "not reported"))}</span></div>
+          ${detailChipRow([["revision", item.revision], ["confidence", item.confidence]])}
+          ${guidance.length ? guidance.map(([field, values]) => `<section class="detail-section"><h5>${escapeHtml(formatLookupLabel(field))}</h5><p class="character-prose">${escapeHtml(formatLookupValue(values))}</p></section>`).join("") : '<p class="detail-muted">No declared guidance for this projection.</p>'}
+        </article>
+      `;
+    }
+    return renderRecordCard(item, {
+      title: item.field || item.scope || `${scopeLabel} ${index + 1}`,
+      hiddenKeys: ["field", "scope", "guidelines", "confidence"],
+      body: item.guidelines || "",
+      chips: [["scope", item.scope], ["confidence", item.confidence]],
+    });
+  }), `No ${scopeLabel} guidance is available.`);
 }
 
 function renderUserDirectory(payload) {
@@ -3167,6 +3290,7 @@ function renderBackgroundWorkers(panel) {
 const CHARACTER_PANEL_TARGETS = [
   "#character-profile-table",
   "#character-cognition-state-table",
+  "#character-operational-posture-table",
   "#character-self-image-table",
   "#character-growth-table",
   "#character-carry-over-table",
@@ -3209,6 +3333,10 @@ async function refreshCharacter() {
     redaction: payload.redaction || {},
   });
   renderCognitionStatePanel("#character-cognition-state-table", panels.cognition_state, "No character cognition state is available.");
+  renderCharacterOperationalPosturePanel(
+    "#character-operational-posture-table",
+    panels.operational_posture,
+  );
   renderCharacterSelfImagePanel("#character-self-image-table", {
     items: panelItems(panels.self_image),
     emptyText: panelEmptyText(panels.self_image, "No self-image rows."),
@@ -3249,6 +3377,7 @@ async function refreshUsers(showNeedsInput = true) {
   const panels = payload.panels || {};
   renderUserProfilePanel(panels.profile);
   renderRelationshipPanel(panels.relationship);
+  renderRelationshipOperationalPanel(panels.relationship_operational);
   renderCognitionStatePanel("#user-cognition-state-table", panels.cognition_state, "No user cognition state is available.");
   renderMemoryUnitRows("#user-memory-table", {
     items: panelItems(panels.memory),
@@ -3264,6 +3393,7 @@ function renderUserNeedsInput() {
   const panel = {status: "needs_input", reason: "Select a known user or enter platform and account ID."};
   renderPanelState("#user-profile-table", panel);
   setHtml("#user-relationship-table", '<tr><td colspan="3">Select a known user or enter platform and account ID.</td></tr>');
+  renderPanelState("#user-relationship-operational-table", panel);
   renderPanelState("#user-cognition-state-table", panel);
   renderPanelState("#user-memory-table", panel);
   renderPanelState("#user-style-table", panel);

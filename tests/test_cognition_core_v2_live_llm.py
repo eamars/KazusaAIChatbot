@@ -281,6 +281,11 @@ async def _run_character_case(
     """Run one character-scoped case and restore the singleton exactly."""
 
     await seed_shared_documents(live_db)
+    snapshot_document = await live_db.character_state.find_one(
+        {"_id": "global"},
+    )
+    if snapshot_document is None:
+        raise AssertionError("the shared character-state seed is missing")
     snapshot = await get_character_cognition_state()
     try:
         payload = _chain_input(
@@ -303,7 +308,11 @@ async def _run_character_case(
         assert capture is not None
         assert artifact_path.exists()
     finally:
-        await replace_character_cognition_state(snapshot)
+        await live_db.character_state.replace_one(
+            {"_id": "global"},
+            snapshot_document,
+            upsert=False,
+        )
 
 
 async def _run_lifecycle_case(
@@ -519,7 +528,9 @@ async def test_live_v2_lifecycle_case_writes_complete_raw_capture(
     reset_validation_capture(case_id)
     services = build_cognition_core_services()
 
-    payload["episode"]["percepts"][0]["content"] = message
+    percept_content = payload["episode"]["percepts"][0]["content"]
+    percept_content["semantic_text"] = message
+    percept_content["text"] = message
     payload["evidence"][0]["semantic_text"] = message
     payload["evidence"][0]["evidence_ref"]["semantic_summary"] = message
     output = await run_cognition(payload, services)

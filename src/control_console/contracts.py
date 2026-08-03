@@ -192,6 +192,24 @@ class CognitionRunGraphSnapshot(StrictModel):
     redaction: dict[str, Any] = Field(default_factory=dict)
 
 
+class CognitionContextConsumption(StrictModel):
+    """Exact redacted context consumed by the latest cognition graph run."""
+
+    schema_version: Literal["cognition_context_consumption.v1"]
+    status: Literal[
+        "available",
+        "partial",
+        "not_reported",
+        "unavailable",
+        "stale",
+        "degraded",
+    ]
+    settled_relevance: dict[str, Any] = Field(default_factory=dict)
+    cognition: dict[str, Any] = Field(default_factory=dict)
+    surface: dict[str, Any] = Field(default_factory=dict)
+    health: dict[str, Any] = Field(default_factory=dict)
+
+
 class ServiceActionRequest(StrictModel):
     """Operator request for one state-changing service action."""
 

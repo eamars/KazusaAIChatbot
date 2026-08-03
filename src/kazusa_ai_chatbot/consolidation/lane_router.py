@@ -36,6 +36,7 @@ from kazusa_ai_chatbot.consolidation.source_policy import (
     ASSISTANT_ACCEPTANCE_SOURCE_KIND,
     build_consolidation_source_views,
     source_refs_from_views,
+    validate_character_operational_sources,
     validate_lane_source_policy,
 )
 from kazusa_ai_chatbot.consolidation.target import (
@@ -82,6 +83,10 @@ _FORBIDDEN_ROUTER_TASK_KEYS = frozenset(
     ("target_id", "write_lane", "payload", "fact")
 )
 _MAX_ROUTER_TASKS = 4
+_CHARACTER_OPERATIONAL_TASK_KEY = "character_operational_state_task"
+_CHARACTER_OPERATIONAL_TASK_KEYS = frozenset(("reason", "source_keys"))
+_CHARACTER_OPERATIONAL_REASON_LIMIT = 160
+_CHARACTER_OPERATIONAL_SOURCE_LIMIT = 4
 
 _LANE_DESCRIPTIONS = {
     "user_memory_units": "保存关于当前真实用户的持久事实、模式、变化或里程碑。",
@@ -103,8 +108,39 @@ HumanMessage 中包含：
 - source_views：可安全用于 prompt、并带有 source_key 的证据行。
 
 从 lane_roster 中选择零到四项 lane task。一项 task 表示本 episode 存在值得由对应 specialist
-检查的持久更新。只返回 lane name、简短 reason 和来自 source_views 的 source_key。持久化细节、
-记忆正文、target id、时间戳与缓存行为由后续确定性阶段负责。
+检查的持久更新。另独立判断 character_operational_state_task：它不计入四项 lane task，且仅表示
+本 episode 是否需要一次 source-free 的角色短期运行状态评估。只返回 lane name、简短 reason 和
+来自 source_views 的 source_key。持久化细节、记忆正文、target id、时间戳与缓存行为由后续确定性阶段负责。
+
+# Operational slot
+The operational slot is independent from durable consolidation lanes. It asks
+whether the completed episode leaves a source-free character-level posture that
+the next turn may need to consume. A durable lane and an operational task may
+both be selected for the same episode.
+
+Return a non-null operational task when the accepted episode contains a
+character-facing consequence that can survive the current scene, including:
+- deliberate harm, humiliation, coercion, rejection, or a boundary violation;
+- a threat, loss, exposure, or other event that can leave residual pressure;
+- an apology, repair, or accepted change that changes the character's posture;
+- an accepted task result whose outcome can shape the next character turn.
+
+For these cases, select one to four source_keys from the supplied source_views.
+Prefer current_turn_user_message together with assistant_final_dialog; add
+internal_thought or episode_trace only when they are present and materially
+support the same source-free consequence. The operational task coexists with
+durable lane tasks and never replaces or suppresses them.
+
+Return null only when the episode is clearly ordinary, informational, or
+transient and leaves no character-level consequence beyond the current scene,
+or when no accepted assistant dialog exists. A durable lane selection alone
+does not justify null for a boundary, repair, or user fact.
+
+The operational object must contain exactly these keys and no others:
+{"reason": "short bounded reason", "source_keys": ["source_key"]}
+The top-level response must always contain exactly lane_tasks and
+character_operational_state_task. Always include that key with either null or
+the exact object shape above; keep operational fields out of durable lane rows.
 
 # 判断步骤
 1. 阅读 source_views，判断已完成回应之后是否形成持久记忆更新。
@@ -137,15 +173,16 @@ HumanMessage 中包含：
 # 输出格式
 只返回有效 JSON：
 {
-  "lane_tasks": [
-    {
-      "lane": "lane_roster 中的一个 lane",
-      "reason": "简短语义理由",
-      "source_keys": ["source_key"],
-      "identity_evidence": "仅 character_identity_growth 使用的三字段对象"
-    }
-  ]
+  "lane_tasks": [],
+  "character_operational_state_task": {
+    "reason": "A deliberate boundary violation may leave residual character posture.",
+    "source_keys": ["current_turn_user_message", "assistant_final_dialog"]
+  }
 }
+
+For a character_identity_growth lane row, identity_evidence is an object with
+exactly these keys: decontextualized_event, character_cognition_summary, and
+visible_self_expression_summary. Omit identity_evidence for every other lane.
 '''
 
 _lane_router_llm = LLInterface()
@@ -217,24 +254,76 @@ def build_lane_roster(
 def validate_lane_router_output(
     output: Mapping[str, Any],
     roster: list[dict[str, str]],
-) -> dict[str, list[dict[str, Any]]]:
-    """Validate that router output contains only coarse lane tasks.
+) -> dict[str, Any]:
+    """Validate the four durable lanes and independent operational slot.
 
     Args:
         output: Parsed router JSON.
         roster: Lane roster built from the target plan.
 
     Returns:
-        Normalized router output with validated lane tasks.
+        Exact route decision with validated durable and operational tasks.
 
     Raises:
         ValueError: If the output contains unknown lanes, non-roster lanes,
             persistence fields, memory payload fields, or malformed task rows.
     """
 
-    if set(output) != {"lane_tasks"}:
-        raise ValueError("router output must contain only lane_tasks")
-    lane_tasks = output.get("lane_tasks")
+    if set(output) != {
+        "lane_tasks",
+        _CHARACTER_OPERATIONAL_TASK_KEY,
+    }:
+        raise ValueError("router output does not match the route decision contract")
+    validated_tasks = _validate_durable_lane_tasks(
+        output["lane_tasks"],
+        roster,
+    )
+    operational_task = _validate_character_operational_task(
+        output[_CHARACTER_OPERATIONAL_TASK_KEY],
+    )
+    return {
+        "lane_tasks": validated_tasks,
+        _CHARACTER_OPERATIONAL_TASK_KEY: operational_task,
+    }
+
+
+def _validate_route_decision_for_pipeline(
+    output: object,
+    roster: list[dict[str, str]],
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None, str]:
+    """Validate durable and operational routing without cross-slot loss.
+
+    The top-level decision is all-or-nothing.  Once its exact shape is
+    established, the operational slot has an independent bounded failure
+    boundary: a malformed slot cannot suppress already valid durable work.
+    """
+
+    if not isinstance(output, Mapping):
+        return [], None, "route_invalid"
+    if set(output) != {"lane_tasks", _CHARACTER_OPERATIONAL_TASK_KEY}:
+        return [], None, "route_invalid"
+    try:
+        lane_tasks = _validate_durable_lane_tasks(
+            output["lane_tasks"],
+            roster,
+        )
+    except (TypeError, ValueError):
+        return [], None, "route_invalid"
+    try:
+        operational_task = _validate_character_operational_task(
+            output[_CHARACTER_OPERATIONAL_TASK_KEY],
+        )
+    except (TypeError, ValueError):
+        return lane_tasks, None, "route_invalid"
+    return lane_tasks, operational_task, ""
+
+
+def _validate_durable_lane_tasks(
+    lane_tasks: object,
+    roster: list[dict[str, str]],
+) -> list[dict[str, Any]]:
+    """Validate the existing bounded durable lane list independently."""
+
     if not isinstance(lane_tasks, list):
         raise ValueError("lane_tasks must be a list")
     if len(lane_tasks) > _MAX_ROUTER_TASKS:
@@ -294,8 +383,37 @@ def validate_lane_router_output(
             )
         validated_tasks.append(validated_task)
 
-    validated_output = {"lane_tasks": validated_tasks}
-    return validated_output
+    return validated_tasks
+
+
+def _validate_character_operational_task(
+    value: object,
+) -> dict[str, Any] | None:
+    """Validate the independent optional operational router slot."""
+
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise ValueError("character operational task must be an object or null")
+    if set(value) != _CHARACTER_OPERATIONAL_TASK_KEYS:
+        raise ValueError("character operational task keys are invalid")
+    reason = text_or_empty(value.get("reason"))
+    if not reason or len(reason) > _CHARACTER_OPERATIONAL_REASON_LIMIT:
+        raise ValueError("character operational task reason is invalid")
+    raw_source_keys = value.get("source_keys")
+    if not isinstance(raw_source_keys, list):
+        raise ValueError("character operational task source_keys must be a list")
+    source_keys = [text_or_empty(source_key) for source_key in raw_source_keys]
+    if (
+        not 1 <= len(source_keys) <= _CHARACTER_OPERATIONAL_SOURCE_LIMIT
+        or any(not source_key for source_key in source_keys)
+        or len(source_keys) != len(set(source_keys))
+    ):
+        raise ValueError("character operational task source_keys are invalid")
+    return {
+        "reason": reason,
+        "source_keys": source_keys,
+    }
 
 
 def _validate_router_identity_evidence(
@@ -415,23 +533,43 @@ async def run_consolidation_lane_pipeline(
     source_views_by_key = _source_views_by_key(source_views)
     target_plan = state["consolidation_target_plan"]
     roster = build_lane_roster(target_plan)
-    router_output = await call_lane_router_llm(
-        state,
-        source_views=source_views,
-        roster=roster,
-    )
-    router_validation_error = ""
     try:
-        validated_router_output = validate_lane_router_output(
-            router_output,
-            roster,
+        router_output = await call_lane_router_llm(
+            state,
+            source_views=source_views,
+            roster=roster,
         )
-    except ValueError as exc:
-        logger.warning(f"lane router output dropped: {exc}")
+    except Exception:
         router_tasks = []
-        router_validation_error = str(exc)
+        character_operational_task = None
+        router_validation_error = "route_invalid"
     else:
-        router_tasks = validated_router_output["lane_tasks"]
+        (
+            router_tasks,
+            character_operational_task,
+            router_validation_error,
+        ) = _validate_route_decision_for_pipeline(router_output, roster)
+    if router_validation_error:
+        logger.warning("lane router output dropped or reduced")
+
+    character_operational_error = router_validation_error
+    character_operational_evidence: list[dict[str, Any]] = []
+    if character_operational_task is not None:
+        if not _operational_slot_is_available(state, source_views):
+            character_operational_task = None
+            character_operational_error = "route_invalid"
+        else:
+            try:
+                character_operational_evidence = (
+                    _validated_character_operational_evidence(
+                        task=character_operational_task,
+                        source_views_by_key=source_views_by_key,
+                        state=state,
+                    )
+                )
+            except ValueError:
+                character_operational_task = None
+                character_operational_error = "source_policy_rejected"
 
     lane_results: list[dict[str, Any]] = []
     write_intents: list[dict[str, Any]] = []
@@ -512,6 +650,16 @@ async def run_consolidation_lane_pipeline(
     working_state["enabled_consolidation_write_lanes"] = accepted_lanes
     working_state["user_memory_unit_source_refs"] = accepted_user_memory_refs
     working_state["character_self_guidance_source_refs"] = accepted_self_guidance_refs
+    working_state["character_operational_work"] = {
+        "status": _character_operational_route_status(
+            task=character_operational_task,
+            error_code=character_operational_error,
+            available=_operational_slot_is_available(state, source_views),
+        ),
+        "error_code": character_operational_error or None,
+        "task": character_operational_task,
+        "evidence": character_operational_evidence,
+    }
     _ensure_writer_defaults(working_state)
 
     if not dry_run and accepted_lanes:
@@ -556,6 +704,10 @@ async def run_consolidation_lane_pipeline(
         "mode": "dry_run" if dry_run else "apply",
         "accepted_lanes": accepted_lanes,
         "write_intent_count": len(write_intents),
+        "character_operational_route": {
+            "status": working_state["character_operational_work"]["status"],
+            "error_code": character_operational_error or None,
+        },
     }
     if router_validation_error:
         metadata["lane_pipeline"]["router_validation_error"] = (
@@ -590,6 +742,9 @@ async def run_consolidation_lane_pipeline(
         "router_tasks": router_tasks,
         "lane_results": lane_results,
         "write_intents": write_intents,
+        "character_operational_work": working_state[
+            "character_operational_work"
+        ],
         "state": working_state,
     }
     return packet
@@ -616,6 +771,80 @@ def _source_views_by_key(
         if source_key:
             views_by_key[source_key] = source_view
     return views_by_key
+
+
+def _operational_slot_is_available(
+    state: Mapping[str, Any],
+    source_views: list[dict[str, Any]],
+) -> bool:
+    """Return whether this settled normal-chat episode may use the slot."""
+
+    origin = state.get("consolidation_origin")
+    if not isinstance(origin, Mapping):
+        return False
+    if text_or_empty(origin.get("trigger_source")) != "user_message":
+        return False
+    for source_view in source_views:
+        if (
+            text_or_empty(source_view.get("source_key"))
+            == ASSISTANT_ACCEPTANCE_SOURCE_KIND
+            and text_or_empty(source_view.get("summary"))
+        ):
+            return True
+    return False
+
+
+def _validated_character_operational_evidence(
+    *,
+    task: Mapping[str, Any],
+    source_views_by_key: Mapping[str, Mapping[str, Any]],
+    state: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Bind router source keys to current-episode operational evidence only."""
+
+    origin = state.get("consolidation_origin")
+    if not isinstance(origin, Mapping):
+        raise ValueError("character operational origin is unavailable")
+    source_episode_id = text_or_empty(origin.get("episode_id"))
+    occurred_at = text_or_empty(origin.get("storage_timestamp_utc"))
+    if not source_episode_id or not occurred_at:
+        raise ValueError("character operational provenance is unavailable")
+
+    selected_source_keys = task.get("source_keys")
+    if not isinstance(selected_source_keys, list):
+        raise ValueError("character operational source keys are unavailable")
+    evidence: list[dict[str, Any]] = []
+    for source_key in selected_source_keys:
+        if not isinstance(source_key, str):
+            raise ValueError("character operational source key is invalid")
+        source_view = source_views_by_key.get(source_key)
+        if source_view is None:
+            raise ValueError("character operational source key is unknown")
+        evidence.append({
+            "source_key": source_key,
+            "source_kind": text_or_empty(source_view.get("source_kind")),
+            "source_id": source_episode_id,
+            "occurred_at": occurred_at,
+            "semantic_text": text_or_empty(source_view.get("summary")),
+        })
+    return validate_character_operational_sources(evidence)
+
+
+def _character_operational_route_status(
+    *,
+    task: Mapping[str, Any] | None,
+    error_code: str,
+    available: bool,
+) -> str:
+    """Project the route boundary into one public bounded status."""
+
+    if not available:
+        return "not_eligible"
+    if error_code:
+        return "failed"
+    if task is None:
+        return "no_change"
+    return "selected"
 
 
 def _selected_source_views(

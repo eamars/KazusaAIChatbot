@@ -252,9 +252,11 @@ def canonical_episode(
     content: str = "a grounded current episode",
     current_global_user_id: str = "v2-test-user",
     metadata: dict[str, Any] | None = None,
+    output_mode: str | None = None,
 ) -> CognitiveEpisodeV1:
     """Build one exact episode across the five native deterministic sources."""
 
+    del output_mode
     source_kind_by_trigger: dict[TriggerSource, str] = {
         "user_message": "dialog",
         "internal_thought": "internal_thought",

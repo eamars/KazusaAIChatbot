@@ -154,18 +154,21 @@ async def _run_cognition(
         (fact["producer"], _fact_without_producer(fact))
         for fact in payload["direct_facts"]
     ]
+    reducer_relationship_context = _native_relationship_context(
+        payload.get("relationship_context"),
+    )
     preliminary_state = apply_state_update(
         previous_state,
         direct_facts=fact_pairs,
         elapsed_seconds=elapsed_seconds,
         updated_at=updated_at,
         character_constraints=payload["character_constraints"],
-        relationship_context=payload.get("relationship_context"),
+        relationship_context=reducer_relationship_context,
     )
     preliminary_state = create_deterministic_goals(
         preliminary_state,
         character_constraints=payload["character_constraints"],
-        relationship_context=payload.get("relationship_context"),
+        relationship_context=reducer_relationship_context,
         evidence=payload["evidence"],
         updated_at=updated_at,
     )
@@ -175,6 +178,9 @@ async def _run_cognition(
         character_constraints=payload["character_constraints"],
         character_identity_context=payload["character_identity_context"],
         relationship_context=payload.get("relationship_context"),
+        character_operational_context=payload.get(
+            "character_operational_context",
+        ),
         evidence=payload["evidence"],
     )
     questions = plan_semantic_questions(
@@ -275,13 +281,13 @@ async def _run_cognition(
         final_state,
         updated_at=updated_at,
         character_constraints=payload["character_constraints"],
-        relationship_context=payload.get("relationship_context"),
+        relationship_context=reducer_relationship_context,
         transition_contexts=relief_transitions,
     )
     final_state = create_deterministic_goals(
         final_state,
         character_constraints=payload["character_constraints"],
-        relationship_context=payload.get("relationship_context"),
+        relationship_context=reducer_relationship_context,
         evidence=payload["evidence"],
         updated_at=updated_at,
     )
@@ -292,6 +298,9 @@ async def _run_cognition(
         character_constraints=payload["character_constraints"],
         character_identity_context=payload["character_identity_context"],
         relationship_context=payload.get("relationship_context"),
+        character_operational_context=payload.get(
+            "character_operational_context",
+        ),
         evidence=payload["evidence"],
     )
 
@@ -1211,6 +1220,20 @@ def _fact_without_producer(fact: Mapping[str, Any]) -> dict[str, Any]:
     result = dict(fact)
     result.pop("producer", None)
     return result
+
+
+def _native_relationship_context(
+    relationship_context: Mapping[str, Any] | None,
+) -> Mapping[str, Any] | None:
+    """Keep prompt-only relationship projections out of native reducers."""
+
+    if (
+        isinstance(relationship_context, Mapping)
+        and relationship_context.get("schema_version")
+        == "relationship_operational_context.v1"
+    ):
+        return None
+    return relationship_context
 
 
 def _episode_updated_at(episode: Mapping[str, Any]) -> str:

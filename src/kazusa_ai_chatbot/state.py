@@ -160,6 +160,8 @@ class IMProcessState(TypedDict):
     internal_monologue_residue_context: NotRequired[str]
     past_dialog_cognition_context: NotRequired[str]
     action_availability_runtime: NotRequired[dict[str, Any]]
+    interaction_style_context: NotRequired[dict[str, Any]]
+    settled_relevance_context_consumption: NotRequired[dict[str, Any]]
 
     # Debug modes (optional, passed from ChatRequest)
     debug_modes: DebugModes

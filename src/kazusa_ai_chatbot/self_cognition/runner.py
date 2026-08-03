@@ -492,7 +492,24 @@ async def _default_cognition_client(state: dict[str, Any]) -> dict[str, Any]:
         raise StateContractError(
             "V2 self-cognition completed without cognition_core_output"
         )
-    await commit_cognition_output(core_output)  # type: ignore[arg-type]
+    state_update = core_output.get("state_update")
+    if (
+        isinstance(state_update, dict)
+        and state_update.get("state_scope") == "character"
+    ):
+        expected_character_updated_at = resolved_state.get(
+            "character_cognition_base_updated_at"
+        )
+        await commit_cognition_output(  # type: ignore[arg-type]
+            core_output,
+            expected_character_updated_at=(
+                expected_character_updated_at
+                if isinstance(expected_character_updated_at, str)
+                else None
+            ),
+        )
+    else:
+        await commit_cognition_output(core_output)  # type: ignore[arg-type]
     resolved_state["cognition_state_committed"] = True
     return_value = dict(resolved_state)
     return return_value

@@ -9,20 +9,24 @@ from __future__ import annotations
 import asyncio
 from copy import deepcopy
 import hashlib
+import json
 import logging
 import os
 import socket
 import time
 import traceback
 from uuid import uuid4
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from contextlib import asynccontextmanager, suppress
 from typing import Any, Literal
 
 from fastapi import FastAPI, BackgroundTasks
 
 from kazusa_ai_chatbot.action_spec.execution import execute_action_specs_for_trace
-from kazusa_ai_chatbot.action_spec.results import has_consolidatable_output
+from kazusa_ai_chatbot.action_spec.results import (
+    has_consolidatable_output,
+    project_episode_trace_for_consolidation,
+)
 from kazusa_ai_chatbot.config import (
     CALENDAR_SCHEDULER_CLAIM_LIMIT,
     CALENDAR_SCHEDULER_ENABLED,
@@ -73,6 +77,12 @@ from kazusa_ai_chatbot.cognition_episode import (
     build_text_chat_media_description_rows,
     build_user_message_episode,
 )
+from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
+    project_character_operational_state,
+    project_operational_relationship_context,
+    project_relationship_context,
+    select_character_operational_context,
+)
 from kazusa_ai_chatbot.conversation_progress import (
     ConversationProgressScope,
     ConversationProgressSourceRefV2,
@@ -100,6 +110,7 @@ from kazusa_ai_chatbot.past_dialog_cognition import (
 )
 from kazusa_ai_chatbot.llm_interface.route_report import render_llm_route_table
 from kazusa_ai_chatbot import llm_tracing
+from kazusa_ai_chatbot.llm_tracing import failure_capsule
 from kazusa_ai_chatbot.reflection_cycle.phase_scheduler import (
     REFLECTION_PHASE_GROUPS_PER_SLOT,
 )
@@ -117,6 +128,7 @@ from kazusa_ai_chatbot.db import (
     issue_internal_action_latch,
     ensure_character_identity,
     apply_assistant_delivery_receipt,
+    build_interaction_style_context,
     get_current_identity,
     get_character_profile,
     get_character_runtime_state,
@@ -125,6 +137,7 @@ from kazusa_ai_chatbot.db import (
     get_conversation_history,
     get_user_profile,
     load_media_descriptor_entries,
+    complete_character_operational_receipt,
     query_active_commitment_memory_units_for_user,
     resolve_global_user_id,
     save_conversation,
@@ -223,6 +236,22 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_memory_lifecycle import (
     call_post_surface_memory_lifecycle_review,
 )
 from kazusa_ai_chatbot.consolidation.core import call_consolidation_subgraph
+from kazusa_ai_chatbot.consolidation.character_operational_state import (
+    CharacterOperationalExecutionContext,
+    prepare_character_operational_target,
+    run_character_operational_target,
+)
+from kazusa_ai_chatbot.cognition_core_v2.character_carryover import (
+    CharacterCarryoverServicesV1,
+    build_character_carryover_services,
+)
+from kazusa_ai_chatbot.brain_service.character_state_ordering import (
+    _registered_predecessor_receipt,
+    await_predecessors,
+    capture_predecessor_watermark,
+    complete_predecessor,
+    register_predecessor,
+)
 from kazusa_ai_chatbot.rag.cache2_policy import (
     MEDIA_DESCRIPTOR_CACHE_NAME,
 )
@@ -1615,14 +1644,10 @@ def _settled_state_from_lease(
         "character" in fragment.semantic_target_labels
         for fragment in lease.fragments
     )
-    relationship_context = str(
-        user_profile.get("last_relationship_insight", "")
-    ).strip()
-    if not relationship_context:
-        relationship_context = (
-            "direct participant" if direct_participant
-            else "group participant"
-        )
+    relationship_context = (
+        "direct participant" if direct_participant
+        else "group participant"
+    )
     group_attention = ""
     if request is not None and request.channel_type == "group":
         attention_context = build_group_attention_context(
@@ -1630,6 +1655,15 @@ def _settled_state_from_lease(
             platform_bot_id=request.platform_bot_id,
         )
         group_attention = attention_context["group_attention"]
+    operational_effective_at = (
+        parse_storage_utc_datetime(latest_active_timestamp)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+    character_operational_view = project_character_operational_state(
+        _runtime_character_state["cognition_state"],
+        effective_at=operational_effective_at,
+    )
     return_value = {
         "conversation_scope": (
             response_owner.scope[2]
@@ -1650,7 +1684,10 @@ def _settled_state_from_lease(
             else ""
         ),
         "relationship_context": relationship_context,
-        "character_mood": str(_runtime_character_state.get("mood", "")),
+        "character_operational_context": select_character_operational_context(
+            character_operational_view,
+            consumer_role="settled_relevance",
+        ),
         "group_attention": group_attention,
         "bot_continuity": lease.latest_bot_continuity,
         "user_profile": user_profile,
@@ -1676,7 +1713,43 @@ def _settled_state_from_lease(
             else ""
         ),
     }
+    user_cognition_state = user_profile.get("cognition_state")
+    if isinstance(user_cognition_state, Mapping):
+        return_value["relationship_operational_context"] = (
+            project_relationship_context(
+                user_cognition_state,
+                effective_at=operational_effective_at,
+            )
+        )
     return return_value
+
+
+def _settled_relevance_context_consumption(
+    settled_state: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Retain the exact bounded selections supplied to settled relevance."""
+
+    result: dict[str, Any] = {}
+    character_context = settled_state.get("character_operational_context")
+    if isinstance(character_context, Mapping):
+        result["character_operational_context"] = dict(character_context)
+    relationship_context = settled_state.get("relationship_operational_context")
+    if isinstance(relationship_context, Mapping):
+        try:
+            result["relationship_context"] = (
+                project_operational_relationship_context(relationship_context)
+            )
+        except (KeyError, ValueError):
+            pass
+    style_snapshot = settled_state.get("interaction_style_context")
+    if isinstance(style_snapshot, Mapping):
+        relevance = style_snapshot.get("relevance")
+        if isinstance(relevance, Mapping):
+            result["style"] = {"relevance": dict(relevance)}
+    predecessor = settled_state.get("character_operational_predecessor_barrier")
+    if isinstance(predecessor, Mapping):
+        result["predecessor"] = dict(predecessor)
+    return result
 
 
 def _history_relation_from_timestamp(
@@ -1878,6 +1951,8 @@ async def _process_settlement_lease(
     """Assess and finish one ready turn while the worker owns its activity."""
 
     try:
+        predecessor_barrier = await _await_character_operational_predecessors()
+        await _refresh_runtime_character_state()
         prepared_media, additional_media_present = await _prepare_settled_media(
             lease,
         )
@@ -1895,6 +1970,19 @@ async def _process_settlement_lease(
         settled_state = _settled_state_from_lease(
             lease,
             history=history,
+        )
+        settled_state["interaction_style_context"] = (
+            await build_interaction_style_context(
+                global_user_id=response_owner.global_user_id,
+                channel_type=response_owner.request.channel_type,
+                platform=response_owner.request.platform,
+                platform_channel_id=(
+                    response_owner.request.platform_channel_id
+                ),
+            )
+        )
+        settled_state["character_operational_predecessor_barrier"] = (
+            predecessor_barrier
         )
         decision = await _turn_settlement_coordinator.evaluate_settled(
             lease,
@@ -1980,6 +2068,12 @@ async def _process_settlement_lease(
             prepared_media=prepared_media,
             media_prepared=True,
             additional_media_present=additional_media_present,
+            interaction_style_context=settled_state[
+                "interaction_style_context"
+            ],
+            settled_relevance_context_consumption=(
+                _settled_relevance_context_consumption(settled_state)
+            ),
         )
         await _complete_settled_fragments(
             lease,
@@ -1991,6 +2085,31 @@ async def _process_settlement_lease(
             lease.turn_id,
             lease.version,
         )
+
+
+async def _await_character_operational_predecessors() -> dict[str, Any]:
+    """Release settled relevance only after prior operational work resolves."""
+
+    try:
+        watermark = capture_predecessor_watermark()
+        result = await await_predecessors(
+            before_sequence=watermark + 1,
+        )
+    except Exception:
+        return {
+            "status": "degraded",
+            "watermark": 0,
+            "awaited_count": 0,
+            "timed_out_count": 0,
+            "wait_ms": 0,
+        }
+    return {
+        "status": result.status,
+        "watermark": result.watermark,
+        "awaited_count": result.awaited_count,
+        "timed_out_count": result.timed_out_count,
+        "wait_ms": result.wait_ms,
+    }
 
 
 async def _turn_settlement_worker() -> None:
@@ -2189,11 +2308,30 @@ def _ops_self_cognition_stats_payload(
 
 
 async def _refresh_runtime_character_state() -> None:
-    """Replace the process-local runtime state with the current DB projection."""
+    """Refresh the process-local runtime state from a V2 DB projection."""
     global _runtime_character_state
 
     runtime_state = await get_character_runtime_state()
-    _runtime_character_state = runtime_state
+    cognition_state = runtime_state.get("cognition_state")
+    updated_at = runtime_state.get("updated_at")
+    if (
+        not isinstance(cognition_state, Mapping)
+        or not isinstance(updated_at, str)
+        or not updated_at.strip()
+    ):
+        if "cognition_state" in _runtime_character_state:
+            logger.warning(
+                "Ignoring incomplete runtime character-state refresh; "
+                "retaining the current V2 projection"
+            )
+            return
+        raise DatabaseBackendError(
+            "runtime character state is missing V2 cognition_state or updated_at"
+        )
+    _runtime_character_state = {
+        "cognition_state": deepcopy(cognition_state),
+        "updated_at": updated_at.strip(),
+    }
 
 
 async def _load_latest_character_profile_snapshot() -> dict[str, object]:
@@ -2617,6 +2755,9 @@ async def _deliver_accepted_task_result_episode(
             "reason": "delivery channel id is missing",
         }
 
+    operational_context: CharacterOperationalExecutionContext | None = None
+    operational_token: dict[str, Any] | None = None
+    operational_effective_at = ""
     try:
         character_profile = await _load_latest_character_profile_snapshot()
         user_profile = await get_user_profile(requester_global_user_id)
@@ -2673,6 +2814,12 @@ async def _deliver_accepted_task_result_episode(
         character_profile = identity_snapshot["character_profile"]
         _adopt_character_profile_snapshot(character_profile)
         character_name = _active_character_name()
+        style_snapshot = await build_interaction_style_context(
+            global_user_id=requester_global_user_id,
+            channel_type=channel_type,
+            platform=platform,
+            platform_channel_id=platform_channel_id,
+        )
         initial_state: IMProcessState = {
             "storage_timestamp_utc": episode["created_at"],
             "local_time_context": _episode_local_time_context(episode),
@@ -2724,6 +2871,7 @@ async def _deliver_accepted_task_result_episode(
             "target_broadcast": False,
             "future_promises": [],
             "consolidation_state": {},
+            "interaction_style_context": style_snapshot,
             "promoted_reflection_context": promoted_reflection_context,
             "action_availability_runtime": (
                 _action_availability_runtime_for_target(
@@ -2751,6 +2899,15 @@ async def _deliver_accepted_task_result_episode(
                 "status": "failed",
                 "reason": "result-ready cognition selected no visible text",
             }
+
+        (
+            operational_context,
+            operational_token,
+            operational_effective_at,
+        ) = await _prepare_character_operational_predecessor(
+            episode=episode,
+            delivery_tracking_id="",
+        )
 
         dispatch_result = await handle_send_message(
             {
@@ -2784,6 +2941,20 @@ async def _deliver_accepted_task_result_episode(
             adapter_registry,
         )
     except Exception as exc:
+        if (
+            operational_context is not None
+            and operational_token is not None
+        ):
+            sequence = operational_token.get("process_sequence")
+            if isinstance(sequence, int) and not isinstance(sequence, bool):
+                receipt = await _complete_claimed_operational_receipt(
+                    context=operational_context,
+                    source_episode_id=episode["episode_id"],
+                    sequence=sequence,
+                    status="failed",
+                    error_code="route_invalid",
+                )
+                complete_predecessor(operational_token, receipt)
         logger.exception(
             f"Accepted task result delivery failed: {exc}"
         )
@@ -2795,13 +2966,30 @@ async def _deliver_accepted_task_result_episode(
     dispatch_tracking_id = str(
         dispatch_result.get("delivery_tracking_id") or ""
     )
-    settled_trace = await _settle_runtime_episode_trace(
-        episode=episode,
-        graph_result=result,
-        response_dialog=final_dialog,
-        delivery_tracking_id=dispatch_tracking_id,
-        settled_at=storage_utc_now_iso(),
-    )
+    try:
+        settled_trace = await _settle_runtime_episode_trace(
+            episode=episode,
+            graph_result=result,
+            response_dialog=final_dialog,
+            delivery_tracking_id=dispatch_tracking_id,
+            settled_at=storage_utc_now_iso(),
+        )
+    except Exception:
+        if (
+            operational_context is not None
+            and operational_token is not None
+        ):
+            sequence = operational_token.get("process_sequence")
+            if isinstance(sequence, int) and not isinstance(sequence, bool):
+                receipt = await _complete_claimed_operational_receipt(
+                    context=operational_context,
+                    source_episode_id=episode["episode_id"],
+                    sequence=sequence,
+                    status="failed",
+                    error_code="route_invalid",
+                )
+                complete_predecessor(operational_token, receipt)
+        raise
     result["episode_trace"] = settled_trace
     consolidation_state = result.get("consolidation_state")
     if isinstance(consolidation_state, dict):
@@ -2824,6 +3012,24 @@ async def _deliver_accepted_task_result_episode(
         consolidation_state["conversation_progress_turn_outcome"] = (
             progress_turn_outcome
         )
+    if operational_context is not None and operational_token is not None:
+        operational_receipt = await _run_accepted_task_operational_work(
+            context=operational_context,
+            token=operational_token,
+            episode=episode,
+            settled_trace=settled_trace,
+            final_dialog=final_dialog,
+            operational_state=(
+                consolidation_state
+                if isinstance(consolidation_state, Mapping)
+                else result
+            ),
+            effective_at=operational_effective_at,
+        )
+        if isinstance(consolidation_state, dict):
+            consolidation_state["character_operational_receipt"] = (
+                _public_operational_receipt(operational_receipt)
+            )
     if isinstance(consolidation_state, dict):
         await _run_accepted_task_result_post_turn(
             consolidation_state,
@@ -3422,6 +3628,13 @@ def _build_response_cognition_graph(
     )
     memory_detail = _graph_memory_detail(state)
     reasoning_detail = _graph_reasoning_detail(state)
+    reasoning_status = "completed" if reasoning_detail else "skipped"
+    reasoning_detail["context_consumption"] = _graph_context_consumption(
+        state=state,
+        graph_result=graph_result,
+        graph_status=graph_status,
+        failure=failure,
+    )
     intake_detail = _graph_intake_detail(state)
     action_detail: dict[str, Any] = {}
     if selected_actions:
@@ -3437,11 +3650,6 @@ def _build_response_cognition_graph(
     action_status = (
         "completed"
         if action_spec_count or action_result_count or future_promise_count
-        else "skipped"
-    )
-    reasoning_status = (
-        "completed"
-        if reasoning_detail
         else "skipped"
     )
     visual_node = _graph_visual_node(
@@ -4523,6 +4731,510 @@ def _graph_reasoning_detail(state: Mapping[str, Any]) -> dict[str, Any]:
     return detail
 
 
+def _graph_context_consumption(
+    *,
+    state: Mapping[str, Any],
+    graph_result: Mapping[str, Any],
+    graph_status: str,
+    failure: BaseException | None,
+) -> dict[str, Any]:
+    """Build the exact public context record from one executed graph state."""
+
+    settled_relevance, predecessor = _graph_settled_relevance_consumption(
+        state.get("settled_relevance_context_consumption"),
+    )
+    cognition = _graph_cognition_context_consumption(
+        state.get("cognition_input"),
+    )
+    surface = _graph_surface_context_consumption(
+        state.get("text_surface_input_v2"),
+        state.get("interaction_style_context"),
+    )
+    health = _graph_context_consumption_health(
+        state=state,
+        graph_result=graph_result,
+        predecessor=predecessor,
+        failure=failure,
+    )
+    stages = (settled_relevance, cognition, surface)
+    status = _graph_context_consumption_status(
+        stages=stages,
+        graph_status=graph_status,
+        failure=failure,
+    )
+    return {
+        "schema_version": "cognition_context_consumption.v1",
+        "status": status,
+        "settled_relevance": settled_relevance,
+        "cognition": cognition,
+        "surface": surface,
+        "health": health,
+    }
+
+
+def _graph_settled_relevance_consumption(
+    value: Any,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Project the immutable selections supplied to settled relevance."""
+
+    if not isinstance(value, Mapping):
+        return {}, {}
+    stage: dict[str, Any] = {}
+    character_context = _graph_public_character_operational_context(
+        value.get("character_operational_context"),
+    )
+    if character_context:
+        stage["character_operational_context"] = character_context
+    relationship_context = _graph_public_relationship_context(
+        value.get("relationship_context"),
+    )
+    if relationship_context:
+        stage["relationship_context"] = relationship_context
+    style = value.get("style")
+    if isinstance(style, Mapping):
+        projected_style = _graph_public_style_projection(
+            style,
+            consumer_role="relevance",
+        )
+        if projected_style:
+            stage["style"] = projected_style
+    predecessor = value.get("predecessor")
+    if isinstance(predecessor, Mapping):
+        return stage, _graph_public_predecessor(predecessor)
+    return stage, {}
+
+
+def _graph_cognition_context_consumption(value: Any) -> dict[str, Any]:
+    """Project only the context present in the executed V2 cognition input."""
+
+    if not isinstance(value, Mapping):
+        return {}
+    stage: dict[str, Any] = {}
+    character_context = _graph_public_character_operational_context(
+        value.get("character_operational_context"),
+    )
+    if character_context:
+        stage["character_operational_context"] = character_context
+    relationship_context = _graph_public_relationship_context(
+        value.get("relationship_context"),
+    )
+    if relationship_context:
+        stage["relationship_context"] = relationship_context
+    group_action = _graph_public_group_engagement_context(
+        value.get("group_engagement_action_context"),
+    )
+    if group_action:
+        stage["group_engagement_action_context"] = group_action
+    return stage
+
+
+def _graph_surface_context_consumption(
+    surface_input: Any,
+    style_snapshot: Any,
+) -> dict[str, Any]:
+    """Record the source-labelled style projection accepted by L3."""
+
+    if not isinstance(surface_input, Mapping):
+        return {}
+    if not isinstance(style_snapshot, Mapping):
+        return {}
+    style = _graph_public_style_projection(
+        style_snapshot,
+        consumer_role="surface",
+    )
+    return {"style": style} if style else {}
+
+
+def _graph_context_consumption_health(
+    *,
+    state: Mapping[str, Any],
+    graph_result: Mapping[str, Any],
+    predecessor: Mapping[str, Any],
+    failure: BaseException | None,
+) -> dict[str, Any]:
+    """Expose bounded execution health without trace or receipt identities."""
+
+    health: dict[str, Any] = {}
+    if predecessor:
+        health["predecessor"] = dict(predecessor)
+    cognition_output = state.get("cognition_core_output")
+    if not isinstance(cognition_output, Mapping):
+        cognition_output = graph_result.get("cognition_core_output")
+    if isinstance(cognition_output, Mapping):
+        diagnostics = cognition_output.get("diagnostics")
+        if isinstance(diagnostics, Mapping):
+            stage_status = diagnostics.get("stage_status")
+            projected_status = _graph_public_stage_status(stage_status)
+            if projected_status:
+                health["stage_status"] = projected_status
+
+    trace = state.get("episode_trace")
+    if not isinstance(trace, Mapping):
+        trace = graph_result.get("episode_trace")
+    attempts = _graph_public_attempts(trace)
+    if failure is not None and not attempts:
+        attempts = [{
+            "stage": "service.graph",
+            "error_code": _graph_public_code(
+                getattr(failure, "error_code", "internal_invariant"),
+            ),
+            "attempt_count": 1,
+            "final_status": "failed",
+        }]
+    if attempts:
+        health["attempts"] = attempts
+
+    metadata = state.get("consolidation_metadata")
+    if isinstance(metadata, Mapping):
+        receipt = _graph_public_operational_receipt(
+            metadata.get("character_operational_receipt"),
+        )
+        if receipt:
+            health["operational_receipt"] = receipt
+    return health
+
+
+def _graph_context_consumption_status(
+    *,
+    stages: tuple[dict[str, Any], dict[str, Any], dict[str, Any]],
+    graph_status: str,
+    failure: BaseException | None,
+) -> str:
+    """Classify the public consumption record without changing graph state."""
+
+    if failure is not None or graph_status == "failed":
+        return "degraded"
+    present_count = sum(bool(stage) for stage in stages)
+    if not present_count:
+        return "not_reported"
+    if graph_status == "partial" or present_count < len(stages):
+        return "partial"
+    return "available"
+
+
+def _graph_public_character_operational_context(value: Any) -> dict[str, Any]:
+    """Copy one character selection through a strict public allowlist."""
+
+    if not isinstance(value, Mapping):
+        return {}
+    if value.get("schema_version") != "character_operational_context.v1":
+        return {}
+    result = _graph_public_text_fields(
+        value,
+        (
+            "schema_version",
+            "source_updated_at",
+            "effective_at",
+            "view_digest",
+            "consumer_role",
+            "context_digest",
+        ),
+        maximum=160,
+    )
+    result["affect"] = _graph_public_rows(
+        value.get("affect"),
+        fields=(
+            "emotion_id",
+            "intensity",
+            "phase",
+            "trend",
+            "root_kind",
+            "cause_class",
+            "freshness",
+        ),
+        limit=3,
+    )
+    result["pressures"] = _graph_public_rows(
+        value.get("pressures"),
+        fields=("kind", "salience", "lifecycle", "cause_class", "freshness"),
+        limit=4,
+    )
+    return result
+
+
+def _graph_public_relationship_context(value: Any) -> dict[str, Any]:
+    """Project one relationship selection without an id or event text."""
+
+    if not isinstance(value, Mapping):
+        return {}
+    source: Mapping[str, Any] = value
+    if "relationship_id" in value:
+        try:
+            source = project_operational_relationship_context(value)
+        except (KeyError, ValueError):
+            return {}
+    axes_value = source.get("axes")
+    axes: dict[str, str] = {}
+    if isinstance(axes_value, Mapping):
+        for field_name in (
+            "familiarity",
+            "positive_regard",
+            "trust",
+            "attachment",
+            "desired_closeness",
+            "perceived_closeness",
+            "care",
+            "boundary_safety",
+            "exclusivity",
+            "unresolved_injury",
+            "salience",
+        ):
+            text = _graph_public_text(axes_value.get(field_name), maximum=80)
+            if text:
+                axes[field_name] = text
+    result: dict[str, Any] = {"axes": axes}
+    result["causal_context"] = _graph_public_rows(
+        source.get("causal_context"),
+        fields=("entity_kind", "salience", "lifecycle", "freshness"),
+        limit=2,
+    )
+    result["affect"] = _graph_public_rows(
+        source.get("affect"),
+        fields=("emotion_id", "intensity", "phase", "trend", "freshness"),
+        limit=2,
+    )
+    result.update(_graph_public_text_fields(
+        source,
+        ("relationship_freshness", "evidence_freshness"),
+        maximum=80,
+    ))
+    return result
+
+
+def _graph_public_style_projection(
+    snapshot: Mapping[str, Any],
+    *,
+    consumer_role: str,
+) -> dict[str, Any]:
+    """Copy a source-labelled immutable style projection without provenance."""
+
+    role_projection = snapshot.get(consumer_role)
+    if not isinstance(role_projection, Mapping):
+        return {}
+    sources: dict[str, Any] = {}
+    for source_name in ("user", "group_channel"):
+        source = role_projection.get(source_name)
+        if not isinstance(source, Mapping):
+            continue
+        status = _graph_public_text(source.get("status"), maximum=40)
+        if status not in {"active", "empty", "missing", "failed"}:
+            continue
+        projected: dict[str, Any] = {"status": status}
+        revision = source.get("revision")
+        if isinstance(revision, int) and not isinstance(revision, bool) and revision >= 0:
+            projected["revision"] = revision
+        guidance_source: Mapping[str, Any] = source
+        fields: tuple[str, ...]
+        limit: int
+        if consumer_role == "surface":
+            overlay = source.get("overlay")
+            if not isinstance(overlay, Mapping):
+                continue
+            guidance_source = overlay
+            fields = (
+                "speech_guidelines",
+                "social_guidelines",
+                "pacing_guidelines",
+                "engagement_guidelines",
+            )
+            limit = 8
+        elif consumer_role == "relevance":
+            fields = ("engagement_guidelines",)
+            limit = 3
+        else:
+            fields = ("social_guidelines", "engagement_guidelines")
+            limit = 3
+        for field_name in fields:
+            projected[field_name] = _graph_public_text_list(
+                guidance_source.get(field_name),
+                limit=limit,
+                maximum=240,
+            )
+        confidence = _graph_public_text(
+            guidance_source.get("confidence"),
+            maximum=80,
+        )
+        if confidence:
+            projected["confidence"] = confidence
+        sources[source_name] = projected
+    return {consumer_role: sources} if sources else {}
+
+
+def _graph_public_group_engagement_context(value: Any) -> dict[str, Any]:
+    """Copy the exact group-action selection passed into Core V2."""
+
+    if not isinstance(value, Mapping):
+        return {}
+    result = {
+        "engagement_guidelines": _graph_public_text_list(
+            value.get("engagement_guidelines"),
+            limit=3,
+            maximum=240,
+        ),
+    }
+    confidence = _graph_public_text(value.get("confidence"), maximum=80)
+    if confidence:
+        result["confidence"] = confidence
+    return result if result["engagement_guidelines"] or confidence else {}
+
+
+def _graph_public_predecessor(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Keep only bounded predecessor health counters."""
+
+    result: dict[str, Any] = {}
+    status = _graph_public_text(value.get("status"), maximum=40)
+    if status in {"healthy", "degraded"}:
+        result["status"] = status
+    for field_name in ("watermark", "awaited_count", "timed_out_count", "wait_ms"):
+        field_value = value.get(field_name)
+        if isinstance(field_value, int) and not isinstance(field_value, bool) and field_value >= 0:
+            result[field_name] = field_value
+    return result
+
+
+def _graph_public_stage_status(value: Any) -> dict[str, str]:
+    """Allowlist the stable V2 stage health labels."""
+
+    if not isinstance(value, Mapping):
+        return {}
+    result: dict[str, str] = {}
+    for field_name in (
+        "input_validation",
+        "deterministic_preliminary",
+        "semantic_appraisal",
+        "final_reduction",
+        "branch_cognition",
+        "workspace_collapse",
+        "action_planning",
+    ):
+        status = _graph_public_text(value.get(field_name), maximum=40)
+        if status in {"completed", "failed", "skipped"}:
+            result[field_name] = status
+    return result
+
+
+def _graph_public_attempts(value: Any) -> list[dict[str, Any]]:
+    """Copy bounded typed attempt diagnostics without checkpoints or refs."""
+
+    if not isinstance(value, Mapping):
+        return []
+    raw_attempts = value.get("attempt_diagnostics")
+    if not isinstance(raw_attempts, list):
+        return []
+    attempts: list[dict[str, Any]] = []
+    for raw_attempt in raw_attempts[:8]:
+        if not isinstance(raw_attempt, Mapping):
+            continue
+        attempt: dict[str, Any] = {}
+        for field_name in ("stage", "error_code", "final_status"):
+            field_value = _graph_public_code(raw_attempt.get(field_name))
+            if field_value:
+                attempt[field_name] = field_value
+        count = raw_attempt.get("attempt_count")
+        if isinstance(count, int) and not isinstance(count, bool) and count >= 0:
+            attempt["attempt_count"] = count
+        if attempt:
+            attempts.append(attempt)
+    return attempts
+
+
+def _graph_public_operational_receipt(value: Any) -> dict[str, Any]:
+    """Copy only public receipt health from already-sanitized metadata."""
+
+    if not isinstance(value, Mapping):
+        return {}
+    result = _graph_public_text_fields(
+        value,
+        (
+            "status",
+            "base_updated_at",
+            "committed_updated_at",
+            "registered_at",
+            "completed_at",
+            "error_code",
+        ),
+        maximum=160,
+    )
+    durable = value.get("durable")
+    if isinstance(durable, bool):
+        result["durable"] = durable
+    attempt_count = value.get("attempt_count")
+    if isinstance(attempt_count, int) and not isinstance(attempt_count, bool) and attempt_count >= 0:
+        result["attempt_count"] = attempt_count
+    return result
+
+
+def _graph_public_rows(
+    value: Any,
+    *,
+    fields: tuple[str, ...],
+    limit: int,
+) -> list[dict[str, str]]:
+    """Copy bounded rows using only declared public semantic labels."""
+
+    if not isinstance(value, list):
+        return []
+    rows: list[dict[str, str]] = []
+    for raw_row in value[:limit]:
+        if not isinstance(raw_row, Mapping):
+            continue
+        row = _graph_public_text_fields(raw_row, fields, maximum=160)
+        if row:
+            rows.append(row)
+    return rows
+
+
+def _graph_public_text_fields(
+    value: Mapping[str, Any],
+    fields: tuple[str, ...],
+    *,
+    maximum: int,
+) -> dict[str, str]:
+    """Copy bounded text fields without coercing arbitrary values."""
+
+    result: dict[str, str] = {}
+    for field_name in fields:
+        text = _graph_public_text(value.get(field_name), maximum=maximum)
+        if text:
+            result[field_name] = text
+    return result
+
+
+def _graph_public_text_list(
+    value: Any,
+    *,
+    limit: int,
+    maximum: int,
+) -> list[str]:
+    """Copy one bounded list of prompt-safe learned guidance."""
+
+    if not isinstance(value, list):
+        return []
+    return [
+        text
+        for item in value[:limit]
+        if (text := _graph_public_text(item, maximum=maximum))
+    ]
+
+
+def _graph_public_text(value: Any, *, maximum: int) -> str:
+    """Return bounded strings only for an explicit public allowlist."""
+
+    if not isinstance(value, str):
+        return ""
+    return value.strip()[:maximum]
+
+
+def _graph_public_code(value: Any) -> str:
+    """Return a compact typed status or error code, never exception text."""
+
+    code = _graph_public_text(value, maximum=80)
+    if not code:
+        return ""
+    allowed = set("abcdefghijklmnopqrstuvwxyz0123456789_.-:")
+    return code if all(character in allowed for character in code) else ""
+
+
 def _graph_memory_detail(state: Mapping[str, Any]) -> dict[str, Any]:
     """Project useful retrieval, continuity, progress, and commitment data."""
 
@@ -4897,6 +5609,8 @@ async def _process_queued_chat_item(
     prepared_media: list[MultiMediaDoc] | None = None,
     media_prepared: bool = False,
     additional_media_present: bool = False,
+    interaction_style_context: Mapping[str, Any] | None = None,
+    settled_relevance_context_consumption: Mapping[str, Any] | None = None,
 ) -> None:
     """Run one queued item through the existing chat graph and post-writes.
 
@@ -5246,6 +5960,17 @@ async def _process_queued_chat_item(
         character_profile = identity_snapshot["character_profile"]
         _adopt_character_profile_snapshot(character_profile)
         character_name = _active_character_name()
+        if interaction_style_context is None:
+            style_snapshot = await build_interaction_style_context(
+                global_user_id=global_user_id,
+                channel_type=req.channel_type,
+                platform=req.platform,
+                platform_channel_id=req.platform_channel_id,
+            )
+        elif isinstance(interaction_style_context, Mapping):
+            style_snapshot = dict(interaction_style_context)
+        else:
+            raise ValueError("interaction style snapshot is invalid")
 
         initial_state: IMProcessState = {
             "storage_timestamp_utc": item.storage_timestamp_utc,
@@ -5316,6 +6041,7 @@ async def _process_queued_chat_item(
             "target_broadcast": False,
             "future_promises": [],
             "consolidation_state": {},
+            "interaction_style_context": style_snapshot,
             "promoted_reflection_context": promoted_reflection_context,
             "action_availability_runtime": (
                 _action_availability_runtime_for_target(
@@ -5325,6 +6051,12 @@ async def _process_queued_chat_item(
                 )
             ),
         }
+        if settled_relevance_context_consumption is not None:
+            if not isinstance(settled_relevance_context_consumption, Mapping):
+                raise ValueError("settled relevance context consumption is invalid")
+            initial_state["settled_relevance_context_consumption"] = dict(
+                settled_relevance_context_consumption,
+            )
         initial_state.update(snapshot_state_update(
             identity_snapshot,
             episode_id=episode["episode_id"],
@@ -5645,6 +6377,28 @@ async def _process_queued_chat_item(
                 author_platform_user_id=req.platform_user_id,
                 dialog_text="\n".join(response_dialog),
             )
+        if should_consolidate and consolidation_state_dict is not None:
+            (
+                operational_context,
+                operational_token,
+                operational_effective_at,
+            ) = await _prepare_character_operational_predecessor(
+                episode=episode,
+                delivery_tracking_id=delivery_tracking_id,
+            )
+            if operational_context is not None:
+                consolidation_state_dict[
+                    "character_operational_execution_context"
+                ] = operational_context
+                consolidation_state_dict[
+                    "character_operational_predecessor_token"
+                ] = operational_token
+                consolidation_state_dict[
+                    "character_operational_episode_id"
+                ] = episode["episode_id"]
+                consolidation_state_dict[
+                    "character_operational_effective_at"
+                ] = operational_effective_at
         _chat_input_queue.complete(item, response)
         stages_reached.append("response_completed")
         visible_response_sent = bool(response_dialog)
@@ -5972,14 +6726,485 @@ async def _run_consolidation_background(state: dict) -> None:
         state: Persona graph state snapshot needed by the consolidator.
     """
 
+    async def _call_consolidation_with_operational_target(
+        settled_state: dict,
+    ) -> dict:
+        try:
+            consolidation_result = await call_consolidation_subgraph(
+                settled_state,
+            )
+        except Exception:
+            await _complete_operational_after_router_failure(settled_state)
+            raise
+        await _run_operational_work_from_consolidation(
+            settled_state,
+            consolidation_result,
+        )
+        return consolidation_result
+
     await brain_post_turn.run_consolidation_background(
         state,
-        call_consolidation_subgraph_func=call_consolidation_subgraph,
+        call_consolidation_subgraph_func=(
+            _call_consolidation_with_operational_target
+        ),
         update_character_runtime_state_func=(
             _update_runtime_character_state_from_consolidation
         ),
         logger=logger,
     )
+
+
+async def _prepare_character_operational_predecessor(
+    *,
+    episode: CognitiveEpisodeV1,
+    delivery_tracking_id: str,
+) -> tuple[
+    CharacterOperationalExecutionContext | None,
+    dict[str, Any],
+    str,
+]:
+    """Claim one receipt and predecessor token before visible completion."""
+
+    registered_at = storage_utc_now_iso()
+    token = register_predecessor(
+        episode["episode_id"],
+        registered_at=registered_at,
+    )
+    sequence = token["process_sequence"]
+    try:
+        context = await prepare_character_operational_target(
+            source_episode_id=episode["episode_id"],
+            sequence=sequence,
+            effective_at=registered_at,
+            delivery_tracking_id=delivery_tracking_id,
+            created_at=episode["created_at"],
+        )
+    except Exception:
+        receipt = _local_operational_failure_receipt(
+            source_episode_id=episode["episode_id"],
+            sequence=sequence,
+            registered_at=registered_at,
+            error_code="persistence_failed",
+        )
+        complete_predecessor(token, receipt)
+        return None, token, registered_at
+
+    registration_receipt = _registered_predecessor_receipt(token)
+    if (
+        registration_receipt is not None
+        and registration_receipt.get("error_code") == "capacity_exceeded"
+    ):
+        if context.claim["claim_status"] == "claimed":
+            receipt = await _complete_claimed_operational_receipt(
+                context=context,
+                source_episode_id=episode["episode_id"],
+                sequence=sequence,
+                status="failed",
+                error_code="capacity_exceeded",
+            )
+            complete_predecessor(token, receipt)
+        return None, token, registered_at
+
+    if context.claim["claim_status"] == "terminal":
+        complete_predecessor(token, context.claim["receipt"])
+        return None, token, registered_at
+    if context.claim["claim_status"] == "in_progress":
+        return None, token, registered_at
+    return context, token, registered_at
+
+
+async def _run_operational_target_with_capsule(
+    *,
+    trace_id: str,
+    source_episode_id: str,
+    sequence: int,
+    evidence: Sequence[Mapping[str, Any]],
+    effective_at: str,
+    services: CharacterCarryoverServicesV1,
+    execution_context: CharacterOperationalExecutionContext,
+) -> Mapping[str, Any]:
+    """Run one carry-over update inside a protected failure capsule.
+
+    Args:
+        trace_id: Owning turn trace identity from the background state.
+        source_episode_id: Episode owning the operational slot.
+        sequence: Process sequence of the claimed receipt.
+        evidence: Validated carry-over evidence rows.
+        effective_at: Storage timestamp anchoring elapsed decay.
+        services: Carry-over cognition services.
+        execution_context: Preclaimed operational receipt context.
+
+    Returns:
+        The terminal receipt from the carry-over target.
+    """
+
+    session = failure_capsule.begin_failure_capsule(
+        trace_id=trace_id,
+        entrypoint="character_operational_carryover",
+        input_payload={
+            "source_episode_id": source_episode_id,
+            "sequence": sequence,
+        },
+    )
+    try:
+        receipt = await run_character_operational_target(
+            source_episode_id=source_episode_id,
+            sequence=sequence,
+            evidence=evidence,
+            effective_at=effective_at,
+            services=services,
+            execution_context=execution_context,
+        )
+    except Exception as exc:
+        failure_capsule.mark_failure(
+            session,
+            failure_kind="carryover_terminal_failure",
+            stage_name="character_operational_carryover",
+            details={},
+            exception=exc,
+        )
+        failure_capsule.finish_failure_capsule(
+            session,
+            outcome="terminal_failure",
+            exception=exc,
+        )
+        raise
+    failure_capsule.finish_failure_capsule(session, outcome=None)
+    return receipt
+
+
+async def _run_operational_work_from_consolidation(
+    settled_state: Mapping[str, Any],
+    consolidation_result: dict,
+) -> None:
+    """Execute or terminalize the one preclaimed operational router slot."""
+
+    context = settled_state.get("character_operational_execution_context")
+    token = settled_state.get("character_operational_predecessor_token")
+    source_episode_id = settled_state.get("character_operational_episode_id")
+    effective_at = settled_state.get("character_operational_effective_at")
+    trace_id = str(settled_state.get("llm_trace_id") or "")
+    if (
+        not isinstance(context, CharacterOperationalExecutionContext)
+        or not isinstance(token, Mapping)
+        or not isinstance(source_episode_id, str)
+        or not isinstance(effective_at, str)
+    ):
+        return
+    sequence = token.get("process_sequence")
+    if isinstance(sequence, bool) or not isinstance(sequence, int):
+        return
+
+    receipt: Mapping[str, Any]
+    try:
+        work = consolidation_result.get("character_operational_work")
+        if not isinstance(work, Mapping):
+            receipt = await _complete_claimed_operational_receipt(
+                context=context,
+                source_episode_id=source_episode_id,
+                sequence=sequence,
+                status="failed",
+                error_code="route_invalid",
+            )
+        else:
+            status = work.get("status")
+            if status == "selected":
+                evidence = work.get("evidence")
+                if not isinstance(evidence, list):
+                    receipt = await _complete_claimed_operational_receipt(
+                        context=context,
+                        source_episode_id=source_episode_id,
+                        sequence=sequence,
+                        status="failed",
+                        error_code="source_policy_rejected",
+                    )
+                else:
+                    receipt = await _run_operational_target_with_capsule(
+                        trace_id=trace_id,
+                        source_episode_id=source_episode_id,
+                        sequence=sequence,
+                        evidence=evidence,
+                        effective_at=effective_at,
+                        services=build_character_carryover_services(),
+                        execution_context=context,
+                    )
+            elif status == "no_change":
+                receipt = await _complete_claimed_operational_receipt(
+                    context=context,
+                    source_episode_id=source_episode_id,
+                    sequence=sequence,
+                    status="no_change",
+                    error_code=None,
+                )
+            else:
+                error_code = work.get("error_code")
+                if error_code not in {
+                    "route_invalid",
+                    "source_policy_rejected",
+                }:
+                    error_code = "route_invalid"
+                receipt = await _complete_claimed_operational_receipt(
+                    context=context,
+                    source_episode_id=source_episode_id,
+                    sequence=sequence,
+                    status="failed",
+                    error_code=error_code,
+                )
+    except Exception:
+        receipt = await _complete_claimed_operational_receipt(
+            context=context,
+            source_episode_id=source_episode_id,
+            sequence=sequence,
+            status="failed",
+            error_code="provider_exhausted",
+        )
+    complete_predecessor(token, receipt)
+    _attach_operational_receipt_metadata(
+        consolidation_result,
+        receipt=receipt,
+    )
+
+
+async def _run_accepted_task_operational_work(
+    *,
+    context: CharacterOperationalExecutionContext,
+    token: Mapping[str, Any],
+    episode: CognitiveEpisodeV1,
+    settled_trace: Mapping[str, Any],
+    final_dialog: list[str],
+    operational_state: Mapping[str, Any],
+    effective_at: str,
+) -> Mapping[str, Any]:
+    """Run the accepted-task direct carry-over path without durable routing."""
+
+    sequence = token.get("process_sequence")
+    if isinstance(sequence, bool) or not isinstance(sequence, int):
+        return _local_operational_failure_receipt(
+            source_episode_id=episode["episode_id"],
+            sequence=0,
+            registered_at=context.registered_at,
+            error_code="persistence_failed",
+        )
+    trace_id = str(operational_state.get("llm_trace_id") or "")
+    evidence = _accepted_task_operational_evidence(
+        episode=episode,
+        settled_trace=settled_trace,
+        final_dialog=final_dialog,
+        operational_state=operational_state,
+    )
+    try:
+        if not evidence:
+            receipt = await _complete_claimed_operational_receipt(
+                context=context,
+                source_episode_id=episode["episode_id"],
+                sequence=sequence,
+                status="no_change",
+                error_code=None,
+            )
+        else:
+            receipt = await _run_operational_target_with_capsule(
+                trace_id=trace_id,
+                source_episode_id=episode["episode_id"],
+                sequence=sequence,
+                evidence=evidence,
+                effective_at=effective_at,
+                services=build_character_carryover_services(),
+                execution_context=context,
+            )
+    except Exception:
+        receipt = await _complete_claimed_operational_receipt(
+            context=context,
+            source_episode_id=episode["episode_id"],
+            sequence=sequence,
+            status="failed",
+            error_code="provider_exhausted",
+        )
+    complete_predecessor(token, receipt)
+    return receipt
+
+
+def _accepted_task_operational_evidence(
+    *,
+    episode: CognitiveEpisodeV1,
+    settled_trace: Mapping[str, Any],
+    final_dialog: list[str],
+    operational_state: Mapping[str, Any],
+) -> list[dict[str, str]]:
+    """Build direct accepted-task evidence in the declared stable order."""
+
+    source_episode_id = episode["episode_id"]
+    occurred_at = str(settled_trace.get("settled_at") or "").strip()
+    if not occurred_at:
+        occurred_at = episode["created_at"]
+    evidence: list[dict[str, str]] = []
+    trace_projection = project_episode_trace_for_consolidation(
+        dict(settled_trace),
+    )
+    trace_text = json.dumps(
+        {
+            "action_results": trace_projection.get("action_results", []),
+            "surface_outputs": trace_projection.get("surface_outputs", []),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    if trace_text not in {"{\"action_results\":[],\"surface_outputs\":[]}", ""}:
+        evidence.append({
+            "source_key": "episode_trace",
+            "source_kind": "episode_trace",
+            "source_id": source_episode_id,
+            "occurred_at": occurred_at,
+            "semantic_text": trace_text,
+        })
+    internal_thought = operational_state.get("internal_monologue")
+    if isinstance(internal_thought, str) and internal_thought.strip():
+        evidence.append({
+            "source_key": "internal_thought",
+            "source_kind": "internal_thought",
+            "source_id": source_episode_id,
+            "occurred_at": occurred_at,
+            "semantic_text": internal_thought.strip(),
+        })
+    dialog_text = "\n".join(
+        fragment.strip()
+        for fragment in final_dialog
+        if fragment.strip()
+    )
+    if dialog_text:
+        evidence.append({
+            "source_key": "assistant_final_dialog",
+            "source_kind": "assistant_final_dialog",
+            "source_id": source_episode_id,
+            "occurred_at": occurred_at,
+            "semantic_text": dialog_text,
+        })
+    return evidence
+
+
+async def _complete_operational_after_router_failure(
+    settled_state: Mapping[str, Any],
+) -> None:
+    """Release a pre-exposure claim when the normal router fails closed."""
+
+    context = settled_state.get("character_operational_execution_context")
+    token = settled_state.get("character_operational_predecessor_token")
+    source_episode_id = settled_state.get("character_operational_episode_id")
+    if (
+        not isinstance(context, CharacterOperationalExecutionContext)
+        or not isinstance(token, Mapping)
+        or not isinstance(source_episode_id, str)
+    ):
+        return
+    sequence = token.get("process_sequence")
+    if isinstance(sequence, bool) or not isinstance(sequence, int):
+        return
+    receipt = await _complete_claimed_operational_receipt(
+        context=context,
+        source_episode_id=source_episode_id,
+        sequence=sequence,
+        status="failed",
+        error_code="route_invalid",
+    )
+    complete_predecessor(token, receipt)
+
+
+async def _complete_claimed_operational_receipt(
+    *,
+    context: CharacterOperationalExecutionContext,
+    source_episode_id: str,
+    sequence: int,
+    status: Literal["no_change", "failed"],
+    error_code: str | None,
+) -> Mapping[str, Any]:
+    """Terminalize a claimed receipt or return a bounded local failure."""
+
+    try:
+        return await complete_character_operational_receipt(
+            source_episode_id=source_episode_id,
+            lease_owner=context.lease_owner,
+            status=status,
+            completed_at=storage_utc_now_iso(),
+            error_code=error_code,
+            attempt_count=0,
+        )
+    except Exception:
+        return _local_operational_failure_receipt(
+            source_episode_id=source_episode_id,
+            sequence=sequence,
+            registered_at=context.registered_at,
+            error_code="persistence_failed",
+        )
+
+
+def _local_operational_failure_receipt(
+    *,
+    source_episode_id: str,
+    sequence: int,
+    registered_at: str,
+    error_code: str,
+) -> dict[str, Any]:
+    """Build the bounded non-durable failure used to release waiters."""
+
+    return {
+        "schema_version": "character_operational_receipt.v1",
+        "source_episode_id": source_episode_id,
+        "status": "failed",
+        "sequence": sequence,
+        "durable": False,
+        "base_updated_at": registered_at,
+        "committed_updated_at": "",
+        "registered_at": registered_at,
+        "completed_at": registered_at,
+        "lease_owner": "",
+        "lease_expires_at": "",
+        "attempt_count": 0,
+        "error_code": error_code,
+    }
+
+
+def _attach_operational_receipt_metadata(
+    consolidation_result: dict,
+    *,
+    receipt: Mapping[str, Any],
+) -> None:
+    """Attach only public operational health to background metadata."""
+
+    metadata = consolidation_result.get("consolidation_metadata")
+    if not isinstance(metadata, Mapping):
+        metadata = {}
+    updated_metadata = dict(metadata)
+    updated_metadata["character_operational_receipt"] = (
+        _public_operational_receipt(receipt)
+    )
+    if receipt.get("status") == "committed":
+        write_success = updated_metadata.get("write_success")
+        if not isinstance(write_success, Mapping):
+            write_success = {}
+        updated_write_success = dict(write_success)
+        updated_write_success["character_state"] = True
+        updated_metadata["write_success"] = updated_write_success
+    consolidation_result["consolidation_metadata"] = updated_metadata
+
+
+def _public_operational_receipt(
+    receipt: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Remove protected episode and lease details from operational telemetry."""
+
+    return {
+        field_name: receipt.get(field_name)
+        for field_name in (
+            "status",
+            "durable",
+            "base_updated_at",
+            "committed_updated_at",
+            "registered_at",
+            "completed_at",
+            "attempt_count",
+            "error_code",
+        )
+    }
 
 
 async def _run_post_turn_memory_lifecycle_background(state: dict) -> dict:

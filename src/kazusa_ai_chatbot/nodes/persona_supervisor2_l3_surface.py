@@ -30,9 +30,6 @@ from kazusa_ai_chatbot.cognition_core_v2.surface import (
     run_visual_surface_planning,
 )
 from kazusa_ai_chatbot.cognition_resolver.state import validate_resolver_state
-from kazusa_ai_chatbot.db.interaction_style_images import (
-    build_interaction_style_context,
-)
 from kazusa_ai_chatbot.llm_interface import LLMCallConfig
 from kazusa_ai_chatbot.nodes.linguistic_texture import (
     get_abstraction_reframing_description,
@@ -184,27 +181,29 @@ async def repair_text_surface_for_dialog(
 async def _load_interaction_style_context(
     state: Mapping[str, Any],
 ) -> str:
-    """Load and render prompt-safe style guidance for the active surface."""
+    """Render the service-owned prompt-safe turn snapshot for L3."""
 
-    context = await build_interaction_style_context(
-        global_user_id=str(state.get("global_user_id", "")),
-        channel_type=str(state.get("channel_type", "")),
-        platform=str(state.get("platform", "")),
-        platform_channel_id=str(state.get("platform_channel_id", "")),
-    )
+    context = state.get("interaction_style_context")
+    if not isinstance(context, Mapping):
+        raise ValueError("interaction style turn snapshot is required")
     return _render_interaction_style_context(context)
 
 
 def _render_interaction_style_context(context: Mapping[str, Any]) -> str:
     """Project allowlisted style guidance into the bounded V2 text field."""
 
+    if context.get("schema_version") != "interaction_style_turn_snapshot.v1":
+        raise ValueError("interaction style snapshot schema is invalid")
     application_order = context.get("application_order")
     if not isinstance(application_order, list):
         raise ValueError("interaction style application order is required")
+    surface = context.get("surface")
+    if not isinstance(surface, Mapping):
+        raise ValueError("interaction style surface projection is required")
 
     scope_labels = {
-        "user_style": "当前用户风格",
-        "group_channel_style": "当前群聊风格",
+        "user": "当前用户风格",
+        "group_channel": "当前群聊风格",
     }
     field_labels = {
         "speech_guidelines": "语言",
@@ -216,7 +215,10 @@ def _render_interaction_style_context(context: Mapping[str, Any]) -> str:
     for scope_name in application_order:
         if scope_name not in scope_labels:
             raise ValueError("unknown interaction style scope")
-        overlay = context.get(scope_name)
+        source_projection = surface.get(scope_name)
+        if not isinstance(source_projection, Mapping):
+            raise ValueError("interaction style source projection is required")
+        overlay = source_projection.get("overlay")
         if not isinstance(overlay, Mapping):
             raise ValueError("interaction style overlay is required")
         for field_name, field_label in field_labels.items():

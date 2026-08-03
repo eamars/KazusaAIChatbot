@@ -586,6 +586,12 @@ def _contains_east_asian_script(text: str) -> bool:
 @asynccontextmanager
 async def _neutral_character_runtime_state():
     """Temporarily reset native character cognition for stable live assertions."""
+    database = await get_db()
+    snapshot_document = await database.character_state.find_one(
+        {"_id": "global"},
+    )
+    if snapshot_document is None:
+        raise AssertionError("the global character-state singleton is missing")
     snapshot = await get_character_cognition_state()
     neutral_state = build_character_production_state(
         updated_at=(
@@ -597,7 +603,11 @@ async def _neutral_character_runtime_state():
     try:
         yield
     finally:
-        await replace_character_cognition_state(snapshot)
+        await database.character_state.replace_one(
+            {"_id": "global"},
+            snapshot_document,
+            upsert=False,
+        )
         await _refresh_character_profile()
 
 

@@ -247,7 +247,8 @@ def test_router_output_accepts_only_coarse_lane_tasks() -> None:
                 "reason": "user stated a durable personal fact",
                 "source_keys": ["current_turn_user_message"],
             }
-        ]
+        ],
+        "character_operational_state_task": None,
     }
 
     validated = module.validate_lane_router_output(output, roster)
@@ -281,6 +282,7 @@ def test_identity_route_requires_one_closed_semantic_evidence_card() -> None:
                 ),
             },
         }],
+        "character_operational_state_task": None,
     }
 
     validated = module.validate_lane_router_output(output, roster)
@@ -301,7 +303,9 @@ async def test_router_prompt_excludes_repository_refs(
     captured_messages: list[Any] = []
 
     class _Response:
-        content = '{"lane_tasks":[]}'
+        content = (
+            '{"lane_tasks":[],"character_operational_state_task":null}'
+        )
 
     async def _invoke(messages, *, config):
         del config
@@ -373,4 +377,10 @@ def test_router_output_rejects_non_coarse_fields(
     roster = module.build_lane_roster(target_plan)
 
     with pytest.raises(ValueError):
-        module.validate_lane_router_output({"lane_tasks": [bad_task]}, roster)
+        module.validate_lane_router_output(
+            {
+                "lane_tasks": [bad_task],
+                "character_operational_state_task": None,
+            },
+            roster,
+        )

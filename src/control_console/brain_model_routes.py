@@ -99,6 +99,14 @@ _ROUTES: tuple[BrainModelRouteDescriptor, ...] = (
         fallback_backed=False,
     ),
     BrainModelRouteDescriptor(
+        route_key="COGNITION_LLM_CHARACTER_CARRYOVER",
+        env_prefix="COGNITION_LLM_CHARACTER_CARRYOVER",
+        label="Character carry-over",
+        group="Cognition Core V2",
+        required=True,
+        fallback_backed=False,
+    ),
+    BrainModelRouteDescriptor(
         route_key="COGNITION_LLM_APPRAISAL_EVENT_AGENCY",
         env_prefix="COGNITION_LLM_APPRAISAL_EVENT_AGENCY",
         label="Appraisal: event and agency",

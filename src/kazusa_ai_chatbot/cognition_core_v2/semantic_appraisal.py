@@ -105,6 +105,15 @@ question.permitted_delta_path_domains 的每一项给出 state_field、handles �
 delta 必须是 -40 到 40（含边界）的 JSON 整数，例如 -5、0 或 12；不得使用字符串、小数、
 百分比或正负号小数比例。
 
+# 轴选择
+若证据直接呈现可观察的后果，请在 question.permitted_delta_path_domains 允许的路径中选择相应 axis，
+不要用中性或无关的 axis 代替：
+- 有证据支持的蓄意阻碍、明确伤害或边界侵害：harm，以及有支持时的 unfairness 和 intentionality；
+- 已发生且不可逆的损失：负向 outcome_impact 或 temporal_loss；
+- 污染或基本规范/边界受到侵害：contamination_risk 或 norm_violation。
+每个 axis 仍只描述所给证据中的可观察后果；不得因此增添情绪、归因类别、未给出的角色或事实。
+上述 axis 仅在该 question 的允许路径中出现时才选择；证据不足时省略。
+
 semantic_value 是一句简洁描述，目标长度 120 字符且上限 200 字符，其中不重复标准、约束或证据
 解释，也不使用数值；数值只放在 delta 字段。每条 delta reason 不超过 300 字符。role 必须取以下
 固定 enum token：actor（行动者）、experiencer（体验者）、
@@ -1225,6 +1234,8 @@ def _fit_appraisal_payload(payload: dict[str, Any]) -> str:
         "goals",
         "affect",
         "relationship",
+        "relationship_operational_context",
+        "character_operational_context",
         "roles",
     )
     state = payload["state"]
@@ -1333,6 +1344,19 @@ def _project_question_state(
             result["roles"] = selected_roles
     if "r1" in allowed and isinstance(source.get("relationship"), Mapping):
         result["relationship"] = dict(source["relationship"])
+    operational_context = _project_question_operational_context(
+        source.get("character_operational_context"),
+        question_kind=question["question_kind"],
+    )
+    if operational_context is not None:
+        result["character_operational_context"] = operational_context
+    if (
+        question["question_kind"] == "relationship_social"
+        and isinstance(source.get("relationship"), Mapping)
+    ):
+        result["relationship_operational_context"] = dict(
+            source["relationship"],
+        )
     constraints = _project_question_constraints(
         projection,
         source.get("character_constraints"),
@@ -1347,6 +1371,63 @@ def _project_question_state(
     if identity:
         result["character_identity"] = deepcopy(identity)
     return result
+
+
+def _project_question_operational_context(
+    value: Any,
+    *,
+    question_kind: str,
+) -> dict[str, list[dict[str, Any]]] | None:
+    """Restrict global posture to the appraisal families allowed to use it."""
+
+    if not isinstance(value, Mapping):
+        return None
+    affect = value.get("affect")
+    pressures = value.get("pressures")
+    if not isinstance(affect, list) or not isinstance(pressures, list):
+        return None
+    if question_kind in {"event_agency", "epistemic_comparison_memory"}:
+        return None
+    selected_affect = [
+        dict(row)
+        for row in affect
+        if isinstance(row, Mapping)
+    ]
+    selected_pressures = [
+        dict(row)
+        for row in pressures
+        if isinstance(row, Mapping)
+    ]
+    if question_kind == "moral_identity":
+        allowed_causes = {"boundary_pressure", "repair_pressure"}
+        selected_affect = [
+            row for row in selected_affect
+            if row.get("cause_class") in allowed_causes
+        ]
+        selected_pressures = [
+            row for row in selected_pressures
+            if row.get("cause_class") in allowed_causes
+        ]
+    elif question_kind == "existential_drive":
+        allowed_causes = {
+            "meaning_pressure",
+            "goal_pressure",
+            "competence_pressure",
+        }
+        selected_affect = [
+            row for row in selected_affect
+            if row.get("cause_class") in allowed_causes
+        ]
+        selected_pressures = [
+            row for row in selected_pressures
+            if row.get("cause_class") in allowed_causes
+        ]
+    if not selected_affect and not selected_pressures:
+        return None
+    return {
+        "affect": selected_affect,
+        "pressures": selected_pressures,
+    }
 
 
 def _project_question_constraints(

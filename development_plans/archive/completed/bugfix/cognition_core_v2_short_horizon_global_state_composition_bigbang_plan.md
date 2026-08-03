@@ -4,12 +4,12 @@
 
 - Goal: close the V2 functional gaps formerly covered by mood, global vibe, and last relationship insight through native emotion-specific character carry-over, ordinary elapsed fading between sleep cycles, causal per-user relationship projection, and one role-based user/group interaction-style composition path.
 - Plan class: `high_risk_migration`.
-- Status: `in_progress`.
+- Status: `completed`.
 - Mandatory skills: `development-plan`, `local-llm-architecture`, `no-prepost-user-input`, `debug-llm`, `character-test`, `control-console-web-development`, `py-style`, `cjk-safety`, `test-style-and-execution`, and `python-venv`.
 - Overall cutover strategy: a forward-only V2 big-bang contract replacement after the character identity-growth plan completes, with no legacy prose-state restoration, compatibility mapper, dual read, dual write, channel-situation store, historical replay, or database backfill.
 - Highest-risk areas: preserving the frozen twenty-one-emotion semantics while extending character-scope elapsed evolution; deriving a global consequence without copying user-scoped relationship state; preventing the new operational route from competing with the router's four durable-task slots; keeping global state fresh across normal and accepted-task paths without leaking scoped detail; bounding every reachable input/output/security check without an uncaught pipeline failure; proving behavioral rather than prompt-only impact; preserving current-scene authority; and avoiding latency regression.
 - Acceptance criteria: a zero-gap capability matrix and twenty-one-emotion scope matrix are signed; a normal offence can produce separately derived offender-specific relationship injury and privacy-safe character-global affect; ordinary elapsed evolution changes the effective global emotion before sleep; the next eligible cross-channel turn consumes its committed state version without treating another user as the offender; current history and conversation progress remain scene authority; one interaction-style snapshot serves relevance, cognition, and surface; every direct V2-path limit resolves by bounded reduction, owner-local replacement, or a typed terminal disposition; controlled and natural real-LLM evidence demonstrates emotion-specific causal behavior and fading; baseline-parity proof shows persisted global affect changes at least one decision (appraisal/goal/stance) AND visible speech like the main-branch mood/global-vibe path did; and authenticated browser sign-off shows full persisted/effective affect, scoped relationship state, exact consumed context, and bounded/degraded health.
-- Execution authority: the user approved this plan on 2026-08-02 with the explicit `Approve. Proceed` implementation command; this plan is `in_progress` in `development_plans/active/bugfix/` and production edits, database writes, live-service changes, and execution are authorized by that approval plus this plan's status.
+- Execution authority: the user approved this plan on 2026-08-02 with the explicit `Approve. Proceed` implementation command and approved Stage 11 closeout on 2026-08-03; this completed record is archived under `development_plans/archive/completed/bugfix/`.
 
 ## Context
 
@@ -109,6 +109,20 @@ durable authority and the shared snapshot replaces only P0's loader.
 11. Baseline-parity anti-cheat: a behavioral case passes only when the SAME persisted global state can be shown to change both a decision (appraisal/goal/stance) and the visible dialog, and the consumed-context digest contains the rows that produced that change. Prompt-only differences, a static/inserted mood line, hardcoded emotion or expected-dialog literals, direct state seeding before entrypoint invocation, mocked consumption, and surface-only rewrites that leave decisions unchanged are invalid.
 12. No affect laundering: production code may not append global affect to dialog or surface without passing through the declared consumer projections and recorded context digest, and may not fabricate or duplicate affect rows to inflate influence. Full global state is never copied into a model prompt.
 13. Baseline anchors are mandatory: each controlled and natural review records the main-branch anchors it parallels (prompt/source lines and, where available, the conversation-history example), the exact consumed global-state rows, and the decision+dialog deltas, so the reviewer can verify v2 restores the baseline influence direction without inventing facts, topics, or reasons to speak.
+14. Carry-over role anti-cheat: the LLM selects only the declared source-free
+    role handles. Production code may validate and map those handles, but may
+    not infer actor/target roles from source text, fixture ids, expected
+    emotion, or keywords, and may not hardcode every candidate as
+    `actor=self`. Missing, unknown, duplicate, or conflicting role assignments
+    follow the bounded same-owner replacement path.
+15. A `state_rejected` proposal may consume only the existing three-attempt
+    cap. It may not be converted to a commit, repaired by direct reducer/state
+    writes, or made to pass by weakening native emotion guards, accepting zero
+    deltas, or adding a route fallback.
+16. Performance samples include every attempted run in stable order. Slow,
+    failed, timed-out, or replaced runs may not be discarded from the raw
+    ledger, thresholds may not be relaxed, and a route change invalidates the
+    prior comparable sample set.
 
 ## Must Do
 
@@ -663,6 +677,41 @@ Agents may choose private helper names, preserve-rubric fixture wording, and upd
 
 Stop for direction before adding persisted fields/collections; changing the emotion matrix/formulas/guards, cause enum/predicates, caps/deadline/rates/lifecycle/routing/precedence; changing identity, relationship reducer, progress, RAG semantics, reason-to-speak, action/scheduler/adapter/delivery semantics; adding calls/fallbacks/compatibility/flags/migration/current-Asuna access; broadening visibility; or editing outside the surface except a proven path move.
 
+## Open-Gate Remediation Decision — 2026-08-03
+
+| Gate | Architect decision | Execution boundary |
+|---|---|---|
+| Stage 8 performance | Retain every approved timing, size, call-count, and sample threshold. | The seven-minute Qwen 27B probe is a failed route candidate, not a reason to remove the gate. Complete the missing guarded samples on one approved configured route; any route change requires a fresh comparable sample set. |
+| Stage 9 `state_rejected` | Correct the existing carry-over prompt/contract and native role adapter before changing model route or unrelated cognition. | The retained offence trace reached one valid `apply` decision and failed in `_reduce_apply_decision(...)` before CAS. The current adapter collapses all candidate roles to `actor=self`, while the approved contract already declares `self`, `unspecified_other`, and `group_context`. This is the smallest owning boundary. |
+| Stage 10 browser | Use project Playwright because the in-app Browser reported `No browser is available`. | Start this workspace's console on the first free loopback port in `8770..8799`, supply the same guarded Stage 9 route/database settings through process environment, authenticate, and label the result `Playwright fallback validation`. |
+
+Stage 9 remediation converges implementation to the already approved one-
+question/one-appraisal contract:
+
+- each `apply` proposition has exact keys `kind`, `semantic_value`,
+  `evidence_handles`, `role_assignments`, and `deltas`; action, reason,
+  semantic value, and roles have no parser defaults;
+- `role_assignments` contains one to three unique exact
+  `role|entity_handle` rows, using only
+  `actor|experiencer|target|object` and
+  `self|unspecified_other|group_context`; the LLM owns the semantic choice and
+  deterministic code only binds the closed handles;
+- an externally caused offence can therefore select
+  `actor=unspecified_other,target=self`; self-caused events retain
+  `actor=self`; no source identity or relationship handle enters global state;
+- zero deltas are contract-invalid. A structurally valid proposal that fails
+  native reduction or changes no native path triggers full same-owner
+  replacement with closed error code `state_rejected` until the existing
+  three-attempt cap, then returns degraded no-change;
+- protected evidence records the parsed proposition, selected role handles,
+  native candidate roles, changed paths or rejection class, attempt, and final
+  receipt. Public evidence retains only bounded redacted handles/classes.
+
+No route switch is authorized until these focused tests pass and the exact
+offence trace is rerun. A later route change is allowed only when the corrected
+contract still fails behavior and the replacement route independently passes
+Stage 8 without changing caps, prompts, formulas, guards, or call counts.
+
 ## Implementation Order
 
 ### Stage 1 — Post-Identity Rebaseline And Closure
@@ -733,38 +782,78 @@ Stop for direction before adding persisted fields/collections; changing the emot
 31. Add redaction, missing-data, failure/degraded, version mismatch, and stale-service tests.
 32. Pass repository, contract, web-surface, and fake-service browser tests.
 
-### Stage 8 — Deterministic And Guarded-Database Verification
+### Stage 8 — Approved Remediation, Deterministic, And Performance Verification
 
-33. Run focused files, affected regression suites, static greps, compilation, and guarded clean-database persistence/restart/concurrency tests.
-34. Record call/repair counts, reads, sizes, dispositions, barrier overhead, healthy/retry latency, and timeout release.
-35. Fix only behavior within approved contracts, rerun affected gates, and
-    begin `anti_cheat_audit.md` with the frozen-test comparison and direct-path
-    scans.
+33. Parent adds these exact focused failures to
+    `tests/test_cognition_core_v2_character_carryover.py` before production
+    correction:
+    `test_external_offence_roles_reach_native_reducer`,
+    `test_disgust_target_role_is_preserved`,
+    `test_exact_carryover_schema_has_no_defaults`,
+    `test_zero_delta_requests_replacement`, and
+    `test_state_rejected_exhaustion_has_no_state_update`; record the failing
+    output and updated focused-test hash in `anti_cheat_audit.md`.
+34. In `cognition_core_v2/character_carryover.py`, implement only the exact
+    role passthrough, exact-schema validation, non-zero-delta validation, and
+    bounded native-rejection replacement defined in the Open-Gate Remediation
+    Decision. Change no emotion formula/guard, route fallback, attempt cap,
+    state writer, relevance path, dialog surface, or fixture-specific logic.
+35. Run the focused carry-over file, the Stage 4 seven-file deterministic
+    gate, affected regression suites, static greps, compilation, and guarded
+    clean-database persistence/restart/concurrency tests. Record the accepted
+    parsed roles, native roles, changed paths, receipts, hashes, and zero direct
+    writes.
+36. Complete every missing performance sample: call/repair counts, reads,
+    prompt sizes, long-context disposition, no-pending E2E p95, healthy routed
+    carry-over p95, immediate-next-turn p95, retry release, and timeout release.
+    Preserve all raw runs and comparable environment metadata.
 
 ### Stage 9 — One-At-A-Time Real-LLM Verification
 
-36. Run each controlled emotion-specific A/B case separately and inspect protected traces.
-37. Run the offence-by-A to later-user-B sequence, controlled-clock elapsed-fading sequence, apology/repair sequence, and private/group cross-scope sequences through normal entrypoints without direct state writes.
-38. Run relationship-emotion isolation, privacy, stale-topic, irrelevant-state, and style-cannot-create-reason negative cases.
-39. Parent authors the controlled, natural, and negative reviews from retained
+37. Rerun the three controlled offence cases first, separately, and inspect
+    protected role/reduction traces after each; stop on any role, privacy,
+    native-guard, or direct-write mismatch.
+38. Run the remaining controlled emotion-specific A/B cases separately and inspect protected traces.
+39. Run the offence-by-A to later-user-B sequence, controlled-clock elapsed-fading sequence, apology/repair sequence, and private/group cross-scope sequences through normal entrypoints without direct state writes.
+40. Run relationship-emotion isolation, privacy, stale-topic, irrelevant-state, and style-cannot-create-reason negative cases.
+41. Parent authors the controlled, natural, and negative reviews from retained
     raw evidence and adds pair-delta and evidence-hash rows to the anti-cheat
     audit.
 
+### User-Accepted Stage 9 Mechanism Disposition — 2026-08-03
+
+The user explicitly accepted Stage 9 based on the mechanism rather than the
+weak local-model behavior. The bounded contracts, role handling, replacement
+and exhaustion paths, native guards, privacy boundaries, persistence/CAS
+behavior, ordering, and console mechanisms are the accepted basis. The live
+model's lack of committed native affect, failed baseline-parity evidence, and
+incomplete negative behavior cases remain recorded as non-passing evidence;
+they are not reclassified as behavioral success or emotion-specific quality.
+This closes the Stage 9 disposition for this execution without waiving the
+final review, manifest, user sign-off, lifecycle, or archive requirements.
+
 ### Stage 10 — Real-Service Browser Sign-Off
 
-40. Start the real service and authenticated console against the same guarded data.
-41. Validate Character, User, Group, Overview cognition graph, loading, empty, degraded, desktop, and narrow layouts.
-42. Inspect network payloads and browser console; save screenshots and the browser review.
+42. Start the real service and this workspace's authenticated console against
+    the same guarded data using the Stage 10 process-environment and port rule
+    above; do not reuse another workspace's process or session.
+43. Authenticate Playwright with the console's ephemeral operator token or an
+    explicitly supplied token, redact the token from artifacts, then validate
+    Character, User, Group, Overview cognition graph, loading, empty, degraded,
+    desktop, and narrow layouts.
+44. Inspect authenticated network payloads, browser console, and page errors;
+    save screenshots and the browser review, then terminate only the processes
+    and browser profile created for this gate.
 
 ### Stage 11 — Review And Closeout
 
-43. Run the full affected regression command, final static scans, and complete
+45. Run the full affected regression command, final static scans, and complete
     `anti_cheat_audit.md`.
-44. Start one independent review subagent with the plan, full diff, evidence,
+46. Start one independent review subagent with the plan, full diff, evidence,
     and anti-cheat audit; record its report in
     `test_artifacts/cognition_core_v2_short_horizon_state/independent_code_review.md`.
-45. Parent fixes in-scope findings and reruns every affected gate.
-46. Complete `final_closure_manifest.md`, present it with the readable behavior
+47. Parent fixes in-scope findings and reruns every affected gate.
+48. Complete `final_closure_manifest.md`, present it with the readable behavior
     and browser evidence to the user, record explicit approval in
     `user_signoff.md`, then update lifecycle status and archive the plan.
 
@@ -777,16 +866,16 @@ Stop for direction before adding persisted fields/collections; changing the emot
 ## Progress Checklist
 
 - [x] Stage 1 — prerequisite and closure matrices signed. Covers steps 1-5; evidence: `test_artifacts/cognition_core_v2_short_horizon_state/rebaseline.md`, `baseline_to_v2_capability_closure.md`, and `emotion_scope_decay_matrix.md`; main-branch gap anchors recorded from `git grep main` (mood/global-vibe/relationship-insight producers and L1/L2/L2c2/L3/surface consumers) and read-only history probe `_history_probe.json`; parent `/root`, 2026-08-02; handoff to Stage 2 recorded.
-- [x] Stage 2 — focused test contract established and production subagent started. Covers steps 6-10; evidence: `test_artifacts/cognition_core_v2_short_horizon_state/focused_test_contract.json` and `production_subagent_brief.md`; frozen-test commit `3be764f911bdd6d8faecee6ff499ed1a9c72f812`; parent `/root`, 2026-08-02; handoff to Stage 3 is pending production verification.
-- [ ] Stage 3 — native versioning, fading, projection, receipt transaction, and exact writer conversion pass. Covers steps 11-14; retain focused output; reread, hand off, and sign `<parent/date>`.
-- [ ] Stage 4 — dedicated one-appraisal carry-over, reserved router slot, and direct accepted-task adapter pass. Covers steps 15-19; retain call/update/receipt/failure evidence; reread, hand off, and sign `<parent/date>`.
-- [ ] Stage 5 — durable/process ordering and one-snapshot handoff pass. Covers steps 20-23; retain restart/capacity/timeout/read evidence; reread, hand off, and sign `<parent/date>`.
-- [ ] Stage 6 — relevance/cognition/surface and universal bounded boundaries pass. Covers steps 24-28; retain exact dispositions, sizes, attempts, contexts, and no-escape proof; reread, hand off, and sign `<parent/date>`.
-- [ ] Stage 7 — telemetry and console contracts pass. Covers steps 29-32; verify console unit/web/fake-service tests; retain redacted fixtures/render assertions; reread, hand off to Stage 8, and sign `<parent/date>`.
-- [ ] Stage 8 — deterministic, guarded-DB, and performance gates pass. Covers steps 33-35; run every listed gate and retain deterministic, database, performance, and initial anti-cheat evidence; reread, hand off to Stage 9, and sign `<parent/date>`.
-- [ ] Stage 9 — one-at-a-time real-LLM gates pass. Covers steps 36-39; verify offence/emotion/elapsed/repair/cross-scope/negative rubrics plus the baseline-parity decision+dialog rubric; retain raw artifacts, hashes, pair deltas, baseline anchors, consumed-context digests, and the four readable reviews (`controlled_ab_review.md`, `natural_causal_chain_review.md`, `baseline_parity_behavior_review.md`, `negative_live_llm_review.md`); reread, hand off to Stage 10, and sign `<parent/date>`.
-- [ ] Stage 10 — authenticated browser gate passes. Covers steps 40-42; verify all target states/layouts/controls, redaction, screenshots, and zero browser errors; retain browser sign-off; reread, hand off to Stage 11, and sign `<parent/date>`.
-- [ ] Stage 11 — independent review, anti-cheat audit, remediation, and closeout pass. Covers steps 43-46; verify review approval, reruns, manifest completeness, baseline-parity gate, and explicit user approval; retain the named review/audit/manifest/sign-off artifacts; archive only after every final sign-off rule passes and sign `<parent/date>`.
+- [x] Stage 2 — focused test contract established and production subagent started. Covers steps 6-10; evidence: `test_artifacts/cognition_core_v2_short_horizon_state/focused_test_contract.json` and `production_subagent_brief.md`; frozen-test commit `3be764f911bdd6d8faecee6ff499ed1a9c72f812`; parent `/root`, 2026-08-02; handoff to Stage 3 completed.
+- [x] Stage 3 — native versioning, fading, projection, receipt transaction, and exact writer conversion pass. Covers steps 11-14; evidence: `test_artifacts/cognition_core_v2_short_horizon_state/deterministic_verification.md`, `guarded_database_and_ordering.md`, and the focused 44-test result; parent `/root`, 2026-08-03; handoff to Stage 4 completed.
+- [x] Stage 4 — dedicated one-appraisal carry-over, reserved router slot, and direct accepted-task adapter pass. Covers steps 15-19; evidence: `test_artifacts/cognition_core_v2_short_horizon_state/deterministic_verification.md`, `full_regression.md`, `anti_cheat_audit.md`, the 24-test canonical lane suite, and retained live receipts; parent `/root`, 2026-08-03; handoff to Stage 5 completed.
+- [x] Stage 5 — durable/process ordering and one-snapshot handoff pass. Covers steps 20-23; evidence: `test_artifacts/cognition_core_v2_short_horizon_state/guarded_database_and_ordering.md`, `deterministic_verification.md`, and the ordering, restart, capacity, timeout, database-read, and interaction-style test results; parent `/root`, 2026-08-03; handoff to Stage 6 completed.
+- [x] Stage 6 — relevance/cognition/surface and universal bounded boundaries pass. Covers steps 24-28; evidence: `test_artifacts/cognition_core_v2_short_horizon_state/deterministic_verification.md`, `full_regression.md`, and the relevance, cognition, surface, integration, and universal-boundary test results; parent `/root`, 2026-08-03; handoff to Stage 7 completed.
+- [x] Stage 7 — telemetry and console contracts pass. Covers steps 29-32; evidence: `test_artifacts/cognition_core_v2_short_horizon_state/deterministic_verification.md`, `full_regression.md`, and the repository, cognition-graph, contract, web-surface, redaction, and fake-service test results; parent `/root`, 2026-08-03; handoff to Stage 8 completed.
+- [x] Stage 8 — approved carry-over remediation, deterministic, guarded-DB, and performance disposition accepted. Covers steps 33-36; the post-review role-conflict and semantic-value contract corrections are implemented and the final Stage 11 deterministic evidence is `531 passed, 4 deselected, 1 warning`, with focused carry-over `14 passed` and the final carry-over/operational/service set `54 passed`. The isolated no-pending predecessor probe records 1,000 iterations at 0.0011 ms p95. The user explicitly accepted the local-model p95/latency consequence; slow and incomplete samples remain recorded and are not numeric threshold passes.
+- [x] Stage 9 — mechanism accepted with local-model behavioral drift. Covers steps 37-41; the post-fix anger, sadness, disgust, and natural A→B reruns remain retained failure evidence with no committed native affect or consumed global version. The user accepted this behavior based on the bounded mechanism; no behavioral success, baseline-parity success, or emotion-specific quality claim is made.
+- [x] Stage 10 — authenticated Playwright fallback gate passes with an accepted guarded-database posture exception. Covers steps 42-44; the in-app Browser failure and project Playwright fallback are recorded. The current-workspace console on `8770` and brain on `8781` passed guarded authentication, route/API/network, redaction, explicit terminal-state, narrow-layout, screenshot, and zero-browser-error checks; the operational-posture data panel is explicitly unavailable because of the accepted reserved-database seed mismatch; evidence: `console_browser_signoff.md` and `playwright/console_browser_validation.summary.json`.
+- [x] Stage 11 — independent review, anti-cheat audit, remediation, and closeout pass. Covers steps 45-48; the fresh review findings were remediated through the DeepSeek-owned final contract patch, the final deterministic rerun is `531 passed, 4 deselected, 1 warning` with focused `54 passed`, and the independent reviewer approved the final code/audit/evidence package. The four guarded live-DB smoke cases were rerun individually and are accepted as an external exception for the existing reserved-database seed hash mismatch; evidence and raw output are retained. The user approved the documented behavior, evidence, UI, and accepted exceptions; `user_signoff.md` records the approval, and the completed plan is archived.
 
 ## Verification
 
@@ -811,7 +900,7 @@ rg -n "build_interaction_style_context" src/kazusa_ai_chatbot/nodes/persona_supe
 rg -n "character_operational_state_view|character_operational_context|character_carryover_decision|relationship_operational_context|interaction_style_turn_snapshot|character_operational_receipt" src tests
 rg -n "COGNITION_LLM_CHARACTER_CARRYOVER|character_operational_state_task|consolidation_route_decision.v2" src tests
 rg -n "semantic_appraisals.*max 4|character_operational_state.*lane_tasks" src tests
-rg -n "replace_character_cognition_state" src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition.py src/kazusa_ai_chatbot/reflection_cycle/affect_settling.py
+rg -n "(^|[^A-Za-z0-9_])replace_character_cognition_state\s*\(" src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition.py src/kazusa_ai_chatbot/reflection_cycle/affect_settling.py
 ```
 
 Expected:
@@ -823,7 +912,9 @@ Expected:
   `db/script_operations.py`, and historical/active plan text;
 - canonical route/contract matches occur only in declared owners/consumers;
 - the sixth and seventh commands return zero matches, proving one appraisal,
-  independent router cardinality, and canonical compare-and-set writers.
+  independent router cardinality, and that no direct legacy writer call
+  remains; canonical `compare_and_replace_character_cognition_state(...)`
+  calls are intentionally outside the direct-writer pattern.
 
 ### Focused Deterministic Tests
 
@@ -891,13 +982,13 @@ versions, receipt transitions, restart results, and teardown scope in
 Run every parameter ID separately:
 
 ```powershell
-venv\Scripts\python.exe -m pytest "tests/test_short_horizon_state_composition_live_llm.py::test_offence_emotion_specific_counterfactual[anger_case]" -q -s
-venv\Scripts\python.exe -m pytest "tests/test_short_horizon_state_composition_live_llm.py::test_offence_emotion_specific_counterfactual[sadness_case]" -q -s
-venv\Scripts\python.exe -m pytest "tests/test_short_horizon_state_composition_live_llm.py::test_offence_emotion_specific_counterfactual[disgust_case]" -q -s
-venv\Scripts\python.exe -m pytest "tests/test_short_horizon_state_composition_live_llm.py::test_elapsed_global_affect_counterfactual[case_01]" -q -s
-venv\Scripts\python.exe -m pytest "tests/test_short_horizon_state_composition_live_llm.py::test_global_warmth_counterfactual[case_01]" -q -s
-venv\Scripts\python.exe -m pytest "tests/test_short_horizon_state_composition_live_llm.py::test_relationship_cause_counterfactual[case_01]" -q -s
-venv\Scripts\python.exe -m pytest "tests/test_short_horizon_state_composition_live_llm.py::test_style_scope_counterfactual[case_01]" -q -s
+venv\Scripts\python.exe -m pytest -m "live_llm and live_db" "tests/test_short_horizon_state_composition_live_llm.py::test_offence_emotion_specific_counterfactual[anger_case]" -q -s
+venv\Scripts\python.exe -m pytest -m "live_llm and live_db" "tests/test_short_horizon_state_composition_live_llm.py::test_offence_emotion_specific_counterfactual[sadness_case]" -q -s
+venv\Scripts\python.exe -m pytest -m "live_llm and live_db" "tests/test_short_horizon_state_composition_live_llm.py::test_offence_emotion_specific_counterfactual[disgust_case]" -q -s
+venv\Scripts\python.exe -m pytest -m "live_llm and live_db" "tests/test_short_horizon_state_composition_live_llm.py::test_elapsed_global_affect_counterfactual[case_01]" -q -s
+venv\Scripts\python.exe -m pytest -m "live_llm and live_db" "tests/test_short_horizon_state_composition_live_llm.py::test_global_warmth_counterfactual[case_01]" -q -s
+venv\Scripts\python.exe -m pytest -m "live_llm and live_db" "tests/test_short_horizon_state_composition_live_llm.py::test_relationship_cause_counterfactual[case_01]" -q -s
+venv\Scripts\python.exe -m pytest -m "live_llm and live_db" "tests/test_short_horizon_state_composition_live_llm.py::test_style_scope_counterfactual[case_01]" -q -s
 ```
 
 Repeat the elapsed, warmth, relationship, and style nodes with `case_02` and
@@ -944,12 +1035,12 @@ test_artifacts/cognition_core_v2_short_horizon_state/controlled_ab_review.md
 Run each sequence separately:
 
 ```powershell
-venv\Scripts\python.exe -m pytest tests/test_short_horizon_state_composition_e2e_live_llm.py::test_offence_by_user_a_changes_next_user_b_turn -q -s
-venv\Scripts\python.exe -m pytest tests/test_short_horizon_state_composition_e2e_live_llm.py::test_offence_global_affect_fades_before_sleep -q -s
-venv\Scripts\python.exe -m pytest tests/test_short_horizon_state_composition_e2e_live_llm.py::test_apology_repairs_user_a_and_global_carryover -q -s
-venv\Scripts\python.exe -m pytest tests/test_short_horizon_state_composition_e2e_live_llm.py::test_private_event_changes_next_group_turn -q -s
-venv\Scripts\python.exe -m pytest tests/test_short_horizon_state_composition_e2e_live_llm.py::test_group_event_changes_next_private_turn -q -s
-venv\Scripts\python.exe -m pytest tests/test_short_horizon_state_composition_e2e_live_llm.py::test_accepted_task_result_changes_next_turn -q -s
+venv\Scripts\python.exe -m pytest -m "live_llm and live_db" tests/test_short_horizon_state_composition_e2e_live_llm.py::test_offence_by_user_a_changes_next_user_b_turn -q -s
+venv\Scripts\python.exe -m pytest -m "live_llm and live_db" tests/test_short_horizon_state_composition_e2e_live_llm.py::test_offence_global_affect_fades_before_sleep -q -s
+venv\Scripts\python.exe -m pytest -m "live_llm and live_db" tests/test_short_horizon_state_composition_e2e_live_llm.py::test_apology_repairs_user_a_and_global_carryover -q -s
+venv\Scripts\python.exe -m pytest -m "live_llm and live_db" tests/test_short_horizon_state_composition_e2e_live_llm.py::test_private_event_changes_next_group_turn -q -s
+venv\Scripts\python.exe -m pytest -m "live_llm and live_db" tests/test_short_horizon_state_composition_e2e_live_llm.py::test_group_event_changes_next_private_turn -q -s
+venv\Scripts\python.exe -m pytest -m "live_llm and live_db" tests/test_short_horizon_state_composition_e2e_live_llm.py::test_accepted_task_result_changes_next_turn -q -s
 ```
 
 Each proof must join:
@@ -1007,6 +1098,10 @@ Create
 `test_artifacts/cognition_core_v2_short_horizon_state/performance_review.md`
 with post-identity baseline and final measurements.
 
+Every threshold below remains binding for an unwaived product-performance
+claim. The failed seven-minute Qwen probe and the incomplete prior sample set
+remain recorded as failures/incomplete evidence.
+
 Required:
 
 - no new foreground model call;
@@ -1035,11 +1130,42 @@ Required:
 - the captured long-context V2 reproduction passes with no call-count, prompt,
   crash, or latency regression outside these thresholds.
 
+### User-Accepted Local-Model Performance Exception — 2026-08-03
+
+The user explicitly accepted the observed p95/latency consequence of running
+the configured local model and directed closure of the performance gate. The
+recorded slow and incomplete samples remain preserved as evidence; they are
+not reclassified as numeric threshold passes. This exception closes the
+Stage 8 performance disposition for this execution and does not waive the
+live behavioral, privacy, or final closeout gates.
+
+### User-Accepted Stage 11 Guarded-Database Exception — 2026-08-03
+
+The user explicitly accepted the reserved `_test_kazusa_live_llm` seed-integrity
+issue encountered during the four individual guarded live-DB smoke reruns.
+MongoDB was reachable, but the existing `character_state:{'_id': 'global'}`
+document did not match the checked-in fixture hash, so each case failed before
+cognition execution. The raw output remains retained in
+`live_db_stage11_final_contract.log`; this is an external-state exception, not
+a deterministic pass or a local-model behavior result. No destructive reset or
+reseed was performed. This exception permits Stage 11 closeout to continue
+with the live-DB gate recorded as `ACCEPTED EXCEPTION`, subject to independent
+review and final user approval. The same accepted database state leaves the
+browser Character operational-posture panel in an explicit terminal
+`unavailable` state; the authenticated shell, API, redaction, layout, and
+terminal-state mechanics remain evidenced, while persisted/effective posture
+data availability is not claimed as a pass.
+
 ### Console Browser Gate
 
-Use the in-app Browser when available; otherwise use project Playwright and
-record the reason. Start the authenticated real console at its configured
-loopback URL, normally `http://127.0.0.1:8765/`, against the same guarded data.
+The in-app Browser failure is already recorded, so use project Playwright and
+identify the evidence as fallback validation. Start only this workspace's
+authenticated real console on the first free port in `8770..8799` at
+`http://127.0.0.1:<port>/`, with the same guarded Stage 9 database and carry-
+over route values supplied as process-environment overrides. Record the exact
+workspace, port, URL, brain URL, database name, route/model, and session state;
+redact credentials and the operator token. Evidence from the other workspace
+listeners on 8765/8766 is invalid.
 
 Verify:
 
@@ -1155,6 +1281,20 @@ Final sign-off is an evidence review, not a checklist or test-count decision. Th
 
 Final passing rules:
 
+The dated user-authorized Stage 8 performance disposition and Stage 9
+mechanism disposition above are explicit closure-contract exceptions for this
+execution. They permit Acceptance Criteria 14, 17, 18, 19, 20, and 23 to be
+recorded as `ACCEPTED EXCEPTION` with their non-passing raw evidence retained;
+they do not convert those observations into `PASS`, waive independent review,
+or waive the user's final approval of the manifest, behavior evidence, and
+browser evidence. The dated Stage 11 guarded-database disposition likewise
+permits the four seed-blocked smoke cases to be recorded as an accepted
+external-state exception with raw output retained; it is not a test pass.
+For Acceptance Criterion 21, the authenticated browser mechanics may remain
+directly evidenced, while the persisted/effective operational-posture data
+availability is recorded as the same accepted external-state exception.
+All other criteria remain subject to the rules below.
+
 1. Every named artifact exists, is non-empty, and resolves to its cited raw hash; blanks, placeholders, missing rows, and prose-only evidence fail.
 2. All eleven stages and twenty-three acceptance criteria pass; unchecked evidence links or missing signatures invalidate a checked box.
 3. Every required case runs. Skip, xfail, deselection, deletion, or weakened coverage fails. A warning is reviewed only when source, owner, relevance, disposition, and reviewer agreement are recorded.
@@ -1224,4 +1364,4 @@ Final passing rules:
 
 ## Execution Evidence
 
-Execution appends dated command, count, hash, result, reviewer, and stage-signature rows only to the exact artifacts in `Final Sign-Off Contract`. Completion requires `final_closure_manifest.md` to resolve every Acceptance Criterion 1-23 row to those artifacts, `baseline_parity_behavior_review.md` to pass the baseline-parity gate, `independent_code_review.md` to approve the final diff/audit, and `user_signoff.md` to record explicit final approval.
+Execution appended dated command, count, hash, result, reviewer, and stage-signature rows only to the exact artifacts in `Final Sign-Off Contract`. Completion resolved every Acceptance Criterion 1-23 row to those artifacts, preserved the accepted non-passing behavior and external-state exceptions, recorded approval in `user_signoff.md`, and archived the completed plan.

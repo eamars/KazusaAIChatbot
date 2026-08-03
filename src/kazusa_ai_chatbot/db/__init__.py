@@ -40,6 +40,8 @@ from kazusa_ai_chatbot.db.schemas import (
     AttachmentDoc,
     CalendarRunDoc,
     CalendarScheduleDoc,
+    CharacterOperationalClaimV1,
+    CharacterOperationalReceiptV1,
     CharacterProfileDoc,
     CharacterReflectionRunDoc,
     ConversationEpisodeBlockDoc,
@@ -65,6 +67,7 @@ from kazusa_ai_chatbot.db.schemas import (
     SelfCognitionActionAttemptDoc,
     SelfCognitionGroupReviewWindowDoc,
     PostTurnLifecycleRecordV1,
+    PostTurnLifecycleRecordV2,
     UserMemoryContextDoc,
     UserMemoryContextEntry,
     UserMemoryUnitDoc,
@@ -182,7 +185,13 @@ from kazusa_ai_chatbot.db.internal_action_latches import (
     release_internal_action_latch,
 )
 from kazusa_ai_chatbot.db.post_turn_lifecycle import (
+    build_character_operational_lifecycle_record,
+    claim_character_operational_receipt,
+    commit_character_operational_update,
+    complete_character_operational_receipt,
     ensure_post_turn_lifecycle_record_indexes,
+    expire_character_operational_receipts,
+    get_character_operational_receipt,
     upsert_post_turn_lifecycle_record,
 )
 
@@ -268,6 +277,7 @@ _LAZY_USER_EXPORTS = {
 _LAZY_CHARACTER_EXPORTS = {
     "LegacyCharacterStateError",
     "RUNTIME_CHARACTER_STATE_FIELDS",
+    "compare_and_replace_character_cognition_state",
     "compose_character_profile",
     "ensure_operational_character_state",
     "get_character_cognition_state",
@@ -321,6 +331,7 @@ __all__ = [
     "get_text_embedding", "get_text_embeddings_batch",
     # Schemas
     "AttachmentDoc", "CalendarRunDoc", "CalendarScheduleDoc",
+    "CharacterOperationalClaimV1", "CharacterOperationalReceiptV1",
     "CharacterProfileDoc",
     "CharacterReflectionRunDoc",
     "ConversationEpisodeBlockDoc", "ConversationEpisodeStateDoc",
@@ -330,7 +341,7 @@ __all__ = [
     "InternalActionLatchClaimV1", "InternalActionLatchV1",
     "InteractionStyleOverlayDoc", "InteractionStyleScopeType",
     "InteractionStyleStatus", "MemoryDoc", "MentionDoc",
-    "PostTurnLifecycleRecordV1",
+    "PostTurnLifecycleRecordV1", "PostTurnLifecycleRecordV2",
     "PlatformAccountDoc", "RAGCache2PersistentEntryDoc",
     "ReflectionMessageRefDoc", "ReflectionScopeDoc",
     "ScheduledEventDoc", "SelfCognitionActionAttemptDoc",
@@ -400,6 +411,7 @@ __all__ = [
     # Character
     "LegacyCharacterStateError",
     "RUNTIME_CHARACTER_STATE_FIELDS",
+    "compare_and_replace_character_cognition_state",
     "compose_character_profile",
     "ensure_operational_character_state",
     "get_character_cognition_state",
@@ -428,6 +440,12 @@ __all__ = [
     "fail_internal_action_latch", "issue_internal_action_latch",
     "release_internal_action_latch",
     "ensure_post_turn_lifecycle_record_indexes",
+    "build_character_operational_lifecycle_record",
+    "claim_character_operational_receipt",
+    "commit_character_operational_update",
+    "complete_character_operational_receipt",
+    "expire_character_operational_receipts",
+    "get_character_operational_receipt",
     "upsert_post_turn_lifecycle_record",
     # Memory
     "enable_memory_vector_index", "get_active_promises", "save_memory", "search_memory",

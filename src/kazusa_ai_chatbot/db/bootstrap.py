@@ -41,6 +41,7 @@ from kazusa_ai_chatbot.db.internal_action_latches import (
 from kazusa_ai_chatbot.db.post_turn_lifecycle import (
     POST_TURN_LIFECYCLE_RECORDS_COLLECTION,
     ensure_post_turn_lifecycle_record_indexes,
+    expire_character_operational_receipts,
 )
 from kazusa_ai_chatbot.db.character_identity_growth import (
     GROWTH_COLLECTION_NAMES,
@@ -68,6 +69,7 @@ from kazusa_ai_chatbot.db.self_cognition import (
     SELF_COGNITION_ACTION_ATTEMPTS_COLLECTION,
     SELF_COGNITION_GROUP_REVIEW_WINDOWS_COLLECTION,
 )
+from kazusa_ai_chatbot.time_boundary import storage_utc_now_iso
 
 logger = logging.getLogger(__name__)
 
@@ -230,6 +232,9 @@ async def db_bootstrap() -> None:
     await ensure_background_work_job_indexes()
     await ensure_internal_action_latch_indexes()
     await ensure_post_turn_lifecycle_record_indexes()
+    await expire_character_operational_receipts(
+        now=storage_utc_now_iso().replace("+00:00", "Z"),
+    )
     await db.conversation_episode_state.create_index(
         [("platform", 1), ("platform_channel_id", 1), ("global_user_id", 1)],
         unique=True,

@@ -314,7 +314,14 @@ async def _run_daily_sleep_recovery(
         return result
 
     try:
-        await db.replace_character_cognition_state(recovered_state)
+        committed = await db.compare_and_replace_character_cognition_state(
+            expected_updated_at=state["updated_at"],
+            replacement=recovered_state,
+        )
+        if not committed:
+            raise DatabaseOperationError(
+                "daily sleep recovery character state version conflict"
+            )
     except DatabaseOperationError as exc:
         logger.exception(f"Daily sleep recovery persistence failed: {exc}")
         await _persist_affect_settling_run(

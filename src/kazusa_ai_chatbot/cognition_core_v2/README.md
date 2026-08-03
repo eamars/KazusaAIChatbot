@@ -334,6 +334,22 @@ Input validation, bounded semantic appraisal, dependency-ready goal branches,
 complete-bid collapse, route validation, replacement-state reduction, and
 typed output validation run in one inspectable call.
 
+## Short-Horizon Operational Context
+
+The character-scope `CharacterCognitionStateV2` remains the sole persisted
+short-horizon global authority. Callers derive an elapsed-effective full view,
+then pass only a bounded `character_operational_context` to the approved
+consumer branch. Current-user relationship context remains user scoped and is
+projected separately; its durable relationship id never crosses the public
+operational boundary.
+
+The service reuses one immutable interaction-style snapshot for settled
+relevance, V2 cognition, and L3 surface. The V2 input/output and L3 input are
+the source of the graph-owned `cognition_context_consumption.v1` record. That
+record is observability only: it uses bounded public selections, digests, and
+typed health; it does not alter cognition semantics or introduce a second
+state authority.
+
 ## Failure Behavior
 
 Every recoverable V2 producer and verifier has at least three total local

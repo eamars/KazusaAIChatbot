@@ -443,6 +443,52 @@ class PostTurnLifecycleRecordV1(TypedDict, total=False):
     purge_after: str
 
 
+class CharacterOperationalReceiptV1(TypedDict, total=False):
+    """Durable terminal state for one character carry-over episode."""
+
+    schema_version: Literal["character_operational_receipt.v1"]
+    source_episode_id: str
+    status: Literal[
+        "pending",
+        "no_change",
+        "committed",
+        "failed",
+        "timed_out",
+    ]
+    sequence: int
+    durable: bool
+    base_updated_at: str
+    committed_updated_at: str
+    registered_at: str
+    completed_at: str
+    lease_owner: str
+    lease_expires_at: str
+    attempt_count: int
+    error_code: str | None
+
+
+class CharacterOperationalClaimV1(TypedDict, total=False):
+    """Result of atomically claiming one lifecycle receipt."""
+
+    claim_status: Literal["claimed", "in_progress", "terminal"]
+    receipt: CharacterOperationalReceiptV1
+
+
+class PostTurnLifecycleRecordV2(TypedDict, total=False):
+    """Mutable post-turn audit record with an operational receipt."""
+
+    schema_version: Literal["post_turn_lifecycle_record.v2"]
+    lifecycle_record_id: str
+    source_episode_id: str
+    delivery_tracking_id: str
+    action_projections: list[dict]
+    status: Literal["skipped", "completed", "partial", "failed"]
+    error_codes: list[str]
+    character_operational_receipt: CharacterOperationalReceiptV1
+    created_at: str
+    purge_after: str
+
+
 class MemoryDoc(TypedDict, total=False):
     """Evolving shared-memory unit in the ``memory`` collection."""
     memory_unit_id: str             # Stable id for this memory unit
