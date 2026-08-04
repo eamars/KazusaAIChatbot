@@ -138,7 +138,7 @@ GOAL_RESOLUTION_VALUES = frozenset({
 PAST_DIALOG_COGNITION_CONTEXT_MAX_CHARS = 1800
 GROUP_ENGAGEMENT_GUIDELINE_MAX_CHARS = 120
 GROUP_ENGAGEMENT_CONFIDENCE_MAX_CHARS = 80
-RELATIONAL_WILLINGNESS_SCHEMA_VERSION = "relational_willingness.v1"
+RELATIONAL_WILLINGNESS_SCHEMA_VERSION = "relational_willingness.v2"
 RELATIONAL_APPLICABILITY_VALUES = frozenset({
     "not_relationship_sensitive",
     "relationship_sensitive",
@@ -164,8 +164,26 @@ RELATIONAL_NON_ACCEPTING_STANCES = frozenset({
     "negotiate",
     "conditional_accept",
 })
+RELATIONAL_CURRENT_USER_RELATIONSHIP_STATE_VALUES = frozenset({
+    "not_applicable",
+    "unestablished",
+    "developing_or_uncertain",
+    "established",
+})
+RELATIONAL_DEVELOPING_OR_UNCERTAIN_STANCES = frozenset({
+    "reject",
+    "deflect",
+    "negotiate",
+    "conditional_accept",
+})
 RELATIONAL_WILLINGNESS_MAX_REASON_CHARS = 300
 MAX_RELATIONAL_WILLINGNESS_EVIDENCE_HANDLES = 4
+RELATIONAL_PROVENANCE_ROLE_VALUES = frozenset({
+    "current_episode",
+    "current_user_history_only",
+    "character_or_world_context_only",
+    "contextual_fact_only",
+})
 MEMORY_SCOPE_VALUES = frozenset({
     "current_user_continuity",
     "shared_character_or_world",
@@ -292,15 +310,16 @@ class CognitionEvidenceV2(TypedDict):
     ]
 
 
-class RelationalWillingnessV1(TypedDict):
+class RelationalWillingnessV2(TypedDict):
     """Transient current-turn relational-willingness decision.
 
     The ordinary goal owner produces one exact decision per relationship-
     sensitive turn. Deterministic stages validate, preserve, and copy the
-    decision; they never derive or rewrite the stance from prose.
+    decision; they never derive or rewrite the stance or relationship state
+    from prose.
     """
 
-    schema_version: Literal["relational_willingness.v1"]
+    schema_version: Literal["relational_willingness.v2"]
     applicability: Literal[
         "not_relationship_sensitive",
         "relationship_sensitive",
@@ -313,8 +332,56 @@ class RelationalWillingnessV1(TypedDict):
         "conditional_accept",
         "accept",
     ]
+    current_user_relationship_state: Literal[
+        "not_applicable",
+        "unestablished",
+        "developing_or_uncertain",
+        "established",
+    ]
     reason: str
     evidence_handles: list[str]
+
+
+def project_evidence_provenance_role(
+    source_kind: str,
+    memory_scope: object,
+) -> str:
+    """Map trusted evidence metadata to a transient model-facing authority role.
+
+    The role is derived only from validated source-kind and memory-scope
+    metadata. Unknown provenance fails closed with a contract error so no
+    free-text inference can assign authority.
+
+    Args:
+        source_kind: Validated ``evidence_ref.source_kind`` value.
+        memory_scope: Optional validated ``memory_scope`` value carried by
+            promoted-memory evidence rows.
+
+    Returns:
+        One transient provenance-role label from
+        ``RELATIONAL_PROVENANCE_ROLE_VALUES``.
+
+    Raises:
+        CognitionContractError: When the metadata cannot be mapped.
+    """
+
+    if source_kind == "episode":
+        return "current_episode"
+    if source_kind == "promoted_memory":
+        if memory_scope == "current_user_continuity":
+            return "current_user_history_only"
+        if memory_scope == "shared_character_or_world":
+            return "character_or_world_context_only"
+        raise CognitionContractError(
+            "promoted memory evidence requires a trusted memory scope"
+        )
+    if source_kind == "promoted_reflection":
+        return "character_or_world_context_only"
+    if source_kind in EVIDENCE_SOURCE_QUESTION_IDS:
+        return "contextual_fact_only"
+    raise CognitionContractError(
+        "evidence source kind is unsupported"
+    )
 
 
 class DirectFactV2(TypedDict):
@@ -481,7 +548,7 @@ class ActionBidV2(TypedDict):
     evidence_handles: list[str]
     expected_consequences: list[str]
     confidence: str
-    relational_willingness: NotRequired[RelationalWillingnessV1]
+    relational_willingness: NotRequired[RelationalWillingnessV2]
 
 
 class GoalBidDraftV2(TypedDict):
@@ -496,7 +563,7 @@ class GoalBidDraftV2(TypedDict):
     evidence_handles: list[str]
     expected_consequences: list[str]
     confidence: str
-    relational_willingness: NotRequired[RelationalWillingnessV1]
+    relational_willingness: NotRequired[RelationalWillingnessV2]
 
 
 class SelectedIntentionV2(TypedDict):
@@ -686,7 +753,7 @@ class CognitionObservabilityV2(TypedDict):
     appraisals: list[CognitionAppraisalObservationV2]
     branches: list[CognitionBranchObservationV2]
     collapse: CognitionCollapseObservationV2
-    relational_willingness: NotRequired[RelationalWillingnessV1]
+    relational_willingness: NotRequired[RelationalWillingnessV2]
 
 
 class CognitionCoreInputV2(TypedDict):
@@ -739,7 +806,7 @@ class CognitionCoreOutputV2(TypedDict):
     expression_policy: ExpressionPolicyV2
     diagnostics: CognitionDiagnosticsV2
     cognition_observability: NotRequired[CognitionObservabilityV2]
-    relational_willingness: NotRequired[RelationalWillingnessV1]
+    relational_willingness: NotRequired[RelationalWillingnessV2]
 
 
 class SurfaceBidProjectionV2(TypedDict):
@@ -811,7 +878,7 @@ class TextSurfaceInputV2(TypedDict):
     interaction_style_context: str
     character_expression_context: CharacterExpressionContextV2
     visual_character_context: str
-    relational_willingness: NotRequired[RelationalWillingnessV1]
+    relational_willingness: NotRequired[RelationalWillingnessV2]
 
 
 class TextSurfaceOutputV2(TypedDict):
@@ -1346,7 +1413,7 @@ def _validate_relational_output_consistency(
 ) -> None:
     """Require the top-level decision to copy every admitted ordinary bid."""
 
-    ordinary_decisions: list[RelationalWillingnessV1] = []
+    ordinary_decisions: list[RelationalWillingnessV2] = []
     admitted_bid = payload.get("admitted_bid")
     if (
         isinstance(admitted_bid, Mapping)
@@ -1382,7 +1449,7 @@ def validate_relational_willingness(
     *,
     evidence_handles: set[str] | None = None,
     episode_handles: set[str] | None = None,
-) -> RelationalWillingnessV1:
+) -> RelationalWillingnessV2:
     """Validate one exact transient relational-willingness decision.
 
     Args:
@@ -1410,6 +1477,7 @@ def validate_relational_willingness(
         "schema_version",
         "applicability",
         "stance",
+        "current_user_relationship_state",
         "reason",
         "evidence_handles",
     }
@@ -1431,14 +1499,49 @@ def validate_relational_willingness(
         raise CognitionContractError(
             "relational willingness stance is invalid"
         )
-    if applicability == "not_relationship_sensitive":
-        if stance != "not_applicable":
-            raise CognitionContractError(
-                "non-sensitive relational willingness must be not_applicable"
-            )
-    elif stance == "not_applicable":
+    relationship_state = value["current_user_relationship_state"]
+    if (
+        not isinstance(relationship_state, str)
+        or relationship_state
+        not in RELATIONAL_CURRENT_USER_RELATIONSHIP_STATE_VALUES
+    ):
         raise CognitionContractError(
-            "sensitive relational willingness requires an ordered stance"
+            "relational willingness relationship state is invalid"
+        )
+    if applicability == "not_relationship_sensitive":
+        if (
+            stance != "not_applicable"
+            or relationship_state != "not_applicable"
+        ):
+            raise CognitionContractError(
+                "non-sensitive relational willingness must be "
+                "not_applicable with not_applicable relationship state"
+            )
+    elif (
+        stance == "not_applicable"
+        or relationship_state == "not_applicable"
+    ):
+        raise CognitionContractError(
+            "sensitive relational willingness requires an ordered stance "
+            "and a real relationship state"
+        )
+    elif (
+        relationship_state == "unestablished"
+        and stance != "reject"
+    ):
+        raise CognitionContractError(
+            "unestablished relational willingness allows only reject"
+        )
+    elif (
+        relationship_state == "developing_or_uncertain"
+        and stance not in RELATIONAL_DEVELOPING_OR_UNCERTAIN_STANCES
+    ):
+        raise CognitionContractError(
+            "developing or uncertain relational willingness cannot accept"
+        )
+    elif stance == "accept" and relationship_state != "established":
+        raise CognitionContractError(
+            "accept requires an established current-user relationship state"
         )
     _require_simplified_chinese_reason(
         value["reason"],

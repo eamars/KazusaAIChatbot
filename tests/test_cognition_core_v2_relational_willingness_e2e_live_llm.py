@@ -784,6 +784,35 @@ async def _run_public_case(
         actual_stance = str(decision.get("stance", ""))
         if actual_stance not in _VALID_STANCES:
             raise AssertionError(f"invalid public stance: {actual_stance}")
+        decision_state = str(
+            decision.get("current_user_relationship_state", "")
+        )
+        if decision_state not in {
+            "not_applicable",
+            "unestablished",
+            "developing_or_uncertain",
+            "established",
+        }:
+            raise AssertionError(
+                f"invalid public relationship state: {decision_state}"
+            )
+        if actual_stance != "not_applicable" and (
+            decision.get("applicability") != "relationship_sensitive"
+        ):
+            raise AssertionError(
+                "non-applicable stance requires a sensitive applicability: "
+                f"decision={decision}"
+            )
+        if profile_name == "stranger" and decision_state != "unestablished":
+            raise AssertionError(
+                f"stranger expected unestablished state, got {decision_state}; "
+                f"decision={decision}"
+            )
+        if profile_name == "lover" and decision_state != "established":
+            raise AssertionError(
+                f"lover expected established state, got {decision_state}; "
+                f"decision={decision}"
+            )
         endpoint_expectations = fixture["endpoint_expectations"]
         expected_stance = str(endpoint_expectations.get(profile_name, ""))
         if expected_stance and expected_stance != "observation_only":

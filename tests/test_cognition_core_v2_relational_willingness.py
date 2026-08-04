@@ -17,6 +17,7 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionCoreServicesV2,
     CognitionExecutionError,
     EVIDENCE_SOURCE_QUESTION_IDS,
+    project_evidence_provenance_role,
     validate_cognition_core_input,
     validate_cognition_core_output,
 )
@@ -72,14 +73,25 @@ def _decision(
     *,
     applicability: str = 'relationship_sensitive',
     stance: str = 'reject',
+    relationship_state: str | None = None,
     evidence_handles: list[str] | None = None,
 ) -> dict[str, object]:
     """Build one bounded relational decision candidate."""
 
+    if relationship_state is None:
+        if applicability == 'not_relationship_sensitive':
+            relationship_state = 'not_applicable'
+        elif stance == 'reject':
+            relationship_state = 'unestablished'
+        elif stance == 'accept':
+            relationship_state = 'established'
+        else:
+            relationship_state = 'developing_or_uncertain'
     return {
-        'schema_version': 'relational_willingness.v1',
+        'schema_version': 'relational_willingness.v2',
         'applicability': applicability,
         'stance': stance,
+        'current_user_relationship_state': relationship_state,
         'reason': '当前回合证据显示关系许可尚未建立',
         'evidence_handles': list(evidence_handles or ['e1']),
     }
@@ -413,6 +425,116 @@ def test_relational_decision_contract_requires_exact_pairing() -> None:
         validate_cognition_core_output(_output_with_decision(unknown_field))
 
 
+def test_relational_decision_v2_requires_exact_keys_and_enums() -> None:
+    """The V2 decision has exact keys and closed enum values only."""
+
+    missing_state = _decision()
+    missing_state.pop('current_user_relationship_state')
+    with pytest.raises(CognitionContractError):
+        validate_cognition_core_output(_output_with_decision(missing_state))
+
+    invalid_state = _decision(relationship_state='stranger')
+    with pytest.raises(CognitionContractError):
+        validate_cognition_core_output(_output_with_decision(invalid_state))
+
+    v1_object = {
+        'schema_version': 'relational_willingness.v1',
+        'applicability': 'relationship_sensitive',
+        'stance': 'reject',
+        'reason': '当前回合证据显示关系许可尚未建立',
+        'evidence_handles': ['e1'],
+    }
+    with pytest.raises(CognitionContractError):
+        validate_cognition_core_output(_output_with_decision(v1_object))
+
+
+def test_relational_pairing_matrix_is_deterministic() -> None:
+    """Every allowed pairing validates and every forbidden pairing fails."""
+
+    allowed = [
+        ('not_relationship_sensitive', 'not_applicable', 'not_applicable'),
+        ('relationship_sensitive', 'unestablished', 'reject'),
+        ('relationship_sensitive', 'developing_or_uncertain', 'reject'),
+        ('relationship_sensitive', 'developing_or_uncertain', 'deflect'),
+        ('relationship_sensitive', 'developing_or_uncertain', 'negotiate'),
+        (
+            'relationship_sensitive',
+            'developing_or_uncertain',
+            'conditional_accept',
+        ),
+        ('relationship_sensitive', 'established', 'reject'),
+        ('relationship_sensitive', 'established', 'deflect'),
+        ('relationship_sensitive', 'established', 'negotiate'),
+        ('relationship_sensitive', 'established', 'conditional_accept'),
+        ('relationship_sensitive', 'established', 'accept'),
+    ]
+    for applicability, relationship_state, stance in allowed:
+        decision = _decision(
+            applicability=applicability,
+            stance=stance,
+            relationship_state=relationship_state,
+        )
+        validate_cognition_core_output(_output_with_decision(decision))
+
+    forbidden = [
+        ('not_relationship_sensitive', 'not_applicable', 'reject'),
+        ('not_relationship_sensitive', 'unestablished', 'not_applicable'),
+        ('relationship_sensitive', 'not_applicable', 'not_applicable'),
+        ('relationship_sensitive', 'not_applicable', 'reject'),
+        ('relationship_sensitive', 'unestablished', 'deflect'),
+        ('relationship_sensitive', 'unestablished', 'negotiate'),
+        ('relationship_sensitive', 'unestablished', 'conditional_accept'),
+        ('relationship_sensitive', 'unestablished', 'accept'),
+        ('relationship_sensitive', 'developing_or_uncertain', 'accept'),
+        ('relationship_sensitive', 'established', 'not_applicable'),
+    ]
+    for applicability, relationship_state, stance in forbidden:
+        decision = _decision(
+            applicability=applicability,
+            stance=stance,
+            relationship_state=relationship_state,
+        )
+        with pytest.raises(CognitionContractError):
+            validate_cognition_core_output(_output_with_decision(decision))
+
+
+def test_evidence_provenance_roles_map_every_supported_metadata() -> None:
+    """Trusted source metadata maps to one exact transient authority role."""
+
+    expected = {
+        ('episode', None): 'current_episode',
+        (
+            'promoted_memory',
+            'current_user_continuity',
+        ): 'current_user_history_only',
+        (
+            'promoted_memory',
+            'shared_character_or_world',
+        ): 'character_or_world_context_only',
+        ('promoted_reflection', None): 'character_or_world_context_only',
+    }
+    for source_kind in EVIDENCE_SOURCE_QUESTION_IDS:
+        if source_kind == 'promoted_memory':
+            continue
+        if (source_kind, None) not in expected:
+            expected[(source_kind, None)] = 'contextual_fact_only'
+    for (source_kind, memory_scope), role in expected.items():
+        assert project_evidence_provenance_role(
+            source_kind,
+            memory_scope,
+        ) == role
+
+    with pytest.raises(CognitionContractError):
+        project_evidence_provenance_role('promoted_memory', None)
+    with pytest.raises(CognitionContractError):
+        project_evidence_provenance_role(
+            'promoted_memory',
+            'unknown_scope',
+        )
+    with pytest.raises(CognitionContractError):
+        project_evidence_provenance_role('unknown_source', None)
+
+
 @pytest.mark.asyncio
 async def test_ordinary_goal_draft_carries_current_episode_decision() -> None:
     """Ordinary goal ownership preserves the validated episode-backed decision."""
@@ -451,8 +573,14 @@ async def test_ordinary_goal_draft_carries_current_episode_decision() -> None:
 
     assert bid['relational_willingness'] == decision
     assert llm.messages
+    system_prompt = str(llm.messages[0][0].content)
     rendered_prompt = str(llm.messages[0][-1].content)
     assert 'shared_character_or_world' in rendered_prompt
+    assert 'provenance_role' in rendered_prompt
+    assert 'current_episode' in rendered_prompt
+    assert 'character_or_world_context_only' in rendered_prompt
+    assert 'current_user_relationship_state' in system_prompt
+    assert 'relational_willingness.v2' in system_prompt
     assert '当前用户提出了需要关系判断的请求' in rendered_prompt
 
 
@@ -492,6 +620,154 @@ async def test_ordinary_goal_rejects_decision_without_episode_evidence() -> None
             evidence,
             _core_services(llm),
         )
+
+
+@pytest.mark.asyncio
+async def test_ordinary_goal_regenerates_invalid_accept_pairing() -> None:
+    """An invalid accept with unestablished state invokes same-owner repair."""
+
+    class _RepairLLM:
+        def __init__(self) -> None:
+            self.messages: list[list[object]] = []
+
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config: object,
+        ) -> SimpleNamespace:
+            del config
+            self.messages.append(messages)
+            if len(self.messages) == 1:
+                decision = _decision(
+                    stance='accept',
+                    relationship_state='unestablished',
+                )
+            else:
+                decision = _decision(stance='reject')
+            payload = {
+                'intention': '保持当前回合的清晰边界',
+                'desired_outcome': '让可见回应符合当前关系判断',
+                'concrete_detail': '只使用当前回合的直接证据',
+                'reason': '当前关系证据支持该回应方向',
+                'private_monologue': '先保持与当前判断一致。',
+                'target_role_handles': [],
+                'evidence_handles': ['e1'],
+                'expected_consequences': ['保留当前回合连续性'],
+                'confidence': 'high',
+                'relational_willingness': deepcopy(decision),
+            }
+            return SimpleNamespace(
+                content=json.dumps(payload, ensure_ascii=False),
+            )
+
+    llm = _RepairLLM()
+    evidence = [
+        _evidence_row(
+            'e1',
+            'episode',
+            '当前用户提出了需要关系判断的请求。',
+        ),
+    ]
+    bid = await run_goal_cognition(
+        BranchDefinition(
+            branch_id='ordinary_response',
+            dependencies=(),
+            action_tendencies=('speak',),
+            goal_kind='ordinary_response',
+        ),
+        {
+            'scope': 'user',
+            'kind': 'goal',
+            'entity_id': 'goal:ordinary-response',
+        },
+        _goal_context(),
+        evidence,
+        _core_services(llm),
+    )
+
+    assert len(llm.messages) == 2
+    assert llm.messages[1][0].content == llm.messages[0][0].content
+    repair_payload = json.loads(str(llm.messages[1][1].content))
+    feedback = repair_payload['repair_feedback']
+    assert 'relational willingness' in feedback['validation_error']
+    contract = feedback['relational_willingness_contract']
+    assert contract['schema_version'] == 'relational_willingness.v2'
+    assert contract['allowed_stance_pairings']['relationship_sensitive'][
+        'unestablished'
+    ] == ['reject']
+    assert bid['relational_willingness']['stance'] == 'reject'
+    assert (
+        bid['relational_willingness']['current_user_relationship_state']
+        == 'unestablished'
+    )
+
+
+@pytest.mark.asyncio
+async def test_ordinary_goal_exhaustion_fails_closed_before_commit() -> None:
+    """Repeated invalid pairings exhaust attempts without default acceptance."""
+
+    class _InvalidLLM:
+        def __init__(self) -> None:
+            self.call_count = 0
+
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config: object,
+        ) -> SimpleNamespace:
+            del messages, config
+            self.call_count += 1
+            decision = _decision(
+                stance='accept',
+                relationship_state='unestablished',
+            )
+            payload = {
+                'intention': '保持当前回合的清晰边界',
+                'desired_outcome': '让可见回应符合当前关系判断',
+                'concrete_detail': '只使用当前回合的直接证据',
+                'reason': '当前关系证据支持该回应方向',
+                'private_monologue': '先保持与当前判断一致。',
+                'target_role_handles': [],
+                'evidence_handles': ['e1'],
+                'expected_consequences': ['保留当前回合连续性'],
+                'confidence': 'high',
+                'relational_willingness': deepcopy(decision),
+            }
+            return SimpleNamespace(
+                content=json.dumps(payload, ensure_ascii=False),
+            )
+
+    llm = _InvalidLLM()
+    evidence = [
+        _evidence_row(
+            'e1',
+            'episode',
+            '当前用户提出了需要关系判断的请求。',
+        ),
+    ]
+    with pytest.raises(CognitionExecutionError) as error_info:
+        await run_goal_cognition(
+            BranchDefinition(
+                branch_id='ordinary_response',
+                dependencies=(),
+                action_tendencies=('speak',),
+                goal_kind='ordinary_response',
+            ),
+            {
+                'scope': 'user',
+                'kind': 'goal',
+                'entity_id': 'goal:ordinary-response',
+            },
+            _goal_context(),
+            evidence,
+            _core_services(llm),
+        )
+
+    assert error_info.value.safe_checkpoint == 'pre_state_commit'
+    assert error_info.value.attempt_count == 3
+    assert llm.call_count == 3
 
 
 def test_authoritative_collapse_keeps_ordinary_bid_primary() -> None:

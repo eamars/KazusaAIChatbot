@@ -21,8 +21,11 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionExecutionError,
     GoalBidDraftV2,
     MAX_RELATIONAL_WILLINGNESS_EVIDENCE_HANDLES,
-    RelationalWillingnessV1,
+    RELATIONAL_APPLICABILITY_VALUES,
+    RELATIONAL_CURRENT_USER_RELATIONSHIP_STATE_VALUES,
+    RELATIONAL_STANCE_VALUES,
     RELATIONAL_WILLINGNESS_MAX_REASON_CHARS,
+    project_evidence_provenance_role,
     validate_relational_willingness,
 )
 from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
@@ -78,12 +81,21 @@ GOAL_COGNITION_PROMPT = '''你是一个独立的目标认知分支。请为当�
 4. 身体或场景请求只能形成言语立场；仅完全匹配且 `status=executed` 的 permitted result 证明相应能力已完成。本阶段只决定语义目标，
 不判断工具、worker、调度或运行时能力，也不承诺执行。缺事实时保留“取得所需证据后回应”。无依据的目标角色留空，
 给出预期后果。
-5. `relational_willingness`：当 `branch.goal_kind` 为 `ordinary_response` 时，结合当前请求、当前用户关系机制、角色边界、
-按当前场景和分范围证据判断。`shared_character_or_world` 只说明角色认知，不能授予当前用户关系许可；`current_user_continuity` 只解释历史，
-不覆盖原生关系状态。关系尚未建立时选择 `relationship_sensitive/reject`；安全恋人关系相容且场景安全时选择
-`relationship_sensitive/accept`。中间关系综合 trust、attachment、closeness、care、boundary_safety 等机制作语义判断，不计算分数。
-关系敏感立场按 reject、deflect、negotiate、conditional_accept、accept 排序；无关请求选择 `not_relationship_sensitive/not_applicable`。
-当前 episode 明确给出的角色自我边界、明确拒绝、威胁或强迫条件属于本回合的直接约束，优先于关系、共享记忆和 compliance 表达；关系不能覆盖角色自我定义或缺乏自由同意的场景。只有当前 episode 没有这类否定条件时，才以关系和其他证据判断接受程度。不把 compliance 当作意愿或同意：压力表达不等于同意。
+5. `relational_willingness`：当 `branch.goal_kind` 为 `ordinary_response` 时，先判断请求是否关系敏感；
+   关系敏感时依据关系投影对当前用户分类：`unestablished`（关系尚未建立）、`developing_or_uncertain`
+   （关系发展中或不确定）或 `established`（已建立的稳定关系）。关系状态只描述当前用户，不由角色一般
+   特质、他人关系或私有角色扮演语境决定。每条证据的 `provenance_role` 说明其权威：`current_episode`
+   是当前请求和当前场景的直接事实；`current_user_history_only` 只解释当前用户历史，不能覆盖原生
+   关系状态；`character_or_world_context_only` 只提供角色相容性与世界知识，不能授予当前用户关系许可；
+   `contextual_fact_only` 只是一般语境。关系尚未建立（unestablished）时只能选择
+   `relationship_sensitive/reject`；发展中或不确定（developing_or_uncertain）时不得 accept，可选择
+   reject、deflect、negotiate 或 conditional_accept；已建立（established）时可按角色边界与场景选择
+   reject、deflect、negotiate、conditional_accept 或 accept；accept 只在 established 时有效。限制在
+   私有互动中的证据在公开群场景中不具有权威性。无关请求选择
+   `not_relationship_sensitive/not_applicable`。当前 episode 明确给出的角色自我边界、明确拒绝、威胁
+   或强迫条件属于本回合的直接约束，优先于关系、共享记忆和 compliance 表达；关系不能覆盖角色自我定义
+   或缺乏自由同意的场景。只有当前 episode 没有这类否定条件时，才以关系和其他证据判断接受程度。
+   不把 compliance 当作意愿或同意：压力表达不等于同意。
 
 本阶段只作目标判断，不选择执行路由或能力，也不写最终对话。自由文本使用简体中文；普通叙述使用“当前角色”和“当前用户”；用户引文、专有名词、
 代码、URL、schema 或 enum token 保持原样。private_monologue 使用当前角色第一人称，reason 解释候选依据；内部句柄、结构术语和运行元数据不得进入
@@ -92,9 +104,11 @@ GOAL_COGNITION_PROMPT = '''你是一个独立的目标认知分支。请为当�
 只返回 JSON，字段恰好是 intention、desired_outcome、concrete_detail、reason、private_monologue、target_role_handles、
 evidence_handles、expected_consequences 和 confidence；`branch.goal_kind` 为 `ordinary_response` 时还含
 `relational_willingness`，其字段是
-schema_version（`relational_willingness.v1`）、applicability（`relationship_sensitive` 或
+schema_version（`relational_willingness.v2`）、applicability（`relationship_sensitive` 或
 `not_relationship_sensitive`）、stance（reject、deflect、negotiate、conditional_accept、accept 或
-not_applicable，与 applicability 配对）、reason（简体中文，≤300字）和 evidence_handles（一到四个已提供
+not_applicable，与 applicability 和 current_user_relationship_state 配对）、
+current_user_relationship_state（not_applicable、unestablished、developing_or_uncertain 或
+established）、reason（简体中文，≤300字）和 evidence_handles（一到四个已提供
 handle，至少一个来自当前 episode）。叙述字段与 confidence 为字符串，handle 字段为字符串数组；
 expected_consequences 是非空字符串数组。`evidence_handles` 最多九项，`target_role_handles` 最多八项；不输出
 target_roles、role_handles、semantic_text、动作细节、数值 confidence、route、action/resolver handle 或其他字段。
@@ -111,9 +125,10 @@ target_roles、role_handles、semantic_text、动作细节、数值 confidence�
   "expected_consequences": ["简体中文预期后果"],
   "confidence": "high",
   "relational_willingness": {
-    "schema_version": "relational_willingness.v1",
+    "schema_version": "relational_willingness.v2",
     "applicability": "relationship_sensitive",
     "stance": "reject",
+    "current_user_relationship_state": "unestablished",
     "reason": "简体中文原因",
     "evidence_handles": []
   }
@@ -130,7 +145,7 @@ GENERIC_GOAL_REPAIR_INSTRUCTIONS = (
     '`evidence_handles` 只使用 `repair_feedback.allowed_evidence_handles`；`target_role_handles` 只使用`repair_feedback.allowed_role_handles`。',
     'handle 数组的每个元素必须逐个等于一个允许的 handle；不得使用范围、通配符、组合写法或 source ID。',
     '角色 handle 不能放入 evidence_handles，evidence handle 不能放入target_role_handles。',
-    '存在 `repair_feedback.relational_willingness_contract` 时，`relational_willingness` 必须严格符合其中的字段、schema、枚举配对和证据范围，并至少引用一个`repair_feedback.current_episode_evidence_handles` 中的 handle。',
+    '存在 `repair_feedback.relational_willingness_contract` 时，`relational_willingness` 必须严格符合其中的字段、schema、枚举配对（applicability、current_user_relationship_state 与 stance）和证据范围，并至少引用一个`repair_feedback.current_episode_evidence_handles` 中的 handle。',
     '`repair_feedback.validation_error` 是本次必须修正的失败原因。',
     '保留仍受原始证据支持的语义，任何缺失或无效字段都依据原始输入完整重生成。',
     '只返回一个 JSON 对象，不添加代码围栏、解释、注释或额外字段。',
@@ -151,7 +166,7 @@ SELECTION_GOAL_REPAIR_INSTRUCTIONS = (
     '`evidence_handles` 只能逐个使用`repair_feedback.allowed_evidence_handles`，并覆盖`repair_feedback.required_evidence_handles`；`target_role_handles` 只能逐个使用`repair_feedback.allowed_role_handles`。',
     '角色 handle不能放入 evidence_handles，evidence handle 不能放入 target_role_handles；不得使用范围、通配符、组合写法或 source ID。',
     '`repair_feedback.role_handles_forbidden_in_evidence_handles` 中的 handle绝不能写入`evidence_handles`。',
-    '存在 `repair_feedback.relational_willingness_contract` 时，`relational_willingness` 必须严格符合其中的字段、schema、枚举配对和证据范围，并至少引用一个`repair_feedback.current_episode_evidence_handles` 中的 handle。',
+    '存在 `repair_feedback.relational_willingness_contract` 时，`relational_willingness` 必须严格符合其中的字段、schema、枚举配对（applicability、current_user_relationship_state 与 stance）和证据范围，并至少引用一个`repair_feedback.current_episode_evidence_handles` 中的 handle。',
     '`repair_feedback.validation_error` 是本次必须修正的失败原因。',
     '保留仍受原始证据支持的语义，任何缺失或无效字段都依据原始输入完整重生成。',
     '只返回一个严格 JSON 对象，不添加代码围栏、解释、注释或额外字段。',
@@ -185,14 +200,20 @@ REQUIRED_SELECTION_GOAL_PROMPT = '''你负责在本轮选择权属于当前角�
    不得只说以后决定、列举候选、把决定交给其他角色，或要求后续阶段补全。
 5. 本阶段不选择执行能力或路由，不写最终对话。`selection`、`reason` 和
    `private_monologue` 使用简体中文；专名、代码、URL 和输入原文保持原样。
-6. 输出必须同时给出 relational_willingness 关系敏感判断：memory_scope 为
-   shared_character_or_world 的共享记忆只说明角色对内容的认知，不能授予当前用户关系许可；
-   memory_scope 为 current_user_continuity 的记忆只解释过往历史，不覆盖原生关系状态。关系尚未
-   建立时，关系敏感请求选择 relationship_sensitive/reject；已建立的安全恋人关系对角色相容且
-   场景安全的同类请求选择 relationship_sensitive/accept。中间关系综合 trust、attachment、
-   closeness、care 与 boundary_safety 等机制作语义判断，不计算分数。关系敏感立场按顺序为
-   reject、deflect、negotiate、conditional_accept、accept；请求与关系判断无关时选择
-   not_relationship_sensitive/not_applicable。当前 episode 明确给出的角色自我边界、明确拒绝、威胁或强迫条件属于本回合的直接约束，优先于关系、共享记忆和 compliance 表达；关系不能覆盖角色自我定义或缺乏自由同意的场景。只有当前 episode 没有这类否定条件时，才以关系和其他证据判断接受程度。不把 compliance 当作意愿或同意：压力下的表达不等于意愿或同意。
+6. 输出必须同时给出 relational_willingness 关系敏感判断：先判断请求是否关系敏感，关系敏感时依据
+   关系投影对当前用户分类（unestablished、developing_or_uncertain 或 established），关系状态只
+   描述当前用户，不由角色一般特质、他人关系或私有角色扮演语境决定。每条证据的 provenance_role
+   说明其权威：current_episode 是当前请求和当前场景的直接事实；current_user_history_only 只解释
+   当前用户历史，不覆盖原生关系状态；character_or_world_context_only 只提供角色相容性与世界知识，
+   不能授予当前用户关系许可；contextual_fact_only 只是一般语境。关系尚未建立（unestablished）时
+   只能选择 relationship_sensitive/reject；发展中或不确定（developing_or_uncertain）时不得 accept，
+   可选择 reject、deflect、negotiate 或 conditional_accept；已建立（established）时可按角色边界与
+   场景选择 reject、deflect、negotiate、conditional_accept 或 accept；accept 只在 established 时
+   有效。请求与关系判断无关时选择 not_relationship_sensitive/not_applicable。限制在私有互动中的
+   证据在公开群场景中不具有权威性。当前 episode 明确给出的角色自我边界、明确拒绝、威胁或强迫条件
+   属于本回合的直接约束，优先于关系、共享记忆和 compliance 表达；关系不能覆盖角色自我定义或缺乏
+   自由同意的场景。只有当前 episode 没有这类否定条件时，才以关系和其他证据判断接受程度。不把
+   compliance 当作意愿或同意：压力下的表达不等于意愿或同意。
 
 # 输出格式
 只返回一个严格 JSON 对象，不要代码围栏、解释、注释或额外字段：
@@ -206,17 +227,18 @@ REQUIRED_SELECTION_GOAL_PROMPT = '''你负责在本轮选择权属于当前角�
   "expected_consequences": [""],
   "confidence": "high",
   "relational_willingness": {
-    "schema_version": "relational_willingness.v1",
+    "schema_version": "relational_willingness.v2",
     "applicability": "relationship_sensitive",
     "stance": "reject",
+    "current_user_relationship_state": "unestablished",
     "reason": "",
     "evidence_handles": []
   }
 }
 `selection_kind` 只能是 `choice`、`refusal`、`condition` 或 `negotiation`。
-relational_willingness 的字段必须恰好是 schema_version、applicability、stance、reason 和
-evidence_handles；reason 使用简体中文且不超过 300 字符；evidence_handles 是一到四个已提供
-handle，其中至少一个来自当前 episode 证据。
+relational_willingness 的字段必须恰好是 schema_version、applicability、stance、
+current_user_relationship_state、reason 和 evidence_handles；reason 使用简体中文且不超过 300
+字符；evidence_handles 是一到四个已提供 handle，其中至少一个来自当前 episode 证据。
 '''
 
 _ACTIVE_REQUIRED_SELECTION_GOAL_PROMPT = '''你负责在本轮选择权属于当前角色时，直接产出角色的实际选择。
@@ -355,21 +377,36 @@ def _build_goal_repair_feedback(
                 "schema_version",
                 "applicability",
                 "stance",
+                "current_user_relationship_state",
                 "reason",
                 "evidence_handles",
             ],
-            "schema_version": "relational_willingness.v1",
-            "applicability_stance_pairs": {
-                "not_relationship_sensitive": [
-                    "not_applicable"
-                ],
-                "relationship_sensitive": [
-                    "reject",
-                    "deflect",
-                    "negotiate",
-                    "conditional_accept",
-                    "accept",
-                ],
+            "schema_version": "relational_willingness.v2",
+            "applicability_values": sorted(RELATIONAL_APPLICABILITY_VALUES),
+            "stance_values": sorted(RELATIONAL_STANCE_VALUES),
+            "current_user_relationship_state_values": sorted(
+                RELATIONAL_CURRENT_USER_RELATIONSHIP_STATE_VALUES
+            ),
+            "allowed_stance_pairings": {
+                "not_relationship_sensitive": {
+                    "not_applicable": ["not_applicable"],
+                },
+                "relationship_sensitive": {
+                    "unestablished": ["reject"],
+                    "developing_or_uncertain": [
+                        "reject",
+                        "deflect",
+                        "negotiate",
+                        "conditional_accept",
+                    ],
+                    "established": [
+                        "reject",
+                        "deflect",
+                        "negotiate",
+                        "conditional_accept",
+                        "accept",
+                    ],
+                },
             },
             "reason": "non_empty_simplified_chinese_string",
             "maximum_reason_chars": RELATIONAL_WILLINGNESS_MAX_REASON_CHARS,
@@ -470,6 +507,10 @@ async def run_goal_cognition(
             "handle": row["evidence_handle"],
             "source_kind": row["evidence_ref"]["source_kind"],
             "semantic_text": row["semantic_text"],
+            "provenance_role": project_evidence_provenance_role(
+                row["evidence_ref"]["source_kind"],
+                row.get("memory_scope"),
+            ),
         }
         for row in evidence
     ]

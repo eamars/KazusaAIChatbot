@@ -148,10 +148,10 @@ memory/context 为空或失败，也不能把直接自我报告改成 requires_r
 面对身体互动请求，通常由发言表达当前角色立场；只有另一个明确提供的能力确实具有不同且清晰的
 非身体效果时，才选择该能力。
 
-primary bid 携带 relational_willingness 时，它是已经确认的关系许可判断：reject、deflect、
-negotiate 或 conditional_accept 表示该关系敏感请求尚未被接受，只能由可见发言表达立场，
-action_requests 与 resolver_requests 必须保持为空；只有 accept 才可进入能力请求。请求与关系
-判断无关（not_relationship_sensitive/not_applicable）时维持一般规划。
+primary bid 携带 relational_willingness 时，它是已经确认的关系许可判断（含当前用户关系状态）：
+reject、deflect、negotiate 或 conditional_accept 表示该关系敏感请求尚未被接受，只能由可见发言
+表达立场，action_requests 与 resolver_requests 必须保持为空；只有 accept 才可进入能力请求。
+请求与关系判断无关（not_relationship_sensitive/not_applicable）时维持一般规划。
 
 每项请求必须引用一个提供的 bid handle 和一个提供的 capability handle。action request 按
 affordance.decision_mode 填写 decision：

@@ -203,33 +203,53 @@ owned by action planning.
 ## Current-Turn Relational Willingness
 
 The ordinary-response goal owner produces one exact transient
-`relational_willingness.v1` decision per turn. The decision pairs a
-relationship-sensitive applicability with one ordered stance (`reject`,
+`relational_willingness.v2` decision per turn. The decision pairs a
+relationship-sensitive applicability with a native
+`current_user_relationship_state` (`unestablished`,
+`developing_or_uncertain`, or `established`) and one ordered stance (`reject`,
 `deflect`, `negotiate`, `conditional_accept`, or `accept`), or marks a request
-that is not relationship-sensitive with `not_relationship_sensitive/
-not_applicable`. The ordinary-response prompt, including its typed
-required-selection form, requires the field; typed selection on an active
-branch retains its existing output contract and does not re-decide relational
-willingness. A missing or invalid ordinary decision is a structural contract
-error that regenerates through the same goal owner and, after bounded
-attempts, fails closed before state commit. Deterministic code never derives,
-upgrades, or rewrites the stance from prose, relationship numbers, or memory
-text.
+that is not relationship-sensitive with
+`not_relationship_sensitive/not_applicable/not_applicable`. The ordinary
+response prompt, including its typed required-selection form, requires the
+field; typed selection on an active branch retains its existing output
+contract and does not re-decide relational willingness. Deterministic
+validation enforces the exact V2 pairings:
+
+| Applicability | Current-user relationship state | Allowed stance |
+| --- | --- | --- |
+| `not_relationship_sensitive` | `not_applicable` | `not_applicable` |
+| `relationship_sensitive` | `unestablished` | `reject` |
+| `relationship_sensitive` | `developing_or_uncertain` | `reject`, `deflect`, `negotiate`, or `conditional_accept` |
+| `relationship_sensitive` | `established` | any relationship-sensitive stance |
+
+`accept` is valid only with `established`. A relationship-sensitive decision
+cannot use `not_applicable`. A missing, unknown-enum, or internally
+inconsistent ordinary decision is a structural contract error that regenerates
+through the same goal owner and, after bounded attempts, fails closed before
+state commit. Deterministic code never derives, upgrades, or rewrites the
+stance or relationship state from prose, relationship numbers, or memory text.
 
 The decision must cite at least one current-episode evidence handle.
-Promoted-memory evidence carries exactly one prompt-safe scope label:
-`shared_character_or_world` rows inform character or world context but cannot
-grant current-user trust, attachment, closeness, boundary safety, consent, or
-lover access; `current_user_continuity` rows explain history only and never
-override canonical native relationship state. No raw user id or relationship id
-reaches the model.
+Each evidence row receives one transient `provenance_role` derived only from
+trusted source-kind and memory-scope metadata. `current_episode` rows are the
+current request and scene; `current_user_history_only` rows explain history
+only and never override canonical native relationship state;
+`character_or_world_context_only` rows (shared character/world memory and
+promoted reflection) inform character compatibility and knowledge only and
+cannot grant current-user trust, attachment, closeness, boundary safety,
+consent, or lover access; `contextual_fact_only` rows are general context.
+Unknown provenance fails closed at the deterministic boundary. No raw user id
+or relationship id reaches the model.
 
 Relationship axes and boundary profiles reach the model as domain-specific
 semantic descriptions. Zero trust means trust is unestablished, zero boundary
 safety means boundary history is unproven, and the compliance strategy is
 described as a pressure-response style that is not willingness or consent.
 Relationship appraisal receives one canonical `relationship` payload with the
-same axis semantics; no duplicate relationship alias is emitted.
+same axis semantics; no duplicate relationship alias is emitted. The goal LLM
+classifies `current_user_relationship_state` from that qualitative projection;
+deterministic code validates only the declared object's internal consistency,
+handle bounds, and current-episode coverage.
 
 When the ordinary owner declares a turn `relationship_sensitive`, the workspace
 stage uses the deterministic authoritative collapse: the ordinary bid becomes
@@ -240,8 +260,9 @@ model-authored collapse. Action planning receives the exact decision and
 deterministically denies action and resolver effects for `reject`, `deflect`,
 `negotiate`, and `conditional_accept`; only `accept` (and non-sensitive turns)
 enters the effect-authorization path. The same decision is copied into
-`TextSurfaceInputV2` so content and preference stages preserve the stance
-without re-deciding it.
+`TextSurfaceInputV2` so content, preference, and repair stages preserve the
+stance and relationship state without re-deciding them. Workspace, action
+planning, surface planning, and dialog never reinterpret the decision.
 
 Action planning treats local-model output as a bounded proposal rather than an
 execution precondition. It canonicalizes the known envelope, keeps usable
