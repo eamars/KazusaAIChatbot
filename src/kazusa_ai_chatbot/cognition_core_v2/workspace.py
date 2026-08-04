@@ -23,7 +23,10 @@ from kazusa_ai_chatbot.cognition_core_v2.branch_activation import (
 from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
     V2_MODEL_TOTAL_ATTEMPTS,
 )
-from kazusa_ai_chatbot.cognition_core_v2.prompt_budget import PromptBudgetError
+from kazusa_ai_chatbot.cognition_core_v2.prompt_budget import (
+    PromptBudgetError,
+    middle_truncate_text,
+)
 from kazusa_ai_chatbot.llm_tracing import failure_capsule
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 
@@ -359,7 +362,7 @@ def _fit_workspace_prompt_payload(
         text_slots.append((persistent_goal, "description", description))
 
     for owner, field_name, original in text_slots:
-        owner[field_name] = _middle_truncate_text(
+        owner[field_name] = middle_truncate_text(
             original,
             WORKSPACE_CONTEXT_TEXT_FLOOR,
         )
@@ -381,7 +384,7 @@ def _fit_workspace_prompt_payload(
         retained_chars = WORKSPACE_CONTEXT_TEXT_FLOOR
         while lower_bound <= upper_bound:
             candidate_chars = (lower_bound + upper_bound) // 2
-            owner[field_name] = _middle_truncate_text(
+            owner[field_name] = middle_truncate_text(
                 original,
                 candidate_chars,
             )
@@ -395,21 +398,9 @@ def _fit_workspace_prompt_payload(
                 lower_bound = candidate_chars + 1
             else:
                 upper_bound = candidate_chars - 1
-        owner[field_name] = _middle_truncate_text(original, retained_chars)
+        owner[field_name] = middle_truncate_text(original, retained_chars)
 
     return json.dumps(prompt_payload, ensure_ascii=False, sort_keys=True)
-
-
-def _middle_truncate_text(value: str, maximum_chars: int) -> str:
-    """Retain both semantic ends of one bounded workspace text field."""
-
-    if len(value) <= maximum_chars:
-        return value
-    marker = "..."
-    retained_chars = maximum_chars - len(marker)
-    head_chars = (retained_chars + 1) // 2
-    tail_chars = retained_chars - head_chars
-    return value[:head_chars] + marker + value[-tail_chars:]
 
 
 def _record_workspace_trace(

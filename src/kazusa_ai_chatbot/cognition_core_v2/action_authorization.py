@@ -27,7 +27,7 @@ from kazusa_ai_chatbot.llm_interface import LLMCallConfig
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 
 
-ACTION_AUTHORIZATION_PROMPT_CAP = 16000
+ACTION_AUTHORIZATION_PROMPT_CAP = 20000
 ACTION_AUTHORIZATION_ATTEMPT_LIMIT = V2_MODEL_TOTAL_ATTEMPTS
 ACTION_AUTHORIZATION_OUTPUT_CAP = 3000
 ACTION_AUTHORIZATION_TEXT_CAP = 400
@@ -209,7 +209,10 @@ async def authorize_action_requests(
         "candidates": candidates,
     }
     prompt_text = json.dumps(prompt_payload, ensure_ascii=False, sort_keys=True)
-    if len(prompt_text) > ACTION_AUTHORIZATION_PROMPT_CAP:
+    if (
+        len(ACTION_AUTHORIZATION_PROMPT) + len(prompt_text)
+        > ACTION_AUTHORIZATION_PROMPT_CAP
+    ):
         return []
     messages: list[BaseMessage] = [
         SystemMessage(content=ACTION_AUTHORIZATION_PROMPT),
@@ -252,7 +255,6 @@ async def invoke_semantic_authorizer(
     base_prompt_chars = sum(
         len(str(message.content))
         for message in base_messages
-        if isinstance(message, HumanMessage)
     )
     if base_prompt_chars > prompt_cap:
         return {

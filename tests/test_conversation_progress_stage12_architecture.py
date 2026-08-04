@@ -468,9 +468,11 @@ async def test_selection_goal_uses_one_producer_and_zero_semantic_verifiers(
     assert bid['desired_outcome'] == bid['intention']
     assert bid['concrete_detail'] == bid['intention']
     assert not hasattr(goal_cognition, 'REQUIRED_SELECTION_VERIFIER_PROMPT')
+    retired_name = 'REQUIRED_SELECTION_' + 'GOAL_REPAIR_PROMPT'
+    assert not hasattr(goal_cognition, retired_name)
     assert hasattr(
         goal_cognition,
-        'REQUIRED_SELECTION_GOAL_REPAIR_PROMPT',
+        'SELECTION_GOAL_REPAIR_INSTRUCTIONS',
     )
 
 

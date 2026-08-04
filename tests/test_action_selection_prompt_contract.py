@@ -2,6 +2,7 @@
 
 from kazusa_ai_chatbot.cognition_core_v2.action_selection import (
     ACTION_PLANNING_PROMPT,
+    ACTION_PLANNING_PROMPT_CAP,
 )
 
 
@@ -86,3 +87,9 @@ def test_action_prompt_keeps_character_self_report_out_of_optional_retrieval() -
     assert "角色自己的当前感受、经历、偏好或判断" in prompt
     assert "不能证明角色自己的私密状态" in prompt
     assert "直接自我报告" in prompt
+
+
+def test_action_prompt_fits_the_system_inclusive_budget() -> None:
+    """The static planner contract leaves room for its dynamic packet."""
+
+    assert len(ACTION_PLANNING_PROMPT) < ACTION_PLANNING_PROMPT_CAP

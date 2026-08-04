@@ -16,6 +16,7 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
 )
 from kazusa_ai_chatbot.cognition_core_v2.facade import run_cognition
 from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
+    V2_APPRAISAL_TOTAL_ATTEMPTS,
     V2_MODEL_OWNER_POLICIES,
     V2_MODEL_TOTAL_ATTEMPTS,
     V2_VERIFIER_TOTAL_ATTEMPTS,
@@ -50,6 +51,7 @@ __all__ = [
     "V2AttemptDisposition",
     "V2AttemptFailureKind",
     "V2AttemptRecord",
+    "V2_APPRAISAL_TOTAL_ATTEMPTS",
     "V2_MODEL_OWNER_POLICIES",
     "V2_MODEL_TOTAL_ATTEMPTS",
     "V2_VERIFIER_TOTAL_ATTEMPTS",

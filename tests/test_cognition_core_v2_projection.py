@@ -101,10 +101,6 @@ def test_state_projection_separates_user_state_and_character_constraints() -> No
     ] == "极低"
     assert "owner_user_id" not in projection.payload
     assert "updated_at" not in projection.payload
-    assert projection.payload["roles"] == {
-        "当前角色": "当前角色",
-        "当前用户": "当前用户",
-    }
     standard_text = [
         row["description"]
         for row in projection.payload["character_constraints"]["standards"]

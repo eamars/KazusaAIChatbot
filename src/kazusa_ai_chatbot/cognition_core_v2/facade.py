@@ -362,27 +362,35 @@ async def _run_cognition(
         bids.extend(final_execution.results.values())
     bids = [bid for bid in bids if isinstance(bid, Mapping)]
     generated_bids = list(bids)
-    relational_decision = _ordinary_relational_decision(bids)
+    eligible_bids, stale_branch_ids = _bids_with_live_goals(
+        bids,
+        final_state,
+    )
+    warnings.extend(
+        f"stale_goal_bid_dropped:{branch_id}"
+        for branch_id in stale_branch_ids
+    )
+    relational_decision = _ordinary_relational_decision(eligible_bids)
     if (
         relational_decision is not None
         and relational_decision["applicability"] == "relationship_sensitive"
     ):
         collapse = collapse_authoritative_relational_bid(
-            bids,
+            eligible_bids,
             relational_decision,
         )
         warnings.append("authoritative_relational_willingness")
     else:
         try:
             collapse = await collapse_bids(
-                bids,
+                eligible_bids,
                 services,
                 current_event=_workspace_current_event(payload["evidence"]),
                 goal_context_by_ref=_workspace_goal_contexts(
-                    bids,
+                    eligible_bids,
                     final_state,
                 ),
-            ) if bids else _empty_collapse()
+            ) if eligible_bids else _empty_collapse()
         except Exception as exc:
             raise CognitionExecutionError(
                 f"workspace collapse failed: {exc}"
@@ -542,7 +550,7 @@ async def _run_cognition(
                 final_execution.maximum_concurrency if final_execution else 0,
             ),
             "generated_bids": generated_bids,
-            "eligible_bids": bids,
+            "eligible_bids": eligible_bids,
             "failed_branch_ids": sorted({
                 *preliminary_execution.failed_branch_ids,
                 *(
@@ -860,6 +868,30 @@ def _workspace_current_event(
         if row["evidence_ref"]["source_kind"] == "episode"
     ]
     return current_event
+
+
+def _bids_with_live_goals(
+    bids: Sequence[ActionBidV2],
+    state: Mapping[str, Any],
+) -> tuple[list[ActionBidV2], list[str]]:
+    """Keep bids whose non-ordinary persistent goal still exists in state."""
+
+    live_goal_ids = {
+        str(goal["entity_id"])
+        for goal in state["goals"]
+    }
+    retained_bids: list[ActionBidV2] = []
+    dropped_branch_ids: list[str] = []
+    for bid in bids:
+        if bid["branch_id"] == "ordinary_response":
+            retained_bids.append(bid)
+            continue
+        goal_id = str(bid["goal_ref"]["entity_id"])
+        if goal_id in live_goal_ids:
+            retained_bids.append(bid)
+            continue
+        dropped_branch_ids.append(bid["branch_id"])
+    return retained_bids, dropped_branch_ids
 
 
 def _workspace_goal_contexts(

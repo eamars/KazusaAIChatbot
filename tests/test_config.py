@@ -6,6 +6,8 @@ import os
 import subprocess
 import sys
 
+import pytest
+
 
 REQUIRED_ROUTE_PREFIXES = (
     "RELEVANCE_AGENT_LLM",
@@ -84,6 +86,77 @@ class TestRetryLimits:
         )
         assert MAX_MEMORY_RETRIEVER_AGENT_RETRY > 0
         assert MAX_WEB_SEARCH_AGENT_RETRY > 0
+
+
+class TestCognitionCompletionBudgets:
+    @pytest.mark.parametrize(
+        ("environment_name", "maximum"),
+        [
+            ("COGNITION_LLM_MAX_COMPLETION_TOKENS", 8192),
+            (
+                "COGNITION_LLM_CHARACTER_CARRYOVER_MAX_COMPLETION_TOKENS",
+                8192,
+            ),
+            (
+                "COGNITION_LLM_APPRAISAL_EVENT_AGENCY_MAX_COMPLETION_TOKENS",
+                2048,
+            ),
+            (
+                "COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL_MAX_COMPLETION_TOKENS",
+                2048,
+            ),
+            (
+                "COGNITION_LLM_APPRAISAL_MORAL_IDENTITY_MAX_COMPLETION_TOKENS",
+                2048,
+            ),
+            (
+                "COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME_MAX_COMPLETION_TOKENS",
+                2048,
+            ),
+            (
+                "COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY_MAX_COMPLETION_TOKENS",
+                2048,
+            ),
+            (
+                "COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE_MAX_COMPLETION_TOKENS",
+                2048,
+            ),
+            ("COGNITION_LLM_GOAL_ORDINARY_RESPONSE_MAX_COMPLETION_TOKENS", 8192),
+            ("COGNITION_LLM_GOAL_ACTIVE_BRANCH_MAX_COMPLETION_TOKENS", 8192),
+            ("COGNITION_LLM_WORKSPACE_COLLAPSE_MAX_COMPLETION_TOKENS", 1024),
+            ("COGNITION_LLM_ACTION_PLANNING_MAX_COMPLETION_TOKENS", 8192),
+            ("COGNITION_LLM_ACTION_AUTHORIZATION_MAX_COMPLETION_TOKENS", 1024),
+            ("COGNITION_LLM_RESOLVER_AUTHORIZATION_MAX_COMPLETION_TOKENS", 1024),
+        ],
+    )
+    def test_cognition_completion_budget_caps_values_above_ceiling(
+        self,
+        tmp_path,
+        environment_name: str,
+        maximum: int,
+    ) -> None:
+        """Every Core V2 route caps a completion budget above its ceiling."""
+
+        env = _configured_subprocess_env_without_dotenv()
+        env[environment_name] = str(maximum + 1)
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import kazusa_ai_chatbot.config as config; "
+                    f"print(getattr(config, '{environment_name}'))"
+                ),
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0
+        assert result.stdout.strip() == str(maximum)
 
 
 class TestMcpServersDefault:

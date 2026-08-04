@@ -214,6 +214,19 @@ def test_v2_attempt_record_validation_is_bounded_and_data_only() -> None:
 
     assert policy.validate_v2_attempt_record(record) == record
 
+    appraisal_record = {
+        "stage": "semantic_appraisal",
+        "failure_kind": "structure",
+        "attempt_count": 2,
+        "total_attempt_limit": 2,
+        "selected_attempt": None,
+        "disposition": "skipped",
+        "safe_checkpoint": "pre_state_commit",
+    }
+    assert policy.validate_v2_attempt_record(appraisal_record) == (
+        appraisal_record
+    )
+
     for invalid_record in (
         {**record, "candidate_text": "private output"},
         {**record, "attempt_count": 4},

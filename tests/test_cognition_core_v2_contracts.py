@@ -19,6 +19,7 @@ from kazusa_ai_chatbot.cognition_core_v2.output_projection import (
     default_expression_policy,
 )
 from kazusa_ai_chatbot.cognition_core_v2.surface_stages import (
+    SURFACE_REPAIR_INSTRUCTION,
     run_content_plan_stage,
 )
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
@@ -804,7 +805,14 @@ async def test_surface_stage_repairs_invalid_candidate_with_same_context() -> No
     repair_payload = json.loads(
         str(getattr(llm.messages[1][1], "content", "{}"))
     )
-    assert "完整替代对象" in repair_system
+    assert repair_system == str(
+        getattr(llm.messages[0][0], "content", "")
+    )
+    assert (
+        repair_payload["contract_repair"]["repair_instruction"]
+        == SURFACE_REPAIR_INSTRUCTION
+    )
+    assert repair_payload["contract_repair"]["contract_error"]
     assert repair_payload["surface"] == {
         "surface": "当前角色回应当前用户的输入",
     }

@@ -15,6 +15,12 @@ from kazusa_ai_chatbot.character_identity_growth.models import (
 from kazusa_ai_chatbot.character_identity_growth.projection import (
     project_identity_for_surface,
 )
+from kazusa_ai_chatbot.config import (
+    COGNITION_STAGE_TIMEOUT_SECONDS,
+    SURFACE_CONTENT_DEFAULT_MAX_COMPLETION_TOKENS,
+    SURFACE_PREFERENCE_DEFAULT_MAX_COMPLETION_TOKENS,
+    SURFACE_VISUAL_DEFAULT_MAX_COMPLETION_TOKENS,
+)
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionExecutionError,
     TextSurfaceInputV2,
@@ -353,8 +359,18 @@ def _build_text_surface_services() -> TextSurfaceServicesV2:
 
     return TextSurfaceServicesV2(
         llm=_llm_interface,
-        content_plan_config=_surface_config("v2_surface_content"),
-        preference_config=_surface_config("v2_surface_preference"),
+        content_plan_config=_surface_config(
+            "v2_surface_content",
+            max_completion_tokens=(
+                SURFACE_CONTENT_DEFAULT_MAX_COMPLETION_TOKENS
+            ),
+        ),
+        preference_config=_surface_config(
+            "v2_surface_preference",
+            max_completion_tokens=(
+                SURFACE_PREFERENCE_DEFAULT_MAX_COMPLETION_TOKENS
+            ),
+        ),
     )
 
 
@@ -363,7 +379,12 @@ def _build_visual_surface_services() -> VisualSurfaceServicesV2:
 
     return VisualSurfaceServicesV2(
         llm=_llm_interface,
-        visual_config=_surface_config("v2_surface_visual"),
+        visual_config=_surface_config(
+            "v2_surface_visual",
+            max_completion_tokens=(
+                SURFACE_VISUAL_DEFAULT_MAX_COMPLETION_TOKENS
+            ),
+        ),
     )
 
 
@@ -375,8 +396,12 @@ def _visual_directives_disabled(payload: TextSurfaceInputV2) -> bool:
     return disabled
 
 
-def _surface_config(stage_name: str) -> LLMCallConfig:
-    """Reuse the configured cognition route with a stage-specific identity."""
+def _surface_config(
+    stage_name: str,
+    *,
+    max_completion_tokens: int,
+) -> LLMCallConfig:
+    """Bind one surface stage to the cognition route with its own budget."""
 
     return LLMCallConfig(
         stage_name=stage_name,
@@ -387,8 +412,9 @@ def _surface_config(stage_name: str) -> LLMCallConfig:
         temperature=_cognition_llm_config.temperature,
         top_p=_cognition_llm_config.top_p,
         top_k=_cognition_llm_config.top_k,
-        max_completion_tokens=_cognition_llm_config.max_completion_tokens,
+        max_completion_tokens=max_completion_tokens,
         presence_penalty=_cognition_llm_config.presence_penalty,
+        timeout_seconds=COGNITION_STAGE_TIMEOUT_SECONDS,
         thinking=_cognition_llm_config.thinking,
     )
 

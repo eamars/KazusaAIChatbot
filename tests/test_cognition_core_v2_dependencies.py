@@ -462,7 +462,11 @@ async def test_goal_bid_gets_one_bounded_schema_repair(
 
     assert bid["branch_id"] == "ordinary_response"
     assert len(llm.messages) == 2
-    assert "修复" in str(llm.messages[1][0].content)
+    assert llm.messages[1][0].content == llm.messages[0][0].content
+    repair_payload = json.loads(str(llm.messages[1][1].content))
+    assert repair_payload["repair_feedback"]["repair_instruction"] == list(
+        goal_module.GENERIC_GOAL_REPAIR_INSTRUCTIONS
+    )
     assert "requested_route" not in GOAL_COGNITION_PROMPT
     assert "action_handle" not in GOAL_COGNITION_PROMPT
     assert "resolver_handle" not in GOAL_COGNITION_PROMPT
@@ -785,11 +789,14 @@ async def test_required_selection_regenerates_with_the_same_producer() -> None:
     )
     assert all(
         message_set[0].content
-        == goal_module.REQUIRED_SELECTION_GOAL_REPAIR_PROMPT
+        == llm.messages[0][0].content
         for message_set in llm.messages[1:]
     )
     repair_payload = json.loads(str(llm.messages[1][1].content))
     repair_feedback = repair_payload["repair_feedback"]
+    assert repair_feedback["repair_instruction"] == list(
+        goal_module.SELECTION_GOAL_REPAIR_INSTRUCTIONS
+    )
     assert repair_feedback["required_evidence_handles"] == ["e1"]
     assert repair_feedback["allowed_evidence_handles"] == ["e1", "e2"]
     assert repair_feedback["current_episode_evidence_handles"] == ["e1"]
@@ -899,10 +906,13 @@ async def test_required_selection_regeneration_excludes_optional_conversation(
     assert len(llm.messages) == 2
     assert (
         llm.messages[1][0].content
-        == goal_module.REQUIRED_SELECTION_GOAL_REPAIR_PROMPT
+        == llm.messages[0][0].content
     )
     regeneration_payload = json.loads(str(llm.messages[1][1].content))
     regeneration_feedback = regeneration_payload["repair_feedback"]
+    assert regeneration_feedback["repair_instruction"] == list(
+        goal_module.SELECTION_GOAL_REPAIR_INSTRUCTIONS
+    )
     assert regeneration_feedback["required_evidence_handles"] == ["e1"]
     assert regeneration_feedback["allowed_evidence_handles"] == [
         "e1",
@@ -1044,10 +1054,13 @@ async def test_required_selection_repair_replays_grounding_after_handle_failures
     for message_set in llm.messages[1:]:
         assert (
             message_set[0].content
-            == goal_module.REQUIRED_SELECTION_GOAL_REPAIR_PROMPT
+            == llm.messages[0][0].content
         )
         repair_payload = json.loads(str(message_set[1].content))
         feedback = repair_payload['repair_feedback']
+        assert feedback['repair_instruction'] == list(
+            goal_module.SELECTION_GOAL_REPAIR_INSTRUCTIONS
+        )
         assert repair_payload['required_selection_operations'][0][
             'evidence_handle'
         ] == 'e1'
@@ -1157,10 +1170,13 @@ async def test_active_selection_repair_uses_the_same_grounding_contract(
     assert 'relational_willingness' not in bid
     assert (
         llm.messages[1][0].content
-        == goal_module.REQUIRED_SELECTION_GOAL_REPAIR_PROMPT
+        == llm.messages[0][0].content
     )
     repair_payload = json.loads(str(llm.messages[1][1].content))
     feedback = repair_payload['repair_feedback']
+    assert feedback['repair_instruction'] == list(
+        goal_module.SELECTION_GOAL_REPAIR_INSTRUCTIONS
+    )
     assert 'relational_willingness' not in feedback['required_top_level_fields']
     assert 'relational_willingness_contract' not in feedback
     assert feedback['required_evidence_handles'] == ['e1']
@@ -1380,4 +1396,6 @@ def test_required_selection_producer_selects_relevant_progress_evidence(
     assert '`semantic_context` 中出现的 handle' in prompt
     assert 'conversation_evidence_relations' not in prompt
     assert not hasattr(goal_module, 'REQUIRED_SELECTION_VERIFIER_PROMPT')
-    assert hasattr(goal_module, 'REQUIRED_SELECTION_GOAL_REPAIR_PROMPT')
+    retired_name = 'REQUIRED_SELECTION_' + 'GOAL_REPAIR_PROMPT'
+    assert not hasattr(goal_module, retired_name)
+    assert hasattr(goal_module, 'SELECTION_GOAL_REPAIR_INSTRUCTIONS')

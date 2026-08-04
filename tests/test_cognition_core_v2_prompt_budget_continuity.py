@@ -64,6 +64,7 @@ from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
 from tests.cognition_core_v2_test_helpers import (
     canonical_episode,
     canonical_identity_context,
+    maximum_identity_context,
 )
 
 
@@ -189,6 +190,34 @@ class _InvalidCandidateLLM:
             for message in messages
         ])
         return SimpleNamespace(content=self.candidate_content)
+
+
+class _InvalidThenValidSurfaceLLM:
+    """Fail the first surface attempt and accept the fitted repair packet."""
+
+    def __init__(self) -> None:
+        """Initialize the request ledger."""
+
+        self.calls: list[list[str]] = []
+
+    async def ainvoke(
+        self,
+        messages: list[object],
+        *,
+        config: object,
+    ) -> SimpleNamespace:
+        """Return one invalid candidate followed by a valid visual result."""
+
+        del config
+        self.calls.append([
+            str(getattr(message, "content", ""))
+            for message in messages
+        ])
+        if len(self.calls) == 1:
+            return SimpleNamespace(content="{}")
+        return SimpleNamespace(content=json.dumps({
+            "visual_directives": "valid visual directive",
+        }))
 
 
 def _fixture_document() -> dict[str, Any]:
@@ -468,7 +497,11 @@ def _maximum_prompt_state(scope: str) -> dict[str, Any]:
     return state_models_module.validate_cognition_state(state)
 
 
-def _maximum_valid_cognition_input(scope: str) -> dict[str, Any]:
+def _maximum_valid_cognition_input(
+    scope: str,
+    *,
+    identity_context: dict[str, dict[str, object]],
+) -> dict[str, Any]:
     """Validate one complete maximum prompt-shape cognition input."""
 
     trigger_source = "user_message"
@@ -483,7 +516,7 @@ def _maximum_valid_cognition_input(scope: str) -> dict[str, Any]:
         "state_scope": scope,
         "mutable_state": _maximum_prompt_state(scope),
         "character_constraints": _maximum_character_constraints(),
-        "character_identity_context": canonical_identity_context(),
+        "character_identity_context": identity_context,
         "evidence": _maximum_evidence(),
         "direct_facts": [],
         "available_actions": [],
@@ -511,7 +544,10 @@ def _maximum_appraisal_context(
     scope = "character"
     if question_kind == "relationship_social":
         scope = "user"
-    payload = _maximum_valid_cognition_input(scope)
+    payload = _maximum_valid_cognition_input(
+        scope,
+        identity_context=maximum_identity_context(),
+    )
     state = payload["mutable_state"]
     evidence = payload["evidence"]
     projection = project_state_for_prompt(
@@ -538,7 +574,10 @@ def _maximum_goal_context() -> tuple[
 ]:
     """Build the complete valid maximum required-goal context."""
 
-    payload = _maximum_valid_cognition_input("character")
+    payload = _maximum_valid_cognition_input(
+        "character",
+        identity_context=maximum_identity_context(),
+    )
     state = payload["mutable_state"]
     evidence = payload["evidence"]
     evidence[0]["evidence_ref"]["source_kind"] = "episode"
@@ -786,7 +825,10 @@ async def test_each_maximum_appraisal_family_reaches_its_model_boundary(
 
     assert len(llm.calls) == 1
     human_payload = llm.calls[0]["human_payload"]
-    assert len(human_payload) <= 8000
+    assert (
+        len(llm.calls[0]["system_prompt"]) + len(human_payload)
+        <= semantic_appraisal_module.SEMANTIC_APPRAISAL_PROMPT_CAP
+    )
     prompt_payload = json.loads(human_payload)
     assert len(prompt_payload["evidence"]) == 8
     assert [
@@ -899,6 +941,95 @@ async def test_appraisal_accumulates_one_item_then_stops_on_empty() -> None:
     ] == ["intentionality|current_user|"]
 
 
+@pytest.mark.asyncio
+async def test_appraisal_exhaustion_returns_the_accepted_prefix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A later exhausted item keeps the already accepted appraisal prefix."""
+
+    class _PrefixThenInvalidLLM:
+        def __init__(self) -> None:
+            self.payloads: list[dict[str, Any]] = []
+
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config: object,
+        ) -> SimpleNamespace:
+            del config
+            payload = json.loads(str(getattr(messages[1], "content", "")))
+            self.payloads.append(payload)
+            question_id = payload["question"]["question_id"]
+            if len(self.payloads) == 1:
+                result = {
+                    "question_id": question_id,
+                    "proposition": {
+                        "proposition_kind": "intentionality",
+                        "subject_handle": "current_user",
+                        "evidence_handles": ["e1"],
+                        "role_assignments": [{
+                            "role": "target",
+                            "entity_handle": "self",
+                        }],
+                        "semantic_value": (
+                            "the current user intentionally made a commitment"
+                        ),
+                    },
+                    "delta": None,
+                }
+            else:
+                result = {
+                    "question_id": question_id,
+                    "proposition": {
+                        "proposition_kind": "intentionality",
+                        "subject_handle": "unknown-role",
+                        "evidence_handles": ["e1"],
+                        "role_assignments": [],
+                        "semantic_value": "invalid role handle",
+                    },
+                    "delta": None,
+                }
+            return SimpleNamespace(content=json.dumps(result))
+
+    events: list[tuple[str, dict[str, object]]] = []
+    monkeypatch.setattr(
+        semantic_appraisal_module,
+        "capture_validation_event",
+        lambda event_id, payload: events.append((event_id, dict(payload))),
+    )
+    state, evidence, projection, questions = _production_appraisal_context()
+    question = next(
+        item for item in questions if item["question_kind"] == "event_agency"
+    )
+    llm = _PrefixThenInvalidLLM()
+
+    result = await appraise_semantic_question(
+        question,
+        evidence,
+        projection,
+        _appraisal_services(llm),
+        validation_state=state,
+    )
+
+    assert len(llm.payloads) == 3
+    assert len(result["propositions"]) == 1
+    assert result["deltas"] == []
+    assert events == [(
+        "semantic_appraisal_bounded_termination",
+        {
+            "question_id": question["question_id"],
+            "item_index": 2,
+            "error_code": "semantic_appraisal_contract_exhausted",
+            "attempt_count": 2,
+            "accepted_proposition_count": 1,
+            "accepted_delta_count": 0,
+            "disposition": "accepted_prefix",
+            "error": events[0][1]["error"],
+        },
+    )]
+
+
 def test_appraisal_suppresses_exact_repeats_as_no_progress() -> None:
     """Repeated accepted components become an empty bounded terminator."""
 
@@ -955,7 +1086,7 @@ def test_persistent_event_handles_are_distinct_from_evidence_handles() -> None:
 
 
 def test_appraisal_exact_cap_and_cap_plus_one_are_distinct() -> None:
-    """The appraisal owner accepts 8,000 and rejects irreducible 8,001."""
+    """The appraisal owner accepts its exact payload cap and rejects one more."""
 
     evidence_rows = [{
         "handle": "e1",
@@ -968,18 +1099,25 @@ def test_appraisal_exact_cap_and_cap_plus_one_are_distinct() -> None:
         "evidence": evidence_rows,
         "state": {},
     }
-    _pad_to_serialized_length(payload, question, 8000)
+    appraisal_cap = semantic_appraisal_module.SEMANTIC_APPRAISAL_PROMPT_CAP
+    _pad_to_serialized_length(payload, question, appraisal_cap)
 
-    fitted = semantic_appraisal_module._fit_appraisal_payload(payload)
+    fitted, _ = semantic_appraisal_module._fit_appraisal_payload(
+        payload,
+        system_prompt_chars=0,
+    )
 
-    assert len(fitted) == 8000
+    assert len(fitted) == appraisal_cap
     question["padding"] += "x"
     with pytest.raises(CognitionContextLimitError):
-        semantic_appraisal_module._fit_appraisal_payload(payload)
+        semantic_appraisal_module._fit_appraisal_payload(
+            payload,
+            system_prompt_chars=0,
+        )
 
 
 def test_goal_exact_aggregate_cap_and_cap_plus_one_are_distinct() -> None:
-    """The goal owner counts its system prompt inside the 24,000 cap."""
+    """The goal owner counts its system prompt inside the aggregate cap."""
 
     evidence_rows = [{
         "handle": "e1",
@@ -995,7 +1133,8 @@ def test_goal_exact_aggregate_cap_and_cap_plus_one_are_distinct() -> None:
         "role_handles": [],
         "role_summaries": {},
     }
-    payload_cap = 24000 - len(goal_cognition_module.GOAL_COGNITION_PROMPT)
+    goal_cap = goal_cognition_module.GOAL_COGNITION_PROMPT_CAP
+    payload_cap = goal_cap - len(goal_cognition_module.GOAL_COGNITION_PROMPT)
     _pad_to_serialized_length(payload, semantic_context, payload_cap)
 
     fitted = goal_cognition_module._fit_goal_prompt_payload(
@@ -1005,7 +1144,7 @@ def test_goal_exact_aggregate_cap_and_cap_plus_one_are_distinct() -> None:
 
     assert (
         len(goal_cognition_module.GOAL_COGNITION_PROMPT) + len(fitted)
-        == 24000
+        == goal_cap
     )
     semantic_context["padding"] += "x"
     with pytest.raises(PromptBudgetError):
@@ -1114,7 +1253,7 @@ async def test_action_budget_drops_group_guidance_before_plan(
         "supporting_bids": [],
         "episode": {
             "trigger_source": "self_cognition",
-            "output_mode": "private_state",
+            "output_mode": "think_only",
         },
         "evidence": _maximum_evidence(1),
         "available_actions": [],
@@ -1146,7 +1285,7 @@ async def test_action_budget_drops_group_guidance_before_plan(
     monkeypatch.setattr(
         action_selection_module,
         "ACTION_PLANNING_PROMPT_CAP",
-        reduced_chars,
+        len(action_selection_module.ACTION_PLANNING_PROMPT) + reduced_chars,
     )
     reduced_probe = _BoundaryProbeLLM()
 
@@ -1281,9 +1420,7 @@ def test_required_selection_regeneration_feedback_counts_toward_cap() -> None:
     initial_system_prompt = (
         goal_cognition_module.REQUIRED_SELECTION_GOAL_PROMPT
     )
-    regeneration_system_prompt = (
-        goal_cognition_module.REQUIRED_SELECTION_GOAL_REPAIR_PROMPT
-    )
+    regeneration_system_prompt = initial_system_prompt
     repair_payload = dict(payload)
     repair_payload["repair_feedback"] = {
         "validation_error": "selection goal draft fields are not exact",
@@ -1329,7 +1466,7 @@ def test_required_selection_regeneration_feedback_counts_toward_cap() -> None:
         len(regeneration_system_prompt) + len(regeneration_payload)
         <= goal_cognition_module.GOAL_COGNITION_PROMPT_CAP
     )
-    assert len(regeneration_system_prompt) < len(initial_system_prompt)
+    assert regeneration_system_prompt == initial_system_prompt
     assert len(regeneration_payload) > len(initial_payload)
     fitted_repair_payload = json.loads(regeneration_payload)
     assert (
@@ -1358,7 +1495,10 @@ def test_malformed_appraisal_projection_is_an_invariant_failure(
     """Malformed canonical projection stays distinct from budget exhaustion."""
 
     with pytest.raises(ValueError, match=message) as error_info:
-        semantic_appraisal_module._fit_appraisal_payload(payload)
+        semantic_appraisal_module._fit_appraisal_payload(
+            payload,
+            system_prompt_chars=0,
+        )
 
     assert not isinstance(
         error_info.value,
@@ -1460,7 +1600,11 @@ async def test_goal_prompt_fits_maximum_evidence_without_duplication() -> None:
     assert bid["evidence_handles"] == ["e1"]
     assert len(llm.human_payloads) == 1
     human_payload = llm.human_payloads[0]
-    assert len(human_payload) <= 24000
+    assert (
+        len(goal_cognition_module.GOAL_COGNITION_PROMPT)
+        + len(human_payload)
+        <= goal_cognition_module.GOAL_COGNITION_PROMPT_CAP
+    )
     prompt_payload = json.loads(human_payload)
     assert "evidence" not in prompt_payload["semantic_context"]
     assert "goal_projection" not in prompt_payload["semantic_context"]
@@ -1553,9 +1697,11 @@ def test_required_selection_has_only_producer_repair_surface() -> None:
         goal_cognition_module,
         "REQUIRED_SELECTION_VERIFIER_PROMPT",
     )
+    retired_name = "REQUIRED_SELECTION_" + "GOAL_REPAIR_PROMPT"
+    assert not hasattr(goal_cognition_module, retired_name)
     assert hasattr(
         goal_cognition_module,
-        "REQUIRED_SELECTION_GOAL_REPAIR_PROMPT",
+        "SELECTION_GOAL_REPAIR_INSTRUCTIONS",
     )
 
 
@@ -1819,7 +1965,7 @@ async def test_action_repair_overflow_returns_empty_before_second_call(
     assert decision == (
         action_selection_module._empty_action_plan_decision()
     )
-    assert len(llm.calls) == 1
+    assert len(llm.calls) == 0
 
 
 @pytest.mark.asyncio
@@ -1904,7 +2050,7 @@ async def test_authorization_repair_overflow_denies_before_second_call(
     )
 
     assert decisions == {"c1": False}
-    assert len(llm.calls) == 1
+    assert len(llm.calls) == 0
 
 
 @pytest.mark.asyncio
@@ -1956,7 +2102,10 @@ async def test_appraisal_repair_uses_residual_budget_for_second_call(
     monkeypatch.setattr(
         semantic_appraisal_module,
         "_fit_appraisal_payload",
-        lambda payload: "p" * 7900,
+        lambda payload, *, system_prompt_chars: (
+            "p" * 7900,
+            frozenset(),
+        ),
     )
     invalid_candidate = json.dumps({"padding": "x" * 5000})
     llm = _InvalidCandidateLLM(invalid_candidate)
@@ -1975,14 +2124,23 @@ async def test_appraisal_repair_uses_residual_budget_for_second_call(
 
     assert len(llm.calls) == 2
     repair_dynamic_chars = sum(len(content) for content in llm.calls[1][1:])
-    assert repair_dynamic_chars <= 10000
-    assert len(llm.calls[1][2]) < len(invalid_candidate)
+    assert (
+        len(llm.calls[1][0]) + repair_dynamic_chars
+        <= semantic_appraisal_module.SEMANTIC_APPRAISAL_REPAIR_PROMPT_CAP
+    )
+    assert len(llm.calls[1][2]) <= len(invalid_candidate)
 
 
 @pytest.mark.asyncio
-async def test_text_surface_overflow_returns_validated_degraded_output() -> None:
+async def test_text_surface_overflow_returns_validated_degraded_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Text cap overflow projects the committed intention without model prose."""
 
+    surface_stages_module = importlib.import_module(
+        "kazusa_ai_chatbot.cognition_core_v2.surface_stages"
+    )
+    monkeypatch.setattr(surface_stages_module, "SURFACE_STAGE_PROMPT_CAP", 100)
     llm = _NoCallLLM()
 
     output = await surface_module.run_text_surface_planning(
@@ -1999,6 +2157,67 @@ async def test_text_surface_overflow_returns_validated_degraded_output() -> None
         "state the selected grounded response"
     )
     assert llm.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_surface_overflow_reduces_bids_before_model_boundary() -> None:
+    """Surface preflight retains the minimum supporting-bid set before calling."""
+
+    llm = _BoundaryProbeLLM()
+
+    with pytest.raises(_BoundaryReached):
+        await surface_module.run_text_surface_planning(
+            _surface_input(),
+            SimpleNamespace(
+                llm=llm,
+                content_plan_config=object(),
+                preference_config=object(),
+            ),
+        )
+
+    assert len(llm.calls) == 2
+    supporting_bid_counts = {
+        len(json.loads(call["human_payload"])["surface"]["supporting_bids"])
+        for call in llm.calls
+    }
+    assert min(supporting_bid_counts) < 7
+    assert supporting_bid_counts <= set(range(2, 8))
+
+
+@pytest.mark.asyncio
+async def test_surface_repair_reuses_the_fitted_surface_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Surface repair carries the reduced projection into its retry packet."""
+
+    surface_stages_module = importlib.import_module(
+        "kazusa_ai_chatbot.cognition_core_v2.surface_stages"
+    )
+    monkeypatch.setattr(
+        surface_stages_module,
+        "SURFACE_STAGE_PROMPT_CAP",
+        12_000,
+    )
+    llm = _InvalidThenValidSurfaceLLM()
+
+    result = await surface_stages_module._run_surface_stage(
+        payload=_surface_input(),
+        system_prompt="surface",
+        llm=llm,
+        config=object(),
+        stage_name="visual",
+        validator=surface_stages_module._validate_visual_result,
+        safe_checkpoint="pre_state_commit",
+    )
+
+    assert result == "valid visual directive"
+    assert len(llm.calls) == 2
+    initial_surface = json.loads(llm.calls[0][1])["surface"]
+    repair_surface = json.loads(llm.calls[1][1])["surface"]
+    assert len(initial_surface["supporting_bids"]) < 7
+    assert repair_surface["supporting_bids"] == (
+        initial_surface["supporting_bids"]
+    )
 
 
 @pytest.mark.asyncio
@@ -2040,13 +2259,19 @@ async def test_surface_repair_overflow_is_typed_before_second_call(
         )
 
     assert error_info.value.error_code == "surface_visual_context_limit"
-    assert len(llm.calls) == 1
+    assert len(llm.calls) == 0
 
 
 @pytest.mark.asyncio
-async def test_visual_surface_overflow_is_typed_for_optional_omission() -> None:
+async def test_visual_surface_overflow_is_typed_for_optional_omission(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Visual cap overflow reaches the existing optional-stage failure owner."""
 
+    surface_stages_module = importlib.import_module(
+        "kazusa_ai_chatbot.cognition_core_v2.surface_stages"
+    )
+    monkeypatch.setattr(surface_stages_module, "SURFACE_STAGE_PROMPT_CAP", 100)
     llm = _NoCallLLM()
 
     with pytest.raises(CognitionExecutionError) as error_info:

@@ -116,7 +116,10 @@ async def authorize_resolver_requests(
         ensure_ascii=False,
         sort_keys=True,
     )
-    if len(prompt_text) > RESOLVER_AUTHORIZATION_PROMPT_CAP:
+    if (
+        len(RESOLVER_AUTHORIZATION_PROMPT) + len(prompt_text)
+        > RESOLVER_AUTHORIZATION_PROMPT_CAP
+    ):
         return []
     messages: list[BaseMessage] = [
         SystemMessage(content=RESOLVER_AUTHORIZATION_PROMPT),

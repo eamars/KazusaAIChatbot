@@ -84,10 +84,14 @@ ordinary-response goal, and dependency-ready active-goal branches can submit
 up to twenty model tasks concurrently. Final dependency-ready goal work,
 workspace collapse, action planning, and the applicable authorization stage
 remain ordered after that wave. The six appraisal routes use a code-owned
-25,000-token completion default. Each family runs at most eight serial
-micro-appraisal items on its existing route. Each item keeps one normal call
-and one bounded replacement attempt, with an 8,000-character initial dynamic
-payload and a separate 10,000-character repair payload.
+2,048-token completion default. Goal and action-planning routes use the
+8,192-token semantic default; workspace and authorization routes use the
+1,024-token structured default. Surface content, preference, and visual
+routes use 8,192, 4,096, and 2,048 tokens respectively. Every cognition-owned
+call has the bounded `COGNITION_STAGE_TIMEOUT_SECONDS` timeout, 120 seconds
+by default and configurable only within 10 to 600 seconds. Each appraisal
+family runs at most eight serial micro-appraisal items on its existing route.
+Each item keeps one normal call and one bounded replacement attempt.
 
 Goal, threat, and outcome appraisal uses affirmative entity-specific terminal
 assertions: `goal_completed`, `event_completed`, `threat_resolved`,
@@ -291,7 +295,7 @@ real visible boundaries and addressee constraints, so both lists may be empty.
 Dialog owns natural character-specific chat-ready wording. Three focused
 hard-error checks run in parallel on the existing dialog-model route within
 the bounded verifier path. Current visible percepts retain their shared
-24,000-character cap. Semantic fidelity separately caps authoritative surface
+32,000-character cap. Semantic fidelity separately caps authoritative surface
 semantics at 11,000 characters, candidate dialog at 12,000 characters, and its
 complete serialized payload at 50,000 characters. Semantic fidelity receives
 current model-visible percept rows, the candidate role frame, candidate
@@ -433,35 +437,41 @@ model call into the active capsule without changing parser or retry behavior.
 
 ## Aggregate Prompt Budgets
 
-Each V2 model owner budgets its complete deterministic serialization rather
-than relying on independent producer-field limits. Semantic appraisal owns an
-8,000-character packet containing its question contract, one top-level
-semantic-evidence registry, and its authorized state projection. Exact
+Each V2 model owner budgets its complete deterministic serialization, including
+its static system prompt, rather than relying on independent producer-field
+limits. Semantic appraisal owns a 20,000-character aggregate packet containing
+its question contract, one top-level semantic-evidence registry, and its
+authorized state projection. Exact
 `permitted_delta_paths` remain private validator authority; the model receives
 grouped `state_field`, `handles`, and `axes` domains and returns the same
 canonical `state_field.handle.axis` target path.
 
-Appraisal and goal cognition reduce supplemental projected state first. If the
-packet remains over its fixed cap, they retain every evidence row, handle,
-source kind, and source order while middle-truncating semantic text from the
-lowest-priority row backward. Both owners preserve at least 96 characters per
-reduced evidence text, or the complete original when it is shorter. Goal
-cognition owns the equivalent single-registry packet under its fixed
-24,000-character cap, with the current episode retaining highest source
-priority. Its goal projection and canonical role summaries are each serialized
-once; duplicate evidence, goal projection, role summaries, and scene role
-labels are absent from supplemental semantic context.
+Appraisal reduces identity, constraints, then state rows before evidence text;
+goal cognition reduces supplemental context, scene, constraints, identity, and
+then evidence. Identity and scene reductions use fixed semantic floors and
+middle truncation while preserving core identity, boundaries, evidence rows,
+handles, source kind, and source order. Both owners preserve at least 96
+characters per reduced evidence text, or the complete original when it is
+shorter. Goal cognition owns the equivalent single-registry packet under its
+fixed 36,000-character aggregate cap, with the current episode retaining
+highest source priority. Its goal projection and canonical role summaries are
+each serialized once; duplicate evidence, goal projection, role summaries,
+and scene role labels are absent from supplemental semantic context.
 Past-dialog and group-engagement contexts are supplemental and are removed in
 a stable order before required evidence text is reduced. Action planning uses
-the same fixed 24,000-character cap and replaces its optional group-engagement
+a 32,000-character aggregate cap and replaces its optional group-engagement
 block with the exact empty shape before applying the existing over-cap
 disposition.
 
 Every bounded repair or replacement attempt measures its owner-defined dynamic
-content before invoking its model. Generic goal cognition retains its existing
-24,000-character semantic payload cap. Required-selection cognition measures
-its complete system prompt, including dynamic regeneration feedback, together
-with its fitted payload under the same 24,000-character cap. A
+content before invoking its model. The appraisal initial and repair ceilings
+are 20,000 and 24,000 characters, action and resolver authorization use
+20,000 and 24,000 characters, and each surface stage uses 32,000 characters.
+Generic and required-selection goal cognition share the 36,000-character
+aggregate cap. Required-selection regeneration reuses the initial static
+system prompt; its dynamic `repair_feedback` carries the validation error,
+field contract, permitted handles, and a non-empty producer instruction tuple.
+A
 required-selection regeneration that would cross the cap consumes no
 additional model call and fails at the existing pre-state-commit boundary.
 

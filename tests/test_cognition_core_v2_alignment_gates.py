@@ -205,7 +205,7 @@ def test_each_question_receives_only_its_latest_identity_partition() -> None:
         family = question["question_kind"]
         question_state = _project_question_state(projection, question)
         serialized = str(question_state)
-        expected_identity = identity_context[family]
+        expected_identity = projection.identity_by_question[family]
         if expected_identity:
             assert question_state["character_identity"] == expected_identity
             assert family_markers[family] in serialized

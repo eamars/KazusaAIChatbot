@@ -56,7 +56,7 @@ long_term/todo.md
 | [character_identity_growth_contract_recovery_bugfix_plan.md](archive/completed/bugfix/character_identity_growth_contract_recovery_bugfix_plan.md) | Follow-up bugfix for identity-growth model contracts, provenance indices, review copying, and bounded retry recovery | completed |
 | [qq_group_public_scene_response_ordering_bugfix_plan.md](archive/completed/bugfix/qq_group_public_scene_response_ordering_bugfix_plan.md) | QQ multi-user public-scene composition and same-group response-ordering bugfix | completed |
 | [required_selection_partial_recovery_bugfix_plan.md](active/bugfix/required_selection_partial_recovery_bugfix_plan.md) | Reproduction-gated required-selection structural and complete-sibling-bid recovery bugfix plan | draft |
-| [cognition_core_v2_first_pass_robustness_bugfix_plan.md](active/bugfix/cognition_core_v2_first_pass_robustness_bugfix_plan.md) | Core V2 first-pass generation grounding, evaluator feedback, per-stage token/character budget rebalance, and deterministic failure-path recovery bugfix plan | draft |
+| [cognition_core_v2_first_pass_robustness_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_first_pass_robustness_bugfix_plan.md) | Core V2 first-pass generation grounding, evaluator feedback, per-stage token/character budget rebalance, and deterministic failure-path recovery bugfix plan | completed |
 
 ## Reference Documents
 
@@ -501,6 +501,21 @@ behavioral, and guarded-database exceptions, and final Stage 11 closeout.
 |---|---|
 | Moved from active bugfix to completed archive | `cognition_core_v2_short_horizon_global_state_composition_bigbang_plan.md` |
 
+### 2026-08-04 Cognition Core V2 first-pass robustness accepted closure
+
+The first-pass robustness bugfix completed its production implementation,
+deterministic verification, baseline fixture correction, one-at-a-time live
+LLM evidence collection, human-readable monologue/dialog review, and
+independent code review. The user explicitly approved lifecycle closure while
+accepting the recorded Stage 18 live harness, database-precondition,
+brief-reply-boundary, and baseline-latency residuals. The archived plan keeps
+Stage 18 unchecked as historical evidence rather than representing those
+residuals as passing.
+
+| Outcome | Plan |
+|---|---|
+| Moved from active bugfix to completed archive by explicit user acceptance with recorded residuals | `cognition_core_v2_first_pass_robustness_bugfix_plan.md` |
+
 ## Archive
 
 Completed and superseded records live under `archive/`. Use them for historical
@@ -522,6 +537,7 @@ plans.
 | [control_console_ui_e2e_acceptance_test_plan.md](archive/completed/bugfix/control_console_ui_e2e_acceptance_test_plan.md) |
 | [cognition_chain_responsibility_allocation_bugfix_plan.md](archive/completed/bugfix/cognition_chain_responsibility_allocation_bugfix_plan.md) |
 | [cognition_core_v2_baseline_regression_hardening_plan.md](archive/completed/bugfix/cognition_core_v2_baseline_regression_hardening_plan.md) |
+| [cognition_core_v2_first_pass_robustness_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_first_pass_robustness_bugfix_plan.md) |
 | [cognition_core_v2_character_identity_growth_bigbang_plan.md](archive/completed/bugfix/cognition_core_v2_character_identity_growth_bigbang_plan.md) |
 | [cognition_core_v2_compositional_action_planning_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_compositional_action_planning_bugfix_plan.md) |
 | [cognition_goal_capability_and_workspace_relevance_bugfix_plan.md](archive/completed/bugfix/cognition_goal_capability_and_workspace_relevance_bugfix_plan.md) |

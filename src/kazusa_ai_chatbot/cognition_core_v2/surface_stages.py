@@ -25,9 +25,11 @@ from kazusa_ai_chatbot.utils import parse_llm_json_output
 
 
 SURFACE_STAGE_ATTEMPT_LIMIT = V2_MODEL_TOTAL_ATTEMPTS
-SURFACE_STAGE_PROMPT_CAP = 24000
+SURFACE_STAGE_PROMPT_CAP = 32000
 SURFACE_STAGE_REPAIR_OUTPUT_CAP = 8000
-SURFACE_STAGE_REPAIR_PROMPT_CAP = 24000
+SURFACE_STAGE_REPAIR_PROMPT_CAP = 32000
+SURFACE_STAGE_ERROR_CAP = 500
+MIN_SURFACE_SUPPORTING_BIDS = 2
 DELIVERY_PROFILE_FIELDS = (
     "lexical_register",
     "sentence_shape",
@@ -36,12 +38,8 @@ DELIVERY_PROFILE_FIELDS = (
     "punctuation",
 )
 
-_SURFACE_REPAIR_PROMPT = '''上一份 surface 阶段输出没有通过当前节点的 contract 校验。
-请在完全相同的 surface 语境和语义判断下，生成一份完整替代对象。保留原始的角色判断、
-情绪方向、关系方向、selected intention、能力结果和事实；只修复字段集合、字段类型、长度、
-列表基数和 JSON 语法。当前上下文是中文时，所有新生成的自由文本和角色称谓使用简体中文；
-schema key、ID、URL、代码、命令、enum token 和用户原文按原样保留。只返回当前阶段规定的
-JSON 对象，不添加解释、markdown 或额外字段。'''
+SURFACE_REPAIR_INSTRUCTION = '保留原始的角色判断、\r\n情绪方向、关系方向、selected intention、能力结果和事实；只修复字段集合、字段类型、长度、\r\n列表基数和 JSON 语法。只返回当前阶段规定的\r\nJSON 对象，不添加解释、markdown 或额外字段。'
+
 
 
 CONTENT_PLAN_SYSTEM_PROMPT = '''规划当前角色在这个场景中实际会说出或发送的内容，使其自然表达
@@ -285,10 +283,11 @@ async def _run_surface_stage(
 ) -> Any:
     """Run one surface owner with bounded parse, repair, and fail-closed handling."""
 
-    prompt_text = _surface_prompt_text(
+    prompt_text, fitted_payload = _surface_prompt_packet(
         payload,
         stage_name=stage_name,
         safe_checkpoint=safe_checkpoint,
+        system_prompt_chars=len(system_prompt),
     )
     request_messages = [
         SystemMessage(content=system_prompt),
@@ -338,9 +337,11 @@ async def _run_surface_stage(
                     safe_checkpoint=safe_checkpoint,
                 ) from exc
             request_messages = _surface_repair_messages(
-                payload=payload,
+                payload=fitted_payload,
+                system_prompt=system_prompt,
                 invalid_candidate="",
                 reason="上一轮模型调用未返回可用候选，请在相同语境下重新生成完整 JSON。",
+                contract_error="",
                 stage_name=stage_name,
                 safe_checkpoint=safe_checkpoint,
                 attempt_count=attempt_index + 1,
@@ -381,9 +382,11 @@ async def _run_surface_stage(
                     safe_checkpoint=safe_checkpoint,
                 ) from exc
             request_messages = _surface_repair_messages(
-                payload=payload,
+                payload=fitted_payload,
+                system_prompt=system_prompt,
                 invalid_candidate=str(response_text),
                 reason="上一份候选未通过当前阶段的字段、类型、长度或 JSON contract 校验。",
+                contract_error=str(exc),
                 stage_name=stage_name,
                 safe_checkpoint=safe_checkpoint,
                 attempt_count=attempt_index + 1,
@@ -468,18 +471,22 @@ def _surface_execution_error(
 def _surface_repair_messages(
     *,
     payload: Mapping[str, Any],
+    system_prompt: str,
     invalid_candidate: str,
     reason: str,
+    contract_error: str,
     stage_name: str,
     safe_checkpoint: str,
     attempt_count: int,
 ) -> list[SystemMessage | HumanMessage]:
-    """Build a bounded same-context repair request with Chinese instructions."""
+    """Build one repair request that retains the stage system prompt."""
 
     repair_payload = {
         "surface": payload,
         "contract_repair": {
+            "repair_instruction": SURFACE_REPAIR_INSTRUCTION,
             "reason": reason,
+            "contract_error": contract_error[:SURFACE_STAGE_ERROR_CAP],
             "invalid_candidate": _bounded_repair_text(invalid_candidate),
         },
     }
@@ -488,19 +495,27 @@ def _surface_repair_messages(
         ensure_ascii=False,
         sort_keys=True,
     )
-    if len(prompt_text) > SURFACE_STAGE_REPAIR_PROMPT_CAP:
+    if (
+        len(system_prompt) + len(prompt_text)
+        > SURFACE_STAGE_REPAIR_PROMPT_CAP
+    ):
         prompt_text = json.dumps(
             {
                 "surface": payload,
                 "contract_repair": {
+                    "repair_instruction": SURFACE_REPAIR_INSTRUCTION,
                     "reason": reason,
+                    "contract_error": contract_error[:SURFACE_STAGE_ERROR_CAP],
                     "invalid_candidate": "上一份候选已省略；请依据 surface 语境返回完整合法对象。",
                 },
             },
             ensure_ascii=False,
             sort_keys=True,
         )
-    if len(prompt_text) > SURFACE_STAGE_REPAIR_PROMPT_CAP:
+    if (
+        len(system_prompt) + len(prompt_text)
+        > SURFACE_STAGE_REPAIR_PROMPT_CAP
+    ):
         raise _surface_execution_error(
             stage_name=stage_name,
             error_code="context_limit",
@@ -509,7 +524,7 @@ def _surface_repair_messages(
             safe_checkpoint=safe_checkpoint,
         )
     return [
-        SystemMessage(content=_SURFACE_REPAIR_PROMPT),
+        SystemMessage(content=system_prompt),
         HumanMessage(content=prompt_text),
     ]
 
@@ -640,6 +655,7 @@ def _surface_prompt_text(
     *,
     stage_name: str,
     safe_checkpoint: str,
+    system_prompt_chars: int,
 ) -> str:
     """Serialize one projected surface packet or raise its typed cap failure.
 
@@ -647,6 +663,8 @@ def _surface_prompt_text(
         payload: Prompt-safe semantic surface context.
         stage_name: Surface owner used in typed failure metadata.
         safe_checkpoint: Caller-owned state checkpoint for degradation.
+        system_prompt_chars: Stable system prompt length counted inside the
+            aggregate cap.
 
     Returns:
         Deterministic JSON within the aggregate surface cap.
@@ -655,12 +673,53 @@ def _surface_prompt_text(
         CognitionExecutionError: If the projected aggregate exceeds the cap.
     """
 
-    prompt_text = json.dumps(
-        {"surface": payload},
-        ensure_ascii=False,
-        sort_keys=True,
+    prompt_text, _ = _surface_prompt_packet(
+        payload,
+        stage_name=stage_name,
+        safe_checkpoint=safe_checkpoint,
+        system_prompt_chars=system_prompt_chars,
     )
-    if len(prompt_text) > SURFACE_STAGE_PROMPT_CAP:
+    return prompt_text
+
+
+def _surface_prompt_packet(
+    payload: Mapping[str, Any],
+    *,
+    stage_name: str,
+    safe_checkpoint: str,
+    system_prompt_chars: int,
+) -> tuple[str, dict[str, Any]]:
+    """Serialize and retain the exact reduced packet used by the model."""
+
+    reduced_payload = dict(payload)
+    while True:
+        prompt_text = json.dumps(
+            {"surface": reduced_payload},
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        if (
+            system_prompt_chars + len(prompt_text)
+            <= SURFACE_STAGE_PROMPT_CAP
+        ):
+            return prompt_text, reduced_payload
+        supporting_bids = reduced_payload.get("supporting_bids")
+        if supporting_bids is not None:
+            if (
+                isinstance(supporting_bids, list)
+                and len(supporting_bids) > MIN_SURFACE_SUPPORTING_BIDS
+            ):
+                reduced_payload["supporting_bids"] = supporting_bids[:-1]
+                continue
+            reduced_payload.pop("supporting_bids", None)
+            continue
+        semantic_affect = reduced_payload.get("semantic_affect")
+        if semantic_affect is not None:
+            if isinstance(semantic_affect, list) and semantic_affect:
+                reduced_payload["semantic_affect"] = semantic_affect[:-1]
+                continue
+            reduced_payload.pop("semantic_affect", None)
+            continue
         raise _surface_execution_error(
             stage_name=stage_name,
             error_code="context_limit",
@@ -668,7 +727,6 @@ def _surface_prompt_text(
             detail="surface 阶段 prompt 超过有界上下文上限",
             safe_checkpoint=safe_checkpoint,
         )
-    return prompt_text
 
 
 def _bounded_text(value: Any, label: str, maximum: int) -> str:

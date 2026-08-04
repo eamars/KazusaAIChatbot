@@ -34,6 +34,7 @@ from kazusa_ai_chatbot.config import (
     COGNITION_LLM_MAX_COMPLETION_TOKENS,
     COGNITION_LLM_MODEL,
     COGNITION_LLM_THINKING_ENABLED,
+    COGNITION_STAGE_TIMEOUT_SECONDS,
     COGNITION_LLM_ACTION_AUTHORIZATION_API_KEY,
     COGNITION_LLM_ACTION_AUTHORIZATION_BASE_URL,
     COGNITION_LLM_ACTION_AUTHORIZATION_MAX_COMPLETION_TOKENS,
@@ -201,6 +202,7 @@ _appraisal_event_agency_config = LLMCallConfig(
         COGNITION_LLM_APPRAISAL_EVENT_AGENCY_MAX_COMPLETION_TOKENS
     ),
     presence_penalty=None,
+    timeout_seconds=COGNITION_STAGE_TIMEOUT_SECONDS,
     thinking=LLMThinkingConfig(
         enabled=COGNITION_LLM_APPRAISAL_EVENT_AGENCY_THINKING_ENABLED
     ),
@@ -218,6 +220,7 @@ _appraisal_relationship_social_config = LLMCallConfig(
         COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL_MAX_COMPLETION_TOKENS
     ),
     presence_penalty=None,
+    timeout_seconds=COGNITION_STAGE_TIMEOUT_SECONDS,
     thinking=LLMThinkingConfig(
         enabled=COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL_THINKING_ENABLED
     ),
@@ -235,6 +238,7 @@ _appraisal_moral_identity_config = LLMCallConfig(
         COGNITION_LLM_APPRAISAL_MORAL_IDENTITY_MAX_COMPLETION_TOKENS
     ),
     presence_penalty=None,
+    timeout_seconds=COGNITION_STAGE_TIMEOUT_SECONDS,
     thinking=LLMThinkingConfig(
         enabled=COGNITION_LLM_APPRAISAL_MORAL_IDENTITY_THINKING_ENABLED
     ),
@@ -252,6 +256,7 @@ _appraisal_goal_threat_outcome_config = LLMCallConfig(
         COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME_MAX_COMPLETION_TOKENS
     ),
     presence_penalty=None,
+    timeout_seconds=COGNITION_STAGE_TIMEOUT_SECONDS,
     thinking=LLMThinkingConfig(
         enabled=COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME_THINKING_ENABLED
     ),
@@ -269,6 +274,7 @@ _appraisal_epistemic_comparison_memory_config = LLMCallConfig(
         COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY_MAX_COMPLETION_TOKENS
     ),
     presence_penalty=None,
+    timeout_seconds=COGNITION_STAGE_TIMEOUT_SECONDS,
     thinking=LLMThinkingConfig(
         enabled=(
             COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY_THINKING_ENABLED
@@ -288,6 +294,7 @@ _appraisal_existential_drive_config = LLMCallConfig(
         COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE_MAX_COMPLETION_TOKENS
     ),
     presence_penalty=None,
+    timeout_seconds=COGNITION_STAGE_TIMEOUT_SECONDS,
     thinking=LLMThinkingConfig(
         enabled=COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE_THINKING_ENABLED
     ),
@@ -305,6 +312,7 @@ _goal_ordinary_response_config = LLMCallConfig(
         COGNITION_LLM_GOAL_ORDINARY_RESPONSE_MAX_COMPLETION_TOKENS
     ),
     presence_penalty=None,
+    timeout_seconds=COGNITION_STAGE_TIMEOUT_SECONDS,
     thinking=LLMThinkingConfig(
         enabled=COGNITION_LLM_GOAL_ORDINARY_RESPONSE_THINKING_ENABLED
     ),
@@ -322,6 +330,7 @@ _goal_active_branch_config = LLMCallConfig(
         COGNITION_LLM_GOAL_ACTIVE_BRANCH_MAX_COMPLETION_TOKENS
     ),
     presence_penalty=None,
+    timeout_seconds=COGNITION_STAGE_TIMEOUT_SECONDS,
     thinking=LLMThinkingConfig(
         enabled=COGNITION_LLM_GOAL_ACTIVE_BRANCH_THINKING_ENABLED
     ),
@@ -339,6 +348,7 @@ _workspace_collapse_config = LLMCallConfig(
         COGNITION_LLM_WORKSPACE_COLLAPSE_MAX_COMPLETION_TOKENS
     ),
     presence_penalty=None,
+    timeout_seconds=COGNITION_STAGE_TIMEOUT_SECONDS,
     thinking=LLMThinkingConfig(
         enabled=COGNITION_LLM_WORKSPACE_COLLAPSE_THINKING_ENABLED
     ),
@@ -354,6 +364,7 @@ _action_planning_config = LLMCallConfig(
     top_k=None,
     max_completion_tokens=COGNITION_LLM_ACTION_PLANNING_MAX_COMPLETION_TOKENS,
     presence_penalty=None,
+    timeout_seconds=COGNITION_STAGE_TIMEOUT_SECONDS,
     thinking=LLMThinkingConfig(
         enabled=COGNITION_LLM_ACTION_PLANNING_THINKING_ENABLED
     ),
@@ -371,6 +382,7 @@ _action_authorization_config = LLMCallConfig(
         COGNITION_LLM_ACTION_AUTHORIZATION_MAX_COMPLETION_TOKENS
     ),
     presence_penalty=None,
+    timeout_seconds=COGNITION_STAGE_TIMEOUT_SECONDS,
     thinking=LLMThinkingConfig(
         enabled=COGNITION_LLM_ACTION_AUTHORIZATION_THINKING_ENABLED
     ),
@@ -388,6 +400,7 @@ _resolver_authorization_config = LLMCallConfig(
         COGNITION_LLM_RESOLVER_AUTHORIZATION_MAX_COMPLETION_TOKENS
     ),
     presence_penalty=None,
+    timeout_seconds=COGNITION_STAGE_TIMEOUT_SECONDS,
     thinking=LLMThinkingConfig(
         enabled=COGNITION_LLM_RESOLVER_AUTHORIZATION_THINKING_ENABLED
     ),

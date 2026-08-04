@@ -7,6 +7,7 @@ from typing import Literal, Mapping, TypedDict, cast
 
 V2_MODEL_TOTAL_ATTEMPTS = 3
 V2_VERIFIER_TOTAL_ATTEMPTS = 3
+V2_APPRAISAL_TOTAL_ATTEMPTS = 2
 
 V2AttemptFailureKind = Literal[
     "provider",
@@ -60,7 +61,7 @@ V2_MODEL_OWNER_POLICIES: dict[str, V2ModelOwnerPolicy] = {
         "exhausted_disposition": "accepted_degraded",
     },
     "semantic_appraisal": {
-        "total_attempt_limit": V2_MODEL_TOTAL_ATTEMPTS,
+        "total_attempt_limit": V2_APPRAISAL_TOTAL_ATTEMPTS,
         "exhausted_disposition": "skipped",
     },
     "goal_bid_structure": {

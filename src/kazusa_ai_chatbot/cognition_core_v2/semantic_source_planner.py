@@ -180,7 +180,7 @@ def question_proposition_kind_semantics(
 def _select_evidence_rows(
     evidence: Sequence[CognitionEvidenceV2],
 ) -> list[CognitionEvidenceV2]:
-    """Select the first eight valid typed rows in source order."""
+    """Select every valid typed row in source order."""
 
     selected: list[CognitionEvidenceV2] = []
     seen: set[str] = set()

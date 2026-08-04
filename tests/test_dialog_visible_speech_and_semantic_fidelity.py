@@ -1659,7 +1659,13 @@ async def test_surface_owner_repair_regenerates_invalid_contract_once() -> None:
     repair_payload = json.loads(
         str(getattr(llm.messages[1][1], "content", "{}"))
     )
-    assert "完整替代对象" in repair_system
+    assert repair_system == str(
+        getattr(llm.messages[0][0], "content", "")
+    )
+    assert (
+        repair_payload["contract_repair"]["repair_instruction"]
+        == surface_stages.SURFACE_REPAIR_INSTRUCTION
+    )
     assert repair_payload["contract_repair"]["invalid_candidate"] == (
         '{"content_plan": 3}'
     )

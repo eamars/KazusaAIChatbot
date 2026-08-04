@@ -1,6 +1,6 @@
 # cognition core v2 first-pass robustness bugfix plan
 
-Status: draft
+Status: completed
 
 Plan class: high_risk_migration
 
@@ -14,7 +14,7 @@ Cutover: staged bigbang per stage, no runtime flags
   budgets so the cognition stages stop failing closed on irreducible context.
 - Plan class: `high_risk_migration` (production LLM generation limits, prompt
   contracts, and failure dispositions change across twelve routes).
-- Status: `draft`.
+- Status: `completed`.
 - Mandatory skills: `development-plan`, `local-llm-architecture`, `py-style`,
   `cjk-safety`, `test-style-and-execution`, `python-venv`,
   `no-prepost-user-input`.
@@ -1120,7 +1120,7 @@ re-runs the same test.
 
 ## Progress Checklist
 
-- [ ] Stage 0 - baseline captured
+- [x] Stage 0 - baseline captured
   - Covers: steps 1-2.
   - Files: none.
   - Verify: the deterministic batch in `Verification / Deterministic baseline`.
@@ -1128,8 +1128,8 @@ re-runs the same test.
     `test_live_character_prompts_fit_local_model_attention_caps` already fails
     on `GOAL_COGNITION_PROMPT` and `REQUIRED_SELECTION_GOAL_PROMPT`.
   - Handoff: next agent starts at Stage 1.
-  - Sign-off: `<agent/date>` after evidence is recorded.
-- [ ] Stage 1 - maximum-identity test contract established
+  - Sign-off: `parent/2026-08-04`.
+- [x] Stage 1 - maximum-identity test contract established
   - Covers: steps 3-4.
   - Files: `tests/cognition_core_v2_test_helpers.py`,
     `tests/test_cognition_core_v2_prompt_budget_continuity.py`.
@@ -1138,8 +1138,8 @@ re-runs the same test.
     identity-bearing appraisal families and the `PromptBudgetError` for goal
     cognition.
   - Handoff: next agent starts at Stage 2.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 2 - completion-token and timeout rebalance implemented
+  - Sign-off: `parent/2026-08-04`.
+- [x] Stage 2 - completion-token and timeout rebalance implemented
   - Covers: step 5.
   - Files: `src/kazusa_ai_chatbot/config.py`,
     `src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition.py`,
@@ -1151,8 +1151,8 @@ re-runs the same test.
   - Evidence: test output plus the grep result proving no cognition route still
     defaults to `DEFAULT_LLM_MAX_COMPLETION_TOKENS`.
   - Handoff: next agent starts at Stage 3.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 3 - shared reduction helpers implemented
+  - Sign-off: `parent/2026-08-04`.
+- [x] Stage 3 - shared reduction helpers implemented
   - Covers: step 6.
   - Files: `src/kazusa_ai_chatbot/cognition_core_v2/prompt_budget.py`,
     `src/kazusa_ai_chatbot/cognition_core_v2/workspace.py`.
@@ -1162,8 +1162,8 @@ re-runs the same test.
   - Evidence: compile result, test output, grep returning matches only in
     `prompt_budget.py`.
   - Handoff: next agent starts at Stage 4.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 4 - cap accounting and context reduction implemented
+  - Sign-off: `parent/2026-08-04`.
+- [x] Stage 4 - cap accounting and context reduction implemented
   - Covers: steps 7-9.
   - Files: `semantic_appraisal.py`, `goal_cognition.py`,
     `action_selection.py`, `action_authorization.py`,
@@ -1173,8 +1173,8 @@ re-runs the same test.
   - Evidence: the step 4 failures now pass; the exact-cap and cap-plus-one
     tests pass at the new values.
   - Handoff: next agent starts at Stage 5.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 5 - appraisal provenance bound and bounded item termination
+  - Sign-off: `parent/2026-08-04`.
+- [x] Stage 5 - appraisal provenance bound and bounded item termination
   - Covers: steps 10-11.
   - Files: `semantic_appraisal.py`, `tests/test_cognition_core_v2_failures.py`.
   - Verify: `venv\Scripts\python.exe -m pytest tests\test_cognition_core_v2_failures.py -q`
@@ -1182,8 +1182,8 @@ re-runs the same test.
     `selected roles handles must contain between 0 and 8 items`, then the pass;
     plus the accepted-prefix return proof.
   - Handoff: next agent starts at Stage 6.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 6 - generic goal degradation implemented
+  - Sign-off: `parent/2026-08-04`.
+- [x] Stage 6 - generic goal degradation implemented
   - Covers: steps 12-13.
   - Files: `goal_cognition.py`, `tests/test_cognition_core_v2_failures.py`.
   - Verify: `venv\Scripts\python.exe -m pytest tests\test_cognition_core_v2_failures.py tests\test_cognition_core_v2_dependencies.py -q`
@@ -1191,8 +1191,8 @@ re-runs the same test.
     `confidence`, or `relational_willingness` defect still raises
     `goal_bid_structure_exhausted`.
   - Handoff: next agent starts at Stage 7.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 7 - stale goal bids dropped before collapse
+  - Sign-off: `parent/2026-08-04`.
+- [x] Stage 7 - stale goal bids dropped before collapse
   - Covers: steps 14-15.
   - Files: `facade.py`, `tests/test_cognition_core_v2_integration.py`.
   - Verify: `venv\Scripts\python.exe -m pytest tests\test_cognition_core_v2_integration.py -q`
@@ -1200,8 +1200,8 @@ re-runs the same test.
     `stale_goal_bid_dropped:<branch_id>` and the turn completes; the unfiltered
     bid list remains in the `branch_execution` validation event.
   - Handoff: next agent starts at Stage 8.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 8 - surface repair contract implemented
+  - Sign-off: `parent/2026-08-04`.
+- [x] Stage 8 - surface repair contract implemented
   - Covers: steps 16-17.
   - Files: `surface_stages.py`,
     `tests/test_cognition_core_v2_dependencies.py`.
@@ -1211,8 +1211,8 @@ re-runs the same test.
   - Evidence: the repair request retains the stage system prompt and carries
     the exact `contract_error`; grep returns no matches.
   - Handoff: next agent starts at Stage 9.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 9 - goal repair semantic authority restored
+  - Sign-off: `parent/2026-08-04`.
+- [x] Stage 9 - goal repair semantic authority restored
   - Covers: steps 18-19.
   - Files: `goal_cognition.py`,
     `tests/test_cognition_core_v2_dependencies.py`.
@@ -1223,8 +1223,8 @@ re-runs the same test.
     relational-willingness ordering sentences are present in the regeneration
     request; both greps return no matches.
   - Handoff: next agent starts at Stage 10.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 10 - actionable validator errors implemented
+  - Sign-off: `parent/2026-08-04`.
+- [x] Stage 10 - actionable validator errors implemented
   - Covers: steps 20-21.
   - Files: `semantic_appraisal.py`,
     `tests/test_cognition_core_v2_failures.py`.
@@ -1233,8 +1233,8 @@ re-runs the same test.
     allowlist; the allowlist is capped at
     `MAX_ERROR_ALLOWLIST_ITEMS` with the `(+N more)` suffix.
   - Handoff: next agent starts at Stage 11.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 11 - lockstep handle reduction implemented
+  - Sign-off: `parent/2026-08-04`.
+- [x] Stage 11 - lockstep handle reduction implemented
   - Covers: steps 22-23.
   - Files: `semantic_appraisal.py`,
     `tests/test_cognition_core_v2_prompt_budget_continuity.py`.
@@ -1245,8 +1245,8 @@ re-runs the same test.
     `permitted_delta_path_domains[*].handles`; the item validator rejects that
     handle.
   - Handoff: next agent starts at Stage 12.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 12 - output skeletons added
+  - Sign-off: `parent/2026-08-04`.
+- [x] Stage 12 - output skeletons added
   - Covers: steps 24-25.
   - Files: `semantic_appraisal.py`, `goal_cognition.py`,
     `tests/test_cognition_core_v2_live_character_judgment.py`.
@@ -1255,8 +1255,8 @@ re-runs the same test.
   - Evidence: the skeleton block is present in both prompts; every existing
     prompt content assertion still passes; the new length caps hold.
   - Handoff: next agent starts at Stage 13.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 13 - planner row containment implemented
+  - Sign-off: `parent/2026-08-04`.
+- [x] Stage 13 - planner row containment implemented
   - Covers: steps 26-27.
   - Files: `action_selection.py`,
     `tests/test_action_selection_prompt_contract.py`.
@@ -1265,8 +1265,8 @@ re-runs the same test.
     invalid raises once and reaches the empty blocked proposal after three
     attempts.
   - Handoff: next agent starts at Stage 14.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 14 - surface reduction pass implemented
+  - Sign-off: `parent/2026-08-04`.
+- [x] Stage 14 - surface reduction pass implemented
   - Covers: steps 28-29.
   - Files: `surface_stages.py`,
     `tests/test_cognition_core_v2_prompt_budget_continuity.py`.
@@ -1275,8 +1275,8 @@ re-runs the same test.
     payload still over cap after reduction returns the validated degraded
     surface with zero model calls.
   - Handoff: next agent starts at Stage 15.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 15 - policy, projection, and docstring hygiene complete
+  - Sign-off: `parent/2026-08-04`.
+- [x] Stage 15 - policy, projection, and docstring hygiene complete
   - Covers: steps 30-31.
   - Files: `model_attempt_policy.py`, `__init__.py`, `state_projection.py`,
     `semantic_source_planner.py`,
@@ -1289,8 +1289,8 @@ re-runs the same test.
     `total_attempt_limit=2` passes `validate_v2_attempt_record`; grep shows no
     remaining Chinese-keyed `roles` projection.
   - Handoff: next agent starts at Stage 16.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 16 - documentation updated
+  - Sign-off: `parent/2026-08-04`.
+- [x] Stage 16 - documentation updated
   - Covers: step 32.
   - Files: `src/kazusa_ai_chatbot/cognition_core_v2/README.md`,
     `docs/HOWTO.md`.
@@ -1298,8 +1298,8 @@ re-runs the same test.
   - Evidence: no stale `8,000-character`, `24,000-character`, or `25000`
     cognition value remains; every new contract is described.
   - Handoff: next agent starts at Stage 17.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 17 - full deterministic verification passes
+  - Sign-off: `parent/2026-08-04`.
+- [x] Stage 17 - full deterministic verification passes
   - Covers: step 33.
   - Files: none.
   - Verify: every command in `Verification / Deterministic regression` and
@@ -1307,7 +1307,8 @@ re-runs the same test.
   - Evidence: complete command output plus explicit comparison against the
     Stage 0 baseline.
   - Handoff: next agent starts at Stage 18.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
+  - Sign-off: `parent/2026-08-04`; the corrected baseline fixtures now pass and
+    the complete deterministic command is green.
 - [ ] Stage 18 - live LLM verification passes
   - Covers: step 34.
   - Files: none.
@@ -1317,8 +1318,11 @@ re-runs the same test.
     latency, and the agent's judgment on whether the behavior satisfies the
     contract.
   - Handoff: next agent starts at Stage 19.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 19 - independent code review complete
+  - Sign-off: retained unchecked as a historical residual. The user accepted
+    the documented live harness, database-precondition, brief-reply boundary,
+    and missing baseline-latency exceptions for lifecycle closure on
+    `2026-08-04`.
+- [x] Stage 19 - independent code review complete
   - Covers: step 35.
   - Files: whatever the review requires inside the approved change surface.
   - Verify: re-run every affected focused test, static check, and regression
@@ -1326,15 +1330,19 @@ re-runs the same test.
   - Evidence: reviewer identity, files reviewed, findings, fixes applied,
     commands rerun, residual risks, approval status.
   - Handoff: next agent starts at Stage 20.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 20 - acceptance criteria and lifecycle signed off
+  - Sign-off: `parent/2026-08-04`; the reviewer found no unresolved code-level
+    finding. Final lifecycle approval was subsequently supplied by the user
+    with the documented Stage 18 residuals accepted.
+- [x] Stage 20 - acceptance criteria and lifecycle signed off
   - Covers: step 36.
   - Files: this plan, `development_plans/README.md`.
   - Verify: every line in `Acceptance Criteria` is satisfied and evidenced.
   - Evidence: final `git diff --stat`, the completed `Execution Evidence`
     section, and the registry status change.
   - Handoff: none. Plan reaches `completed`.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
+  - Sign-off: `parent/2026-08-04`; the user explicitly approved closure after
+    reviewing the baseline correction, deterministic results, live evidence,
+    human-readable review artifact, and recorded residuals.
 
 ## Verification
 
@@ -1613,33 +1621,175 @@ This plan is complete when:
 
 ## Execution Evidence
 
-Populate during execution. Do not pre-fill.
+Completed during execution; retained as the final lifecycle record.
 
-- Pre-edit git state:
-- Stage 0 deterministic baseline result:
-- Pre-existing failures confirmed:
-- Stage 1 expected-failure evidence:
-- Config and route grep results:
-- `py_compile` results per edited file:
-- Stage 4 maximum-identity pass evidence:
-- Stage 5 provenance-overflow pre-fix error text and post-fix result:
-- Stage 6 degradation matrix results:
-- Stage 7 stale-bid warning and trace evidence:
-- Stage 8 surface repair request evidence:
-- Stage 9 goal regeneration request evidence:
-- Stage 10 actionable error samples:
-- Stage 11 lockstep reduction evidence:
-- Stage 12 prompt skeleton and length evidence:
-- Stage 13 planner containment evidence:
-- Stage 14 surface reduction evidence:
-- Stage 15 policy and projection evidence:
-- Documentation grep results:
-- Full deterministic regression result:
+- Pre-edit git state: empty `git status --short` output before lifecycle
+  transition; the only subsequent changes before implementation are this plan
+  and its registry row moving from `draft` to `in_progress`.
+- Stage 0 deterministic baseline result: the cognition V2 batch completed with
+  `411 passed, 5 failed, 201 deselected` in 4.65 seconds. The focused config
+  and action-selection batch completed with `61 passed` in 5.10 seconds.
+- Pre-existing failures confirmed: the documented prompt-length assertion
+  failed as expected, and four additional failures were present before any
+  production or test implementation:
+  `tests/test_cognition_core_v2_alignment_gates.py::test_each_question_receives_only_its_latest_identity_partition`
+  (semantic boundary projection differs from the fixture's numeric boundary
+  values),
+  `tests/test_cognition_core_v2_frozen_replay_drift.py::test_connector_separates_current_event_continuity_and_private_residue`
+  (`public_group_scene` is absent from the fixture state),
+  `tests/test_cognition_core_v2_live_character_judgment.py::test_goal_prompt_owns_present_character_judgment`
+  (required `先前语境` text is absent), and
+  `tests/test_cognition_core_v2_stage_model_routing.py::test_selection_producer_retry_reuses_goal_route_and_trace`
+  (retry uses the repair prompt instead of the expected initial prompt).
+- Stage 1 expected-failure evidence: added the maximum identity and projection
+  fixtures, then passed `py_compile` for both edited test files. The continuity
+  test completed with `32 passed, 6 failed`; the five identity-bearing appraisal
+  families (`event_agency`, `relationship_social`, `moral_identity`,
+  `goal_threat_outcome`, and `existential_drive`) each raised
+  `CognitionContextLimitError` with the existing aggregate-cap message.
+  `epistemic_comparison_memory` reached its model boundary. The maximum goal
+  case raised `CognitionExecutionError` caused by the underlying
+  `PromptBudgetError` from the existing goal prompt cap.
+- Implementation handoff: DeepSeek `deepseek_v4_flash_0731` completed the
+  explicitly owned cognition production slice after the required acknowledgement
+  turn and extended observation window. The parent agent integrated the test,
+  documentation, evidence, and lifecycle changes.
+- Config and route grep results: all thirteen cognition/surface route configs
+  carry `COGNITION_STAGE_TIMEOUT_SECONDS`; cognition completion settings use
+  stage-specific defaults and `_capped_int_from_env`; the forbidden retired
+  repair prompts, `_middle_truncate_text`, `"roles"` projection, and stale
+  `25000`/`25_000`, `8,000-character`, and `24,000-character` cognition values
+  have zero matches. `DEFAULT_LLM_MAX_COMPLETION_TOKENS` remains 25,000 and
+  only appears in its definition and non-Cognition consumers.
+- `py_compile` results per edited file: all sixteen production files named by
+  the plan compiled successfully on the final rerun. Service, cognition-node,
+  and surface-node import smoke checks also passed.
+- Stage 4 maximum-identity pass evidence: the maximum identity fixtures and
+  all six appraisal-family boundary cases now reach their bounded model
+  boundary without `CognitionContextLimitError`; the maximum goal prompt case
+  reaches its model boundary without `PromptBudgetError`.
+- Stage 5 provenance-overflow pre-fix error text and post-fix result: the
+  eight-item, eight-entity `goal_threat_outcome` case passes merged validation
+  after the permitted-set-derived provenance bounds replace the hard-coded
+  eight-item limit. The focused prompt-budget suite passes this case.
+- Stage 6 degradation matrix results: the generic ordinary bid with an unknown
+  evidence handle degrades and reaches collapse; invalid relational willingness
+  remains fatal. The failures/contracts focused gates and full V2 deterministic
+  suite pass these dispositions.
+- Stage 7 stale-bid warning and trace evidence: stale non-ordinary bids are
+  dropped only when their persistent goal is absent from final state, with the
+  named `stale_goal_bid_dropped:<branch_id>` warning and the unfiltered trace
+  retained. The integration stale-bid regression passes.
+- Stage 8 surface repair request evidence: contract and provider repairs retain
+  the initial system prompt, exact validation error, and the fitted reduced
+  payload. `test_surface_repair_reuses_the_fitted_surface_payload` passes.
+- Stage 9 goal regeneration request evidence: goal retries reuse the initial
+  system prompt and structured contract feedback, including the relational-
+  willingness ordering rules. Goal dependency and prompt-continuity focused
+  tests pass.
+- Stage 10 actionable error samples: handle, path, kind, text, and allowlist
+  validation errors include the rejected value and bounded permitted values;
+  the actionable-error regression passes.
+- Stage 11 lockstep reduction evidence: appraisal reductions remove a state row
+  from all five authority locations and preserve `self`/`current_user` handles;
+  the projection and prompt-budget continuity gates pass.
+- Stage 12 prompt skeleton and length evidence: appraisal, goal, and action
+  system prompts fit their system-inclusive caps and the JSON skeleton tests
+  pass. New config tests verify every cognition route caps an oversized
+  environment override at its approved ceiling.
+- Stage 13 planner containment evidence: invalid planner rows are dropped and
+  logged individually; an all-invalid set raises once and lands on the empty
+  blocked proposal. The action-planning and prompt-contract gates pass.
+- Stage 14 surface reduction evidence: over-cap surface inputs reduce before a
+  model call, and irreducibly over-cap inputs return validated degraded output;
+  the surface prompt-budget tests pass.
+- Stage 15 policy and projection evidence: `total_attempt_limit=2` appraisal
+  records validate, stale-bid provenance remains inspectable, and the Chinese-
+  keyed `roles` projection is absent. The retry-continuity and projection gates
+  pass.
+- Documentation grep results: `docs/HOWTO.md` and the cognition README now
+  describe the distinct appraisal, goal, and surface reduction orders, stage
+  ceilings, system-inclusive budgets, and capped environment overrides. Static
+  greps are clean for all forbidden legacy names and stale values.
+- Full deterministic regression result after baseline correction: the exact
+  plan command completed with `421 passed, 201 deselected` in 3.43 seconds.
+  The focused config, action-selection, payload, and service command completed
+  with `129 passed` in 7.11 seconds. The two Stage 0 residuals were corrected
+  in test fixtures only: the alignment expectation now follows the canonical
+  semantic projection, and the frozen replay state includes the required
+  `public_group_scene` field. No production code change was required for either
+  baseline failure.
+- Baseline correction evidence: the two targeted baseline tests passed, the
+  exact deterministic command is green, and the focused regression, compile,
+  import, static-grep, and diff checks pass.
 - Live LLM commands, artifact paths, routes, models, attempts, latency, and
-  per-case judgment:
-- Observed latency change versus baseline:
-- Independent reviewer identity and files reviewed:
-- Review findings, fixes applied, and commands rerun:
-- Residual risks:
-- Final `git diff --stat`:
-- Final sign-off:
+  per-case judgment: every collected live case was invoked serially by the
+  parent and the generated artifacts were inspected before proceeding. The
+  character-judgment set passed 4/4, with representative artifacts at
+  `test_artifacts/llm_traces/cognition_core_v2_live_character_judgment__high_affinity_progression__20260804T001956081611Z.json`,
+  `...__private_required_selection_production.json`,
+  `...__changed_group_scene_release__20260804T002045781866Z.json`, and
+  `...__upstream_nested_role_meaning__20260804T002107335325Z.json`; the
+  human-review contracts confirmed grounded continuity, direct required
+  selection, changed-scene release, and upstream role meaning. The relational
+  willingness set passed 9/9 and its artifacts are in
+  `test_artifacts/cognition_core_v2_relational_willingness/`, covering stranger
+  rejection, intermediate-33 rejection, intermediate-67 acceptance, lover
+  acceptance, memory-scope counterfactuals, compliance, taboo, and coercion.
+  The workspace set passed 2/2 at
+  `...cognition_core_v2_workspace_live_llm__captured_online_search_stale_autonomy.json`
+  and `...__matching_autonomy_goal.json`; the latter records one
+  `COGNITION_LLM_WORKSPACE_COLLAPSE` call on `gemma-4-31b-fable-5-agent-distill`
+  with 1,895.547 ms latency and the autonomy boundary as primary. The core
+  live collection's raw capture and lifecycle checks passed 21/21 each, while
+  its explicitly DB-gated cases reached MongoDB but failed the precondition
+  seed-hash check. Action planning passed 9/32; the remaining 23 failures are
+  harness/fixture contract assumptions outside the approved Change Surface
+  (for example missing `background_work_request`, `public_group_scene`, or
+  `character_stance`, plus live assertions about action routing). Surface-owner
+  passed 2/7; five cases failed in upstream action-bid schema setup before the
+  surface owner. The repeated text-surface contract artifact at
+  `test_artifacts/llm_traces/cognition_core_v2_stage_2__v2_text_surface_stage_contracts__20260804T013441450223Z.json`
+  records two text calls and one visual call but the live model returned empty
+  `visible_boundaries` for the brief-reply style, so that brittle assertion is
+  retained as an accepted live residual. The consolidated human-readable
+  monologue/dialog review is
+  `test_artifacts/llm_reviews/cognition_core_v2_first_pass_robustness_stage18_monologue_dialog_review.md`.
+- Observed latency change versus baseline: no comparable baseline latency
+  series was present in the inspected artifacts. The recorded calls stayed
+  below the 120-second stage timeout and no inspected call showed completion
+  truncation. The missing baseline comparison remains a documented Stage 18
+  residual accepted for closure by the user.
+- Independent reviewer identity and files reviewed: Faraday
+  (`kazusa_plan_reviewer`, agent
+  `019fca69-3d3f-7c30-bd80-fc7a24a52c8a`) reviewed the full changed production,
+  test, fixture, documentation, plan, and registry diff. The initial review
+  identified accepted-prefix recovery, unbounded route overrides, fitted
+  surface-repair payload reuse, baseline assertion drift, missing regression
+  coverage, and documentation-order issues.
+- Review findings, fixes applied, and commands rerun: accepted-prefix recovery
+  now returns a validated prefix and records a typed bounded-termination event;
+  cognition route environment overrides are capped by stage ceiling;
+  surface retries reuse the fitted payload; baseline assertions were restored;
+  the named regression files were updated; and HOWTO reduction orders are
+  distinct. The re-review confirmed all prior code blockers resolved and found
+  no new code-level unresolved finding. Reruns passed the two new prompt-budget
+  regressions, `tests/test_config.py` (`68 passed`), the focused batch
+  (`129 passed`), `py_compile`, imports, static greps, and `git diff --check`.
+  The reviewer withheld final approval only because the live acceptance
+  residuals and lifecycle evidence were open at review time; the user later
+  accepted those residuals and directed closure.
+- Residual risks: Stage 18 remains historically unchecked for the live
+  action/surface harness failures, the brief-reply `visible_boundaries`
+  assertion, the MongoDB seed-hash precondition mismatch, and the absent
+  comparable baseline-latency series. No database changes were made. These
+  residuals are outside the approved production Change Surface or require
+  fixture/database decisions not authorized by this plan; the user explicitly
+  accepted them for lifecycle closure.
+- Final `git diff --stat`: `40 files changed, 1648 insertions(+), 389
+  deletions(-)`; `git diff --check` is clean apart from normal LF-to-CRLF
+  warnings from the Windows working tree.
+- Final sign-off: user-approved lifecycle closure on `2026-08-04`. Plan status
+  is `completed`; Stage 17 and Stage 20 are checked, while Stage 18 remains
+  unchecked as an explicit historical residual. The registry is updated to the
+  completed archive path.

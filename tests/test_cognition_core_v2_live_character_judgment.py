@@ -20,6 +20,9 @@ from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
     REQUIRED_SELECTION_GOAL_PROMPT,
     run_goal_cognition,
 )
+from kazusa_ai_chatbot.cognition_core_v2.semantic_appraisal import (
+    SEMANTIC_APPRAISAL_PROMPT,
+)
 from kazusa_ai_chatbot.cognition_core_v2.surface_stages import (
     CONTENT_PLAN_SYSTEM_PROMPT,
     PREFERENCE_SYSTEM_PROMPT,
@@ -99,8 +102,9 @@ def _normalized(prompt: str) -> str:
 def test_live_character_prompts_fit_local_model_attention_caps() -> None:
     """Keep each semantic question bounded for the local dialog model."""
 
-    assert len(GOAL_COGNITION_PROMPT) <= 2200
-    assert len(REQUIRED_SELECTION_GOAL_PROMPT) <= 2400
+    assert len(GOAL_COGNITION_PROMPT) <= 3000
+    assert len(REQUIRED_SELECTION_GOAL_PROMPT) <= 2600
+    assert len(SEMANTIC_APPRAISAL_PROMPT) <= 3500
     assert len(CONTENT_PLAN_SYSTEM_PROMPT) <= 2400
     assert len(PREFERENCE_SYSTEM_PROMPT) <= 1200
     assert len(dialog_module._V2_DIALOG_GENERATOR_PROMPT) <= 2700
@@ -117,7 +121,7 @@ def test_live_character_prompts_fit_local_model_attention_caps() -> None:
         "",
     )
     assert semantic_prompt
-    assert len(semantic_prompt) <= 1800
+    assert len(semantic_prompt) <= 2000
     role_prompt = getattr(
         dialog_module,
         "_V2_DIALOG_ROLE_DIRECTION_PROMPT",
@@ -139,10 +143,12 @@ def test_goal_prompt_owns_present_character_judgment() -> None:
         "关系",
         "此刻真实动机",
         "先前语境",
+        "conversation_evidence",
         "不是命令",
         "推进",
         "response_operation",
         "selection_owner",
+        "target_role_handles",
     ):
         assert required_text in prompt
 

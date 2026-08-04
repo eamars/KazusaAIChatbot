@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from copy import deepcopy
 from typing import Any
 
@@ -101,7 +102,7 @@ def _fit_payload_evidence_texts(
         if len(semantic_text) <= minimum_text_chars:
             continue
 
-        row[text_field] = _middle_truncate_text(
+        row[text_field] = middle_truncate_text(
             semantic_text,
             minimum_text_chars,
         )
@@ -118,7 +119,7 @@ def _fit_payload_evidence_texts(
         retained_chars = minimum_text_chars
         while lower_bound <= upper_bound:
             candidate_chars = (lower_bound + upper_bound) // 2
-            row[text_field] = _middle_truncate_text(
+            row[text_field] = middle_truncate_text(
                 semantic_text,
                 candidate_chars,
             )
@@ -133,7 +134,7 @@ def _fit_payload_evidence_texts(
             else:
                 upper_bound = candidate_chars - 1
 
-        row[text_field] = _middle_truncate_text(
+        row[text_field] = middle_truncate_text(
             semantic_text,
             retained_chars,
         )
@@ -149,7 +150,27 @@ def _fit_payload_evidence_texts(
     )
 
 
-def _middle_truncate_text(value: str, maximum_chars: int) -> str:
+IDENTITY_TEXT_FLOORS: tuple[tuple[tuple[str, ...], int], ...] = (
+    (("core", "backstory"), 600),
+    (("core", "description"), 400),
+    (("self_image", "self_concept"), 400),
+    (("personality", "quirks"), 300),
+    (("personality", "taboos"), 300),
+    (("personality", "logic"), 300),
+    (("personality", "tempo"), 300),
+    (("personality", "defense"), 300),
+)
+MAX_REDUCED_GROWTH_EDGES = 2
+MAX_REDUCED_STANDARD_DESCRIPTION_CHARS = 120
+SCENE_TEXT_FLOORS: tuple[tuple[str, int], ...] = (
+    ("public_group_scene", 400),
+    ("conversation_continuity", 400),
+    ("semantic_scene", 300),
+    ("semantic_temporal_context", 200),
+)
+
+
+def middle_truncate_text(value: str, maximum_chars: int) -> str:
     """Retain both semantic ends while removing the middle of long text."""
 
     if len(value) <= maximum_chars:
@@ -173,3 +194,98 @@ def _middle_truncate_text(value: str, maximum_chars: int) -> str:
         + value[-tail_chars:]
     )
     return bounded_text
+
+
+def reduce_identity_projection(identity: dict[str, Any]) -> bool:
+    """Apply the next bounded identity reduction step for one prompt packet.
+
+    One call applies the first text floor whose field is still above it, or
+    truncates growth edges once every text floor is reached. Fields that are
+    permission- or role-relevant (name, gender, age, birthday, mbti, and every
+    boundary value) are never reduced, and missing keys are skipped.
+
+    Args:
+        identity: Prompt-visible identity partition mutated in place.
+
+    Returns:
+        True when one bounded reduction step was applied, False at the floor.
+    """
+
+    for path, floor in IDENTITY_TEXT_FLOORS:
+        owner = identity
+        for key in path[:-1]:
+            nested = owner.get(key)
+            if not isinstance(nested, Mapping):
+                owner = None
+                break
+            owner = nested
+        if owner is None:
+            continue
+        leaf_key = path[-1]
+        value = owner.get(leaf_key)
+        if isinstance(value, str) and len(value) > floor:
+            owner[leaf_key] = middle_truncate_text(value, floor)
+            return True
+    self_image = identity.get("self_image")
+    if isinstance(self_image, Mapping):
+        growth_edges = self_image.get("current_growth_edges")
+        if (
+            isinstance(growth_edges, list)
+            and len(growth_edges) > MAX_REDUCED_GROWTH_EDGES
+        ):
+            self_image["current_growth_edges"] = (
+                growth_edges[:MAX_REDUCED_GROWTH_EDGES]
+            )
+            return True
+    return False
+
+
+def reduce_constraints_projection(constraints: dict[str, Any]) -> bool:
+    """Apply the next bounded character-constraint reduction step.
+
+    One call middle-truncates every standard description above its floor.
+    Drives, standards rows, and meaning state are never removed.
+
+    Args:
+        constraints: Prompt-visible character constraints mutated in place.
+
+    Returns:
+        True when at least one description was reduced, False at the floor.
+    """
+
+    standards = constraints.get("standards")
+    if not isinstance(standards, list):
+        return False
+    reduced = False
+    for standard in standards:
+        if not isinstance(standard, Mapping):
+            continue
+        description = standard.get("description")
+        if (
+            isinstance(description, str)
+            and len(description) > MAX_REDUCED_STANDARD_DESCRIPTION_CHARS
+        ):
+            standard["description"] = middle_truncate_text(
+                description,
+                MAX_REDUCED_STANDARD_DESCRIPTION_CHARS,
+            )
+            reduced = True
+    return reduced
+
+
+def reduce_scene_context_projection(scene_context: dict[str, Any]) -> bool:
+    """Apply the next bounded scene-context reduction step.
+
+    Args:
+        scene_context: Prompt-visible scene context mutated in place.
+
+    Returns:
+        True when one scene text field was reduced, False at the floor.
+    """
+
+    for key, floor in SCENE_TEXT_FLOORS:
+        value = scene_context.get(key)
+        if isinstance(value, str) and len(value) > floor:
+            scene_context[key] = middle_truncate_text(value, floor)
+            return True
+    return False

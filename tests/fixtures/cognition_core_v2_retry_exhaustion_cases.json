@@ -9,7 +9,7 @@
       "exhausted_disposition": "accepted_degraded"
     },
     "semantic_appraisal": {
-      "total_attempt_limit": 3,
+      "total_attempt_limit": 2,
       "exhausted_disposition": "skipped"
     },
     "goal_bid_structure": {

@@ -51,7 +51,7 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 
 ACTION_REQUEST_CAP = 3
-ACTION_PLANNING_PROMPT_CAP = 24000
+ACTION_PLANNING_PROMPT_CAP = 32000
 ACTION_PLANNING_REPAIR_OUTPUT_CAP = 4000
 ACTION_PLANNING_ATTEMPT_LIMIT = V2_MODEL_TOTAL_ATTEMPTS
 MODEL_TEXT_CAP = 500
@@ -331,7 +331,10 @@ async def plan_actions(
         "current_resolver_goal_progress": current_goal_progress,
     }
     prompt_text = json.dumps(prompt_payload, ensure_ascii=False, sort_keys=True)
-    if len(prompt_text) > ACTION_PLANNING_PROMPT_CAP:
+    if (
+        len(ACTION_PLANNING_PROMPT) + len(prompt_text)
+        > ACTION_PLANNING_PROMPT_CAP
+    ):
         reduced_payload = dict(prompt_payload)
         reduced_payload["group_engagement_action_context"] = {
             "engagement_guidelines": [],
@@ -342,7 +345,10 @@ async def plan_actions(
             ensure_ascii=False,
             sort_keys=True,
         )
-    if len(prompt_text) > ACTION_PLANNING_PROMPT_CAP:
+    if (
+        len(ACTION_PLANNING_PROMPT) + len(prompt_text)
+        > ACTION_PLANNING_PROMPT_CAP
+    ):
         decision = _empty_action_plan_decision()
     else:
         messages: list[BaseMessage] = [
@@ -461,7 +467,6 @@ async def _invoke_action_planner(
     base_prompt_chars = sum(
         len(str(message.content))
         for message in base_messages
-        if isinstance(message, HumanMessage)
     )
     if base_prompt_chars > ACTION_PLANNING_PROMPT_CAP:
         return _empty_action_plan_decision()
@@ -708,12 +713,15 @@ def _normalize_action_request_rows(
         try:
             row = _validate_action_request_row(value, bids, actions)
         except ValueError as exc:
-            raise ValueError(
-                f"invalid action request row: {exc}"
-            ) from exc
+            logger.warning(
+                f"Action planning dropped an invalid action request row: {exc}"
+            )
+            continue
         normalized.append(row)
         if len(normalized) >= ACTION_REQUEST_CAP:
             break
+    if values and not normalized:
+        raise ValueError("every proposed action request row was unusable")
     return normalized
 
 
@@ -729,12 +737,15 @@ def _normalize_resolver_request_rows(
         try:
             row = _validate_resolver_request_row(value, bids, resolvers)
         except ValueError as exc:
-            raise ValueError(
-                f"invalid resolver request row: {exc}"
-            ) from exc
+            logger.warning(
+                f"Action planning dropped an invalid resolver request row: {exc}"
+            )
+            continue
         normalized.append(row)
         if len(normalized) >= ACTION_REQUEST_CAP:
             break
+    if values and not normalized:
+        raise ValueError("every proposed resolver request row was unusable")
     return normalized
 
 

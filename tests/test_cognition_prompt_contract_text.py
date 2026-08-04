@@ -17,12 +17,12 @@ from kazusa_ai_chatbot.cognition_core_v2.character_carryover import (
     CHARACTER_CARRYOVER_PROMPT,
 )
 from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
+    GENERIC_GOAL_REPAIR_INSTRUCTIONS,
     GOAL_COGNITION_PROMPT,
-    GOAL_COGNITION_REPAIR_PROMPT,
     MAX_GOAL_BID_EVIDENCE_HANDLES,
     MAX_GOAL_BID_ROLE_HANDLES,
-    REQUIRED_SELECTION_GOAL_REPAIR_PROMPT,
     REQUIRED_SELECTION_GOAL_PROMPT,
+    SELECTION_GOAL_REPAIR_INSTRUCTIONS,
 )
 from kazusa_ai_chatbot.cognition_core_v2.resolver_authorization import (
     RESOLVER_AUTHORIZATION_PROMPT,
@@ -79,9 +79,9 @@ def _branch_modified_prompt_fragments() -> tuple[str, ...]:
         ACTION_AUTHORIZATION_PROMPT,
         ACTION_PLANNING_PROMPT,
         GOAL_COGNITION_PROMPT,
-        GOAL_COGNITION_REPAIR_PROMPT,
-        REQUIRED_SELECTION_GOAL_REPAIR_PROMPT,
         REQUIRED_SELECTION_GOAL_PROMPT,
+        *GENERIC_GOAL_REPAIR_INSTRUCTIONS,
+        *SELECTION_GOAL_REPAIR_INSTRUCTIONS,
         RESOLVER_AUTHORIZATION_PROMPT,
         SEMANTIC_APPRAISAL_PROMPT,
         CONTENT_PLAN_SYSTEM_PROMPT,
@@ -257,11 +257,11 @@ def test_goal_prompt_requires_complete_grounded_bid() -> None:
     ):
         assert required_text in prompt
 
-    repair_prompt = " ".join(GOAL_COGNITION_REPAIR_PROMPT.split())
+    repair_prompt = " ".join(GENERIC_GOAL_REPAIR_INSTRUCTIONS)
     assert MAX_GOAL_BID_EVIDENCE_HANDLES == 9
     assert MAX_GOAL_BID_ROLE_HANDLES == 8
     assert "每个元素必须逐个等于一个允许的 handle" in repair_prompt
-    assert "不得使用范围、通配符、 组合写法或 source ID" in repair_prompt
+    assert "source ID" in repair_prompt
     assert "`evidence_handles` 最多九项" in repair_prompt
     assert "`target_role_handles` 最多八项" in repair_prompt
 
@@ -284,10 +284,8 @@ def test_relational_willingness_prompt_contract_is_explicit_and_stable() -> None
     """Keep relationship-sensitive judgment in one ordinary goal contract."""
 
     goal_prompt = " ".join(GOAL_COGNITION_PROMPT.split())
-    repair_prompt = " ".join(GOAL_COGNITION_REPAIR_PROMPT.split())
-    selection_repair_prompt = " ".join(
-        REQUIRED_SELECTION_GOAL_REPAIR_PROMPT.split()
-    )
+    repair_prompt = " ".join(GENERIC_GOAL_REPAIR_INSTRUCTIONS)
+    selection_repair_prompt = " ".join(SELECTION_GOAL_REPAIR_INSTRUCTIONS)
     selection_prompt = " ".join(REQUIRED_SELECTION_GOAL_PROMPT.split())
     surface_prompts = " ".join((
         CONTENT_PLAN_SYSTEM_PROMPT,

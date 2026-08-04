@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from kazusa_ai_chatbot.character_identity_growth import models
 from kazusa_ai_chatbot.cognition_episode import (
     CognitiveEpisodeV1,
     MAX_COGNITIVE_EPISODE_MEDIA_PERCEPTS,
@@ -88,6 +89,64 @@ def canonical_identity_context(
                 marker=marker,
             ),
         },
+        include_epistemic_core=include_epistemic_core,
+    )
+
+
+def maximum_character_identity() -> dict[str, object]:
+    """Build an identity at every declared text and growth-edge ceiling."""
+
+    identity = canonical_character_identity(marker="maximum")
+    identity.update({
+        "name": "n" * models.TEXT_LIMIT_BY_PATH["name"],
+        "description": "d" * models.TEXT_LIMIT_BY_PATH["description"],
+        "gender": "g" * models.TEXT_LIMIT_BY_PATH["gender"],
+        "birthday": "b" * models.TEXT_LIMIT_BY_PATH["birthday"],
+        "backstory": "s" * models.TEXT_LIMIT_BY_PATH["backstory"],
+        "personality_brief": {
+            "mbti": "m" * models.TEXT_LIMIT_BY_PATH[
+                "personality_brief.mbti"
+            ],
+            "logic": "l" * models.TEXT_LIMIT_BY_PATH[
+                "personality_brief.logic"
+            ],
+            "tempo": "t" * models.TEXT_LIMIT_BY_PATH[
+                "personality_brief.tempo"
+            ],
+            "defense": "f" * models.TEXT_LIMIT_BY_PATH[
+                "personality_brief.defense"
+            ],
+            "quirks": "q" * models.TEXT_LIMIT_BY_PATH[
+                "personality_brief.quirks"
+            ],
+            "taboos": "o" * models.TEXT_LIMIT_BY_PATH[
+                "personality_brief.taboos"
+            ],
+        },
+        "self_image": {
+            "self_concept": "c" * models.TEXT_LIMIT_BY_PATH[
+                "self_image.self_concept"
+            ],
+            "current_growth_edges": [
+                f"{index:02d}" + "e" * (models.GROWTH_EDGE_LIMIT - 2)
+                for index in range(models.GROWTH_EDGE_COUNT_LIMIT)
+            ],
+        },
+        "visual_characterization": "v" * models.TEXT_LIMIT_BY_PATH[
+            "visual_characterization"
+        ],
+    })
+    return identity
+
+
+def maximum_identity_context(
+    *,
+    include_epistemic_core: bool = False,
+) -> dict[str, dict[str, object]]:
+    """Build the closed cognition projection from the maximum identity."""
+
+    return project_identity_for_cognition(
+        {"effective_identity": maximum_character_identity()},
         include_epistemic_core=include_epistemic_core,
     )
 

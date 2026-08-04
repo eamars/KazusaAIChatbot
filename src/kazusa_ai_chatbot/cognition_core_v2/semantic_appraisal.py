@@ -26,7 +26,11 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     SemanticQuestionV2,
 )
 from kazusa_ai_chatbot.cognition_core_v2.diagnostics import (
+    capture_validation_event,
     capture_validation_stage,
+)
+from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
+    V2_APPRAISAL_TOTAL_ATTEMPTS,
 )
 from kazusa_ai_chatbot.cognition_core_v2.semantic_source_planner import (
     question_proposition_kind_semantics,
@@ -35,6 +39,8 @@ from kazusa_ai_chatbot.cognition_core_v2.semantic_source_planner import (
 from kazusa_ai_chatbot.cognition_core_v2.prompt_budget import (
     PromptBudgetError,
     fit_evidence_texts_to_budget,
+    reduce_constraints_projection,
+    reduce_identity_projection,
 )
 from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
     PromptProjectionV2,
@@ -47,12 +53,16 @@ from kazusa_ai_chatbot.llm_tracing import failure_capsule
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 
 
-SEMANTIC_APPRAISAL_ATTEMPT_LIMIT = 2
+SEMANTIC_APPRAISAL_ATTEMPT_LIMIT = V2_APPRAISAL_TOTAL_ATTEMPTS
 SEMANTIC_APPRAISAL_ITEM_LIMIT = 8
-SEMANTIC_APPRAISAL_PROMPT_CAP = 8000
-SEMANTIC_APPRAISAL_REPAIR_PROMPT_CAP = 10000
+SEMANTIC_APPRAISAL_PROMPT_CAP = 20000
+SEMANTIC_APPRAISAL_REPAIR_PROMPT_CAP = 24000
 SEMANTIC_APPRAISAL_ITEM_EXPLANATION_LIMIT = 120
 MIN_PROMPT_EVIDENCE_TEXT_CHARS = 96
+MAX_APPRAISAL_OBJECT_HANDLES = 8
+MAX_APPRAISAL_SEMANTIC_TEXT_CHARS = 200
+MAX_APPRAISAL_DELTA_REASON_CHARS = 300
+MAX_ERROR_ALLOWLIST_ITEMS = 40
 _SEMANTIC_APPRAISAL_RESULT_FIELDS = {
     "question_id",
     "selected_evidence_handles",
@@ -75,6 +85,14 @@ _PROPOSITION_SUBJECT_KINDS = {
     "threat_resolved": "threat",
     "event_repaired": "event",
     "knowledge_answered": "knowledge_gap",
+}
+_PROPOSITION_SUBJECT_KIND_SETS = {
+    "outcome_pending": frozenset({
+        "goal",
+        "event",
+        "threat",
+        "knowledge_gap",
+    }),
 }
 
 
@@ -135,6 +153,26 @@ ceN、ctN 或 ckN 时，该对象的 evidence_handles 必须包含对应的来�
 输出前逐个对象检查：subject_handle、object_handle、role_assignments[*].entity_handle 或
 target_path 中每出现一个 ceN、ctN、ckN，就把映射值加入该对象的 evidence_handles；无法加入时省略
 该 candidate 或整个对象。
+
+# 输出示例
+{
+  "question_id": "q:event_agency",
+  "proposition": {
+    "proposition_kind": "event_completed",
+    "subject_handle": "ev1",
+    "evidence_handles": ["e1"],
+    "role_assignments": [
+      {"role": "actor", "entity_handle": "current_user"}
+    ],
+    "semantic_value": "这里写一句简体中文语义描述。"
+  },
+  "delta": {
+    "target_path": "goals.g1.importance",
+    "delta": 10,
+    "evidence_handles": ["e1"],
+    "reason": "这里写不超过三百字的简体中文原因。"
+  }
+}
 '''
 
 
@@ -266,21 +304,55 @@ async def appraise_semantic_question(
             ),
             "emitted_delta_paths": sorted(emitted_paths),
         }
-        payload_text = _fit_appraisal_payload(payload)
-        item_result, merged_result = await _appraise_semantic_item(
-            question=question,
-            item_question=item_question,
-            evidence=evidence,
-            evidence_by_handle=evidence_by_handle,
-            projection=projection,
-            validation_state=validation_state,
-            accepted_result=accepted_result,
-            services=services,
-            config=config,
-            system_message=system_message,
-            payload_text=payload_text,
-            item_index=item_index,
+        payload_text, surviving_role_handles = _fit_appraisal_payload(
+            payload,
+            system_prompt_chars=len(system_message.content),
         )
+        item_question["permitted_role_handles"] = [
+            handle
+            for handle in item_question["permitted_role_handles"]
+            if handle in surviving_role_handles
+        ]
+        item_question["permitted_delta_paths"] = [
+            path
+            for path in item_question["permitted_delta_paths"]
+            if len(path.split(".")) == 3
+            and path.split(".")[1] in surviving_role_handles
+        ]
+        try:
+            item_result, merged_result = await _appraise_semantic_item(
+                question=question,
+                item_question=item_question,
+                evidence=evidence,
+                evidence_by_handle=evidence_by_handle,
+                projection=projection,
+                validation_state=validation_state,
+                accepted_result=accepted_result,
+                services=services,
+                config=config,
+                system_message=system_message,
+                payload_text=payload_text,
+                item_index=item_index,
+            )
+        except CognitionExecutionError as exc:
+            if accepted_result is None:
+                raise
+            capture_validation_event(
+                "semantic_appraisal_bounded_termination",
+                {
+                    "question_id": question["question_id"],
+                    "item_index": item_index,
+                    "error_code": exc.error_code,
+                    "attempt_count": exc.attempt_count,
+                    "accepted_proposition_count": len(
+                        accepted_result["propositions"]
+                    ),
+                    "accepted_delta_count": len(accepted_result["deltas"]),
+                    "disposition": "accepted_prefix",
+                    "error": str(exc),
+                },
+            )
+            return accepted_result
         if not item_result["propositions"] and not item_result["deltas"]:
             final_result = (
                 accepted_result
@@ -784,8 +856,10 @@ def _appraisal_repair_messages(
         ensure_ascii=False,
         sort_keys=True,
     )
+    system_prompt_chars = len(str(system_message.content))
     residual_candidate_chars = (
         SEMANTIC_APPRAISAL_REPAIR_PROMPT_CAP
+        - system_prompt_chars
         - len(str(human_message.content))
         - len(repair_payload_text)
     )
@@ -822,7 +896,10 @@ def _appraisal_repair_messages(
         for message in messages
         if not isinstance(message, SystemMessage)
     )
-    if dynamic_context_chars > SEMANTIC_APPRAISAL_REPAIR_PROMPT_CAP:
+    if (
+        system_prompt_chars + dynamic_context_chars
+        > SEMANTIC_APPRAISAL_REPAIR_PROMPT_CAP
+    ):
         raise CognitionContextLimitError(
             "semantic appraisal repair context exceeds the contract cap"
         )
@@ -868,6 +945,7 @@ def validate_semantic_appraisal_result(
         evidence_handles,
         "selected evidence",
         minimum=0,
+        maximum=len(evidence_handles),
     )
     selected_evidence_set = set(selected_evidence)
     selected_roles = _validate_handles(
@@ -875,6 +953,7 @@ def validate_semantic_appraisal_result(
         set(question["permitted_role_handles"]),
         "selected roles",
         minimum=0,
+        maximum=len(question["permitted_role_handles"]),
     )
     propositions = [
         _validate_proposition(
@@ -935,21 +1014,51 @@ def _validate_proposition(
     if set(value) != allowed:
         raise ValueError("semantic proposition fields are not exact")
     proposition_kind = value["proposition_kind"]
-    if proposition_kind not in question_proposition_kinds(question["question_kind"]):
-        raise ValueError("semantic proposition kind is not owned by question")
+    permitted_kinds = question_proposition_kinds(question["question_kind"])
+    if proposition_kind not in permitted_kinds:
+        raise ValueError(
+            "semantic proposition kind "
+            f"{proposition_kind!r} is not owned by question; "
+            f"permitted kinds: {json.dumps(permitted_kinds)}"
+        )
     subject = value["subject_handle"]
     if subject not in set(question["permitted_role_handles"]):
-        raise ValueError("semantic proposition subject handle is not permitted")
+        raise ValueError(
+            "semantic proposition subject handle "
+            f"{subject!r} is not permitted; allowed role handles: "
+            f"{_allowlist_hint(question['permitted_role_handles'])}"
+        )
     required_subject_kind = _PROPOSITION_SUBJECT_KINDS.get(proposition_kind)
     if (
         required_subject_kind is not None
         and handle_to_ref[subject]["kind"] != required_subject_kind
     ):
-        raise ValueError("semantic proposition kind requires subject kind")
+        raise ValueError(
+            "semantic proposition kind requires subject kind "
+            f"{required_subject_kind!r}; received "
+            f"{handle_to_ref[subject]['kind']!r}"
+        )
+    permitted_subject_kinds = _PROPOSITION_SUBJECT_KIND_SETS.get(
+        proposition_kind
+    )
+    if (
+        permitted_subject_kinds is not None
+        and handle_to_ref[subject]["kind"] not in permitted_subject_kinds
+    ):
+        raise ValueError(
+            "semantic proposition subject kind "
+            f"{handle_to_ref[subject]['kind']!r} is not permitted for "
+            f"{proposition_kind!r}; permitted kinds: "
+            f"{json.dumps(sorted(permitted_subject_kinds))}"
+        )
     if "object_handle" in value and value["object_handle"] not in set(
         question["permitted_role_handles"]
     ):
-        raise ValueError("semantic proposition object handle is not permitted")
+        raise ValueError(
+            "semantic proposition object handle "
+            f"{value['object_handle']!r} is not permitted; allowed role "
+            f"handles: {_allowlist_hint(question['permitted_role_handles'])}"
+        )
     if proposition_kind == "goal_supersession":
         if "object_handle" not in value:
             raise ValueError("goal supersession requires an object handle")
@@ -1012,7 +1121,10 @@ def _validate_proposition(
         "subject_handle": subject,
         "evidence_handles": cited,
         "role_assignments": normalized_assignments,
-        "semantic_value": _require_text(value.get("semantic_value")),
+        "semantic_value": _require_text(
+            value.get("semantic_value"),
+            "semantic_value",
+        ),
     }
     if "object_handle" in value:
         result["object_handle"] = value["object_handle"]
@@ -1037,7 +1149,9 @@ def _validate_delta(
     path = value["target_path"]
     if path not in set(question["permitted_delta_paths"]):
         raise ValueError(
-            f"semantic delta path {path} is not owned by question"
+            f"semantic delta path {path!r} is not owned by question; "
+            f"permitted paths: "
+            f"{_allowlist_hint(question['permitted_delta_paths'])}"
         )
     delta = value["delta"]
     if (
@@ -1064,8 +1178,26 @@ def _validate_delta(
         "target_path": path,
         "delta": delta,
         "evidence_handles": cited,
-        "reason": _require_text(value["reason"], maximum=300),
+        "reason": _require_text(
+            value["reason"],
+            "reason",
+            maximum=MAX_APPRAISAL_DELTA_REASON_CHARS,
+        ),
     }
+
+
+def _allowlist_hint(values: Sequence[str]) -> str:
+    """Render a bounded sorted allowlist for one contract error message."""
+
+    sorted_values = sorted(values)
+    shown_values = sorted_values[:MAX_ERROR_ALLOWLIST_ITEMS]
+    hint = json.dumps(shown_values)
+    if len(sorted_values) > MAX_ERROR_ALLOWLIST_ITEMS:
+        hint = (
+            f"{hint} "
+            f"(+{len(sorted_values) - MAX_ERROR_ALLOWLIST_ITEMS} more)"
+        )
+    return hint
 
 
 def _validate_handles(
@@ -1074,15 +1206,28 @@ def _validate_handles(
     label: str,
     *,
     minimum: int = 1,
+    maximum: int = MAX_APPRAISAL_OBJECT_HANDLES,
 ) -> list[str]:
     """Validate a bounded duplicate-free handle list."""
 
-    if not isinstance(value, list) or not minimum <= len(value) <= 8:
+    if not isinstance(value, list) or not minimum <= len(value) <= maximum:
         raise ValueError(
-            f"{label} handles must contain between {minimum} and 8 items"
+            f"{label} handles must contain between {minimum} and {maximum} "
+            f"items; allowed: {_allowlist_hint(allowed)}"
         )
-    if any(not isinstance(handle, str) or handle not in allowed for handle in value):
-        raise ValueError(f"{label} contains an unknown handle")
+    invalid_handles = [
+        handle
+        for handle in value
+        if not isinstance(handle, str) or handle not in allowed
+    ]
+    if invalid_handles:
+        rejected_text = json.dumps(
+            sorted({str(handle) for handle in invalid_handles})
+        )
+        raise ValueError(
+            f"{label} contains unknown handles {rejected_text}; "
+            f"allowed: {_allowlist_hint(allowed)}"
+        )
     if len(value) != len(set(value)):
         raise ValueError(f"{label} handles are duplicated")
     return list(value)
@@ -1219,16 +1364,27 @@ def _validate_question_handle_authority(
             raise ValueError("semantic question contains a non-canonical path handle")
 
 
-def _require_text(value: Any, maximum: int = 200) -> str:
+def _require_text(
+    value: Any,
+    label: str,
+    *,
+    maximum: int = MAX_APPRAISAL_SEMANTIC_TEXT_CHARS,
+) -> str:
     """Require bounded non-empty semantic text."""
 
     if not isinstance(value, str) or not value.strip() or len(value) > maximum:
-        raise ValueError("semantic text is invalid")
+        raise ValueError(
+            f"{label} must be non-empty text up to {maximum} characters"
+        )
     return value
 
 
-def _fit_appraisal_payload(payload: dict[str, Any]) -> str:
-    """Fit one appraisal after reducing state, then evidence text."""
+def _fit_appraisal_payload(
+    payload: dict[str, Any],
+    *,
+    system_prompt_chars: int,
+) -> tuple[str, frozenset[str]]:
+    """Fit one appraisal packet and return its text and surviving handles."""
 
     supplemental_order = (
         "knowledge_gaps",
@@ -1238,7 +1394,6 @@ def _fit_appraisal_payload(payload: dict[str, Any]) -> str:
         "affect",
         "relationship",
         "character_operational_context",
-        "roles",
     )
     state = payload["state"]
     if not isinstance(state, Mapping):
@@ -1256,14 +1411,35 @@ def _fit_appraisal_payload(payload: dict[str, Any]) -> str:
         if isinstance(question, Mapping)
         else None
     )
+    if system_prompt_chars >= SEMANTIC_APPRAISAL_PROMPT_CAP:
+        raise CognitionContextLimitError(
+            "required semantic appraisal context exceeds the contract cap"
+        )
     projected_state = dict(state)
     while True:
         candidate = dict(payload)
         candidate["state"] = projected_state
         payload_text = json.dumps(candidate, ensure_ascii=False, sort_keys=True)
-        if len(payload_text) <= SEMANTIC_APPRAISAL_PROMPT_CAP:
-            return payload_text
+        if (
+            system_prompt_chars + len(payload_text)
+            <= SEMANTIC_APPRAISAL_PROMPT_CAP
+        ):
+            surviving_handles = frozenset(
+                question.get("permitted_role_handles", ())
+            )
+            return payload_text, surviving_handles
+        identity = projected_state.get("character_identity")
+        if isinstance(identity, Mapping) and reduce_identity_projection(
+            identity
+        ):
+            continue
+        constraints = projected_state.get("character_constraints")
+        if isinstance(constraints, Mapping) and reduce_constraints_projection(
+            constraints
+        ):
+            continue
         removed = False
+        removed_row: Any = None
         for key in supplemental_order:
             if (
                 question_kind == "relationship_social"
@@ -1272,6 +1448,7 @@ def _fit_appraisal_payload(payload: dict[str, Any]) -> str:
                 continue
             value = projected_state.get(key)
             if isinstance(value, list) and value:
+                removed_row = value[-1]
                 projected_state[key] = value[:-1]
                 removed = True
                 break
@@ -1280,20 +1457,75 @@ def _fit_appraisal_payload(payload: dict[str, Any]) -> str:
                 removed = True
                 break
         if removed:
+            removed_handle: str | None = None
+            if key in {
+                "goals",
+                "threats",
+                "events",
+                "knowledge_gaps",
+            }:
+                if isinstance(removed_row, Mapping):
+                    row_handle = removed_row.get("handle")
+                    if isinstance(row_handle, str):
+                        removed_handle = row_handle
+            elif key == "relationship":
+                removed_handle = "r1"
+            if removed_handle is not None:
+                permitted_handles = question["permitted_role_handles"]
+                if removed_handle in permitted_handles:
+                    question["permitted_role_handles"] = [
+                        handle
+                        for handle in permitted_handles
+                        if handle != removed_handle
+                    ]
+                field_domains = question["handle_field_domains"]
+                for field_name in (
+                    "subject_handle",
+                    "object_handle",
+                    "entity_handle",
+                ):
+                    values = field_domains[field_name]
+                    if removed_handle in values:
+                        field_domains[field_name] = [
+                            value
+                            for value in values
+                            if value != removed_handle
+                        ]
+                origin_evidence = question["candidate_origin_evidence"]
+                origin_evidence.pop(removed_handle, None)
+                path_domains = question["permitted_delta_path_domains"]
+                for domain in path_domains:
+                    handles = domain["handles"]
+                    if removed_handle in handles:
+                        domain["handles"] = [
+                            handle
+                            for handle in handles
+                            if handle != removed_handle
+                        ]
+                question["permitted_delta_path_domains"] = [
+                    domain
+                    for domain in path_domains
+                    if domain["handles"]
+                ]
             continue
         try:
             fitted_payload = fit_evidence_texts_to_budget(
                 candidate,
                 evidence_rows,
                 text_field="semantic_text",
-                maximum_chars=SEMANTIC_APPRAISAL_PROMPT_CAP,
+                maximum_chars=(
+                    SEMANTIC_APPRAISAL_PROMPT_CAP - system_prompt_chars
+                ),
                 minimum_text_chars=MIN_PROMPT_EVIDENCE_TEXT_CHARS,
             )
         except PromptBudgetError as exc:
             raise CognitionContextLimitError(
                 "required semantic appraisal context exceeds the contract cap"
             ) from exc
-        return fitted_payload
+        surviving_handles = frozenset(
+            question.get("permitted_role_handles", ())
+        )
+        return fitted_payload, surviving_handles
 
 
 def _compact_permitted_delta_path_domains(
@@ -1346,15 +1578,6 @@ def _project_question_state(
         ]
         if selected:
             result[field_name] = selected
-    roles = source.get("roles", {})
-    if isinstance(roles, Mapping):
-        selected_roles = {
-            handle: summary
-            for handle, summary in roles.items()
-            if handle in allowed
-        }
-        if selected_roles:
-            result["roles"] = selected_roles
     if "r1" in allowed and isinstance(source.get("relationship"), Mapping):
         result["relationship"] = dict(source["relationship"])
     operational_context = _project_question_operational_context(

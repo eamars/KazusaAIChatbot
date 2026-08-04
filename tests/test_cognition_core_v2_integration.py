@@ -955,6 +955,25 @@ def test_workspace_current_event_projects_only_episode_evidence() -> None:
     }]
 
 
+def test_stale_nonordinary_goal_bid_is_dropped_before_collapse() -> None:
+    """Only persistent goals still present in state reach workspace collapse."""
+
+    retained, dropped = facade_module._bids_with_live_goals(
+        [
+            _workspace_bid("ordinary_response"),
+            _workspace_bid("live_goal"),
+            _workspace_bid("stale_goal"),
+        ],
+        {"goals": [{"entity_id": "live_goal"}]},
+    )
+
+    assert [bid["branch_id"] for bid in retained] == [
+        "ordinary_response",
+        "live_goal",
+    ]
+    assert dropped == ["stale_goal"]
+
+
 def test_workspace_goal_contexts_bind_nonordinary_bid_provenance() -> None:
     """Each persistent branch carries its exact current goal into collapse."""
 

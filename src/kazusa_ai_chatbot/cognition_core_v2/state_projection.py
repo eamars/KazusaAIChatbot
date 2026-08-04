@@ -1053,10 +1053,6 @@ def project_state_for_prompt(
         "affect": [],
         "causal_candidates": [],
         "evidence": [],
-        "roles": {
-            "当前角色": "当前角色",
-            "当前用户": "当前用户",
-        },
         "character_constraints": _project_constraints(character_constraints),
         "character_identity": goal_identity,
     }

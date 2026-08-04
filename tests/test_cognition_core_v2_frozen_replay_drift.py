@@ -349,6 +349,7 @@ def test_connector_separates_current_event_continuity_and_private_residue() -> N
         "user_multimedia_input": [],
         "rag_result": {"memory_evidence": []},
         "character_profile": character_profile,
+        "public_group_scene": "",
         "conversation_progress": _progress_payload(),
         "internal_monologue_residue_context": (
             "I still care about answering without swapping roles."

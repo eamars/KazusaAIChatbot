@@ -18,6 +18,7 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
 )
 from kazusa_ai_chatbot.llm_tracing import failure_capsule
 from kazusa_ai_chatbot.cognition_core_v2.semantic_appraisal import (
+    _validate_handles,
     validate_semantic_appraisal_result,
 )
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
@@ -463,6 +464,20 @@ def test_unsupported_appraisal_can_select_no_evidence() -> None:
     assert result["selected_evidence_handles"] == []
     assert result["propositions"] == []
     assert result["deltas"] == []
+
+
+def test_appraisal_handle_errors_name_rejected_values_and_allowlist() -> None:
+    """Bounded appraisal handle errors keep both sides of the rejection clear."""
+
+    with pytest.raises(
+        ValueError,
+        match=r"unknown handles.*unknown-role.*allowed.*e1.*e2",
+    ):
+        _validate_handles(
+            ["unknown-role"],
+            {"e1", "e2"},
+            "evidence",
+        )
 
 
 @pytest.mark.asyncio

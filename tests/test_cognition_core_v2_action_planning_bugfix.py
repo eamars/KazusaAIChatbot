@@ -879,14 +879,17 @@ def test_action_plan_merges_semantic_goal_progress_delta() -> None:
 
 
 def test_action_plan_rejects_invalid_registry_decision_format() -> None:
-    """A scheduled action invalidates the complete candidate on bad syntax."""
+    """All-invalid action rows fail closed with one typed aggregate error."""
 
     action = _action("future_speak")
     action.update({
         "decision_mode": "required_text",
         "decision_pattern": r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}",
     })
-    with pytest.raises(ValueError, match="invalid action request row"):
+    with pytest.raises(
+        ValueError,
+        match="every proposed action request row was unusable",
+    ):
         _validate_action_plan_decision(
             _planner_response(
                 actions=[{
@@ -904,14 +907,17 @@ def test_action_plan_rejects_invalid_registry_decision_format() -> None:
 
 
 def test_closed_action_with_unknown_decision_invalidates_candidate() -> None:
-    """A closed action cannot escape its registry decision vocabulary."""
+    """An unusable closed-action row cannot produce an action request."""
 
     action = _action("trigger_future_cognition")
     action["decision_mode"] = "closed"
     action["allowed_decisions"] = ["schedule"]
     action["default_decision"] = "schedule"
 
-    with pytest.raises(ValueError, match="invalid action request row"):
+    with pytest.raises(
+        ValueError,
+        match="every proposed action request row was unusable",
+    ):
         _validate_action_plan_decision(
             _planner_response(
                 actions=[{
@@ -929,7 +935,7 @@ def test_closed_action_with_unknown_decision_invalidates_candidate() -> None:
 
 
 def test_invalid_resolver_row_invalidates_valid_sibling() -> None:
-    """A malformed resolver row cannot silently erase a semantic failure."""
+    """A malformed resolver sibling is dropped while the valid row survives."""
 
     response = _planner_response(resolvers=[
         {
@@ -945,13 +951,19 @@ def test_invalid_resolver_row_invalidates_valid_sibling() -> None:
         },
     ])
 
-    with pytest.raises(ValueError, match="invalid resolver request row"):
-        _validate_action_plan_decision(
-            response,
-            bid_handles={"b1": _bid("ordinary_response")},
-            action_handles={},
-            resolver_handles={"r1": _resolver("task_resolution_request")},
-        )
+    decision = _validate_action_plan_decision(
+        response,
+        bid_handles={"b1": _bid("ordinary_response")},
+        action_handles={},
+        resolver_handles={"r1": _resolver("task_resolution_request")},
+    )
+
+    assert decision["resolver_requests"] == [{
+        "bid_handle": "b1",
+        "resolver_handle": "r1",
+        "semantic_goal": "recover grounded context",
+        "reason": "the answer depends on missing context",
+    }]
 
 
 def test_action_plan_strips_extra_resolver_fields() -> None:
