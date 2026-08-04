@@ -29,6 +29,7 @@ from kazusa_ai_chatbot.cognition_core_v2.facade import (
     _native_relationship_context,
 )
 from kazusa_ai_chatbot.cognition_core_v2.semantic_appraisal import (
+    SEMANTIC_APPRAISAL_PROMPT,
     _appraise_semantic_item,
 )
 from kazusa_ai_chatbot.cognition_core_v2.semantic_source_planner import (
@@ -372,6 +373,8 @@ async def _run_semantic_case(case_id: str) -> None:
         services,
         f"appraisal_{question['question_kind']}_config",
     )
+    historical_payload = json.loads(historical_payload_text)
+    historical_question = historical_payload["question"]
     item_index = int(
         str(case["stage_name"]).split(".item_", maxsplit=1)[1].split(
         ".",
@@ -389,8 +392,19 @@ async def _run_semantic_case(case_id: str) -> None:
             accepted_result=None,
             services=services,
             config=config,
-            system_message=SystemMessage(content=historical_system_prompt),
+            system_message=SystemMessage(content=SEMANTIC_APPRAISAL_PROMPT),
             payload_text=historical_payload_text,
+            repair_allowed_values={
+                "handle_field_domains": historical_question[
+                    "handle_field_domains"
+                ],
+                "candidate_origin_evidence": historical_question[
+                    "candidate_origin_evidence"
+                ],
+                "permitted_delta_path_domains": historical_question[
+                    "permitted_delta_path_domains"
+                ],
+            },
             item_index=item_index,
         )
     except CognitionExecutionError as exc:
@@ -406,7 +420,8 @@ async def _run_semantic_case(case_id: str) -> None:
         "source_trace_id": case["trace_id"],
         "source_stage_name": case["stage_name"],
         "source_attempt_index": case["attempt_index"],
-        "replay_mode": "historical_model_facing_prompt",
+        "replay_mode": "current_system_prompt_historical_payload",
+        "current_system_prompt_chars": len(SEMANTIC_APPRAISAL_PROMPT),
         "historical_system_prompt_chars": len(historical_system_prompt),
         "historical_validation_error": representative.get(
             "validation_error"
@@ -437,19 +452,25 @@ async def _run_semantic_case(case_id: str) -> None:
         and stage.get("parse_status") == "failed"
     ]
     if not failed_stages:
-        pytest.xfail(
-            "current live model produced no contract failure for the "
-            f"historical family; inspect {_ARTIFACT_ROOT}"
-        )
+        assert caught_error is None
+        return
     assert all(stage.get("raw_output") for stage in failed_stages)
+    successful_stages = [
+        stage
+        for stage in stages
+        if isinstance(stage, Mapping)
+        and stage.get("parse_status") == "succeeded"
+    ]
+    if caught_error is None and successful_stages:
+        return
     expected_error = str(case["expected_error"])
     observed_errors = [
         str(stage.get("error") or "") for stage in failed_stages
     ]
     if not any(expected_error in error for error in observed_errors):
-        pytest.xfail(
-            "current live model produced a different contract failure: "
-            f"{observed_errors}"
+        pytest.fail(
+            "current live model produced a different terminal contract "
+            f"failure: {observed_errors}"
         )
     if capsule.get("outcome") == "terminal_failure":
         assert caught_error is not None

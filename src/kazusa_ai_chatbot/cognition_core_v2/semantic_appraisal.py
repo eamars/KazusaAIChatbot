@@ -96,63 +96,46 @@ _PROPOSITION_SUBJECT_KIND_SETS = {
 }
 
 
-SEMANTIC_APPRAISAL_PROMPT = '''你根据有界证据回答一个范围明确的语义问题。
-只使用本次 prompt 允许的 handle 和语义描述。动作选择、对话生成、emotion id、生命周期状态与
-事实补充不属于本阶段。只有在所给证据支持时，才返回语义命题和允许路径上的数值变化。
-每个 proposition_kind 都是其所给语义定义已经成立的肯定式断言。
-当前调用只生成一个 micro_appraisal item。proposition 和 delta 各自只能是一个对象或 null，
-不能使用数组，也不能列举多个候选。没有尚未输出的必要项目时，两者都返回 null 以结束循环。
+SEMANTIC_APPRAISAL_PROMPT = '''你负责根据有界证据回答一个范围明确的语义问题，并返回一个可验证的
+micro_appraisal。本阶段只判断证据已经支持的含义；动作选择、对话生成、emotion id、生命周期状态、
+持久化和事实补充属于其他阶段。每个 proposition_kind 都是所给语义定义已经成立的肯定式断言。
 
-遵守每条证据的 source_kind。角色自己的反思或内部观察属于证据，不是当前用户的即时发言。
-生成的文字不复述来源包标题、时间戳、传输摘要、schema key 或运行元数据。新生成的自由文本使用
-简体中文；引用的用户原文、专有名词、代码、URL 以及必要的 schema 或 enum token 保持原样。
+# 按这个顺序判断
+1. 先读 question.question_id、question.question_kind 和 question.semantic_question，确定这一题要判断的含义。
+   再读 evidence；每行的 source_kind 说明来源，角色自己的反思或内部观察仍是证据，不是当前用户的即时发言。
+   只使用本次输入允许的 handle 和证据，不把来源包标题、时间戳、传输摘要、schema key 或运行元数据当成新事实。
+2. 先完成句柄映射，再写语义文字。question.handle_field_domains 说明每个字段能用哪些 handle：subject_handle、
+   object_handle 和 role_assignments[*].entity_handle 使用 permitted_role_handles，evidence_handles 使用其中的
+   evidence handle。ceN、ctN、ckN 分别是候选事件、威胁和知识缺口，evN 是持久事件，eN 是证据；它们不是人物。
+   人物角色使用 self 或 current_user，role 只使用 actor、experiencer、target、object、affected_goal、
+   affected_relationship 这六个 enum token。
+3. 使用 question.candidate_origin_evidence 做来源核对。一个 proposition 或 delta 的 subject_handle、object_handle、
+   role assignment 或 target_path 只要出现 ceN、ctN 或 ckN，就把映射出的来源 evidence handle 放进同一个对象的
+   evidence_handles；这就是候选来源引用。找不到对应来源时，省略这个候选或整个对象。角色 handle 不能代替
+   evidence handle，未知 handle 也不能靠猜测补齐。
 
-# 输出格式
-只返回一个 JSON 对象，字段必须恰好是 question_id、proposition 和 delta。
-proposition 与 delta 若不是 null，就必须引用提供的 evidence handle；未知或缺少支持的含义直接
-返回 null。不要输出 explanation、selected_evidence_handles、selected_role_handles、propositions
-或 deltas。
+# 继续按顺序完成输出
+4. 若有数值变化，只从 question.permitted_delta_path_domains 选择路径。每项给出 state_field、handles 和
+   axes；从同一项各取一个值，按 state_field.handle.axis 原样拼成 target_path，不构造其他 state path。
+   有证据支持的蓄意阻碍、明确伤害或边界侵害可选 harm，以及有支持时的 unfairness 和 intentionality；
+   已发生且不可逆的损失可选负向 outcome_impact 或 temporal_loss；污染或基本规范/边界受到侵害可选
+   contamination_risk 或 norm_violation。axis 只描述证据中的可观察后果，不得因此增添情绪、归因类别、未给出的角色或事实；
+   不在允许表中的 axis 不能使用，证据不足时返回 null。
+5. 每次只生成一个 micro_appraisal item。proposition 和 delta 各自只能是一个对象或 null，不能使用数组，也不能列举多个候选。
+   没有新的受支持项目时，两者都返回 null 以结束循环。semantic_value 写简洁的简体中文，
+   目标约 120 字、上限 200 字，不重复标准或证据解释，也不写数值；delta reason 使用简体中文且不超过 300 字。
+   引用的用户原文、专有名词、代码、URL 以及必要的 schema 或 enum token 保持原样，普通自由文本使用“当前角色”
+   和“当前用户”，不要写内部角色句柄或英文角色称谓。
 
-每个 proposition 对象必须恰好包含 proposition_kind、subject_handle、evidence_handles、
-role_assignments 和 semantic_value，并可选包含 object_handle。每条 role assignment 必须恰好
-包含 role 和 entity_handle。每个 delta 对象必须恰好包含 target_path、delta、
-evidence_handles 和 reason。所给 role handle 与 delta path 按原值使用；不输出 kind、handle、
-semantic_text、role_handles、path 或其他 proposition、delta 字段。
-question.permitted_delta_path_domains 的每一项给出 state_field、handles 和 axes。
-每个 target_path 必须从同一项中各取一个值，按 state_field.handle.axis 组合并原样输出。
-delta 必须是 -40 到 40（含边界）的 JSON 整数，例如 -5、0 或 12；不得使用字符串、小数、
-百分比或正负号小数比例。
+# 只返回这个对象
+顶层字段必须恰好是 question_id、proposition、delta。不要输出 explanation、selected_evidence_handles、selected_role_handles、propositions 或 deltas。proposition 若存在，字段必须恰好是 proposition_kind、
+subject_handle、evidence_handles、role_assignments、semantic_value，可选 object_handle；每条 role assignment
+只能有 role 和 entity_handle。delta 若存在，字段必须恰好是 target_path、delta、evidence_handles、reason。
+delta 必须是 -40 到 40（含边界）的 JSON 整数，例如 -5、0 或 12；不使用字符串、小数、百分比或比例。
 
-# 轴选择
-若证据直接呈现可观察的后果，请在 question.permitted_delta_path_domains 允许的路径中选择相应 axis，
-不要用中性或无关的 axis 代替：
-- 有证据支持的蓄意阻碍、明确伤害或边界侵害：harm，以及有支持时的 unfairness 和 intentionality；
-- 已发生且不可逆的损失：负向 outcome_impact 或 temporal_loss；
-- 污染或基本规范/边界受到侵害：contamination_risk 或 norm_violation。
-每个 axis 仍只描述所给证据中的可观察后果；不得因此增添情绪、归因类别、未给出的角色或事实。
-上述 axis 仅在该 question 的允许路径中出现时才选择；证据不足时省略。
-
-semantic_value 是一句简洁描述，目标长度 120 字符且上限 200 字符，其中不重复标准、约束或证据
-解释，也不使用数值；数值只放在 delta 字段。每条 delta reason 不超过 300 字符。role 必须取以下
-固定 enum token：actor（行动者）、experiencer（体验者）、
-target（对象）、object（客体）、affected_goal（受影响目标）或 affected_relationship（受影响关系）。
-r1、ce1、ct1、ck1 等实体 handle 放在 entity_handle，不能放在 role。当前角色和当前用户的内部
-角色句柄只用于结构化字段；中文自由文本使用“当前角色”“当前用户”或配置的角色名、用户显示名，
-不要把内部角色句柄或英文角色称谓写入中文自由文本。固定 schema key 和 enum token 仍按原值输出。
-ceN、ctN、ckN 表示候选事件、威胁或知识缺口，不是人物；人物的 actor、experiencer 或 target 使用
-self 或 current_user。无法从允许 handle 准确分配角色时，role_assignments 使用空数组。
-
-handle 域严格对应 question：subject_handle、object_handle 与 role_assignments[*].entity_handle
-只能使用 question.permitted_role_handles；proposition、delta 的 evidence_handles 只能使用
-question.evidence_handles；target_path
-只能使用 question.permitted_delta_path_domains 允许的 state_field.handle.axis 组合。持久 event handle
-使用 ev1..evN，evidence handle 使用 e1..eN，候选 event、threat、knowledge gap handle 分别使用
-ce1..ceN、ct1..ctN、ck1..ckN。question.candidate_origin_evidence 是允许的 candidate handle 到其
-来源 evidence handle 的唯一映射；任何 proposition、delta 的 target_path 或结构化 handle 使用
-ceN、ctN 或 ckN 时，该对象的 evidence_handles 必须包含对应的来源 evidence handle。
-输出前逐个对象检查：subject_handle、object_handle、role_assignments[*].entity_handle 或
-target_path 中每出现一个 ceN、ctN、ckN，就把映射值加入该对象的 evidence_handles；无法加入时省略
-该 candidate 或整个对象。
+# 输出前最后检查
+确认 question_id 没有改写；每个结构化 handle 都来自自己的域；每个 ceN、ctN、ckN 都带有对应的来源 evidence
+handle；target_path 完全来自一个允许的 state_field.handle.axis；文字没有把运行元数据写入语义。只返回 JSON 对象。
 
 # 输出示例
 {
@@ -308,6 +291,17 @@ async def appraise_semantic_question(
             payload,
             system_prompt_chars=len(system_message.content),
         )
+        repair_allowed_values = {
+            "handle_field_domains": deepcopy(
+                payload["question"]["handle_field_domains"]
+            ),
+            "candidate_origin_evidence": deepcopy(
+                payload["question"]["candidate_origin_evidence"]
+            ),
+            "permitted_delta_path_domains": deepcopy(
+                payload["question"]["permitted_delta_path_domains"]
+            ),
+        }
         item_question["permitted_role_handles"] = [
             handle
             for handle in item_question["permitted_role_handles"]
@@ -332,6 +326,7 @@ async def appraise_semantic_question(
                 config=config,
                 system_message=system_message,
                 payload_text=payload_text,
+                repair_allowed_values=repair_allowed_values,
                 item_index=item_index,
             )
         except CognitionExecutionError as exc:
@@ -380,6 +375,7 @@ async def _appraise_semantic_item(
     config: LLMCallConfig,
     system_message: SystemMessage,
     payload_text: str,
+    repair_allowed_values: Mapping[str, Any],
     item_index: int,
 ) -> tuple[SemanticAppraisalResultV2, SemanticAppraisalResultV2]:
     """Generate and validate one bounded appraisal item."""
@@ -527,6 +523,7 @@ async def _appraise_semantic_item(
                 human_message=human_message,
                 invalid_candidate=str(raw_output),
                 contract_error=str(exc),
+                allowed_values=repair_allowed_values,
             )
             continue
 
@@ -829,6 +826,7 @@ def _appraisal_repair_messages(
     human_message: HumanMessage,
     invalid_candidate: str,
     contract_error: str,
+    allowed_values: Mapping[str, Any],
 ) -> list[SystemMessage | HumanMessage | AIMessage]:
     """Build one bounded replacement request from the latest invalid output.
 
@@ -844,17 +842,19 @@ def _appraisal_repair_messages(
 
     repair_payload = {
         "repair_instruction": (
-            "请在相同语义问题和证据范围内返回一个完整替代 JSON 对象，只修复 JSON、"
-            "字段、类型、handle 和 contract 约束。顶层字段必须恰好是 question_id、"
-            "proposition 和 delta；proposition 和 delta 各自只能是一个对象或 null，"
-            "不得使用数组；不要输出 Markdown、解释段落或 JSON 以外的文字。"
+            "请把 contract_error 当作唯一失败规则，在原来的语义问题和证据范围内完整重生成 JSON。"
+            "只修正该规则涉及的字段、类型、handle 或允许路径，保留其他受支持含义；"
+            "allowed_values 给出的现有域、候选来源和路径表是唯一允许值。"
+            "顶层字段必须恰好是 question_id、proposition 和 delta；两者各自只能是一个对象或 null，"
+            "不能使用数组，也不能输出 Markdown、解释段落或 JSON 以外的文字。"
         ),
         "contract_error": contract_error,
+        "allowed_values": dict(allowed_values),
     }
     repair_payload_text = json.dumps(
         repair_payload,
         ensure_ascii=False,
-        sort_keys=True,
+        sort_keys=False,
     )
     system_prompt_chars = len(str(system_message.content))
     residual_candidate_chars = (
@@ -1419,7 +1419,11 @@ def _fit_appraisal_payload(
     while True:
         candidate = dict(payload)
         candidate["state"] = projected_state
-        payload_text = json.dumps(candidate, ensure_ascii=False, sort_keys=True)
+        payload_text = json.dumps(
+            candidate,
+            ensure_ascii=False,
+            sort_keys=False,
+        )
         if (
             system_prompt_chars + len(payload_text)
             <= SEMANTIC_APPRAISAL_PROMPT_CAP

@@ -31,17 +31,11 @@ from tests.llm_trace import write_llm_trace
 
 _TRACE_SUITE = 'cognition_core_v2_required_selection_live_llm'
 _PRODUCTION_PROFILE_EXPORT = Path(
-    'test_artifacts/diagnostics/user_profile_for_efa8a644_reproduction.json'
+    'test_artifacts/diagnostics/reproduction_user_profile.json'
 )
 _PRODUCTION_CHARACTER_EXPORT = Path(
-    'test_artifacts/diagnostics/character_state_for_efa8a644_reproduction.json'
+    'test_artifacts/diagnostics/reproduction_character_state.json'
 )
-_THIRD_PARTY_FAILURE_EXPORT = Path(
-    'test_artifacts/diagnostics/'
-    'chat_qq_ch_1f677493d7a52025_1634535291'
-)
-
-
 class _CapturingLLM:
     """Delegate to configured model routes and retain every raw response."""
 
@@ -317,12 +311,12 @@ def _third_party_reply_case_args() -> dict[str, Any]:
     """Build the captured third-party reply and autonomy-pressure input."""
 
     character_export = json.loads(
-        (_THIRD_PARTY_FAILURE_EXPORT / 'character_state.json').read_text(
+        _PRODUCTION_CHARACTER_EXPORT.read_text(
             encoding='utf-8',
         )
     )
     profile_export = json.loads(
-        (_THIRD_PARTY_FAILURE_EXPORT / 'user_profile.json').read_text(
+        _PRODUCTION_PROFILE_EXPORT.read_text(
             encoding='utf-8',
         )
     )
@@ -403,7 +397,6 @@ def _third_party_reply_case_args() -> dict[str, Any]:
                 'description': character_state['description'],
                 'personality_brief': character_state['personality_brief'],
                 'boundary_profile': character_state['boundary_profile'],
-                'self_image': character_state['self_image'],
                 'backstory': character_state['backstory'],
             },
             'goal_projection': cognition_state['goals'][0],
@@ -493,8 +486,8 @@ async def test_live_required_selection_ignores_internal_evidence_row() -> None:
     internal_row = {
         'evidence_handle': 'e2',
         'evidence_ref': {
-            'source_kind': 'internal_monologue',
-            'source_id': 'internal-monologue:current-feeling',
+            'source_kind': 'promoted_reflection',
+            'source_id': 'promoted-reflection:current-feeling',
             'occurred_at': '2026-07-30T00:00:00Z',
             'semantic_summary': '当前角色想提出一个轻松而具体的共同活动。',
         },
@@ -856,7 +849,6 @@ async def test_live_autonomy_selection_with_exact_production_scene(
             'description': character_state['description'],
             'personality_brief': character_state['personality_brief'],
             'boundary_profile': character_state['boundary_profile'],
-            'self_image': character_state['self_image'],
             'backstory': character_state['backstory'],
         },
         'goal_projection': cognition_state['goals'][0],
@@ -934,7 +926,6 @@ async def test_live_autonomy_selection_with_multiple_progress_events(
         'description': character_state['description'],
         'personality_brief': character_state['personality_brief'],
         'boundary_profile': character_state['boundary_profile'],
-        'self_image': character_state['self_image'],
         'backstory': character_state['backstory'],
     }
     semantic_context_updates = {
@@ -1028,7 +1019,6 @@ async def test_live_relationship_selection_with_production_state() -> None:
             'description': character_state['description'],
             'personality_brief': character_state['personality_brief'],
             'boundary_profile': character_state['boundary_profile'],
-            'self_image': character_state['self_image'],
             'backstory': character_state['backstory'],
         },
         'goal_projection': cognition_state['goals'][0],
@@ -1114,7 +1104,6 @@ async def test_live_autonomy_selection_with_compound_evidence_pressure(
             'description': character_state['description'],
             'personality_brief': character_state['personality_brief'],
             'boundary_profile': character_state['boundary_profile'],
-            'self_image': character_state['self_image'],
             'backstory': character_state['backstory'],
         },
         'goal_projection': cognition_state['goals'][0],
@@ -1334,7 +1323,6 @@ async def test_live_autonomy_food_choice_with_stale_goal_pressure() -> None:
                         'personality_brief'
                     ],
                     'boundary_profile': character_state['boundary_profile'],
-                    'self_image': character_state['self_image'],
                     'backstory': character_state['backstory'],
                 },
                 'goal_projection': cognition_state['goals'][0],
@@ -1407,7 +1395,6 @@ async def test_live_parallel_food_choice_selection_contract_pressure() -> None:
                 'description': character_state['description'],
                 'personality_brief': character_state['personality_brief'],
                 'boundary_profile': character_state['boundary_profile'],
-                'self_image': character_state['self_image'],
                 'backstory': character_state['backstory'],
             },
             'goal_projection': cognition_state['goals'][0],

@@ -50,6 +50,7 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
+| [cognition_core_v2_generation_contract_prompt_projection_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_generation_contract_prompt_projection_bugfix_plan.md) | High-risk Core V2 prompt, model-facing contract, and diagnostic replay bugfix | completed |
 | [control_console_web_availability_followup_plan.md](archive/completed/bugfix/control_console_web_availability_followup_plan.md) | Follow-up bugfix for Control Console operational projections and static asset availability | completed |
 | [cognition_core_v2_relational_willingness_gradient_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_relational_willingness_gradient_bugfix_plan.md) | Core V2 post-prewarm relational-willingness contract for stranger rejection, lover acceptance, scoped-memory authority, and an explicit intermediate gradient | completed |
 | [cognition_core_v2_short_horizon_global_state_composition_bigbang_plan.md](archive/completed/bugfix/cognition_core_v2_short_horizon_global_state_composition_bigbang_plan.md) | Post-identity V2 plan for transient global posture, causal relationship context, scoped style composition, and runtime/UI proof | completed |
