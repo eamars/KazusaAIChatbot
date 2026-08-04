@@ -107,9 +107,10 @@ class _ScriptedLLM:
                 "expected_consequences": ["preserve continuity"],
                 "confidence": "high",
                 "relational_willingness": self.relational_decision or {
-                    "schema_version": "relational_willingness.v1",
+                    "schema_version": "relational_willingness.v2",
                     "applicability": "not_relationship_sensitive",
                     "stance": "not_applicable",
+                    "current_user_relationship_state": "not_applicable",
                     "reason": "当前回合证据不涉及关系许可判断",
                     "evidence_handles": ["e1"],
                 },
@@ -389,9 +390,10 @@ async def test_v2_facade_commits_before_surface_and_preserves_complete_bid() -> 
     assert output["intention"]["route"] == "speech"
     assert output["admitted_bid"]["reason"] == "the episode supplies bounded evidence"
     assert output["relational_willingness"] == {
-        "schema_version": "relational_willingness.v1",
+        "schema_version": "relational_willingness.v2",
         "applicability": "not_relationship_sensitive",
         "stance": "not_applicable",
+        "current_user_relationship_state": "not_applicable",
         "reason": "当前回合证据不涉及关系许可判断",
         "evidence_handles": ["e1"],
     }
@@ -407,9 +409,10 @@ async def test_sensitive_collapse_observability_uses_fixed_preservation_reason()
     """Sensitive collapse observability never copies model bid prose."""
 
     decision = {
-        "schema_version": "relational_willingness.v1",
+        "schema_version": "relational_willingness.v2",
         "applicability": "relationship_sensitive",
         "stance": "reject",
+        "current_user_relationship_state": "unestablished",
         "reason": "当前回合关系证据不支持该请求。",
         "evidence_handles": ["e1"],
     }
@@ -797,9 +800,10 @@ async def test_goal_structure_recovers_on_third_attempt() -> None:
                     "expected_consequences": ["preserve continuity"],
                     "confidence": "high",
                     "relational_willingness": {
-                        "schema_version": "relational_willingness.v1",
+                        "schema_version": "relational_willingness.v2",
                         "applicability": "not_relationship_sensitive",
                         "stance": "not_applicable",
+                        "current_user_relationship_state": "not_applicable",
                         "reason": '当前回合证据不涉及关系许可判断',
                         "evidence_handles": ["e1"],
                     },
@@ -845,9 +849,10 @@ async def test_required_goal_invalid_evidence_reaches_action_planning(
                     "expected_consequences": ["preserve continuity"],
                     "confidence": "high",
                     "relational_willingness": {
-                        "schema_version": "relational_willingness.v1",
+                        "schema_version": "relational_willingness.v2",
                         "applicability": "not_relationship_sensitive",
                         "stance": "not_applicable",
+                        "current_user_relationship_state": "not_applicable",
                         "reason": '当前回合证据不涉及关系许可判断',
                         "evidence_handles": ["e1"],
                     },

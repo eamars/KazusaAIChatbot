@@ -297,13 +297,21 @@ def test_relational_willingness_prompt_contract_is_explicit_and_stable() -> None
             "relationship_sensitive",
             "not_relationship_sensitive",
             "conditional_accept",
-            "current_user_continuity",
+            "current_user_relationship_state",
+            "current_user_history_only",
+            "current_episode",
+            "unestablished",
+            "developing_or_uncertain",
+            "established",
+            "provenance_role",
+            "character_or_world_context_only",
         ):
             assert required_text in prompt
     assert "不把 compliance 当作意愿或同意" in goal_prompt
     assert "当 `branch.goal_kind` 为 `ordinary_response`" in goal_prompt
     assert "semantic_context.branch.goal_kind" not in goal_prompt
     assert "relational_willingness_contract" in repair_prompt
+    assert "current_user_relationship_state" in repair_prompt
     assert "current_episode_evidence_handles" in repair_prompt
     assert "角色 handle 不能放入 evidence_handles" in repair_prompt
     assert "required_evidence_handles" in selection_repair_prompt

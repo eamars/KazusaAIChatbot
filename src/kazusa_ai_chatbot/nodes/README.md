@@ -210,11 +210,15 @@ current-user relationship access; current-user continuity memory explains
 history without overriding the canonical native relationship state.
 
 The ordinary goal owner in Cognition Core V2 decides current-turn relational
-willingness. The connector passes the validated decision through the V2 output
-and the L3 surface input so workspace, action permission, content planning, and
-preference planning preserve the exact stance (`reject`, `deflect`,
-`negotiate`, `conditional_accept`, `accept`, or `not_applicable`) instead of
-re-deriving it from prose or relationship numbers.
+willingness. Each goal evidence row receives one transient `provenance_role`
+derived from trusted source-kind and memory-scope metadata; promoted
+reflection and shared character/world context cannot grant current-user access.
+The connector passes the validated `relational_willingness.v2` decision
+(applicability, `current_user_relationship_state`, stance, reason, and
+evidence handles) through the V2 output and the L3 surface input so workspace,
+action permission, content planning, preference planning, and dialog preserve
+the exact stance and relationship state instead of re-deriving them from prose
+or relationship numbers.
 
 ## Action Ownership
 

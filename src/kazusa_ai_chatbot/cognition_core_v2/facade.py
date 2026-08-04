@@ -26,7 +26,7 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionExecutionError,
     CognitionObservabilityV2,
     GroupEngagementActionContextV2,
-    RelationalWillingnessV1,
+    RelationalWillingnessV2,
     SemanticAppraisalResultV2,
     validate_cognition_core_input,
     validate_cognition_core_output,
@@ -1053,7 +1053,7 @@ def _empty_collapse() -> dict[str, Any]:
 
 def _ordinary_relational_decision(
     bids: Sequence[ActionBidV2],
-) -> RelationalWillingnessV1 | None:
+) -> RelationalWillingnessV2 | None:
     """Copy the validated ordinary relational decision from the bid set."""
 
     for bid in bids:
@@ -1077,7 +1077,7 @@ def _build_cognition_observability(
     collapse: Mapping[str, Any],
     selected_bid_reason: str,
     diagnostics: Mapping[str, Any],
-    relational_willingness: RelationalWillingnessV1 | None,
+    relational_willingness: RelationalWillingnessV2 | None,
 ) -> CognitionObservabilityV2:
     """Build semantic branch evidence without exposing prompt-local handles."""
 

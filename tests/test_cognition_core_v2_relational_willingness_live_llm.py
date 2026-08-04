@@ -134,7 +134,7 @@ def _memory_rows(
 ) -> list[dict[str, Any]]:
     """Build one scoped memory arm through the real connector mapping."""
 
-    if memory_arm == 'none':
+    if memory_arm in {'none', 'promoted_reflection'}:
         return []
     arm = fixture['evidence_arms'][memory_arm]
     row = {
@@ -150,11 +150,28 @@ def _memory_rows(
     return [row]
 
 
+def _reflection_rows(
+    fixture: dict[str, Any],
+    memory_arm: str,
+) -> list[dict[str, Any]]:
+    """Build one promoted-reflection arm through the real connector mapping."""
+
+    if memory_arm != 'promoted_reflection':
+        return []
+    arm = fixture['evidence_arms']['private_roleplay_reflection']
+    return [{
+        'memory_name': 'private roleplay reflection',
+        'content': arm['semantic_text'],
+    }]
+
+
 def _build_direct_payload(
     *,
     profile_name: str,
     memory_arm: str,
     scene_suffix: str = '',
+    request_text: str | None = None,
+    group_scene: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Build a production-shaped cognition input and its frozen hash inputs."""
 
@@ -168,6 +185,13 @@ def _build_direct_payload(
     scene_text = str(fixture['scene']['semantic_scene'])
     if scene_suffix:
         scene_text = f'{scene_text} {scene_suffix}'
+    if group_scene:
+        scene_text = (
+            f'{scene_text} 当前场景是公开群聊，参与者可以同时看到这段对话。'
+        )
+    effective_request = (
+        fixture['request'] if request_text is None else request_text
+    )
 
     state = _global_state()
     state['character_profile'] = deepcopy(character)
@@ -180,14 +204,25 @@ def _build_direct_payload(
     state['global_user_id'] = _LIVE_USER_ID
     state['platform_user_id'] = 'relational-willingness-direct-platform-user'
     state['user_name'] = 'direct live user'
-    state['user_input'] = fixture['request']
+    state['user_input'] = effective_request
     state['cognitive_episode'] = canonical_episode(
         episode_id='relational-willingness-direct-episode',
-        content=f'{scene_text} 当前用户请求：{fixture["request"]}',
+        content=f'{scene_text} 当前用户请求：{effective_request}',
         current_global_user_id=_LIVE_USER_ID,
     )
+    if group_scene:
+        episode = state['cognitive_episode']
+        episode['target_scope']['channel_type'] = 'group'
+        episode['origin_metadata']['privacy_scope'] = 'group'
+        episode['privacy_scope'] = 'group'
+        state['public_group_scene'] = (
+            '公开群聊场景；当前用户请求对全部参与者可见。'
+        )
     state['rag_result'] = {
         'memory_evidence': _memory_rows(fixture, memory_arm),
+    }
+    state['promoted_reflection_context'] = {
+        'promoted_lore': _reflection_rows(fixture, memory_arm),
     }
 
     mutable_state = build_acquaintance_user_state(
@@ -202,10 +237,14 @@ def _build_direct_payload(
         mutable_state=mutable_state,
     )
     hash_inputs = {
-        'request': fixture['request'],
+        'request': effective_request,
         'character': character,
         'scene': scene_text,
-        'memory': _memory_rows(fixture, memory_arm),
+        'memory': (
+            _reflection_rows(fixture, memory_arm)
+            if memory_arm == 'promoted_reflection'
+            else _memory_rows(fixture, memory_arm)
+        ),
         'relationship': fixture['relationship_profiles'][profile_name],
     }
     return payload, {
@@ -263,6 +302,8 @@ async def _run_direct_case(
     profile_name: str,
     memory_arm: str = 'shared_memory',
     scene_suffix: str = '',
+    request_text: str | None = None,
+    group_scene: bool = False,
 ) -> dict[str, Any]:
     """Run one direct ordinary-owner case and retain its complete raw boundary."""
 
@@ -270,6 +311,8 @@ async def _run_direct_case(
         profile_name=profile_name,
         memory_arm=memory_arm,
         scene_suffix=scene_suffix,
+        request_text=request_text,
+        group_scene=group_scene,
     )
     from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
         build_cognition_core_services,
@@ -355,6 +398,7 @@ async def test_stranger_rejects() -> None:
     )
     decision = _decision(result)
     assert decision['applicability'] == 'relationship_sensitive'
+    assert decision['current_user_relationship_state'] == 'unestablished'
     assert decision['stance'] == 'reject'
 
 
@@ -368,13 +412,10 @@ async def test_intermediate_33_observation() -> None:
     )
     decision = _decision(result)
     assert decision['applicability'] == 'relationship_sensitive'
-    assert decision['stance'] in {
-        'reject',
-        'deflect',
-        'negotiate',
-        'conditional_accept',
-        'accept',
-    }
+    if decision['current_user_relationship_state'] == (
+        'developing_or_uncertain'
+    ):
+        assert decision['stance'] != 'accept'
 
 
 @pytest.mark.live_llm
@@ -387,13 +428,10 @@ async def test_intermediate_67_observation() -> None:
     )
     decision = _decision(result)
     assert decision['applicability'] == 'relationship_sensitive'
-    assert decision['stance'] in {
-        'reject',
-        'deflect',
-        'negotiate',
-        'conditional_accept',
-        'accept',
-    }
+    if decision['current_user_relationship_state'] == (
+        'developing_or_uncertain'
+    ):
+        assert decision['stance'] != 'accept'
 
 
 @pytest.mark.live_llm
@@ -406,6 +444,7 @@ async def test_lover_accepts() -> None:
     )
     decision = _decision(result)
     assert decision['applicability'] == 'relationship_sensitive'
+    assert decision['current_user_relationship_state'] == 'established'
     assert decision['stance'] == 'accept'
 
 
@@ -420,6 +459,7 @@ async def test_stranger_current_user_memory_does_not_upgrade_access() -> None:
     )
     decision = _decision(result)
     assert decision['applicability'] == 'relationship_sensitive'
+    assert decision['current_user_relationship_state'] == 'unestablished'
     assert decision['stance'] == 'reject'
 
 
@@ -434,6 +474,7 @@ async def test_lover_without_shared_memory_accepts() -> None:
     )
     decision = _decision(result)
     assert decision['applicability'] == 'relationship_sensitive'
+    assert decision['current_user_relationship_state'] == 'established'
     assert decision['stance'] == 'accept'
 
 
@@ -450,6 +491,7 @@ async def test_compliance_does_not_upgrade_stranger() -> None:
     )
     decision = _decision(result)
     assert decision['applicability'] == 'relationship_sensitive'
+    assert decision['current_user_relationship_state'] == 'unestablished'
     assert decision['stance'] == 'reject'
 
 
@@ -464,6 +506,7 @@ async def test_taboo_can_reject_lover() -> None:
     )
     decision = _decision(result)
     assert decision['applicability'] == 'relationship_sensitive'
+    assert decision['current_user_relationship_state'] == 'established'
     assert decision['stance'] != 'accept'
 
 
@@ -481,4 +524,50 @@ async def test_coercion_can_reject_lover() -> None:
     )
     decision = _decision(result)
     assert decision['applicability'] == 'relationship_sensitive'
+    assert decision['current_user_relationship_state'] == 'established'
     assert decision['stance'] != 'accept'
+
+
+@pytest.mark.live_llm
+async def test_stranger_private_roleplay_reflection_rejects() -> None:
+    """Private roleplay reflection cannot grant a stranger current-user access."""
+
+    result = await _run_direct_case(
+        case_id='stranger_private_roleplay_reflection',
+        profile_name='stranger',
+        memory_arm='promoted_reflection',
+    )
+    decision = _decision(result)
+    assert decision['applicability'] == 'relationship_sensitive'
+    assert decision['current_user_relationship_state'] == 'unestablished'
+    assert decision['stance'] == 'reject'
+
+
+@pytest.mark.live_llm
+async def test_lover_group_scene_private_context_only_non_accept() -> None:
+    """Private-only context is non-authoritative in a public group scene."""
+
+    result = await _run_direct_case(
+        case_id='lover_group_scene_private_context_only',
+        profile_name='lover',
+        memory_arm='promoted_reflection',
+        group_scene=True,
+    )
+    decision = _decision(result)
+    assert decision['applicability'] == 'relationship_sensitive'
+    assert decision['stance'] != 'accept'
+
+
+@pytest.mark.live_llm
+async def test_non_relationship_sensitive_request_not_applicable() -> None:
+    """A non-sensitive request uses the not_applicable pair."""
+
+    result = await _run_direct_case(
+        case_id='non_relationship_sensitive_request',
+        profile_name='stranger',
+        request_text='明天早上几点适合跑步？',
+    )
+    decision = _decision(result)
+    assert decision['applicability'] == 'not_relationship_sensitive'
+    assert decision['current_user_relationship_state'] == 'not_applicable'
+    assert decision['stance'] == 'not_applicable'

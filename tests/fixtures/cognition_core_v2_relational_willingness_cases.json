@@ -84,6 +84,10 @@
       "memory_scope": "current_user_continuity",
       "semantic_text": "当前用户曾在已接受的共同经历中表达过尊重边界。"
     },
+    "private_roleplay_reflection": {
+      "source_kind": "promoted_reflection",
+      "semantic_text": "角色在私有角色扮演互动中曾使用支配与服从主题的语气，但这种互动语境本身不构成当前用户的关系许可或同意。"
+    },
     "episode": {
       "source_kind": "episode",
       "semantic_text": "当前用户在私密场景中提出了本回合请求。"

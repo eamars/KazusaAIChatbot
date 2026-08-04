@@ -396,9 +396,10 @@ async def test_goal_bid_gets_one_bounded_schema_repair(
         "expected_consequences": ["the conversation continues"],
         "confidence": "high",
         "relational_willingness": {
-            "schema_version": "relational_willingness.v1",
+            "schema_version": "relational_willingness.v2",
             "applicability": "not_relationship_sensitive",
             "stance": "not_applicable",
+            "current_user_relationship_state": "not_applicable",
             "reason": '当前回合证据不涉及关系许可判断',
             "evidence_handles": ["e1"],
         },
@@ -497,9 +498,10 @@ async def test_goal_bid_repair_replays_grounding_after_handle_failures() -> None
         "expected_consequences": ["the current user receives a clear stance"],
         "confidence": "high",
         "relational_willingness": {
-            "schema_version": "relational_willingness.v1",
+            "schema_version": "relational_willingness.v2",
             "applicability": "relationship_sensitive",
             "stance": "deflect",
+            "current_user_relationship_state": "developing_or_uncertain",
             "reason": '当前请求需要结合当前关系与角色边界作出判断',
             "evidence_handles": ["e1", "e5"],
         },
@@ -602,10 +604,12 @@ async def test_goal_bid_repair_replays_grounding_after_handle_failures() -> None
             "handle": "e1",
             "semantic_text": "the current user made a direct request",
             "source_kind": "episode",
+            "provenance_role": "current_episode",
         }, {
             "handle": "e5",
             "semantic_text": "earlier relationship context",
             "source_kind": "conversation_evidence",
+            "provenance_role": "contextual_fact_only",
         }]
         feedback = repair_payload["repair_feedback"]
         assert feedback["allowed_evidence_handles"] == ["e1", "e5"]
@@ -616,6 +620,7 @@ async def test_goal_bid_repair_replays_grounding_after_handle_failures() -> None
             "schema_version",
             "applicability",
             "stance",
+            "current_user_relationship_state",
             "reason",
             "evidence_handles",
         ]
@@ -705,9 +710,10 @@ async def test_required_selection_regenerates_with_the_same_producer() -> None:
         "expected_consequences": ["当前用户得到一个明确选择。"],
         "confidence": "high",
         "relational_willingness": {
-            "schema_version": "relational_willingness.v1",
+            "schema_version": "relational_willingness.v2",
             "applicability": "not_relationship_sensitive",
             "stance": "not_applicable",
+            "current_user_relationship_state": "not_applicable",
             "reason": '当前回合证据不涉及关系许可判断',
             "evidence_handles": ["e1"],
         },
@@ -824,9 +830,10 @@ async def test_required_selection_regeneration_excludes_optional_conversation(
         'expected_consequences': ['当前用户得到一个明确选择。'],
         'confidence': 'high',
         'relational_willingness': {
-            'schema_version': 'relational_willingness.v1',
+            'schema_version': 'relational_willingness.v2',
             'applicability': 'not_relationship_sensitive',
             'stance': 'not_applicable',
+            'current_user_relationship_state': 'not_applicable',
             'reason': '当前回合证据不涉及关系许可判断',
             'evidence_handles': ['e1'],
         },
@@ -945,9 +952,10 @@ async def test_required_selection_repair_replays_grounding_after_handle_failures
         'expected_consequences': ['The current choice is communicated clearly.'],
         'confidence': 'high',
         'relational_willingness': {
-            'schema_version': 'relational_willingness.v1',
+            'schema_version': 'relational_willingness.v2',
             'applicability': 'relationship_sensitive',
             'stance': 'deflect',
+            'current_user_relationship_state': 'developing_or_uncertain',
             'reason': '当前选择需要结合关系和角色边界判断。',
             'evidence_handles': ['e1', 'e5'],
         },
@@ -1246,9 +1254,10 @@ async def test_required_selection_invalid_evidence_degrades_after_exhaustion(
         "expected_consequences": ["The conversation continues."],
         "confidence": "high",
         "relational_willingness": {
-            "schema_version": "relational_willingness.v1",
+            "schema_version": "relational_willingness.v2",
             "applicability": "not_relationship_sensitive",
             "stance": "not_applicable",
+            "current_user_relationship_state": "not_applicable",
             "reason": '当前回合证据不涉及关系许可判断',
             "evidence_handles": ["e1"],
         },

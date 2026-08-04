@@ -15,7 +15,7 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     ActionBidV2,
     CollapsedIntentionV2,
     CognitionCoreServicesV2,
-    RelationalWillingnessV1,
+    RelationalWillingnessV2,
 )
 from kazusa_ai_chatbot.cognition_core_v2.branch_activation import (
     branch_order_key,
@@ -53,7 +53,7 @@ persistent_goal 与 current_event 是不同事项，必须抑制该候选，即�
 
 def collapse_authoritative_relational_bid(
     bids: Sequence[ActionBidV2],
-    decision: RelationalWillingnessV1,
+    decision: RelationalWillingnessV2,
 ) -> CollapsedIntentionV2:
     """Preserve the ordinary relational owner without semantic reinterpretation.
 
