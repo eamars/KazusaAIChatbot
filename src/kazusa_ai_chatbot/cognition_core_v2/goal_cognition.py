@@ -19,6 +19,7 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionCoreServicesV2,
     CognitionEvidenceV2,
     CognitionExecutionError,
+    CURRENT_EPISODE_EVIDENCE_SOURCE_KINDS,
     GoalBidDraftV2,
     MAX_RELATIONAL_WILLINGNESS_EVIDENCE_HANDLES,
     RELATIONAL_APPLICABILITY_VALUES,
@@ -302,7 +303,8 @@ async def run_goal_cognition(
     episode_evidence_handles = {
         row["evidence_handle"]
         for row in evidence
-        if row["evidence_ref"]["source_kind"] == "episode"
+        if row["evidence_ref"]["source_kind"]
+        in CURRENT_EPISODE_EVIDENCE_SOURCE_KINDS
     }
     required_evidence_handles = {
         operation['evidence_handle']

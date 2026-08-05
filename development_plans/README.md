@@ -50,6 +50,7 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
+| [background_tool_result_delivery_current_episode_evidence_bugfix_plan.md](archive/completed/bugfix/background_tool_result_delivery_current_episode_evidence_bugfix_plan.md) | Background tool-result evidence authority and visible result-delivery regression | completed |
 | [background_coding_event_loop_starvation_bugfix_plan.md](archive/completed/bugfix/background_coding_event_loop_starvation_bugfix_plan.md) | Background coding async-boundary responsiveness and deterministic regression coverage | completed |
 | [relevance_native_reply_review_remediation_plan.md](archive/completed/bugfix/relevance_native_reply_review_remediation_plan.md) | Post-review deterministic native-reply coverage, ID validation, and ICD wording remediation | completed |
 | [relevance_native_reply_monotonic_delivery_plan.md](archive/completed/bugfix/relevance_native_reply_monotonic_delivery_plan.md) | Deterministic `/chat` native-reply monotonic delivery and delay promotion | completed |

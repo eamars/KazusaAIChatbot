@@ -503,6 +503,7 @@ def test_evidence_provenance_roles_map_every_supported_metadata() -> None:
 
     expected = {
         ('episode', None): 'current_episode',
+        ('tool_result', None): 'current_episode',
         (
             'promoted_memory',
             'current_user_continuity',
@@ -585,6 +586,48 @@ async def test_ordinary_goal_draft_carries_current_episode_decision() -> None:
 
 
 @pytest.mark.asyncio
+async def test_ordinary_goal_accepts_tool_result_as_current_episode_evidence(
+) -> None:
+    """A completed task result satisfies the current-episode citation rule."""
+
+    decision = _decision(evidence_handles=['e1'])
+    llm = _GoalLLM(decision)
+    evidence = [
+        _evidence_row(
+            'e1',
+            'tool_result',
+            'The task needs additional user-provided information.',
+        ),
+    ]
+    bid = await run_goal_cognition(
+        BranchDefinition(
+            branch_id='ordinary_response',
+            dependencies=(),
+            action_tendencies=('speak',),
+            goal_kind='ordinary_response',
+        ),
+        {
+            'scope': 'user',
+            'kind': 'goal',
+            'entity_id': 'goal:ordinary-response',
+        },
+        _goal_context(),
+        evidence,
+        _core_services(llm),
+    )
+
+    assert bid['relational_willingness'] == decision
+    assert llm.messages
+    rendered_prompt = str(llm.messages[0][-1].content)
+    assert 'tool_result' in rendered_prompt
+    assert 'provenance_role' in rendered_prompt
+    assert 'current_episode' in rendered_prompt
+    assert 'The task needs additional user-provided information.' in (
+        rendered_prompt
+    )
+
+
+@pytest.mark.asyncio
 async def test_ordinary_goal_rejects_decision_without_episode_evidence() -> None:
     """A relational decision cannot cite memory without current episode coverage."""
 
@@ -601,6 +644,44 @@ async def test_ordinary_goal_rejects_decision_without_episode_evidence() -> None
             'promoted_memory',
             'shared memory cannot grant current-user permission',
             memory_scope='shared_character_or_world',
+        ),
+    ]
+    with pytest.raises(CognitionExecutionError):
+        await run_goal_cognition(
+            BranchDefinition(
+                branch_id='ordinary_response',
+                dependencies=(),
+                action_tendencies=('speak',),
+                goal_kind='ordinary_response',
+            ),
+            {
+                'scope': 'user',
+                'kind': 'goal',
+                'entity_id': 'goal:ordinary-response',
+            },
+            _goal_context(),
+            evidence,
+            _core_services(llm),
+        )
+
+
+@pytest.mark.asyncio
+async def test_ordinary_goal_rejects_history_only_citation_with_tool_result(
+) -> None:
+    """History-only citations still fail closed when a tool result is present."""
+
+    decision = _decision(evidence_handles=['e2'])
+    llm = _GoalLLM(decision)
+    evidence = [
+        _evidence_row(
+            'e1',
+            'tool_result',
+            'The task needs additional user-provided information.',
+        ),
+        _evidence_row(
+            'e2',
+            'conversation_evidence',
+            'earlier relationship context',
         ),
     ]
     with pytest.raises(CognitionExecutionError):

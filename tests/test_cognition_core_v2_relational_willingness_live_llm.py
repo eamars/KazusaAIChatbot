@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 
+from kazusa_ai_chatbot.cognition_episode import TriggerSource
 from kazusa_ai_chatbot.character_identity_growth.projection import (
     project_identity_for_cognition,
     project_identity_for_surface,
@@ -52,6 +53,7 @@ _CHARACTER_PATH = _ROOT / 'personalities' / 'asuna.json'
 _ARTIFACT_ROOT = (
     _ROOT / 'test_artifacts' / 'cognition_core_v2_relational_willingness'
 )
+_DIAGNOSTIC_ARTIFACT_ROOT = _ROOT / 'test_artifacts' / 'diagnostics'
 _NOW = '2026-07-14T00:00:00Z'
 _LIVE_USER_ID = 'relational-willingness-direct-user'
 _SHARED_MEMORY_ID = 'relational-willingness-shared-memory'
@@ -172,16 +174,24 @@ def _build_direct_payload(
     scene_suffix: str = '',
     request_text: str | None = None,
     group_scene: bool = False,
+    trigger_source: TriggerSource = 'user_message',
+    episode_metadata: dict[str, Any] | None = None,
+    character_override: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Build a production-shaped cognition input and its frozen hash inputs."""
 
     fixture = _load_fixture()
-    character = _load_character()
-    identity_file_hash = hashlib.sha256(
-        _CHARACTER_PATH.read_bytes(),
-    ).hexdigest()
-    if identity_file_hash != fixture['character']['identity_sha256'].lower():
-        raise AssertionError('the Asuna identity hash changed from the fixture')
+    if character_override is None:
+        character = _load_character()
+        identity_file_hash = hashlib.sha256(
+            _CHARACTER_PATH.read_bytes(),
+        ).hexdigest()
+        if identity_file_hash != fixture['character']['identity_sha256'].lower():
+            raise AssertionError(
+                'the Asuna identity hash changed from the fixture'
+            )
+    else:
+        character = deepcopy(character_override)
     scene_text = str(fixture['scene']['semantic_scene'])
     if scene_suffix:
         scene_text = f'{scene_text} {scene_suffix}'
@@ -209,6 +219,8 @@ def _build_direct_payload(
         episode_id='relational-willingness-direct-episode',
         content=f'{scene_text} 当前用户请求：{effective_request}',
         current_global_user_id=_LIVE_USER_ID,
+        trigger_source=trigger_source,
+        metadata=episode_metadata,
     )
     if group_scene:
         episode = state['cognitive_episode']
@@ -238,6 +250,8 @@ def _build_direct_payload(
     )
     hash_inputs = {
         'request': effective_request,
+        'trigger_source': trigger_source,
+        'episode_metadata': episode_metadata,
         'character': character,
         'scene': scene_text,
         'memory': (
@@ -284,11 +298,16 @@ def _direct_context(payload: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def _write_artifact(case_id: str, artifact: dict[str, Any]) -> str:
+def _write_artifact(
+    case_id: str,
+    artifact: dict[str, Any],
+    *,
+    artifact_root: Path = _ARTIFACT_ROOT,
+) -> str:
     """Write raw direct evidence under the ignored relational artifact root."""
 
-    _ARTIFACT_ROOT.mkdir(parents=True, exist_ok=True)
-    path = _ARTIFACT_ROOT / f'{case_id}__{time_ns()}.json'
+    artifact_root.mkdir(parents=True, exist_ok=True)
+    path = artifact_root / f'{case_id}__{time_ns()}.json'
     path.write_text(
         json.dumps(artifact, ensure_ascii=False, indent=2, default=str) + '\n',
         encoding='utf-8',
@@ -304,6 +323,10 @@ async def _run_direct_case(
     scene_suffix: str = '',
     request_text: str | None = None,
     group_scene: bool = False,
+    trigger_source: TriggerSource = 'user_message',
+    episode_metadata: dict[str, Any] | None = None,
+    artifact_root: Path = _ARTIFACT_ROOT,
+    character_override: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run one direct ordinary-owner case and retain its complete raw boundary."""
 
@@ -313,6 +336,9 @@ async def _run_direct_case(
         scene_suffix=scene_suffix,
         request_text=request_text,
         group_scene=group_scene,
+        trigger_source=trigger_source,
+        episode_metadata=episode_metadata,
+        character_override=character_override,
     )
     from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
         build_cognition_core_services,
@@ -360,7 +386,11 @@ async def _run_direct_case(
             ],
         },
     }
-    artifact_path = _write_artifact(case_id, artifact)
+    artifact_path = _write_artifact(
+        case_id,
+        artifact,
+        artifact_root=artifact_root,
+    )
     if failure is not None:
         pytest.fail(f'direct relational case failed; artifact={artifact_path}')
     if bid is None or not isinstance(bid.get('relational_willingness'), dict):
@@ -386,6 +416,75 @@ def _decision(result: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise AssertionError('direct bid decision is not an object')
     return value
+
+
+@pytest.mark.live_llm
+async def test_tool_result_result_delivery_live_case() -> None:
+    """A real tool result produces a grounded clarification-oriented goal."""
+
+    task_id = 'task-live-tool-result'
+    result_summary = 'The task needs additional user-provided information.'
+    character_override = json.loads(
+        (_ROOT / 'personalities' / 'example.json').read_text(
+            encoding='utf-8',
+        )
+    )
+    result = await _run_direct_case(
+        case_id='background_tool_result_delivery_live',
+        profile_name='lover',
+        request_text=(
+            'The completed background task needs additional user-provided '
+            'information. Ask me which missing input I should provide.'
+        ),
+        trigger_source='tool_result',
+        episode_metadata={
+            'task_id': task_id,
+            'result_summary': result_summary,
+            'failure_text': '',
+            'cognition_source': {
+                'source_kind': 'tool_result',
+                'source_id': task_id,
+                'occurred_at': _NOW,
+                'semantic_summary': result_summary,
+            },
+        },
+        artifact_root=_DIAGNOSTIC_ARTIFACT_ROOT,
+        character_override=character_override,
+    )
+    bid = result['bid']
+    decision = _decision(result)
+    evidence = result['model_calls'][0]['messages']
+    prompt_text = json.dumps(evidence, ensure_ascii=False)
+
+    assert 'tool_result' in prompt_text
+    assert 'current_episode' in prompt_text
+    assert task_id not in prompt_text
+    assert task_id not in json.dumps(bid, ensure_ascii=False)
+    assert 'e1' in bid['evidence_handles']
+    assert 'e1' in decision['evidence_handles']
+    assert bid['desired_outcome']
+    assert bid['concrete_detail']
+
+    artifact_path = Path(result['artifact_path'])
+    artifact = json.loads(artifact_path.read_text(encoding='utf-8'))
+    artifact['trace_metadata'] = {
+        'boundary': 'direct run_goal_cognition live case',
+        'trace_id': None,
+        'model_routes': [call['route'] for call in result['model_calls']],
+    }
+    artifact['quality_notes'] = {
+        'automated_checks': [
+            'tool_result source kind remained in the model-facing evidence',
+            'current_episode authority was rendered for e1',
+            'the validated goal and relational willingness cited e1',
+            'the synthetic task identifier was absent from the model output',
+        ],
+        'human_review_required': True,
+    }
+    artifact_path.write_text(
+        json.dumps(artifact, ensure_ascii=False, indent=2) + '\n',
+        encoding='utf-8',
+    )
 
 
 @pytest.mark.live_llm

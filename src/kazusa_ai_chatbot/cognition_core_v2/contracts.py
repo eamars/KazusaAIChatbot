@@ -184,6 +184,11 @@ RELATIONAL_PROVENANCE_ROLE_VALUES = frozenset({
     "character_or_world_context_only",
     "contextual_fact_only",
 })
+
+CURRENT_EPISODE_EVIDENCE_SOURCE_KINDS = frozenset({
+    "episode",
+    "tool_result",
+})
 MEMORY_SCOPE_VALUES = frozenset({
     "current_user_continuity",
     "shared_character_or_world",
@@ -365,7 +370,7 @@ def project_evidence_provenance_role(
         CognitionContractError: When the metadata cannot be mapped.
     """
 
-    if source_kind == "episode":
+    if source_kind in CURRENT_EPISODE_EVIDENCE_SOURCE_KINDS:
         return "current_episode"
     if source_kind == "promoted_memory":
         if memory_scope == "current_user_continuity":
@@ -1457,9 +1462,10 @@ def validate_relational_willingness(
         evidence_handles: Optional complete set of prompt-safe evidence handles
             available to the producing call. Unknown handles are a structural
             contract error when supplied.
-        episode_handles: Optional subset of evidence handles whose
-            ``evidence_ref.source_kind`` is ``episode``. When supplied, at
-            least one cited handle must come from the current episode.
+        episode_handles: Optional subset of evidence handles classified as
+            current-episode evidence, sourced from ``episode`` and
+            ``tool_result`` rows. When supplied, at least one cited handle
+            must come from the current episode.
 
     Returns:
         A shallow validated copy of the decision.

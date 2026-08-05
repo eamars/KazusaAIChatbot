@@ -637,6 +637,166 @@ async def test_goal_bid_repair_replays_grounding_after_handle_failures() -> None
 
 
 @pytest.mark.asyncio
+async def test_goal_bid_repair_projects_tool_result_as_current_episode(
+) -> None:
+    """Repair feedback exposes a tool_result row as current-episode evidence."""
+
+    valid = {
+        "intention": "respond to the completed background task result",
+        "desired_outcome": "clarify the missing information",
+        "concrete_detail": "ask for the missing input from the current result",
+        "reason": "the completed task needs additional user-provided information",
+        "private_monologue": "I should respond to the result with a clarification.",
+        "target_role_handles": ["r1"],
+        "evidence_handles": ["e1", "e5"],
+        "expected_consequences": ["the user can provide the missing information"],
+        "confidence": "high",
+        "relational_willingness": {
+            "schema_version": "relational_willingness.v2",
+            "applicability": "relationship_sensitive",
+            "stance": "deflect",
+            "current_user_relationship_state": "developing_or_uncertain",
+            "reason": "当前请求需要结合当前关系与角色边界作出判断",
+            "evidence_handles": ["e1", "e5"],
+        },
+    }
+    invalid_handle_draft = {
+        **valid,
+        "evidence_handles": ["e1", "ev3"],
+        "relational_willingness": {
+            **valid["relational_willingness"],
+            "evidence_handles": ["e1", "ev3"],
+        },
+    }
+    history_only_draft = {
+        **valid,
+        "relational_willingness": {
+            **valid["relational_willingness"],
+            "evidence_handles": ["e5"],
+        },
+    }
+    responses = [
+        invalid_handle_draft,
+        history_only_draft,
+        valid,
+    ]
+
+    class _LLM:
+        def __init__(self) -> None:
+            self.messages: list[list[object]] = []
+
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config: object,
+        ) -> SimpleNamespace:
+            del config
+            self.messages.append(messages)
+            response = responses[len(self.messages) - 1]
+            return SimpleNamespace(content=json.dumps(response))
+
+    llm = _LLM()
+    bid = await run_goal_cognition(
+        DEFAULT_BRANCH_DEFINITIONS["ordinary_response"],
+        {"scope": "user", "kind": "goal", "entity_id": "g1"},
+        {
+            "current_event": [{
+                "handle": "e1",
+                "source_kind": "tool_result",
+                "semantic_text": (
+                    "The task needs additional user-provided information."
+                ),
+            }],
+            "relationship": {"relationship_summary": "current relationship"},
+            "_role_bindings": {"r1": {"role": "current_user"}},
+            "role_summaries": {"r1": "the current user"},
+        },
+        [{
+            "evidence_handle": "e1",
+            "evidence_ref": {
+                "source_kind": "tool_result",
+                "source_id": "task-123",
+                "occurred_at": "2026-08-05T00:00:00Z",
+                "semantic_summary": (
+                    "The task needs additional user-provided information."
+                ),
+            },
+            "semantic_text": (
+                "The task needs additional user-provided information."
+            ),
+            "visible_to": ["q:event_agency"],
+        }, {
+            "evidence_handle": "e5",
+            "evidence_ref": {
+                "source_kind": "conversation_evidence",
+                "source_id": "history-1",
+                "occurred_at": "2026-07-14T00:00:00Z",
+                "semantic_summary": "earlier relationship context",
+            },
+            "semantic_text": "earlier relationship context",
+            "visible_to": ["q:event_agency"],
+        }],
+        SimpleNamespace(
+            llm=llm,
+            goal_ordinary_response_config=object(),
+        ),
+    )
+
+    expected_evidence = [{
+        "handle": "e1",
+        "semantic_text": (
+            "The task needs additional user-provided information."
+        ),
+        "source_kind": "tool_result",
+        "provenance_role": "current_episode",
+    }, {
+        "handle": "e5",
+        "semantic_text": "earlier relationship context",
+        "source_kind": "conversation_evidence",
+        "provenance_role": "contextual_fact_only",
+    }]
+    assert bid["relational_willingness"]["evidence_handles"] == [
+        "e1",
+        "e5",
+    ]
+    assert len(llm.messages) == 3
+    initial_payload = json.loads(str(llm.messages[0][1].content))
+    assert initial_payload["evidence"] == expected_evidence
+    for message_set, repair_payload in zip(
+        llm.messages[1:],
+        (
+            json.loads(str(llm.messages[1][1].content)),
+            json.loads(str(llm.messages[2][1].content)),
+        ),
+        strict=True,
+    ):
+        assert (
+            len(str(message_set[0].content))
+            + len(str(message_set[1].content))
+            <= goal_module.GOAL_COGNITION_PROMPT_CAP
+        )
+        assert repair_payload["evidence"] == expected_evidence
+        feedback = repair_payload["repair_feedback"]
+        assert feedback["allowed_evidence_handles"] == ["e1", "e5"]
+        assert feedback["current_episode_evidence_handles"] == ["e1"]
+        assert feedback["allowed_role_handles"] == ["r1"]
+        relational_contract = feedback["relational_willingness_contract"]
+        assert relational_contract["current_episode_evidence_handles"] == [
+            "e1"
+        ]
+    first_repair = json.loads(str(llm.messages[1][1].content))
+    second_repair = json.loads(str(llm.messages[2][1].content))
+    assert "ev3" in first_repair["repair_feedback"]["invalid_draft"]
+    assert first_repair["repair_feedback"]["validation_error"] == (
+        "evidence handles are not permitted"
+    )
+    assert second_repair["repair_feedback"]["validation_error"] == (
+        "relational willingness must cite current episode evidence"
+    )
+
+
+@pytest.mark.asyncio
 async def test_goal_bid_schema_exhaustion_is_typed_after_three_attempts() -> None:
     """A required branch requests graph retry after its local attempt cap."""
 
