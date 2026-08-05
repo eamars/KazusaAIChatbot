@@ -32,6 +32,14 @@ _EXPECTED_END_TO_END_VALID_COUNT = 176
 _EXPECTED_HISTORICAL_VALID_COUNT = 40
 
 
+if not _REPLAY_MANIFEST_PATH.exists():
+    pytest.skip(
+        'identity-growth replay manifest is unavailable; run the recovery '
+        'script with its source exports before enabling this live cohort',
+        allow_module_level=True,
+    )
+
+
 def _load_replay_cases() -> list[dict[str, object]]:
     """Load the frozen case manifest without contacting a live service."""
 

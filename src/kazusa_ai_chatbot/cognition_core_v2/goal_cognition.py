@@ -116,7 +116,7 @@ REQUIRED_SELECTION_GOAL_PROMPT = '''你负责在选择权属于当前角色时�
 
 # 判断顺序
 1. `required_selection_operations` 是已解析的权威选择权事实。保持行动者、对象、受益者、选择拥有者和回应拥有者方向，并在 `evidence_handles` 引用其中每个 `evidence_handle`。
-2. `conversation_progress_evidence` 是既有进度事实；只引用实质约束本轮选择的行。`completed`、`rejected`、`superseded` 等终态继续约束本轮，除非当前输入明确要求重开。当前 episode 比进度更新，部件与整体及同义表达应按语义判断，不要要求逐字相同；引用相关约束并推进。
+2. `conversation_progress_evidence` 是既有进度事实；只引用实质约束本轮选择的行。`completed`、`rejected`、`superseded` 等终态继续约束本轮，除非当前输入明确要求重开。终态行描述的动作、对象或部位不得再次作为本轮选择或预期执行结果；先建立排除清单，把这些终态行描述的具体事项从 `selection` 和 `expected_consequences` 中排除，再选择尚未处理的独立事项，或形成拒绝、协商或条件。当前 episode 比进度更新，部件与整体及同义表达应按语义判断，不要要求逐字相同；引用相关约束并推进。
 3. `supporting_evidence` 只提供可选支持。`evidence_handles` 只能逐字使用上述三个输入提供的 evidence handle；`semantic_context` 中的 handle、`role_handles` 和 `target_role_handles`（如 `r1`、`current_user`、`self`）是角色引用，不能放入证据数组，也不得使用范围、通配符、组合写法或 source ID。
 4. 以 `semantic_context.character_identity` 的最新且权威的角色身份为准，它可覆盖初始种子身份，不得用旧习惯。结合角色约束、情绪、关系和场景作出当前角色自己的选择。群参与建议和私有连续性只帮助理解当前场景，不创造话题、事实、权限或发言理由。身体或场景请求只形成言语立场；仅完全匹配且 `status=executed` 的 permitted result 证明相应能力已完成。
 5. 每次都输出 `relational_willingness`。先判断请求是否 `relationship_sensitive`；敏感时依据关系投影判断当前用户为 `unestablished`、`developing_or_uncertain` 或 `established`。`provenance_role` 中，`current_episode` 是当前请求和场景的直接事实，`current_user_history_only` 只解释当前用户历史，`character_or_world_context_only` 只提供角色相容性与世界知识，`contextual_fact_only` 只是一般语境。
@@ -131,7 +131,7 @@ _ACTIVE_REQUIRED_SELECTION_GOAL_PROMPT = '''你负责在选择权属于当前角
 
 # 判断顺序
 1. `required_selection_operations` 是权威选择权事实。保持行动者、对象、受益者、选择拥有者和回应拥有者方向，并在 `evidence_handles` 引用其中每个 `evidence_handle`。
-2. `conversation_progress_evidence` 是既有进度事实；只引用实质约束本轮选择的行。`completed`、`rejected`、`superseded` 等终态继续约束本轮，除非当前输入明确要求重开。当前 episode 比进度更新；结合动作、对象、部件与整体及同义表达判断同一事件，不要要求逐字相同。旧事件若已完成、拒绝或被纠正，优先于旧事件状态；引用相关约束并推进。
+2. `conversation_progress_evidence` 是既有进度事实；只引用实质约束本轮选择的行。`completed`、`rejected`、`superseded` 等终态继续约束本轮，除非当前输入明确要求重开。终态行描述的动作、对象或部位不得再次作为本轮选择或预期执行结果；先建立排除清单，把这些终态行描述的具体事项从 `selection` 和 `expected_consequences` 中排除，再选择尚未处理的独立事项，或形成拒绝、协商或条件。当前 episode 比进度更新；结合动作、对象、部件与整体及同义表达判断同一事件，不要要求逐字相同。旧事件若已完成、拒绝或被纠正，优先于旧事件状态；引用相关约束并推进。
 3. `supporting_evidence` 只提供可选支持。`evidence_handles` 只能逐字使用上述三个输入提供的 evidence handle；`semantic_context` 中的 handle、`role_handles` 和 `target_role_handles`（如 `r1`、`current_user`、`self`）是角色引用，不能放入证据数组，也不得使用范围、通配符、组合写法或 source ID。
 4. `semantic_context.character_identity` 是最新且权威的角色身份，可覆盖初始种子身份，不得用旧习惯。结合角色约束、情绪、关系和当前场景作出当前角色自己的选择；结构化用户对话角色具有权威性，保持行动者、对象和受益者方向。群参与建议与私有连续性只帮助理解当前场景，不创造话题、事实、权限或发言理由。
 5. 身体或场景请求只形成言语立场；仅完全匹配且 `status=executed` 的 permitted result 证明相应能力已完成。`selection` 必须直接写出一个具体选择，不把决定交给其他角色或后续阶段；`selection`、`reason` 和 `private_monologue` 使用简体中文，输入引文、专有名词、代码和 URL 保持原样。

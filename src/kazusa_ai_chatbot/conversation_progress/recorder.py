@@ -218,7 +218,11 @@ _EVENT_RECORDER_PROMPT = '''\
    - `beneficiary`：受益者，不适用时为空；
    - `precondition`：成立前提，不适用时为空。
    同一具体动作和对象内的方式、强度、阶段或反应变化更新原事件；
+   同一类动作作用于不同具体部位或对象时，属于不同的独立事件；
    转向另一个可独立完成的动作或对象时另建新事件。
+   前一具体部位已经得到评价，回应随后提出或开始另一个具体部位时，
+   前一事件写 `concluded`，后一部位另建事件；整段同类互动继续不合并
+   这两个事件。
 4. `semantic_summary` 必须脱离上下文也能区分具体事件，不能只写序号、代词或此前事项。
 5. 每个变化或新事件引用一个或多个已提供的 `source_turn_handles`。
 6. `lifecycle_change` 只报告本轮变化：
@@ -233,6 +237,12 @@ _EVENT_RECORDER_PROMPT = '''\
    该事件写 `concluded`；总体满意度、奖励条件或整段互动继续不改变这个完成事实。
    既有事件已经得到明确结果或评价，且实际回应转向另一个可独立完成的事件时，
    前者写 `concluded`；整段互动继续不延长前者生命周期。
+   如果来源对既有事件给出了明确结果、评价或停止信号，而实际回应已经
+   转向另一个独立的动作、对象或部位，必须写 `concluded`，不能因为场景
+   仍为 `same`、总体互动仍在继续或还有后续奖励条件而写 `none`。
+   此时该句柄属于本轮已变化事件，先输出 `observation="changed"`，再在
+   `lifecycle_change` 中写 `concluded`；`observation="unchanged"` 只用于
+   本轮没有新事实的句柄。
    只有暂定且仍会在同一个具体事件尝试中变化的评价不算 `concluded`。
 7. `relevance` 只报告当前语义作用：
    - `decision`：仍直接约束当前判断或区分已处理与未处理事项。
@@ -251,6 +261,11 @@ _EVENT_RECORDER_PROMPT = '''\
 顶层对象必须完整包含且仅包含 `schema_version`、`existing_events` 和 `new_events` 三个字段。
 两个数组即使为空也必须显式输出；没有新事件时必须原样输出 `"new_events": []`。
 只返回一个严格 JSON 对象，不要代码围栏、解释、注释或额外字段。
+既有事件的 `observation` 只能是 `unchanged` 或 `changed`；它不是生命周期值。
+`lifecycle_change` 只能是 `none`、`began`、`concluded`、`declined`、`replaced`
+或 `reopened`，绝不能填写 `changed`。
+`observation` 绝不能填写 `concluded`；完成事件的固定组合是
+`"observation": "changed"` 与 `"lifecycle_change": "concluded"`。
 未变化的既有事件必须完整包含且仅包含 `event_handle` 和 `observation`，严格为：
 {
   "event_handle": "e1",
@@ -267,6 +282,17 @@ _EVENT_RECORDER_PROMPT = '''\
   "lifecycle_change": "none",
   "relevance": "scene",
   "source_turn_handles": ["current_input"]
+}
+既有事件完成时，仍然使用 `observation="changed"`，并单独写
+`lifecycle_change="concluded"`：
+{
+  "event_handle": "e1",
+  "observation": "changed",
+  "semantic_summary": "具体事件已经完成",
+  "outcome": "已得到确定结论",
+  "lifecycle_change": "concluded",
+  "relevance": "decision",
+  "source_turn_handles": ["current_response"]
 }
 新事件严格为：
 {
@@ -294,6 +320,8 @@ _EVENT_RECORDER_PROMPT = '''\
 2. `existing_events` 和 `new_events` 每次都输出为数组；没有项目也输出 `[]`。
 3. `observation="unchanged"` 行恰好包含 `event_handle` 和 `observation`。
 4. 两个数组和顶层对象全部闭合后才结束输出。
+5. 直接输出完整对象：首字符为 `{`，末字符为 `}`；数组和对象闭合后
+   立即停止，先写任何代码围栏、备注或解释都不属于输出。
 '''
 
 _event_recorder_llm = LLInterface()

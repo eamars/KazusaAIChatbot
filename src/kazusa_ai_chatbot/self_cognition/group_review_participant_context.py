@@ -660,14 +660,24 @@ def _hydration_from_sources(
         axes = relationship_context["axes"]
         positive_regard = axes.get("positive_regard", "中性或混合")
         attachment = axes.get("attachment", "无")
-        if positive_regard in {"正向", "强烈正向"}:
+        if positive_regard in {
+            '观感轻度正面',
+            '正面观感正在形成',
+            '观感明显正面',
+            '观感强烈正面',
+            '观感非常强烈正面',
+        }:
             relationship_band = "正向"
             relationship_label = (
                 "强连接"
-                if attachment in {"高", "极高"}
+                if attachment in {'依恋深厚', '依恋非常深厚'}
                 else "增长中的连接"
             )
-        elif positive_regard in {"负向", "强烈负向"}:
+        elif positive_regard in {
+            '观感轻度负面',
+            '观感明显负面',
+            '观感强烈负面',
+        }:
             relationship_band = "负向"
             relationship_label = "紧张关系"
         else:

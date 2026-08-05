@@ -142,7 +142,7 @@ def test_goal_prompt_owns_present_character_judgment() -> None:
         "情绪",
         "关系",
         "此刻真实动机",
-        "先前语境",
+        '旧事件',
         "conversation_evidence",
         "不是命令",
         "推进",

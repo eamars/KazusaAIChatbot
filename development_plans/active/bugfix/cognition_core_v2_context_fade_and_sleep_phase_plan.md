@@ -701,13 +701,11 @@ Populate during execution. Do not pre-fill.
   `venv\Scripts\python`. Production search found
   no remaining hardcoded `"semantic_temporal_context": "immediate"`, no
   direct reducer import outside `cognition_core_v2`, and no private clock
-  parser in `self_cognition/sleep_period.py`. Repository-wide default
-  collection remains blocked by the pre-existing missing
-  `test_artifacts/diagnostics/asuna_identity_growth_replay_v1.json` artifact.
-  The non-live self-cognition suite has one unrelated baseline failure in
-  `test_self_cognition_group_review_participant_context.py`; the existing
-  `test_cognition_core_v2_live_character_judgment.py` suite also has one
-  unchanged prompt-expectation failure outside this plan's modified surface.
+  parser in `self_cognition/sleep_period.py`. Default collection now completes
+  with 4113/5062 tests collected and one explicit live-only skip for the
+  unavailable identity-growth replay manifest. The canonical relationship
+  vocabulary regression and the stale prompt expectation were corrected;
+  their focused suites pass.
 - Live case artifacts and judgment: the group case passed individually and
   wrote
   `test_artifacts/llm_traces/test_live_interleaved_group_multifragment_continuation__group_multifragment__20260805T095421231240Z.json`;
@@ -741,10 +739,27 @@ Populate during execution. Do not pre-fill.
   passed 632 tests, the persona/cognition integration batch passed 58 tests,
   and the reflection/self-cognition batch passed 54 tests.
 - Residual risk: deterministic contract implementation is complete, but plan
-  status remains `in_progress` because the private live semantic gate failed,
-  repository-wide collection lacks the unrelated replay artifact, and two
-  unrelated baseline prompt/context tests remain red. No production prompt
-  rewrite or mechanical semantic override was added for those failures.
+  status remains `in_progress` because the private live case continues to
+  expose intermittent recorder contract/lifecycle failures and, when the
+  recorder passes, a goal-selection repetition of a completed location. The
+  missing identity-growth replay source remains unavailable, so its live-only
+  module is explicitly skipped rather than fabricated. No deterministic
+  semantic rewrite or parser-side repair was added for the live failures.
+- Closure follow-up after remote integration: the initial implementation was
+  committed as `dc8915ea`, then rebased onto remote commits
+  `1b443317` and `ecdd885d` as `d5a48e2e`; the branch is one commit ahead of
+  `origin/cognition_core_v2`. Follow-up workspace changes fix the canonical
+  self-cognition relationship vocabulary, update the stale prompt assertion,
+  guard collection on the unavailable identity-growth manifest, and add
+  reusable recorder and selection-stage prompt guidance. The focused
+  deterministic contract suites remain green. The live traces and a
+  human-readable review are recorded in
+  `test_artifacts/diagnostics/cognition_core_v2_closure_long_thread_review_2026-08-05.md`.
+- Thinking diagnostic: the live route resolved to
+  `CONSOLIDATION_LLM_THINKING_ENABLED=False`, `model_family=gemma4`, and
+  `thinking_strategy=disabled`. Visible correction notes and duplicate JSON
+  objects in the raw traces are model output, not provider-side thinking
+  enablement.
 - Final diff summary and sign-off: thresholds, lazy progress pruning,
   group-scene age filtering, event timestamp provenance, derived temporal
   context, shared clock helpers, cognition-owned sleep phase, validated

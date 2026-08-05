@@ -1284,6 +1284,11 @@ async def test_live_asuna_houjing_long_thread_regression(
         ),
         "surface_intent": "respond",
     }
+    current["decontextualized_input"] = (
+        '当前用户已经完成对'
+        f'{BOT_DISPLAY_NAME}后颈和肩膀的按摩，并询问她选择'
+        '另一个接下来可触摸的部位。'
+    )
     invocation, prepared, recorder_calls = await _invoke_recorder(
         monkeypatch,
         current,
