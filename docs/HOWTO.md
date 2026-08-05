@@ -917,7 +917,9 @@ The service reuses its already loaded native character-state snapshot for both
 relevance calls and performs no relevance-specific database read. Settled
 history uses stable bounded participant handles instead of raw ids. A
 state-salience decision may retain another participant as the actual recipient;
-in that case `use_reply_feature` remains false.
+in that case the relevance-owned base `use_reply_feature` remains false;
+deterministic delivery may still promote the final flag for a qualifying group
+response.
 
 Group turns become eligible after six quiet seconds and close at ten seconds
 from the opening enqueue time. Inputs enqueued before the hard boundary are

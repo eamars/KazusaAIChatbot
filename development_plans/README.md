@@ -50,6 +50,8 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
+| [relevance_native_reply_review_remediation_plan.md](archive/completed/bugfix/relevance_native_reply_review_remediation_plan.md) | Post-review deterministic native-reply coverage, ID validation, and ICD wording remediation | completed |
+| [relevance_native_reply_monotonic_delivery_plan.md](archive/completed/bugfix/relevance_native_reply_monotonic_delivery_plan.md) | Deterministic `/chat` native-reply monotonic delivery and delay promotion | completed |
 | [cognition_core_v2_generation_contract_prompt_projection_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_generation_contract_prompt_projection_bugfix_plan.md) | High-risk Core V2 prompt, model-facing contract, and diagnostic replay bugfix | completed |
 | [control_console_web_availability_followup_plan.md](archive/completed/bugfix/control_console_web_availability_followup_plan.md) | Follow-up bugfix for Control Console operational projections and static asset availability | completed |
 | [cognition_core_v2_relational_willingness_gradient_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_relational_willingness_gradient_bugfix_plan.md) | Core V2 post-prewarm relational-willingness contract for stranger rejection, lover acceptance, scoped-memory authority, and an explicit intermediate gradient | completed |
@@ -282,6 +284,30 @@ and whole-group behavior, and verified the control-console observation surface.
 | Outcome | Plans |
 |---|---|
 | Moved from active bugfix to completed archive | `relevance_native_reply_anchor_guard_bugfix_plan.md` |
+
+### 2026-08-05 relevance native-reply monotonic delivery completion
+
+The follow-up delivery bugfix completed after the bounded DeepSeek
+implementation handoff, deterministic service and adapter regressions, parent
+diff review, and lifecycle closeout. The final `/chat` flag now preserves the
+existing graph latch and may be promoted deterministically for qualifying group
+owner-mismatch or delayed responses without changing the public response schema
+or proactive delivery paths.
+
+| Outcome | Plans |
+|---|---|
+| Moved from active bugfix to completed archive | `relevance_native_reply_monotonic_delivery_plan.md` |
+
+### 2026-08-05 native-reply review remediation completion
+
+The post-review remediation completed after deterministic edge-case coverage,
+whitespace-only message-ID validation, HOWTO clarification, focused and
+affected regressions, and parent closeout review. The archived implementation
+plan remains unchanged.
+
+| Outcome | Plans |
+|---|---|
+| Moved from active bugfix to completed archive | `relevance_native_reply_review_remediation_plan.md` |
 
 ### 2026-07-18 Cognition Core V2 Stage 2 closure
 

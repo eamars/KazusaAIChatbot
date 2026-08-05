@@ -117,6 +117,41 @@ class _CapturingSurfaceLLM:
         return response
 
 
+class _CapturingCoreLLM:
+    """Capture every core-stage request and raw model response."""
+
+    def __init__(self, delegate: Any) -> None:
+        self.delegate = delegate
+        self.calls: list[dict[str, object]] = []
+
+    async def ainvoke(
+        self,
+        messages: list[object],
+        *args: object,
+        config: object | None = None,
+        **kwargs: object,
+    ) -> Any:
+        """Delegate one configured core call and retain inspectable evidence."""
+
+        response = await self.delegate.ainvoke(
+            messages,
+            *args,
+            config=config,
+            **kwargs,
+        )
+        self.calls.append({
+            "stage_name": str(getattr(config, "stage_name", "")),
+            "route_name": str(getattr(config, "route_name", "")),
+            "model": str(getattr(config, "model", "")),
+            "messages": [
+                str(getattr(message, "content", ""))
+                for message in messages
+            ],
+            "raw_output": str(getattr(response, "content", "")),
+        })
+        return response
+
+
 def _cases() -> list[dict[str, object]]:
     """Load the approved lifecycle rows for individual live execution."""
 
@@ -977,3 +1012,110 @@ async def test_same_ambiguous_events_report_cross_model_variance_live_llm(
     """Capture the same ambiguous event through both configured model routes."""
 
     await _run_cross_model_case(live_db, request)
+
+
+@pytest.mark.live_llm
+@pytest.mark.live_db
+@pytest.mark.asyncio
+async def test_live_persistent_boundary_condition_creates_goal_branch_two(
+    live_db,
+    request,
+) -> None:
+    """Persist a synthetic boundary goal and execute it as branch two."""
+
+    case_id = "persistent-autonomy-boundary-branch-two"
+    owner_id, state = await _prepare_user_state(live_db, request)
+    condition_evidence = {
+        "source_kind": "episode",
+        "source_id": "episode:synthetic-boundary-pressure",
+        "occurred_at": "2026-07-14T00:00:00Z",
+        "semantic_summary": (
+            "Synthetic pressure makes the current relationship boundary unsafe."
+        ),
+    }
+    state["relationship"].update({
+        "boundary_safety": -80,
+        "salience": 80,
+        "evidence_refs": [condition_evidence],
+    })
+
+    try:
+        payload = _chain_input(
+            "A synthetic pressure condition is active: the current actor is "
+            "trying to override the character's personal boundary.",
+            episode_id="live-v2-persistent-autonomy-boundary",
+            mutable_state=state,
+        )
+        reset_validation_capture(case_id)
+        base_services = build_cognition_core_services()
+        capturing_llm = _CapturingCoreLLM(base_services.llm)
+        services = replace(base_services, llm=capturing_llm)
+        output = await run_cognition(
+            payload,
+            services,
+        )
+        capture = validation_capture_snapshot()
+        raw_capture_path = write_validation_capture()
+        replacement_state = output["state_update"]["replacement_state"]
+        await replace_user_cognition_state(owner_id, replacement_state)
+        persisted_state = await get_user_cognition_state(owner_id)
+
+        autonomy_goal = next(
+            goal
+            for goal in replacement_state["goals"]
+            if goal["goal_kind"] == "autonomy_boundary"
+        )
+        persisted_autonomy_goal = next(
+            goal
+            for goal in persisted_state["goals"]
+            if goal["goal_kind"] == "autonomy_boundary"
+        )
+        branches = output["cognition_observability"]["branches"]
+        autonomy_branch = next(
+            branch
+            for branch in branches
+            if branch["goal_kind"] == "autonomy_boundary"
+        )
+        trace_path = write_llm_trace(
+            "cognition_core_v2_goal_branch_creation_live_llm",
+            case_id,
+            {
+                "input": payload,
+                "synthetic_condition": {
+                    "relationship_boundary_safety": -80,
+                    "relationship_salience": 80,
+                    "evidence": condition_evidence,
+                },
+                "output": output,
+                "model_calls": capturing_llm.calls,
+                "raw_validation_capture": capture,
+                "raw_validation_capture_path": str(raw_capture_path),
+                "persisted_state": persisted_state,
+                "contract_checks": {
+                    "autonomy_goal_created": (
+                        autonomy_goal["status"] == "pursuing"
+                    ),
+                    "persisted_goal_created": (
+                        persisted_autonomy_goal["entity_id"]
+                        == autonomy_goal["entity_id"]
+                    ),
+                    "branch_two": autonomy_branch["branch_index"] == 2,
+                    "branch_completed": autonomy_branch["status"] == "completed",
+                },
+            },
+        )
+
+        assert output["schema_version"] == "cognition_core_output.v2"
+        assert output["diagnostics"]["selected_branch_count"] >= 2
+        assert output["diagnostics"]["completed_branch_count"] >= 2
+        assert autonomy_goal["status"] == "pursuing"
+        assert persisted_autonomy_goal["entity_id"] == autonomy_goal["entity_id"]
+        assert autonomy_branch["branch_index"] == 2
+        assert autonomy_branch["goal_kind"] == "autonomy_boundary"
+        assert autonomy_branch["status"] == "completed"
+        assert raw_capture_path.exists()
+        assert trace_path.exists()
+    finally:
+        await live_db.user_profiles.delete_one(
+            {"global_user_id": owner_id},
+        )

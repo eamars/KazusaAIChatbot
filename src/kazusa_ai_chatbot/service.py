@@ -283,6 +283,7 @@ CONVERSATION_HISTORY_COLLECTION = "conversation_history"
 COGNITION_SAFE_RETRY_LIMIT = 1
 SETTLED_RELEVANCE_HISTORY_SCAN_LIMIT = 48
 SETTLED_RELEVANCE_LOGICAL_TURN_LIMIT = 10
+NATIVE_REPLY_DELAY_PROMOTION_THRESHOLD_SECONDS = 120.0
 OPERATIONAL_RETRY_NOTICE = (
     "The character could not complete this turn because its response path "
     "exhausted a safe internal retry. Please try again."
@@ -6213,14 +6214,25 @@ async def _process_queued_chat_item(
 
         stages_reached.append("graph")
         final_dialog = result["final_dialog"]
-        reply_owner_is_effective_latest = (
-            not settlement_fragments
-            or settlement_fragments[-1].arrival_sequence == item.sequence
+        base_reply_feature = bool(result["use_reply_feature"])
+        owner_mismatch = (
+            bool(settlement_fragments)
+            and settlement_fragments[-1].arrival_sequence != item.sequence
         )
-        use_reply_feature = (
-            bool(final_dialog)
-            and bool(result["use_reply_feature"])
-            and reply_owner_is_effective_latest
+        elapsed_seconds = time.monotonic() - item.enqueue_monotonic
+        native_reply_promotion = (
+            req.channel_type == "group"
+            and bool(req.platform_message_id.strip())
+            and (
+                owner_mismatch
+                or (
+                    elapsed_seconds
+                    > NATIVE_REPLY_DELAY_PROMOTION_THRESHOLD_SECONDS
+                )
+            )
+        )
+        use_reply_feature = bool(final_dialog) and (
+            base_reply_feature or native_reply_promotion
         )
         consolidation_state = result["consolidation_state"]
         scheduled_followup_count = len(result["future_promises"])

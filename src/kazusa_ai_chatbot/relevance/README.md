@@ -135,8 +135,12 @@ character-directed message or speaker. Private turns, whole-group invitations,
 state-salience admissions whose actual recipient is not the character, and
 non-proceed actions do not request one. The actual recipient remains independent
 from the reason to speak, so state salience may admit a turn while retaining a
-participant or unknown recipient. Delivery feasibility and the
-executable quote target remain outside this package.
+participant or unknown recipient. This Boolean is the base semantic request
+consumed by the final service boundary: deterministic delivery may promote it
+to `True` for a visible group response under the documented delivery
+conditions, and it never erases an existing `True`. Delivery feasibility,
+promotion thresholds, and the executable quote target remain outside this
+package.
 
 ## Ownership Boundaries
 

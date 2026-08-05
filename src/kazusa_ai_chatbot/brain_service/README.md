@@ -232,9 +232,17 @@ Private adjacency-only coalescing retains the existing immediate-ready timing
 and shows the full coalesced logical input to frontline before attaching its
 individual fragments to the exact survivor turn. An appended request completes
 with an empty response after attachment; only the response owner receives the
-assembled turn's visible response. A settled native-reply request reaches the
-adapter only when that response owner is also the effective latest fragment;
-otherwise the visible response is delivered without a misleading quote.
+assembled turn's visible response. The final native-reply flag is monotonic at
+the service boundary: relevance and the graph latch supply the base Boolean,
+and response construction never erases a latched `True`, even when the
+response owner is older than the effective latest fragment. Deterministic
+delivery may additionally promote a `False` base request to `True` only for a
+visible group response with a non-empty inbound platform message id when the
+response owner is not the effective latest fragment or when the response's
+enqueue-to-construction delay exceeds 120 seconds. Private scope, a missing
+platform message id, a fresh matching-owner response, and an empty dialog
+never promote; the adapter continues rendering the flag only for the first
+outbound message.
 Fresh settled history excludes active-turn rows and retains the newest whole
 logical turns under its exact 6,000-character compact-JSON sub-budget. The
 opening/newest four-image budget is shared across reassessments, with overflow

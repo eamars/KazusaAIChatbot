@@ -1382,10 +1382,10 @@ def test_required_selection_producer_demands_one_actual_selection() -> None:
 
     prompt = goal_module.REQUIRED_SELECTION_GOAL_PROMPT
 
-    assert '`selection` 是唯一' in prompt
-    assert '权威选择内容' in prompt
-    assert "不得只说以后决定" in prompt
-    assert '"selection": ""' in prompt
+    assert '`selection_kind`' in prompt
+    assert '`selection`' in prompt
+    assert '必须直接写出当前角色的一个选择' in prompt
+    assert '不把决定交给后续阶段' in prompt
 
 
 def test_required_selection_producer_selects_relevant_progress_evidence(
@@ -1395,14 +1395,14 @@ def test_required_selection_producer_selects_relevant_progress_evidence(
     prompt = goal_module.REQUIRED_SELECTION_GOAL_PROMPT
 
     assert '`conversation_progress_evidence`' in prompt
-    assert '引用其中会实质约束本轮选择的' in prompt
-    assert '不引用与当前选择无关的历史' in prompt
+    assert '只引用实质约束本轮选择的行' in prompt
+    assert '当前 episode 比进度更新' in prompt
     assert '`completed`' in prompt
     assert '`rejected`' in prompt
     assert '`superseded`' in prompt
-    assert '只有当前输入明确要求重开' in prompt
+    assert '除非当前输入明确要求重开' in prompt
     assert '`supporting_evidence` 只提供可选支持' in prompt
-    assert '`semantic_context` 中出现的 handle' in prompt
+    assert '`semantic_context` 中的 handle' in prompt
     assert 'conversation_evidence_relations' not in prompt
     assert not hasattr(goal_module, 'REQUIRED_SELECTION_VERIFIER_PROMPT')
     retired_name = 'REQUIRED_SELECTION_' + 'GOAL_REPAIR_PROMPT'

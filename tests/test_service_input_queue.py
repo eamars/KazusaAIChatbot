@@ -1187,10 +1187,91 @@ async def test_final_settled_contract_failure_returns_operational_error(
 
 
 @pytest.mark.asyncio
-async def test_native_reply_is_suppressed_for_obsolete_response_owner(
+async def test_native_reply_promotes_for_owner_mismatch_and_delay(
     monkeypatch,
 ) -> None:
-    """An assembled answer cannot quote an older opening fragment."""
+    """An assembled delayed group answer promotes for either condition."""
+
+    await _reset_queue_state()
+    monkeypatch.setattr(
+        service_module.time,
+        "monotonic",
+        lambda: 1300.0,
+    )
+
+    class _Graph:
+        """Return one visible answer without a semantic native-reply request."""
+
+        async def ainvoke(self, state):
+            assert state["use_reply_feature"] is False
+            return {
+                "should_respond": True,
+                "use_reply_feature": state["use_reply_feature"],
+                "final_dialog": ["assembled answer"],
+                "future_promises": [],
+                "consolidation_state": None,
+            }
+
+    monkeypatch.setattr(
+        service_module,
+        "_save_assistant_message",
+        AsyncMock(),
+    )
+    _patch_common_dependencies(monkeypatch, _Graph())
+    opening_item = _item(1, direct_address=True)
+    opening_item.enqueue_monotonic = 1000.0
+    opening_item.conversation_row_id = "row-1"
+    followup_item = _item(
+        2,
+        platform_user_id="user-1",
+        content="Here is the actual question.",
+    )
+    followup_item.conversation_row_id = "row-2"
+    fragments = [
+        PersistedChatFragment(
+            arrival_sequence=queued_item.sequence,
+            scope=("qq", "chan-1", "group"),
+            author_platform_user_id="user-1",
+            author_global_user_id="global-user-1",
+            platform_message_id=str(queued_item.sequence),
+            conversation_row_id=queued_item.conversation_row_id,
+            storage_timestamp_utc=queued_item.storage_timestamp_utc,
+            enqueue_monotonic=queued_item.enqueue_monotonic,
+            body_text=queued_item.request.message_envelope.body_text,
+            queue_item=queued_item,
+        )
+        for queued_item in (opening_item, followup_item)
+    ]
+
+    await service_module._process_queued_chat_item(
+        opening_item,
+        settlement_fragments=fragments,
+        settled_decision={
+            "response_action": "proceed",
+            "reason_to_respond": "specific group question",
+            "use_reply_feature": False,
+            "channel_topic": "question",
+            "indirect_speech_context": "",
+        },
+        skip_user_persist=True,
+        settlement_turn_id="turn-1",
+        settlement_version=2,
+        settlement_claimed=True,
+        prepared_media=[],
+        media_prepared=True,
+    )
+
+    response = await opening_item.future
+    assert response.messages == ["assembled answer"]
+    assert response.use_reply_feature is True
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
+async def test_native_reply_true_survives_owner_mismatch(
+    monkeypatch,
+) -> None:
+    """An existing native-reply request survives an older response owner."""
 
     await _reset_queue_state()
 
@@ -1257,7 +1338,7 @@ async def test_native_reply_is_suppressed_for_obsolete_response_owner(
 
     response = await opening_item.future
     assert response.messages == ["assembled answer"]
-    assert response.use_reply_feature is False
+    assert response.use_reply_feature is True
     await _reset_queue_state()
 
 
@@ -1324,6 +1405,405 @@ async def test_native_reply_reaches_single_fragment_response(
     response = await item.future
     assert response.messages == ["direct answer"]
     assert response.use_reply_feature is True
+    await _reset_queue_state()
+
+
+@pytest.mark.parametrize("base_reply_feature", [False, True])
+@pytest.mark.asyncio
+async def test_native_reply_is_false_without_visible_dialog(
+    monkeypatch,
+    base_reply_feature,
+) -> None:
+    """An empty dialog exposes no native-reply flag for either base value."""
+
+    await _reset_queue_state()
+    monkeypatch.setattr(
+        service_module.time,
+        "monotonic",
+        lambda: 1200.0,
+    )
+
+    class _Graph:
+        """Return no visible answer with the requested base flag."""
+
+        async def ainvoke(self, state):
+            assert state["use_reply_feature"] is base_reply_feature
+            return {
+                "should_respond": True,
+                "use_reply_feature": state["use_reply_feature"],
+                "final_dialog": [],
+                "future_promises": [],
+                "consolidation_state": None,
+            }
+
+    monkeypatch.setattr(
+        service_module,
+        "_save_assistant_message",
+        AsyncMock(),
+    )
+    _patch_common_dependencies(monkeypatch, _Graph())
+    item = _item(1, direct_address=True)
+    item.conversation_row_id = "row-1"
+    item.enqueue_monotonic = 1078.0
+
+    await service_module._process_queued_chat_item(
+        item,
+        settled_decision={
+            "response_action": "proceed",
+            "reason_to_respond": "direct character request",
+            "use_reply_feature": base_reply_feature,
+            "channel_topic": "",
+            "indirect_speech_context": "",
+        },
+        skip_user_persist=True,
+        settlement_turn_id="turn-1",
+        settlement_version=1,
+        settlement_claimed=True,
+        prepared_media=[],
+        media_prepared=True,
+    )
+
+    response = await item.future
+    assert response.messages == []
+    assert response.use_reply_feature is False
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
+async def test_native_reply_promotes_after_delay_threshold(
+    monkeypatch,
+) -> None:
+    """A delayed visible group response promotes a native reply request."""
+
+    await _reset_queue_state()
+    monkeypatch.setattr(
+        service_module.time,
+        "monotonic",
+        lambda: 1200.0,
+    )
+
+    class _Graph:
+        """Return one visible answer without a semantic native-reply request."""
+
+        async def ainvoke(self, state):
+            assert state["use_reply_feature"] is False
+            return {
+                "should_respond": True,
+                "use_reply_feature": state["use_reply_feature"],
+                "final_dialog": ["delayed answer"],
+                "future_promises": [],
+                "consolidation_state": None,
+            }
+
+    monkeypatch.setattr(
+        service_module,
+        "_save_assistant_message",
+        AsyncMock(),
+    )
+    _patch_common_dependencies(monkeypatch, _Graph())
+    item = _item(1, direct_address=True)
+    item.conversation_row_id = "row-1"
+    item.enqueue_monotonic = 1078.0
+
+    await service_module._process_queued_chat_item(
+        item,
+        settled_decision={
+            "response_action": "proceed",
+            "reason_to_respond": "direct character request",
+            "use_reply_feature": False,
+            "channel_topic": "",
+            "indirect_speech_context": "",
+        },
+        skip_user_persist=True,
+        settlement_turn_id="turn-1",
+        settlement_version=1,
+        settlement_claimed=True,
+        prepared_media=[],
+        media_prepared=True,
+    )
+
+    response = await item.future
+    assert response.messages == ["delayed answer"]
+    assert response.use_reply_feature is True
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
+async def test_native_reply_delay_promotion_requires_strictly_greater_than_threshold(
+    monkeypatch,
+) -> None:
+    """A response at exactly 120 seconds does not promote a native reply."""
+
+    await _reset_queue_state()
+    monkeypatch.setattr(
+        service_module.time,
+        "monotonic",
+        lambda: 1200.0,
+    )
+
+    class _Graph:
+        """Return one visible answer without a semantic native-reply request."""
+
+        async def ainvoke(self, state):
+            assert state["use_reply_feature"] is False
+            return {
+                "should_respond": True,
+                "use_reply_feature": state["use_reply_feature"],
+                "final_dialog": ["boundary answer"],
+                "future_promises": [],
+                "consolidation_state": None,
+            }
+
+    monkeypatch.setattr(
+        service_module,
+        "_save_assistant_message",
+        AsyncMock(),
+    )
+    _patch_common_dependencies(monkeypatch, _Graph())
+    item = _item(1, direct_address=True)
+    item.conversation_row_id = "row-1"
+    item.enqueue_monotonic = 1080.0
+
+    await service_module._process_queued_chat_item(
+        item,
+        settled_decision={
+            "response_action": "proceed",
+            "reason_to_respond": "direct character request",
+            "use_reply_feature": False,
+            "channel_topic": "",
+            "indirect_speech_context": "",
+        },
+        skip_user_persist=True,
+        settlement_turn_id="turn-1",
+        settlement_version=1,
+        settlement_claimed=True,
+        prepared_media=[],
+        media_prepared=True,
+    )
+
+    response = await item.future
+    assert response.messages == ["boundary answer"]
+    assert response.use_reply_feature is False
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
+async def test_native_reply_promotion_skips_private_scope(
+    monkeypatch,
+) -> None:
+    """Delay promotion never applies to a private visible response."""
+
+    await _reset_queue_state()
+    monkeypatch.setattr(
+        service_module.time,
+        "monotonic",
+        lambda: 1200.0,
+    )
+
+    class _Graph:
+        """Return one visible answer without a semantic native-reply request."""
+
+        async def ainvoke(self, state):
+            assert state["use_reply_feature"] is False
+            return {
+                "should_respond": True,
+                "use_reply_feature": state["use_reply_feature"],
+                "final_dialog": ["private answer"],
+                "future_promises": [],
+                "consolidation_state": None,
+            }
+
+    monkeypatch.setattr(
+        service_module,
+        "_save_assistant_message",
+        AsyncMock(),
+    )
+    _patch_common_dependencies(monkeypatch, _Graph())
+    item = _item(
+        1,
+        channel_type="private",
+        platform_channel_id="dm-1",
+        direct_address=True,
+    )
+    item.conversation_row_id = "row-1"
+    item.enqueue_monotonic = 1078.0
+
+    await service_module._process_queued_chat_item(
+        item,
+        settled_decision={
+            "response_action": "proceed",
+            "reason_to_respond": "direct character request",
+            "use_reply_feature": False,
+            "channel_topic": "",
+            "indirect_speech_context": "",
+        },
+        skip_user_persist=True,
+        settlement_turn_id="turn-1",
+        settlement_version=1,
+        settlement_claimed=True,
+        prepared_media=[],
+        media_prepared=True,
+    )
+
+    response = await item.future
+    assert response.messages == ["private answer"]
+    assert response.use_reply_feature is False
+    await _reset_queue_state()
+
+
+@pytest.mark.parametrize("platform_message_id", ["", " "])
+@pytest.mark.asyncio
+async def test_native_reply_promotion_requires_platform_message_id(
+    monkeypatch,
+    platform_message_id,
+) -> None:
+    """Missing or whitespace-only IDs cannot promote a native reply."""
+
+    await _reset_queue_state()
+    monkeypatch.setattr(
+        service_module.time,
+        "monotonic",
+        lambda: 1300.0,
+    )
+
+    class _Graph:
+        """Return one visible answer without a semantic native-reply request."""
+
+        async def ainvoke(self, state):
+            assert state["use_reply_feature"] is False
+            return {
+                "should_respond": True,
+                "use_reply_feature": state["use_reply_feature"],
+                "final_dialog": ["assembled answer"],
+                "future_promises": [],
+                "consolidation_state": None,
+            }
+
+    monkeypatch.setattr(
+        service_module,
+        "_save_assistant_message",
+        AsyncMock(),
+    )
+    _patch_common_dependencies(monkeypatch, _Graph())
+    opening_item = _item(1, direct_address=True)
+    opening_item.request.platform_message_id = platform_message_id
+    opening_item.enqueue_monotonic = 1000.0
+    opening_item.conversation_row_id = "row-1"
+    followup_item = _item(
+        2,
+        platform_user_id="user-1",
+        content="Here is the actual question.",
+    )
+    followup_item.conversation_row_id = "row-2"
+    fragments = [
+        PersistedChatFragment(
+            arrival_sequence=queued_item.sequence,
+            scope=("qq", "chan-1", "group"),
+            author_platform_user_id="user-1",
+            author_global_user_id="global-user-1",
+            platform_message_id=str(queued_item.sequence),
+            conversation_row_id=queued_item.conversation_row_id,
+            storage_timestamp_utc=queued_item.storage_timestamp_utc,
+            enqueue_monotonic=queued_item.enqueue_monotonic,
+            body_text=queued_item.request.message_envelope.body_text,
+            queue_item=queued_item,
+        )
+        for queued_item in (opening_item, followup_item)
+    ]
+
+    await service_module._process_queued_chat_item(
+        opening_item,
+        settlement_fragments=fragments,
+        settled_decision={
+            "response_action": "proceed",
+            "reason_to_respond": "specific group question",
+            "use_reply_feature": False,
+            "channel_topic": "question",
+            "indirect_speech_context": "",
+        },
+        skip_user_persist=True,
+        settlement_turn_id="turn-1",
+        settlement_version=2,
+        settlement_claimed=True,
+        prepared_media=[],
+        media_prepared=True,
+    )
+
+    response = await opening_item.future
+    assert response.messages == ["assembled answer"]
+    assert response.use_reply_feature is False
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
+async def test_native_reply_stays_false_without_promotion_condition(
+    monkeypatch,
+) -> None:
+    """A fresh matching-owner response keeps a false semantic request."""
+
+    await _reset_queue_state()
+    monkeypatch.setattr(
+        service_module.time,
+        "monotonic",
+        lambda: 1200.0,
+    )
+
+    class _Graph:
+        """Return one visible answer without a semantic native-reply request."""
+
+        async def ainvoke(self, state):
+            assert state["use_reply_feature"] is False
+            return {
+                "should_respond": True,
+                "use_reply_feature": state["use_reply_feature"],
+                "final_dialog": ["direct answer"],
+                "future_promises": [],
+                "consolidation_state": None,
+            }
+
+    monkeypatch.setattr(
+        service_module,
+        "_save_assistant_message",
+        AsyncMock(),
+    )
+    _patch_common_dependencies(monkeypatch, _Graph())
+    item = _item(1, direct_address=True)
+    item.conversation_row_id = "row-1"
+    item.enqueue_monotonic = 1190.0
+    fragment = PersistedChatFragment(
+        arrival_sequence=item.sequence,
+        scope=("qq", "chan-1", "group"),
+        author_platform_user_id="user-1",
+        author_global_user_id="global-user-1",
+        platform_message_id="1",
+        conversation_row_id=item.conversation_row_id,
+        storage_timestamp_utc=item.storage_timestamp_utc,
+        enqueue_monotonic=item.enqueue_monotonic,
+        body_text=item.request.message_envelope.body_text,
+        queue_item=item,
+    )
+
+    await service_module._process_queued_chat_item(
+        item,
+        settlement_fragments=[fragment],
+        settled_decision={
+            "response_action": "proceed",
+            "reason_to_respond": "direct character request",
+            "use_reply_feature": False,
+            "channel_topic": "",
+            "indirect_speech_context": "",
+        },
+        skip_user_persist=True,
+        settlement_turn_id="turn-1",
+        settlement_version=1,
+        settlement_claimed=True,
+        prepared_media=[],
+        media_prepared=True,
+    )
+
+    response = await item.future
+    assert response.messages == ["direct answer"]
+    assert response.use_reply_feature is False
     await _reset_queue_state()
 
 
