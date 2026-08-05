@@ -16,6 +16,9 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionContextLimitError,
     CognitionExecutionError,
 )
+from kazusa_ai_chatbot.cognition_core_v2.morning_refresh import (
+    run_character_morning_refresh,
+)
 from kazusa_ai_chatbot.llm_tracing import failure_capsule
 from kazusa_ai_chatbot.cognition_core_v2.semantic_appraisal import (
     _validate_handles,
@@ -25,6 +28,7 @@ from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     CognitionStateError,
     build_acquaintance_user_state,
     build_character_production_state,
+    validate_cognition_state,
 )
 from kazusa_ai_chatbot.cognition_core_v2.state_reducers import (
     _validate_goal_supersession,
@@ -1187,3 +1191,82 @@ def test_elapsed_decay_and_sleep_recovery_are_scope_specific() -> None:
 
     assert recovered["goals"][0]["salience"] == 42
     assert recovered["affect_activations"][0]["score"] == 32
+
+    with pytest.raises(TypeError):
+        apply_sleep_recovery(
+            character_state,
+            elapsed_sleep_seconds=7200,
+            character_constraints={},
+        )
+
+
+def test_morning_refresh_requires_character_scope() -> None:
+    """The morning-refresh entrypoint fails closed outside character scope."""
+
+    user_state = build_acquaintance_user_state(
+        global_user_id="user-c",
+        updated_at="2026-07-14T00:00:00Z",
+    )
+
+    with pytest.raises(CognitionStateError):
+        run_character_morning_refresh(
+            user_state,
+            elapsed_sleep_seconds=7200,
+            updated_at="2026-07-14T08:00:01Z",
+        )
+
+
+def test_morning_refresh_returns_validated_state_and_transition_counts() -> None:
+    """The entrypoint validates its output and reports bounded counts."""
+
+    character_state = build_character_production_state(
+        updated_at="2026-07-14T00:00:00Z",
+    )
+    character_state["drives"]["connection"]["pressure"] = 60
+
+    result = run_character_morning_refresh(
+        character_state,
+        elapsed_sleep_seconds=7200,
+        updated_at="2026-07-14T08:00:01Z",
+    )
+
+    assert result["schema_version"] == "character_morning_refresh_result.v2"
+    assert result["applied_elapsed_sleep_seconds"] == 7200
+    assert result["recovered_state"]["updated_at"] == "2026-07-14T08:00:01Z"
+    assert result["recovered_state"]["drives"]["connection"]["pressure"] == 32
+    assert result["reduced_drive_count"] == 8
+    assert result["settled_entity_count"] == 0
+    assert result["retained_activation_count"] == 0
+    assert result["removed_activation_count"] == 0
+    validated = validate_cognition_state(result["recovered_state"])
+    assert validated["state_scope"] == "character"
+
+
+def test_morning_refresh_validates_output_timestamp_contract() -> None:
+    """An invalid replacement timestamp fails output validation."""
+
+    character_state = build_character_production_state(
+        updated_at="2026-07-14T00:00:00Z",
+    )
+
+    with pytest.raises(CognitionStateError):
+        run_character_morning_refresh(
+            character_state,
+            elapsed_sleep_seconds=7200,
+            updated_at="2026-07-14T08:00:01+00:00",
+        )
+
+
+def test_morning_refresh_rejects_negative_elapsed_seconds() -> None:
+    """Elapsed sleep seconds must be non-negative."""
+
+    character_state = build_character_production_state(
+        updated_at="2026-07-14T00:00:00Z",
+    )
+
+    with pytest.raises(ValueError):
+        run_character_morning_refresh(
+            character_state,
+            elapsed_sleep_seconds=-1,
+            updated_at="2026-07-14T08:00:01Z",
+        )

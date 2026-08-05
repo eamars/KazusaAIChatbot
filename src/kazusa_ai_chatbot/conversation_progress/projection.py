@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
+from datetime import timedelta, timezone
 
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     EVIDENCE_SOURCE_QUESTION_IDS,
@@ -22,6 +23,7 @@ from kazusa_ai_chatbot.conversation_progress.policy import (
     GROUP_SCENE_MAX_ADDRESSED_NAMES,
     GROUP_SCENE_MAX_NAME_CHARS,
     GROUP_SCENE_MAX_RENDERED_CHARS,
+    GROUP_SCENE_MAX_TURN_AGE_MINUTES,
     GROUP_SCENE_MAX_TURN_TEXT_CHARS,
     GROUP_SCENE_MAX_TURNS,
     GROUP_SCENE_MAX_VISIBLE_PARTICIPANTS,
@@ -40,21 +42,34 @@ from kazusa_ai_chatbot.time_boundary import parse_storage_utc_datetime
 logger = logging.getLogger(__name__)
 
 
-def build_group_scene_context(
+def filter_group_scene_ambient_turns(
     *,
     ambient_logical_turns: Sequence[ConversationLogicalTurnV1],
     trigger_occurred_at: str,
-    trigger_speaker_name: str,
-    trigger_body_text: str,
-    trigger_addressed_global_user_ids: Sequence[str],
-    trigger_reply_to_display_name: str,
-    scope_users: Sequence[Mapping[str, object]],
-) -> GroupSceneContextV1:
-    """Build one bounded chronological public scene without persistence."""
+) -> list[ConversationLogicalTurnV1]:
+    """Keep only valid ambient turns within the group-scene age window.
+
+    Args:
+        ambient_logical_turns: Canonical logical turns available before the
+            current group trigger.
+        trigger_occurred_at: Current trigger timestamp used as the age
+            reference.
+
+    Returns:
+        A copied sequence of valid ambient turns that remain within the
+        configured group-scene retention window.
+    """
 
     trigger_time = parse_storage_utc_datetime(trigger_occurred_at)
-    roster = _group_scene_roster(scope_users)
-    ambient: list[tuple[object, int, GroupSceneTurnV1]] = []
+    maximum_turn_age = timedelta(minutes=GROUP_SCENE_MAX_TURN_AGE_MINUTES)
+    required_fields = (
+        'role',
+        'display_name',
+        'fragments',
+        'addressed_to_global_user_ids',
+        'reply_context',
+    )
+    filtered: list[ConversationLogicalTurnV1] = []
     for index, turn in enumerate(ambient_logical_turns):
         if not isinstance(turn, Mapping):
             logger.warning(
@@ -62,13 +77,6 @@ def build_group_scene_context(
                 'row is not a mapping'
             )
             continue
-        required_fields = (
-            'role',
-            'display_name',
-            'fragments',
-            'addressed_to_global_user_ids',
-            'reply_context',
-        )
         if any(field not in turn for field in required_fields):
             logger.warning(
                 f'Skipped malformed ambient group-scene row {index}: '
@@ -90,6 +98,33 @@ def build_group_scene_context(
                 f'invalid occurred_at: {exc}'
             )
             continue
+        if trigger_time - occurred_time > maximum_turn_age:
+            continue
+        filtered.append(deepcopy(dict(turn)))
+    return filtered
+
+
+def build_group_scene_context(
+    *,
+    ambient_logical_turns: Sequence[ConversationLogicalTurnV1],
+    trigger_occurred_at: str,
+    trigger_speaker_name: str,
+    trigger_body_text: str,
+    trigger_addressed_global_user_ids: Sequence[str],
+    trigger_reply_to_display_name: str,
+    scope_users: Sequence[Mapping[str, object]],
+) -> GroupSceneContextV1:
+    """Build one bounded chronological public scene without persistence."""
+
+    trigger_time = parse_storage_utc_datetime(trigger_occurred_at)
+    roster = _group_scene_roster(scope_users)
+    ambient: list[tuple[object, int, GroupSceneTurnV1]] = []
+    filtered_ambient_logical_turns = filter_group_scene_ambient_turns(
+        ambient_logical_turns=ambient_logical_turns,
+        trigger_occurred_at=trigger_occurred_at,
+    )
+    for index, turn in enumerate(filtered_ambient_logical_turns):
+        occurred_time = parse_storage_utc_datetime(turn['occurred_at'])
         ambient.append((
             occurred_time,
             index,
@@ -623,12 +658,17 @@ def project_conversation_progress_evidence(
             event,
             maximum_chars=row_budget,
         )
+        event_occurred_at = (
+            parse_storage_utc_datetime(event['updated_at'])
+            .astimezone(timezone.utc)
+            .strftime('%Y-%m-%dT%H:%M:%SZ')
+        )
         evidence.append({
             'evidence_handle': '',
             'evidence_ref': {
                 'source_kind': 'conversation_evidence',
                 'source_id': f'conversation-progress-event:{event["event_id"]}',
-                'occurred_at': occurred_at,
+                'occurred_at': event_occurred_at,
                 'semantic_summary': event['semantic_summary'],
             },
             'semantic_text': semantic_text,

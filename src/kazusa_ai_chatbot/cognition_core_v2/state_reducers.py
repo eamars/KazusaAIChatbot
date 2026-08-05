@@ -881,8 +881,6 @@ def apply_sleep_recovery(
     *,
     elapsed_sleep_seconds: int,
     updated_at: str | None = None,
-    character_constraints: Mapping[str, Any] | None = None,
-    relationship_context: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Apply one deterministic character-scope sleep recovery pass."""
 

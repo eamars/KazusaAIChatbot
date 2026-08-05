@@ -81,6 +81,29 @@ def test_decision_critical_completed_event_is_first_citeable_evidence():
     )
 
 
+def test_evidence_occurred_at_uses_the_event_own_timestamp():
+    evidence = project_conversation_progress_evidence(_progress(), NOW)
+
+    assert all(
+        row['evidence_ref']['occurred_at'] == '2026-07-28T09:30:00Z'
+        for row in evidence
+    )
+
+
+def test_evidence_occurred_at_is_not_the_episode_timestamp():
+    progress = _progress()
+    progress['events'][0]['updated_at'] = '2026-07-27T08:15:30+00:00'
+
+    evidence = project_conversation_progress_evidence(progress, NOW)
+
+    assert evidence[0]['evidence_ref']['occurred_at'] == (
+        '2026-07-27T08:15:30Z'
+    )
+    assert evidence[0]['evidence_ref']['occurred_at'] != (
+        '2026-07-28T09:30:00Z'
+    )
+
+
 def test_event_evidence_respects_row_and_character_caps():
     progress = _progress()
     for index in range(20):

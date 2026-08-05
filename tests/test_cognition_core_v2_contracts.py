@@ -560,6 +560,24 @@ def test_scene_context_requires_bounded_public_group_scene() -> None:
         validate_cognition_core_input(payload)
 
 
+def test_scene_context_character_sleep_phase_is_optional_and_validated() -> None:
+    """The sleep-phase field is optional and bounded text when present."""
+
+    payload = _input()
+    assert "character_sleep_phase" not in payload["scene_context"]
+    validate_cognition_core_input(payload)
+
+    payload = _input()
+    payload["scene_context"]["character_sleep_phase"] = "睡眠中"
+    validated = validate_cognition_core_input(payload)
+    assert validated["scene_context"]["character_sleep_phase"] == "睡眠中"
+
+    payload = _input()
+    payload["scene_context"]["character_sleep_phase"] = 7
+    with pytest.raises(CognitionContractError):
+        validate_cognition_core_input(payload)
+
+
 @pytest.mark.parametrize(
     "group_context",
     [

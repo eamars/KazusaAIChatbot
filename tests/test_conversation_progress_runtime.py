@@ -7,6 +7,9 @@ from unittest.mock import AsyncMock
 import pytest
 
 from kazusa_ai_chatbot.conversation_progress import cache, runtime
+from kazusa_ai_chatbot.conversation_progress.policy import (
+    prune_aged_progress_packet,
+)
 from kazusa_ai_chatbot.conversation_progress.recorder import (
     ConversationProgressContextLimitError,
     ConversationProgressRecorderOutputError,
@@ -17,6 +20,7 @@ from kazusa_ai_chatbot.conversation_progress.repository import (
 )
 from tests.conversation_progress_v2_helpers import (
     SCOPE,
+    event,
     event_update,
     packet,
     recorder_delta,
@@ -114,6 +118,125 @@ def test_database_wins_equal_turn_count_and_cache_wins_only_when_newer():
     selected, source = runtime._select_packet(db_packet, cached_newer)
     assert selected == cached_newer
     assert source == 'cache'
+
+
+@pytest.mark.asyncio
+async def test_load_prunes_aged_events_before_projection_and_cache(
+    monkeypatch,
+):
+    """Prune on the read path without issuing any database write."""
+
+    aged = packet(turn_count=2, events=[
+        event(
+            event_id='aged_background',
+            retention='background',
+        ),
+        event(
+            event_id='fresh_event',
+            retention='decision_critical',
+        ),
+    ])
+    aged['events'][0]['updated_at'] = '2026-07-27T09:00:00+00:00'
+    aged['events'][1]['updated_at'] = '2026-07-28T09:00:00+00:00'
+    monkeypatch.setattr(
+        runtime,
+        'load_active_packet',
+        AsyncMock(return_value=aged),
+    )
+    monkeypatch.setattr(
+        runtime,
+        'get_ambient_conversation_history',
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        runtime,
+        'get_participant_conversation_history',
+        AsyncMock(return_value=[]),
+    )
+    persist_write = AsyncMock()
+    monkeypatch.setattr(runtime, 'persist_progress_write', persist_write)
+
+    result = await runtime.ConversationProgressRuntime().load(
+        scope=SCOPE,
+        current_timestamp_utc='2026-07-28T09:30:00+00:00',
+        platform_bot_id='platform-bot',
+        active_turn_conversation_row_ids=[],
+    )
+
+    assert [row['event_id'] for row in result['episode_state']['events']] == [
+        'fresh_event'
+    ]
+    assert [
+        row['event_id']
+        for row in result['conversation_progress']['events']
+    ] == ['fresh_event']
+    cached = cache.get_cached_packet(
+        scope=SCOPE,
+        current_timestamp_utc='2026-07-28T09:30:00+00:00',
+    )
+    assert [row['event_id'] for row in cached['events']] == ['fresh_event']
+    persist_write.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_record_persists_pruned_prior_packet_form(monkeypatch):
+    """The next recorded turn persists the read-path pruned packet form."""
+
+    aged = packet(turn_count=3, events=[
+        event(
+            event_id='aged_background',
+            retention='background',
+        ),
+        event(
+            event_id='surviving_event',
+            retention='active_scene',
+        ),
+    ])
+    aged['events'][0]['updated_at'] = '2026-07-27T09:00:00+00:00'
+    pruned, dropped_count, _ = prune_aged_progress_packet(
+        aged,
+        current_timestamp_utc='2026-07-28T09:30:00+00:00',
+    )
+    assert dropped_count == 1
+    invocation = RecorderInvocationResult(
+        delta=recorder_delta(event_updates=[
+            event_update(event_id='surviving_event')
+        ]),
+        recorder_call_count=2,
+        event_attempt_count=1,
+        scene_attempt_count=1,
+        event_disposition='accepted',
+        scene_disposition='accepted',
+        event_human_payload_chars=800,
+        scene_human_payload_chars=400,
+        provider_usage={},
+    )
+    monkeypatch.setattr(
+        runtime,
+        'load_referenced_blocks',
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        runtime,
+        'record_with_llm',
+        AsyncMock(return_value=invocation),
+    )
+    persistence = AsyncMock(return_value=ProgressWriteResult(
+        written=True,
+        block_inserted=False,
+        disposition='written',
+    ))
+    monkeypatch.setattr(runtime, 'persist_progress_write', persistence)
+
+    result = await runtime.ConversationProgressRuntime().record(
+        record_input=record_input(prior_packet=pruned),
+    )
+
+    assert result['written'] is True
+    prepared = persistence.await_args.args[0]
+    assert [row['event_id'] for row in prepared.packet['events']] == [
+        'surviving_event'
+    ]
 
 
 @pytest.mark.asyncio

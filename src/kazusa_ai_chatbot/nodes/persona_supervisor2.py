@@ -27,6 +27,7 @@ from kazusa_ai_chatbot.config import (
 )
 from kazusa_ai_chatbot.conversation_progress import (
     build_group_scene_context,
+    filter_group_scene_ambient_turns,
     logical_turns_as_history_rows,
     project_group_scene_prompt,
 )
@@ -720,6 +721,11 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
     """
 
     ambient_logical_turns = state['ambient_logical_turns']
+    if state['channel_type'] == 'group':
+        ambient_logical_turns = filter_group_scene_ambient_turns(
+            ambient_logical_turns=ambient_logical_turns,
+            trigger_occurred_at=state['storage_timestamp_utc'],
+        )
     interaction_logical_turns = state['interaction_logical_turns']
     ambient_history = logical_turns_as_history_rows(
         ambient_logical_turns

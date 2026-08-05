@@ -27,6 +27,9 @@ from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     build_acquaintance_user_state,
     build_character_production_state,
 )
+from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
+    project_duration,
+)
 from kazusa_ai_chatbot.time_boundary import local_time_context_from_storage_utc
 
 
@@ -267,7 +270,10 @@ def _build_benchmark_payload(case: dict[str, str]) -> dict[str, object]:
             "semantic_scene": semantic_text,
             "public_group_scene": "",
             "conversation_continuity": "",
-            "semantic_temporal_context": "immediate",
+            "semantic_temporal_context": project_duration(
+                occurred_at,
+                occurred_at,
+            ),
         },
     }
 

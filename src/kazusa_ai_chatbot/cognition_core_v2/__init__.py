@@ -15,6 +15,10 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     VisualSurfaceServicesV2,
 )
 from kazusa_ai_chatbot.cognition_core_v2.facade import run_cognition
+from kazusa_ai_chatbot.cognition_core_v2.morning_refresh import (
+    CharacterMorningRefreshResultV2,
+    run_character_morning_refresh,
+)
 from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
     V2_APPRAISAL_TOTAL_ATTEMPTS,
     V2_MODEL_OWNER_POLICIES,
@@ -40,6 +44,7 @@ __all__ = [
     "CognitionCoreServicesV2",
     "CognitionContextLimitError",
     "CognitionContractError",
+    "CharacterMorningRefreshResultV2",
     "CognitionExecutionError",
     "CognitionStateError",
     "DeliveryProfileV2",
@@ -58,6 +63,7 @@ __all__ = [
     "build_acquaintance_user_state",
     "build_character_production_state",
     "prune_terminal_entities",
+    "run_character_morning_refresh",
     "resolve_state_scope",
     "run_cognition",
     "run_text_surface_planning",

@@ -85,6 +85,61 @@ def test_sleep_recovery_changes_transient_state_only():
     assert recovered["updated_at"] == "2026-07-14T08:00:01Z"
 
 
+def test_sleep_recovery_routes_through_cognition_v2_entrypoint(monkeypatch):
+    """The adapter calls the v2 entrypoint and audits its returned summary."""
+
+    state = build_character_production_state(
+        updated_at="2026-07-14T00:00:00Z",
+    )
+    calls: dict[str, object] = {}
+
+    def fake_refresh(
+        state_value,
+        *,
+        elapsed_sleep_seconds,
+        updated_at,
+    ):
+        del state_value
+        calls["elapsed_sleep_seconds"] = elapsed_sleep_seconds
+        calls["updated_at"] = updated_at
+        return {
+            "schema_version": "character_morning_refresh_result.v2",
+            "recovered_state": dict(state),
+            "applied_elapsed_sleep_seconds": elapsed_sleep_seconds,
+            "reduced_drive_count": 8,
+            "settled_entity_count": 1,
+            "retained_activation_count": 2,
+            "removed_activation_count": 1,
+        }
+
+    monkeypatch.setattr(
+        affect_settling,
+        "run_character_morning_refresh",
+        fake_refresh,
+    )
+
+    recovered, artifact = affect_settling.sleep_recovery(
+        state,
+        local_date_key="2026-07-14",
+        elapsed_sleep_seconds=7200,
+        started_at="2026-07-14T08:00:00Z",
+        completed_at="2026-07-14T08:00:01Z",
+    )
+
+    assert calls == {
+        "elapsed_sleep_seconds": 7200,
+        "updated_at": "2026-07-14T08:00:01Z",
+    }
+    assert artifact["elapsed_sleep_seconds"] == 7200
+    assert artifact["transition_counts"] == {
+        "reduced_drive_count": 8,
+        "settled_entity_count": 1,
+        "retained_activation_count": 2,
+        "removed_activation_count": 1,
+    }
+    assert recovered == state
+
+
 @pytest.mark.asyncio
 async def test_daily_sleep_recovery_persists_once_without_llm(monkeypatch):
     state = build_character_production_state(

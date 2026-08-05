@@ -420,6 +420,75 @@ def one_second_before_storage_utc_iso(timestamp_utc: str) -> str:
     return previous_timestamp_utc
 
 
+def local_period_bounds(local_period: str) -> tuple[int, int]:
+    """Parse exact ``HH:MM-HH:MM`` text into local minutes after midnight.
+
+    Args:
+        local_period: Exact ``HH:MM-HH:MM`` text with distinct bounds.
+
+    Returns:
+        ``(start_minutes, end_minutes)`` after local midnight.
+
+    Raises:
+        ValueError: If the text is not exact ``HH:MM-HH:MM`` or the bounds
+            are equal.
+    """
+
+    parts = local_period.split("-", maxsplit=1)
+    if len(parts) != 2:
+        raise ValueError("sleep period must use HH:MM-HH:MM")
+
+    start_minutes = _local_clock_minutes(parts[0])
+    end_minutes = _local_clock_minutes(parts[1])
+    if start_minutes == end_minutes:
+        raise ValueError("sleep period start and end must differ")
+
+    bounds = (start_minutes, end_minutes)
+    return bounds
+
+
+def local_minutes_in_zone(now: datetime, *, time_zone: str) -> int:
+    """Project one timezone-aware instant into local minutes after midnight.
+
+    Args:
+        now: Timezone-aware instant to project.
+        time_zone: IANA timezone name used for the local projection.
+
+    Returns:
+        Minutes after local midnight for ``now`` in ``time_zone``.
+
+    Raises:
+        ValueError: If ``now`` is timezone-naive.
+    """
+
+    if now.tzinfo is None or now.utcoffset() is None:
+        raise ValueError("now must be timezone-aware")
+
+    local_timezone = ZoneInfo(time_zone)
+    local_now = now.astimezone(local_timezone)
+    minutes = (local_now.hour * 60) + local_now.minute
+    return minutes
+
+
+def _local_clock_minutes(value: str) -> int:
+    """Parse exact ``HH:MM`` text into minutes after local midnight."""
+
+    if len(value) != 5 or value[2] != ":":
+        raise ValueError("sleep period must use HH:MM-HH:MM")
+    hour_text = value[:2]
+    minute_text = value[3:]
+    if not hour_text.isdecimal() or not minute_text.isdecimal():
+        raise ValueError("sleep period must use HH:MM-HH:MM")
+
+    hour = int(hour_text)
+    minute = int(minute_text)
+    if hour > 23 or minute > 59:
+        raise ValueError("sleep period must use HH:MM-HH:MM")
+
+    minutes = (hour * 60) + minute
+    return minutes
+
+
 def _stripped_string(value: str, label: str) -> str:
     """Validate and strip public string input."""
 

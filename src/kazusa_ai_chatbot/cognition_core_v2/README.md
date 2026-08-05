@@ -393,6 +393,7 @@ execution, dialog wording, and adapter delivery remain downstream owners.
 - `run_text_surface_planning(...)`
 - `repair_text_surface_planning(...)`
 - `run_visual_surface_planning(...)`
+- `run_character_morning_refresh(...)`
 - `validate_cognition_input(...)`
 - `validate_cognition_core_output(...)`
 
@@ -417,6 +418,55 @@ the source of the graph-owned `cognition_context_consumption.v1` record. That
 record is observability only: it uses bounded public selections, digests, and
 typed health; it does not alter cognition semantics or introduce a second
 state authority.
+
+## Context Fade And Sleep Phase
+
+Aged conversational context is discarded deterministically before projection;
+it is never presented to a model together with an instruction to discount it.
+Group-scene ambient turns older than `GROUP_SCENE_MAX_TURN_AGE_MINUTES`
+(default 120 minutes) relative to the trigger are dropped inside
+`filter_group_scene_ambient_turns`, which is shared by
+`build_group_scene_context` and the persona Stage 0 decontextualizer; the
+filtered sequence also supplies group scope participants. The trigger is never
+filtered and `omitted_turn_count` counts only count-based truncation.
+Conversation-progress events older than their retention-tier threshold are
+dropped on the read path
+by `conversation_progress.policy.prune_aged_progress_packet` immediately after
+packet selection, using `CONVERSATION_PROGRESS_BACKGROUND_MAX_AGE_MINUTES`
+(120), `CONVERSATION_PROGRESS_ACTIVE_SCENE_MAX_AGE_MINUTES` (360), and
+`CONVERSATION_PROGRESS_DECISION_CRITICAL_MAX_AGE_MINUTES` (2880). When no
+event survives, or the newest surviving event is older than
+`CONVERSATION_PROGRESS_NARRATIVE_MAX_AGE_MINUTES` (360), the complete
+narrative field set is cleared to its canonical empty shape. Pruning issues no
+database write; the next recorded turn persists the pruned form.
+
+Progress evidence rows carry each originating event's own `updated_at` as
+`evidence_ref.occurred_at`, normalized to the V2 UTC-Z second-truncated
+format, and `scene_context.semantic_temporal_context` is derived from the
+newest surviving event age using the `project_duration` vocabulary rather than
+a hardcoded literal.
+
+`scene_context.character_sleep_phase` is an optional validated field produced
+by `project_character_sleep_phase(now, *, sleep_local_period,
+character_time_zone, wake_prep_minutes)`. The vocabulary is frozen and
+deterministic: `清醒时段` outside the window, `睡眠中` inside the window, and
+`即将醒来` inside the final `wake_prep_minutes` before the exclusive window
+end. The two in-window labels cover exactly the half-open local window that
+`is_self_cognition_sleep_period` reports, including midnight wrap; an empty
+period is outside. The field reaches goal cognition only and never appraisal,
+surface, `CharacterOperationalContextV1`, or `TextSurfaceInputV2`.
+
+## Morning Refresh
+
+`run_character_morning_refresh(state, *, elapsed_sleep_seconds, updated_at)`
+is the public deterministic character morning-refresh transition. It owns the
+character-scope guard, the `apply_sleep_recovery` reducer call, and
+`validate_cognition_state` on its output, and returns
+`CharacterMorningRefreshResultV2` with the recovered state, the applied
+elapsed seconds, and bounded deterministic transition counts. It knows nothing
+about local dates, run identifiers, or persistence.
+`reflection_cycle.affect_settling` calls this entrypoint and keeps scheduling,
+idempotency, the guarded write, the refresh callback, and the audit row.
 
 ## Failure Behavior
 

@@ -9,9 +9,14 @@ from dataclasses import dataclass, field
 from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfoNotFoundError
 
 from kazusa_ai_chatbot.cognition_core_v2.state_reducers import (
     apply_character_elapsed_decay,
+)
+from kazusa_ai_chatbot.time_boundary import (
+    local_minutes_in_zone,
+    local_period_bounds,
 )
 
 
@@ -61,6 +66,11 @@ MAX_RELATIONSHIP_CAUSAL_ROWS = 2
 MAX_RELATIONSHIP_AFFECT_ROWS = 2
 MAX_RELATIONSHIP_CAUSAL_SUMMARY_CHARS = 160
 OPERATIONAL_PRESSURE_THRESHOLD = 40
+MINUTES_PER_DAY = 24 * 60
+
+CHARACTER_SLEEP_PHASE_OUTSIDE = "清醒时段"
+CHARACTER_SLEEP_PHASE_IN_WINDOW = "睡眠中"
+CHARACTER_SLEEP_PHASE_WAKE_PREP = "即将醒来"
 
 _CHARACTER_OPERATIONAL_CONSUMER_ROLES = frozenset({
     "settled_relevance",
@@ -355,6 +365,88 @@ def project_duration(started_at: str, now: str) -> str:
     if seconds < 7 * 24 * 3600:
         return "最近几天内"
     return "较久以前"
+
+
+def project_character_sleep_phase(
+    now: datetime,
+    *,
+    sleep_local_period: str,
+    character_time_zone: str,
+    wake_prep_minutes: int,
+) -> str:
+    """Translate the configured sleep window into a frozen phase label.
+
+    The window is the same half-open local period that
+    ``is_self_cognition_sleep_period`` reports: inclusive start, exclusive
+    end, with overnight windows wrapping past midnight. The two in-window
+    labels partition that window, with the wake-prep label covering the final
+    ``wake_prep_minutes`` before the exclusive end. An empty
+    ``sleep_local_period`` disables the window and returns the outside label.
+
+    Args:
+        now: Timezone-aware instant to project.
+        sleep_local_period: Exact ``HH:MM-HH:MM`` local period or empty text.
+        character_time_zone: IANA timezone used for the local projection.
+        wake_prep_minutes: Positive minutes before the window end covered by
+            the wake-prep label.
+
+    Returns:
+        One frozen label: ``CHARACTER_SLEEP_PHASE_OUTSIDE``,
+        ``CHARACTER_SLEEP_PHASE_IN_WINDOW``, or
+        ``CHARACTER_SLEEP_PHASE_WAKE_PREP``.
+
+    Raises:
+        ValueError: If ``now`` is timezone-naive, the period or timezone is
+            invalid, or ``wake_prep_minutes`` is not a positive integer.
+    """
+
+    if now.tzinfo is None or now.utcoffset() is None:
+        raise ValueError("now must be timezone-aware")
+    if not isinstance(sleep_local_period, str):
+        raise ValueError("sleep_local_period must be a string")
+    if (
+        isinstance(wake_prep_minutes, bool)
+        or not isinstance(wake_prep_minutes, int)
+        or wake_prep_minutes < 1
+    ):
+        raise ValueError("wake_prep_minutes must be a positive integer")
+
+    clean_period = sleep_local_period.strip()
+    if not clean_period:
+        return CHARACTER_SLEEP_PHASE_OUTSIDE
+
+    try:
+        start_minutes, end_minutes = local_period_bounds(clean_period)
+        current_minutes = local_minutes_in_zone(
+            now,
+            time_zone=character_time_zone,
+        )
+    except (TypeError, ZoneInfoNotFoundError) as exc:
+        raise ValueError(
+            f"invalid character time zone: {character_time_zone!r}"
+        ) from exc
+
+    if start_minutes < end_minutes:
+        in_window = start_minutes <= current_minutes < end_minutes
+        end_minutes_in_day = end_minutes
+        projected_minutes = current_minutes
+    else:
+        in_window = (
+            current_minutes >= start_minutes
+            or current_minutes < end_minutes
+        )
+        end_minutes_in_day = end_minutes + MINUTES_PER_DAY
+        projected_minutes = (
+            current_minutes + MINUTES_PER_DAY
+            if current_minutes < start_minutes
+            else current_minutes
+        )
+
+    if not in_window:
+        return CHARACTER_SLEEP_PHASE_OUTSIDE
+    if projected_minutes >= end_minutes_in_day - wake_prep_minutes:
+        return CHARACTER_SLEEP_PHASE_WAKE_PREP
+    return CHARACTER_SLEEP_PHASE_IN_WINDOW
 
 
 def project_relationship_context(

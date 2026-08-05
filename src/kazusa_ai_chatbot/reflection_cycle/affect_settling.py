@@ -10,9 +10,7 @@ from typing import Any
 
 from kazusa_ai_chatbot import db
 from kazusa_ai_chatbot import event_logging
-from kazusa_ai_chatbot.cognition_core_v2.state_reducers import (
-    apply_sleep_recovery as apply_sleep_recovery_state,
-)
+from kazusa_ai_chatbot.cognition_core_v2 import run_character_morning_refresh
 from kazusa_ai_chatbot.config import (
     AFFECT_SETTLING_WAKE_PREP_MINUTES,
     CHARACTER_SLEEP_LOCAL_PERIOD,
@@ -229,17 +227,30 @@ def sleep_recovery(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Apply deterministic character recovery and build its audit artifact."""
 
-    recovered_state = apply_sleep_recovery_state(
+    refresh_result = run_character_morning_refresh(
         state,
         elapsed_sleep_seconds=elapsed_sleep_seconds,
         updated_at=completed_at,
     )
+    recovered_state = refresh_result["recovered_state"]
     changed_paths = _changed_state_paths(state, recovered_state)
     artifact = {
         "status": "completed",
         "local_date_key": local_date_key,
         "state_scope": "character",
-        "elapsed_sleep_seconds": elapsed_sleep_seconds,
+        "elapsed_sleep_seconds": (
+            refresh_result["applied_elapsed_sleep_seconds"]
+        ),
+        "transition_counts": {
+            "reduced_drive_count": refresh_result["reduced_drive_count"],
+            "settled_entity_count": refresh_result["settled_entity_count"],
+            "retained_activation_count": (
+                refresh_result["retained_activation_count"]
+            ),
+            "removed_activation_count": (
+                refresh_result["removed_activation_count"]
+            ),
+        },
         "changed_paths": changed_paths,
         "semantic_recovery_summary": _recovery_summary(
             state,

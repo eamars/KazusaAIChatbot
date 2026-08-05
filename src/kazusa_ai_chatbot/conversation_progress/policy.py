@@ -3,11 +3,20 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from datetime import datetime, timedelta
 from typing import Mapping
 
+from kazusa_ai_chatbot.config import (
+    CONVERSATION_PROGRESS_ACTIVE_SCENE_MAX_AGE_MINUTES,
+    CONVERSATION_PROGRESS_BACKGROUND_MAX_AGE_MINUTES,
+    CONVERSATION_PROGRESS_DECISION_CRITICAL_MAX_AGE_MINUTES,
+    CONVERSATION_PROGRESS_NARRATIVE_MAX_AGE_MINUTES,
+    GROUP_SCENE_MAX_TURN_AGE_MINUTES,
+)
 from kazusa_ai_chatbot.conversation_progress.models import (
     ConversationProgressPromptV2,
+    ConversationProgressStateV2,
 )
 from kazusa_ai_chatbot.time_boundary import parse_storage_utc_datetime
 
@@ -17,6 +26,22 @@ BLOCK_VECTOR_INDEX_NAME = 'conversation_episode_blocks_vector_index'
 
 EPISODE_TTL = timedelta(hours=48)
 CACHE_TTL_SECONDS = 60 * 60
+
+_NARRATIVE_FIELDS = (
+    'current_thread',
+    'character_stance',
+    'user_goal',
+    'current_blocker',
+    'emotional_trajectory',
+    'episode_narrative',
+)
+_RETENTION_MAX_AGE_MINUTES = {
+    'background': CONVERSATION_PROGRESS_BACKGROUND_MAX_AGE_MINUTES,
+    'active_scene': CONVERSATION_PROGRESS_ACTIVE_SCENE_MAX_AGE_MINUTES,
+    'decision_critical': (
+        CONVERSATION_PROGRESS_DECISION_CRITICAL_MAX_AGE_MINUTES
+    ),
+}
 
 AMBIENT_ROW_SCAN_LIMIT = 48
 INTERACTION_ROW_SCAN_LIMIT = 128
@@ -114,6 +139,69 @@ def storage_expiry(
     current = parse_storage_utc_datetime(storage_timestamp_utc)
     purge_after = current + EPISODE_TTL
     return purge_after.isoformat(), purge_after
+
+
+def prune_aged_progress_packet(
+    packet: ConversationProgressStateV2,
+    *,
+    current_timestamp_utc: str,
+) -> tuple[ConversationProgressStateV2, int, bool]:
+    """Drop aged events and clear a stale narrative before projection.
+
+    Age is measured from each event's ``updated_at`` against the current
+    storage instant using the retention-tier thresholds. When no event
+    survives, or the newest surviving event is older than the narrative
+    threshold, the complete narrative field set is cleared to its canonical
+    empty shape. The returned packet preserves every other stored field and
+    remains valid for ``validate_active_packet``; no database write occurs.
+
+    Args:
+        packet: Active packet selected for one read.
+        current_timestamp_utc: Current storage UTC instant.
+
+    Returns:
+        The pruned packet, the number of dropped events, and whether the
+        narrative field set was cleared.
+    """
+
+    current_time = parse_storage_utc_datetime(current_timestamp_utc)
+    pruned_packet = deepcopy(dict(packet))
+    retained_events = []
+    dropped_count = 0
+    for event in pruned_packet['events']:
+        event_time = parse_storage_utc_datetime(event['updated_at'])
+        maximum_age = timedelta(
+            minutes=_RETENTION_MAX_AGE_MINUTES[event['retention']]
+        )
+        if current_time - event_time > maximum_age:
+            dropped_count += 1
+            continue
+        retained_events.append(event)
+    pruned_packet['events'] = retained_events
+
+    newest_event_time = max(
+        (
+            parse_storage_utc_datetime(event['updated_at'])
+            for event in retained_events
+        ),
+        default=None,
+    )
+    narrative_cleared = False
+    if newest_event_time is None:
+        narrative_cleared = True
+    else:
+        narrative_limit = timedelta(
+            minutes=CONVERSATION_PROGRESS_NARRATIVE_MAX_AGE_MINUTES
+        )
+        narrative_cleared = (
+            current_time - newest_event_time > narrative_limit
+        )
+    if narrative_cleared:
+        for field_name in _NARRATIVE_FIELDS:
+            pruned_packet[field_name] = ''
+        pruned_packet['overused_moves'] = []
+
+    return pruned_packet, dropped_count, narrative_cleared
 
 
 def is_unexpired_storage_timestamp(

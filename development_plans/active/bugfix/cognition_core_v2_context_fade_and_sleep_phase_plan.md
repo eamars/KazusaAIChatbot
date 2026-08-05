@@ -5,7 +5,7 @@
 - Goal: make group-scene and conversation-progress context fade by elapsed time
   through deterministic discard before projection, and make the character sleep
   phase and morning refresh first-class cognition v2 concerns.
-- Status: draft
+- Status: in_progress
 - Scope boundary: `cognition_core_v2` owns the sleep-phase descriptor and the
   morning-refresh transition; `conversation_progress` owns age-based discard of
   its own turns, events, and narrative; `time_boundary` owns shared local-clock
@@ -446,6 +446,8 @@ re-homed.
   thresholds; add `prune_aged_progress_packet`.
 - `src/kazusa_ai_chatbot/conversation_progress/projection.py` — group-scene age
   filter; event-own `occurred_at` in progress evidence.
+- `src/kazusa_ai_chatbot/conversation_progress/__init__.py` — export the shared
+  group-scene ambient-turn filter used by the persona stage.
 - `src/kazusa_ai_chatbot/conversation_progress/runtime.py` — call the prune
   after packet selection in `load`.
 - `src/kazusa_ai_chatbot/self_cognition/sleep_period.py` — use the shared
@@ -462,11 +464,17 @@ re-homed.
   morning-refresh entrypoint and its result type.
 - `src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition.py` — derive
   `semantic_temporal_context`; populate `character_sleep_phase`.
+- `src/kazusa_ai_chatbot/nodes/persona_supervisor2.py` — apply the shared
+  age-filtered ambient sequence before group scope and Stage 0 prompt
+  construction.
 - `src/kazusa_ai_chatbot/reflection_cycle/affect_settling.py` — call the v2
   entrypoint instead of importing the reducer.
 - `src/kazusa_ai_chatbot/cognition_core_v2/README.md` and `docs/HOWTO.md` —
   document the thresholds, the discard contract, the sleep-phase field, and the
   morning-refresh entrypoint.
+- `tests/test_conversation_progress_v2_live_llm.py` — add individually-run
+  live acceptance cases for stale group ambient turns and stale private
+  progress events.
 
 ### Create
 
@@ -612,23 +620,23 @@ Record the checks actually run, their results, and any residual risk.
 
 ## Progress Checklist
 
-- [ ] Thresholds and shared clock helpers added; `self_cognition` parsers
+- [x] Thresholds and shared clock helpers added; `self_cognition` parsers
   removed with its five tests passing unchanged in intent.
-- [ ] `prune_aged_progress_packet` implemented and wired into
+- [x] `prune_aged_progress_packet` implemented and wired into
   `ConversationProgressRuntime.load`; packet validity and tier boundaries
   covered.
-- [ ] Group-scene age filter implemented; trigger retention and
+- [x] Group-scene age filter implemented; trigger retention and
   `omitted_turn_count` covered.
-- [ ] Progress evidence `occurred_at` and derived
+- [x] Progress evidence `occurred_at` and derived
   `semantic_temporal_context` implemented; relationship freshness impact
   checked.
-- [ ] Sleep-phase projector and `scene_context` field implemented and reaching
+- [x] Sleep-phase projector and `scene_context` field implemented and reaching
   goal cognition.
-- [ ] Morning-refresh entrypoint implemented, exported, and consumed by
+- [x] Morning-refresh entrypoint implemented, exported, and consumed by
   `reflection_cycle`; reducer parameters removed.
-- [ ] Documentation updated.
+- [x] Documentation updated.
 - [ ] Regression radius and static checks pass; live cases inspected.
-- [ ] Independent code review complete and findings resolved.
+- [x] Independent code review complete and findings resolved.
 
 Each item records its changed surface, verification result, and any deviation
 in `Execution Evidence` before it is marked complete.
@@ -654,20 +662,93 @@ amendment.
 
 Populate during execution. Do not pre-fill.
 
-- Pre-change baseline and git state:
+- Pre-change baseline and git state: `git status --short` was clean before
+  delegation. After the explicit user execution command, the parent moved this
+  plan and its registry row from `draft` to `in_progress`. DeepSeek completed
+  the acknowledgement turn and began the bounded implementation turn with the
+  explicit owned-file list; its 600-second hard deadline expired, so the parent
+  interrupted the handoff, preserved the workspace patch, and completed the
+  review locally.
 - Threshold and clock-helper relocation result, including sleep-period gate:
-- Progress prune result, tier boundaries, packet validity:
-- Group-scene filter result:
-- Evidence provenance and temporal-context result, relationship freshness check:
-- Sleep-phase projector and scene-field result:
-- Morning-refresh entrypoint result and output validation:
-- Persistence check result:
-- Regression and static-check results:
-- Live case artifacts and judgment:
+  the five configured thresholds and `time_boundary` helpers are present;
+  `tests/test_self_cognition_sleep_period.py` passed all five cases, and the
+  new sleep-phase/shared-clock coverage passed.
+- Progress prune result, tier boundaries, packet validity: all retention-tier
+  boundary, stale-narrative, non-clearing, validation, and read-path tests
+  passed. `tests/test_conversation_progress_v2_contract.py`,
+  `tests/test_conversation_progress_runtime.py`, and
+  `tests/test_conversation_progress_compaction.py` passed 41 tests together.
+- Group-scene filter result: the age boundary, trigger retention, and
+  age-excluded `omitted_turn_count` tests passed; the complete non-live
+  conversation-progress suite passed 171 tests.
+- Evidence provenance and temporal-context result, relationship freshness
+  check: event-owned UTC-Z timestamps and newest-survivor duration projection
+  passed the cognition connector/evidence checks. The cognition V2
+  deterministic suite passed 458 tests, with four explicitly excluded live or
+  benchmark files.
+- Sleep-phase projector and scene-field result: same-day, overnight, empty,
+  invalid-input, shared-clock, and self-cognition-union cases passed. The
+  optional contract validates backward-compatible inputs, and the connector
+  test confirms the field reaches goal cognition.
+- Morning-refresh entrypoint result and output validation: the public export,
+  character-scope guard, reducer signature, state-output validation, bounded
+  transition counts, and reflection adapter route passed 40 focused tests.
+- Persistence check result: read-path pruning performed no database write in
+  the runtime tests, and the next recorded turn persisted the pruned packet.
+- Regression and static-check results: the complete non-live reflection suite
+  passed 167 tests; the prompt-budget checks passed 44 tests; all changed
+  27 Python files, including the two new files, compiled under
+  `venv\Scripts\python`. Production search found
+  no remaining hardcoded `"semantic_temporal_context": "immediate"`, no
+  direct reducer import outside `cognition_core_v2`, and no private clock
+  parser in `self_cognition/sleep_period.py`. Repository-wide default
+  collection remains blocked by the pre-existing missing
+  `test_artifacts/diagnostics/asuna_identity_growth_replay_v1.json` artifact.
+  The non-live self-cognition suite has one unrelated baseline failure in
+  `test_self_cognition_group_review_participant_context.py`; the existing
+  `test_cognition_core_v2_live_character_judgment.py` suite also has one
+  unchanged prompt-expectation failure outside this plan's modified surface.
+- Live case artifacts and judgment: the group case passed individually and
+  wrote
+  `test_artifacts/llm_traces/test_live_interleaved_group_multifragment_continuation__group_multifragment__20260805T095421231240Z.json`;
+  its trace showed two accepted recorder calls, eight participant turns, the
+  unrelated source excluded, and coherent downstream output. The private
+  long-thread case was run individually and wrote
+  `test_artifacts/llm_traces/test_live_asuna_houjing_long_thread_regression__asuna_houjing_cognition_semantic_failure__20260805T095603271546Z.json`;
+  its contract reached both relevant events, but the model-selected bid
+  omitted the completed event and repeated its completed location. This is
+  recorded as a semantic-quality residual for follow-up.
 - Known asymmetries recorded for a future decision: morning refresh is
   character-scope only, so user-scope affect receives no nightly relief; and
   `elapsed_sleep_seconds` is the configured window length rather than real
   elapsed time.
-- Review findings, fixes, verification rerun:
-- Residual risk:
-- Final diff summary and sign-off:
+- Review findings, fixes, verification rerun: parent review replaced string
+  timestamp ordering with parsed-instant ordering, normalized invalid timezone
+  errors to `ValueError`, removed the remaining production temporal literal in
+  the validation CLI, and made the morning-refresh scope guard explicit. The
+  affected focused suites and compilation checks passed after each fix. The
+  live group fixture also received its missing required `public_group_scene`
+  field so the prescribed case could reach the changed builder.
+- Default-agent independent review and follow-up: the reviewer identified a
+  stale group ambient sequence still reaching Stage 0, temporal context being
+  derived from the capped prompt subset, and non-integer morning-refresh input
+  being accepted. A shared parsed-time group filter now feeds scope, scene,
+  and Stage 0; temporal context now reads the full pruned episode packet; and
+  morning refresh rejects booleans and non-integers. The reviewer also required
+  stale-data live acceptance coverage. The new group and private cases passed
+  individually, and their durable traces were inspected; the focused
+  deterministic suite passed 31 tests, the conversation/cognition batch
+  passed 632 tests, the persona/cognition integration batch passed 58 tests,
+  and the reflection/self-cognition batch passed 54 tests.
+- Residual risk: deterministic contract implementation is complete, but plan
+  status remains `in_progress` because the private live semantic gate failed,
+  repository-wide collection lacks the unrelated replay artifact, and two
+  unrelated baseline prompt/context tests remain red. No production prompt
+  rewrite or mechanical semantic override was added for those failures.
+- Final diff summary and sign-off: thresholds, lazy progress pruning,
+  group-scene age filtering, event timestamp provenance, derived temporal
+  context, shared clock helpers, cognition-owned sleep phase, validated
+  morning refresh, reflection routing, documentation, and focused tests are
+  implemented. Parent sign-off covers the deterministic contract surface;
+  lifecycle closeout awaits disposition of the recorded live and unrelated
+  baseline residuals.

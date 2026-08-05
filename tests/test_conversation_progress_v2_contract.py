@@ -15,6 +15,11 @@ from kazusa_ai_chatbot.conversation_progress.delta_merge import (
     validate_scene_observation,
 )
 from kazusa_ai_chatbot.conversation_progress.policy import (
+    CONVERSATION_PROGRESS_ACTIVE_SCENE_MAX_AGE_MINUTES,
+    CONVERSATION_PROGRESS_BACKGROUND_MAX_AGE_MINUTES,
+    CONVERSATION_PROGRESS_DECISION_CRITICAL_MAX_AGE_MINUTES,
+    CONVERSATION_PROGRESS_NARRATIVE_MAX_AGE_MINUTES,
+    GROUP_SCENE_MAX_TURN_AGE_MINUTES,
     MAX_ACTIVE_BLOCK_REFS,
     MAX_ACTIVE_EVENTS,
     MAX_ACTIVE_PACKET_CHARS,
@@ -23,6 +28,7 @@ from kazusa_ai_chatbot.conversation_progress.policy import (
     MAX_RECENT_TURN_REFS,
     MAX_REACHABLE_BLOCK_REFS,
     MAX_THREAD_FIELD_CHARS,
+    prune_aged_progress_packet,
 )
 from kazusa_ai_chatbot.conversation_progress.repository import (
     validate_active_packet,
@@ -42,6 +48,11 @@ from tests.conversation_progress_v2_helpers import (
 def test_approved_policy_constants_are_exact() -> None:
     """Keep all deterministic capacity limits at their approved values."""
 
+    assert GROUP_SCENE_MAX_TURN_AGE_MINUTES == 120
+    assert CONVERSATION_PROGRESS_BACKGROUND_MAX_AGE_MINUTES == 120
+    assert CONVERSATION_PROGRESS_ACTIVE_SCENE_MAX_AGE_MINUTES == 360
+    assert CONVERSATION_PROGRESS_DECISION_CRITICAL_MAX_AGE_MINUTES == 2880
+    assert CONVERSATION_PROGRESS_NARRATIVE_MAX_AGE_MINUTES == 360
     assert MAX_EPISODE_NARRATIVE_CHARS == 900
     assert MAX_THREAD_FIELD_CHARS == 240
     assert MAX_ACTIVE_EVENTS == 24
@@ -58,6 +69,138 @@ def test_exact_v2_packet_with_bson_expiry_is_accepted() -> None:
     validated = validate_active_packet(packet(events=[event()]))
 
     assert validated['schema_version'] == 'conversation_progress.v2'
+
+
+def test_prune_drops_events_at_each_retention_tier_boundary() -> None:
+    """Drop an event only when its age exceeds its retention-tier threshold."""
+
+    boundaries = (
+        (
+            'background',
+            '2026-07-28T07:30:00+00:00',
+            '2026-07-28T07:29:59+00:00',
+        ),
+        (
+            'active_scene',
+            '2026-07-28T03:30:00+00:00',
+            '2026-07-28T03:29:59+00:00',
+        ),
+        (
+            'decision_critical',
+            '2026-07-26T09:30:00+00:00',
+            '2026-07-26T09:29:59+00:00',
+        ),
+    )
+    for retention, at_limit_timestamp, beyond_limit_timestamp in boundaries:
+        at_limit = packet(events=[event(
+            event_id=f'{retention}_at_limit',
+            retention=retention,
+        )])
+        at_limit['events'][0]['updated_at'] = at_limit_timestamp
+        pruned, dropped_count, narrative_cleared = prune_aged_progress_packet(
+            at_limit,
+            current_timestamp_utc='2026-07-28T09:30:00+00:00',
+        )
+        assert dropped_count == 0
+        assert narrative_cleared is (retention == 'decision_critical')
+        assert len(pruned['events']) == 1
+
+        beyond_limit = packet(events=[event(
+            event_id=f'{retention}_beyond_limit',
+            retention=retention,
+        )])
+        beyond_limit['events'][0]['updated_at'] = beyond_limit_timestamp
+        pruned, dropped_count, _ = prune_aged_progress_packet(
+            beyond_limit,
+            current_timestamp_utc='2026-07-28T09:30:00+00:00',
+        )
+        assert dropped_count == 1
+        assert pruned['events'] == []
+
+
+def test_prune_clears_narrative_when_newest_event_is_stale() -> None:
+    """Clear the complete narrative set when the newest survivor is stale."""
+
+    stale = packet(events=[event(
+        event_id='stale_scene_event',
+        retention='decision_critical',
+    )])
+    stale['events'][0]['updated_at'] = '2026-07-27T00:00:00+00:00'
+
+    pruned, dropped_count, narrative_cleared = prune_aged_progress_packet(
+        stale,
+        current_timestamp_utc='2026-07-28T09:30:00+00:00',
+    )
+
+    assert dropped_count == 0
+    assert narrative_cleared is True
+    for field_name in (
+        'current_thread',
+        'character_stance',
+        'user_goal',
+        'current_blocker',
+        'emotional_trajectory',
+        'episode_narrative',
+    ):
+        assert pruned[field_name] == ''
+    assert pruned['overused_moves'] == []
+
+
+def test_prune_preserves_fresh_narrative_and_other_packet_fields() -> None:
+    """Keep narrative intact while preserving every non-event field."""
+
+    fresh = packet(
+        turn_count=4,
+        events=[event(
+            event_id='fresh_event',
+            retention='active_scene',
+        )],
+        recent_turn_refs=['row:row_1', 'row:row_2'],
+    )
+    fresh['current_thread'] = 'keep this thread'
+    fresh['overused_moves'] = ['repeating the same offer']
+
+    pruned, dropped_count, narrative_cleared = prune_aged_progress_packet(
+        fresh,
+        current_timestamp_utc='2026-07-28T09:30:00+00:00',
+    )
+
+    assert dropped_count == 0
+    assert narrative_cleared is False
+    assert pruned['current_thread'] == 'keep this thread'
+    assert pruned['overused_moves'] == ['repeating the same offer']
+    assert pruned['turn_count'] == 4
+    assert pruned['recent_turn_refs'] == ['row:row_1', 'row:row_2']
+    assert pruned['created_at'] == '2026-07-28T09:30:00+00:00'
+    assert pruned['updated_at'] == '2026-07-28T09:30:00+00:00'
+    assert pruned['expires_at'] == '2026-07-30T09:30:00+00:00'
+
+
+def test_pruned_packet_satisfies_active_packet_validation() -> None:
+    """A pruned packet, including an empty event list, stays valid."""
+
+    aged = packet(turn_count=3, events=[
+        event(
+            event_id='aged_background',
+            retention='background',
+        ),
+        event(
+            event_id='aged_scene',
+            retention='active_scene',
+        ),
+    ])
+    for event_row in aged['events']:
+        event_row['updated_at'] = '2026-07-20T09:30:00+00:00'
+
+    pruned, _, narrative_cleared = prune_aged_progress_packet(
+        aged,
+        current_timestamp_utc='2026-07-28T09:30:00+00:00',
+    )
+    validated = validate_active_packet(pruned)
+
+    assert narrative_cleared is True
+    assert validated['events'] == []
+    assert validated['turn_count'] == 3
 
 
 @pytest.mark.parametrize(

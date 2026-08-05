@@ -69,27 +69,33 @@ class _GoalCaptureLLM:
             'evidence_handles': ['e2'],
             'expected_consequences': ['the conversation advances'],
             'confidence': 'high',
+            'relational_willingness': {
+                'schema_version': 'relational_willingness.v2',
+                'applicability': 'not_relationship_sensitive',
+                'stance': 'not_applicable',
+                'current_user_relationship_state': 'not_applicable',
+                'reason': '普通延续请求，不涉及关系敏感判断。',
+                'evidence_handles': ['e1', 'e2'],
+            },
         }
         return SimpleNamespace(content=json.dumps(result))
 
 
-def _progress() -> dict[str, Any]:
+def _active_progress_packet() -> dict[str, Any]:
     active = packet(events=[event(
         event_id='completed_action',
         summary='the participant completed the selected action',
         state='completed',
         retention='decision_critical',
     )])
+    active['events'][0]['updated_at'] = '2026-07-14T00:00:00Z'
     active['current_thread'] = 'select a new continuation'
     active['current_blocker'] = 'avoid presenting completed work as new'
     active['overused_moves'] = ['resetting to the completed action']
     active['episode_narrative'] = (
         'The selected action is complete and a new choice is unresolved.'
     )
-    return build_progress_prompt(
-        active_packet=active,
-        interaction_logical_turns=[],
-    )
+    return active
 
 
 def _character_profile() -> dict[str, Any]:
@@ -105,7 +111,9 @@ def _character_profile() -> dict[str, Any]:
     return profile
 
 
-def _payload() -> dict[str, Any]:
+def _payload(active_packet: dict[str, Any] | None = None) -> dict[str, Any]:
+    if active_packet is None:
+        active_packet = _active_progress_packet()
     character_state = build_character_production_state(updated_at=NOW)
     return build_cognition_input_from_global_state(
         {
@@ -117,7 +125,12 @@ def _payload() -> dict[str, Any]:
             'global_user_id': 'progress-user',
             'user_input': 'What should happen next?',
             'decontextualized_input': 'The participant asks for the next step.',
-            'conversation_progress': _progress(),
+            'conversation_episode_state': active_packet,
+            'conversation_progress': build_progress_prompt(
+                active_packet=active_packet,
+                interaction_logical_turns=[],
+            ),
+            'public_group_scene': '',
             'user_multimedia_input': [],
             'rag_result': {'memory_evidence': []},
             'character_profile': _character_profile(),
@@ -153,6 +166,59 @@ def test_connector_projects_bounded_scene_without_source_ids():
     assert 'completed_action' not in scene
     assert 'row_source_1' not in scene
     assert len(scene) <= 2200
+
+
+def test_connector_derives_temporal_context_from_newest_event():
+    payload = _payload()
+
+    assert payload['scene_context']['semantic_temporal_context'] == '即时'
+    assert payload['scene_context']['semantic_temporal_context'] != (
+        'immediate'
+    )
+
+
+def test_connector_uses_newest_packet_event_before_prompt_event_cap():
+    """Temporal context uses the pruned packet, not its capped event subset."""
+
+    active_packet = packet(events=[])
+    older_events = []
+    for index in range(8):
+        older_event = event(
+            event_id=f'older-critical-{index}',
+            summary=f'older decision event {index}',
+            retention='decision_critical',
+        )
+        older_event['updated_at'] = '2026-07-13T00:00:00Z'
+        older_events.append(older_event)
+    newest_event = event(
+        event_id='newest-background',
+        summary='newest surviving background event',
+        retention='background',
+    )
+    newest_event['updated_at'] = '2026-07-14T00:00:00Z'
+    active_packet['events'] = older_events + [newest_event]
+
+    prompt = build_progress_prompt(
+        active_packet=active_packet,
+        interaction_logical_turns=[],
+    )
+    assert 'newest-background' not in {
+        row['event_id'] for row in prompt['events']
+    }
+
+    payload = _payload(active_packet)
+
+    assert payload['scene_context']['semantic_temporal_context'] == '即时'
+
+
+def test_connector_carries_validated_character_sleep_phase():
+    payload = _payload()
+
+    assert payload['scene_context']['character_sleep_phase'] in {
+        '清醒时段',
+        '睡眠中',
+        '即将醒来',
+    }
 
 
 @pytest.mark.asyncio

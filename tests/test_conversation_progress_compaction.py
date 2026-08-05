@@ -15,9 +15,13 @@ from kazusa_ai_chatbot.conversation_progress.compaction import (
     validate_block,
     validate_compaction_plan,
 )
+from kazusa_ai_chatbot.conversation_progress.policy import (
+    prune_aged_progress_packet,
+)
 from kazusa_ai_chatbot.conversation_progress.repository import (
     PreparedProgressWrite,
     persist_progress_write,
+    validate_active_packet,
 )
 from tests.conversation_progress_v2_helpers import event, packet
 
@@ -105,6 +109,64 @@ def test_compaction_archives_terminal_background_and_preserves_critical():
         'terminal_background'
     ]
     assert result['compacted_block_refs'] == [block['block_id']]
+
+
+def test_compaction_after_prune_archives_only_surviving_events():
+    """Pruned-out events never enter a compacted block or the active packet."""
+
+    active = packet(
+        turn_count=20,
+        events=[
+            event(
+                event_id='aged_terminal_background',
+                state='completed',
+                retention='background',
+            ),
+            event(
+                event_id='fresh_terminal_background',
+                state='completed',
+                retention='background',
+            ),
+            event(
+                event_id='critical_completed',
+                state='completed',
+                retention='decision_critical',
+            ),
+        ],
+        recent_turn_refs=[f'row:row_{index}' for index in range(12)],
+    )
+    active['events'][0]['updated_at'] = '2026-07-20T09:30:00+00:00'
+    pruned, dropped_count, _ = prune_aged_progress_packet(
+        active,
+        current_timestamp_utc='2026-07-28T09:30:00+00:00',
+    )
+    assert dropped_count == 1
+    validate_active_packet(pruned)
+
+    plan = build_compaction_plan(
+        active_packet=pruned,
+        active_blocks=[],
+    )
+    assert plan is not None
+    assert plan['archive_event_ids'] == ['fresh_terminal_background']
+    block = create_block_from_plan(
+        compaction_plan=plan,
+        active_packet=pruned,
+        active_blocks=[],
+    )
+    validate_block(block)
+    result = apply_compaction_to_packet(
+        active_packet=pruned,
+        compaction_plan=plan,
+        block_id=block['block_id'],
+    )
+
+    assert [row['event_id'] for row in result['events']] == [
+        'critical_completed'
+    ]
+    assert [row['event_id'] for row in block['events']] == [
+        'fresh_terminal_background'
+    ]
 
 
 def test_compaction_plan_rejects_protected_event_ids() -> None:

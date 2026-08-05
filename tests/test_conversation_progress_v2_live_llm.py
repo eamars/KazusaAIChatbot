@@ -62,10 +62,12 @@ from kazusa_ai_chatbot.conversation_progress.policy import (
     MAX_PROGRESS_EVIDENCE_CHARS,
     MAX_PROGRESS_SCENE_CHARS,
     MAX_RECENT_TURN_REFS,
+    prune_aged_progress_packet,
 )
 from kazusa_ai_chatbot.conversation_progress.projection import (
     build_progress_prompt,
     continuation_projection_chars,
+    filter_group_scene_ambient_turns,
 )
 from kazusa_ai_chatbot.conversation_progress.repository import (
     PreparedProgressWrite,
@@ -73,6 +75,9 @@ from kazusa_ai_chatbot.conversation_progress.repository import (
     validate_active_packet,
 )
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
+from kazusa_ai_chatbot.nodes import (
+    persona_supervisor2_msg_decontextualizer as decontextualizer_module,
+)
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_generator
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
     build_cognition_core_services,
@@ -253,6 +258,27 @@ async def _skip_if_routes_unavailable(
                     f"LLM endpoint returned {response.status_code}: "
                     f"{base_url}"
                 )
+
+
+async def _skip_if_decontextualizer_route_unavailable() -> None:
+    """Skip the focused Stage-0 case when its live endpoint is unavailable."""
+
+    base_url = str(
+        decontextualizer_module._msg_decontextualizer_llm_config.base_url
+    ).rstrip('/')
+    async with httpx.AsyncClient(timeout=4.0) as client:
+        try:
+            response = await client.get(f'{base_url}/models')
+        except httpx.HTTPError as exc:
+            pytest.skip(
+                f'decontextualizer endpoint is unavailable: {base_url}: '
+                f'{exc}'
+            )
+    if response.status_code >= 500:
+        pytest.skip(
+            f'decontextualizer endpoint returned {response.status_code}: '
+            f'{base_url}'
+        )
 
 
 def _scope_record_input(
@@ -548,7 +574,9 @@ async def _semantic_handoff(
             "global_user_id": active_packet["global_user_id"],
             "user_input": current_input,
             "decontextualized_input": current_input,
+            "conversation_episode_state": active_packet,
             "conversation_progress": progress_prompt,
+            "public_group_scene": "",
             "user_multimedia_input": [],
             "rag_result": {"memory_evidence": []},
             "character_profile": _character_profile(),
@@ -1038,6 +1066,7 @@ async def test_live_original_failure_progress_semantic_handoff(
             "global_user_id": USER_A_GLOBAL_USER_ID,
             "user_input": final_user_turn["fragments"][0],
             "decontextualized_input": final_user_turn["fragments"][0],
+            "conversation_episode_state": active_packet,
             "conversation_progress": progress_prompt,
             "user_multimedia_input": [],
             "rag_result": {"memory_evidence": []},
@@ -1867,6 +1896,186 @@ async def test_live_interleaved_group_multifragment_continuation(
             "unrelated_group_source_absent": True,
             "critical_event_state": protected["state"],
         },
+    )
+
+
+async def test_live_group_stale_ambient_is_absent_from_stage_zero_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Stage 0 receives fresh group history after deterministic age discard."""
+
+    await _skip_if_decontextualizer_route_unavailable()
+    trigger_timestamp = _COGNITION_NOW
+    stale_turn = logical_turn(
+        turn_id='row:stale-group-turn',
+        row_id='stale-group-turn',
+    )
+    stale_turn['occurred_at'] = '2026-07-28T06:00:00+00:00'
+    stale_turn['fragments'] = ['STALE_GROUP_TURN']
+    fresh_turn = logical_turn(
+        turn_id='row:fresh-group-turn',
+        row_id='fresh-group-turn',
+    )
+    fresh_turn['occurred_at'] = '2026-07-28T09:00:00+00:00'
+    fresh_turn['fragments'] = ['FRESH_GROUP_TURN']
+    filtered_turns = filter_group_scene_ambient_turns(
+        ambient_logical_turns=[stale_turn, fresh_turn],
+        trigger_occurred_at=trigger_timestamp,
+    )
+    decontextualizer_llm = _CapturingLLM(
+        decontextualizer_module._msg_decontextualizer_llm,
+    )
+    monkeypatch.setattr(
+        decontextualizer_module,
+        '_msg_decontextualizer_llm',
+        decontextualizer_llm,
+    )
+    state = {
+        'character_profile': {'name': BOT_DISPLAY_NAME},
+        'user_input': 'Continue FRESH_GROUP_TURN.',
+        'user_name': 'participant',
+        'platform_user_id': 'platform-user',
+        'platform_bot_id': BOT_PLATFORM_USER_ID,
+        'prompt_message_context': {
+            'body_text': 'Continue FRESH_GROUP_TURN.',
+            'mentions': [],
+            'attachments': [],
+            'addressed_to_global_user_ids': [],
+            'broadcast': True,
+        },
+        'channel_type': 'group',
+        'channel_name': CHANNEL_ID,
+        'channel_topic': '',
+        'indirect_speech_context': '',
+        'reply_context': {},
+        'ambient_logical_turns': filtered_turns,
+    }
+
+    result = await decontextualizer_module.call_msg_decontextualizer(state)
+    human_payload = json.loads(
+        decontextualizer_llm.calls[0]['human_messages'][0]
+    )
+    rendered_history = '\n'.join(human_payload['chat_history'])
+    trace_path = write_llm_trace(
+        'test_live_group_stale_ambient_is_absent_from_stage_zero_prompt',
+        'group_stale_ambient',
+        {
+            'trigger_timestamp': trigger_timestamp,
+            'filtered_turn_ids': [
+                turn['turn_id'] for turn in filtered_turns
+            ],
+            'decontextualizer_human_payload': human_payload,
+            'decontextualizer_raw_model_output': (
+                decontextualizer_llm.calls[0]['raw_output']
+            ),
+            'decontextualizer_result': result,
+            'hard_gates': {
+                'stale_turn_absent': (
+                    'STALE_GROUP_TURN' not in rendered_history
+                ),
+                'fresh_turn_present': 'FRESH_GROUP_TURN' in rendered_history,
+            },
+        },
+    )
+    print(json.dumps({
+        'case_id': 'group_stale_ambient',
+        'trace_path': str(trace_path),
+        'stale_turn_absent': 'STALE_GROUP_TURN' not in rendered_history,
+        'fresh_turn_present': 'FRESH_GROUP_TURN' in rendered_history,
+    }, ensure_ascii=True, indent=2))
+
+    assert 'STALE_GROUP_TURN' not in rendered_history
+    assert 'FRESH_GROUP_TURN' in rendered_history
+
+
+async def test_live_private_stale_progress_is_pruned_before_cognition(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stale private event is absent from the live cognition evidence."""
+
+    await _skip_if_routes_unavailable()
+    fresh_event = event(
+        event_id='fresh-private-event',
+        summary='fresh private decision event',
+        state='in_progress',
+        retention='decision_critical',
+    )
+    fresh_event['updated_at'] = '2026-07-28T09:00:00+00:00'
+    stale_event = event(
+        event_id='stale-private-event',
+        summary='STALE_PRIVATE_EVENT',
+        state='completed',
+        retention='background',
+    )
+    stale_event['updated_at'] = '2026-07-25T09:00:00+00:00'
+    active_packet = packet(events=[fresh_event, stale_event])
+    pruned_packet, dropped_count, narrative_cleared = (
+        prune_aged_progress_packet(
+            active_packet,
+            current_timestamp_utc=_COGNITION_NOW,
+        )
+    )
+    assert dropped_count == 1
+    assert narrative_cleared is False
+    assert [
+        row['event_id'] for row in pruned_packet['events']
+    ] == ['fresh-private-event']
+
+    handoff = await _semantic_handoff(
+        monkeypatch=monkeypatch,
+        active_packet=pruned_packet,
+        interaction_turns=[logical_turn()],
+        current_input='Continue from the fresh private event.',
+        target_event_id='fresh-private-event',
+        case_id='private_stale_progress',
+    )
+    evidence_source_ids = {
+        row['evidence_ref']['source_id']
+        for row in handoff['cognition_input']['evidence']
+    }
+    trace_path = write_llm_trace(
+        'test_live_private_stale_progress_is_pruned_before_cognition',
+        'private_stale_progress',
+        {
+            'pre_prune_packet': active_packet,
+            'pruned_packet': pruned_packet,
+            'dropped_count': dropped_count,
+            'narrative_cleared': narrative_cleared,
+            'cognition_input': handoff['cognition_input'],
+            'goal_model_calls': handoff['goal_model_calls'],
+            'surface_model_calls': handoff['surface_model_calls'],
+            'dialog_model_calls': handoff['dialog_model_calls'],
+            'final_dialog': handoff['final_dialog'],
+            'hard_gates': {
+                'stale_event_absent': (
+                    'conversation-progress-event:stale-private-event'
+                    not in evidence_source_ids
+                ),
+                'fresh_event_present': (
+                    'conversation-progress-event:fresh-private-event'
+                    in evidence_source_ids
+                ),
+            },
+        },
+    )
+    print(json.dumps({
+        'case_id': 'private_stale_progress',
+        'trace_path': str(trace_path),
+        'stale_event_absent': (
+            'conversation-progress-event:stale-private-event'
+            not in evidence_source_ids
+        ),
+        'fresh_event_present': (
+            'conversation-progress-event:fresh-private-event'
+            in evidence_source_ids
+        ),
+    }, ensure_ascii=True, indent=2))
+
+    assert 'conversation-progress-event:stale-private-event' not in (
+        evidence_source_ids
+    )
+    assert 'conversation-progress-event:fresh-private-event' in (
+        evidence_source_ids
     )
 
 

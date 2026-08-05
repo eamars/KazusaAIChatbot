@@ -8,11 +8,14 @@ delivery, or service worker loops.
 from __future__ import annotations
 
 from datetime import datetime
-from zoneinfo import ZoneInfo
 
 from kazusa_ai_chatbot.config import (
     CHARACTER_SLEEP_LOCAL_PERIOD,
     CHARACTER_TIME_ZONE,
+)
+from kazusa_ai_chatbot.time_boundary import (
+    local_minutes_in_zone,
+    local_period_bounds,
 )
 
 
@@ -44,10 +47,8 @@ def is_self_cognition_sleep_period(
     if not clean_period:
         return False
 
-    start_minutes, end_minutes = _local_period_bounds(clean_period)
-    local_timezone = ZoneInfo(character_time_zone)
-    local_now = now.astimezone(local_timezone)
-    current_minutes = (local_now.hour * 60) + local_now.minute
+    start_minutes, end_minutes = local_period_bounds(clean_period)
+    current_minutes = local_minutes_in_zone(now, time_zone=character_time_zone)
 
     if start_minutes < end_minutes:
         return start_minutes <= current_minutes < end_minutes
@@ -56,37 +57,3 @@ def is_self_cognition_sleep_period(
         current_minutes >= start_minutes
         or current_minutes < end_minutes
     )
-
-
-def _local_period_bounds(value: str) -> tuple[int, int]:
-    """Parse exact ``HH:MM-HH:MM`` text into local-minute bounds."""
-
-    parts = value.split("-", maxsplit=1)
-    if len(parts) != 2:
-        raise ValueError("sleep period must use HH:MM-HH:MM")
-
-    start_minutes = _local_time_minutes(parts[0])
-    end_minutes = _local_time_minutes(parts[1])
-    if start_minutes == end_minutes:
-        raise ValueError("sleep period start and end must differ")
-
-    return start_minutes, end_minutes
-
-
-def _local_time_minutes(value: str) -> int:
-    """Parse exact ``HH:MM`` text into minutes after local midnight."""
-
-    if len(value) != 5 or value[2] != ":":
-        raise ValueError("sleep period must use HH:MM-HH:MM")
-    hour_text = value[:2]
-    minute_text = value[3:]
-    if not hour_text.isdecimal() or not minute_text.isdecimal():
-        raise ValueError("sleep period must use HH:MM-HH:MM")
-
-    hour = int(hour_text)
-    minute = int(minute_text)
-    if hour > 23 or minute > 59:
-        raise ValueError("sleep period must use HH:MM-HH:MM")
-
-    minutes = (hour * 60) + minute
-    return minutes

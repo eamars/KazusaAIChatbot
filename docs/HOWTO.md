@@ -157,6 +157,11 @@ COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS=120.0
 TASK_RESOLUTION_INLINE_BUDGET_SECONDS=30.0
 SELF_COGNITION_ENABLED=true
 CHARACTER_SLEEP_LOCAL_PERIOD=02:00-12:00
+GROUP_SCENE_MAX_TURN_AGE_MINUTES=120
+CONVERSATION_PROGRESS_BACKGROUND_MAX_AGE_MINUTES=120
+CONVERSATION_PROGRESS_ACTIVE_SCENE_MAX_AGE_MINUTES=360
+CONVERSATION_PROGRESS_DECISION_CRITICAL_MAX_AGE_MINUTES=2880
+CONVERSATION_PROGRESS_NARRATIVE_MAX_AGE_MINUTES=360
 
 # Durable calendar scheduler
 CALENDAR_SCHEDULER_ENABLED=true
@@ -457,6 +462,47 @@ The remaining affect-settling policy values are named constants in
 The due local time is the later of promotion time plus grace and sleep end
 minus wake prep. The affect-settling module import fails if that due time is
 after sleep end plus wake defer grace.
+
+### Context fade and sleep phase
+
+Aged conversational context is discarded deterministically before projection,
+never handed to a model with an instruction to discount it. Group-scene
+ambient turns older than `GROUP_SCENE_MAX_TURN_AGE_MINUTES` (default `120`)
+relative to the trigger are dropped by the shared
+`filter_group_scene_ambient_turns` projection used by group-scene rendering
+and the persona Stage 0 decontextualizer; the filtered sequence also supplies
+group scope participants. The trigger is never filtered and
+`omitted_turn_count` counts only count-based truncation. Conversation-progress events older than their retention-tier
+threshold are dropped on the read path immediately after packet selection:
+`CONVERSATION_PROGRESS_BACKGROUND_MAX_AGE_MINUTES` (default `120`),
+`CONVERSATION_PROGRESS_ACTIVE_SCENE_MAX_AGE_MINUTES` (default `360`), and
+`CONVERSATION_PROGRESS_DECISION_CRITICAL_MAX_AGE_MINUTES` (default `2880`).
+When no event survives, or the newest surviving event is older than
+`CONVERSATION_PROGRESS_NARRATIVE_MAX_AGE_MINUTES` (default `360`), the complete
+narrative field set is cleared to its canonical empty shape. Pruning is a
+read-path projection concern only: it issues no database write, and the next
+recorded turn persists the pruned form.
+
+Progress evidence rows carry each originating event's own `updated_at` as
+`evidence_ref.occurred_at`, normalized to the V2 UTC-Z second-truncated
+format, and `scene_context.semantic_temporal_context` is derived from the
+newest surviving event age using the `project_duration` vocabulary.
+
+`scene_context.character_sleep_phase` is derived from
+`CHARACTER_SLEEP_LOCAL_PERIOD`, `CHARACTER_TIME_ZONE`, and
+`AFFECT_SETTLING_WAKE_PREP_MINUTES` by the deterministic projector in
+`cognition_core_v2.state_projection`. The frozen vocabulary is `清醒时段`
+outside the window, `睡眠中` inside the window, and `即将醒来` within the final
+`AFFECT_SETTLING_WAKE_PREP_MINUTES` before the window ends; the two in-window
+labels cover exactly the same half-open local window that gates the
+self-cognition lanes. The phase reaches goal cognition only and never the
+appraisal or surface prompts.
+
+Daily affect settling runs through the `cognition_core_v2` public
+`run_character_morning_refresh(...)` entrypoint, which owns the character
+scope guard, the sleep-recovery reducer call, and output-state validation.
+The reflection cycle keeps scheduling, idempotency, the guarded write, the
+refresh callback, and the audit row.
 
 `BACKGROUND_WORK_WORKER_ENABLED` controls the internal background-work runtime.
 L2d uses `task_resolution_request` when current evidence is insufficient for a

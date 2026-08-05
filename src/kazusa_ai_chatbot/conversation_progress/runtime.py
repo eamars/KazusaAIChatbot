@@ -48,6 +48,7 @@ from kazusa_ai_chatbot.conversation_progress.policy import (
     AMBIENT_ROW_SCAN_LIMIT,
     INTERACTION_LOGICAL_TURN_LIMIT,
     INTERACTION_ROW_SCAN_LIMIT,
+    prune_aged_progress_packet,
 )
 from kazusa_ai_chatbot.db.conversation import (
     get_ambient_conversation_history,
@@ -95,6 +96,12 @@ class ConversationProgressRuntime:
             current_timestamp_utc=current_timestamp_utc,
         )
         packet, source = _select_packet(state_result, cached)
+        if packet is not None:
+            pruned_packet, _, _ = prune_aged_progress_packet(
+                packet,
+                current_timestamp_utc=current_timestamp_utc,
+            )
+            packet = pruned_packet
         if source == 'db' and packet is not None:
             invalidate_cached_packet(scope=scope)
             put_cached_packet(scope=scope, packet=packet)

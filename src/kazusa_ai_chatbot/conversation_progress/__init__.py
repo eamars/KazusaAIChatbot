@@ -21,6 +21,7 @@ from kazusa_ai_chatbot.conversation_progress.models import (
 )
 from kazusa_ai_chatbot.conversation_progress.projection import (
     build_group_scene_context,
+    filter_group_scene_ambient_turns,
     project_conversation_progress_evidence,
     project_conversation_progress_scene,
     project_group_scene_prompt,
@@ -50,6 +51,7 @@ __all__ = [
     'ConversationProgressStateV2',
     'assemble_logical_turns',
     'build_group_scene_context',
+    'filter_group_scene_ambient_turns',
     'load_progress_context',
     'logical_turns_as_history_rows',
     'project_conversation_progress_evidence',

@@ -27,8 +27,11 @@ from kazusa_ai_chatbot.action_spec.registry import (
 from kazusa_ai_chatbot.action_spec.evaluator import ActionSpecEvaluator
 from kazusa_ai_chatbot.action_spec.results import project_trace_action_result_v2
 from kazusa_ai_chatbot.config import (
+    AFFECT_SETTLING_WAKE_PREP_MINUTES,
     BACKGROUND_WORK_WORKER_ENABLED,
     CALENDAR_SCHEDULER_ENABLED,
+    CHARACTER_SLEEP_LOCAL_PERIOD,
+    CHARACTER_TIME_ZONE,
     COGNITION_LLM_API_KEY,
     COGNITION_LLM_BASE_URL,
     COGNITION_LLM_MAX_COMPLETION_TOKENS,
@@ -122,7 +125,9 @@ from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     validate_cognition_state,
 )
 from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
+    project_character_sleep_phase,
     project_character_operational_state,
+    project_duration,
     project_relationship_context,
     select_character_operational_context,
 )
@@ -536,6 +541,7 @@ def build_cognition_input_from_global_state(
         timestamp,
     ))
     conversation_progress = state.get("conversation_progress")
+    conversation_episode_state = state.get("conversation_episode_state")
     if conversation_progress is None:
         conversation_continuity = ""
     elif not isinstance(conversation_progress, dict):
@@ -555,6 +561,10 @@ def build_cognition_input_from_global_state(
             'Current participant continuity:\n'
             f'{conversation_continuity}'
         )[:2200].rstrip()
+    semantic_temporal_context = _semantic_temporal_context(
+        conversation_episode_state,
+        current_timestamp=timestamp,
+    )
     public_group_scene = _text(state['public_group_scene'])[:1800]
     evidence.extend(_rag_evidence(state.get("rag_result"), timestamp))
     evidence.extend(_promoted_reflection_evidence(
@@ -590,6 +600,12 @@ def build_cognition_input_from_global_state(
     current_user_label = _named_role_label("当前用户", user_name)
     character_role = character_label
     current_user_role = current_user_label
+    character_sleep_phase = project_character_sleep_phase(
+        parse_storage_utc_datetime(timestamp),
+        sleep_local_period=CHARACTER_SLEEP_LOCAL_PERIOD,
+        character_time_zone=CHARACTER_TIME_ZONE,
+        wake_prep_minutes=AFFECT_SETTLING_WAKE_PREP_MINUTES,
+    )
     if (
         episode["trigger_source"] == "user_message"
         and _episode_has_source_kind(episode, "dialog")
@@ -632,10 +648,11 @@ def build_cognition_input_from_global_state(
             "channel_scope": channel_scope,
             "character_role": character_role,
             "current_user_role": current_user_role,
+            "character_sleep_phase": character_sleep_phase,
             "semantic_scene": semantic_text[:500],
             "public_group_scene": public_group_scene,
             "conversation_continuity": conversation_continuity,
-            "semantic_temporal_context": "immediate",
+            "semantic_temporal_context": semantic_temporal_context,
         },
     }
     if relationship_operational_context is not None:
@@ -1985,6 +2002,39 @@ def _v2_timestamp(value: str) -> str:
 
     parsed = parse_storage_utc_datetime(value).astimezone(timezone.utc)
     return parsed.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _semantic_temporal_context(
+    conversation_progress: object,
+    *,
+    current_timestamp: str,
+) -> str:
+    """Derive scene temporal context from the newest surviving event age.
+
+    When no progress event survives pruning, the derived value describes the
+    current turn only.
+    """
+
+    if isinstance(conversation_progress, Mapping):
+        progress_events = conversation_progress.get('events')
+        if isinstance(progress_events, list):
+            updated_at_values = [
+                _v2_timestamp(event_row['updated_at'])
+                for event_row in progress_events
+                if (
+                    isinstance(event_row, Mapping)
+                    and isinstance(event_row.get('updated_at'), str)
+                )
+            ]
+            if updated_at_values:
+                newest_event_timestamp = max(updated_at_values)
+                temporal_context = project_duration(
+                    newest_event_timestamp,
+                    current_timestamp,
+                )
+                return temporal_context
+    temporal_context = project_duration(current_timestamp, current_timestamp)
+    return temporal_context
 
 
 def _text(value: object) -> str:

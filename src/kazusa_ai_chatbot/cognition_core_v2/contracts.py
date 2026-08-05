@@ -428,6 +428,7 @@ class SceneContextV2(TypedDict):
     channel_scope: Literal["private", "group", "internal"]
     character_role: str
     current_user_role: NotRequired[str]
+    character_sleep_phase: NotRequired[str]
     semantic_scene: str
     public_group_scene: str
     conversation_continuity: str
@@ -2688,6 +2689,8 @@ def _validate_scene_context(value: Any) -> None:
     }
     if isinstance(value, Mapping) and "current_user_role" in value:
         required.add("current_user_role")
+    if isinstance(value, Mapping) and "character_sleep_phase" in value:
+        required.add("character_sleep_phase")
     if not isinstance(value, Mapping) or set(value) != required:
         raise CognitionContractError("scene context fields are not exact")
     if value["channel_scope"] not in {"private", "group", "internal"}:
