@@ -59,6 +59,15 @@ _TRACE_STEPS_PATH = (
     / "diagnostics"
     / "llm_trace_steps_2026-08-04.json"
 )
+_CURRENT_RUN_TRACE_PATH = (
+    _ROOT
+    / "test_artifacts"
+    / "diagnostics"
+    / (
+        "cognition_v2_run_llmtrace_fab989d622da48a89c6e5566e2121251_"
+        "20260805.json"
+    )
+)
 _ARTIFACT_ROOT = (
     _ROOT
     / "test_artifacts"
@@ -107,6 +116,14 @@ _SEMANTIC_CASES: dict[str, dict[str, object]] = {
         "stage_name": "semantic_appraisal.q:moral_identity.item_1",
         "attempt_index": 1,
         "question_id": "q:moral_identity",
+        "expected_error": "semantic role value is invalid",
+    },
+    "current_run_event_agency_role_value_invalid": {
+        "trace_id": "llmtrace_fab989d622da48a89c6e5566e2121251",
+        "trace_path": _CURRENT_RUN_TRACE_PATH,
+        "stage_name": "semantic_appraisal.q:event_agency.item_1",
+        "attempt_index": 1,
+        "question_id": "q:event_agency",
         "expected_error": "semantic role value is invalid",
     },
     "resolved_knowledge_gap_transition_rejected": {
@@ -182,15 +199,31 @@ def _load_case_capsule(
 ) -> tuple[dict[str, Any], dict[str, Any], str, str]:
     """Load one preserved capsule and its representative failed attempt."""
 
-    if not _TRACE_STEPS_PATH.exists():
+    trace_path = case.get("trace_path", _TRACE_STEPS_PATH)
+    if not isinstance(trace_path, Path):
+        trace_path = _TRACE_STEPS_PATH
+    if not trace_path.exists():
         raise AssertionError(
-            f"day-wide trace export is missing: {_TRACE_STEPS_PATH}"
+            f"captured trace export is missing: {trace_path}"
         )
-    export = json.loads(_TRACE_STEPS_PATH.read_text(encoding="utf-8"))
-    for row in export["documents"]:
-        capsule = row.get("capsule")
-        if not isinstance(capsule, dict):
-            continue
+    export = json.loads(trace_path.read_text(encoding="utf-8"))
+    capsules: list[Mapping[str, Any]] = []
+    documents = export.get("documents")
+    if isinstance(documents, list):
+        for row in documents:
+            if isinstance(row, Mapping) and isinstance(
+                row.get("capsule"),
+                Mapping,
+            ):
+                capsules.append(row["capsule"])
+    direct_capsules = export.get("cognition_failure_capsules")
+    if isinstance(direct_capsules, list):
+        capsules.extend(
+            capsule
+            for capsule in direct_capsules
+            if isinstance(capsule, Mapping)
+        )
+    for capsule in capsules:
         if capsule.get("trace_id") != case["trace_id"]:
             continue
         for attempt in capsule.get("attempts", []):
@@ -509,6 +542,14 @@ async def test_semantic_role_value_invalid_live_llm() -> None:
     """Reproduce the captured semantic-role exhaustion."""
 
     await _run_semantic_case("semantic_role_value_invalid")
+
+
+async def test_current_run_event_agency_role_value_invalid_live_llm() -> None:
+    """Replay the current run's event-agency role-value failure."""
+
+    await _run_semantic_case(
+        "current_run_event_agency_role_value_invalid"
+    )
 
 
 async def test_resolved_knowledge_gap_transition_rejected_live_llm() -> None:

@@ -120,7 +120,8 @@ micro_appraisal。本阶段只判断证据已经支持的含义；动作选择�
    object_handle 和 role_assignments[*].entity_handle 使用 permitted_role_handles，evidence_handles 使用其中的
    evidence handle。ceN、ctN、ckN 分别是候选事件、威胁和知识缺口，evN 是持久事件，eN 是证据；它们不是人物。
    人物角色使用 self 或 current_user，role 只使用 actor、experiencer、target、object、affected_goal、
-   affected_relationship 这六个 enum token。
+   affected_relationship 这六个 enum token。证据标签或关系注释（如 beneficiary）只是待解读的事实，
+   不是 role 值；不支持时省略该 assignment，不编造、不照抄。
 3. 使用 question.candidate_origin_evidence 做来源核对。一个 proposition 或 delta 的 subject_handle、object_handle、
    role assignment 或 target_path 只要出现 ceN、ctN 或 ckN，就把映射出的来源 evidence handle 放进同一个对象的
    evidence_handles；这就是候选来源引用。找不到对应来源时，省略这个候选或整个对象。角色 handle 不能代替
@@ -129,8 +130,8 @@ micro_appraisal。本阶段只判断证据已经支持的含义；动作选择�
 # 继续按顺序完成输出
 4. 若有数值变化，只从 question.permitted_delta_path_domains 选择一项。每项给出 state_field、handles、
    axes 和 delta_limit；从同一项各取一个 state_field、一个 handle、一个 axis，按 state_field.handle.axis
-   原样拼成 target_path，不构造其他 state path。delta 必须是该项 delta_limit 范围内的整数，
-   例如 delta_limit 为 10 时只写 -10 到 10。有证据支持的蓄意阻碍、明确伤害或边界侵害可选 harm，
+   原样拼成 target_path，不构造其他 state path。delta 必须是该项 delta_limit 范围内的整数。
+   有证据支持的蓄意阻碍、明确伤害或边界侵害可选 harm，
    以及有支持时的 unfairness 和 intentionality；已发生且不可逆的损失可选负向 outcome_impact 或
    temporal_loss；污染或基本规范/边界受到侵害可选 contamination_risk 或 norm_violation。axis 只描述
    证据中的可观察后果，不得因此增添情绪、归因类别、未给出的角色或事实；不在允许表中的 axis 不能使用，
@@ -155,21 +156,8 @@ handle；target_path 完全来自一个允许的 state_field.handle.axis；文�
 # 输出示例
 {
   "question_id": "q:event_agency",
-  "proposition": {
-    "proposition_kind": "event_completed",
-    "subject_handle": "ev1",
-    "evidence_handles": ["e1"],
-    "role_assignments": [
-      {"role": "actor", "entity_handle": "current_user"}
-    ],
-    "semantic_value": "这里写一句简体中文语义描述。"
-  },
-  "delta": {
-    "target_path": "goals.g1.importance",
-    "delta": 10,
-    "evidence_handles": ["e1"],
-    "reason": "这里写不超过三百字的简体中文原因。"
-  }
+  "proposition": {"proposition_kind": "event_completed", "subject_handle": "ev1", "evidence_handles": ["e1"], "role_assignments": [{"role": "actor", "entity_handle": "current_user"}], "semantic_value": "这里写一句简体中文语义描述。"},
+  "delta": {"target_path": "goals.g1.importance", "delta": 10, "evidence_handles": ["e1"], "reason": "这里写不超过三百字的简体中文原因。"}
 }
 '''
 
@@ -860,7 +848,9 @@ def _appraisal_repair_messages(
             "请把 contract_error 当作唯一失败规则，在原来的语义问题和证据范围内完整重生成 JSON。"
             "只修正该规则涉及的字段、类型、handle 或允许路径，保留其他受支持含义；"
             "allowed_values 给出的现有域、候选来源和路径表是唯一允许值；"
-            "proposition 的 role_assignments 是必填字段，证据不支持任何角色时写 []。"
+            "proposition 的 role_assignments 是必填字段，证据不支持任何角色时写 []；"
+            "role 只能是六个 enum token：actor、experiencer、target、object、affected_goal、"
+            "affected_relationship；证据标签（如 beneficiary）不能写入 role，不支持时省略该 assignment。"
             "顶层字段必须恰好是 question_id、proposition 和 delta；两者各自只能是一个对象或 null，"
             "不能使用数组，也不能输出 Markdown、解释段落或 JSON 以外的文字。"
         ),

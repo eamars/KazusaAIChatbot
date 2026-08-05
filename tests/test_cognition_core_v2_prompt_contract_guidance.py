@@ -260,6 +260,9 @@ def test_semantic_repair_projects_existing_contract_values() -> None:
     assert "role_assignments 是必填字段，证据不支持任何角色时写 []" in (
         repair_payload["repair_instruction"]
     )
+    assert "证据标签（如 beneficiary）不能写入 role" in (
+        repair_payload["repair_instruction"]
+    )
 
 
 def test_permitted_delta_path_domains_expose_path_delta_limits() -> None:
