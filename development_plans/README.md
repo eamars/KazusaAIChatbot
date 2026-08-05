@@ -50,6 +50,7 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
+| [background_coding_event_loop_starvation_bugfix_plan.md](archive/completed/bugfix/background_coding_event_loop_starvation_bugfix_plan.md) | Background coding async-boundary responsiveness and deterministic regression coverage | completed |
 | [relevance_native_reply_review_remediation_plan.md](archive/completed/bugfix/relevance_native_reply_review_remediation_plan.md) | Post-review deterministic native-reply coverage, ID validation, and ICD wording remediation | completed |
 | [relevance_native_reply_monotonic_delivery_plan.md](archive/completed/bugfix/relevance_native_reply_monotonic_delivery_plan.md) | Deterministic `/chat` native-reply monotonic delivery and delay promotion | completed |
 | [cognition_core_v2_generation_contract_prompt_projection_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_generation_contract_prompt_projection_bugfix_plan.md) | High-risk Core V2 prompt, model-facing contract, and diagnostic replay bugfix | completed |
