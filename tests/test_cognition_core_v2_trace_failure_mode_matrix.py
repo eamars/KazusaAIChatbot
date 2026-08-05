@@ -517,9 +517,47 @@ def test_semantic_delta_type_invalid_is_rejected() -> None:
             {"e1", "e2"},
             _semantic_handle_refs(),
         ),
-        "semantic delta must be a JSON integer from -40 through 40; "
+        "semantic delta must be a JSON integer from -10 through 10; "
         "received int",
     )
+
+
+def test_relationship_delta_narrow_bound_is_enforced() -> None:
+    """A real relationship path rejects deltas beyond its per-event limit."""
+
+    question = _semantic_question(
+        paths=["relationship.r1.attachment"],
+    )
+    rejected = _empty_semantic_result()
+    rejected["selected_evidence_handles"] = ["e1"]
+    rejected["deltas"] = [_semantic_delta(
+        target_path="relationship.r1.attachment",
+        delta=11,
+    )]
+    _assert_value_error(
+        lambda: validate_semantic_appraisal_result(
+            rejected,
+            question,
+            {"e1", "e2"},
+            _semantic_handle_refs(),
+        ),
+        "semantic delta must be a JSON integer from -10 through 10; "
+        "received int",
+    )
+
+    accepted = _empty_semantic_result()
+    accepted["selected_evidence_handles"] = ["e1"]
+    accepted["deltas"] = [_semantic_delta(
+        target_path="relationship.r1.attachment",
+        delta=10,
+    )]
+    validated = validate_semantic_appraisal_result(
+        accepted,
+        question,
+        {"e1", "e2"},
+        _semantic_handle_refs(),
+    )
+    assert validated["deltas"][0]["delta"] == 10
 
 
 def test_semantic_micro_appraisal_fields_not_exact_is_rejected() -> None:

@@ -260,3 +260,25 @@ The ratio must be at least 95% using the unrounded value.
 - [x] Targeted live cases run individually and inspected.
 - [x] Aggregate sign-off ratio is at least 95%; critical gates pass.
 - [x] Parent review, residual-risk record, independent GO review, and lifecycle closeout completed.
+
+## Post-Closeout Real-Run Regression Evidence
+
+This evidence note records a production-shaped real-LLM failure discovered
+after closeout. It does not change the completed plan's scope, frozen test
+denominator, acceptance decision, or implementation contract.
+
+- Case: `relationship_social_attachment_range_after_prompt_fix`.
+- Run: delivery tracking id `f48a049ff4c4421d8b73ed8ac96ffed1`, trace id
+  `llmtrace_9f325fea52674dcf913ccf6f9ca755de`.
+- Input: `不行不行，不能天天放任性欲支配大脑`.
+- Observed failure: `semantic_appraisal.q:relationship_social` exhausted its
+  bounded attempts because `attachment is outside its range`.
+- Companion observations: `q:goal_threat_outcome` also hit a terminal-event
+  transition contract failure, and the ordinary-response goal required one
+  repair attempt. The run completed with six visible dialog messages and a
+  partial-failure capsule.
+- Classification: regression case requiring live coverage and human quality
+  review; this run is not a passing positive case.
+- Raw evidence: `test_artifacts/diagnostics/db_llm_trace_delivery_f48a049ff4c4421d8b73ed8ac96ffed1.json`;
+  readable review:
+  `test_artifacts/diagnostics/llm_debug_review_delivery_f48a049ff4c4421d8b73ed8ac96ffed1.md`.

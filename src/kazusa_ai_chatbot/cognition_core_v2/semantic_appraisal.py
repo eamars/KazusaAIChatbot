@@ -63,6 +63,12 @@ MAX_APPRAISAL_OBJECT_HANDLES = 8
 MAX_APPRAISAL_SEMANTIC_TEXT_CHARS = 200
 MAX_APPRAISAL_DELTA_REASON_CHARS = 300
 MAX_ERROR_ALLOWLIST_ITEMS = 40
+DELTA_LIMIT_NARROW = 10
+DELTA_LIMIT_WIDE = 40
+_DELTA_LIMIT_BY_STATE_FIELD = {
+    "relationship": DELTA_LIMIT_NARROW,
+    "meaning_state": DELTA_LIMIT_NARROW,
+}
 _SEMANTIC_APPRAISAL_RESULT_FIELDS = {
     "question_id",
     "selected_evidence_handles",
@@ -96,6 +102,12 @@ _PROPOSITION_SUBJECT_KIND_SETS = {
 }
 
 
+def _delta_limit_for_state_field(state_field: str) -> int:
+    """Return the reducer's per-event delta bound for one state field."""
+
+    return _DELTA_LIMIT_BY_STATE_FIELD.get(state_field, DELTA_LIMIT_WIDE)
+
+
 SEMANTIC_APPRAISAL_PROMPT = '''你负责根据有界证据回答一个范围明确的语义问题，并返回一个可验证的
 micro_appraisal。本阶段只判断证据已经支持的含义；动作选择、对话生成、emotion id、生命周期状态、
 持久化和事实补充属于其他阶段。每个 proposition_kind 都是所给语义定义已经成立的肯定式断言。
@@ -115,12 +127,14 @@ micro_appraisal。本阶段只判断证据已经支持的含义；动作选择�
    evidence handle，未知 handle 也不能靠猜测补齐。
 
 # 继续按顺序完成输出
-4. 若有数值变化，只从 question.permitted_delta_path_domains 选择路径。每项给出 state_field、handles 和
-   axes；从同一项各取一个值，按 state_field.handle.axis 原样拼成 target_path，不构造其他 state path。
-   有证据支持的蓄意阻碍、明确伤害或边界侵害可选 harm，以及有支持时的 unfairness 和 intentionality；
-   已发生且不可逆的损失可选负向 outcome_impact 或 temporal_loss；污染或基本规范/边界受到侵害可选
-   contamination_risk 或 norm_violation。axis 只描述证据中的可观察后果，不得因此增添情绪、归因类别、未给出的角色或事实；
-   不在允许表中的 axis 不能使用，证据不足时返回 null。
+4. 若有数值变化，只从 question.permitted_delta_path_domains 选择一项。每项给出 state_field、handles、
+   axes 和 delta_limit；从同一项各取一个 state_field、一个 handle、一个 axis，按 state_field.handle.axis
+   原样拼成 target_path，不构造其他 state path。delta 必须是该项 delta_limit 范围内的整数，
+   例如 delta_limit 为 10 时只写 -10 到 10。有证据支持的蓄意阻碍、明确伤害或边界侵害可选 harm，
+   以及有支持时的 unfairness 和 intentionality；已发生且不可逆的损失可选负向 outcome_impact 或
+   temporal_loss；污染或基本规范/边界受到侵害可选 contamination_risk 或 norm_violation。axis 只描述
+   证据中的可观察后果，不得因此增添情绪、归因类别、未给出的角色或事实；不在允许表中的 axis 不能使用，
+   证据不足时返回 null。
 5. 每次只生成一个 micro_appraisal item。proposition 和 delta 各自只能是一个对象或 null，不能使用数组，也不能列举多个候选。
    没有新的受支持项目时，两者都返回 null 以结束循环。semantic_value 写简洁的简体中文，
    目标约 120 字、上限 200 字，不重复标准或证据解释，也不写数值；delta reason 使用简体中文且不超过 300 字。
@@ -129,9 +143,10 @@ micro_appraisal。本阶段只判断证据已经支持的含义；动作选择�
 
 # 只返回这个对象
 顶层字段必须恰好是 question_id、proposition、delta。不要输出 explanation、selected_evidence_handles、selected_role_handles、propositions 或 deltas。proposition 若存在，字段必须恰好是 proposition_kind、
-subject_handle、evidence_handles、role_assignments、semantic_value，可选 object_handle；每条 role assignment
-只能有 role 和 entity_handle。delta 若存在，字段必须恰好是 target_path、delta、evidence_handles、reason。
-delta 必须是 -40 到 40（含边界）的 JSON 整数，例如 -5、0 或 12；不使用字符串、小数、百分比或比例。
+subject_handle、evidence_handles、role_assignments、semantic_value，可选 object_handle；
+role_assignments 是必填字段，证据不支持任何角色时写 []；每条 role assignment 只能有 role 和
+entity_handle。delta 若存在，字段必须恰好是 target_path、delta、evidence_handles、reason。delta 必须是
+所选路径所在域 delta_limit 范围内的 JSON 整数，例如 -5、0 或 10；不使用字符串、小数、百分比或比例。
 
 # 输出前最后检查
 确认 question_id 没有改写；每个结构化 handle 都来自自己的域；每个 ceN、ctN、ckN 都带有对应的来源 evidence
@@ -844,7 +859,8 @@ def _appraisal_repair_messages(
         "repair_instruction": (
             "请把 contract_error 当作唯一失败规则，在原来的语义问题和证据范围内完整重生成 JSON。"
             "只修正该规则涉及的字段、类型、handle 或允许路径，保留其他受支持含义；"
-            "allowed_values 给出的现有域、候选来源和路径表是唯一允许值。"
+            "allowed_values 给出的现有域、候选来源和路径表是唯一允许值；"
+            "proposition 的 role_assignments 是必填字段，证据不支持任何角色时写 []。"
             "顶层字段必须恰好是 question_id、proposition 和 delta；两者各自只能是一个对象或 null，"
             "不能使用数组，也不能输出 Markdown、解释段落或 JSON 以外的文字。"
         ),
@@ -1154,13 +1170,15 @@ def _validate_delta(
             f"{_allowlist_hint(question['permitted_delta_paths'])}"
         )
     delta = value["delta"]
+    delta_limit = _delta_limit_for_state_field(path.split(".")[0])
     if (
         isinstance(delta, bool)
         or not isinstance(delta, int)
-        or not -40 <= delta <= 40
+        or not -delta_limit <= delta <= delta_limit
     ):
         raise ValueError(
-            "semantic delta must be a JSON integer from -40 through 40; "
+            "semantic delta must be a JSON integer from "
+            f"{-delta_limit} through {delta_limit}; "
             f"received {type(delta).__name__}"
         )
     cited = _validate_handles(
@@ -1560,6 +1578,7 @@ def _compact_permitted_delta_path_domains(
                 "state_field": state_field,
                 "handles": sorted(handles_by_axes[axes]),
                 "axes": list(axes),
+                "delta_limit": _delta_limit_for_state_field(state_field),
             })
     return domains
 

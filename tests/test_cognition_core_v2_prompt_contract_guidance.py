@@ -24,6 +24,7 @@ from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
 from kazusa_ai_chatbot.cognition_core_v2.semantic_appraisal import (
     SEMANTIC_APPRAISAL_PROMPT,
     _appraisal_repair_messages,
+    _compact_permitted_delta_path_domains,
     _fit_appraisal_payload,
 )
 
@@ -46,6 +47,8 @@ def test_core_v2_prompts_keep_one_authoritative_handle_domain() -> None:
         "question.permitted_delta_path_domains",
         "来源 evidence handle",
         "state_field.handle.axis",
+        "delta_limit",
+        "role_assignments 是必填字段，证据不支持任何角色时写 []",
         "不要输出 explanation、selected_evidence_handles、selected_role_handles、propositions",
     ):
         assert required_text in semantic_prompt
@@ -209,6 +212,7 @@ def test_semantic_repair_projects_existing_contract_values() -> None:
                 "state_field": "events",
                 "handles": ["ce1"],
                 "axes": ["salience"],
+                "delta_limit": 40,
             }],
         },
         "evidence": [],
@@ -249,7 +253,44 @@ def test_semantic_repair_projects_existing_contract_values() -> None:
     assert repair_payload["allowed_values"][
         "permitted_delta_path_domains"
     ][0]["axes"] == ["salience"]
+    assert repair_payload["allowed_values"][
+        "permitted_delta_path_domains"
+    ][0]["delta_limit"] == 40
     assert "唯一失败规则" in repair_payload["repair_instruction"]
+    assert "role_assignments 是必填字段，证据不支持任何角色时写 []" in (
+        repair_payload["repair_instruction"]
+    )
+
+
+def test_permitted_delta_path_domains_expose_path_delta_limits() -> None:
+    """Projected domains carry the reducer's per-field delta bound."""
+
+    domains = _compact_permitted_delta_path_domains([
+        "relationship.r1.attachment",
+        "relationship.r1.perceived_closeness",
+        "meaning_state.m1.purpose_coherence",
+        "goals.g1.importance",
+        "active_events.ce1.harm",
+        "threats.ct1.likelihood",
+        "knowledge_gaps.ck1.uncertainty",
+        "drives.d1.pressure",
+        "events.ev1.salience",
+    ])
+    limits_by_field = {
+        domain["state_field"]: domain["delta_limit"]
+        for domain in domains
+    }
+    assert limits_by_field["relationship"] == 10
+    assert limits_by_field["meaning_state"] == 10
+    for state_field in (
+        "goals",
+        "active_events",
+        "threats",
+        "knowledge_gaps",
+        "drives",
+        "events",
+    ):
+        assert limits_by_field[state_field] == 40
 
 
 def test_goal_repair_feedback_preserves_cross_namespace_authority() -> None:

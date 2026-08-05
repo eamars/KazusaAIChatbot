@@ -194,34 +194,36 @@ def test_text_prompts_organically_favor_spoken_or_typed_dialog() -> None:
 def test_semantic_appraisal_prompt_limits_model_authority() -> None:
     """Keep state, lifecycle, and persistence outside appraisal authority."""
 
+    prompt = " ".join(SEMANTIC_APPRAISAL_PROMPT.split())
+
     for required_text in (
         "有界证据",
         "允许的 handle",
         "propositions",
         "deltas",
         "蓄意阻碍、明确伤害或边界侵害",
-        "harm，以及有支持时的 unfairness 和 intentionality",
+        "以及有支持时的 unfairness 和 intentionality",
         "负向 outcome_impact 或 temporal_loss",
         "contamination_risk 或 norm_violation",
         "不得因此增添情绪、归因类别、未给出的角色或事实",
     ):
-        assert required_text in SEMANTIC_APPRAISAL_PROMPT
+        assert required_text in prompt
     for forbidden_text in (
         "emotion_id",
         "activation_id",
         "replacement_state",
         "persistence route",
     ):
-        assert forbidden_text not in SEMANTIC_APPRAISAL_PROMPT
+        assert forbidden_text not in prompt
     for required_contract in (
         'proposition 和 delta 各自只能是一个对象或 null',
         '不能使用数组，也不能列举多个候选',
         '不要输出 explanation、selected_evidence_handles、selected_role_handles、propositions',
-        'delta 必须是 -40 到 40（含边界）的 JSON 整数',
+        'delta 必须是该项 delta_limit 范围内的整数',
         'question.candidate_origin_evidence',
         '来源 evidence handle',
     ):
-        assert required_contract in SEMANTIC_APPRAISAL_PROMPT
+        assert required_contract in prompt
 
 
 def test_character_carryover_prompt_maps_observable_effects_to_event_axes() -> None:
