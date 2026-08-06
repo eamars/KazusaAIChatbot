@@ -163,6 +163,15 @@ async def db_bootstrap() -> None:
         ],
         name="conv_delivery_tracking_logical_index",
     )
+    await db.conversation_history.create_index(
+        [
+            ("platform", 1),
+            ("platform_channel_id", 1),
+            ("role", 1),
+            ("received_at", 1),
+        ],
+        name="conversation_history_ingress_received_at_v1",
+    )
     await db.user_profiles.create_index(
         "global_user_id", unique=True, name="user_global_id_unique",
     )

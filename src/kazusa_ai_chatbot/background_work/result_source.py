@@ -85,6 +85,7 @@ def build_result_ready_episode_from_job(
         "result_ref": accepted_task_id,
         "source_platform_bot_id": job.get("source_platform_bot_id", ""),
         "source_character_name": job.get("source_character_name", ""),
+        "source_message_id": job.get("source_message_id", ""),
     }
     if coding_run_context is not None:
         result["coding_run_context"] = dict(coding_run_context)

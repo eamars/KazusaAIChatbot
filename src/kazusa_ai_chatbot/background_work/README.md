@@ -67,7 +67,14 @@ limitations remain prompt-safe.
 
 Workers do not call shared cognition or adapters directly. Delivery uses the
 accepted-task result source, normal cognition, dispatcher validation, and the
-usual adapter path.
+usual adapter path. The job's original `source_message_id` is carried
+separately from the synthetic `tool-result:<task_id>` episode identity. At
+accepted-task result delivery, the service resolves the original user row in
+`conversation_history` and selects `reply_to_msg_id` from that source id only
+when the durable server `received_at` age strictly exceeds 120 seconds or an
+intervening same-channel user receipt exists before the delivery cutoff. The
+synthetic tool-result identity remains provenance only and is never passed as
+a reply target.
 
 ## Persistence
 

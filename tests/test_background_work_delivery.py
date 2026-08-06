@@ -106,6 +106,7 @@ def test_tool_result_source_builder_creates_prompt_safe_episode() -> None:
     assert episode["origin_metadata"]["platform_message_id"] == (
         "tool-result:task-001"
     )
+    assert episode["origin_metadata"]["source_message_id"] == "message-1"
     assert episode["origin_metadata"]["active_turn_platform_message_ids"] == [
         "tool-result:task-001"
     ]
@@ -221,6 +222,23 @@ async def test_service_result_ready_delivery_uses_dispatcher_boundary(
     )
     monkeypatch.setattr(
         service_module,
+        "get_user_message_by_platform_message_id",
+        AsyncMock(return_value={
+            "_id": "source-row-1",
+            "platform": "debug",
+            "platform_channel_id": "debug-private-1",
+            "role": "user",
+            "platform_message_id": "message-1",
+            "received_at": "2026-06-06T00:00:00+00:00",
+        }),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "has_inbound_after",
+        AsyncMock(return_value=False),
+    )
+    monkeypatch.setattr(
+        service_module,
         "build_promoted_reflection_context",
         AsyncMock(return_value={}),
     )
@@ -265,6 +283,7 @@ async def test_service_result_ready_delivery_uses_dispatcher_boundary(
     send_args = handle_send_message.await_args.args[0]
     assert send_args["text"] == "@Test User Here is the requested result."
     assert send_args["target_channel"] == "debug-private-1"
+    assert send_args["reply_to_msg_id"] == "message-1"
     assert send_args["delivery_mentions"] == [
         {
             "entity_kind": "user",
@@ -284,6 +303,219 @@ async def test_service_result_ready_delivery_uses_dispatcher_boundary(
     assert post_turn_state["conversation_progress_turn_outcome"] == (
         "visible_response"
     )
+
+
+@pytest.mark.asyncio
+async def test_background_reply_target_uses_original_source_on_durable_age(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A result older than 120 seconds replies to the original source row."""
+
+    service_module = importlib.import_module("kazusa_ai_chatbot.service")
+    monkeypatch.setattr(
+        service_module,
+        "get_user_message_by_platform_message_id",
+        AsyncMock(return_value={
+            "_id": "source-row-1",
+            "platform": "debug",
+            "platform_channel_id": "debug-private-1",
+            "role": "user",
+            "platform_message_id": "message-1",
+            "received_at": "2026-06-06T00:00:00+00:00",
+        }),
+    )
+    has_inbound_after = AsyncMock(return_value=False)
+    monkeypatch.setattr(
+        service_module,
+        "has_inbound_after",
+        has_inbound_after,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "storage_utc_now_iso",
+        lambda: "2026-06-06T00:02:05+00:00",
+    )
+
+    reply_target = await service_module._resolve_background_reply_target(
+        platform="debug",
+        platform_channel_id="debug-private-1",
+        source_message_id="message-1",
+    )
+
+    assert reply_target == "message-1"
+    has_inbound_after.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_background_reply_target_intervening_qualifies_under_threshold(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An intervening user row qualifies a fresh original-source reply."""
+
+    service_module = importlib.import_module("kazusa_ai_chatbot.service")
+    monkeypatch.setattr(
+        service_module,
+        "get_user_message_by_platform_message_id",
+        AsyncMock(return_value={
+            "_id": "source-row-1",
+            "platform": "debug",
+            "platform_channel_id": "debug-private-1",
+            "role": "user",
+            "platform_message_id": "message-1",
+            "received_at": "2026-06-06T00:01:00+00:00",
+        }),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "has_inbound_after",
+        AsyncMock(return_value=True),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "storage_utc_now_iso",
+        lambda: "2026-06-06T00:02:00+00:00",
+    )
+
+    reply_target = await service_module._resolve_background_reply_target(
+        platform="debug",
+        platform_channel_id="debug-private-1",
+        source_message_id="message-1",
+    )
+
+    assert reply_target == "message-1"
+
+
+@pytest.mark.asyncio
+async def test_background_reply_target_strict_age_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Exactly 120 seconds without interleaving keeps a normal send."""
+
+    service_module = importlib.import_module("kazusa_ai_chatbot.service")
+    monkeypatch.setattr(
+        service_module,
+        "get_user_message_by_platform_message_id",
+        AsyncMock(return_value={
+            "_id": "source-row-1",
+            "platform": "debug",
+            "platform_channel_id": "debug-private-1",
+            "role": "user",
+            "platform_message_id": "message-1",
+            "received_at": "2026-06-06T00:00:00+00:00",
+        }),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "has_inbound_after",
+        AsyncMock(return_value=False),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "storage_utc_now_iso",
+        lambda: "2026-06-06T00:02:00+00:00",
+    )
+
+    reply_target = await service_module._resolve_background_reply_target(
+        platform="debug",
+        platform_channel_id="debug-private-1",
+        source_message_id="message-1",
+    )
+
+    assert reply_target is None
+
+
+@pytest.mark.asyncio
+async def test_background_reply_target_fails_closed_on_missing_source_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing original source row produces a normal send."""
+
+    service_module = importlib.import_module("kazusa_ai_chatbot.service")
+    monkeypatch.setattr(
+        service_module,
+        "get_user_message_by_platform_message_id",
+        AsyncMock(return_value=None),
+    )
+    has_inbound_after = AsyncMock(return_value=True)
+    monkeypatch.setattr(
+        service_module,
+        "has_inbound_after",
+        has_inbound_after,
+    )
+
+    reply_target = await service_module._resolve_background_reply_target(
+        platform="debug",
+        platform_channel_id="debug-private-1",
+        source_message_id="message-1",
+    )
+
+    assert reply_target is None
+    has_inbound_after.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_background_reply_target_fails_closed_without_source_received_at(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A legacy source row without received_at keeps a normal send."""
+
+    service_module = importlib.import_module("kazusa_ai_chatbot.service")
+    monkeypatch.setattr(
+        service_module,
+        "get_user_message_by_platform_message_id",
+        AsyncMock(return_value={
+            "_id": "source-row-1",
+            "platform": "debug",
+            "platform_channel_id": "debug-private-1",
+            "role": "user",
+            "platform_message_id": "message-1",
+        }),
+    )
+    has_inbound_after = AsyncMock(return_value=True)
+    monkeypatch.setattr(
+        service_module,
+        "has_inbound_after",
+        has_inbound_after,
+    )
+
+    reply_target = await service_module._resolve_background_reply_target(
+        platform="debug",
+        platform_channel_id="debug-private-1",
+        source_message_id="message-1",
+    )
+
+    assert reply_target is None
+    has_inbound_after.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_background_reply_target_rejects_synthetic_or_blank_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Synthetic tool-result identities are never reply targets."""
+
+    service_module = importlib.import_module("kazusa_ai_chatbot.service")
+    source_lookup = AsyncMock()
+    monkeypatch.setattr(
+        service_module,
+        "get_user_message_by_platform_message_id",
+        source_lookup,
+    )
+
+    synthetic_target = await service_module._resolve_background_reply_target(
+        platform="debug",
+        platform_channel_id="debug-private-1",
+        source_message_id="tool-result:task-001",
+    )
+    blank_target = await service_module._resolve_background_reply_target(
+        platform="debug",
+        platform_channel_id="debug-private-1",
+        source_message_id="",
+    )
+
+    assert synthetic_target is None
+    assert blank_target is None
+    source_lookup.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -424,6 +424,11 @@ def _patch_chat_dependencies(
     )
     monkeypatch.setattr(
         service_module,
+        "get_user_message_by_row_id",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        service_module,
         "set_conversation_source_episode_id",
         AsyncMock(return_value=1),
     )
@@ -2097,6 +2102,12 @@ async def test_chat_listen_only_drops_before_graph(monkeypatch):
     )
     save_conversation = AsyncMock()
     monkeypatch.setattr(service_module, "save_conversation", save_conversation)
+    save_receipt = AsyncMock(return_value="row-1")
+    monkeypatch.setattr(
+        service_module,
+        "save_conversation_receipt",
+        save_receipt,
+    )
 
     class _Graph:
         """Expose a mock graph entrypoint for listen-only assertions."""
@@ -2134,7 +2145,8 @@ async def test_chat_listen_only_drops_before_graph(monkeypatch):
     assert response.messages == []
     assert response.use_reply_feature is False
     graph.ainvoke.assert_not_awaited()
-    save_conversation.assert_awaited_once()
+    save_receipt.assert_awaited_once()
+    save_conversation.assert_not_awaited()
     await _reset_queue_state()
 
 

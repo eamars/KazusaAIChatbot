@@ -161,6 +161,7 @@ class ToolResultOriginV1(TypedDict, total=False):
     schema_version: Literal["tool_result_origin.v1"]
     owner: str
     platform_message_id: str
+    source_message_id: str
     active_turn_platform_message_ids: list[str]
     active_turn_conversation_row_ids: list[str]
     task_id: str
@@ -190,6 +191,7 @@ class ToolResultReadyV1(TypedDict, total=False):
     result_ref: str
     source_platform_bot_id: str
     source_character_name: str
+    source_message_id: str
 
 
 class CognitiveEpisodeV1(TypedDict):
@@ -836,6 +838,7 @@ def build_tool_result_episode(
     origin = _origin_with_defaults(
         {
             "platform_message_id": trigger_message_id,
+            "source_message_id": str(result_data.get("source_message_id", "")),
             "active_turn_platform_message_ids": [trigger_message_id],
             "active_turn_conversation_row_ids": [],
             "task_id": task_id,

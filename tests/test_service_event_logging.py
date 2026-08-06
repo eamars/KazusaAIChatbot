@@ -124,6 +124,14 @@ async def test_enqueue_suppresses_routine_accepted_queue_event(
         "_ensure_chat_input_worker_started",
         lambda: None,
     )
+    monkeypatch.setattr(
+        service_module,
+        "_commit_ingress_receipt",
+        AsyncMock(return_value={
+            "conversation_row_id": "row-1",
+            "received_at": "2026-04-29T00:00:00+00:00",
+        }),
+    )
 
     chat_task = asyncio.create_task(
         service_module._enqueue_chat_request(

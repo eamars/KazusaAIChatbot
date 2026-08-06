@@ -136,12 +136,17 @@ from kazusa_ai_chatbot.db import (
     get_conversation_by_platform_message_id,
     get_conversation_history,
     get_user_profile,
+    get_user_message_by_platform_message_id,
+    get_user_message_by_row_id,
+    has_inbound_after,
     load_media_descriptor_entries,
     complete_character_operational_receipt,
     query_active_commitment_memory_units_for_user,
     resolve_global_user_id,
     save_conversation,
+    save_conversation_receipt,
     set_conversation_source_episode_id,
+    update_conversation_row_llm_trace_id,
     upsert_post_turn_lifecycle_record,
     IdentityLedgerNotFoundError,
 )
@@ -194,6 +199,7 @@ from kazusa_ai_chatbot.brain_service.contracts import (
     Cache2AgentStatsResponse as Cache2AgentStatsResponse,
     Cache2HealthResponse as Cache2HealthResponse,
     ChatRequest,
+    ChatRequestReceiptMetadata,
     ChatResponse,
     DebugModesIn as DebugModesIn,
     DeliveryReceiptRequest,
@@ -364,6 +370,39 @@ def _queue_wait_ms(item: QueuedChatItem) -> int:
     wait_seconds = max(0.0, (now - queued_at).total_seconds())
     wait_ms = int(wait_seconds * MILLISECONDS_PER_SECOND)
     return wait_ms
+
+
+def _durable_reply_age_exceeds_threshold(
+    owner_received_at: str,
+    response_cutoff_received_at: str,
+) -> bool:
+    """Return whether durable owner age strictly exceeds the reply threshold.
+
+    Args:
+        owner_received_at: Server arrival instant of the response-owner receipt.
+        response_cutoff_received_at: Server arrival instant captured at the
+            final response boundary.
+
+    Returns:
+        True only when the owner age is strictly greater than 120.0 seconds.
+        Unparseable evidence fails closed to False.
+    """
+
+    try:
+        owner_datetime = parse_storage_utc_datetime(owner_received_at)
+        cutoff_datetime = parse_storage_utc_datetime(
+            response_cutoff_received_at,
+        )
+    except ValueError:
+        return_value = False
+        return return_value
+
+    elapsed_seconds = (cutoff_datetime - owner_datetime).total_seconds()
+    exceeds_threshold = (
+        elapsed_seconds
+        > NATIVE_REPLY_DELAY_PROMOTION_THRESHOLD_SECONDS
+    )
+    return exceeds_threshold
 
 
 def _runtime_error_fields(exc: BaseException) -> tuple[str, str, str, str]:
@@ -1240,6 +1279,17 @@ async def _prepare_frontline_fragment(
                 "frontline message persistence did not commit a row"
             )
         item.conversation_row_id = conversation_row_id
+    elif item.llm_trace_id:
+        try:
+            await update_conversation_row_llm_trace_id(
+                row_id=item.conversation_row_id,
+                llm_trace_id=item.llm_trace_id,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to attach trace metadata to committed ingress row: "
+                f"row={item.conversation_row_id} error={exc}"
+            )
     fragment = _build_frontline_fragment(
         item,
         message_envelope=message_envelope,
@@ -2062,7 +2112,6 @@ async def _process_settlement_lease(
             response_owner,
             settlement_fragments=list(lease.fragments),
             settled_decision=decision,
-            skip_user_persist=True,
             settlement_turn_id=lease.turn_id,
             settlement_version=lease.version,
             settlement_claimed=True,
@@ -2721,6 +2770,77 @@ async def _persist_post_turn_lifecycle_record(
     await upsert_post_turn_lifecycle_record(record)
 
 
+async def _resolve_background_reply_target(
+    *,
+    platform: str,
+    platform_channel_id: str,
+    source_message_id: str,
+) -> str | None:
+    """Resolve the durable original-source reply target for result delivery.
+
+    Returns the original source message ID only when a user-role source row
+    with a usable server received_at exists and the deterministic age or
+    interleaving gate qualifies. Missing evidence, blank IDs, and synthetic
+    tool-result identities fail closed to a normal send.
+
+    Args:
+        platform: Runtime platform of the source message.
+        platform_channel_id: Channel/group/DM id of the source message.
+        source_message_id: Original inbound platform message ID retained by the
+            completed background-work job.
+
+    Returns:
+        Original source message ID when the durable gate qualifies, otherwise
+        None.
+    """
+
+    clean_source_message_id = str(source_message_id or "").strip()
+    if (
+        not clean_source_message_id
+        or clean_source_message_id.startswith("tool-result:")
+    ):
+        return_value: str | None = None
+        return return_value
+
+    source_row = await get_user_message_by_platform_message_id(
+        platform=platform,
+        platform_channel_id=platform_channel_id,
+        platform_message_id=clean_source_message_id,
+    )
+    if source_row is None:
+        return_value = None
+        return return_value
+
+    source_received_at = str(source_row.get("received_at") or "").strip()
+    if not source_received_at:
+        return_value = None
+        return return_value
+    source_row_id = str(source_row.get("_id") or "").strip()
+    if not source_row_id:
+        return_value = None
+        return return_value
+
+    response_cutoff_received_at = storage_utc_now_iso()
+    source_age_exceeds_threshold = _durable_reply_age_exceeds_threshold(
+        source_received_at,
+        response_cutoff_received_at,
+    )
+    if not source_age_exceeds_threshold:
+        intervening = await has_inbound_after(
+            platform=platform,
+            platform_channel_id=platform_channel_id,
+            owner_row_id=source_row_id,
+            owner_received_at=source_received_at,
+            response_cutoff_received_at=response_cutoff_received_at,
+        )
+        if not intervening:
+            return_value = None
+            return return_value
+
+    return_value = clean_source_message_id
+    return return_value
+
+
 async def _deliver_accepted_task_result_episode(
     episode: CognitiveEpisodeV1,
 ) -> dict[str, Any]:
@@ -2910,13 +3030,22 @@ async def _deliver_accepted_task_result_episode(
             delivery_tracking_id="",
         )
 
+        original_source_message_id = str(
+            episode["origin_metadata"].get("source_message_id", "")
+        ).strip()
+        reply_to_msg_id = await _resolve_background_reply_target(
+            platform=platform,
+            platform_channel_id=platform_channel_id,
+            source_message_id=original_source_message_id,
+        )
+
         dispatch_result = await handle_send_message(
             {
                 "target_platform": platform,
                 "target_channel": platform_channel_id,
                 "target_channel_type": channel_type,
                 "text": "\n".join(final_dialog),
-                "reply_to_msg_id": None,
+                "reply_to_msg_id": reply_to_msg_id,
                 "delivery_mentions": _accepted_task_delivery_mentions(
                     result=result,
                     episode=episode,
@@ -3345,21 +3474,24 @@ async def _drop_queued_chat_item(item: QueuedChatItem) -> bool:
     save_started_at = 0.0
     persistence_error: BaseException | None = None
     try:
-        global_user_id, user_profile = await _resolve_queued_user(item)
-        message_envelope = await _resolve_message_envelope_identities(
-            item.request,
-        )
-        item.global_user_id = global_user_id
-        item.user_profile = dict(user_profile)
-        item.resolved_message_envelope = message_envelope
-        reply_context = await _hydrate_reply_context(item.request)
-        save_started_at = time.perf_counter()
-        conversation_row_id = await _save_user_message_from_item(
-            item,
-            global_user_id=global_user_id,
-            reply_context=reply_context,
-            message_envelope=message_envelope,
-        )
+        if item.conversation_row_id:
+            conversation_row_id = item.conversation_row_id
+        else:
+            global_user_id, user_profile = await _resolve_queued_user(item)
+            message_envelope = await _resolve_message_envelope_identities(
+                item.request,
+            )
+            item.global_user_id = global_user_id
+            item.user_profile = dict(user_profile)
+            item.resolved_message_envelope = message_envelope
+            reply_context = await _hydrate_reply_context(item.request)
+            save_started_at = time.perf_counter()
+            conversation_row_id = await _save_user_message_from_item(
+                item,
+                global_user_id=global_user_id,
+                reply_context=reply_context,
+                message_envelope=message_envelope,
+            )
         if not conversation_row_id:
             await event_logging.record_database_operation_event(
                 component=SERVICE_COMPONENT,
@@ -3480,21 +3612,24 @@ async def _persist_collapsed_queued_chat_item(
     save_started_at = 0.0
     persistence_error: BaseException | None = None
     try:
-        global_user_id, user_profile = await _resolve_queued_user(item)
-        message_envelope = await _resolve_message_envelope_identities(
-            item.request,
-        )
-        item.global_user_id = global_user_id
-        item.user_profile = dict(user_profile)
-        item.resolved_message_envelope = message_envelope
-        reply_context = await _hydrate_reply_context(item.request)
-        save_started_at = time.perf_counter()
-        conversation_row_id = await _save_user_message_from_item(
-            item,
-            global_user_id=global_user_id,
-            reply_context=reply_context,
-            message_envelope=message_envelope,
-        )
+        if item.conversation_row_id:
+            conversation_row_id = item.conversation_row_id
+        else:
+            global_user_id, user_profile = await _resolve_queued_user(item)
+            message_envelope = await _resolve_message_envelope_identities(
+                item.request,
+            )
+            item.global_user_id = global_user_id
+            item.user_profile = dict(user_profile)
+            item.resolved_message_envelope = message_envelope
+            reply_context = await _hydrate_reply_context(item.request)
+            save_started_at = time.perf_counter()
+            conversation_row_id = await _save_user_message_from_item(
+                item,
+                global_user_id=global_user_id,
+                reply_context=reply_context,
+                message_envelope=message_envelope,
+            )
         if conversation_row_id:
             item.conversation_row_id = conversation_row_id
         else:
@@ -5603,7 +5738,6 @@ async def _process_queued_chat_item(
     *,
     settlement_fragments: list[PersistedChatFragment] | None = None,
     settled_decision: Mapping[str, Any] | None = None,
-    skip_user_persist: bool = False,
     settlement_turn_id: str = "",
     settlement_version: int = 0,
     settlement_claimed: bool = False,
@@ -5672,6 +5806,17 @@ async def _process_queued_chat_item(
             global_user_id=global_user_id,
             started_at=item.storage_timestamp_utc,
         )
+        if item.request.debug_modes.listen_only and item.conversation_row_id:
+            try:
+                await update_conversation_row_llm_trace_id(
+                    row_id=item.conversation_row_id,
+                    llm_trace_id=llm_trace_id,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to attach trace metadata to listen-only ingress "
+                    f"row: row={item.conversation_row_id} error={exc}"
+                )
 
         multimedia_input: list[MultiMediaDoc] = []
         media_scope = (
@@ -5740,7 +5885,7 @@ async def _process_queued_chat_item(
         reply_context = await _hydrate_reply_context(req)
         stages_reached.append("history_loaded")
         user_save_started_at = 0.0
-        if skip_user_persist and item.conversation_row_id:
+        if item.conversation_row_id:
             conversation_row_id = item.conversation_row_id
         else:
             user_save_started_at = time.perf_counter()
@@ -6215,20 +6360,47 @@ async def _process_queued_chat_item(
         stages_reached.append("graph")
         final_dialog = result["final_dialog"]
         base_reply_feature = bool(result["use_reply_feature"])
-        owner_mismatch = (
-            bool(settlement_fragments)
-            and settlement_fragments[-1].arrival_sequence != item.sequence
+        response_cutoff_received_at = storage_utc_now_iso()
+        owner_received_at = str(item.received_at or "").strip()
+        owner_row_id = str(item.conversation_row_id or "").strip()
+        owner_receipt_available = False
+        if (
+            owner_received_at
+            and owner_row_id
+            and not base_reply_feature
+            and req.channel_type == "group"
+            and bool(req.platform_message_id.strip())
+        ):
+            owner_row = await get_user_message_by_row_id(
+                row_id=owner_row_id,
+                platform=req.platform,
+                platform_channel_id=req.platform_channel_id,
+            )
+            owner_receipt_available = (
+                owner_row is not None
+                and str(owner_row.get("received_at") or "").strip()
+                == owner_received_at
+            )
+        intervening = False
+        if owner_receipt_available:
+            intervening = await has_inbound_after(
+                platform=req.platform,
+                platform_channel_id=req.platform_channel_id,
+                owner_row_id=owner_row_id,
+                owner_received_at=owner_received_at,
+                response_cutoff_received_at=response_cutoff_received_at,
+            )
+        durable_delayed = owner_receipt_available and (
+            _durable_reply_age_exceeds_threshold(
+                owner_received_at,
+                response_cutoff_received_at,
+            )
         )
-        elapsed_seconds = time.monotonic() - item.enqueue_monotonic
         native_reply_promotion = (
             req.channel_type == "group"
             and bool(req.platform_message_id.strip())
             and (
-                owner_mismatch
-                or (
-                    elapsed_seconds
-                    > NATIVE_REPLY_DELAY_PROMOTION_THRESHOLD_SECONDS
-                )
+                intervening or durable_delayed
             )
         )
         use_reply_feature = bool(final_dialog) and (
@@ -6670,6 +6842,46 @@ async def _stop_chat_input_worker() -> None:
     _turn_settlement_coordinator = _new_turn_settlement_coordinator()
 
 
+async def _commit_ingress_receipt(req: ChatRequest) -> ChatRequestReceiptMetadata:
+    """Commit the canonical durable user receipt before queue admission.
+
+    Args:
+        req: Incoming chat request from an adapter.
+
+    Returns:
+        Mapping of the committed conversation row ID and its server-generated
+        received_at.
+    """
+
+    received_at = storage_utc_now_iso()
+    global_user_id = await resolve_global_user_id(
+        platform=req.platform,
+        platform_user_id=req.platform_user_id,
+        display_name=req.display_name,
+    )
+    message_envelope = await _resolve_message_envelope_identities(req)
+    reply_context = await _hydrate_reply_context(req)
+    conversation_row_id = await brain_intake.save_ingress_receipt(
+        req,
+        global_user_id=global_user_id,
+        reply_context=reply_context,
+        save_conversation_receipt_func=save_conversation_receipt,
+        resolve_message_envelope_identities_func=(
+            _resolve_message_envelope_identities
+        ),
+        message_envelope=message_envelope,
+        received_at=received_at,
+        logger=logger,
+    )
+    if not conversation_row_id:
+        raise RuntimeError("ingress receipt persistence did not commit a row")
+    receipt: ChatRequestReceiptMetadata = {
+        "conversation_row_id": conversation_row_id,
+        "received_at": received_at,
+    }
+    return receipt
+
+
 async def _enqueue_chat_request(req: ChatRequest) -> ChatResponse:
     """Enqueue one request and wait for the worker-produced response.
 
@@ -6720,6 +6932,8 @@ async def _enqueue_chat_request(req: ChatRequest) -> ChatResponse:
         )
 
     try:
+        receipt = await _commit_ingress_receipt(req)
+        req._receipt_metadata = receipt
         response = await _chat_input_queue.enqueue(
             req,
             pipeline_run_handle=handle,

@@ -235,14 +235,16 @@ with an empty response after attachment; only the response owner receives the
 assembled turn's visible response. The final native-reply flag is monotonic at
 the service boundary: relevance and the graph latch supply the base Boolean,
 and response construction never erases a latched `True`, even when the
-response owner is older than the effective latest fragment. Deterministic
+response owner is older than later durable inbound receipts. Deterministic
 delivery may additionally promote a `False` base request to `True` only for a
-visible group response with a non-empty inbound platform message id when the
-response owner is not the effective latest fragment or when the response's
-enqueue-to-construction delay exceeds 120 seconds. Private scope, a missing
-platform message id, a fresh matching-owner response, and an empty dialog
-never promote; the adapter continues rendering the flag only for the first
-outbound message.
+visible group response with a non-empty inbound platform message id when a
+durable `conversation_history` user receipt in the same platform/channel
+arrived after the response-owner receipt and at or before the response cutoff,
+or when the owner receipt's server-arrival age strictly exceeds 120 seconds.
+Author identity and later intake disposition never filter this evidence.
+Private scope, a missing platform message id, missing durable arrival
+evidence, and an empty dialog never promote; the adapter continues rendering
+the flag only for the first outbound message.
 Fresh settled history excludes active-turn rows and retains the newest whole
 logical turns under its exact 6,000-character compact-JSON sub-budget. The
 opening/newest four-image budget is shared across reassessments, with overflow
@@ -619,11 +621,15 @@ This canonicalization does not update historical conversation rows.
 
 ## Persistence Timing
 
-The normal `/chat` path records the incoming user row before frontline
-execution. If that row is not committed, the request fails closed and no
-visible reply is released. Discarded, listen-only, and private-coalesced
-inputs retain their persisted source rows. A settled turn is not allowed to
-run on any fragment whose source row was not committed.
+The normal `/chat` path commits one canonical `conversation_history` user
+receipt with a server-generated `received_at` before queue admission. If that
+receipt is not committed, the request fails closed and no visible reply is
+released. Queue pruning, shutdown drain, private coalescing, and frontline
+discard cannot erase the committed receipt; later intake consumes or updates
+the same row and never inserts a duplicate. The existing `timestamp` field
+keeps its event/local-time meaning and is not the authoritative arrival clock.
+A settled turn is not allowed to run on any fragment whose source row was not
+committed.
 An envelope with neither authored `body_text` nor attachments completes with
 an empty response before queue admission and creates no conversation row.
 
@@ -649,7 +655,11 @@ materializes the same checkpoint into a `task_orchestrator` background job
 before selected L3 text runs. Status checks use `accepted_task_status_check`
 and never enqueue a worker job. Completed accepted-task-backed jobs later
 return as `tool_result` cognitive episodes. Background-work workers must not
-call adapters, dispatcher delivery, or cognition directly.
+call adapters, dispatcher delivery, or cognition directly. Accepted-task
+result delivery resolves the job's original source message row in
+`conversation_history` and uses the same durable age/interleaving gate to
+select `reply_to_msg_id`; the synthetic `tool-result:<task_id>` identity is
+provenance only and never becomes a reply target.
 
 Delivery receipt adapters may still need bounded `not_found` retry behavior
 for transport timing and cross-process delivery, but a non-empty

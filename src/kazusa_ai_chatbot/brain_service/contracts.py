@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Literal, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -56,6 +56,13 @@ class MessageEnvelopeIn(BaseModel):
     broadcast: bool
 
 
+class ChatRequestReceiptMetadata(TypedDict, total=False):
+    """Service-internal durable receipt identity attached before queue admission."""
+
+    conversation_row_id: str
+    received_at: str
+
+
 class ChatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -71,6 +78,8 @@ class ChatRequest(BaseModel):
     message_envelope: MessageEnvelopeIn
     local_timestamp: str = ""
     debug_modes: DebugModesIn = Field(default_factory=DebugModesIn)
+
+    _receipt_metadata: ChatRequestReceiptMetadata | None = None
 
 
 class AttachmentOut(BaseModel):

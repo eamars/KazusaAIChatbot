@@ -105,6 +105,7 @@ class ConversationMessageDoc(TypedDict, total=False):
     llm_trace_id: str          # Turn-scoped LLM trace id, when available
     source_episode_id: str     # Settled cognitive episode root for reflection
     timestamp: str             # ISO-8601 UTC timestamp
+    received_at: str           # Server-generated UTC arrival instant for inbound user rows
     embedding: list[float]     # Dense vector (on text content only)
 
 

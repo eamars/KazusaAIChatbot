@@ -341,10 +341,12 @@ exact 6,000-character compact-JSON sub-budget before the unchanged
 
 ## Relevance Turn Settlement
 
-Active chat intake persists each typed message before semantic routing. The
-frontline route receives bounded message evidence, typed target/reply labels,
-open-turn descriptors, and silent same-author preludes. It returns
-`discard`, `start`, or `append`.
+Active chat intake commits one canonical `conversation_history` user receipt
+with a server-generated `received_at` before queue admission, then persists
+or updates that same row during semantic routing. The frontline route
+receives bounded message evidence, typed target/reply labels, open-turn
+descriptors, and silent same-author preludes. It returns `discard`, `start`,
+or `append`.
 
 Both relevance stages also receive bounded interaction evidence and a bounded
 projection of the same process-local native character cognition state. Group
@@ -969,11 +971,15 @@ you need process-local `task_alive` state.
 Primary brain entrypoint.
 
 The endpoint enqueues each request into the brain's process-local input queue
-and waits for that request's response future. The intake worker persists active
-messages and runs their compact frontline decisions in arrival order. It then
-returns to intake while admitted group turns wait in the independent settlement
-scheduler. Explicit `listen_only` input follows its debug bypass; active group
-messages have no queue-threshold semantic pruning before frontline.
+and waits for that request's response future. Before queue admission the
+service commits one durable inbound user receipt with a server-generated
+`received_at`; queue pruning, shutdown drain, coalescing, and frontline
+discard cannot erase it, and later intake never inserts a second copy. The
+intake worker consumes or updates that same row and runs compact frontline
+decisions in arrival order. It then returns to intake while admitted group
+turns wait in the independent settlement scheduler. Explicit `listen_only`
+input follows its debug bypass; active group messages have no queue-threshold
+semantic pruning before frontline.
 
 Adapters own platform-specific reply detection. The brain projects typed target
 and reply evidence into frontline semantic labels; raw reply identifiers do not
@@ -985,7 +991,10 @@ history uses stable bounded participant handles instead of raw ids. A
 state-salience decision may retain another participant as the actual recipient;
 in that case the relevance-owned base `use_reply_feature` remains false;
 deterministic delivery may still promote the final flag for a qualifying group
-response.
+response when a durable same-channel user receipt arrived after the response
+owner's receipt and before the response cutoff, or when the owner's durable
+server-arrival age strictly exceeds 120 seconds. Author identity and later
+packet disposition do not filter that evidence.
 
 Group turns become eligible after six quiet seconds and close at ten seconds
 from the opening enqueue time. Inputs enqueued before the hard boundary are

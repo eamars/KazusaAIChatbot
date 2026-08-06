@@ -700,15 +700,18 @@ async def list_recent_group_summaries(
     return summaries
 
 
-async def save_conversation(doc: ConversationMessageDoc) -> str:
-    """Persist one conversation message and invalidate matching cache entries.
+def _validate_conversation_doc(
+    doc: ConversationMessageDoc,
+) -> ConversationMessageDoc:
+    """Validate one conversation row and apply the shared storage policy.
 
     Args:
-        doc: Conversation-history row to store.
+        doc: Conversation-history row to persist.
 
     Returns:
-        MongoDB row ID string for the committed conversation-history row.
+        The validated row with safe attachment documents applied.
     """
+
     if "content" in doc:
         raise KeyError("content")
 
@@ -731,20 +734,34 @@ async def save_conversation(doc: ConversationMessageDoc) -> str:
             "conversation message requires body_text or a storable attachment"
         )
 
-    if "embedding" not in doc or not doc.get("embedding"):
-        doc["embedding"] = await get_document_text_embedding(
-            _embedding_source_text(doc)
+    return doc
+
+
+async def save_conversation(doc: ConversationMessageDoc) -> str:
+    """Persist one conversation message and invalidate matching cache entries.
+
+    Args:
+        doc: Conversation-history row to store.
+
+    Returns:
+        MongoDB row ID string for the committed conversation-history row.
+    """
+    prepared_doc = _validate_conversation_doc(doc)
+
+    if "embedding" not in prepared_doc or not prepared_doc.get("embedding"):
+        prepared_doc["embedding"] = await get_document_text_embedding(
+            _embedding_source_text(prepared_doc)
         )
 
     db = await get_db()
-    insert_result = await db.conversation_history.insert_one(doc)
+    insert_result = await db.conversation_history.insert_one(prepared_doc)
     inserted_id_str = str(insert_result.inserted_id)
     invalidation_event = CacheInvalidationEvent(
         source="conversation_history",
-        platform=doc.get("platform", ""),
-        platform_channel_id=doc.get("platform_channel_id", ""),
-        global_user_id=doc.get("global_user_id", ""),
-        storage_timestamp_utc=doc.get("timestamp", ""),
+        platform=prepared_doc.get("platform", ""),
+        platform_channel_id=prepared_doc.get("platform_channel_id", ""),
+        global_user_id=prepared_doc.get("global_user_id", ""),
+        storage_timestamp_utc=prepared_doc.get("timestamp", ""),
         reason="save_conversation",
     )
     cache_runtime = cache2_runtime.get_rag_cache2_runtime()
@@ -757,12 +774,267 @@ async def save_conversation(doc: ConversationMessageDoc) -> str:
         return inserted_id_str
 
     if evicted_count:
-        platform = doc.get("platform", "")
-        platform_channel_id = doc.get("platform_channel_id", "")
-        global_user_id = doc.get("global_user_id", "")
+        platform = prepared_doc.get("platform", "")
+        platform_channel_id = prepared_doc.get("platform_channel_id", "")
+        global_user_id = prepared_doc.get("global_user_id", "")
         logger.debug(f'Cache2 invalidation source=conversation_history platform={platform} channel={platform_channel_id} global_user={global_user_id} evicted={evicted_count}')
 
     return inserted_id_str
+
+
+async def save_conversation_receipt(doc: ConversationMessageDoc) -> str:
+    """Commit one inbound user receipt before slow enrichment runs.
+
+    The row is inserted first so the server-arrival receipt is durable before
+    embedding enrichment; enrichment then updates the same row. Cache2
+    invalidation runs after enrichment completes.
+
+    Args:
+        doc: Conversation-history row to store. Must carry ``received_at``.
+
+    Returns:
+        MongoDB row ID string for the committed conversation-history row.
+    """
+
+    received_at = str(doc.get("received_at") or "").strip()
+    if not received_at:
+        raise ValueError("conversation receipt requires received_at")
+    prepared_doc = _validate_conversation_doc(doc)
+
+    db = await get_db()
+    insert_result = await db.conversation_history.insert_one(prepared_doc)
+    inserted_id_str = str(insert_result.inserted_id)
+
+    if "embedding" not in prepared_doc or not prepared_doc.get("embedding"):
+        try:
+            embedding = await get_document_text_embedding(
+                _embedding_source_text(prepared_doc)
+            )
+            await db.conversation_history.update_one(
+                {"_id": insert_result.inserted_id},
+                {"$set": {"embedding": embedding}},
+            )
+        except Exception as exc:
+            logger.warning(
+                "Conversation receipt embedding enrichment failed; "
+                f"receipt row remains committed: row={inserted_id_str} "
+                f"error={exc}"
+            )
+
+    invalidation_event = CacheInvalidationEvent(
+        source="conversation_history",
+        platform=prepared_doc.get("platform", ""),
+        platform_channel_id=prepared_doc.get("platform_channel_id", ""),
+        global_user_id=prepared_doc.get("global_user_id", ""),
+        storage_timestamp_utc=prepared_doc.get("timestamp", ""),
+        reason="save_conversation_receipt",
+    )
+    cache_runtime = cache2_runtime.get_rag_cache2_runtime()
+    try:
+        evicted_count = await cache_runtime.invalidate(invalidation_event)
+    except Exception as exc:
+        logger.warning(
+            "Cache2 invalidation after save_conversation_receipt failed: "
+            f"{exc}"
+        )
+        return inserted_id_str
+
+    if evicted_count:
+        platform = prepared_doc.get("platform", "")
+        platform_channel_id = prepared_doc.get("platform_channel_id", "")
+        global_user_id = prepared_doc.get("global_user_id", "")
+        logger.debug(
+            "Cache2 invalidation source=conversation_history "
+            f"platform={platform} channel={platform_channel_id} "
+            f"global_user={global_user_id} evicted={evicted_count}"
+        )
+
+    return inserted_id_str
+
+
+async def update_conversation_row_llm_trace_id(
+    *,
+    row_id: str,
+    llm_trace_id: str,
+) -> bool:
+    """Attach one turn trace id to an already-committed conversation row.
+
+    Args:
+        row_id: Conversation-history row id of the committed receipt.
+        llm_trace_id: Turn-scoped trace id generated after receipt commit.
+
+    Returns:
+        True when one row matched, otherwise false.
+    """
+
+    clean_row_id = str(row_id).strip()
+    clean_trace_id = str(llm_trace_id).strip()
+    if not clean_row_id or not clean_trace_id:
+        return False
+
+    object_ids = _object_ids_from_row_ids([clean_row_id])
+    if not object_ids:
+        return False
+
+    db = await get_db()
+    result = await db.conversation_history.update_one(
+        {"_id": object_ids[0]},
+        {"$set": {"llm_trace_id": clean_trace_id}},
+    )
+    return_value = bool(result.matched_count)
+    return return_value
+
+
+async def get_user_message_by_platform_message_id(
+    *,
+    platform: str,
+    platform_channel_id: str,
+    platform_message_id: str,
+) -> ConversationMessageDoc | None:
+    """Fetch one user-role conversation row by exact platform identity.
+
+    Args:
+        platform: Runtime platform of the source message.
+        platform_channel_id: Channel/group/DM id of the source message.
+        platform_message_id: Platform-native message id of the source message.
+
+    Returns:
+        User conversation row when found, otherwise ``None``.
+    """
+
+    if not platform_message_id:
+        return_value: ConversationMessageDoc | None = None
+        return return_value
+
+    db = await get_db()
+    query = {
+        "platform": platform,
+        "platform_channel_id": platform_channel_id,
+        "role": "user",
+        "platform_message_id": platform_message_id,
+    }
+    row = await db.conversation_history.find_one(query)
+    return_value = row
+    return return_value
+
+
+async def get_user_message_by_row_id(
+    *,
+    row_id: str,
+    platform: str,
+    platform_channel_id: str,
+) -> ConversationMessageDoc | None:
+    """Fetch one committed user receipt by its canonical Mongo row ID.
+
+    Args:
+        row_id: Canonical conversation-history row ID returned at receipt
+            commit time.
+        platform: Runtime platform of the receipt.
+        platform_channel_id: Channel/group/DM id of the receipt.
+
+    Returns:
+        The matching user receipt when it still exists, otherwise ``None``.
+    """
+
+    clean_row_id = str(row_id).strip()
+    if not clean_row_id:
+        return_value: ConversationMessageDoc | None = None
+        return return_value
+    object_ids = _object_ids_from_row_ids([clean_row_id])
+    row_id_value: ObjectId | str = (
+        object_ids[0] if object_ids else clean_row_id
+    )
+
+    db = await get_db()
+    row = await db.conversation_history.find_one(
+        {
+            "_id": row_id_value,
+            "platform": platform,
+            "platform_channel_id": platform_channel_id,
+            "role": "user",
+        },
+        projection={"_id": 1, "received_at": 1},
+    )
+    return_value = row
+    return return_value
+
+
+async def has_inbound_after(
+    *,
+    platform: str,
+    platform_channel_id: str,
+    owner_row_id: str,
+    owner_received_at: str,
+    response_cutoff_received_at: str,
+) -> bool:
+    """Return whether any user receipt arrived after the owner and before the cutoff.
+
+    The query counts every durable ``conversation_history`` row with
+    ``role="user"`` in the same platform/channel whose server ``received_at``
+    is strictly after the owner receipt and at or before the response cutoff.
+    Author identity and later intake disposition do not filter this fact.
+    Rows without ``received_at`` are never counted. When equal server instants
+    occur, insertion order (MongoDB ``_id``) is the stable tie-break.
+
+    Args:
+        platform: Runtime platform of the response owner.
+        platform_channel_id: Channel/group/DM id of the response owner.
+        owner_row_id: Canonical Mongo row ID of the response-owner receipt.
+        owner_received_at: Server arrival instant of the response-owner receipt.
+        response_cutoff_received_at: Server arrival instant captured at the
+            final response boundary.
+
+    Returns:
+        True when at least one matching inbound user receipt exists.
+    """
+
+    clean_owner_row_id = str(owner_row_id).strip()
+    if not clean_owner_row_id:
+        return False
+    object_ids = _object_ids_from_row_ids([clean_owner_row_id])
+    owner_id_value: ObjectId | str = (
+        object_ids[0] if object_ids else clean_owner_row_id
+    )
+
+    db = await get_db()
+    anchor = await db.conversation_history.find_one(
+        {
+            "_id": owner_id_value,
+            "platform": platform,
+            "platform_channel_id": platform_channel_id,
+            "role": "user",
+            "received_at": owner_received_at,
+        },
+        projection={"_id": 1},
+    )
+    if anchor is None:
+        return False
+
+    query: dict[str, Any] = {
+        "platform": platform,
+        "platform_channel_id": platform_channel_id,
+        "role": "user",
+    }
+    received_after_owner = {
+        "$gt": owner_received_at,
+        "$lte": response_cutoff_received_at,
+    }
+    if owner_received_at < response_cutoff_received_at:
+        query["$or"] = [
+            {"received_at": received_after_owner},
+            {
+                "received_at": owner_received_at,
+                "_id": {"$gt": anchor["_id"]},
+            },
+        ]
+    else:
+        query["received_at"] = received_after_owner
+    row = await db.conversation_history.find_one(
+        query,
+        projection={"_id": 1},
+    )
+    return_value = row is not None
+    return return_value
 
 
 async def apply_assistant_delivery_receipt(
