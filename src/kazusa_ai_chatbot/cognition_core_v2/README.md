@@ -419,6 +419,25 @@ record is observability only: it uses bounded public selections, digests, and
 typed health; it does not alter cognition semantics or introduce a second
 state authority.
 
+Operational context packets use compact canonical JSON accounting
+(`ensure_ascii=False`, sorted keys, and compact separators). Relationship
+operational context is capped at 900 decoded characters and character
+operational context at 1,200 decoded characters, including its final
+`context_digest`. Producers fit packets before publication; the Cognition V2
+input validator applies the same owner-specific fit to a copied packet before
+strict validation and returns the fitted packet to downstream stages. The fit
+may middle-truncate bounded summaries or remove optional rows, but preserves
+identity, axes, handles, timestamps, provenance, and required current-turn
+facts. Malformed structure remains a contract error; only irreducible required
+overflow reaches the typed context-limit invariant.
+
+Relationship fitting first retains the longest possible causal summaries with
+an 80-character floor, then drops the lowest-priority causal rows from the
+end of their stable salience/recency order, and then drops affect rows.
+Character fitting drops pressures from the end of their stable order before
+affect rows. The character digest is recomputed when fitting changes the body
+and remains stable for a valid no-op consumer fit.
+
 ## Context Fade And Sleep Phase
 
 Aged conversational context is discarded deterministically before projection;

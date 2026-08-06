@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from copy import deepcopy
@@ -11,6 +9,18 @@ from datetime import datetime, timezone
 from typing import Any
 from zoneinfo import ZoneInfoNotFoundError
 
+from kazusa_ai_chatbot.cognition_core_v2.prompt_budget import (
+    CHARACTER_OPERATIONAL_CONSUMER_ROLES,
+    CHARACTER_OPERATIONAL_CONTEXT_DIGEST_CHARS,
+    MAX_CONTEXT_AFFECT_ROWS,
+    MAX_CONTEXT_PRESSURE_ROWS,
+    MAX_RELATIONSHIP_AFFECT_ROWS,
+    MAX_RELATIONSHIP_CAUSAL_ROWS,
+    MAX_RELATIONSHIP_CAUSAL_SUMMARY_CHARS,
+    canonical_digest,
+    fit_character_operational_context,
+    fit_relationship_operational_context,
+)
 from kazusa_ai_chatbot.cognition_core_v2.state_reducers import (
     apply_character_elapsed_decay,
 )
@@ -59,12 +69,6 @@ _SIGNED_RELATIONSHIP_AXES = frozenset({
 })
 MAX_CHARACTER_OPERATIONAL_AFFECT_ROWS = 21
 MAX_CHARACTER_OPERATIONAL_PRESSURE_ROWS = 8
-MAX_CONTEXT_AFFECT_ROWS = 3
-MAX_CONTEXT_PRESSURE_ROWS = 4
-MAX_CHARACTER_OPERATIONAL_CONTEXT_CHARS = 1200
-MAX_RELATIONSHIP_CAUSAL_ROWS = 2
-MAX_RELATIONSHIP_AFFECT_ROWS = 2
-MAX_RELATIONSHIP_CAUSAL_SUMMARY_CHARS = 160
 OPERATIONAL_PRESSURE_THRESHOLD = 40
 MINUTES_PER_DAY = 24 * 60
 
@@ -72,12 +76,6 @@ CHARACTER_SLEEP_PHASE_OUTSIDE = "清醒时段"
 CHARACTER_SLEEP_PHASE_IN_WINDOW = "睡眠中"
 CHARACTER_SLEEP_PHASE_WAKE_PREP = "即将醒来"
 
-_CHARACTER_OPERATIONAL_CONSUMER_ROLES = frozenset({
-    "settled_relevance",
-    "appraisal branch",
-    "goal",
-    "surface",
-})
 _RELATIONSHIP_REQUIRED_EMOTION_IDS = frozenset({
     "love_attachment",
     "jealousy",
@@ -513,7 +511,7 @@ def project_character_operational_state(
         effective_state,
         effective_at=effective_at,
     )
-    source_digest = _canonical_digest(dict(state))
+    source_digest = canonical_digest(dict(state))
     view_without_digest = {
         "schema_version": CHARACTER_OPERATIONAL_STATE_VIEW_SCHEMA,
         "source_updated_at": source_updated_at,
@@ -524,7 +522,7 @@ def project_character_operational_state(
     }
     view = {
         **view_without_digest,
-        "view_digest": _canonical_digest(view_without_digest),
+        "view_digest": canonical_digest(view_without_digest),
     }
     return view
 
@@ -536,7 +534,7 @@ def select_character_operational_context(
 ) -> dict[str, Any]:
     """Select one bounded model-facing context from a full operational view."""
 
-    if consumer_role not in _CHARACTER_OPERATIONAL_CONSUMER_ROLES:
+    if consumer_role not in CHARACTER_OPERATIONAL_CONSUMER_ROLES:
         raise ValueError(f"unsupported operational consumer role: {consumer_role}")
     if state_view["schema_version"] != CHARACTER_OPERATIONAL_STATE_VIEW_SCHEMA:
         raise ValueError("unsupported character operational state view")
@@ -564,11 +562,12 @@ def select_character_operational_context(
         "affect": affect_rows,
         "pressures": pressure_rows,
     }
-    _fit_operational_context_to_budget(context_without_digest)
-    context = {
+    context_with_placeholder = {
         **context_without_digest,
-        "context_digest": _canonical_digest(context_without_digest),
+        "context_digest": "0" * CHARACTER_OPERATIONAL_CONTEXT_DIGEST_CHARS,
     }
+    fit_result = fit_character_operational_context(context_with_placeholder)
+    context = fit_result.payload
     return context
 
 
@@ -668,7 +667,8 @@ def _project_user_relationship_context(
             effective_at=effective_at,
         ),
     }
-    return relationship_context
+    fit_result = fit_relationship_operational_context(relationship_context)
+    return fit_result.payload
 
 
 def _project_character_affect_rows(
@@ -1064,45 +1064,6 @@ def _elapsed_seconds(source_updated_at: str, effective_at: str) -> int:
     elapsed = _parse_utc(effective_at) - _parse_utc(source_updated_at)
     elapsed_seconds = max(0, int(elapsed.total_seconds()))
     return elapsed_seconds
-
-
-def _canonical_digest(value: Mapping[str, Any]) -> str:
-    """Hash one redacted or persisted mapping with stable JSON serialization."""
-
-    serialized = json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        default=str,
-    )
-    digest = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
-    return digest
-
-
-def _fit_operational_context_to_budget(context: dict[str, Any]) -> None:
-    """Remove lowest-priority selected rows until the fixed context cap fits."""
-
-    while _serialized_character_count(context) > MAX_CHARACTER_OPERATIONAL_CONTEXT_CHARS:
-        if context["pressures"]:
-            context["pressures"].pop()
-            continue
-        if context["affect"]:
-            context["affect"].pop()
-            continue
-        break
-
-
-def _serialized_character_count(value: Mapping[str, Any]) -> int:
-    """Measure the complete deterministic JSON representation for a context."""
-
-    serialized = json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-    return len(serialized)
 
 
 def project_trend(previous: int, current: int) -> str:

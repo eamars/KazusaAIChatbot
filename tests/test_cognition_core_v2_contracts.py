@@ -18,12 +18,14 @@ from kazusa_ai_chatbot.cognition_core_v2.output_projection import (
     build_state_update,
     default_expression_policy,
 )
+from kazusa_ai_chatbot.cognition_core_v2.prompt_budget import canonical_digest
 from kazusa_ai_chatbot.cognition_core_v2.surface_stages import (
     SURFACE_REPAIR_INSTRUCTION,
     run_content_plan_stage,
 )
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionContractError,
+    CognitionContextLimitError,
     CognitionDiagnosticsV2,
     CognitionCoreServicesV2,
     CollapsedIntentionV2,
@@ -192,6 +194,86 @@ def _input() -> dict[str, object]:
             "semantic_temporal_context": "immediate",
         },
         "private_continuity_context": "I remain calmly attentive.",
+    }
+
+
+def _oversized_relationship_context() -> dict[str, object]:
+    """Build the operational relationship packet from the RCA shape."""
+
+    state = build_acquaintance_user_state(
+        global_user_id="context-limit-user",
+        updated_at=NOW,
+    )
+    relationship = state["relationship"]
+    return {
+        "schema_version": "relationship_operational_context.v1",
+        "relationship_id": relationship["relationship_id"],
+        "axes": {
+            field_name: relationship[field_name]
+            for field_name in (
+                "familiarity",
+                "positive_regard",
+                "trust",
+                "attachment",
+                "desired_closeness",
+                "perceived_closeness",
+                "care",
+                "boundary_safety",
+                "exclusivity",
+                "unresolved_injury",
+                "salience",
+            )
+        },
+        "causal_context": [
+            {
+                "entity_kind": "event",
+                "semantic_summary": "a" * 160,
+                "salience": "极高",
+                "lifecycle": "active",
+                "freshness": "即时",
+            },
+            {
+                "entity_kind": "event",
+                "semantic_summary": "b" * 155,
+                "salience": "高",
+                "lifecycle": "active",
+                "freshness": "即时",
+            },
+        ],
+        "affect": [],
+        "relationship_freshness": "即时",
+        "evidence_freshness": "无证据",
+    }
+
+
+def _oversized_character_operational_context() -> dict[str, object]:
+    """Build a digest-bearing character packet that requires row reduction."""
+
+    affect_row = {
+        "emotion_id": "emotion",
+        "intensity": "high",
+        "phase": "active",
+        "trend": "stable",
+        "root_kind": "event",
+        "cause_class": "general_activation",
+        "freshness": "f" * 300,
+    }
+    pressure_row = {
+        "kind": "event",
+        "salience": "high",
+        "lifecycle": "active",
+        "cause_class": "general_activation",
+        "freshness": "p" * 300,
+    }
+    return {
+        "schema_version": "character_operational_context.v1",
+        "source_updated_at": NOW,
+        "effective_at": NOW,
+        "view_digest": "v" * 64,
+        "consumer_role": "goal",
+        "affect": [deepcopy(affect_row) for _ in range(3)],
+        "pressures": [deepcopy(pressure_row) for _ in range(4)],
+        "context_digest": "0" * 64,
     }
 
 
@@ -657,6 +739,155 @@ def test_relationship_context_uses_exact_native_relationship_contract() -> None:
     validate_cognition_core_input(payload)
 
     relationship["unexpected_axis"] = 50
+    with pytest.raises(CognitionContractError):
+        validate_cognition_core_input(payload)
+
+
+def test_consumer_fits_oversized_relationship_context_without_mutation() -> None:
+    """The validator returns a bounded copy of a legacy operational packet."""
+
+    payload = _input()
+    relationship_context = _oversized_relationship_context()
+    original = deepcopy(relationship_context)
+    payload["relationship_context"] = relationship_context
+
+    validated = validate_cognition_core_input(payload)
+
+    fitted = validated["relationship_context"]
+    assert isinstance(fitted, dict)
+    assert relationship_context == original
+    assert fitted is not relationship_context
+    assert len(json.dumps(
+        fitted,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )) <= 900
+
+
+def test_consumer_keeps_structural_errors_on_oversized_packets() -> None:
+    """Fitting cannot hide malformed rows inside an oversized packet."""
+
+    payload = _input()
+    relationship_context = _oversized_relationship_context()
+    relationship_context["causal_context"][0]["entity_kind"] = "invalid"
+    payload["relationship_context"] = relationship_context
+
+    with pytest.raises(CognitionContractError):
+        validate_cognition_core_input(payload)
+
+
+def test_consumer_keeps_required_field_bound_errors_structural() -> None:
+    """Required identity bounds remain structural contract failures."""
+
+    payload = _input()
+    relationship_context = _oversized_relationship_context()
+    relationship_context["relationship_id"] = "r" * 1000
+    payload["relationship_context"] = relationship_context
+
+    with pytest.raises(CognitionContractError):
+        validate_cognition_core_input(payload)
+
+
+def test_consumer_keeps_required_axis_errors_structural() -> None:
+    """Required relationship axes remain strict on oversized packets."""
+
+    payload = _input()
+    relationship_context = _oversized_relationship_context()
+    relationship_context["axes"]["trust"] = "invalid"
+    payload["relationship_context"] = relationship_context
+
+    with pytest.raises(CognitionContractError):
+        validate_cognition_core_input(payload)
+
+
+def test_consumer_keeps_individual_summary_bound_structural() -> None:
+    """Aggregate fitting cannot hide an over-bound causal summary."""
+
+    payload = _input()
+    relationship_context = _oversized_relationship_context()
+    relationship_context["causal_context"][0]["semantic_summary"] = "x" * 161
+    payload["relationship_context"] = relationship_context
+
+    with pytest.raises(CognitionContractError):
+        validate_cognition_core_input(payload)
+
+
+def test_consumer_reports_irreducible_aggregate_overflow_as_typed_limit() -> None:
+    """Valid required fields can still trigger the aggregate limit invariant."""
+
+    payload = _input()
+    relationship_context = _oversized_relationship_context()
+    relationship_context["causal_context"] = []
+    relationship_context["relationship_id"] = "r" * 200
+    relationship_context["relationship_freshness"] = "f" * 500
+    relationship_context["evidence_freshness"] = "e" * 500
+    payload["relationship_context"] = relationship_context
+
+    with pytest.raises(CognitionContextLimitError):
+        validate_cognition_core_input(payload)
+
+
+def test_consumer_fits_oversized_character_context_with_digest() -> None:
+    """The validator bounds character rows and returns a valid final digest."""
+
+    payload = _input()
+    character_context = _oversized_character_operational_context()
+    original = deepcopy(character_context)
+    payload["character_operational_context"] = character_context
+
+    validated = validate_cognition_core_input(payload)
+
+    fitted = validated["character_operational_context"]
+    assert isinstance(fitted, dict)
+    assert character_context == original
+    assert fitted is not character_context
+    assert len(json.dumps(
+        fitted,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )) <= 1200
+    context_body = {
+        key: value
+        for key, value in fitted.items()
+        if key != "context_digest"
+    }
+    assert fitted["context_digest"] == (
+        canonical_digest(context_body)
+    )
+
+
+def test_consumer_keeps_structural_errors_in_oversized_character_context() -> None:
+    """Fitting cannot hide malformed character rows."""
+
+    payload = _input()
+    character_context = _oversized_character_operational_context()
+    character_context["affect"][0]["phase"] = "invalid"
+    payload["character_operational_context"] = character_context
+
+    with pytest.raises(CognitionContractError):
+        validate_cognition_core_input(payload)
+
+
+def test_consumer_keeps_invalid_character_digest_structural() -> None:
+    """An oversized packet cannot repair a stale character digest."""
+
+    payload = _input()
+    character_context = _oversized_character_operational_context()
+    character_context["context_digest"] = "x" * 64
+    payload["character_operational_context"] = character_context
+
+    with pytest.raises(CognitionContractError):
+        validate_cognition_core_input(payload)
+
+
+def test_consumer_keeps_non_mapping_character_context_structural() -> None:
+    """The fit guard defers non-mapping input to the strict validator."""
+
+    payload = _input()
+    payload["character_operational_context"] = "invalid"
+
     with pytest.raises(CognitionContractError):
         validate_cognition_core_input(payload)
 

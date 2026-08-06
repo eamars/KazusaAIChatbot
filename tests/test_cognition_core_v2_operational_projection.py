@@ -4,6 +4,12 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+from kazusa_ai_chatbot.cognition_core_v2.prompt_budget import (
+    MAX_CHARACTER_OPERATIONAL_CONTEXT_CHARS,
+    canonical_digest,
+    fit_character_operational_context,
+    serialized_character_count,
+)
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     build_acquaintance_user_state,
     build_character_production_state,
@@ -126,6 +132,69 @@ def test_full_view_and_consumer_context_have_distinct_digests_and_caps() -> None
     serialized = repr(context)
     assert "episode-redacted" not in serialized
     assert "channel" not in serialized
+
+
+def test_character_context_fit_accounts_for_final_digest() -> None:
+    """The final digest-bearing packet remains within its complete cap."""
+
+    affect_row = {
+        "emotion_id": "emotion",
+        "intensity": "high",
+        "phase": "active",
+        "trend": "stable",
+        "root_kind": "event",
+        "cause_class": "general_activation",
+        "freshness": "f" * 300,
+    }
+    pressure_row = {
+        "kind": "event",
+        "salience": "high",
+        "lifecycle": "active",
+        "cause_class": "general_activation",
+        "freshness": "p" * 300,
+    }
+    state_view = {
+        "schema_version": "character_operational_state_view.v1",
+        "source_updated_at": NOW,
+        "effective_at": LATER,
+        "view_digest": "v" * 64,
+        "affect": [deepcopy(affect_row) for _ in range(3)],
+        "pressures": [deepcopy(pressure_row) for _ in range(4)],
+    }
+    original = deepcopy(state_view)
+
+    context = select_character_operational_context(
+        state_view,
+        consumer_role="goal",
+    )
+    context_body = {
+        key: value
+        for key, value in context.items()
+        if key != "context_digest"
+    }
+
+    assert serialized_character_count(context) <= (
+        MAX_CHARACTER_OPERATIONAL_CONTEXT_CHARS
+    )
+    assert context["context_digest"] == canonical_digest(context_body)
+    assert state_view == original
+
+
+def test_character_context_refit_preserves_a_valid_digest() -> None:
+    """A consumer no-op fit keeps an already valid context digest stable."""
+
+    state = build_character_production_state(updated_at=NOW)
+    view = project_character_operational_state(state, effective_at=LATER)
+    context = select_character_operational_context(
+        view,
+        consumer_role="goal",
+    )
+
+    refit = fit_character_operational_context(context)
+
+    assert refit.payload == context
+    assert refit.trimmed_fields == ()
+    assert refit.dropped_rows == ()
 
 
 def test_relationship_projection_keeps_causes_separate_from_character_view() -> None:

@@ -306,6 +306,26 @@ Surface packets reduce supporting bids and then semantic affect. Regeneration
 reuses the initial system prompt and places the contract error, field contract,
 permitted handles, and producer repair instruction in structured feedback.
 
+In addition to aggregate prompt budgets, Cognition Core V2 validates two
+operational-context packet caps using compact canonical JSON character counts:
+relationship context is limited to 900 decoded characters, and character
+context is limited to 1,200 decoded characters including the final
+`context_digest`. Producers fit both packets before publication. The canonical
+input validator repeats the owner-specific fit on a copied packet before
+strict shape validation so legacy rows and direct callers cannot crash the
+turn with recoverable size-only overflow. Fitting may middle-truncate bounded
+summaries or drop optional rows in the documented stable order; it preserves
+identity, axes, handles, timestamps, provenance, and required current-turn
+facts. Structural errors remain contract failures, while irreducible required
+overflow is reported as the typed context-limit invariant.
+
+The reduction order is fixed. Relationship packets retain the longest causal
+summary that fits while keeping an 80-character floor, then drop lowest
+priority causal rows from the end of their stable salience/recency order, and
+then drop affect rows. Character packets drop pressures from the end of their
+stable order before affect rows. A character digest is recomputed when the
+packet body changes and remains unchanged for a valid no-op consumer fit.
+
 `RELEVANCE_AGENT_LLM` serves both compact frontline intake and settled
 relevance. Frontline uses a 256-token completion cap, thinking disabled, and
 an 8,000-character rendered-input cap; settled relevance uses a 512-token
