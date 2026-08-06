@@ -1325,7 +1325,12 @@ def _validate_authoritative_settled_decision(
     *,
     available_dispositions: list[str],
 ) -> AuthoritativeSettledDecision:
-    """Validate one authoritative semantic disposition and visible metadata."""
+    """Validate one authoritative semantic disposition and visible metadata.
+
+    A null indirect_speech_context is the model's explicit semantic absence of
+    indirect speech and is canonicalized to the empty string; any other
+    non-string value remains a contract error.
+    """
 
     if not isinstance(raw, Mapping):
         raise ValueError("authoritative settled output must be an object")
@@ -1360,7 +1365,9 @@ def _validate_authoritative_settled_decision(
         raise ValueError("authoritative use_reply_feature must be bool")
     if not isinstance(channel_topic, str):
         raise ValueError("authoritative channel_topic must be a string")
-    if not isinstance(indirect_context, str):
+    if indirect_context is None:
+        indirect_context = ""
+    elif not isinstance(indirect_context, str):
         raise ValueError(
             "authoritative indirect_speech_context must be a string"
         )
