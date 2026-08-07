@@ -5,6 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 import json
 from pathlib import Path
+import sys
 from typing import Any
 
 import pytest
@@ -14,8 +15,19 @@ from tests.test_task_resolution_orchestrator import _context
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm]
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
+
 _ARTIFACT_ROOT = Path("test_artifacts/task_resolution/raw")
 _PUBLIC_URL = "https://unsloth.ai/docs/models/kimi-k3"
+_CAPTURED_BACKGROUND_JOB_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "test_artifacts"
+    / "diagnostics"
+    / "background_job_63f34d5a.json"
+)
 
 
 class _CapturingLLM:
@@ -48,6 +60,28 @@ def _request(objective: str) -> dict[str, object]:
         "reason": "The current evidence is insufficient for this task.",
         "evidence_handles": ["e1"],
     }
+
+
+def _load_captured_task_execution_context() -> dict[str, object]:
+    """Load the production specialist context from the background export."""
+
+    if not _CAPTURED_BACKGROUND_JOB_PATH.exists():
+        raise AssertionError(
+            f"captured background job is missing: "
+            f"{_CAPTURED_BACKGROUND_JOB_PATH}"
+        )
+    export = json.loads(
+        _CAPTURED_BACKGROUND_JOB_PATH.read_text(encoding="utf-8")
+    )
+    documents = export.get("documents")
+    if not isinstance(documents, list) or len(documents) != 1:
+        raise AssertionError("captured background export must contain one job")
+    context = documents[0].get("task_execution_context")
+    if not isinstance(context, dict):
+        raise AssertionError(
+            "captured background job has no task execution context"
+        )
+    return context
 
 
 def _result_spec(
@@ -110,15 +144,21 @@ async def _run_case(
     forced_first_selection: dict[str, str] | None = None,
     exclude_coding_candidate: bool = False,
     initial_orchestrator_calls: int = 0,
+    execution_context: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Run one real selector through closed handlers and save raw evidence."""
 
     from kazusa_ai_chatbot.task_resolution import orchestrator, state
 
+    context = (
+        execution_context
+        if execution_context is not None
+        else _context()
+    )
     planner_output = _request(objective)
     checkpoint = state.create_task_resolution_checkpoint(
         planner_output,
-        _context(),
+        context,
     )
     checkpoint["orchestrator_call_count"] = initial_orchestrator_calls
     capturing_llm = _CapturingLLM(orchestrator._task_orchestrator_llm)
@@ -207,7 +247,7 @@ async def _run_case(
 
     final_result = await orchestrator.run_task_orchestrator(
         checkpoint,
-        _context(),
+        context,
         inline_deadline=orchestrator.monotonic() + 30.0,
         checkpoint_persist_func=persist,
     )
@@ -237,6 +277,7 @@ async def _run_case(
         "schema_version": "task_resolution_live_case.v1",
         "case_id": case_id,
         "exact_input": objective,
+        "execution_context": context,
         "planner_output": planner_output,
         "orchestrator_model_calls": capturing_llm.calls,
         "orchestrator_decisions": decisions,
@@ -331,6 +372,79 @@ async def test_live_private_conversation_memory_recall(
         expected_status="resolved",
         expected_trace=["local_context"],
     )
+
+
+async def test_live_captured_chat_history_audit_routes_to_coding_without_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reproduce the capability-audit route that bypassed conversation retrieval."""
+
+    objective = (
+        "核实当前角色是否具备抓取特定用户（@Nagasaki-soyo-清尘）最近 10 天"
+        "聊天记录的技术能力及权限，并获取执行该操作的具体可行性结论。"
+    )
+    artifact = await _run_case(
+        monkeypatch,
+        case_id="captured_chat_history_audit_routes_to_coding",
+        objective=objective,
+        specialist_specs={
+            "local_context": [_result_spec(
+                "incompatible",
+                remaining_needs=[objective],
+            )],
+        },
+        expected_status="deferred",
+        expected_trace=None,
+        expected_pending="coding",
+        forced_first_selection={
+            "specialist": "local_context",
+            "subgoal": (
+                "verify current role permissions and technical capabilities "
+                "for accessing specific user chat history"
+            ),
+            "coding_objective_mode": "none",
+        },
+        execution_context=_load_captured_task_execution_context(),
+    )
+
+    decisions = artifact["orchestrator_decisions"]
+    assert decisions[0]["source"] == "forced_test_route"
+    assert decisions[0]["specialist"] == "local_context"
+    assert decisions[-1]["source"] == "live_llm"
+    assert decisions[-1]["specialist"] == "coding"
+    pending = artifact["final_checkpoint"]["pending_dispatch"]
+    assert pending["specialist"] == "coding"
+    assert pending["coding_objective_mode"] == "read_only"
+    assert artifact["final_result"]["evidence"] == []
+
+
+async def test_live_captured_chat_history_retrieval_routes_to_local_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The corrected retrieval objective reaches conversation evidence, not coding."""
+
+    objective = (
+        "抓取 @Nagasaki-soyo-清尘 最近 10 天的聊天记录并返回给当前用户"
+    )
+    artifact = await _run_case(
+        monkeypatch,
+        case_id="captured_chat_history_retrieval_routes_to_local_context",
+        objective=objective,
+        specialist_specs={
+            "local_context": [_result_spec(
+                "resolved",
+                summary="The named member's recent chat history was retrieved.",
+            )],
+        },
+        expected_status="resolved",
+        expected_trace=["local_context"],
+        execution_context=_load_captured_task_execution_context(),
+    )
+
+    decisions = artifact["orchestrator_decisions"]
+    assert decisions
+    assert decisions[-1]["specialist"] == "local_context"
+    assert artifact["final_result"]["evidence"]
 
 
 async def test_live_public_current_fact_research(

@@ -53,6 +53,13 @@ from tests.llm_trace import write_llm_trace
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm]
 
+_CAPTURED_TRACE_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "test_artifacts"
+    / "diagnostics"
+    / "llm_trace_llmtrace_e86e2bda365e49aca2d0ad54fb0fd066_20260806T222404Z.json"
+)
+
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
 if hasattr(sys.stderr, 'reconfigure'):
@@ -190,6 +197,96 @@ def _resolver(kind: str, description: str) -> dict[str, str]:
     }
 
 
+def _load_captured_action_planning_case() -> dict[str, object]:
+    """Rebuild the exact action-planning boundary from the failure capsule."""
+
+    if not _CAPTURED_TRACE_PATH.exists():
+        raise AssertionError(
+            f"captured trace is missing: {_CAPTURED_TRACE_PATH}"
+        )
+    trace = json.loads(
+        _CAPTURED_TRACE_PATH.read_text(encoding="utf-8")
+    )
+    capsule_step = next(
+        step
+        for step in trace["llm_trace_steps"]
+        if step.get("stage_name") == "cognition_failure_capsule"
+    )
+    attempts = capsule_step["capsule"]["attempts"]
+    action_attempt = next(
+        attempt
+        for attempt in attempts
+        if attempt["stage_name"] == "action_planning"
+    )
+    action_payload = json.loads(action_attempt["messages"][1]["content"])
+    goal_attempt = next(
+        attempt
+        for attempt in attempts
+        if attempt["stage_name"] == "goal_cognition.ordinary_response.repair_1"
+    )
+    raw_bid = goal_attempt["parsed_output"]
+    target_roles = [{
+        "role": "target",
+        "entity_kind": "user",
+        "entity_id": "user-1",
+    } for _handle in raw_bid["target_role_handles"]]
+    bid = {
+        "branch_id": "ordinary_response",
+        "goal_ref": {
+            "scope": "user",
+            "kind": "goal",
+            "entity_id": "g1",
+        },
+        "intention": raw_bid["intention"],
+        "desired_outcome": raw_bid["desired_outcome"],
+        "concrete_detail": raw_bid["concrete_detail"],
+        "reason": raw_bid["reason"],
+        "private_monologue": raw_bid["private_monologue"],
+        "relational_willingness": raw_bid["relational_willingness"],
+        "target_roles": target_roles,
+        "evidence_handles": list(raw_bid["evidence_handles"]),
+        "expected_consequences": list(raw_bid["expected_consequences"]),
+        "confidence": raw_bid["confidence"],
+    }
+    evidence_rows = []
+    for row in action_payload["evidence"]:
+        evidence_rows.append({
+            "evidence_handle": row["handle"],
+            "evidence_ref": {
+                "source_kind": row["source_kind"],
+                "source_id": f"captured:{row['handle']}",
+                "occurred_at": "2026-08-06T22:15:46Z",
+                "semantic_summary": row["semantic_text"][:200],
+            },
+            "semantic_text": row["semantic_text"],
+            "visible_to": ["q:event_agency"],
+        })
+    resolver_rows = [
+        _resolver(
+            row["capability"],
+            row["semantic_capability"],
+        )
+        for _handle, row in sorted(action_payload["resolver_handles"].items())
+    ]
+    return {
+        "user_input": action_payload[
+            "current_resolver_goal_progress"
+        ]["original_goal"],
+        "bid": bid,
+        "actions": [
+            _action("accepted_task_status_check"),
+            _action("future_speak"),
+        ],
+        "resolvers": resolver_rows,
+        "evidence_rows": evidence_rows,
+        "resolver_context": action_payload["resolver_context"],
+        "current_goal_progress": action_payload[
+            "current_resolver_goal_progress"
+        ],
+        "historical_output": action_attempt["parsed_output"],
+    }
+
+
 async def _run_case(
     *,
     case_id: str,
@@ -200,6 +297,7 @@ async def _run_case(
     evidence_rows: list[dict[str, object]] | None = None,
     resolver_context: str = "resolver_state: status=idle",
     runtime_capability_limits: list[str] | None = None,
+    current_goal_progress: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Run one production-model planner call and write inspectable evidence."""
 
@@ -233,6 +331,7 @@ async def _run_case(
             resolver_context=resolver_context,
             runtime_capability_limits=runtime_capability_limits or [],
             services=services,
+            current_goal_progress=current_goal_progress,
         )
     except Exception as exc:
         write_llm_trace(
@@ -246,6 +345,7 @@ async def _run_case(
                 "available_resolvers": resolvers or [],
                 "resolver_context": resolver_context,
                 "runtime_capability_limits": runtime_capability_limits or [],
+                "current_goal_progress": current_goal_progress,
                 "prompt_messages": capturing_llm.messages,
                 "raw_model_output": capturing_llm.raw_output,
                 "model_calls": capturing_llm.calls,
@@ -264,6 +364,7 @@ async def _run_case(
             "available_resolvers": resolvers or [],
             "resolver_context": resolver_context,
             "runtime_capability_limits": runtime_capability_limits or [],
+            "current_goal_progress": current_goal_progress,
             "prompt_messages": capturing_llm.messages,
             "raw_model_output": capturing_llm.raw_output,
             "model_calls": capturing_llm.calls,
@@ -905,6 +1006,252 @@ async def test_local_reference_selects_task_resolution() -> None:
     assert [row["capability"] for row in result["resolver_requests"]] == [
         "task_resolution_request",
     ]
+
+
+async def test_captured_chat_history_request_keeps_retrieval_goal() -> None:
+    """Keep the request concrete at the action-planning boundary."""
+
+    user_input = (
+        '@一之濑明日奈 明日奈～能抓取一下 '
+        '@Nagasaki-soyo-清尘 最近10天的聊天记录么？'
+    )
+    result = await _run_case(
+        case_id="captured_chat_history_action_boundary",
+        user_input=user_input,
+        bid={
+            "branch_id": "ordinary_response",
+            "goal_ref": {
+                "scope": "user",
+                "kind": "goal",
+                "entity_id": "g1",
+            },
+            "intention": (
+                "回应当前用户的指令，尝试执行抓取指定用户聊天记录的操作并告知结果。"
+            ),
+            "desired_outcome": (
+                "成功获取 Nagasaki-soyo-清尘 最近 10 天的聊天记录并将其呈现给当前用户，"
+                "或在无法执行时给出符合角色性格的解释。"
+            ),
+            "concrete_detail": (
+                "针对 @Nagasaki-soyo-清尘 的最近 10 天聊天记录进行抓取，并在群聊中予以回应。"
+            ),
+            "reason": (
+                "当前用户直接通过 @ 指令要求当前角色执行一项具体的功能性任务（抓取特定用户的历史消息），"
+                "且该请求在当前的群聊语境下是明确的指令。明日奈性格活泼随心所欲，"
+                "面对这种具体的小任务通常会尝试配合或以自己的方式处理。"
+            ),
+            "private_monologue": (
+                "诶？突然让我去翻那个人的聊天记录？真是个奇怪的要求呢～"
+                "不过既然是老公想看的话，我就帮他搜搜看吧！"
+                "要是能发现什么有趣的秘密就太棒了，嘿嘿～"
+            ),
+            "relational_willingness": {
+                "applicability": "not_relationship_sensitive",
+                "stance": "not_applicable",
+                "current_user_relationship_state": "not_applicable",
+                "reason": "当前请求属于功能性操作，不涉及关系边界变化。",
+                "evidence_handles": ["e1"],
+            },
+            "target_roles": [{
+                "role": "target",
+                "entity_kind": "user",
+                "entity_id": "user-1",
+            }],
+            "evidence_handles": ["e1"],
+            "expected_consequences": ["当前用户获得所需信息"],
+            "confidence": "high",
+        },
+        evidence_rows=[{
+            "evidence_handle": "e1",
+            "evidence_ref": {
+                "source_kind": "episode",
+                "source_id": "episode:captured-chat-history-request",
+                "occurred_at": "2026-08-07T10:15:45Z",
+                "semantic_summary": user_input,
+            },
+            "semantic_text": json.dumps({
+                "response_operation": {
+                    "embedded_actor_role": "当前角色",
+                    "embedded_target_role": "其他参与者",
+                    "operation": "要求当前角色执行抓取特定用户聊天记录操作并回应结果",
+                    "response_owner_role": "当前角色",
+                    "selection_owner_role": "无",
+                    "selection_required": False,
+                },
+                "role_explicit_content": (
+                    "当前用户请求当前角色抓取 Nagasaki-soyo-清尘 最近 10 天的聊天记录。"
+                ),
+            }, ensure_ascii=False),
+            "visible_to": ["q:event_agency"],
+        }],
+        resolver_context=(
+            "resolver_state: status=running; cycle_index=0; max_cycles=3; "
+            "terminal_reason=; original_goal=" + user_input + "\n"
+            "resolver_goal_progress: original_goal=" + user_input + "; current_focus="
+        ),
+        current_goal_progress={
+            "schema_version": "resolver_goal_progress.v1",
+            "original_goal": user_input,
+            "current_focus": "",
+            "deliverables": [],
+            "missing_user_inputs": [],
+            "evidence_dependencies": [],
+            "attempted_paths": [],
+            "source_backed_facts": [],
+            "assumptions_or_inferences": [],
+            "blockers": [],
+            "final_response_requirements": [],
+        },
+        resolvers=[
+            _resolver(
+                "approval_preparation",
+                "Prepare one minimal approval question before an allowed side effect.",
+            ),
+            _resolver(
+                "human_clarification",
+                "Ask the user for one missing piece of information they control.",
+            ),
+            _resolver(
+                "self_goal_resolution",
+                "Resolve or prioritize one internal self-cognition goal for an eligible private source.",
+            ),
+            _resolver(
+                "task_resolution_request",
+                "Resolve one bounded semantic task when current evidence is insufficient. "
+                "The task-resolution session selects and coordinates its own specialist evidence work.",
+            ),
+        ],
+    )
+
+    assert result["intention"]["route"] == "evidence"
+    resolver_requests = result["resolver_requests"]
+    assert len(resolver_requests) == 1
+    request = resolver_requests[0]
+    assert request["capability"] == "task_resolution_request"
+    semantic_goal = str(request["semantic_goal"])
+    assert "抓取" in semantic_goal
+    assert "Nagasaki-soyo-清尘" in semantic_goal
+    assert "10" in semantic_goal
+    assert "能力" not in semantic_goal
+    assert "权限" not in semantic_goal
+    assert "可行性" not in semantic_goal
+    assert result["resolver_goal_progress"] is None
+
+
+async def test_captured_full_action_planning_preserves_retrieval_goal() -> None:
+    """Replay the exact production input and require the retrieval meaning."""
+
+    case = _load_captured_action_planning_case()
+    result = await _run_case(
+        case_id="captured_full_action_planning_retrieval_goal",
+        user_input=str(case["user_input"]),
+        bid=case["bid"],
+        actions=case["actions"],
+        resolvers=case["resolvers"],
+        evidence_rows=case["evidence_rows"],
+        resolver_context=str(case["resolver_context"]),
+        current_goal_progress=case["current_goal_progress"],
+    )
+
+    assert result["intention"]["route"] == "evidence"
+    request = result["resolver_requests"][0]
+    assert request["capability"] == "task_resolution_request"
+    semantic_goal = str(request["semantic_goal"])
+    retrieval_verb_present = any(
+        verb in semantic_goal
+        for verb in ("抓取", "检索", "获取")
+    )
+    assert retrieval_verb_present
+    assert "Nagasaki-soyo-清尘" in semantic_goal
+    assert "10" in semantic_goal
+    assert "能力" not in semantic_goal
+    assert "权限" not in semantic_goal
+    assert "可行性" not in semantic_goal
+    assert result["resolver_goal_progress"] is None
+
+
+async def test_explicit_capability_question_keeps_audit_goal() -> None:
+    """An unanswered explicit audit question remains an audit resolver goal."""
+
+    user_input = (
+        '@一之濑明日奈 明日奈～你有能力或者权限抓取 '
+        '@Nagasaki-soyo-清尘 最近10天的聊天记录么？'
+    )
+    result = await _run_case(
+        case_id="explicit_capability_audit_boundary",
+        user_input=user_input,
+        bid={
+            "branch_id": "ordinary_response",
+            "goal_ref": {
+                "scope": "user",
+                "kind": "goal",
+                "entity_id": "g1",
+            },
+            "intention": (
+                "回应当前用户对抓取指定用户聊天记录的能力与权限的询问。"
+            ),
+            "desired_outcome": (
+                "核实当前角色是否具备抓取 Nagasaki-soyo-清尘 最近 10 天"
+                "聊天记录的能力和权限，并把结论交给当前用户。"
+            ),
+            "concrete_detail": (
+                "针对 @Nagasaki-soyo-清尘 的最近 10 天聊天记录，回答当前角色"
+                "是否具备抓取能力与权限。"
+            ),
+            "reason": (
+                "当前用户明确询问能力与权限本身，而不是要求直接抓取聊天记录。"
+            ),
+            "private_monologue": (
+                "她在问我们到底有没有这个本事和权限，先弄清楚边界再回答她。"
+            ),
+            "relational_willingness": {
+                "applicability": "not_relationship_sensitive",
+                "stance": "not_applicable",
+                "current_user_relationship_state": "not_applicable",
+                "reason": "当前请求属于能力询问，不涉及关系边界变化。",
+                "evidence_handles": ["e1"],
+            },
+            "target_roles": [{
+                "role": "target",
+                "entity_kind": "user",
+                "entity_id": "user-1",
+            }],
+            "evidence_handles": ["e1"],
+            "expected_consequences": ["当前用户获得能力与权限的结论"],
+            "confidence": "high",
+        },
+        resolvers=[
+            _resolver(
+                "approval_preparation",
+                "Prepare one minimal approval question before an allowed side effect.",
+            ),
+            _resolver(
+                "human_clarification",
+                "Ask the user for one missing piece of information they control.",
+            ),
+            _resolver(
+                "self_goal_resolution",
+                "Resolve or prioritize one internal self-cognition goal for an eligible private source.",
+            ),
+            _resolver(
+                "task_resolution_request",
+                "Resolve one bounded semantic task when current evidence is insufficient. "
+                "The task-resolution session selects and coordinates its own specialist evidence work.",
+            ),
+        ],
+    )
+
+    assert result["intention"]["route"] == "evidence"
+    assert result["goal_resolution"] == "requires_required_evidence"
+    resolver_requests = result["resolver_requests"]
+    assert len(resolver_requests) == 1
+    request = resolver_requests[0]
+    assert request["capability"] == "task_resolution_request"
+    semantic_goal = str(request["semantic_goal"])
+    audit_marker_present = "能力" in semantic_goal or "权限" in semantic_goal
+    assert audit_marker_present
+    assert "Nagasaki-soyo-清尘" in semantic_goal
+    assert "10" in semantic_goal
 
 
 async def test_satisfied_local_context_recurrence_returns_to_speech() -> None:

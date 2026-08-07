@@ -34,6 +34,7 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     GOAL_RESOLUTION_VALUES,
     GoalResolutionV2,
     GroupEngagementActionContextV2,
+    project_evidence_provenance_role,
     ResolverAffordanceV2,
     ResolverCapabilityRequestV2,
     SelectedIntentionV2,
@@ -64,6 +65,22 @@ ACTION_PLANNING_PROMPT = '''你负责为当前角色提出语义能力请求。�
 目标的具体可执行 action request 或 resolver request。primary bid 决定可见意图；supporting bid
 可以提供相容的私有动作或证据需求。本阶段不选择或复述 route，不改写目标候选，不生成最终对话，
 不执行或核准能力，也不虚构未提供的能力。协议代码会在语义授权完成后派生 route。
+
+# 生成步骤
+先识别当前用户请求要达成的效果，以及该效果的目标对象、范围和明确的时间约束。证据行中的
+provenance_role 是确定性代码给出的语义权威标签：current_episode 是当前用户请求与当前场景的
+权威来源；current_user_history_only、character_or_world_context_only 和 contextual_fact_only
+只提供支持性上下文，不能替代或改写当前请求的效果。已接纳目标（bid）的措辞只是当前角色对
+请求的理解，不能改变当前用户请求本身；当 bid 出现能力确认、权限核验、可行性评估或 API 支持
+检查等措辞，而当前用户请求没有明确询问这些内容时，这些措辞属于运行时约束或角色顾虑，不得
+写入 semantic_goal。能力、权限、可行性和 API 支持是运行时约束：除非当前用户明确要求审核是否
+能做、是否被允许或是否可行，不得把这些约束改写成语义目标。task_resolution_request 的
+semantic_goal 必须忠实保留用户要求的检索或工作效果、目标对象、范围和时间约束；缺失证据只能
+作为推进该效果的依赖说明，不能把目标替换成能力自审或可行性查询。reason 只解释该请求如何
+推进已接纳目标，不是第二个目标。只有当当前用户明确询问能力、权限或可行性本身时，
+semantic_goal 才可以是该审计目标。当当前用户明确询问能力、权限或可行性本身，而可信的运行时
+限制和证据不足以回答时，goal_resolution 必须为 requires_required_evidence，并使用
+task_resolution_request 保留该审计目标；不得仅凭 bid 或角色自述将其判为 answerable_now。
 
 输出一个语义提案对象。action_requests 与 resolver_requests 互斥，各自最多包含三项。即时可见
 发言不是能力请求，不放入本输出。需要补充证据、持久化澄清或批准步骤时，只选择 resolver；后续
@@ -181,7 +198,18 @@ source_backed_facts、assumptions_or_inferences、blockers 和 final_response_re
 字符串，字段内部不再嵌套对象。所有新生成的语义内容使用简体中文，schema key、enum token
 和 capability name 保持协议原样。
 协议代码绑定 schema_version 和 original_goal，确定性代码从 current_resolver_goal_progress
-保留省略的已知 checklist 字段。
+保留省略的已知 checklist 字段。当 current_resolver_goal_progress 是空壳（current_focus、
+deliverables、evidence_dependencies 及其他清单字段均为空）时，resolver_goal_progress 必须
+为 null；不要仅因为选择了 resolver 就新建目标清单。已有非空进度只允许返回与当前用户请求效果
+一致的局部更新；普通检索请求不能把能力、权限或可行性核验写成 deliverable、current_focus
+或 final_response_requirements。
+
+输出前自查：先判断当前用户是否明确询问能力、权限、可行性或 API 支持本身。若未明确询问，
+resolver 请求的 semantic_goal 只陈述用户要求达成的检索或工作效果及其目标对象、范围和时间
+约束；若其中包含是否具备能力、是否被允许、是否可行、能否执行或 API 支持等审计表述，删除
+这些表述，它们属于运行时约束，不是本阶段目标，reason 也不得把它们写成第二目标。若已明确
+询问，则保留该审计目标；当可信证据不足以回答时使用 requires_required_evidence 和
+task_resolution_request，不要仅凭 bid 或角色自述输出 answerable_now。
 
 # 输出格式
 只返回一个 JSON 对象，字段必须恰好是：
@@ -297,6 +325,10 @@ async def plan_actions(
                 "handle": row["evidence_handle"],
                 "source_kind": row["evidence_ref"]["source_kind"],
                 "semantic_text": row["semantic_text"],
+                "provenance_role": project_evidence_provenance_role(
+                    row["evidence_ref"]["source_kind"],
+                    row.get("memory_scope"),
+                ),
             }
             for row in evidence
         ],
@@ -593,7 +625,7 @@ def _action_planning_repair_message(
         "contract_requirements": {
             "resolver_goal_progress": (
                 "current_resolver_goal_progress 为空时必须为 null；已有目标进度时只能更新其字段，"
-                "新建时必须返回完整对象。"
+                "空壳进度不得新建清单；新建时必须返回完整对象。"
             ),
             "deliverable_fields": [
                 "description",
@@ -905,6 +937,10 @@ def _validate_goal_progress_choice(
         return return_value
 
     current = dict(validate_resolver_goal_progress(current_goal_progress))
+    if _is_empty_goal_progress_shell(current):
+        raise ValueError(
+            "resolver goal progress cannot update an empty shell"
+        )
     allowed_fields = set(current)
     if not set(value).issubset(allowed_fields):
         raise ValueError("resolver goal progress update fields are invalid")
@@ -923,6 +959,25 @@ def _validate_goal_progress_choice(
     validated = validate_resolver_goal_progress(raw_progress)
     return_value = dict(validated)
     return return_value
+
+
+def _is_empty_goal_progress_shell(
+    progress: Mapping[str, Any],
+) -> bool:
+    """Return whether progress has no checklist content to update."""
+
+    content_fields = (
+        "current_focus",
+        "deliverables",
+        "missing_user_inputs",
+        "evidence_dependencies",
+        "attempted_paths",
+        "source_backed_facts",
+        "assumptions_or_inferences",
+        "blockers",
+        "final_response_requirements",
+    )
+    return not any(progress[field] for field in content_fields)
 
 
 def _materialize_action_requests(

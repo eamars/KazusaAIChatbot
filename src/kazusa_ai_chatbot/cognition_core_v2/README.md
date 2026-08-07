@@ -291,6 +291,21 @@ an execution horizon, a queue worker, a timeout, a checkpoint, or tool
 parameters. The resolver owns inline execution and deterministic promotion;
 task resolution owns next-specialist selection inside its fixed session limits.
 
+Action planning preserves the current user's requested effect in every resolver
+`semantic_goal`: the target, scope, and explicit time constraints survive
+intact, and missing evidence may be stated only as a dependency of that effect.
+Capability, permission, feasibility, and API support are runtime constraints
+owned by deterministic runtime stages; they become semantic audit objectives
+only when the current user explicitly asks whether the operation is possible or
+authorized. Evidence rows carry a transient `provenance_role` projected by the
+deterministic provenance helper; `current_episode` rows are the authoritative
+current request and scene, while history, character/world, and contextual rows
+remain supporting context. No raw source id or storage metadata reaches the
+planner. Downstream task resolution consumes the emitted objective unchanged
+and does not repair action-planning semantic substitution. An empty resolver
+progress shell remains `null`; an invented checklist is a structural contract
+error handled by the existing bounded same-stage regeneration path.
+
 The shared surface input receives semantic intention, bounded affect and
 relationship projections, complete-bid projections, permitted action results,
 interaction style, an exact tempo/linguistic-texture expression context, and a

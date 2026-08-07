@@ -878,6 +878,43 @@ def test_action_plan_merges_semantic_goal_progress_delta() -> None:
     assert progress["evidence_dependencies"] == ["character memory"]
 
 
+def test_empty_goal_progress_shell_rejects_new_checklist() -> None:
+    """An empty recurrence shell cannot receive invented planner progress."""
+
+    empty_progress = {
+        "schema_version": "resolver_goal_progress.v1",
+        "original_goal": "answer the user's breakfast question",
+        "current_focus": "",
+        "deliverables": [],
+        "missing_user_inputs": [],
+        "evidence_dependencies": [],
+        "attempted_paths": [],
+        "source_backed_facts": [],
+        "assumptions_or_inferences": [],
+        "blockers": [],
+        "final_response_requirements": [],
+    }
+    response = _planner_response(resolvers=[{
+        "bid_handle": "b1",
+        "resolver_handle": "r1",
+        "semantic_goal": "retrieve grounded breakfast evidence",
+        "reason": "the answer depends on character memory",
+    }])
+    response["resolver_goal_progress"] = _goal_progress()
+
+    with pytest.raises(
+        ValueError,
+        match="cannot update an empty shell",
+    ):
+        _validate_action_plan_decision(
+            response,
+            bid_handles={"b1": _bid("ordinary_response")},
+            action_handles={},
+            resolver_handles={"r1": _resolver("task_resolution_request")},
+            current_goal_progress=empty_progress,
+        )
+
+
 def test_action_plan_rejects_invalid_registry_decision_format() -> None:
     """All-invalid action rows fail closed with one typed aggregate error."""
 
@@ -1092,3 +1129,130 @@ def test_speak_and_internal_apply_are_absent_from_planner_affordances() -> None:
     assert [row["action_kind"] for row in visible] == [
         "background_work_request",
     ]
+
+
+def _evidence(
+    handle: str,
+    source_kind: str,
+    semantic_text: str,
+    *,
+    memory_scope: str | None = None,
+) -> dict[str, object]:
+    """Build one prompt-safe evidence row for a deterministic planner test."""
+
+    row: dict[str, object] = {
+        "evidence_handle": handle,
+        "evidence_ref": {
+            "source_kind": source_kind,
+            "source_id": f"raw:{handle}",
+            "occurred_at": "2026-08-07T00:00:00Z",
+            "semantic_summary": semantic_text,
+        },
+        "semantic_text": semantic_text,
+        "visible_to": ["q:event_agency"],
+    }
+    if memory_scope is not None:
+        row["memory_scope"] = memory_scope
+    return row
+
+
+def test_resolver_semantic_goal_passes_through_without_rewrite() -> None:
+    """Normalization preserves the model-authored objective verbatim."""
+
+    goal = (
+        "抓取 @Nagasaki-soyo-清尘 最近 10 天的聊天记录并返回给当前用户"
+    )
+    decision = _validate_action_plan_decision(
+        _planner_response(resolvers=[{
+            "bid_handle": "b1",
+            "resolver_handle": "r1",
+            "semantic_goal": goal,
+            "reason": "当前答案需要该聊天记录作为证据",
+        }]),
+        bid_handles={"b1": _bid("ordinary_response")},
+        action_handles={},
+        resolver_handles={"r1": _resolver("task_resolution_request")},
+    )
+
+    assert decision["resolver_requests"][0]["semantic_goal"] == goal
+
+
+def test_explicit_audit_goal_is_not_rewritten_by_deterministic_code() -> None:
+    """An explicit capability question keeps its model-owned audit meaning."""
+
+    goal = (
+        "核实当前角色是否具备抓取特定用户（@Nagasaki-soyo-清尘）最近 10 天"
+        "聊天记录的技术能力及权限"
+    )
+    decision = _validate_action_plan_decision(
+        _planner_response(resolvers=[{
+            "bid_handle": "b1",
+            "resolver_handle": "r1",
+            "semantic_goal": goal,
+            "reason": "当前用户明确询问能力与权限",
+        }]),
+        bid_handles={"b1": _bid("ordinary_response")},
+        action_handles={},
+        resolver_handles={"r1": _resolver("task_resolution_request")},
+    )
+
+    assert decision["resolver_requests"][0]["semantic_goal"] == goal
+
+
+@pytest.mark.asyncio
+async def test_action_planning_evidence_projection_is_authority_labeled() -> None:
+    """Every payload evidence row carries a deterministic provenance role."""
+
+    captured: dict[str, object] = {}
+
+    class _LLM:
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config: object,
+        ) -> SimpleNamespace:
+            del config
+            captured.update(json.loads(str(messages[-1].content)))
+            return SimpleNamespace(content=json.dumps(_planner_response()))
+
+    await plan_actions(
+        primary_bid=_bid("ordinary_response"),
+        supporting_bids=[],
+        episode={
+            "episode_id": "episode-provenance",
+            "trigger_source": "user_message",
+            "output_mode": "visible_reply",
+        },
+        evidence=[
+            _evidence("e1", "episode", "the current request"),
+            _evidence("e2", "conversation_evidence", "a historical row"),
+            _evidence("e3", "promoted_reflection", "a reflection row"),
+            _evidence(
+                "e4",
+                "promoted_memory",
+                "a memory row",
+                memory_scope="current_user_continuity",
+            ),
+        ],
+        available_actions=[],
+        available_resolvers=[],
+        resolver_context="resolver_status=idle",
+        services=SimpleNamespace(
+            llm=_LLM(),
+            action_planning_config=object(),
+            action_authorization_config=object(),
+            resolver_authorization_config=object(),
+        ),
+    )
+
+    projected = captured["evidence"]
+    assert [row["provenance_role"] for row in projected] == [
+        "current_episode",
+        "contextual_fact_only",
+        "character_or_world_context_only",
+        "current_user_history_only",
+    ]
+    serialized = json.dumps(projected, ensure_ascii=False)
+    assert "source_id" not in serialized
+    assert "occurred_at" not in serialized

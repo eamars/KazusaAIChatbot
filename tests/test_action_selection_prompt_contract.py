@@ -93,3 +93,71 @@ def test_action_prompt_fits_the_system_inclusive_budget() -> None:
     """The static planner contract leaves room for its dynamic packet."""
 
     assert len(ACTION_PLANNING_PROMPT) < ACTION_PLANNING_PROMPT_CAP
+
+
+def test_action_prompt_states_request_fidelity_generation_procedure() -> None:
+    """The planner identifies the requested effect before deciding resolver need."""
+
+    prompt = "".join(ACTION_PLANNING_PROMPT.split()).casefold()
+
+    assert "生成步骤" in prompt
+    assert "先识别当前用户请求要达成的效果" in prompt
+    assert "目标对象、范围和明确的时间约束" in prompt
+    assert "semantic_goal必须忠实保留用户要求的检索或工作效果" in prompt
+    assert "reason只解释该请求如何推进已接纳目标，不是第二个目标" in prompt
+
+
+def test_action_prompt_labels_evidence_authority_deterministically() -> None:
+    """Current-request rows are authoritative; context rows are supporting."""
+
+    prompt = "".join(ACTION_PLANNING_PROMPT.split())
+
+    assert "provenance_role" in prompt
+    assert "current_episode是当前用户请求与当前场景的权威来源" in prompt
+    assert "current_user_history_only" in prompt
+    assert "character_or_world_context_only" in prompt
+    assert "contextual_fact_only" in prompt
+    assert "只提供支持性上下文" in prompt
+
+
+def test_action_prompt_keeps_capability_audit_for_explicit_questions() -> None:
+    """Runtime constraints become objectives only when the user asks for them."""
+
+    prompt = "".join(ACTION_PLANNING_PROMPT.split())
+
+    assert "能力、权限、可行性和API支持是运行时约束" in prompt
+    assert "除非当前用户明确要求审核是否能做、是否被允许或是否可行" in prompt
+    assert "只有当当前用户明确询问能力、权限或可行性本身时" in prompt
+    assert "semantic_goal才可以是该审计目标" in prompt
+
+
+def test_action_prompt_requires_evidence_for_unanswered_explicit_audits() -> None:
+    """An unanswered capability question remains a resolver-owned audit."""
+
+    prompt = "".join(ACTION_PLANNING_PROMPT.split())
+
+    assert "可信的运行时限制和证据不足以回答时" in prompt
+    assert "goal_resolution必须为requires_required_evidence" in prompt
+    assert "task_resolution_request保留该审计目标" in prompt
+    assert "不得仅凭bid或角色自述将其判为answerable_now" in prompt
+
+
+def test_action_prompt_does_not_create_empty_goal_progress_checklists() -> None:
+    """A new resolver request does not invent a capability checklist."""
+
+    prompt = "".join(ACTION_PLANNING_PROMPT.split())
+
+    assert "current_resolver_goal_progress是空壳" in prompt
+    assert "resolver_goal_progress必须为null" in prompt
+    assert "不要仅因为选择了resolver就新建目标清单" in prompt
+    assert "普通检索请求不能把能力、权限或可行性核验写成deliverable" in prompt
+
+
+def test_action_prompt_forbids_deterministic_semantic_rewriting() -> None:
+    """Semantic meaning stays model-owned with no keyword routing or filters."""
+
+    prompt = ACTION_PLANNING_PROMPT.casefold()
+
+    assert "不要添加关键词路由、确定性" in prompt
+    assert "后处理" in prompt
+    assert "不要依据用户原文关键词进行这个分类" in prompt
