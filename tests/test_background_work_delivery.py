@@ -144,6 +144,27 @@ def test_tool_result_payload_uses_semantic_metadata() -> None:
         assert forbidden not in serialized_payload
 
 
+def test_tool_result_source_builder_preserves_enriched_blocker_summary() -> None:
+    """Enriched result summaries must stay the tool-result semantic text."""
+
+    result_source = importlib.import_module(
+        "kazusa_ai_chatbot.background_work.result_source"
+    )
+    job = _accepted_task_completed_job()
+    enriched_summary = (
+        "The task needs additional user-provided information.\n"
+        "Specific blocker: Please narrow the question before more source reading.\n"
+        "Remaining limitation: Source-reading report limit would be exceeded."
+    )
+    job["result_summary"] = enriched_summary
+
+    episode = result_source.build_result_ready_episode_from_job(job)
+
+    assert episode["trigger_source"] == "tool_result"
+    assert episode["percepts"][0]["source_kind"] == "tool_result"
+    assert episode["percepts"][0]["content"]["semantic_summary"] == enriched_summary
+
+
 @pytest.mark.asyncio
 async def test_service_result_ready_delivery_uses_dispatcher_boundary(
     monkeypatch,

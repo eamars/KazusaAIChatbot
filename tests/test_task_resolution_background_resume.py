@@ -85,6 +85,32 @@ def _recorded_checkpoint(
     return updated, snapshot
 
 
+def _incident_result() -> dict[str, object]:
+    """Build the incident-shaped needs_user_input worker fixture."""
+
+    return {
+        "status": "needs_user_input",
+        "prompt_safe_summary": (
+            "The task needs additional user-provided information."
+        ),
+        "coding_run_context": {
+            "schema_version": "coding_run_context.v1",
+            "coding_run_ref": "coding-run-001",
+            "status": "blocked",
+            "summary": "Please narrow the question before more source reading.",
+            "limitations": ["Source-reading report limit would be exceeded."],
+            "allowed_next_actions": [
+                "respond_to_blocker",
+                "summarize",
+                "status",
+                "cancel",
+            ],
+            "followup_open": True,
+        },
+        "remaining_needs": ["Source-reading report limit would be exceeded."],
+    }
+
+
 @pytest.mark.asyncio
 async def test_terminal_snapshot_recovers_without_redispatch(
     monkeypatch: pytest.MonkeyPatch,
@@ -430,6 +456,144 @@ def test_delivery_summary_prioritizes_latest_bounded_evidence() -> None:
     assert "https://latest.example/source-7" in summary
     assert "https://latest.example/source-8" not in summary
     assert "https://old.example/source" not in summary
+
+
+def test_delivery_summary_incident_shaped_coding_blocker_detail() -> None:
+    """A blocked coding run must keep its typed blocker and limitation."""
+
+    worker = importlib.import_module("kazusa_ai_chatbot.background_work.worker")
+
+    summary = worker._task_result_delivery_summary(_incident_result())
+
+    assert summary == (
+        "The task needs additional user-provided information.\n"
+        "Specific blocker: Please narrow the question before more source reading.\n"
+        "Remaining limitation: Source-reading report limit would be exceeded."
+    )
+
+
+def test_delivery_summary_non_coding_user_input_keeps_only_remaining_needs() -> None:
+    """A user-input result without a coding run appends only its needs."""
+
+    worker = importlib.import_module("kazusa_ai_chatbot.background_work.worker")
+    result = {
+        "status": "needs_user_input",
+        "prompt_safe_summary": (
+            "The task needs additional user-provided information."
+        ),
+        "coding_run_context": {},
+        "remaining_needs": ["Please provide the account identifier."],
+    }
+
+    summary = worker._task_result_delivery_summary(result)
+
+    assert summary == (
+        "The task needs additional user-provided information.\n"
+        "Remaining limitation: Please provide the account identifier."
+    )
+
+
+def test_delivery_summary_missing_blocker_detail_keeps_generic_summary() -> None:
+    """Missing blocker detail must not invent replacement delivery text."""
+
+    worker = importlib.import_module("kazusa_ai_chatbot.background_work.worker")
+    result = {
+        "status": "failed",
+        "prompt_safe_summary": "The task could not be completed.",
+        "coding_run_context": {},
+        "remaining_needs": [],
+    }
+
+    summary = worker._task_result_delivery_summary(result)
+
+    assert summary == "The task could not be completed."
+
+
+def test_delivery_summary_deduplicates_blocker_and_limitation_text() -> None:
+    """Exact duplicate blocker and need text must appear only once."""
+
+    worker = importlib.import_module("kazusa_ai_chatbot.background_work.worker")
+    result = _incident_result()
+    result["remaining_needs"] = [
+        "Please narrow the question before more source reading.",
+        "Source-reading report limit would be exceeded.",
+        "Source-reading report limit would be exceeded.",
+    ]
+
+    summary = worker._task_result_delivery_summary(result)
+
+    assert summary == (
+        "The task needs additional user-provided information.\n"
+        "Specific blocker: Please narrow the question before more source reading.\n"
+        "Remaining limitation: Source-reading report limit would be exceeded."
+    )
+
+
+def test_delivery_summary_non_success_statuses_keep_prompt_safe_summary() -> None:
+    """All non-success statuses share the prompt-safe blocker projection."""
+
+    worker = importlib.import_module("kazusa_ai_chatbot.background_work.worker")
+    for status in ("approval_required", "unavailable", "failed"):
+        result = {
+            "status": status,
+            "prompt_safe_summary": "The task needs a follow-up.",
+            "coding_run_context": {},
+            "remaining_needs": ["One remaining input is missing."],
+        }
+
+        summary = worker._task_result_delivery_summary(result)
+
+        assert summary == (
+            "The task needs a follow-up.\n"
+            "Remaining limitation: One remaining input is missing."
+        )
+
+
+@pytest.mark.asyncio
+async def test_completed_non_success_job_propagates_enriched_summary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A needs_user_input result reaches failure and job result summaries."""
+
+    worker = importlib.import_module("kazusa_ai_chatbot.background_work.worker")
+    request = _resume_queue_request()
+    job = {
+        **request,
+        "schema_version": "background_work_job.v2",
+        "job_id": "job-user-input-delivery",
+        "worker_payload": {
+            **request["worker_payload"],
+            "checkpoint": request["worker_payload"]["checkpoint"],
+        },
+    }
+    result = _incident_result()
+    mark_failure = AsyncMock(return_value={"state": "failure_ready"})
+    complete_job = AsyncMock(return_value={"status": "completed"})
+    monkeypatch.setattr(worker, "mark_accepted_task_failure_ready", mark_failure)
+    monkeypatch.setattr(worker, "complete_background_work_job", complete_job)
+
+    await worker._complete_task_orchestrator_job(
+        job,
+        lease_owner="worker-user-input-test",
+        result=result,
+    )
+
+    expected = (
+        "The task needs additional user-provided information.\n"
+        "Specific blocker: Please narrow the question before more source reading.\n"
+        "Remaining limitation: Source-reading report limit would be exceeded."
+    )
+    assert mark_failure.await_args.kwargs["failure_summary"] == expected
+    assert mark_failure.await_args.kwargs["result_kind"] == "needs_user_input"
+    assert mark_failure.await_args.kwargs["remaining_needs"] == [
+        "Source-reading report limit would be exceeded."
+    ]
+    assert mark_failure.await_args.kwargs["coding_run_context"] == dict(
+        result["coding_run_context"]
+    )
+    assert complete_job.await_args.kwargs["artifact_text"] == expected
+    assert complete_job.await_args.kwargs["result_summary"] == expected
+    assert complete_job.await_args.kwargs["task_resolution_result"] == result
 
 
 @pytest.mark.asyncio

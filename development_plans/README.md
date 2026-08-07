@@ -57,7 +57,7 @@ long_term/todo.md
 | Document | Type | Status |
 |---|---|---|
 | [cognition_core_v2_action_planning_request_fidelity_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_action_planning_request_fidelity_bugfix_plan.md) | Action-planning request fidelity and retrieval-goal preservation | completed |
-| [background_task_result_blocker_detail_delivery_bugfix_plan.md](active/bugfix/background_task_result_blocker_detail_delivery_bugfix_plan.md) | Explicit task-result blocker detail in background delivery | draft |
+| [background_task_result_blocker_detail_delivery_bugfix_plan.md](archive/completed/bugfix/background_task_result_blocker_detail_delivery_bugfix_plan.md) | Explicit task-result blocker detail in background delivery | completed |
 | [cognition_size_limit_truncation_and_fallback_scan_plan.md](archive/completed/bugfix/cognition_size_limit_truncation_and_fallback_scan_plan.md) | Project-wide context-size scan and deterministic truncation fallback | completed |
 | [durable_ingress_native_reply_intervening_message_bugfix_plan.md](archive/completed/bugfix/durable_ingress_native_reply_intervening_message_bugfix_plan.md) | Durable inbound ordering for /chat and original-message background replies | completed |
 | [background_tool_result_delivery_current_episode_evidence_bugfix_plan.md](archive/completed/bugfix/background_tool_result_delivery_current_episode_evidence_bugfix_plan.md) | Background tool-result evidence authority and visible result-delivery regression | completed |

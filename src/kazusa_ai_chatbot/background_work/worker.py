@@ -264,7 +264,8 @@ def _task_result_delivery_summary(result: TaskResolutionResultV1) -> str:
     """Project validated task evidence into prompt-safe delivery text."""
 
     if result["status"] not in {"resolved", "partial"}:
-        return result["prompt_safe_summary"]
+        summary = _non_success_delivery_summary(result)
+        return summary
 
     summary_rows: list[str] = []
     source_urls: list[str] = []
@@ -289,6 +290,36 @@ def _task_result_delivery_summary(result: TaskResolutionResultV1) -> str:
         raise TaskResolutionContractError(
             "successful background task result is missing delivery evidence"
         )
+    summary = "\n".join(summary_rows)
+    return summary
+
+
+def _non_success_delivery_summary(result: TaskResolutionResultV1) -> str:
+    """Compose prompt-safe blocker detail for a non-success task result.
+
+    The validated prompt-safe summary opens the text, followed by the declared
+    coding-run blocker and remaining needs as exact detail lines. Empty or
+    already-present detail is omitted without inventing replacement wording.
+    """
+
+    summary_rows = [result["prompt_safe_summary"]]
+    present_text: set[str] = set(summary_rows)
+    blocker_summary = ""
+    coding_run_context = result["coding_run_context"]
+    if coding_run_context:
+        blocker_summary = coding_run_context["summary"].strip()
+    if blocker_summary and blocker_summary not in present_text:
+        present_text.add(blocker_summary)
+        summary_rows.append(f"Specific blocker: {blocker_summary}")
+    remaining_needs: list[str] = []
+    for raw_need in result["remaining_needs"]:
+        need = raw_need.strip()
+        if need and need not in present_text:
+            present_text.add(need)
+            remaining_needs.append(need)
+    if remaining_needs:
+        remaining_text = "; ".join(remaining_needs)
+        summary_rows.append(f"Remaining limitation: {remaining_text}")
     summary = "\n".join(summary_rows)
     return summary
 

@@ -51,6 +51,11 @@ The bound coding operation is closed to revision, summary, status, approved
 verification, blocker response, and cancellation. It retains trusted approval
 evidence and cannot create a new coding run through the background queue.
 
+Non-success task-resolution delivery composes only the validated prompt-safe
+summary, coding-run blocker summary, and remaining needs into the delivered
+result summary. Coding-run references, raw payloads, and adapter metadata never
+enter that text.
+
 `future_speak` retains its deterministic scheduling payload and does not enter
 the task-resolution specialist loop.
 
@@ -64,6 +69,11 @@ one trace row without double-counting. A recovered started dispatch becomes an
 at-most-once unavailable result and is never invoked again. Terminal resolved
 and evidence-bearing partial results become accepted-task result-ready state;
 limitations remain prompt-safe.
+
+Non-success task-resolution results (`needs_user_input`, `approval_required`,
+`unavailable`, and `failed`) preserve the typed coding-run blocker and remaining
+limitation as exact prompt-safe detail lines in the accepted-task failure and
+job result summaries.
 
 Workers do not call shared cognition or adapters directly. Delivery uses the
 accepted-task result source, normal cognition, dispatcher validation, and the
