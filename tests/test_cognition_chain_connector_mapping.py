@@ -492,6 +492,46 @@ def test_connector_projects_one_generic_task_resolution_owner() -> None:
     assert all(row["context_ref"] == "" for row in actions)
 
 
+def test_connector_projects_routing_boolean_to_v1_priority() -> None:
+    """True maps to background and false to now for the generic row."""
+
+    output = _core_output()
+    output["resolver_requests"] = [
+        {
+            "capability": "task_resolution_request",
+            "semantic_goal": "research the bounded public question",
+            "reason": "the work should start in the durable path",
+            "evidence_handles": [],
+            "start_in_background": True,
+        },
+        {
+            "capability": "task_resolution_request",
+            "semantic_goal": "retrieve the missing local context",
+            "reason": "the current response lacks required evidence",
+            "evidence_handles": [],
+            "start_in_background": False,
+        },
+        {
+            "capability": "human_clarification",
+            "semantic_goal": "ask which city the user means",
+            "reason": "the current phrase is incomplete",
+            "evidence_handles": [],
+        },
+    ]
+
+    update = connector._project_output_to_global_state(output, _global_state())
+    requests = update["resolver_capability_requests"]
+
+    assert [row["priority"] for row in requests] == [
+        "background",
+        "now",
+        "now",
+    ]
+    assert requests[0]["capability_kind"] == "task_resolution_request"
+    assert requests[1]["capability_kind"] == "task_resolution_request"
+    assert requests[2]["capability_kind"] == "human_clarification"
+
+
 def test_connector_omits_capabilities_with_unavailable_runtime_routes() -> None:
     """Cognition receives only capabilities admitted by deterministic probes."""
 

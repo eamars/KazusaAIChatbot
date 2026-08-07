@@ -638,6 +638,7 @@ class ResolverCapabilityRequestV2(TypedDict):
     semantic_goal: str
     reason: str
     evidence_handles: list[str]
+    start_in_background: NotRequired[bool]
 
 
 class ResolverProgressV2(TypedDict):
@@ -1814,7 +1815,25 @@ def _validate_action_request(value: Any) -> None:
 def _validate_resolver_request(value: Any) -> None:
     """Validate one route-approved semantic resolver request."""
 
-    if not isinstance(value, Mapping) or set(value) != {
+    if not isinstance(value, Mapping):
+        raise CognitionContractError("resolver request must be a mapping")
+    capability = value.get("capability")
+    if capability == "task_resolution_request":
+        if set(value) != {
+            "capability",
+            "semantic_goal",
+            "reason",
+            "evidence_handles",
+            "start_in_background",
+        }:
+            raise CognitionContractError(
+                "task resolution request fields are not exact"
+            )
+        if not isinstance(value["start_in_background"], bool):
+            raise CognitionContractError(
+                "task resolution start_in_background must be a boolean"
+            )
+    elif set(value) != {
         "capability",
         "semantic_goal",
         "reason",

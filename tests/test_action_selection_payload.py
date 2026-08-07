@@ -59,6 +59,22 @@ def test_action_prompt_keeps_runtime_constraints_out_of_objectives() -> None:
     assert "provenance_role" in prompt
 
 
+def test_action_prompt_exposes_routing_boolean_without_queue_mechanics() -> None:
+    """The planner owns the narrow boolean, never durable execution details."""
+
+    prompt = "".join(ACTION_PLANNING_PROMPT.split()).casefold()
+
+    assert "start_in_background" in prompt
+    for forbidden in (
+        "accepted_task_id",
+        "idempotency_key",
+        "inline_budget_seconds",
+        "checkpoint",
+        "queue_request",
+    ):
+        assert forbidden not in prompt
+
+
 @pytest.mark.asyncio
 async def test_action_planning_payload_projects_provenance_roles_only() -> None:
     """The model sees semantic authority labels, never raw source metadata."""

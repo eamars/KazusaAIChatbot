@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from kazusa_ai_chatbot.task_resolution import TaskResolutionContractError
 from tests.test_task_resolution_orchestrator import _context
 
 
@@ -43,6 +44,151 @@ def test_inline_budget_default_is_thirty_seconds() -> None:
     assert config.TASK_RESOLUTION_INLINE_BUDGET_SECONDS == 30.0
     assert service.MINIMUM_INLINE_BUDGET_SECONDS == 1.0
     assert service.MAXIMUM_INLINE_BUDGET_SECONDS == 120.0
+
+
+@pytest.mark.asyncio
+async def test_background_start_creates_initial_checkpoint_and_promotes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Direct background start reuses deferred promotion with a fresh session."""
+
+    service = importlib.import_module("kazusa_ai_chatbot.task_resolution.service")
+    promoted: list[dict[str, object]] = []
+
+    async def promote(
+        result: dict[str, object],
+        context: dict[str, object],
+        *,
+        source_trigger_source: str,
+        source_platform_bot_id: str,
+        requester_display_name: str,
+    ) -> dict[str, object]:
+        assert context == _context()
+        assert source_trigger_source == "user_message"
+        assert source_platform_bot_id == "debug-bot"
+        assert requester_display_name == "Test User"
+        promoted.append(result)
+        return {
+            "status": "pending",
+            "job_id": "job-001",
+            "job_ref": "background_work_job:job-001",
+            "accepted_task_id": "task-001",
+            "task_identity_key": "accepted_task:v2:abc",
+            "accepted_task_summary": _request()["semantic_goal"],
+            "acknowledgement_constraint": "promise_allowed",
+            "wait_guidance": "non_numeric_wait",
+            "result_summary": "Accepted task continuation is durable.",
+        }
+
+    monkeypatch.setattr(
+        service,
+        "promote_deferred_task_resolution",
+        promote,
+    )
+
+    result = await service.start_task_resolution_in_background(
+        _request(),
+        _context(),
+        source_trigger_source="user_message",
+        source_platform_bot_id="debug-bot",
+        requester_display_name="Test User",
+    )
+
+    assert result["status"] == "deferred"
+    assert result["evidence"] == []
+    checkpoint = result["checkpoint"]
+    assert checkpoint["dispatch_count"] == 0
+    assert checkpoint["orchestrator_call_count"] == 0
+    assert checkpoint["semantic_objective"] == _request()["semantic_goal"]
+    assert len(promoted) == 1
+
+
+@pytest.mark.asyncio
+async def test_background_start_materializes_one_pending_idempotent_job(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Direct background start creates one accepted task and one queue job."""
+
+    service = importlib.import_module("kazusa_ai_chatbot.task_resolution.service")
+    task = {
+        "accepted_task_id": "task-001",
+        "task_identity_key": "accepted_task:v2:abc",
+        "accepted_task_summary": _request()["semantic_goal"],
+        "state": "enqueueing",
+    }
+    monkeypatch.setattr(
+        service,
+        "create_or_return_active_accepted_task",
+        AsyncMock(return_value={"status": "created", "task": task}),
+    )
+    monkeypatch.setattr(
+        service,
+        "mark_accepted_task_pending",
+        AsyncMock(return_value={**task, "state": "pending"}),
+    )
+    enqueue = AsyncMock(return_value={
+        "status": "pending",
+        "job_id": "job-001",
+        "job_ref": "background_work_job:job-001",
+        "accepted_task_id": "task-001",
+        "task_identity_key": "accepted_task:v2:abc",
+        "accepted_task_summary": _request()["semantic_goal"],
+        "acknowledgement_constraint": "promise_allowed",
+        "wait_guidance": "non_numeric_wait",
+        "result_summary": "Accepted task continuation is durable.",
+    })
+    monkeypatch.setattr(service, "enqueue_background_work_request", enqueue)
+
+    await service.start_task_resolution_in_background(
+        _request(),
+        _context(),
+        source_trigger_source="user_message",
+        source_platform_bot_id="debug-bot",
+        requester_display_name="Test User",
+    )
+
+    queued = enqueue.await_args.args[0]
+    assert queued["job_id"] == "job-001"
+    assert queued["accepted_task_id"] == "task-001"
+    assert queued["idempotency_key"] == "background_work:task-001"
+    assert queued["requested_worker"] == "task_orchestrator"
+    assert queued["worker_payload"]["operation"] == "resume_task_resolution"
+    assert queued["worker_payload"]["checkpoint"]["dispatch_count"] == 0
+    assert enqueue.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_background_start_enqueue_failure_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Queue failure surfaces a contract error instead of an acceptance."""
+
+    service = importlib.import_module("kazusa_ai_chatbot.task_resolution.service")
+
+    async def promote(
+        result: dict[str, object],
+        context: dict[str, object],
+        **kwargs: object,
+    ) -> dict[str, object]:
+        del result, context, kwargs
+        raise TaskResolutionContractError(
+            "task-resolution durable promotion failed"
+        )
+
+    monkeypatch.setattr(
+        service,
+        "promote_deferred_task_resolution",
+        promote,
+    )
+
+    with pytest.raises(TaskResolutionContractError, match="promotion failed"):
+        await service.start_task_resolution_in_background(
+            _request(),
+            _context(),
+            source_trigger_source="user_message",
+            source_platform_bot_id="debug-bot",
+            requester_display_name="Test User",
+        )
 
 
 @pytest.mark.asyncio

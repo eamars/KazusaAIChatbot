@@ -40,6 +40,12 @@ long_term/todo.md
 |---|---|---|
 | [coding_agent_assessment_gap_phase_d_plan.md](active/short_term/coding_agent_assessment_gap_phase_d_plan.md) | High-risk coding-agent migration plan for a generic JSON action loop, persistent repository index, exploration-cap removal, and delete/rename | in progress |
 
+## Completed Short-Term Plans
+
+| Document | Type | Status |
+|---|---|---|
+| [task_resolution_character_background_handoff_plan.md](archive/completed/short_term/task_resolution_character_background_handoff_plan.md) | Character-selected task-resolution background handoff and partial-result continuation | completed |
+
 ## Supporting Experiment Records
 
 | Document | Type | Status | Supports |

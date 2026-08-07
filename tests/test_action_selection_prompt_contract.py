@@ -57,6 +57,20 @@ def test_action_prompt_exposes_one_generic_task_resolution_capability() -> None:
         assert forbidden not in prompt
 
 
+def test_action_prompt_requires_exact_task_resolution_routing_boolean() -> None:
+    """The generic resolver row carries exactly one JSON boolean."""
+
+    prompt = "".join(ACTION_PLANNING_PROMPT.split())
+
+    assert "start_in_background" in prompt
+    assert "JSON布尔值" in prompt
+    assert "直接进入持久后台路径执行" in prompt
+    assert "近似前台预算尝试内联执行" in prompt
+    assert "task_resolution_request行必须恰好包含bid_handle" in prompt
+    assert "其他resolver行必须恰好包含bid_handle" in prompt
+    assert "本阶段不选择worker、队列、时限或执行参数" in prompt
+
+
 def test_action_prompt_requires_grounded_out_of_turn_effect() -> None:
     """Planner reasoning cannot be converted into a durable action request."""
 

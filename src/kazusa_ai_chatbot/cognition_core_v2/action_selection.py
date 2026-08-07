@@ -211,12 +211,19 @@ resolver 请求的 semantic_goal 只陈述用户要求达成的检索或工作�
 询问，则保留该审计目标；当可信证据不足以回答时使用 requires_required_evidence 和
 task_resolution_request，不要仅凭 bid 或角色自述输出 answerable_now。
 
+task_resolution_request 行必须额外给出 start_in_background，且只能使用 JSON
+布尔值。true 表示该有界工作应直接进入持久后台路径执行；false 表示先按近似
+前台预算尝试内联执行，只有无法在预算内完成时才转为同一后台继续。选择依据是
+当前请求的效果是否适合在本轮内联完成，还是应当直接持久化后台执行；本阶段不
+选择 worker、队列、时限或执行参数。
+
 # 输出格式
 只返回一个 JSON 对象，字段必须恰好是：
 - action_requests：零到三个对象，每个对象必须恰好包含 bid_handle、action_handle、decision、
   semantic_goal 和 reason；
-- resolver_requests：零到三个对象，每个对象必须恰好包含 bid_handle、resolver_handle、
-  semantic_goal 和 reason；
+- resolver_requests：零到三个对象；task_resolution_request 行必须恰好包含 bid_handle、
+  resolver_handle、semantic_goal、reason 和 start_in_background（JSON 布尔值），其他
+  resolver 行必须恰好包含 bid_handle、resolver_handle、semantic_goal 和 reason；
 - goal_resolution：必须是 answerable_now、requires_required_evidence、requires_user_input 或 blocked
   之一；
 - resolver_pending_resolution：null，或恰好包含 decision 和 reason 的对象；
@@ -623,6 +630,12 @@ def _action_planning_repair_message(
             "满足所有精确字段和请求规则，并且只输出 JSON。"
         ),
         "contract_requirements": {
+            "task_resolution_route": (
+                "task_resolution_request 行必须恰好包含 bid_handle、"
+                "resolver_handle、semantic_goal、reason 和 "
+                "start_in_background；start_in_background 只能是 JSON 布尔值，"
+                "不能是字符串、数字或 null，其他 resolver 行不加该字段。"
+            ),
             "resolver_goal_progress": (
                 "current_resolver_goal_progress 为空时必须为 null；已有目标进度时只能更新其字段，"
                 "空壳进度不得新建清单；新建时必须返回完整对象。"
@@ -761,10 +774,10 @@ def _normalize_resolver_request_rows(
     values: Sequence[object],
     bids: Mapping[str, ActionBidV2],
     resolvers: Mapping[str, ResolverAffordanceV2],
-) -> list[dict[str, str]]:
+) -> list[dict[str, Any]]:
     """Keep bounded canonical resolver proposals with valid trusted handles."""
 
-    normalized: list[dict[str, str]] = []
+    normalized: list[dict[str, Any]] = []
     for value in values:
         try:
             row = _validate_resolver_request_row(value, bids, resolvers)
@@ -867,8 +880,13 @@ def _validate_resolver_request_row(
     value: object,
     bids: Mapping[str, ActionBidV2],
     resolvers: Mapping[str, ResolverAffordanceV2],
-) -> dict[str, str]:
-    """Validate one resolver row and its admitted-bid provenance."""
+) -> dict[str, Any]:
+    """Validate one resolver row and its admitted-bid provenance.
+
+    A generic task-resolution row requires the exact model-selected
+    ``start_in_background`` JSON boolean.  Other resolver rows retain the
+    exact four-field shape without the routing boolean.
+    """
 
     required = {
         "bid_handle",
@@ -876,7 +894,9 @@ def _validate_resolver_request_row(
         "semantic_goal",
         "reason",
     }
-    if not isinstance(value, Mapping) or not required.issubset(value):
+    if not isinstance(value, Mapping):
+        raise ValueError("resolver request fields are incomplete")
+    if not required.issubset(value):
         raise ValueError("resolver request fields are incomplete")
     bid_handle = value["bid_handle"]
     resolver_handle = value["resolver_handle"]
@@ -884,6 +904,25 @@ def _validate_resolver_request_row(
         raise ValueError("resolver request bid handle is unavailable")
     if resolver_handle not in resolvers:
         raise ValueError("resolver request resolver handle is unavailable")
+    affordance = resolvers[resolver_handle]
+    start_in_background = None
+    if affordance["capability"] == "task_resolution_request":
+        task_required = required | {"start_in_background"}
+        if set(value) != task_required:
+            raise ValueError(
+                "task resolution request fields must be exactly "
+                "bid_handle, resolver_handle, semantic_goal, reason, "
+                "start_in_background"
+            )
+        start_in_background = value["start_in_background"]
+        if not isinstance(start_in_background, bool):
+            raise ValueError(
+                "task resolution start_in_background must be a boolean"
+            )
+    elif "start_in_background" in value:
+        raise ValueError(
+            "start_in_background is only valid for task resolution requests"
+        )
     semantic_goal = _bounded_model_text(
         value["semantic_goal"],
         "resolver request semantic_goal",
@@ -895,6 +934,8 @@ def _validate_resolver_request_row(
         "semantic_goal": semantic_goal,
         "reason": reason,
     }
+    if start_in_background is not None:
+        return_value["start_in_background"] = start_in_background
     return return_value
 
 
@@ -1004,7 +1045,7 @@ def _materialize_action_requests(
 
 
 def _materialize_resolver_requests(
-    requests: Sequence[Mapping[str, str]],
+    requests: Sequence[Mapping[str, Any]],
     bids: Mapping[str, ActionBidV2],
     resolvers: Mapping[str, ResolverAffordanceV2],
 ) -> list[ResolverCapabilityRequestV2]:
@@ -1014,12 +1055,15 @@ def _materialize_resolver_requests(
     for request in requests:
         bid = bids[request["bid_handle"]]
         affordance = resolvers[request["resolver_handle"]]
-        result.append({
+        row: ResolverCapabilityRequestV2 = {
             "capability": affordance["capability"],
             "semantic_goal": request["semantic_goal"],
             "reason": request["reason"],
             "evidence_handles": list(bid["evidence_handles"]),
-        })
+        }
+        if "start_in_background" in request:
+            row["start_in_background"] = request["start_in_background"]
+        result.append(row)
     return result
 
 

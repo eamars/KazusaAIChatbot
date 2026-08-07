@@ -1124,3 +1124,111 @@ async def test_facade_derives_relief_from_direct_threat_resolution() -> None:
         "kind": "threat",
         "entity_id": "threat:resolved-by-action",
     }
+
+
+def _output_with_resolver_request(
+    *,
+    capability: str = "task_resolution_request",
+    start_in_background: object = False,
+    extra_field: str | None = None,
+    include_boolean: bool = True,
+) -> dict[str, object]:
+    """Build a validated output fixture carrying one resolver request."""
+
+    output = canonical_cognition_output()
+    row: dict[str, object] = {
+        "capability": capability,
+        "semantic_goal": "resolve the bounded evidence task",
+        "reason": "the admitted motive has an evidence gap",
+        "evidence_handles": ["e1"],
+    }
+    if include_boolean:
+        row["start_in_background"] = start_in_background
+    if extra_field is not None:
+        row[extra_field] = "background"
+    output["resolver_requests"] = [row]
+    return output
+
+
+@pytest.mark.parametrize("start_in_background", [True, False])
+def test_task_resolution_output_accepts_exact_routing_boolean(
+    start_in_background: bool,
+) -> None:
+    """A validated task-resolution row keeps its exact JSON boolean."""
+
+    output = _output_with_resolver_request(
+        start_in_background=start_in_background,
+    )
+
+    validated = validate_cognition_core_output(output)
+
+    row = validated["resolver_requests"][0]
+    assert row["start_in_background"] is start_in_background
+
+
+@pytest.mark.parametrize(
+    "start_in_background",
+    ["true", 1, 0, None, 1.0],
+)
+def test_task_resolution_output_rejects_non_boolean_route_value(
+    start_in_background: object,
+) -> None:
+    """Strings, numbers, and null cannot select the durable route."""
+
+    output = _output_with_resolver_request(
+        start_in_background=start_in_background,
+    )
+
+    with pytest.raises(
+        CognitionContractError,
+        match="start_in_background must be a boolean",
+    ):
+        validate_cognition_core_output(output)
+
+
+def test_task_resolution_output_requires_routing_boolean() -> None:
+    """A generic task-resolution row cannot omit its required boolean."""
+
+    output = _output_with_resolver_request(include_boolean=False)
+
+    with pytest.raises(CognitionContractError, match="fields are not exact"):
+        validate_cognition_core_output(output)
+
+
+def test_task_resolution_output_rejects_extra_route_field() -> None:
+    """Extra route fields fail closed at the V2 output boundary."""
+
+    output = _output_with_resolver_request(extra_field="priority")
+
+    with pytest.raises(CognitionContractError, match="fields are not exact"):
+        validate_cognition_core_output(output)
+
+
+def test_other_resolver_rows_keep_their_exact_shape() -> None:
+    """Non-task-resolution rows do not carry the routing boolean."""
+
+    output = _output_with_resolver_request(
+        capability="human_clarification",
+        include_boolean=False,
+    )
+
+    validated = validate_cognition_core_output(output)
+
+    assert set(validated["resolver_requests"][0]) == {
+        "capability",
+        "semantic_goal",
+        "reason",
+        "evidence_handles",
+    }
+
+
+def test_other_resolver_rows_reject_the_routing_boolean() -> None:
+    """The routing boolean is exclusive to the generic task-resolution row."""
+
+    output = _output_with_resolver_request(
+        capability="human_clarification",
+        start_in_background=True,
+    )
+
+    with pytest.raises(CognitionContractError, match="fields are not exact"):
+        validate_cognition_core_output(output)

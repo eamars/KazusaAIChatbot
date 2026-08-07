@@ -48,14 +48,19 @@ local、public、coding 或 text/computation specialist，也不让规划者选�
 
 async def authorize_resolver_requests(
     *,
-    resolver_requests: Sequence[Mapping[str, str]],
+    resolver_requests: Sequence[Mapping[str, Any]],
     bid_handles: Mapping[str, ActionBidV2],
     evidence: Sequence[CognitionEvidenceV2],
     resolver_handles: Mapping[str, ResolverAffordanceV2],
     resolver_context: str,
     services: CognitionCoreServicesV2,
-) -> list[dict[str, str]]:
-    """Retain proposed resolver work whose evidence need remains useful."""
+) -> list[dict[str, Any]]:
+    """Retain proposed resolver work whose evidence need remains useful.
+
+    Authorization judges only the unresolved evidence need and the capability
+    match.  The validated routing boolean is preserved verbatim on each
+    retained row; this stage never derives or reinterprets the route choice.
+    """
 
     if not resolver_requests:
         return []
@@ -69,7 +74,7 @@ async def authorize_resolver_requests(
         for row in evidence
     ]
     candidates: dict[str, dict[str, Any]] = {}
-    candidate_requests: dict[str, dict[str, str]] = {}
+    candidate_requests: dict[str, dict[str, Any]] = {}
     for index, request in enumerate(resolver_requests, start=1):
         bid_handle = request["bid_handle"]
         resolver_handle = request["resolver_handle"]

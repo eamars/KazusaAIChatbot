@@ -955,12 +955,24 @@ async def _execute_with_timeout(
 def _select_immediate_request(
     state: GlobalPersonaState,
 ) -> ResolverCapabilityRequestV1 | None:
-    """Return the first immediate resolver request selected by cognition."""
+    """Return the first resolver request this cycle must process.
+
+    Priority ``now`` requests execute immediately as before.  A priority
+    ``background`` task-resolution request also executes in the same cycle
+    through the direct durable handoff branch without an inline specialist.
+    """
 
     requests = state.get("resolver_capability_requests", [])
     for request in requests:
         validated_request = validate_resolver_capability_request(request)
         if validated_request["priority"] == "now":
+            return_value = validated_request
+            return return_value
+        if (
+            validated_request["priority"] == "background"
+            and validated_request["capability_kind"]
+            == "task_resolution_request"
+        ):
             return_value = validated_request
             return return_value
     return_value = None

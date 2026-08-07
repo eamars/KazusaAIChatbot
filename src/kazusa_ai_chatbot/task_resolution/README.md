@@ -44,6 +44,11 @@ await resume_task_resolution(checkpoint, execution_context)
 It excludes adapter objects, database handles, credentials, raw worker
 payloads, and coding-agent internal state.
 
+`start_task_resolution_in_background(...)` creates the initial checkpoint and
+uses the existing accepted-task, pending-state, queue, and idempotency
+promotion boundary without running an inline specialist. The public result is
+the same validated deferred shape used by inline work that exceeds its budget.
+
 ## Runtime Flow
 
 - Four specialist dispatches maximum.
@@ -63,6 +68,10 @@ payloads, and coding-agent internal state.
   dispatch is settled unavailable rather than relaunched.
 - Inline coding selections always return a deferred selected handover before a
   coding handler is imported or called.
+- A direct background handoff creates no specialist evidence before the worker
+  resumes. If a deferred result contains committed evidence, callers expose
+  that evidence before continuation context; an empty evidence list remains
+  empty and does not become a claimed partial result.
 - A resolved or evidence-bearing partial result with remaining needs creates
   deterministic dependency child nodes. The first dependency-ready node
   continues through the same bounded loop; exhausted continuation returns an

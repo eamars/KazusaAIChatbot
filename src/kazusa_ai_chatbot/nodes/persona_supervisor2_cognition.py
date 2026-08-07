@@ -1053,7 +1053,7 @@ def _project_output_to_global_state(
                 "capability_kind": request["capability"],
                 "objective": request["semantic_goal"],
                 "reason": request["reason"],
-                "priority": "now",
+                "priority": _resolver_request_priority(request),
             }
             for request in output["resolver_requests"]
         ],
@@ -1081,6 +1081,16 @@ def _project_output_to_global_state(
         "should_respond": route != "silence",
         "rag_result": state.get("rag_result", {}),
     }
+
+
+def _resolver_request_priority(request: Mapping[str, Any]) -> str:
+    """Project the validated task-resolution boolean to the V1 priority."""
+
+    if request["capability"] == "task_resolution_request":
+        if request["start_in_background"] is True:
+            return "background"
+        return "now"
+    return "now"
 
 
 def _materialize_v2_action_requests(

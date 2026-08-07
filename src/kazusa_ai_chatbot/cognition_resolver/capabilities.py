@@ -74,6 +74,7 @@ from kazusa_ai_chatbot.task_resolution.contracts import (
 from kazusa_ai_chatbot.task_resolution.service import (
     promote_deferred_task_resolution,
     resolve_task_inline,
+    start_task_resolution_in_background,
 )
 from kazusa_ai_chatbot.utils import log_preview, text_or_empty
 
@@ -433,7 +434,13 @@ async def _execute_task_resolution_request(
     request: ResolverCapabilityRequestV1,
     state: GlobalPersonaState,
 ) -> ResolverObservationV1:
-    """Run the one L2d-visible task-resolution capability inline first."""
+    """Run the one L2d-visible task-resolution capability route.
+
+    A background-priority request enters the direct durable handoff path with
+    no inline specialist invocation.  A now-priority request runs inline first
+    under the approximate foreground budget and defers only when it cannot
+    finish.
+    """
 
     execution_context = _task_resolution_execution_context_from_state(state)
     task_request = {
@@ -442,6 +449,26 @@ async def _execute_task_resolution_request(
         "reason": request["reason"],
         "evidence_handles": [],
     }
+    if request["priority"] == "background":
+        try:
+            deferred_result = await start_task_resolution_in_background(
+                task_request,
+                execution_context,
+                source_trigger_source=_cognitive_episode_trigger_source(state),
+                source_platform_bot_id=_required_state_text(
+                    state,
+                    "platform_bot_id",
+                ),
+                requester_display_name=_required_state_text(state, "user_name"),
+            )
+        except TaskResolutionContractError as exc:
+            return _task_resolution_failure_observation(request, state, exc)
+        return _task_resolution_observation(
+            request,
+            state,
+            deferred_result,
+            durably_promoted=True,
+        )
     try:
         result = await resolve_task_inline(
             task_request,
@@ -565,6 +592,23 @@ def _task_resolution_observation(
                 "result will return through the normal conversation path."
             ),
         )
+        if result["evidence"]:
+            observation["evidence_refs"] = _task_resolution_evidence_refs(
+                result,
+                observed_at=_created_at_utc(state),
+            )
+            observation["knowledge_projection"] = {
+                "investigation_summary": result["prompt_safe_summary"],
+                "knowledge_we_know_so_far": [
+                    evidence["summary"]
+                    for evidence in result["evidence"]
+                ],
+                "knowledge_still_lacking": list(result["remaining_needs"]),
+                "recommended_next_iteration": [],
+                "evidence_boundary_notes": _task_resolution_limitations(
+                    result,
+                ),
+            }
         validated_observation = validate_resolver_observation(observation)
         return validated_observation
     if status in {"resolved", "partial"}:

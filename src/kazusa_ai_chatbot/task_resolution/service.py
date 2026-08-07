@@ -35,6 +35,7 @@ from kazusa_ai_chatbot.task_resolution.contracts import (
 from kazusa_ai_chatbot.task_resolution.orchestrator import run_task_orchestrator
 from kazusa_ai_chatbot.task_resolution.state import (
     create_task_resolution_checkpoint,
+    result_from_checkpoint,
 )
 
 
@@ -70,6 +71,56 @@ async def resolve_task_inline(
         inline_deadline=deadline,
     )
     return result
+
+
+async def start_task_resolution_in_background(
+    request: ResolverCapabilityRequestV2,
+    execution_context: TaskResolutionExecutionContextV1,
+    *,
+    source_trigger_source: str,
+    source_platform_bot_id: str,
+    requester_display_name: str,
+) -> TaskResolutionResultV1:
+    """Enter the durable handoff path directly without an inline specialist.
+
+    The initial checkpoint is created and immediately materialized through the
+    same accepted-task, pending-transition, and idempotent queue promotion used
+    by deferred inline work.  The returned deferred result carries only the
+    initial empty checkpoint, so no partial content is invented before the
+    worker resumes.
+
+    Args:
+        request: Authorized V2 `task_resolution_request` capability row.
+        execution_context: Trusted prompt-safe context for specialist adapters.
+        source_trigger_source: Canonical episode trigger source for identity.
+        source_platform_bot_id: Adapter bot id required by accepted tasks.
+        requester_display_name: Adapter user display name for accepted tasks.
+
+    Returns:
+        The validated deferred result whose checkpoint is now durable.
+
+    Raises:
+        TaskResolutionContractError: When checkpoint, accepted-task, pending,
+            or queue durability cannot be established.
+    """
+
+    context = validate_task_resolution_execution_context(execution_context)
+    checkpoint = create_task_resolution_checkpoint(request, context)
+    deferred_result = result_from_checkpoint(
+        checkpoint,
+        status="deferred",
+        prompt_safe_summary="The task needs durable continuation.",
+        completed_subgoals=[],
+        coding_run_context={},
+    )
+    await promote_deferred_task_resolution(
+        deferred_result,
+        context,
+        source_trigger_source=source_trigger_source,
+        source_platform_bot_id=source_platform_bot_id,
+        requester_display_name=requester_display_name,
+    )
+    return deferred_result
 
 
 async def resume_task_resolution(

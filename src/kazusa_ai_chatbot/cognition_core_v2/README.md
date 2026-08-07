@@ -290,6 +290,12 @@ sufficient or that this capability is needed. It does not choose a specialist,
 an execution horizon, a queue worker, a timeout, a checkpoint, or tool
 parameters. The resolver owns inline execution and deterministic promotion;
 task resolution owns next-specialist selection inside its fixed session limits.
+The task-resolution row also requires the model-owned JSON boolean
+`start_in_background`. `true` enters durable checkpoint creation and accepted
+task promotion directly; `false` preserves the bounded inline-first path and
+uses the same durable continuation only when that inline run defers. The
+boolean is preserved through authorization and recurrence as a route decision;
+deterministic code owns the queue, worker, checkpoint, and idempotency details.
 
 Action planning preserves the current user's requested effect in every resolver
 `semantic_goal`: the target, scope, and explicit time constraints survive

@@ -219,6 +219,7 @@ async def test_answerable_now_drops_optional_resolver_request() -> None:
             "resolver_handle": "r1",
             "semantic_goal": "retrieve an optional relationship example",
             "reason": "the model considered extra context despite a sufficient answer",
+            "start_in_background": False,
         }],
         goal_resolution="answerable_now",
     )
@@ -317,6 +318,10 @@ def test_action_planning_repair_message_repeats_nested_contract() -> None:
     )
 
     assert payload["contract_requirements"]["resolver_goal_progress"]
+    assert payload["contract_requirements"]["task_resolution_route"]
+    assert "start_in_background" in payload["contract_requirements"][
+        "task_resolution_route"
+    ]
     assert payload["contract_requirements"]["deliverable_fields"] == [
         "description",
         "status",
@@ -654,6 +659,7 @@ async def test_denied_required_resolver_closes_goal_without_progress() -> None:
             "resolver_handle": "r1",
             "semantic_goal": "分析指定仓库的源代码结构",
             "reason": "当前用户要求读取指定仓库",
+            "start_in_background": False,
         }],
         goal_resolution="requires_required_evidence",
     )
@@ -856,6 +862,7 @@ def test_action_plan_merges_semantic_goal_progress_delta() -> None:
         "resolver_handle": "r1",
         "semantic_goal": "retrieve grounded breakfast evidence",
         "reason": "the answer depends on character memory",
+        "start_in_background": False,
     }])
     response["resolver_goal_progress"] = {
         "original_goal": "answer the user's breakfast question",
@@ -899,6 +906,7 @@ def test_empty_goal_progress_shell_rejects_new_checklist() -> None:
         "resolver_handle": "r1",
         "semantic_goal": "retrieve grounded breakfast evidence",
         "reason": "the answer depends on character memory",
+        "start_in_background": False,
     }])
     response["resolver_goal_progress"] = _goal_progress()
 
@@ -980,6 +988,7 @@ def test_invalid_resolver_row_invalidates_valid_sibling() -> None:
             "resolver_handle": "r1",
             "semantic_goal": "recover grounded context",
             "reason": "the answer depends on missing context",
+            "start_in_background": False,
         },
         {
             "bid_handle": "b1",
@@ -1000,6 +1009,7 @@ def test_invalid_resolver_row_invalidates_valid_sibling() -> None:
         "resolver_handle": "r1",
         "semantic_goal": "recover grounded context",
         "reason": "the answer depends on missing context",
+        "start_in_background": False,
     }]
 
 
@@ -1019,7 +1029,7 @@ def test_action_plan_strips_extra_resolver_fields() -> None:
         response,
         bid_handles={"b1": _bid("ordinary_response")},
         action_handles={},
-        resolver_handles={"r1": _resolver("task_resolution_request")},
+        resolver_handles={"r1": _resolver("human_clarification")},
     )
 
     assert decision["resolver_requests"] == [{
@@ -1028,6 +1038,94 @@ def test_action_plan_strips_extra_resolver_fields() -> None:
         "semantic_goal": "recover the omitted local referent",
         "reason": "the current phrase is incomplete",
     }]
+
+
+def test_task_resolution_row_requires_exact_routing_boolean() -> None:
+    """The generic task-resolution row needs exactly one JSON boolean."""
+
+    for start_in_background in ("true", 1, 0, None, "yes"):
+        response = _planner_response(resolvers=[{
+            "bid_handle": "b1",
+            "resolver_handle": "r1",
+            "semantic_goal": "recover the omitted local referent",
+            "reason": "the current phrase is incomplete",
+            "start_in_background": start_in_background,
+        }])
+        with pytest.raises(
+            ValueError,
+            match="every proposed resolver request row was unusable",
+        ):
+            _validate_action_plan_decision(
+                response,
+                bid_handles={"b1": _bid("ordinary_response")},
+                action_handles={},
+                resolver_handles={"r1": _resolver(
+                    "task_resolution_request",
+                )},
+            )
+
+
+def test_task_resolution_row_rejects_missing_or_extra_route_fields() -> None:
+    """Missing and extra route fields fail closed for the generic row."""
+
+    missing_boolean = _planner_response(resolvers=[{
+        "bid_handle": "b1",
+        "resolver_handle": "r1",
+        "semantic_goal": "recover the omitted local referent",
+        "reason": "the current phrase is incomplete",
+    }])
+    with pytest.raises(
+        ValueError,
+        match="every proposed resolver request row was unusable",
+    ):
+        _validate_action_plan_decision(
+            missing_boolean,
+            bid_handles={"b1": _bid("ordinary_response")},
+            action_handles={},
+            resolver_handles={"r1": _resolver("task_resolution_request")},
+        )
+
+    extra_route = _planner_response(resolvers=[{
+        "bid_handle": "b1",
+        "resolver_handle": "r1",
+        "semantic_goal": "recover the omitted local referent",
+        "reason": "the current phrase is incomplete",
+        "start_in_background": True,
+        "priority": "background",
+    }])
+    with pytest.raises(
+        ValueError,
+        match="every proposed resolver request row was unusable",
+    ):
+        _validate_action_plan_decision(
+            extra_route,
+            bid_handles={"b1": _bid("ordinary_response")},
+            action_handles={},
+            resolver_handles={"r1": _resolver("task_resolution_request")},
+        )
+
+
+def test_non_task_resolver_rejects_task_resolution_route_field() -> None:
+    """The route boolean cannot be smuggled into another capability row."""
+
+    response = _planner_response(resolvers=[{
+        "bid_handle": "b1",
+        "resolver_handle": "r1",
+        "semantic_goal": "recover the omitted local referent",
+        "reason": "the current phrase is incomplete",
+        "start_in_background": True,
+    }])
+
+    with pytest.raises(
+        ValueError,
+        match="every proposed resolver request row was unusable",
+    ):
+        _validate_action_plan_decision(
+            response,
+            bid_handles={"b1": _bid("ordinary_response")},
+            action_handles={},
+            resolver_handles={"r1": _resolver("human_clarification")},
+        )
 
 
 @pytest.mark.asyncio
@@ -1168,6 +1266,7 @@ def test_resolver_semantic_goal_passes_through_without_rewrite() -> None:
             "resolver_handle": "r1",
             "semantic_goal": goal,
             "reason": "当前答案需要该聊天记录作为证据",
+            "start_in_background": False,
         }]),
         bid_handles={"b1": _bid("ordinary_response")},
         action_handles={},
@@ -1190,6 +1289,7 @@ def test_explicit_audit_goal_is_not_rewritten_by_deterministic_code() -> None:
             "resolver_handle": "r1",
             "semantic_goal": goal,
             "reason": "当前用户明确询问能力与权限",
+            "start_in_background": True,
         }]),
         bid_handles={"b1": _bid("ordinary_response")},
         action_handles={},
@@ -1197,6 +1297,82 @@ def test_explicit_audit_goal_is_not_rewritten_by_deterministic_code() -> None:
     )
 
     assert decision["resolver_requests"][0]["semantic_goal"] == goal
+
+
+@pytest.mark.asyncio
+async def test_task_resolution_boolean_survives_authorization_and_materialization(
+) -> None:
+    """The validated routing boolean passes authorization unchanged."""
+
+    captured_authorization_candidates: dict[str, object] = {}
+    responses = [
+        _planner_response(resolvers=[{
+            "bid_handle": "b1",
+            "resolver_handle": "r1",
+            "semantic_goal": "resolve the bounded evidence task",
+            "reason": "the admitted motive has an evidence gap",
+            "start_in_background": True,
+        }]),
+        {"decisions": {"c1": True}},
+    ]
+    calls = 0
+
+    class _LLM:
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config: object,
+        ) -> SimpleNamespace:
+            nonlocal calls
+            del config
+            if calls == 1:
+                captured_authorization_candidates.update(
+                    json.loads(str(messages[-1].content)),
+                )
+            response = responses[calls]
+            calls += 1
+            return SimpleNamespace(content=json.dumps(response))
+
+    result = await plan_actions(
+        primary_bid=_bid("ordinary_response"),
+        supporting_bids=[],
+        episode={
+            "episode_id": "episode-background-boolean",
+            "trigger_source": "user_message",
+            "output_mode": "visible_reply",
+        },
+        evidence=[{
+            "evidence_handle": "e1",
+            "evidence_ref": {
+                "source_kind": "episode",
+                "source_id": "episode-background-boolean",
+                "occurred_at": "2026-08-07T00:00:00Z",
+                "semantic_summary": "the user asked for bounded research",
+            },
+            "semantic_text": "the user asked for bounded research",
+            "visible_to": ["q:event_agency"],
+        }],
+        available_actions=[],
+        available_resolvers=[_resolver("task_resolution_request")],
+        resolver_context="resolver_status=idle",
+        services=SimpleNamespace(
+            llm=_LLM(),
+            action_planning_config=object(),
+            action_authorization_config=object(),
+            resolver_authorization_config=object(),
+        ),
+    )
+
+    assert result["resolver_requests"] == [{
+        "capability": "task_resolution_request",
+        "semantic_goal": "resolve the bounded evidence task",
+        "reason": "the admitted motive has an evidence gap",
+        "evidence_handles": ["e1"],
+        "start_in_background": True,
+    }]
+    authorization_candidates = captured_authorization_candidates["candidates"]
+    assert "start_in_background" not in authorization_candidates["c1"]
 
 
 @pytest.mark.asyncio

@@ -93,12 +93,15 @@ state, or final stance. Resolver code cannot write `replacement_state`, choose
 a goal branch, or rewrite an intention route.
 
 `task_resolution_request` is the single generic evidence-work capability. The
-resolver runs its session inline under the configured wall-clock budget. A
-resolved or evidence-bearing partial result becomes a prompt-safe observation
-for the next cognition cycle. When the budget expires, deterministic promotion
-persists the same checkpoint and a reviewed task-orchestrator job; the worker
-resumes it without resetting counters. The planner does not see specialists,
-queue state, or persistence mechanics.
+model-owned `start_in_background` boolean selects its entry route. `true`
+creates the checkpoint and enters the same accepted-task, pending-state, queue,
+and idempotency boundary directly, without invoking an inline specialist. `false`
+runs the session inline under the configured wall-clock budget; a deferred run
+uses that same durable continuation boundary. A resolved or evidence-bearing
+partial result becomes a prompt-safe observation for the next cognition cycle.
+Deferred evidence is projected before continuation context, and an empty
+deferred evidence set produces no fabricated partial knowledge. The planner
+does not see specialists, queue state, or persistence mechanics.
 
 ## Public Interfaces
 
@@ -123,6 +126,11 @@ and platform identifiers.
 
 Human-readable traces under `test_artifacts/cognition_resolver/` are diagnostic
 artifacts only. They never become cognition input automatically.
+
+Background handoff only reports a pending continuation after checkpoint,
+accepted-task, pending-state, and queue promotion succeed. Any contract,
+checkpoint, or enqueue failure stays in the typed resolver observation path and
+does not authorize a visible completion claim.
 
 ## Testing Contract
 
