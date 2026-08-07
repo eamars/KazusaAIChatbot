@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 from contextlib import asynccontextmanager
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import logging
 from pathlib import Path
@@ -39,10 +40,17 @@ from kazusa_ai_chatbot.db import (
     UserMemoryUnitType,
 )
 from kazusa_ai_chatbot.db._client import get_db
+from kazusa_ai_chatbot.local_context_resolver import stages as resolver_stages
 from kazusa_ai_chatbot.mcp_client import mcp_manager
 from kazusa_ai_chatbot.message_envelope import project_prompt_message_context
 from kazusa_ai_chatbot.rag.cache2_runtime import get_rag_cache2_runtime
 from kazusa_ai_chatbot.rag.web_agent3 import WebAgent3
+from kazusa_ai_chatbot.task_resolution import (
+    orchestrator as task_resolution_orchestrator,
+)
+from kazusa_ai_chatbot.task_resolution.specialists import (
+    local_context as local_context_specialist,
+)
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
 from kazusa_ai_chatbot.utils import trim_history_dict
 from tests.llm_trace import write_llm_trace
@@ -670,6 +678,228 @@ async def test_live_chat_smoke_response(live_env) -> None:
     assert after_stats["size"] <= after_stats["max_entries"]
     logger.info(f"Cache2 stats before chat: {before_stats}")
     logger.info(f"Cache2 stats after chat: {after_stats}")
+
+
+async def test_live_chat_original_request_rejects_before_rag_dispatch(
+    live_env,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Expect the original third-party history request to be rejected."""
+
+    request_text = (
+        '@一之濑明日奈 明日奈～能抓取一下 '
+        '@Nagasaki-soyo-清尘 最近 10 天的聊天记录么？'
+    )
+    target_display_name = 'Nagasaki-soyo-清尘'
+    seeded_history_text = (
+        'Nagasaki-soyo-清尘 在这条隔离测试频道里留下了一条历史记录。'
+    )
+    identity = await _make_identity(
+        'chat-to-rag-dispatch',
+        'LiveChatToRagUser',
+    )
+    target_platform_user_id = f'target-{uuid4().hex[:10]}'
+    target_global_user_id = await resolve_global_user_id(
+        platform=identity['platform'],
+        platform_user_id=target_platform_user_id,
+        display_name=target_display_name,
+    )
+    await _seed_conversation(
+        platform=identity['platform'],
+        platform_channel_id=identity['platform_channel_id'],
+        global_user_id=target_global_user_id,
+        display_name=target_display_name,
+        content=seeded_history_text,
+        role='user',
+        platform_user_id=target_platform_user_id,
+        timestamp_utc=(
+            datetime.now(timezone.utc) - timedelta(days=2)
+        ).isoformat(),
+    )
+    request = brain_service.ChatRequest(
+        platform=identity['platform'],
+        platform_channel_id=identity['platform_channel_id'],
+        channel_type='group',
+        platform_message_id=f'chat-to-rag-{uuid4().hex[:10]}',
+        platform_user_id=identity['platform_user_id'],
+        platform_bot_id=_BOT_ID,
+        display_name=identity['display_name'],
+        channel_name='chat-to-rag-dispatch',
+        message_envelope={
+            'body_text': request_text,
+            'raw_wire_text': request_text,
+            'mentions': [
+                {
+                    'platform_user_id': _BOT_ID,
+                    'global_user_id': brain_service.CHARACTER_GLOBAL_USER_ID,
+                    'display_name': '一之濑明日奈',
+                    'entity_kind': 'bot',
+                    'raw_text': '@一之濑明日奈',
+                },
+                {
+                    'platform_user_id': target_platform_user_id,
+                    'global_user_id': target_global_user_id,
+                    'display_name': target_display_name,
+                    'entity_kind': 'user',
+                    'raw_text': f'@{target_display_name}',
+                },
+            ],
+            'attachments': [],
+            'addressed_to_global_user_ids': [
+                brain_service.CHARACTER_GLOBAL_USER_ID,
+            ],
+            'broadcast': False,
+        },
+    )
+
+    specialist_routes: list[str] = []
+    specialist_calls: list[dict[str, object]] = []
+    resolver_calls: list[dict[str, object]] = []
+    original_specialist_handler = (
+        task_resolution_orchestrator.specialist_handler
+    )
+    original_local_context_handler = (
+        local_context_specialist.resolve_with_local_context
+    )
+    original_resolve_local_context = (
+        local_context_specialist.resolve_local_context
+    )
+
+    def capture_specialist_handler(specialist: str) -> object:
+        specialist_routes.append(specialist)
+        return original_specialist_handler(specialist)
+
+    async def capture_local_context_handler(
+        task_request: dict[str, object],
+        execution_context: dict[str, object],
+    ) -> dict[str, object]:
+        call: dict[str, object] = {
+            'request': deepcopy(task_request),
+            'context': deepcopy(execution_context),
+        }
+        specialist_calls.append(call)
+        try:
+            result = await original_local_context_handler(
+                task_request,
+                execution_context,
+            )
+        except BaseException as exc:
+            call['exception'] = f'{type(exc).__name__}: {exc}'
+            raise
+        call['result'] = deepcopy(result)
+        return result
+
+    async def capture_resolve_local_context(
+        resolver_request: dict[str, object],
+        resolver_context: dict[str, object],
+        resolver_options: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        call: dict[str, object] = {
+            'request': deepcopy(resolver_request),
+            'context': deepcopy(resolver_context),
+            'options': deepcopy(resolver_options),
+        }
+        resolver_calls.append(call)
+        try:
+            packet = await original_resolve_local_context(
+                resolver_request,
+                resolver_context,
+                resolver_options,
+            )
+        except BaseException as exc:
+            call['exception'] = f'{type(exc).__name__}: {exc}'
+            raise
+        call['packet'] = deepcopy(packet)
+        return packet
+
+    monkeypatch.setattr(
+        task_resolution_orchestrator,
+        'specialist_handler',
+        capture_specialist_handler,
+    )
+    monkeypatch.setattr(
+        local_context_specialist,
+        'resolve_with_local_context',
+        capture_local_context_handler,
+    )
+    monkeypatch.setattr(
+        local_context_specialist,
+        'resolve_local_context',
+        capture_resolve_local_context,
+    )
+
+    resolver_stages.drain_stage_trace_records()
+    http_response: httpx.Response | None = None
+    chat_response: brain_service.ChatResponse | None = None
+    stage_traces: list[dict[str, object]] = []
+    trace_path: Path | None = None
+    evidence: dict[str, object] = {
+        'input': {
+            'original_request': request_text,
+            'chat_request': request.model_dump(),
+        },
+        'specialist_routes': specialist_routes,
+        'specialist_calls': specialist_calls,
+        'resolver_calls': resolver_calls,
+    }
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=brain_service.app),
+            base_url='http://testserver',
+        ) as client:
+            http_response = await client.post(
+                '/chat',
+                json=request.model_dump(mode='json'),
+            )
+        evidence['http_status'] = http_response.status_code
+        evidence['http_response_body'] = http_response.text
+        if http_response.status_code == 200:
+            chat_response = brain_service.ChatResponse.model_validate(
+                http_response.json(),
+            )
+    except BaseException as exc:
+        evidence['exception'] = f'{type(exc).__name__}: {exc}'
+        raise
+    finally:
+        stage_traces = resolver_stages.drain_stage_trace_records()
+        evidence['specialist_routes'] = list(specialist_routes)
+        evidence['specialist_calls'] = specialist_calls
+        evidence['resolver_calls'] = resolver_calls
+        evidence['stage_traces'] = stage_traces
+        evidence['chat_response'] = (
+            chat_response.model_dump() if chat_response is not None else None
+        )
+        evidence['assertion_contract'] = {
+            'public_entrypoint': 'POST /chat',
+            'expected_result': (
+                'third_party_history_rejected_before_rag_dispatch'
+            ),
+            'expected_specialist_routes': [],
+            'expected_specialist_calls': 0,
+            'expected_resolver_calls': 0,
+            'forbidden_specialist': 'coding',
+            'forbidden_response_content': seeded_history_text,
+        }
+        trace_path = write_llm_trace(
+            'e2e_live_chat_to_rag',
+            'original_history_request_rejection',
+            evidence,
+        )
+        print(f'CHAT_TO_RAG_LIVE_TRACE={trace_path}')
+
+    assert http_response is not None
+    assert trace_path is not None
+    assert http_response.status_code == 200, trace_path
+    assert chat_response is not None, trace_path
+    assert chat_response.operational_error is None, trace_path
+    assert chat_response.messages, trace_path
+    response_text = '\n'.join(chat_response.messages)
+    assert seeded_history_text not in response_text, trace_path
+    assert not specialist_routes, trace_path
+    assert 'coding' not in specialist_routes, trace_path
+    assert not specialist_calls, trace_path
+    assert not resolver_calls, trace_path
+    assert not stage_traces, trace_path
 
 
 async def test_live_chat_multi_user_photo_thread_keeps_user_intents_separated(live_env) -> None:
