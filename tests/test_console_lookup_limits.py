@@ -28,10 +28,15 @@ def test_lookup_routes_enforce_pagination_redaction_and_no_embeddings(
         self,
         *,
         current_timestamp_utc: str | None = None,
+        latest_context_consumption: dict | None = None,
+        include_operational_context: bool = False,
         limit: int = 25,
     ):
         _ = self
         assert current_timestamp_utc
+        assert isinstance(latest_context_consumption, dict)
+        assert isinstance(latest_context_consumption.get("status"), str)
+        assert include_operational_context is True
         assert limit == 5
         return {
             "status": "empty",

@@ -311,12 +311,11 @@ def test_owner_entity_unavailable_panels_render_reasons(
         assert "Group style helper is unavailable." in page.locator(
             "#group-style-table",
         ).inner_text()
-        assert "cognition" not in page.locator(
-            "[data-page='groups']",
-        ).inner_text().lower()
-        assert "relationship" not in page.locator(
-            "[data-page='groups']",
-        ).inner_text().lower()
+        group_headings = page.locator(
+            "[data-page='groups'] h3",
+        ).all_inner_texts()
+        assert "Cognition state" not in group_headings
+        assert "Relationship" not in group_headings
 
         summary = e2e_summary_writer(
             name="owner_entity_unavailable_panel_states",

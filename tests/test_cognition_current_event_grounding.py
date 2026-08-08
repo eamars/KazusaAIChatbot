@@ -69,11 +69,8 @@ class _CapturingAppraisalLLM:
         question = payload["question"]
         result = {
             "question_id": question["question_id"],
-            "selected_evidence_handles": ["e1"],
-            "selected_role_handles": [],
-            "propositions": [],
-            "deltas": [],
-            "explanation": "The current event is grounded by visible evidence.",
+            "proposition": None,
+            "delta": None,
         }
         return SimpleNamespace(content=json.dumps(result))
 

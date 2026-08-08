@@ -12,6 +12,14 @@ from kazusa_ai_chatbot.coding_agent.code_action_loop.context import (
 )
 from kazusa_ai_chatbot.coding_agent.path_classification import is_test_path
 
+_STAGE5A_AUDIT_PATH = Path("test_artifacts/stage5a_v2_trace_audit.md")
+_STAGE5A_INVENTORY_PATH = Path("test_artifacts/stage5a_cutover_inventory.md")
+requires_stage5a_artifacts = pytest.mark.skipif(
+    not _STAGE5A_AUDIT_PATH.is_file()
+    or not _STAGE5A_INVENTORY_PATH.is_file(),
+    reason="private Stage 5A review artifacts are unavailable",
+)
+
 
 def test_shared_test_path_classifier_covers_root_nested_and_non_test_paths() -> None:
     """All callers use one normalized test-artifact classification contract."""
@@ -300,13 +308,14 @@ async def test_private_stage5a_concurrency_driver_proves_overlap_and_isolation(
     assert all(worker["status"] == "completed" for worker in result["workers"])
 
 
+@requires_stage5a_artifacts
 def test_historical_audit_and_cutover_inventory_are_diagnostic_artifacts() -> None:
     """Stage 5A retains review evidence without claiming public cutover."""
 
-    audit = Path("test_artifacts/stage5a_v2_trace_audit.md").read_text(
+    audit = _STAGE5A_AUDIT_PATH.read_text(
         encoding="utf-8",
     )
-    inventory = Path("test_artifacts/stage5a_cutover_inventory.md").read_text(
+    inventory = _STAGE5A_INVENTORY_PATH.read_text(
         encoding="utf-8",
     )
     assert "3 surfaced behavioral failures" in audit

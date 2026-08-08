@@ -156,7 +156,6 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     RESOLVER_CAPABILITY_SEMANTICS,
 )
 from kazusa_ai_chatbot.db import (
-    build_group_engagement_action_context,
     compare_and_replace_character_cognition_state,
     get_character_cognition_state,
     get_user_cognition_state,
@@ -783,7 +782,6 @@ async def call_cognition_subgraph(
     except (Exception, asyncio.CancelledError):
         await _cancel_cognition_preparation_tasks(
             prewarm_task,
-            None,
         )
         raise
     try:
@@ -812,29 +810,18 @@ async def call_cognition_subgraph(
         group_engagement_context: Mapping[str, Any] = empty_group_context
         if group_self_cognition:
             style_snapshot = state.get("interaction_style_context")
-            if isinstance(style_snapshot, Mapping):
-                existing_group_context = style_snapshot.get(
-                    "group_engagement_action_context"
+            if not isinstance(style_snapshot, Mapping):
+                raise CognitionExecutionError(
+                    "interaction style turn snapshot is required"
                 )
-                if not isinstance(existing_group_context, Mapping):
-                    raise CognitionExecutionError(
-                        "group engagement snapshot projection is required"
-                    )
-                group_engagement_context = existing_group_context
-            else:
-                existing_group_context = state.get(
-                    "group_engagement_action_context"
+            existing_group_context = style_snapshot.get(
+                "group_engagement_action_context"
+            )
+            if not isinstance(existing_group_context, Mapping):
+                raise CognitionExecutionError(
+                    "group engagement snapshot projection is required"
                 )
-                if isinstance(existing_group_context, Mapping):
-                    group_engagement_context = existing_group_context
-                else:
-                    group_engagement_context = (
-                        await build_group_engagement_action_context(
-                            channel_type=state["channel_type"],
-                            platform=state["platform"],
-                            platform_channel_id=state["platform_channel_id"],
-                        )
-                    )
+            group_engagement_context = existing_group_context
         resolved_state["group_engagement_action_context"] = {
             "engagement_guidelines": list(
                 group_engagement_context["engagement_guidelines"]
@@ -844,7 +831,6 @@ async def call_cognition_subgraph(
     except (Exception, asyncio.CancelledError):
         await _cancel_cognition_preparation_tasks(
             prewarm_task,
-            None,
         )
         raise
     state = resolved_state  # type: ignore[assignment]

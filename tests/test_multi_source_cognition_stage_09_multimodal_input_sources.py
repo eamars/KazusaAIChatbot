@@ -289,9 +289,10 @@ def test_connector_projects_media_as_separate_typed_evidence() -> None:
             "character_profile": character_profile,
             "channel_type": "private",
             "cognitive_episode": episode,
-            "user_input": "Please inspect the attached material.",
-            "decontextualized_input": "Please inspect the attached material.",
-            "rag_result": {
+                "user_input": "Please inspect the attached material.",
+                "decontextualized_input": "Please inspect the attached material.",
+                "public_group_scene": "",
+                "rag_result": {
                 "user_memory_unit_candidates": [],
             },
             "user_multimedia_input": [{

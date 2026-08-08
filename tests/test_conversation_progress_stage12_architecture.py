@@ -319,7 +319,6 @@ def _selection_goal_draft() -> dict[str, object]:
     """Build one authoritative selection-goal producer result."""
 
     return {
-        'selection_kind': 'choice',
         'selection': 'choose the current character palm',
         'reason': 'the prior neck choice is already complete',
         'private_monologue': 'I want a genuinely different choice.',

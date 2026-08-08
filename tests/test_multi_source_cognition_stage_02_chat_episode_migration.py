@@ -177,6 +177,7 @@ def test_v2_connector_preserves_episode_and_projects_current_percept() -> None:
         "user_input": "fallback text",
         "decontextualized_input": "fallback semantic text",
         "user_multimedia_input": [],
+        "public_group_scene": "",
         "rag_result": {"memory_evidence": []},
     }
 

@@ -45,6 +45,10 @@ async def _skip_if_llm_unavailable() -> None:
 
 @pytest.fixture()
 async def ensure_live_llm() -> None:
+    if not _PERSONALITY_PATH.is_file():
+        pytest.skip(
+            f"live personality fixture is unavailable: {_PERSONALITY_PATH}"
+        )
     await _skip_if_llm_unavailable()
 
 
@@ -309,14 +313,8 @@ def _assert_no_legacy_fillers(text: str) -> None:
         assert token not in lowered, f"Legacy English filler leaked into dialog: {text!r}"
 
 
-_CHARACTER_PROFILE_DATA = load_personality(_PERSONALITY_PATH)
-_CHARACTER_PUBLIC_FACTS_DATA = {
-    key: _CHARACTER_PROFILE_DATA[key]
-    for key in ("name", "description", "gender", "age", "birthday", "backstory")
-}
-
-
 def _build_character_public_facts_text() -> str:
+    profile = load_personality(_PERSONALITY_PATH)
     lines = ["### 角色公开资料"]
     labels = {
         "name": "姓名",
@@ -326,12 +324,16 @@ def _build_character_public_facts_text() -> str:
         "birthday": "生日",
         "backstory": "背景故事",
     }
-    for key in ("name", "description", "gender", "age", "birthday", "backstory"):
-        lines.append(f"- {labels[key]}: {_CHARACTER_PUBLIC_FACTS_DATA[key]}")
+    for key in (
+        "name",
+        "description",
+        "gender",
+        "age",
+        "birthday",
+        "backstory",
+    ):
+        lines.append(f"- {labels[key]}: {profile[key]}")
     return "\n".join(lines)
-
-
-_CHARACTER_PUBLIC_FACTS = _build_character_public_facts_text()
 
 
 _DECONTEXT_CASES = [
@@ -767,7 +769,7 @@ async def test_live_CONTENT_PLAN_uses_character_public_facts_for_birthday_questi
             {"role": "user", "content": "想提前准备一下。"},
         ],
         channel_topic="询问角色公开资料",
-        objective_facts=_CHARACTER_PUBLIC_FACTS,
+        objective_facts=_build_character_public_facts_text(),
         memory_evidence_text="",
     )
     state.update(
@@ -794,7 +796,7 @@ async def test_live_CONTENT_PLAN_does_not_leak_character_public_facts_on_unrelat
             {"role": "user", "content": "就是想问问你。"},
         ],
         channel_topic="日常关心",
-        objective_facts=_CHARACTER_PUBLIC_FACTS,
+        objective_facts=_build_character_public_facts_text(),
         memory_evidence_text="最近聊天主要围绕日常状态和轻松闲聊。",
     )
     state.update(

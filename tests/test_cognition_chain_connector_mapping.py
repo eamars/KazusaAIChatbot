@@ -219,10 +219,10 @@ def test_connector_maps_private_residual_and_bounded_group_guidance() -> None:
 
 
 @pytest.mark.asyncio
-async def test_group_self_cognition_loads_engagement_context_once(
+async def test_group_self_cognition_reuses_snapshot_engagement_context(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Eligible group self-cognition loads guidance before V2 judgment."""
+    """Eligible group self-cognition reuses the service-owned turn snapshot."""
 
     state = _global_state()
     state["channel_type"] = "group"
@@ -251,7 +251,10 @@ async def test_group_self_cognition_loads_engagement_context_once(
         "engagement_guidelines": ["GROUP_ENGAGEMENT_SENTINEL"],
         "confidence": "high",
     }
-    load_group = AsyncMock(return_value=group_context)
+    state["interaction_style_context"] = {
+        "schema_version": "interaction_style_turn_snapshot.v1",
+        "group_engagement_action_context": group_context,
+    }
     cognition_output = {
         **_core_output(),
         "intention": {
@@ -273,12 +276,6 @@ async def test_group_self_cognition_loads_engagement_context_once(
     run_cognition = AsyncMock(return_value=cognition_output)
     monkeypatch.setattr(
         connector,
-        "build_group_engagement_action_context",
-        load_group,
-        raising=False,
-    )
-    monkeypatch.setattr(
-        connector,
         "get_character_cognition_state",
         AsyncMock(return_value=build_character_production_state(
             updated_at=NOW,
@@ -288,11 +285,6 @@ async def test_group_self_cognition_loads_engagement_context_once(
 
     update = await connector.call_cognition_subgraph(state, commit=False)
 
-    load_group.assert_awaited_once_with(
-        channel_type="group",
-        platform="debug",
-        platform_channel_id="channel-1",
-    )
     cognition_input = run_cognition.await_args.args[0]
     assert cognition_input["group_engagement_action_context"] == group_context
     assert (
@@ -312,26 +304,18 @@ async def test_group_self_cognition_loads_engagement_context_once(
         commit=False,
     )
 
-    load_group.assert_awaited_once()
     later_input = run_cognition.await_args_list[1].args[0]
     assert later_input["group_engagement_action_context"] == group_context
     assert later_update["group_engagement_action_context"] == group_context
 
 
 @pytest.mark.asyncio
-async def test_user_turn_skips_group_engagement_database_read(
+async def test_user_turn_has_no_connector_owned_group_style_read(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An ordinary user turn receives empty guidance without a group read."""
+    """An ordinary user turn receives empty guidance with no connector loader."""
 
-    load_group = AsyncMock()
     run_cognition = AsyncMock(return_value=_core_output())
-    monkeypatch.setattr(
-        connector,
-        "build_group_engagement_action_context",
-        load_group,
-        raising=False,
-    )
     monkeypatch.setattr(
         connector,
         "get_user_cognition_state",
@@ -351,7 +335,7 @@ async def test_user_turn_skips_group_engagement_database_read(
 
     await connector.call_cognition_subgraph(_global_state(), commit=False)
 
-    load_group.assert_not_awaited()
+    assert not hasattr(connector, "build_group_engagement_action_context")
     cognition_input = run_cognition.await_args.args[0]
     assert cognition_input["group_engagement_action_context"] == {
         "engagement_guidelines": [],

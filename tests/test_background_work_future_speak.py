@@ -125,9 +125,7 @@ async def test_future_speak_execution_enqueues_requested_worker(
     """Action execution should enqueue a real background job for future_speak."""
 
     from kazusa_ai_chatbot.action_spec import execution as execution_module
-    from kazusa_ai_chatbot.action_spec.handlers import (
-        background_work as background_work_handler,
-    )
+    from kazusa_ai_chatbot.accepted_task import lifecycle
 
     action_spec = materialize_semantic_action_requests(
         [
@@ -201,12 +199,12 @@ async def test_future_speak_execution_enqueues_requested_worker(
         }
 
     monkeypatch.setattr(
-        background_work_handler,
+        lifecycle,
         "create_or_return_active_accepted_task",
         create_accepted_task,
     )
     monkeypatch.setattr(
-        background_work_handler,
+        lifecycle,
         "mark_accepted_task_pending",
         mark_pending,
     )

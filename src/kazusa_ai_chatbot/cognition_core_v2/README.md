@@ -161,17 +161,23 @@ instead of independently by every downstream local-model stage.
 
 Goal-bid output uses an exact route-to-capability-field matrix. A malformed bid
 receives up to three total LLM attempts while deterministic validation remains
-strict. A still-failed required branch requests the existing clean graph retry
-and then raises an execution error rather than becoming an empty workspace and
-character silence. Every goal attempt is eligible for the protected turn trace.
+strict. The three-call limit belongs to each goal-producing stage and branch
+for the whole cognition invocation. The service's one clean graph retry may
+consume only unused calls from the same ledger and cannot reset it. Exhausted
+goal branches are non-retryable. A failed required branch may continue only
+when its phase already contains a complete validated sibling bid; the failure
+and `required_branch_recovered_by_valid_bid:<branch_id>` warning remain visible,
+and only complete bids reach workspace collapse. With no complete sibling,
+cognition raises before collapse. Every goal attempt is eligible for the
+protected turn trace.
 
 When upstream episode evidence carries a typed required selection, deterministic
 routing selects one specialized goal producer instead of the generic goal
 producer. Deterministic code partitions its input into authoritative required
 operations, complete model-visible conversation-progress evidence, and
 optional supporting evidence. The producing call emits one authoritative
-`selection`, its selection kind, reason, role/evidence handles, consequences,
-and confidence. It must cite every required operation. The goal LLM cites only
+`selection`, reason, role/evidence handles, consequences, and confidence. It
+must cite every required operation. The goal LLM cites only
 progress rows that materially constrain the current choice and leaves
 unrelated history uncited. Completed, rejected, and superseded progress remains
 model-visible and may be reopened only when the current input explicitly
@@ -521,15 +527,16 @@ bid; action planning returns no work; authorization denies; and text-surface
 exhaustion projects a validated neutral surface from canonical V2 truth.
 
 Malformed canonical input, invalid persistent state, unsupported routes,
-unresolved required dependencies after the existing clean graph retry, failed
+unresolved required dependencies after the bounded branch policy, failed
 commit or post-commit invariants, and total model unavailability with no owned
-fallback remain execution errors. Goal cognition may deliver a degraded
-selection after its local attempts are exhausted when the parsed candidate is
-complete and only contains invalid evidence handles; deterministic projection
-retains required valid evidence and drops the invalid references. Other goal
-contract failures remain execution errors. Recoverable and degraded outcomes
-follow the normal persistence and delivery path. Callers commit only validated
-replacement state.
+fallback remain execution errors. Unknown fields, invalid semantic values,
+unsupported or duplicate role/evidence handles, missing required citations,
+invalid consequences, and invalid relational pairings stay producer-owned
+contract errors. Goal cognition regenerates a complete candidate within its
+cumulative budget and never deletes model-authored handles or values into
+acceptance. Recoverable and degraded outcomes owned by other stages follow the
+normal persistence and delivery path. Callers commit only validated replacement
+state.
 
 All four public entrypoints capture their raw arguments before validation in a
 ContextVar-isolated protected failure buffer. `repair_text_surface_planning`
@@ -545,6 +552,11 @@ stages—record every provider and contract attempt with its one-based attempt
 index, non-secret call configuration, exact messages and response, parsed
 output, and concrete error. The canonical JSON-repair fallback records its own
 model call into the active capsule without changing parser or retry behavior.
+Goal attempts additionally record the cognition invocation, graph attempt,
+branch, producing stage, local attempt, cumulative producer attempt, configured
+limit, attempt disposition, and final branch disposition. The invocation-wide
+ledger is protected diagnostic data and does not enter event logs, public
+responses, or operational status.
 
 ## Aggregate Prompt Budgets
 

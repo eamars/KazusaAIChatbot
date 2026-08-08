@@ -98,6 +98,7 @@ async def test_task_resolution_cutover_live_db(
         await db["accepted_tasks"].insert_one({
             "_id": f"task-{marker}",
             "schema_version": "accepted_task.v1",
+            "accepted_task_id": f"legacy-task-{marker}",
             "test_marker": marker,
         })
         for collection_name in _PRESERVED_COLLECTIONS:

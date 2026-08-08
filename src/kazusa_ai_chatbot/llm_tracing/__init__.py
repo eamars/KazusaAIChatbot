@@ -222,6 +222,7 @@ async def record_llm_trace_step(
     attempt_index: int = 0,
     validation_error: str = "",
     attempt_started_at: float | None = None,
+    attempt_metadata: Mapping[str, object] | None = None,
 ) -> LLMTraceWriteResult:
     """Record one LLM stage prompt/response trace."""
 
@@ -239,6 +240,7 @@ async def record_llm_trace_step(
         attempt_index=attempt_index,
         validation_error=validation_error,
         started_at=attempt_started_at,
+        attempt_metadata=attempt_metadata,
     )
     if not trace_id:
         return _write_result(

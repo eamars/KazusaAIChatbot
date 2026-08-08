@@ -136,6 +136,16 @@ async def test_failure_capsule_promotes_exact_input_and_attempt(monkeypatch):
         input_payload=input_payload,
     )
     config = make_llm_call_config("cognition_test_stage")
+    attempt_budget = {
+        "cognition_invocation_id": "ledger-invocation-1",
+        "graph_attempt": 1,
+        "branch_id": "autonomy_boundary",
+        "producing_stage": "goal_bid_structure",
+        "local_attempt": 1,
+        "cumulative_producer_attempt": 1,
+        "configured_limit": 3,
+        "attempt_disposition": "regenerate",
+    }
     await tracing.record_llm_trace_step(
         trace_id="trace-capsule",
         stage_name="cognition_test_stage",
@@ -155,6 +165,7 @@ async def test_failure_capsule_promotes_exact_input_and_attempt(monkeypatch):
         branch_id="autonomy_boundary",
         attempt_index=1,
         validation_error="required field missing",
+        attempt_metadata=attempt_budget,
     )
     failure_capsule.mark_failure(
         session,
@@ -168,6 +179,16 @@ async def test_failure_capsule_promotes_exact_input_and_attempt(monkeypatch):
     invocation_id = failure_capsule.finish_failure_capsule(
         session,
         outcome="partial_failure",
+        attempt_ledger={
+            "schema_version": "cognition_attempt_ledger.v1",
+            "cognition_invocation_id": "ledger-invocation-1",
+            "attempts": [attempt_budget],
+            "branch_dispositions": [{
+                "branch_id": "autonomy_boundary",
+                "disposition": "exhausted",
+                "error_code": "goal_bid_structure_exhausted",
+            }],
+        },
     )
     await asyncio.wait_for(persisted.wait(), timeout=1)
 
@@ -181,7 +202,7 @@ async def test_failure_capsule_promotes_exact_input_and_attempt(monkeypatch):
     assert capsule["cognition_invocation_id"] == invocation_id
     assert capsule["input_payload"]["nested"]["value"] == "before"
     assert capsule["input_sha256"]
-    assert capsule["schema_version"] == "cognition_failure_capsule.v2"
+    assert capsule["schema_version"] == "cognition_failure_capsule.v3"
     assert capsule["outcome"] == "partial_failure"
     assert capsule["failure_events"] == [{
         "failure_kind": "recovered_contract_error",
@@ -203,6 +224,13 @@ async def test_failure_capsule_promotes_exact_input_and_attempt(monkeypatch):
         "required field missing"
     )
     assert capsule["attempts"][0]["branch_id"] == "autonomy_boundary"
+    assert capsule["attempts"][0]["attempt_budget"] == attempt_budget
+    assert capsule["attempt_ledger"]["attempts"] == [attempt_budget]
+    assert capsule["attempt_ledger"]["branch_dispositions"] == [{
+        "branch_id": "autonomy_boundary",
+        "disposition": "exhausted",
+        "error_code": "goal_bid_structure_exhausted",
+    }]
     assert capsule["attempts"][0]["config"]["base_url"] == config.base_url
     assert "api_key" not in capsule["attempts"][0]["config"]
     assert "test-api-key" not in repr(capsule_rows[0])

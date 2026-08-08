@@ -35,6 +35,20 @@ def _state() -> dict[str, Any]:
         "user_input": "hello",
         "action_results": [],
         "character_profile": _character_profile(),
+        "interaction_style_context": {
+            "schema_version": "interaction_style_turn_snapshot.v1",
+            "surface": {
+                "user": {
+                    "overlay": {
+                        "speech_guidelines": [],
+                        "social_guidelines": [],
+                        "pacing_guidelines": [],
+                        "engagement_guidelines": [],
+                    },
+                },
+            },
+            "application_order": ["user"],
+        },
     }
 
 
@@ -148,25 +162,6 @@ async def test_surface_handler_returns_native_output(monkeypatch) -> None:
         surface_module,
         "run_visual_surface_planning",
         _fake_visual_planner,
-    )
-
-    async def _style_context(**kwargs: Any) -> dict[str, Any]:
-        del kwargs
-        return {
-            "user_style": {
-                "speech_guidelines": [],
-                "social_guidelines": [],
-                "pacing_guidelines": [],
-                "engagement_guidelines": [],
-                "confidence": "",
-            },
-            "application_order": ["user_style"],
-        }
-
-    monkeypatch.setattr(
-        surface_module,
-        "build_interaction_style_context",
-        _style_context,
     )
 
     result = await surface_module.call_l3_text_surface_handler(_state())

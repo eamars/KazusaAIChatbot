@@ -65,9 +65,9 @@ Inside `persona_supervisor2`, the live persona graph is:
 stage_0_msg_decontextualizer
   -> stage_1_goal_resolver
        start eligible cycle-zero shared-memory prewarm
-       start eligible targetless group engagement projection
        load one mutable user or character V2 state
-       join preparation tasks before native V2 input construction
+       join shared-memory preparation before native V2 input construction
+       reuse the service-owned interaction-style turn snapshot
        build CognitionCoreInputV2
        run V2 cognition without an intermediate commit
        optionally execute one cognition-selected resolver capability
@@ -149,11 +149,12 @@ preparation. Its confirmed shared rows merge only into
 the base RAG payload, and later resolver cycles reuse that state without
 another lookup.
 
-Canonical targetless group self-cognition starts one group-channel engagement
-projection in the same preparation window. Goal cognition and action planning
-receive the same bounded advisory value; appraisal, workspace collapse,
-surface planning, and dialog do not. Ordinary user turns and other ineligible
-episodes receive the exact empty value without a group style database read.
+Canonical targetless group self-cognition consumes the group-channel engagement
+projection from the immutable interaction-style snapshot loaded once by the
+service before the graph. Goal cognition and action planning receive the same
+bounded advisory value; appraisal, workspace collapse, surface planning, and
+dialog do not. Ordinary user turns and other ineligible episodes receive the
+exact empty value without a connector-owned group style database read.
 
 When Stage 0 supplied a valid semantic projection, the connector forwards its
 `role_explicit_content` and `response_operation` unchanged as current episode
@@ -348,8 +349,9 @@ selected dialog and retained valid surface.
 Before this dialog boundary, a typed character-owned required selection routes
 the selected goal branch to one specialized producer in place of its generic
 goal prompt. The producer emits one authoritative selection and accounts for
-every supplied conversation-evidence handle. Structural retries reuse that
-same goal owner; no semantic evaluator or replacement owner is added. Dialog's
+every required-selection handle while retaining complete progress evidence for
+its own relevance judgment. Structural retries reuse that same goal owner; no
+semantic evaluator or replacement owner is added. Dialog's
 corresponding focused check reads the canonical nested
 `percept.content.response_operation` and owns only explicit selection-owner
 transfer and actor/target reversal. Semantic completeness, brevity, and
@@ -404,14 +406,18 @@ actions, deliver messages, schedule work, or reopen cognition.
 ## Failure And Safety Rules
 
 - Missing or partial V2 cognition output fails before surface routing.
-- Recoverable V2 model failures use at least three total local attempts.
+- Recoverable V2 model failures use their declared total attempt budget. Goal
+  cognition's three calls are cumulative per producing stage and branch across
+  the service graph retry; an orchestration replay cannot reset them.
 - Degradable exhaustion finishes with the owner fallback: normalized original
   input, omitted optional appraisal or visual output, already-valid bid,
   empty or denied control work, validated neutral text surface, unavailable
   verifier, or retained bounded dialog.
 - Invalid canonical episodes, mutable state, bids, routes, required zero-valid
-  cognition after clean graph retry, commit failures, and zero-candidate total
-  model unavailability remain unrecoverable at their owning boundary.
+  cognition after the complete-sibling policy, commit failures, and
+  zero-candidate total model unavailability remain unrecoverable at their
+  owning boundary. Unsupported goal handles are regenerated or rejected and
+  are never deterministically deleted into acceptance.
 - Model stages own semantic judgment; deterministic code owns contract
   validation, persistence, permissions, limits, and delivery eligibility.
 - Resolver observations and RAG rows remain evidence, never final stance.

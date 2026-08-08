@@ -191,6 +191,12 @@ async def test_empty_lane_router_output_skips_persistence_work(monkeypatch) -> N
         assert state["existing_dedup_keys"] == set()
         return {
             "router_tasks": [],
+            "character_operational_work": {
+                "status": "not_eligible",
+                "error_code": None,
+                "task": None,
+                "evidence": [],
+            },
             "state": {
                 **state,
                 "new_facts": [],

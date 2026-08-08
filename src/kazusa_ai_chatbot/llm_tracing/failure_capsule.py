@@ -124,6 +124,7 @@ def append_model_attempt(
     attempt_index: int = 0,
     validation_error: str = "",
     started_at: float | None = None,
+    attempt_metadata: Mapping[str, object] | None = None,
 ) -> None:
     """Append one exact model attempt to the active protected session.
 
@@ -142,6 +143,7 @@ def append_model_attempt(
         attempt_index: One-based attempt number when the owner exposes it.
         validation_error: Concrete provider or contract failure text.
         started_at: Monotonic start used only to retain real call order.
+        attempt_metadata: Optional bounded invocation-wide attempt coordinates.
     """
 
     session = _CURRENT_SESSION.get()
@@ -199,6 +201,11 @@ def append_model_attempt(
             "status": status,
             "_started_at": started_at,
         }
+        if attempt_metadata is not None:
+            attempt["attempt_budget"] = _redact_value(
+                _snapshot_value(attempt_metadata),
+                secret_values,
+            )
     except Exception as exc:
         _warn_capture_failure("attempt snapshot", exc)
         return
@@ -301,6 +308,7 @@ def finish_failure_capsule(
     *,
     outcome: CapsuleOutcome | None,
     exception: BaseException | None = None,
+    attempt_ledger: Mapping[str, object] | None = None,
 ) -> str:
     """Discard a clean session or schedule one protected failure row.
 
@@ -309,6 +317,7 @@ def finish_failure_capsule(
         outcome: Explicit failure outcome, or ``None`` to infer partial
             promotion from buffered failed attempts and failure events.
         exception: Original terminal exception retained as protected evidence.
+        attempt_ledger: Bounded invocation-wide attempt and branch metadata.
 
     Returns:
         The persisted invocation identity, or an empty string when the session
@@ -342,7 +351,7 @@ def finish_failure_capsule(
                 ),
             }
         capsule = {
-            "schema_version": "cognition_failure_capsule.v2",
+            "schema_version": "cognition_failure_capsule.v3",
             "trace_id": session.trace_id,
             "cognition_invocation_id": session.cognition_invocation_id,
             "entrypoint": session.entrypoint,
@@ -353,6 +362,11 @@ def finish_failure_capsule(
             "outcome": effective_outcome,
             "exception": exception_payload,
         }
+        if attempt_ledger is not None:
+            capsule["attempt_ledger"] = _redact_value(
+                _snapshot_value(attempt_ledger),
+                session.secret_values,
+            )
         document = _capsule_document(capsule)
     except Exception as exc:
         _warn_capture_failure("finalization", exc)

@@ -13,6 +13,7 @@ from pydantic import ValidationError
 
 from kazusa_ai_chatbot import chat_input_queue as queue_module
 from kazusa_ai_chatbot import service as service_module
+from kazusa_ai_chatbot.cognition_core_v2 import model_attempt_policy
 from kazusa_ai_chatbot.brain_service import intake as brain_intake
 from kazusa_ai_chatbot.brain_service.turn_settlement import (
     AssessmentLease,
@@ -1829,10 +1830,10 @@ async def test_precommit_cognition_failure_retries_once_then_succeeds(
             self.call_count += 1
             if self.call_count == 1:
                 raise service_module.CognitionExecutionError(
-                    "selection goal structure exhausted",
-                    error_code="goal_bid_structure_exhausted",
-                    branch_id="ordinary_response",
-                    stage="goal_cognition",
+                    "later cognition stage requested a clean retry",
+                    error_code="workspace_contract_failed",
+                    branch_id="",
+                    stage="workspace_collapse",
                     attempt_count=3,
                     safe_checkpoint="pre_state_commit",
                     retryable=True,
@@ -1877,6 +1878,86 @@ async def test_precommit_cognition_failure_retries_once_then_succeeds(
     assert response.messages == ["recovered response"]
     assert response.operational_error is None
     save_assistant_message.assert_awaited_once()
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
+async def test_service_graph_retry_reuses_goal_attempt_ledger(
+    monkeypatch,
+) -> None:
+    """Both graph invocations consume one shared per-branch producer budget."""
+
+    await _reset_queue_state()
+
+    class _Graph:
+        """Reserve one goal call per graph and fail a later owner once."""
+
+        def __init__(self) -> None:
+            self.coordinates: list[dict[str, object]] = []
+
+        async def ainvoke(self, _state):
+            graph_attempt = len(self.coordinates) + 1
+            self.coordinates.append(
+                model_attempt_policy.reserve_v2_model_attempt(
+                    stage="goal_bid_structure",
+                    branch_id="ordinary_response",
+                    local_attempt=1,
+                )
+            )
+            if graph_attempt == 1:
+                raise service_module.CognitionExecutionError(
+                    "later cognition stage requested a clean retry",
+                    error_code="workspace_contract_failed",
+                    stage="workspace_collapse",
+                    attempt_count=1,
+                    safe_checkpoint="pre_state_commit",
+                    retryable=True,
+                )
+            return {
+                "should_respond": True,
+                "use_reply_feature": False,
+                "final_dialog": ["recovered response"],
+                "future_promises": [],
+                "consolidation_state": None,
+            }
+
+    graph = _Graph()
+    monkeypatch.setattr(
+        service_module,
+        "_save_assistant_message",
+        AsyncMock(),
+    )
+    _patch_common_dependencies(monkeypatch, graph)
+    item = _item(1, direct_address=True)
+    item.conversation_row_id = "row-1"
+
+    await service_module._process_queued_chat_item(
+        item,
+        settled_decision={
+            "response_action": "proceed",
+            "reason_to_respond": "direct character request",
+            "use_reply_feature": False,
+            "channel_topic": "",
+            "indirect_speech_context": "",
+        },
+        settlement_turn_id="turn-1",
+        settlement_version=1,
+        settlement_claimed=True,
+        prepared_media=[],
+        media_prepared=True,
+    )
+
+    response = await item.future
+    assert response.messages == ["recovered response"]
+    assert [row["graph_attempt"] for row in graph.coordinates] == [1, 2]
+    assert [
+        row["cumulative_producer_attempt"]
+        for row in graph.coordinates
+    ] == [1, 2]
+    assert len({
+        row["cognition_invocation_id"]
+        for row in graph.coordinates
+    }) == 1
     await _reset_queue_state()
 
 
@@ -1965,15 +2046,15 @@ async def test_postcommit_degraded_dialog_uses_normal_delivery_path(
 
 
 @pytest.mark.asyncio
-async def test_precommit_cognition_retry_exhaustion_returns_operational_error(
+async def test_goal_cognition_exhaustion_skips_service_retry(
     monkeypatch,
 ) -> None:
-    """Two typed failures should yield one structured non-character fallback."""
+    """Consumed goal budget yields one structured non-character fallback."""
 
     await _reset_queue_state()
 
     class _Graph:
-        """Exhaust the one permitted safe cognition retry."""
+        """Raise one typed non-retryable goal exhaustion."""
 
         def __init__(self) -> None:
             self.call_count = 0
@@ -1987,7 +2068,7 @@ async def test_precommit_cognition_retry_exhaustion_returns_operational_error(
                 stage="goal_cognition",
                 attempt_count=3,
                 safe_checkpoint="pre_state_commit",
-                retryable=True,
+                retryable=False,
             )
 
     graph = _Graph()
@@ -2024,7 +2105,7 @@ async def test_precommit_cognition_retry_exhaustion_returns_operational_error(
     )
 
     response = await item.future
-    assert graph.call_count == 2
+    assert graph.call_count == 1
     assert response.messages == [service_module.OPERATIONAL_RETRY_NOTICE]
     assert response.content_type == "operational_error"
     assert response.delivery_tracking_id == ""

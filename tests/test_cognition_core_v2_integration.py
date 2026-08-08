@@ -822,14 +822,15 @@ async def test_goal_structure_recovers_on_third_attempt() -> None:
 
 
 @pytest.mark.asyncio
-async def test_required_goal_invalid_evidence_reaches_action_planning(
+async def test_required_goal_invalid_evidence_stops_before_action_planning(
 ) -> None:
-    """A complete invalid-handle bid continues as a degraded cognition bid."""
+    """An unsupported handle never reaches a downstream semantic owner."""
 
     class _GoalDegradedLLM(_ScriptedLLM):
         def __init__(self) -> None:
             super().__init__()
             self.goal_calls = 0
+            self.action_planning_calls = 0
 
         async def ainvoke(
             self,
@@ -840,7 +841,6 @@ async def test_required_goal_invalid_evidence_reaches_action_planning(
             if getattr(config, "stage_name", "") == "v2_goal":
                 self.goal_calls += 1
                 result = {
-                    "selection_kind": "choice",
                     "selection": "acknowledge the grounded episode",
                     "reason": "the episode supplies bounded evidence",
                     "private_monologue": "I can answer this directly.",
@@ -860,6 +860,8 @@ async def test_required_goal_invalid_evidence_reaches_action_planning(
                 return SimpleNamespace(
                     content=json.dumps(result, ensure_ascii=False),
                 )
+            if getattr(config, "stage_name", "") == "v2_route":
+                self.action_planning_calls += 1
             return await super().ainvoke(messages, config=config)
 
     payload = _input()
@@ -876,16 +878,18 @@ async def test_required_goal_invalid_evidence_reaches_action_planning(
     })
     llm = _GoalDegradedLLM()
 
-    output = await run_cognition(payload, _core_services(llm))
+    with pytest.raises(CognitionExecutionError) as error_info:
+        await run_cognition(payload, _core_services(llm))
 
     assert llm.goal_calls == 3
-    assert output["admitted_bid"]["branch_id"] == "ordinary_response"
-    assert output["admitted_bid"]["evidence_handles"] == ["e1"]
+    assert llm.action_planning_calls == 0
+    assert error_info.value.error_code == "goal_bid_structure_exhausted"
+    assert error_info.value.retryable is False
 
 
 @pytest.mark.asyncio
-async def test_required_goal_exhaustion_requests_clean_graph_retry() -> None:
-    """A required zero-valid branch remains a typed pre-commit retry case."""
+async def test_required_goal_exhaustion_is_nonretryable() -> None:
+    """A required zero-valid branch consumes its invocation-wide budget."""
 
     class _GoalExhaustionLLM(_ScriptedLLM):
         def __init__(self) -> None:
@@ -910,7 +914,7 @@ async def test_required_goal_exhaustion_requests_clean_graph_retry() -> None:
 
     error = error_info.value
     assert error.safe_checkpoint == "pre_state_commit"
-    assert error.retryable is True
+    assert error.retryable is False
     assert error.attempt_count == 3
     assert llm.goal_calls == 3
 

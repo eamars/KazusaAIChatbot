@@ -450,6 +450,9 @@ Brain service responsibilities:
 - A typed cognition failure marked retryable at `pre_state_commit` receives at
   most one clean graph retry from the original prepared turn state. Exhaustion
   returns a structured operational response with an empty delivery identifier.
+  Goal-cognition calls retain one invocation-wide per-branch ledger across
+  both graph attempts; goal exhaustion is non-retryable after cumulative call
+  three, while a later-stage failure may reuse only the goal budget left.
 - Operational response text is a system notice. It creates no assistant
   conversation row, progress record, consolidation input, or delivery receipt.
 - The brain service may run post-turn consolidation for selected surface

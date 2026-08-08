@@ -223,6 +223,11 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionExecutionError,
     validate_cognition_observability,
 )
+from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
+    bind_v2_attempt_ledger,
+    create_v2_attempt_ledger,
+    reset_v2_attempt_ledger,
+)
 from kazusa_ai_chatbot.relevance import (
     SettledRelevanceContractError,
     build_group_attention_context,
@@ -6211,12 +6216,20 @@ async def _process_queued_chat_item(
 
         original_initial_state = deepcopy(initial_state)
         cognition_attempt_count = 0
+        cognition_attempt_ledger = create_v2_attempt_ledger(correlation_id)
         while True:
             cognition_attempt_count += 1
+            attempt_ledger_token = bind_v2_attempt_ledger(
+                cognition_attempt_ledger,
+                graph_attempt=cognition_attempt_count,
+            )
             try:
-                result = await _graph.ainvoke(
-                    deepcopy(original_initial_state),
-                )
+                try:
+                    result = await _graph.ainvoke(
+                        deepcopy(original_initial_state),
+                    )
+                finally:
+                    reset_v2_attempt_ledger(attempt_ledger_token)
                 break
             except Exception as exc:
                 if _can_retry_cognition_failure(

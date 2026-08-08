@@ -5,11 +5,6 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
-from kazusa_ai_chatbot.accepted_task import (
-    create_or_return_active_accepted_task,
-    mark_accepted_task_enqueue_failed,
-    mark_accepted_task_pending,
-)
 from kazusa_ai_chatbot.accepted_task.models import AcceptedTaskCreateRequest
 from kazusa_ai_chatbot.action_spec.models import (
     ActionValidationError,
@@ -337,6 +332,12 @@ async def _create_or_queue_accepted_task(
     task_brief: str,
 ) -> BackgroundWorkQueueResult:
     """Create v2 accepted state and enqueue its single approved worker."""
+
+    from kazusa_ai_chatbot.accepted_task.lifecycle import (
+        create_or_return_active_accepted_task,
+        mark_accepted_task_enqueue_failed,
+        mark_accepted_task_pending,
+    )
 
     create_request = _accepted_task_create_request(
         validated,

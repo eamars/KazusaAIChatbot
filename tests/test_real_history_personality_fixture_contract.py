@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from tests.test_real_history_personality_e2e_live_llm import (
     _CASES,
     _build_profile_case,
@@ -17,6 +19,15 @@ from tests.test_real_history_personality_e2e_live_llm import (
 
 
 _ROOT = Path(__file__).resolve().parents[1]
+_REQUIRED_PRIVATE_FIXTURES = (
+    _ROOT / "test_artifacts" / "chat_history_638473184_recent.json",
+    _ROOT / "personalities" / "asuna.json",
+    _ROOT / "personalities" / "kazusa.json",
+)
+requires_private_fixtures = pytest.mark.skipif(
+    any(not path.is_file() for path in _REQUIRED_PRIVATE_FIXTURES),
+    reason="real-history personality fixtures are unavailable",
+)
 
 
 def _profile_name(label: str) -> str:
@@ -26,6 +37,7 @@ def _profile_name(label: str) -> str:
     return str(profile["name"])
 
 
+@requires_private_fixtures
 def test_fixture_has_twenty_direct_kazusa_history_rows() -> None:
     """The paired population must contain only direct source rows."""
 
@@ -41,6 +53,7 @@ def test_fixture_has_twenty_direct_kazusa_history_rows() -> None:
     )
 
 
+@requires_private_fixtures
 def test_asuna_projection_removes_source_identity_from_every_case() -> None:
     """Asuna must receive mapped identity evidence for every paired case."""
 
@@ -73,6 +86,7 @@ def test_asuna_projection_removes_source_identity_from_every_case() -> None:
         )
 
 
+@requires_private_fixtures
 def test_kazusa_projection_preserves_source_body_text() -> None:
     """Kazusa remains the unchanged source-language comparison baseline."""
 
@@ -102,6 +116,7 @@ def test_kazusa_projection_preserves_source_body_text() -> None:
         assert validity["passed"], validity
 
 
+@requires_private_fixtures
 def test_routing_guard_has_no_typed_active_target() -> None:
     """The separate guard must not recreate the contaminated envelope."""
 
@@ -202,6 +217,7 @@ def test_private_monologue_fails_closed_when_canonical_node_is_missing() -> None
     assert _extract_private_monologue(response_payload) == ("", "")
 
 
+@requires_private_fixtures
 def test_external_project_url_is_immutable_during_asuna_projection() -> None:
     """Profile projection keeps a project URL as external user evidence."""
 

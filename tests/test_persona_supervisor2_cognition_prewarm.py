@@ -285,10 +285,10 @@ async def test_invalid_episode_starts_no_prewarm_side_effect(
 
 
 @pytest.mark.asyncio
-async def test_state_load_failure_cancels_group_preparation_task(
+async def test_group_self_cognition_requires_service_owned_style_snapshot(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A failed character-state load cancels and joins group preparation."""
+    """The connector fails closed when its service-owned snapshot is absent."""
 
     state = _global_state()
     state["channel_type"] = "group"
@@ -307,46 +307,21 @@ async def test_state_load_failure_cancels_group_preparation_task(
     target_scope["current_global_user_id"] = None
     target_scope["current_platform_user_id"] = None
 
-    group_started = asyncio.Event()
-    group_cancelled = asyncio.Event()
-    preparation_tasks: list[asyncio.Task[object]] = []
-
-    async def load_group_context(**_: object) -> dict[str, object]:
-        task = asyncio.current_task()
-        assert task is not None
-        preparation_tasks.append(task)
-        group_started.set()
-        try:
-            await asyncio.Event().wait()
-        finally:
-            group_cancelled.set()
-        raise AssertionError("cancelled group load resumed")
-
-    async def fail_character_state_load() -> dict[str, object]:
-        await group_started.wait()
-        raise RuntimeError("state load failed")
-
-    monkeypatch.setattr(
-        connector,
-        "build_group_engagement_action_context",
-        load_group_context,
-    )
     monkeypatch.setattr(
         connector,
         "get_character_cognition_state",
-        fail_character_state_load,
+        AsyncMock(return_value=build_character_production_state(
+            updated_at=NOW,
+        )),
     )
 
-    try:
-        with pytest.raises(RuntimeError, match="state load failed"):
-            await connector.call_cognition_subgraph(state, commit=False)
+    with pytest.raises(
+        connector.CognitionExecutionError,
+        match="interaction style turn snapshot is required",
+    ):
+        await connector.call_cognition_subgraph(state, commit=False)
 
-        assert group_cancelled.is_set()
-    finally:
-        for task in preparation_tasks:
-            if not task.done():
-                task.cancel()
-        await asyncio.gather(*preparation_tasks, return_exceptions=True)
+    assert not hasattr(connector, "build_group_engagement_action_context")
 
 
 @pytest.mark.asyncio

@@ -1185,9 +1185,9 @@ def validate_cognition_core_output(
     if not isinstance(payload["supporting_bids"], list):
         raise CognitionContractError("supporting_bids must be a list")
     for bid in payload["supporting_bids"]:
-        _validate_action_bid(bid)
+        validate_action_bid(bid)
     if "admitted_bid" in payload:
-        _validate_action_bid(payload["admitted_bid"])
+        validate_action_bid(payload["admitted_bid"])
     if not isinstance(payload["state_update"], Mapping):
         raise CognitionContractError("state_update must be a mapping")
     _validate_state_update(payload["state_update"])
@@ -1743,7 +1743,7 @@ def _validate_intention(value: Any) -> None:
         _require_text(value["selected_branch_id"], "intention.selected_branch_id")
 
 
-def _validate_action_bid(value: Any) -> None:
+def validate_action_bid(value: Any) -> None:
     """Validate one complete branch-owned bid at the public boundary."""
 
     if not isinstance(value, Mapping):

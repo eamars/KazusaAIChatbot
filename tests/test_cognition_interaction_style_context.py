@@ -17,7 +17,11 @@ from tests.cognition_core_v2_test_helpers import (
 )
 
 
-def _overlay(*, speech: list[str] | None = None, engagement: list[str] | None = None) -> dict[str, Any]:
+def _overlay(
+    *,
+    speech: list[str] | None = None,
+    engagement: list[str] | None = None,
+) -> dict[str, Any]:
     """Build one sanitized runtime style overlay."""
 
     return {
@@ -29,6 +33,31 @@ def _overlay(*, speech: list[str] | None = None, engagement: list[str] | None = 
     }
 
 
+def _snapshot(
+    *,
+    user: dict[str, Any] | None = None,
+    group: dict[str, Any] | None = None,
+    **metadata: object,
+) -> dict[str, Any]:
+    """Build the service-owned prompt-safe turn snapshot consumed by L3."""
+
+    surface = {
+        "user": {
+            "overlay": user or _overlay(),
+        },
+    }
+    application_order = ["user"]
+    if group is not None:
+        surface["group_channel"] = {"overlay": group}
+        application_order.append("group_channel")
+    return {
+        "schema_version": "interaction_style_turn_snapshot.v1",
+        "surface": surface,
+        "application_order": application_order,
+        **metadata,
+    }
+
+
 def _state(*, channel_type: str = "private") -> dict[str, Any]:
     """Build a committed cognition state at the V2 L3 boundary."""
 
@@ -37,6 +66,9 @@ def _state(*, channel_type: str = "private") -> dict[str, Any]:
         content="current conversation",
     )
     episode["target_scope"]["channel_type"] = channel_type
+    episode["origin_metadata"]["debug_modes"][
+        "no_visual_directives"
+    ] = True
     return {
         "global_user_id": "internal-user-id",
         "channel_type": channel_type,
@@ -46,6 +78,7 @@ def _state(*, channel_type: str = "private") -> dict[str, Any]:
         "cognition_core_output": canonical_cognition_output(),
         "action_results": [],
         "character_profile": _character_profile(),
+        "interaction_style_context": _snapshot(),
     }
 
 
@@ -91,34 +124,16 @@ def test_interaction_style_is_owned_by_unified_content_planning() -> None:
 
 
 @pytest.mark.asyncio
-async def test_private_style_load_uses_user_scope_without_group(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Private L3 loads only the current participant's sanitized style."""
+async def test_private_style_load_uses_preloaded_user_snapshot() -> None:
+    """Private L3 consumes only the service-owned sanitized turn snapshot."""
 
-    captured: dict[str, str] = {}
-
-    async def _load(**kwargs: str) -> dict[str, Any]:
-        captured.update(kwargs)
-        return {
-            "user_style": _overlay(speech=["Use compact warmth."]),
-            "application_order": ["user_style"],
-        }
-
-    monkeypatch.setattr(
-        surface_module,
-        "build_interaction_style_context",
-        _load,
+    state = _state()
+    state["interaction_style_context"] = _snapshot(
+        user=_overlay(speech=["Use compact warmth."]),
     )
 
-    rendered = await surface_module._load_interaction_style_context(_state())
+    rendered = await surface_module._load_interaction_style_context(state)
 
-    assert captured == {
-        "global_user_id": "internal-user-id",
-        "channel_type": "private",
-        "platform": "debug",
-        "platform_channel_id": "private-channel-id",
-    }
     assert rendered == "当前用户风格 语言: Use compact warmth."
     assert "group" not in rendered.casefold()
 
@@ -126,16 +141,15 @@ async def test_private_style_load_uses_user_scope_without_group(
 def test_group_style_projection_is_ordered_bounded_and_allowlisted() -> None:
     """User guidance precedes group guidance without storage metadata leaks."""
 
-    context = {
-        "user_style": _overlay(speech=["Use compact warmth."]),
-        "group_channel_style": _overlay(
+    context = _snapshot(
+        user=_overlay(speech=["Use compact warmth."]),
+        group=_overlay(
             engagement=["Join loose topics only when there is a grounded reason."]
         ),
-        "application_order": ["user_style", "group_channel_style"],
-        "style_image_id": "secret-style-image-id",
-        "revision": 98,
-        "source_reflection_run_ids": ["secret-run-id"],
-    }
+        style_image_id="secret-style-image-id",
+        revision=98,
+        source_reflection_run_ids=["secret-run-id"],
+    )
 
     rendered = surface_module._render_interaction_style_context(context)
 
@@ -148,13 +162,12 @@ def test_group_style_projection_is_ordered_bounded_and_allowlisted() -> None:
 def test_chinese_style_projection_uses_chinese_role_labels() -> None:
     """Chinese guidance keeps the model-facing style vocabulary Chinese."""
 
-    context = {
-        "user_style": _overlay(speech=["使用简洁、温和的句子。"]),
-        "group_channel_style": _overlay(
+    context = _snapshot(
+        user=_overlay(speech=["使用简洁、温和的句子。"]),
+        group=_overlay(
             engagement=["只在有依据时加入群聊话题。"]
         ),
-        "application_order": ["user_style", "group_channel_style"],
-    }
+    )
 
     rendered = surface_module._render_interaction_style_context(context)
 
@@ -169,13 +182,6 @@ async def test_surface_handler_passes_loaded_style_to_v2_planner(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The real connector places learned guidance in TextSurfaceInputV2."""
-
-    async def _load(**kwargs: str) -> dict[str, Any]:
-        del kwargs
-        return {
-            "user_style": _overlay(speech=["Prefer short direct sentences."]),
-            "application_order": ["user_style"],
-        }
 
     captured: dict[str, Any] = {}
 
@@ -199,14 +205,13 @@ async def test_surface_handler_passes_loaded_style_to_v2_planner(
             "permitted_action_results": [],
         }
 
-    monkeypatch.setattr(
-        surface_module,
-        "build_interaction_style_context",
-        _load,
-    )
     monkeypatch.setattr(surface_module, "run_text_surface_planning", _plan)
 
-    await surface_module.call_l3_text_surface_handler(_state())
+    state = _state()
+    state["interaction_style_context"] = _snapshot(
+        user=_overlay(speech=["Prefer short direct sentences."]),
+    )
+    await surface_module.call_l3_text_surface_handler(state)
 
     assert captured["interaction_style_context"] == (
         "当前用户风格 语言: Prefer short direct sentences."
@@ -226,9 +231,6 @@ async def test_surface_handler_passes_loaded_style_to_v2_planner(
 def test_empty_style_context_has_explicit_semantic_fallback() -> None:
     """An empty learned overlay still satisfies the exact text contract."""
 
-    rendered = surface_module._render_interaction_style_context({
-        "user_style": _overlay(),
-        "application_order": ["user_style"],
-    })
+    rendered = surface_module._render_interaction_style_context(_snapshot())
 
     assert rendered == "没有可用的已学习互动风格指引。"

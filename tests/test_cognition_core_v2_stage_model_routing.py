@@ -237,7 +237,6 @@ def _selection_goal_draft() -> dict[str, object]:
     """Build one authoritative required-selection producer response."""
 
     return {
-        "selection_kind": "choice",
         "selection": "choose one concrete current action",
         "reason": "the typed operation gives the character selection ownership",
         "private_monologue": "I will make this choice directly.",

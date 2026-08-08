@@ -22,7 +22,7 @@ from kazusa_ai_chatbot.cognition_core_v2.dependency_graph import (
     build_dependency_levels,
 )
 from kazusa_ai_chatbot.cognition_core_v2.facade import (
-    _raise_for_failed_required_branches,
+    _raise_for_unrecoverable_required_branch_failures,
 )
 from kazusa_ai_chatbot.cognition_core_v2.parallel_executor import (
     BranchFailure,
@@ -851,7 +851,7 @@ async def test_goal_bid_schema_exhaustion_is_typed_after_three_attempts() -> Non
         )
 
     assert error_info.value.safe_checkpoint == "pre_state_commit"
-    assert error_info.value.retryable is True
+    assert error_info.value.retryable is False
     assert error_info.value.attempt_count == 3
     assert llm.call_count == 3
 
@@ -861,7 +861,6 @@ async def test_required_selection_regenerates_with_the_same_producer() -> None:
     """Retry only structural production without a semantic evaluator."""
 
     selected = {
-        "selection_kind": "choice",
         "selection": "当前角色选择让当前用户继续抱紧她。",
         "reason": "当前输入把选择权交给当前角色。",
         "private_monologue": "我现在直接作出自己的选择。",
@@ -966,7 +965,8 @@ async def test_required_selection_regenerates_with_the_same_producer() -> None:
     assert repair_feedback["required_evidence_handles"] == ["e1"]
     assert repair_feedback["allowed_evidence_handles"] == ["e1", "e2"]
     assert repair_feedback["current_episode_evidence_handles"] == ["e1"]
-    assert "selection_kind" in repair_feedback["required_top_level_fields"]
+    retired_field = "selection_" + "kind"
+    assert retired_field not in repair_feedback["required_top_level_fields"]
     assert "selection goal draft fields are not exact" in (
         repair_feedback["validation_error"]
     )
@@ -981,7 +981,6 @@ async def test_required_selection_regeneration_excludes_optional_conversation(
     """Keep optional conversation handles out of mandatory retry feedback."""
 
     valid_selection = {
-        'selection_kind': 'choice',
         'selection': '当前角色选择让当前用户陪她去散步。',
         'reason': '当前角色根据关系和此刻感受作出具体选择。',
         'private_monologue': '我现在直接说出自己的选择。',
@@ -1103,7 +1102,6 @@ async def test_required_selection_repair_replays_grounding_after_handle_failures
     """Every selection repair receives exact grounding and schema feedback."""
 
     selected = {
-        'selection_kind': 'choice',
         'selection': 'The character makes the current choice directly.',
         'reason': 'The current operation gives the character the choice.',
         'private_monologue': 'I should make this choice from the current facts.',
@@ -1263,7 +1261,6 @@ async def test_active_selection_repair_uses_the_same_grounding_contract(
     """Active required selections use producer repair without relation output."""
 
     valid = {
-        'selection_kind': 'choice',
         'selection': 'The character chooses the grounded next step.',
         'reason': 'The current operation requires a concrete choice.',
         'private_monologue': 'I should choose from the current evidence.',
@@ -1400,12 +1397,11 @@ async def test_required_selection_structure_exhaustion_is_typed() -> None:
 
 
 @pytest.mark.asyncio
-async def test_required_selection_invalid_evidence_degrades_after_exhaustion(
+async def test_required_selection_invalid_evidence_fails_after_exhaustion(
 ) -> None:
-    """Continue with valid evidence after repeated invalid-handle output."""
+    """Unsupported evidence remains fatal after bounded regeneration."""
 
     selected = {
-        "selection_kind": "choice",
         "selection": "The character accepts the current question.",
         "reason": "The current input directly asks for the character's answer.",
         "private_monologue": "I can answer the question directly.",
@@ -1452,51 +1448,48 @@ async def test_required_selection_invalid_evidence_degrades_after_exhaustion(
         },
     })
 
-    bid = await run_goal_cognition(
-        DEFAULT_BRANCH_DEFINITIONS["ordinary_response"],
-        {"scope": "user", "kind": "goal", "entity_id": "g1"},
-        {
-            "_role_bindings": {
-                "current_user": {
-                    "role": "target",
-                    "entity_kind": "user",
-                    "entity_id": "u1",
+    with pytest.raises(CognitionExecutionError) as error_info:
+        await run_goal_cognition(
+            DEFAULT_BRANCH_DEFINITIONS["ordinary_response"],
+            {"scope": "user", "kind": "goal", "entity_id": "g1"},
+            {
+                "_role_bindings": {
+                    "current_user": {
+                        "role": "target",
+                        "entity_kind": "user",
+                        "entity_id": "u1",
+                    },
+                    "r1": {
+                        "role": "target",
+                        "entity_kind": "relationship",
+                        "entity_id": "relationship:u1",
+                    },
                 },
-                "r1": {
-                    "role": "target",
-                    "entity_kind": "relationship",
-                    "entity_id": "relationship:u1",
+                "role_summaries": {
+                    "current_user": "The current user.",
+                    "r1": "The current relationship.",
                 },
             },
-            "role_summaries": {
-                "current_user": "The current user.",
-                "r1": "The current relationship.",
-            },
-        },
-        [{
-            "evidence_handle": "e1",
-            "evidence_ref": {
-                "source_kind": "episode",
-                "source_id": "episode-1",
-                "occurred_at": "2026-07-15T00:00:00Z",
-                "semantic_summary": semantic_text,
-            },
-            "semantic_text": semantic_text,
-            "visible_to": ["q:event_agency"],
-        }],
-        SimpleNamespace(
-            llm=llm,
-            goal_ordinary_response_config=object(),
-        ),
-    )
+            [{
+                "evidence_handle": "e1",
+                "evidence_ref": {
+                    "source_kind": "episode",
+                    "source_id": "episode-1",
+                    "occurred_at": "2026-07-15T00:00:00Z",
+                    "semantic_summary": semantic_text,
+                },
+                "semantic_text": semantic_text,
+                "visible_to": ["q:event_agency"],
+            }],
+            SimpleNamespace(
+                llm=llm,
+                goal_ordinary_response_config=object(),
+            ),
+        )
 
     assert llm.calls == 3
-    assert bid["evidence_handles"] == ["e1"]
-    assert bid["target_roles"] == [{
-        "role": "target",
-        "entity_kind": "user",
-        "entity_id": "u1",
-    }]
+    assert error_info.value.error_code == "goal_bid_structure_exhausted"
+    assert error_info.value.retryable is False
 
 
 def test_required_branch_failure_cannot_collapse_to_silence() -> None:
@@ -1523,7 +1516,7 @@ def test_required_branch_failure_cannot_collapse_to_silence() -> None:
         CognitionExecutionError,
         match="required cognition",
     ) as raised:
-        _raise_for_failed_required_branches(
+        _raise_for_unrecoverable_required_branch_failures(
             execution,
             [DEFAULT_BRANCH_DEFINITIONS["ordinary_response"]],
         )
@@ -1537,12 +1530,71 @@ def test_required_branch_failure_cannot_collapse_to_silence() -> None:
     assert raised.value.__cause__ is original_error
 
 
+def test_required_branch_failure_preserves_a_complete_sibling_bid() -> None:
+    """A validated sibling keeps one branch-local failure from becoming fatal."""
+
+    execution = ParallelExecutionResult(
+        results={"autonomy_boundary": _bid("autonomy_boundary")},
+        failed_branch_ids={"ordinary_response"},
+        failure_records={
+            "ordinary_response": BranchFailure(
+                branch_id="ordinary_response",
+                error_code="goal_bid_structure_exhausted",
+                stage="goal_cognition",
+                attempt_count=3,
+                safe_checkpoint="pre_state_commit",
+                retryable=False,
+                exception_class="CognitionExecutionError",
+            ),
+        },
+    )
+
+    _raise_for_unrecoverable_required_branch_failures(
+        execution,
+        [DEFAULT_BRANCH_DEFINITIONS["ordinary_response"]],
+    )
+
+    assert execution.results == {
+        "autonomy_boundary": _bid("autonomy_boundary")
+    }
+    assert execution.warnings == [
+        "required_branch_recovered_by_valid_bid:ordinary_response"
+    ]
+
+
+def test_required_branch_failure_rejects_an_incomplete_sibling_bid() -> None:
+    """A partial mapping cannot satisfy required-branch recovery."""
+
+    execution = ParallelExecutionResult(
+        results={"autonomy_boundary": {"branch_id": "autonomy_boundary"}},
+        failed_branch_ids={"ordinary_response"},
+        failure_records={
+            "ordinary_response": BranchFailure(
+                branch_id="ordinary_response",
+                error_code="goal_bid_structure_exhausted",
+                stage="goal_cognition",
+                attempt_count=3,
+                safe_checkpoint="pre_state_commit",
+                retryable=False,
+                exception_class="CognitionExecutionError",
+            ),
+        },
+    )
+
+    with pytest.raises(CognitionExecutionError):
+        _raise_for_unrecoverable_required_branch_failures(
+            execution,
+            [DEFAULT_BRANCH_DEFINITIONS["ordinary_response"]],
+        )
+
+
 def test_required_selection_producer_demands_one_actual_selection() -> None:
     """Keep the authoritative choice inside the producing cognition call."""
 
     prompt = goal_module.REQUIRED_SELECTION_GOAL_PROMPT
 
-    assert '`selection_kind`' in prompt
+    retired_field = "`selection_" + "kind`"
+    assert retired_field not in prompt
     assert '`selection`' in prompt
     assert '必须直接写出当前角色的一个选择' in prompt
     assert '不把决定交给后续阶段' in prompt

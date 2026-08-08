@@ -28,6 +28,7 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     GroupEngagementActionContextV2,
     RelationalWillingnessV2,
     SemanticAppraisalResultV2,
+    validate_action_bid,
     validate_cognition_core_input,
     validate_cognition_core_output,
 )
@@ -38,6 +39,14 @@ from kazusa_ai_chatbot.cognition_core_v2.diagnostics import (
     capture_validation_event,
 )
 from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import run_goal_cognition
+from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
+    bind_v2_attempt_ledger,
+    create_v2_attempt_ledger,
+    current_v2_attempt_ledger,
+    record_v2_branch_disposition,
+    reset_v2_attempt_ledger,
+    snapshot_v2_attempt_ledger,
+)
 from kazusa_ai_chatbot.cognition_core_v2.output_projection import (
     build_state_update,
     default_expression_policy,
@@ -108,31 +117,46 @@ async def run_cognition(
 ) -> CognitionCoreOutputV2:
     """Run cognition with failure-only protected replay capture."""
 
-    session = failure_capsule.begin_failure_capsule(
-        trace_id=llm_tracing.current_trace_id(),
-        entrypoint="run_cognition",
-        input_payload=input_payload,
-    )
-    try:
-        output = await _run_cognition(input_payload, services)
-    except Exception as exc:
-        failure_capsule.mark_failure(
-            session,
-            failure_kind="terminal_failure",
-            stage_name="run_cognition",
-            details={},
-            exception=exc,
+    ledger_token = None
+    if current_v2_attempt_ledger() is None:
+        ledger_token = bind_v2_attempt_ledger(
+            create_v2_attempt_ledger(),
+            graph_attempt=1,
         )
+    try:
+        session = failure_capsule.begin_failure_capsule(
+            trace_id=llm_tracing.current_trace_id(),
+            entrypoint="run_cognition",
+            input_payload=input_payload,
+        )
+        try:
+            output = await _run_cognition(input_payload, services)
+        except Exception as exc:
+            failure_capsule.mark_failure(
+                session,
+                failure_kind="terminal_failure",
+                stage_name="run_cognition",
+                details={},
+                exception=exc,
+            )
+            failure_capsule.finish_failure_capsule(
+                session,
+                outcome="terminal_failure",
+                exception=exc,
+                attempt_ledger=snapshot_v2_attempt_ledger(),
+            )
+            raise
+
+        _mark_cognition_partial_failures(session, output)
         failure_capsule.finish_failure_capsule(
             session,
-            outcome="terminal_failure",
-            exception=exc,
+            outcome=None,
+            attempt_ledger=snapshot_v2_attempt_ledger(),
         )
-        raise
-
-    _mark_cognition_partial_failures(session, output)
-    failure_capsule.finish_failure_capsule(session, outcome=None)
-    return output
+        return output
+    finally:
+        if ledger_token is not None:
+            reset_v2_attempt_ledger(ledger_token)
 
 
 async def _run_cognition(
@@ -251,7 +275,7 @@ async def _run_cognition(
         appraisal_warnings,
     ) = appraisal_collection
     warnings.extend(appraisal_warnings)
-    _raise_for_failed_required_branches(
+    _raise_for_unrecoverable_required_branch_failures(
         preliminary_execution,
         preliminary_branches,
     )
@@ -351,7 +375,7 @@ async def _run_cognition(
         completed_external_dependencies=successful_questions,
     ) if new_branch_definitions else None
     if final_execution is not None:
-        _raise_for_failed_required_branches(
+        _raise_for_unrecoverable_required_branch_failures(
             final_execution,
             new_branch_definitions,
         )
@@ -622,11 +646,11 @@ def _mark_cognition_partial_failures(
         )
 
 
-def _raise_for_failed_required_branches(
+def _raise_for_unrecoverable_required_branch_failures(
     execution: ParallelExecutionResult,
     definitions: Sequence[BranchDefinition],
 ) -> None:
-    """Prevent required branch failures from becoming semantic silence."""
+    """Continue complete sibling bids or escalate an unrecoverable failure."""
 
     required_failures = sorted(
         definition.branch_id
@@ -636,45 +660,77 @@ def _raise_for_failed_required_branches(
             and definition.branch_id in execution.failed_branch_ids
         )
     )
-    if required_failures:
-        failed_names = ", ".join(required_failures)
-        primary_failure = execution.failure_records.get(required_failures[0])
-        error = CognitionExecutionError(
-            f"required cognition branch failed: {failed_names}",
-            error_code=(
-                primary_failure.error_code
-                if primary_failure is not None
-                else "internal_invariant"
-            ),
-            branch_id=(
-                primary_failure.branch_id
-                if primary_failure is not None
-                else required_failures[0]
-            ),
-            stage=(
-                primary_failure.stage
-                if primary_failure is not None
-                else "cognition_branch"
-            ),
-            attempt_count=(
-                primary_failure.attempt_count
-                if primary_failure is not None
-                else 1
-            ),
-            safe_checkpoint=(
-                primary_failure.safe_checkpoint
-                if primary_failure is not None
-                else "unknown"
-            ),
-            retryable=(
-                primary_failure.retryable
-                if primary_failure is not None
-                else False
-            ),
-        )
-        if primary_failure is not None and primary_failure.exception is not None:
-            raise error from primary_failure.exception
-        raise error
+    if not required_failures:
+        return
+
+    complete_sibling_exists = False
+    for bid in execution.results.values():
+        try:
+            validate_action_bid(bid)
+        except CognitionContractError:
+            continue
+        complete_sibling_exists = True
+        break
+    if complete_sibling_exists:
+        for branch_id in required_failures:
+            warning = f"required_branch_recovered_by_valid_bid:{branch_id}"
+            if warning not in execution.warnings:
+                execution.warnings.append(warning)
+            failure = execution.failure_records.get(branch_id)
+            record_v2_branch_disposition(
+                branch_id=branch_id,
+                disposition="recovered_by_sibling",
+                error_code=(failure.error_code if failure is not None else ""),
+            )
+        return
+
+    failed_names = ", ".join(required_failures)
+    primary_failure = execution.failure_records.get(required_failures[0])
+    record_v2_branch_disposition(
+        branch_id=required_failures[0],
+        disposition="exhausted",
+        error_code=(
+            primary_failure.error_code
+            if primary_failure is not None
+            else "internal_invariant"
+        ),
+    )
+    error = CognitionExecutionError(
+        f"required cognition branch failed: {failed_names}",
+        error_code=(
+            primary_failure.error_code
+            if primary_failure is not None
+            else "internal_invariant"
+        ),
+        branch_id=(
+            primary_failure.branch_id
+            if primary_failure is not None
+            else required_failures[0]
+        ),
+        stage=(
+            primary_failure.stage
+            if primary_failure is not None
+            else "cognition_branch"
+        ),
+        attempt_count=(
+            primary_failure.attempt_count
+            if primary_failure is not None
+            else 1
+        ),
+        safe_checkpoint=(
+            primary_failure.safe_checkpoint
+            if primary_failure is not None
+            else "unknown"
+        ),
+        retryable=(
+            primary_failure.retryable
+            if primary_failure is not None
+            else False
+        ),
+    )
+    if primary_failure is not None and primary_failure.exception is not None:
+        raise error from primary_failure.exception
+    raise error
 
 
 def _resolver_progress(

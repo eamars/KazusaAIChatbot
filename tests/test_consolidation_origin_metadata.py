@@ -320,7 +320,16 @@ async def test_call_consolidation_subgraph_threads_origin_to_all_nodes(
             "future_promises": [],
             "metadata": {"write_success": {}},
         }
-        return {"router_tasks": [], "state": pipeline_state}
+        return {
+            "router_tasks": [],
+            "character_operational_work": {
+                "status": "not_eligible",
+                "error_code": None,
+                "task": None,
+                "evidence": [],
+            },
+            "state": pipeline_state,
+        }
 
     monkeypatch.setattr(
         consolidator_module,
@@ -386,7 +395,16 @@ async def test_call_consolidation_subgraph_returns_sanitized_result(
             "future_promises": [],
             "metadata": {"write_success": {"character_state": True}},
         }
-        return {"router_tasks": [], "state": pipeline_state}
+        return {
+            "router_tasks": [],
+            "character_operational_work": {
+                "status": "not_eligible",
+                "error_code": None,
+                "task": None,
+                "evidence": [],
+            },
+            "state": pipeline_state,
+        }
 
     monkeypatch.setattr(
         consolidator_module,
@@ -402,4 +420,6 @@ async def test_call_consolidation_subgraph_returns_sanitized_result(
         "new_facts",
         "future_promises",
         "consolidation_metadata",
+        "character_operational_work",
     }
+    assert result["character_operational_work"]["status"] == "not_eligible"

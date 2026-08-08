@@ -81,6 +81,23 @@ def test_repository_module_imports_in_a_fresh_process() -> None:
     assert result.returncode == 0, result.stderr
 
 
+def test_accepted_task_package_imports_in_a_fresh_process() -> None:
+    """The public lifecycle package must not depend on prior import order."""
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import kazusa_ai_chatbot.accepted_task",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
 @pytest.mark.asyncio
 async def test_create_or_return_active_claims_enqueueing_task(
     monkeypatch: pytest.MonkeyPatch,

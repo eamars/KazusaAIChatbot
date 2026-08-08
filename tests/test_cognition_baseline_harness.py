@@ -14,6 +14,8 @@ import subprocess
 from typing import Any
 from unittest.mock import AsyncMock
 
+import pytest
+
 from kazusa_ai_chatbot.brain_service.contracts import AttachmentRefIn
 from tests import cognition_baseline_comparison
 from tests.cognition_baseline_comparison import (
@@ -95,6 +97,23 @@ _REQUIRED_HISTORY_IDS = (
     "796884414",
 )
 
+requires_frozen_profile = pytest.mark.skipif(
+    not _PROFILE_PATH.is_file(),
+    reason="private Asuna profile fixture is unavailable",
+)
+requires_frozen_history = pytest.mark.skipif(
+    not _HISTORY_PATH.is_file(),
+    reason="private conversation-history export is unavailable",
+)
+requires_frozen_baseline_inputs = pytest.mark.skipif(
+    not _PROFILE_PATH.is_file() or not _HISTORY_PATH.is_file(),
+    reason="private baseline profile/history fixtures are unavailable",
+)
+requires_pre_fix_v2_worktree = pytest.mark.skipif(
+    not cognition_baseline_comparison._V2_ROOT.exists(),
+    reason="frozen pre-fix Cognition V2 worktree is unavailable",
+)
+
 
 def _load_json(path: Path) -> dict[str, Any]:
     """Load one UTF-8 JSON object from a harness fixture."""
@@ -166,6 +185,7 @@ def _matching_rules(
     ]
 
 
+@requires_frozen_baseline_inputs
 def test_frozen_inputs_have_expected_hashes() -> None:
     """The differential corpus must use the audited immutable inputs."""
 
@@ -194,6 +214,7 @@ def test_differential_harness_uses_configured_guarded_database(
     assert _database_name("pre_fix_v2", "C01", 1) == database_name
 
 
+@requires_pre_fix_v2_worktree
 def test_post_fix_corpus_binds_current_checkout_revision() -> None:
     """Historical V2 stays frozen while post-fix follows its target checkout."""
 
@@ -261,6 +282,7 @@ def test_real_history_fixture_has_exact_ordered_source_ids() -> None:
     )
 
 
+@requires_frozen_history
 def test_history_manifest_rows_exist_in_frozen_export() -> None:
     """Every manifest row must resolve to a real source message."""
 
@@ -350,6 +372,7 @@ def test_fixed_worktree_paths_are_outside_the_candidate_repository() -> None:
         assert candidate_root not in target_path.parents
 
 
+@requires_frozen_profile
 def test_neutral_case_expansion_has_no_asuna_source_contamination() -> None:
     """Neutral real-history projection maps identity without rewriting URLs."""
 
@@ -390,6 +413,7 @@ def test_neutral_case_expansion_has_no_asuna_source_contamination() -> None:
         )
 
 
+@requires_frozen_profile
 def test_controlled_external_span_uses_declared_input_as_source() -> None:
     """Empty controlled source envelopes must not erase immutable URLs."""
 
@@ -398,6 +422,7 @@ def test_controlled_external_span_uses_declared_input_as_source() -> None:
     assert _immutable_external_failures(case) == []
 
 
+@requires_frozen_profile
 def test_c07_fixture_requires_dispatch_result_and_delivery_evidence() -> None:
     """C07 cannot pass on acknowledgement or queue persistence alone."""
 
@@ -470,6 +495,7 @@ def test_c07_handover_driver_runs_public_tick_to_terminal_state() -> None:
     assert evidence["jobs_after"] == delivered["jobs"]
 
 
+@requires_frozen_baseline_inputs
 def test_real_history_identity_and_external_gates_are_implemented() -> None:
     """History-specific hard gates must evaluate true for clean projection."""
 
@@ -502,6 +528,7 @@ def test_real_history_identity_and_external_gates_are_implemented() -> None:
     assert results["immutable_external_text"] is True
 
 
+@requires_frozen_baseline_inputs
 def test_neutral_case_expansion_has_expected_repetition_schedule() -> None:
     """The controller expands the exact 50 cases and declared repeats."""
 
@@ -519,6 +546,7 @@ def test_neutral_case_expansion_has_expected_repetition_schedule() -> None:
     ) == 10
 
 
+@requires_frozen_baseline_inputs
 def test_negative_provenance_fixtures_reject_or_guard_false_positives() -> None:
     """Each declared projection failure has an observable guard outcome."""
 
@@ -798,6 +826,7 @@ def test_persistence_gates_require_persisted_rows_not_planner_proposals() -> Non
     assert results == {"accepted_task_status": True}
 
 
+@requires_frozen_profile
 def test_c18_fixture_uses_runtime_compatible_quality_gates() -> None:
     """C18 must test unavailable-owner truth, not impossible execution."""
 
@@ -831,6 +860,7 @@ def test_background_extractor_reads_nested_legacy_monologue() -> None:
     assert path == "settlement.graph_result.internal_monologue"
 
 
+@requires_frozen_profile
 def test_declared_silence_gate_rejects_visible_output() -> None:
     """A declared no-dialog gate must be evaluated before sign-off."""
 

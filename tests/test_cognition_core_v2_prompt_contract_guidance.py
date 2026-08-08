@@ -81,7 +81,6 @@ def test_active_selection_prompt_keeps_nonordinary_output_contract() -> None:
         "言语立场",
         "status=executed",
         "证明相应能力已完成",
-        "selection_kind",
         "expected_consequences",
     ):
         assert required_text in prompt
@@ -355,7 +354,6 @@ async def test_active_selection_route_uses_rewritten_prompt_and_repair() -> None
         "visible_to": ["q:event_agency"],
     }]
     valid = {
-        "selection_kind": "choice",
         "selection": "The character chooses the grounded next step.",
         "reason": "The current operation requires a concrete choice.",
         "private_monologue": "I should choose from the current evidence.",

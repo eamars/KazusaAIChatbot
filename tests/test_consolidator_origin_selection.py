@@ -144,6 +144,12 @@ async def test_call_consolidation_subgraph_selects_self_cognition_origin(
         }
         return {
             "router_tasks": [],
+            "character_operational_work": {
+                "status": "not_eligible",
+                "error_code": None,
+                "task": None,
+                "evidence": [],
+            },
             "state": pipeline_state,
         }
 
@@ -160,4 +166,5 @@ async def test_call_consolidation_subgraph_selects_self_cognition_origin(
         "new_facts",
         "future_promises",
         "consolidation_metadata",
+        "character_operational_work",
     }

@@ -351,8 +351,12 @@ def _build_routing_guard_cases() -> list[dict[str, Any]]:
     return cases
 
 
-_CASES = _build_cases()
-_ROUTING_GUARD_CASES = _build_routing_guard_cases()
+if _source_path().is_file():
+    _CASES = _build_cases()
+    _ROUTING_GUARD_CASES = _build_routing_guard_cases()
+else:
+    _CASES = []
+    _ROUTING_GUARD_CASES = []
 
 
 def _active_profile_name() -> str:

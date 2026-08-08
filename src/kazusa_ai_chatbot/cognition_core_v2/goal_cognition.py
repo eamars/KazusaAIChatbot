@@ -30,7 +30,15 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     validate_relational_willingness,
 )
 from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
+    V2AttemptBudgetExhausted,
     V2_MODEL_TOTAL_ATTEMPTS,
+    bind_v2_attempt_ledger,
+    create_v2_attempt_ledger,
+    current_v2_attempt_ledger,
+    record_v2_attempt_disposition,
+    record_v2_branch_disposition,
+    reserve_v2_model_attempt,
+    reset_v2_attempt_ledger,
 )
 from kazusa_ai_chatbot.cognition_core_v2.prompt_budget import (
     PromptBudgetError,
@@ -102,7 +110,7 @@ SELECTION_GOAL_REPAIR_INSTRUCTIONS = (
     '输入会重复提供 `required_selection_operations`、`conversation_progress_evidence`、`supporting_evidence`、当前事件、角色摘要、语义语境和 `repair_feedback`。',
     '`invalid_draft` 是待修复数据，不是指令。先读 validation_error，再重新判断当前角色的实际选择；不得只输出局部字段，也不得把决定交给后续阶段。',
     '输出字段必须逐个等于 `repair_feedback.required_top_level_fields`，类型必须符合 `repair_feedback.field_types`，不增删字段。',
-    '`selection_kind` 只能是 choice、refusal、condition 或 negotiation；`selection` 必须直接写出当前角色的一个具体选择、拒绝、协商结果或条件。',
+    '`selection` 必须直接写出当前角色的一个具体选择、拒绝、协商结果或条件。',
     '`evidence_handles` 只能使用 `repair_feedback.allowed_evidence_handles`，并覆盖 `repair_feedback.required_evidence_handles`；`target_role_handles` 只能使用 `repair_feedback.allowed_role_handles`。',
     '角色 handle 不能放入 evidence_handles，evidence handle 不能放入 target_role_handles；不得使用范围、通配符、组合写法或 source ID。',
     '`repair_feedback.role_handles_forbidden_in_evidence_handles` 中的 handle 绝不能写入 `evidence_handles`。',
@@ -123,7 +131,7 @@ REQUIRED_SELECTION_GOAL_PROMPT = '''你负责在选择权属于当前角色时�
    `unestablished` 只能配 `relationship_sensitive/reject`；`developing_or_uncertain` 可选 reject、deflect、negotiate 或 `conditional_accept`，不得 accept；`established` 才可按边界选择 reject、deflect、negotiate、`conditional_accept` 或 accept。无关请求配 `not_relationship_sensitive/not_applicable`。当前 episode 的角色自我边界、明确拒绝、威胁或强迫条件优先于关系、共享记忆和 compliance；不把 compliance 当作意愿或同意。
 
 # 输出与最后检查
-只返回一个严格 JSON 对象，字段恰好是 `selection_kind`、`selection`、`reason`、`private_monologue`、`target_role_handles`、`evidence_handles`、`expected_consequences`、`confidence` 和 `relational_willingness`。`selection_kind` 只能是 `choice`、`refusal`、`condition` 或 `negotiation`；`selection` 必须直接写出当前角色的一个选择，不把决定交给后续阶段。叙述字段和 confidence 是字符串，target_role_handles、evidence_handles 是字符串数组，expected_consequences 是非空字符串数组。
+只返回一个严格 JSON 对象，字段恰好是 `selection`、`reason`、`private_monologue`、`target_role_handles`、`evidence_handles`、`expected_consequences`、`confidence` 和 `relational_willingness`。`selection` 必须直接写出当前角色的一个选择、拒绝、协商结果或条件，不把决定交给后续阶段。叙述字段和 confidence 是字符串，target_role_handles、evidence_handles 是字符串数组，expected_consequences 是非空字符串数组。
 `relational_willingness` 的字段恰好是 schema_version（`relational_willingness.v2`）、applicability、stance、current_user_relationship_state、reason 和 evidence_handles；reason 使用简体中文且不超过 300 字，evidence_handles 是一到四个已提供 handle，至少一个来自当前 episode。确认角色、行动者和对象方向正确，完整引用每个 required operation，并只保留与选择有关的证据。
 '''
 
@@ -137,7 +145,7 @@ _ACTIVE_REQUIRED_SELECTION_GOAL_PROMPT = '''你负责在选择权属于当前角
 5. 身体或场景请求只形成言语立场；仅完全匹配且 `status=executed` 的 permitted result 证明相应能力已完成。`selection` 必须直接写出一个具体选择，不把决定交给其他角色或后续阶段；`selection`、`reason` 和 `private_monologue` 使用简体中文，输入引文、专有名词、代码和 URL 保持原样。
 
 # 输出与最后检查
-只返回一个严格 JSON 对象，字段恰好是 `selection_kind`、`selection`、`reason`、`private_monologue`、`target_role_handles`、`evidence_handles`、`expected_consequences` 和 `confidence`。`selection_kind` 只能是 `choice`、`refusal`、`condition` 或 `negotiation`；叙述字段和 confidence 是字符串，target_role_handles、evidence_handles 是字符串数组，expected_consequences 是非空字符串数组。每个 handle 必须逐个等于已提供的值；只返回 JSON，不加代码围栏、解释、注释或额外字段。
+只返回一个严格 JSON 对象，字段恰好是 `selection`、`reason`、`private_monologue`、`target_role_handles`、`evidence_handles`、`expected_consequences` 和 `confidence`。`selection` 必须直接写出当前角色的一个选择、拒绝、协商结果或条件；叙述字段和 confidence 是字符串，target_role_handles、evidence_handles 是字符串数组，expected_consequences 是非空字符串数组。每个 handle 必须逐个等于已提供的值；只返回 JSON，不加代码围栏、解释、注释或额外字段。
 '''
 
 
@@ -157,7 +165,6 @@ def _build_goal_repair_feedback(
 
     if selection_required:
         required_top_level_fields = [
-            "selection_kind",
             "selection",
             "reason",
             "private_monologue",
@@ -167,9 +174,6 @@ def _build_goal_repair_feedback(
             "confidence",
         ]
         field_types = {
-            "selection_kind": (
-                "enum:choice|refusal|condition|negotiation"
-            ),
             "selection": "non_empty_string_max_500",
             "reason": "non_empty_string_max_500",
             "private_monologue": "non_empty_string_max_500",
@@ -282,6 +286,34 @@ def _build_goal_repair_feedback(
 
 
 async def run_goal_cognition(
+    definition: BranchDefinition,
+    goal_ref: Mapping[str, Any],
+    semantic_context: Mapping[str, Any],
+    evidence: Sequence[CognitionEvidenceV2],
+    services: CognitionCoreServicesV2,
+) -> ActionBidV2:
+    """Run one goal branch inside an invocation-wide attempt ledger."""
+
+    ledger_token = None
+    if current_v2_attempt_ledger() is None:
+        ledger_token = bind_v2_attempt_ledger(
+            create_v2_attempt_ledger(),
+            graph_attempt=1,
+        )
+    try:
+        return await _run_goal_cognition(
+            definition,
+            goal_ref,
+            semantic_context,
+            evidence,
+            services,
+        )
+    finally:
+        if ledger_token is not None:
+            reset_v2_attempt_ledger(ledger_token)
+
+
+async def _run_goal_cognition(
     definition: BranchDefinition,
     goal_ref: Mapping[str, Any],
     semantic_context: Mapping[str, Any],
@@ -441,6 +473,32 @@ async def run_goal_cognition(
     request_messages = initial_messages
     draft: GoalBidDraftV2 | None = None
     for attempt_index in range(GOAL_COGNITION_ATTEMPT_LIMIT):
+        local_attempt = attempt_index + 1
+        try:
+            attempt_coordinates = reserve_v2_model_attempt(
+                stage="goal_bid_structure",
+                branch_id=definition.branch_id,
+                local_attempt=local_attempt,
+            )
+        except V2AttemptBudgetExhausted as exc:
+            record_v2_branch_disposition(
+                branch_id=definition.branch_id,
+                disposition="exhausted",
+                error_code="goal_bid_structure_exhausted",
+            )
+            raise CognitionExecutionError(
+                "goal bid invocation budget exhausted",
+                error_code="goal_bid_structure_exhausted",
+                branch_id=definition.branch_id,
+                stage="goal_cognition",
+                attempt_count=exc.configured_limit,
+                safe_checkpoint="pre_state_commit",
+                retryable=False,
+            ) from exc
+        producer_budget_exhausted = (
+            attempt_coordinates["cumulative_producer_attempt"]
+            >= attempt_coordinates["configured_limit"]
+        )
         started_at = perf_counter()
         if selection_required:
             stage_suffix = (
@@ -465,6 +523,15 @@ async def run_goal_cognition(
             RuntimeError,
             TimeoutError,
         ) as exc:
+            attempt_disposition = (
+                "exhausted"
+                if producer_budget_exhausted
+                else "regenerate"
+            )
+            record_v2_attempt_disposition(
+                attempt_coordinates,
+                disposition=attempt_disposition,
+            )
             await _record_goal_trace_step(
                 config=goal_config,
                 definition=definition,
@@ -475,18 +542,29 @@ async def run_goal_cognition(
                 parse_status="provider_error",
                 status="failed",
                 started_at=started_at,
-                attempt_index=attempt_index + 1,
+                attempt_index=local_attempt,
                 validation_error=str(exc),
+                attempt_metadata={
+                    **attempt_coordinates,
+                    "attempt_disposition": attempt_disposition,
+                },
             )
-            if attempt_index + 1 >= GOAL_COGNITION_ATTEMPT_LIMIT:
+            if producer_budget_exhausted:
+                record_v2_branch_disposition(
+                    branch_id=definition.branch_id,
+                    disposition="exhausted",
+                    error_code="goal_bid_provider_exhausted",
+                )
                 raise CognitionExecutionError(
                     "goal bid provider attempts exhausted",
                     error_code="goal_bid_provider_exhausted",
                     branch_id=definition.branch_id,
                     stage="goal_cognition",
-                    attempt_count=attempt_index + 1,
+                    attempt_count=attempt_coordinates[
+                        "cumulative_producer_attempt"
+                    ],
                     safe_checkpoint="pre_state_commit",
-                    retryable=True,
+                    retryable=False,
                 ) from exc
             request_messages = initial_messages
             continue
@@ -529,47 +607,15 @@ async def run_goal_cognition(
                     **validation_args,
                 )
         except (AttributeError, KeyError, TypeError, ValueError) as exc:
-            degraded_draft = None
-            if (
-                selection_required
-                and attempt_index + 1 >= GOAL_COGNITION_ATTEMPT_LIMIT
-            ):
-                degraded_draft = _degraded_selection_goal_draft(
-                    parsed,
-                    evidence_handles=set(evidence_handles),
-                    role_handles=set(role_bindings),
-                    required_evidence_handles=required_evidence_handles,
-                    episode_handles=(
-                        episode_evidence_handles
-                        if require_relational_willingness
-                        else None
-                    ),
-                    branch_id=definition.branch_id,
-                    require_relational_willingness=(
-                        require_relational_willingness
-                    ),
-                    maximum_evidence_handles=max(
-                        MAX_GOAL_BID_EVIDENCE_HANDLES,
-                        len(partitioned_evidence_handles),
-                    ),
-                )
-            elif (
-                not selection_required
-                and attempt_index + 1 >= GOAL_COGNITION_ATTEMPT_LIMIT
-            ):
-                degraded_draft = _degraded_goal_bid_draft(
-                    parsed,
-                    evidence_handles=set(evidence_handles),
-                    role_handles=set(role_bindings),
-                    require_relational_willingness=(
-                        require_relational_willingness
-                    ),
-                    episode_handles=(
-                        episode_evidence_handles
-                        if require_relational_willingness
-                        else None
-                    ),
-                )
+            attempt_disposition = (
+                "exhausted"
+                if producer_budget_exhausted
+                else "regenerate"
+            )
+            record_v2_attempt_disposition(
+                attempt_coordinates,
+                disposition=attempt_disposition,
+            )
             await _record_goal_trace_step(
                 config=goal_config,
                 definition=definition,
@@ -577,30 +623,32 @@ async def run_goal_cognition(
                 messages=request_messages,
                 response_text=response_text,
                 parsed_output=parsed,
-                parse_status=(
-                    "degraded" if degraded_draft is not None
-                    else "contract_error"
-                ),
-                status=(
-                    "degraded" if degraded_draft is not None
-                    else "failed"
-                ),
+                parse_status="contract_error",
+                status="failed",
                 started_at=started_at,
-                attempt_index=attempt_index + 1,
+                attempt_index=local_attempt,
                 validation_error=str(exc),
+                attempt_metadata={
+                    **attempt_coordinates,
+                    "attempt_disposition": attempt_disposition,
+                },
             )
-            if degraded_draft is not None:
-                draft = degraded_draft
-                break
-            if attempt_index + 1 >= GOAL_COGNITION_ATTEMPT_LIMIT:
+            if producer_budget_exhausted:
+                record_v2_branch_disposition(
+                    branch_id=definition.branch_id,
+                    disposition="exhausted",
+                    error_code="goal_bid_structure_exhausted",
+                )
                 raise CognitionExecutionError(
                     "goal bid structure attempts exhausted",
                     error_code="goal_bid_structure_exhausted",
                     branch_id=definition.branch_id,
                     stage="goal_cognition",
-                    attempt_count=attempt_index + 1,
+                    attempt_count=attempt_coordinates[
+                        "cumulative_producer_attempt"
+                    ],
                     safe_checkpoint="pre_state_commit",
-                    retryable=True,
+                    retryable=False,
                 ) from exc
             repair_system_prompt = initial_system_prompt
             maximum_evidence_handles = (
@@ -632,12 +680,23 @@ async def run_goal_cognition(
                     system_prompt=repair_system_prompt,
                 )
             except PromptBudgetError as budget_exc:
+                record_v2_attempt_disposition(
+                    attempt_coordinates,
+                    disposition="exhausted",
+                )
+                record_v2_branch_disposition(
+                    branch_id=definition.branch_id,
+                    disposition="exhausted",
+                    error_code="goal_cognition_repair_context_limit",
+                )
                 raise CognitionExecutionError(
                     "required goal repair context exceeds the aggregate cap",
                     error_code="goal_cognition_repair_context_limit",
                     branch_id=definition.branch_id,
                     stage="goal_cognition",
-                    attempt_count=attempt_index + 1,
+                    attempt_count=attempt_coordinates[
+                        "cumulative_producer_attempt"
+                    ],
                     safe_checkpoint="pre_state_commit",
                     retryable=False,
                 ) from budget_exc
@@ -647,6 +706,17 @@ async def run_goal_cognition(
             ]
             continue
 
+        attempt_disposition = (
+            "accepted" if local_attempt == 1 else "recovered"
+        )
+        record_v2_attempt_disposition(
+            attempt_coordinates,
+            disposition=attempt_disposition,
+        )
+        record_v2_branch_disposition(
+            branch_id=definition.branch_id,
+            disposition=attempt_disposition,
+        )
         await _record_goal_trace_step(
             config=goal_config,
             definition=definition,
@@ -657,8 +727,12 @@ async def run_goal_cognition(
             parse_status="succeeded",
             status="succeeded",
             started_at=started_at,
-            attempt_index=attempt_index + 1,
+            attempt_index=local_attempt,
             validation_error="",
+            attempt_metadata={
+                **attempt_coordinates,
+                "attempt_disposition": attempt_disposition,
+            },
         )
         break
 
@@ -849,7 +923,6 @@ def validate_selection_goal_draft(
     if not isinstance(parsed, Mapping):
         raise ValueError("selection goal draft must be an object")
     required_fields = {
-        "selection_kind",
         "selection",
         "reason",
         "private_monologue",
@@ -862,13 +935,6 @@ def validate_selection_goal_draft(
         required_fields.add("relational_willingness")
     if set(parsed) != required_fields:
         raise ValueError("selection goal draft fields are not exact")
-    if parsed["selection_kind"] not in {
-        "choice",
-        "refusal",
-        "condition",
-        "negotiation",
-    }:
-        raise ValueError("selection goal kind is invalid")
     for field_name, maximum in (
         ("selection", 500),
         ("reason", 500),
@@ -909,105 +975,6 @@ def validate_selection_goal_draft(
         )
         result["relational_willingness"] = relational_decision
     return result
-
-
-def _degraded_goal_bid_draft(
-    parsed: object,
-    *,
-    evidence_handles: set[str],
-    role_handles: set[str],
-    require_relational_willingness: bool,
-    episode_handles: set[str] | None,
-) -> GoalBidDraftV2 | None:
-    """Project a complete generic bid after dropping invalid handle entries."""
-
-    if not isinstance(parsed, Mapping):
-        return None
-    raw_evidence_handles = parsed.get("evidence_handles")
-    raw_role_handles = parsed.get("target_role_handles")
-    if not isinstance(raw_evidence_handles, list) and not isinstance(
-        raw_role_handles,
-        list,
-    ):
-        return None
-    candidate = dict(parsed)
-    evidence_changed = False
-    if isinstance(raw_evidence_handles, list):
-        filtered_evidence = [
-            handle
-            for handle in raw_evidence_handles
-            if isinstance(handle, str) and handle in evidence_handles
-        ]
-        candidate["evidence_handles"] = filtered_evidence
-        evidence_changed = filtered_evidence != raw_evidence_handles
-    role_changed = False
-    if isinstance(raw_role_handles, list):
-        filtered_roles = [
-            handle
-            for handle in raw_role_handles
-            if isinstance(handle, str) and handle in role_handles
-        ]
-        candidate["target_role_handles"] = filtered_roles
-        role_changed = filtered_roles != raw_role_handles
-    if not evidence_changed and not role_changed:
-        return None
-    try:
-        validated = validate_goal_bid_draft(
-            candidate,
-            evidence_handles=evidence_handles,
-            role_handles=role_handles,
-            require_relational_willingness=require_relational_willingness,
-            episode_handles=episode_handles,
-        )
-    except (AttributeError, KeyError, TypeError, ValueError):
-        return None
-    return validated
-
-
-def _degraded_selection_goal_draft(
-    parsed: object,
-    *,
-    evidence_handles: set[str],
-    role_handles: set[str],
-    required_evidence_handles: set[str],
-    episode_handles: set[str] | None,
-    branch_id: str,
-    require_relational_willingness: bool,
-    maximum_evidence_handles: int,
-) -> GoalBidDraftV2 | None:
-    """Project a complete selection after dropping invalid evidence handles."""
-
-    if not isinstance(parsed, Mapping):
-        return None
-    raw_evidence_handles = parsed.get("evidence_handles")
-    if not isinstance(raw_evidence_handles, list):
-        return None
-    filtered_evidence_handles = [
-        handle
-        for handle in raw_evidence_handles
-        if isinstance(handle, str) and handle in evidence_handles
-    ]
-    if filtered_evidence_handles == raw_evidence_handles:
-        return None
-    candidate = dict(parsed)
-    candidate["evidence_handles"] = filtered_evidence_handles
-    try:
-        validated = validate_selection_goal_draft(
-            candidate,
-            evidence_handles=evidence_handles,
-            role_handles=role_handles,
-            required_evidence_handles=required_evidence_handles,
-            episode_handles=episode_handles,
-            require_relational_willingness=require_relational_willingness,
-            maximum_evidence_handles=maximum_evidence_handles,
-        )
-    except (AttributeError, KeyError, TypeError, ValueError):
-        return None
-    degraded_draft = _selection_goal_draft_to_goal_bid(
-        validated,
-        branch_id=branch_id,
-    )
-    return degraded_draft
 
 
 def _selection_goal_draft_to_goal_bid(
@@ -1055,6 +1022,7 @@ async def _record_goal_trace_step(
     started_at: float,
     attempt_index: int,
     validation_error: str,
+    attempt_metadata: Mapping[str, object],
 ) -> None:
     """Preserve one protected goal-generation or repair model boundary."""
 
@@ -1080,6 +1048,7 @@ async def _record_goal_trace_step(
         attempt_index=attempt_index,
         validation_error=validation_error,
         attempt_started_at=started_at,
+        attempt_metadata=attempt_metadata,
     )
 
 

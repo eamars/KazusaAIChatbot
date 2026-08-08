@@ -6,7 +6,6 @@ import asyncio
 from collections.abc import Mapping
 from dataclasses import replace
 import json
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -22,20 +21,26 @@ from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
     run_goal_cognition,
     validate_selection_goal_draft,
 )
+from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
+    bind_v2_attempt_ledger,
+    create_v2_attempt_ledger,
+    reset_v2_attempt_ledger,
+    snapshot_v2_attempt_ledger,
+)
+from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+    build_acquaintance_user_state,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
     build_cognition_core_services,
 )
 from kazusa_ai_chatbot.utils import parse_llm_json_output
+from tests.cognition_core_v2_test_helpers import (
+    canonical_service_character_profile,
+)
 from tests.llm_trace import write_llm_trace
 
 
 _TRACE_SUITE = 'cognition_core_v2_required_selection_live_llm'
-_PRODUCTION_PROFILE_EXPORT = Path(
-    'test_artifacts/diagnostics/reproduction_user_profile.json'
-)
-_PRODUCTION_CHARACTER_EXPORT = Path(
-    'test_artifacts/diagnostics/reproduction_character_state.json'
-)
 class _CapturingLLM:
     """Delegate to configured model routes and retain every raw response."""
 
@@ -241,35 +246,41 @@ async def _run_live_required_selection_case(
     bid: dict[str, Any] | None = None
     failure: dict[str, Any] | None = None
 
+    ledger = create_v2_attempt_ledger(f'live-probe:{case_id}')
+    ledger_token = bind_v2_attempt_ledger(ledger, graph_attempt=1)
     try:
-        bid = await run_goal_cognition(
-            DEFAULT_BRANCH_DEFINITIONS[branch_id],
-            {
-                'scope': 'user',
-                'kind': 'goal',
-                'entity_id': f'goal:{case_id}',
-            },
-            semantic_context,
-            evidence,
-            services,
-        )
-    except CognitionExecutionError as exc:
-        failure = {
-            'error_class': type(exc).__name__,
-            'message': str(exc),
-            'error_code': exc.error_code,
-            'attempt_count': exc.attempt_count,
-            'cause_class': (
-                type(exc.__cause__).__name__
-                if exc.__cause__ is not None
-                else ''
-            ),
-            'cause_message': (
-                str(exc.__cause__)
-                if exc.__cause__ is not None
-                else ''
-            ),
-        }
+        try:
+            bid = await run_goal_cognition(
+                DEFAULT_BRANCH_DEFINITIONS[branch_id],
+                {
+                    'scope': 'user',
+                    'kind': 'goal',
+                    'entity_id': f'goal:{case_id}',
+                },
+                semantic_context,
+                evidence,
+                services,
+            )
+        except CognitionExecutionError as exc:
+            failure = {
+                'error_class': type(exc).__name__,
+                'message': str(exc),
+                'error_code': exc.error_code,
+                'attempt_count': exc.attempt_count,
+                'cause_class': (
+                    type(exc.__cause__).__name__
+                    if exc.__cause__ is not None
+                    else ''
+                ),
+                'cause_message': (
+                    str(exc.__cause__)
+                    if exc.__cause__ is not None
+                    else ''
+                ),
+            }
+        attempt_ledger = snapshot_v2_attempt_ledger()
+    finally:
+        reset_v2_attempt_ledger(ledger_token)
 
     _add_contract_diagnostics(
         capturing_llm.calls,
@@ -289,6 +300,7 @@ async def _run_live_required_selection_case(
             'expected_route_name': expected_config.route_name,
             'expected_model': expected_config.model,
             'model_calls': capturing_llm.calls,
+            'attempt_ledger': attempt_ledger,
             'action_bid': bid,
             'failure': failure,
             'behavior_contract': (
@@ -310,16 +322,7 @@ async def _run_live_required_selection_case(
 def _third_party_reply_case_args() -> dict[str, Any]:
     """Build the captured third-party reply and autonomy-pressure input."""
 
-    character_export = json.loads(
-        _PRODUCTION_CHARACTER_EXPORT.read_text(
-            encoding='utf-8',
-        )
-    )
-    profile_export = json.loads(
-        _PRODUCTION_PROFILE_EXPORT.read_text(
-            encoding='utf-8',
-        )
-    )
+    profile_export, character_export = _synthetic_pressure_exports()
     character_state = character_export['character_state']
     cognition_state = profile_export['profile']['cognition_state']
     progress_summaries = [
@@ -429,6 +432,89 @@ def _third_party_reply_case_args() -> dict[str, Any]:
         },
     }
     return case_args
+
+
+def _synthetic_pressure_exports(
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Build portable production-shaped context for required-selection probes."""
+
+    timestamp = '2026-07-30T09:30:00Z'
+    cognition_state = build_acquaintance_user_state(
+        global_user_id='required-selection-user',
+        updated_at=timestamp,
+    )
+    cognition_state['relationship'].update({
+        'familiarity': 80,
+        'positive_regard': 70,
+        'trust': 75,
+        'attachment': 65,
+        'desired_closeness': 70,
+        'perceived_closeness': 65,
+        'care': 70,
+        'boundary_safety': 60,
+        'salience': 75,
+    })
+    evidence_ref = {
+        'source_kind': 'episode',
+        'source_id': 'episode:required-selection-pressure',
+        'occurred_at': timestamp,
+        'semantic_summary': 'A shared plan changed after a third party withdrew.',
+    }
+    goal = {
+        'entity_id': 'goal:autonomy-boundary:required-selection',
+        'description': (
+            'Choose an independent response while respecting the changed scene.'
+        ),
+        'status': 'pursuing',
+        'goal_kind': 'autonomy_boundary',
+        'importance': 80,
+        'progress': 45,
+        'obstruction': 35,
+        'expected_success': 65,
+        'controllability': 75,
+        'recoverability': 70,
+        'urgency': 70,
+        'salience': 85,
+        'role_refs': [],
+        'evidence_refs': [evidence_ref],
+        'created_at': timestamp,
+        'updated_at': timestamp,
+    }
+    event = {
+        'entity_id': 'event:required-selection-third-party-withdrawal',
+        'description': 'A third party withdrew from the shared playful plan.',
+        'salience': 80,
+        'role_refs': [],
+        'evidence_refs': [evidence_ref],
+        'created_at': timestamp,
+        'updated_at': timestamp,
+        'status': 'active',
+        'outcome_impact': 45,
+        'responsibility': 40,
+        'intentionality': 60,
+        'harm': 20,
+        'unfairness': 15,
+        'exposure': 30,
+        'repair_need': 35,
+        'reparability': 85,
+        'expectation_mismatch': 70,
+        'norm_violation': 20,
+        'contamination_risk': 0,
+        'identity_threat': 20,
+        'comparison_gap': 0,
+        'vastness': 0,
+        'memory_warmth': 35,
+        'temporal_loss': 0,
+    }
+    cognition_state['goals'] = [goal]
+    cognition_state['active_events'] = [event]
+    character_state = canonical_service_character_profile(
+        marker='required-selection-pressure',
+    )
+    return (
+        {'profile': {'cognition_state': cognition_state}},
+        {'character_state': character_state},
+    )
 
 
 @pytest.mark.live_llm
@@ -828,12 +914,7 @@ async def test_live_autonomy_selection_with_exact_production_scene(
 ) -> None:
     """Replay the failing active-branch scene through the dense route."""
 
-    profile_export = json.loads(_PRODUCTION_PROFILE_EXPORT.read_text(
-        encoding='utf-8',
-    ))
-    character_export = json.loads(_PRODUCTION_CHARACTER_EXPORT.read_text(
-        encoding='utf-8',
-    ))
+    profile_export, character_export = _synthetic_pressure_exports()
     cognition_state = profile_export['profile']['cognition_state']
     character_state = character_export['character_state']
     semantic_context_updates = {
@@ -914,12 +995,7 @@ async def test_live_autonomy_selection_with_multiple_progress_events(
 ) -> None:
     """Probe dense selection with production state and progress pressure."""
 
-    profile_export = json.loads(_PRODUCTION_PROFILE_EXPORT.read_text(
-        encoding='utf-8',
-    ))
-    character_export = json.loads(_PRODUCTION_CHARACTER_EXPORT.read_text(
-        encoding='utf-8',
-    ))
+    profile_export, character_export = _synthetic_pressure_exports()
     cognition_state = profile_export['profile']['cognition_state']
     character_state = character_export['character_state']
     character_identity = {
@@ -1000,12 +1076,7 @@ async def test_live_autonomy_selection_with_multiple_progress_events(
 async def test_live_relationship_selection_with_production_state() -> None:
     """Probe whether the production-shaped failure transfers across branches."""
 
-    profile_export = json.loads(_PRODUCTION_PROFILE_EXPORT.read_text(
-        encoding='utf-8',
-    ))
-    character_export = json.loads(_PRODUCTION_CHARACTER_EXPORT.read_text(
-        encoding='utf-8',
-    ))
+    profile_export, character_export = _synthetic_pressure_exports()
     cognition_state = profile_export['profile']['cognition_state']
     character_state = character_export['character_state']
     semantic_context_updates = {
@@ -1085,12 +1156,7 @@ async def test_live_autonomy_selection_with_compound_evidence_pressure(
 ) -> None:
     """Keep two operations mandatory while progress remains model-selected."""
 
-    profile_export = json.loads(_PRODUCTION_PROFILE_EXPORT.read_text(
-        encoding='utf-8',
-    ))
-    character_export = json.loads(_PRODUCTION_CHARACTER_EXPORT.read_text(
-        encoding='utf-8',
-    ))
+    profile_export, character_export = _synthetic_pressure_exports()
     cognition_state = profile_export['profile']['cognition_state']
     character_state = character_export['character_state']
     semantic_context_updates = {
@@ -1269,12 +1335,7 @@ async def test_live_autonomy_selection_with_ten_visible_evidence_rows(
 async def test_live_autonomy_food_choice_with_stale_goal_pressure() -> None:
     """Probe a current food choice against an unrelated active autonomy goal."""
 
-    profile_export = json.loads(_PRODUCTION_PROFILE_EXPORT.read_text(
-        encoding='utf-8',
-    ))
-    character_export = json.loads(_PRODUCTION_CHARACTER_EXPORT.read_text(
-        encoding='utf-8',
-    ))
+    profile_export, character_export = _synthetic_pressure_exports()
     cognition_state = profile_export['profile']['cognition_state']
     character_state = character_export['character_state']
     progress_rows = []
@@ -1347,12 +1408,7 @@ async def test_live_autonomy_food_choice_with_stale_goal_pressure() -> None:
 async def test_live_parallel_food_choice_selection_contract_pressure() -> None:
     """Run competing food-choice selections with production concurrency."""
 
-    profile_export = json.loads(_PRODUCTION_PROFILE_EXPORT.read_text(
-        encoding='utf-8',
-    ))
-    character_export = json.loads(_PRODUCTION_CHARACTER_EXPORT.read_text(
-        encoding='utf-8',
-    ))
+    profile_export, character_export = _synthetic_pressure_exports()
     cognition_state = profile_export['profile']['cognition_state']
     character_state = character_export['character_state']
     progress_rows = []

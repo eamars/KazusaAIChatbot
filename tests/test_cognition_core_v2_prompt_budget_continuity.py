@@ -1426,7 +1426,6 @@ def test_required_selection_regeneration_feedback_counts_toward_cap() -> None:
     repair_payload["repair_feedback"] = {
         "validation_error": "selection goal draft fields are not exact",
         "required_top_level_fields": [
-            "selection_kind",
             "selection",
             "reason",
             "private_monologue",
@@ -1437,7 +1436,6 @@ def test_required_selection_regeneration_feedback_counts_toward_cap() -> None:
             "relational_willingness",
         ],
         "field_types": {
-            "selection_kind": "enum:choice|refusal|condition|negotiation",
             "selection": "non_empty_string_max_500",
         },
         "allowed_evidence_handles": ["e1", "e2", "e3"],

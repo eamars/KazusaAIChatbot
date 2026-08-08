@@ -17,7 +17,9 @@
     {"pattern": "src/kazusa_ai_chatbot/global_character_growth/**", "owner": "character_identity", "gate": "identity_growth"},
     {"pattern": "src/kazusa_ai_chatbot/character_profile.py", "owner": "profile_bootstrap", "gate": "profile"},
     {"pattern": "src/kazusa_ai_chatbot/character_profiles/**", "owner": "profile_bootstrap", "gate": "profile"},
+    {"pattern": "src/kazusa_ai_chatbot/chat_input_queue.py", "owner": "intake_queue", "gate": "chat_boundary"},
     {"pattern": "src/kazusa_ai_chatbot/coding_agent/**", "owner": "action_task_coding_scheduler", "gate": "coding_agent"},
+    {"pattern": "src/kazusa_ai_chatbot/complex_task_resolver/**", "owner": "resolver", "gate": "task_resolution"},
     {"pattern": "src/kazusa_ai_chatbot/config.py", "owner": "runtime_configuration", "gate": "configuration"},
     {"pattern": "src/kazusa_ai_chatbot/consolidation/**", "owner": "persistence_consolidation", "gate": "consolidation"},
     {"pattern": "src/kazusa_ai_chatbot/conversation_progress/**", "owner": "persistence_consolidation", "gate": "continuity"},
@@ -40,6 +42,8 @@
     {"pattern": "src/kazusa_ai_chatbot/self_cognition/**", "owner": "internal_scheduled_tool_result", "gate": "self_cognition"},
     {"pattern": "src/kazusa_ai_chatbot/service.py", "owner": "intake_queue", "gate": "service_boundary"},
     {"pattern": "src/kazusa_ai_chatbot/state.py", "owner": "intake_queue", "gate": "graph_state"},
+    {"pattern": "src/kazusa_ai_chatbot/task_resolution/**", "owner": "resolver", "gate": "task_resolution"},
+    {"pattern": "src/kazusa_ai_chatbot/time_boundary.py", "owner": "runtime_configuration", "gate": "time_boundary"},
     {"pattern": "src/kazusa_ai_chatbot/utils.py", "owner": "cognition", "gate": "llm_contract"}
   ],
   "deleted_baseline_modules": [

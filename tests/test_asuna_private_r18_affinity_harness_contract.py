@@ -21,7 +21,13 @@ from tests.test_asuna_private_r18_affinity_live_llm import (
 from tests import run_asuna_private_r18_affinity_replay as replay_controller
 from tests import test_asuna_private_r18_affinity_live_llm as live_harness
 
+requires_private_manifest = pytest.mark.skipif(
+    not _MANIFEST_PATH.is_file(),
+    reason="private R18 replay manifest is unavailable",
+)
 
+
+@requires_private_manifest
 def test_private_r18_manifest_is_the_exact_20_input_sequence() -> None:
     """The harness selects only the corrected private R18 user inputs."""
 
@@ -41,6 +47,7 @@ def test_private_r18_manifest_is_the_exact_20_input_sequence() -> None:
     assert Path(_MANIFEST_PATH).is_file()
 
 
+@requires_private_manifest
 def test_full_sequence_does_not_project_old_dialog_or_residue() -> None:
     """The full E2E input projection excludes prior R18 state artifacts."""
 
@@ -57,6 +64,7 @@ def test_full_sequence_does_not_project_old_dialog_or_residue() -> None:
         )
 
 
+@requires_private_manifest
 def test_high_and_default_relationship_seeds_are_explicitly_distinct() -> None:
     """The two sequences differ at the native relationship seed boundary."""
 
@@ -89,6 +97,7 @@ def test_artifact_paths_are_guarded_to_the_replay_root(tmp_path: Path) -> None:
         _guarded_path(tmp_path / "outside.json")
 
 
+@requires_private_manifest
 def test_replay_request_uses_service_time_and_keeps_source_provenance() -> None:
     """Model-facing rows use runtime chronology while the fixture keeps time."""
 

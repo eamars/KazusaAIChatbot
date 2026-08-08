@@ -14,7 +14,7 @@
     },
     "goal_bid_structure": {
       "total_attempt_limit": 3,
-      "exhausted_disposition": "accepted_degraded"
+      "exhausted_disposition": "unrecoverable"
     },
     "workspace_collapse": {
       "total_attempt_limit": 3,
