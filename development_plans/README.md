@@ -44,6 +44,7 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
+| [legacy_llm_configuration_cleanup_plan.md](archive/completed/short_term/legacy_llm_configuration_cleanup_plan.md) | Removal of ten legacy local environment keys and three stale verifier Compose bindings | completed |
 | [task_resolution_character_background_handoff_plan.md](archive/completed/short_term/task_resolution_character_background_handoff_plan.md) | Character-selected task-resolution background handoff and partial-result continuation | completed |
 
 ## Supporting Experiment Records
