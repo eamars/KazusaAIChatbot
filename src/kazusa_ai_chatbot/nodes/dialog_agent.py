@@ -756,13 +756,12 @@ async def _repair_dialog_hard_failure(
     return repaired_dialog, repaired_surface
 
 
-_V2_DIALOG_SEMANTIC_FIDELITY_PROMPT = '''按完整语境检查角色回应的语义忠实度。
+_V2_DIALOG_SEMANTIC_FIDELITY_PROMPT = '''检查角色回应语义忠实度。
 
 # 职责边界
-本阶段核对候选的内部语义连贯、与当前用户输入及 authoritative_surface_semantics 的一致性。
-response_operation 的完成度和 selection_owner_role 转移由其他检查负责。selection_required 字段
-由角色方向检查独占，已经从本阶段输入中移除。保留在输入中的非选择 response_operation 由本阶段
-负责核对行动者、对象、受益者和主语方向。
+核对语义连贯性，以及与当前用户输入和 authoritative_surface_semantics 的一致性。
+response_operation 的完成度和 selection_owner_role 转移由其他检查负责。selection_required 由角色方向
+检查独占；仅核对非选择 response_operation 的行动者、对象、受益者和主语方向。
 
 # 判定语境
 current_visible_percepts 提供当前输入和结构化角色；candidate_role_frame 定义候选代词归属；
@@ -1105,9 +1104,7 @@ selection_owner_role 决定选择哪项动作，embedded_actor_role 执行已选
 解析“当前角色希望或要求当前用户做 X”一类嵌套从句时，当前用户是 X 的行动者，当前角色是
 要求和选择的所有者。
 
-本阶段不判断回应是否充分、详细、优雅或完全覆盖 content plan，也不得以不够具体、过于简短或
-未完成 required operation 为理由拒绝。violations 只能报告明确的选择所有者转移，或明确的
-行动者/对象颠倒。祈使句已经命名一个动作时，不因缺少解释、步骤或额外细节而拒绝。
+violations 只能报告明确的选择所有者转移或行动者/对象颠倒；祈使句已命名动作时不因缺少细节而拒绝。
 
 # 输出格式
 只返回一个 JSON 对象，字段必须恰好是 aligned 和 violations。aligned 是布尔值；violations

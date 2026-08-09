@@ -115,34 +115,32 @@ async def run_content_plan_stage(
     )
 
 
-PREFERENCE_SYSTEM_PROMPT = '''识别当前角色判断和当前场景中真实存在的可见表达边界或称呼对象约束。
+PREFERENCE_SYSTEM_PROMPT = '''识别当前角色判断和场景中真实存在的表达边界与称呼约束。
 以 selected intention、visible episode、projected bids、expression policy、semantic affect、
-semantic relationship、interaction style 和 permitted_action_results 为语境。
-relational_willingness 保持已确认的关系许可立场（含当前用户关系状态）。
-resolver_result 是来源自有的 resolver 执行结果，按 status 和 semantic_result 原义保留。
-runtime_capability_limits 是可信的运行时能力边界，只用于保持表达与现实能力一致。
+semantic relationship、interaction style 和 permitted_action_results 为语境；
+relational_willingness、resolver_result 按原义保留（resolver_result 含 status、semantic_result）；
+runtime_capability_limits 只约束现实能力。
 
 每一条 visible_boundaries 都对应权威语境中明确生效的表达限制或细节范围；每一条
-addressee_plan 都对应真实存在的称呼安排。输入中的结构化 addressee_plan 是上游已经确认的
-参与者目标和 wording_policy；逐条保留其 handle、display_name、semantic_role 和 wording_policy，
-不得新增、删除、改名或把第三方改成 current_user。相应约束为空时返回空列表，让角色按当前判断自然表达。
+addressee_plan 都对应真实存在的称呼安排。输入 addressee_plan 是上游确认的参与者目标；逐条保留
+handle、display_name、semantic_role 和 wording_policy，不得新增、删除、改名或把第三方改成
+current_user。相应约束为空时返回空列表，按当前判断自然表达。
 普通场景事实、时间、情绪、关系状态和已选回应立场分别归入 content_plan、content_requirements
 或 delivery_profile。拒绝、接受、指责、协商、条件和立场变化归入 content_plan 或
-content_requirements；情绪、强度、直接程度和表达节奏归入 delivery_profile。通用安全、内容审查、
-亲密程度或通用助手礼貌边界在权威语境明确提供时进入 visible_boundaries。
+content_requirements；情绪、强度、直接程度和表达节奏归入 delivery_profile。权威语境提供的安全、内容审查、亲密程度或通用礼貌边界才
+进入 visible_boundaries。
 
-能力结果的 status 按原义处理：executed 对应其有界的已完成效果，其他 status 对应各自状态。
-当前用户的即时发言来自 visible percept；角色自己的反思作为语境证据；运行元数据留在内部。
-
-新生成的自由文本使用简体中文；用户引文、专有名词、代码、URL 以及 schema 或 enum token 保持
-原样。内部角色句柄或英文角色称谓仅作为结构化值或原文内容保留；中文自由文本使用配置名称、当前
-角色、当前用户或其他参与者。最终对话由 dialog 渲染器生成；本阶段返回规划字段。
+status 按原义；executed 表示有界完成效果，其他 status 保持各自状态。
+visible percept 是当前用户即时发言；角色反思是语境证据；运行元数据留内部。
+自由文本用简体中文；用户引文、专名、代码、URL、schema 或 enum token 原样保留。角色句柄或英文
+称谓只作结构化值或原文；中文自由文本使用配置名称、当前角色、当前用户或其他参与者。dialog 生成
+最终对话；本阶段只返回规划字段。
 
 # 输出格式
 只返回一个 JSON 对象，字段必须恰好是 visible_boundaries 和 addressee_plan。visible_boundaries
-是零到八个非空字符串的列表，列表内各条唯一，每条最多 500 字符；addressee_plan 是零到八个
-结构化对象的列表，每个对象必须恰好包含 handle、display_name、semantic_role 和 wording_policy，
-并逐字保留输入的结构化目标行。'''
+是零到八个非空且唯一的字符串，每条最多 500 字符；addressee_plan 是零到八个结构化对象的列表，
+每个对象必须恰好包含 handle、display_name、semantic_role 和 wording_policy，并逐字保留输入的
+结构化目标行。'''
 
 
 async def run_preference_stage(
