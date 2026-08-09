@@ -14,6 +14,7 @@ import json
 import logging
 import re
 import time
+from collections.abc import Mapping
 from typing import Any, NotRequired, TypedDict
 
 import httpx
@@ -334,6 +335,10 @@ _V2_DIALOG_GENERATOR_PROMPT = '''你是当前角色的最终文字渲染器。�
 自然、鲜活、有角色辨识度，并且切合当前场景的聊天内容。上游认知负责角色判断；surface planning
 提供语义内容、真实边界、称呼安排、delivery profile 和 permitted action results。
 resolver_result 提供来源自有的 resolver capability 执行结果，与 action result 分开保留。
+task_resolution_request 的 resolver_result 还提供 source-owned evidence_state、evidence_excerpts、
+evidence_handles、prompt_safe_observation_handle 和 remaining_needs。evidence_state=complete 时，
+最终文字只能依据 supplied evidence_excerpts 回答并保留其限定；partial、pending、missing 或
+blocked 时，明确表达答案缺口、等待状态或 typed blocker，不把 generic semantic_result 当作答案事实。
 
 # 渲染步骤
 1. selected_surface_intent 是本轮语义锚点；content_plan 和 content_requirements 展开所需事实、
@@ -355,6 +360,8 @@ pending 表达已记录、已排队或等待对应 worker；failed 与 unavailab
 请求、意图或 content plan 表达角色的言语立场。
 resolver_result.status=succeeded 且 semantic_result 明确任务已接纳并继续工作时，可以表达已接纳、
 继续处理和等待后续结果，但不能声称最终结果已经完成。
+task_resolution_request 的 evidence_state=complete 只能依据 evidence_excerpts；不完整状态必须保留
+remaining_needs 所表达的事实缺口，不能补写缺失的用户引文或最终答案。
 5. 按 runtime_capability_limits 表达可信的能力边界、等待状态和下一步条件。
 6. 存在 repair_context 时，以已替换并验证的 text_surface_output_v2 生成完整新回应，并逐项解决
 verified_hard_issues，同时保持角色声音和相容的创造性内容。
@@ -390,6 +397,8 @@ content_requirements、delivery_profile 和完整规划。可自由组合惊讶�
 4. 按 permitted_action_results 映射执行状态：executed 表达其有界的已完成效果；scheduled 与
 pending 表达已记录、已排队或等待对应 worker；failed 与 unavailable 表达当前限制和可行下一步。
 resolver_result 按 status 和 semantic_result 原义表达；已成功接纳的后续工作不得改写为失败。
+task_resolution_request 的 evidence_state=complete 只能依据 evidence_excerpts；partial、pending、
+missing 或 blocked 必须保留答案缺口、等待状态或 typed blocker，不能在修复中补写缺失事实。
 5. 按 runtime_capability_limits 表达可信的能力边界、等待状态和下一步条件。
 6. 使用 delivery_profile 的五个维度实现用词、句形、节奏、犹豫和标点，让相同语义呈现鲜明而
 多样的角色声音。
@@ -766,10 +775,19 @@ response_operation 的完成度和 selection_owner_role 转移由其他检查负
 # 判定语境
 current_visible_percepts 提供当前输入和结构化角色；candidate_role_frame 定义候选代词归属；
 role_explicit_content 提供上游已解析的行动者、动作和对象方向，content 保留原文证据。
+selection_required 和 role_explicit_content 已经从本阶段输入中移除；选择所有者与选择完成度由角色方向
+检查独占；角色方向检查独占选择所有者与选择完成度。
+本阶段核对候选的内部语义连贯和与权威语义的一致性；保留在输入中的非选择 response_operation
+只作为行动方向证据，负责核对行动者、对象、受益者和主语。
 authoritative_surface_semantics 提供本轮已选回应意图、内容计划、内容要求、可见边界和结构化
 addressee_plan。addressee_plan 中的 wording_policy 是称呼方向的权威约束：第三方 target 行需要
 display_name 或明确第三人称；current_user 行只有在允许第二人称时才能由“你”承担。
 selected_surface_intent 是语义判定锚点，其他字段提供事实、理由和范围。
+如果 authoritative_surface_semantics 含有 task_resolution_request 的 resolver_result，必须把其中
+的 evidence_state、evidence_excerpts、evidence_handles、prompt_safe_observation_handle 和
+remaining_needs 当作同一个来源绑定的证据边界。complete 只允许依据 supplied excerpts 回答；
+partial、pending、missing 或 blocked 不支持把缺失的当前用户引文写成已经得到的答案，即使 status
+为 succeeded 或 semantic_result 声称任务已接纳。
 
 依次阅读当前输入、权威语义和候选中的全部消息，判断每句话回应的对象以及前后句如何承接。先判断
 候选是否构成一条与 selected_surface_intent 一致的完整语义弧线，再判断具体句子的作用。分清角色
@@ -799,6 +817,8 @@ selected_surface_intent 是语义判定锚点，其他字段提供事实、理�
 5. 候选实际以权威语义未提供的新动机、条件或约束削弱、推迟或改变已选立场。
 6. 当前 percept 包含 tool_result 时，候选添加 authoritative_surface_semantics 未提供的产品规格、
 价格、库存、数量、时间、因果关系或其他可外部核查事实。
+7. task_resolution_request 的 evidence_state 不为 complete，候选却把 remaining_needs 所指的
+缺失事实或当前用户引文呈现为已经确认的答案。
 
 结构化 role_explicit_content 和 response_operation 提供祈使句隐含主语的权威解析。并列动作覆盖度
 属于内容完整性检查；本阶段聚焦已表达动作的语义方向。hard_errors 必须引用候选原文，指出具体
@@ -889,6 +909,11 @@ async def _verify_dialog_semantic_fidelity(
             dict(row) for row in validated_surface["addressee_plan"]
         ],
     }
+    resolver_result = validated_surface.get("resolver_result")
+    if isinstance(resolver_result, dict):
+        authoritative_surface_semantics["resolver_result"] = dict(
+            resolver_result
+        )
     payload = {
         "candidate_final_dialog": generated_dialog,
         "candidate_role_frame": _candidate_role_frame(validated_surface),
@@ -1085,6 +1110,7 @@ candidate_role_frame 定义回应中的代词归属；required_role_operations �
 1. 候选明确要求 selection_owner_role 之外的角色决定“选择哪项动作”，从而转移选择所有者；
 2. 候选在唯一明确的角色读法下颠倒 embedded_actor_role 与 embedded_target_role。
 除此之外必须标为 true。不得报告遗漏、未完成、不充分、不具体、过短、语气或文风问题。
+不得以不够具体、过短、语气或文风作为角色方向错误。
 
 当前角色可以拒绝、协商、附加条件或不执行某项动作，而不改变角色方向。笑话、双关、省略以及
 存在多种合理角色读法的措辞按 aligned 处理。文风、新颖度、亲密程度、安全、动作执行与文笔质量
@@ -1357,6 +1383,8 @@ resolver_result 是来源自有的 resolver capability 结果，不属于 permit
 当 status=succeeded 且 semantic_result 明确任务已接纳并将继续工作时，它支持候选表达任务已接纳、
 正在继续处理或等待后续结果；它不支持声称最终结果已经完成。不得仅因 permitted_action_results
 为空而把这种有来源的持续工作误判为 false_execution。
+task_resolution_request 的 evidence_state、evidence_excerpts 和 remaining_needs 是答案事实边界；
+不完整的 evidence_state 不支持候选把缺失的当前用户引文或所需事实说成已经确认。
 
 payload 可以包含 externally completed tool result 的 completed_source_evidence。
 如果候选回应准确表达了该证据支持的事实，即使没有 executed action result，也按有依据处理。

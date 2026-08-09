@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from collections.abc import Awaitable, Callable, Mapping
 from copy import deepcopy
 from importlib import import_module
@@ -19,6 +20,7 @@ from kazusa_ai_chatbot.config import (
     BACKGROUND_WORK_LLM_MODEL,
     BACKGROUND_WORK_LLM_THINKING_ENABLED,
 )
+from kazusa_ai_chatbot.llm_tracing.failure_capsule import mark_current_failure
 from kazusa_ai_chatbot.llm_interface import (
     LLInterface,
     LLMCallConfig,
@@ -27,7 +29,6 @@ from kazusa_ai_chatbot.llm_interface import (
 from kazusa_ai_chatbot.task_resolution.contracts import (
     MAX_TASK_RESOLUTION_DISPATCHES,
     MAX_TASK_RESOLUTION_ORCHESTRATOR_CALLS,
-    MAX_TASK_RESOLUTION_ROUTE_CORRECTIONS,
     MAX_TASK_RESOLUTION_SPECIALIST_INVOCATIONS,
     TASK_SPECIALISTS,
     TaskResolutionCheckpointV1,
@@ -37,6 +38,7 @@ from kazusa_ai_chatbot.task_resolution.contracts import (
     TaskSpecialistResultV1,
     validate_task_resolution_checkpoint,
     validate_task_resolution_execution_context,
+    validate_task_resolution_result,
     validate_task_specialist_result,
 )
 from kazusa_ai_chatbot.task_resolution.state import (
@@ -98,6 +100,8 @@ _task_orchestrator_llm_config = LLMCallConfig(
     presence_penalty=None,
     thinking=LLMThinkingConfig(enabled=BACKGROUND_WORK_LLM_THINKING_ENABLED),
 )
+
+logger = logging.getLogger(__name__)
 
 TaskSpecialistHandler = Callable[
     [dict[str, object], TaskResolutionExecutionContextV1],
@@ -214,10 +218,25 @@ async def run_task_orchestrator(
                     "reason": "The inline task deadline elapsed before completion.",
                     "retryable": True,
                 }
-            validated_result = validate_task_specialist_result(specialist_result)
             try:
+                validated_result = validate_task_specialist_result(
+                    specialist_result,
+                )
                 current = record_specialist_result(current, validated_result)
-            except TaskResolutionContractError:
+            except TaskResolutionContractError as exc:
+                mark_current_failure(
+                    failure_kind="task_specialist_contract_error",
+                    stage_name="task_resolution_orchestrator",
+                    details={
+                        "specialist": specialist,
+                        "task_node_id": pending_dispatch["task_node_id"],
+                        "error": str(exc),
+                    },
+                    exception=exc,
+                )
+                logger.error(
+                    f"Task specialist candidate failed contract validation: {exc}"
+                )
                 current = _terminalize_without_continuation(
                     current,
                     status="failed",

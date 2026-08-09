@@ -9,7 +9,7 @@ internals.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Literal, NotRequired, TypedDict, cast
+from typing import Literal, TypedDict, cast
 
 
 TASK_RESOLUTION_EXECUTION_CONTEXT_VERSION = "task_resolution_execution_context.v1"
@@ -570,10 +570,32 @@ def validate_task_resolution_result(value: object) -> TaskResolutionResultV1:
     _require_version(data, TASK_RESOLUTION_RESULT_VERSION)
     status = _require_enum(data, "status", TASK_RESOLUTION_STATUSES)
     evidence = _validate_evidence_list(data, "evidence")
-    if status == "partial" and not evidence:
-        raise TaskResolutionContractError(
-            "partial task-resolution result requires validated evidence"
-        )
+    completed_subgoals = _require_bounded_text_list(
+        data,
+        "completed_subgoals",
+    )
+    remaining_needs = _require_bounded_text_list(
+        data,
+        "remaining_needs",
+    )
+    if status == "resolved":
+        if not evidence:
+            raise TaskResolutionContractError(
+                "resolved task-resolution result requires validated evidence"
+            )
+        if remaining_needs:
+            raise TaskResolutionContractError(
+                "resolved task-resolution result cannot retain remaining needs"
+            )
+    if status == "partial":
+        if not evidence:
+            raise TaskResolutionContractError(
+                "partial task-resolution result requires validated evidence"
+            )
+        if not remaining_needs:
+            raise TaskResolutionContractError(
+                "partial task-resolution result requires remaining needs"
+            )
     checkpoint = _validate_result_checkpoint(data)
     if status == "deferred":
         if not checkpoint:
@@ -607,14 +629,8 @@ def validate_task_resolution_result(value: object) -> TaskResolutionResultV1:
             maximum=MAX_TASK_RESOLUTION_TEXT_CHARS,
         ),
         "evidence": evidence,
-        "completed_subgoals": _require_bounded_text_list(
-            data,
-            "completed_subgoals",
-        ),
-        "remaining_needs": _require_bounded_text_list(
-            data,
-            "remaining_needs",
-        ),
+        "completed_subgoals": completed_subgoals,
+        "remaining_needs": remaining_needs,
         "checkpoint": checkpoint,
         "coding_run_context": coding_run_context,
     }

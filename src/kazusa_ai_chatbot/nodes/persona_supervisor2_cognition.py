@@ -17,7 +17,6 @@ from kazusa_ai_chatbot.action_spec.models import (
 from kazusa_ai_chatbot.action_spec.registry import (
     ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
     APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
-    MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     SPEAK_CAPABILITY,
     build_episode_affordances,
     build_initial_action_capabilities,
@@ -152,9 +151,12 @@ from kazusa_ai_chatbot.conversation_progress import (
 )
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     ALLOWED_RESOLVER_CAPABILITIES,
+    CURRENT_TURN_RELATIONAL_WILLINGNESS_VERSION,
     RESOLVER_CAPABILITY_REQUEST_VERSION,
     RESOLVER_CAPABILITY_SEMANTICS,
+    validate_current_turn_relational_willingness,
 )
+from kazusa_ai_chatbot.cognition_resolver.state import validate_resolver_state
 from kazusa_ai_chatbot.db import (
     compare_and_replace_character_cognition_state,
     get_character_cognition_state,
@@ -671,9 +673,26 @@ def build_cognition_input_from_global_state(
         payload["pending_resolver_resume"] = dict(pending_resume)
     resolver_state = state.get("resolver_state")
     if isinstance(resolver_state, Mapping):
+        cycle_index = resolver_state.get("cycle_index")
+        if isinstance(cycle_index, int) and not isinstance(cycle_index, bool):
+            payload["resolver_cycle_index"] = cycle_index
         goal_progress = resolver_state.get("goal_progress")
         if isinstance(goal_progress, Mapping):
             payload["resolver_goal_progress"] = dict(goal_progress)
+        evidence_dependency = resolver_state.get(
+            "required_resolver_evidence_dependency"
+        )
+        if isinstance(evidence_dependency, Mapping):
+            payload["required_resolver_evidence_dependency"] = dict(
+                evidence_dependency
+            )
+        relational_carrier = resolver_state.get(
+            "current_turn_relational_willingness"
+        )
+        if isinstance(relational_carrier, Mapping):
+            payload["current_turn_relational_willingness"] = dict(
+                relational_carrier
+            )
     return validate_cognition_core_input(payload)
 
 
@@ -1034,7 +1053,7 @@ def _project_output_to_global_state(
     affect = output["affect_projection"]
     dominant = affect[0] if affect else None
     route = output["intention"]["route"]
-    return {
+    update: dict[str, Any] = {
         "cognition_state_update": output["state_update"],
         "cognition_intention": output["intention"],
         "semantic_affect_projection": affect,
@@ -1074,6 +1093,47 @@ def _project_output_to_global_state(
         "should_respond": route != "silence",
         "rag_result": state.get("rag_result", {}),
     }
+    resolver_state = state.get("resolver_state")
+    relational_decision = output.get("relational_willingness")
+    if (
+        isinstance(resolver_state, Mapping)
+        and resolver_state.get("cycle_index") == 0
+        and isinstance(relational_decision, Mapping)
+    ):
+        episode = state.get("cognitive_episode")
+        episode_id = (
+            episode.get("episode_id")
+            if isinstance(episode, Mapping)
+            else None
+        )
+        if not isinstance(episode_id, str) or not episode_id.strip():
+            raise CognitionExecutionError(
+                "current-turn relational carrier requires episode identity"
+            )
+        carrier = {
+            "schema_version": CURRENT_TURN_RELATIONAL_WILLINGNESS_VERSION,
+            "episode_id": episode_id,
+            "branch_id": "ordinary_response",
+            "decision": {
+                "applicability": relational_decision["applicability"],
+                "current_user_relationship_state": relational_decision[
+                    "current_user_relationship_state"
+                ],
+                "stance": relational_decision["stance"],
+            },
+        }
+        validated_carrier = validate_current_turn_relational_willingness(
+            carrier,
+            episode_id=episode_id,
+        )
+        updated_resolver_state = dict(resolver_state)
+        updated_resolver_state["current_turn_relational_willingness"] = (
+            validated_carrier
+        )
+        update["resolver_state"] = validate_resolver_state(
+            updated_resolver_state
+        )
+    return update
 
 
 def _resolver_request_priority(request: Mapping[str, Any]) -> str:

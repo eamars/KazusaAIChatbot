@@ -13,6 +13,7 @@ from openai import OpenAIError
 
 from kazusa_ai_chatbot import event_logging
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
+    RESOLVER_EVIDENCE_STATE_VERSION,
     RESOLVER_OBSERVATION_VERSION,
     ResolverCapabilityRequestV1,
     ResolverObservationV1,
@@ -117,7 +118,39 @@ def project_resolver_observation_for_cognition(
         raise ResolverValidationError("resolver observation id is required")
     if not summary:
         raise ResolverValidationError("resolver observation summary is required")
-    semantic_text = f"{capability}: {summary}" if capability else summary
+    semantic_segments = [
+        f"{capability}: {summary}" if capability else summary,
+    ]
+    evidence_state = observation.get("task_resolution_evidence_state")
+    if isinstance(evidence_state, Mapping):
+        state = text_or_empty(evidence_state.get("state")).strip()
+        if state:
+            semantic_segments.append(f"evidence_state={state}")
+        remaining_needs = evidence_state.get("remaining_needs")
+        if isinstance(remaining_needs, list):
+            needs = [
+                item.strip()
+                for item in remaining_needs
+                if isinstance(item, str) and item.strip()
+            ]
+            if needs:
+                semantic_segments.append(
+                    "remaining_needs=" + " | ".join(needs[:4])
+                )
+    raw_evidence_refs = observation.get("evidence_refs")
+    if isinstance(raw_evidence_refs, list):
+        evidence_excerpts = [
+            excerpt.strip()
+            for evidence_ref in raw_evidence_refs
+            if isinstance(evidence_ref, Mapping)
+            for excerpt in [evidence_ref.get("excerpt")]
+            if isinstance(excerpt, str) and excerpt.strip()
+        ][:4]
+        if evidence_excerpts:
+            semantic_segments.append(
+                "evidence_excerpts=" + " | ".join(evidence_excerpts)
+            )
+    semantic_text = "; ".join(semantic_segments)
     evidence = CognitionEvidenceV2(
         evidence_handle="e1",
         evidence_ref={
@@ -594,6 +627,11 @@ def _task_resolution_observation(
                 "result will return through the normal conversation path."
             ),
         )
+        observation["task_resolution_evidence_state"] = {
+            "schema_version": RESOLVER_EVIDENCE_STATE_VERSION,
+            "state": "pending",
+            "remaining_needs": list(result["remaining_needs"]),
+        }
         if result["evidence"]:
             observation["evidence_refs"] = _task_resolution_evidence_refs(
                 result,
@@ -620,6 +658,11 @@ def _task_resolution_observation(
             status="succeeded",
             prompt_safe_summary=result["prompt_safe_summary"],
         )
+        observation["task_resolution_evidence_state"] = {
+            "schema_version": RESOLVER_EVIDENCE_STATE_VERSION,
+            "state": "complete" if status == "resolved" else "partial",
+            "remaining_needs": list(result["remaining_needs"]),
+        }
         observation["evidence_refs"] = _task_resolution_evidence_refs(
             result,
             observed_at=_created_at_utc(state),
@@ -644,6 +687,11 @@ def _task_resolution_observation(
             prompt_safe_summary=result["prompt_safe_summary"],
         )
         observation["blocker_kind"] = "requires_user_input"
+        observation["task_resolution_evidence_state"] = {
+            "schema_version": RESOLVER_EVIDENCE_STATE_VERSION,
+            "state": "blocked",
+            "remaining_needs": list(result["remaining_needs"]),
+        }
         validated_observation = validate_resolver_observation(observation)
         return validated_observation
     if status == "approval_required":
@@ -653,6 +701,11 @@ def _task_resolution_observation(
             status="blocked",
             prompt_safe_summary=result["prompt_safe_summary"],
         )
+        observation["task_resolution_evidence_state"] = {
+            "schema_version": RESOLVER_EVIDENCE_STATE_VERSION,
+            "state": "blocked",
+            "remaining_needs": list(result["remaining_needs"]),
+        }
         validated_observation = validate_resolver_observation(observation)
         return validated_observation
     if status in {"unavailable", "failed"}:
@@ -662,6 +715,11 @@ def _task_resolution_observation(
             status="failed",
             prompt_safe_summary=result["prompt_safe_summary"],
         )
+        observation["task_resolution_evidence_state"] = {
+            "schema_version": RESOLVER_EVIDENCE_STATE_VERSION,
+            "state": "blocked",
+            "remaining_needs": list(result["remaining_needs"]),
+        }
         validated_observation = validate_resolver_observation(observation)
         return validated_observation
     raise ResolverValidationError("task-resolution result status is unsupported")
@@ -684,6 +742,11 @@ def _task_resolution_failure_observation(
             "resolution path."
         ),
     )
+    observation["task_resolution_evidence_state"] = {
+        "schema_version": RESOLVER_EVIDENCE_STATE_VERSION,
+        "state": "blocked",
+        "remaining_needs": [],
+    }
     validated_observation = validate_resolver_observation(observation)
     return validated_observation
 
@@ -861,6 +924,12 @@ def _observation_base(
         "evidence_refs": [],
         "created_at_utc": _created_at_utc(state),
     }
+    if request["capability_kind"] == "task_resolution_request":
+        observation["task_resolution_evidence_state"] = {
+            "schema_version": RESOLVER_EVIDENCE_STATE_VERSION,
+            "state": "missing" if status == "succeeded" else "blocked",
+            "remaining_needs": [],
+        }
     return observation
 
 

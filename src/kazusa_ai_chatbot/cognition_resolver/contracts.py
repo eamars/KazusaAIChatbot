@@ -19,6 +19,13 @@ RESOLVER_CYCLE_TRACE_VERSION = "resolver_cycle_trace.v1"
 RESOLVER_PENDING_RESUME_VERSION = "resolver_pending_resume.v1"
 RESOLVER_PENDING_RESOLUTION_VERSION = "resolver_pending_resolution.v1"
 RESOLVER_GOAL_PROGRESS_VERSION = "resolver_goal_progress.v1"
+RESOLVER_EVIDENCE_STATE_VERSION = "resolver_evidence_state.v1"
+REQUIRED_RESOLVER_EVIDENCE_DEPENDENCY_VERSION = (
+    "required_resolver_evidence_dependency.v1"
+)
+CURRENT_TURN_RELATIONAL_WILLINGNESS_VERSION = (
+    "current_turn_relational_willingness.v1"
+)
 
 MAX_RESOLVER_SUMMARY_CHARS = 600
 MAX_RESOLVER_OBJECTIVE_CHARS = 400
@@ -30,6 +37,8 @@ MAX_RESOLVER_GOAL_ITEMS = 8
 MAX_RESOLVER_RAG_EVIDENCE_SUMMARY_CHARS = 320
 MAX_RESOLVER_RAG_EVIDENCE_ITEMS = 4
 MAX_RESOLVER_KNOWLEDGE_ITEMS = 8
+MAX_RESOLVER_EVIDENCE_EXCERPTS = 4
+MAX_RESOLVER_EVIDENCE_EXCERPT_CHARS = 500
 
 _RAW_MARKER_RE = re.compile(r"\braw-[A-Za-z0-9_-]+")
 
@@ -91,6 +100,13 @@ ALLOWED_GOAL_DELIVERABLE_STATUSES = frozenset((
     "satisfied",
     "blocked",
 ))
+ALLOWED_RESOLVER_EVIDENCE_STATES = frozenset((
+    "complete",
+    "partial",
+    "pending",
+    "missing",
+    "blocked",
+))
 
 
 class ResolverValidationError(ValueError):
@@ -129,8 +145,41 @@ class ResolverObservationV1(TypedDict):
     knowledge_projection: NotRequired[dict[str, object]]
     pending_resume_id: NotRequired[str]
     blocker_kind: NotRequired[ResolverObservationBlockerV1]
+    task_resolution_evidence_state: NotRequired[
+        "ResolverEvidenceStateV1"
+    ]
     evidence_refs: list[EvidenceRefV1]
     created_at_utc: str
+
+
+class ResolverEvidenceStateV1(TypedDict):
+    """Typed answer-evidence disposition for a task-resolution observation."""
+
+    schema_version: Literal["resolver_evidence_state.v1"]
+    state: Literal["complete", "partial", "pending", "missing", "blocked"]
+    remaining_needs: list[str]
+
+
+class CurrentTurnRelationalWillingnessV1(TypedDict):
+    """Immutable current-turn relational decision carried through recurrence."""
+
+    schema_version: Literal["current_turn_relational_willingness.v1"]
+    episode_id: str
+    branch_id: Literal["ordinary_response"]
+    decision: dict[str, str]
+
+
+class RequiredResolverEvidenceDependencyV1(TypedDict):
+    """Exact resolver dependency bound to one accepted answer-evidence request."""
+
+    schema_version: Literal["required_resolver_evidence_dependency.v1"]
+    accepted_request_handle: str
+    observation_id: str
+    prompt_safe_observation_handle: str
+    capability_kind: Literal["task_resolution_request"]
+    state: Literal["complete", "partial", "pending", "missing", "blocked"]
+    evidence_handles: list[str]
+    remaining_needs: list[str]
 
 
 class ResolverCycleTraceV1(TypedDict):
@@ -231,7 +280,205 @@ class ResolverCycleStateV1(TypedDict):
     held_action_specs: list[ActionSpecV1]
     pending_resume: NotRequired[ResolverPendingResumeV1]
     goal_progress: NotRequired[ResolverGoalProgressV1]
+    current_turn_relational_willingness: NotRequired[
+        CurrentTurnRelationalWillingnessV1
+    ]
+    required_resolver_evidence_dependency: NotRequired[
+        RequiredResolverEvidenceDependencyV1
+    ]
     terminal_reason: str
+
+
+def validate_resolver_evidence_state(
+    value: object,
+) -> ResolverEvidenceStateV1:
+    """Validate one task-resolution evidence disposition."""
+
+    data = _require_mapping(value, "resolver_evidence_state")
+    _require_exact_keys(
+        data,
+        {"schema_version", "state", "remaining_needs"},
+        "resolver_evidence_state",
+    )
+    _require_version(data, RESOLVER_EVIDENCE_STATE_VERSION)
+    state = _require_enum(data, "state", ALLOWED_RESOLVER_EVIDENCE_STATES)
+    remaining_needs = _normalize_goal_text_list(data, "remaining_needs")
+    return_value: ResolverEvidenceStateV1 = {
+        "schema_version": RESOLVER_EVIDENCE_STATE_VERSION,
+        "state": state,
+        "remaining_needs": remaining_needs,
+    }
+    return return_value
+
+
+def validate_current_turn_relational_willingness(
+    value: object,
+    *,
+    episode_id: str,
+) -> CurrentTurnRelationalWillingnessV1:
+    """Validate the recurrence-only current-turn relational carrier."""
+
+    data = _require_mapping(value, "current_turn_relational_willingness")
+    _require_exact_keys(
+        data,
+        {"schema_version", "episode_id", "branch_id", "decision"},
+        "current_turn_relational_willingness",
+    )
+    _require_version(data, CURRENT_TURN_RELATIONAL_WILLINGNESS_VERSION)
+    carrier_episode_id = _require_non_empty_string(data, "episode_id")
+    if carrier_episode_id != episode_id:
+        raise ResolverValidationError(
+            "current_turn_relational_willingness: episode_id mismatch"
+        )
+    if data.get("branch_id") != "ordinary_response":
+        raise ResolverValidationError(
+            "current_turn_relational_willingness: branch_id is invalid"
+        )
+    decision = data.get("decision")
+    if not isinstance(decision, dict):
+        raise ResolverValidationError(
+            "current_turn_relational_willingness: decision must be an object"
+        )
+    _require_exact_keys(
+        decision,
+        {
+            "applicability",
+            "current_user_relationship_state",
+            "stance",
+        },
+        "current_turn_relational_willingness.decision",
+    )
+    allowed_pairs = {
+        (
+            "not_relationship_sensitive",
+            "not_applicable",
+            "not_applicable",
+        ),
+        ("relationship_sensitive", "unestablished", "reject"),
+        ("relationship_sensitive", "unestablished", "deflect"),
+        ("relationship_sensitive", "unestablished", "negotiate"),
+        (
+            "relationship_sensitive",
+            "unestablished",
+            "conditional_accept",
+        ),
+        ("relationship_sensitive", "unestablished", "accept"),
+        (
+            "relationship_sensitive",
+            "developing_or_uncertain",
+            "reject",
+        ),
+        (
+            "relationship_sensitive",
+            "developing_or_uncertain",
+            "deflect",
+        ),
+        (
+            "relationship_sensitive",
+            "developing_or_uncertain",
+            "negotiate",
+        ),
+        (
+            "relationship_sensitive",
+            "developing_or_uncertain",
+            "conditional_accept",
+        ),
+        (
+            "relationship_sensitive",
+            "developing_or_uncertain",
+            "accept",
+        ),
+        ("relationship_sensitive", "established", "reject"),
+        ("relationship_sensitive", "established", "deflect"),
+        ("relationship_sensitive", "established", "negotiate"),
+        ("relationship_sensitive", "established", "conditional_accept"),
+        ("relationship_sensitive", "established", "accept"),
+    }
+    decision_tuple = (
+        decision.get("applicability"),
+        decision.get("current_user_relationship_state"),
+        decision.get("stance"),
+    )
+    if decision_tuple not in allowed_pairs:
+        raise ResolverValidationError(
+            "current_turn_relational_willingness: decision pairing is invalid"
+        )
+    normalized: CurrentTurnRelationalWillingnessV1 = {
+        "schema_version": CURRENT_TURN_RELATIONAL_WILLINGNESS_VERSION,
+        "episode_id": carrier_episode_id,
+        "branch_id": "ordinary_response",
+        "decision": {
+            "applicability": decision_tuple[0],
+            "current_user_relationship_state": decision_tuple[1],
+            "stance": decision_tuple[2],
+        },
+    }
+    return normalized
+
+
+def validate_required_resolver_evidence_dependency(
+    value: object,
+) -> RequiredResolverEvidenceDependencyV1:
+    """Validate one accepted resolver request's answer-evidence dependency."""
+
+    data = _require_mapping(value, "required_resolver_evidence_dependency")
+    _require_exact_keys(
+        data,
+        {
+            "schema_version",
+            "accepted_request_handle",
+            "observation_id",
+            "prompt_safe_observation_handle",
+            "capability_kind",
+            "state",
+            "evidence_handles",
+            "remaining_needs",
+        },
+        "required_resolver_evidence_dependency",
+    )
+    _require_version(data, REQUIRED_RESOLVER_EVIDENCE_DEPENDENCY_VERSION)
+    accepted_request_handle = _require_non_empty_string(
+        data,
+        "accepted_request_handle",
+    )
+    observation_id = _require_non_empty_string(data, "observation_id")
+    prompt_safe_observation_handle = _require_non_empty_string(
+        data,
+        "prompt_safe_observation_handle",
+    )
+    if data.get("capability_kind") != "task_resolution_request":
+        raise ResolverValidationError(
+            "required_resolver_evidence_dependency: capability_kind is invalid"
+        )
+    state = _require_enum(data, "state", ALLOWED_RESOLVER_EVIDENCE_STATES)
+    evidence_handles = _normalize_string_handle_list(
+        data,
+        "evidence_handles",
+    )
+    remaining_needs = _normalize_goal_text_list(data, "remaining_needs")
+    if state == "complete" and (not evidence_handles or remaining_needs):
+        raise ResolverValidationError(
+            "complete dependency requires evidence handles and no remaining needs"
+        )
+    if state == "partial" and (not evidence_handles or not remaining_needs):
+        raise ResolverValidationError(
+            "partial dependency requires evidence handles and remaining needs"
+        )
+    if state == "missing" and evidence_handles:
+        raise ResolverValidationError(
+            "missing dependency cannot contain evidence handles"
+        )
+    return_value: RequiredResolverEvidenceDependencyV1 = {
+        "schema_version": REQUIRED_RESOLVER_EVIDENCE_DEPENDENCY_VERSION,
+        "accepted_request_handle": accepted_request_handle,
+        "observation_id": observation_id,
+        "prompt_safe_observation_handle": prompt_safe_observation_handle,
+        "capability_kind": "task_resolution_request",
+        "state": state,
+        "evidence_handles": evidence_handles,
+        "remaining_needs": remaining_needs,
+    }
+    return return_value
 
 
 def validate_resolver_capability_request(
@@ -277,6 +524,24 @@ def validate_resolver_observation(value: object) -> ResolverObservationV1:
     evidence_refs = _require_list(data, "evidence_refs")
     normalized_evidence_refs = _normalize_evidence_refs(evidence_refs)
     created_at_utc = _require_non_empty_string(data, "created_at_utc")
+    task_evidence_state = None
+    if capability_kind == "task_resolution_request":
+        if "task_resolution_evidence_state" not in data:
+            raise ResolverValidationError(
+                "task_resolution_evidence_state: required for task resolution"
+            )
+        task_evidence_state = validate_resolver_evidence_state(
+            data["task_resolution_evidence_state"],
+        )
+        _validate_task_evidence_state_consistency(
+            task_evidence_state,
+            status=status,
+            evidence_refs=normalized_evidence_refs,
+        )
+    elif "task_resolution_evidence_state" in data:
+        raise ResolverValidationError(
+            "task_resolution_evidence_state: only valid for task resolution"
+        )
     pending_resume_id = data.get("pending_resume_id")
     if pending_resume_id is not None and not isinstance(pending_resume_id, str):
         raise ResolverValidationError("pending_resume_id: expected string")
@@ -322,6 +587,8 @@ def validate_resolver_observation(value: object) -> ResolverObservationV1:
         normalized["pending_resume_id"] = pending_resume_id
     if blocker_kind is not None:
         normalized["blocker_kind"] = blocker_kind
+    if task_evidence_state is not None:
+        normalized["task_resolution_evidence_state"] = task_evidence_state
     return_value = normalized
     return return_value
 
@@ -580,6 +847,10 @@ def project_observations_for_cognition(
         status = validated["status"]
         summary = validated["prompt_safe_summary"]
         blocker_kind = validated.get("blocker_kind")
+        task_evidence_state = validated.get("task_resolution_evidence_state")
+        evidence_excerpts = resolver_evidence_excerpts_for_cognition(
+            validated,
+        )
         knowledge_context = _project_knowledge_projection(validated)
         if knowledge_context:
             line_parts = [
@@ -591,6 +862,11 @@ def project_observations_for_cognition(
                 f"summary={_prompt_safe_projection_text(summary)}",
                 knowledge_context,
             ]
+            _append_task_evidence_projection(
+                line_parts,
+                task_evidence_state=task_evidence_state,
+                evidence_excerpts=evidence_excerpts,
+            )
             if blocker_kind is not None:
                 line_parts.append(f"blocker_kind={blocker_kind}")
             line = "; ".join(line_parts)
@@ -607,6 +883,11 @@ def project_observations_for_cognition(
         ]
         if blocker_kind is not None:
             line_parts.append(f"blocker_kind={blocker_kind}")
+        _append_task_evidence_projection(
+            line_parts,
+            task_evidence_state=task_evidence_state,
+            evidence_excerpts=evidence_excerpts,
+        )
         rag_summary = _project_rag_result_summary(validated)
         if rag_summary:
             line_parts.append(
@@ -617,6 +898,96 @@ def project_observations_for_cognition(
     projection = "\n".join(lines)
     return_value = projection
     return return_value
+
+
+def resolver_evidence_excerpts_for_cognition(
+    observation: ResolverObservationV1,
+) -> list[str]:
+    """Derive bounded source-owned excerpts in their stored evidence order."""
+
+    excerpts: list[str] = []
+    for evidence_ref in observation["evidence_refs"]:
+        excerpt = evidence_ref.get("excerpt")
+        if not isinstance(excerpt, str) or not excerpt.strip():
+            continue
+        excerpts.append(_clip_text(excerpt.strip(), MAX_RESOLVER_EVIDENCE_EXCERPT_CHARS))
+        if len(excerpts) >= MAX_RESOLVER_EVIDENCE_EXCERPTS:
+            break
+    return_value = excerpts
+    return return_value
+
+
+def _append_task_evidence_projection(
+    line_parts: list[str],
+    *,
+    task_evidence_state: ResolverEvidenceStateV1 | None,
+    evidence_excerpts: list[str],
+) -> None:
+    """Append typed task evidence state without exposing source identifiers."""
+
+    if task_evidence_state is None:
+        return
+    line_parts.append(f"evidence_state={task_evidence_state['state']}")
+    if evidence_excerpts:
+        rendered_excerpts = " | ".join(
+            _prompt_safe_projection_text(excerpt)
+            for excerpt in evidence_excerpts
+        )
+        line_parts.append(f"evidence_excerpts={rendered_excerpts}")
+    remaining_needs = task_evidence_state["remaining_needs"]
+    if remaining_needs:
+        rendered_needs = " | ".join(
+            _prompt_safe_projection_text(item)
+            for item in remaining_needs
+        )
+        line_parts.append(f"remaining_needs={rendered_needs}")
+
+
+def _validate_task_evidence_state_consistency(
+    evidence_state: ResolverEvidenceStateV1,
+    *,
+    status: str,
+    evidence_refs: list[EvidenceRefV1],
+) -> None:
+    """Keep task evidence state aligned with the observation disposition."""
+
+    evidence_available = any(
+        isinstance(evidence_ref.get("excerpt"), str)
+        and bool(evidence_ref["excerpt"].strip())
+        for evidence_ref in evidence_refs
+    )
+    state = evidence_state["state"]
+    remaining_needs = evidence_state["remaining_needs"]
+    if state == "complete":
+        if status != "succeeded" or not evidence_available or remaining_needs:
+            raise ResolverValidationError(
+                "complete task evidence requires succeeded status, evidence, "
+                "and no remaining needs"
+            )
+        return
+    if state == "partial":
+        if status != "succeeded" or not evidence_available or not remaining_needs:
+            raise ResolverValidationError(
+                "partial task evidence requires succeeded status, evidence, "
+                "and remaining needs"
+            )
+        return
+    if state == "pending":
+        if status != "succeeded":
+            raise ResolverValidationError(
+                "pending task evidence requires succeeded observation status"
+            )
+        return
+    if state == "missing":
+        if status != "succeeded" or evidence_available:
+            raise ResolverValidationError(
+                "missing task evidence requires succeeded status without evidence"
+            )
+        return
+    if status not in {"blocked", "failed"}:
+        raise ResolverValidationError(
+            "blocked task evidence requires blocked or failed observation status"
+        )
 
 
 def _normalize_knowledge_projection(value: object) -> dict[str, object]:
@@ -772,6 +1143,35 @@ def _require_mapping(value: object, label: str) -> dict:
     if not isinstance(value, dict):
         raise ResolverValidationError(f"{label}: expected object")
     return_value = value
+    return return_value
+
+
+def _require_exact_keys(
+    data: dict,
+    expected_keys: set[str],
+    label: str,
+) -> None:
+    """Require one nested contract mapping to contain exactly its keys."""
+
+    if set(data) != expected_keys:
+        raise ResolverValidationError(f"{label}: fields are not exact")
+
+
+def _normalize_string_handle_list(
+    data: dict,
+    field_name: str,
+) -> list[str]:
+    """Normalize a bounded list of non-empty prompt-safe handles."""
+
+    raw_items = _require_list(data, field_name)
+    normalized: list[str] = []
+    for raw_item in raw_items:
+        if not isinstance(raw_item, str) or not raw_item.strip():
+            raise ResolverValidationError(f"{field_name}: expected strings")
+        normalized.append(_clip_text(raw_item.strip(), MAX_RESOLVER_GOAL_ITEM_CHARS))
+        if len(normalized) >= MAX_RESOLVER_KNOWLEDGE_ITEMS:
+            break
+    return_value = normalized
     return return_value
 
 

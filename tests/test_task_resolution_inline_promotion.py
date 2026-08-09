@@ -62,11 +62,13 @@ async def test_background_start_creates_initial_checkpoint_and_promotes(
         source_trigger_source: str,
         source_platform_bot_id: str,
         requester_display_name: str,
+        source_llm_trace_id: str = "",
     ) -> dict[str, object]:
         assert context == _context()
         assert source_trigger_source == "user_message"
         assert source_platform_bot_id == "debug-bot"
         assert requester_display_name == "Test User"
+        assert source_llm_trace_id == ""
         promoted.append(result)
         return {
             "status": "pending",

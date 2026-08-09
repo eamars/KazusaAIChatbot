@@ -192,6 +192,7 @@ def test_l3_builder_projects_latest_resolver_result_as_separate_authority() -> N
     resolver_state = new_resolver_state(
         decontextualized_input="research current retail evidence",
         max_cycles=3,
+        episode_id="surface-episode",
     )
     state["resolver_state"] = append_observation(
         resolver_state,
@@ -206,6 +207,11 @@ def test_l3_builder_projects_latest_resolver_result_as_separate_authority() -> N
                 "The bounded task was accepted for continued work; its later "
                 "result will return through the normal conversation path."
             ),
+            "task_resolution_evidence_state": {
+                "schema_version": "resolver_evidence_state.v1",
+                "state": "missing",
+                "remaining_needs": ["the final evidence"],
+            },
             "evidence_refs": [],
             "created_at_utc": "2026-07-14T00:00:00Z",
         },
@@ -223,6 +229,11 @@ def test_l3_builder_projects_latest_resolver_result_as_separate_authority() -> N
             "The bounded task was accepted for continued work; its later "
             "result will return through the normal conversation path."
         ),
+        "prompt_safe_observation_handle": "resolver_observation_optional",
+        "evidence_state": "missing",
+        "evidence_excerpts": [],
+        "evidence_handles": [],
+        "remaining_needs": ["the final evidence"],
     }
     assert payload["permitted_action_results"] == []
 

@@ -36,6 +36,9 @@ from kazusa_ai_chatbot.cognition_core_v2.surface import (
     run_text_surface_planning,
     run_visual_surface_planning,
 )
+from kazusa_ai_chatbot.cognition_resolver.contracts import (
+    resolver_evidence_excerpts_for_cognition,
+)
 from kazusa_ai_chatbot.cognition_resolver.state import validate_resolver_state
 from kazusa_ai_chatbot.llm_interface import LLMCallConfig
 from kazusa_ai_chatbot.nodes.linguistic_texture import (
@@ -573,8 +576,8 @@ def _action_results(state: Mapping[str, Any]) -> list[dict[str, Any]]:
     return result
 
 
-def _resolver_result(state: Mapping[str, Any]) -> dict[str, str] | None:
-    """Project the latest source-owned resolver outcome into L3."""
+def _resolver_result(state: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Project the bound source-owned resolver outcome into L3."""
 
     raw_resolver_state = state.get("resolver_state")
     if not isinstance(raw_resolver_state, Mapping):
@@ -583,9 +586,81 @@ def _resolver_result(state: Mapping[str, Any]) -> dict[str, str] | None:
     observations = resolver_state["observations"]
     if not observations:
         return None
+    dependency = resolver_state.get(
+        "required_resolver_evidence_dependency"
+    )
+    if dependency is not None:
+        observation = next(
+            (
+                candidate
+                for candidate in observations
+                if candidate["observation_id"] == dependency["observation_id"]
+            ),
+            None,
+        )
+        if observation is None:
+            raise ValueError(
+                "required resolver evidence observation is unavailable"
+            )
+        if observation["capability_kind"] != "task_resolution_request":
+            raise ValueError(
+                "required resolver evidence observation has wrong capability"
+            )
+        return _task_resolver_result(observation, dependency=dependency)
+
     observation = observations[-1]
+    if observation["capability_kind"] == "task_resolution_request":
+        return _task_resolver_result(observation, dependency=None)
     return {
         "capability_kind": observation["capability_kind"],
         "status": observation["status"],
         "semantic_result": observation["prompt_safe_summary"],
+    }
+
+
+def _task_resolver_result(
+    observation: Mapping[str, Any],
+    *,
+    dependency: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Project one task observation with source-owned evidence metadata."""
+
+    evidence_state = observation.get("task_resolution_evidence_state")
+    if not isinstance(evidence_state, Mapping):
+        raise ValueError("task resolver observation lacks evidence state")
+    excerpts = resolver_evidence_excerpts_for_cognition(observation)
+    if dependency is None:
+        prompt_safe_observation_handle = "resolver_observation_optional"
+        evidence_handles = [
+            f"resolver_evidence_optional_{index}"
+            for index, _excerpt in enumerate(excerpts, start=1)
+        ]
+    else:
+        prompt_safe_observation_handle = dependency[
+            "prompt_safe_observation_handle"
+        ]
+        evidence_handles = list(dependency["evidence_handles"])
+        if len(evidence_handles) != len(excerpts):
+            raise ValueError(
+                "required resolver evidence handles do not match excerpts"
+            )
+        if dependency["state"] != evidence_state["state"]:
+            raise ValueError(
+                "required resolver evidence state does not match observation"
+            )
+        if list(dependency["remaining_needs"]) != list(
+            evidence_state["remaining_needs"]
+        ):
+            raise ValueError(
+                "required resolver remaining needs do not match observation"
+            )
+    return {
+        "capability_kind": observation["capability_kind"],
+        "status": observation["status"],
+        "semantic_result": observation["prompt_safe_summary"],
+        "prompt_safe_observation_handle": prompt_safe_observation_handle,
+        "evidence_state": evidence_state["state"],
+        "evidence_excerpts": excerpts,
+        "evidence_handles": evidence_handles,
+        "remaining_needs": list(evidence_state["remaining_needs"]),
     }

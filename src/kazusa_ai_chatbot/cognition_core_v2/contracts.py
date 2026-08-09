@@ -38,6 +38,17 @@ from kazusa_ai_chatbot.cognition_episode import (
     CognitiveEpisodeValidationError,
     validate_cognitive_episode_v1,
 )
+from kazusa_ai_chatbot.cognition_resolver.contracts import (
+    MAX_RESOLVER_EVIDENCE_EXCERPT_CHARS,
+    MAX_RESOLVER_EVIDENCE_EXCERPTS,
+    RESOLVER_EVIDENCE_STATE_VERSION,
+    CurrentTurnRelationalWillingnessV1,
+    RequiredResolverEvidenceDependencyV1,
+    ResolverValidationError,
+    validate_current_turn_relational_willingness,
+    validate_resolver_evidence_state,
+    validate_required_resolver_evidence_dependency,
+)
 from kazusa_ai_chatbot.config import (
     L3_INTERACTION_STYLE_GUIDELINES_PER_FIELD_LIMIT,
 )
@@ -839,6 +850,13 @@ class CognitionCoreInputV2(TypedDict):
     resolver_context: str
     runtime_capability_limits: NotRequired[list[str]]
     resolver_goal_progress: NotRequired[dict[str, Any]]
+    required_resolver_evidence_dependency: NotRequired[
+        RequiredResolverEvidenceDependencyV1
+    ]
+    current_turn_relational_willingness: NotRequired[
+        CurrentTurnRelationalWillingnessV1
+    ]
+    resolver_cycle_index: NotRequired[int]
     pending_resolver_resume: NotRequired[dict[str, Any]]
     scene_context: SceneContextV2
     private_continuity_context: str
@@ -904,6 +922,13 @@ class SurfaceResolverResultV2(TypedDict):
     capability_kind: str
     status: Literal["succeeded", "blocked", "failed"]
     semantic_result: str
+    prompt_safe_observation_handle: NotRequired[str]
+    evidence_state: NotRequired[
+        Literal["complete", "partial", "pending", "missing", "blocked"]
+    ]
+    evidence_excerpts: NotRequired[list[str]]
+    evidence_handles: NotRequired[list[str]]
+    remaining_needs: NotRequired[list[str]]
 
 
 class CharacterExpressionContextV2(TypedDict):
@@ -937,6 +962,9 @@ class TextSurfaceInputV2(TypedDict):
     semantic_relationship: NotRequired[SemanticRelationshipProjectionV2]
     permitted_action_results: list[SemanticActionResultV2]
     resolver_result: NotRequired[SurfaceResolverResultV2]
+    required_resolver_evidence_dependency: NotRequired[
+        RequiredResolverEvidenceDependencyV1
+    ]
     runtime_capability_limits: NotRequired[list[str]]
     interaction_style_context: str
     character_expression_context: CharacterExpressionContextV2
@@ -1064,6 +1092,17 @@ def validate_cognition_core_input(
             else set()
         )
         | (
+            {"required_resolver_evidence_dependency"}
+            if "required_resolver_evidence_dependency" in payload
+            else set()
+        )
+        | (
+            {"current_turn_relational_willingness"}
+            if "current_turn_relational_willingness" in payload
+            else set()
+        )
+        | ({"resolver_cycle_index"} if "resolver_cycle_index" in payload else set())
+        | (
             {"pending_resolver_resume"}
             if "pending_resolver_resume" in payload
             else set()
@@ -1160,6 +1199,35 @@ def validate_cognition_core_input(
         _validate_resolver_goal_progress_input(
             payload["resolver_goal_progress"]
         )
+    if "required_resolver_evidence_dependency" in payload:
+        try:
+            validate_required_resolver_evidence_dependency(
+                payload["required_resolver_evidence_dependency"]
+            )
+        except ResolverValidationError as exc:
+            raise CognitionContractError(
+                f"required resolver evidence dependency is invalid: {exc}"
+            ) from exc
+    if "current_turn_relational_willingness" in payload:
+        try:
+            validate_current_turn_relational_willingness(
+                payload["current_turn_relational_willingness"],
+                episode_id=payload["episode"]["episode_id"],
+            )
+        except ResolverValidationError as exc:
+            raise CognitionContractError(
+                f"current-turn relational carrier is invalid: {exc}"
+            ) from exc
+    if "resolver_cycle_index" in payload:
+        cycle_index = payload["resolver_cycle_index"]
+        if (
+            not isinstance(cycle_index, int)
+            or isinstance(cycle_index, bool)
+            or cycle_index < 0
+        ):
+            raise CognitionContractError(
+                "resolver cycle index must be a non-negative integer"
+            )
     if not isinstance(payload["scene_context"], Mapping):
         raise CognitionContractError("scene_context must be a mapping")
     _validate_scene_context(payload["scene_context"])
@@ -1316,6 +1384,11 @@ def validate_text_surface_input(
         | ({"semantic_relationship"} if "semantic_relationship" in payload else set())
         | ({"resolver_result"} if "resolver_result" in payload else set())
         | (
+            {"required_resolver_evidence_dependency"}
+            if "required_resolver_evidence_dependency" in payload
+            else set()
+        )
+        | (
             {"runtime_capability_limits"}
             if "runtime_capability_limits" in payload
             else set()
@@ -1382,8 +1455,29 @@ def validate_text_surface_input(
         )
     for row in payload["permitted_action_results"]:
         _validate_action_result(row)
+    required_dependency = None
+    if "required_resolver_evidence_dependency" in payload:
+        try:
+            required_dependency = (
+                validate_required_resolver_evidence_dependency(
+                    payload["required_resolver_evidence_dependency"]
+                )
+            )
+        except ResolverValidationError as exc:
+            raise CognitionContractError(
+                f"surface required resolver dependency is invalid: {exc}"
+            ) from exc
     if "resolver_result" in payload:
         _validate_surface_resolver_result(payload["resolver_result"])
+        if required_dependency is not None:
+            _validate_surface_resolver_result_dependency(
+                payload["resolver_result"],
+                required_dependency,
+            )
+    elif required_dependency is not None:
+        raise CognitionContractError(
+            "surface required resolver dependency needs resolver result"
+        )
     if "relational_willingness" in payload:
         validate_relational_willingness(payload["relational_willingness"])
     if "addressee_plan" in payload:
@@ -3294,8 +3388,20 @@ def _validate_action_result(value: Any) -> None:
 def _validate_surface_resolver_result(value: Any) -> None:
     """Validate one source-owned resolver outcome for L3 planning."""
 
-    required = {"capability_kind", "status", "semantic_result"}
-    if not isinstance(value, Mapping) or set(value) != required:
+    base_fields = {"capability_kind", "status", "semantic_result"}
+    if not isinstance(value, Mapping):
+        raise CognitionContractError("surface resolver result fields are not exact")
+    capability_kind = value.get("capability_kind")
+    required = base_fields
+    if capability_kind == "task_resolution_request":
+        required = base_fields | {
+            "prompt_safe_observation_handle",
+            "evidence_state",
+            "evidence_excerpts",
+            "evidence_handles",
+            "remaining_needs",
+        }
+    if set(value) != required:
         raise CognitionContractError("surface resolver result fields are not exact")
     _require_text(value["capability_kind"], "surface resolver capability kind")
     if value["status"] not in {"succeeded", "blocked", "failed"}:
@@ -3305,6 +3411,119 @@ def _validate_surface_resolver_result(value: Any) -> None:
         "surface resolver semantic result",
         maximum=2000,
     )
+    if capability_kind != "task_resolution_request":
+        return
+    _validate_surface_task_evidence_fields(value)
+
+
+def _validate_surface_task_evidence_fields(value: Mapping[str, Any]) -> None:
+    """Validate the prompt-safe evidence projection for a task result."""
+
+    _require_text(
+        value["prompt_safe_observation_handle"],
+        "surface resolver observation handle",
+        maximum=200,
+    )
+    evidence_state = {
+        "schema_version": RESOLVER_EVIDENCE_STATE_VERSION,
+        "state": value["evidence_state"],
+        "remaining_needs": value["remaining_needs"],
+    }
+    try:
+        validate_resolver_evidence_state(evidence_state)
+    except ResolverValidationError as exc:
+        raise CognitionContractError(
+            f"surface resolver evidence state is invalid: {exc}"
+        ) from exc
+    evidence_excerpts = value["evidence_excerpts"]
+    if (
+        not isinstance(evidence_excerpts, list)
+        or len(evidence_excerpts) > MAX_RESOLVER_EVIDENCE_EXCERPTS
+    ):
+        raise CognitionContractError(
+            "surface resolver evidence excerpts are invalid"
+        )
+    for index, excerpt in enumerate(evidence_excerpts):
+        _require_text(
+            excerpt,
+            f"surface resolver evidence_excerpts[{index}]",
+            maximum=MAX_RESOLVER_EVIDENCE_EXCERPT_CHARS,
+        )
+    evidence_handles = value["evidence_handles"]
+    if (
+        not isinstance(evidence_handles, list)
+        or len(evidence_handles) > 8
+    ):
+        raise CognitionContractError(
+            "surface resolver evidence handles are invalid"
+        )
+    for index, handle in enumerate(evidence_handles):
+        _require_text(
+            handle,
+            f"surface resolver evidence_handles[{index}]",
+            maximum=240,
+        )
+    if len(evidence_handles) != len(set(evidence_handles)):
+        raise CognitionContractError(
+            "surface resolver evidence handles are duplicated"
+        )
+    remaining_needs = value["remaining_needs"]
+    if not isinstance(remaining_needs, list) or len(remaining_needs) > 8:
+        raise CognitionContractError(
+            "surface resolver remaining needs are invalid"
+        )
+    for index, need in enumerate(remaining_needs):
+        _require_text(
+            need,
+            f"surface resolver remaining_needs[{index}]",
+            maximum=240,
+        )
+    state = value["evidence_state"]
+    if state == "complete" and (not evidence_excerpts or remaining_needs):
+        raise CognitionContractError(
+            "complete surface resolver evidence needs excerpts and no needs"
+        )
+    if state == "partial" and (not evidence_excerpts or not remaining_needs):
+        raise CognitionContractError(
+            "partial surface resolver evidence needs excerpts and needs"
+        )
+    if state == "missing" and evidence_excerpts:
+        raise CognitionContractError(
+            "missing surface resolver evidence cannot contain excerpts"
+        )
+    if value["status"] == "succeeded" and state == "blocked":
+        raise CognitionContractError(
+            "succeeded surface resolver result cannot have blocked evidence"
+        )
+    if value["status"] != "succeeded" and state != "blocked":
+        raise CognitionContractError(
+            "blocked surface resolver result needs blocked evidence"
+        )
+
+
+def _validate_surface_resolver_result_dependency(
+    result: Mapping[str, Any],
+    dependency: RequiredResolverEvidenceDependencyV1,
+) -> None:
+    """Require the surface result to match its exact internal dependency."""
+
+    if result["capability_kind"] != dependency["capability_kind"]:
+        raise CognitionContractError(
+            "surface resolver capability does not match dependency"
+        )
+    for field_name in (
+        "prompt_safe_observation_handle",
+        "evidence_state",
+        "evidence_handles",
+        "remaining_needs",
+    ):
+        dependency_field = (
+            "state" if field_name == "evidence_state" else field_name
+        )
+        if result[field_name] != dependency[dependency_field]:
+            raise CognitionContractError(
+                f"surface resolver dependency field mismatch: {field_name}"
+            )
 
 
 def validate_surface_addressee_plan(value: Any) -> None:

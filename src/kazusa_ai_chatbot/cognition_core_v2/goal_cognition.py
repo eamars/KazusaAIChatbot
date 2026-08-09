@@ -47,6 +47,11 @@ from kazusa_ai_chatbot.cognition_core_v2.prompt_budget import (
     reduce_identity_projection,
     reduce_scene_context_projection,
 )
+from kazusa_ai_chatbot.cognition_resolver.contracts import (
+    CurrentTurnRelationalWillingnessV1,
+    ResolverValidationError,
+    validate_current_turn_relational_willingness,
+)
 from kazusa_ai_chatbot.llm_interface import LLMCallConfig
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 
@@ -91,6 +96,24 @@ GOAL_COGNITION_PROMPT = '''你是一个独立的目标认知分支。请为当�
 # 输出与最后检查
 只返回一个 JSON 对象，字段恰好是 intention、desired_outcome、concrete_detail、reason、private_monologue、target_role_handles、evidence_handles、expected_consequences 和 confidence；当 `branch.goal_kind` 为 `ordinary_response` 时还含 `relational_willingness`。其字段恰好是 schema_version（`relational_willingness.v2`）、applicability（`relationship_sensitive` 或 `not_relationship_sensitive`）、stance（reject、deflect、negotiate、conditional_accept、accept 或 not_applicable）、current_user_relationship_state（not_applicable、unestablished、developing_or_uncertain 或 established）、reason（简体中文，≤300字）和 evidence_handles（一到四个已提供 handle，至少一个来自当前 episode）。
 叙述字段与 confidence 为字符串，handle 字段为字符串数组，expected_consequences 是非空字符串数组；`evidence_handles` 最多九项，`target_role_handles` 最多八项。每个元素必须逐个等于一个已提供的 handle，不得使用范围、通配符、组合写法或 source ID。确认角色、行动者、对象和受益者方向没有反转；确认缺失证据时保留“取得所需证据后回应”；确认请求只形成言语立场，不写执行细节，不输出 target_roles、role_handles、semantic_text、数值 confidence、route、action/resolver handle 或其他字段。
+'''
+
+
+ORDINARY_RECURRENCE_GOAL_COGNITION_PROMPT = '''你是普通回应目标分支的递归目标认知。请根据当前事件、角色身份、上下文和已提供证据，重新选择一个完整、有证据支持的当前目标。
+
+本轮的关系许可判断已经在更早的同一 cognitive episode 中完成，并由确定性代码携带。你只负责重新判断普通回应目标及其后果，不重新判断关系许可，不输出 relational_willingness，也不把 resolver observation 的存在当作发言理由。
+
+保持 response_operation 的行动者、对象、受益者、选择权和回应意图方向。当前 episode 比旧关系、共享记忆和一般角色习惯更权威；缺失事实时保留取得所需证据后回应，不把执行能力或运行时约束改写为目标。
+
+只返回一个严格 JSON 对象，字段必须恰好是 intention、desired_outcome、concrete_detail、reason、private_monologue、target_role_handles、evidence_handles、expected_consequences 和 confidence。叙述字段与 confidence 为字符串，handle 字段为字符串数组，expected_consequences 是非空字符串数组；每个 handle 必须逐个等于输入中提供的值，不得使用 source ID、范围、通配符或其他字段。自由文本使用简体中文，不写最终对话、执行路由或能力句柄。
+'''
+
+
+ORDINARY_RECURRENCE_SELECTION_GOAL_COGNITION_PROMPT = '''你是普通回应的递归选择目标分支。关系许可判断已经在同一 cognitive episode 的较早阶段完成，并由确定性代码携带；你只负责依据当前事件和证据重新表达当前角色的具体选择，不输出 relational_willingness，也不重新判断关系许可。
+
+保持 required_selection_operations 的行动者、对象、受益者和选择拥有者方向。当前 episode 比旧关系、共享记忆和角色习惯更权威，缺失事实时不得假装完成。
+
+只返回一个严格 JSON 对象，字段必须恰好是 selection、reason、private_monologue、target_role_handles、evidence_handles、expected_consequences 和 confidence。selection 必须直接写出当前角色的具体选择、拒绝、协商结果或条件；叙述字段和 confidence 为字符串，handle 字段为字符串数组，expected_consequences 是非空字符串数组；每个 handle 必须逐个等于输入中提供的值，不得使用 source ID、范围、通配符或其他字段。自由文本使用简体中文。
 '''
 
 
@@ -359,6 +382,7 @@ async def run_goal_cognition(
     semantic_context: Mapping[str, Any],
     evidence: Sequence[CognitionEvidenceV2],
     services: CognitionCoreServicesV2,
+    current_turn_relational_willingness: Mapping[str, Any] | None = None,
 ) -> ActionBidV2:
     """Run one goal branch inside an invocation-wide attempt ledger."""
 
@@ -375,6 +399,7 @@ async def run_goal_cognition(
             semantic_context,
             evidence,
             services,
+            current_turn_relational_willingness,
         )
     finally:
         if ledger_token is not None:
@@ -387,13 +412,37 @@ async def _run_goal_cognition(
     semantic_context: Mapping[str, Any],
     evidence: Sequence[CognitionEvidenceV2],
     services: CognitionCoreServicesV2,
+    current_turn_relational_willingness: Mapping[str, Any] | None = None,
 ) -> ActionBidV2:
     """Run one goal branch and map its draft to a complete deterministic bid."""
 
     required_operations = _required_selection_operations(evidence)
     selection_required = bool(required_operations)
+    recurrence_relational_willingness = (
+        definition.branch_id == "ordinary_response"
+        and current_turn_relational_willingness is not None
+    )
+    if recurrence_relational_willingness:
+        try:
+            current_turn_relational_willingness = (
+                validate_current_turn_relational_willingness(
+                    current_turn_relational_willingness,
+                    episode_id=current_turn_relational_willingness["episode_id"],
+                )
+            )
+        except (ResolverValidationError, KeyError, TypeError) as exc:
+            raise CognitionExecutionError(
+                f"current-turn relational carrier is invalid: {exc}",
+                error_code="current_turn_relational_carrier_invalid",
+                branch_id=definition.branch_id,
+                stage="goal_cognition",
+                attempt_count=0,
+                safe_checkpoint="pre_state_commit",
+                retryable=False,
+            ) from exc
     require_relational_willingness = (
         definition.branch_id == "ordinary_response"
+        and not recurrence_relational_willingness
     )
     if selection_required or definition.branch_id == "ordinary_response":
         goal_config = services.goal_ordinary_response_config
@@ -513,7 +562,13 @@ async def _run_goal_cognition(
         ]
     else:
         prompt_payload['evidence'] = prompt_evidence
-    if selection_required:
+    if recurrence_relational_willingness:
+        initial_system_prompt = (
+            ORDINARY_RECURRENCE_SELECTION_GOAL_COGNITION_PROMPT
+            if selection_required
+            else ORDINARY_RECURRENCE_GOAL_COGNITION_PROMPT
+        )
+    elif selection_required:
         initial_system_prompt = (
             REQUIRED_SELECTION_GOAL_PROMPT
             if require_relational_willingness
@@ -681,6 +736,9 @@ async def _run_goal_cognition(
                 draft = _selection_goal_draft_to_goal_bid(
                     selection_draft,
                     branch_id=definition.branch_id,
+                    include_relational_willingness=(
+                        require_relational_willingness
+                    ),
                 )
             else:
                 draft = validate_goal_bid_draft(
@@ -844,7 +902,54 @@ async def _run_goal_cognition(
         bid["relational_willingness"] = dict(
             draft["relational_willingness"]
         )
+    elif (
+        definition.branch_id == "ordinary_response"
+        and recurrence_relational_willingness
+        and current_turn_relational_willingness is not None
+    ):
+        bid["relational_willingness"] = (
+            _materialize_recurrence_relational_willingness(
+                current_turn_relational_willingness,
+                episode_evidence_handles,
+            )
+        )
     return bid
+
+
+def _materialize_recurrence_relational_willingness(
+    carrier: CurrentTurnRelationalWillingnessV1,
+    episode_evidence_handles: set[str],
+) -> dict[str, Any]:
+    """Rebuild the canonical relational row from the immutable stance triple."""
+
+    if not episode_evidence_handles:
+        raise CognitionExecutionError(
+            "current-turn relational carrier has no current-episode evidence",
+            error_code="current_turn_relational_carrier_invalid",
+            branch_id="ordinary_response",
+            stage="goal_cognition",
+            attempt_count=0,
+            safe_checkpoint="pre_state_commit",
+            retryable=False,
+        )
+    decision = carrier["decision"]
+    materialized = {
+        "schema_version": "relational_willingness.v2",
+        "applicability": decision["applicability"],
+        "stance": decision["stance"],
+        "current_user_relationship_state": decision[
+            "current_user_relationship_state"
+        ],
+        "reason": "沿用本轮已确认的关系许可判断。",
+        "evidence_handles": [min(episode_evidence_handles)],
+    }
+    validated = validate_relational_willingness(
+        materialized,
+        evidence_handles=episode_evidence_handles,
+        episode_handles=episode_evidence_handles,
+    )
+    return_value = dict(validated)
+    return return_value
 
 
 def _fit_goal_prompt_payload(
@@ -1063,6 +1168,7 @@ def _selection_goal_draft_to_goal_bid(
     selection_draft: Mapping[str, Any],
     *,
     branch_id: str,
+    include_relational_willingness: bool = True,
 ) -> GoalBidDraftV2:
     """Map one authoritative selection string into the complete bid shape."""
 
@@ -1084,7 +1190,7 @@ def _selection_goal_draft_to_goal_bid(
         ),
         "confidence": selection_draft["confidence"],
     }
-    if branch_id == "ordinary_response":
+    if branch_id == "ordinary_response" and include_relational_willingness:
         result["relational_willingness"] = dict(
             selection_draft["relational_willingness"]
         )

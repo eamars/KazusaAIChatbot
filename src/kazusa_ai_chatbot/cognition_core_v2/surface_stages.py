@@ -47,6 +47,8 @@ CONTENT_PLAN_SYSTEM_PROMPT = '''规划当前角色在这个场景中实际会说
 已经形成的角色判断。综合 selected intention、primary bid、supporting bid、visible episode、
 semantic affect、semantic relationship、expression policy、interaction style 和
 permitted_action_results。resolver_result 提供本轮 resolver capability 的来源自有执行结果。
+task_resolution_request 的 resolver_result 还提供 source-owned evidence_state、evidence_excerpts、
+evidence_handles、prompt_safe_observation_handle 和 remaining_needs；这些字段共同界定当前事实边界。
 character_expression_context 提供 tempo 和 linguistic_texture，与这些
 语境共同塑造句式、节奏和角色声音。runtime_capability_limits 提供运行时能力边界；按每项能力的
 真实状态表达已经发生的结果、当前限制、等待状态或下一步条件。
@@ -70,6 +72,10 @@ scheduled 表达已记录、已排队、待执行及相应条件；其他状态�
 当 resolver_result.status=succeeded 且 semantic_result 明确任务已接纳并将继续执行时，表达已接纳、
 正在等待后续结果的真实状态；不得改写成 capability 不可用、任务失败或不会继续。此时 blocked 仅表示
 当前前台缺少最终答案，不覆盖已经成功接纳的后续工作。
+对于 task_resolution_request，evidence_state=complete 只允许依据 evidence_excerpts 回答并保留
+其中的限定；partial、pending、missing 或 blocked 必须明确说明所需事实尚不可用、仍在获取中或
+存在 typed blocker，并在 remaining_needs 指示时请求所需材料。status=succeeded 不能覆盖不完整
+的 evidence_state，也不能把 generic semantic_result 当作答案证据。
 5. 以 selected intention 及 intention.reason 为语义锚点，阅读完整语境，分清角色是在回应请求
 本身，还是在回应提问的时机、突然程度或直接程度。可自由组合惊讶、害羞、防御、调侃、嘴硬、
 迟疑、温柔、热烈或其他符合角色的情绪与特征。这些表达可以先于明确决定出现，并与收尾共同组成
@@ -119,6 +125,9 @@ PREFERENCE_SYSTEM_PROMPT = '''识别当前角色判断和场景中真实存在�
 以 selected intention、visible episode、projected bids、expression policy、semantic affect、
 semantic relationship、interaction style 和 permitted_action_results 为语境；
 relational_willingness、resolver_result 按原义保留（resolver_result 含 status、semantic_result）；
+task_resolution_request 的 resolver_result 中 evidence_state、evidence_excerpts、evidence_handles
+和 remaining_needs 是来源自有的答案边界；complete 只支持 supplied excerpts，其他状态不得写成
+已获得缺失事实。
 runtime_capability_limits 只约束现实能力。
 
 每一条 visible_boundaries 都对应权威语境中明确生效的表达限制或细节范围；每一条
@@ -196,6 +205,8 @@ delivery_profile 表达。
 5. 按 permitted_action_results 和 runtime_capability_limits 的原义重建状态：executed 对应有界
 的完成效果，pending 或 scheduled 对应等待状态，其他 status 对应当前限制。
 resolver_result 明确任务已接纳并将继续执行时，保留该等待后续结果的事实，不得改写为任务失败。
+task_resolution_request 的 evidence_state=complete 只能依据 evidence_excerpts；partial、pending、
+missing 和 blocked 必须保留缺口、等待或 typed blocker，不得把 semantic_result 当作缺失答案。
 6. content_requirements 使用正向目标句式，描述回应应呈现的立场、情绪流动、角色特征、事实和
 互动推进；delivery_profile 用词语层次、句式、节奏、犹豫和标点实现这些语义选择，让角色声音
 保持鲜明。

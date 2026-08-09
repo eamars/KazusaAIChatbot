@@ -17,9 +17,11 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     project_observations_for_cognition,
     project_pending_resume_for_cognition,
     validate_resolver_cycle_trace,
+    validate_current_turn_relational_willingness,
     validate_resolver_goal_progress,
     validate_resolver_observation,
     validate_resolver_pending_resume,
+    validate_required_resolver_evidence_dependency,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
 from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import (
@@ -33,11 +35,13 @@ def new_resolver_state(
     *,
     decontextualized_input: str,
     max_cycles: int,
+    episode_id: str,
 ) -> ResolverCycleStateV1:
     """Create the initial resolver state for a decontextualized user turn."""
 
     _require_non_empty_text(decontextualized_input, "decontextualized_input")
     validated_max_cycles = _require_positive_int(max_cycles, "max_cycles")
+    _require_non_empty_text(episode_id, "episode_id")
     return_value: ResolverCycleStateV1 = {
         "schema_version": RESOLVER_CYCLE_STATE_VERSION,
         "cycle_index": 0,
@@ -201,6 +205,7 @@ def ensure_initial_resolver_inputs(
         resolver_state = new_resolver_state(
             decontextualized_input=decontextualized_input,
             max_cycles=max_cycles,
+            episode_id=_cognitive_episode_id(initialized),
         )
     else:
         resolver_state = validate_resolver_state(resolver_state)
@@ -289,6 +294,17 @@ def project_resolver_context(
     pending_context = project_pending_resume_for_cognition(pending_resume)
     if pending_context:
         lines.append(pending_context)
+    dependency = normalized_state.get(
+        "required_resolver_evidence_dependency"
+    )
+    if dependency is not None:
+        lines.append(
+            "required_resolver_evidence_dependency: "
+            f"observation_handle={dependency['prompt_safe_observation_handle']}; "
+            f"state={dependency['state']}; "
+            f"evidence_handles={','.join(dependency['evidence_handles'])}; "
+            f"remaining_needs={' | '.join(dependency['remaining_needs'])}"
+        )
     return_value = "\n".join(lines)
     return return_value
 
@@ -331,12 +347,57 @@ def validate_resolver_state(value: object) -> ResolverCycleStateV1:
         "goal_progress": goal_progress,
         "terminal_reason": terminal_reason,
     }
+    current_turn_carrier = data.get("current_turn_relational_willingness")
+    if current_turn_carrier is not None:
+        carrier_episode_id = (
+            _carrier_episode_id(current_turn_carrier)
+        )
+        normalized["current_turn_relational_willingness"] = (
+            validate_current_turn_relational_willingness(
+                current_turn_carrier,
+                episode_id=carrier_episode_id,
+            )
+        )
+    evidence_dependency = data.get(
+        "required_resolver_evidence_dependency"
+    )
+    if evidence_dependency is not None:
+        normalized["required_resolver_evidence_dependency"] = (
+            validate_required_resolver_evidence_dependency(
+                evidence_dependency,
+            )
+        )
     pending_resume = data.get("pending_resume")
     if pending_resume is not None:
         normalized["pending_resume"] = validate_resolver_pending_resume(
             pending_resume,
         )
     return_value = normalized
+    return return_value
+
+
+def _cognitive_episode_id(state: Mapping[str, Any]) -> str:
+    """Require the canonical episode identity for new resolver state."""
+
+    episode = state.get("cognitive_episode")
+    if not isinstance(episode, Mapping):
+        raise ResolverValidationError("cognitive_episode: expected object")
+    episode_id = episode.get("episode_id")
+    _require_non_empty_text(episode_id, "cognitive_episode.episode_id")
+    return_value = episode_id
+    return return_value
+
+
+def _carrier_episode_id(value: object) -> str:
+    """Read the carrier episode identity before validating its exact shape."""
+
+    if not isinstance(value, Mapping):
+        raise ResolverValidationError(
+            "current_turn_relational_willingness: expected object"
+        )
+    episode_id = value.get("episode_id")
+    _require_non_empty_text(episode_id, "current_turn_relational_willingness.episode_id")
+    return_value = episode_id
     return return_value
 
 

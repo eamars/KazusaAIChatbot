@@ -1916,6 +1916,7 @@ async def test_c03_action_planning_selects_local_recall_from_connector_state() -
     resolver_state = new_resolver_state(
         decontextualized_input=decontextualized_input,
         max_cycles=3,
+        episode_id=episode["episode_id"],
     )
     runtime_snapshot = {
         'worker_status': {
@@ -2076,6 +2077,7 @@ async def test_o04_action_planning_selects_local_recall_from_frozen_e2e_state() 
     resolver_state = new_resolver_state(
         decontextualized_input=decontextualized_input,
         max_cycles=3,
+        episode_id=frozen_graph["cognitive_episode"]["episode_id"],
     )
     resolver_state = update_goal_progress(
         resolver_state,
@@ -2201,6 +2203,7 @@ async def _run_frozen_repository_action_planning_case(
     resolver_state = new_resolver_state(
         decontextualized_input=decontextualized_input,
         max_cycles=3,
+        episode_id=frozen_graph["cognitive_episode"]["episode_id"],
     )
     runtime_snapshot = frozen_graph['action_availability_runtime']
     connector_input = build_cognition_input_from_global_state(
@@ -2472,6 +2475,7 @@ def _build_seeded_coding_connector_input(
     resolver_state = new_resolver_state(
         decontextualized_input=decontextualized_input,
         max_cycles=3,
+        episode_id=frozen_graph["cognitive_episode"]["episode_id"],
     )
     connector_input = build_cognition_input_from_global_state(
         {
@@ -2651,6 +2655,7 @@ async def test_c12_action_planning_selects_seeded_status_owner() -> None:
     resolver_state = new_resolver_state(
         decontextualized_input=decontextualized_input,
         max_cycles=3,
+        episode_id=frozen_graph["cognitive_episode"]["episode_id"],
     )
     runtime_snapshot = frozen_graph['action_availability_runtime']
     connector_input = build_cognition_input_from_global_state(
@@ -2830,6 +2835,7 @@ async def test_c12_goal_cognition_uses_persisted_status_context() -> None:
     resolver_state = new_resolver_state(
         decontextualized_input=decontextualized_input,
         max_cycles=3,
+        episode_id=frozen_graph["cognitive_episode"]["episode_id"],
     )
     connector_input = build_cognition_input_from_global_state(
         {
@@ -3076,6 +3082,7 @@ async def test_c11_action_authorization_rejects_unavailable_coding_owner() -> No
     resolver_state = new_resolver_state(
         decontextualized_input=decontextualized_input,
         max_cycles=3,
+        episode_id=frozen_graph["cognitive_episode"]["episode_id"],
     )
     connector_input = build_cognition_input_from_global_state(
         {

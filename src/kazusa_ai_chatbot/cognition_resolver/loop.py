@@ -17,6 +17,7 @@ from kazusa_ai_chatbot.action_spec.models import (
 from kazusa_ai_chatbot.action_spec.registry import SPEAK_CAPABILITY
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     RESOLVER_CYCLE_TRACE_VERSION,
+    RESOLVER_EVIDENCE_STATE_VERSION,
     RESOLVER_OBSERVATION_VERSION,
     ResolverCapabilityRequestV1,
     ResolverCycleStateV1,
@@ -28,6 +29,7 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     validate_resolver_goal_progress,
     validate_resolver_observation,
     validate_resolver_pending_resolution,
+    validate_required_resolver_evidence_dependency,
 )
 from kazusa_ai_chatbot.cognition_resolver.pending import (
     apply_pending_resolution,
@@ -174,6 +176,19 @@ async def call_cognition_resolver_loop(
             return return_value
 
         resolver_state = append_observation(resolver_state, observation)
+        resolver_state = _bind_required_evidence_dependency(
+            resolver_state,
+            selected_request=selected_request,
+            observation=observation,
+            request_ordinal=_resolver_request_ordinal(
+                cognition_state,
+                selected_request,
+            ),
+            required=(
+                cognition_state.get("goal_resolution")
+                == "requires_required_evidence"
+            ),
+        )
         if "rag_result" in observation:
             cognition_state["rag_result"] = observation["rag_result"]
             await _attach_past_dialog_cognition_from_rag_result(
@@ -269,6 +284,10 @@ async def _run_max_cycle_final_cognition(
     resolver_state = _resolver_state(state)
     blocker = _max_cycle_observation(state, resolver_state)
     resolver_state = append_observation(resolver_state, blocker)
+    resolver_state = _mark_existing_dependency_blocked(
+        resolver_state,
+        blocker,
+    )
     updated_resolver_state = dict(resolver_state)
     updated_resolver_state["status"] = "max_cycles"
     updated_resolver_state["terminal_reason"] = "maximum resolver cycles reached"
@@ -349,6 +368,10 @@ async def _run_duplicate_request_final_cognition(
 
     blocker = _duplicate_request_observation(selected_request, state)
     resolver_state = append_observation(resolver_state, blocker)
+    resolver_state = _mark_existing_dependency_blocked(
+        resolver_state,
+        blocker,
+    )
     updated_resolver_state = dict(resolver_state)
     updated_resolver_state["status"] = "blocked"
     updated_resolver_state["terminal_reason"] = (
@@ -455,6 +478,16 @@ async def _run_blocked_pending_final_cognition(
     )
     resolver_state = _resolver_state(state)
     resolver_state = append_observation(resolver_state, normalized_observation)
+    resolver_state = _bind_required_evidence_dependency(
+        resolver_state,
+        selected_request=selected_request,
+        observation=normalized_observation,
+        request_ordinal=_resolver_request_ordinal(state, selected_request),
+        required=(
+            state.get("goal_resolution")
+            == "requires_required_evidence"
+        ),
+    )
     updated_resolver_state = dict(resolver_state)
     updated_resolver_state["status"] = pending_resume["status"]
     updated_resolver_state["pending_resume"] = pending_resume
@@ -545,6 +578,16 @@ async def _run_user_input_blocker_final_cognition(
 
     resolver_state = _resolver_state(state)
     resolver_state = append_observation(resolver_state, observation)
+    resolver_state = _bind_required_evidence_dependency(
+        resolver_state,
+        selected_request=selected_request,
+        observation=observation,
+        request_ordinal=_resolver_request_ordinal(state, selected_request),
+        required=(
+            state.get("goal_resolution")
+            == "requires_required_evidence"
+        ),
+    )
     updated_resolver_state = dict(resolver_state)
     updated_resolver_state["status"] = "blocked"
     updated_resolver_state["terminal_reason"] = (
@@ -1050,6 +1093,106 @@ def _is_repeated_capability_request(
     return return_value
 
 
+def _resolver_request_ordinal(
+    state: GlobalPersonaState,
+    selected_request: ResolverCapabilityRequestV1,
+) -> int:
+    """Return the stable one-based request position selected in this cycle."""
+
+    requests = state.get("resolver_capability_requests")
+    if not isinstance(requests, list):
+        raise ResolverValidationError(
+            "resolver_capability_requests: expected list"
+        )
+    for ordinal, raw_request in enumerate(requests, start=1):
+        validated_request = validate_resolver_capability_request(raw_request)
+        if validated_request == selected_request:
+            return_value = ordinal
+            return return_value
+    raise ResolverValidationError(
+        "selected resolver request was not present in the cognition output"
+    )
+
+
+def _bind_required_evidence_dependency(
+    resolver_state: ResolverCycleStateV1,
+    *,
+    selected_request: ResolverCapabilityRequestV1,
+    observation: ResolverObservationV1,
+    request_ordinal: int,
+    required: bool,
+) -> ResolverCycleStateV1:
+    """Bind one required task request to its exact observation evidence state."""
+
+    if (
+        not required
+        or selected_request["capability_kind"] != "task_resolution_request"
+    ):
+        return_value = resolver_state
+        return return_value
+    evidence_state = observation.get("task_resolution_evidence_state")
+    if not isinstance(evidence_state, Mapping):
+        raise ResolverValidationError(
+            "task observation is missing its evidence state"
+        )
+    cycle_index = resolver_state["cycle_index"]
+    evidence_handles = [
+        f"resolver_evidence_{cycle_index}_{request_ordinal}_{index}"
+        for index, evidence_ref in enumerate(
+            observation["evidence_refs"],
+            start=1,
+        )
+        if isinstance(evidence_ref.get("excerpt"), str)
+        and evidence_ref["excerpt"].strip()
+    ]
+    dependency = {
+        "schema_version": "required_resolver_evidence_dependency.v1",
+        "accepted_request_handle": (
+            f"resolver_request_{cycle_index}_{request_ordinal}"
+        ),
+        "observation_id": observation["observation_id"],
+        "prompt_safe_observation_handle": (
+            f"resolver_observation_{cycle_index}_{request_ordinal}"
+        ),
+        "capability_kind": "task_resolution_request",
+        "state": evidence_state["state"],
+        "evidence_handles": evidence_handles[:4],
+        "remaining_needs": list(evidence_state["remaining_needs"]),
+    }
+    validated_dependency = validate_required_resolver_evidence_dependency(
+        dependency,
+    )
+    updated = dict(resolver_state)
+    updated["required_resolver_evidence_dependency"] = validated_dependency
+    return_value = validate_resolver_state(updated)
+    return return_value
+
+
+def _mark_existing_dependency_blocked(
+    resolver_state: ResolverCycleStateV1,
+    observation: ResolverObservationV1,
+) -> ResolverCycleStateV1:
+    """Carry an existing required dependency into a terminal blocker state."""
+
+    dependency = resolver_state.get("required_resolver_evidence_dependency")
+    if dependency is None:
+        return_value = resolver_state
+        return return_value
+    updated_dependency = dict(dependency)
+    updated_dependency["state"] = "blocked"
+    evidence_state = observation.get("task_resolution_evidence_state")
+    if isinstance(evidence_state, Mapping):
+        updated_dependency["remaining_needs"] = list(
+            evidence_state["remaining_needs"]
+        )
+    updated = dict(resolver_state)
+    updated["required_resolver_evidence_dependency"] = (
+        validate_required_resolver_evidence_dependency(updated_dependency)
+    )
+    return_value = validate_resolver_state(updated)
+    return return_value
+
+
 def _timeout_observation(
     request: ResolverCapabilityRequestV1,
     state: GlobalPersonaState,
@@ -1069,6 +1212,12 @@ def _timeout_observation(
         "evidence_refs": [],
         "created_at_utc": _created_at_utc(state),
     }
+    if request["capability_kind"] == "task_resolution_request":
+        observation["task_resolution_evidence_state"] = {
+            "schema_version": RESOLVER_EVIDENCE_STATE_VERSION,
+            "state": "blocked",
+            "remaining_needs": [],
+        }
     return_value = validate_resolver_observation(observation)
     return return_value
 
@@ -1094,6 +1243,12 @@ def _duplicate_request_observation(
         "evidence_refs": [],
         "created_at_utc": _created_at_utc(state),
     }
+    if request["capability_kind"] == "task_resolution_request":
+        observation["task_resolution_evidence_state"] = {
+            "schema_version": RESOLVER_EVIDENCE_STATE_VERSION,
+            "state": "blocked",
+            "remaining_needs": [],
+        }
     return_value = validate_resolver_observation(observation)
     return return_value
 
@@ -1208,6 +1363,12 @@ def _max_cycle_observation(
         "evidence_refs": [],
         "created_at_utc": _created_at_utc(state),
     }
+    if previous_observation["capability_kind"] == "task_resolution_request":
+        observation["task_resolution_evidence_state"] = {
+            "schema_version": RESOLVER_EVIDENCE_STATE_VERSION,
+            "state": "blocked",
+            "remaining_needs": [],
+        }
     return_value = validate_resolver_observation(observation)
     return return_value
 

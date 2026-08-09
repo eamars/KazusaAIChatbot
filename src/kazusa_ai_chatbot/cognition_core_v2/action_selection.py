@@ -30,7 +30,6 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     ActionBidV2,
     CognitionCoreServicesV2,
     CognitionEvidenceV2,
-    CognitionExecutionError,
     GOAL_RESOLUTION_VALUES,
     GoalResolutionV2,
     GroupEngagementActionContextV2,
@@ -45,8 +44,10 @@ from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
 )
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     ALLOWED_PENDING_DECISIONS,
+    RequiredResolverEvidenceDependencyV1,
     RESOLVER_GOAL_PROGRESS_VERSION,
     ResolverValidationError,
+    validate_required_resolver_evidence_dependency,
     validate_resolver_goal_progress,
 )
 from kazusa_ai_chatbot.utils import parse_llm_json_output
@@ -249,6 +250,9 @@ async def plan_actions(
     runtime_capability_limits: Sequence[str] = (),
     services: CognitionCoreServicesV2,
     current_goal_progress: Mapping[str, Any] | None = None,
+    required_resolver_evidence_dependency: (
+        RequiredResolverEvidenceDependencyV1 | Mapping[str, Any] | None
+    ) = None,
 ) -> dict[str, Any]:
     """Select one route and bounded semantic requests from admitted motives.
 
@@ -277,6 +281,11 @@ async def plan_actions(
             "engagement_guidelines": [],
             "confidence": "",
         }
+    validated_dependency = None
+    if required_resolver_evidence_dependency is not None:
+        validated_dependency = validate_required_resolver_evidence_dependency(
+            required_resolver_evidence_dependency,
+        )
     bids = [primary_bid, *supporting_bids]
     bid_handles = {
         f"b{index}": bid for index, bid in enumerate(bids, start=1)
@@ -368,6 +377,11 @@ async def plan_actions(
         },
         "runtime_capability_limits": list(runtime_capability_limits),
         "current_resolver_goal_progress": current_goal_progress,
+        "required_resolver_evidence_dependency": (
+            _project_required_evidence_dependency(validated_dependency)
+            if validated_dependency is not None
+            else None
+        ),
     }
     prompt_text = json.dumps(prompt_payload, ensure_ascii=False, sort_keys=True)
     if (
@@ -401,6 +415,7 @@ async def plan_actions(
             action_handles=action_handles,
             resolver_handles=resolver_handles,
             current_goal_progress=current_goal_progress,
+            required_resolver_evidence_dependency=validated_dependency,
             runtime_capability_limits=runtime_capability_limits,
         )
     relational_decision = primary_bid.get("relational_willingness")
@@ -437,7 +452,10 @@ async def plan_actions(
         action_handles,
     )
     action_owner_denied = bool(decision["action_requests"]) and not action_requests
-    goal_resolution = decision["goal_resolution"]
+    goal_resolution = _enforce_required_evidence_answerability(
+        decision["goal_resolution"],
+        validated_dependency,
+    )
     if relational_permission_denied or goal_resolution == "answerable_now":
         resolver_requests = []
     else:
@@ -498,6 +516,9 @@ async def _invoke_action_planner(
     action_handles: Mapping[str, ActionAffordanceV2],
     resolver_handles: Mapping[str, ResolverAffordanceV2],
     current_goal_progress: Mapping[str, Any] | None,
+    required_resolver_evidence_dependency: (
+        RequiredResolverEvidenceDependencyV1 | None
+    ),
     runtime_capability_limits: Sequence[str],
 ) -> dict[str, Any]:
     """Invoke the semantic planner with bounded contract replacements."""
@@ -566,6 +587,9 @@ async def _invoke_action_planner(
                 action_handles=action_handles,
                 resolver_handles=resolver_handles,
                 current_goal_progress=current_goal_progress,
+                required_resolver_evidence_dependency=(
+                    required_resolver_evidence_dependency
+                ),
             )
         except (ResolverValidationError, ValueError) as exc:
             await _record_action_planning_trace(
@@ -695,6 +719,9 @@ def _validate_action_plan_decision(
     action_handles: Mapping[str, ActionAffordanceV2],
     resolver_handles: Mapping[str, ResolverAffordanceV2],
     current_goal_progress: Mapping[str, Any] | None = None,
+    required_resolver_evidence_dependency: (
+        RequiredResolverEvidenceDependencyV1 | None
+    ) = None,
 ) -> dict[str, Any]:
     """Normalize semantic choices into the canonical planner contract."""
 
@@ -730,7 +757,10 @@ def _validate_action_plan_decision(
         "action_requests": normalized_actions,
         "resolver_requests": normalized_resolvers,
         "goal_resolution": _validate_goal_resolution(
-            parsed.get("goal_resolution")
+            parsed.get("goal_resolution"),
+            required_resolver_evidence_dependency=(
+                required_resolver_evidence_dependency
+            ),
         ),
         "resolver_pending_resolution": pending_resolution,
         "resolver_goal_progress": goal_progress,
@@ -738,12 +768,58 @@ def _validate_action_plan_decision(
     return return_value
 
 
-def _validate_goal_resolution(value: object) -> GoalResolutionV2:
+def _validate_goal_resolution(
+    value: object,
+    *,
+    required_resolver_evidence_dependency: (
+        RequiredResolverEvidenceDependencyV1 | None
+    ) = None,
+) -> GoalResolutionV2:
     """Validate the model-owned answerability decision."""
 
     if not isinstance(value, str) or value not in GOAL_RESOLUTION_VALUES:
         raise ValueError("goal_resolution is invalid")
+    if (
+        value == "answerable_now"
+        and required_resolver_evidence_dependency is not None
+        and required_resolver_evidence_dependency["state"] != "complete"
+    ):
+        raise ValueError(
+            "answerable_now requires complete required resolver evidence"
+        )
     return cast(GoalResolutionV2, value)
+
+
+def _project_required_evidence_dependency(
+    dependency: RequiredResolverEvidenceDependencyV1,
+) -> dict[str, object]:
+    """Project safe dependency fields into the action-planning prompt."""
+
+    return {
+        "prompt_safe_observation_handle": dependency[
+            "prompt_safe_observation_handle"
+        ],
+        "state": dependency["state"],
+        "evidence_handles": list(dependency["evidence_handles"]),
+        "remaining_needs": list(dependency["remaining_needs"]),
+    }
+
+
+def _enforce_required_evidence_answerability(
+    goal_resolution: GoalResolutionV2,
+    dependency: RequiredResolverEvidenceDependencyV1 | None,
+) -> GoalResolutionV2:
+    """Keep final action routing aligned with a bound evidence state."""
+
+    if (
+        goal_resolution == "answerable_now"
+        and dependency is not None
+        and dependency["state"] != "complete"
+    ):
+        return_value: GoalResolutionV2 = "requires_required_evidence"
+        return return_value
+    return_value = goal_resolution
+    return return_value
 
 
 def _normalize_action_request_rows(

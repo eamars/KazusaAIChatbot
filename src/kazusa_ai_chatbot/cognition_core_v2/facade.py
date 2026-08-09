@@ -441,6 +441,9 @@ async def _run_cognition(
             ),
             services=services,
             current_goal_progress=payload.get("resolver_goal_progress"),
+            required_resolver_evidence_dependency=payload.get(
+                "required_resolver_evidence_dependency"
+            ),
         )
     except CognitionExecutionError:
         raise
@@ -810,6 +813,18 @@ def _branch_handler(
     async def handle(definition: Any) -> ActionBidV2:
         if definition.branch_id == "ordinary_response" and not payload["evidence"]:
             return None  # type: ignore[return-value]
+        relational_carrier = payload.get(
+            "current_turn_relational_willingness"
+        )
+        cycle_index = payload.get("resolver_cycle_index", 0)
+        if (
+            definition.branch_id == "ordinary_response"
+            and cycle_index > 0
+            and not isinstance(relational_carrier, Mapping)
+        ):
+            raise CognitionExecutionError(
+                "current-turn relational carrier is missing on recurrence"
+            )
         goal = _goal_for_branch(state, definition.goal_kind)
         if goal is None:
             goal_ref = {
@@ -825,12 +840,21 @@ def _branch_handler(
             }
         context = dict(semantic_context)
         context["goal_projection"] = _goal_projection(goal, definition.goal_kind)
+        if isinstance(relational_carrier, Mapping):
+            context["current_turn_relational_willingness"] = dict(
+                relational_carrier
+            )
         return await run_goal_cognition(
             definition,
             goal_ref,
             context,
             payload["evidence"],
             services,
+            current_turn_relational_willingness=(
+                relational_carrier
+                if isinstance(relational_carrier, Mapping)
+                else None
+            ),
         )
 
     return handle

@@ -289,6 +289,11 @@ def test_resolver_context_projects_original_goal_and_objectives() -> None:
             "status": "failed",
             "prompt_safe_summary": "搜索工具未返回已确认事实。",
             "evidence_refs": [],
+            "task_resolution_evidence_state": {
+                "schema_version": "resolver_evidence_state.v1",
+                "state": "blocked",
+                "remaining_needs": [],
+            },
             "created_at_utc": "2026-05-29T21:00:00+00:00",
         },
     ]
@@ -400,6 +405,11 @@ async def test_loop_runs_cognition_capability_then_cognition_again() -> None:
                 ],
             },
             "evidence_refs": [],
+            "task_resolution_evidence_state": {
+                "schema_version": "resolver_evidence_state.v1",
+                "state": "missing",
+                "remaining_needs": [],
+            },
             "created_at_utc": "2026-05-29T21:00:00+00:00",
         }
 
@@ -574,6 +584,11 @@ async def test_loop_projects_goal_progress_across_iterations() -> None:
             "status": "failed",
             "prompt_safe_summary": "没有确认到每家店当前营业状态。",
             "evidence_refs": [],
+            "task_resolution_evidence_state": {
+                "schema_version": "resolver_evidence_state.v1",
+                "state": "blocked",
+                "remaining_needs": [],
+            },
             "created_at_utc": "2026-05-29T21:00:00+00:00",
         }
 
@@ -682,6 +697,11 @@ async def test_loop_blocks_duplicate_capability_objective_before_execution() -> 
             "status": "failed",
             "prompt_safe_summary": "没有找到已确认事实。",
             "evidence_refs": [],
+            "task_resolution_evidence_state": {
+                "schema_version": "resolver_evidence_state.v1",
+                "state": "blocked",
+                "remaining_needs": [],
+            },
             "created_at_utc": "2026-05-29T21:00:00+00:00",
         }
 
@@ -800,6 +820,11 @@ async def test_loop_blocks_renamed_retry_after_failed_observation() -> None:
             "status": "failed",
             "prompt_safe_summary": "Local context resolution failed.",
             "evidence_refs": [],
+            "task_resolution_evidence_state": {
+                "schema_version": "resolver_evidence_state.v1",
+                "state": "blocked",
+                "remaining_needs": [],
+            },
             "created_at_utc": "2026-05-29T21:00:00+00:00",
         }
 
@@ -850,6 +875,11 @@ async def test_duplicate_final_cognition_repeated_request_gets_terminal_speak() 
             "status": "failed",
             "prompt_safe_summary": "没有找到已确认事实。",
             "evidence_refs": [],
+            "task_resolution_evidence_state": {
+                "schema_version": "resolver_evidence_state.v1",
+                "state": "blocked",
+                "remaining_needs": [],
+            },
             "created_at_utc": "2026-05-29T21:00:00+00:00",
         }
 
@@ -926,6 +956,11 @@ async def test_duplicate_final_cognition_changed_request_gets_terminal_speak() -
             "status": "failed",
             "prompt_safe_summary": "没有找到已确认事实。",
             "evidence_refs": [],
+            "task_resolution_evidence_state": {
+                "schema_version": "resolver_evidence_state.v1",
+                "state": "blocked",
+                "remaining_needs": [],
+            },
             "created_at_utc": "2026-05-29T21:00:00+00:00",
         }
 
@@ -1033,6 +1068,11 @@ async def test_loop_runs_final_cognition_with_max_cycle_blocker() -> None:
             "status": "failed",
             "prompt_safe_summary": "证据仍不足。",
             "evidence_refs": [],
+            "task_resolution_evidence_state": {
+                "schema_version": "resolver_evidence_state.v1",
+                "state": "blocked",
+                "remaining_needs": [],
+            },
             "created_at_utc": "2026-05-29T21:00:00+00:00",
         }
 
@@ -1084,6 +1124,11 @@ async def test_loop_converts_max_cycle_request_to_visible_blocker() -> None:
             "status": "failed",
             "prompt_safe_summary": "搜索超时，但已有部分约束可说明。",
             "evidence_refs": [],
+            "task_resolution_evidence_state": {
+                "schema_version": "resolver_evidence_state.v1",
+                "state": "blocked",
+                "remaining_needs": [],
+            },
             "created_at_utc": "2026-05-29T21:00:00+00:00",
         }
 
@@ -1854,6 +1899,11 @@ async def test_hil_follow_up_can_continue_original_goal_after_answer() -> None:
                 },
             },
             "evidence_refs": [],
+            "task_resolution_evidence_state": {
+                "schema_version": "resolver_evidence_state.v1",
+                "state": "missing",
+                "remaining_needs": [],
+            },
             "created_at_utc": "2026-05-29T21:00:00+00:00",
         }
 
@@ -2329,6 +2379,11 @@ async def test_user_input_blocker_converges_after_one_final_cognition() -> None:
                 "Local context recall requires user input: missing referent."
             ),
             "evidence_refs": [],
+            "task_resolution_evidence_state": {
+                "schema_version": "resolver_evidence_state.v1",
+                "state": "blocked",
+                "remaining_needs": [],
+            },
             "created_at_utc": "2026-05-29T21:00:00+00:00",
         }
 
@@ -2389,6 +2444,11 @@ async def test_user_input_blocker_without_final_action_surfaces_clarification() 
                 "Local context recall requires user input: missing referent."
             ),
             "evidence_refs": [],
+            "task_resolution_evidence_state": {
+                "schema_version": "resolver_evidence_state.v1",
+                "state": "blocked",
+                "remaining_needs": [],
+            },
             "created_at_utc": "2026-05-29T21:00:00+00:00",
         }
 

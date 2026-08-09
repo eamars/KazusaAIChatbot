@@ -92,6 +92,11 @@ def _observation() -> dict:
                 "observed_at": "2026-05-30T00:00:00+00:00",
             }
         ],
+        "task_resolution_evidence_state": {
+            "schema_version": "resolver_evidence_state.v1",
+            "state": "complete",
+            "remaining_needs": [],
+        },
         "created_at_utc": "2026-05-30T00:00:00+00:00",
     }
 
@@ -203,6 +208,7 @@ def _minimal_global_state() -> dict:
         "decontextualized_input": "User asks for evidence-backed judgment.",
         "global_user_id": "user-1",
         "character_profile": {"global_user_id": "character-1"},
+        "cognitive_episode": {"episode_id": "resolver-test-episode"},
     }
 
 
@@ -295,6 +301,11 @@ def test_observation_validator_projects_typed_user_input_blocker() -> None:
     observation = _observation()
     observation["status"] = "blocked"
     observation["blocker_kind"] = "requires_user_input"
+    observation["task_resolution_evidence_state"] = {
+        "schema_version": "resolver_evidence_state.v1",
+        "state": "blocked",
+        "remaining_needs": [],
+    }
 
     validated = validate_resolver_observation(observation)
     projection = project_observations_for_cognition([validated])
@@ -303,6 +314,11 @@ def test_observation_validator_projects_typed_user_input_blocker() -> None:
     assert "blocker_kind=requires_user_input" in projection
 
     observation["status"] = "succeeded"
+    observation["task_resolution_evidence_state"] = {
+        "schema_version": "resolver_evidence_state.v1",
+        "state": "complete",
+        "remaining_needs": [],
+    }
     with pytest.raises(ResolverValidationError, match="blocker_kind"):
         validate_resolver_observation(observation)
 
@@ -443,6 +459,7 @@ def test_new_resolver_state_initializes_cycle_zero() -> None:
     state = new_resolver_state(
         decontextualized_input="Need a deliberate answer.",
         max_cycles=3,
+        episode_id="resolver-test-episode",
     )
 
     assert state["schema_version"] == RESOLVER_CYCLE_STATE_VERSION
@@ -463,6 +480,7 @@ def test_append_observation_projects_alias_and_caps_context() -> None:
     state = new_resolver_state(
         decontextualized_input="Need repeated evidence.",
         max_cycles=3,
+        episode_id="resolver-test-episode",
     )
     for index in range(MAX_PROJECTED_RESOLVER_OBSERVATIONS + 2):
         observation = _observation()
@@ -485,6 +503,7 @@ def test_append_cycle_trace_stores_bounded_trace_row() -> None:
     state = new_resolver_state(
         decontextualized_input="Need one resolver cycle.",
         max_cycles=3,
+        episode_id="resolver-test-episode",
     )
     trace = _cycle_trace()
     trace["terminal_reason"] = "x" * (MAX_RESOLVER_TRACE_CHARS + 50)
@@ -536,6 +555,7 @@ def test_targetless_group_self_cognition_bootstraps_without_user_owner() -> None
     state = _minimal_global_state()
     state["global_user_id"] = ""
     state["cognitive_episode"] = {
+        "episode_id": "targetless-self-cognition-episode",
         "trigger_source": "self_cognition",
         "target_scope": {
             "channel_type": "group",

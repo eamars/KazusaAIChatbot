@@ -59,6 +59,7 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
+| [cognition_core_v2_quoted_message_evidence_and_recurrence_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_quoted_message_evidence_and_recurrence_bugfix_plan.md) | Quoted-message resolver evidence continuity, answerability gating, and ordinary-branch recurrence stability | completed |
 | [llm_trace_console_full_web_correlation_surface_bugfix_plan.md](archive/completed/bugfix/llm_trace_console_full_web_correlation_surface_bugfix_plan.md) | Full web-console correlation ID visibility across the existing mapped views | completed |
 | [background_work_jobs_console_job_id_visibility_bugfix_plan.md](archive/completed/bugfix/background_work_jobs_console_job_id_visibility_bugfix_plan.md) | Existing Background Work Jobs card job-ID visibility in the web console | completed |
 | [llm_trace_console_correlation_gap_bugfix_plan.md](archive/completed/bugfix/llm_trace_console_correlation_gap_bugfix_plan.md) | Protected trace correlation retrieval, web availability mapping, and forward action/background/future-cognition id propagation | completed |
