@@ -54,7 +54,12 @@ class _UnifiedSurfaceLLM:
         ):
             result = {
                 "visible_boundaries": [],
-                "addressee_plan": ["Address the current user."],
+                "addressee_plan": [{
+                    "handle": "current_user",
+                    "display_name": "Current User",
+                    "semantic_role": "direct_recipient",
+                    "wording_policy": "second_person_allowed",
+                }],
             }
         elif "delivery_profile" in system_prompt:
             result = {
@@ -126,7 +131,12 @@ def _surface_output() -> dict[str, object]:
             "Keep one accepting stance throughout the response.",
         ],
         "visible_boundaries": [],
-        "addressee_plan": ["Address the current user."],
+        "addressee_plan": [{
+            "handle": "current_user",
+            "display_name": "Current User",
+            "semantic_role": "direct_recipient",
+            "wording_policy": "second_person_allowed",
+        }],
         "delivery_profile": _delivery_profile(),
         "selected_surface_intent": "confirm shared participation",
         "permitted_action_results": [],
@@ -332,7 +342,7 @@ def test_surface_prompts_use_contextual_stance_and_boundary_scope() -> None:
     assert "没有具体来源时，这两个字段分别返回空列表" in (
         surface_repair_prompt
     )
-    assert "addressee_plan的条目格式为“现有参与者+本轮实际使用的称呼形式”" in (
+    assert "addressee_plan逐字保留输入提供的结构化参与者、语义角色和wording_policy" in (
         surface_repair_prompt
     )
     assert "亲密感、语气词、词汇、句式和节奏由delivery_profile表达" in (
@@ -366,7 +376,7 @@ def test_surface_prompts_use_contextual_stance_and_boundary_scope() -> None:
     )
     assert (
         "先整体阅读selected_surface_intent、content_plan、"
-        "content_requirements、visible_boundaries和delivery_profile"
+        "content_requirements、visible_boundaries、addressee_plan和delivery_profile"
         in dialog_prompt
     )
     assert "判断规划中的开场反应指向行动或关系本身" in dialog_prompt
@@ -490,6 +500,12 @@ async def test_semantic_fidelity_payload_uses_only_surface_semantics(
             "Keep one accepting stance throughout the response.",
         ],
         "visible_boundaries": [],
+        "addressee_plan": [{
+            "handle": "current_user",
+            "display_name": "Current User",
+            "semantic_role": "direct_recipient",
+            "wording_policy": "second_person_allowed",
+        }],
     }
     serialized_authority = json.dumps(
         payload["authoritative_surface_semantics"],
@@ -595,6 +611,11 @@ async def test_dialog_repair_payload_excludes_rejected_candidates(
         generator_llm.ainvoke.await_args.args[0][1].content
     )
     assert repair_payload == {
+        "candidate_role_frame": {
+            "speaker_role": "当前角色",
+            "first_person_role": "当前角色",
+            "second_person_role": "当前用户",
+        },
         "text_surface_output_v2": replacement,
         "user_name": "Current User",
         "repair_context": {

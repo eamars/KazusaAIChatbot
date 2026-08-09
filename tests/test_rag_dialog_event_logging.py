@@ -155,7 +155,12 @@ def _dialog_global_state() -> dict[str, object]:
             "content_plan": "Acknowledge the request.",
             "content_requirements": ["Address the current user."],
             "visible_boundaries": [],
-            "addressee_plan": ["current user"],
+            "addressee_plan": [{
+                "handle": "current_user",
+                "display_name": "current user",
+                "semantic_role": "direct_recipient",
+                "wording_policy": "second_person_allowed",
+            }],
             "delivery_profile": {
                 "lexical_register": "plain",
                 "sentence_shape": "concise",

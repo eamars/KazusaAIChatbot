@@ -1,7 +1,7 @@
 import asyncio
 import base64
 import binascii
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 import hashlib
 import json
 import logging
@@ -637,6 +637,7 @@ _MSG_DECONTEXTUALIZER_PROMPT = '''\
 - `reply_context.reply_to_display_name` 与 `reply_context.reply_excerpt` 是当前消息回复对象和可见摘录，是短答、确认、指示词、省略决策问题的强证据。
 - `chat_history` 是最近可见频道历史，格式是日志式文本行。每一行冒号前是可见说话人，可选包含 `reply_to` 后面的显式回复对象；冒号后是可见正文。普通群聊行默认是频道可见。
 - `scope_users` 是本轮已知用户身份表，只提供 `display_name`、`platform_user_id`、`global_user_id` 和 `aliases`。它只在其他来源已经桥接到某个可见身份后，用于选择稳定显示名。
+- `scene_participant_bindings` 是本轮已经从可见群聊参与者中解析出的第三方表。每一行只有 `handle`、`display_name` 和 `entity_kind=third_party`；只能使用表内的 handle，不得猜测或输出平台、全局、数据库或 trace ID。
 - `channel_topic` 与 `indirect_speech_context` 是弱场景提示，只辅助解释场景；正文、reply、mention、显式地址和附件事实优先。
 
 # 处理流程
@@ -697,11 +698,11 @@ _MSG_DECONTEXTUALIZER_PROMPT = '''\
     "is_modified": true,
     "reasoning": "一句话说明使用了哪些证据；未修改时说明原因",
     "referents": [
-        {{"phrase": "原文中的指代短语", "referent_role": "subject | object | time", "status": "resolved | unresolved"}}
+        {{"phrase": "原文中的指代短语", "referent_role": "subject | object | time", "status": "resolved | unresolved", "participant_handle": "p1"}}
     ]
 }}
 
-`status="resolved"` 表示对象能从 `user_input`、`prompt_message_context`、`reply_context` 或 `chat_history` 的桥接证据确定，包括 `reply_context.reply_excerpt`；它不要求 `output` 一定改写。`status="unresolved"` 只在这些桥接字段都没有可识别对象时使用。
+`status="resolved"` 表示对象能从 `user_input`、`prompt_message_context`、`reply_context` 或 `chat_history` 的桥接证据确定，包括 `reply_context.reply_excerpt`；它不要求 `output` 一定改写。若对象是 `scene_participant_bindings` 中的第三方，必须填写对应 `participant_handle`；未知 handle、显示名与 handle 不一致、或 unresolved 行填写 handle 都是 contract 错误。`status="unresolved"` 只在这些桥接字段都没有可识别对象时使用。
 `is_modified` 表示 `output` 是否不同于原句。`referents` 必须每次输出。`referent_role` 只允许 `subject`、`object`、`time`；`status` 只允许 `resolved` 或 `unresolved`。
 `role_explicit_content` 必须每次输出，控制在 1000 字符以内。它只消除角色代词歧义，不回答问题、不选择角色立场，也不增删原意；它是中文自由文本。
 `response_operation` 必须每次输出且字段完整。`operation` 控制在 500 字符以内；它只标注原输入要求的回应与选择所有权，不生成回应内容，并保持中文自由文本。四个角色字段只使用中文角色枚举。
@@ -764,6 +765,9 @@ async def call_msg_decontextualizer(state: GlobalPersonaState) -> dict:
     scope_users = state.get("scope_users")
     if scope_users:
         input_msg["scope_users"] = scope_users
+    participant_bindings = state.get("scene_participant_bindings")
+    if participant_bindings:
+        input_msg["scene_participant_bindings"] = participant_bindings
     human_message = HumanMessage(content=json.dumps(input_msg, ensure_ascii=False))
 
     # logger.debug(
@@ -820,7 +824,10 @@ async def call_msg_decontextualizer(state: GlobalPersonaState) -> dict:
         try:
             response_text = getattr(llm_response, "content", "")
             parsed = parse_llm_json_output(response_text)
-            validated = _validate_decontextualizer_result(parsed)
+            validated = _validate_decontextualizer_result(
+                parsed,
+                participant_bindings=participant_bindings,
+            )
         except (
             AttributeError,
             CognitiveEpisodeValidationError,
@@ -907,7 +914,11 @@ async def call_msg_decontextualizer(state: GlobalPersonaState) -> dict:
     return return_value
 
 
-def _validate_decontextualizer_result(value: object) -> dict[str, object]:
+def _validate_decontextualizer_result(
+    value: object,
+    *,
+    participant_bindings: Sequence[Mapping[str, object]] | None = None,
+) -> dict[str, object]:
     """Validate one complete decontextualizer candidate at its owner boundary."""
 
     if not isinstance(value, Mapping):
@@ -939,11 +950,18 @@ def _validate_decontextualizer_result(value: object) -> dict[str, object]:
     for raw_referent in raw_referents:
         if not isinstance(raw_referent, Mapping):
             raise ValueError("decontextualizer referent must be an object")
-        if set(raw_referent) != {"phrase", "referent_role", "status"}:
+        allowed_fields = {"phrase", "referent_role", "status"}
+        if "participant_handle" in raw_referent:
+            allowed_fields.add("participant_handle")
+        if set(raw_referent) != allowed_fields:
             raise ValueError("decontextualizer referent fields are not exact")
     referents = normalize_referents(raw_referents)
     if len(referents) != len(raw_referents):
         raise ValueError("decontextualizer referents contain invalid rows")
+    _validate_participant_referents(
+        referents,
+        participant_bindings=participant_bindings or (),
+    )
 
     role_explicit_content = _bounded_role_explicit_content(
         value["role_explicit_content"],
@@ -961,6 +979,52 @@ def _validate_decontextualizer_result(value: object) -> dict[str, object]:
         "role_explicit_content": role_explicit_content,
         "response_operation": response_operation,
     }
+
+
+def _validate_participant_referents(
+    referents: Sequence[Mapping[str, str]],
+    *,
+    participant_bindings: Sequence[Mapping[str, object]],
+) -> None:
+    """Validate episode-local participant handles without semantic rewriting."""
+
+    bindings_by_handle: dict[str, str] = {}
+    display_names: set[str] = set()
+    for binding in participant_bindings:
+        if not isinstance(binding, Mapping):
+            raise ValueError("scene participant binding is invalid")
+        handle = binding.get("handle")
+        display_name = binding.get("display_name")
+        if (
+            not isinstance(handle, str)
+            or not handle.strip()
+            or not isinstance(display_name, str)
+            or not display_name.strip()
+        ):
+            raise ValueError("scene participant binding is invalid")
+        bindings_by_handle[handle.strip()] = display_name.strip()
+        display_names.add(display_name.strip())
+
+    for referent in referents:
+        participant_handle = referent.get("participant_handle")
+        phrase = referent["phrase"].strip()
+        if participant_handle is not None:
+            if referent["status"] != "resolved":
+                raise ValueError(
+                    "unresolved referents cannot carry participant handles"
+                )
+            if participant_handle not in bindings_by_handle:
+                raise ValueError("referent participant handle is unknown")
+            if phrase in display_names and (
+                bindings_by_handle[participant_handle] != phrase
+            ):
+                raise ValueError(
+                    "referent participant display name does not match handle"
+                )
+        elif referent["status"] == "resolved" and phrase in display_names:
+            raise ValueError(
+                "resolved participant names require a participant handle"
+            )
 
 
 def _decontextualizer_repair_message(

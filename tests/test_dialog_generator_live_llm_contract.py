@@ -90,7 +90,12 @@ def _dialog_payload(character_profile: dict, case: dict) -> tuple[HumanMessage, 
             'content_plan': case['content_plan']['semantic_content'],
             'content_requirements': [case['content_plan']['visible_goal']],
             'visible_boundaries': [],
-            'addressee_plan': ['current user'],
+            'addressee_plan': [{
+                'handle': 'current_user',
+                'display_name': 'current user',
+                'semantic_role': 'direct_recipient',
+                'wording_policy': 'second_person_allowed',
+            }],
             'delivery_profile': {
                 'lexical_register': case['linguistic_style'],
                 'sentence_shape': case['content_plan']['rendering'],
@@ -204,7 +209,12 @@ async def test_live_dialog_generator_node_accepts_deepseek_output() -> None:
             'content_plan': '先把充电、视频输出、用途待确认分开会比较省事。',
             'content_requirements': ['保持建议对象和分类动作不变。'],
             'visible_boundaries': [],
-            'addressee_plan': ['测试用户'],
+            'addressee_plan': [{
+                'handle': 'current_user',
+                'display_name': '测试用户',
+                'semantic_role': 'direct_recipient',
+                'wording_policy': 'second_person_allowed',
+            }],
             'delivery_profile': {
                 'lexical_register': '务实、略带吐槽、保持平等交流',
                 'sentence_shape': '25-45 字的紧凑短句',

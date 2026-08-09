@@ -23,6 +23,7 @@ from kazusa_ai_chatbot.config import (
 )
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionExecutionError,
+    SurfaceAddresseePlanV1,
     TextSurfaceInputV2,
     TextSurfaceOutputV2,
     TextSurfaceServicesV2,
@@ -89,7 +90,7 @@ def build_text_surface_input_from_global_state(
         "intention": dict(validated_output["intention"]),
         "goal_resolution": validated_output["goal_resolution"],
         "supporting_bids": [
-            _surface_bid_projection(bid)
+            _surface_bid_projection(bid, state=state)
             for bid in validated_output["supporting_bids"]
         ],
         "expression_policy": dict(validated_output["expression_policy"]),
@@ -100,6 +101,10 @@ def build_text_surface_input_from_global_state(
         "interaction_style_context": interaction_style_context,
         "character_expression_context": expression_context,
         "visual_character_context": visual_context,
+        "addressee_plan": _surface_addressee_plan(
+            validated_output["intention"].get("target_roles", []),
+            state=state,
+        ),
     }
     runtime_limits = build_runtime_capability_limits(state)
     if runtime_limits:
@@ -109,7 +114,10 @@ def build_text_surface_input_from_global_state(
         payload["resolver_result"] = resolver_result
     admitted = validated_output.get("admitted_bid")
     if isinstance(admitted, Mapping):
-        payload["primary_bid"] = _surface_bid_projection(admitted)
+        payload["primary_bid"] = _surface_bid_projection(
+            admitted,
+            state=state,
+        )
     relationship = validated_output.get("relationship_projection")
     if isinstance(relationship, Mapping):
         payload["semantic_relationship"] = dict(relationship)
@@ -419,7 +427,11 @@ def _surface_config(
     )
 
 
-def _surface_bid_projection(bid: Mapping[str, Any]) -> dict[str, Any]:
+def _surface_bid_projection(
+    bid: Mapping[str, Any],
+    *,
+    state: Mapping[str, Any],
+) -> dict[str, Any]:
     """Copy complete-bid semantic content without persistent ids or private refs."""
 
     return {
@@ -428,12 +440,114 @@ def _surface_bid_projection(bid: Mapping[str, Any]) -> dict[str, Any]:
         "desired_outcome": bid["desired_outcome"],
         "permitted_detail": bid["concrete_detail"],
         "target_summaries": [
-            role.get("role", "对象")
+            _surface_role_summary(role, state=state)
             for role in bid.get("target_roles", [])
             if isinstance(role, Mapping)
         ],
         "expected_consequences": list(bid["expected_consequences"]),
     }
+
+
+def _surface_role_summary(
+    role: Mapping[str, Any],
+    *,
+    state: Mapping[str, Any],
+) -> str:
+    """Render a target summary with visible names but no backing IDs."""
+
+    entity_kind = role.get("entity_kind")
+    if entity_kind == "third_party":
+        handle = _role_episode_handle(role)
+        for binding in state.get("scene_participant_bindings", []):
+            if not isinstance(binding, Mapping):
+                continue
+            if binding.get("handle") != handle:
+                continue
+            display_name = binding.get("display_name")
+            if isinstance(display_name, str) and display_name.strip():
+                return display_name.strip()
+        return "群聊其他参与者"
+    if entity_kind == "user":
+        return str(state.get("user_name", "当前用户")) or "当前用户"
+    if entity_kind == "character":
+        profile = state.get("character_profile")
+        if isinstance(profile, Mapping):
+            name = profile.get("name")
+            if isinstance(name, str) and name.strip():
+                return name.strip()
+        return "当前角色"
+    return str(role.get("role", "对象"))
+
+
+def _role_episode_handle(role: Mapping[str, Any]) -> str:
+    """Extract the non-persistent handle from a third-party role reference."""
+
+    entity_id = role.get("entity_id")
+    if not isinstance(entity_id, str) or not entity_id.startswith("scene:"):
+        return ""
+    return entity_id.removeprefix("scene:")
+
+
+def _surface_addressee_plan(
+    target_roles: object,
+    *,
+    state: Mapping[str, Any],
+) -> list[SurfaceAddresseePlanV1]:
+    """Project admitted target roles into visible wording constraints."""
+
+    if not isinstance(target_roles, list):
+        raise ValueError("surface target roles must be a list")
+    result: list[SurfaceAddresseePlanV1] = []
+    seen_handles: set[str] = set()
+    for role in target_roles:
+        if not isinstance(role, Mapping):
+            raise ValueError("surface target role must be a mapping")
+        entity_kind = role.get("entity_kind")
+        if entity_kind == "third_party":
+            handle = _role_episode_handle(role)
+            binding = next(
+                (
+                    row
+                    for row in state.get("scene_participant_bindings", [])
+                    if isinstance(row, Mapping)
+                    and row.get("handle") == handle
+                ),
+                None,
+            )
+            if not isinstance(binding, Mapping):
+                raise ValueError("surface target third-party binding is missing")
+            display_name = binding.get("display_name")
+            if not isinstance(display_name, str) or not display_name.strip():
+                raise ValueError("surface target display name is invalid")
+            semantic_role = "embedded_target"
+            wording_policy = "named_or_third_person_required"
+        elif entity_kind == "user":
+            handle = "current_user"
+            display_name = str(state.get("user_name", "当前用户"))
+            semantic_role = "embedded_target"
+            wording_policy = "second_person_allowed"
+        elif entity_kind == "character":
+            handle = "self"
+            profile = state.get("character_profile")
+            display_name = (
+                str(profile.get("name", "当前角色"))
+                if isinstance(profile, Mapping)
+                else "当前角色"
+            )
+            semantic_role = "embedded_actor"
+            wording_policy = "named_or_third_person_required"
+        else:
+            continue
+        if handle in seen_handles:
+            continue
+        seen_handles.add(handle)
+        result.append({
+            "handle": handle,
+            "display_name": display_name.strip(),
+            "semantic_role": semantic_role,
+            "wording_policy": wording_policy,
+        })
+    return result
 
 
 def _canonical_episode(state: Mapping[str, Any]) -> dict[str, Any]:

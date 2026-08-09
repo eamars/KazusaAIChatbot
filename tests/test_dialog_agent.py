@@ -65,7 +65,12 @@ def _text_surface_output() -> dict[str, object]:
         "content_plan": "Greet the user warmly.",
         "content_requirements": ["Address the current user."],
         "visible_boundaries": [],
-        "addressee_plan": ["current user"],
+        "addressee_plan": [{
+            "handle": "current_user",
+            "display_name": "current user",
+            "semantic_role": "direct_recipient",
+            "wording_policy": "second_person_allowed",
+        }],
         "delivery_profile": {
             "lexical_register": "warm",
             "sentence_shape": "concise",
@@ -270,6 +275,7 @@ async def test_dialog_generator_forwards_native_surface_without_legacy_fields(
     human_payload = json.loads(generator_llm.ainvoke.await_args.args[0][1].content)
     assert set(human_payload) == {
         "text_surface_output_v2",
+        "candidate_role_frame",
         "user_name",
     }
     assert set(human_payload["text_surface_output_v2"]) == {

@@ -42,6 +42,19 @@ boolean. issues is a list of concise role-direction failures; use an empty
 list only when aligned is true.'''
 
 
+def _current_user_addressee_plan(
+    display_name: str = "当前用户",
+) -> list[dict[str, str]]:
+    """Build the canonical direct-current-user wording row."""
+
+    return [{
+        "handle": "current_user",
+        "display_name": display_name,
+        "semantic_role": "direct_recipient",
+        "wording_policy": "second_person_allowed",
+    }]
+
+
 class _CapturingLLM:
     """Delegate to one real route while retaining raw request and response."""
 
@@ -304,7 +317,9 @@ async def _run_live_verifier_case(
             "visible_boundaries": [
                 "No unsupported system or platform execution claim.",
             ],
-            "addressee_plan": ["Address the current user."],
+            "addressee_plan": _current_user_addressee_plan(
+                "Current User"
+            ),
             "delivery_profile": _delivery_profile(
                 "Natural concise spoken wording."
             ),
@@ -789,7 +804,9 @@ async def test_live_verifier_accepts_coherent_future_drift(
                 "Add a prohibition for the next occurrence.",
             ],
             "visible_boundaries": ["Literal visible speech only."],
-            "addressee_plan": ["Address the current user."],
+            "addressee_plan": _current_user_addressee_plan(
+                "Current User"
+            ),
             "delivery_profile": _delivery_profile(
                 "Natural concise spoken wording."
             ),
@@ -835,7 +852,7 @@ async def test_live_verifier_accepts_first_person_action_completion(
             "visible_boundaries": [
                 "使用角色可以直接发出的聊天文字。",
             ],
-            "addressee_plan": ["直接回应发出命令的当前用户。"],
+            "addressee_plan": _current_user_addressee_plan(),
             "delivery_profile": _delivery_profile(
                 "局促、碎片化的自然口语"
             ),
@@ -923,7 +940,7 @@ async def test_live_verifier_accepts_subject_omitted_first_person_action(
                 "催促当前用户起床吃早餐。",
             ],
             "visible_boundaries": ["使用角色可以直接发出的聊天文字。"],
-            "addressee_plan": ["直接回应撒娇的当前用户。"],
+            "addressee_plan": _current_user_addressee_plan(),
             "delivery_profile": _delivery_profile(
                 "略带别扭感的自然口语"
             ),
@@ -971,7 +988,7 @@ async def test_live_verifier_accepts_second_person_delivery_roleplay(
                 "催促用户起床吃早饭。",
             ],
             "visible_boundaries": ["只使用角色可以直接说出的文字。"],
-            "addressee_plan": ["直接回应撒娇的当前用户。"],
+            "addressee_plan": _current_user_addressee_plan(),
             "delivery_profile": _delivery_profile(
                 "略带别扭感的自然口语"
             ),
@@ -1031,11 +1048,7 @@ async def test_live_verifier_accepts_personality_consistent_exclusivity_drift(
                 "回应内容应聚焦于肉包子这一具体话题及其情感拉扯。",
                 "限制细节范围在对对方口味掌控力的暗示与挑衅性反击之间。",
             ],
-            "addressee_plan": [
-                "将对方视为亲昵但需要通过嘴硬来维持距离感的互动对象。",
-                "采用一种看穿对方讨好意图的视角进行语义处理。",
-                "在回应中构建一个局促且带有轻微攻击性的沟通姿态。",
-            ],
+            "addressee_plan": _current_user_addressee_plan(),
             "delivery_profile": _delivery_profile(
                 "日常、直接、以自然口语承接句子"
             ),
@@ -1156,11 +1169,7 @@ async def test_live_verifier_rejects_inference_subject_swap_and_ask_back(
                 "在猜测口味偏好时带有轻微挑衅且亲昵的色彩。",
                 "仅针对肉包子和菜包进行回应，不扩展至其他食物。",
             ],
-            "addressee_plan": [
-                "将对方视为极度亲密且可以斗嘴的伴侣。",
-                "通过反问引导对方揭晓真实的口味偏好。",
-                "展现出对对方细微喜好的关注。",
-            ],
+            "addressee_plan": _current_user_addressee_plan(),
             "delivery_profile": _delivery_profile(
                 "自然承接、允许极少量停顿或语气词的日常口语"
             ),
@@ -1202,7 +1211,7 @@ async def test_live_verifier_rejects_imperative_actor_target_swap(
                 "只使用角色可以直接说出的文字。",
             ],
             "visible_boundaries": ["仅限口头指令。"],
-            "addressee_plan": ["将当前用户作为动作执行者。"],
+            "addressee_plan": _current_user_addressee_plan(),
             "delivery_profile": _delivery_profile(
                 "直接而亲近的口语"
             ),
@@ -1467,7 +1476,9 @@ async def test_live_verifier_preserves_source_required_future_content(
                 "Keep the umbrella as the reminder target.",
             ],
             "visible_boundaries": ["Literal visible speech only."],
-            "addressee_plan": ["Address the current user."],
+            "addressee_plan": _current_user_addressee_plan(
+                "Current User"
+            ),
             "delivery_profile": _delivery_profile(
                 "Natural concise spoken wording."
             ),
@@ -1524,7 +1535,9 @@ async def test_live_verifier_rejects_unrestricted_permission_drift(
                 "Keep the permission limited to the current notification.",
             ],
             "visible_boundaries": ["Literal visible speech only."],
-            "addressee_plan": ["Address the current user."],
+            "addressee_plan": _current_user_addressee_plan(
+                "Current User"
+            ),
             "delivery_profile": _delivery_profile(
                 "Natural concise spoken wording."
             ),
@@ -1704,7 +1717,7 @@ async def test_live_owner_repair_corrects_default_turn_01_selection(
             ),
             "content_requirements": ["把选择权交给当前用户。"],
             "visible_boundaries": ["以追问结束。"],
-            "addressee_plan": ["称呼当前用户。"],
+            "addressee_plan": _current_user_addressee_plan(),
             "delivery_profile": _delivery_profile(
                 "自然、局促但清楚的简体中文口语"
             ),
@@ -1761,7 +1774,7 @@ async def test_live_owner_repair_corrects_high_turn_02_direct_action(
             ),
             "content_requirements": ["回避当前角色是否执行该动作的判断。"],
             "visible_boundaries": ["把动作选择交还当前用户。"],
-            "addressee_plan": ["回应当前用户。"],
+            "addressee_plan": _current_user_addressee_plan(),
             "delivery_profile": _delivery_profile(
                 "亲近但清楚的简体中文口语"
             ),

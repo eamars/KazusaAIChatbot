@@ -212,6 +212,7 @@ async def _run_cognition(
         character_operational_context=payload.get(
             "character_operational_context",
         ),
+        scene_context=payload["scene_context"],
         evidence=payload["evidence"],
     )
     questions = plan_semantic_questions(
@@ -332,6 +333,7 @@ async def _run_cognition(
         character_operational_context=payload.get(
             "character_operational_context",
         ),
+        scene_context=payload["scene_context"],
         evidence=payload["evidence"],
     )
 
@@ -863,13 +865,7 @@ def _branch_context(
             ref,
             scene_context=scene_context,
         )
-        if ref["kind"] in ROLE_ENTITY_KINDS:
-            role_bindings[handle] = {
-                "role": _role_label(handle, ref),
-                "entity_kind": ref["kind"],
-                "entity_id": ref["entity_id"],
-            }
-        elif handle == "self":
+        if handle == "self":
             role_bindings[handle] = {
                 "role": "actor",
                 "entity_kind": "character",
@@ -880,6 +876,12 @@ def _branch_context(
                 "role": "target",
                 "entity_kind": "user",
                 "entity_id": state["owner_user_id"],
+            }
+        elif ref["kind"] in ROLE_ENTITY_KINDS:
+            role_bindings[handle] = {
+                "role": _role_label(handle, ref),
+                "entity_kind": ref["kind"],
+                "entity_id": ref["entity_id"],
             }
     context["role_summaries"] = role_summaries
     context["_role_bindings"] = role_bindings
@@ -1030,6 +1032,18 @@ def _role_summary(
         return _scene_role_label(scene_context, "character_role", "当前角色")
     if handle == "current_user":
         return _scene_role_label(scene_context, "current_user_role", "当前用户")
+    if handle.startswith("p") and isinstance(scene_context, Mapping):
+        bindings = scene_context.get("participant_bindings")
+        if isinstance(bindings, list):
+            for binding in bindings:
+                if not isinstance(binding, Mapping):
+                    continue
+                if binding.get("handle") != handle:
+                    continue
+                display_name = binding.get("display_name")
+                if isinstance(display_name, str) and display_name.strip():
+                    return f"{handle}={display_name.strip()}（群聊其他参与者）"
+        return f"{handle}=群聊其他参与者"
     if handle.startswith("ce"):
         return "当前事件候选"
     if handle.startswith("ct"):
@@ -1075,6 +1089,7 @@ def _role_label(handle: str, ref: Mapping[str, str]) -> str:
         "relationship": "affected_relationship",
         "user": "target",
         "character": "actor",
+        "third_party": "target",
     }.get(ref["kind"], "object")
 
 

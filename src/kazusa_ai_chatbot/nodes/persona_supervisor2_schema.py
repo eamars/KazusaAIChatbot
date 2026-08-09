@@ -9,6 +9,7 @@ from kazusa_ai_chatbot.action_spec.results import (
 from kazusa_ai_chatbot.cognition_episode import CognitiveEpisodeV1
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     GoalResolutionV2,
+    SceneParticipantBindingV1,
     TextSurfaceInputV2,
     TextSurfaceOutputV2,
     VisualSurfaceOutputV2,
@@ -47,6 +48,7 @@ class ReferentResolution(TypedDict, total=False):
     phrase: str
     referent_role: ReferentRole
     status: Literal["resolved", "unresolved"]
+    participant_handle: NotRequired[str]
 
 
 class ScopeUser(TypedDict):
@@ -98,6 +100,7 @@ class GlobalPersonaState(TypedDict):
     indirect_speech_context: str
     channel_topic: str
     scope_users: NotRequired[list[ScopeUser]]
+    scene_participant_bindings: NotRequired[list[SceneParticipantBindingV1]]
     conversation_episode_state: NotRequired[ConversationProgressStateV2 | None]
     conversation_progress: NotRequired[ConversationProgressPromptV2]
     public_group_scene: str

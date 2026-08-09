@@ -962,7 +962,12 @@ def test_text_surface_output_validates_every_list_entry() -> None:
         "content_plan": "acknowledge the current percept",
         "content_requirements": ["Preserve the current addressee."],
         "visible_boundaries": ["keep the response concise"],
-        "addressee_plan": ["address the current participant"],
+        "addressee_plan": [{
+            "handle": "current_user",
+            "display_name": "current participant",
+            "semantic_role": "direct_recipient",
+            "wording_policy": "second_person_allowed",
+        }],
         "delivery_profile": _delivery_profile(),
         "selected_surface_intent": "acknowledge",
         "permitted_action_results": [{

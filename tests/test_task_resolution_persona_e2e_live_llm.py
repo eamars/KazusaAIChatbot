@@ -92,7 +92,12 @@ def _surface(
         "content_plan": content_plan,
         "content_requirements": [requirement],
         "visible_boundaries": [limitation],
-        "addressee_plan": ["current user"],
+        "addressee_plan": [{
+            "handle": "current_user",
+            "display_name": "current user",
+            "semantic_role": "direct_recipient",
+            "wording_policy": "second_person_allowed",
+        }],
         "delivery_profile": {
             "lexical_register": "plain, warm, and factual",
             "sentence_shape": "two concise sentences",

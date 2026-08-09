@@ -45,7 +45,12 @@ class _PromptCaptureLLM:
         elif stage_name == "past_dialog_preference":
             result = {
                 "visible_boundaries": ["bounded"],
-                "addressee_plan": ["bounded"],
+                "addressee_plan": [{
+                    "handle": "current_user",
+                    "display_name": "bounded",
+                    "semantic_role": "direct_recipient",
+                    "wording_policy": "second_person_allowed",
+                }],
             }
         else:
             raise AssertionError("unexpected text-surface stage")

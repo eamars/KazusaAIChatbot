@@ -42,7 +42,12 @@ class _LLM:
         if "visible_boundaries" in system and "addressee_plan" in system:
             result = {
                 "visible_boundaries": ["visible boundary"],
-                "addressee_plan": ["current participant"],
+                "addressee_plan": [{
+                    "handle": "current_user",
+                    "display_name": "current participant",
+                    "semantic_role": "direct_recipient",
+                    "wording_policy": "second_person_allowed",
+                }],
             }
         elif "content_plan" in system and "content_requirements" in system:
             result = {

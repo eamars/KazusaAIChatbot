@@ -102,6 +102,17 @@ Deterministic code validates exact shape, enums, booleans, and bounds, then
 attaches the model-owned values unchanged to existing dialog-percept metadata.
 The raw percept content remains available beside this projection.
 
+Group decontextualization also receives a bounded, display-name-only roster of
+episode-local third-party bindings (`p1` through `pN`). When the model resolves
+a third-party referent, it must carry the matching `participant_handle`; an
+unknown handle, mismatched display name, or unresolved referent is a bounded
+contract error. These bindings are transient semantic context, not global
+user identities and not persistence inputs. Cognition, L3, and dialog share
+the same binding and its structured addressee policy. A `pN` target must remain
+named or explicitly third-person in visible wording, while the current user's
+delivery identity remains the existing transport recipient. No deterministic
+post-generation replacement changes the text after dialog rendering.
+
 Provider or invalid decontextualizer output receives up to three total local
 attempts. A structural repair carries only the latest bounded rejected
 candidate and exact nested-field validation error. Exhaustion retains the

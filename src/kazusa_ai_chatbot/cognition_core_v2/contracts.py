@@ -27,6 +27,7 @@ from kazusa_ai_chatbot.cognition_core_v2.prompt_budget import (
     MAX_RELATIONSHIP_CAUSAL_ROWS,
     MAX_RELATIONSHIP_CAUSAL_SUMMARY_CHARS,
     MAX_RELATIONSHIP_OPERATIONAL_CONTEXT_CHARS,
+    MAX_SCENE_PARTICIPANT_BINDINGS,
     OPERATIONAL_CAUSE_CLASSES,
     RELATIONSHIP_AFFECT_PHASES,
     RELATIONSHIP_CAUSAL_ENTITY_KINDS,
@@ -44,6 +45,8 @@ from kazusa_ai_chatbot.cognition_core_v2.state_models import (
 
 
 _CJK_IDEOGRAPH_RE = re.compile(r"[\u4e00-\u9fff]")
+SCENE_PARTICIPANT_HANDLE_RE = re.compile(r"^p[1-9][0-9]*$")
+SURFACE_ROLE_HANDLE_RE = re.compile(r"^(?:current_user|self|p[1-9][0-9]*)$")
 
 
 @dataclass(frozen=True)
@@ -440,6 +443,20 @@ class ResolverAffordanceV2(TypedDict):
     availability: str
 
 
+class SceneParticipantBindingV1(TypedDict):
+    """Prompt-safe episode-local binding for one visible scene participant.
+
+    Bindings are derived deterministically from the already resolved scene
+    roster, scoped to one cognitive episode, and contain only the episode-local
+    handle and the exact visible display name. Platform, global, and database
+    identifiers never enter these rows or any model payload.
+    """
+
+    handle: str
+    display_name: str
+    entity_kind: Literal["third_party"]
+
+
 class SceneContextV2(TypedDict):
     """Prompt-safe scene context without platform identifiers."""
 
@@ -451,6 +468,7 @@ class SceneContextV2(TypedDict):
     public_group_scene: str
     conversation_continuity: str
     semantic_temporal_context: str
+    participant_bindings: NotRequired[list[SceneParticipantBindingV1]]
 
 
 class GroupEngagementActionContextV2(TypedDict):
@@ -904,6 +922,33 @@ class TextSurfaceInputV2(TypedDict):
     character_expression_context: CharacterExpressionContextV2
     visual_character_context: str
     relational_willingness: NotRequired[RelationalWillingnessV2]
+    addressee_plan: NotRequired[list[SurfaceAddresseePlanV1]]
+
+
+class SurfaceAddresseePlanV1(TypedDict):
+    """Structured prompt-safe addressee and clause-target projection.
+
+    Rows carry the episode-local handle, the exact visible display name, the
+    semantic role the participant plays in the planned wording, and the
+    deterministic wording policy the wording owners must follow. The current
+    user stays the transport/direct-message recipient and permits second
+    person only when the current user is the intended clause target; a typed
+    third-party target requires its visible name or an unambiguous
+    third-person expression.
+    """
+
+    handle: str
+    display_name: str
+    semantic_role: Literal[
+        "direct_recipient",
+        "embedded_target",
+        "embedded_actor",
+        "observer",
+    ]
+    wording_policy: Literal[
+        "second_person_allowed",
+        "named_or_third_person_required",
+    ]
 
 
 class TextSurfaceOutputV2(TypedDict):
@@ -913,7 +958,7 @@ class TextSurfaceOutputV2(TypedDict):
     content_plan: str
     content_requirements: list[str]
     visible_boundaries: list[str]
-    addressee_plan: list[str]
+    addressee_plan: list[SurfaceAddresseePlanV1]
     delivery_profile: DeliveryProfileV2
     selected_surface_intent: str
     permitted_action_results: list[SemanticActionResultV2]
@@ -1259,6 +1304,11 @@ def validate_text_surface_input(
             {"relational_willingness"}
             if "relational_willingness" in payload
             else set()
+        )
+        | (
+            {"addressee_plan"}
+            if "addressee_plan" in payload
+            else set()
         ),
         "text surface input",
     )
@@ -1316,6 +1366,8 @@ def validate_text_surface_input(
         _validate_surface_resolver_result(payload["resolver_result"])
     if "relational_willingness" in payload:
         validate_relational_willingness(payload["relational_willingness"])
+    if "addressee_plan" in payload:
+        validate_surface_addressee_plan(payload["addressee_plan"])
     _validate_runtime_capability_limits(payload)
     return dict(payload)  # type: ignore[return-value]
 
@@ -1365,14 +1417,19 @@ def validate_text_surface_output(
             raise CognitionContractError(
                 f"{field_name} must contain 0-8 items"
             )
-        if len(items) != len(set(items)):
-            raise CognitionContractError(f"{field_name} contains duplicates")
-        for index, item in enumerate(items):
-            _require_text(
-                item,
-                f"{field_name}[{index}]",
-                maximum=500,
-            )
+        if field_name == "visible_boundaries":
+            if len(items) != len(set(items)):
+                raise CognitionContractError(
+                    f"{field_name} contains duplicates"
+                )
+            for index, item in enumerate(items):
+                _require_text(
+                    item,
+                    f"{field_name}[{index}]",
+                    maximum=500,
+                )
+        else:
+            validate_surface_addressee_plan(items)
     action_results = payload["permitted_action_results"]
     if not isinstance(action_results, list):
         raise CognitionContractError(
@@ -2751,6 +2808,8 @@ def _validate_scene_context(value: Any) -> None:
         required.add("current_user_role")
     if isinstance(value, Mapping) and "character_sleep_phase" in value:
         required.add("character_sleep_phase")
+    if isinstance(value, Mapping) and "participant_bindings" in value:
+        required.add("participant_bindings")
     if not isinstance(value, Mapping) or set(value) != required:
         raise CognitionContractError("scene context fields are not exact")
     if value["channel_scope"] not in {"private", "group", "internal"}:
@@ -2759,6 +2818,7 @@ def _validate_scene_context(value: Any) -> None:
         "channel_scope",
         "conversation_continuity",
         "public_group_scene",
+        "participant_bindings",
     }:
         _require_text(value[field_name], f"scene context.{field_name}")
     _require_bounded_text(
@@ -2771,6 +2831,57 @@ def _validate_scene_context(value: Any) -> None:
         "scene context.conversation_continuity",
         maximum=2200,
     )
+    participant_bindings = value.get("participant_bindings")
+    if participant_bindings is not None:
+        _validate_scene_participant_bindings(participant_bindings)
+
+
+def _validate_scene_participant_bindings(value: Any) -> None:
+    """Validate one bounded prompt-safe scene participant roster."""
+
+    if (
+        not isinstance(value, list)
+        or len(value) > MAX_SCENE_PARTICIPANT_BINDINGS
+    ):
+        raise CognitionContractError(
+            "scene participant bindings must contain "
+            f"0-{MAX_SCENE_PARTICIPANT_BINDINGS} items"
+        )
+    handles: list[str] = []
+    for index, binding in enumerate(value):
+        if (
+            not isinstance(binding, Mapping)
+            or set(binding) != {
+                "handle",
+                "display_name",
+                "entity_kind",
+            }
+        ):
+            raise CognitionContractError(
+                f"scene participant binding[{index}] fields are not exact"
+            )
+        handle = binding["handle"]
+        if (
+            not isinstance(handle, str)
+            or not SCENE_PARTICIPANT_HANDLE_RE.fullmatch(handle)
+        ):
+            raise CognitionContractError(
+                f"scene participant binding[{index}].handle is invalid"
+            )
+        if handle in handles:
+            raise CognitionContractError(
+                "scene participant bindings contain duplicate handles"
+            )
+        handles.append(handle)
+        _require_bounded_text(
+            binding["display_name"],
+            f"scene participant binding[{index}].display_name",
+            maximum=200,
+        )
+        if binding["entity_kind"] != "third_party":
+            raise CognitionContractError(
+                "scene participant binding entity_kind is invalid"
+            )
 
 
 def _validate_group_engagement_action_context(value: Any) -> None:
@@ -3174,6 +3285,78 @@ def _validate_surface_resolver_result(value: Any) -> None:
         "surface resolver semantic result",
         maximum=2000,
     )
+
+
+def validate_surface_addressee_plan(value: Any) -> None:
+    """Validate bounded, prompt-safe target and wording rows."""
+
+    if not isinstance(value, list) or len(value) > 8:
+        raise CognitionContractError(
+            "surface addressee plan must contain 0-8 items"
+        )
+    handles: set[str] = set()
+    for index, row in enumerate(value):
+        if (
+            not isinstance(row, Mapping)
+            or set(row) != {
+                "handle",
+                "display_name",
+                "semantic_role",
+                "wording_policy",
+            }
+        ):
+            raise CognitionContractError(
+                f"surface addressee plan[{index}] fields are not exact"
+            )
+        handle = row["handle"]
+        if (
+            not isinstance(handle, str)
+            or not SURFACE_ROLE_HANDLE_RE.fullmatch(handle)
+        ):
+            raise CognitionContractError(
+                f"surface addressee plan[{index}].handle is invalid"
+            )
+        if handle in handles:
+            raise CognitionContractError(
+                "surface addressee plan contains duplicate handles"
+            )
+        handles.add(handle)
+        _require_bounded_text(
+            row["display_name"],
+            f"surface addressee plan[{index}].display_name",
+            maximum=200,
+        )
+        if row["semantic_role"] not in {
+            "direct_recipient",
+            "embedded_target",
+            "embedded_actor",
+            "observer",
+        }:
+            raise CognitionContractError(
+                f"surface addressee plan[{index}].semantic_role is invalid"
+            )
+        wording_policy = row["wording_policy"]
+        if wording_policy not in {
+            "second_person_allowed",
+            "named_or_third_person_required",
+        }:
+            raise CognitionContractError(
+                f"surface addressee plan[{index}].wording_policy is invalid"
+            )
+        if handle.startswith("p") and (
+            wording_policy != "named_or_third_person_required"
+        ):
+            raise CognitionContractError(
+                "third-party addressees require named or third-person wording"
+            )
+        if (
+            handle == "current_user"
+            and row["semantic_role"] in {"direct_recipient", "embedded_target"}
+            and wording_policy != "second_person_allowed"
+        ):
+            raise CognitionContractError(
+                "current-user addressees require second-person wording"
+            )
 
 
 def _require_axis(value: Any, label: str) -> None:

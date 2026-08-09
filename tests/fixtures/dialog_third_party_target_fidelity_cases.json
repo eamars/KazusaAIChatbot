@@ -1,0 +1,36 @@
+{
+  "schema_version": "dialog_third_party_target_fidelity.v1",
+  "cases": [
+    {
+      "case_id": "group_named_third_party",
+      "channel_type": "group",
+      "current_user_display_name": "YCHDDZZ",
+      "scene_display_names": ["YCHDDZZ", "蚝爹油", "Asuna"],
+      "expected_participant": {
+        "handle": "p1",
+        "display_name": "蚝爹油",
+        "entity_kind": "third_party"
+      },
+      "expected_wording_policy": "named_or_third_person_required",
+      "transport_recipient": "current_user"
+    },
+    {
+      "case_id": "direct_current_user",
+      "channel_type": "private",
+      "current_user_display_name": "YCHDDZZ",
+      "scene_display_names": ["YCHDDZZ", "Asuna"],
+      "expected_participant": null,
+      "expected_wording_policy": "second_person_allowed",
+      "transport_recipient": "current_user"
+    },
+    {
+      "case_id": "no_third_party_binding",
+      "channel_type": "group",
+      "current_user_display_name": "YCHDDZZ",
+      "scene_display_names": ["YCHDDZZ", "Asuna"],
+      "expected_participant": null,
+      "expected_wording_policy": null,
+      "transport_recipient": "current_user"
+    }
+  ]
+}

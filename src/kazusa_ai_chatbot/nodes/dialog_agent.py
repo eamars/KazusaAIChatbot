@@ -298,6 +298,38 @@ MAX_FOCUSED_VERIFIER_ISSUES = 4
 MAX_MERGED_VERIFIER_ISSUES = 8
 
 
+def _candidate_role_frame(
+    surface_output: TextSurfaceOutputV2,
+) -> dict[str, Any]:
+    """Project the authoritative target wording rules for dialog owners."""
+
+    second_person_allowed_handles = [
+        row["handle"]
+        for row in surface_output["addressee_plan"]
+        if row["wording_policy"] == "second_person_allowed"
+    ]
+    typed_non_current_targets = [
+        {
+            "handle": row["handle"],
+            "display_name": row["display_name"],
+            "semantic_role": row["semantic_role"],
+            "wording_policy": row["wording_policy"],
+        }
+        for row in surface_output["addressee_plan"]
+        if (
+            row["handle"].startswith("p")
+            and row["handle"] not in second_person_allowed_handles
+        )
+    ]
+    frame = dict(_CANDIDATE_ROLE_FRAME)
+    if typed_non_current_targets:
+        frame["second_person_allowed_handles"] = (
+            second_person_allowed_handles
+        )
+        frame["typed_non_current_targets"] = typed_non_current_targets
+    return frame
+
+
 _V2_DIALOG_GENERATOR_PROMPT = '''你是当前角色的最终文字渲染器。把 text_surface_output_v2 转化为
 自然、鲜活、有角色辨识度，并且切合当前场景的聊天内容。上游认知负责角色判断；surface planning
 提供语义内容、真实边界、称呼安排、delivery profile 和 permitted action results。
@@ -308,14 +340,16 @@ resolver_result 提供来源自有的 resolver capability 执行结果，与 act
 理由和互动推进；visible_boundaries 确定表达范围。以这组权威语义组织对象、事实、位置、数量、
 时间、行动者、受益者和回应方向。
 2. 先整体阅读 selected_surface_intent、content_plan、content_requirements、
-visible_boundaries 和 delivery_profile，判断规划中的开场反应指向行动或关系本身，还是指向提问的
+visible_boundaries、addressee_plan 和 delivery_profile，判断规划中的开场反应指向行动或关系本身，还是指向提问的
 时机、突然程度或直接程度。可自由组合惊讶、羞赧、防御、调侃、嘴硬、表面勉强、间接表达、温柔、
 热烈以及其他符合角色的情绪和特征。这些表达可以先于明确决定出现，并与后文共同传达同一已选决定。
 在这条语义弧线内，自由加入相容的想象细节、个性、幽默、主动性、温度和创造性展开，形成当前角色
 实际会说出或发送的鲜活回应。
-3. 按每条 percept 的结构化角色框架保持行动者、对象、受益者与主语方向。生成的对话由当前角色
-说出：第一人称属于当前角色，第二人称指当前用户；跨角色框架转换时延续原有方向。回顾型请求直接
-表达 surface 已确认的历史事实。
+3. 按每条 percept 的结构化角色框架和 addressee_plan 保持行动者、对象、受益者与主语方向。生成的
+对话由当前角色说出：第一人称属于当前角色；只有 wording_policy 为 second_person_allowed 的
+current_user 行允许用第二人称；typed third-party 行必须使用其 display_name 或明确第三人称，
+不得把第三方改写成当前用户的“你”。跨角色框架转换时延续原有方向。回顾型请求直接表达 surface
+已确认的历史事实。
 4. 按 permitted_action_results 映射执行状态：executed 表达其有界的已完成效果；scheduled 与
 pending 表达已记录、已排队或等待对应 worker；failed 与 unavailable 表达当前限制和可行下一步；
 请求、意图或 content plan 表达角色的言语立场。
@@ -564,6 +598,7 @@ async def _render_dialog_candidate(
         system_message = SystemMessage(content=_V2_DIALOG_GENERATOR_PROMPT)
         payload: dict[str, Any] = {
             "text_surface_output_v2": dict(validated_surface),
+            "candidate_role_frame": _candidate_role_frame(validated_surface),
             "user_name": user_name,
         }
         stage_name = "dialog_generator"
@@ -573,6 +608,7 @@ async def _render_dialog_candidate(
         )
         payload = {
             "text_surface_output_v2": dict(validated_surface),
+            "candidate_role_frame": _candidate_role_frame(validated_surface),
             "user_name": user_name,
             "repair_context": {
                 "verified_hard_issues": list(repair_issues),
@@ -731,7 +767,9 @@ response_operation 的完成度和 selection_owner_role 转移由其他检查负
 # 判定语境
 current_visible_percepts 提供当前输入和结构化角色；candidate_role_frame 定义候选代词归属；
 role_explicit_content 提供上游已解析的行动者、动作和对象方向，content 保留原文证据。
-authoritative_surface_semantics 提供本轮已选回应意图、内容计划、内容要求和可见边界。
+authoritative_surface_semantics 提供本轮已选回应意图、内容计划、内容要求、可见边界和结构化
+addressee_plan。addressee_plan 中的 wording_policy 是称呼方向的权威约束：第三方 target 行需要
+display_name 或明确第三人称；current_user 行只有在允许第二人称时才能由“你”承担。
 selected_surface_intent 是语义判定锚点，其他字段提供事实、理由和范围。
 
 依次阅读当前输入、权威语义和候选中的全部消息，判断每句话回应的对象以及前后句如何承接。先判断
@@ -848,10 +886,13 @@ async def _verify_dialog_semantic_fidelity(
         "visible_boundaries": list(
             validated_surface["visible_boundaries"]
         ),
+        "addressee_plan": [
+            dict(row) for row in validated_surface["addressee_plan"]
+        ],
     }
     payload = {
         "candidate_final_dialog": generated_dialog,
-        "candidate_role_frame": dict(_CANDIDATE_ROLE_FRAME),
+        "candidate_role_frame": _candidate_role_frame(validated_surface),
         "current_visible_percepts": _project_semantic_fidelity_percepts(
             current_visible_percepts
         ),
@@ -1049,6 +1090,9 @@ candidate_role_frame 定义回应中的代词归属；required_role_operations �
 当前角色可以拒绝、协商、附加条件或不执行某项动作，而不改变角色方向。笑话、双关、省略以及
 存在多种合理角色读法的措辞按 aligned 处理。文风、新颖度、亲密程度、安全、动作执行与文笔质量
 不属于本阶段。
+当 typed_addressee_plan 含有 wording_policy 为 named_or_third_person_required 的 pN 行时，
+候选把该行的明确控制、调侃或关系对象唯一地写成当前用户第二人称，属于
+typed_operation_role_reversal；候选使用该行的 display_name 或明确第三人称则保持 aligned。
 当 selection_owner_role 是当前角色且 embedded_actor_role 是当前用户时，当前角色用明确的
 愿望、请求或祈使句说出希望用户做的动作，就已经完成选择；不要求额外写成执行说明，也不因使用
 “想要”“希望”“请”之类的请求表达而标为遗漏。
@@ -1137,6 +1181,7 @@ def _required_selection_role_operations(
 
 async def _verify_dialog_role_direction(
     *,
+    surface_output: TextSurfaceOutputV2 | None = None,
     generated_dialog: list[str],
     current_visible_percepts: list[dict[str, Any]],
     llm_trace_id: str,
@@ -1144,10 +1189,20 @@ async def _verify_dialog_role_direction(
 ) -> dict[str, Any]:
     """Check nested role direction when typed input requires a selection."""
 
+    validated_surface = (
+        validate_text_surface_output(surface_output)
+        if isinstance(surface_output, dict)
+        else None
+    )
     required_operations = _required_selection_role_operations(
         current_visible_percepts
     )
-    if not required_operations:
+    typed_addressee_plan = [
+        dict(row)
+        for row in (validated_surface or {}).get("addressee_plan", [])
+        if row["handle"].startswith("p")
+    ]
+    if not required_operations and not typed_addressee_plan:
         return {"aligned": True, "violations": []}
 
     system_message = SystemMessage(
@@ -1155,9 +1210,15 @@ async def _verify_dialog_role_direction(
     )
     payload = {
         "candidate_final_dialog": generated_dialog,
-        "candidate_role_frame": dict(_CANDIDATE_ROLE_FRAME),
+        "candidate_role_frame": (
+            _candidate_role_frame(validated_surface)
+            if validated_surface is not None
+            else dict(_CANDIDATE_ROLE_FRAME)
+        ),
         "required_role_operations": required_operations,
     }
+    if typed_addressee_plan:
+        payload["typed_addressee_plan"] = typed_addressee_plan
     human_message = HumanMessage(content=json.dumps(
         payload,
         ensure_ascii=False,
@@ -1511,6 +1572,7 @@ async def _verify_dialog_compliance(
             post_repair=post_repair,
         ),
         _verify_dialog_role_direction(
+            surface_output=surface_output,
             generated_dialog=generated_dialog,
             current_visible_percepts=current_visible_percepts,
             llm_trace_id=llm_trace_id,

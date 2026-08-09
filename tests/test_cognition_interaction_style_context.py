@@ -193,7 +193,12 @@ async def test_surface_handler_passes_loaded_style_to_v2_planner(
             "content_plan": "Acknowledge the exchange.",
             "content_requirements": ["Address the current participant."],
             "visible_boundaries": [],
-            "addressee_plan": ["current participant"],
+            "addressee_plan": [{
+                "handle": "current_user",
+                "display_name": "current participant",
+                "semantic_role": "direct_recipient",
+                "wording_policy": "second_person_allowed",
+            }],
             "delivery_profile": {
                 "lexical_register": "plain",
                 "sentence_shape": "brief",

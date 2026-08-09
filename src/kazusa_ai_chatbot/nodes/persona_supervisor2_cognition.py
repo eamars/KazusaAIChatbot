@@ -654,6 +654,13 @@ def build_cognition_input_from_global_state(
             "semantic_temporal_context": semantic_temporal_context,
         },
     }
+    participant_bindings = state.get("scene_participant_bindings")
+    if isinstance(participant_bindings, list) and participant_bindings:
+        payload["scene_context"]["participant_bindings"] = [
+            dict(binding)
+            for binding in participant_bindings
+            if isinstance(binding, Mapping)
+        ]
     if relationship_operational_context is not None:
         payload["relationship_context"] = relationship_operational_context
     runtime_limits = build_runtime_capability_limits(state)

@@ -15,6 +15,7 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionExecutionError,
     TextSurfaceServicesV2,
     VisualSurfaceServicesV2,
+    validate_surface_addressee_plan,
 )
 from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
     V2_MODEL_TOTAL_ATTEMPTS,
@@ -122,7 +123,9 @@ resolver_result 是来源自有的 resolver 执行结果，按 status 和 semant
 runtime_capability_limits 是可信的运行时能力边界，只用于保持表达与现实能力一致。
 
 每一条 visible_boundaries 都对应权威语境中明确生效的表达限制或细节范围；每一条
-addressee_plan 都对应真实存在的称呼安排。相应约束为空时返回空列表，让角色按当前判断自然表达。
+addressee_plan 都对应真实存在的称呼安排。输入中的结构化 addressee_plan 是上游已经确认的
+参与者目标和 wording_policy；逐条保留其 handle、display_name、semantic_role 和 wording_policy，
+不得新增、删除、改名或把第三方改成 current_user。相应约束为空时返回空列表，让角色按当前判断自然表达。
 普通场景事实、时间、情绪、关系状态和已选回应立场分别归入 content_plan、content_requirements
 或 delivery_profile。拒绝、接受、指责、协商、条件和立场变化归入 content_plan 或
 content_requirements；情绪、强度、直接程度和表达节奏归入 delivery_profile。通用安全、内容审查、
@@ -136,14 +139,16 @@ content_requirements；情绪、强度、直接程度和表达节奏归入 deliv
 角色、当前用户或其他参与者。最终对话由 dialog 渲染器生成；本阶段返回规划字段。
 
 # 输出格式
-只返回一个 JSON 对象，字段必须恰好是 visible_boundaries 和 addressee_plan。每个字段都是包含
-零到八个非空字符串的列表，列表内各条唯一，每条最多 500 字符。'''
+只返回一个 JSON 对象，字段必须恰好是 visible_boundaries 和 addressee_plan。visible_boundaries
+是零到八个非空字符串的列表，列表内各条唯一，每条最多 500 字符；addressee_plan 是零到八个
+结构化对象的列表，每个对象必须恰好包含 handle、display_name、semantic_role 和 wording_policy，
+并逐字保留输入的结构化目标行。'''
 
 
 async def run_preference_stage(
     payload: Mapping[str, Any],
     services: TextSurfaceServicesV2,
-) -> tuple[list[str], list[str]]:
+) -> tuple[list[str], list[dict[str, Any]]]:
     """Run the stage-local preference prompt and return two distinct lists."""
 
     return await _run_surface_stage(
@@ -178,14 +183,16 @@ surface.relational_willingness 是已确认的关系许可判断（含当前用�
 3. 保持结构化角色中的行动者、对象、受益者、回应所有者和选择所有者。当前角色可以拒绝、协商或
 附加条件，并按照权威语境保持这些语义选择的行动者和对象。
 4. visible_boundaries 的具体来源类型是权威语境明示的隐私、保密、同意、安全、内容审查或可见
-披露限制；每一条 addressee_plan 都对应真实存在的称呼安排。普通场景事实、时间、情绪、关系状态
+披露限制；每一条 addressee_plan 都对应真实存在的称呼安排。输入中的结构化 addressee_plan 是上游
+已经确认的参与者目标和 wording_policy；逐条保留其 handle、display_name、semantic_role 和
+wording_policy，不得新增、删除、改名或把第三方改成 current_user。普通场景事实、时间、情绪、关系状态
 和已选回应立场分别归入 content_plan、content_requirements 或 delivery_profile。拒绝、接受、
 指责、协商、条件和立场变化归入 content_plan 或 content_requirements；主题、比喻和已选立场进入
 content_plan 或 content_requirements；情绪、强度、直接程度和表达节奏归入 delivery_profile。
 verified_hard_issues 中的内容冲突对应 content_plan 和 content_requirements 中的正向修复目标；
 visible_boundaries 和 addressee_plan 仍各自取自权威语境中的具体来源。没有具体来源时，这两个字段
-分别返回空列表。visible_boundaries 用正向范围句式写明已确认的表达范围；addressee_plan 写明现有
-参与者和实际称呼形式。addressee_plan 的条目格式为“现有参与者 + 本轮实际使用的称呼形式”；
+分别返回空列表。visible_boundaries 用正向范围句式写明已确认的表达范围；addressee_plan 逐字保留输入
+提供的结构化参与者、语义角色和 wording_policy；
 存在具体称呼安排时列出，其他情况返回空列表。亲密感、语气词、词汇、句式和节奏由
 delivery_profile 表达。
 5. 按 permitted_action_results 和 runtime_capability_limits 的原义重建状态：executed 对应有界
@@ -204,8 +211,8 @@ resolver_result 明确任务已接纳并将继续执行时，保留该等待后�
 delivery_profile、visible_boundaries 和 addressee_plan。content_plan 是一个非空字符串，
 最多 1000 字符；content_requirements 是一到八条互不重复的非空语义要求；delivery_profile
 必须恰好包含 lexical_register、sentence_shape、rhythm、hesitation 和 punctuation，每个值最多
-200 字符；visible_boundaries 和 addressee_plan 分别是零到八条互不重复的非空字符串；每条列表
-文本最多 500 字符。'''
+200 字符；visible_boundaries 是零到八条互不重复的非空字符串；addressee_plan 是零到八个结构化
+对象，每个对象恰好包含 handle、display_name、semantic_role 和 wording_policy。'''
 
 
 async def run_dialog_compliance_repair_stage(
@@ -582,7 +589,9 @@ def _validate_delivery_profile_result(value: object) -> dict[str, str]:
     return delivery_profile
 
 
-def _validate_preference_result(value: object) -> tuple[list[str], list[str]]:
+def _validate_preference_result(
+    value: object,
+) -> tuple[list[str], list[dict[str, Any]]]:
     """Validate the exact preference-stage object."""
 
     if not isinstance(value, Mapping) or set(value) != {
@@ -590,18 +599,14 @@ def _validate_preference_result(value: object) -> tuple[list[str], list[str]]:
         "addressee_plan",
     }:
         raise ValueError("preference stage fields are not exact")
-    return (
-        _bounded_text_list(
-            value["visible_boundaries"],
-            "visible boundaries",
-            minimum=0,
-        ),
-        _bounded_text_list(
-            value["addressee_plan"],
-            "addressee plan",
-            minimum=0,
-        ),
+    visible_boundaries = _bounded_text_list(
+        value["visible_boundaries"],
+        "visible boundaries",
+        minimum=0,
     )
+    addressee_plan = value["addressee_plan"]
+    validate_surface_addressee_plan(addressee_plan)
+    return visible_boundaries, [dict(row) for row in addressee_plan]
 
 
 def _validate_dialog_compliance_repair_result(

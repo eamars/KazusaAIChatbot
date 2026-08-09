@@ -47,7 +47,7 @@ class _SurfaceLLM:
         if "visible_boundaries" in system and "addressee_plan" in system:
             result = {
                 "visible_boundaries": ["Use visible speech only."],
-                "addressee_plan": ["Address the current user."],
+                "addressee_plan": list(payload.get("addressee_plan", [])),
             }
         elif "content_plan" in system and "content_requirements" in system:
             result = {
@@ -125,7 +125,12 @@ def _surface_output() -> dict[str, object]:
             "Preserve the requested response operation and current time scope.",
         ],
         "visible_boundaries": ["Return only literal visible speech."],
-        "addressee_plan": ["Address the current user."],
+        "addressee_plan": [{
+            "handle": "current_user",
+            "display_name": "Current User",
+            "semantic_role": "direct_recipient",
+            "wording_policy": "second_person_allowed",
+        }],
         "delivery_profile": {
             "lexical_register": "warm",
             "sentence_shape": "concise",
@@ -563,6 +568,12 @@ async def test_verifier_receives_bounded_visible_percepts(
             "Preserve the requested response operation and current time scope.",
         ],
         "visible_boundaries": ["Return only literal visible speech."],
+        "addressee_plan": [{
+            "handle": "current_user",
+            "display_name": "Current User",
+            "semantic_role": "direct_recipient",
+            "wording_policy": "second_person_allowed",
+        }],
     }
     surface_payload = json.loads(
         surface_llm.ainvoke.await_args.args[0][1].content,
@@ -576,7 +587,6 @@ async def test_verifier_receives_bounded_visible_percepts(
     surface_llm.ainvoke.assert_awaited_once()
     rendered = json.dumps(compliance_payload)
     for forbidden_field in (
-        "addressee_plan",
         "delivery_profile",
         "permitted_action_results",
         "metadata",
@@ -1459,9 +1469,15 @@ async def test_false_execution_verdict_uses_one_grounded_llm_repair(
         generator_llm.ainvoke.await_args_list[1].args[0][1].content,
     )
     assert set(repair_payload) == {
+        "candidate_role_frame",
         "repair_context",
         "text_surface_output_v2",
         "user_name",
+    }
+    assert repair_payload["candidate_role_frame"] == {
+        "speaker_role": "当前角色",
+        "first_person_role": "当前角色",
+        "second_person_role": "当前用户",
     }
     assert repair_payload["text_surface_output_v2"] == _surface_output()
     assert repair_payload["repair_context"] == {
@@ -1549,7 +1565,12 @@ async def test_surface_owner_repair_replaces_all_owned_fields() -> None:
                 "visible_boundaries": [
                     "角色可以拒绝、协商或附加条件。",
                 ],
-                "addressee_plan": ["称呼当前用户。"],
+                "addressee_plan": [{
+                    "handle": "current_user",
+                    "display_name": "当前用户",
+                    "semantic_role": "direct_recipient",
+                    "wording_policy": "second_person_allowed",
+                }],
                 "delivery_profile": {
                     "lexical_register": "直接口语",
                     "sentence_shape": "紧凑短句",
@@ -1585,7 +1606,12 @@ async def test_surface_owner_repair_replaces_all_owned_fields() -> None:
     assert repaired["visible_boundaries"] == [
         "角色可以拒绝、协商或附加条件。",
     ]
-    assert repaired["addressee_plan"] == ["称呼当前用户。"]
+    assert repaired["addressee_plan"] == [{
+        "handle": "current_user",
+        "display_name": "当前用户",
+        "semantic_role": "direct_recipient",
+        "wording_policy": "second_person_allowed",
+    }]
     assert repaired["delivery_profile"] == {
         "lexical_register": "直接口语",
         "sentence_shape": "紧凑短句",
@@ -1633,7 +1659,12 @@ async def test_surface_owner_repair_regenerates_invalid_contract_once() -> None:
                     "content_plan": "当前角色明确选择下一步并告诉当前用户。",
                     "content_requirements": ["保持选择所有者为当前角色。"],
                     "visible_boundaries": [],
-                    "addressee_plan": ["直接称呼当前用户。"],
+                    "addressee_plan": [{
+                        "handle": "current_user",
+                        "display_name": "当前用户",
+                        "semantic_role": "direct_recipient",
+                        "wording_policy": "second_person_allowed",
+                    }],
                     "delivery_profile": {
                         "lexical_register": "直接口语",
                         "sentence_shape": "紧凑短句",

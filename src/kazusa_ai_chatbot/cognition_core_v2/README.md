@@ -159,6 +159,18 @@ consumes this semantic projection unchanged as current episode meaning so
 nested role and response ownership are resolved once before goal cognition
 instead of independently by every downstream local-model stage.
 
+In a group episode, visible third-party participants use an episode-local
+typed binding such as `p1`, paired with its display name and the
+`third_party` entity kind. The binding is transient: it is available to
+decontextualization, cognition goal selection, L3 surface planning, and dialog
+verification, but it is not a user identifier, a persistent memory handle, or
+a delivery recipient. A typed `pN` target is rendered by name or an explicit
+third-person reference; only a `current_user` addressee row with
+`second_person_allowed` authorizes `你`. The structured addressee plan is
+propagated as surface authority and validated again at the dialog boundary.
+The dialog path therefore preserves target semantics without post-generation
+name substitution or deterministic text rewriting.
+
 Goal-bid output uses an exact route-to-capability-field matrix. A malformed bid
 receives up to three total LLM attempts while deterministic validation remains
 strict. The three-call limit belongs to each goal-producing stage and branch

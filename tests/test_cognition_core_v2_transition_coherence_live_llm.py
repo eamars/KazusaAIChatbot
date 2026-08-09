@@ -339,7 +339,12 @@ def _authoritative_accepting_surface(
             "以羞赧和含蓄塑造表达，同时清楚确认共同参与。",
         ],
         "visible_boundaries": [],
-        "addressee_plan": ["当前用户"],
+        "addressee_plan": [{
+            "handle": "current_user",
+            "display_name": "当前用户",
+            "semantic_role": "direct_recipient",
+            "wording_policy": "second_person_allowed",
+        }],
         "delivery_profile": {
             "lexical_register": "亲密、口语化",
             "sentence_shape": "自然短句",

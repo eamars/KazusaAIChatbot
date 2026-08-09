@@ -33,9 +33,13 @@ from kazusa_ai_chatbot.conversation_progress import (
 )
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionExecutionError,
+    SceneParticipantBindingV1,
     validate_cognition_core_output,
     validate_text_surface_output,
     validate_visual_surface_output,
+)
+from kazusa_ai_chatbot.cognition_core_v2.prompt_budget import (
+    MAX_SCENE_PARTICIPANT_BINDINGS,
 )
 from kazusa_ai_chatbot.cognition_resolver.capabilities import (
     execute_resolver_capability_request,
@@ -268,6 +272,61 @@ def _build_scope_users(
     )
 
     return scope_users
+
+
+def _build_scene_participant_bindings(
+    state: IMProcessState,
+    scope_users: list[ScopeUser],
+) -> list[SceneParticipantBindingV1]:
+    """Project non-current visible group users into episode-local handles."""
+
+    if state["channel_type"] != "group":
+        return []
+    current_global_user_id = text_or_empty(state["global_user_id"])
+    current_platform_user_id = text_or_empty(state["platform_user_id"])
+    current_display_name = text_or_empty(state["user_name"])
+    character_profile = state["character_profile"]
+    character_global_user_id = text_or_empty(
+        character_profile["global_user_id"]
+    )
+    character_platform_user_id = text_or_empty(state["platform_bot_id"])
+    character_display_name = text_or_empty(character_profile["name"])
+    bindings: list[SceneParticipantBindingV1] = []
+    for scope_user in scope_users:
+        display_name = text_or_empty(scope_user.get("display_name"))
+        if not display_name:
+            continue
+        row_global_user_id = text_or_empty(scope_user.get("global_user_id"))
+        row_platform_user_id = text_or_empty(
+            scope_user.get("platform_user_id")
+        )
+        same_global_identity = bool(row_global_user_id) and (
+            row_global_user_id in {
+                current_global_user_id,
+                character_global_user_id,
+            }
+        )
+        same_platform_identity = bool(row_platform_user_id) and (
+            row_platform_user_id in {
+                current_platform_user_id,
+                character_platform_user_id,
+            }
+        )
+        if (
+            same_global_identity
+            or same_platform_identity
+            or display_name in {current_display_name, character_display_name}
+        ):
+            continue
+        handle = f"p{len(bindings) + 1}"
+        bindings.append({
+            "handle": handle,
+            "display_name": display_name,
+            "entity_kind": "third_party",
+        })
+        if len(bindings) >= MAX_SCENE_PARTICIPANT_BINDINGS:
+            break
+    return bindings
 
 
 def _selected_action_specs(state: GlobalPersonaState) -> list[dict]:
@@ -734,6 +793,10 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         state,
         ambient_history,
     )
+    scene_participant_bindings = _build_scene_participant_bindings(
+        state,
+        scope_users,
+    )
     public_group_scene = ''
     if state['channel_type'] == 'group':
         try:
@@ -862,6 +925,7 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         "indirect_speech_context": state["indirect_speech_context"],
         "channel_topic": state["channel_topic"],
         "scope_users": scope_users,
+        "scene_participant_bindings": scene_participant_bindings,
         "public_group_scene": public_group_scene,
         "conversation_episode_state": state.get("conversation_episode_state"),
         "conversation_progress": state.get("conversation_progress"),

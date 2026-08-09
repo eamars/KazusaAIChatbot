@@ -1084,6 +1084,7 @@ def project_state_for_prompt(
     character_identity_context: Mapping[str, Mapping[str, object]],
     relationship_context: Mapping[str, Any] | None = None,
     character_operational_context: Mapping[str, Any] | None = None,
+    scene_context: Mapping[str, Any] | None = None,
     evidence: Sequence[Mapping[str, Any]] = (),
 ) -> PromptProjectionV2:
     """Project all prompt-visible state into semantic descriptors.
@@ -1187,6 +1188,27 @@ def project_state_for_prompt(
             "kind": "relationship",
             "entity_id": f"relationship:user:{owner_user_id}",
         }
+    participant_bindings = (
+        scene_context.get("participant_bindings")
+        if isinstance(scene_context, Mapping)
+        else None
+    )
+    if participant_bindings is not None:
+        if not isinstance(participant_bindings, list):
+            raise ValueError("scene participant bindings must be a list")
+        for binding in participant_bindings:
+            if not isinstance(binding, Mapping):
+                raise ValueError("scene participant binding must be a mapping")
+            handle = binding.get("handle")
+            if not isinstance(handle, str) or not handle.strip():
+                raise ValueError("scene participant handle is invalid")
+            if handle in handle_to_ref:
+                raise ValueError("scene participant handle collides")
+            handle_to_ref[handle] = {
+                "scope": "episode",
+                "kind": "third_party",
+                "entity_id": f"scene:{handle}",
+            }
     for index, row in enumerate(evidence, start=1):
         evidence_handle = row.get("evidence_handle")
         if not isinstance(evidence_handle, str):

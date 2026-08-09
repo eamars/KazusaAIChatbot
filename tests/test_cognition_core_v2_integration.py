@@ -84,7 +84,12 @@ class _ScriptedLLM:
         elif stage_name == "v2_preference":
             result = {
                 "visible_boundaries": ["bounded visible boundary"],
-                "addressee_plan": ["bounded addressee plan"],
+                "addressee_plan": [{
+                    "handle": "current_user",
+                    "display_name": "current user",
+                    "semantic_role": "direct_recipient",
+                    "wording_policy": "second_person_allowed",
+                }],
             }
         elif stage_name == "v2_visual":
             result = {"visual_directives": "bounded visual directives"}
@@ -542,7 +547,12 @@ async def test_v2_surface_receives_semantic_handoff_only() -> None:
     assert output["schema_version"] == "text_surface_output.v2"
     assert output["content_plan"] == "bounded content-plan guidance"
     assert output["visible_boundaries"] == ["bounded visible boundary"]
-    assert output["addressee_plan"] == ["bounded addressee plan"]
+    assert output["addressee_plan"] == [{
+        "handle": "current_user",
+        "display_name": "current user",
+        "semantic_role": "direct_recipient",
+        "wording_policy": "second_person_allowed",
+    }]
     assert len(llm.calls) == 2
     rendered_prompts = "\n".join(llm.human_calls)
     for raw_value in (

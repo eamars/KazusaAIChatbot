@@ -113,6 +113,10 @@ async def _run_text_surface_planning(
         return degraded_output
     content_plan, content_requirements, delivery_profile = content_result
     visible_boundaries, addressee_plan = preference
+    addressee_plan = _authoritative_addressee_plan(
+        payload,
+        addressee_plan,
+    )
     output: TextSurfaceOutputV2 = {
         "schema_version": "text_surface_output.v2",
         "content_plan": content_plan,
@@ -163,7 +167,10 @@ def build_degraded_text_surface(
             "表达已选择的回应意图，并保持当前事实、角色方向和能力结果原义。",
         ],
         "visible_boundaries": [],
-        "addressee_plan": [],
+        "addressee_plan": _authoritative_addressee_plan(
+            payload,
+            [],
+        ),
         "delivery_profile": {
             "lexical_register": "自然、清楚",
             "sentence_shape": "简洁完整",
@@ -282,7 +289,10 @@ async def _repair_text_surface_planning(
             replacement["content_requirements"]
         ),
         "visible_boundaries": list(replacement["visible_boundaries"]),
-        "addressee_plan": list(replacement["addressee_plan"]),
+        "addressee_plan": _authoritative_addressee_plan(
+            payload,
+            replacement["addressee_plan"],
+        ),
         "delivery_profile": dict(replacement["delivery_profile"]),
         "selected_surface_intent": payload["intention"]["intention"],
         "permitted_action_results": [
@@ -381,6 +391,11 @@ def _project_surface_payload(
         ),
         "interaction_style_context": payload["interaction_style_context"],
     }
+    if "addressee_plan" in payload:
+        result["addressee_plan"] = [
+            dict(row)
+            for row in payload["addressee_plan"]
+        ]
     if "runtime_capability_limits" in payload:
         result["runtime_capability_limits"] = list(
             payload["runtime_capability_limits"]
@@ -396,6 +411,20 @@ def _project_surface_payload(
             payload["relational_willingness"]
         )
     return result
+
+
+def _authoritative_addressee_plan(
+    input_payload: Mapping[str, Any],
+    candidate: object,
+) -> list[dict[str, Any]]:
+    """Preserve cognition-owned target identity as structural surface context."""
+
+    source = input_payload.get("addressee_plan")
+    if isinstance(source, list):
+        return [dict(row) for row in source]
+    if not isinstance(candidate, list):
+        raise ValueError("surface addressee plan must be a list")
+    return [dict(row) for row in candidate]
 
 
 def _project_action_results_for_prompt(

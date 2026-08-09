@@ -103,7 +103,12 @@ def _surface_payload(
             'content_plan': content_plan,
             'content_requirements': [selected_surface_intent],
             'visible_boundaries': visible_boundaries,
-            'addressee_plan': [user_name],
+            'addressee_plan': [{
+                'handle': 'current_user',
+                'display_name': user_name,
+                'semantic_role': 'direct_recipient',
+                'wording_policy': 'second_person_allowed',
+            }],
             'delivery_profile': {
                 'lexical_register': lexical_register,
                 'sentence_shape': message_shape_guidance,
