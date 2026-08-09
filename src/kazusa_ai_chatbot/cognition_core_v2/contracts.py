@@ -7,15 +7,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal, Mapping, NotRequired, Sequence, TypedDict
 
-from kazusa_ai_chatbot.cognition_episode import (
-    CognitiveEpisodeV1,
-    CognitiveEpisodeValidationError,
-    validate_cognitive_episode_v1,
-)
-from kazusa_ai_chatbot.config import (
-    L3_INTERACTION_STYLE_GUIDELINES_PER_FIELD_LIMIT,
-)
-from kazusa_ai_chatbot.llm_interface import LLMCallConfig, LLMInvoker
 from kazusa_ai_chatbot.cognition_core_v2.prompt_budget import (
     CHARACTER_OPERATIONAL_CONSUMER_ROLES,
     CHARACTER_OPERATIONAL_CONTEXT_DIGEST_CHARS,
@@ -42,7 +33,15 @@ from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     validate_cognition_state,
     validate_relationship_state,
 )
-
+from kazusa_ai_chatbot.cognition_episode import (
+    CognitiveEpisodeV1,
+    CognitiveEpisodeValidationError,
+    validate_cognitive_episode_v1,
+)
+from kazusa_ai_chatbot.config import (
+    L3_INTERACTION_STYLE_GUIDELINES_PER_FIELD_LIMIT,
+)
+from kazusa_ai_chatbot.llm_interface import LLMCallConfig, LLMInvoker
 
 _CJK_IDEOGRAPH_RE = re.compile(r"[\u4e00-\u9fff]")
 SCENE_PARTICIPANT_HANDLE_RE = re.compile(r"^p[1-9][0-9]*$")
@@ -63,6 +62,9 @@ class EmotionDefinition:
     causal_entity_kinds: tuple[str, ...] = ()
 
 
+MAX_BRANCH_INTENT_GUIDANCE_CHARS = 240
+
+
 @dataclass(frozen=True)
 class BranchDefinition:
     """Describe the state conditions and dependencies for one goal branch."""
@@ -73,6 +75,24 @@ class BranchDefinition:
     required: bool = False
     goal_kind: str = "goal"
     dependency_options: tuple[tuple[str, ...], ...] = ()
+    branch_intent_guidance: str = ""
+
+    def __post_init__(self) -> None:
+        """Validate the bounded static guidance owned by this branch."""
+
+        guidance = self.branch_intent_guidance
+        if not isinstance(guidance, str):
+            raise TypeError(
+                "branch_intent_guidance must be a string"
+            )
+        if guidance and not guidance.strip():
+            raise ValueError(
+                "branch_intent_guidance must not be whitespace-only"
+            )
+        if len(guidance) > MAX_BRANCH_INTENT_GUIDANCE_CHARS:
+            raise ValueError(
+                "branch_intent_guidance exceeds the 240-character limit"
+            )
 
 
 class CognitionContractError(ValueError):

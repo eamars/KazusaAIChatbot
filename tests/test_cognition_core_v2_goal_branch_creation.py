@@ -12,7 +12,6 @@ from kazusa_ai_chatbot.cognition_core_v2.state_reducers import (
     create_deterministic_goals,
 )
 
-
 NOW = "2026-07-14T00:00:00Z"
 
 
@@ -62,3 +61,4 @@ def test_boundary_pressure_creates_autonomy_goal_as_branch_two() -> None:
         "autonomy_boundary",
     ]
     assert branches[1].goal_kind == "autonomy_boundary"
+    assert branches[1].branch_intent_guidance

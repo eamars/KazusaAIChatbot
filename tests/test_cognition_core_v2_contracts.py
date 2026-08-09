@@ -11,6 +11,26 @@ from kazusa_ai_chatbot.cognition_core_v2 import (
     run_cognition,
     run_text_surface_planning,
 )
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    EVIDENCE_SOURCE_QUESTION_IDS,
+    GROUP_ENGAGEMENT_CONFIDENCE_MAX_CHARS,
+    GROUP_ENGAGEMENT_GUIDELINE_MAX_CHARS,
+    L3_INTERACTION_STYLE_GUIDELINES_PER_FIELD_LIMIT,
+    MAX_BRANCH_INTENT_GUIDANCE_CHARS,
+    BranchDefinition,
+    CognitionContextLimitError,
+    CognitionContractError,
+    CognitionCoreServicesV2,
+    CognitionDiagnosticsV2,
+    CollapsedIntentionV2,
+    EventComparisonResultV2,
+    TextSurfaceServicesV2,
+    VisualSurfaceServicesV2,
+    validate_cognition_core_input,
+    validate_cognition_core_output,
+    validate_text_surface_input,
+    validate_text_surface_output,
+)
 from kazusa_ai_chatbot.cognition_core_v2.facade import (
     _episode_updated_at,
 )
@@ -19,33 +39,14 @@ from kazusa_ai_chatbot.cognition_core_v2.output_projection import (
     default_expression_policy,
 )
 from kazusa_ai_chatbot.cognition_core_v2.prompt_budget import canonical_digest
-from kazusa_ai_chatbot.cognition_core_v2.surface_stages import (
-    SURFACE_REPAIR_INSTRUCTION,
-    run_content_plan_stage,
-)
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
-    CognitionContractError,
-    CognitionContextLimitError,
-    CognitionDiagnosticsV2,
-    CognitionCoreServicesV2,
-    CollapsedIntentionV2,
-    EVIDENCE_SOURCE_QUESTION_IDS,
-    EventComparisonResultV2,
-    GROUP_ENGAGEMENT_CONFIDENCE_MAX_CHARS,
-    GROUP_ENGAGEMENT_GUIDELINE_MAX_CHARS,
-    L3_INTERACTION_STYLE_GUIDELINES_PER_FIELD_LIMIT,
-    TextSurfaceServicesV2,
-    VisualSurfaceServicesV2,
-    validate_cognition_core_input,
-    validate_cognition_core_output,
-    validate_text_surface_input,
-    validate_text_surface_output,
-)
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     build_acquaintance_user_state,
     build_character_production_state,
 )
-
+from kazusa_ai_chatbot.cognition_core_v2.surface_stages import (
+    SURFACE_REPAIR_INSTRUCTION,
+    run_content_plan_stage,
+)
 from llm_test_helpers import make_llm_call_config
 from tests.cognition_core_v2_test_helpers import (
     canonical_cognition_output,
@@ -53,8 +54,22 @@ from tests.cognition_core_v2_test_helpers import (
     canonical_identity_context,
 )
 
-
 NOW = "2026-07-14T00:00:00Z"
+
+
+def test_branch_definition_exposes_bounded_neutral_guidance_default() -> None:
+    """Keep custom branch definitions neutral unless guidance is supplied."""
+
+    definition = BranchDefinition("custom", (), ())
+    guidance_field = next(
+        field
+        for field in fields(BranchDefinition)
+        if field.name == "branch_intent_guidance"
+    )
+
+    assert guidance_field.default == ""
+    assert definition.branch_intent_guidance == ""
+    assert MAX_BRANCH_INTENT_GUIDANCE_CHARS == 240
 
 
 def _delivery_profile() -> dict[str, str]:

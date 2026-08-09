@@ -5,20 +5,20 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
-from langchain_core.messages import HumanMessage, SystemMessage
 import pytest
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot.cognition_core_v2.branch_activation import (
     DEFAULT_BRANCH_DEFINITIONS,
 )
 from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
+    _ACTIVE_REQUIRED_SELECTION_GOAL_PROMPT,
     GENERIC_GOAL_REPAIR_INSTRUCTIONS,
     GOAL_COGNITION_PROMPT,
     NON_ORDINARY_GENERIC_GOAL_REPAIR_INSTRUCTIONS,
     NON_ORDINARY_GOAL_COGNITION_PROMPT,
     REQUIRED_SELECTION_GOAL_PROMPT,
     SELECTION_GOAL_REPAIR_INSTRUCTIONS,
-    _ACTIVE_REQUIRED_SELECTION_GOAL_PROMPT,
     _build_goal_repair_feedback,
     _fit_goal_prompt_payload,
     run_goal_cognition,
@@ -95,6 +95,8 @@ def test_nonordinary_generic_goal_prompt_excludes_relational_contract() -> None:
         "`pN`",
         "conversation_evidence",
         "status=executed",
+        "branch.branch_intent_guidance",
+        "ordinary_response",
     ):
         assert required_text in prompt
     for forbidden_text in (
@@ -200,6 +202,7 @@ def test_prompt_payloads_preserve_contract_order() -> None:
             "branch": {
                 "goal_kind": "active_branch",
                 "action_tendencies": ["choose"],
+                "branch_intent_guidance": '保持当前分支的语义关注。',
             },
             "goal": {"goal_kind": "active_branch", "lifecycle": "active"},
             "semantic_context": {"current_event": "Choose the next step."},
@@ -233,6 +236,11 @@ def test_prompt_payloads_preserve_contract_order() -> None:
         "supporting_evidence",
     ]
     goal_payload = json.loads(goal_text)
+    assert list(goal_payload["branch"]) == [
+        "goal_kind",
+        "action_tendencies",
+        "branch_intent_guidance",
+    ]
     assert goal_payload["required_selection_operations"][0][
         "evidence_handle"
     ] == "e1"

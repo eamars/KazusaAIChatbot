@@ -279,6 +279,47 @@ observed, missing, and unexpected top-level key sets; they retain the full
 candidate in protected diagnostics but do not echo it or the `invalid_draft`
 token in model-facing exact-field feedback.
 
+### Branch-owned generic intent guidance
+
+Each default branch definition owns one bounded
+`branch_intent_guidance` string. The value is a semantic attention focus, not a
+positive or negative motive label. The current event, identity, role direction,
+boundaries, and supplied evidence remain authoritative. The default values are
+limited to 240 characters; a custom definition may retain the empty neutral
+default and omit the descriptor from its generic prompt.
+
+All fourteen registry rows have a fixed value. Exactly thirteen nonordinary
+generic initial and repair payloads project the value under the
+`branch_intent_guidance` key. `ordinary_response` keeps its existing ordinary
+prompt and uses its row only as registry/documentation context. Typed
+required-selection paths also omit the value. Branch identity is always the
+registry `branch_id`; local workspace `bN` handles are not branch identities.
+
+| Branch | Semantic responsibility | Literal runtime guidance |
+|---|---|---|
+| `ordinary_response` | Neutral current-event baseline with existing relational-willingness ownership. | 为当前事件提供中性的上下文基线；在适用时保留现有 relational_willingness 的归属，不引入其他分支的专门焦点。 |
+| `relationship_connection` | Voluntary, context-appropriate reciprocal interpersonal connection. | 评估是否以及如何通过自愿且符合当前情境的互惠参与来建立、维持、调整或修复人际连接。 |
+| `bond_protection` | Protect an important bond from evidenced threat or damage. | 评估当前事件是否对重要关系纽带造成有证据支持的威胁或损害，并考虑相称的保护或修复。 |
+| `trust_verification` | Check whether trust is warranted under current uncertainty. | 评估当前证据是否支持信任、保留信任或需要核实；不把不确定性直接解释为背叛。 |
+| `autonomy_boundary` | Protect current-character-owned autonomy and boundaries when grounded. | 评估当前事件是否对角色自身的自主权、意愿或明确边界造成有证据支持的压力或代价；在有依据时保护边界，不假定恶意。 |
+| `safety_coping` | Manage evidenced threat or strain proportionately. | 评估当前事件是否存在有证据支持的威胁或压力，并考虑相称的保护或应对；不凭空升级恐惧。 |
+| `obstruction_strategy` | Resolve an obstacle blocking current-goal progress. | 评估当前事件是否阻碍当前目标的进展，并考虑相称的解决、对抗或修复。 |
+| `loss_recovery` | Process evidenced loss through recovery, adaptation, or grief. | 评估当前事件是否构成有依据的损失，并考虑恢复、适应或适当的哀悼；不强迫悲伤。 |
+| `moral_repair` | Assess evidence-supported responsibility for harm and pursue proportionate repair. | 评估当前角色是否对伤害负有有证据支持的责任；如有，考虑相称的修复或道歉。 |
+| `social_care` | Respond to grounded needs of affected people through care or support. | 评估受当前事件影响的人是否有有依据的需要，并考虑相称的支持或照护；不强迫温柔。 |
+| `reciprocal_response` | Determine a proportionate response to another actor; reciprocity is not compliance or matched valence. | 确定当前角色对另一方行为的有证据支持且相称的回应；互惠不等于服从，也不要求匹配情绪价性。 |
+| `epistemic_exploration` | Reduce uncertainty through exploration, questions, or comparison. | 通过探索、提问或比较，减少当前有依据的不确定性并增进理解；区分求知与无依据的断言。 |
+| `meaning_reconstruction` | Rebuild coherent meaning after an evidenced narrative or existential disruption. | 在当前事件造成有依据的叙事或存在性中断后，评估如何重建连贯意义；不强迫乐观。 |
+| `self_improvement` | Find an evidence-grounded opportunity to learn, correct, or develop capability without presuming deficiency or success. | 评估当前角色是否有有证据支持的学习、纠错或能力发展机会；不预设缺陷、乐观或成功。 |
+
+When evidence does not support a nonordinary branch's specialized focus, its
+goal producer still emits the existing complete bid contract with no supported
+basis for specialized progress. It cites only relevant supplied evidence and
+does not borrow the ordinary motive. Existing workspace collapse owns whether
+that bid is suppressed; deterministic code does not rewrite semantic bid
+fields. Active-goal descriptions may still contain evidence-grounded valence as
+contextual state; that is distinct from static branch polarity.
+
 When the ordinary owner declares a turn `relationship_sensitive`, the workspace
 stage uses the deterministic authoritative collapse: the ordinary bid becomes
 primary, no supporting bid is exposed, every other bid is recorded as
