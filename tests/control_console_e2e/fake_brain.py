@@ -158,12 +158,18 @@ class FakeBrainServer(AbstractContextManager["FakeBrainServer"]):
                     body = self.rfile.read(content_length)
                     payload = json.loads(body.decode("utf-8"))
                 owner.record_chat_request(payload)
-                graph = graph_snapshot(status="completed", run_id="debug-run-1")
+                graph = graph_snapshot(
+                    status="completed",
+                    run_id="debug-run-1",
+                    llm_trace_id="llm-trace-debug-1",
+                    cognition_invocation_id="cognition-invocation-debug-1",
+                )
                 owner.set_graph(graph)
                 _write_json(
                     self,
                     {
                         "delivery_tracking_id": "debug-run-1",
+                        "trace_id": "llm-trace-debug-1",
                         "messages": [{"text": "fake brain reply"}],
                         "cognition_graph": graph,
                     },
@@ -206,13 +212,33 @@ class FakeBrainServer(AbstractContextManager["FakeBrainServer"]):
         }
 
 
-def graph_snapshot(*, status: str, run_id: str) -> dict[str, Any]:
+def graph_snapshot(
+    *,
+    status: str,
+    run_id: str,
+    llm_trace_id: str = "",
+    cognition_invocation_id: str = "",
+    source_calendar_run_id: str = "",
+) -> dict[str, Any]:
     """Return a cognition graph snapshot with parallel branches."""
+
+    llm_trace_id = llm_trace_id or f"llm-trace-{run_id}"
+    cognition_invocation_id = (
+        cognition_invocation_id or f"cognition-invocation-{run_id}"
+    )
+    if not source_calendar_run_id and run_id.startswith("self-"):
+        source_calendar_run_id = f"calendar-run-{run_id}"
+    metadata = {
+        "llm_trace_id": llm_trace_id,
+        "cognition_invocation_id": cognition_invocation_id,
+        "source_calendar_run_id": source_calendar_run_id,
+    }
 
     if status == "not_reported":
         return {
             "status": "not_reported",
             "run_id": run_id,
+            **metadata,
             "nodes": [],
             "edges": [],
         }
@@ -224,6 +250,7 @@ def graph_snapshot(*, status: str, run_id: str) -> dict[str, Any]:
     return {
         "status": status,
         "run_id": run_id,
+        **metadata,
         "nodes": [
             {
                 "id": "input.message",

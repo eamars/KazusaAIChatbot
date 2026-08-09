@@ -82,7 +82,6 @@ USER_COGNITION_FIELDS = {
     "updated_at",
 }
 OWNER_PRIVATE_FIELDS = {
-    "global_user_id",
     "owner_user_id",
     "relationship_id",
     "other_user_id",

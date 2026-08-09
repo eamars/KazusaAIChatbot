@@ -93,6 +93,7 @@ def test_live_database_owner_pages_render_human_readable_data(
         )
         assert relationship["evidence_count"] >= 0
         assert relationship["updated_at"]
+        assert user_payload["panels"]["profile"]["items"][0]["global_user_id"]
         assert user_payload["panels"]["style"]["status"] == "empty"
         _assert_owner_tables_readable(
             page,
@@ -223,7 +224,7 @@ def test_live_database_owner_pages_render_human_readable_data(
                     "group": str(group_screenshot_path),
                     "calendar": str(calendar_screenshot_path),
                 },
-                "redaction": "no visible global_user_id, embeddings, prompts, or raw object placeholders",
+                "redaction": "mapped global_user_id is visible in the user profile; embeddings, prompts, and raw object placeholders remain excluded",
             },
         )
 

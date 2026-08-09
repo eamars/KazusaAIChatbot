@@ -336,6 +336,9 @@ async def list_recent_background_work_jobs(*, limit: int) -> list[dict[str, Any]
     projection = {
         "_id": 0,
         "job_id": 1,
+        "accepted_task_id": 1,
+        "source_action_attempt_id": 1,
+        "source_llm_trace_id": 1,
         "status": 1,
         "delivery_state": 1,
         "requested_worker": 1,

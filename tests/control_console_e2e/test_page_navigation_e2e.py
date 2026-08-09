@@ -665,6 +665,7 @@ def test_owner_panels_use_panel_specific_readable_layouts(
     e2e_console,
     e2e_browser_page,
     e2e_summary_writer,
+    e2e_artifact_dir,
 ) -> None:
     """Owner panels should format state and memory rows by their meaning."""
 
@@ -712,7 +713,8 @@ def test_owner_panels_use_panel_specific_readable_layouts(
                     owner: 'user',
                     identity: {
                       platform: 'qq',
-                      platform_user_id: 'platform-user-1'
+                      platform_user_id: 'platform-user-1',
+                      global_user_id: 'global-user-001'
                     },
                     panels: {
                       profile: {
@@ -720,6 +722,7 @@ def test_owner_panels_use_panel_specific_readable_layouts(
                         items: [{
                           platform: 'qq',
                           platform_user_id: 'platform-user-1',
+                          global_user_id: 'global-user-001',
                           display_name: 'Review User',
                           alias_count: 2
                         }]
@@ -802,6 +805,7 @@ def test_owner_panels_use_panel_specific_readable_layouts(
         ).wait_for()
         profile_text = page.locator("#user-profile-table").inner_text()
         assert "Review User" in profile_text
+        assert "global-user-001" in profile_text
         relationship_text = page.locator(
             "#user-relationship-table",
         ).inner_text()
@@ -834,6 +838,9 @@ def test_owner_panels_use_panel_specific_readable_layouts(
         assert "prefers direct review" in memory_text
         assert "unit_id" not in memory_text
         assert "unit-1" not in memory_text
+        user_screenshot_path = e2e_artifact_dir / "user_global_id_reference.png"
+        page.screenshot(path=str(user_screenshot_path), full_page=True)
+        assert user_screenshot_path.exists()
 
         summary = e2e_summary_writer(
             name="owner_panel_specific_layouts",
@@ -845,6 +852,7 @@ def test_owner_panels_use_panel_specific_readable_layouts(
                     "V2 relationship axes render separately from profile",
                     "memory units render one card per unit",
                 ],
+                "screenshot": str(user_screenshot_path),
             },
         )
 
@@ -855,6 +863,7 @@ def test_semantic_owner_surfaces_exclude_internal_projection_metadata(
     e2e_console,
     e2e_browser_page,
     e2e_summary_writer,
+    e2e_artifact_dir,
 ) -> None:
     """Semantic panels should render meaning without projection machinery."""
 
@@ -957,6 +966,8 @@ def test_semantic_owner_surfaces_exclude_internal_projection_metadata(
                         status: 'available',
                         items: [{
                           label: 'Daily reflection',
+                          calendar_schedule_id: 'calendar-schedule-001',
+                          source_llm_trace_id: 'calendar-source-trace-001',
                           trigger_kind: 'future_cognition',
                           status: 'active',
                           next_run_at: '2026-06-20T00:00:00+00:00'
@@ -965,6 +976,9 @@ def test_semantic_owner_surfaces_exclude_internal_projection_metadata(
                       runs: {
                         status: 'available',
                         items: [{
+                          calendar_run_id: 'calendar-run-001',
+                          calendar_schedule_id: 'calendar-schedule-001',
+                          source_llm_trace_id: 'calendar-run-source-trace-001',
                           run_kind: 'reflection',
                           status: 'completed',
                           scheduled_for: '2026-06-19T23:59:00+00:00',
@@ -1000,10 +1014,16 @@ def test_semantic_owner_surfaces_exclude_internal_projection_metadata(
                       jobs: {
                         status: 'available',
                         items: [{
+                          background_work_job_id: 'job-console-001',
+                          accepted_task_id: 'accepted-task-console-001',
+                          source_action_attempt_id: 'action-attempt-console-001',
+                          source_llm_trace_id: 'job-source-trace-001',
                           worker: 'coding_agent',
                           status: 'completed',
                           delivery_state: 'ready',
-                          updated_at: '2026-06-19T00:00:00+00:00'
+                          created_at: '2026-06-18T00:00:00+00:00',
+                          completed_at: '2026-06-19T00:00:00+00:00',
+                          updated_at: '2026-06-19T00:30:00+00:00'
                         }]
                       },
                       worker_activity: {
@@ -1023,6 +1043,7 @@ def test_semantic_owner_surfaces_exclude_internal_projection_metadata(
                         status: 'available',
                         items: [{
                           worker_name: 'text_artifact',
+                          background_work_job_id: 'job-error-console-001',
                           error: 'one bounded worker failure',
                           created_at: '2026-06-19T00:00:00+00:00'
                         }]
@@ -1030,6 +1051,10 @@ def test_semantic_owner_surfaces_exclude_internal_projection_metadata(
                       delivery_detail: {
                         status: 'available',
                         items: [{
+                          background_work_job_id: 'job-console-001',
+                          parent_llm_trace_id: 'job-source-trace-001',
+                          child_llm_trace_id: 'job-child-trace-001',
+                          source_background_work_job_id: 'job-console-001',
                           worker: 'coding_agent',
                           delivery_state: 'ready',
                           delivery_attempt_count: 1
@@ -1053,6 +1078,11 @@ def test_semantic_owner_surfaces_exclude_internal_projection_metadata(
                       error_class: 'TimeoutError',
                       error_preview: 'bounded timeout',
                       correlation_id: 'cc-req-1',
+                      request_id: 'event-request-001',
+                      tracking_id: 'event-tracking-001',
+                      run_id: 'event-run-001',
+                      trigger_id: 'event-trigger-001',
+                      attempt_id: 'event-attempt-001',
                       created_at: '2026-06-19T00:00:00+00:00'
                     }],
                     facets: {
@@ -1088,9 +1118,23 @@ def test_semantic_owner_surfaces_exclude_internal_projection_metadata(
         ).inner_text().lower()
         assert page.locator("#calendar-schedules-table .record-card").count() == 1
         assert page.locator("#calendar-runs-table .record-card").count() == 1
+        page.locator(
+            "#calendar-schedules-table details.graph-run-reference summary"
+        ).click()
+        page.locator(
+            "#calendar-runs-table details.graph-run-reference summary"
+        ).click()
         calendar_text = page.locator("[data-page='calendar']").inner_text()
-        assert "schedule_id" not in calendar_text
-        assert "run_id" not in calendar_text
+        assert "Schedule reference" in calendar_text
+        assert "calendar-schedule-001" in calendar_text
+        assert "calendar-source-trace-001" in calendar_text
+        assert "Run reference" in calendar_text
+        assert "calendar-run-001" in calendar_text
+        assert "calendar-schedule-001" in calendar_text
+        assert "calendar-run-source-trace-001" in calendar_text
+        calendar_screenshot_path = e2e_artifact_dir / "calendar_id_references.png"
+        page.screenshot(path=str(calendar_screenshot_path), full_page=True)
+        assert calendar_screenshot_path.exists()
 
         _open_page(page, "background", "Background work")
         page.locator("#refresh-background").click()
@@ -1110,9 +1154,47 @@ def test_semantic_owner_surfaces_exclude_internal_projection_metadata(
             "failed",
         ]
         assert page.locator("#background-jobs-table .record-card").count() == 1
+        jobs_card = page.locator("#background-jobs-table .record-card").first
+        job_reference = jobs_card.locator("details.graph-run-reference")
+        assert job_reference.count() == 1
+        assert job_reference.locator("summary").inner_text() == "Job reference"
+        job_reference.locator("summary").click()
+        jobs_text = jobs_card.inner_text()
+        for expected_value in (
+            "job-console-001",
+            "accepted-task-console-001",
+            "action-attempt-console-001",
+            "job-source-trace-001",
+            "coding_agent",
+            "ready",
+        ):
+            assert expected_value in jobs_text
+        assert "JOB ID" not in jobs_text
+        assert page.locator(
+            "#background-errors-table details.graph-run-reference"
+        ).count() == 1
+        page.locator(
+            "#background-errors-table details.graph-run-reference summary"
+        ).click()
+        assert page.locator(
+            "#background-delivery-table details.graph-run-reference"
+        ).count() == 0
+        screenshot_path = e2e_artifact_dir / "background_jobs_job_reference.png"
+        page.screenshot(path=str(screenshot_path), full_page=True)
+        assert screenshot_path.exists()
         assert "one bounded worker failure" in page.locator(
             "#background-errors-table",
         ).inner_text()
+        assert "job-error-console-001" in page.locator(
+            "#background-errors-table",
+        ).inner_text()
+        delivery_text = page.locator("#background-delivery-table").inner_text()
+        for expected_value in (
+            "job-console-001",
+            "job-source-trace-001",
+            "job-child-trace-001",
+        ):
+            assert expected_value in delivery_text
         assert "ready" in page.locator(
             "#background-delivery-table",
         ).inner_text()
@@ -1120,6 +1202,21 @@ def test_semantic_owner_surfaces_exclude_internal_projection_metadata(
         _open_page(page, "events", "Event monitor")
         page.locator("#refresh-events").click()
         page.locator("#event-table").get_by_text("resource health").wait_for()
+        event_row = page.locator("#event-table tr").first
+        event_row.locator("summary").click()
+        event_text = event_row.inner_text()
+        for expected_value in (
+            "event-request-001",
+            "cc-req-1",
+            "event-tracking-001",
+            "event-run-001",
+            "event-trigger-001",
+            "event-attempt-001",
+        ):
+            assert expected_value in event_text
+        event_screenshot_path = e2e_artifact_dir / "event_id_references.png"
+        page.screenshot(path=str(event_screenshot_path), full_page=True)
+        assert event_screenshot_path.exists()
         assert page.locator("[data-page='events'] thead th").all_inner_texts() == [
             "TIME",
             "SEVERITY",
@@ -1162,7 +1259,12 @@ def test_semantic_owner_surfaces_exclude_internal_projection_metadata(
                     "calendar and background outcomes",
                     "event and audit tables",
                     "projection metadata absent",
+                    "background Jobs job reference screenshot",
                 ],
+                "screenshots": {
+                    "background": str(screenshot_path),
+                    "event": str(event_screenshot_path),
+                },
             },
         )
 

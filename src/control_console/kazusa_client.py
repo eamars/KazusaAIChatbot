@@ -389,6 +389,12 @@ class KazusaClient:
             "response": _project_debug_chat_response(response_payload),
             "tracking_id": response_payload.get("delivery_tracking_id"),
             "trace_id": _safe_optional_text(response_payload.get("trace_id")) or "",
+            "delivery_tracking_id": response_payload.get(
+                "delivery_tracking_id",
+            ),
+            "llm_trace_id": _safe_optional_text(
+                response_payload.get("trace_id"),
+            ) or "",
             "latency_ms": elapsed_ms,
             "sent_at": datetime.now(timezone.utc).isoformat(),
             "error": None,
@@ -542,6 +548,16 @@ def project_cognition_graph_snapshot(
         "source": source,
         "status": raw_graph.get("status", "partial"),
         "run_id": _safe_optional_text(raw_graph.get("run_id")) or inferred_run_id,
+        "llm_trace_id": (
+            _safe_optional_text(raw_graph.get("llm_trace_id"))
+            or _safe_optional_text(payload.get("trace_id"))
+        ),
+        "cognition_invocation_id": _safe_optional_text(
+            raw_graph.get("cognition_invocation_id")
+        ),
+        "source_calendar_run_id": _safe_optional_text(
+            raw_graph.get("source_calendar_run_id")
+        ),
         "generated_at": datetime.now(timezone.utc),
         "nodes": _project_graph_nodes(raw_graph.get("nodes")),
         "edges": [],
@@ -894,6 +910,13 @@ def _project_known_cognition_fields(
         source=source,
         status="partial",
         run_id=run_id,
+        llm_trace_id=_safe_optional_text(payload.get("trace_id")),
+        cognition_invocation_id=_safe_optional_text(
+            payload.get("cognition_invocation_id")
+        ),
+        source_calendar_run_id=_safe_optional_text(
+            payload.get("source_calendar_run_id")
+        ),
         generated_at=datetime.now(timezone.utc),
         nodes=[
             CognitionRunGraphNode.model_validate(node)

@@ -126,7 +126,8 @@ Every live job created from a trace-backed action carries the additive
 and job id in protected origin metadata. Accepted-task result delivery creates
 a separate child trace with `parent_llm_trace_id` and
 `source_background_work_job_id`; these fields are diagnostic ownership only and
-are excluded from worker payloads, prompt-facing source packets, and Console
-lookup projections.
+are excluded from worker payloads and prompt-facing source packets. The
+existing Background Work Jobs, Errors, and Delivery detail cards expose the
+bounded job and trace references mapped for the web control console.
 Idempotent duplicate writes preserve an existing non-empty source trace and
 record a bounded conflict marker when a different source is supplied.

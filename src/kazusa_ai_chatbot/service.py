@@ -3874,6 +3874,7 @@ def _build_response_cognition_graph(
     graph_result: Mapping[str, Any],
     consolidation_state: Mapping[str, Any] | None,
     run_id: str,
+    cognition_invocation_id: str = "",
     graph_status: str = "completed",
     visual_stage_failed: bool = False,
     visual_stage_reached: bool | None = None,
@@ -4037,6 +4038,14 @@ def _build_response_cognition_graph(
         graph_status = "partial"
     snapshot = {
         "run_id": run_id,
+        "llm_trace_id": _safe_graph_text(
+            graph_result.get("llm_trace_id"),
+            max_chars=120,
+        ),
+        "cognition_invocation_id": _safe_graph_text(
+            cognition_invocation_id,
+            max_chars=120,
+        ),
         "status": graph_status,
         "nodes": nodes,
         "edges": edges,
@@ -4267,6 +4276,14 @@ def _build_self_cognition_cognition_graph(
     ]
     snapshot = {
         "run_id": _safe_graph_text(run_record.get("run_id"), max_chars=120),
+        "llm_trace_id": _safe_graph_text(
+            run_record.get("llm_trace_id"),
+            max_chars=120,
+        ),
+        "source_calendar_run_id": _safe_graph_text(
+            run_record.get("source_calendar_run_id"),
+            max_chars=120,
+        ),
         "status": run_status if run_status in {"completed", "failed"} else "partial",
         "nodes": nodes,
         "edges": edges,
@@ -6406,6 +6423,9 @@ async def _process_queued_chat_item(
                         },
                         consolidation_state=original_initial_state,
                         run_id=correlation_id,
+                        cognition_invocation_id=(
+                            cognition_attempt_ledger.cognition_invocation_id
+                        ),
                         graph_status="failed",
                         visual_stage_failed=visual_stage_failed,
                         visual_stage_reached=(
@@ -6660,6 +6680,9 @@ async def _process_queued_chat_item(
             graph_result=result,
             consolidation_state=consolidation_state_dict,
             run_id=delivery_tracking_id or correlation_id,
+            cognition_invocation_id=(
+                cognition_attempt_ledger.cognition_invocation_id
+            ),
         )
         _record_latest_cognition_graph(cognition_graph)
         response = ChatResponse(

@@ -793,12 +793,10 @@ function cognitionGraphSummaryMarkup(model) {
     <div class="graph-run-summary">
       <div class="graph-run-title">
         <strong>${escapeHtml(sourceLabel)}</strong>
-        ${model.runId ? `
-          <details class="graph-run-reference">
-            <summary>Run reference</summary>
-            <code>${escapeHtml(model.runId)}</code>
-          </details>
-        ` : ""}
+        ${renderReferenceDisclosure(
+          "Run reference",
+          cognitionGraphReferenceEntries(model),
+        )}
       </div>
       <div class="badge-stack">
         <span class="${escapeHtml(cognitionGraphStatusBadgeClass(model.graph.status || "not_reported"))}" data-component="Badge">${escapeHtml(status)}</span>
@@ -807,6 +805,22 @@ function cognitionGraphSummaryMarkup(model) {
       </div>
     </div>
   `;
+}
+
+function cognitionGraphReferenceEntries(model) {
+  const entries = [["run_id", model.graph.run_id]];
+  if (model.source === "self_latest") {
+    entries.push(
+      ["child_llm_trace_id", model.graph.llm_trace_id],
+      ["source_calendar_run_id", model.graph.source_calendar_run_id],
+    );
+  } else {
+    entries.push(
+      ["llm_trace_id", model.graph.llm_trace_id],
+      ["cognition_invocation_id", model.graph.cognition_invocation_id],
+    );
+  }
+  return entries;
 }
 
 function cognitionGraphSourceLabel(source) {
@@ -2261,9 +2275,14 @@ function debugMessageText(message) {
 function debugResponseMeta(result) {
   const response = result.response || {};
   const parts = [];
-  if (result.trace_id) parts.push(`trace ${result.trace_id}`);
+  const traceId = firstPresentValue(result, ["llm_trace_id", "trace_id"]);
+  const trackingId = firstPresentValue(result, [
+    "delivery_tracking_id",
+    "tracking_id",
+  ]);
+  if (traceId) parts.push(`trace ${traceId}`);
   else parts.push("trace unavailable");
-  if (result.tracking_id) parts.push(`tracking ${result.tracking_id}`);
+  if (trackingId) parts.push(`tracking ${trackingId}`);
   if (Number.isFinite(result.latency_ms)) parts.push(`${result.latency_ms} ms`);
   if (Number.isFinite(response.delivery_mention_count)) parts.push(`${response.delivery_mention_count} mentions`);
   if (Number.isFinite(response.attachment_count)) parts.push(`${response.attachment_count} attachments`);
@@ -2349,6 +2368,9 @@ function firstPresentValue(item, keys) {
 function recordTitle(item, fallback = "record") {
   const title = firstPresentValue(item, [
     "run_id",
+    "calendar_run_id",
+    "calendar_schedule_id",
+    "background_work_job_id",
     "job_id",
     "schedule_id",
     "event_id",
@@ -2368,11 +2390,31 @@ function recordDetailEntries(item, hiddenKeys = []) {
   ));
 }
 
-function renderRecordCard(item, {title = "", status = "", hiddenKeys = [], body = "", chips = []} = {}) {
+function renderReferenceDisclosure(summary, entries) {
+  const visibleEntries = entries.filter(([, value]) => (
+    value !== null && value !== undefined && value !== ""
+  ));
+  if (!visibleEntries.length) return "";
+  return `
+    <details class="graph-run-reference">
+      <summary>${escapeHtml(summary)}</summary>
+      ${renderDetailGrid(visibleEntries)}
+    </details>
+  `;
+}
+
+function renderRecordCard(item, {title = "", status = "", hiddenKeys = [], body = "", chips = [], reference = "", referenceLabel = "Job reference", references = []} = {}) {
   const cardTitle = title || recordTitle(item);
   const statusText = status || item?.status || item?.delivery_state || "";
   const details = renderDetailGrid(recordDetailEntries(item, hiddenKeys));
   const chipRow = chips.length ? detailChipRow(chips) : "";
+  const referenceEntries = references.length
+    ? references
+    : [[referenceLabel, reference]];
+  const referenceMarkup = renderReferenceDisclosure(
+    referenceLabel,
+    referenceEntries,
+  );
   return `
     <article class="record-card">
       <div class="record-card-header">
@@ -2381,6 +2423,7 @@ function renderRecordCard(item, {title = "", status = "", hiddenKeys = [], body 
       </div>
       ${body ? `<p class="character-prose">${escapeHtml(formatCharacterProse(body))}</p>` : ""}
       ${chipRow}
+      ${referenceMarkup}
       ${details}
     </article>
   `;
@@ -3027,6 +3070,7 @@ function renderUserProfilePanel(panel) {
           ["accounts", item.account_count],
           ["aliases", item.alias_count],
           ["updated", item.updated_at],
+          ["global_user_id", item.global_user_id],
         ])}
         ${accounts.map((account) => `
           <div class="detail-kv">
@@ -3116,7 +3160,10 @@ function renderUserDirectory(payload) {
     const accounts = Array.isArray(item.accounts) ? item.accounts : [];
     return accounts.map((account) => `
       <tr>
-        <td>${escapeHtml(formatLookupValue(`${account.platform}:${account.platform_user_id}`))}</td>
+        <td>
+          <span class="table-primary">${escapeHtml(formatLookupValue(`${account.platform}:${account.platform_user_id}`))}</span>
+          ${item.global_user_id ? `<span class="table-meta">${escapeHtml(formatLookupValue(`global_user_id: ${item.global_user_id}`))}</span>` : ""}
+        </td>
         <td>${escapeHtml(formatLookupValue(account.display_name || item.display_name))}</td>
         <td>${escapeHtml(formatLookupValue(item.alias_count))}</td>
         <td>${escapeHtml(formatLookupValue(item.updated_at))}</td>
@@ -3205,12 +3252,21 @@ function renderCalendarSchedules(panel) {
   renderPanelCards("#calendar-schedules-table", panel, (items) => items.map((item) => renderRecordCard(item, {
     title: item.trigger_kind ? formatLookupLabel(item.trigger_kind) : "Schedule",
     status: item.status || "",
-    hiddenKeys: ["trigger_kind", "status", "start_at", "next_run_at", "updated_at"],
     chips: [
       ["starts", item.start_at],
       ["next run", item.next_run_at],
       ["updated", item.updated_at],
     ],
+    hiddenKeys: [
+      "calendar_schedule_id",
+      "trigger_kind",
+      "status",
+      "start_at",
+      "next_run_at",
+      "updated_at",
+    ],
+    referenceLabel: "Schedule reference",
+    references: [["Schedule reference", item.calendar_schedule_id]],
   })), "No schedule definitions are available.");
 }
 
@@ -3219,7 +3275,16 @@ function renderCalendarRuns(panel) {
   renderPanelCards("#calendar-runs-table", panel, (items) => items.map((item) => renderRecordCard(item, {
     title: item.trigger_kind ? formatLookupLabel(item.trigger_kind) : "Calendar run",
     status: item.status || "",
-    hiddenKeys: ["trigger_kind", "status", "due_at", "completed_at", "failed_at", "skipped_at", "updated_at"],
+    hiddenKeys: [
+      "calendar_run_id",
+      "trigger_kind",
+      "status",
+      "due_at",
+      "completed_at",
+      "failed_at",
+      "skipped_at",
+      "updated_at",
+    ],
     chips: [
       ["due", item.due_at],
       ["completed", item.completed_at],
@@ -3232,6 +3297,8 @@ function renderCalendarRuns(panel) {
         ) ? "" : item.updated_at,
       ],
     ],
+    referenceLabel: "Run reference",
+    references: [["Run reference", item.calendar_run_id]],
   })), "No recent calendar runs are available.");
 }
 
@@ -3255,18 +3322,32 @@ function renderBackgroundSummary(panel) {
   setHtml("#background-summary-table", rows.map(([label, value]) => `<tr><td>${escapeHtml(label)}</td><td>${escapeHtml(formatLookupValue(value))}</td></tr>`).join(""));
 }
 
-function renderBackgroundJobs(target, panel, emptyText) {
+function renderBackgroundJobs(target, panel, emptyText, showJobReference = false) {
   renderPanelCards(target, panel, (items) => items.map((item, index) => renderRecordCard(item, {
     title: item.requester_display_name || item.worker || `Job ${index + 1}`,
     status: item.status || item.delivery_state || "",
-    hiddenKeys: ["requester_display_name", "worker", "status", "delivery_state", "created_at", "updated_at", "completed_at"],
+    hiddenKeys: [
+      "requester_display_name",
+      "worker",
+      "status",
+      "delivery_state",
+      "created_at",
+      "updated_at",
+      "completed_at",
+      ...(showJobReference ? ["background_work_job_id", "job_id"] : []),
+    ],
     chips: [
       ["worker", item.worker],
       ["delivery", item.delivery_state === item.status ? "" : item.delivery_state],
-      ["created", item.created_at],
-      ["completed", item.completed_at],
-      ["updated", item.updated_at === item.completed_at ? "" : item.updated_at],
+      ...(target === "#background-jobs-table" ? [] : [
+        ["created", item.created_at],
+        ["completed", item.completed_at],
+        ["updated", item.updated_at === item.completed_at ? "" : item.updated_at],
+      ]),
     ],
+    references: showJobReference
+      ? [["Job reference", item.background_work_job_id]]
+      : [],
   })), emptyText);
 }
 
@@ -3480,10 +3561,10 @@ async function refreshBackground() {
   const panels = payload.panels || {};
   renderBackgroundSummary(panels.summary);
   setEntityStatus("#background-jobs-status", panels.jobs?.status || "empty");
-  renderBackgroundJobs("#background-jobs-table", panels.jobs, "No background-work jobs are available.");
+  renderBackgroundJobs("#background-jobs-table", panels.jobs, "No background-work jobs are available.", true);
   renderBackgroundWorkers(panels.worker_activity);
   setEntityStatus("#background-errors-status", panels.errors?.status || "empty");
-  renderBackgroundJobs("#background-errors-table", panels.errors, "No recent background worker errors.");
+  renderBackgroundJobs("#background-errors-table", panels.errors, "No recent background worker errors.", true);
   setEntityStatus("#background-delivery-status", panels.delivery_detail?.status || "empty");
   renderBackgroundJobs("#background-delivery-table", panels.delivery_detail, "No jobs are ready for delivery.");
 }
@@ -3497,11 +3578,12 @@ function facetRows(facet, emptyText, labelFormatter = formatLookupLabel) {
 function eventDetailMarkup(event) {
   const details = [
     ["source", event.source],
-    ["request", event.request_id || event.correlation_id],
-    ["tracking", event.tracking_id],
-    ["run", event.run_id],
-    ["trigger", event.trigger_id],
-    ["attempt", event.attempt_id],
+    ["request_id", event.request_id],
+    ["correlation_id", event.correlation_id],
+    ["tracking_id", event.tracking_id],
+    ["run_id", event.run_id],
+    ["trigger_id", event.trigger_id],
+    ["attempt_id", event.attempt_id],
     ["processed", event.processed_count],
     ["succeeded", event.succeeded_count],
     ["failed", event.failed_count],

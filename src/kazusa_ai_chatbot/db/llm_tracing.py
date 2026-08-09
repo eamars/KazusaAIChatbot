@@ -143,6 +143,41 @@ async def list_llm_trace_steps_for_trace_ids(
     return rows
 
 
+async def list_background_work_delivery_trace_runs(
+    *,
+    source_background_work_job_ids: Sequence[str],
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Return bounded child trace references for background-work jobs."""
+
+    clean_job_ids = _unique_strings(source_background_work_job_ids)
+    if not clean_job_ids or limit < 1:
+        return []
+
+    db = await get_db()
+    projection = {
+        "_id": 0,
+        "trace_id": 1,
+        "parent_llm_trace_id": 1,
+        "source_background_work_job_id": 1,
+    }
+    cursor = (
+        db[LLM_TRACE_RUNS_COLLECTION]
+        .find(
+            {
+                "source_background_work_job_id": {
+                    "$in": clean_job_ids,
+                },
+            },
+            projection,
+        )
+        .sort([("started_at", -1), ("trace_id", 1)])
+        .limit(limit)
+    )
+    rows = await cursor.to_list(length=limit)
+    return [dict(row) for row in rows]
+
+
 def _unique_strings(values: Sequence[str]) -> list[str]:
     """Return stripped string values in first-seen order."""
 

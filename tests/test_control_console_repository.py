@@ -502,6 +502,7 @@ async def test_repository_projects_native_v2_character_and_user_state() -> None:
     }
     user_profile = user["panels"]["profile"]["items"][0]
     assert user_profile["alias_count"] == 2
+    assert user_profile["global_user_id"] == "global-user-secret"
     relationship_rows = {
         item["axis"]: item
         for item in user["panels"]["relationship"]["items"]
@@ -528,7 +529,6 @@ async def test_repository_projects_native_v2_character_and_user_state() -> None:
     }
     rendered = repr({"character": character, "user": user})
     for forbidden in (
-        "global-user-secret",
         "suspected-alias-secret",
         "relationship-evidence-secret",
         "goal-character-secret",
@@ -705,6 +705,7 @@ async def test_repository_lists_safe_user_and_group_directories() -> None:
         "account_count": 1,
         "alias_count": 1,
         "updated_at": updated_at,
+        "global_user_id": "global-user-secret",
     }]
     assert groups["status"] == "available"
     assert groups["items"][0] == {
@@ -732,7 +733,7 @@ async def test_repository_lists_safe_user_and_group_directories() -> None:
         "skip_reason": "coalesced_into_newer_window",
     }]
     rendered = repr({"users": users, "groups": groups, "group": group})
-    assert "global-user-secret" not in rendered
+    assert "global-user-secret" in rendered
     assert "suspected-alias-secret" not in rendered
     assert "group-review-secret" not in rendered
     assert "case-secret" not in rendered
@@ -772,6 +773,7 @@ async def test_repository_calendar_includes_recent_terminal_runs() -> None:
         return [{
             "run_id": "calendar-run-secret",
             "schedule_id": "calendar-schedule-secret",
+            "source_llm_trace_id": "calendar-source-trace-secret",
             "trigger_kind": "reflection_phase_slot",
             "status": "completed",
             "due_at": "2026-07-26T23:00:00Z",
@@ -820,6 +822,9 @@ async def test_repository_calendar_includes_recent_terminal_runs() -> None:
         "skipped": 0,
     }
     assert page["panels"]["runs"]["items"] == [{
+        "calendar_run_id": "calendar-run-secret",
+        "calendar_schedule_id": "calendar-schedule-secret",
+        "source_llm_trace_id": "calendar-source-trace-secret",
         "trigger_kind": "reflection_phase_slot",
         "status": "completed",
         "due_at": "2026-07-26T23:00:00Z",
@@ -834,8 +839,9 @@ async def test_repository_calendar_includes_recent_terminal_runs() -> None:
         "reason"
     ].lower()
     rendered = repr(page)
-    assert "calendar-run-secret" not in rendered
-    assert "calendar-schedule-secret" not in rendered
+    assert "calendar-run-secret" in rendered
+    assert "calendar-schedule-secret" in rendered
+    assert "calendar-source-trace-secret" in rendered
     assert "nested-run-secret" not in rendered
     assert "worker-secret" not in rendered
     assert "max_attempts" not in rendered

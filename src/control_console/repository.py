@@ -33,6 +33,7 @@ from kazusa_ai_chatbot.conversation_progress import (
     load_progress_context as default_load_progress_context,
 )
 from kazusa_ai_chatbot.db import background_work_jobs as background_work_job_store
+from kazusa_ai_chatbot.db import llm_tracing as llm_trace_store
 from kazusa_ai_chatbot.db import character_identity_growth as identity_store
 from kazusa_ai_chatbot.db.character import (
     get_character_profile as default_get_character_profile,
@@ -227,6 +228,7 @@ class ControlConsoleRepository:
         list_calendar_schedules: AsyncHelper | None = None,
         list_recent_calendar_runs: AsyncHelper | None = None,
         find_deliverable_background_work_jobs: AsyncHelper | None = None,
+        list_background_work_delivery_trace_runs: AsyncHelper | None = None,
         list_recent_background_work_jobs: AsyncHelper | None = None,
         load_progress_context: AsyncHelper | None = None,
         load_residue_context: AsyncHelper | None = None,
@@ -256,6 +258,9 @@ class ControlConsoleRepository:
         self._list_recent_calendar_runs = list_recent_calendar_runs
         self._find_deliverable_background_work_jobs = (
             find_deliverable_background_work_jobs
+        )
+        self._list_background_work_delivery_trace_runs = (
+            list_background_work_delivery_trace_runs
         )
         self._list_recent_background_work_jobs = list_recent_background_work_jobs
         self._load_progress_context = load_progress_context
@@ -812,6 +817,7 @@ class ControlConsoleRepository:
         if not isinstance(profile, dict):
             profile = {}
         identity = dict(resolution["identity"])
+        identity["global_user_id"] = resolution["global_user_id"]
         profile_items = _project_user_profile(
             profile,
             identity=identity,
@@ -1605,10 +1611,51 @@ class ControlConsoleRepository:
             )
             return panel
 
-        items = [
-            _project_background_job(job)
+        bounded_jobs = [
+            job
             for job in list(jobs)[:limit]
             if isinstance(job, dict)
+        ]
+        job_ids = [
+            str(job.get("job_id", "")).strip()
+            for job in bounded_jobs
+            if str(job.get("job_id", "")).strip()
+        ]
+        trace_rows: list[dict[str, Any]] = []
+        trace_helper = self._list_background_work_delivery_trace_runs
+        if (
+            trace_helper is None
+            and self._find_deliverable_background_work_jobs is None
+        ):
+            trace_helper = llm_trace_store.list_background_work_delivery_trace_runs
+        if trace_helper is not None and job_ids:
+            try:
+                loaded_trace_rows = await trace_helper(
+                    source_background_work_job_ids=job_ids,
+                    limit=max(limit, len(job_ids)),
+                )
+            except REPOSITORY_HELPER_ERRORS:
+                loaded_trace_rows = []
+            if isinstance(loaded_trace_rows, list):
+                trace_rows = [
+                    row
+                    for row in loaded_trace_rows
+                    if isinstance(row, dict)
+                ]
+        delivery_traces = {
+            str(row.get("source_background_work_job_id", "")).strip(): row
+            for row in trace_rows
+            if str(row.get("source_background_work_job_id", "")).strip()
+        }
+        items = [
+            _project_background_job(
+                job,
+                include_job_id=False,
+                delivery_trace=delivery_traces.get(
+                    str(job.get("job_id", "")).strip(),
+                ),
+            )
+            for job in bounded_jobs
         ]
         panel = _entity_panel(
             status="available" if items else "empty",
@@ -1643,7 +1690,7 @@ class ControlConsoleRepository:
             return panel
 
         items = [
-            _project_background_job(job)
+            _project_background_job(job, include_job_id=True)
             for job in list(jobs)[:limit]
             if isinstance(job, dict)
         ]
@@ -2283,7 +2330,9 @@ def _panel_lookup_page(
         "redaction": {
             "prompt_view": "production projections only",
             "raw_documents": "excluded",
-            "internal_global_ids": "excluded",
+            "internal_global_ids": (
+                "excluded except explicitly mapped global_user_id user surfaces"
+            ),
             "dedupe_tokens": "excluded",
         },
     }
@@ -2495,7 +2544,9 @@ def _owner_entity_redaction() -> dict[str, str]:
         "model_inputs": "excluded",
         "raw_messages": "excluded",
         "raw_reflections": "excluded",
-        "internal_global_ids": "excluded",
+        "internal_global_ids": (
+            "excluded except explicitly mapped global_user_id user surfaces"
+        ),
         "vector_fields": "excluded",
     }
     return redaction
@@ -2531,12 +2582,13 @@ def _project_calendar_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
 
 
 def _project_calendar_schedule(schedule: dict[str, Any]) -> dict[str, Any]:
-    """Project one schedule definition without source ids or payload internals."""
+    """Project one schedule definition without payload internals."""
 
     source_scope = schedule.get("source_scope")
     if not isinstance(source_scope, dict):
         source_scope = {}
     row = {
+        "calendar_schedule_id": schedule.get("schedule_id", ""),
         "trigger_kind": schedule.get("trigger_kind", ""),
         "status": schedule.get("status", ""),
         "start_at": schedule.get("start_at", ""),
@@ -2545,6 +2597,7 @@ def _project_calendar_schedule(schedule: dict[str, Any]) -> dict[str, Any]:
         "source_channel_type": source_scope.get("source_channel_type", ""),
         "recurrence": schedule.get("recurrence", {}),
         "timezone": schedule.get("timezone", ""),
+        "source_llm_trace_id": schedule.get("source_llm_trace_id", ""),
         "updated_at": schedule.get("updated_at", ""),
     }
     projected_row = redact_mapping({
@@ -2555,8 +2608,13 @@ def _project_calendar_schedule(schedule: dict[str, Any]) -> dict[str, Any]:
     return projected_row
 
 
-def _project_background_job(job: dict[str, Any]) -> dict[str, Any]:
-    """Project one background-work job without task payload internals."""
+def _project_background_job(
+    job: dict[str, Any],
+    *,
+    include_job_id: bool,
+    delivery_trace: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Project one background-work job for a bounded console panel."""
 
     allowed_fields = (
         "status",
@@ -2578,6 +2636,30 @@ def _project_background_job(job: dict[str, Any]) -> dict[str, Any]:
         for field in allowed_fields
         if field in job and job[field] not in (None, "")
     }
+    if include_job_id:
+        job_id = job.get("job_id")
+        if job_id not in (None, ""):
+            row["background_work_job_id"] = job_id
+        for field in (
+            "accepted_task_id",
+            "source_action_attempt_id",
+            "source_llm_trace_id",
+        ):
+            value = job.get(field)
+            if value not in (None, ""):
+                row[field] = value
+    else:
+        job_id = job.get("job_id")
+        if job_id not in (None, ""):
+            row["background_work_job_id"] = job_id
+            row["source_background_work_job_id"] = job_id
+        source_trace = job.get("source_llm_trace_id")
+        if source_trace not in (None, ""):
+            row["parent_llm_trace_id"] = source_trace
+        if isinstance(delivery_trace, Mapping):
+            child_trace = delivery_trace.get("trace_id")
+            if child_trace not in (None, ""):
+                row["child_llm_trace_id"] = child_trace
     if (
         row.get("result_summary")
         and row.get("failure_summary") == row.get("result_summary")
@@ -2754,7 +2836,7 @@ def _project_user_profile(
     *,
     identity: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    """Project a user profile without internal canonical identifiers."""
+    """Project a user profile with the requested canonical user identifier."""
 
     accounts = profile.get("platform_accounts")
     if not isinstance(accounts, list):
@@ -2785,6 +2867,11 @@ def _project_user_profile(
         value = identity.get(field)
         if value not in (None, ""):
             row[field] = value
+    global_user_id = identity.get("global_user_id") or profile.get(
+        "global_user_id",
+    )
+    if global_user_id not in (None, ""):
+        row["global_user_id"] = global_user_id
 
     items = [redact_mapping(row)] if row else []
     return items
@@ -2964,7 +3051,7 @@ def _project_relationship_operational_panel(
 
 
 def _project_user_directory_item(profile: dict[str, Any]) -> dict[str, Any]:
-    """Project one user directory row without canonical or alias identities."""
+    """Project one user directory row with its canonical user identifier."""
 
     accounts = profile.get("accounts")
     if not isinstance(accounts, list):
@@ -2998,6 +3085,9 @@ def _project_user_directory_item(profile: dict[str, Any]) -> dict[str, Any]:
         "alias_count": alias_count,
         "updated_at": str(updated_at),
     }
+    global_user_id = profile.get("global_user_id")
+    if global_user_id not in (None, ""):
+        row["global_user_id"] = global_user_id
     return row
 
 
@@ -3292,6 +3382,11 @@ def _project_calendar_run(document: dict[str, Any]) -> dict[str, Any]:
         for field in allowed_fields
         if field in document and document[field] not in (None, "")
     }
+    row.update({
+        "calendar_run_id": document.get("run_id", ""),
+        "calendar_schedule_id": document.get("schedule_id", ""),
+        "source_llm_trace_id": document.get("source_llm_trace_id", ""),
+    })
     result_summary = document.get("result_summary")
     if isinstance(result_summary, dict):
         projected_summary = _project_run_summary(result_summary)
@@ -3337,7 +3432,7 @@ def _project_run_summary(summary: dict[str, Any]) -> dict[str, Any]:
 
 
 def _project_worker_event(row: dict[str, Any]) -> dict[str, Any]:
-    """Project one worker error without correlation or run identifiers."""
+    """Project one worker error with its bounded job reference."""
 
     allowed_fields = (
         "event_type",
@@ -3354,5 +3449,10 @@ def _project_worker_event(row: dict[str, Any]) -> dict[str, Any]:
         for field in allowed_fields
         if field in row and row[field] not in (None, "")
     }
+    background_work_job_id = row.get("background_work_job_id") or row.get(
+        "job_id",
+    )
+    if background_work_job_id not in (None, ""):
+        projected["background_work_job_id"] = background_work_job_id
     projected_row = redact_mapping(projected)
     return projected_row

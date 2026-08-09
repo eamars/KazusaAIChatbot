@@ -126,6 +126,10 @@ def build_run_record(
             "topic_limit": int(budget["topic_limit"]),
         },
     }
+    for field_name in ("llm_trace_id", "source_calendar_run_id"):
+        field_value = _string_field(case, field_name)
+        if field_value:
+            run_record[field_name] = field_value
     return run_record
 
 
