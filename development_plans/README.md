@@ -75,7 +75,7 @@ long_term/todo.md
 | [character_identity_growth_contract_recovery_bugfix_plan.md](archive/completed/bugfix/character_identity_growth_contract_recovery_bugfix_plan.md) | Follow-up bugfix for identity-growth model contracts, provenance indices, review copying, and bounded retry recovery | completed |
 | [qq_group_public_scene_response_ordering_bugfix_plan.md](archive/completed/bugfix/qq_group_public_scene_response_ordering_bugfix_plan.md) | QQ multi-user public-scene composition and same-group response-ordering bugfix | completed |
 | [cognition_core_v2_first_pass_robustness_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_first_pass_robustness_bugfix_plan.md) | Core V2 first-pass generation grounding, evaluator feedback, per-stage token/character budget rebalance, and deterministic failure-path recovery bugfix plan | completed |
-| [cognition_core_v2_context_fade_and_sleep_phase_plan.md](active/bugfix/cognition_core_v2_context_fade_and_sleep_phase_plan.md) | Deterministic age-based discard of group-scene turns and conversation-progress topics before projection, plus cognition V2 ownership of the character sleep phase and morning refresh | in progress |
+| [cognition_core_v2_context_fade_and_sleep_phase_plan.md](archive/completed/bugfix/cognition_core_v2_context_fade_and_sleep_phase_plan.md) | Deterministic age-based discard of group-scene turns and conversation-progress topics before projection, plus cognition V2 ownership of the character sleep phase and morning refresh | completed |
 
 ## Reference Documents
 

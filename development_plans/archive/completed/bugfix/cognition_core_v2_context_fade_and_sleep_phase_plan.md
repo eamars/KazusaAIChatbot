@@ -5,7 +5,7 @@
 - Goal: make group-scene and conversation-progress context fade by elapsed time
   through deterministic discard before projection, and make the character sleep
   phase and morning refresh first-class cognition v2 concerns.
-- Status: in_progress
+- Status: completed
 - Scope boundary: `cognition_core_v2` owns the sleep-phase descriptor and the
   morning-refresh transition; `conversation_progress` owns age-based discard of
   its own turns, events, and narrative; `time_boundary` owns shared local-clock
@@ -635,7 +635,7 @@ Record the checks actually run, their results, and any residual risk.
 - [x] Morning-refresh entrypoint implemented, exported, and consumed by
   `reflection_cycle`; reducer parameters removed.
 - [x] Documentation updated.
-- [ ] Regression radius and static checks pass; live cases inspected.
+- [x] Regression radius and static checks pass; live cases inspected.
 - [x] Independent code review complete and findings resolved.
 
 Each item records its changed surface, verification result, and any deviation
@@ -695,27 +695,44 @@ Populate during execution. Do not pre-fill.
   transition counts, and reflection adapter route passed 40 focused tests.
 - Persistence check result: read-path pruning performed no database write in
   the runtime tests, and the next recorded turn persisted the pruned packet.
-- Regression and static-check results: the complete non-live reflection suite
-  passed 167 tests; the prompt-budget checks passed 44 tests; all changed
-  27 Python files, including the two new files, compiled under
-  `venv\Scripts\python`. Production search found
-  no remaining hardcoded `"semantic_temporal_context": "immediate"`, no
-  direct reducer import outside `cognition_core_v2`, and no private clock
-  parser in `self_cognition/sleep_period.py`. Default collection now completes
-  with 4113/5062 tests collected and one explicit live-only skip for the
-  unavailable identity-growth replay manifest. The canonical relationship
-  vocabulary regression and the stale prompt expectation were corrected;
-  their focused suites pass.
-- Live case artifacts and judgment: the group case passed individually and
-  wrote
+- Regression and static-check results (final): the non-live conversation-
+  progress regression radius passed 173 tests; the non-live Cognition V2
+  suite passed 513 tests with two expected day-wide trace-inventory skips and
+  four live/benchmark deselections; the reflection, self-cognition, and
+  persona regression batch passed 377 tests; and the post-correction prompt
+  budget/guidance checks passed 55 tests. All 139 changed Python files
+  compiled under `venv\Scripts\python`; `git diff --check` passed. Production
+  search found no direct `apply_sleep_recovery` import outside
+  `cognition_core_v2`, no private clock parser in
+  `self_cognition/sleep_period.py`, and no hardcoded
+  `semantic_temporal_context` value of `immediate`.
+- Repository-wide default baseline: `pytest -q -rA --maxfail=1` stopped after
+  1,504 passed, 21 skipped, and 1,134 deselected at
+  `tests/test_cognition_preference_adapter.py::test_preference_stage_owns_visible_boundaries_only`.
+  The isolated failure is a stale preference-prompt expectation outside this
+  plan's change surface; the test file is untouched, and every plan-specific
+  regression batch passed.
+- Live case artifacts and judgment (initial attempts): the group case passed
+  individually and wrote
   `test_artifacts/llm_traces/test_live_interleaved_group_multifragment_continuation__group_multifragment__20260805T095421231240Z.json`;
   its trace showed two accepted recorder calls, eight participant turns, the
-  unrelated source excluded, and coherent downstream output. The private
-  long-thread case was run individually and wrote
+  unrelated source excluded, and coherent downstream output. The first
+  private long-thread attempt wrote
   `test_artifacts/llm_traces/test_live_asuna_houjing_long_thread_regression__asuna_houjing_cognition_semantic_failure__20260805T095603271546Z.json`;
   its contract reached both relevant events, but the model-selected bid
-  omitted the completed event and repeated its completed location. This is
-  recorded as a semantic-quality residual for follow-up.
+  omitted the completed event and repeated its completed location. The
+  failure is retained as semantic-quality evidence in the human-readable
+  closure review.
+- Live closure reruns: after a bounded prompt-only correction in
+  `src/kazusa_ai_chatbot/cognition_core_v2/goal_cognition.py`, the private
+  long-thread replay passed in 86.57 seconds with completed-event citation,
+  distinct-location selection, current-input grounding, no accidental reopen,
+  and intact source lineage. The final group replay passed in 37.51 seconds
+  with two accepted recorder calls, eight participant logical turns, seven
+  final fragments, `unrelated_group_source_absent=true`, and
+  `critical_event_state=completed`. Both final traces and the parent-authored
+  semantic judgments are recorded in
+  `test_artifacts/diagnostics/cognition_core_v2_context_fade_sleep_phase_closure_review_2026-08-09.md`.
 - Known asymmetries recorded for a future decision: morning refresh is
   character-scope only, so user-scope affect receives no nightly relief; and
   `elapsed_sleep_seconds` is the configured window length rather than real
@@ -738,13 +755,13 @@ Populate during execution. Do not pre-fill.
   deterministic suite passed 31 tests, the conversation/cognition batch
   passed 632 tests, the persona/cognition integration batch passed 58 tests,
   and the reflection/self-cognition batch passed 54 tests.
-- Residual risk: deterministic contract implementation is complete, but plan
-  status remains `in_progress` because the private live case continues to
-  expose intermittent recorder contract/lifecycle failures and, when the
-  recorder passes, a goal-selection repetition of a completed location. The
-  missing identity-growth replay source remains unavailable, so its live-only
-  module is explicitly skipped rather than fabricated. No deterministic
-  semantic rewrite or parser-side repair was added for the live failures.
+- Residual-risk disposition: the initial private semantic failure was resolved
+  by the bounded goal-prompt correction and the replay passed on the second
+  attempt. The missing identity-growth replay source remains unavailable, so
+  its live-only module is explicitly skipped rather than fabricated. The
+  repository-wide baseline preference-prompt failure is outside this plan's
+  ownership boundary and remains unmodified. No deterministic semantic rewrite
+  or parser-side repair was added.
 - Closure follow-up after remote integration: the initial implementation was
   committed as `dc8915ea`, then rebased onto remote commits
   `1b443317` and `ecdd885d` as `d5a48e2e`; the branch is one commit ahead of
@@ -763,7 +780,7 @@ Populate during execution. Do not pre-fill.
 - Final diff summary and sign-off: thresholds, lazy progress pruning,
   group-scene age filtering, event timestamp provenance, derived temporal
   context, shared clock helpers, cognition-owned sleep phase, validated
-  morning refresh, reflection routing, documentation, and focused tests are
-  implemented. Parent sign-off covers the deterministic contract surface;
-  lifecycle closeout awaits disposition of the recorded live and unrelated
-  baseline residuals.
+  morning refresh, reflection routing, documentation, the bounded goal-prompt
+  correction, and focused tests are complete. The deterministic contract
+  surface and final live semantic gates are signed off; residuals are
+  explicitly classified above.
