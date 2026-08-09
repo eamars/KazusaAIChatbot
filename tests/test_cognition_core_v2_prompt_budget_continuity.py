@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 from copy import deepcopy
 import importlib
 import json
@@ -32,6 +33,9 @@ from kazusa_ai_chatbot.cognition_core_v2 import (
 )
 from kazusa_ai_chatbot.cognition_core_v2 import (
     state_models as state_models_module,
+)
+from kazusa_ai_chatbot.cognition_core_v2 import (
+    state_reducers as state_reducers_module,
 )
 from kazusa_ai_chatbot.cognition_core_v2 import surface as surface_module
 from kazusa_ai_chatbot.cognition_core_v2 import workspace as workspace_module
@@ -74,6 +78,50 @@ FIXTURE_PATH = (
     / "cognition_core_v2_prompt_budget_production_case.json"
 )
 INCIDENT_TIMESTAMP = "2026-07-28T04:19:18Z"
+_CAPTURED_NEAR_CAP_CASES: tuple[dict[str, object], ...] = (
+    {
+        "case_id": "a1a573_near_cap_semantic_repair",
+        "trace_id": "llmtrace_93482f08e4a74aa5af90adc6e6f5918a",
+        "trace_path": (
+            Path(__file__).parents[1]
+            / "test_artifacts"
+            / "diagnostics"
+            / "cognition_trace_a1a573b590a3494786c4edebdee55342.json"
+        ),
+        "stage_name": "semantic_appraisal.q:goal_threat_outcome.item_1",
+        "question_id": "q:goal_threat_outcome",
+    },
+    {
+        "case_id": "caad1a_near_cap_semantic_repair",
+        "trace_id": "llmtrace_caad1a9370cf4d859e8ea6233f1e473d",
+        "trace_path": (
+            Path(__file__).parents[1]
+            / "test_artifacts"
+            / "diagnostics"
+            / (
+                "postdraft_goal_bid_failure_llmtrace_"
+                "caad1a9370cf4d859e8ea6233f1e473d.json"
+            )
+        ),
+        "stage_name": "semantic_appraisal.q:goal_threat_outcome.item_1",
+        "question_id": "q:goal_threat_outcome",
+    },
+    {
+        "case_id": "df6eb4_near_cap_semantic_repair",
+        "trace_id": "llmtrace_df6eb45b1bfc405fa0e781baa7ce8d76",
+        "trace_path": (
+            Path(__file__).parents[1]
+            / "test_artifacts"
+            / "diagnostics"
+            / (
+                "postdraft_goal_bid_failure_llmtrace_"
+                "df6eb45b1bfc405fa0e781baa7ce8d76.json"
+            )
+        ),
+        "stage_name": "semantic_appraisal.q:goal_threat_outcome.item_1",
+        "question_id": "q:goal_threat_outcome",
+    },
+)
 
 
 class _BoundaryReached(AssertionError):
@@ -316,6 +364,124 @@ def _appraisal_services(llm: object) -> SimpleNamespace:
         appraisal_existential_drive_config=object(),
     )
     return services
+
+
+def _load_captured_near_cap_case(
+    case: Mapping[str, object],
+) -> tuple[dict[str, Any], str]:
+    """Load one preserved near-cap input and its invalid candidate."""
+
+    trace_path = case.get("trace_path")
+    trace_id = case.get("trace_id")
+    stage_name = case.get("stage_name")
+    if not isinstance(trace_path, Path):
+        raise AssertionError("captured near-cap trace path is invalid")
+    if not isinstance(trace_id, str) or not isinstance(stage_name, str):
+        raise AssertionError("captured near-cap trace identity is invalid")
+    if not trace_path.exists():
+        raise AssertionError(
+            f"captured near-cap trace is missing: {trace_path}"
+        )
+    trace = json.loads(trace_path.read_text(encoding="utf-8"))
+    capsules = [
+        capsule
+        for capsule in trace.get("cognition_failure_capsules", [])
+        if (
+            isinstance(capsule, Mapping)
+            and capsule.get("trace_id") == trace_id
+        )
+    ]
+    if len(capsules) != 1:
+        raise AssertionError(
+            "captured near-cap trace must contain one matching capsule"
+        )
+    input_payload = capsules[0].get("input_payload")
+    if not isinstance(input_payload, dict):
+        raise AssertionError("captured near-cap input is not an object")
+    attempts = [
+        attempt
+        for attempt in capsules[0].get("attempts", [])
+        if (
+            isinstance(attempt, Mapping)
+            and attempt.get("stage_name") == stage_name
+        )
+    ]
+    if len(attempts) != 1:
+        raise AssertionError(
+            "captured near-cap trace must contain one matching attempt"
+        )
+    attempt = attempts[0]
+    validation_error = str(attempt.get("validation_error") or "")
+    raw_response_text = str(attempt.get("raw_response_text") or "")
+    if "semantic delta path" not in validation_error:
+        raise AssertionError("captured near-cap error is not a path error")
+    if "; permitted paths:" not in validation_error:
+        raise AssertionError("captured near-cap error lost its path domain")
+    if not raw_response_text:
+        raise AssertionError("captured near-cap response is empty")
+    return input_payload, raw_response_text
+
+
+def _captured_near_cap_appraisal_context(
+    input_payload: Mapping[str, Any],
+) -> tuple[
+    dict[str, Any],
+    dict[str, Any],
+    Any,
+    list[Mapping[str, Any]],
+]:
+    """Rebuild deterministic pre-appraisal context from a captured input."""
+
+    payload = validate_cognition_core_input(input_payload)
+    previous_state = state_models_module.validate_cognition_state(
+        payload["mutable_state"]
+    )
+    updated_at = facade_module._episode_updated_at(payload["episode"])
+    elapsed_seconds = facade_module._cognition_elapsed_seconds(
+        previous_state,
+        updated_at,
+    )
+    fact_pairs = [
+        (fact["producer"], facade_module._fact_without_producer(fact))
+        for fact in payload["direct_facts"]
+    ]
+    relationship_context = facade_module._native_relationship_context(
+        payload.get("relationship_context")
+    )
+    preliminary_state = state_reducers_module.apply_state_update(
+        previous_state,
+        direct_facts=fact_pairs,
+        elapsed_seconds=elapsed_seconds,
+        updated_at=updated_at,
+        character_constraints=payload["character_constraints"],
+        relationship_context=relationship_context,
+    )
+    preliminary_state = state_reducers_module.create_deterministic_goals(
+        preliminary_state,
+        character_constraints=payload["character_constraints"],
+        relationship_context=relationship_context,
+        evidence=payload["evidence"],
+        updated_at=updated_at,
+    )
+    preliminary_state = state_models_module.validate_cognition_state(
+        preliminary_state
+    )
+    projection = project_state_for_prompt(
+        preliminary_state,
+        character_constraints=payload["character_constraints"],
+        character_identity_context=payload["character_identity_context"],
+        relationship_context=payload.get("relationship_context"),
+        character_operational_context=payload.get(
+            "character_operational_context"
+        ),
+        evidence=payload["evidence"],
+    )
+    questions = plan_semantic_questions(
+        payload["evidence"],
+        preliminary_state,
+        projection.handle_to_ref,
+    )
+    return payload, preliminary_state, projection, questions
 
 
 def _maximum_evidence(count: int = 32) -> list[dict[str, Any]]:
@@ -2128,6 +2294,66 @@ async def test_appraisal_repair_uses_residual_budget_for_second_call(
         <= semantic_appraisal_module.SEMANTIC_APPRAISAL_REPAIR_PROMPT_CAP
     )
     assert len(llm.calls[1][2]) <= len(invalid_candidate)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "case",
+    _CAPTURED_NEAR_CAP_CASES,
+    ids=lambda case: str(case["case_id"]),
+)
+async def test_captured_near_cap_repairs_fit_the_existing_budget(
+    case: Mapping[str, object],
+) -> None:
+    """Each captured near-cap path reaches its bounded repair call."""
+
+    input_payload, historical_response = _load_captured_near_cap_case(case)
+    payload, preliminary_state, projection, questions = (
+        _captured_near_cap_appraisal_context(input_payload)
+    )
+    question_id = case.get("question_id")
+    assert isinstance(question_id, str)
+    matching_questions = [
+        question
+        for question in questions
+        if question.get("question_id") == question_id
+    ]
+    assert len(matching_questions) == 1
+    llm = _InvalidCandidateLLM(historical_response)
+
+    with pytest.raises(
+        CognitionExecutionError,
+        match="contract attempts exhausted",
+    ):
+        await appraise_semantic_question(
+            matching_questions[0],
+            payload["evidence"],
+            projection,
+            _appraisal_services(llm),
+            validation_state=preliminary_state,
+        )
+
+    assert len(llm.calls) == 2
+    repair_messages = llm.calls[1]
+    repair_size = sum(len(content) for content in repair_messages)
+    assert (
+        repair_size
+        <= semantic_appraisal_module.SEMANTIC_APPRAISAL_REPAIR_PROMPT_CAP
+    )
+    repair_payload = json.loads(repair_messages[-1])
+    assert set(repair_payload) == {
+        "repair_instruction",
+        "contract_error",
+        "allowed_values",
+    }
+    assert (
+        "knowledge_gaps.k7.uncertainty"
+        in repair_payload["contract_error"]
+    )
+    assert "permitted paths:" not in repair_payload["contract_error"]
+    assert "permitted_delta_path_domains" in repair_payload[
+        "allowed_values"
+    ]
 
 
 @pytest.mark.asyncio

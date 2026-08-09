@@ -58,7 +58,7 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
-| [cognition_core_v2_goal_schema_and_semantic_repair_compaction_bugfix_plan.md](active/bugfix/cognition_core_v2_goal_schema_and_semantic_repair_compaction_bugfix_plan.md) | Non-ordinary goal-schema isolation and semantic repair-envelope compaction | draft |
+| [cognition_core_v2_goal_schema_and_semantic_repair_compaction_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_goal_schema_and_semantic_repair_compaction_bugfix_plan.md) | Non-ordinary goal-schema isolation and semantic repair-envelope compaction | completed |
 | [dialog_third_party_target_binding_and_addressee_fidelity_bugfix_plan.md](archive/completed/bugfix/dialog_third_party_target_binding_and_addressee_fidelity_bugfix_plan.md) | Ephemeral third-party target binding and final-dialog addressee fidelity | completed |
 | [cognition_core_v2_action_planning_request_fidelity_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_action_planning_request_fidelity_bugfix_plan.md) | Action-planning request fidelity and retrieval-goal preservation | completed |
 | [background_task_result_blocker_detail_delivery_bugfix_plan.md](archive/completed/bugfix/background_task_result_blocker_detail_delivery_bugfix_plan.md) | Explicit task-result blocker detail in background delivery | completed |

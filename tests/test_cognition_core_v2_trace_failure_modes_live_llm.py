@@ -5,14 +5,17 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 from time import time_ns
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from langchain_core.messages import SystemMessage
 
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    CognitionContextLimitError,
     CognitionExecutionError,
     validate_cognition_core_input,
 )
@@ -30,6 +33,7 @@ from kazusa_ai_chatbot.cognition_core_v2.facade import (
 )
 from kazusa_ai_chatbot.cognition_core_v2.semantic_appraisal import (
     SEMANTIC_APPRAISAL_PROMPT,
+    SEMANTIC_APPRAISAL_REPAIR_PROMPT_CAP,
     _appraise_semantic_item,
 )
 from kazusa_ai_chatbot.cognition_core_v2.semantic_source_planner import (
@@ -67,6 +71,12 @@ _CURRENT_RUN_TRACE_PATH = (
         "cognition_v2_run_llmtrace_fab989d622da48a89c6e5566e2121251_"
         "20260805.json"
     )
+)
+_A1A573_TRACE_PATH = (
+    _ROOT
+    / "test_artifacts"
+    / "diagnostics"
+    / "cognition_trace_a1a573b590a3494786c4edebdee55342.json"
 )
 _ARTIFACT_ROOT = (
     _ROOT
@@ -125,6 +135,18 @@ _SEMANTIC_CASES: dict[str, dict[str, object]] = {
         "attempt_index": 1,
         "question_id": "q:event_agency",
         "expected_error": "semantic role value is invalid",
+    },
+    "a1a573_goal_threat_unowned_knowledge_gap_path": {
+        "trace_id": "llmtrace_93482f08e4a74aa5af90adc6e6f5918a",
+        "trace_path": _A1A573_TRACE_PATH,
+        "stage_name": (
+            "semantic_appraisal.q:goal_threat_outcome.item_1"
+        ),
+        "attempt_index": 1,
+        "question_id": "q:goal_threat_outcome",
+        "expected_error": "semantic delta path",
+        "replay_historical_candidate": True,
+        "require_repair_call": True,
     },
     "resolved_knowledge_gap_transition_rejected": {
         "trace_id": "llmtrace_b2935ecd4361456a9bfb10deeaa790b1",
@@ -192,6 +214,48 @@ _SEMANTIC_CASES: dict[str, dict[str, object]] = {
         ),
     },
 }
+
+
+class _HistoricalFirstThenLiveLLM:
+    """Replay one preserved invalid candidate before a real repair call."""
+
+    def __init__(self, delegate: Any, historical_response: str) -> None:
+        self.delegate = delegate
+        self.historical_response = historical_response
+        self.calls: list[dict[str, Any]] = []
+
+    async def ainvoke(
+        self,
+        messages: list[object],
+        *args: object,
+        config: object,
+        **kwargs: object,
+    ) -> Any:
+        """Return the preserved first candidate, then call the real model."""
+
+        if not self.calls:
+            response = SimpleNamespace(content=self.historical_response)
+            response_source = "preserved_historical_candidate"
+        else:
+            response = await self.delegate.ainvoke(
+                messages,
+                *args,
+                config=config,
+                **kwargs,
+            )
+            response_source = "live_model"
+        self.calls.append({
+            "messages": [
+                {
+                    "type": type(message).__name__,
+                    "content": str(getattr(message, "content", "")),
+                }
+                for message in messages
+            ],
+            "raw_output": str(response.content),
+            "response_source": response_source,
+        })
+        return response
 
 
 def _load_case_capsule(
@@ -387,8 +451,23 @@ async def _run_semantic_case(case_id: str) -> None:
     reset_validation_capture(
         f"trace_failure_modes_{case_id}_{time_ns()}"
     )
-    caught_error: CognitionExecutionError | None = None
-    services = build_cognition_core_services()
+    caught_error: CognitionExecutionError | CognitionContextLimitError | None = (
+        None
+    )
+    base_services = build_cognition_core_services()
+    historical_llm: _HistoricalFirstThenLiveLLM | None = None
+    services = base_services
+    if case.get("replay_historical_candidate"):
+        historical_response = representative.get("raw_response_text")
+        if not isinstance(historical_response, str):
+            raise AssertionError(
+                "historical semantic candidate is not text"
+            )
+        historical_llm = _HistoricalFirstThenLiveLLM(
+            base_services.llm,
+            historical_response,
+        )
+        services = replace(base_services, llm=historical_llm)
     question = matching_questions[0]
     evidence_by_handle: dict[str, dict[str, str]] = {}
     for row in payload["evidence"]:
@@ -442,6 +521,8 @@ async def _run_semantic_case(case_id: str) -> None:
         )
     except CognitionExecutionError as exc:
         caught_error = exc
+    except CognitionContextLimitError as exc:
+        caught_error = exc
     capture = validation_capture_snapshot()
     assert capture is not None
     raw_capture_path = write_validation_capture(
@@ -453,7 +534,11 @@ async def _run_semantic_case(case_id: str) -> None:
         "source_trace_id": case["trace_id"],
         "source_stage_name": case["stage_name"],
         "source_attempt_index": case["attempt_index"],
-        "replay_mode": "current_system_prompt_historical_payload",
+        "replay_mode": (
+            "preserved_historical_candidate_then_live_repair"
+            if historical_llm is not None
+            else "current_system_prompt_historical_payload"
+        ),
         "current_system_prompt_chars": len(SEMANTIC_APPRAISAL_PROMPT),
         "historical_system_prompt_chars": len(historical_system_prompt),
         "historical_validation_error": representative.get(
@@ -461,12 +546,15 @@ async def _run_semantic_case(case_id: str) -> None:
         ),
         "observed_error": (
             {
-                "error_code": caught_error.error_code,
-                "attempt_count": caught_error.attempt_count,
+                "error_code": getattr(caught_error, "error_code", None),
+                "attempt_count": getattr(caught_error, "attempt_count", None),
                 "message": str(caught_error),
             }
             if caught_error is not None
             else None
+        ),
+        "model_calls": (
+            historical_llm.calls if historical_llm is not None else []
         ),
         "capture": capture,
         "raw_capture_path": str(raw_capture_path),
@@ -484,6 +572,39 @@ async def _run_semantic_case(case_id: str) -> None:
         if isinstance(stage, Mapping)
         and stage.get("parse_status") == "failed"
     ]
+    if case.get("require_repair_call"):
+        assert historical_llm is not None
+        assert len(historical_llm.calls) >= 2, (
+            "semantic repair boundary was not reached; "
+            f"raw_capture={raw_capture_path}"
+        )
+        historical_error = str(
+            representative.get("validation_error") or ""
+        )
+        assert "; permitted paths:" in historical_error
+        repair_messages = historical_llm.calls[1]["messages"]
+        repair_size = sum(
+            len(str(message["content"])) for message in repair_messages
+        )
+        assert repair_size <= SEMANTIC_APPRAISAL_REPAIR_PROMPT_CAP
+        repair_payload = json.loads(repair_messages[-1]["content"])
+        assert set(repair_payload) == {
+            "repair_instruction",
+            "contract_error",
+            "allowed_values",
+        }
+        contract_error = str(repair_payload["contract_error"])
+        assert "knowledge_gaps.k7.uncertainty" in contract_error
+        assert "permitted paths:" not in contract_error
+        assert (
+            "permitted_delta_path_domains"
+            in repair_payload["allowed_values"]
+        )
+        assert any(
+            stage.get("error") == historical_error
+            for stage in stages
+            if isinstance(stage, Mapping)
+        )
     if not failed_stages:
         assert caught_error is None
         return
@@ -549,6 +670,14 @@ async def test_current_run_event_agency_role_value_invalid_live_llm() -> None:
 
     await _run_semantic_case(
         "current_run_event_agency_role_value_invalid"
+    )
+
+
+async def test_a1a573_goal_threat_unowned_path_live_llm() -> None:
+    """Replay the unowned knowledge-gap path from the plan evidence."""
+
+    await _run_semantic_case(
+        "a1a573_goal_threat_unowned_knowledge_gap_path"
     )
 
 

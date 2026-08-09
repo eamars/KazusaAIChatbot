@@ -269,6 +269,16 @@ classifies `current_user_relationship_state` from that qualitative projection;
 deterministic code validates only the declared object's internal consistency,
 handle bounds, and current-episode coverage.
 
+Generic goal branches use branch-specific model contracts. `ordinary_response`
+retains the nine generic fields plus transient `relational_willingness`, while
+active generic branches such as `self_improvement` receive only the nine
+generic fields. Typed required-selection branches keep their existing
+ordinary or active selection contract. A generic goal repair reuses the same
+static branch contract as its initial call. Exact-field failures report the
+observed, missing, and unexpected top-level key sets; they retain the full
+candidate in protected diagnostics but do not echo it or the `invalid_draft`
+token in model-facing exact-field feedback.
+
 When the ordinary owner declares a turn `relationship_sensitive`, the workspace
 stage uses the deterministic authoritative collapse: the ordinary bid becomes
 primary, no supporting bid is exposed, every other bid is recorded as
@@ -602,6 +612,10 @@ Every bounded repair or replacement attempt measures its owner-defined dynamic
 content before invoking its model. The appraisal initial and repair ceilings
 are 20,000 and 24,000 characters, action and resolver authorization use
 20,000 and 24,000 characters, and each surface stage uses 32,000 characters.
+Semantic appraisal repair feedback keeps the failed rule and exact offending
+path while omitting only the validator-owned permitted-path suffix when the
+same path domains are already present in `allowed_values`; the protected trace
+retains the complete original validation error.
 Generic and required-selection goal cognition share the 36,000-character
 aggregate cap. Required-selection regeneration reuses the initial static
 system prompt; its dynamic `repair_feedback` carries the validation error,

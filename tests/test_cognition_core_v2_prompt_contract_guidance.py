@@ -14,6 +14,8 @@ from kazusa_ai_chatbot.cognition_core_v2.branch_activation import (
 from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
     GENERIC_GOAL_REPAIR_INSTRUCTIONS,
     GOAL_COGNITION_PROMPT,
+    NON_ORDINARY_GENERIC_GOAL_REPAIR_INSTRUCTIONS,
+    NON_ORDINARY_GOAL_COGNITION_PROMPT,
     REQUIRED_SELECTION_GOAL_PROMPT,
     SELECTION_GOAL_REPAIR_INSTRUCTIONS,
     _ACTIVE_REQUIRED_SELECTION_GOAL_PROMPT,
@@ -25,6 +27,7 @@ from kazusa_ai_chatbot.cognition_core_v2.semantic_appraisal import (
     SEMANTIC_APPRAISAL_PROMPT,
     _appraisal_repair_messages,
     _compact_permitted_delta_path_domains,
+    _compact_semantic_contract_error,
     _fit_appraisal_payload,
 )
 
@@ -34,6 +37,7 @@ def test_core_v2_prompts_fit_local_model_guidance_targets() -> None:
 
     assert len(SEMANTIC_APPRAISAL_PROMPT) <= 3_000
     assert len(GOAL_COGNITION_PROMPT) <= 3_000
+    assert len(NON_ORDINARY_GOAL_COGNITION_PROMPT) <= 3_000
     assert len(REQUIRED_SELECTION_GOAL_PROMPT) <= 2_600
 
 
@@ -65,6 +69,47 @@ def test_core_v2_prompts_keep_one_authoritative_handle_domain() -> None:
     ):
         assert required_text in goal_prompt
     assert "semantic_context.branch.goal_kind" not in goal_prompt
+
+
+def test_nonordinary_generic_goal_prompt_excludes_relational_contract() -> None:
+    """Keep active generic branches on the exact nine-field contract."""
+
+    prompt = NON_ORDINARY_GOAL_COGNITION_PROMPT
+    required_fields = (
+        "intention",
+        "desired_outcome",
+        "concrete_detail",
+        "reason",
+        "private_monologue",
+        "target_role_handles",
+        "evidence_handles",
+        "expected_consequences",
+        "confidence",
+    )
+
+    for field_name in required_fields:
+        assert field_name in prompt
+    for required_text in (
+        "response_operation",
+        "role_summaries",
+        "`pN`",
+        "conversation_evidence",
+        "status=executed",
+    ):
+        assert required_text in prompt
+    for forbidden_text in (
+        "relational_willingness",
+        "relationship_sensitive",
+        "current_user_relationship_state",
+        "unestablished",
+    ):
+        assert forbidden_text not in prompt
+
+    repair_instructions = " ".join(
+        NON_ORDINARY_GENERIC_GOAL_REPAIR_INSTRUCTIONS
+    )
+    assert "invalid_draft" in repair_instructions
+    assert "relational_willingness" not in repair_instructions
 
 
 def test_active_selection_prompt_keeps_nonordinary_output_contract() -> None:
@@ -295,11 +340,32 @@ def test_permitted_delta_path_domains_expose_path_delta_limits() -> None:
         assert limits_by_field[state_field] == 40
 
 
+def test_semantic_repair_compacts_only_the_owned_path_suffix() -> None:
+    """Keep the failed rule/path while projecting the path domain separately."""
+
+    full_error = (
+        "semantic delta path 'knowledge_gaps.k7.uncertainty' is not owned "
+        "by question; permitted paths: [\"goals.g1.importance\"]"
+    )
+
+    assert _compact_semantic_contract_error(full_error) == (
+        "semantic delta path 'knowledge_gaps.k7.uncertainty' is not owned "
+        "by question"
+    )
+    assert _compact_semantic_contract_error(
+        "semantic delta fields are not exact; permitted paths: [\"x\"]"
+    ) == "semantic delta fields are not exact; permitted paths: [\"x\"]"
+    assert _compact_semantic_contract_error(
+        "semantic delta path 'x' is not owned by question"
+    ) == "semantic delta path 'x' is not owned by question"
+
+
 def test_goal_repair_feedback_preserves_cross_namespace_authority() -> None:
     """Repair payloads keep required evidence separate from role handles."""
 
     feedback = _build_goal_repair_feedback(
         validation_error="invalid_draft",
+        parsed={"evidence_handles": ["r1"]},
         response_text='{"evidence_handles": ["r1"]}',
         evidence_handles={"e1", "e2"},
         episode_evidence_handles={"e1"},
@@ -325,6 +391,51 @@ def test_goal_repair_feedback_preserves_cross_namespace_authority() -> None:
     assert "current_user_relationship_state" in " ".join(
         GENERIC_GOAL_REPAIR_INSTRUCTIONS
     )
+
+
+def test_nonordinary_exact_field_repair_uses_key_facts_without_draft() -> None:
+    """Exact-field repair exposes parsed keys without echoing candidate text."""
+
+    parsed = {
+        "intention": "continue the active goal",
+        "desired_outcome": "preserve the active goal",
+        "concrete_detail": "use the current evidence",
+        "reason": "current evidence supports the goal",
+        "private_monologue": "I should preserve the goal.",
+        "target_role_handles": [],
+        "evidence_handles": ["e1"],
+        "expected_consequences": ["the goal remains grounded"],
+        "confidence": "high",
+        "relational_willingness": {"unexpected": "candidate value"},
+    }
+    feedback = _build_goal_repair_feedback(
+        validation_error="goal bid draft fields are not exact",
+        parsed=parsed,
+        response_text=json.dumps(parsed),
+        evidence_handles={"e1"},
+        episode_evidence_handles={"e1"},
+        role_bindings={},
+        required_evidence_handles=set(),
+        selection_required=False,
+        require_relational_willingness=False,
+        maximum_evidence_handles=9,
+    )
+
+    assert feedback["observed_top_level_fields"] == sorted(parsed)
+    assert feedback["missing_top_level_fields"] == []
+    assert feedback["unexpected_top_level_fields"] == [
+        "relational_willingness"
+    ]
+    assert "invalid_draft" not in feedback
+    assert "candidate value" not in json.dumps(feedback)
+    assert feedback["repair_instruction"] == [
+        instruction
+        for instruction in NON_ORDINARY_GENERIC_GOAL_REPAIR_INSTRUCTIONS
+        if "invalid_draft" not in instruction
+    ]
+    repair_instructions = " ".join(feedback["repair_instruction"])
+    assert "invalid_draft" not in repair_instructions
+    assert "relational_willingness" not in repair_instructions
 
 
 @pytest.mark.asyncio

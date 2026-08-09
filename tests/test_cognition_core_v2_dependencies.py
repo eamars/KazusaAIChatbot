@@ -465,9 +465,22 @@ async def test_goal_bid_gets_one_bounded_schema_repair(
     assert len(llm.messages) == 2
     assert llm.messages[1][0].content == llm.messages[0][0].content
     repair_payload = json.loads(str(llm.messages[1][1].content))
-    assert repair_payload["repair_feedback"]["repair_instruction"] == list(
-        goal_module.GENERIC_GOAL_REPAIR_INSTRUCTIONS
+    repair_feedback = repair_payload["repair_feedback"]
+    assert repair_feedback["repair_instruction"] == [
+        instruction
+        for instruction in goal_module.GENERIC_GOAL_REPAIR_INSTRUCTIONS
+        if "invalid_draft" not in instruction
+    ]
+    assert repair_feedback["observed_top_level_fields"] == sorted(
+        responses[0]
     )
+    assert repair_feedback["missing_top_level_fields"] == []
+    assert repair_feedback["unexpected_top_level_fields"] == [
+        "requested_route"
+    ]
+    assert "invalid_draft" not in repair_feedback
+    assert "invalid_draft" not in json.dumps(repair_feedback)
+    assert json.dumps(responses[0]) not in str(llm.messages[1][1].content)
     assert "requested_route" not in GOAL_COGNITION_PROMPT
     assert "action_handle" not in GOAL_COGNITION_PROMPT
     assert "resolver_handle" not in GOAL_COGNITION_PROMPT
@@ -481,6 +494,204 @@ async def test_goal_bid_gets_one_bounded_schema_repair(
     assert trace_recorder.await_args_list[0].kwargs["parse_status"] == (
         "contract_error"
     )
+    assert trace_recorder.await_args_list[0].kwargs["response_text"] == (
+        json.dumps(responses[0])
+    )
+    assert trace_recorder.await_args_list[0].kwargs["parsed_output"] == (
+        responses[0]
+    )
+
+
+def test_nonordinary_goal_bid_rejects_relational_willingness_field() -> None:
+    """Keep the active generic validator strict about its nine fields."""
+
+    draft = {
+        "intention": "continue the active goal",
+        "desired_outcome": "preserve the active goal",
+        "concrete_detail": "use the current evidence",
+        "reason": "current evidence supports the goal",
+        "private_monologue": "I should preserve the goal.",
+        "target_role_handles": [],
+        "evidence_handles": ["e1"],
+        "expected_consequences": ["the goal remains grounded"],
+        "confidence": "high",
+        "relational_willingness": {},
+    }
+
+    with pytest.raises(ValueError, match="fields are not exact"):
+        validate_goal_bid_draft(
+            draft,
+            evidence_handles={"e1"},
+            role_handles=set(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_nonordinary_goal_repair_uses_branch_specific_schema() -> None:
+    """An active generic repair removes the ordinary field and then recovers."""
+
+    valid = {
+        "intention": "continue the active goal",
+        "desired_outcome": "preserve the active goal",
+        "concrete_detail": "use the current evidence",
+        "reason": "current evidence supports the goal",
+        "private_monologue": "I should preserve the goal.",
+        "target_role_handles": [],
+        "evidence_handles": ["e1"],
+        "expected_consequences": ["the goal remains grounded"],
+        "confidence": "high",
+    }
+    contaminated = {
+        **valid,
+        "relational_willingness": {"unexpected": "ordinary-only field"},
+    }
+
+    class _LLM:
+        def __init__(self) -> None:
+            self.messages: list[list[object]] = []
+
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config: object,
+        ) -> SimpleNamespace:
+            del config
+            self.messages.append(messages)
+            candidate = (
+                contaminated if len(self.messages) == 1 else valid
+            )
+            return SimpleNamespace(content=json.dumps(candidate))
+
+    llm = _LLM()
+    bid = await run_goal_cognition(
+        DEFAULT_BRANCH_DEFINITIONS["self_improvement"],
+        {"scope": "user", "kind": "goal", "entity_id": "g1"},
+        {"_role_bindings": {}, "role_summaries": {}},
+        [{
+            "evidence_handle": "e1",
+            "evidence_ref": {
+                "source_kind": "episode",
+                "source_id": "episode-1",
+                "occurred_at": "2026-08-09T00:00:00Z",
+                "semantic_summary": "The active goal needs review.",
+            },
+            "semantic_text": "The active goal needs review.",
+            "visible_to": ["q:goal_threat_outcome"],
+        }],
+        SimpleNamespace(
+            llm=llm,
+            goal_active_branch_config=object(),
+        ),
+    )
+
+    assert len(llm.messages) == 2
+    assert all(
+        message_set[0].content
+        == goal_module.NON_ORDINARY_GOAL_COGNITION_PROMPT
+        for message_set in llm.messages
+    )
+    repair_payload = json.loads(str(llm.messages[1][1].content))
+    repair_feedback = repair_payload["repair_feedback"]
+    assert repair_feedback["observed_top_level_fields"] == sorted(
+        contaminated
+    )
+    assert repair_feedback["missing_top_level_fields"] == []
+    assert repair_feedback["unexpected_top_level_fields"] == [
+        "relational_willingness"
+    ]
+    assert "invalid_draft" not in repair_feedback
+    assert "invalid_draft" not in " ".join(
+        repair_feedback["repair_instruction"]
+    )
+    assert "relational_willingness" not in " ".join(
+        repair_feedback["repair_instruction"]
+    )
+    assert "relational_willingness" not in str(llm.messages[0][0].content)
+    assert "relational_willingness" not in bid
+
+
+@pytest.mark.asyncio
+async def test_nonordinary_goal_repair_keeps_candidate_context_for_handle_error(
+) -> None:
+    """Keep candidate context available outside the exact-field repair path."""
+
+    valid = {
+        "intention": "continue the active goal",
+        "desired_outcome": "preserve the active goal",
+        "concrete_detail": "use the current evidence",
+        "reason": "current evidence supports the goal",
+        "private_monologue": "I should preserve the goal.",
+        "target_role_handles": [],
+        "evidence_handles": ["e1"],
+        "expected_consequences": ["the goal remains grounded"],
+        "confidence": "high",
+    }
+    invalid = {**valid, "evidence_handles": ["e-not-permitted"]}
+
+    class _LLM:
+        def __init__(self) -> None:
+            self.messages: list[list[object]] = []
+
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config: object,
+        ) -> SimpleNamespace:
+            del config
+            self.messages.append(messages)
+            candidate = invalid if len(self.messages) == 1 else valid
+            return SimpleNamespace(content=json.dumps(candidate))
+
+    llm = _LLM()
+    bid = await run_goal_cognition(
+        DEFAULT_BRANCH_DEFINITIONS["self_improvement"],
+        {"scope": "user", "kind": "goal", "entity_id": "g1"},
+        {"_role_bindings": {}, "role_summaries": {}},
+        [{
+            "evidence_handle": "e1",
+            "evidence_ref": {
+                "source_kind": "episode",
+                "source_id": "episode-1",
+                "occurred_at": "2026-08-09T00:00:00Z",
+                "semantic_summary": "The active goal needs review.",
+            },
+            "semantic_text": "The active goal needs review.",
+            "visible_to": ["q:goal_threat_outcome"],
+        }],
+        SimpleNamespace(
+            llm=llm,
+            goal_active_branch_config=object(),
+        ),
+    )
+
+    assert len(llm.messages) == 2
+    assert all(
+        message_set[0].content
+        == goal_module.NON_ORDINARY_GOAL_COGNITION_PROMPT
+        for message_set in llm.messages
+    )
+    repair_payload = json.loads(str(llm.messages[1][1].content))
+    repair_feedback = repair_payload["repair_feedback"]
+    assert repair_feedback["validation_error"] == (
+        "evidence handles are not permitted"
+    )
+    assert repair_feedback["invalid_draft"] == json.dumps(invalid)
+    assert repair_feedback["repair_instruction"] == list(
+        goal_module.NON_ORDINARY_GENERIC_GOAL_REPAIR_INSTRUCTIONS
+    )
+    assert "relational_willingness" not in repair_feedback[
+        "required_top_level_fields"
+    ]
+    assert "relational_willingness_contract" not in repair_feedback
+    for field_name in (
+        "observed_top_level_fields",
+        "missing_top_level_fields",
+        "unexpected_top_level_fields",
+    ):
+        assert field_name not in repair_feedback
+    assert "relational_willingness" not in bid
 
 
 @pytest.mark.asyncio

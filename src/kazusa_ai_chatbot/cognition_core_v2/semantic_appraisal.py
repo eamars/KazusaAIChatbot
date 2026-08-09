@@ -82,6 +82,11 @@ _SEMANTIC_APPRAISAL_ITEM_FIELDS = {
     "proposition",
     "delta",
 }
+_SEMANTIC_DELTA_PATH_ERROR_PREFIX = "semantic delta path "
+_SEMANTIC_DELTA_PATH_ERROR_RULE_SUFFIX = " is not owned by question"
+_SEMANTIC_DELTA_PATH_ERROR_PERMITTED_PATHS_SEPARATOR = (
+    "; permitted paths:"
+)
 
 _PROPOSITION_SUBJECT_KINDS = {
     "goal_release": "goal",
@@ -521,11 +526,14 @@ async def _appraise_semantic_item(
                     safe_checkpoint="pre_state_commit",
                     retryable=False,
                 ) from exc
+            full_contract_error = str(exc)
             request_messages = _appraisal_repair_messages(
                 system_message=system_message,
                 human_message=human_message,
                 invalid_candidate=str(raw_output),
-                contract_error=str(exc),
+                contract_error=_compact_semantic_contract_error(
+                    full_contract_error
+                ),
                 allowed_values=repair_allowed_values,
             )
             continue
@@ -821,6 +829,38 @@ def _record_semantic_appraisal_trace(
         validation_error=validation_error,
         started_at=started_at,
     )
+
+
+def _compact_semantic_contract_error(contract_error: str) -> str:
+    """Remove only the validator-owned permitted-path suffix.
+
+    The unowned semantic-delta-path validator error already identifies the
+    failed rule and exact path before appending the permitted-path domain. The
+    domain is projected separately in ``allowed_values`` for repair requests,
+    so only that exact validator suffix is removed from model-facing text.
+    Other contract errors remain unchanged.
+
+    Args:
+        contract_error: Complete validator error captured before repair
+            feedback projection.
+
+    Returns:
+        The compacted model-facing error or the original error unchanged.
+    """
+
+    if not contract_error.startswith(_SEMANTIC_DELTA_PATH_ERROR_PREFIX):
+        return contract_error
+    marker_index = contract_error.find(
+        _SEMANTIC_DELTA_PATH_ERROR_PERMITTED_PATHS_SEPARATOR
+    )
+    if marker_index < 0:
+        return contract_error
+    if not contract_error[:marker_index].endswith(
+        _SEMANTIC_DELTA_PATH_ERROR_RULE_SUFFIX
+    ):
+        return contract_error
+    compacted_error = contract_error[:marker_index]
+    return compacted_error
 
 
 def _appraisal_repair_messages(
