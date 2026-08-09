@@ -62,6 +62,7 @@ async def execute_action_specs_for_trace(
     record_attempt_func: ActionAttemptRecorder | None = None,
     enqueue_background_work_func: BackgroundWorkEnqueueFunc | None = None,
     availability_snapshot_factory: AvailabilitySnapshotFactory | None = None,
+    source_llm_trace_id: str = "",
 ) -> list[ActionResultV1]:
     """Validate and execute selected actions into auditable trace rows.
 
@@ -77,6 +78,9 @@ async def execute_action_specs_for_trace(
         enqueue_background_work_func: Optional queue helper seam for generic
             background-work requests.
         availability_snapshot_factory: Optional fresh runtime snapshot factory.
+        source_llm_trace_id: Protected trace owned by the state that selected
+            these actions. Empty values are retained for deterministic preview
+            paths that do not persist live companion rows.
 
     Returns:
         Prompt-safe action results for episode trace and consolidation.
@@ -182,10 +186,17 @@ async def execute_action_specs_for_trace(
                 }
         elif validated_spec["kind"] == TRIGGER_FUTURE_COGNITION_CAPABILITY:
             try:
+                future_kwargs: dict[str, Any] = {
+                    "storage_timestamp_utc": normalized_storage_timestamp_utc,
+                    "action_attempt_id": action_attempt_id,
+                }
+                if source_llm_trace_id.strip():
+                    future_kwargs["source_llm_trace_id"] = (
+                        source_llm_trace_id.strip()
+                    )
                 future_result = await execute_future_cognition_action(
                     validated_spec,
-                    storage_timestamp_utc=normalized_storage_timestamp_utc,
-                    action_attempt_id=action_attempt_id,
+                    **future_kwargs,
                 )
             except ActionValidationError as exc:
                 status = "rejected"
@@ -222,11 +233,18 @@ async def execute_action_specs_for_trace(
                 }
         elif validated_spec["kind"] == FUTURE_SPEAK_CAPABILITY:
             try:
+                queue_kwargs: dict[str, Any] = {
+                    "storage_timestamp_utc": normalized_storage_timestamp_utc,
+                    "action_attempt_id": action_attempt_id,
+                    "enqueue_background_work_func": enqueue_background_work_func,
+                }
+                if source_llm_trace_id.strip():
+                    queue_kwargs["source_llm_trace_id"] = (
+                        source_llm_trace_id.strip()
+                    )
                 queue_result = await enqueue_future_speak_action(
                     validated_spec,
-                    storage_timestamp_utc=normalized_storage_timestamp_utc,
-                    action_attempt_id=action_attempt_id,
-                    enqueue_background_work_func=enqueue_background_work_func,
+                    **queue_kwargs,
                 )
             except ActionValidationError as exc:
                 status = "rejected"
@@ -279,11 +297,18 @@ async def execute_action_specs_for_trace(
                 }
         elif validated_spec["kind"] == ACCEPTED_CODING_TASK_REQUEST_CAPABILITY:
             try:
+                queue_kwargs = {
+                    "storage_timestamp_utc": normalized_storage_timestamp_utc,
+                    "action_attempt_id": action_attempt_id,
+                    "enqueue_background_work_func": enqueue_background_work_func,
+                }
+                if source_llm_trace_id.strip():
+                    queue_kwargs["source_llm_trace_id"] = (
+                        source_llm_trace_id.strip()
+                    )
                 queue_result = await enqueue_accepted_coding_task_action(
                     validated_spec,
-                    storage_timestamp_utc=normalized_storage_timestamp_utc,
-                    action_attempt_id=action_attempt_id,
-                    enqueue_background_work_func=enqueue_background_work_func,
+                    **queue_kwargs,
                 )
             except ActionValidationError as exc:
                 status = "rejected"
@@ -395,6 +420,7 @@ async def execute_action_specs_for_trace(
                 eval_result,
                 storage_timestamp_utc=normalized_storage_timestamp_utc,
                 execution_result=execution_result,
+                source_llm_trace_id=source_llm_trace_id,
             )
         action_results.append(action_result)
     return action_results
@@ -435,6 +461,7 @@ async def _record_action_attempt(
     *,
     storage_timestamp_utc: str,
     execution_result: dict[str, Any],
+    source_llm_trace_id: str = "",
 ) -> None:
     """Record one action attempt through the existing idempotency ledger."""
 
@@ -443,6 +470,7 @@ async def _record_action_attempt(
         eval_result,
         recorded_at=storage_timestamp_utc,
         execution_result=execution_result,
+        source_llm_trace_id=source_llm_trace_id,
     )
     result = record_attempt_func(attempt_record)
     if hasattr(result, "__await__"):

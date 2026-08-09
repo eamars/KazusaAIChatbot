@@ -27,6 +27,46 @@ def _authenticated_client(tmp_path):
     return client
 
 
+def test_kazusa_event_projection_retains_named_correlation_fields() -> None:
+    """Event Monitor keeps each supplied correlation identifier distinct."""
+
+    from control_console.app import _project_kazusa_event
+
+    projected = _project_kazusa_event({
+        "event_id": "event-1",
+        "event_family": "pipeline_turn",
+        "event_type": "turn",
+        "component": "brain_service",
+        "severity": "warning",
+        "status": "degraded",
+        "correlation_id": "correlation-1",
+        "run_id": "run-1",
+        "trigger_id": "trigger-1",
+        "attempt_id": "attempt-1",
+        "created_at": "2026-08-09T00:00:00+00:00",
+        "payload": {
+            "request_id": "request-1",
+            "tracking_id": "tracking-1",
+        },
+    })
+
+    assert {
+        projected["request_id"],
+        projected["correlation_id"],
+        projected["tracking_id"],
+        projected["run_id"],
+        projected["trigger_id"],
+        projected["attempt_id"],
+    } == {
+        "request-1",
+        "correlation-1",
+        "tracking-1",
+        "run-1",
+        "trigger-1",
+        "attempt-1",
+    }
+
+
 def test_cognition_debug_routes_pass_exact_scope_to_repository(
     monkeypatch,
     tmp_path,
@@ -386,6 +426,7 @@ async def test_calendar_lookup_uses_semantic_schedule_and_visibility_panels() ->
         return [
             {
                 "schedule_id": "schedule-1",
+                "source_llm_trace_id": "calendar-source-trace",
                 "trigger_kind": "future_cognition",
                 "status": "active",
                 "next_run_at": "2026-06-25T00:00:00+00:00",
@@ -444,12 +485,14 @@ async def test_calendar_lookup_uses_semantic_schedule_and_visibility_panels() ->
     schedule_panel = panels["schedules"]
     assert schedule_panel["items"] == [
         {
+            "calendar_schedule_id": "schedule-1",
             "trigger_kind": "future_cognition",
             "status": "active",
             "next_run_at": "2026-06-25T00:00:00+00:00",
             "source_platform": "qq",
             "source_channel_type": "group",
             "recurrence": {"kind": "once"},
+            "source_llm_trace_id": "calendar-source-trace",
         },
     ]
     assert panels["runs"]["status"] == "empty"
@@ -473,6 +516,7 @@ async def test_background_lookup_separates_jobs_and_delivery_detail() -> None:
         return [
             {
                 "job_id": "job-1",
+                "source_llm_trace_id": "parent-trace-1",
                 "status": "completed",
                 "delivery_state": "ready",
                 "task_brief": "summarize the benchmark notes",
@@ -491,6 +535,9 @@ async def test_background_lookup_separates_jobs_and_delivery_detail() -> None:
         return [
             {
                 "job_id": "job-2",
+                "accepted_task_id": "task-2",
+                "source_action_attempt_id": "attempt-2",
+                "source_llm_trace_id": "source-trace-2",
                 "status": "queued",
                 "delivery_state": "queued",
                 "task_brief": "must-not-leak",
@@ -501,8 +548,24 @@ async def test_background_lookup_separates_jobs_and_delivery_detail() -> None:
             },
         ]
 
+    async def list_background_work_delivery_trace_runs(
+        *,
+        source_background_work_job_ids: list[str],
+        limit: int,
+    ):
+        assert source_background_work_job_ids == ["job-1"]
+        assert limit == 3
+        return [{
+            "source_background_work_job_id": "job-1",
+            "trace_id": "child-trace-1",
+            "parent_llm_trace_id": "parent-trace-1",
+        }]
+
     repository = ControlConsoleRepository(
         find_deliverable_background_work_jobs=find_deliverable_background_work_jobs,
+        list_background_work_delivery_trace_runs=(
+            list_background_work_delivery_trace_runs
+        ),
         list_recent_background_work_jobs=list_recent_background_work_jobs,
     )
 
@@ -520,7 +583,22 @@ async def test_background_lookup_separates_jobs_and_delivery_detail() -> None:
         "delivery_detail",
     }
     assert panels["jobs"]["items"][0]["status"] == "queued"
+    assert panels["jobs"]["items"][0] == {
+        "background_work_job_id": "job-2",
+        "accepted_task_id": "task-2",
+        "source_action_attempt_id": "attempt-2",
+        "source_llm_trace_id": "source-trace-2",
+        "status": "queued",
+        "delivery_state": "queued",
+        "updated_at": "2026-06-24T00:00:00+00:00",
+        "artifact_char_count": 0,
+        "result_summary": "waiting",
+    }
     assert panels["delivery_detail"]["items"][0] == {
+        "background_work_job_id": "job-1",
+        "parent_llm_trace_id": "parent-trace-1",
+        "child_llm_trace_id": "child-trace-1",
+        "source_background_work_job_id": "job-1",
         "status": "completed",
         "delivery_state": "ready",
         "updated_at": "2026-06-24T00:00:00+00:00",
@@ -528,12 +606,14 @@ async def test_background_lookup_separates_jobs_and_delivery_detail() -> None:
         "source_platform": "qq",
         "source_channel_type": "private",
     }
+    assert "job_id" not in panels["delivery_detail"]["items"][0]
     rendered = repr(page)
     assert "source_context" not in rendered
     assert "idempotency_key" not in rendered
     assert "artifact_text" not in rendered
     assert "task_brief" not in rendered
-    assert "job_id" not in rendered
+    assert "job-2" in rendered
+    assert "job-1" in repr(panels["delivery_detail"])
     assert "prompt_view" not in repr(panels)
     assert "must-not-leak" not in rendered
 
@@ -742,7 +822,7 @@ async def test_user_entity_shows_scoped_progress_and_carry_over() -> None:
     rendered = repr(page)
     assert "last_user_input" not in rendered
     assert "must-not-leak" not in rendered
-    assert "global-user-1" not in rendered
+    assert "global-user-1" in rendered
     assert "scope_order" not in rendered
     assert "prompt_view" not in rendered
 

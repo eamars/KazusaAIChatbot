@@ -30,6 +30,7 @@ from kazusa_ai_chatbot.brain_service.post_turn import (
 from kazusa_ai_chatbot.internal_monologue_residue import (
     record_completed_episode_residue,
 )
+from kazusa_ai_chatbot import llm_tracing
 from kazusa_ai_chatbot.dispatcher.adapter_iface import AdapterRegistry
 from kazusa_ai_chatbot.nodes.dialog_agent import StateContractError
 from kazusa_ai_chatbot.runtime_coordination import (
@@ -365,6 +366,10 @@ async def run_self_cognition_worker_tick(
                 ),
             )
         case_for_run = case
+        self_trace_id = ""
+        self_trace_token = None
+        self_trace_status = "failed"
+        self_trace_dialog_count = 0
         try:
             if active_pipeline_handle is not None:
                 active_pipeline_handle.raise_if_cancelled(
@@ -376,6 +381,11 @@ async def run_self_cognition_worker_tick(
             )
             case_for_run = _case_with_prior_attempts(case, prior_attempts)
             if run_case_func is None:
+                self_trace_id = _self_cognition_trace_id(case_for_run)
+                case_for_run = dict(case_for_run)
+                case_for_run["llm_trace_id"] = self_trace_id
+                await _ensure_self_cognition_trace(case_for_run, self_trace_id)
+                self_trace_token = llm_tracing.bind_trace_id(self_trace_id)
                 artifact_payloads = (
                     await runner.build_self_cognition_case_artifacts_async(
                         case_for_run,
@@ -406,6 +416,7 @@ async def run_self_cognition_worker_tick(
                 adapter_registry=adapter_registry,
                 pipeline_run_handle=active_pipeline_handle,
             )
+            self_trace_dialog_count = 1 if dispatch_status == "sent" else 0
             await _settle_and_finish_self_cognition_episode(
                 artifact_payloads=artifact_payloads,
                 dispatch_status=dispatch_status,
@@ -430,9 +441,11 @@ async def run_self_cognition_worker_tick(
                 case_for_run,
                 now=now,
             )
+            self_trace_status = "succeeded"
         except PipelineCancelled as exc:
             result.deferred = True
             result.defer_reason = exc.cancellation.reason
+            self_trace_status = "cancelled"
             await _defer_source_calendar_run(
                 case_for_run,
                 now=now,
@@ -496,6 +509,21 @@ async def run_self_cognition_worker_tick(
             )
             continue
         finally:
+            if self_trace_token is not None:
+                llm_tracing.reset_trace_id(self_trace_token)
+            if self_trace_id:
+                try:
+                    await llm_tracing.finalize_llm_trace_run(
+                        trace_id=self_trace_id,
+                        status=self_trace_status,
+                        final_dialog_count=self_trace_dialog_count,
+                        delivery_tracking_id="",
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Self-cognition trace finalization failed: %s",
+                        exc,
+                    )
             await _release_owned_pipeline_handle(
                 active_pipeline_handle,
                 owns_pipeline_handle=owns_pipeline_handle,
@@ -892,6 +920,48 @@ def _pipeline_scope_from_case(
         channel_type=channel_type,
     )
     return scope
+
+
+def _self_cognition_trace_id(case: models.SelfCognitionCase) -> str:
+    """Return or allocate the protected trace id for one live case."""
+
+    existing = _optional_text(case.get("llm_trace_id"))
+    if existing is not None:
+        return existing
+    return llm_tracing.build_trace_id()
+
+
+async def _ensure_self_cognition_trace(
+    case: models.SelfCognitionCase,
+    trace_id: str,
+) -> None:
+    """Ensure protected trace metadata before Cognition V2 starts."""
+
+    target_scope = case.get("target_scope")
+    scope = target_scope if isinstance(target_scope, dict) else {}
+    case_id = _optional_text(case.get("case_id")) or "self_cognition"
+    try:
+        await llm_tracing.ensure_llm_trace_run(
+            trace_id=trace_id,
+            platform=_optional_text(scope.get("platform")) or "orchestrator",
+            platform_channel_id=(
+                _optional_text(scope.get("platform_channel_id")) or ""
+            ),
+            channel_type=_optional_text(scope.get("channel_type")) or "internal",
+            platform_message_id=f"self_cognition:{case_id}",
+            global_user_id=_optional_text(scope.get("user_id")) or "",
+            parent_llm_trace_id=(
+                _optional_text(case.get("source_llm_trace_id")) or ""
+            ),
+            source_calendar_run_id=(
+                _optional_text(case.get("source_calendar_run_id")) or ""
+            ),
+        )
+    except Exception as exc:
+        logger.warning(
+            "Self-cognition trace initialization failed: %s",
+            exc,
+        )
 
 
 async def _call_run_case_func(

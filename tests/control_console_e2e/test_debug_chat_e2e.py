@@ -12,6 +12,7 @@ def test_debug_chat_sends_to_brain_and_updates_history_and_graph(
     unused_tcp_port_factory,
     e2e_console,
     e2e_browser_page,
+    e2e_artifact_dir,
     e2e_summary_writer,
 ) -> None:
     """Verify debug chat UI talks to brain and renders the returned graph."""
@@ -27,6 +28,7 @@ def test_debug_chat_sends_to_brain_and_updates_history_and_graph(
         with e2e_console(
             brain_base_url=fake_brain.base_url,
             service_registry_path=registry_path,
+            sse_interval_seconds=60.0,
         ) as console:
             page = e2e_browser_page(console.base_url)
             _login(page)
@@ -55,6 +57,8 @@ def test_debug_chat_sends_to_brain_and_updates_history_and_graph(
             assert "think only probe" in chat_text
             assert "listen only probe" in chat_text
             assert "fake brain reply" in chat_text
+            assert "trace llm-trace-debug-1" in chat_text
+            assert "tracking debug-run-1" in chat_text
             assert page.locator("#debug-cognition-status").inner_text() == "completed"
             run_summary = page.locator(
                 "#debug-cognition-graph .graph-run-summary"
@@ -62,8 +66,16 @@ def test_debug_chat_sends_to_brain_and_updates_history_and_graph(
             assert "Current debug cognition" in run_summary.inner_text()
             assert "debug-run-1" not in run_summary.inner_text()
             run_reference = run_summary.locator(".graph-run-reference")
-            run_reference.evaluate("element => { element.open = true; }")
+            run_reference.locator("summary").click()
             assert "debug-run-1" in run_reference.inner_text()
+            debug_run_reference_screenshot = (
+                e2e_artifact_dir / "debug_cognition_run_reference.png"
+            )
+            run_reference.screenshot(path=str(debug_run_reference_screenshot))
+            debug_id_screenshot = (
+                e2e_artifact_dir / "debug_chat_id_references.png"
+            )
+            page.screenshot(path=str(debug_id_screenshot), full_page=True)
             assert page.locator("#debug-cognition-graph .graph-stage-group").count() == 4
             assert page.locator("#debug-cognition-graph .graph-edge-layer").count() == 0
             debug_graph = page.locator("#debug-cognition-graph")
@@ -118,6 +130,10 @@ def test_debug_chat_sends_to_brain_and_updates_history_and_graph(
                         "debug cognition graph",
                         "brain /chat payload",
                     ],
+                    "screenshots": {
+                        "chat_ids": str(debug_id_screenshot),
+                        "run_reference": str(debug_run_reference_screenshot),
+                    },
                 },
             )
 

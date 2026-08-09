@@ -695,15 +695,60 @@ async def test_upsert_self_cognition_action_attempt_uses_idempotency_key() -> No
         "recorded_at": "2026-05-13T00:01:00+00:00",
     }
     db = _mock_db()
-    db.self_cognition_action_attempts.replace_one = AsyncMock()
+    db.self_cognition_action_attempts.update_one = AsyncMock()
 
     with _patched_get_db(db):
         await db_self_cognition_module.upsert_self_cognition_action_attempt(attempt)
 
-    db.self_cognition_action_attempts.replace_one.assert_awaited_once_with(
+    db.self_cognition_action_attempts.update_one.assert_awaited_once_with(
         {"idempotency_key": "sha256:abc"},
-        attempt,
+        {"$set": attempt},
         upsert=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_upsert_self_cognition_action_attempt_records_source_conflict() -> None:
+    """A duplicate action write keeps the original source trace immutable."""
+
+    attempt = {
+        "idempotency_key": "sha256:conflict",
+        "source_llm_trace_id": "llmtrace-incoming",
+        "status": "scheduled",
+    }
+    db = _mock_db()
+    db.self_cognition_action_attempts.update_one = AsyncMock()
+    db.self_cognition_action_attempts.find_one = AsyncMock(
+        return_value={"source_llm_trace_id": "llmtrace-original"},
+    )
+
+    with _patched_get_db(db):
+        await db_self_cognition_module.upsert_self_cognition_action_attempt(
+            attempt,
+        )
+
+    calls = db.self_cognition_action_attempts.update_one.await_args_list
+    assert calls[0].args == (
+        {"idempotency_key": "sha256:conflict"},
+        {
+            "$set": {"idempotency_key": "sha256:conflict", "status": "scheduled"},
+            "$setOnInsert": {"source_llm_trace_id": "llmtrace-incoming"},
+        },
+    )
+    assert calls[0].kwargs == {"upsert": True}
+    assert calls[1].args == (
+        {
+            "idempotency_key": "sha256:conflict",
+            "source_llm_trace_id": "llmtrace-original",
+        },
+        {
+            "$set": {
+                "correlation_write_status": "conflict",
+                "correlation_conflict_source_llm_trace_id": (
+                    "llmtrace-incoming"
+                ),
+            },
+        },
     )
 
 

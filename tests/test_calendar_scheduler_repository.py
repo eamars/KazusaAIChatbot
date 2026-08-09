@@ -123,6 +123,91 @@ async def test_upsert_calendar_run_uses_idempotency_key() -> None:
 
 
 @pytest.mark.asyncio
+async def test_upsert_calendar_run_records_source_conflict() -> None:
+    """A duplicate calendar run keeps its original source trace."""
+
+    from kazusa_ai_chatbot.calendar_scheduler import repository
+
+    db = _db()
+    db.calendar_runs.update_one = AsyncMock(
+        return_value=MagicMock(upserted_id=None),
+    )
+    db.calendar_runs.find_one = AsyncMock(return_value={
+        "source_llm_trace_id": "llmtrace-original",
+    })
+    run = {
+        "run_id": "run-conflict",
+        "idempotency_key": "future_cognition:conflict",
+        "source_llm_trace_id": "llmtrace-incoming",
+    }
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(repository, "get_db", AsyncMock(return_value=db))
+        await repository.upsert_calendar_run(run)
+
+    calls = db.calendar_runs.update_one.await_args_list
+    assert calls[0].args == (
+        {"idempotency_key": "future_cognition:conflict"},
+        {"$setOnInsert": run},
+    )
+    assert calls[0].kwargs == {"upsert": True}
+    assert calls[1].args == (
+        {
+            "idempotency_key": "future_cognition:conflict",
+            "source_llm_trace_id": "llmtrace-original",
+        },
+        {
+            "$set": {
+                "correlation_write_status": "conflict",
+                "correlation_conflict_source_llm_trace_id": (
+                    "llmtrace-incoming"
+                ),
+            },
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_upsert_calendar_schedule_records_source_conflict() -> None:
+    """Schedule idempotency collisions expose the same bounded conflict."""
+
+    from kazusa_ai_chatbot.calendar_scheduler import repository
+
+    db = _db()
+    db.calendar_schedules.update_one = AsyncMock(
+        return_value=MagicMock(upserted_id=None),
+    )
+    db.calendar_schedules.find_one = AsyncMock(return_value={
+        "source_llm_trace_id": "llmtrace-original",
+    })
+    schedule = {
+        "schedule_id": "schedule-conflict",
+        "idempotency_key": "future_cognition:schedule-conflict",
+        "source_llm_trace_id": "llmtrace-incoming",
+    }
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(repository, "get_db", AsyncMock(return_value=db))
+        await repository.upsert_calendar_schedule(schedule)
+
+    calls = db.calendar_schedules.update_one.await_args_list
+    assert calls[1].args == (
+        {
+            "idempotency_key": "future_cognition:schedule-conflict",
+            "source_llm_trace_id": "llmtrace-original",
+        },
+        {
+            "$set": {
+                "correlation_write_status": "conflict",
+                "correlation_conflict_source_llm_trace_id": (
+                    "llmtrace-incoming"
+                ),
+            },
+        },
+    )
+
+
+@pytest.mark.asyncio
 async def test_list_due_calendar_runs_reads_eligible_runs_without_claiming() -> None:
     """Source collectors may inspect due runs before worker ownership claim."""
 

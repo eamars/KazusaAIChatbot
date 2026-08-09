@@ -662,6 +662,9 @@ class CalendarScheduleDoc(TypedDict, total=False):
     recurrence: dict
     payload: dict
     source_scope: dict
+    source_llm_trace_id: str
+    correlation_write_status: str
+    correlation_conflict_source_llm_trace_id: str
     idempotency_key: str
     timezone: str
     legacy_source: dict | None
@@ -683,6 +686,9 @@ class CalendarRunDoc(TypedDict, total=False):
     due_at: str
     payload: dict
     source_scope: dict
+    source_llm_trace_id: str
+    correlation_write_status: str
+    correlation_conflict_source_llm_trace_id: str
     idempotency_key: str
     attempt_count: int
     max_attempts: int
@@ -707,6 +713,9 @@ class SelfCognitionActionAttemptDoc(TypedDict, total=False):
     """Durable action-attempt state for idle self-cognition deduplication."""
 
     attempt_id: str
+    source_llm_trace_id: str
+    correlation_write_status: str
+    correlation_conflict_source_llm_trace_id: str
     run_id: str
     trigger_id: str
     source_kind: str

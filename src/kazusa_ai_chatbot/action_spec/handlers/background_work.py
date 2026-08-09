@@ -127,6 +127,7 @@ async def enqueue_future_speak_action(
     storage_timestamp_utc: str,
     action_attempt_id: str,
     enqueue_background_work_func: BackgroundWorkEnqueueFunc | None = None,
+    source_llm_trace_id: str = "",
 ) -> BackgroundWorkQueueResult:
     """Persist a retained future-speak task and its deterministic worker job."""
 
@@ -142,6 +143,7 @@ async def enqueue_future_speak_action(
         validated,
         storage_timestamp_utc=storage_timestamp_utc,
         action_attempt_id=action_attempt_id,
+        source_llm_trace_id=source_llm_trace_id,
         task_kind="future_speak",
         semantic_objective=continuation_objective,
         accepted_task_summary=continuation_objective,
@@ -161,6 +163,7 @@ async def enqueue_accepted_coding_task_action(
     storage_timestamp_utc: str,
     action_attempt_id: str,
     enqueue_background_work_func: BackgroundWorkEnqueueFunc | None = None,
+    source_llm_trace_id: str = "",
 ) -> BackgroundWorkQueueResult:
     """Persist one reviewed continuation for an existing coding run."""
 
@@ -183,6 +186,7 @@ async def enqueue_accepted_coding_task_action(
         validated,
         storage_timestamp_utc=storage_timestamp_utc,
         action_attempt_id=action_attempt_id,
+        source_llm_trace_id=source_llm_trace_id,
         task_kind="coding_continuation",
         semantic_objective=semantic_objective,
         accepted_task_summary=semantic_objective,
@@ -323,6 +327,7 @@ async def _create_or_queue_accepted_task(
     *,
     storage_timestamp_utc: str,
     action_attempt_id: str,
+    source_llm_trace_id: str,
     task_kind: str,
     semantic_objective: str,
     accepted_task_summary: str,
@@ -368,6 +373,7 @@ async def _create_or_queue_accepted_task(
         accepted_task,
         storage_timestamp_utc=storage_timestamp_utc,
         action_attempt_id=action_attempt_id,
+        source_llm_trace_id=source_llm_trace_id,
         semantic_objective=semantic_objective,
         requested_worker=requested_worker,
         worker_payload=worker_payload,
@@ -488,6 +494,7 @@ def _queue_request_from_accepted_task(
     *,
     storage_timestamp_utc: str,
     action_attempt_id: str,
+    source_llm_trace_id: str,
     semantic_objective: str,
     requested_worker: str,
     worker_payload: Mapping[str, object],
@@ -500,6 +507,7 @@ def _queue_request_from_accepted_task(
     request: BackgroundWorkQueueRequest = {
         "job_id": f"job-{accepted_task_id.removeprefix('task-')}",
         "source_action_attempt_id": action_attempt_id,
+        "source_llm_trace_id": source_llm_trace_id.strip(),
         "idempotency_key": f"background_work:{accepted_task_id}",
         "accepted_task_id": accepted_task_id,
         "task_identity_key": _task_text(accepted_task, "task_identity_key"),

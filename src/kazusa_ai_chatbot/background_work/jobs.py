@@ -341,6 +341,9 @@ def _build_job_document(
         "job_id": job_id,
         "idempotency_key": request["idempotency_key"].strip(),
         "source_action_attempt_id": request["source_action_attempt_id"].strip(),
+        "source_llm_trace_id": str(
+            request.get("source_llm_trace_id") or ""
+        ).strip(),
         "accepted_task_id": request["accepted_task_id"].strip(),
         "task_identity_key": request["task_identity_key"].strip(),
         "semantic_objective": request["semantic_objective"].strip(),

@@ -80,6 +80,7 @@ async def start_task_resolution_in_background(
     source_trigger_source: str,
     source_platform_bot_id: str,
     requester_display_name: str,
+    source_llm_trace_id: str = "",
 ) -> TaskResolutionResultV1:
     """Enter the durable handoff path directly without an inline specialist.
 
@@ -119,6 +120,7 @@ async def start_task_resolution_in_background(
         source_trigger_source=source_trigger_source,
         source_platform_bot_id=source_platform_bot_id,
         requester_display_name=requester_display_name,
+        source_llm_trace_id=source_llm_trace_id,
     )
     return deferred_result
 
@@ -146,6 +148,7 @@ async def promote_deferred_task_resolution(
     source_trigger_source: str,
     source_platform_bot_id: str,
     requester_display_name: str,
+    source_llm_trace_id: str = "",
 ) -> BackgroundWorkQueueResult:
     """Materialize one deferred inline session as the same durable v2 task.
 
@@ -231,6 +234,7 @@ async def promote_deferred_task_resolution(
     queue_request: BackgroundWorkQueueRequest = {
         "job_id": job_id,
         "source_action_attempt_id": checkpoint["session_id"],
+        "source_llm_trace_id": source_llm_trace_id.strip(),
         "idempotency_key": f"background_work:{accepted_task_id}",
         "accepted_task_id": accepted_task_id,
         "task_identity_key": accepted_task["task_identity_key"],

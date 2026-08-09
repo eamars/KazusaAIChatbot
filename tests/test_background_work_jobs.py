@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -19,6 +20,7 @@ def _resume_queue_request() -> dict[str, object]:
     return {
         "job_id": "job-001",
         "source_action_attempt_id": "action_attempt:task-resolution-001",
+        "source_llm_trace_id": "llmtrace_source-1",
         "idempotency_key": "background_work:task-resolution-001",
         "accepted_task_id": "task-001",
         "task_identity_key": "accepted_task:v2:abc",
@@ -107,6 +109,7 @@ async def test_enqueue_persists_one_v2_task_orchestrator_job(
     job = stored_jobs[0]
     assert job["schema_version"] == "background_work_job.v2"
     assert job["requested_worker"] == "task_orchestrator"
+    assert job["source_llm_trace_id"] == "llmtrace_source-1"
     assert job["semantic_objective"] == (
         "Resolve one bounded public question."
     )
@@ -232,4 +235,64 @@ def test_job_document_keeps_accepted_task_audit_identity() -> None:
     assert job["accepted_task_id"] == "task-001"
     assert job["task_identity_key"] == "accepted_task:v2:abc"
     assert job["idempotency_key"] == "background_work:task-resolution-001"
+    assert job["source_llm_trace_id"] == "llmtrace_source-1"
     assert job["attempt_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_insert_background_work_job_records_source_conflict(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An idempotent duplicate preserves the original source trace."""
+
+    db_module = importlib.import_module(
+        "kazusa_ai_chatbot.db.background_work_jobs"
+    )
+    collection = MagicMock()
+    collection.insert_one = AsyncMock(
+        side_effect=db_module.DuplicateKeyError("duplicate")
+    )
+    collection.find_one = AsyncMock(return_value={
+        "schema_version": "background_work_job.v2",
+        "idempotency_key": "background_work:conflict",
+        "job_id": "job-original",
+        "source_llm_trace_id": "llmtrace-original",
+    })
+    collection.update_one = AsyncMock()
+    db = MagicMock()
+    db.__getitem__.return_value = collection
+    monkeypatch.setattr(db_module, "get_db", AsyncMock(return_value=db))
+
+    jobs_module = importlib.import_module(
+        "kazusa_ai_chatbot.background_work.jobs"
+    )
+    job = jobs_module._build_job_document(
+        _resume_queue_request(),
+        job_id="job-incoming",
+        storage_timestamp_utc="2026-06-06T00:00:00+00:00",
+    )
+    job["idempotency_key"] = "background_work:conflict"
+    job["source_llm_trace_id"] = "llmtrace-incoming"
+
+    result = await db_module.insert_background_work_job(job)
+
+    assert result["source_llm_trace_id"] == "llmtrace-original"
+    assert result["correlation_write_status"] == "conflict"
+    assert result["correlation_conflict_source_llm_trace_id"] == (
+        "llmtrace-incoming"
+    )
+    collection.update_one.assert_awaited_once_with(
+        {
+            "schema_version": db_module.BACKGROUND_WORK_JOB_SCHEMA_VERSION,
+            "idempotency_key": "background_work:conflict",
+            "source_llm_trace_id": "llmtrace-original",
+        },
+        {
+            "$set": {
+                "correlation_write_status": "conflict",
+                "correlation_conflict_source_llm_trace_id": (
+                    "llmtrace-incoming"
+                ),
+            },
+        },
+    )

@@ -229,12 +229,18 @@ def test_response_graph_contains_semantic_details_and_visual_directive(
         "gaze_direction": ["toward the screen"],
         "visual_vibe": ["attentive", "attentive"],
     }
+    graph_result = _response_graph_result()
+    graph_result["llm_trace_id"] = "llm-trace-response"
     graph = service._build_response_cognition_graph(
-        graph_result=_response_graph_result(),
+        graph_result=graph_result,
         consolidation_state=_response_state(visual_directives=visual_directives),
         run_id="response-run",
+        cognition_invocation_id="cognition-invocation-response",
     )
 
+    assert graph["run_id"] == "response-run"
+    assert graph["llm_trace_id"] == "llm-trace-response"
+    assert graph["cognition_invocation_id"] == "cognition-invocation-response"
     intake = _node(graph, "intake")
     assert intake["detail"]["input"].startswith("input-start")
     assert intake["detail"]["input"].endswith("input-end <&> \"quoted\"")
@@ -609,6 +615,8 @@ def test_self_cognition_graph_uses_shared_semantic_vocabulary(monkeypatch) -> No
     artifacts = {
         models.ARTIFACT_RUN_RECORD: {
             "run_id": "self-run-1",
+            "llm_trace_id": "child-llm-trace-1",
+            "source_calendar_run_id": "calendar-run-1",
             "trigger_kind": "group_chat_review",
             "selected_route": "action_candidate",
             "output_mode": "scheduled_action_request",
@@ -657,6 +665,9 @@ def test_self_cognition_graph_uses_shared_semantic_vocabulary(monkeypatch) -> No
     graph = service._build_self_cognition_cognition_graph(artifacts)
 
     assert graph is not None
+    assert graph["run_id"] == "self-run-1"
+    assert graph["llm_trace_id"] == "child-llm-trace-1"
+    assert graph["source_calendar_run_id"] == "calendar-run-1"
     source = _node(graph, "self.source")
     assert "actual self input" in repr(source["detail"])
     assert "summary" not in source["detail"]

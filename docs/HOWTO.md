@@ -945,6 +945,45 @@ failure cannot replace or delay cognition behavior.
 `--cognition-invocation-id <id>` with `--trace-id` to select one safe-retry
 invocation while retaining the compatible trace-level fields.
 
+Trace correlation runbook for the Control Console use case:
+
+1. Copy the value displayed as `trace <id>` in Debug Chat and record the exact
+   source surface as `web_control_trace_id`. A graph `run_id`, event
+   `correlation_id`, delivery tracking id, or bare opaque value is not a trace
+   until exact field evidence establishes it.
+2. Export the bounded manifest before requesting raw trace evidence:
+
+   ```powershell
+   venv\Scripts\python -m scripts.export_trace_correlation_manifest `
+     --identifier <copied-value> `
+     --source-surface web_control_trace_id `
+     --output test_artifacts\diagnostics\trace_correlation_<name>.json
+   ```
+
+3. Inspect `parent_trace`, `identifiers`, `joins`, and `unresolved`. The
+   resolver preserves zero and multiple candidates, reports
+   `not_available_from_web` for untyped browser values, and never chooses a
+   newest row. Open `export_llm_trace --trace-id <trace>` only after the parent
+   status is `confirmed`.
+
+Availability matrix:
+
+| Identifier | Browser availability | Next exact route |
+| --- | --- | --- |
+| Debug Chat `trace_id` | rendered when authorized and retained | correlation manifest with `web_control_trace_id` |
+| `delivery_tracking_id` | rendered separately | `export_llm_trace --delivery-tracking-id <id>` |
+| `platform_message_id` | API/request-only | `export_llm_trace --platform-message-id <id>` |
+| `cognition_invocation_id` | protected-only | parent trace export selector |
+| `global_user_id` | protected-only | manifest with `protected_global_user_id` |
+| action/background/accepted-task/calendar ids | absent from current Console projection | manifest with the matching protected source surface |
+| graph `run_id` or event `correlation_id` | generic surface only | record `unknown`; do not infer a trace |
+| child/future execution trace ids | protected-only | manifest child-trace joins |
+
+The database-pull and debug-LLM skills treat this manifest as the protected
+evidence handoff. Keep generated JSON under `test_artifacts/diagnostics`,
+inspect each anchor one at a time, and keep raw trace export separate from the
+identifier-only manifest.
+
 Apply or inspect logging retention for existing rows:
 
 ```bash

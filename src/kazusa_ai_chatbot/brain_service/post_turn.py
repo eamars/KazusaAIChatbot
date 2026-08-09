@@ -521,6 +521,7 @@ async def run_post_turn_memory_lifecycle_background(
         action_results = await execute_action_specs_func(
             lifecycle_specs,
             storage_timestamp_utc=current_state["storage_timestamp_utc"],
+            source_llm_trace_id=_state_text(current_state, "llm_trace_id"),
         )
         executed_results = _executed_lifecycle_results(action_results)
         if not executed_results:

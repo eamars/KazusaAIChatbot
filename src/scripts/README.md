@@ -35,6 +35,7 @@ availability.
 | `export_dialog_trace_review_input.py` | `python -m scripts.export_dialog_trace_review_input --dialog-text <text>` | Export compact review input for one dialog's protected LLM trace. |
 | `export_event_log.py` | `python -m scripts.export_event_log --hours 24` | Export sanitized event-log aggregate diagnostics. |
 | `export_llm_trace.py` | `python -m scripts.export_llm_trace --trace-id <id>` | Export protected LLM trace rows plus linked audit and conversation rows. |
+| `export_trace_correlation_manifest.py` | `python -m scripts.export_trace_correlation_manifest --identifier <value> --source-surface <enum> --output <path>` | Export a bounded typed parent-trace correlation manifest without raw prompt, response, message-body, or embedding content. |
 | `export_memory.py` | `python -m scripts.export_memory` / `export-memory` | Export memory rows, optionally filtered by memory type or status. |
 | `export_user_image.py` | `python -m scripts.export_user_image <user>` / `export-user-image` | Export a user image profile bundle. |
 | `export_user_memories.py` | `python -m scripts.export_user_memories <user>` / `export-user-memories` | Export user memory rows. |

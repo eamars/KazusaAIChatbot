@@ -172,6 +172,10 @@ async def db_bootstrap() -> None:
         ],
         name="conversation_history_ingress_received_at_v1",
     )
+    await db.conversation_history.create_index(
+        "llm_trace_id",
+        name="conversation_history_llm_trace_id",
+    )
     await db.user_profiles.create_index(
         "global_user_id", unique=True, name="user_global_id_unique",
     )
@@ -193,6 +197,10 @@ async def db_bootstrap() -> None:
         [("status", 1), ("next_run_at", 1), ("trigger_kind", 1)],
         name="calendar_schedule_status_next_trigger",
     )
+    await db[CALENDAR_SCHEDULES_COLLECTION].create_index(
+        [("source_llm_trace_id", 1), ("updated_at", 1)],
+        name="calendar_schedule_source_trace_updated",
+    )
     await db[CALENDAR_RUNS_COLLECTION].create_index(
         "idempotency_key",
         unique=True,
@@ -206,6 +214,10 @@ async def db_bootstrap() -> None:
     await db[CALENDAR_RUNS_COLLECTION].create_index(
         [("status", 1), ("due_at", 1), ("trigger_kind", 1)],
         name="calendar_run_status_due_trigger",
+    )
+    await db[CALENDAR_RUNS_COLLECTION].create_index(
+        [("source_llm_trace_id", 1), ("updated_at", 1)],
+        name="calendar_run_source_trace_updated",
     )
     await db[CALENDAR_RUNS_COLLECTION].create_index(
         [("lease_expires_at", 1), ("status", 1)],
@@ -223,6 +235,10 @@ async def db_bootstrap() -> None:
     await db[SELF_COGNITION_ACTION_ATTEMPTS_COLLECTION].create_index(
         [("status", 1), ("recorded_at", -1)],
         name="self_cognition_attempt_status_recorded",
+    )
+    await db[SELF_COGNITION_ACTION_ATTEMPTS_COLLECTION].create_index(
+        [("source_llm_trace_id", 1), ("recorded_at", -1)],
+        name="self_cognition_attempt_source_trace_recorded",
     )
     await db[SELF_COGNITION_GROUP_REVIEW_WINDOWS_COLLECTION].create_index(
         "source_id",

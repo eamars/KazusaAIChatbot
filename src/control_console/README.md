@@ -116,8 +116,11 @@ graph snapshot contract:
 - `redaction`: an explicit policy summary for excluded prompts, embeddings,
   raw messages, message envelopes, and operational identifiers.
 
-The renderer labels each graph by semantic source. Its machine run identifier
-appears only in the closed `Run reference` disclosure used for correlation.
+The renderer labels each graph by semantic source. The existing closed `Run
+reference` disclosure carries the mapped identifiers needed to correlate the
+view: conversation and debug cognition show `run_id`, `llm_trace_id`, and
+`cognition_invocation_id`; self-cognition shows `run_id`, the child
+`llm_trace_id`, and `source_calendar_run_id`.
 
 The brain `/chat` response may include a bounded `cognition_graph` snapshot
 derived from the actual graph result and consolidation state. The console
@@ -515,3 +518,32 @@ No Node.js, npm, pnpm, yarn, React, Vue, Vite, Webpack, Tailwind build tooling, 
 ## Testing Expectations
 
 Deterministic tests cover strict contracts, auth/CSRF, registry validation, local state writes, log redaction, audit records, argv-only supervisor calls, route failure codes, event monitor redaction, repository unavailable fallbacks, debug-chat unavailable behavior, and compact SSE replay/gap behavior.
+
+## Debug Chat Trace Synchronization
+
+When an operator asks an agent to look up `xxx`, the value copied from the
+Debug Chat metadata must be recorded as `source_surface=web_control_trace_id`.
+The browser displays the brain-owned `trace_id` separately from
+`delivery_tracking_id`; it never derives a trace from a graph run, event
+correlation, request, action, or delivery identifier. The brain discloses the
+top-level trace only when the request is `platform=debug`, the configured
+`KAZUSA_CONTROL_BRAIN_SHARED_SECRET` matches, and a protected trace run was
+recorded. The console sends the exact `debug-v1` marker and shared-secret
+headers for that request.
+
+| Identifier | Current browser availability | Exact next retrieval route |
+| --- | --- | --- |
+| `llm_trace_id` / `trace_id` | Debug Chat history shows `trace ...`; cognition references show the mapped trace row | `scripts.export_trace_correlation_manifest --source-surface web_control_trace_id --identifier <copied>` |
+| `delivery_tracking_id` | Debug Chat history shows `tracking ...`, distinct from the trace | `scripts.export_llm_trace --delivery-tracking-id <id>` after the field is confirmed |
+| `cognition_invocation_id` | shown in Overview Latest conversation cognition and Debug Current debug cognition `Run reference` | resolve the parent first, then `scripts.export_llm_trace --trace-id <trace> --cognition-invocation-id <id>` |
+| `global_user_id` | shown in the existing Users row and selected profile | use the selected Users profile as the web source of truth |
+| `background_work_job_id` | shown as `Job reference` in Jobs and Errors; delivery details retain it with parent/child trace fields | inspect the existing Background Work card details |
+| `accepted_task_id`, `source_action_attempt_id`, `source_llm_trace_id` | shown in Background Work Jobs card details | inspect the existing Job reference disclosure and details |
+| `calendar_schedule_id`, `source_llm_trace_id` | shown in Calendar Schedules and source details | inspect the existing Schedule reference and card details |
+| `calendar_run_id`, related schedule/source trace | shown in Calendar Recent runs and existing timestamp/detail rows | inspect the existing Run reference and card details |
+| event `request_id`, `correlation_id`, `tracking_id`, `run_id`, `trigger_id`, `attempt_id` | retained in the existing Event Monitor detail disclosure | open the existing event detail row |
+| self-cognition child trace and calendar source | shown as `child_llm_trace_id` and `source_calendar_run_id` in the existing self-cognition `Run reference` | resolve the parent trace before opening child evidence |
+
+The manifest is the protected evidence handoff. Inspect `parent_trace`,
+`identifiers`, `joins`, and `unresolved` before opening a separate raw trace
+export. Zero and multiple candidates remain explicit; no newest row is chosen.

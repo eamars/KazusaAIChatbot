@@ -2235,6 +2235,24 @@ async def test_worker_default_path_requests_production_consolidation_without_fil
 
     case = _commitment_case_with_delivery_target()
     captured_kwargs: dict[str, Any] = {}
+    observed_trace_ids: list[str] = []
+    ensure_trace_run = AsyncMock(return_value={
+        "accepted": True,
+        "trace_id": "llmtrace-worker",
+        "status": "recorded",
+        "reason": "",
+    })
+    finalize_trace_run = AsyncMock()
+    monkeypatch.setattr(
+        worker.llm_tracing,
+        "ensure_llm_trace_run",
+        ensure_trace_run,
+    )
+    monkeypatch.setattr(
+        worker.llm_tracing,
+        "finalize_llm_trace_run",
+        finalize_trace_run,
+    )
 
     async def collect_cases(*, now: datetime, max_cases: int) -> list[dict[str, Any]]:
         del now, max_cases
@@ -2248,6 +2266,7 @@ async def test_worker_default_path_requests_production_consolidation_without_fil
         next_case: dict[str, Any],
         **kwargs: Any,
     ) -> dict[str, Any]:
+        observed_trace_ids.append(worker.llm_tracing.current_trace_id())
         captured_kwargs.update(kwargs)
         trigger_record = tracking.build_trigger_record(next_case)
         run_record = tracking.build_run_record(
@@ -2291,6 +2310,18 @@ async def test_worker_default_path_requests_production_consolidation_without_fil
 
     assert result.processed_count == 1
     assert captured_kwargs["apply_consolidation"] is False
+    assert len(observed_trace_ids) == 1
+    assert observed_trace_ids[0].startswith("llmtrace_")
+    ensure_trace_run.assert_awaited_once()
+    assert ensure_trace_run.await_args.kwargs["trace_id"] == (
+        observed_trace_ids[0]
+    )
+    finalize_trace_run.assert_awaited_once_with(
+        trace_id=observed_trace_ids[0],
+        status="succeeded",
+        final_dialog_count=0,
+        delivery_tracking_id="",
+    )
     assert list(tmp_path.iterdir()) == []
 
 

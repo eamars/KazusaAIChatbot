@@ -47,6 +47,7 @@ def read_action_attempt_compat(row: dict[str, Any]) -> dict[str, Any]:
     normalized.setdefault("continuation_status", "legacy_not_recorded")
     normalized.setdefault("execution_result", None)
     normalized.setdefault("errors", [])
+    normalized.setdefault("source_llm_trace_id", "")
     return normalized
 
 
@@ -56,6 +57,7 @@ def build_action_attempt_record(
     *,
     recorded_at: str,
     execution_result: dict[str, Any] | None = None,
+    source_llm_trace_id: str = "",
 ) -> dict[str, Any]:
     """Build an additive action-attempt record for the existing ledger."""
 
@@ -70,6 +72,7 @@ def build_action_attempt_record(
     status = "candidate" if ok else "rejected"
     record = {
         "attempt_id": attempt_id,
+        "source_llm_trace_id": source_llm_trace_id.strip(),
         "run_id": "",
         "trigger_id": "",
         "source_kind": source_ref.get("ref_kind", ""),

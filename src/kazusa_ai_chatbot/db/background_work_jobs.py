@@ -51,6 +51,10 @@ async def ensure_background_work_job_indexes() -> None:
             [("schema_version", 1), ("delivery_state", 1), ("updated_at", 1)],
             name="background_work_v2_delivery_state_updated",
         )
+        await collection.create_index(
+            [("source_llm_trace_id", 1), ("created_at", 1)],
+            name="background_work_v2_source_trace_created",
+        )
     except PyMongoError as exc:
         raise DatabaseOperationError(
             f"failed to ensure background work job indexes: {exc}"
@@ -79,7 +83,30 @@ async def insert_background_work_job(
             raise DatabaseOperationError(
                 "background work idempotency collision without a v2 row"
             )
-        return dict(existing)
+        existing_job = dict(existing)
+        incoming_source = str(job.get("source_llm_trace_id") or "").strip()
+        existing_source = str(
+            existing_job.get("source_llm_trace_id") or ""
+        ).strip()
+        if (
+            incoming_source
+            and existing_source
+            and incoming_source != existing_source
+        ):
+            conflict_fields = {
+                "correlation_write_status": "conflict",
+                "correlation_conflict_source_llm_trace_id": incoming_source,
+            }
+            await collection.update_one(
+                {
+                    "schema_version": BACKGROUND_WORK_JOB_SCHEMA_VERSION,
+                    "idempotency_key": job["idempotency_key"],
+                    "source_llm_trace_id": existing_source,
+                },
+                {"$set": conflict_fields},
+            )
+            existing_job.update(conflict_fields)
+        return existing_job
     except PyMongoError as exc:
         raise DatabaseOperationError(
             f"failed to insert background work job: {exc}"
@@ -309,6 +336,9 @@ async def list_recent_background_work_jobs(*, limit: int) -> list[dict[str, Any]
     projection = {
         "_id": 0,
         "job_id": 1,
+        "accepted_task_id": 1,
+        "source_action_attempt_id": 1,
+        "source_llm_trace_id": 1,
         "status": 1,
         "delivery_state": 1,
         "requested_worker": 1,

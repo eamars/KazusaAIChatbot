@@ -41,6 +41,9 @@ async def execute_future_speak_job(
         action_spec,
         storage_timestamp_utc=_job_timestamp(job),
         action_attempt_id=_required_job_text(job, "source_action_attempt_id"),
+        source_llm_trace_id=_required_job_text(job, "source_llm_trace_id")
+        if job.get("source_llm_trace_id")
+        else "",
     )
     scheduled_for = str(future_result["trigger_at"])
     result: FutureSpeakExecutionResult = {
@@ -166,6 +169,7 @@ async def _execute_future_cognition_action(
     *,
     storage_timestamp_utc: str,
     action_attempt_id: str,
+    source_llm_trace_id: str = "",
 ) -> dict[str, object]:
     """Run the action-owned scheduler after a future job is claimed.
 
@@ -182,5 +186,6 @@ async def _execute_future_cognition_action(
         action_spec,
         storage_timestamp_utc=storage_timestamp_utc,
         action_attempt_id=action_attempt_id,
+        source_llm_trace_id=source_llm_trace_id,
     )
     return result

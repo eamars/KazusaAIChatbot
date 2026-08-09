@@ -186,6 +186,9 @@ class CognitionRunGraphSnapshot(StrictModel):
         "partial",
     ] = "not_reported"
     run_id: str | None = Field(default=None, max_length=120)
+    llm_trace_id: str | None = Field(default=None, max_length=120)
+    cognition_invocation_id: str | None = Field(default=None, max_length=120)
+    source_calendar_run_id: str | None = Field(default=None, max_length=120)
     generated_at: datetime
     nodes: list[CognitionRunGraphNode] = Field(default_factory=list, max_length=64)
     edges: list[CognitionRunGraphEdge] = Field(default_factory=list, max_length=96)
@@ -396,6 +399,9 @@ class ConsoleDebugChatResponse(StrictModel):
     request: dict[str, Any]
     response: dict[str, Any] | None
     tracking_id: str | None
+    trace_id: str = ""
+    delivery_tracking_id: str | None = None
+    llm_trace_id: str = ""
     latency_ms: int | None
     sent_at: datetime
     error: dict[str, Any] | None = None

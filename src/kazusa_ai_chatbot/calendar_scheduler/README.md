@@ -322,3 +322,15 @@ The calendar scheduler must not:
 - keep a compatibility layer or fallback to legacy `scheduled_events` after
   migration and cutover;
 - use event logs as state, idempotency, or migration truth.
+
+## Trace Ownership
+
+Trace-backed `future_cognition` and `future_speak` schedule creation writes
+`source_llm_trace_id` on both the durable schedule and its materialized run.
+The later self-cognition worker binds a new execution trace and records the
+source calendar run as `source_calendar_run_id` plus the source trace as its
+parent. Idempotent refresh preserves an existing forward source trace when a
+historical or deterministic refresh has no source value; it does not backfill
+old rows. Schedule and run idempotency collisions preserve the original
+non-empty source trace and record bounded conflict metadata for correlation
+review.

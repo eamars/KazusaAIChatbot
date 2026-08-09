@@ -1,0 +1,135 @@
+[
+  {
+    "name": "web trace exact match",
+    "source_surface": "web_control_trace_id",
+    "identifier": "llmtrace_console_001",
+    "rows": [
+      {"trace_id": "llmtrace_console_001"}
+    ],
+    "status": "confirmed",
+    "trace_ids": ["llmtrace_console_001"]
+  },
+  {
+    "name": "unknown opaque value",
+    "source_surface": "unknown",
+    "identifier": "d63003933a924c03a258fcf9d891e6b5",
+    "rows": [
+      {"trace_id": "llmtrace_should_not_be_inferred"}
+    ],
+    "status": "not_available_from_web",
+    "trace_ids": []
+  },
+  {
+    "name": "ambiguous exact source",
+    "source_surface": "protected_action_attempt_id",
+    "identifier": "attempt-ambiguous",
+    "rows": [
+      {"source_llm_trace_id": "llmtrace_a"},
+      {"source_llm_trace_id": "llmtrace_b"}
+    ],
+    "status": "ambiguous",
+    "trace_ids": ["llmtrace_a", "llmtrace_b"]
+  },
+  {
+    "name": "exact source not found",
+    "source_surface": "protected_calendar_run_id",
+    "identifier": "run-missing",
+    "rows": [],
+    "status": "not_found",
+    "trace_ids": []
+  },
+  {
+    "name": "historical action attempt without source trace",
+    "source_surface": "protected_action_attempt_id",
+    "identifier": "attempt-historical",
+    "rows": [
+      {"attempt_id": "attempt-historical"}
+    ],
+    "status": "not_captured",
+    "trace_ids": []
+  },
+  {
+    "name": "historical background job without source trace",
+    "source_surface": "protected_background_work_job_id",
+    "identifier": "job-historical",
+    "rows": [
+      {"job_id": "job-historical"}
+    ],
+    "status": "not_captured",
+    "trace_ids": []
+  },
+  {
+    "name": "historical accepted task without source trace",
+    "source_surface": "protected_accepted_task_id",
+    "identifier": "task-historical",
+    "rows": [
+      {"accepted_task_id": "task-historical"}
+    ],
+    "status": "not_captured",
+    "trace_ids": []
+  },
+  {
+    "name": "historical calendar schedule without source trace",
+    "source_surface": "protected_calendar_schedule_id",
+    "identifier": "schedule-historical",
+    "rows": [
+      {"schedule_id": "schedule-historical"}
+    ],
+    "status": "not_captured",
+    "trace_ids": []
+  },
+  {
+    "name": "historical calendar run without source trace",
+    "source_surface": "protected_calendar_run_id",
+    "identifier": "run-historical",
+    "rows": [
+      {"run_id": "run-historical"}
+    ],
+    "status": "not_captured",
+    "trace_ids": []
+  },
+  {
+    "name": "capture mode unavailable",
+    "source_surface": "protected_llm_trace_id",
+    "identifier": "llmtrace-off-001",
+    "rows": [],
+    "protected_available": false,
+    "status": "not_available",
+    "trace_ids": []
+  },
+  {
+    "name": "direct future cognition run",
+    "source_surface": "protected_calendar_run_id",
+    "identifier": "run-future-001",
+    "rows": [
+      {"run_id": "run-future-001", "source_llm_trace_id": "llmtrace_future"}
+    ],
+    "status": "confirmed",
+    "trace_ids": ["llmtrace_future"]
+  },
+  {
+    "name": "background future job",
+    "source_surface": "protected_background_work_job_id",
+    "identifier": "job-future-001",
+    "rows": [
+      {"job_id": "job-future-001", "source_llm_trace_id": "llmtrace_parent"}
+    ],
+    "status": "confirmed",
+    "trace_ids": ["llmtrace_parent"]
+  },
+  {
+    "name": "recorded source conflict",
+    "source_surface": "protected_action_attempt_id",
+    "identifier": "attempt-conflict",
+    "rows": [
+      {
+        "attempt_id": "attempt-conflict",
+        "source_llm_trace_id": "llmtrace_original",
+        "correlation_write_status": "conflict",
+        "correlation_conflict_source_llm_trace_id": "llmtrace-incoming"
+      }
+    ],
+    "status": "conflict",
+    "trace_ids": ["llmtrace_original", "llmtrace-incoming"]
+  }
+]

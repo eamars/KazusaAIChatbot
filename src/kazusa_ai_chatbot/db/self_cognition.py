@@ -41,11 +41,42 @@ async def upsert_self_cognition_action_attempt(
 
     db = await get_db()
     try:
-        await db.self_cognition_action_attempts.replace_one(
-            {"idempotency_key": attempt["idempotency_key"]},
-            attempt,
-            upsert=True,
-        )
+        collection = db.self_cognition_action_attempts
+        key_filter = {"idempotency_key": attempt["idempotency_key"]}
+        incoming_source = str(attempt.get("source_llm_trace_id") or "").strip()
+        mutable_attempt = dict(attempt)
+        mutable_attempt.pop("source_llm_trace_id", None)
+        update: dict[str, dict[str, object]] = {"$set": mutable_attempt}
+        if incoming_source:
+            update["$setOnInsert"] = {
+                "source_llm_trace_id": incoming_source,
+            }
+        await collection.update_one(key_filter, update, upsert=True)
+        if incoming_source:
+            existing = await collection.find_one(
+                key_filter,
+                {"_id": 0, "source_llm_trace_id": 1},
+            )
+            existing_source = (
+                str(existing.get("source_llm_trace_id") or "").strip()
+                if isinstance(existing, dict)
+                else ""
+            )
+            if existing_source and existing_source != incoming_source:
+                await collection.update_one(
+                    {
+                        **key_filter,
+                        "source_llm_trace_id": existing_source,
+                    },
+                    {
+                        "$set": {
+                            "correlation_write_status": "conflict",
+                            "correlation_conflict_source_llm_trace_id": (
+                                incoming_source
+                            ),
+                        },
+                    },
+                )
     except PyMongoError as exc:
         raise DatabaseOperationError(
             f"failed to upsert self-cognition action attempt: {exc}"

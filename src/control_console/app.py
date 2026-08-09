@@ -113,6 +113,11 @@ SAFE_KAZUSA_EVENT_PAYLOAD_FIELDS = (
     "run_kind",
     "worker_name",
 )
+SAFE_KAZUSA_EVENT_CORRELATION_FIELDS = (
+    "request_id",
+    "tracking_id",
+    "background_work_job_id",
+)
 
 
 class NoCacheStaticFiles(StaticFiles):
@@ -209,6 +214,7 @@ def create_app(
     kazusa_client = KazusaClient(
         base_url=app_settings.brain_base_url,
         timeout_seconds=DEBUG_CHAT_TIMEOUT_SECONDS,
+        control_shared_secret=app_settings.brain_shared_secret,
     )
     stream_buffer = SSEEventBuffer(max_events=100)
     stream_shutdown_event = asyncio.Event()
@@ -895,6 +901,9 @@ def create_app(
                 "request": redact_mapping(request.model_dump(mode="json")),
                 "response": None,
                 "tracking_id": None,
+                "trace_id": "",
+                "delivery_tracking_id": None,
+                "llm_trace_id": "",
                 "latency_ms": None,
                 "sent_at": datetime.now(timezone.utc).isoformat(),
                 "error": {
@@ -935,6 +944,9 @@ def create_app(
                 "request": redact_mapping(request.model_dump(mode="json")),
                 "response": None,
                 "tracking_id": None,
+                "trace_id": "",
+                "delivery_tracking_id": None,
+                "llm_trace_id": "",
                 "latency_ms": None,
                 "sent_at": datetime.now(timezone.utc).isoformat(),
                 "error": {"code": "brain_unavailable", "message": str(exc)},
@@ -1628,6 +1640,10 @@ def _project_kazusa_event(document: dict[str, Any]) -> dict[str, Any]:
         "created_at": str(created_at),
         "duration_ms": document.get("duration_ms"),
     }
+    for field in SAFE_KAZUSA_EVENT_CORRELATION_FIELDS:
+        value = document.get(field)
+        if value not in (None, ""):
+            row[field] = str(value)
     error = document.get("error")
     if isinstance(error, dict):
         error_class = error.get("error_class")
@@ -1642,6 +1658,10 @@ def _project_kazusa_event(document: dict[str, Any]) -> dict[str, Any]:
             value = payload.get(field)
             if value not in (None, ""):
                 row[field] = value
+        for field in SAFE_KAZUSA_EVENT_CORRELATION_FIELDS:
+            value = document.get(field) or payload.get(field)
+            if value not in (None, ""):
+                row[field] = str(value)
     projected_row = redact_mapping({
         key: value
         for key, value in row.items()

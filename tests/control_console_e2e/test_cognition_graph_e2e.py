@@ -34,7 +34,7 @@ def test_overview_cognition_graph_updates_from_latest_brain_run(
         with e2e_console(
             brain_base_url=fake_brain.base_url,
             service_registry_path=registry_path,
-            sse_interval_seconds=0.2,
+            sse_interval_seconds=5.0,
         ) as console:
             page = e2e_browser_page(console.base_url)
             _login(page)
@@ -61,13 +61,15 @@ def test_overview_cognition_graph_updates_from_latest_brain_run(
             assert "Latest conversation cognition" in run_summary.inner_text()
             assert "run-live" not in run_summary.inner_text()
             run_reference = run_summary.locator(".graph-run-reference")
-            run_reference_text = run_reference.evaluate(
-                """element => {
-                  element.open = true;
-                  return element.innerText;
-                }"""
-            )
+            run_reference.locator("summary").click()
+            run_reference_text = run_reference.inner_text()
             assert "run-live" in run_reference_text
+            assert "llm-trace-run-live" in run_reference_text
+            assert "cognition-invocation-run-live" in run_reference_text
+            conversation_reference_screenshot = (
+                e2e_artifact_dir / "conversation_cognition_run_reference.png"
+            )
+            run_reference.screenshot(path=str(conversation_reference_screenshot))
             dependency_panel = page.locator(
                 "#overview-cognition-graph .graph-dependency-panel"
             )
@@ -81,6 +83,25 @@ def test_overview_cognition_graph_updates_from_latest_brain_run(
             assert page.locator(
                 "#overview-self-cognition-card"
             ).is_visible()
+            self_reference = page.locator(
+                "#overview-self-cognition-graph .graph-run-reference"
+            )
+            self_reference.locator("summary").click()
+            self_reference_text = self_reference.inner_text()
+            assert "self-run-complete" in self_reference_text
+            assert "llm-trace-self-run-complete" in self_reference_text
+            assert "calendar-run-self-run-complete" in self_reference_text
+            self_reference_screenshot = (
+                e2e_artifact_dir / "self_cognition_run_reference.png"
+            )
+            self_reference.screenshot(path=str(self_reference_screenshot))
+            cognition_reference_screenshot = (
+                e2e_artifact_dir / "cognition_id_references.png"
+            )
+            page.screenshot(
+                path=str(cognition_reference_screenshot),
+                full_page=True,
+            )
             assert page.locator(
                 "#overview-cognition-graph .graph-latest-event"
             ).count() == 0
@@ -228,7 +249,16 @@ def test_overview_cognition_graph_updates_from_latest_brain_run(
                         "stable inspector detail",
                         "graph stage no horizontal overflow",
                     ],
-                    "screenshot": str(l2_memory_screenshot),
+                    "screenshots": {
+                        "conversation_reference": str(
+                            conversation_reference_screenshot
+                        ),
+                        "cognition_references": str(
+                            cognition_reference_screenshot
+                        ),
+                        "l2_memory": str(l2_memory_screenshot),
+                        "self_reference": str(self_reference_screenshot),
+                    },
                 },
             )
 

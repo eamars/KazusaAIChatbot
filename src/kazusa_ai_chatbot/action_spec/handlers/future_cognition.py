@@ -41,6 +41,7 @@ def build_future_cognition_calendar_documents(
     *,
     storage_timestamp_utc: str,
     action_attempt_id: str,
+    source_llm_trace_id: str = "",
 ) -> dict[str, dict[str, Any]]:
     """Build calendar rows for a future self-cognition slot.
 
@@ -50,6 +51,7 @@ def build_future_cognition_calendar_documents(
             creation time and as the immediate calendar due time when no
             trigger time was supplied.
         action_attempt_id: Stable action-attempt id for trace correlation.
+        source_llm_trace_id: Protected trace that selected the action.
 
     Returns:
         Calendar schedule and run documents containing semantic trigger
@@ -94,6 +96,7 @@ def build_future_cognition_calendar_documents(
         source_scope=source_scope,
         idempotency_key=idempotency_key,
         storage_timestamp_utc=normalized_storage_timestamp_utc,
+        source_llm_trace_id=source_llm_trace_id.strip(),
     )
     run = calendar_models.build_calendar_run_from_schedule(
         schedule,
@@ -112,6 +115,7 @@ async def execute_future_cognition_action(
     *,
     storage_timestamp_utc: str,
     action_attempt_id: str,
+    source_llm_trace_id: str = "",
 ) -> dict:
     """Persist a future self-cognition slot without running cognition inline.
 
@@ -119,6 +123,7 @@ async def execute_future_cognition_action(
         action_spec: Selected ``trigger_future_cognition`` action spec.
         storage_timestamp_utc: Current episode storage UTC timestamp.
         action_attempt_id: Stable action-attempt id for trace correlation.
+        source_llm_trace_id: Protected trace that selected the action.
 
     Returns:
         Execution result containing calendar schedule/run audit evidence.
@@ -128,6 +133,7 @@ async def execute_future_cognition_action(
         action_spec,
         storage_timestamp_utc=storage_timestamp_utc,
         action_attempt_id=action_attempt_id,
+        source_llm_trace_id=source_llm_trace_id,
     )
     schedule = documents["schedule"]
     run = documents["run"]

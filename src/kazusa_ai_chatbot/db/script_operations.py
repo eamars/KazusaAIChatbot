@@ -42,6 +42,14 @@ from kazusa_ai_chatbot.time_boundary import (
     storage_utc_now,
 )
 from kazusa_ai_chatbot.conversation_progress.policy import storage_expiry
+from kazusa_ai_chatbot.llm_tracing.correlation import (
+    MAX_COMPANION_CANDIDATES,
+    MAX_CONVERSATION_ROWS,
+    MAX_FAILURE_CAPSULES,
+    MAX_PARENT_CANDIDATES,
+    CorrelationSourceSurface,
+    normalize_source_surface,
+)
 
 
 DERIVED_EMBEDDING_FIELD = "embedding"
@@ -457,6 +465,267 @@ async def export_collection_rows(
     cursor = cursor.limit(limit)
     records = [dict(doc) for doc in await cursor.to_list(length=limit)]
     return records
+
+
+_CORRELATION_SOURCE_FIELDS = {
+    "web_control_trace_id": (
+        "llm_trace_runs",
+        {"trace_id": 1},
+        {"trace_id": 1},
+    ),
+    "protected_llm_trace_id": (
+        "llm_trace_runs",
+        {"trace_id": 1},
+        {"trace_id": 1},
+    ),
+    "protected_cognition_invocation_id": (
+        "llm_trace_steps",
+        {},
+        {
+            "trace_id": 1,
+            "cognition_invocation_id": 1,
+            "capsule.cognition_invocation_id": 1,
+        },
+    ),
+    "protected_global_user_id": (
+        "llm_trace_runs",
+        {"global_user_id": 1},
+        {"trace_id": 1, "global_user_id": 1},
+    ),
+    "protected_action_attempt_id": (
+        "self_cognition_action_attempts",
+        {"attempt_id": 1},
+        {
+            "source_llm_trace_id": 1,
+            "attempt_id": 1,
+            "correlation_write_status": 1,
+            "correlation_conflict_source_llm_trace_id": 1,
+        },
+    ),
+    "protected_background_work_job_id": (
+        "background_work_jobs",
+        {"job_id": 1},
+        {
+            "source_llm_trace_id": 1,
+            "job_id": 1,
+            "correlation_write_status": 1,
+            "correlation_conflict_source_llm_trace_id": 1,
+        },
+    ),
+    "protected_accepted_task_id": (
+        "background_work_jobs",
+        {"accepted_task_id": 1},
+        {
+            "source_llm_trace_id": 1,
+            "accepted_task_id": 1,
+            "correlation_write_status": 1,
+            "correlation_conflict_source_llm_trace_id": 1,
+        },
+    ),
+    "protected_calendar_schedule_id": (
+        "calendar_schedules",
+        {"schedule_id": 1},
+        {
+            "source_llm_trace_id": 1,
+            "schedule_id": 1,
+            "correlation_write_status": 1,
+            "correlation_conflict_source_llm_trace_id": 1,
+        },
+    ),
+    "protected_calendar_run_id": (
+        "calendar_runs",
+        {"run_id": 1},
+        {
+            "source_llm_trace_id": 1,
+            "run_id": 1,
+            "correlation_write_status": 1,
+            "correlation_conflict_source_llm_trace_id": 1,
+        },
+    ),
+}
+
+
+def _correlation_identifier_filter(
+    source_surface: CorrelationSourceSurface,
+    identifier: str,
+) -> dict[str, Any]:
+    """Build the exact identifier filter for one protected source surface."""
+
+    if source_surface == "protected_cognition_invocation_id":
+        return {
+            "$or": [
+                {"cognition_invocation_id": identifier},
+                {"capsule.cognition_invocation_id": identifier},
+            ]
+        }
+    spec = _CORRELATION_SOURCE_FIELDS.get(source_surface)
+    if spec is None:
+        raise ValueError(f"unsupported correlation source: {source_surface}")
+    filter_fields = spec[1]
+    if not filter_fields:
+        raise ValueError(f"source requires a dedicated filter: {source_surface}")
+    return {field: identifier for field in filter_fields}
+
+
+async def list_trace_correlation_candidates(
+    *,
+    source_surface: str,
+    identifier: str,
+    limit: int = MAX_PARENT_CANDIDATES,
+) -> list[dict[str, Any]]:
+    """Read bounded exact candidates for one typed protected source."""
+
+    normalized_surface = normalize_source_surface(source_surface)
+    if normalized_surface == "unknown":
+        return []
+    if limit < 1 or limit > MAX_PARENT_CANDIDATES:
+        raise ValueError("parent correlation limit is outside the fixed cap")
+    spec = _CORRELATION_SOURCE_FIELDS.get(normalized_surface)
+    if spec is None:
+        raise ValueError(f"unsupported correlation source: {normalized_surface}")
+    collection_name, _filter_fields, projection = spec
+    filter_doc = _correlation_identifier_filter(
+        normalized_surface,
+        identifier.strip(),
+    )
+    return await export_collection_rows(
+        collection_name=collection_name,
+        filter_doc=filter_doc,
+        projection={"_id": 0, **projection},
+        sort_doc={"trace_id": 1, "source_llm_trace_id": 1},
+        limit=limit,
+    )
+
+
+async def list_trace_correlation_companions(
+    *,
+    trace_id: str,
+) -> dict[str, list[dict[str, Any]]]:
+    """Read bounded identifier-only companion rows for one parent trace."""
+
+    clean_trace_id = trace_id.strip()
+    if not clean_trace_id:
+        return {}
+    rows_by_kind: dict[str, list[dict[str, Any]]] = {}
+    rows_by_kind["conversation_history"] = await export_collection_rows(
+        collection_name="conversation_history",
+        filter_doc={"llm_trace_id": clean_trace_id},
+        projection={
+            "_id": 0,
+            "llm_trace_id": 1,
+            "row_id": 1,
+            "message_id": 1,
+            "platform": 1,
+            "platform_channel_id": 1,
+            "platform_message_id": 1,
+            "channel_type": 1,
+            "role": 1,
+            "timestamp": 1,
+            "delivery_tracking_id": 1,
+        },
+        sort_doc={"timestamp": 1},
+        limit=MAX_CONVERSATION_ROWS,
+    )
+    rows_by_kind["llm_trace_steps"] = await export_collection_rows(
+        collection_name="llm_trace_steps",
+        filter_doc={"trace_id": clean_trace_id},
+        projection={
+            "_id": 0,
+            "trace_id": 1,
+            "stage_name": 1,
+            "sequence": 1,
+            "capture_reason": 1,
+            "cognition_invocation_id": 1,
+            "capsule.cognition_invocation_id": 1,
+            "created_at": 1,
+        },
+        sort_doc={"sequence": 1, "created_at": 1},
+        limit=MAX_FAILURE_CAPSULES,
+    )
+    companion_specs = {
+        "self_cognition_action_attempts": {
+            "collection_name": "self_cognition_action_attempts",
+            "projection": {
+                "_id": 0,
+                "attempt_id": 1,
+                "source_llm_trace_id": 1,
+                "action_kind": 1,
+                "status": 1,
+                "correlation_write_status": 1,
+                "correlation_conflict_source_llm_trace_id": 1,
+                "created_at": 1,
+            },
+        },
+        "background_work_jobs": {
+            "collection_name": "background_work_jobs",
+            "projection": {
+                "_id": 0,
+                "job_id": 1,
+                "accepted_task_id": 1,
+                "source_action_attempt_id": 1,
+                "source_llm_trace_id": 1,
+                "status": 1,
+                "correlation_write_status": 1,
+                "correlation_conflict_source_llm_trace_id": 1,
+                "created_at": 1,
+            },
+        },
+        "calendar_schedules": {
+            "collection_name": "calendar_schedules",
+            "projection": {
+                "_id": 0,
+                "schedule_id": 1,
+                "source_action_attempt_id": 1,
+                "source_llm_trace_id": 1,
+                "status": 1,
+                "correlation_write_status": 1,
+                "correlation_conflict_source_llm_trace_id": 1,
+                "due_at": 1,
+                "created_at": 1,
+            },
+        },
+        "calendar_runs": {
+            "collection_name": "calendar_runs",
+            "projection": {
+                "_id": 0,
+                "run_id": 1,
+                "source_action_attempt_id": 1,
+                "source_llm_trace_id": 1,
+                "source_calendar_run_id": 1,
+                "status": 1,
+                "correlation_write_status": 1,
+                "correlation_conflict_source_llm_trace_id": 1,
+                "due_at": 1,
+                "created_at": 1,
+            },
+        },
+    }
+    for kind, spec in companion_specs.items():
+        rows_by_kind[kind] = await export_collection_rows(
+            collection_name=spec["collection_name"],
+            filter_doc={"source_llm_trace_id": clean_trace_id},
+            projection=spec["projection"],
+            sort_doc={"created_at": 1, "due_at": 1},
+            limit=MAX_COMPANION_CANDIDATES,
+        )
+    rows_by_kind["child_trace_runs"] = await export_collection_rows(
+        collection_name="llm_trace_runs",
+        filter_doc={"parent_llm_trace_id": clean_trace_id},
+        projection={
+            "_id": 0,
+            "trace_id": 1,
+            "parent_llm_trace_id": 1,
+            "source_background_work_job_id": 1,
+            "source_calendar_run_id": 1,
+            "status": 1,
+            "platform": 1,
+            "started_at": 1,
+            "completed_at": 1,
+        },
+        sort_doc={"started_at": 1},
+        limit=MAX_COMPANION_CANDIDATES,
+    )
+    return rows_by_kind
 
 
 async def load_lane_cleanup_rows(

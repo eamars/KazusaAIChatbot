@@ -47,6 +47,7 @@ def build_one_time_calendar_schedule(
     storage_timestamp_utc: str,
     timezone: str = "UTC",
     legacy_source: dict[str, Any] | None = None,
+    source_llm_trace_id: str = "",
 ) -> dict[str, Any]:
     """Build one active one-time schedule for a closed trigger kind.
 
@@ -77,6 +78,7 @@ def build_one_time_calendar_schedule(
         "recurrence": {"kind": "once"},
         "payload": deepcopy(payload),
         "source_scope": deepcopy(source_scope),
+        "source_llm_trace_id": source_llm_trace_id.strip(),
         "idempotency_key": idempotency_key,
         "timezone": timezone,
         "legacy_source": deepcopy(legacy_source),
@@ -117,6 +119,9 @@ def build_calendar_run_from_schedule(
         "due_at": due_at,
         "payload": deepcopy(schedule["payload"]),
         "source_scope": deepcopy(schedule["source_scope"]),
+        "source_llm_trace_id": str(
+            schedule.get("source_llm_trace_id") or ""
+        ).strip(),
         "idempotency_key": idempotency_key,
         "attempt_count": 0,
         "max_attempts": schedule.get("max_attempts", DEFAULT_RUN_MAX_ATTEMPTS),

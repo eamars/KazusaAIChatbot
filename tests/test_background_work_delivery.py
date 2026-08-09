@@ -51,6 +51,7 @@ def _accepted_task_completed_job() -> dict:
     job = _completed_job()
     job["accepted_task_id"] = "task-001"
     job["task_identity_key"] = "accepted_task:v1:abc"
+    job["source_llm_trace_id"] = "llmtrace-parent-1"
     return job
 
 
@@ -107,6 +108,12 @@ def test_tool_result_source_builder_creates_prompt_safe_episode() -> None:
         "tool-result:task-001"
     )
     assert episode["origin_metadata"]["source_message_id"] == "message-1"
+    assert episode["origin_metadata"]["source_llm_trace_id"] == (
+        "llmtrace-parent-1"
+    )
+    assert episode["origin_metadata"]["source_background_work_job_id"] == (
+        "job-001"
+    )
     assert episode["origin_metadata"]["active_turn_platform_message_ids"] == [
         "tool-result:task-001"
     ]
@@ -194,6 +201,8 @@ async def test_service_result_ready_delivery_uses_dispatcher_boundary(
         },
     })
     post_turn = AsyncMock()
+    ensure_trace = AsyncMock(return_value={"accepted": True})
+    finalize_trace = AsyncMock()
 
     monkeypatch.setattr(service_module, "_adapter_registry", object())
     monkeypatch.setattr(
@@ -271,6 +280,16 @@ async def test_service_result_ready_delivery_uses_dispatcher_boundary(
     monkeypatch.setattr(service_module, "persona_supervisor2", persona_supervisor2)
     monkeypatch.setattr(service_module, "handle_send_message", handle_send_message)
     monkeypatch.setattr(
+        service_module.llm_tracing,
+        "ensure_llm_trace_run",
+        ensure_trace,
+    )
+    monkeypatch.setattr(
+        service_module.llm_tracing,
+        "finalize_llm_trace_run",
+        finalize_trace,
+    )
+    monkeypatch.setattr(
         service_module,
         "_run_accepted_task_result_post_turn",
         post_turn,
@@ -293,6 +312,9 @@ async def test_service_result_ready_delivery_uses_dispatcher_boundary(
     }
     persona_state = persona_supervisor2.await_args.args[0]
     assert persona_state["cognitive_episode"] == episode
+    assert persona_state["llm_trace_id"] == (
+        ensure_trace.await_args.kwargs["trace_id"]
+    )
     assert persona_state["reason_to_respond"] == "tool_result"
     assert persona_state["platform_message_id"] == "tool-result:task-001"
     assert persona_state["active_turn_platform_message_ids"] == [
@@ -317,6 +339,17 @@ async def test_service_result_ready_delivery_uses_dispatcher_boundary(
     assert dispatch_context.source_message_id == "tool-result:task-001"
     assert dispatch_context.source_platform_bot_id == "bot-1"
     assert dispatch_context.source_character_name == "Current Character"
+    assert ensure_trace.await_args.kwargs["parent_llm_trace_id"] == (
+        "llmtrace-parent-1"
+    )
+    assert ensure_trace.await_args.kwargs["source_background_work_job_id"] == (
+        "job-001"
+    )
+    finalize_trace.assert_awaited_once()
+    assert finalize_trace.await_args.kwargs["status"] == "succeeded"
+    assert finalize_trace.await_args.kwargs["delivery_tracking_id"] == (
+        "delivery-001"
+    )
     ensure_identity = service_module._ensure_character_global_identity
     assert ensure_identity.await_args.kwargs["character_name"] == "Current Character"
     post_turn.assert_awaited_once()

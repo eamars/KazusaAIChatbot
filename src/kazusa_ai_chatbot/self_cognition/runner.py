@@ -695,6 +695,7 @@ async def _with_private_action_results(
         private_specs,
         storage_timestamp_utc=cognition_state["storage_timestamp_utc"],
         record_attempt_func=upsert_action_attempt,
+        source_llm_trace_id=str(cognition_state.get("llm_trace_id") or ""),
         availability_snapshot_factory=(
             lambda _context: build_action_availability_snapshot(
                 cognition_state,
@@ -795,6 +796,7 @@ def _build_cognition_state(
     state = {
         "character_profile": _character_profile(case),
         "storage_timestamp_utc": storage_timestamp_utc,
+        "llm_trace_id": _string_field(case, "llm_trace_id"),
         "local_time_context": local_time_context,
         "user_input": models.SELF_COGNITION_INPUT_TEXT,
         "prompt_message_context": {

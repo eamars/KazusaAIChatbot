@@ -460,6 +460,7 @@ async def _execute_task_resolution_request(
                     "platform_bot_id",
                 ),
                 requester_display_name=_required_state_text(state, "user_name"),
+                source_llm_trace_id=text_or_empty(state.get("llm_trace_id")),
             )
         except TaskResolutionContractError as exc:
             return _task_resolution_failure_observation(request, state, exc)
@@ -489,6 +490,7 @@ async def _execute_task_resolution_request(
                     "platform_bot_id",
                 ),
                 requester_display_name=_required_state_text(state, "user_name"),
+                source_llm_trace_id=text_or_empty(state.get("llm_trace_id")),
             )
         except TaskResolutionContractError as exc:
             return _task_resolution_failure_observation(request, state, exc)
