@@ -6,7 +6,7 @@ import asyncio
 import hashlib
 import json
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from contextvars import ContextVar, Token
 from typing import Literal, TypedDict
 from uuid import uuid4
@@ -153,6 +153,9 @@ async def ensure_llm_trace_run(
     platform_message_id: str,
     global_user_id: str,
     started_at: str | None = None,
+    parent_llm_trace_id: str = "",
+    source_background_work_job_id: str = "",
+    source_calendar_run_id: str = "",
 ) -> LLMTraceWriteResult:
     """Ensure a trace-run row exists for one live turn."""
 
@@ -176,6 +179,9 @@ async def ensure_llm_trace_run(
         "completed_at": "",
         "final_dialog_count": 0,
         "delivery_tracking_id": "",
+        "parent_llm_trace_id": parent_llm_trace_id.strip(),
+        "source_background_work_job_id": source_background_work_job_id.strip(),
+        "source_calendar_run_id": source_calendar_run_id.strip(),
         "created_at": storage_utc_now_iso(),
         "expires_at": expiry_from_storage_iso(
             run_started_at,

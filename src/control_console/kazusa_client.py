@@ -314,12 +314,14 @@ class KazusaClient:
         *,
         base_url: str,
         timeout_seconds: float,
+        control_shared_secret: str = "",
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         """Create a client for one brain base URL."""
 
         self._base_url = base_url.rstrip("/")
         self._timeout_seconds = timeout_seconds
+        self._control_shared_secret = control_shared_secret.strip()
         self._transport = transport
 
     async def get_health(self) -> dict[str, Any]:
@@ -374,8 +376,9 @@ class KazusaClient:
 
         started_at = time.perf_counter()
         payload = _debug_chat_payload(request)
+        headers = _debug_chat_headers(self._control_shared_secret)
         async with self._client() as client:
-            response = await client.post("/chat", json=payload)
+            response = await client.post("/chat", json=payload, headers=headers)
         response.raise_for_status()
         response_payload = response.json()
         elapsed_ms = int((time.perf_counter() - started_at) * 1000)
@@ -385,6 +388,7 @@ class KazusaClient:
             "request": redact_mapping(payload),
             "response": _project_debug_chat_response(response_payload),
             "tracking_id": response_payload.get("delivery_tracking_id"),
+            "trace_id": _safe_optional_text(response_payload.get("trace_id")) or "",
             "latency_ms": elapsed_ms,
             "sent_at": datetime.now(timezone.utc).isoformat(),
             "error": None,
@@ -443,6 +447,18 @@ def _debug_chat_payload(request: ConsoleDebugChatRequest) -> dict[str, Any]:
         "debug_modes": debug_modes,
     }
     return payload
+
+
+def _debug_chat_headers(shared_secret: str) -> dict[str, str]:
+    """Build the Brain-side authorization headers for Debug Chat only."""
+
+    clean_secret = shared_secret.strip()
+    if not clean_secret:
+        return {}
+    return {
+        "X-Kazusa-Control-Console": "debug-v1",
+        "X-Kazusa-Control-Console-Auth": clean_secret,
+    }
 
 
 def _project_debug_chat_response(response_payload: dict[str, Any]) -> dict[str, Any]:

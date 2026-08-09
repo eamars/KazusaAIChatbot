@@ -174,3 +174,15 @@ Stop and ask for clarification if:
 - the only available artifact is raw JSON and you cannot produce a readable
   summary without risking semantic distortion;
 - privacy constraints prevent showing the data needed for human judgment.
+
+## Correlation Evidence Handoff
+
+For `Look up the trace id of xxx`, treat `xxx` as a copied Control Console
+value and record `source_surface=web_control_trace_id` before review. The
+first artifact is the bounded `trace_correlation_manifest.v1` manifest, not a
+raw prompt/output export. Inspect its `parent_trace`, `identifiers`, `joins`,
+and `unresolved` sections and record the exact resolution status in the
+human-readable review. Only a confirmed parent may be opened with
+`export_llm_trace`; an untyped or ambiguous value remains an unresolved
+diagnostic result. This handoff does not authorize an LLM call or convert
+deterministic correlation success into a quality judgment.

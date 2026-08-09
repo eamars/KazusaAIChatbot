@@ -573,6 +573,9 @@ async def collect_commitment_due_cognition_cases(
         if not text_or_empty(case.get("case_name")):
             continue
         case["source_calendar_run_id"] = run_id
+        case["source_llm_trace_id"] = text_or_empty(
+            run.get("source_llm_trace_id")
+        )
         cases.append(case)
 
     return cases
@@ -1417,6 +1420,9 @@ def _build_scheduled_future_cognition_case(
         "user_profile": case_user_profile,
         "platform_bot_id": source_platform_bot_id,
         "source_calendar_run_id": run_id,
+        "source_llm_trace_id": text_or_empty(
+            run.get("source_llm_trace_id")
+        ),
         "source_action_attempt_id": source_action_attempt_id,
         "cognition_source": {
             "source_kind": "scheduler_event",

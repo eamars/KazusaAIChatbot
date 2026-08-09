@@ -99,3 +99,24 @@ After running an export, tell the user:
 - The time window or filter used, when relevant.
 
 Keep the response short and avoid dumping the exported JSON into chat.
+
+## Trace-Correlation Handoff
+
+When the requested data starts with a Control Console trace value, record the
+exact copied value and its source surface before querying. For the canonical
+Debug Chat trace line use `web_control_trace_id` and create the protected,
+identifier-only manifest first:
+
+```powershell
+venv\Scripts\python -m scripts.export_trace_correlation_manifest `
+  --identifier <copied-value> `
+  --source-surface web_control_trace_id `
+  --output test_artifacts\diagnostics\trace_correlation_<name>.json
+```
+
+Inspect `parent_trace`, `identifiers`, `joins`, and `unresolved` before
+pulling any companion collection or forming a diagnosis. The manifest uses
+fixed limits and projections: conversation bodies, embeddings, raw trace
+payloads, worker payloads, and secrets stay outside this artifact. Preserve
+zero, multiple, expired/not-captured, and protected-unavailable outcomes; do
+not substitute a mock result for a live database outcome.

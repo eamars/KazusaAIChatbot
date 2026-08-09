@@ -117,3 +117,16 @@ cutover.
 Do not add a generic router, dynamic worker discovery, direct adapter delivery,
 or direct shared-cognition invocation. Do not delete collections outside the
 approved accepted-task and background-job history boundary.
+
+## Trace Ownership
+
+Every live job created from a trace-backed action carries the additive
+`source_llm_trace_id` beside `source_action_attempt_id` and
+`accepted_task_id`. A completed job's result episode retains the source trace
+and job id in protected origin metadata. Accepted-task result delivery creates
+a separate child trace with `parent_llm_trace_id` and
+`source_background_work_job_id`; these fields are diagnostic ownership only and
+are excluded from worker payloads, prompt-facing source packets, and Console
+lookup projections.
+Idempotent duplicate writes preserve an existing non-empty source trace and
+record a bounded conflict marker when a different source is supplied.

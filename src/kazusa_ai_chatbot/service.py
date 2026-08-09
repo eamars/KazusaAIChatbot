@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 from copy import deepcopy
 import hashlib
+import hmac
 import json
 import logging
 import os
@@ -20,7 +21,7 @@ from collections.abc import Mapping, Sequence
 from contextlib import asynccontextmanager, suppress
 from typing import Any, Literal
 
-from fastapi import FastAPI, BackgroundTasks
+from fastapi import BackgroundTasks, FastAPI, Request
 
 from kazusa_ai_chatbot.action_spec.execution import execute_action_specs_for_trace
 from kazusa_ai_chatbot.action_spec.results import (
@@ -44,6 +45,7 @@ from kazusa_ai_chatbot.config import (
     CHAT_HISTORY_RECENT_LIMIT,
     CONVERSATION_HISTORY_LIMIT,
     COGNITION_VISUAL_DIRECTIVES_ENABLED,
+    KAZUSA_CONTROL_BRAIN_SHARED_SECRET,
     MEDIA_DESCRIPTOR_CACHE_MAX_HYDRATION_ENTRIES,
     REFLECTION_CYCLE_ENABLED,
     REFLECTION_PHASE_MAX_SLOTS_PER_PERIOD,
@@ -303,6 +305,40 @@ OPERATIONAL_FAILURE_NOTICE = (
     "The character could not complete this turn because of an internal "
     "response-path error. Please try again."
 )
+CONTROL_CONSOLE_MARKER_HEADER = "x-kazusa-control-console"
+CONTROL_CONSOLE_AUTH_HEADER = "x-kazusa-control-console-auth"
+CONTROL_CONSOLE_MARKER = "debug-v1"
+
+
+def _authorize_console_trace_request(
+    *,
+    request: Request,
+    chat_request: ChatRequest,
+) -> None:
+    """Bind Brain-side trace disclosure authorization to one chat request."""
+
+    supplied_marker = request.headers.get(CONTROL_CONSOLE_MARKER_HEADER, "")
+    supplied_secret = request.headers.get(CONTROL_CONSOLE_AUTH_HEADER, "")
+    configured_secret = KAZUSA_CONTROL_BRAIN_SHARED_SECRET
+    chat_request._console_trace_authorized = bool(
+        chat_request.platform == "debug"
+        and configured_secret
+        and supplied_marker == CONTROL_CONSOLE_MARKER
+        and hmac.compare_digest(supplied_secret, configured_secret)
+    )
+
+
+def _operator_trace_id(
+    *,
+    request: ChatRequest,
+    trace_id: str,
+    trace_recorded: bool,
+) -> str:
+    """Return the trace id only for an authorized retained Debug Chat run."""
+
+    if not trace_recorded or not request._console_trace_authorized:
+        return ""
+    return trace_id
 
 
 def _service_event_scope(req: ChatRequest) -> event_logging.EventScopeInput:
@@ -548,6 +584,7 @@ def _operational_error_response(
     trace_id: str,
     exception: BaseException,
     attempt_count: int,
+    operator_trace_id: str = "",
 ) -> ChatResponse:
     """Build a transparent structured operational response.
 
@@ -587,6 +624,7 @@ def _operational_error_response(
         messages=[notice],
         content_type="operational_error",
         delivery_tracking_id="",
+        trace_id=operator_trace_id,
         operational_error=operational_error,
     )
     return return_value
@@ -1263,7 +1301,7 @@ async def _prepare_frontline_fragment(
     item.resolved_message_envelope = message_envelope
     if not item.llm_trace_id:
         item.llm_trace_id = llm_tracing.build_trace_id()
-    await llm_tracing.ensure_llm_trace_run(
+    trace_write = await llm_tracing.ensure_llm_trace_run(
         trace_id=item.llm_trace_id,
         platform=req.platform,
         platform_channel_id=req.platform_channel_id,
@@ -1271,6 +1309,9 @@ async def _prepare_frontline_fragment(
         platform_message_id=req.platform_message_id,
         global_user_id=global_user_id,
         started_at=item.storage_timestamp_utc,
+    )
+    item.llm_trace_recorded = item.llm_trace_recorded or bool(
+        trace_write["accepted"]
     )
     if not item.conversation_row_id:
         conversation_row_id = await _save_user_message_from_item(
@@ -1906,6 +1947,11 @@ async def _complete_settled_operational_failure(
         trace_id=response_owner.llm_trace_id,
         exception=exception,
         attempt_count=max(1, int(getattr(exception, "attempt_count", 1))),
+        operator_trace_id=_operator_trace_id(
+            request=response_owner.request,
+            trace_id=response_owner.llm_trace_id,
+            trace_recorded=response_owner.llm_trace_recorded,
+        ),
     )
     await _complete_settled_fragments(lease, response)
     if response_owner.llm_trace_id:
@@ -1966,7 +2012,16 @@ async def _frontline_intake_item(item: QueuedChatItem) -> None:
             return
 
         if outcome.action == "append":
-            _chat_input_queue.complete(item, ChatResponse())
+            _chat_input_queue.complete(
+                item,
+                ChatResponse(
+                    trace_id=_operator_trace_id(
+                        request=item.request,
+                        trace_id=item.llm_trace_id,
+                        trace_recorded=item.llm_trace_recorded,
+                    ),
+                ),
+            )
             await _release_queued_pipeline_handle(item)
             await llm_tracing.finalize_llm_trace_run(
                 trace_id=item.llm_trace_id,
@@ -2881,6 +2936,43 @@ async def _deliver_accepted_task_result_episode(
             "reason": "delivery channel id is missing",
         }
 
+    source_trace_id = str(
+        episode["origin_metadata"].get("source_llm_trace_id", "")
+    ).strip()
+    source_background_work_job_id = str(
+        episode["origin_metadata"].get(
+            "source_background_work_job_id",
+            "",
+        )
+    ).strip()
+    result_trace_id = llm_tracing.build_trace_id()
+    result_trace_finalized = False
+
+    async def finalize_result_trace(
+        *,
+        status: str,
+        final_dialog_count: int,
+        delivery_tracking_id: str,
+    ) -> None:
+        """Finalize the result-delivery child trace without gating delivery."""
+
+        nonlocal result_trace_finalized
+        if result_trace_finalized:
+            return
+        result_trace_finalized = True
+        try:
+            await llm_tracing.finalize_llm_trace_run(
+                trace_id=result_trace_id,
+                status=status,
+                final_dialog_count=final_dialog_count,
+                delivery_tracking_id=delivery_tracking_id,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Background result trace finalization failed: %s",
+                exc,
+            )
+
     operational_context: CharacterOperationalExecutionContext | None = None
     operational_token: dict[str, Any] | None = None
     operational_effective_at = ""
@@ -2949,7 +3041,7 @@ async def _deliver_accepted_task_result_episode(
         initial_state: IMProcessState = {
             "storage_timestamp_utc": episode["created_at"],
             "local_time_context": _episode_local_time_context(episode),
-            "llm_trace_id": llm_tracing.build_trace_id(),
+            "llm_trace_id": result_trace_id,
             "platform": platform,
             "platform_message_id": str(
                 episode["origin_metadata"].get("platform_message_id", "")
@@ -3007,20 +3099,41 @@ async def _deliver_accepted_task_result_episode(
                 )
             ),
         }
-        initial_state.update(snapshot_state_update(
-            identity_snapshot,
-            episode_id=episode_id,
-            include_epistemic_core=False,
-        ))
-        progress_update = await load_conversation_episode_state(initial_state)
-        initial_state.update(progress_update)
-        result = await persona_supervisor2(initial_state)
+        await llm_tracing.ensure_llm_trace_run(
+            trace_id=result_trace_id,
+            platform=platform,
+            platform_channel_id=platform_channel_id,
+            channel_type=channel_type,
+            platform_message_id=str(
+                episode["origin_metadata"].get("platform_message_id", "")
+            ),
+            global_user_id=requester_global_user_id,
+            parent_llm_trace_id=source_trace_id,
+            source_background_work_job_id=source_background_work_job_id,
+        )
+        trace_token = llm_tracing.bind_trace_id(result_trace_id)
+        try:
+            initial_state.update(snapshot_state_update(
+                identity_snapshot,
+                episode_id=episode_id,
+                include_epistemic_core=False,
+            ))
+            progress_update = await load_conversation_episode_state(initial_state)
+            initial_state.update(progress_update)
+            result = await persona_supervisor2(initial_state)
+        finally:
+            llm_tracing.reset_trace_id(trace_token)
         final_dialog = [
             fragment
             for fragment in result.get("final_dialog", [])
             if isinstance(fragment, str) and fragment.strip()
         ]
         if not final_dialog:
+            await finalize_result_trace(
+                status="failed",
+                final_dialog_count=0,
+                delivery_tracking_id="",
+            )
             return {
                 "status": "failed",
                 "reason": "result-ready cognition selected no visible text",
@@ -3093,6 +3206,11 @@ async def _deliver_accepted_task_result_episode(
         logger.exception(
             f"Accepted task result delivery failed: {exc}"
         )
+        await finalize_result_trace(
+            status="failed",
+            final_dialog_count=0,
+            delivery_tracking_id="",
+        )
         return {
             "status": "failed",
             "reason": str(exc),
@@ -3124,7 +3242,17 @@ async def _deliver_accepted_task_result_episode(
                     error_code="route_invalid",
                 )
                 complete_predecessor(operational_token, receipt)
+        await finalize_result_trace(
+            status="failed",
+            final_dialog_count=0,
+            delivery_tracking_id="",
+        )
         raise
+    await finalize_result_trace(
+        status="succeeded",
+        final_dialog_count=len(final_dialog),
+        delivery_tracking_id=dispatch_tracking_id,
+    )
     result["episode_trace"] = settled_trace
     consolidation_state = result.get("consolidation_state")
     if isinstance(consolidation_state, dict):
@@ -5802,7 +5930,7 @@ async def _process_queued_chat_item(
         if not isinstance(message_envelope, Mapping):
             message_envelope = await _resolve_message_envelope_identities(req)
         stages_reached.append("identity")
-        await llm_tracing.ensure_llm_trace_run(
+        trace_write = await llm_tracing.ensure_llm_trace_run(
             trace_id=llm_trace_id,
             platform=req.platform,
             platform_channel_id=req.platform_channel_id,
@@ -5810,6 +5938,9 @@ async def _process_queued_chat_item(
             platform_message_id=req.platform_message_id,
             global_user_id=global_user_id,
             started_at=item.storage_timestamp_utc,
+        )
+        item.llm_trace_recorded = item.llm_trace_recorded or bool(
+            trace_write["accepted"]
         )
         if item.request.debug_modes.listen_only and item.conversation_row_id:
             try:
@@ -5994,7 +6125,16 @@ async def _process_queued_chat_item(
                 f'channel={req.platform_channel_id or "<dm>"} '
                 f'message={req.platform_message_id or "<none>"}'
             )
-            _chat_input_queue.complete(item, ChatResponse())
+            _chat_input_queue.complete(
+                item,
+                ChatResponse(
+                    trace_id=_operator_trace_id(
+                        request=req,
+                        trace_id=llm_trace_id,
+                        trace_recorded=item.llm_trace_recorded,
+                    ),
+                ),
+            )
             stages_reached.append("no_content")
             stages_reached.append("response_completed")
             await event_logging.record_pipeline_turn_event(
@@ -6249,6 +6389,11 @@ async def _process_queued_chat_item(
                     trace_id=llm_trace_id,
                     exception=exc,
                     attempt_count=cognition_attempt_count,
+                    operator_trace_id=_operator_trace_id(
+                        request=req,
+                        trace_id=llm_trace_id,
+                        trace_recorded=item.llm_trace_recorded,
+                    ),
                 )
                 failure_graph: dict[str, Any] | None = None
                 try:
@@ -6525,6 +6670,11 @@ async def _process_queued_chat_item(
             delivery_mentions=delivery_mentions if response_dialog else [],
             scheduled_followups=0,
             delivery_tracking_id=delivery_tracking_id,
+            trace_id=_operator_trace_id(
+                request=req,
+                trace_id=llm_trace_id,
+                trace_recorded=item.llm_trace_recorded,
+            ),
             cognition_graph=cognition_graph,
         )
 
@@ -7966,7 +8116,11 @@ async def runtime_adapter_heartbeat_endpoint(req: RuntimeAdapterRegistrationRequ
 
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
+async def chat(
+    req: ChatRequest,
+    background_tasks: BackgroundTasks,
+    request: Request,
+):
     """Enqueue an inbound chat message and wait for queue processing.
 
     Args:
@@ -7979,6 +8133,7 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
     """
 
     _ = background_tasks
+    _authorize_console_trace_request(request=request, chat_request=req)
     response = await _enqueue_chat_request(req)
     return response
 

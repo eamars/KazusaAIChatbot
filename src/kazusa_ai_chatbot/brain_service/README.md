@@ -767,3 +767,21 @@ through heartbeat/startup behavior. A missing, non-string, or empty
 keeps the adapter's last successfully validated brain name. Missing runtime
 adapters cause dispatcher delivery validation to reject or fail callback sends
 according to dispatcher policy.
+
+## Debug Chat Trace Disclosure
+
+`ChatResponse.trace_id` is the brain-owned protected trace id for the current
+turn. It is populated only for an authorized Control Console Debug Chat request
+whose trace run was retained successfully. The authorization requires
+`platform=debug`, `X-Kazusa-Control-Console: debug-v1`, and a matching
+`X-Kazusa-Control-Console-Auth` value for `KAZUSA_CONTROL_BRAIN_SHARED_SECRET`.
+Normal adapters receive an empty top-level `trace_id`. The separate
+`delivery_tracking_id` remains a delivery receipt identifier and is never used
+as a trace alias. Structured `OperationalErrorOut.trace_id` remains available
+inside an operational error for its existing failure contract; it is not a
+public top-level disclosure.
+
+Trace persistence is best effort and capture-mode governed. A missing retained
+run produces an empty Console value and the manifest reports the corresponding
+availability status. Protected source fields are identifier-only and never
+enter the prompt-facing state, dialog graph, or adapter payload.

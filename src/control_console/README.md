@@ -515,3 +515,30 @@ No Node.js, npm, pnpm, yarn, React, Vue, Vite, Webpack, Tailwind build tooling, 
 ## Testing Expectations
 
 Deterministic tests cover strict contracts, auth/CSRF, registry validation, local state writes, log redaction, audit records, argv-only supervisor calls, route failure codes, event monitor redaction, repository unavailable fallbacks, debug-chat unavailable behavior, and compact SSE replay/gap behavior.
+
+## Debug Chat Trace Synchronization
+
+When an operator asks an agent to look up `xxx`, the value copied from the
+Debug Chat metadata must be recorded as `source_surface=web_control_trace_id`.
+The browser displays the brain-owned `trace_id` separately from
+`delivery_tracking_id`; it never derives a trace from a graph run, event
+correlation, request, action, or delivery identifier. The brain discloses the
+top-level trace only when the request is `platform=debug`, the configured
+`KAZUSA_CONTROL_BRAIN_SHARED_SECRET` matches, and a protected trace run was
+recorded. The console sends the exact `debug-v1` marker and shared-secret
+headers for that request.
+
+| Identifier | Current browser availability | Exact next retrieval route |
+| --- | --- | --- |
+| `trace_id` shown as `trace ...` | rendered when retained and authorized | `scripts.export_trace_correlation_manifest --source-surface web_control_trace_id --identifier <copied>` |
+| `delivery_tracking_id` shown as `tracking ...` | rendered, distinct from trace | `scripts.export_llm_trace --delivery-tracking-id <id>` after the field is confirmed |
+| `platform_message_id` | API/request-only; absent from the Debug Chat result | `scripts.export_llm_trace --platform-message-id <id>` |
+| `cognition_invocation_id` | protected-only | resolve the parent first, then `scripts.export_llm_trace --trace-id <trace> --cognition-invocation-id <id>` |
+| `global_user_id` | protected-only | manifest with `--source-surface protected_global_user_id` |
+| action-attempt, background-job, accepted-task, calendar schedule/run ids | absent from the current browser projection | manifest with the matching protected source surface |
+| graph `run_id` and event `correlation_id` | rendered on their own surfaces, but generic | record `source_surface=unknown`; the manifest returns `not_available_from_web` until typed evidence exists |
+| child/future execution trace ids | protected-only | inspect manifest `joins.child_trace_runs` and the exact parent relation |
+
+The manifest is the protected evidence handoff. Inspect `parent_trace`,
+`identifiers`, `joins`, and `unresolved` before opening a separate raw trace
+export. Zero and multiple candidates remain explicit; no newest row is chosen.

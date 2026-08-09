@@ -57,6 +57,7 @@ class BackgroundWorkQueueRequest(TypedDict):
 
     job_id: str
     source_action_attempt_id: str
+    source_llm_trace_id: NotRequired[str]
     idempotency_key: str
     accepted_task_id: str
     task_identity_key: str
@@ -110,6 +111,9 @@ class BackgroundWorkJobDoc(TypedDict, total=False):
     job_id: str
     idempotency_key: str
     source_action_attempt_id: str
+    source_llm_trace_id: str
+    correlation_write_status: str
+    correlation_conflict_source_llm_trace_id: str
     accepted_task_id: str
     task_identity_key: str
     semantic_objective: str

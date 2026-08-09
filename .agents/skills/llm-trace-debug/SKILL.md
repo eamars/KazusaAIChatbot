@@ -182,3 +182,44 @@ Logging retention is controlled by two shared settings:
 - `DEBUG_LOG_TTL_DAYS` covers protected debug trace data.
 
 Do not introduce per-collection TTL settings for trace debugging.
+
+## Control Console Trace-Correlation Handoff
+
+For the agent use case `Look up the trace id of xxx`, `xxx` must be the exact
+value copied from the Control Console Debug Chat metadata line `trace ...`.
+Record the copied value and `source_surface=web_control_trace_id` before any
+protected query. The line is the canonical browser trace surface; a graph
+`run_id`, event `correlation_id`, delivery tracking id, action id, or bare
+opaque value is not interchangeable with it.
+
+Create the bounded identifier-only manifest first:
+
+```powershell
+venv\Scripts\python -m scripts.export_trace_correlation_manifest `
+  --identifier <copied-value> `
+  --source-surface web_control_trace_id `
+  --output test_artifacts\diagnostics\trace_correlation_<name>.json
+```
+
+Inspect `parent_trace`, `identifiers`, `joins`, and `unresolved` in that order.
+Continue to `scripts.export_llm_trace --trace-id <trace>` only when the parent
+status is `confirmed`. Preserve `not_found`, `ambiguous`,
+`not_available_from_web`, `not_captured`, `conflict`, and `not_available` as
+terminal evidence; never select a newest candidate.
+
+## Web Availability Matrix
+
+| Identifier | Browser availability | Exact next route |
+| --- | --- | --- |
+| Debug Chat `trace_id` | rendered when authorized and retained | correlation manifest with `web_control_trace_id` |
+| `delivery_tracking_id` | rendered separately from trace | `scripts.export_llm_trace --delivery-tracking-id <id>` after field confirmation |
+| `platform_message_id` | API/request-only | `scripts.export_llm_trace --platform-message-id <id>` |
+| `cognition_invocation_id` | protected-only | resolve parent, then the trace export selector |
+| `global_user_id` | protected-only | correlation manifest with `protected_global_user_id` |
+| action-attempt, background-job, accepted-task, calendar schedule/run ids | absent from current Console projection | correlation manifest with the matching protected source surface |
+| graph `run_id` and event `correlation_id` | generic rendered surfaces, not trace ids | record `unknown`; manifest returns `not_available_from_web` until typed evidence exists |
+| child/future execution trace ids | protected-only | inspect exact `joins.child_trace_runs` relations |
+
+The manifest is an evidence handoff, not a raw trace export. Keep it under
+`test_artifacts/diagnostics`, inspect one supplied anchor at a time, and keep
+the separate protected trace export out of chat output.

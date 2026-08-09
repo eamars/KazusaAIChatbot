@@ -209,6 +209,7 @@ def create_app(
     kazusa_client = KazusaClient(
         base_url=app_settings.brain_base_url,
         timeout_seconds=DEBUG_CHAT_TIMEOUT_SECONDS,
+        control_shared_secret=app_settings.brain_shared_secret,
     )
     stream_buffer = SSEEventBuffer(max_events=100)
     stream_shutdown_event = asyncio.Event()
@@ -895,6 +896,7 @@ def create_app(
                 "request": redact_mapping(request.model_dump(mode="json")),
                 "response": None,
                 "tracking_id": None,
+                "trace_id": "",
                 "latency_ms": None,
                 "sent_at": datetime.now(timezone.utc).isoformat(),
                 "error": {
@@ -935,6 +937,7 @@ def create_app(
                 "request": redact_mapping(request.model_dump(mode="json")),
                 "response": None,
                 "tracking_id": None,
+                "trace_id": "",
                 "latency_ms": None,
                 "sent_at": datetime.now(timezone.utc).isoformat(),
                 "error": {"code": "brain_unavailable", "message": str(exc)},

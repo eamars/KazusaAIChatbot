@@ -2261,6 +2261,8 @@ function debugMessageText(message) {
 function debugResponseMeta(result) {
   const response = result.response || {};
   const parts = [];
+  if (result.trace_id) parts.push(`trace ${result.trace_id}`);
+  else parts.push("trace unavailable");
   if (result.tracking_id) parts.push(`tracking ${result.tracking_id}`);
   if (Number.isFinite(result.latency_ms)) parts.push(`${result.latency_ms} ms`);
   if (Number.isFinite(response.delivery_mention_count)) parts.push(`${response.delivery_mention_count} mentions`);

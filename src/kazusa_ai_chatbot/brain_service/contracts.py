@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, TypedDict
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from kazusa_ai_chatbot.message_envelope import MentionEntityKind
 
@@ -80,6 +80,7 @@ class ChatRequest(BaseModel):
     debug_modes: DebugModesIn = Field(default_factory=DebugModesIn)
 
     _receipt_metadata: ChatRequestReceiptMetadata | None = None
+    _console_trace_authorized: bool = PrivateAttr(default=False)
 
 
 class AttachmentOut(BaseModel):
@@ -112,6 +113,7 @@ class ChatResponse(BaseModel):
     delivery_mentions: list[dict[str, Any]] = Field(default_factory=list)
     scheduled_followups: int = 0
     delivery_tracking_id: str = ""
+    trace_id: str = ""
     cognition_graph: dict[str, Any] | None = None
     operational_error: OperationalErrorOut | None = None
 

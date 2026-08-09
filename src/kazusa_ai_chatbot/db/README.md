@@ -671,3 +671,23 @@ Outside `src/kazusa_ai_chatbot/db/` callers use:
 Inside `src/kazusa_ai_chatbot/db/`, package internals use backend access,
 query/update details, backend exception handling, and private
 collection-specific helpers.
+
+## Trace Correlation Read Contract
+
+Protected diagnostic lookups use named helpers in
+`db.script_operations`, not ad hoc MongoDB access. The bounded helpers resolve
+one exact parent trace and read projected companion identifiers for
+`conversation_history`, trace steps/failure capsules, action attempts,
+background jobs, calendar schedules/runs, and child trace runs. Conversation
+rows exclude body and embedding content; trace step capsules and job payloads
+are not included in the manifest path.
+
+The source fields are additive durable ownership fields:
+`source_llm_trace_id` on action/background/calendar rows and
+`parent_llm_trace_id`, `source_background_work_job_id`, and
+`source_calendar_run_id` on child trace runs. Bootstrap creates bounded named
+indexes for these fields. Historical rows remain unchanged and are surfaced as
+`not_captured` when the field is absent. Duplicate writes preserve an existing
+non-empty source trace and add bounded `correlation_write_status=conflict` plus
+`correlation_conflict_source_llm_trace_id` metadata when a different source is
+presented.

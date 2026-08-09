@@ -38,6 +38,7 @@ class QueuedChatItem:
             settlement deadlines.
         llm_trace_id: Protected trace run shared by this input's relevance and
             downstream cognition stages.
+        llm_trace_recorded: Whether the protected trace-run write succeeded.
     """
 
     sequence: int
@@ -56,6 +57,7 @@ class QueuedChatItem:
     user_profile: dict[str, Any] = field(default_factory=dict)
     resolved_message_envelope: Any | None = None
     llm_trace_id: str = ""
+    llm_trace_recorded: bool = False
 
 
 @dataclass

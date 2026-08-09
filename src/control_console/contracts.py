@@ -396,6 +396,7 @@ class ConsoleDebugChatResponse(StrictModel):
     request: dict[str, Any]
     response: dict[str, Any] | None
     tracking_id: str | None
+    trace_id: str = ""
     latency_ms: int | None
     sent_at: datetime
     error: dict[str, Any] | None = None

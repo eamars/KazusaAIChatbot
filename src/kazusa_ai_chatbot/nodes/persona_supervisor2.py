@@ -387,6 +387,7 @@ async def _action_results_for_state(
         remaining_specs,
         storage_timestamp_utc=state["storage_timestamp_utc"],
         executed_action_attempt_ids=executed_action_attempt_ids,
+        source_llm_trace_id=str(state.get("llm_trace_id") or ""),
         availability_snapshot_factory=(
             lambda _context: build_action_availability_snapshot(state)
         ),
@@ -414,6 +415,7 @@ async def _execute_pre_surface_action_results(
     return await execute_action_specs_for_trace(
         action_specs,
         storage_timestamp_utc=state["storage_timestamp_utc"],
+        source_llm_trace_id=str(state.get("llm_trace_id") or ""),
         availability_snapshot_factory=(
             lambda _context: build_action_availability_snapshot(state)
         ),
@@ -456,6 +458,7 @@ async def stage_2a_background_work_enqueue(
     action_results = await execute_action_specs_for_trace(
         background_specs,
         storage_timestamp_utc=state["storage_timestamp_utc"],
+        source_llm_trace_id=str(state.get("llm_trace_id") or ""),
         availability_snapshot_factory=(
             lambda _context: build_action_availability_snapshot(state)
         ),

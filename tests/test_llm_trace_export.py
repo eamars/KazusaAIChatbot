@@ -48,6 +48,28 @@ async def test_resolve_trace_id_from_dialog_text(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_resolve_trace_id_rejects_multiple_candidate_traces(monkeypatch):
+    """Metadata lookup must preserve ambiguity instead of choosing newest."""
+
+    monkeypatch.setattr(
+        export_llm_trace.script_operations,
+        "export_collection_rows",
+        AsyncMock(side_effect=[
+            [{"llm_trace_id": "trace-delivery"}],
+            [{"llm_trace_id": "trace-platform"}],
+        ]),
+    )
+
+    with pytest.raises(ValueError, match="multiple llm_trace_id"):
+        await export_llm_trace.resolve_trace_id(
+            trace_id="",
+            dialog_text="",
+            delivery_tracking_id="delivery-1",
+            platform_message_id="platform-1",
+        )
+
+
+@pytest.mark.asyncio
 async def test_build_trace_export_groups_failure_capsules(monkeypatch):
     ordinary_step = {
         "trace_id": "trace-1",

@@ -9,20 +9,77 @@ Date: 2026-08-09
   `llm_trace_id`, retrieves the available `global_user_id` and Cognition
   invocation evidence, and follows exact links to action, background-work,
   calendar, and future-cognition records.
-- Status: draft
+- Status: completed
 - Scope boundary: the protected trace lane, its read-only diagnostic export
-  path, the trace-debug and diagnostic skills, and forward correlation fields
-  written by the live action/background/calendar/self-cognition path. The
-  Control Console remains a read-only projection with its current redaction
-  boundary.
+  path, the trace-debug and diagnostic skills, forward correlation fields
+  written by the live action/background/calendar/self-cognition path, and one
+  authenticated Debug Chat `trace_id` projection. The Console exposes only
+  that canonical trace id for the stated operator workflow. Existing delivery
+  tracking, graph, and event values remain separate rendered telemetry and are
+  never trace anchors; global, action, background, calendar, scheduler, and raw
+  content identifiers remain protected or redacted.
 - Change direction: record the web-console source surface before resolving an
   opaque value; resolve parent traces only through typed exact candidates;
   export a bounded correlation manifest; add forward source-trace links to
   durable action and scheduling records; and bind a protected trace to future
   self-cognition execution. Historical rows remain immutable and report
   missing capture explicitly.
-- Acceptance state: pending user approval. This plan creation does not start
-  implementation or authorize production-code edits.
+- Acceptance state: user-approved implementation; independent content and code
+  reviews passed on 2026-08-09; lifecycle completed.
+
+### 2026-08-09 approved use-case amendment
+
+The supported operator workflow is fixed to:
+
+```text
+user request: "Look up the trace id of <xxx>."
+<xxx> = the authenticated Control Console Debug Chat `trace_id` value
+agent -> llm-trace-debug skill -> exact protected trace lookup
+```
+
+The brain response and Control Console client must carry one canonical
+`llm_trace_id` into a dedicated rendered `trace_id` field. The existing
+`delivery_tracking_id` remains the delivery-receipt identifier and is never
+used as a trace-id alias. The graph `run_id` remains generic graph telemetry
+unless it independently carries the same trace id through the explicit
+`trace_id` field.
+
+The disclosure is authorized by a brain-verifiable service boundary, not by the
+caller-controlled `platform` value alone. The trace projection is enabled only
+when both processes are configured with the same non-empty
+`KAZUSA_CONTROL_BRAIN_SHARED_SECRET`. For the server-side Debug Chat request,
+the authenticated Control Console client sends these exact headers to `/chat`:
+
+```text
+X-Kazusa-Control-Console: debug-v1
+X-Kazusa-Control-Console-Auth: <KAZUSA_CONTROL_BRAIN_SHARED_SECRET>
+```
+
+The Brain compares the secret in constant time and marks the request's
+internal, non-public trace-disclosure context only when both headers are valid
+and `ChatRequest.platform == "debug"`. The public `ChatRequest` schema does not
+gain an authorization field. Missing or mismatched configuration fails closed
+for trace disclosure: ordinary chat processing remains available, but the
+response contains an empty top-level `trace_id` and the Console displays trace
+availability as absent. It does not turn an ordinary adapter request into a
+console request. The authenticated Console session and CSRF checks remain the
+browser-side authorization, while the shared secret is the Brain-side
+provenance check. Direct or spoofed `/chat` calls that provide only
+`platform="debug"` therefore receive no operator-facing trace id.
+
+The supported copied web source is `web_control_trace_id`. Its exact join is
+`llm_trace_runs.trace_id == input.identifier`, backed by the unique protected
+trace-run index. The manifest records zero, one, or unavailable protected rows
+without shape inference. Generic request, graph, event, trigger, and attempt
+values remain telemetry-only and are reported as `not_available_from_web` or
+`not_applicable`; they are not parent-trace anchors in this workflow.
+
+Every one-to-many companion relation retains a bounded candidate list and its
+own `match_count`, `status`, and exact collection/field provenance. A
+duplicate durable write preserves an existing non-empty source trace. A
+missing historical source trace remains `not_captured`. A conflicting source
+trace is reported as a bounded write conflict and does not overwrite the
+existing row or select a newest candidate.
 
 ## Scope And Change Direction
 
@@ -92,12 +149,24 @@ The canonical meaning of “future cognition id” is fixed as follows:
 
 The implementation never introduces a second alias named `future_cognition_id`.
 
-The web console is not expanded in this plan. Its current redaction contract
-continues to hide global, operational, and scheduler identifiers. The web
-availability matrix becomes explicit in the skills and ICDs so the agent can
-distinguish “not shown by the web” from “not captured by the runtime.” A
-separate security-approved console disclosure plan is required for any future
-browser panel that displays hidden identifiers.
+The web console receives one narrow authenticated Debug Chat projection in this
+plan: the brain-owned `llm_trace_id` is rendered as `trace_id` when a retained
+protected run exists. Its existing redaction contract continues to hide global,
+operational, and scheduler identifiers. The web-availability matrix becomes
+explicit in the skills and ICDs so the agent can distinguish “not shown by the
+web” from “not captured by the runtime.” A separate security-approved console
+disclosure plan is required for any future browser panel that displays hidden
+identifiers.
+
+The existing `OperationalErrorOut.trace_id` field is a separate, pre-existing
+machine-readable adapter contract. It remains available only inside the
+user-visible operational-error envelope already consumed by registered
+adapters, including NapCat; it is not a new console source surface, is not
+rendered by the Control Console, and is not accepted as a `web_control_trace_id`
+unless the value was separately rendered by authenticated Debug Chat. The
+implementation preserves its empty-value behavior and exact value equality with
+the owning failed turn's trace when present. Regression coverage must include
+both the existing non-debug adapter envelope and the new Debug Chat projection.
 
 ## Mandatory Skills
 
@@ -134,7 +203,8 @@ browser panel that displays hidden identifiers.
   identifiers, but it must not copy raw prompts, raw model output, full
   conversation bodies, embeddings, secrets, adapter payloads, or unbounded
   action/job payloads.
-- Keep the console a projection boundary. Do not add hidden identifiers to
+- Keep the console a projection boundary. Add only the dedicated authenticated
+  Debug Chat `trace_id` projection; do not add any other hidden identifier to
   Control Console routes, projections, HTML, CSS, or JavaScript in this plan.
 - Resolve identifiers through typed, allowlisted fields and exact matches.
   Zero matches produce `not_found`; multiple parent candidates produce
@@ -218,14 +288,7 @@ browser panel that displays hidden identifiers.
 
    The supported `source-surface` values are:
 
-   - `web_debug_tracking`;
-   - `web_cognition_run_reference`;
-   - `web_event_request`;
-   - `web_event_run`;
-   - `web_event_trigger`;
-   - `web_event_attempt`;
-   - `web_debug_request_id`;
-   - `web_debug_platform_message_id`;
+   - `web_control_trace_id`;
    - `protected_llm_trace_id`;
    - `protected_cognition_invocation_id`;
    - `protected_global_user_id`;
@@ -303,9 +366,16 @@ browser panel that displays hidden identifiers.
     bare opaque example, zero/multiple candidates, capture-mode availability,
     exact companion joins, historical `not_captured` rows, direct future
     cognition, `future_speak` background scheduling, and child future/result
-    traces. Add redaction assertions that ensure no protected raw content or
-    hidden identifier leaks into the console projections or sanitized event
-    log.
+     traces. Add redaction assertions that ensure no protected raw content or
+     hidden identifier leaks into the console projections or sanitized event
+     log. The console/Brain authorization tests must prove that a
+     caller-controlled `platform="debug"` without the exact shared-secret
+     headers receives an empty `trace_id`, while the authenticated server-side
+     Console path receives the canonical value. The named operational-error
+     contract tests must prove that the existing `OperationalErrorOut.trace_id`
+     preserves the failed-turn trace, retains its empty fallback, remains in
+     the existing adapter envelope, is absent from the Console projection, and
+     never promotes its nested value into the top-level Debug Chat `trace_id`.
 
 12. Produce one parent-authored evidence review artifact for the supplied
     anchors `0a04c1db64e24dd7870cd3d865179f37`,
@@ -317,13 +387,21 @@ browser panel that displays hidden identifiers.
 ## Deferred
 
 - Do not add a Control Console route, panel, browser label, or API field for
-  `global_user_id`, `llm_trace_id`, `cognition_invocation_id`, job ids,
-  action-attempt ids, schedule ids, or run ids.
+  `global_user_id`, `cognition_invocation_id`, job ids, action-attempt ids,
+  schedule ids, or run ids. The sole new console field is the authenticated
+  Debug Chat `trace_id` response field defined by this plan; the existing
+  `OperationalErrorOut.trace_id` adapter field remains governed by its
+  pre-existing operational-error contract.
 - Do not change current Control Console redaction of internal global ids,
-  operational ids, prompts, raw model output, raw messages, embeddings, or
-  scheduler payloads.
-- Do not expose protected trace rows through `/chat`, health, adapter
-  responses, event-log payloads, or public browser APIs.
+  action/background/calendar/scheduler ids, prompts, raw model output, raw
+  messages, embeddings, or scheduler payloads. Preserve existing rendered
+  delivery, graph, and event telemetry as separate non-anchor metadata.
+- Do not expose protected trace rows or trace content through `/chat`, health,
+  event-log payloads, or public browser APIs. The new Debug Chat-only `trace_id`
+  scalar is the sole new console disclosure exception. The existing scalar
+  `OperationalErrorOut.trace_id` remains limited to its existing operational
+  error envelope for registered adapter delivery and is not generalized or
+  rendered by the web console.
 - Do not backfill historical action, background, calendar, or self-cognition
   rows. A missing forward field is reported as `not_captured`.
 - Do not change the trace retention period, capture-mode defaults, failure
@@ -366,7 +444,7 @@ The operator-facing availability contract is:
 | graph `Run reference` | Rendered in the closed cognition graph disclosure | Generic graph correlation; type requires resolver evidence |
 | event `correlation_id` | Rendered in event detail when present | Sanitized event row; not automatically an LLM trace |
 | event `run_id` / `trigger_id` / `attempt_id` | Rendered as generic event detail when present | Sanitized event row and owning durable record |
-| `llm_trace_id` | Not exposed by the current web console | Protected `llm_trace_runs`, `llm_trace_steps` |
+| `llm_trace_id` / Console `trace_id` | Rendered only in authenticated Debug Chat when the protected run was recorded | Protected `llm_trace_runs`, `llm_trace_steps` |
 | `global_user_id` | Not exposed by the current web console | Protected trace run and user profile |
 | `cognition_invocation_id` | Not exposed by the current web console | Protected Cognition failure capsule |
 | `background_work_job_id` | Hidden by the current background projection | `background_work_jobs` |
@@ -389,7 +467,7 @@ discloses.
 
 ### Modify
 
-- `development_plans/README.md` — register this draft under active bugfix
+- `development_plans/README.md` — register this approved plan under active bugfix
   plans.
 - `.agents/skills/llm-trace-debug/SKILL.md` — add typed web-source input,
   availability matrix, exact companion workflow, and manifest handoff.
@@ -397,8 +475,18 @@ discloses.
   correlation-manifest export boundary.
 - `.agents/skills/debug-llm/SKILL.md` — require evidence-first manifest review
   and explicit unresolved-join reporting.
-- `src/control_console/README.md` — document the current rendered/API-only/
-  hidden identifier contract without changing the web surface.
+- `src/control_console/README.md`, `src/control_console/settings.py`, and
+  `src/control_console/app.py` — document and pass the shared-secret
+  Brain-side authorization for the authenticated Debug Chat path.
+- `src/control_console/contracts.py`, `src/control_console/kazusa_client.py`,
+  and `src/control_console/static/console.js` — carry and render the
+  authenticated Debug Chat trace id without exposing other protected fields;
+  the client sends the exact Brain authorization headers only for this call.
+- `src/kazusa_ai_chatbot/config.py`, `src/kazusa_ai_chatbot/service.py`,
+  `src/kazusa_ai_chatbot/brain_service/contracts.py`, and
+  `src/kazusa_ai_chatbot/brain_service/README.md` — define the Brain-side
+  header verification, internal authorization context, Debug Chat-only
+  response field, and absence behavior.
 - `src/kazusa_ai_chatbot/llm_tracing/README.md` — document source/parent trace
   fields, future self-cognition trace binding, and manifest ownership.
 - `src/kazusa_ai_chatbot/db/README.md` — document the read-only maintenance
@@ -435,9 +523,22 @@ discloses.
   `src/kazusa_ai_chatbot/nodes/persona_supervisor2.py`, and
   `src/kazusa_ai_chatbot/brain_service/post_turn.py` — pass the canonical
   trace context across live action and background-result ownership boundaries.
+- `docs/HOWTO.md` — document the required shared secret in the local
+  Control Console/Brain setup.
+- `tests/test_brain_console_trace_auth.py`, `tests/test_console_debug_chat.py`,
+  `tests/test_control_console_kazusa_client.py`,
+  `tests/test_control_console_web_surface.py`,
+  `tests/test_runtime_adapter_registration.py`, and
+  `tests/test_service_cognition_graph.py` — verify Brain authorization,
+  Console synchronization/redaction, and preservation of the existing
+  `OperationalErrorOut.trace_id` adapter envelope. The required assertions are
+  owned by `test_service_cognition_graph.py` for producer value/empty fallback,
+  `test_runtime_adapter_registration.py` for non-debug adapter delivery, and
+  `test_control_console_kazusa_client.py` plus `test_console_debug_chat.py` for
+  Console non-rendering and top-level non-promotion.
 - Directly affected deterministic test files under `tests/` for tracing,
-  action specs, background work, calendar scheduling, self-cognition,
-  post-turn lifecycle, and Control Console redaction.
+  action specs, background work, calendar scheduling, self-cognition, and
+  post-turn lifecycle.
 
 ### Create
 
@@ -456,8 +557,9 @@ discloses.
 
 ### Keep
 
-- Control Console routes, projections, static HTML/CSS/JavaScript, and its
-  intentional exclusion of hidden identifiers.
+- Control Console routes and projections other than the dedicated authenticated
+  Debug Chat `trace_id` field, static HTML/CSS layout, and its intentional
+  exclusion of every other hidden identifier.
 - Protected `llm_trace_runs` and `llm_trace_steps` as the source of model-stage
   evidence.
 - Existing `cognition_invocation_id` failure-capsule behavior and capture-mode
@@ -487,7 +589,7 @@ trace from an opaque value. Any such request requires a new or amended plan.
 
 | Topic | Decision |
 |---|---|
-| Web console | Keep the current redacted projection; document availability and use protected export for hidden ids. |
+| Web console | Render only the canonical authenticated Debug Chat `trace_id` as the new trace field; keep delivery, graph, and event values as separate rendered telemetry that cannot anchor a trace, and keep action, background, calendar, user, prompt, and raw-content identifiers protected or redacted. Preserve the existing adapter-only `OperationalErrorOut.trace_id` contract without rendering it in the console. |
 | Parent trace resolution | Require a typed source surface and one exact parent candidate; preserve zero and multiple results. |
 | Bare opaque ids | Treat them as `unknown` until the operator supplies the source surface; never infer from length or hex characters. |
 | Global user id | Read from protected trace/user records; do not disclose it in the web console. |
@@ -510,8 +612,9 @@ for existing rows.
 | Action/background/calendar writers | bigbang | Live persisted records receive the canonical source trace field from the owning state. |
 | Future self-cognition | bigbang | Each live case receives a bound protected trace and source calendar-run metadata. |
 | Historical rows | immutable | Missing forward fields remain absent and produce `not_captured`; no migration or timestamp reconstruction occurs. |
-| Console disclosure | unchanged | Existing UI/API projections and redaction assertions remain authoritative. |
+| Console disclosure | narrow additive | The authenticated Debug Chat response renders the canonical `trace_id` only when the server-side client supplies the valid `X-Kazusa-Control-Console: debug-v1` marker and constant-time-verified `X-Kazusa-Control-Console-Auth` shared secret, `ChatRequest.platform == "debug"`, and a protected trace run was recorded. Other clients and spoofed debug calls receive an empty field. The existing `OperationalErrorOut.trace_id` remains an adapter-only operational-error field and is covered separately. All other hidden identifiers and raw content remain excluded. |
 | Manifest schema | additive | New `trace_correlation_manifest.v1` is written beside, not inside, the existing raw protected trace export. |
+| Companion writes | immutable additive | Preserve existing source links on idempotent retry; report historical absence and conflicting links without overwrite or newest-row selection. |
 
 Rollback is a source revert for runtime writers and exporter behavior. No
 rollback script, data rewrite, or field-clearing operation is permitted. Newly
@@ -530,7 +633,28 @@ The implementation must use the following status vocabulary:
 - `not_available`: capture or retention prevents the protected source from
   existing;
 - `not_available_from_web`: the value is outside the current console surface;
-- `not_applicable`: the relation does not apply to the run path.
+- `not_applicable`: the relation does not apply to the run path;
+- `conflict`: a forward writer supplied a different source trace for an
+  existing immutable durable row.
+
+The `web_control_trace_id` terminal outcomes are mutually exclusive:
+
+| Evidence | Parent status | Manifest outcome |
+| --- | --- | --- |
+| Exactly one retained `llm_trace_runs` row by `trace_id` | Any captured lifecycle status | `confirmed` |
+| Exact query returns zero protected rows and no protected availability error is reported | Unknown, capture-off, expired, or never-retained value | `not_found` |
+| The allowlisted protected read reports capture/retention/database unavailability | No usable protected row | `not_available` |
+| The copied value uses a generic request/graph/event surface | Not a permitted parent anchor | `not_available_from_web` or `not_applicable` |
+
+The resolver never distinguishes capture-off, expiry, and never-retained from
+an ordinary zero-row query. It uses `not_available` only when the protected
+read boundary explicitly reports that condition. The brain Debug Chat `trace_id`
+field is empty when no retained protected run was recorded, so the Console does
+not present an unusable copied value.
+
+All manifest candidate queries use fixed caps: two parent candidates, 32
+companion candidates per relation, 64 conversation rows, and 32 failure
+capsules. A cap is reported in `joins` and never selects a preferred row.
 
 The protected `trace_correlation_context.v1` contract is identifier-only and
 bounded. It carries source ownership rather than semantic payload:
@@ -551,6 +675,13 @@ protected fields. Action-attempt, background-job, schedule, and run records
 use `source_llm_trace_id` as the exact parent link. These fields never enter a
 model-facing source packet, prompt, dialog result, or Control Console graph
 detail.
+
+The authenticated Debug Chat response adds exactly one operator-facing
+`trace_id` field containing the same value as the brain-owned `llm_trace_id`.
+`delivery_tracking_id` remains a distinct response field. The Control Console
+must show the trace id as the copyable value used by the diagnostic skill and
+must not derive it from delivery, graph, event, request, trigger, or attempt
+ids.
 
 ## Runtime Or Resource Constraints
 
@@ -597,17 +728,23 @@ The implementing agent must run the following focused checks with
      tests/test_self_cognition_event_logging.py -q
    ```
 
-4. Run the Control Console contract and redaction tests. Because this plan
-   does not change the rendered web surface, deterministic route/static
-   checks are sufficient and no browser sign-off is claimed:
+4. Run the Control Console contract, trace-synchronization, and redaction
+   tests. Deterministic API/client/static checks must prove that the exact
+   canonical trace id renders separately from delivery tracking and that
+   generic graph/event ids and protected fields remain absent. A browser
+   sign-off is claimed only when the local browser harness is available:
 
    ```powershell
-   venv\Scripts\python -m pytest `
-     tests/test_control_console_web_surface.py `
-     tests/test_control_console_kazusa_client.py `
-     tests/test_control_console_cognition_graph.py `
-     tests/test_control_console_redaction.py `
-     tests/test_console_lookup_limits.py -q
+    venv\Scripts\python -m pytest `
+      tests/test_brain_console_trace_auth.py `
+      tests/test_console_debug_chat.py `
+      tests/test_control_console_kazusa_client.py `
+      tests/test_control_console_web_surface.py `
+      tests/test_control_console_cognition_graph.py `
+      tests/test_control_console_redaction.py `
+      tests/test_console_lookup_limits.py `
+      tests/test_runtime_adapter_registration.py `
+      tests/test_service_cognition_graph.py -q
    ```
 
 5. Run the existing skill quick validator and inspect its output. Run no live
@@ -632,6 +769,15 @@ The implementing agent must run the following focused checks with
 - The web availability matrix names every requested identifier and states
   whether it is rendered, API-only, protected-only, or absent from the current
   console.
+- An authenticated Debug Chat response renders the exact brain-owned
+  `llm_trace_id` as `trace_id`, keeps `delivery_tracking_id` separate, and
+  leaves `trace_id` empty when no retained protected run was recorded. Existing
+  non-debug operational-error adapter responses preserve the separately scoped
+  `OperationalErrorOut.trace_id` field without creating a console source.
+- A direct or spoofed `/chat` request with only `platform="debug"` cannot
+  receive the top-level trace id; only the authenticated Control Console's
+  exact shared-secret headers authorize that projection, and a missing shared
+  secret fails closed with an empty field.
 - The skill requires a source surface for copied values and does not classify
   `d63003933a924c03a258fcf9d891e6b5` as a trace from its hexadecimal shape.
 - Every parent-trace resolver path preserves zero and multiple candidates;
@@ -664,32 +810,52 @@ The implementing agent must run the following focused checks with
 
 ## Progress Checklist
 
-- [ ] Baseline worktree and existing trace-skill diff recorded.
-- [ ] Web-console availability matrix frozen in the skill and ICDs.
-- [ ] Correlation context and durable source-field contracts implemented.
-- [ ] Strict shared resolver and correlation manifest implemented.
-- [ ] Future self-cognition trace binding implemented.
-- [ ] Deterministic runtime, exporter, skill, and redaction tests pass.
-- [ ] Supplied-anchor live smoke artifacts inspected one at a time.
-- [ ] Independent code review completed.
-- [ ] Execution evidence and residual `not_captured` gaps recorded.
-- [ ] User-approved sign-off received before lifecycle completion.
+- [x] Baseline worktree and existing trace-skill diff recorded.
+- [x] Web-console availability matrix frozen in the skill and ICDs.
+- [x] Correlation context and durable source-field contracts implemented.
+- [x] Strict shared resolver and correlation manifest implemented.
+- [x] Future self-cognition trace binding implemented.
+- [x] Deterministic runtime, exporter, skill, and redaction tests pass.
+- [x] Supplied-anchor live smoke artifacts inspected one at a time.
+- [x] Independent code review completed.
+- [x] Execution evidence and residual `not_captured` gaps recorded.
+- [x] User-approved sign-off received before lifecycle completion.
 
 ## Execution Evidence
 
-This draft is based on the current Control Console, protected trace, database,
-background-work, calendar, self-cognition, exporter, skill, and test contracts
-reviewed on 2026-08-09. No production implementation or live database query is
-performed while the plan is in `draft`.
+Implementation completed on 2026-08-09 after the user approved execution. The
+pre-review `git status --short` and explicitly owned file set are preserved in
+`test_artifacts/diagnostics/trace_correlation_manifest_review_20260809.md`.
 
-At implementation handoff, record:
+Recorded evidence:
 
-- the pre-handoff `git status --short` and explicitly owned file set;
-- focused test and compilation output;
-- one manifest and one review record per supplied anchor;
-- exact unavailable/expired/not-captured causes;
-- protected artifact hashes when artifacts are copied or preserved;
-- the independent review result and any accepted residual gaps.
+- the authenticated Control Console now carries one canonical `trace_id`
+  separately from `delivery_tracking_id`, and the agent-facing diagnostic
+  workflow requires the typed `web_control_trace_id` source surface;
+- strict exact parent resolution, bounded identifier-only manifests, forward
+  action/background/calendar/self-cognition source links, historical
+  `not_captured` reporting, and bounded conflict markers are implemented;
+- final grouped regression suite: `362 passed, 1 warning, 7 deselected`;
+- Python compilation: PASS; `git diff --check`: PASS with expected Windows
+  line-ending warnings; `llm-trace-debug` quick validator: PASS;
+- the three supplied anchors were queried one at a time against the configured
+  MongoDB. The two historical delivery anchors used explicit parent-trace
+  overrides, the typed web-control smoke confirmed the canonical path, and the
+  opaque untyped value terminated as `not_available_from_web` with derived
+  fields `not_applicable`;
+- each manifest was inspected before the next live query. The four manifest
+  SHA-256 hashes and recursive forbidden-key scan are recorded in the review
+  artifact; no raw prompt, response, message body, embedding, or secret field
+  was present;
+- independent code review: PASS with no blocking findings. The reviewer
+  specifically verified exact companion status handling, idempotent conflict
+  preservation, self-cognition worker trace binding, and the fail-closed
+  Control Console disclosure boundary.
+
+Independent plan-review gate: content PASS on 2026-08-09 after the final
+authorization, telemetry-visibility, and OperationalErrorOut regression
+amendments. User approval to execute was received before implementation; no
+residual plan blocker was accepted.
 
 ## Independent Plan Review
 
@@ -707,6 +873,11 @@ the diff and generated manifest contracts. The review must confirm that source
 trace fields are written by the owning runtime boundaries, self-cognition binds
 the trace before Cognition V2 begins, historical rows are not backfilled, and
 hidden identifiers remain absent from web and event-log projections.
+
+Recorded result: PASS on 2026-08-09, with no blocking findings. The reviewer
+inspected the refreshed manifests and confirmed the required `not_captured`,
+`not_applicable`, conflict-preservation, worker-binding, redaction, and
+fail-closed disclosure behavior.
 
 ## Execution Handoff
 

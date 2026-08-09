@@ -720,9 +720,16 @@ def test_web_api_outputs_for_logs_events_audit_character_and_debug_error(
         }
 
     class FakeKazusaClient:
-        def __init__(self, *, base_url: str, timeout_seconds: float) -> None:
+        def __init__(
+            self,
+            *,
+            base_url: str,
+            timeout_seconds: float,
+            control_shared_secret: str = "",
+        ) -> None:
             _ = base_url
             _ = timeout_seconds
+            _ = control_shared_secret
 
         async def send_debug_chat(self, request):
             _ = request
@@ -1224,10 +1231,12 @@ def test_app_uses_live_debug_chat_timeout(monkeypatch, tmp_path) -> None:
             *,
             base_url: str,
             timeout_seconds: float,
+            control_shared_secret: str = "",
         ) -> None:
             """Capture the configured timeout without making network calls."""
 
             _ = base_url
+            _ = control_shared_secret
             captured["timeout_seconds"] = timeout_seconds
 
     monkeypatch.setattr(app_module, "KazusaClient", FakeKazusaClient)

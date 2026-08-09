@@ -16,6 +16,9 @@ from typing import Any
 
 from kazusa_ai_chatbot.db import close_db
 from kazusa_ai_chatbot.db import script_operations
+from kazusa_ai_chatbot.llm_tracing.correlation import (
+    merge_trace_candidates,
+)
 from kazusa_ai_chatbot.time_boundary import storage_utc_now, storage_utc_now_iso
 
 
@@ -97,19 +100,31 @@ async def resolve_trace_id(
             }
         })
 
+    candidate_sets: list[list[dict[str, Any]]] = []
     for filter_doc in filters:
         rows = await script_operations.export_collection_rows(
             collection_name="conversation_history",
             filter_doc=filter_doc,
             projection={"_id": 0, "llm_trace_id": 1},
             sort_doc={"timestamp": -1},
-            limit=1,
+            limit=64,
         )
-        if not rows:
-            continue
-        row_trace_id = str(rows[0].get("llm_trace_id", "")).strip()
-        if row_trace_id:
-            return row_trace_id
+        candidate_sets.append([
+            {"trace_id": row.get("llm_trace_id", "")}
+            for row in rows
+        ])
+
+    resolution = merge_trace_candidates(
+        source_surface="protected_llm_trace_id",
+        identifier="conversation_metadata",
+        candidate_sets=candidate_sets,
+    )
+    if resolution.trace_id:
+        return resolution.trace_id
+    if resolution.status == "ambiguous":
+        raise ValueError(
+            "candidate metadata maps to multiple llm_trace_id values"
+        )
 
     raise ValueError("could not resolve llm_trace_id")
 

@@ -242,6 +242,11 @@ def _optional_local_period_from_env(name: str, default: str) -> str:
 
 load_dotenv()
 
+KAZUSA_CONTROL_BRAIN_SHARED_SECRET = os.getenv(
+    "KAZUSA_CONTROL_BRAIN_SHARED_SECRET",
+    "",
+).strip()
+
 DEFAULT_LLM_MAX_COMPLETION_TOKENS = _positive_int_from_env(
     "DEFAULT_LLM_MAX_COMPLETION_TOKENS",
     "25000",

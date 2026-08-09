@@ -31,6 +31,18 @@ async def ensure_llm_trace_indexes() -> None:
         name="llm_trace_run_scope_time",
     )
     await runs.create_index(
+        [("parent_llm_trace_id", 1), ("started_at", 1)],
+        name="llm_trace_run_parent_time",
+    )
+    await runs.create_index(
+        [("source_background_work_job_id", 1), ("started_at", 1)],
+        name="llm_trace_run_source_job_time",
+    )
+    await runs.create_index(
+        [("source_calendar_run_id", 1), ("started_at", 1)],
+        name="llm_trace_run_source_calendar_time",
+    )
+    await runs.create_index(
         "expires_at",
         expireAfterSeconds=0,
         name="llm_trace_runs_expires_at_ttl",

@@ -95,6 +95,12 @@ def build_result_ready_episode_from_job(
         local_time_context=turn_clock["local_time_context"],
         created_at=completed_at,
     )
+    episode["origin_metadata"]["source_llm_trace_id"] = str(
+        job.get("source_llm_trace_id") or ""
+    ).strip()
+    episode["origin_metadata"]["source_background_work_job_id"] = str(
+        job.get("job_id") or ""
+    ).strip()
     cognition_source = ToolResultCognitionSourceV1(
         source_kind="tool_result",
         source_id=accepted_task_id,
