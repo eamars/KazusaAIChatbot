@@ -331,13 +331,15 @@ non-selection role direction. The selection-only role verifier receives the five
 `response_operation` fields and owns selection transfer plus embedded
 actor/target reversal. Those selection-owned fields are removed from the
 semantic-fidelity projection while the raw current-input meaning remains.
-Deterministic code merges the three verdicts and the literal expression-continuity
-verdict without rewriting dialog
-semantics. Each owner returns at most four issues and the duplicate-free
-merged result returns at most eight. None of the checks treats novelty or
-personality strength as failure. Refusal, negotiation, and conditions chosen
-by the character remain valid responses unless typed actor, target,
-response-owner, or selection-owner direction is reversed.
+Deterministic code merges the three numeric verdicts and the literal
+expression-continuity verdict without rewriting dialog semantics. The aggregate
+is the equal-weight geometric mean of available focused scores; clean lexical
+continuity contributes `1.0`. `DIALOG_PASS_SCORE_THRESHOLD` is currently `0.50`.
+Each owner returns at most four issues and the duplicate-free merged result
+returns at most eight. None of the checks treats novelty or personality
+strength as failure. Refusal, negotiation, and conditions chosen by the
+character remain valid responses unless typed actor, target, response-owner,
+or selection-owner direction is reversed.
 
 Each semantic-fidelity, role-direction, and surface-integrity producer gets
 three structural attempts. An exact-shape failure retains the original system
@@ -345,16 +347,21 @@ and human semantic packet, places the latest bounded rejected verdict in an
 assistant message, and supplies the exact contract error in a human
 correction. This does not re-render dialog or add another semantic owner.
 Protected traces retain every attempt. Exhaustion marks that focused owner
-`unavailable`; no candidate is eligible without the three model-owned checks and
-the deterministic expression-continuity check.
+`unavailable`; available focused scores can still rank a structurally valid
+candidate. If all focused owners are unavailable, the aggregate is `0.0` and
+the latest eligible candidate can be delivered as explicit degraded output
+after the candidate attempt cap. Explicit semantic `hard_errors`, typed role
+violations, false-execution issues, lexical violations, empty candidates, and
+state or delivery failures remain ineligible or fail closed.
 
-The semantic-fidelity producer returns exact `aligned` and `hard_errors`
-fields. This avoids the local model's demonstrated `issues`/`Issues` token
-collision. Deterministic validation accepts no alias and normalizes the
-validated `hard_errors` list only after exact validation. Role direction uses
-an exact `aligned` and typed `violations` contract. Its only violation kinds
-are `selection_owner_transfer` and `typed_operation_role_reversal`. Surface
-integrity retains its evidence-bearing `aligned` and `issues` contract.
+The semantic-fidelity producer returns exact `score` and `hard_errors` fields.
+The role-direction producer returns exact `score` and typed `violations`.
+Surface integrity returns exact `score` and evidence-bearing `issues`.
+Deterministic validation accepts no boolean `aligned` alias, rejects non-finite
+or out-of-range scores, and regenerates malformed verdicts within the bounded
+owner attempts. A candidate with no hard issue but an aggregate below the
+threshold remains comparable for degraded fallback; the highest eligible bid
+is selected after exhaustion, with the latest attempt winning exact ties.
 
 A negative merged verdict returns the retained canonical
 `TextSurfaceInputV2` and bounded verified issues to the L3 owner. Rejected
@@ -364,9 +371,10 @@ boundaries, and addressee together, then reconstructs selected intent, permitted
 results, the exact relational stance, and runtime limits from canonical input.
 If surface replacement exhausts, dialog retains the latest validated surface.
 Every dialog candidate, including the terminal candidate, runs all three
-focused checks and the expression-continuity check. Bounded exhaustion produces
-a typed delivery failure; no
-unverified candidate reaches the persona graph.
+focused checks and the expression-continuity check. Bounded exhaustion selects
+the highest eligible comparable candidate and marks it degraded; when no
+eligible candidate remains it produces a typed delivery failure, so no
+hard-invalid or unverified candidate reaches the persona graph.
 
 Before this dialog boundary, a typed character-owned required selection routes
 the selected goal branch to one specialized producer in place of its generic

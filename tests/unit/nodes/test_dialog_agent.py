@@ -34,7 +34,7 @@ async def test_terminal_candidate_opposite_polarity_is_withheld(
         (),
         {
             "content": json.dumps({
-                "aligned": False,
+                "score": 0.1,
                 "hard_errors": ["Subject reversal remains."],
             })
         },
@@ -43,7 +43,7 @@ async def test_terminal_candidate_opposite_polarity_is_withheld(
     surface_llm.ainvoke = AsyncMock(return_value=type(
         "Response",
         (),
-        {"content": '{"aligned": true, "issues": []}'},
+        {"content": '{"score": 1.0, "issues": []}'},
     )())
     monkeypatch.setattr(dialog_module, "_dialog_generator_llm", generator_llm)
     monkeypatch.setattr(
@@ -57,10 +57,7 @@ async def test_terminal_candidate_opposite_polarity_is_withheld(
         surface_llm,
     )
 
-    with pytest.raises(
-        DialogGenerationContractError,
-        match="terminal verification",
-    ):
+    with pytest.raises(DialogGenerationContractError):
         await dialog_generator(build_dialog_state())
 
     assert generator_llm.ainvoke.await_count == 3

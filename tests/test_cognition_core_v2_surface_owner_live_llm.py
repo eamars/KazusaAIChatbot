@@ -794,15 +794,23 @@ async def test_live_degraded_surface_preserves_character_dialog(
 
         aggregate = {
             'semantic_fidelity': {
-                'status': 'aligned',
+                'status': 'scored',
+                'score': 1.0,
                 'issues': [],
             },
             'role_direction': {
-                'status': 'aligned',
+                'status': 'scored',
+                'score': 1.0,
                 'violations': [],
             },
             'surface_integrity': {
-                'status': 'aligned',
+                'status': 'scored',
+                'score': 1.0,
+                'issues': [],
+            },
+            'lexical_avoidance': {
+                'status': 'scored',
+                'score': 1.0,
                 'issues': [],
             },
         }

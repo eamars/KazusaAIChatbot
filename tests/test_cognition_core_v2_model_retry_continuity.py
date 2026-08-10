@@ -121,24 +121,42 @@ def _dialog_state() -> dict[str, object]:
     }
 
 
-def _compliance_result(*, aligned: bool) -> dict[str, object]:
-    """Build one exact focused-verifier aggregate for dialog ledger tests."""
+def _compliance_result(
+    *,
+    aligned: bool,
+    semantic_hard_error: bool = False,
+) -> dict[str, object]:
+    """Build one scored focused-verifier aggregate for dialog ledger tests."""
+
+    score = 1.0 if aligned else 0.1
 
     return {
         "semantic_fidelity": {
-            "status": "aligned",
-            "issues": [],
+            "status": (
+                "hard_ineligible"
+                if semantic_hard_error
+                else "scored"
+            ),
+            "score": score,
+            "issues": (
+                ["semantic hard error"]
+                if semantic_hard_error
+                else []
+            ),
         },
         "role_direction": {
-            "status": "aligned" if aligned else "misaligned",
-            "violations": [] if aligned else [{
-                "kind": "selection_owner_transfer",
-                "evidence": "I will follow your choice.",
-                "explanation": "The required selection was transferred.",
-            }],
+            "status": "scored",
+            "score": score,
+            "violations": [],
         },
         "surface_integrity": {
-            "status": "aligned",
+            "status": "scored",
+            "score": score,
+            "issues": [],
+        },
+        "lexical_avoidance": {
+            "status": "scored",
+            "score": 1.0,
             "issues": [],
         },
     }
@@ -317,7 +335,7 @@ def test_role_direction_verdict_requires_typed_violation_kinds() -> None:
     }
 
     valid = {
-        "aligned": False,
+        "score": 0.1,
         "violations": [{
             "kind": "selection_owner_transfer",
             "evidence": "I will follow your choice.",
@@ -330,7 +348,7 @@ def test_role_direction_verdict_requires_typed_violation_kinds() -> None:
     ) == valid
 
     invalid = {
-        "aligned": False,
+        "score": 0.1,
         "violations": [{
             **valid["violations"][0],
             "kind": "information_request",
@@ -357,7 +375,7 @@ async def test_focused_verifier_exhaustion_returns_unavailable(
 
     verifier_llm = MagicMock()
     verifier_llm.ainvoke = AsyncMock(return_value=SimpleNamespace(
-        content='{"aligned": true, "Issues": []}',
+        content='{"score": 1.0, "Issues": []}',
     ))
     monkeypatch.setattr(
         dialog_module,
@@ -382,7 +400,7 @@ async def test_focused_verifier_exhaustion_returns_unavailable(
         llm_trace_id="verifier-unavailable-test",
     )
 
-    assert verdict == {"status": "unavailable", "issues": []}
+    assert verdict == {"status": "unavailable", "hard_errors": []}
     assert verifier_llm.ainvoke.await_count == 3
 
 
@@ -419,7 +437,7 @@ async def test_focused_verifier_provider_exhaustion_returns_unavailable(
         llm_trace_id="verifier-provider-unavailable-test",
     )
 
-    assert verdict == {"status": "unavailable", "issues": []}
+    assert verdict == {"status": "unavailable", "hard_errors": []}
     assert verifier_llm.ainvoke.await_count == 3
 
 
@@ -437,12 +455,12 @@ async def test_unexpected_verifier_exception_remains_unrecoverable(
     monkeypatch.setattr(
         dialog_module,
         "_verify_dialog_role_direction",
-        AsyncMock(return_value={"aligned": True, "violations": []}),
+        AsyncMock(return_value={"score": 1.0, "violations": []}),
     )
     monkeypatch.setattr(
         dialog_module,
         "_verify_dialog_surface_integrity",
-        AsyncMock(return_value={"aligned": True, "issues": []}),
+        AsyncMock(return_value={"score": 1.0, "issues": []}),
     )
 
     with pytest.raises(AssertionError, match="verifier invariant"):
@@ -458,7 +476,7 @@ async def test_unexpected_verifier_exception_remains_unrecoverable(
 async def test_dialog_third_candidate_requires_terminal_verification(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A third candidate still requires focused verification before delivery."""
+    """The highest-scoring valid candidate is delivered after exhaustion."""
 
     generator_llm, compliance = _patch_dialog_sequence(
         monkeypatch,
@@ -480,21 +498,18 @@ async def test_dialog_third_candidate_requires_terminal_verification(
         ],
     )
 
-    with pytest.raises(
-        dialog_module.DialogGenerationContractError,
-        match="terminal verification",
-    ):
-        await dialog_module.dialog_generator(_dialog_state())
+    result = await dialog_module.dialog_generator(_dialog_state())
 
     assert generator_llm.ainvoke.await_count == 3
     assert compliance.await_count == 3
+    assert result["final_dialog"] == ["candidate three"]
 
 
 @pytest.mark.asyncio
 async def test_empty_terminal_candidate_withholds_unverified_candidates(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An empty terminal render withholds earlier unverified candidates."""
+    """An empty terminal render leaves the best earlier candidate eligible."""
 
     generator_llm, compliance = _patch_dialog_sequence(
         monkeypatch,
@@ -509,21 +524,18 @@ async def test_empty_terminal_candidate_withholds_unverified_candidates(
         ],
     )
 
-    with pytest.raises(
-        dialog_module.DialogGenerationContractError,
-        match="terminal verification",
-    ):
-        await dialog_module.dialog_generator(_dialog_state())
+    result = await dialog_module.dialog_generator(_dialog_state())
 
     assert generator_llm.ainvoke.await_count == 3
     assert compliance.await_count == 2
+    assert result["final_dialog"] == ["candidate two"]
 
 
 @pytest.mark.asyncio
 async def test_unusable_candidates_remain_unrecoverable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A verified candidate is required even when later attempts are empty."""
+    """A valid candidate remains deliverable when later attempts are empty."""
 
     generator_llm, compliance = _patch_dialog_sequence(
         monkeypatch,
@@ -537,14 +549,11 @@ async def test_unusable_candidates_remain_unrecoverable(
         ],
     )
 
-    with pytest.raises(
-        dialog_module.DialogGenerationContractError,
-        match="terminal verification",
-    ):
-        await dialog_module.dialog_generator(_dialog_state())
+    result = await dialog_module.dialog_generator(_dialog_state())
 
     assert generator_llm.ainvoke.await_count == 3
     assert compliance.await_count == 1
+    assert result["final_dialog"] == ["candidate one"]
 
 
 @pytest.mark.asyncio
@@ -805,7 +814,10 @@ async def test_dialog_surface_repair_exhaustion_retains_valid_surface(
             {"final_dialog": ["candidate two"]},
         ],
         compliance_results=[
-            _compliance_result(aligned=False),
+            _compliance_result(
+                aligned=False,
+                semantic_hard_error=True,
+            ),
             _compliance_result(aligned=True),
         ],
     )

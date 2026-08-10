@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import typing
 from unittest.mock import AsyncMock, MagicMock
 
@@ -13,7 +14,6 @@ import pytest
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
 from kazusa_ai_chatbot.nodes.dialog_agent import (
     DialogAgentState,
-    DialogGenerationContractError,
     StateContractError,
     dialog_agent,
     dialog_generator,
@@ -42,10 +42,10 @@ def _stub_dialog_event_logging(monkeypatch):
         )
     verifier_outputs = {
         "_dialog_semantic_fidelity_llm": (
-            '{"aligned": true, "hard_errors": []}'
+            '{"score": 1.0, "hard_errors": []}'
         ),
         "_dialog_surface_integrity_llm": (
-            '{"aligned": true, "issues": []}'
+            '{"score": 1.0, "issues": []}'
         ),
     }
     for llm_name, verifier_output in verifier_outputs.items():
@@ -187,6 +187,284 @@ def _dialog_state() -> dict[str, object]:
     return state
 
 
+@pytest.mark.parametrize(
+    "invalid_score",
+    [True, -0.01, 1.01, 10**400, float("nan"), float("inf")],
+)
+def test_dialog_score_validation_rejects_non_finite_or_out_of_range(
+    invalid_score: object,
+) -> None:
+    """Evaluator scores are numeric, finite, and bounded to the contract."""
+
+    with pytest.raises(StateContractError, match="score"):
+        dialog_module._validate_numeric_score(
+            invalid_score,
+            label="dialog test",
+        )
+
+
+def test_dialog_score_validation_rejects_passing_score_with_issues() -> None:
+    """Every focused owner must lower its score when it reports an issue."""
+
+    with pytest.raises(StateContractError, match="inconsistent"):
+        dialog_module._validate_semantic_fidelity_verdict(
+            {"score": 0.9, "hard_errors": ["semantic conflict"]},
+            max_issues=4,
+        )
+    with pytest.raises(StateContractError, match="inconsistent"):
+        dialog_module._validate_compliance_verdict(
+            {"score": 0.9, "issues": ["quality issue"]},
+            max_issues=4,
+        )
+    with pytest.raises(StateContractError, match="inconsistent"):
+        dialog_module._validate_role_direction_verdict(
+            {
+                "score": 0.9,
+                "violations": [{
+                    "kind": "selection_owner_transfer",
+                    "evidence": "candidate text",
+                    "explanation": "selection owner changed",
+                }],
+            },
+            generated_dialog=["candidate text"],
+        )
+    with pytest.raises(StateContractError, match="inconsistent"):
+        dialog_module._validate_surface_compliance_verdict(
+            {
+                "score": 0.9,
+                "issues": [{
+                    "kind": "false_execution",
+                    "evidence": "candidate text",
+                    "explanation": "execution has no result",
+                }],
+            },
+            generated_dialog=["candidate text"],
+        )
+
+
+def test_dialog_score_aggregate_uses_available_dimensions() -> None:
+    """Unavailable owners do not erase comparable numeric bids."""
+
+    aggregate = {
+        "semantic_fidelity": {
+            "status": "scored",
+            "score": 0.81,
+            "issues": [],
+        },
+        "role_direction": {
+            "status": "unavailable",
+            "violations": [],
+        },
+        "surface_integrity": {
+            "status": "scored",
+            "score": 0.49,
+            "issues": [],
+        },
+        "lexical_avoidance": {
+            "status": "scored",
+            "score": 1.0,
+            "issues": [],
+        },
+    }
+
+    assert math.isclose(
+        dialog_module._dialog_verifier_aggregate_score(aggregate),
+        (0.81 * 0.49 * 1.0) ** (1 / 3),
+    )
+
+
+def test_dialog_score_all_focused_unavailable_ranks_as_zero() -> None:
+    """A clean lexical result cannot make an outage pass immediately."""
+
+    aggregate = {
+        "semantic_fidelity": {
+            "status": "unavailable",
+            "issues": [],
+        },
+        "role_direction": {
+            "status": "unavailable",
+            "violations": [],
+        },
+        "surface_integrity": {
+            "status": "unavailable",
+            "issues": [],
+        },
+        "lexical_avoidance": {
+            "status": "scored",
+            "score": 1.0,
+            "issues": [],
+        },
+    }
+
+    assert dialog_module._dialog_verifier_aggregate_score(aggregate) == 0.0
+    assert not dialog_module._dialog_verifier_aggregate_is_passed(aggregate)
+
+
+@pytest.mark.asyncio
+async def test_dialog_exhaustion_selects_highest_score_not_latest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Three below-threshold bids return the highest eligible candidate."""
+
+    generator_llm = MagicMock()
+    generator_llm.ainvoke = AsyncMock(side_effect=[
+        AIMessage(content='{"final_dialog": ["low bid"]}'),
+        AIMessage(content='{"final_dialog": ["highest bid"]}'),
+        AIMessage(content='{"final_dialog": ["latest bid"]}'),
+    ])
+
+    def compliance(score: float) -> dict[str, object]:
+        return {
+            "semantic_fidelity": {
+                "status": "scored",
+                "score": score,
+                "issues": [],
+            },
+            "role_direction": {
+                "status": "scored",
+                "score": 1.0,
+                "violations": [],
+            },
+            "surface_integrity": {
+                "status": "scored",
+                "score": 1.0,
+                "issues": [],
+            },
+            "lexical_avoidance": {
+                "status": "scored",
+                "score": 1.0,
+                "issues": [],
+            },
+        }
+
+    compliance_llm = AsyncMock(side_effect=[
+        compliance(0.01),
+        compliance(0.02),
+        compliance(0.015),
+    ])
+    monkeypatch.setattr(dialog_module, "_dialog_generator_llm", generator_llm)
+    monkeypatch.setattr(
+        dialog_module,
+        "_verify_dialog_compliance",
+        compliance_llm,
+    )
+
+    result = await dialog_generator(_dialog_state())
+
+    assert result["final_dialog"] == ["highest bid"]
+    assert generator_llm.ainvoke.await_count == 3
+    assert compliance_llm.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_dialog_exhaustion_all_unavailable_selects_latest_valid_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """All focused outages consume attempts and tie-break to the latest bid."""
+
+    generator_llm = MagicMock()
+    generator_llm.ainvoke = AsyncMock(side_effect=[
+        AIMessage(content='{"final_dialog": ["first outage bid"]}'),
+        AIMessage(content='{"final_dialog": ["second outage bid"]}'),
+        AIMessage(content='{"final_dialog": ["latest outage bid"]}'),
+    ])
+
+    def unavailable() -> dict[str, object]:
+        return {
+            "semantic_fidelity": {
+                "status": "unavailable",
+                "issues": [],
+            },
+            "role_direction": {
+                "status": "unavailable",
+                "violations": [],
+            },
+            "surface_integrity": {
+                "status": "unavailable",
+                "issues": [],
+            },
+            "lexical_avoidance": {
+                "status": "scored",
+                "score": 1.0,
+                "issues": [],
+            },
+        }
+
+    compliance_llm = AsyncMock(side_effect=[
+        unavailable(),
+        unavailable(),
+        unavailable(),
+    ])
+    monkeypatch.setattr(dialog_module, "_dialog_generator_llm", generator_llm)
+    monkeypatch.setattr(
+        dialog_module,
+        "_verify_dialog_compliance",
+        compliance_llm,
+    )
+
+    result = await dialog_generator(_dialog_state())
+
+    assert result["final_dialog"] == ["latest outage bid"]
+    assert generator_llm.ainvoke.await_count == 3
+    assert compliance_llm.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_dialog_exhaustion_ties_select_latest_attempt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Equal aggregate bids resolve deterministically to the latest attempt."""
+
+    generator_llm = MagicMock()
+    generator_llm.ainvoke = AsyncMock(side_effect=[
+        AIMessage(content='{"final_dialog": ["first tied bid"]}'),
+        AIMessage(content='{"final_dialog": ["second tied bid"]}'),
+        AIMessage(content='{"final_dialog": ["latest tied bid"]}'),
+    ])
+
+    def compliance() -> dict[str, object]:
+        return {
+            "semantic_fidelity": {
+                "status": "scored",
+                "score": 0.02,
+                "issues": [],
+            },
+            "role_direction": {
+                "status": "scored",
+                "score": 1.0,
+                "violations": [],
+            },
+            "surface_integrity": {
+                "status": "scored",
+                "score": 1.0,
+                "issues": [],
+            },
+            "lexical_avoidance": {
+                "status": "scored",
+                "score": 1.0,
+                "issues": [],
+            },
+        }
+
+    compliance_llm = AsyncMock(side_effect=[
+        compliance(),
+        compliance(),
+        compliance(),
+    ])
+    monkeypatch.setattr(dialog_module, "_dialog_generator_llm", generator_llm)
+    monkeypatch.setattr(
+        dialog_module,
+        "_verify_dialog_compliance",
+        compliance_llm,
+    )
+
+    result = await dialog_generator(_dialog_state())
+
+    assert result["final_dialog"] == ["latest tied bid"]
+    assert generator_llm.ainvoke.await_count == 3
+    assert compliance_llm.await_count == 3
+
+
 class TestDialogAgentState:
     """Verify the dialog graph state exposes only the canonical surface input."""
 
@@ -267,7 +545,7 @@ async def test_surface_integrity_prompt_receives_runtime_limits(
 
     surface_llm = MagicMock()
     surface_llm.ainvoke = AsyncMock(
-        return_value=AIMessage(content='{"aligned": true, "issues": []}')
+        return_value=AIMessage(content='{"score": 1.0, "issues": []}')
     )
     monkeypatch.setattr(
         dialog_module,
@@ -454,18 +732,23 @@ async def test_dialog_verifies_terminal_candidate_before_delivery(monkeypatch):
     monkeypatch.setattr(dialog_module, "_dialog_generator_llm", generator_llm)
     verifier = AsyncMock(return_value={
         "semantic_fidelity": {
-            "status": "misaligned",
-            "aligned": False,
-            "issues": ["stance mismatch"],
+            "status": "scored",
+            "score": 0.01,
+            "issues": [],
         },
         "role_direction": {
-            "status": "aligned",
-            "aligned": True,
+            "status": "scored",
+            "score": 1.0,
             "violations": [],
         },
         "surface_integrity": {
-            "status": "aligned",
-            "aligned": True,
+            "status": "scored",
+            "score": 1.0,
+            "issues": [],
+        },
+        "lexical_avoidance": {
+            "status": "scored",
+            "score": 1.0,
             "issues": [],
         },
     })
@@ -476,10 +759,10 @@ async def test_dialog_verifies_terminal_candidate_before_delivery(monkeypatch):
         AsyncMock(return_value=_text_surface_output()),
     )
 
-    with pytest.raises(DialogGenerationContractError, match="terminal verification"):
-        await dialog_generator(_dialog_state())
+    result = await dialog_generator(_dialog_state())
 
     assert verifier.await_count == 3
+    assert result["final_dialog"] == ["Candidate."]
 
 
 @pytest.mark.asyncio

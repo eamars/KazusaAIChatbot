@@ -341,13 +341,20 @@
     {
       "source": "src/kazusa_ai_chatbot/nodes/dialog_agent.py",
       "owner": "dialog verifier owner",
-      "contract": "terminal candidate semantic fidelity",
+      "contract": "numeric dialog verifier scoring and comparable candidate fallback",
       "required_unit_tests": [
         "tests/unit/nodes/test_dialog_agent.py::test_terminal_candidate_opposite_polarity_is_withheld",
-        "tests/unit/nodes/test_dialog_agent.py::test_dialog_agent_exposes_owned_contract"
+        "tests/unit/nodes/test_dialog_agent.py::test_dialog_agent_exposes_owned_contract",
+        "tests/test_dialog_agent.py::test_dialog_score_validation_rejects_non_finite_or_out_of_range",
+        "tests/test_dialog_agent.py::test_dialog_score_aggregate_uses_available_dimensions",
+        "tests/test_dialog_agent.py::test_dialog_exhaustion_selects_highest_score_not_latest",
+        "tests/test_dialog_agent.py::test_dialog_exhaustion_ties_select_latest_attempt",
+        "tests/test_dialog_agent.py::test_dialog_exhaustion_all_unavailable_selects_latest_valid_candidate"
       ],
       "supplemental_tests": [
-        "tests/integration/cognition_core_v2/test_terminal_dialog_candidate.py::test_terminal_dialog_candidate_opposite_polarity_is_withheld"
+        "tests/integration/cognition_core_v2/test_terminal_dialog_candidate.py::test_terminal_dialog_candidate_opposite_polarity_is_withheld",
+        "tests/test_dialog_visible_speech_and_semantic_fidelity.py::test_role_direction_score_accepts_character_owned_deflection",
+        "tests/test_dialog_visible_speech_and_semantic_fidelity.py::test_dialog_semantic_exhaustion_withholds_unverified_candidates"
       ]
     },
     {

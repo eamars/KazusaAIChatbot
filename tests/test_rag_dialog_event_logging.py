@@ -529,10 +529,10 @@ async def test_dialog_generator_records_llm_metadata_without_generated_text(
     monkeypatch.setattr(dialog_module, "_dialog_generator_llm", llm)
     verifier_outputs = {
         "_dialog_semantic_fidelity_llm": (
-            '{"aligned": true, "hard_errors": []}'
+            '{"score": 1.0, "hard_errors": []}'
         ),
         "_dialog_surface_integrity_llm": (
-            '{"aligned": true, "issues": []}'
+            '{"score": 1.0, "issues": []}'
         ),
     }
     for llm_name, verifier_output in verifier_outputs.items():
@@ -587,10 +587,10 @@ async def test_dialog_agent_records_quality_without_dialog_text(monkeypatch) -> 
     )
     verifier_outputs = {
         "_dialog_semantic_fidelity_llm": (
-            '{"aligned": true, "hard_errors": []}'
+            '{"score": 1.0, "hard_errors": []}'
         ),
         "_dialog_surface_integrity_llm": (
-            '{"aligned": true, "issues": []}'
+            '{"score": 1.0, "issues": []}'
         ),
     }
     for llm_name, verifier_output in verifier_outputs.items():

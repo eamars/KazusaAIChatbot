@@ -13,7 +13,6 @@ from langchain_core.messages import HumanMessage, SystemMessage
 import pytest
 
 from kazusa_ai_chatbot.cognition_core_v2.surface import (
-    build_degraded_text_surface,
     run_text_surface_planning,
     run_visual_surface_planning,
 )
@@ -35,11 +34,11 @@ _ROLE_ONLY_DIAGNOSTIC_PROMPT = '''只核对 current_visible_percepts 与
 candidate_final_dialog 之间的行动者、动作、目标、受益者和主语方向。按各自的角色框架解析每段文本。
 percept 行提供 speaker_role、first_person_role、addressee_role 和
 implicit_imperative_subject_role。candidate dialog 由当前角色说出：第一人称是当前角色，第二人称是当前用户。
-解析后比较行动者/动作/目标；任何反转都将 aligned 标为 false。忽略风格、新颖性、亲密度、安全性和写作质量。
+解析后比较行动者/动作/目标；任何反转都应显著降低 score。忽略风格、新颖性、亲密度、安全性和写作质量。
 
-Return exactly one JSON object with exactly aligned and issues. aligned is a
-boolean. issues is a list of concise role-direction failures; use an empty
-list only when aligned is true.'''
+Return exactly one JSON object with exactly score and issues. score is a
+finite number from 0 to 1. issues is a list of concise role-direction
+failures.'''
 
 
 def _current_user_addressee_plan(
@@ -135,7 +134,30 @@ def _delivery_profile(lexical_register: str) -> dict[str, str]:
     }
 
 
-def _surface_input(case: dict[str, Any], profile: dict[str, Any]) -> dict[str, Any]:
+def _role_surface_output() -> dict[str, Any]:
+    """Build semantic surface context for focused role-direction live cases."""
+
+    return {
+        "schema_version": "text_surface_output.v2",
+        "content_plan": (
+            "The character decides the next action and tells the current user "
+            "what to do."
+        ),
+        "content_requirements": [
+            "Keep the character as response and selection owner.",
+        ],
+        "visible_boundaries": [],
+        "addressee_plan": _current_user_addressee_plan(),
+        "delivery_profile": _delivery_profile("concise spoken wording"),
+        "selected_surface_intent": "state the selected next action",
+        "permitted_action_results": [],
+    }
+
+
+def _surface_input(
+    case: dict[str, Any],
+    profile: dict[str, Any],
+) -> dict[str, Any]:
     """Build one exact surface input for an individually reviewed live case."""
 
     expression_context, visual_context = _surface_contexts(profile)
@@ -377,8 +399,9 @@ async def _run_live_verifier_case(
     assert artifact_path.exists()
     assert len(semantic_llm.calls) == 1
     assert len(surface_integrity_llm.calls) == 1
+    aggregate_score = dialog_module._dialog_verifier_aggregate_score(verdict)
     assert (
-        dialog_module._dialog_verifier_aggregate_is_aligned(verdict)
+        dialog_module._dialog_verifier_aggregate_is_passed(verdict)
         is expected_aligned
     )
     aggregate_issues = dialog_module._dialog_verifier_aggregate_repair_issues(
@@ -386,8 +409,12 @@ async def _run_live_verifier_case(
     )
     if expected_aligned:
         assert aggregate_issues == []
+        assert aggregate_score >= dialog_module.DIALOG_PASS_SCORE_THRESHOLD
     else:
-        assert aggregate_issues
+        assert (
+            aggregate_score < dialog_module.DIALOG_PASS_SCORE_THRESHOLD
+            or dialog_module._dialog_verifier_aggregate_hard_issues(verdict)
+        )
     return evidence
 
 
@@ -397,6 +424,7 @@ async def _run_live_selection_owner_acceptance_case(
     candidate_dialog: list[str],
     monkeypatch: pytest.MonkeyPatch,
     human_review_contract: dict[str, bool],
+    surface_output: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run one owner-preserving candidate through the real role verifier."""
 
@@ -426,8 +454,27 @@ async def _run_live_selection_owner_acceptance_case(
             "response_operation": response_operation,
         },
     }]
+    if surface_output is None:
+        surface_output = {
+            "schema_version": "text_surface_output.v2",
+            "content_plan": (
+                "The character decides the next action and asks the current "
+                "user to carry it out."
+            ),
+            "content_requirements": [
+                "Keep the character as response and selection owner.",
+            ],
+            "visible_boundaries": [],
+            "addressee_plan": _current_user_addressee_plan(),
+            "delivery_profile": _delivery_profile(
+                "concise spoken wording"
+            ),
+            "selected_surface_intent": "state the selected next action",
+            "permitted_action_results": [],
+        }
 
     verdict = await dialog_module._verify_dialog_role_direction(
+        surface_output=surface_output,
         generated_dialog=candidate_dialog,
         current_visible_percepts=current_visible_percepts,
         llm_trace_id=f"live-{case_id}",
@@ -457,7 +504,8 @@ async def _run_live_selection_owner_acceptance_case(
 
     assert artifact_path.exists()
     assert 1 <= len(role_llm.calls) <= 3
-    assert verdict == {"aligned": True, "violations": []}
+    assert verdict["score"] >= dialog_module.DIALOG_PASS_SCORE_THRESHOLD
+    assert verdict["violations"] == []
     return evidence
 
 
@@ -502,13 +550,40 @@ async def test_live_character_commanded_user_action_preserves_selection_owner(
     )
 
 
+async def test_live_character_owned_deflection_preserves_selection_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A character-owned refusal can redirect the user's next action."""
+
+    surface_output = _role_surface_output()
+    surface_output["content_plan"] = (
+        "Decline image analysis and redirect the current user to the "
+        "claw-machine task."
+    )
+    surface_output["selected_surface_intent"] = (
+        "refuse image analysis and redirect the current user"
+    )
+    await _run_live_selection_owner_acceptance_case(
+        case_id="character_owned_deflection_preserves_selection_owner",
+        candidate_dialog=[
+            "那张图我先不分析了，你把注意力移回接下来的抓娃娃任务。",
+        ],
+        monkeypatch=monkeypatch,
+        surface_output=surface_output,
+        human_review_contract={
+            "character_owns_the_refusal": True,
+            "current_user_receives_the_redirect": True,
+            "real_role_direction_route": True,
+        },
+    )
+
+
 async def test_live_terminal_candidate_is_deliverable_after_semantic_exhaustion(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The third real-model candidate remains deliverable without a fatal."""
+    """The third real-model candidate remains deliverable as degraded output."""
 
     await _skip_if_model_routes_unavailable()
-    profile = _character_profile()
     case = {
         "case_id": "terminal_candidate_is_deliverable_after_semantic_exhaustion",
         "user_input": "这次由你决定下一步让我做什么。",
@@ -531,8 +606,37 @@ async def test_live_terminal_candidate_is_deliverable_after_semantic_exhaustion(
             },
         },
     }
-    surface_input = _surface_input(case, profile)
-    degraded_surface = build_degraded_text_surface(surface_input)
+    surface_input = {
+        "schema_version": "text_surface_input.v2",
+        "episode": canonical_episode(
+            episode_id=f"visible-speech-{case['case_id']}",
+            content=case["user_input"],
+            metadata=case["episode_metadata"],
+        ),
+        "intention": {
+            "route": "speech",
+            "intention": case["intention"],
+            "target_roles": [],
+            "reason": case["reason"],
+        },
+        "goal_resolution": "answerable_now",
+        "supporting_bids": [],
+        "expression_policy": {
+            "visibility": "visible",
+            "emotional_tone": case["emotional_tone"],
+            "intensity": "moderate",
+            "directness": "balanced",
+        },
+        "semantic_affect": [],
+        "permitted_action_results": [],
+        "interaction_style_context": "concise spoken wording",
+        "character_expression_context": {
+            "tempo": "measured",
+            "linguistic_texture": "reserved and direct",
+        },
+        "visual_character_context": "visual context is not used here",
+    }
+    degraded_surface = _role_surface_output()
     generator_llm = _CapturingLLM(dialog_module._dialog_generator_llm)
     verifier_outcomes: list[dict[str, Any]] = []
 
@@ -554,23 +658,29 @@ async def test_live_terminal_candidate_is_deliverable_after_semantic_exhaustion(
             post_repair: Whether this is the second verification opportunity.
 
         Returns:
-            A typed aggregate with semantic fidelity marked misaligned.
+            A typed aggregate with a low score and no hard issue.
         """
 
         candidate_index = len(verifier_outcomes) + 1
         aggregate = {
             "semantic_fidelity": {
-                "status": "misaligned",
-                "issues": [
-                    f"injected semantic rejection {candidate_index}",
-                ],
+                "status": "scored",
+                "score": 0.01,
+                "issues": [],
             },
             "role_direction": {
-                "status": "aligned",
+                "status": "scored",
+                "score": 1.0,
                 "violations": [],
             },
             "surface_integrity": {
-                "status": "aligned",
+                "status": "scored",
+                "score": 1.0,
+                "issues": [],
+            },
+            "lexical_avoidance": {
+                "status": "scored",
+                "score": 1.0,
                 "issues": [],
             },
         }
@@ -585,28 +695,6 @@ async def test_live_terminal_candidate_is_deliverable_after_semantic_exhaustion(
         })
         return aggregate
 
-    async def _retain_surface_after_semantic_rejection(
-        *,
-        surface_input: dict[str, Any],
-        verified_hard_issues: list[str],
-    ) -> dict[str, Any]:
-        """Retain canonical degraded authority after a controlled rejection.
-
-        Args:
-            surface_input: Canonical V2 input retained for surface repair.
-            verified_hard_issues: Bounded issues from the first candidate.
-
-        Returns:
-            The validated degraded surface used by the live test.
-        """
-
-        assert (
-            surface_input["intention"]["intention"]
-            == case["intention"]
-        )
-        assert verified_hard_issues
-        return degraded_surface
-
     monkeypatch.setattr(
         dialog_module,
         "_dialog_generator_llm",
@@ -616,11 +704,6 @@ async def test_live_terminal_candidate_is_deliverable_after_semantic_exhaustion(
         dialog_module,
         "_verify_dialog_compliance",
         _forced_semantic_exhaustion,
-    )
-    monkeypatch.setattr(
-        dialog_module,
-        "repair_text_surface_for_dialog",
-        _retain_surface_after_semantic_rejection,
     )
     monkeypatch.setattr(
         dialog_module.llm_tracing,
@@ -641,7 +724,7 @@ async def test_live_terminal_candidate_is_deliverable_after_semantic_exhaustion(
     result = await dialog_module.dialog_generator(_dialog_state(
         surface_input=surface_input,
         surface_output=degraded_surface,
-        profile=profile,
+        profile={},
     ))
     terminal_payload = parse_llm_json_output(
         generator_llm.calls[-1]["raw_output"]
@@ -658,8 +741,8 @@ async def test_live_terminal_candidate_is_deliverable_after_semantic_exhaustion(
         "disposition": "delivered_terminal_candidate",
         "human_review_contract": {
             "three_real_generator_opportunities": True,
-            "only_first_two_candidates_are_verified": True,
-            "newest_valid_candidate_is_delivered": True,
+            "all_three_candidates_are_verified": True,
+            "latest_equal_score_candidate_is_delivered": True,
             "no_operational_error_surface": True,
         },
     }
@@ -683,7 +766,7 @@ async def test_live_terminal_candidate_is_deliverable_after_semantic_exhaustion(
 
     assert artifact_path.exists()
     assert len(generator_llm.calls) == 3
-    assert len(verifier_outcomes) == 2
+    assert len(verifier_outcomes) == 3
     assert result["final_dialog"] == terminal_candidate
     assert result["final_dialog"]
     assert result["text_surface_output_v2"] == degraded_surface
@@ -773,6 +856,83 @@ async def test_live_verifier_accepts_bracketed_action_description(
         case_id="verifier_accepts_bracketed_action_description",
         candidate_dialog="（她朝对方靠近了一步）好吧。",
         expected_aligned=True,
+        monkeypatch=monkeypatch,
+    )
+
+
+async def test_live_verifier_rejects_literal_surface_lexical_avoidance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A surface-owned forbidden phrase remains a hard lexical issue."""
+
+    await _run_live_verifier_case(
+        case_id="verifier_rejects_literal_surface_lexical_avoidance",
+        candidate_dialog="Please say hello.",
+        surface_output={
+            "schema_version": "text_surface_output.v2",
+            "content_plan": "Answer the current request verbally.",
+            "content_requirements": ["Keep the answer concise."],
+            "visible_boundaries": [],
+            "addressee_plan": _current_user_addressee_plan(
+                "Current User"
+            ),
+            "delivery_profile": _delivery_profile(
+                "Natural concise spoken wording."
+            ),
+            "selected_surface_intent": "Answer the current request.",
+            "lexical_avoidances": ["say hello"],
+            "permitted_action_results": [],
+        },
+        current_visible_percepts=[{
+            "input_source": "dialog_text",
+            "content": "Please answer briefly.",
+        }],
+        human_review_contract={
+            "lexical_avoidance_is_surface_owned": True,
+            "real_compliance_route": True,
+        },
+        expected_aligned=False,
+        monkeypatch=monkeypatch,
+    )
+
+
+async def test_live_verifier_scores_undercomplete_noncontradictory_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A partial but non-contradictory answer supplies a lower ranking bid."""
+
+    await _run_live_verifier_case(
+        case_id="verifier_scores_undercomplete_noncontradictory_candidate",
+        candidate_dialog="Yes.",
+        surface_output={
+            "schema_version": "text_surface_output.v2",
+            "content_plan": (
+                "Answer whether the character agrees to the current plan and "
+                "give one concise reason."
+            ),
+            "content_requirements": [
+                "State a clear yes-or-no position.",
+                "Give one reason for the position.",
+            ],
+            "visible_boundaries": [],
+            "addressee_plan": _current_user_addressee_plan(
+                "Current User"
+            ),
+            "delivery_profile": _delivery_profile(
+                "Natural concise spoken wording."
+            ),
+            "selected_surface_intent": "Answer the current plan question.",
+            "permitted_action_results": [],
+        },
+        current_visible_percepts=[{
+            "input_source": "dialog_text",
+            "content": "Do you agree to the plan, and why?",
+        }],
+        human_review_contract={
+            "partial_answer_is_not_a_role_reversal": True,
+            "real_compliance_route": True,
+        },
+        expected_aligned=False,
         monkeypatch=monkeypatch,
     )
 
@@ -1286,18 +1446,20 @@ async def test_live_focused_role_verifier_rejects_selection_delegation(
     )
     percepts = [{
         "input_source": "dialog_text",
-        "content": "我要亲口听你说你想让我做的下一步",
-        "role_explicit_content": (
-            "当前用户想让当前角色用语言表达出当前角色希望当前用户执行的"
-            "下一个动作"
-        ),
-        "response_operation": {
-            "operation": "要求当前角色告知当前用户接下来的行动指令",
-            "response_owner_role": "当前角色",
-            "selection_owner_role": "当前角色",
-            "selection_required": True,
-            "embedded_actor_role": "当前用户",
-            "embedded_target_role": "当前角色",
+        "content": {
+            "semantic_text": "我要亲口听你说你想让我做的下一步",
+            "role_explicit_content": (
+                "当前用户想让当前角色用语言表达出当前角色希望当前用户执行的"
+                "下一个动作"
+            ),
+            "response_operation": {
+                "operation": "要求当前角色告知当前用户接下来的行动指令",
+                "response_owner_role": "当前角色",
+                "selection_owner_role": "当前角色",
+                "selection_required": True,
+                "embedded_actor_role": "当前用户",
+                "embedded_target_role": "当前角色",
+            },
         },
     }]
     candidate = [
@@ -1306,6 +1468,7 @@ async def test_live_focused_role_verifier_rejects_selection_delegation(
     ]
 
     verdict = await dialog_module._verify_dialog_role_direction(
+        surface_output=_role_surface_output(),
         generated_dialog=candidate,
         current_visible_percepts=percepts,
         llm_trace_id="live-focused-selection-owner-reversal",
@@ -1328,8 +1491,8 @@ async def test_live_focused_role_verifier_rejects_selection_delegation(
 
     assert artifact_path.exists()
     assert len(role_llm.calls) == 1
-    assert verdict["aligned"] is False
-    assert verdict["issues"]
+    assert verdict["score"] < dialog_module.DIALOG_PASS_SCORE_THRESHOLD
+    assert verdict["violations"]
 
 
 async def test_live_focused_role_verifier_rejects_mixed_delegation(
@@ -1348,18 +1511,20 @@ async def test_live_focused_role_verifier_rejects_mixed_delegation(
     )
     percepts = [{
         "input_source": "dialog_text",
-        "content": "我要亲口听你说你想让我做的下一步",
-        "role_explicit_content": (
-            "当前用户要求当前角色亲口说出当前角色希望当前用户执行的"
-            "下一个具体动作。"
-        ),
-        "response_operation": {
-            "operation": "当前角色选择并告诉当前用户接下来要执行的具体动作",
-            "response_owner_role": "当前角色",
-            "selection_owner_role": "当前角色",
-            "selection_required": True,
-            "embedded_actor_role": "当前用户",
-            "embedded_target_role": "当前角色",
+        "content": {
+            "semantic_text": "我要亲口听你说你想让我做的下一步",
+            "role_explicit_content": (
+                "当前用户要求当前角色亲口说出当前角色希望当前用户执行的"
+                "下一个具体动作。"
+            ),
+            "response_operation": {
+                "operation": "当前角色选择并告诉当前用户接下来要执行的具体动作",
+                "response_owner_role": "当前角色",
+                "selection_owner_role": "当前角色",
+                "selection_required": True,
+                "embedded_actor_role": "当前用户",
+                "embedded_target_role": "当前角色",
+            },
         },
     }]
     candidate = [
@@ -1372,6 +1537,7 @@ async def test_live_focused_role_verifier_rejects_mixed_delegation(
     ]
 
     verdict = await dialog_module._verify_dialog_role_direction(
+        surface_output=_role_surface_output(),
         generated_dialog=candidate,
         current_visible_percepts=percepts,
         llm_trace_id="live-focused-mixed-selection-delegation",
@@ -1394,8 +1560,8 @@ async def test_live_focused_role_verifier_rejects_mixed_delegation(
 
     assert artifact_path.exists()
     assert len(role_llm.calls) == 1
-    assert verdict["aligned"] is False
-    assert verdict["issues"]
+    assert verdict["score"] < dialog_module.DIALOG_PASS_SCORE_THRESHOLD
+    assert verdict["violations"]
 
 
 async def test_live_role_only_diagnostic_rejects_actor_target_swap() -> None:
@@ -1446,7 +1612,7 @@ async def test_live_role_only_diagnostic_rejects_actor_target_swap() -> None:
     )
 
     assert artifact_path.exists()
-    assert verdict["aligned"] is False
+    assert verdict["score"] < dialog_module.DIALOG_PASS_SCORE_THRESHOLD
     assert verdict["issues"]
 
 
@@ -1660,8 +1826,8 @@ async def _run_live_owner_repair_case(
     assert repair_payload["text_surface_output_v2"] == repaired_surface
     assert repaired_surface["content_plan"] != surface_output["content_plan"]
     assert repaired_dialog
-    assert verdict["aligned"] is True
-    assert verdict["issues"] == []
+    assert dialog_module._dialog_verifier_aggregate_is_passed(verdict)
+    assert dialog_module._dialog_verifier_aggregate_hard_issues(verdict) == []
     case_result = {
         "artifact_path": str(artifact_path),
         "repaired_dialog": repaired_dialog,

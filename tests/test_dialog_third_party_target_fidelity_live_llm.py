@@ -389,13 +389,16 @@ async def _run_case(
         assert "蚝爹油" in final_text
         assert role_llm.calls
         assert supplemental_verdict is not None
-        assert supplemental_verdict["aligned"] is False
+        assert (
+            supplemental_verdict["score"]
+            < dialog_module.DIALOG_PASS_SCORE_THRESHOLD
+        )
         assert supplemental_verdict["violations"]
     elif expected_target == "current_user":
         assert "你" in final_text or "YCHDDZZ" in final_text
         assert not role_llm.calls
         assert supplemental_verdict is not None
-        assert dialog_module._dialog_verifier_aggregate_is_aligned(
+        assert dialog_module._dialog_verifier_aggregate_is_passed(
             supplemental_verdict,
         )
     else:

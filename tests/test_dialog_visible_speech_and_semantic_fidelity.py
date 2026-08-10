@@ -344,7 +344,7 @@ def test_runtime_prompts_define_live_speech_and_hard_error_contracts() -> None:
     assert "愿望、请求或祈使句" in role_prompt
     assert "说出、回答、选择或发送" in role_prompt
     assert "选择哪项动作" in role_prompt
-    assert "不得以不够具体" in role_prompt
+    assert "不得报告" in role_prompt
     assert "内部存在冲突" in verifier_prompt
     assert "当前用户输入" in verifier_prompt
     assert "行动者" in verifier_prompt
@@ -497,13 +497,13 @@ async def test_verifier_receives_bounded_visible_percepts(
     semantic_llm = MagicMock()
     semantic_llm.ainvoke = AsyncMock(
         return_value=SimpleNamespace(
-            content='{"aligned": true, "hard_errors": []}',
+            content='{"score": 1.0, "hard_errors": []}',
         ),
     )
     surface_llm = MagicMock()
     surface_llm.ainvoke = AsyncMock(
         return_value=SimpleNamespace(
-            content='{"aligned": true, "issues": []}',
+            content='{"score": 1.0, "issues": []}',
         ),
     )
     monkeypatch.setattr(dialog_module, "_dialog_generator_llm", generator_llm)
@@ -618,11 +618,11 @@ async def test_dialog_preserves_explicit_high_risk_language_when_aligned(
     ))
     semantic_llm = MagicMock()
     semantic_llm.ainvoke = AsyncMock(return_value=SimpleNamespace(
-        content='{"aligned": true, "hard_errors": []}',
+        content='{"score": 1.0, "hard_errors": []}',
     ))
     surface_llm = MagicMock()
     surface_llm.ainvoke = AsyncMock(return_value=SimpleNamespace(
-        content='{"aligned": true, "issues": []}',
+        content='{"score": 1.0, "issues": []}',
     ))
     monkeypatch.setattr(dialog_module, "_dialog_generator_llm", generator_llm)
     monkeypatch.setattr(
@@ -664,14 +664,19 @@ def test_expression_continuity_check_is_literal_and_topic_neutral() -> None:
         surface_output=surface_output,
         generated_dialog=["角色可以完整表达成人性内容与伤害主题。"],
     )
-    assert aligned == {"status": "aligned", "issues": []}
+    assert aligned == {
+        "status": "scored",
+        "score": 1.0,
+        "issues": [],
+    }
 
     surface_output["lexical_avoidances"] = ["嗯"]
     misaligned = dialog_module._verify_dialog_lexical_avoidances(
         surface_output=surface_output,
         generated_dialog=["嗯，我会继续说。"],
     )
-    assert misaligned["status"] == "misaligned"
+    assert misaligned["status"] == "hard_ineligible"
+    assert misaligned["score"] == 0.0
     assert misaligned["issues"][0]["kind"] == "lexical_avoidance"
 
 
@@ -705,14 +710,14 @@ async def test_focused_verifiers_merge_four_issues_each(
     semantic_llm = MagicMock()
     semantic_llm.ainvoke = AsyncMock(return_value=SimpleNamespace(
         content=json.dumps({
-            "aligned": False,
+            "score": 0.1,
             "hard_errors": semantic_issues,
         }),
     ))
     surface_llm = MagicMock()
     surface_llm.ainvoke = AsyncMock(return_value=SimpleNamespace(
         content=json.dumps({
-            "aligned": False,
+            "score": 0.1,
             "issues": surface_issue_rows,
         }),
     ))
@@ -739,19 +744,23 @@ async def test_focused_verifiers_merge_four_issues_each(
 
     assert verdict == {
         "semantic_fidelity": {
-            "status": "misaligned",
+            "status": "hard_ineligible",
+            "score": 0.1,
             "issues": semantic_issues,
         },
         "role_direction": {
-            "status": "aligned",
+            "status": "scored",
+            "score": 1.0,
             "violations": [],
         },
         "surface_integrity": {
-            "status": "misaligned",
+            "status": "hard_ineligible",
+            "score": 0.1,
             "issues": surface_issue_rows,
         },
         "lexical_avoidance": {
-            "status": "aligned",
+            "status": "scored",
+            "score": 1.0,
             "issues": [],
         },
     }
@@ -771,7 +780,7 @@ async def test_focused_verifier_exhausts_on_a_fifth_issue(
     semantic_llm = MagicMock()
     semantic_llm.ainvoke = AsyncMock(return_value=SimpleNamespace(
         content=json.dumps({
-            "aligned": False,
+            "score": 0.1,
             "hard_errors": [
                 f"semantic issue {index}"
                 for index in range(5)
@@ -794,7 +803,7 @@ async def test_focused_verifier_exhausts_on_a_fifth_issue(
         llm_trace_id="focused-overflow",
     )
 
-    assert verdict == {"status": "unavailable", "issues": []}
+    assert verdict == {"status": "unavailable", "hard_errors": []}
     assert semantic_llm.ainvoke.await_count == 3
 
 
@@ -805,13 +814,13 @@ async def test_semantic_verifier_regenerates_invalid_structure_in_place(
     """Semantic verification repairs shape without changing its source packet."""
 
     invalid_response = json.dumps({
-        "aligned": True,
+        "score": 1.0,
         "Issues": ["x" * 9000],
     })
     semantic_llm = MagicMock()
     semantic_llm.ainvoke = AsyncMock(side_effect=[
         SimpleNamespace(content=invalid_response),
-        SimpleNamespace(content='{"aligned": true, "hard_errors": []}'),
+        SimpleNamespace(content='{"score": 1.0, "hard_errors": []}'),
     ])
     monkeypatch.setattr(
         dialog_module,
@@ -830,7 +839,7 @@ async def test_semantic_verifier_regenerates_invalid_structure_in_place(
         llm_trace_id="semantic-structure-repair",
     )
 
-    assert verdict == {"aligned": True, "issues": []}
+    assert verdict == {"score": 1.0, "hard_errors": []}
     assert semantic_llm.ainvoke.await_count == 2
     first_messages = semantic_llm.ainvoke.await_args_list[0].args[0]
     repair_messages = semantic_llm.ainvoke.await_args_list[1].args[0]
@@ -850,7 +859,7 @@ async def test_semantic_verifier_regenerates_invalid_structure_in_place(
     )
     assert "missing=['hard_errors']" in repair_messages[3].content
     assert "unexpected=['Issues']" in repair_messages[3].content
-    assert '{"aligned": true, "hard_errors": []}' in (
+    assert '{"score": 0.75, "hard_errors": []}' in (
         repair_messages[3].content
     )
     assert dialog_module.DIALOG_SEMANTIC_VERDICT_FALSE_EXAMPLE in (
@@ -881,13 +890,13 @@ async def test_role_verifier_regenerates_invalid_structure_in_place(
     """Role verification preserves the authoritative five-field role tuple."""
 
     invalid_response = json.dumps({
-        "aligned": True,
+        "score": 1.0,
         "Issues": ["x" * 9000],
     })
     role_llm = MagicMock()
     role_llm.ainvoke = AsyncMock(side_effect=[
         SimpleNamespace(content=invalid_response),
-        SimpleNamespace(content='{"aligned": true, "violations": []}'),
+        SimpleNamespace(content='{"score": 1.0, "violations": []}'),
     ])
     monkeypatch.setattr(
         dialog_module,
@@ -916,7 +925,7 @@ async def test_role_verifier_regenerates_invalid_structure_in_place(
         llm_trace_id="role-structure-repair",
     )
 
-    assert verdict == {"aligned": True, "violations": []}
+    assert verdict == {"score": 1.0, "violations": []}
     assert role_llm.ainvoke.await_count == 2
     first_messages = role_llm.ainvoke.await_args_list[0].args[0]
     repair_messages = role_llm.ainvoke.await_args_list[1].args[0]
@@ -960,13 +969,13 @@ async def test_surface_verifier_regenerates_invalid_structure_in_place(
     """Surface verification repairs structure with the same evidence packet."""
 
     invalid_response = json.dumps({
-        "aligned": True,
+        "score": 1.0,
         "issues": "x" * 9000,
     })
     surface_llm = MagicMock()
     surface_llm.ainvoke = AsyncMock(side_effect=[
         SimpleNamespace(content=invalid_response),
-        SimpleNamespace(content='{"aligned": true, "issues": []}'),
+        SimpleNamespace(content='{"score": 1.0, "issues": []}'),
     ])
     monkeypatch.setattr(
         dialog_module,
@@ -985,7 +994,7 @@ async def test_surface_verifier_regenerates_invalid_structure_in_place(
         llm_trace_id="surface-structure-repair",
     )
 
-    assert verdict == {"aligned": True, "issues": []}
+    assert verdict == {"score": 1.0, "issues": []}
     assert surface_llm.ainvoke.await_count == 2
     first_messages = surface_llm.ainvoke.await_args_list[0].args[0]
     repair_messages = surface_llm.ainvoke.await_args_list[1].args[0]
@@ -1018,7 +1027,7 @@ async def test_surface_verifier_regenerates_invalid_structure_in_place(
 @pytest.mark.parametrize(
     ("verifier_name", "empty_field"),
     [
-        ("semantic", "issues"),
+        ("semantic", "hard_errors"),
         ("role", "violations"),
         ("surface", "issues"),
     ],
@@ -1031,7 +1040,7 @@ async def test_focused_verifier_exhaustion_returns_unavailable(
     """Three structural failures mark only the focused verifier unavailable."""
 
     invalid_response = SimpleNamespace(
-        content='{"aligned": true, "Issues": []}',
+        content='{"score": 1.0, "Issues": []}',
     )
     verifier_llm = MagicMock()
     verifier_llm.ainvoke = AsyncMock(return_value=invalid_response)
@@ -1122,7 +1131,7 @@ async def test_role_direction_verifier_skips_without_required_selection(
         llm_trace_id="role-direction-skip",
     )
 
-    assert verdict == {"aligned": True, "violations": []}
+    assert verdict == {"score": 1.0, "violations": []}
     role_llm.ainvoke.assert_not_awaited()
 
 
@@ -1135,7 +1144,7 @@ async def test_non_selection_role_reversal_remains_semantic_owned(
     semantic_llm = MagicMock()
     semantic_llm.ainvoke = AsyncMock(return_value=SimpleNamespace(
         content=json.dumps({
-            "aligned": False,
+            "score": 0.1,
             "hard_errors": [
                 "候选明确颠倒了当前角色与当前用户的行动方向。"
             ],
@@ -1147,7 +1156,7 @@ async def test_non_selection_role_reversal_remains_semantic_owned(
     ))
     surface_llm = MagicMock()
     surface_llm.ainvoke = AsyncMock(return_value=SimpleNamespace(
-        content='{"aligned": true, "issues": []}',
+        content='{"score": 1.0, "issues": []}',
     ))
     monkeypatch.setattr(
         dialog_module,
@@ -1192,21 +1201,25 @@ async def test_non_selection_role_reversal_remains_semantic_owned(
 
     assert verdict == {
         "semantic_fidelity": {
-            "status": "misaligned",
+            "status": "hard_ineligible",
+            "score": 0.1,
             "issues": [
                 "候选明确颠倒了当前角色与当前用户的行动方向。"
             ],
         },
         "role_direction": {
-            "status": "aligned",
+            "status": "scored",
+            "score": 1.0,
             "violations": [],
         },
         "surface_integrity": {
-            "status": "aligned",
+            "status": "scored",
+            "score": 1.0,
             "issues": [],
         },
         "lexical_avoidance": {
-            "status": "aligned",
+            "status": "scored",
+            "score": 1.0,
             "issues": [],
         },
     }
@@ -1231,7 +1244,7 @@ async def test_selection_role_fields_stay_out_of_semantic_verifier(
 
     semantic_llm = MagicMock()
     semantic_llm.ainvoke = AsyncMock(return_value=SimpleNamespace(
-        content='{"aligned": true, "hard_errors": []}',
+        content='{"score": 1.0, "hard_errors": []}',
     ))
     monkeypatch.setattr(
         dialog_module,
@@ -1264,7 +1277,7 @@ async def test_selection_role_fields_stay_out_of_semantic_verifier(
         llm_trace_id="selection-fields-excluded-from-semantic",
     )
 
-    assert verdict == {"aligned": True, "issues": []}
+    assert verdict == {"score": 1.0, "hard_errors": []}
     payload = json.loads(
         semantic_llm.ainvoke.await_args.args[0][1].content
     )
@@ -1290,6 +1303,68 @@ def test_hard_verifier_and_repair_exclude_drifted_l3_prose() -> None:
 
 
 @pytest.mark.asyncio
+async def test_role_direction_score_accepts_character_owned_deflection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A user-directed deflection is not a role-direction reversal."""
+
+    surface_output = _surface_output()
+    surface_output["selected_surface_intent"] = (
+        "refuse image analysis and redirect to the claw-machine task"
+    )
+    surface_output["content_plan"] = (
+        "Decline the image analysis and ask the current user to refocus "
+        "on the claw-machine task."
+    )
+    role_llm = MagicMock()
+    role_llm.ainvoke = AsyncMock(return_value=SimpleNamespace(
+        content=json.dumps({
+            "score": 0.98,
+            "violations": [],
+        }),
+    ))
+    monkeypatch.setattr(
+        dialog_module,
+        "_dialog_role_direction_llm",
+        role_llm,
+    )
+
+    percept = {
+        "input_source": "dialog_text",
+        "content": {
+            "semantic_text": "Analyze the image.",
+            "response_operation": {
+                "operation": "the character chooses whether to answer or deflect",
+                "response_owner_role": "current_character",
+                "selection_owner_role": "current_character",
+                "selection_required": True,
+                "embedded_actor_role": "current_user",
+                "embedded_target_role": "current_character",
+            },
+        },
+    }
+    candidate = [
+        "快把注意力从这些奇怪的图上移开，重新聚焦到接下来的抓娃娃任务里去！",
+    ]
+
+    verdict = await dialog_module._verify_dialog_role_direction(
+        surface_output=surface_output,
+        generated_dialog=candidate,
+        current_visible_percepts=[percept],
+        llm_trace_id="role-direction-valid-deflection",
+    )
+
+    assert verdict == {"score": 0.98, "violations": []}
+    payload = json.loads(role_llm.ainvoke.await_args.args[0][1].content)
+    assert payload["authoritative_surface_semantics"]["selected_surface_intent"] == (
+        surface_output["selected_surface_intent"]
+    )
+    assert payload["authoritative_surface_semantics"]["content_plan"] == (
+        surface_output["content_plan"]
+    )
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "candidate,aligned",
     [
@@ -1307,7 +1382,7 @@ async def test_role_direction_verifier_owns_required_selection(
     role_llm = MagicMock()
     role_llm.ainvoke = AsyncMock(return_value=SimpleNamespace(
         content=json.dumps({
-            "aligned": aligned,
+            "score": 1.0 if aligned else 0.1,
             "violations": [] if aligned else [{
                 "kind": "selection_owner_transfer",
                 "evidence": "I will follow your choice.",
@@ -1341,18 +1416,20 @@ async def test_role_direction_verifier_owns_required_selection(
     }
 
     verdict = await dialog_module._verify_dialog_role_direction(
+        surface_output=_surface_output(),
         generated_dialog=[candidate],
         current_visible_percepts=[percept],
         llm_trace_id="role-direction-required-selection",
     )
 
-    assert verdict["aligned"] is aligned
+    assert verdict["score"] == (1.0 if aligned else 0.1)
     role_llm.ainvoke.assert_awaited_once()
     payload = json.loads(role_llm.ainvoke.await_args.args[0][1].content)
     assert set(payload) == {
         "candidate_final_dialog",
         "candidate_role_frame",
         "required_role_operations",
+        "authoritative_surface_semantics",
     }
     assert payload["required_role_operations"] == [{
         "response_owner_role": "当前角色",
@@ -1372,7 +1449,7 @@ async def test_role_direction_verifier_requires_exact_candidate_evidence(
     role_llm = MagicMock()
     role_llm.ainvoke = AsyncMock(return_value=SimpleNamespace(
         content=json.dumps({
-            "aligned": False,
+            "score": 0.1,
             "violations": [{
                 "kind": "selection_owner_transfer",
                 "evidence": "I will follow your choice.",
@@ -1422,7 +1499,7 @@ async def test_surface_verifier_requires_exact_candidate_evidence(
     surface_llm = MagicMock()
     surface_llm.ainvoke = AsyncMock(return_value=SimpleNamespace(
         content=json.dumps({
-            "aligned": False,
+            "score": 0.1,
             "issues": ["Action or stage narration."],
         }),
     ))
@@ -1463,20 +1540,20 @@ async def test_false_execution_verdict_uses_one_grounded_llm_repair(
     ])
     semantic_llm = MagicMock()
     semantic_llm.ainvoke = AsyncMock(side_effect=[
-        SimpleNamespace(content='{"aligned": true, "hard_errors": []}'),
-        SimpleNamespace(content='{"aligned": true, "hard_errors": []}'),
+        SimpleNamespace(content='{"score": 1.0, "hard_errors": []}'),
+        SimpleNamespace(content='{"score": 1.0, "hard_errors": []}'),
     ])
     surface_llm = MagicMock()
     surface_llm.ainvoke = AsyncMock(side_effect=[
         SimpleNamespace(content=json.dumps({
-            "aligned": False,
+            "score": 0.1,
             "issues": [{
                 "kind": "false_execution",
                 "evidence": "changed the platform alarm",
                 "explanation": "No executed result supports this claim.",
             }],
         })),
-        SimpleNamespace(content='{"aligned": true, "issues": []}'),
+        SimpleNamespace(content='{"score": 1.0, "issues": []}'),
     ])
     monkeypatch.setattr(dialog_module, "_dialog_generator_llm", generator_llm)
     monkeypatch.setattr(
@@ -1527,7 +1604,7 @@ async def test_false_execution_verdict_uses_one_grounded_llm_repair(
 async def test_second_rejection_withholds_unverified_candidate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A bounded third candidate is withheld after repeated rejection."""
+    """A bounded third candidate is ranked after repeated rejection."""
 
     invalid_dialog = "Ask me what to do next; I will follow your choice."
     generator_llm = MagicMock()
@@ -1537,13 +1614,13 @@ async def test_second_rejection_withholds_unverified_candidate(
     semantic_llm = MagicMock()
     semantic_llm.ainvoke = AsyncMock(return_value=SimpleNamespace(
         content=json.dumps({
-            "aligned": False,
+            "score": 0.1,
             "hard_errors": ["Subject reversal remains."],
         }),
     ))
     surface_llm = MagicMock()
     surface_llm.ainvoke = AsyncMock(return_value=SimpleNamespace(
-        content='{"aligned": true, "issues": []}',
+        content='{"score": 1.0, "issues": []}',
     ))
     monkeypatch.setattr(dialog_module, "_dialog_generator_llm", generator_llm)
     monkeypatch.setattr(
@@ -1559,7 +1636,7 @@ async def test_second_rejection_withholds_unverified_candidate(
 
     with pytest.raises(
         dialog_module.DialogGenerationContractError,
-        match="terminal verification",
+        match="exhausted candidates",
     ):
         await dialog_generator(_dialog_state())
 
@@ -1823,7 +1900,7 @@ async def test_dialog_repair_uses_l3_replacement_as_rendering_authority(
 async def test_dialog_semantic_exhaustion_withholds_unverified_candidates(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Repeated semantic rejection withholds every unverified candidate."""
+    """Explicit semantic hard errors remain fail-closed after exhaustion."""
 
     invalid_dialog = "你来替我决定我想让你做什么。"
     generator_llm = MagicMock()
@@ -1836,13 +1913,13 @@ async def test_dialog_semantic_exhaustion_withholds_unverified_candidates(
     semantic_llm = MagicMock()
     semantic_llm.ainvoke = AsyncMock(return_value=SimpleNamespace(
         content=json.dumps({
-            "aligned": False,
+            "score": 0.1,
             "hard_errors": ["当前角色仍把自己的选择交给当前用户。"],
         }, ensure_ascii=False),
     ))
     surface_llm = MagicMock()
     surface_llm.ainvoke = AsyncMock(return_value=SimpleNamespace(
-        content='{"aligned": true, "issues": []}',
+        content='{"score": 1.0, "issues": []}',
     ))
     surface_repair = AsyncMock(return_value=_surface_output())
     monkeypatch.setattr(dialog_module, "_dialog_generator_llm", generator_llm)
@@ -1866,7 +1943,7 @@ async def test_dialog_semantic_exhaustion_withholds_unverified_candidates(
 
     with pytest.raises(
         dialog_module.DialogGenerationContractError,
-        match="terminal verification",
+        match="exhausted candidates",
     ):
         await dialog_generator(state)
 

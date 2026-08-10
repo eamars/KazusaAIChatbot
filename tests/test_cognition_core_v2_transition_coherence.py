@@ -176,18 +176,27 @@ def _dialog_verifier_aggregate(
         Three-owner verifier state with role and surface checks aligned.
     """
 
-    semantic_status = "aligned" if aligned else "misaligned"
+    semantic_status = "scored"
+    semantic_score = 1.0 if aligned else 0.1
     return {
         "semantic_fidelity": {
             "status": semantic_status,
+            "score": semantic_score,
             "issues": list(semantic_issues),
         },
         "role_direction": {
-            "status": "aligned",
+            "status": "scored",
+            "score": 1.0,
             "violations": [],
         },
         "surface_integrity": {
-            "status": "aligned",
+            "status": "scored",
+            "score": 1.0,
+            "issues": [],
+        },
+        "lexical_avoidance": {
+            "status": "scored",
+            "score": 1.0,
             "issues": [],
         },
     }
@@ -409,7 +418,7 @@ def test_surface_prompts_use_contextual_stance_and_boundary_scope() -> None:
     assert "当这些表达的对象是时机、直接程度、标签或情绪" in (
         semantic_prompt
     )
-    assert "且行动或关系极性与收尾一致时，整段属于aligned" in semantic_prompt
+    assert "且行动或关系极性与收尾一致时，给出高分" in semantic_prompt
     assert "不论位于同一消息或多条消息" in semantic_prompt
     assert "对同一主体、同一行动或关系先明确拒绝或不愿，后明确接受或愿意" in (
         semantic_prompt
@@ -465,7 +474,7 @@ async def test_semantic_fidelity_payload_uses_only_surface_semantics(
 
     semantic_llm = MagicMock()
     semantic_llm.ainvoke = AsyncMock(return_value=SimpleNamespace(
-        content='{"aligned": true, "hard_errors": []}',
+        content='{"score": 1.0, "hard_errors": []}',
     ))
     monkeypatch.setattr(
         dialog_agent,
@@ -551,7 +560,7 @@ async def test_semantic_fidelity_candidate_limit_degrades_before_call(
         llm_trace_id="semantic-context-limit",
     )
 
-    assert verdict == {"status": "unavailable", "issues": []}
+    assert verdict == {"status": "unavailable", "hard_errors": []}
     semantic_llm.ainvoke.assert_not_awaited()
     assert trace_recorder.await_args.kwargs["parse_status"] == (
         "not_called_context_limit"

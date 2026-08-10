@@ -441,8 +441,13 @@ prompts neither request it nor create a rejection or repair rule for it.
 Source percepts and generated character speech carry separate typed pronoun
 frames before role direction is compared. Novelty, coherent drift,
 character-owned refusal, negotiation, and supported changes of mind are not
-failures by themselves. Deterministic code merges only the verdict shapes,
-bounding each owner to four issues and the merged result to eight. A negative
+failures by themselves. Deterministic code validates the exact numeric score
+shapes and merges available scores with an equal-weight geometric mean. The
+dialog threshold is currently `0.50`; a below-threshold candidate without hard
+issues remains eligible for degraded ranking after bounded exhaustion. Explicit
+semantic hard errors, role violations, false-execution issues, lexical
+violations, empty candidates, and state or delivery failures remain fail-closed.
+Each owner is bounded to four issues and the merged result to eight. A negative
 result returns canonical surface input plus bounded verified issues to the
 text-surface owner for one complete replacement of `content_plan`,
 `content_requirements`, `delivery_profile`, `lexical_avoidances`,
@@ -451,9 +456,10 @@ and are absent from both repair-model payloads. Selected intent, action truth,
 the exact relational stance, and runtime capability limits are reconstructed
 from canonical input before each dialog retry. Every candidate, including the
 terminal candidate, passes the semantic, role, surface, and expression-continuity
-checks. After
-bounded exhaustion the delivery boundary raises a typed failure; no
-unverified dialog reaches post-turn consumers. The protected turn trace
+checks. After bounded exhaustion the highest-scoring eligible candidate is
+delivered as degraded output; when no eligible candidate remains the delivery
+boundary raises a typed failure. No hard-invalid or unverified dialog reaches
+post-turn consumers. The protected turn trace
 records rejected checks, surfaces, and dialog candidates as diagnostic
 evidence.
 
@@ -464,11 +470,13 @@ assistant candidate and exact contract error. The replacement remains inside
 that verifier and does not create another dialog candidate. All attempts are
 recorded in the protected trace. Semantic fidelity uses the
 collision-resistant producer field `hard_errors`; deterministic validation
-normalizes it only after exact shape validation. Role direction uses typed
-`violations` limited to `selection_owner_transfer` and
-`typed_operation_role_reversal`; surface integrity retains evidence-bearing
-`issues`. Exhaustion marks only that verifier `unavailable`, so it cannot erase
-a structurally valid dialog candidate.
+rejects boolean aliases, non-finite values, and out-of-range scores before
+bounded regeneration. Role direction uses typed `violations` limited to
+`selection_owner_transfer` and `typed_operation_role_reversal`; surface
+integrity retains evidence-bearing `issues`. Exhaustion marks only that
+verifier `unavailable`; available numeric dimensions continue to rank
+structurally valid candidates, and an all-focused outage receives aggregate
+score `0.0` for deterministic degraded tie-breaking.
 
 ## Document Control
 

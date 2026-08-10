@@ -581,8 +581,8 @@ async def _run_seeded_verifier_negative(
         "parsed_verdict": verdict,
     }, ensure_ascii=True, indent=2))
 
-    assert verdict["aligned"] is False
-    assert verdict["issues"]
+    assert verdict["score"] < dialog_agent.DIALOG_PASS_SCORE_THRESHOLD
+    assert verdict["hard_errors"]
 
 
 async def test_live_captured_room_request_acceptance_is_coherent(

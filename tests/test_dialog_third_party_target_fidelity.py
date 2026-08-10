@@ -435,7 +435,7 @@ async def test_role_verifier_receives_typed_p1_and_can_reject_second_person(
     role_llm = MagicMock()
     role_llm.ainvoke = AsyncMock(return_value=SimpleNamespace(
         content=json.dumps({
-            'aligned': False,
+            'score': 0.1,
             'violations': [{
                 'kind': 'typed_operation_role_reversal',
                 'evidence': '你',
@@ -462,7 +462,7 @@ async def test_role_verifier_receives_typed_p1_and_can_reject_second_person(
         llm_trace_id='typed-target-test',
     )
 
-    assert verdict['aligned'] is False
+    assert verdict['score'] == 0.1
     payload = json.loads(role_llm.ainvoke.await_args.args[0][1].content)
     assert payload['typed_addressee_plan'] == [surface_output['addressee_plan'][0]]
     assert payload['candidate_role_frame']['typed_non_current_targets'] == [{
@@ -500,7 +500,7 @@ async def test_dialog_repair_handoff_carries_p1_role_violation(
     role_llm = MagicMock()
     role_llm.ainvoke = AsyncMock(side_effect=[
         AIMessage(content=json.dumps({
-            'aligned': False,
+            'score': 0.1,
             'violations': [{
                 'kind': 'typed_operation_role_reversal',
                 'evidence': '你',
@@ -508,17 +508,17 @@ async def test_dialog_repair_handoff_carries_p1_role_violation(
             }],
         }, ensure_ascii=False)),
         AIMessage(content=json.dumps({
-            'aligned': True,
+            'score': 1.0,
             'violations': [],
         }, ensure_ascii=False)),
     ])
     semantic_llm = MagicMock()
     semantic_llm.ainvoke = AsyncMock(return_value=AIMessage(
-        content='{"aligned": true, "hard_errors": []}',
+        content='{"score": 1.0, "hard_errors": []}',
     ))
     integrity_llm = MagicMock()
     integrity_llm.ainvoke = AsyncMock(return_value=AIMessage(
-        content='{"aligned": true, "issues": []}',
+        content='{"score": 1.0, "issues": []}',
     ))
     repair_calls: list[dict[str, object]] = []
 

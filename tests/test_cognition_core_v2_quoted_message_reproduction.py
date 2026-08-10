@@ -521,9 +521,26 @@ async def _aligned_verifier(**kwargs: object) -> dict[str, Any]:
 
     del kwargs
     return {
-        "semantic_fidelity": {"status": "aligned", "issues": []},
-        "role_direction": {"status": "aligned", "violations": []},
-        "surface_integrity": {"status": "aligned", "issues": []},
+        "semantic_fidelity": {
+            "status": "scored",
+            "score": 1.0,
+            "issues": [],
+        },
+        "role_direction": {
+            "status": "scored",
+            "score": 1.0,
+            "violations": [],
+        },
+        "surface_integrity": {
+            "status": "scored",
+            "score": 1.0,
+            "issues": [],
+        },
+        "lexical_avoidance": {
+            "status": "scored",
+            "score": 1.0,
+            "issues": [],
+        },
     }
 
 
@@ -720,7 +737,7 @@ async def test_rebuilt_case_reproduces_answer_loss_after_false_resolver_success(
                 "direct_facts": case["direct_facts"],
                 "goal_resolution": action_plan["goal_resolution"],
                 "final_dialog_answers_quoted_question": False,
-                "structural_verifiers": "aligned",
+                "structural_verifiers": "scored",
             },
         },
     )

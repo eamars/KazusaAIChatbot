@@ -17,11 +17,11 @@ def _aligned_dialog_compliance(monkeypatch) -> None:
 
     verifier_payloads = {
         "_dialog_semantic_fidelity_llm": {
-            "aligned": True,
+            "score": 1.0,
             "hard_errors": [],
         },
         "_dialog_surface_integrity_llm": {
-            "aligned": True,
+            "score": 1.0,
             "issues": [],
         },
     }

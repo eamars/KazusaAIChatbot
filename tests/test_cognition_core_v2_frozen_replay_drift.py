@@ -537,22 +537,22 @@ async def test_dialog_semantic_verdict_triggers_one_bounded_repair(
     semantic_llm = MagicMock()
     semantic_llm.ainvoke = AsyncMock(side_effect=[
         AIMessage(content=json.dumps({
-            "aligned": False,
+            "score": 0.1,
             "hard_errors": ["Actor and beneficiary are reversed."],
         })),
         AIMessage(content=json.dumps({
-            "aligned": True,
+            "score": 1.0,
             "hard_errors": [],
         })),
     ])
     surface_llm = MagicMock()
     surface_llm.ainvoke = AsyncMock(side_effect=[
         AIMessage(content=json.dumps({
-            "aligned": True,
+            "score": 1.0,
             "issues": [],
         })),
         AIMessage(content=json.dumps({
-            "aligned": True,
+            "score": 1.0,
             "issues": [],
         })),
     ])
