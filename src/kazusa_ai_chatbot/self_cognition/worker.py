@@ -370,6 +370,7 @@ async def run_self_cognition_worker_tick(
         self_trace_token = None
         self_trace_status = "failed"
         self_trace_dialog_count = 0
+        artifact_payloads: dict[str, Any] = {}
         try:
             if active_pipeline_handle is not None:
                 active_pipeline_handle.raise_if_cancelled(

@@ -115,6 +115,13 @@ _VISION_DESCRIPTOR_PROMPT = '''\
     "uncertainty": ["不确定或模糊之处"]
 }}
 '''
+_VISION_DESCRIPTOR_OUTPUT_FORMAT = '''{
+    "description": "non-empty natural-language image summary",
+    "visible_text": ["recognizable text"],
+    "salient_visual_facts": ["observable visual fact"],
+    "spatial_or_scene_facts": ["observable spatial or scene fact"],
+    "uncertainty": ["unclear or obstructed visual area"]
+}'''
 _llm_interface = LLInterface()
 _vision_descriptor_llm = LLInterface()
 _msg_decontextualizer_llm = LLInterface()
@@ -457,7 +464,7 @@ async def multimedia_descriptor_agent(state: IMProcessState) -> IMProcessState:
                     try:
                         parsed_result = parse_llm_json_output(
                             response_text,
-                            deterministic_only=True,
+                            expected_output_format=_VISION_DESCRIPTOR_OUTPUT_FORMAT,
                         )
                         result = _validate_image_descriptor_result(
                             parsed_result
@@ -496,7 +503,9 @@ async def multimedia_descriptor_agent(state: IMProcessState) -> IMProcessState:
                 )
                 summary = image_observation["summary"]
                 if not description and isinstance(summary, str):
-                    description = summary
+                    description = summary.strip()
+                if description:
+                    result["description"] = description
 
                 logger.debug(
                     f"Image description: user={user_name} "

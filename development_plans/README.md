@@ -50,6 +50,7 @@ long_term/todo.md
 | [august_change_alignment_audit_and_remediation_plan.md](archive/completed/short_term/august_change_alignment_audit_and_remediation_plan.md) | Repository-wide Aug 1+ change alignment audit, bounded remediation, and baseline feature regression map | completed |
 | [legacy_llm_configuration_cleanup_plan.md](archive/completed/short_term/legacy_llm_configuration_cleanup_plan.md) | Removal of ten legacy local environment keys and three stale verifier Compose bindings | completed |
 | [task_resolution_character_background_handoff_plan.md](archive/completed/short_term/task_resolution_character_background_handoff_plan.md) | Character-selected task-resolution background handoff and partial-result continuation | completed |
+| [cognition_graph_multi_source_latest_run_plan.md](archive/completed/short_term/cognition_graph_multi_source_latest_run_plan.md) | Medium source-neutral latest cognition publication and transport contract change | completed |
 
 ## Supporting Experiment Records
 
@@ -84,6 +85,7 @@ long_term/todo.md
 | [qq_group_public_scene_response_ordering_bugfix_plan.md](archive/completed/bugfix/qq_group_public_scene_response_ordering_bugfix_plan.md) | QQ multi-user public-scene composition and same-group response-ordering bugfix | completed |
 | [cognition_core_v2_first_pass_robustness_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_first_pass_robustness_bugfix_plan.md) | Core V2 first-pass generation grounding, evaluator feedback, per-stage token/character budget rebalance, and deterministic failure-path recovery bugfix plan | completed |
 | [cognition_core_v2_context_fade_and_sleep_phase_plan.md](archive/completed/bugfix/cognition_core_v2_context_fade_and_sleep_phase_plan.md) | Deterministic age-based discard of group-scene turns and conversation-progress topics before projection, plus cognition V2 ownership of the character sleep phase and morning refresh | completed |
+| [relevance_pre_active_answer_attribution_bugfix_plan.md](active/bugfix/relevance_pre_active_answer_attribution_bugfix_plan.md) | Large settled-relevance pre-active answer attribution bugfix plan | completed |
 
 ## Reference Documents
 
