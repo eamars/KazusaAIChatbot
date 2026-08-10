@@ -9,8 +9,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from pymongo.errors import PyMongoError
-
+from kazusa_ai_chatbot.db import DatabaseBackendError
 from kazusa_ai_chatbot.db import close_db
 from kazusa_ai_chatbot.db import script_operations
 from kazusa_ai_chatbot.llm_tracing.correlation import (
@@ -423,7 +422,7 @@ async def build_correlation_manifest(
             identifier=normalized_identifier,
             explicit_trace_id=explicit_trace_id,
         )
-    except (PyMongoError, OSError, TimeoutError) as exc:
+    except (DatabaseBackendError, OSError, TimeoutError) as exc:
         resolution = TraceCorrelationResolution(
             source_surface=normalized_surface,
             identifier=normalized_identifier,
@@ -448,7 +447,7 @@ async def build_correlation_manifest(
                     trace_id=resolution.trace_id,
                 )
             )
-        except (PyMongoError, OSError, TimeoutError) as exc:
+        except (DatabaseBackendError, OSError, TimeoutError) as exc:
             unresolved.append({
                 "relation": "companion_reads",
                 "status": "not_available",

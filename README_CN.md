@@ -9,6 +9,8 @@
     <a href="README.md">English</a>
     ·
     <a href="docs/HOWTO.md">运行指南</a>
+    ·
+    <a href="CHANGELOG.md">变更记录</a>
   </p>
 
 <p>
@@ -16,6 +18,7 @@
     <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-brain_service-009688?logo=fastapi&logoColor=white" />
     <img alt="LangGraph" src="https://img.shields.io/badge/LangGraph-cognition_pipeline-1C3C3C" />
     <img alt="MongoDB" src="https://img.shields.io/badge/MongoDB-memory_store-47A248?logo=mongodb&logoColor=white" />
+    <img alt="Release" src="https://img.shields.io/badge/Release-v1.0.0-6f42c1" />
     <img alt="License" src="https://img.shields.io/badge/License-AGPL--3.0-blue" />
   </p>
 </div>
@@ -726,9 +729,10 @@ Live LLM 测试必须一次只运行一个，并检查输出。Live DB 测试需
 
 ## 项目状态
 
-Kazusa 认知核心是 alpha 阶段的实验基础设施，用于长期在线数字角色。主运行时
-已经可以作为本地大脑服务使用，包含适配器、记忆、检索、自我认知、反思和调度；
-但部分自主联系表面仍然有意停留在权限化预览合约中，而不是生产发送路径。
+Kazusa 认知核心 v1.0.0 是面向长期在线数字角色本地运行时的首个稳定版本。
+主运行时已经可以作为可检查的大脑服务使用，包含适配器、记忆、检索、自我认知、
+反思和调度。部分自主联系表面仍然有意停留在权限化预览合约中，而不是生产发送
+路径；启用这些能力前，操作员必须明确配置权限和适配器投递能力。
 
 ## 许可证
 

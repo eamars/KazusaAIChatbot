@@ -140,6 +140,11 @@ def _succeeded_observation(capability_request: dict) -> dict[str, object]:
             "result will return through the normal conversation path."
         ),
         "evidence_refs": [],
+        "task_resolution_evidence_state": {
+            "schema_version": "resolver_evidence_state.v1",
+            "state": "pending",
+            "remaining_needs": [],
+        },
         "created_at_utc": "2026-08-07T00:00:00Z",
     }
 

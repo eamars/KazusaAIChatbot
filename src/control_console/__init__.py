@@ -2,6 +2,6 @@
 
 from __future__ import annotations
 
-__all__ = ["__version__"]
+from kazusa_ai_chatbot.version import __version__
 
-__version__ = "0.1.0"
+__all__ = ["__version__"]

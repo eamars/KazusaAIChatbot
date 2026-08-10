@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kazusa_ai_chatbot"
-version = "0.1.0"
+dynamic = ["version"]
 description = "A platform-agnostic character cognition core with memory and adapters"
 readme = "README.md"
 license = {file = "LICENSE"}
@@ -12,7 +12,7 @@ authors = [
     {name = "eamars"}
 ]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: GNU Affero General Public License v3",
     "Programming Language :: Python :: 3",
@@ -79,6 +79,9 @@ kazusa-control-console = "control_console.main:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["kazusa_ai_chatbot*", "scripts*", "adapters*", "control_console*"]
+
+[tool.setuptools.dynamic]
+version = {attr = "kazusa_ai_chatbot.version.__version__"}
 
 [tool.setuptools.package-data]
 src = ["*.py"]

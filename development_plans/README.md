@@ -44,6 +44,7 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
+| [v1_release_readiness_plan.md](archive/completed/short_term/v1_release_readiness_plan.md) | v1.0.0 release identity, deterministic contract cleanup, packaging, documentation, and local tag cutover | completed |
 | [development_plan_test_impact_traceability_and_cognition_unit_structure_bigbang_plan.md](archive/completed/short_term/development_plan_test_impact_traceability_and_cognition_unit_structure_bigbang_plan.md) | Big-bang development-plan test-impact contract, cognition source ownership manifest, and mirrored deterministic unit-test structure | completed |
 | [character_owned_content_judgment_cutover_plan.md](archive/completed/short_term/character_owned_content_judgment_cutover_plan.md) | Cutover removing application-owned semantic safety/refusal policy and relationship gating while preserving character-owned judgment, expression continuity, and operational guards | completed |
 | [cognition_parallel_neutral_weak_tilt_plan.md](archive/completed/short_term/cognition_parallel_neutral_weak_tilt_plan.md) | Branch-owned semantic intent guidance for generic Cognition V2 bid generation; real-model quality explicitly deferred | completed |

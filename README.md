@@ -9,6 +9,8 @@
     <a href="README_CN.md">简体中文</a>
     ·
     <a href="docs/HOWTO.md">HOWTO</a>
+    ·
+    <a href="CHANGELOG.md">Changelog</a>
   </p>
 
 <p>
@@ -16,6 +18,7 @@
     <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-brain_service-009688?logo=fastapi&logoColor=white" />
     <img alt="LangGraph" src="https://img.shields.io/badge/LangGraph-cognition_pipeline-1C3C3C" />
     <img alt="MongoDB" src="https://img.shields.io/badge/MongoDB-memory_store-47A248?logo=mongodb&logoColor=white" />
+    <img alt="Release" src="https://img.shields.io/badge/Release-v1.0.0-6f42c1" />
     <img alt="License" src="https://img.shields.io/badge/License-AGPL--3.0-blue" />
   </p>
 </div>
@@ -813,11 +816,13 @@ project testing contract.
 
 ## Project Status
 
-Kazusa Cognitive Core is alpha-stage experimental infrastructure for a
-persistent digital character. The main runtime is usable as a local brain
-service with adapters, memory, retrieval, self-cognition, reflection, and
-scheduling, but some autonomous-contact surfaces intentionally remain
-permissioned preview contracts rather than production sends.
+Kazusa Cognitive Core v1.0.0 is the first stable release of the local runtime
+for a persistent digital character. The main runtime provides adapters,
+memory, retrieval, self-cognition, reflection, and scheduling through one
+inspectable brain service. Some autonomous-contact surfaces intentionally
+remain permissioned preview contracts rather than production sends; operators
+must configure permissions and adapter delivery explicitly before enabling
+them.
 
 ## License
 

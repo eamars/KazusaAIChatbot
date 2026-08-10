@@ -1347,10 +1347,12 @@ def test_runner_executes_private_lifecycle_action_for_consolidation(
         storage_timestamp_utc: str,
         executed_action_attempt_ids: set[str] | None = None,
         record_attempt_func: Any = None,
+        source_llm_trace_id: str = "",
         availability_snapshot_factory: Any = None,
     ) -> list[dict[str, Any]]:
         del storage_timestamp_utc, executed_action_attempt_ids
-        del record_attempt_func, availability_snapshot_factory
+        del record_attempt_func, source_llm_trace_id
+        del availability_snapshot_factory
         captured_specs.extend(action_specs)
         action_results = [
             {
@@ -1452,10 +1454,12 @@ def test_runner_routes_lifecycle_intent_through_specialist_before_execution(
         storage_timestamp_utc: str,
         executed_action_attempt_ids: set[str] | None = None,
         record_attempt_func: Any = None,
+        source_llm_trace_id: str = "",
         availability_snapshot_factory: Any = None,
     ) -> list[dict[str, Any]]:
         del storage_timestamp_utc, executed_action_attempt_ids
-        del record_attempt_func, availability_snapshot_factory
+        del record_attempt_func, source_llm_trace_id
+        del availability_snapshot_factory
         captured_specs.extend(action_specs)
         action_results = [
             {

@@ -49,7 +49,8 @@ def _source_paths_for_root(
     """List non-package Python modules represented by one manifest root."""
 
     root_path = repository_root / Path(*source_root.split("/"))
-    if root_path.is_file():
+    explicit_file_root = root_path.is_file()
+    if explicit_file_root:
         candidates = [root_path]
     elif root_path.is_dir():
         candidates = sorted(root_path.rglob("*.py"))
@@ -62,7 +63,7 @@ def _source_paths_for_root(
             str(candidate.relative_to(repository_root))
         )
         for candidate in candidates
-        if candidate.name != "__init__.py"
+        if explicit_file_root or candidate.name != "__init__.py"
     ]
     return source_paths
 

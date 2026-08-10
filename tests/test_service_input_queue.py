@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from fastapi import BackgroundTasks
+from fastapi import BackgroundTasks, Request
 from pydantic import ValidationError
 
 from kazusa_ai_chatbot import chat_input_queue as queue_module
@@ -127,6 +127,12 @@ def _request(
         debug_modes=service_module.DebugModesIn(listen_only=listen_only),
     )
     return request
+
+
+def _chat_http_request() -> Request:
+    """Build the HTTP request context required by the chat authorization seam."""
+
+    return Request({"type": "http", "headers": []})
 
 
 def _item(
@@ -2704,6 +2710,7 @@ async def test_chat_enqueue_commits_receipt_before_queue_admission(
     chat_task = asyncio.create_task(service_module.chat(
         _request("endpoint"),
         BackgroundTasks(),
+        _chat_http_request(),
     ))
     await asyncio.sleep(0)
 
@@ -2777,6 +2784,7 @@ async def test_worker_consumes_precommitted_receipt_without_duplicate(
             platform_channel_id="dm-1",
         ),
         BackgroundTasks(),
+        _chat_http_request(),
     ))
 
     response = await asyncio.wait_for(chat_task, timeout=2.0)
@@ -2876,6 +2884,7 @@ async def test_listen_only_drop_keeps_precommitted_receipt_without_duplicate(
     chat_task = asyncio.create_task(service_module.chat(
         _request("endpoint", listen_only=True),
         BackgroundTasks(),
+        _chat_http_request(),
     ))
 
     response = await asyncio.wait_for(chat_task, timeout=2.0)

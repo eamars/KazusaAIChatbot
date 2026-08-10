@@ -237,7 +237,19 @@ async def test_resolver_loop_attaches_rag_residual_to_private_cognition_state(
             "status": "succeeded",
             "prompt_safe_summary": "Found prior dialog evidence.",
             "rag_result": _rag_result_with_conversation_ref(),
-            "evidence_refs": [],
+            "evidence_refs": [{
+                "schema_version": "evidence_ref.v1",
+                "evidence_kind": "tool_result",
+                "evidence_id": "prior-dialog-evidence",
+                "owner": "conversation_evidence",
+                "excerpt": "A prior Kazusa dialog was retrieved.",
+                "observed_at": "2026-05-29T21:00:00+00:00",
+            }],
+            "task_resolution_evidence_state": {
+                "schema_version": "resolver_evidence_state.v1",
+                "state": "complete",
+                "remaining_needs": [],
+            },
             "created_at_utc": "2026-05-29T21:00:00+00:00",
         }
 
