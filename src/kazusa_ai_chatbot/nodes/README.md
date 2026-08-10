@@ -217,20 +217,21 @@ connector maps each `rag_result.memory_evidence` row to exactly one prompt-safe
 `current_user_continuity`, and every other promoted-memory row (including
 cycle-zero shared prewarm rows) becomes `shared_character_or_world`. The raw
 user id and storage provenance stay behind the deterministic boundary. Shared
-character/world memory can inform what the character knows but cannot establish
-current-user relationship access; current-user continuity memory explains
-history without overriding the canonical native relationship state.
+character/world memory can inform what the character knows; current-user
+continuity memory explains history. The character weighs both with the current
+episode and other typed evidence.
 
 The ordinary goal owner in Cognition Core V2 decides current-turn relational
 willingness. Each goal evidence row receives one transient `provenance_role`
 derived from trusted source-kind and memory-scope metadata; promoted
-reflection and shared character/world context cannot grant current-user access.
+reflection and shared character/world context remain branch evidence and do not
+become a second stance owner.
 The connector passes the validated `relational_willingness.v2` decision
 (applicability, `current_user_relationship_state`, stance, reason, and
 evidence handles) through the V2 output and the L3 surface input so workspace,
 action permission, content planning, preference planning, and dialog preserve
-the exact stance and relationship state instead of re-deriving them from prose
-or relationship numbers.
+the exact complete decision and relationship state instead of re-deriving them
+from prose or relationship numbers.
 
 ## Action Ownership
 
@@ -271,7 +272,8 @@ from:
 - semantic affect and optional relationship projections;
 - permitted semantic action results; and
 - bounded interaction-style guidance, exact tempo/linguistic-texture character
-  expression, and an isolated visual-character context.
+  expression, an interaction-scoped recent-character-dialog projection, and an
+  isolated visual-character context.
 
 The connector loads the existing sanitized user interaction-style overlay and,
 for group turns, the group-channel overlay. It renders only allowlisted speech,
@@ -281,12 +283,21 @@ reflection lineage, and raw channel/user identifiers are excluded.
 
 `run_text_surface_planning(...)` projects visible episode content and runs
 exactly two bounded stages in parallel. Unified content planning atomically
-returns `content_plan`, `content_requirements`, and the exact five-field
-`delivery_profile`; preference planning returns only `visible_boundaries` and
-`addressee_plan`. Unified content receives tempo and linguistic texture,
+returns `content_plan`, `content_requirements`, the exact five-field
+`delivery_profile`, and optional expression-only `lexical_avoidances`; the
+upstream relational decision is carried when present;
+preference planning returns an empty `visible_boundaries` list and the
+upstream `addressee_plan`. Unified content receives tempo and linguistic texture,
 whereas preference receives no character-expression context. Delivery fields
 describe lexical register, sentence shape, rhythm, hesitation, and punctuation
 only; they cannot override the cognition-selected stance.
+
+`lexical_avoidances` is a bounded surface-owned list of concrete current-turn
+wording fragments, such as a repeated recent opening or stale address. It is
+used for literal expression-continuity checking and never classifies topics or
+selects a character stance. The list flows through normal, degraded, repaired,
+and dialog-verifier surfaces; a literal hit enters the existing bounded repair
+path.
 
 When visual directives are enabled, `run_visual_surface_planning(...)` runs as
 an independent sibling call. It alone receives the isolated bounded
@@ -304,10 +315,11 @@ interaction without supplying staging forms; dialog carries emotion,
 personality, and interaction posture through wording, sentence shape, and
 cadence. Action narration remains an ungated model variation: the prompts do
 not request it, and generated instances are neither rejected nor rewritten.
-Three bounded hard-error checks run in parallel on the existing dialog-model
-route. Semantic fidelity receives current percepts, the candidate role frame,
-candidate dialog, and authoritative surface semantics containing selected
-intent, content plan, requirements, and visible boundaries. It checks internal
+Three bounded model-owned hard-error checks run in parallel on the existing
+dialog-model route. Semantic fidelity receives current percepts, the candidate
+role frame, candidate dialog, and authoritative surface semantics containing selected
+intent, content plan, requirements, visible boundaries, lexical avoidances, and the exact
+relational stance when present. It checks internal
 contradiction, direct current-input conflict, actor/target/subject reversal,
 and unsupported within-turn opposite-stance transitions. Delivery profile,
 permitted action results, and selection-owned role fields are excluded from
@@ -319,7 +331,8 @@ non-selection role direction. The selection-only role verifier receives the five
 `response_operation` fields and owns selection transfer plus embedded
 actor/target reversal. Those selection-owned fields are removed from the
 semantic-fidelity projection while the raw current-input meaning remains.
-Deterministic code merges the three verdicts without rewriting dialog
+Deterministic code merges the three verdicts and the literal expression-continuity
+verdict without rewriting dialog
 semantics. Each owner returns at most four issues and the duplicate-free
 merged result returns at most eight. None of the checks treats novelty or
 personality strength as failure. Refusal, negotiation, and conditions chosen
@@ -332,7 +345,8 @@ and human semantic packet, places the latest bounded rejected verdict in an
 assistant message, and supplies the exact contract error in a human
 correction. This does not re-render dialog or add another semantic owner.
 Protected traces retain every attempt. Exhaustion marks that focused owner
-`unavailable`; the valid dialog candidate remains eligible.
+`unavailable`; no candidate is eligible without the three model-owned checks and
+the deterministic expression-continuity check.
 
 The semantic-fidelity producer returns exact `aligned` and `hard_errors`
 fields. This avoids the local model's demonstrated `issues`/`Issues` token
@@ -345,17 +359,14 @@ integrity retains its evidence-bearing `aligned` and `issues` contract.
 A negative merged verdict returns the retained canonical
 `TextSurfaceInputV2` and bounded verified issues to the L3 owner. Rejected
 surface fields and rejected dialog remain protected trace evidence only. L3
-replaces content, requirements, delivery profile, visible boundaries, and
-addressee together, then reconstructs selected intent, permitted action
-results, and runtime limits from canonical input. If surface replacement
-exhausts, dialog retains the latest validated surface. Dialog renders and
-verifies one second candidate without receiving the first dialog. A second
-rejection renders one terminal third candidate from canonical surface truth
-and typed remaining violation kinds, without verifier calls. A bounded third
-candidate is delivered as degraded output; an unusable third candidate falls
-back to candidate two, then candidate one. Only zero usable candidates is
-unrecoverable. The persona graph follows the normal post-turn path with the
-selected dialog and retained valid surface.
+replaces content, requirements, delivery profile, lexical avoidances, visible
+boundaries, and addressee together, then reconstructs selected intent, permitted action
+results, the exact relational stance, and runtime limits from canonical input.
+If surface replacement exhausts, dialog retains the latest validated surface.
+Every dialog candidate, including the terminal candidate, runs all three
+focused checks and the expression-continuity check. Bounded exhaustion produces
+a typed delivery failure; no
+unverified candidate reaches the persona graph.
 
 Before this dialog boundary, a typed character-owned required selection routes
 the selected goal branch to one specialized producer in place of its generic
@@ -399,8 +410,10 @@ controls remain deterministic provenance.
 User cognition state and singleton character cognition state are separate
 mutable scopes. The selected scope is resolved from the episode origin and
 caller, validated before cognition, and replaced once after terminal V2 output.
-Character drives, standards, and meaning constraints can inform a user-scoped
-turn without becoming user-owned mutable state.
+Character drives and meaning constraints can inform a user-scoped turn without
+becoming user-owned mutable state. Standards remain in raw character state and
+are not projected into live model input until a typed source-bound contract
+exists.
 
 The persona graph assembles action results and surface outputs into the existing
 episode-trace envelope for downstream diagnostics and consolidation. The trace

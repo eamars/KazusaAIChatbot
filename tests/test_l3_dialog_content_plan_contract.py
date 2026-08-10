@@ -118,6 +118,9 @@ def test_surface_output_validation_requires_exact_v2_fields() -> None:
         },
         "selected_surface_intent": "acknowledge",
         "permitted_action_results": [],
+        "relational_willingness": dict(
+            _cognition_output()["relational_willingness"]
+        ),
     }
 
     assert validate_text_surface_output(output)["content_plan"] == "Say hello."
@@ -147,6 +150,9 @@ async def test_surface_handler_returns_native_output(monkeypatch) -> None:
         },
         "selected_surface_intent": "acknowledge",
         "permitted_action_results": [],
+        "relational_willingness": dict(
+            _cognition_output()["relational_willingness"]
+        ),
     }
     expected_visual = {
         "schema_version": "visual_surface_output.v2",

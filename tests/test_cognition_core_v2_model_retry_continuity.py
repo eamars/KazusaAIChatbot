@@ -455,10 +455,10 @@ async def test_unexpected_verifier_exception_remains_unrecoverable(
 
 
 @pytest.mark.asyncio
-async def test_dialog_third_candidate_is_terminal_degraded_output(
+async def test_dialog_third_candidate_requires_terminal_verification(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Two semantic rejections retain text and render candidate three."""
+    """A third candidate still requires focused verification before delivery."""
 
     generator_llm, compliance = _patch_dialog_sequence(
         monkeypatch,
@@ -476,22 +476,25 @@ async def test_dialog_third_candidate_is_terminal_degraded_output(
         compliance_results=[
             _compliance_result(aligned=False),
             _compliance_result(aligned=False),
+            _compliance_result(aligned=False),
         ],
     )
 
-    result = await dialog_module.dialog_generator(_dialog_state())
+    with pytest.raises(
+        dialog_module.DialogGenerationContractError,
+        match="terminal verification",
+    ):
+        await dialog_module.dialog_generator(_dialog_state())
 
-    assert result["final_dialog"] == ["candidate three"]
-    assert result["text_surface_output_v2"] == _surface_output()
     assert generator_llm.ainvoke.await_count == 3
-    assert compliance.await_count == 2
+    assert compliance.await_count == 3
 
 
 @pytest.mark.asyncio
-async def test_empty_terminal_candidate_falls_back_to_candidate_two(
+async def test_empty_terminal_candidate_withholds_unverified_candidates(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An unusable terminal render preserves the newest earlier candidate."""
+    """An empty terminal render withholds earlier unverified candidates."""
 
     generator_llm, compliance = _patch_dialog_sequence(
         monkeypatch,
@@ -506,18 +509,21 @@ async def test_empty_terminal_candidate_falls_back_to_candidate_two(
         ],
     )
 
-    result = await dialog_module.dialog_generator(_dialog_state())
+    with pytest.raises(
+        dialog_module.DialogGenerationContractError,
+        match="terminal verification",
+    ):
+        await dialog_module.dialog_generator(_dialog_state())
 
-    assert result["final_dialog"] == ["candidate two"]
     assert generator_llm.ainvoke.await_count == 3
     assert compliance.await_count == 2
 
 
 @pytest.mark.asyncio
-async def test_unusable_second_and_third_candidates_fall_back_to_first(
+async def test_unusable_candidates_remain_unrecoverable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A valid first candidate remains deliverable across later shape failures."""
+    """A verified candidate is required even when later attempts are empty."""
 
     generator_llm, compliance = _patch_dialog_sequence(
         monkeypatch,
@@ -531,9 +537,12 @@ async def test_unusable_second_and_third_candidates_fall_back_to_first(
         ],
     )
 
-    result = await dialog_module.dialog_generator(_dialog_state())
+    with pytest.raises(
+        dialog_module.DialogGenerationContractError,
+        match="terminal verification",
+    ):
+        await dialog_module.dialog_generator(_dialog_state())
 
-    assert result["final_dialog"] == ["candidate one"]
     assert generator_llm.ainvoke.await_count == 3
     assert compliance.await_count == 1
 
@@ -640,6 +649,7 @@ async def test_text_surface_retry_or_validated_degraded_projection(
                             "hesitation": "light",
                             "punctuation": "restrained",
                         },
+                        "lexical_avoidances": [],
                     }))
                 return SimpleNamespace(content='{"invalid": true}')
             if stage_name == "preference":

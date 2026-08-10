@@ -80,10 +80,11 @@ class _ScriptedLLM:
                     "hesitation": "light",
                     "punctuation": "restrained",
                 },
+                "lexical_avoidances": [],
             }
         elif stage_name == "v2_preference":
             result = {
-                "visible_boundaries": ["bounded visible boundary"],
+                "visible_boundaries": [],
                 "addressee_plan": [{
                     "handle": "current_user",
                     "display_name": "current user",
@@ -116,7 +117,7 @@ class _ScriptedLLM:
                     "applicability": "not_relationship_sensitive",
                     "stance": "not_applicable",
                     "current_user_relationship_state": "not_applicable",
-                    "reason": "当前回合证据不涉及关系许可判断",
+                    "reason": "当前回合证据不涉及关系立场判断",
                     "evidence_handles": ["e1"],
                 },
             }
@@ -399,7 +400,7 @@ async def test_v2_facade_commits_before_surface_and_preserves_complete_bid() -> 
         "applicability": "not_relationship_sensitive",
         "stance": "not_applicable",
         "current_user_relationship_state": "not_applicable",
-        "reason": "当前回合证据不涉及关系许可判断",
+        "reason": "当前回合证据不涉及关系立场判断",
         "evidence_handles": ["e1"],
     }
     assert output["admitted_bid"]["relational_willingness"] == (
@@ -546,7 +547,7 @@ async def test_v2_surface_receives_semantic_handoff_only() -> None:
 
     assert output["schema_version"] == "text_surface_output.v2"
     assert output["content_plan"] == "bounded content-plan guidance"
-    assert output["visible_boundaries"] == ["bounded visible boundary"]
+    assert output["visible_boundaries"] == []
     assert output["addressee_plan"] == [{
         "handle": "current_user",
         "display_name": "current user",
@@ -814,7 +815,7 @@ async def test_goal_structure_recovers_on_third_attempt() -> None:
                         "applicability": "not_relationship_sensitive",
                         "stance": "not_applicable",
                         "current_user_relationship_state": "not_applicable",
-                        "reason": '当前回合证据不涉及关系许可判断',
+                        "reason": '当前回合证据不涉及关系立场判断',
                         "evidence_handles": ["e1"],
                     },
                 }
@@ -863,7 +864,7 @@ async def test_required_goal_invalid_evidence_stops_before_action_planning(
                         "applicability": "not_relationship_sensitive",
                         "stance": "not_applicable",
                         "current_user_relationship_state": "not_applicable",
-                        "reason": '当前回合证据不涉及关系许可判断',
+                        "reason": '当前回合证据不涉及关系立场判断',
                         "evidence_handles": ["e1"],
                     },
                 }

@@ -1065,6 +1065,50 @@ def test_task_resolution_row_requires_exact_routing_boolean() -> None:
             )
 
 
+def test_inline_only_runtime_rejects_background_task_resolution() -> None:
+    """Trusted inline-only mode rejects a background route proposal."""
+
+    response = _planner_response(resolvers=[{
+        "bid_handle": "b1",
+        "resolver_handle": "r1",
+        "semantic_goal": "recover the omitted local referent",
+        "reason": "the current phrase is incomplete",
+        "start_in_background": True,
+    }])
+    with pytest.raises(
+        ValueError,
+        match="every proposed resolver request row was unusable",
+    ):
+        _validate_action_plan_decision(
+            response,
+            bid_handles={"b1": _bid("ordinary_response")},
+            action_handles={},
+            resolver_handles={"r1": _resolver(
+                "task_resolution_request",
+            )},
+            runtime_capability_limits=[
+                "当前通用任务解析只有 inline 能力；task_resolution_request 必须先在本轮"
+                "预算内尝试，不能写成后台已经安排。",
+            ],
+        )
+
+    inline_response = _planner_response(resolvers=[{
+        **response["resolver_requests"][0],
+        "start_in_background": False,
+    }])
+    decision = _validate_action_plan_decision(
+        inline_response,
+        bid_handles={"b1": _bid("ordinary_response")},
+        action_handles={},
+        resolver_handles={"r1": _resolver("task_resolution_request")},
+        runtime_capability_limits=[
+            "当前通用任务解析只有 inline 能力；task_resolution_request 必须先在本轮"
+            "预算内尝试，不能写成后台已经安排。",
+        ],
+    )
+    assert decision["resolver_requests"][0]["start_in_background"] is False
+
+
 def test_task_resolution_row_rejects_missing_or_extra_route_fields() -> None:
     """Missing and extra route fields fail closed for the generic row."""
 

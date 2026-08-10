@@ -189,7 +189,6 @@ def _base_state(case: dict[str, Any]) -> dict[str, Any]:
                     [],
                 ),
                 'content_plan': case['content_plan'],
-                'forbidden_phrases': case.get('forbidden_phrases', []),
             },
             'contextual_directives': case['contextual_directives'],
             'visual_directives': {},

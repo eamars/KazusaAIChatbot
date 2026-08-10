@@ -31,6 +31,12 @@ RESOLVER_AUTHORIZATION_PROMPT = '''你负责核准规划阶段提出的证据解
 上下文表明同一需求无法继续产生有效进展，则拒绝候选项。先前一次成功观察本身不妨碍不同的、或
 实质上更窄且所需证据仍缺失的后续请求。
 
+`approval_preparation` 是审批生命周期能力，不是普通证据检索。若当前 episode 明确提出具有持久
+或外部影响的操作，且已接纳目标要求在操作前取得当前用户的明确批准，可以核准一个
+`approval_preparation` 请求；它只准备一个范围受限的批准问题或审批摘要，不执行操作、不表示已经
+批准，也不替代后续的显式批准验证。当前证据必须支持那个具体操作，候选不得把审批准备扩大成一般
+道德、安全或内容判断。
+
 task_resolution_request 是当前缺少证据或有界工作时唯一的通用 resolver。它不让规划者选择
 local、public、coding 或 text/computation specialist，也不让规划者选择时限、持久化、队列、租约、
 工具参数、文件路径或最终措辞。后续 task orchestrator 和 specialist 依据其各自的公开合同处理这些
@@ -104,6 +110,10 @@ async def authorize_resolver_requests(
                 ),
                 "coding_lifecycle": (
                     "既有 coding run 的批准和生命周期保留给明确 action affordance"
+                ),
+                "approval_preparation": (
+                    "对当前证据支持的持久或外部影响操作准备一个范围受限的明确批准问题；"
+                    "不执行操作、不表示已经批准"
                 ),
             },
             "admitted_bid": {

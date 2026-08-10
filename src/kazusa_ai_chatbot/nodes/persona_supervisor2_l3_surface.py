@@ -23,6 +23,8 @@ from kazusa_ai_chatbot.config import (
 )
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionExecutionError,
+    MAX_RECENT_CHARACTER_DIALOG_CHARS,
+    MAX_RECENT_CHARACTER_DIALOG_ROWS,
     SurfaceAddresseePlanV1,
     TextSurfaceInputV2,
     TextSurfaceOutputV2,
@@ -59,6 +61,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
     _llm_interface,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
+from kazusa_ai_chatbot.utils import build_interaction_history_recent
 
 
 _LINGUISTIC_TEXTURE_DESCRIPTORS = {
@@ -104,6 +107,7 @@ def build_text_surface_input_from_global_state(
         "interaction_style_context": interaction_style_context,
         "character_expression_context": expression_context,
         "visual_character_context": visual_context,
+        "recent_character_dialog": _recent_character_dialog(state),
         "addressee_plan": _surface_addressee_plan(
             validated_output["intention"].get("target_roles", []),
             state=state,
@@ -144,6 +148,7 @@ async def call_l3_text_surface_handler(state: GlobalPersonaState) -> dict[str, A
     )
     if _visual_directives_disabled(input_payload):
         text_output = await text_call
+        _assert_relational_willingness_preserved(input_payload, text_output)
         return_value = {
             "text_surface_input_v2": input_payload,
             "text_surface_output_v2": text_output,
@@ -160,6 +165,7 @@ async def call_l3_text_surface_handler(state: GlobalPersonaState) -> dict[str, A
     if isinstance(text_result, BaseException):
         raise text_result
     text_output = text_result
+    _assert_relational_willingness_preserved(input_payload, text_output)
     return_value = {
         "text_surface_input_v2": input_payload,
         "text_surface_output_v2": text_output,
@@ -195,7 +201,27 @@ async def repair_text_surface_for_dialog(
         verified_hard_issues,
         _build_text_surface_services(),
     )
+    _assert_relational_willingness_preserved(surface_input, repaired_output)
     return repaired_output
+
+
+def _assert_relational_willingness_preserved(
+    surface_input: TextSurfaceInputV2,
+    surface_output: TextSurfaceOutputV2,
+) -> None:
+    """Require surface planning to preserve the upstream typed stance exactly."""
+
+    if surface_output.get("relational_willingness") != surface_input.get(
+        "relational_willingness"
+    ):
+        raise CognitionExecutionError(
+            "text surface changed the upstream relational willingness decision",
+            error_code="surface_relational_willingness_mismatch",
+            stage="surface.text",
+            attempt_count=1,
+            safe_checkpoint="pre_state_commit",
+            retryable=False,
+        )
 
 
 async def _load_interaction_style_context(
@@ -207,6 +233,34 @@ async def _load_interaction_style_context(
     if not isinstance(context, Mapping):
         raise ValueError("interaction style turn snapshot is required")
     return _render_interaction_style_context(context)
+
+
+def _recent_character_dialog(state: Mapping[str, Any]) -> list[str]:
+    """Project the latest visible messages authored by the current character."""
+
+    history = state.get("chat_history_recent")
+    if not isinstance(history, list):
+        return []
+    interaction_history = build_interaction_history_recent(
+        history,
+        str(state.get("platform_user_id", "") or ""),
+        str(state.get("platform_bot_id", "") or ""),
+        str(state.get("global_user_id", "") or ""),
+    )
+    projected: list[str] = []
+    for row in interaction_history:
+        if row.get("role") != "assistant":
+            continue
+        body_text = row.get("body_text")
+        if not isinstance(body_text, str):
+            body_text = row.get("content")
+        if not isinstance(body_text, str):
+            continue
+        body_text = body_text.strip()
+        if not body_text:
+            continue
+        projected.append(body_text[:MAX_RECENT_CHARACTER_DIALOG_CHARS])
+    return projected[-MAX_RECENT_CHARACTER_DIALOG_ROWS:]
 
 
 def _render_interaction_style_context(context: Mapping[str, Any]) -> str:

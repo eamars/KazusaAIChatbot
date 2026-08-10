@@ -39,11 +39,13 @@ long_term/todo.md
 | Document | Type | Status |
 |---|---|---|
 | [coding_agent_assessment_gap_phase_d_plan.md](active/short_term/coding_agent_assessment_gap_phase_d_plan.md) | High-risk coding-agent migration plan for a generic JSON action loop, persistent repository index, exploration-cap removal, and delete/rename | in progress |
+| [development_plan_test_impact_traceability_and_cognition_unit_structure_bigbang_plan.md](active/short_term/development_plan_test_impact_traceability_and_cognition_unit_structure_bigbang_plan.md) | Big-bang development-plan test-impact contract, cognition source ownership manifest, and mirrored deterministic unit-test structure | draft |
 
 ## Completed Short-Term Plans
 
 | Document | Type | Status |
 |---|---|---|
+| [character_owned_content_judgment_cutover_plan.md](archive/completed/short_term/character_owned_content_judgment_cutover_plan.md) | Cutover removing application-owned semantic safety/refusal policy and relationship gating while preserving character-owned judgment, expression continuity, and operational guards | completed |
 | [cognition_parallel_neutral_weak_tilt_plan.md](archive/completed/short_term/cognition_parallel_neutral_weak_tilt_plan.md) | Branch-owned semantic intent guidance for generic Cognition V2 bid generation; real-model quality explicitly deferred | completed |
 | [august_change_alignment_audit_and_remediation_plan.md](archive/completed/short_term/august_change_alignment_audit_and_remediation_plan.md) | Repository-wide Aug 1+ change alignment audit, bounded remediation, and baseline feature regression map | completed |
 | [legacy_llm_configuration_cleanup_plan.md](archive/completed/short_term/legacy_llm_configuration_cleanup_plan.md) | Removal of ten legacy local environment keys and three stale verifier Compose bindings | completed |
@@ -59,6 +61,7 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
+| [cognition_core_v2_goal_bid_live_llm_regression_remediation_20260810.md](archive/completed/bugfix/cognition_core_v2_goal_bid_live_llm_regression_remediation_20260810.md) | Goal-bid live-LLM failure classification, frozen-fixture recovery, prompt remediation, and 95% regression gate | completed |
 | [cognition_core_v2_quoted_message_evidence_and_recurrence_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_quoted_message_evidence_and_recurrence_bugfix_plan.md) | Quoted-message resolver evidence continuity, answerability gating, and ordinary-branch recurrence stability | completed |
 | [llm_trace_console_full_web_correlation_surface_bugfix_plan.md](archive/completed/bugfix/llm_trace_console_full_web_correlation_surface_bugfix_plan.md) | Full web-console correlation ID visibility across the existing mapped views | completed |
 | [background_work_jobs_console_job_id_visibility_bugfix_plan.md](archive/completed/bugfix/background_work_jobs_console_job_id_visibility_bugfix_plan.md) | Existing Background Work Jobs card job-ID visibility in the web console | completed |

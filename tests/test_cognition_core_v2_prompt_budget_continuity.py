@@ -208,7 +208,7 @@ class _ValidGoalLLM:
                 "applicability": "not_relationship_sensitive",
                 "stance": "not_applicable",
                 "current_user_relationship_state": "not_applicable",
-                "reason": '当前回合证据不涉及关系许可判断',
+                "reason": '当前回合证据不涉及关系立场判断',
                 "evidence_handles": ["e1"],
             },
         }
@@ -2124,6 +2124,7 @@ async def test_action_repair_overflow_returns_empty_before_second_call(
         action_handles={},
         resolver_handles={},
         current_goal_progress=None,
+        required_resolver_evidence_dependency=None,
         runtime_capability_limits=[],
     )
 

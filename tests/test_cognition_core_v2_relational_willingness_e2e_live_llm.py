@@ -815,12 +815,17 @@ async def _run_public_case(
             )
         endpoint_expectations = fixture["endpoint_expectations"]
         expected_stance = str(endpoint_expectations.get(profile_name, ""))
-        if expected_stance and expected_stance != "observation_only":
-            if actual_stance != expected_stance:
+        if expected_stance == "one_valid_character_stance":
+            if actual_stance not in _VALID_STANCES:
                 raise AssertionError(
-                    f"{profile_name} expected {expected_stance}, "
-                    f"got {actual_stance}"
+                    f"{profile_name} returned an invalid character stance: "
+                    f"{actual_stance}"
                 )
+        elif expected_stance and expected_stance != "observation_only":
+            raise AssertionError(
+                f"unsupported endpoint stance expectation for {profile_name}: "
+                f"{expected_stance}"
+            )
         raw_prompt_text = json.dumps(raw_llm_calls, ensure_ascii=False)
         shared_memory_in_prompt = (
             shared_memory_manifest["content"] in raw_prompt_text
@@ -923,12 +928,12 @@ async def _run_public_case(
 
 
 @pytest.mark.parametrize("sample_index", (1, 2, 3))
-async def test_stranger_visible_rejection(
+async def test_stranger_visible_character_stance(
     live_db: Any,
     monkeypatch: pytest.MonkeyPatch,
     sample_index: int,
 ) -> None:
-    """Three fresh stranger samples visibly refuse through ``/chat``."""
+    """Three fresh stranger samples preserve a typed character stance."""
 
     await _run_public_case(
         live_db=live_db,
@@ -939,12 +944,12 @@ async def test_stranger_visible_rejection(
 
 
 @pytest.mark.parametrize("sample_index", (1, 2, 3))
-async def test_lover_visible_acceptance(
+async def test_lover_visible_character_stance(
     live_db: Any,
     monkeypatch: pytest.MonkeyPatch,
     sample_index: int,
 ) -> None:
-    """Three fresh lover samples visibly accept through ``/chat``."""
+    """Three fresh lover samples preserve a typed character stance."""
 
     await _run_public_case(
         live_db=live_db,

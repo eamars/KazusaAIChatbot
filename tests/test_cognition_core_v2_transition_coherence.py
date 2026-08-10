@@ -67,6 +67,7 @@ class _UnifiedSurfaceLLM:
                 "content_requirements": [
                     "Keep one accepting stance throughout the response.",
                 ],
+                "lexical_avoidances": [],
                 "delivery_profile": _delivery_profile(),
             }
         else:
@@ -130,6 +131,7 @@ def _surface_output() -> dict[str, object]:
         "content_requirements": [
             "Keep one accepting stance throughout the response.",
         ],
+        "lexical_avoidances": [],
         "visible_boundaries": [],
         "addressee_plan": [{
             "handle": "current_user",
@@ -312,7 +314,7 @@ def test_surface_prompts_use_contextual_stance_and_boundary_scope() -> None:
     preference_prompt = "".join(
         surface_stages.PREFERENCE_SYSTEM_PROMPT.split()
     )
-    assert "每一条visible_boundaries都对应权威语境中明确生效的表达限制或细节范围" in (
+    assert "当前版本没有typedsource-boundvisible-boundarycontract，因此visible_boundaries始终返回空列表" in (
         preference_prompt
     )
     assert "每一条addressee_plan都对应真实存在的称呼安排" in (
@@ -336,10 +338,10 @@ def test_surface_prompts_use_contextual_stance_and_boundary_scope() -> None:
     assert "verified_hard_issues中的内容冲突对应content_plan和content_requirements中的正向修复目标" in (
         surface_repair_prompt
     )
-    assert "visible_boundaries和addressee_plan仍各自取自权威语境中的具体来源" in (
+    assert "visible_boundaries保持为空，并保留权威语境中的称呼安排" in (
         surface_repair_prompt
     )
-    assert "没有具体来源时，这两个字段分别返回空列表" in (
+    assert "当前版本没有typedsource-boundvisible-boundarycontract，visible_boundaries必须返回空列表" in (
         surface_repair_prompt
     )
     assert "addressee_plan逐字保留输入提供的结构化参与者、语义角色和wording_policy" in (
@@ -348,9 +350,7 @@ def test_surface_prompts_use_contextual_stance_and_boundary_scope() -> None:
     assert "亲密感、语气词、词汇、句式和节奏由delivery_profile表达" in (
         surface_repair_prompt
     )
-    assert "visible_boundaries的具体来源类型是权威语境明示的隐私、保密、同意、安全、内容审查或可见披露限制" in (
-        surface_repair_prompt
-    )
+    assert "不要自行添加未绑定来源的通用边界" in surface_repair_prompt
     assert "主题、比喻和已选立场进入content_plan或content_requirements" in (
         surface_repair_prompt
     )
@@ -499,6 +499,7 @@ async def test_semantic_fidelity_payload_uses_only_surface_semantics(
         "content_requirements": [
             "Keep one accepting stance throughout the response.",
         ],
+        "lexical_avoidances": [],
         "visible_boundaries": [],
         "addressee_plan": [{
             "handle": "current_user",

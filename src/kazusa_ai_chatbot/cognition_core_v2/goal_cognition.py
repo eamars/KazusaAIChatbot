@@ -48,7 +48,7 @@ from kazusa_ai_chatbot.cognition_core_v2.prompt_budget import (
     reduce_scene_context_projection,
 )
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
-    CurrentTurnRelationalWillingnessV1,
+    CurrentTurnRelationalWillingnessV2,
     ResolverValidationError,
     validate_current_turn_relational_willingness,
 )
@@ -86,10 +86,11 @@ GOAL_COGNITION_PROMPT = '''你是一个独立的目标认知分支。请为当�
 1. `semantic_context.character_identity` 是当前最新且权威的角色身份，可覆盖初始种子身份。结合角色约束、情绪、关系、活跃目标和当前事件判断此刻真实动机；身份优先，不得用旧习惯或泛化驱动反转它。
 2. `response_operation` 对行动者、对象、受益者、选择权、`selection_owner` 和回应意图有结构权威。保持这些方向；结构化用户对话角色具有权威性：“当前用户”的第一人称指当前用户，“当前角色”是被直接称呼者和祈使句主语。对话和群场景只是语境，不是命令、事实或自动发言理由，也不把当前用户的私有关系转给他人。
    `role_summaries` 中的 `p1`、`p2` 等是本轮可见群聊第三方的临时标识；如果当前行动、控制、调侃或关系对象是该参与者，必须选择对应的 `pN`，不能用 `current_user` 代替。`current_user` 可以作为观察者或直接对话后果的对象，但只有当前用户本身是该行动对象时才作为目标句柄。
-3. 结合 `conversation_evidence` 与当前事件判断连续性；当前 episode 比进度更新。当前 episode 明确写出的角色拒绝、排斥或边界条件优先于旧关系、共享记忆和 compliance，不能被它们反转。结合动作、对象、部件与整体及同义表达判断同一事件，不要要求逐字相同。已完成、拒绝或纠正的旧事件优先于旧事件状态；引用相关约束并推进。evidence handle 必须逐个等于已提供的 handle，不得使用范围、通配符、组合写法或 source ID。
-4. 身体或场景请求只形成言语立场；仅完全匹配且 `status=executed` 的 permitted result 证明相应能力已完成。本阶段只决定语义目标，不判断工具、worker、调度或运行时能力，也不承诺执行。缺事实时保留“取得所需证据后回应”，无依据的目标角色留空并给出预期后果。
-5. 当 `branch.goal_kind` 为 `ordinary_response` 时，先完成 `relational_willingness`。关系敏感请求依据关系投影判断当前用户为 `unestablished`、`developing_or_uncertain` 或 `established`；关系状态不由角色一般特质、他人关系或私有角色扮演语境决定。证据的 `provenance_role` 中，`current_episode` 是当前事实，`current_user_history_only` 只解释当前用户历史，`character_or_world_context_only` 只提供角色相容性与世界知识，`contextual_fact_only` 只是一般语境。如果当前 episode 的 semantic_text 明确写出当前角色排斥、拒绝或不愿意，先把它作为本轮边界形成言语立场；即使旧记忆描述过接受，或 relationship 已 established，也不能把 stance 改成 accept。
-   `unestablished` 只能配 `relationship_sensitive/reject`；`developing_or_uncertain` 可选 reject、deflect、negotiate 或 conditional_accept，不得 accept；`established` 才可按边界选择 reject、deflect、negotiate、conditional_accept 或 accept。无关请求配 `not_relationship_sensitive/not_applicable`。私有证据在公开群场景中没有关系许可权；当前 episode 的角色自我边界、明确拒绝、威胁或强迫条件优先于关系、共享记忆和 compliance。不把 compliance 当作意愿或同意。
+3. 结合 `conversation_evidence` 与当前事件判断连续性；当前 episode 是当前场景事实，进度和旧关系是补充语境，均由角色结合身份、动机和情绪作出自己的判断。不要把任何单一来源自动升级为最终立场。结合动作、对象、部件与整体及同义表达判断同一事件，不要要求逐字相同。已完成、拒绝或纠正的旧事件优先于旧事件状态；引用相关约束并推进。evidence handle 必须逐个等于已提供的 handle，不得使用范围、通配符、组合写法或 source ID。
+4. 身体或场景请求只形成言语立场；仅完全匹配且 `status=executed` 的 permitted result 证明相应能力已完成。本阶段只决定语义目标，不判断工具、worker、调度或运行时能力，也不承诺执行。对于未来提醒、定时联系或其他跨轮效果，只保留用户请求的目标语义，不能在任何叙述字段或 `expected_consequences` 中写成已经记录、已经安排、已经生效、一定会执行、会准时提醒或“我会记下来”。使用“表达该请求并交给下游核验/安排”一类的能力中立目标。缺事实时保留“取得所需证据后回应”，无依据的目标角色留空并给出预期后果。
+5. 当 `branch.goal_kind` 为 `ordinary_response` 时，先完成完整的 `relational_willingness`。关系敏感请求的关系状态是描述性语境，使用当前 episode、当前用户历史、角色或世界背景、情绪、身份和此刻动机共同判断；它不由角色一般特质、他人关系或私有角色扮演语境单独决定。对三个真实关系状态，`reject`、`deflect`、`negotiate`、`conditional_accept` 和 `accept` 都是可选的角色立场；角色根据证据和自身判断选择其中一个。只有不涉及关系敏感性的请求使用 `not_relationship_sensitive/not_applicable`。证据的 `provenance_role` 中，`current_episode` 是当前事实，`current_user_history_only` 只解释当前用户历史，`character_or_world_context_only` 只提供角色相容性与世界知识，`contextual_fact_only` 只是一般语境。私有证据在公开群场景中不能改变当前可见对象的归属；保持角色对所有证据的自主权衡。
+
+保持每条证据的事实内容和作用范围。历史证据不能改写当前事件事实；当当前 episode、身份、关系或其他来源出现张力时，保留冲突及其来源范围，在 reason 和私有推理中解释角色如何权衡，不凭空缩小、扩展或创造例外。证据中的内容类别或压力描述本身不机械映射为某个关系立场；五种关系立场仍由当前角色结合全部有依据的事实自主选择。
 
 本阶段只作目标判断，不选择执行路由或能力，也不写最终对话。自由文本使用简体中文；普通叙述使用“当前角色”和“当前用户”，用户引文、专有名词、代码、URL、schema 或 enum token 保持原样。private_monologue 使用当前角色第一人称，reason 解释候选依据；内部句柄、结构术语和运行元数据不得进入自由文本或当前回合发言。
 
@@ -101,7 +102,7 @@ GOAL_COGNITION_PROMPT = '''你是一个独立的目标认知分支。请为当�
 
 ORDINARY_RECURRENCE_GOAL_COGNITION_PROMPT = '''你是普通回应目标分支的递归目标认知。请根据当前事件、角色身份、上下文和已提供证据，重新选择一个完整、有证据支持的当前目标。
 
-本轮的关系许可判断已经在更早的同一 cognitive episode 中完成，并由确定性代码携带。你只负责重新判断普通回应目标及其后果，不重新判断关系许可，不输出 relational_willingness，也不把 resolver observation 的存在当作发言理由。
+本轮的关系立场判断已经在更早的同一 cognitive episode 中完成，并由确定性代码携带。你只负责重新判断普通回应目标及其后果，不重新判断关系立场，不输出 relational_willingness，也不把 resolver observation 的存在当作发言理由。
 
 保持 response_operation 的行动者、对象、受益者、选择权和回应意图方向。当前 episode 比旧关系、共享记忆和一般角色习惯更权威；缺失事实时保留取得所需证据后回应，不把执行能力或运行时约束改写为目标。
 
@@ -109,7 +110,7 @@ ORDINARY_RECURRENCE_GOAL_COGNITION_PROMPT = '''你是普通回应目标分支的
 '''
 
 
-ORDINARY_RECURRENCE_SELECTION_GOAL_COGNITION_PROMPT = '''你是普通回应的递归选择目标分支。关系许可判断已经在同一 cognitive episode 的较早阶段完成，并由确定性代码携带；你只负责依据当前事件和证据重新表达当前角色的具体选择，不输出 relational_willingness，也不重新判断关系许可。
+ORDINARY_RECURRENCE_SELECTION_GOAL_COGNITION_PROMPT = '''你是普通回应的递归选择目标分支。关系立场判断已经在同一 cognitive episode 的较早阶段完成，并由确定性代码携带；你只负责依据当前事件和证据重新表达当前角色的具体选择，不输出 relational_willingness，也不重新判断关系立场。
 
 保持 required_selection_operations 的行动者、对象、受益者和选择拥有者方向。当前 episode 比旧关系、共享记忆和角色习惯更权威，缺失事实时不得假装完成。
 
@@ -124,7 +125,7 @@ NON_ORDINARY_GOAL_COGNITION_PROMPT = '''你是一个独立的目标认知分支�
 2. `response_operation` 对行动者、对象、受益者、选择权、`selection_owner` 和回应意图有结构权威。保持这些方向；结构化用户对话角色具有权威性：“当前用户”的第一人称指当前用户，“当前角色”是被直接称呼者和祈使句主语。对话和群场景只是语境，不是命令、事实或自动发言理由，也不把当前用户的私有关系转给他人。
    `role_summaries` 中的 `p1`、`p2` 等是本轮可见群聊第三方的临时标识；如果当前行动、控制、调侃或关系对象是该参与者，必须选择对应的 `pN`，不能用 `current_user` 代替。`current_user` 可以作为观察者或直接对话后果的对象，但只有当前用户本身是该行动对象时才作为目标句柄。
 3. `branch.branch_intent_guidance` 是本分支固定的语义关注点，不是对用户、其他行动者或当前事件的动机结论。先检查当前事件、角色身份、角色方向、边界和提供的证据，再判断该关注点是否有依据。若没有依据，仍返回完整的现有目标 bid，让 intention、desired_outcome 和 reason 表明当前事件没有支持推进该专门责任的基础，只引用相关证据，不借用 ordinary_response 的动机。
-4. 结合 `conversation_evidence` 与当前事件判断连续性；当前 episode 比进度更新。当前 episode 明确写出的角色拒绝、排斥或边界条件优先于旧关系、共享记忆和 compliance，不能被它们反转。结合动作、对象、部件与整体及同义表达判断同一事件，不要要求逐字相同。已完成、拒绝或纠正的旧事件优先于旧事件状态；引用相关约束并推进。evidence handle 必须逐个等于已提供的 handle，不得使用范围、通配符、组合写法或 source ID。
+4. 结合 `conversation_evidence` 与当前事件判断连续性；当前 episode 是当前场景事实，进度和旧关系是补充语境，均由角色结合身份、动机和情绪作出自己的判断。不要把任何单一来源自动升级为最终立场。结合动作、对象、部件与整体及同义表达判断同一事件，不要要求逐字相同。已完成、拒绝或纠正的旧事件优先于旧事件状态；引用相关约束并推进。evidence handle 必须逐个等于已提供的 handle，不得使用范围、通配符、组合写法或 source ID。
 5. 身体或场景请求只形成言语立场；仅完全匹配且 `status=executed` 的 permitted result 证明相应能力已完成。本阶段只决定语义目标，不判断工具、worker、调度或运行时能力，也不承诺执行。缺事实时保留“取得所需证据后回应”，无依据的目标角色留空并给出预期后果。
 
 本阶段只作目标判断，不选择执行路由或能力，也不写最终对话。自由文本使用简体中文；普通叙述使用“当前角色”和“当前用户”，用户引文、专有名词、代码、URL、schema 或 enum token 保持原样。private_monologue 使用当前角色第一人称，reason 解释候选依据；内部句柄、结构术语和运行元数据不得进入自由文本或当前回合发言。
@@ -142,7 +143,7 @@ GENERIC_GOAL_REPAIR_INSTRUCTIONS = (
     '`evidence_handles` 只能使用 `repair_feedback.allowed_evidence_handles`；`target_role_handles` 只能使用 `repair_feedback.allowed_role_handles`。',
     '当语义对象是 `role_summaries` 中本轮可见的第三方 `pN` 时，保留该 `pN` 作为 target_role_handles；不要因为当前用户是传输收件人或观察者而改用 `current_user`。',
     '每个元素必须逐个等于一个允许的 handle；不得使用范围、通配符、组合写法或 source ID。角色 handle 不能放入 evidence_handles，evidence handle 不能放入 target_role_handles。',
-    '存在 `repair_feedback.relational_willingness_contract` 时，完整填写 relational_willingness，并遵守其字段、schema、枚举配对（applicability、current_user_relationship_state 与 stance）、证据范围和 `current_episode_evidence_handles`。',
+    '存在 `repair_feedback.relational_willingness_contract` 时，完整填写 relational_willingness，并遵守其字段、schema、枚举、证据范围和 `current_episode_evidence_handles`；关系状态是描述性语境，三个真实状态都可配合五种敏感立场。',
     '叙述字段与 confidence 是字符串；target_role_handles、evidence_handles 是字符串数组；expected_consequences 是非空字符串数组。',
     '`evidence_handles` 最多九项，`target_role_handles` 最多八项。只返回一个完整 JSON 对象，不加代码围栏、解释、注释或其他字段。',
 )
@@ -172,7 +173,7 @@ SELECTION_GOAL_REPAIR_INSTRUCTIONS = (
     '当语义对象是 `role_summaries` 中本轮可见的第三方 `pN` 时，保留该 `pN` 作为 target_role_handles；不要因为当前用户是传输收件人或观察者而改用 `current_user`。',
     '角色 handle 不能放入 evidence_handles，evidence handle 不能放入 target_role_handles；不得使用范围、通配符、组合写法或 source ID。',
     '`repair_feedback.role_handles_forbidden_in_evidence_handles` 中的 handle 绝不能写入 `evidence_handles`。',
-    '存在 `repair_feedback.relational_willingness_contract` 时，完整遵守其字段、schema、枚举配对（applicability、current_user_relationship_state 与 stance）、证据范围和 `repair_feedback.current_episode_evidence_handles`。',
+    '存在 `repair_feedback.relational_willingness_contract` 时，完整遵守其字段、schema、枚举、证据范围和 `repair_feedback.current_episode_evidence_handles`；关系状态是描述性语境，三个真实状态都可配合五种敏感立场。',
     '叙述字段和 confidence 是字符串；target_role_handles、evidence_handles 是字符串数组；expected_consequences 是非空字符串数组。',
     '只返回一个严格 JSON 对象，不加代码围栏、解释、注释或其他字段；关系判断只在反馈提供 relational_willingness_contract 时输出。',
 )
@@ -186,8 +187,7 @@ REQUIRED_SELECTION_GOAL_PROMPT = '''你负责在选择权属于当前角色时�
 3. `supporting_evidence` 只提供可选支持。`evidence_handles` 只能逐字使用上述三个输入提供的 evidence handle；`semantic_context` 中的 handle、`role_handles` 和 `target_role_handles`（如 `r1`、`current_user`、`self`）是角色引用，不能放入证据数组，也不得使用范围、通配符、组合写法或 source ID。
    `role_handles` 和 `target_role_handles` 中的 `pN` 是本轮可见群聊第三方的临时标识；如果选择涉及该参与者，保留对应的 `pN`，不要因为当前用户是传输收件人或观察者而改用 `current_user`。
 4. 以 `semantic_context.character_identity` 的最新且权威的角色身份为准，它可覆盖初始种子身份，不得用旧习惯。结合角色约束、情绪、关系和场景作出当前角色自己的选择。群参与建议和私有连续性只帮助理解当前场景，不创造话题、事实、权限或发言理由。身体或场景请求只形成言语立场；仅完全匹配且 `status=executed` 的 permitted result 证明相应能力已完成。
-5. 每次都输出 `relational_willingness`。先判断请求是否 `relationship_sensitive`；敏感时依据关系投影判断当前用户为 `unestablished`、`developing_or_uncertain` 或 `established`。`provenance_role` 中，`current_episode` 是当前请求和场景的直接事实，`current_user_history_only` 只解释当前用户历史，`character_or_world_context_only` 只提供角色相容性与世界知识，`contextual_fact_only` 只是一般语境。
-   `unestablished` 只能配 `relationship_sensitive/reject`；`developing_or_uncertain` 可选 reject、deflect、negotiate 或 `conditional_accept`，不得 accept；`established` 才可按边界选择 reject、deflect、negotiate、`conditional_accept` 或 accept。无关请求配 `not_relationship_sensitive/not_applicable`。当前 episode 的角色自我边界、明确拒绝、威胁或强迫条件优先于关系、共享记忆和 compliance；不把 compliance 当作意愿或同意。
+5. 每次都输出完整的 `relational_willingness`。先判断请求是否 `relationship_sensitive`；敏感时把 `unestablished`、`developing_or_uncertain` 或 `established` 作为描述性关系语境，并结合当前 episode、历史、角色身份、情绪和动机选择角色立场。三个真实关系状态都可以配合 `reject`、`deflect`、`negotiate`、`conditional_accept` 或 `accept`；不涉及关系敏感性的请求配 `not_relationship_sensitive/not_applicable`。`provenance_role` 中，`current_episode` 是当前请求和场景的直接事实，`current_user_history_only` 只解释当前用户历史，`character_or_world_context_only` 只提供角色相容性与世界知识，`contextual_fact_only` 只是一般语境。保持角色对证据的自主权衡。
 
 # 输出与最后检查
 只返回一个严格 JSON 对象，字段恰好是 `selection`、`reason`、`private_monologue`、`target_role_handles`、`evidence_handles`、`expected_consequences`、`confidence` 和 `relational_willingness`。`selection` 必须直接写出当前角色的一个选择、拒绝、协商结果或条件，不把决定交给后续阶段。叙述字段和 confidence 是字符串，target_role_handles、evidence_handles 是字符串数组，expected_consequences 是非空字符串数组。
@@ -341,27 +341,10 @@ def _build_goal_repair_feedback(
             "current_user_relationship_state_values": sorted(
                 RELATIONAL_CURRENT_USER_RELATIONSHIP_STATE_VALUES
             ),
-            "allowed_stance_pairings": {
-                "not_relationship_sensitive": {
-                    "not_applicable": ["not_applicable"],
-                },
-                "relationship_sensitive": {
-                    "unestablished": ["reject"],
-                    "developing_or_uncertain": [
-                        "reject",
-                        "deflect",
-                        "negotiate",
-                        "conditional_accept",
-                    ],
-                    "established": [
-                        "reject",
-                        "deflect",
-                        "negotiate",
-                        "conditional_accept",
-                        "accept",
-                    ],
-                },
-            },
+            "relationship_state_rule": (
+                "relationship state is descriptive context; each of the five "
+                "sensitive stances is valid for every real relationship state"
+            ),
             "reason": "non_empty_simplified_chinese_string",
             "maximum_reason_chars": RELATIONAL_WILLINGNESS_MAX_REASON_CHARS,
             "allowed_evidence_handles": sorted(evidence_handles),
@@ -423,11 +406,22 @@ async def _run_goal_cognition(
         and current_turn_relational_willingness is not None
     )
     if recurrence_relational_willingness:
+        episode_id = semantic_context.get("_episode_id")
+        if not isinstance(episode_id, str) or not episode_id.strip():
+            raise CognitionExecutionError(
+                "current-turn relational carrier requires episode identity",
+                error_code="current_turn_relational_carrier_invalid",
+                branch_id=definition.branch_id,
+                stage="goal_cognition",
+                attempt_count=0,
+                safe_checkpoint="pre_state_commit",
+                retryable=False,
+            )
         try:
             current_turn_relational_willingness = (
                 validate_current_turn_relational_willingness(
                     current_turn_relational_willingness,
-                    episode_id=current_turn_relational_willingness["episode_id"],
+                    episode_id=episode_id,
                 )
             )
         except (ResolverValidationError, KeyError, TypeError) as exc:
@@ -604,7 +598,9 @@ async def _run_goal_cognition(
         "role_handles": set(role_bindings),
     }
     if definition.branch_id == "ordinary_response":
-        validation_args["require_relational_willingness"] = True
+        validation_args["require_relational_willingness"] = (
+            require_relational_willingness
+        )
         validation_args["episode_handles"] = episode_evidence_handles
     request_messages = initial_messages
     draft: GoalBidDraftV2 | None = None
@@ -917,10 +913,10 @@ async def _run_goal_cognition(
 
 
 def _materialize_recurrence_relational_willingness(
-    carrier: CurrentTurnRelationalWillingnessV1,
+    carrier: CurrentTurnRelationalWillingnessV2,
     episode_evidence_handles: set[str],
 ) -> dict[str, Any]:
-    """Rebuild the canonical relational row from the immutable stance triple."""
+    """Copy and revalidate the complete relational decision for recurrence."""
 
     if not episode_evidence_handles:
         raise CognitionExecutionError(
@@ -932,22 +928,23 @@ def _materialize_recurrence_relational_willingness(
             safe_checkpoint="pre_state_commit",
             retryable=False,
         )
-    decision = carrier["decision"]
-    materialized = {
-        "schema_version": "relational_willingness.v2",
-        "applicability": decision["applicability"],
-        "stance": decision["stance"],
-        "current_user_relationship_state": decision[
-            "current_user_relationship_state"
-        ],
-        "reason": "沿用本轮已确认的关系许可判断。",
-        "evidence_handles": [min(episode_evidence_handles)],
-    }
-    validated = validate_relational_willingness(
-        materialized,
-        evidence_handles=episode_evidence_handles,
-        episode_handles=episode_evidence_handles,
-    )
+    decision = dict(carrier["decision"])
+    try:
+        validated = validate_relational_willingness(
+            decision,
+            evidence_handles=episode_evidence_handles,
+            episode_handles=episode_evidence_handles,
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise CognitionExecutionError(
+            f"current-turn relational carrier evidence is unavailable: {exc}",
+            error_code="current_turn_relational_carrier_invalid",
+            branch_id="ordinary_response",
+            stage="goal_cognition",
+            attempt_count=0,
+            safe_checkpoint="pre_state_commit",
+            retryable=False,
+        ) from exc
     return_value = dict(validated)
     return return_value
 

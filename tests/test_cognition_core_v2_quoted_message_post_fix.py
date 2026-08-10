@@ -275,20 +275,14 @@ def _relational_carrier(
     case: dict[str, Any],
     bid: dict[str, Any],
 ) -> dict[str, Any]:
-    """Carry the validated cycle-zero relational triple into recurrence."""
+    """Carry the validated cycle-zero relational decision into recurrence."""
 
     decision = bid["relational_willingness"]
     carrier = {
-        "schema_version": "current_turn_relational_willingness.v1",
+        "schema_version": "current_turn_relational_willingness.v2",
         "episode_id": str(case["episode"]["episode_id"]),
         "branch_id": "ordinary_response",
-        "decision": {
-            "applicability": decision["applicability"],
-            "current_user_relationship_state": (
-                decision["current_user_relationship_state"]
-            ),
-            "stance": decision["stance"],
-        },
+        "decision": dict(decision),
     }
     return validate_current_turn_relational_willingness(
         carrier,
@@ -376,6 +370,10 @@ async def test_post_fix_goal_branch_recurrence_live_llm() -> None:
             services,
         ))
         carrier = _relational_carrier(case, first_bid)
+        recurrence_context = _semantic_context(case)
+        recurrence_context["_episode_id"] = str(
+            case["episode"]["episode_id"]
+        )
         recurrence_bid = dict(await run_goal_cognition(
             DEFAULT_BRANCH_DEFINITIONS["ordinary_response"],
             {
@@ -383,7 +381,7 @@ async def test_post_fix_goal_branch_recurrence_live_llm() -> None:
                 "kind": "goal",
                 "entity_id": "goal:ordinary_response:post-fix-recurrence",
             },
-            _semantic_context(case),
+            recurrence_context,
             [_evidence_row(case, "episode")],
             services,
             current_turn_relational_willingness=carrier,
@@ -412,11 +410,7 @@ async def test_post_fix_goal_branch_recurrence_live_llm() -> None:
                 and all(
                     first_bid["relational_willingness"][key]
                     == recurrence_bid["relational_willingness"][key]
-                    for key in (
-                        "applicability",
-                        "current_user_relationship_state",
-                        "stance",
-                    )
+                    for key in first_bid["relational_willingness"]
                 )
             ),
         },

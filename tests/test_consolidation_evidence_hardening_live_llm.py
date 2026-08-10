@@ -269,7 +269,6 @@ async def test_live_direct_node_integration_smoke(ensure_live_llms) -> None:
                     'semantic_content': '现在会想吃水果奶油蛋糕。',
                     'rendering': '20-40字。',
                 },
-                'forbidden_phrases': [],
             },
             'visual_directives': visual,
         },

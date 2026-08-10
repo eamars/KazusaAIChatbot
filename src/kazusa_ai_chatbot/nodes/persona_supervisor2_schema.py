@@ -252,7 +252,6 @@ class CognitionState(TypedDict):
     rhetorical_strategy: str
     linguistic_style: str
     accepted_user_preferences: list[str]
-    forbidden_phrases: list[str]
 
     content_plan: dict[str, str]
 

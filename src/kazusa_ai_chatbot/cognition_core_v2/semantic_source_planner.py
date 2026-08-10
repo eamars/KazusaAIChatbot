@@ -414,7 +414,7 @@ def _permitted_role_handles(
     prefixes = {
         "event_agency": ("ev", "ce"),
         "relationship_social": ("r", "ct"),
-        "moral_identity": ("ev", "ce", "s"),
+        "moral_identity": ("ev", "ce"),
         "goal_threat_outcome": ("g", "t", "ev", "k", "ce", "ct", "ck"),
         "epistemic_comparison_memory": ("ev", "k", "ce", "ck"),
         "existential_drive": ("d", "m"),

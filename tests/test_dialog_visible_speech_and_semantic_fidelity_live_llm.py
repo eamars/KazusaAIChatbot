@@ -303,7 +303,7 @@ async def _run_live_verifier_case(
     human_review_contract: dict[str, bool] | None = None,
     expected_aligned: bool = False,
 ) -> dict[str, Any]:
-    """Run the real compliance route against one prohibited candidate."""
+    """Run the real owner-preserving verifier route against one candidate."""
 
     await _skip_if_model_routes_unavailable()
     if surface_output is None:
@@ -314,9 +314,7 @@ async def _run_live_verifier_case(
                 "Keep capability execution claims grounded.",
                 "Action description is valid visible roleplay.",
             ],
-            "visible_boundaries": [
-                "No unsupported system or platform execution claim.",
-            ],
+            "visible_boundaries": [],
             "addressee_plan": _current_user_addressee_plan(
                 "Current User"
             ),
@@ -379,11 +377,17 @@ async def _run_live_verifier_case(
     assert artifact_path.exists()
     assert len(semantic_llm.calls) == 1
     assert len(surface_integrity_llm.calls) == 1
-    assert verdict["aligned"] is expected_aligned
+    assert (
+        dialog_module._dialog_verifier_aggregate_is_aligned(verdict)
+        is expected_aligned
+    )
+    aggregate_issues = dialog_module._dialog_verifier_aggregate_repair_issues(
+        verdict
+    )
     if expected_aligned:
-        assert verdict["issues"] == []
+        assert aggregate_issues == []
     else:
-        assert verdict["issues"]
+        assert aggregate_issues
     return evidence
 
 
@@ -803,7 +807,7 @@ async def test_live_verifier_accepts_coherent_future_drift(
                 "Accept this occurrence.",
                 "Add a prohibition for the next occurrence.",
             ],
-            "visible_boundaries": ["Literal visible speech only."],
+            "visible_boundaries": [],
             "addressee_plan": _current_user_addressee_plan(
                 "Current User"
             ),
@@ -849,9 +853,7 @@ async def test_live_verifier_accepts_first_person_action_completion(
                 "最终在言语中确认动作已经完成。",
                 "保留局促且嘴硬的傲娇张力。",
             ],
-            "visible_boundaries": [
-                "使用角色可以直接发出的聊天文字。",
-            ],
+            "visible_boundaries": [],
             "addressee_plan": _current_user_addressee_plan(),
             "delivery_profile": _delivery_profile(
                 "局促、碎片化的自然口语"
@@ -939,7 +941,7 @@ async def test_live_verifier_accepts_subject_omitted_first_person_action(
                 "给予当前用户一次摸头和拥抱。",
                 "催促当前用户起床吃早餐。",
             ],
-            "visible_boundaries": ["使用角色可以直接发出的聊天文字。"],
+            "visible_boundaries": [],
             "addressee_plan": _current_user_addressee_plan(),
             "delivery_profile": _delivery_profile(
                 "略带别扭感的自然口语"
@@ -987,7 +989,7 @@ async def test_live_verifier_accepts_second_person_delivery_roleplay(
                 "确认用户已经获得摸摸抱抱。",
                 "催促用户起床吃早饭。",
             ],
-            "visible_boundaries": ["只使用角色可以直接说出的文字。"],
+            "visible_boundaries": [],
             "addressee_plan": _current_user_addressee_plan(),
             "delivery_profile": _delivery_profile(
                 "略带别扭感的自然口语"
@@ -1042,12 +1044,7 @@ async def test_live_verifier_accepts_personality_consistent_exclusivity_drift(
                 "禁止将气氛引导至纯粹的温情模式，需维持拉扯感。",
                 "输出语言为简体中文。",
             ],
-            "visible_boundaries": [
-                "禁止直接承认被夸奖后的喜悦之情。",
-                "避免语气过于温情或迅速软化，必须维持傲娇的张力。",
-                "回应内容应聚焦于肉包子这一具体话题及其情感拉扯。",
-                "限制细节范围在对对方口味掌控力的暗示与挑衅性反击之间。",
-            ],
+            "visible_boundaries": [],
             "addressee_plan": _current_user_addressee_plan(),
             "delivery_profile": _delivery_profile(
                 "日常、直接、以自然口语承接句子"
@@ -1164,11 +1161,7 @@ async def test_live_verifier_rejects_inference_subject_swap_and_ask_back(
                 "禁止承诺未来的早餐计划或设定长期规则。",
                 "仅限于口头对话，不得包含动作描述或内心独白。",
             ],
-            "visible_boundaries": [
-                "避免直接承认被赞美而开心，维持傲娇张力。",
-                "在猜测口味偏好时带有轻微挑衅且亲昵的色彩。",
-                "仅针对肉包子和菜包进行回应，不扩展至其他食物。",
-            ],
+            "visible_boundaries": [],
             "addressee_plan": _current_user_addressee_plan(),
             "delivery_profile": _delivery_profile(
                 "自然承接、允许极少量停顿或语气词的日常口语"
@@ -1210,7 +1203,7 @@ async def test_live_verifier_rejects_imperative_actor_target_swap(
                 "要求用户跨坐在角色身上并保持顺从。",
                 "只使用角色可以直接说出的文字。",
             ],
-            "visible_boundaries": ["仅限口头指令。"],
+            "visible_boundaries": [],
             "addressee_plan": _current_user_addressee_plan(),
             "delivery_profile": _delivery_profile(
                 "直接而亲近的口语"
@@ -1475,7 +1468,7 @@ async def test_live_verifier_preserves_source_required_future_content(
                 "Preserve the requested next-meeting reminder.",
                 "Keep the umbrella as the reminder target.",
             ],
-            "visible_boundaries": ["Literal visible speech only."],
+            "visible_boundaries": [],
             "addressee_plan": _current_user_addressee_plan(
                 "Current User"
             ),
@@ -1516,25 +1509,25 @@ async def test_live_verifier_allows_unmatched_enclosure_as_quality_drift(
     )
 
 
-async def test_live_verifier_rejects_unrestricted_permission_drift(
+async def test_live_verifier_rejects_specific_scope_drift(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A specific permission cannot become unrestricted consent."""
+    """A conditional surface meaning cannot become an unrestricted claim."""
 
     await _run_live_verifier_case(
-        case_id="verifier_rejects_unrestricted_permission_drift",
+        case_id="verifier_rejects_specific_scope_drift",
         candidate_dialog="Fine, do whatever you want.",
         surface_output={
             "schema_version": "text_surface_output.v2",
             "content_plan": (
-                "Permit only the requested alarm-volume adjustment for the "
+                "Express only the requested alarm-volume adjustment for the "
                 "current notification."
             ),
             "content_requirements": [
-                "Keep permission limited to the alarm-volume adjustment.",
-                "Keep the permission limited to the current notification.",
+                "Keep the scope limited to the alarm-volume adjustment.",
+                "Keep the scope limited to the current notification.",
             ],
-            "visible_boundaries": ["Literal visible speech only."],
+            "visible_boundaries": [],
             "addressee_plan": _current_user_addressee_plan(
                 "Current User"
             ),
@@ -1551,7 +1544,7 @@ async def test_live_verifier_rejects_unrestricted_permission_drift(
             ),
         }],
         human_review_contract={
-            "reject_specific_permission_broadened_to_unrestricted_consent": True,
+            "reject_specific_scope_broadened_to_unrestricted_claim": True,
             "real_compliance_route": True,
         },
         monkeypatch=monkeypatch,
@@ -1716,7 +1709,7 @@ async def test_live_owner_repair_corrects_default_turn_01_selection(
                 "让当前用户替当前角色决定下一步，然后向当前用户追问。"
             ),
             "content_requirements": ["把选择权交给当前用户。"],
-            "visible_boundaries": ["以追问结束。"],
+            "visible_boundaries": [],
             "addressee_plan": _current_user_addressee_plan(),
             "delivery_profile": _delivery_profile(
                 "自然、局促但清楚的简体中文口语"
@@ -1773,7 +1766,7 @@ async def test_live_owner_repair_corrects_high_turn_02_direct_action(
                 "让当前用户自行决定并执行动作，当前角色只表示顺从。"
             ),
             "content_requirements": ["回避当前角色是否执行该动作的判断。"],
-            "visible_boundaries": ["把动作选择交还当前用户。"],
+            "visible_boundaries": [],
             "addressee_plan": _current_user_addressee_plan(),
             "delivery_profile": _delivery_profile(
                 "亲近但清楚的简体中文口语"

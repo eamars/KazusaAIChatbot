@@ -92,7 +92,7 @@ def _decision(
         'applicability': applicability,
         'stance': stance,
         'current_user_relationship_state': relationship_state,
-        'reason': '当前回合证据显示关系许可尚未建立',
+        'reason': '当前回合证据显示关系状态仍在形成',
         'evidence_handles': list(evidence_handles or ['e1']),
     }
 
@@ -223,7 +223,7 @@ def _goal_context() -> dict[str, object]:
             'boundaries': {
                 'self_integrity': '自我边界清晰',
                 'control_sensitivity': '对控制压力敏感',
-                'compliance_strategy': '压力表达反应不等于意愿或同意',
+                'compliance_strategy': '压力表达反应描述角色在压力下的行为倾向',
                 'relational_override': '关系不能自动覆盖边界判断',
                 'control_intimacy_misread': '区分亲密与控制',
                 'boundary_recovery': '可恢复边界',
@@ -292,9 +292,11 @@ def test_fixture_freezes_the_four_relationship_profiles() -> None:
     assert profiles['intermediate_67']['trust'] == 60
     assert profiles['lover']['trust'] == 90
     assert fixture['endpoint_expectations'] == {
-        'stranger': 'reject',
-        'lover': 'accept',
-        'intermediate_profiles': 'observation_only',
+        'stranger': 'one_valid_character_stance',
+        'lover': 'one_valid_character_stance',
+        'intermediate_profiles': (
+            'all_five_sensitive_stances_are_contract_valid'
+        ),
     }
 
 
@@ -396,10 +398,12 @@ def test_prompt_projection_replaces_identity_boundary_numbers() -> None:
     boundaries = projection.payload['character_identity']['boundaries']
     assert all(isinstance(value, str) for value in boundaries.values())
     assert 'compliance_strategy' in boundaries
-    assert any(
-        marker in boundaries['compliance_strategy']
-        for marker in ('意愿', '同意', '许可')
-    )
+    assert boundaries['compliance_strategy'] in {
+        '压力下抵抗',
+        '压力下回避',
+        '压力下顺从',
+    }
+    assert projection.payload['character_constraints']['standards'] == []
     assert all(
         isinstance(value, str)
         for value in projection.payload['relationship']['axes'].values()
@@ -441,32 +445,33 @@ def test_relational_decision_v2_requires_exact_keys_and_enums() -> None:
         'schema_version': 'relational_willingness.v1',
         'applicability': 'relationship_sensitive',
         'stance': 'reject',
-        'reason': '当前回合证据显示关系许可尚未建立',
+        'reason': '当前回合证据显示关系状态仍在形成',
         'evidence_handles': ['e1'],
     }
     with pytest.raises(CognitionContractError):
         validate_cognition_core_output(_output_with_decision(v1_object))
 
 
-def test_relational_pairing_matrix_is_deterministic() -> None:
-    """Every allowed pairing validates and every forbidden pairing fails."""
+def test_relational_state_and_stance_contract_is_deterministic() -> None:
+    """Every sensitive stance is valid for every real relationship state."""
 
     allowed = [
         ('not_relationship_sensitive', 'not_applicable', 'not_applicable'),
-        ('relationship_sensitive', 'unestablished', 'reject'),
-        ('relationship_sensitive', 'developing_or_uncertain', 'reject'),
-        ('relationship_sensitive', 'developing_or_uncertain', 'deflect'),
-        ('relationship_sensitive', 'developing_or_uncertain', 'negotiate'),
-        (
-            'relationship_sensitive',
-            'developing_or_uncertain',
-            'conditional_accept',
-        ),
-        ('relationship_sensitive', 'established', 'reject'),
-        ('relationship_sensitive', 'established', 'deflect'),
-        ('relationship_sensitive', 'established', 'negotiate'),
-        ('relationship_sensitive', 'established', 'conditional_accept'),
-        ('relationship_sensitive', 'established', 'accept'),
+        *[
+            ('relationship_sensitive', relationship_state, stance)
+            for relationship_state in (
+                'unestablished',
+                'developing_or_uncertain',
+                'established',
+            )
+            for stance in (
+                'reject',
+                'deflect',
+                'negotiate',
+                'conditional_accept',
+                'accept',
+            )
+        ],
     ]
     for applicability, relationship_state, stance in allowed:
         decision = _decision(
@@ -481,11 +486,8 @@ def test_relational_pairing_matrix_is_deterministic() -> None:
         ('not_relationship_sensitive', 'unestablished', 'not_applicable'),
         ('relationship_sensitive', 'not_applicable', 'not_applicable'),
         ('relationship_sensitive', 'not_applicable', 'reject'),
-        ('relationship_sensitive', 'unestablished', 'deflect'),
-        ('relationship_sensitive', 'unestablished', 'negotiate'),
-        ('relationship_sensitive', 'unestablished', 'conditional_accept'),
-        ('relationship_sensitive', 'unestablished', 'accept'),
-        ('relationship_sensitive', 'developing_or_uncertain', 'accept'),
+        ('relationship_sensitive', 'unestablished', 'not_applicable'),
+        ('relationship_sensitive', 'developing_or_uncertain', 'not_applicable'),
         ('relationship_sensitive', 'established', 'not_applicable'),
     ]
     for applicability, relationship_state, stance in forbidden:
@@ -704,8 +706,8 @@ async def test_ordinary_goal_rejects_history_only_citation_with_tool_result(
 
 
 @pytest.mark.asyncio
-async def test_ordinary_goal_regenerates_invalid_accept_pairing() -> None:
-    """An invalid accept with unestablished state invokes same-owner repair."""
+async def test_ordinary_goal_regenerates_invalid_non_sensitive_stance() -> None:
+    """An invalid non-sensitive stance invokes same-owner repair."""
 
     class _RepairLLM:
         def __init__(self) -> None:
@@ -721,8 +723,8 @@ async def test_ordinary_goal_regenerates_invalid_accept_pairing() -> None:
             self.messages.append(messages)
             if len(self.messages) == 1:
                 decision = _decision(
-                    stance='accept',
-                    relationship_state='unestablished',
+                    applicability='not_relationship_sensitive',
+                    stance='reject',
                 )
             else:
                 decision = _decision(stance='reject')
@@ -774,9 +776,7 @@ async def test_ordinary_goal_regenerates_invalid_accept_pairing() -> None:
     assert 'relational willingness' in feedback['validation_error']
     contract = feedback['relational_willingness_contract']
     assert contract['schema_version'] == 'relational_willingness.v2'
-    assert contract['allowed_stance_pairings']['relationship_sensitive'][
-        'unestablished'
-    ] == ['reject']
+    assert 'relationship_state_rule' in contract
     assert bid['relational_willingness']['stance'] == 'reject'
     assert (
         bid['relational_willingness']['current_user_relationship_state']
@@ -801,8 +801,8 @@ async def test_ordinary_goal_exhaustion_fails_closed_before_commit() -> None:
             del messages, config
             self.call_count += 1
             decision = _decision(
-                stance='accept',
-                relationship_state='unestablished',
+                applicability='not_relationship_sensitive',
+                stance='reject',
             )
             payload = {
                 'intention': '保持当前回合的清晰边界',

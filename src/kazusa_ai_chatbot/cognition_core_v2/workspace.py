@@ -64,7 +64,7 @@ def collapse_authoritative_relational_bid(
 
     Args:
         bids: Complete branch-owned candidates eligible for partition.
-        decision: Validated ordinary relational-willingness decision.
+        decision: Validated ordinary character-owned relational stance.
 
     Returns:
         The authoritative collapse envelope with the ordinary bid primary.

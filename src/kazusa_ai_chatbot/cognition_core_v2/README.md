@@ -207,8 +207,9 @@ JSON-repair model. There is no semantic verifier, negative verdict,
 evaluator-authored replacement, or recheck. Ordinary turns keep the ordinary
 goal producer.
 
-Goal cognition owns the character's semantic objective, including genuine
-value, relationship, and boundary refusals. It is capability-neutral: it does
+Goal cognition owns the character's semantic objective, including the complete
+character-owned relationship stance and grounded acceptance, refusal,
+negotiation, or conditional participation. It is capability-neutral: it does
 not receive runtime capability limits, infer tool availability from character
 identity, or promise unverified future effects. Missing current facts remain a
 goal to answer after obtaining evidence. Workspace collapse receives the typed
@@ -221,7 +222,7 @@ owned by action planning.
 ## Current-Turn Relational Willingness
 
 The ordinary-response goal owner produces one exact transient
-`relational_willingness.v2` decision per turn. The decision pairs a
+`relational_willingness.v2` decision per turn. The decision carries a
 relationship-sensitive applicability with a native
 `current_user_relationship_state` (`unestablished`,
 `developing_or_uncertain`, or `established`) and one ordered stance (`reject`,
@@ -230,18 +231,18 @@ that is not relationship-sensitive with
 `not_relationship_sensitive/not_applicable/not_applicable`. The ordinary
 response prompt, including its typed required-selection form, requires the
 field; typed selection on an active branch retains its existing output
-contract and does not re-decide relational willingness. Deterministic
-validation enforces the exact V2 pairings:
+contract and does not re-decide relational willingness. Relationship state is
+descriptive context rather than a permission matrix: every sensitive stance is
+valid for each real relationship state. Deterministic validation enforces the
+structural non-sensitive pairing and complete sensitive fields:
 
 | Applicability | Current-user relationship state | Allowed stance |
 | --- | --- | --- |
 | `not_relationship_sensitive` | `not_applicable` | `not_applicable` |
-| `relationship_sensitive` | `unestablished` | `reject` |
-| `relationship_sensitive` | `developing_or_uncertain` | `reject`, `deflect`, `negotiate`, or `conditional_accept` |
-| `relationship_sensitive` | `established` | any relationship-sensitive stance |
+| `relationship_sensitive` | any real relationship state | `reject`, `deflect`, `negotiate`, `conditional_accept`, or `accept` |
 
-`accept` is valid only with `established`. A relationship-sensitive decision
-cannot use `not_applicable`. A missing, unknown-enum, or internally
+The sensitive decision cannot use `not_applicable` for either stance or
+relationship state. A missing, unknown-enum, or internally
 inconsistent ordinary decision is a structural contract error that regenerates
 through the same goal owner and, after bounded attempts, fails closed before
 state commit. Deterministic code never derives, upgrades, or rewrites the
@@ -250,19 +251,20 @@ stance or relationship state from prose, relationship numbers, or memory text.
 The decision must cite at least one current-episode evidence handle.
 Each evidence row receives one transient `provenance_role` derived only from
 trusted source-kind and memory-scope metadata. `current_episode` rows are the
-current request and scene; `current_user_history_only` rows explain history
-only and never override canonical native relationship state;
-`character_or_world_context_only` rows (shared character/world memory and
-promoted reflection) inform character compatibility and knowledge only and
-cannot grant current-user trust, attachment, closeness, boundary safety,
-consent, or lover access; `contextual_fact_only` rows are general context.
+current request and scene; `current_user_history_only` rows explain current-user
+history; `character_or_world_context_only` rows (shared character/world memory
+and promoted reflection) inform character compatibility and knowledge. The
+character weighs these descriptive sources with the current episode and other
+evidence; `contextual_fact_only` rows are general context.
 Unknown provenance fails closed at the deterministic boundary. No raw user id
 or relationship id reaches the model.
 
 Relationship axes and boundary profiles reach the model as domain-specific
-semantic descriptions. Zero trust means trust is unestablished, zero boundary
-safety means boundary history is unproven, and the compliance strategy is
-described as a pressure-response style that is not willingness or consent.
+semantic descriptions. Zero trust and zero boundary-safety retain their own
+axis meanings, and the compliance strategy is projected only as a bounded
+pressure-response style. Persisted standards remain in raw state while the
+live model-facing standards projection is empty; no standard handles are
+emitted.
 Relationship appraisal receives one canonical `relationship` payload with the
 same axis semantics; no duplicate relationship alias is emitted. The goal LLM
 classifies `current_user_relationship_state` from that qualitative projection;
@@ -382,11 +384,13 @@ progress shell remains `null`; an invented checklist is a structural contract
 error handled by the existing bounded same-stage regeneration path.
 
 The shared surface input receives semantic intention, bounded affect and
-relationship projections, complete-bid projections, permitted action results,
-interaction style, an exact tempo/linguistic-texture expression context, and a
-separate bounded visual-character context. Normal text planning makes exactly
-two parallel calls. Unified content planning atomically returns the content
-plan, requirements, and a five-field delivery profile; preference planning
+    relationship projections, complete-bid projections, permitted action results,
+    interaction style, an exact tempo/linguistic-texture expression context, a
+    bounded recent-character-dialog projection, and a separate bounded
+    visual-character context. Normal text planning makes exactly two parallel
+    calls. Unified content planning atomically returns the content plan,
+    requirements, a five-field delivery profile, and optional
+    `lexical_avoidances`; preference planning
 returns only real visible boundaries and addressee constraints. Neither call
 receives the visual-character context, and preference receives no character
 expression context. The delivery profile is limited to lexical register,
@@ -398,20 +402,28 @@ terminal private evidence; it has no downstream image or dialog model. Raw
 episode traces retain those directives for audit, while every model-facing
 consolidation projection excludes their fragments.
 
-Content planning expresses the selected character judgment using the current
+    `lexical_avoidances` contains only concrete current-turn expression fragments
+    such as a repeated recent opening, stale filler, stale address, or wording
+    that obscures the selected intent. It is a surface-owned continuity hint,
+    never a topic, moral, or refusal policy. The dialog renderer preserves the
+    selected semantics while avoiding those literal fragments, and a deterministic
+    literal check routes a hit through the existing bounded repair path.
+
+    Content planning expresses the selected character judgment using the current
 scene, affect, relationship, and interaction style. Coherent imaginative
 detail is allowed when it remains compatible with current input, active
 constraints, and actor/target/subject roles. Preference planning emits only
 real visible boundaries and addressee constraints, so both lists may be empty.
 Dialog owns natural character-specific chat-ready wording. Three focused
 hard-error checks run in parallel on the existing dialog-model route within
-the bounded verifier path. Current visible percepts retain their shared
+the bounded verifier path, followed by the deterministic expression-continuity
+check. Current visible percepts retain their shared
 32,000-character cap. Semantic fidelity separately caps authoritative surface
 semantics at 11,000 characters, candidate dialog at 12,000 characters, and its
 complete serialized payload at 50,000 characters. Semantic fidelity receives
 current model-visible percept rows, the candidate role frame, candidate
 dialog, and the authoritative selected surface intent, content plan,
-requirements, and visible boundaries. It rejects internal contradiction,
+requirements, visible boundaries, and lexical avoidances. It rejects internal contradiction,
 direct current-input conflict, non-selection role reversal, and unsupported
 within-turn opposite-stance transitions. Delivery profile and action-result
 fields are excluded from semantic authority. Role direction receives only typed
@@ -433,19 +445,17 @@ failures by themselves. Deterministic code merges only the verdict shapes,
 bounding each owner to four issues and the merged result to eight. A negative
 result returns canonical surface input plus bounded verified issues to the
 text-surface owner for one complete replacement of `content_plan`,
-`content_requirements`, `delivery_profile`, `visible_boundaries`, and
-`addressee_plan`. Rejected surface fields and rejected dialog are trace-only
+`content_requirements`, `delivery_profile`, `lexical_avoidances`,
+`visible_boundaries`, and `addressee_plan`. Rejected surface fields and rejected dialog are trace-only
 and are absent from both repair-model payloads. Selected intent, action truth,
-and runtime capability limits are reconstructed from canonical input before
-dialog renders candidate two. If that candidate is also rejected, dialog
-renders one terminal third candidate from canonical V2 truth and typed
-remaining violation kinds. Candidate three is not verified. A bounded,
-non-empty third candidate is delivered as degraded output; if it is unusable,
-candidate two and then candidate one remain eligible in newest-first order.
-Only total generator unavailability with no bounded candidate is
-unrecoverable. The returned dialog retains the exact latest valid surface, and
-only that pair can reach post-turn consumers. The protected turn trace records
-rejected checks, surfaces, and dialog candidates as diagnostic evidence.
+the exact relational stance, and runtime capability limits are reconstructed
+from canonical input before each dialog retry. Every candidate, including the
+terminal candidate, passes the semantic, role, surface, and expression-continuity
+checks. After
+bounded exhaustion the delivery boundary raises a typed failure; no
+unverified dialog reaches post-turn consumers. The protected turn trace
+records rejected checks, surfaces, and dialog candidates as diagnostic
+evidence.
 
 Each focused verifier validates its own exact JSON verdict. A structurally
 invalid parsed verdict receives up to two complete replacements using the

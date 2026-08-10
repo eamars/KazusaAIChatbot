@@ -454,7 +454,7 @@ def canonical_cognition_output(
             "applicability": "not_relationship_sensitive",
             "stance": "not_applicable",
             "current_user_relationship_state": "not_applicable",
-            "reason": "当前回合证据不涉及关系许可判断",
+            "reason": "当前回合证据不涉及关系立场判断",
             "evidence_handles": ["e1"],
         }
         output["relational_willingness"] = relational_willingness

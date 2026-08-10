@@ -529,7 +529,7 @@ async def test_v2_text_surface_stage_contracts_live_llm() -> None:
 
     assert len(text_llm.calls) == 2
     assert len(visual_llm.calls) == 1
-    assert output["visible_boundaries"]
+    assert output["visible_boundaries"] == []
     assert output["addressee_plan"]
     assert output["content_requirements"]
     assert set(output["delivery_profile"]) == {

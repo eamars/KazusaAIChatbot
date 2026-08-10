@@ -118,6 +118,15 @@ def test_branch_modified_runtime_prompts_use_chinese_instructions() -> None:
         for marker in retired_english_instruction_markers:
             assert marker not in prompt
 
+    assert "已经记录、已经安排、已经生效" in GOAL_COGNITION_PROMPT
+    assert "保持每条证据的事实内容和作用范围" in GOAL_COGNITION_PROMPT
+    assert "不凭空缩小、扩展或创造例外" in GOAL_COGNITION_PROMPT
+    assert "self_goal_resolution" in ACTION_PLANNING_PROMPT
+    assert "当前用户的历史事实" in ACTION_PLANNING_PROMPT
+    assert "approval_preparation" in RESOLVER_AUTHORIZATION_PROMPT
+    assert "不执行操作、不表示已经" in RESOLVER_AUTHORIZATION_PROMPT
+    assert "批准验证" in RESOLVER_AUTHORIZATION_PROMPT
+
     repair_messages = (
         _authorization_repair_message(
             response_text="invalid",
@@ -312,11 +321,12 @@ def test_relational_willingness_prompt_contract_is_explicit_and_stable() -> None
             "character_or_world_context_only",
         ):
             assert required_text in prompt
-    assert "不把 compliance 当作意愿或同意" in goal_prompt
+    assert "关系状态是描述性语境" in goal_prompt
+    assert "保持角色对所有证据的自主权衡" in goal_prompt
     assert "当 `branch.goal_kind` 为 `ordinary_response`" in goal_prompt
     assert "semantic_context.branch.goal_kind" not in goal_prompt
     assert "relational_willingness_contract" in repair_prompt
-    assert "current_user_relationship_state" in repair_prompt
+    assert "关系状态是描述性语境" in repair_prompt
     assert "current_episode_evidence_handles" in repair_prompt
     assert "角色 handle 不能放入 evidence_handles" in repair_prompt
     assert "required_evidence_handles" in selection_repair_prompt
@@ -344,7 +354,8 @@ def test_goal_prompt_prioritizes_current_episode_over_stale_progress() -> None:
     prompt = " ".join(GOAL_COGNITION_PROMPT.split())
 
     for required_text in (
-        "当前 episode 比进度更新",
+        "当前 episode 是当前场景事实，进度和旧关系是补充语境",
+        "不要把任何单一来源自动升级为最终立场",
         "部件与整体",
         "不要要求逐字相同",
         "优先于旧事件状态",
@@ -404,7 +415,7 @@ def test_generated_semantic_prompts_preserve_language_policy() -> None:
         normalized = " ".join(prompt.split())
         assert "简体中文" in normalized
         assert "用户" in normalized
-        assert "专有名词" in normalized
+        assert "专有名词" in normalized or "专名" in normalized
         assert "schema 或 enum token" in normalized
 
 

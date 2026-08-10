@@ -1090,7 +1090,9 @@ def project_state_for_prompt(
     """Project all prompt-visible state into semantic descriptors.
 
     Persistent ids and raw scalar values stay in ``handle_to_ref`` for
-    deterministic mapping and are never included in ``payload``.
+    deterministic mapping and are never included in ``payload``. Persisted
+    standards remain available to raw state validation and storage, while
+    the live semantic projection keeps their model-facing list empty.
     """
 
     handle_to_ref: dict[str, dict[str, str]] = {}
@@ -1163,12 +1165,6 @@ def project_state_for_prompt(
             "scope": state["state_scope"],
             "kind": "drive",
             "entity_id": drive_id,
-        }
-    for index, standard in enumerate(state.get("standards", []), start=1):
-        handle_to_ref[f"s{index}"] = {
-            "scope": state["state_scope"],
-            "kind": "standard",
-            "entity_id": standard["standard_id"],
         }
     if isinstance(state.get("meaning_state"), Mapping):
         handle_to_ref["m1"] = {
@@ -1442,8 +1438,7 @@ def _project_boundary_profile(boundaries: Mapping[str, Any]) -> dict[str, str]:
     """Translate one identity boundary profile into compact semantics.
 
     Numeric boundary storage stays unchanged. The model receives only bounded
-    Chinese descriptions, and the compliance strategy explicitly states that
-    pressure response is not willingness or consent.
+    Chinese descriptions of the character's pressure-response style.
     """
 
     projected: dict[str, str] = {
@@ -1494,7 +1489,7 @@ def _boundary_float_semantic(value: object, subject: str) -> str:
 
 
 def _compliance_strategy_semantic(value: object) -> str:
-    """Describe pressure-response style without implying consent."""
+    """Describe the character's pressure-response style."""
 
     compliance_labels = {
         "resist": "压力下抵抗",
@@ -1504,7 +1499,7 @@ def _compliance_strategy_semantic(value: object) -> str:
     label = compliance_labels.get(value)
     if label is None:
         raise ValueError("compliance strategy is invalid")
-    return f"{label}；不代表意愿或同意"
+    return label
 
 
 def _boundary_recovery_semantic(value: object) -> str:
@@ -1525,14 +1520,6 @@ def _boundary_recovery_semantic(value: object) -> str:
 def _project_constraints(constraints: Mapping[str, Any]) -> dict[str, Any]:
     """Project character constraints separately from mutable user state."""
 
-    standard_descriptions = {
-        "be truthful": "保持诚实",
-        "avoid causing needless harm": "避免造成不必要的伤害",
-        "respect personal boundaries": "尊重个人边界",
-        "honor accepted commitments": "履行已经接受的承诺",
-        "protect dignity and autonomy": "保护尊严与自主性",
-    }
-
     drives = {
         drive_id: {
             "importance": project_numeric_band(row["importance"]),
@@ -1540,16 +1527,6 @@ def _project_constraints(constraints: Mapping[str, Any]) -> dict[str, Any]:
         }
         for drive_id, row in constraints["drives"].items()
     }
-    standards = [
-        {
-            "description": standard_descriptions.get(
-                row["description"],
-                row["description"],
-            ),
-            "importance": project_numeric_band(row["importance"]),
-        }
-        for row in constraints["standards"]
-    ]
     meaning = {
         field_name: project_numeric_band(constraints["meaning_state"][field_name])
         for field_name in (
@@ -1565,7 +1542,7 @@ def _project_constraints(constraints: Mapping[str, Any]) -> dict[str, Any]:
     }
     return {
         "drives": drives,
-        "standards": standards,
+        "standards": [],
         "meaning_state": meaning,
         "personality_judgment": personality,
     }

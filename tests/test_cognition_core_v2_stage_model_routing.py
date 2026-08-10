@@ -227,7 +227,7 @@ def _ordinary_goal_draft() -> dict[str, object]:
         "applicability": "not_relationship_sensitive",
         "stance": "not_applicable",
         "current_user_relationship_state": "not_applicable",
-        "reason": "当前回合证据不涉及关系许可判断",
+        "reason": "当前回合证据不涉及关系立场判断",
         "evidence_handles": ["e1"],
     }
     return draft
@@ -606,6 +606,7 @@ async def test_action_planning_reuses_its_route_for_repair_and_trace(
         action_handles={},
         resolver_handles={},
         current_goal_progress=None,
+        required_resolver_evidence_dependency=None,
         runtime_capability_limits=(),
     )
 

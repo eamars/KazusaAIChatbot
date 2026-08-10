@@ -16,6 +16,7 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     TextSurfaceServicesV2,
     VisualSurfaceServicesV2,
     validate_surface_addressee_plan,
+    validate_lexical_avoidances,
 )
 from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
     V2_MODEL_TOTAL_ATTEMPTS,
@@ -43,72 +44,41 @@ SURFACE_REPAIR_INSTRUCTION = '保留原始的角色判断、\r\n情绪方向、�
 
 
 
-CONTENT_PLAN_SYSTEM_PROMPT = '''规划当前角色在这个场景中实际会说出或发送的内容，使其自然表达
-已经形成的角色判断。综合 selected intention、primary bid、supporting bid、visible episode、
-semantic affect、semantic relationship、expression policy、interaction style 和
-permitted_action_results。resolver_result 提供本轮 resolver capability 的来源自有执行结果。
-task_resolution_request 的 resolver_result 还提供 source-owned evidence_state、evidence_excerpts、
-evidence_handles、prompt_safe_observation_handle 和 remaining_needs；这些字段共同界定当前事实边界。
-character_expression_context 提供 tempo 和 linguistic_texture，与这些
-语境共同塑造句式、节奏和角色声音。runtime_capability_limits 提供运行时能力边界；按每项能力的
-真实状态表达已经发生的结果、当前限制、等待状态或下一步条件。
+CONTENT_PLAN_SYSTEM_PROMPT = '''规划当前角色实际会说出或发送的内容，表达已经形成的角色判断。综合 selected intention、primary bid、
+supporting bid、visible episode、semantic affect、semantic relationship、expression policy、interaction style、
+permitted_action_results、resolver_result、runtime_capability_limits 和 character_expression_context。task_resolution_request
+的 resolver_result 还含 source-owned evidence_state、evidence_excerpts、evidence_handles、prompt_safe_observation_handle
+和 remaining_needs；只据这些来源表达事实。recent_character_dialog 最多两条最近角色可见消息，仅用于本轮措辞连续性，
+不是事实或立场来源。
 
-goal_resolution 是 cognition 对当前目标可回答性的已确认判断：answerable_now 对应在当前证据
-范围内直接回答；requires_required_evidence 对应说明证据缺口；requires_user_input 对应说明需要
-用户提供的材料；blocked 对应表达当前边界和可行下一步。permitted_action_results 提供事实状态：
-executed 对应其有界的已完成效果；pending 或 scheduled 对应“已记录、已排队、待执行”；failed、
-unavailable 和其他状态对应各自的真实限制。请求或目标候选表达角色的言语态度。
+goal_resolution 是当前目标可回答性的已确认判断：answerable_now 直接回答；requires_required_evidence 或 requires_user_input
+说明缺口；blocked 表达当前边界和下一步。permitted_action_results 按 executed、pending、scheduled、failed 或 unavailable
+的真实状态表述结果；pending、scheduled 表达已记录、已排队、待执行或等待。若 resolver_result.status=succeeded 且 semantic_result 已接纳任务，表达已接纳并等待后续结果，
+不要改写成失败或能力不可用；task_resolution_request 仅以 complete 的 evidence_excerpts 回答，其他 evidence_state 保留缺口。
 
 # 规划步骤
-1. 回应当前输入，并结合先前消息、角色关系、情绪和场景压力推进互动。
-2. 在当前事实、角色方向和明确约束一致的范围内，自由加入连贯的想象细节、玩笑、主动性和有创造力
-的展开，让内容鲜明且贴合角色。
-3. 以结构化 visible percept 确定行动者、对象、受益者和主语。在用户对话中，“当前用户”的第一
-人称指当前用户；“当前角色”是说话者、被直接称呼者和祈使句的隐含主语。自由文本使用自然的中文
-参与者称呼。
-4. 按 permitted_action_results 的状态规划事实表述：executed 表达有界的完成结果；pending 或
-scheduled 表达已记录、已排队、待执行及相应条件；其他状态表达当前限制或下一步。让后续 worker
-结果保持开放。
-当 resolver_result.status=succeeded 且 semantic_result 明确任务已接纳并将继续执行时，表达已接纳、
-正在等待后续结果的真实状态；不得改写成 capability 不可用、任务失败或不会继续。此时 blocked 仅表示
-当前前台缺少最终答案，不覆盖已经成功接纳的后续工作。
-对于 task_resolution_request，evidence_state=complete 只允许依据 evidence_excerpts 回答并保留
-其中的限定；partial、pending、missing 或 blocked 必须明确说明所需事实尚不可用、仍在获取中或
-存在 typed blocker，并在 remaining_needs 指示时请求所需材料。status=succeeded 不能覆盖不完整
-的 evidence_state，也不能把 generic semantic_result 当作答案证据。
-5. 以 selected intention 及 intention.reason 为语义锚点，阅读完整语境，分清角色是在回应请求
-本身，还是在回应提问的时机、突然程度或直接程度。可自由组合惊讶、害羞、防御、调侃、嘴硬、
-迟疑、温柔、热烈或其他符合角色的情绪与特征。这些表达可以先于明确决定出现，并与收尾共同组成
-表达同一已选决定的角色化弧线。当权威语境选择了实际立场变化时，把支持变化的新事实、动机、
-条件、让步或约束及其因果连接写入 content_plan 或 content_requirements。
-6. content_plan 和 content_requirements 承载拒绝、接受、指责、协商、条件、让步和立场变化等
-语义选择。content_requirements 使用正向目标句式，描述回应应呈现的立场、情绪流动、角色特征、
-事实和互动推进；delivery_profile 用词语层次、句式、节奏、犹豫与标点把这些语义实现为鲜明角色
-声音。
-7. relational_willingness 是已确认的关系许可判断（含当前用户关系状态）；content_plan 与
-content_requirements 须保持其 stance 与 current_user_relationship_state 的原样立场。
+1. 回应当前输入，结合先前消息、角色关系、情绪和场景压力推进互动。
+2. 在事实、角色方向和明确约束一致的范围内，自由加入连贯的想象细节、玩笑、主动性和创造性展开。
+3. 以结构化 visible percept 确定行动者、对象、受益者和主语；当前用户是当前用户，当前角色是说话者和被直接称呼者。
+4. 以 selected intention 及 intention.reason 为语义锚点，分清角色是在回应请求本身，还是在回应提问的时机、突然程度或直接程度；可自由组合惊讶、害羞、防御、调侃、嘴硬、迟疑、温柔、热烈或其他符合角色的情绪与特征，形成表达同一已选决定的角色化弧线。
+5. content_requirements 使用正向目标句式；content_plan 和 content_requirements 承载拒绝、接受、指责、协商、条件、让步和立场变化等语义选择；delivery_profile 只描述词语、句式、节奏、犹豫和标点的实现。
+6. relational_willingness 是上游已选择的角色关系立场（含 current_user_relationship_state）；内容字段保持其原样 stance。若权威语境选择立场变化，把新事实、动机、条件或约束写入内容字段。
+7. lexical_avoidances 只记录本轮具体措辞片段，例如 recent_character_dialog 中刚重复的开场、连接词、口头禅、称呼或遮蔽 selected intention 的局部措辞。它只服务表达连续性，不按主题、价值判断或内容许可分类，也不改变、推导或否定角色立场；无具体风险时返回空列表。
 
-返回一份简洁计划、一到八条语义要求和完整 delivery_profile。语义要求保护选定含义、当前真实
-边界、角色方向和能力执行事实。当前用户的即时发言来自 visible percept；角色自己的反思和内部
-观察作为语境证据；运行元数据留在内部。新生成的自由文本使用简体中文；用户引文、专有名词、代码、
-URL 以及 schema 或 enum token 保持原样。内部角色句柄或英文角色称谓仅作为结构化值或原文内容
-保留；中文自由文本使用配置名称、当前角色、当前用户或其他参与者。最终对话由 dialog 渲染器生成；
-本阶段输出规划字段。
+只返回规划字段；最终对话由 dialog 渲染器生成。当前用户的即时发言来自 visible percept；角色反思是语境证据；运行元数据留在内部。
+自由文本使用简体中文，用户引文、专有名词、代码、URL、schema 或 enum token 原样保留。
 
 # 输出格式
-只返回一个 JSON 对象，字段必须恰好是 content_plan、content_requirements 和
-delivery_profile。
-content_plan 是一个非空字符串，最多 1000 字符；content_requirements 是一到八条互不重复的
-非空语义要求，每条最多 500 字符。delivery_profile 必须恰好包含 lexical_register、
-sentence_shape、rhythm、hesitation 和 punctuation；每个值都是非空字符串，最多 200 字符，
-只描述表达实现。'''
+只返回一个 JSON 对象，字段恰好是 content_plan、content_requirements、delivery_profile 和 lexical_avoidances。content_plan 非空且最多 1000 字符；
+content_requirements 为一到八条互不重复的非空语义要求，每条最多 500 字符。delivery_profile 必须恰好包含 lexical_register、sentence_shape、rhythm、hesitation、punctuation，
+每个值非空且最多 200 字符，只描述表达实现。lexical_avoidances 为零到八条互不重复的非空当前措辞片段，每条最多 120 字符，只描述表达连续性。'''
 
 
 async def run_content_plan_stage(
     payload: Mapping[str, Any],
     services: TextSurfaceServicesV2,
-) -> tuple[str, list[str], dict[str, str]]:
-    """Return the atomic content, requirements, and delivery result."""
+) -> tuple[str, list[str], dict[str, str], list[str]]:
+    """Return content, requirements, delivery, and expression continuity."""
 
     return await _run_surface_stage(
         payload=payload,
@@ -121,35 +91,24 @@ async def run_content_plan_stage(
     )
 
 
-PREFERENCE_SYSTEM_PROMPT = '''识别当前角色判断和场景中真实存在的表达边界与称呼约束。
-以 selected intention、visible episode、projected bids、expression policy、semantic affect、
-semantic relationship、interaction style 和 permitted_action_results 为语境；
-relational_willingness、resolver_result 按原义保留（resolver_result 含 status、semantic_result）；
-task_resolution_request 的 resolver_result 中 evidence_state、evidence_excerpts、evidence_handles
-和 remaining_needs 是来源自有的答案边界；complete 只支持 supplied excerpts，其他状态不得写成
-已获得缺失事实。
-runtime_capability_limits 只约束现实能力。
+PREFERENCE_SYSTEM_PROMPT = '''识别当前角色判断和场景中真实存在的表达边界与称呼安排。以 selected intention、visible episode、projected bids、
+expression policy、semantic affect、semantic relationship、interaction style 和 permitted_action_results 为语境；
+relational_willingness、resolver_result 按原义保留。task_resolution_request 的 resolver_result 中 evidence_state、
+evidence_excerpts、evidence_handles 和 remaining_needs 是来源自有的答案边界；complete 只支持 supplied excerpts，
+其他状态保留事实缺口。runtime_capability_limits 只约束现实能力。
 
-每一条 visible_boundaries 都对应权威语境中明确生效的表达限制或细节范围；每一条
-addressee_plan 都对应真实存在的称呼安排。输入 addressee_plan 是上游确认的参与者目标；逐条保留
-handle、display_name、semantic_role 和 wording_policy，不得新增、删除、改名或把第三方改成
-current_user。相应约束为空时返回空列表，按当前判断自然表达。
-普通场景事实、时间、情绪、关系状态和已选回应立场分别归入 content_plan、content_requirements
-或 delivery_profile。拒绝、接受、指责、协商、条件和立场变化归入 content_plan 或
-content_requirements；情绪、强度、直接程度和表达节奏归入 delivery_profile。权威语境提供的安全、内容审查、亲密程度或通用礼貌边界才
-进入 visible_boundaries。
+当前版本没有 typed source-bound visible-boundary contract，因此 visible_boundaries 始终返回空列表；不要从关系、情绪、主题、能力
+或一般常识推导可见边界。每一条 addressee_plan 都对应真实存在的称呼安排；逐条保留输入的 handle、display_name、semantic_role 和 wording_policy，不新增、删除、
+改名或把第三方改成 current_user。相应约束为空时返回空列表。普通场景事实、时间、情绪、关系状态和已选回应立场分别归入内容规划字段；拒绝、接受、指责、协商、条件和立场变化归入 content_plan 或 content_requirements；
+dialog 生成最终对话。
 
-status 按原义；executed 表示有界完成效果，其他 status 保持各自状态。
-visible percept 是当前用户即时发言；角色反思是语境证据；运行元数据留内部。
-自由文本用简体中文；用户引文、专名、代码、URL、schema 或 enum token 原样保留。角色句柄或英文
-称谓只作结构化值或原文；中文自由文本使用配置名称、当前角色、当前用户或其他参与者。dialog 生成
-最终对话；本阶段只返回规划字段。
+当前用户的即时发言来自 visible percept；角色反思是语境证据；运行元数据留内部。自由文本使用简体中文；用户引文、专有名词、
+代码、URL、schema 或 enum token 原样保留；中文自由文本使用当前角色、当前用户或其他参与者。
 
 # 输出格式
-只返回一个 JSON 对象，字段必须恰好是 visible_boundaries 和 addressee_plan。visible_boundaries
-是零到八个非空且唯一的字符串，每条最多 500 字符；addressee_plan 是零到八个结构化对象的列表，
-每个对象必须恰好包含 handle、display_name、semantic_role 和 wording_policy，并逐字保留输入的
-结构化目标行。'''
+只返回一个 JSON 对象，字段恰好是 visible_boundaries 和 addressee_plan。visible_boundaries 是零到八个非空且唯一的字符串，
+每条最多 500 字符；addressee_plan 是零到八个对象，每个对象恰好包含 handle、display_name、semantic_role 和 wording_policy，
+并逐字保留输入的结构化目标行。'''
 
 
 async def run_preference_stage(
@@ -173,7 +132,8 @@ DIALOG_COMPLIANCE_REPAIR_SYSTEM_PROMPT = '''你负责在最终对话未通过硬
 完整的文本 surface 语义。surface 中的 episode、intention、goal_resolution、supporting bids、
 expression policy、semantic affect、semantic relationship、interaction style、
 character_expression_context、permitted_action_results 和 runtime_capability_limits 是本轮权威
-语境。resolver_result 是本轮 resolver capability 的来源自有执行结果。
+ 语境。resolver_result 是本轮 resolver capability 的来源自有执行结果；recent_character_dialog 是最多两条
+最近角色可见消息，只用于本轮措辞连续性。
 
 surface.dialog_compliance_repair.verified_hard_issues 是已经确认的硬错误；
 
@@ -184,21 +144,23 @@ surface.dialog_compliance_repair.verified_hard_issues 是已经确认的硬错�
 与特征。这些表达可以先于明确决定出现，并与收尾共同组成表达同一已选决定的角色化弧线。权威语境
 选择实际立场变化时，把支持变化的新事实、动机、条件、让步或约束及其因果连接写入 content_plan
 或 content_requirements。
-surface.relational_willingness 是已确认的关系许可判断（含当前用户关系状态），替代内容必须保持其立场。
-2. 修正每一项 verified_hard_issues，重新生成内容计划、语义要求和 delivery profile，并依据
-权威语境中的具体来源恢复可见边界和称呼安排。
+surface.relational_willingness 是上游已选择的角色关系立场（含当前用户关系状态），替代内容必须保持其立场。
+2. 修正每一项 verified_hard_issues，重新生成内容计划、语义要求、delivery profile 和
+lexical_avoidances；lexical_avoidances 只保留具体的本轮表达连续性片段，不表达主题许可、道德判断、
+拒绝理由或新的角色立场。
+visible_boundaries 保持为空，并保留权威语境中的称呼安排。
 3. 保持结构化角色中的行动者、对象、受益者、回应所有者和选择所有者。当前角色可以拒绝、协商或
 附加条件，并按照权威语境保持这些语义选择的行动者和对象。
-4. visible_boundaries 的具体来源类型是权威语境明示的隐私、保密、同意、安全、内容审查或可见
-披露限制；每一条 addressee_plan 都对应真实存在的称呼安排。输入中的结构化 addressee_plan 是上游
+4. 当前版本没有 typed source-bound visible-boundary contract，visible_boundaries 必须返回空列表；
+不要自行添加未绑定来源的通用边界。每一条 addressee_plan 都对应真实
+存在的称呼安排。输入中的结构化 addressee_plan 是上游
 已经确认的参与者目标和 wording_policy；逐条保留其 handle、display_name、semantic_role 和
 wording_policy，不得新增、删除、改名或把第三方改成 current_user。普通场景事实、时间、情绪、关系状态
 和已选回应立场分别归入 content_plan、content_requirements 或 delivery_profile。拒绝、接受、
 指责、协商、条件和立场变化归入 content_plan 或 content_requirements；主题、比喻和已选立场进入
 content_plan 或 content_requirements；情绪、强度、直接程度和表达节奏归入 delivery_profile。
 verified_hard_issues 中的内容冲突对应 content_plan 和 content_requirements 中的正向修复目标；
-visible_boundaries 和 addressee_plan 仍各自取自权威语境中的具体来源。没有具体来源时，这两个字段
-分别返回空列表。visible_boundaries 用正向范围句式写明已确认的表达范围；addressee_plan 逐字保留输入
+visible_boundaries 返回空列表；addressee_plan 逐字保留输入
 提供的结构化参与者、语义角色和 wording_policy；
 存在具体称呼安排时列出，其他情况返回空列表。亲密感、语气词、词汇、句式和节奏由
 delivery_profile 表达。
@@ -216,11 +178,12 @@ missing 和 blocked 必须保留缺口、等待或 typed blocker，不得把 sem
 原样。本阶段输出完整的替代规划字段。
 
 # 输出格式
-只返回一个 JSON 对象，字段必须恰好是 content_plan、content_requirements、
-delivery_profile、visible_boundaries 和 addressee_plan。content_plan 是一个非空字符串，
+只返回一个 JSON 对象，字段必须恰好是 content_plan、content_requirements、delivery_profile、
+lexical_avoidances、visible_boundaries 和 addressee_plan。content_plan 是一个非空字符串，
 最多 1000 字符；content_requirements 是一到八条互不重复的非空语义要求；delivery_profile
 必须恰好包含 lexical_register、sentence_shape、rhythm、hesitation 和 punctuation，每个值最多
-200 字符；visible_boundaries 是零到八条互不重复的非空字符串；addressee_plan 是零到八个结构化
+200 字符；lexical_avoidances 是零到八条互不重复的非空当前措辞片段，每条最多 120 字符；
+visible_boundaries 是零到八条互不重复的非空字符串；addressee_plan 是零到八个结构化
 对象，每个对象恰好包含 handle、display_name、semantic_role 和 wording_policy。'''
 
 
@@ -560,13 +523,14 @@ def _bounded_repair_text(value: str) -> str:
 
 def _validate_content_plan_result(
     value: object,
-) -> tuple[str, list[str], dict[str, str]]:
-    """Validate the atomic content-plan and delivery object."""
+) -> tuple[str, list[str], dict[str, str], list[str]]:
+    """Validate content, delivery, and expression-continuity fields."""
 
     if not isinstance(value, Mapping) or set(value) != {
         "content_plan",
         "content_requirements",
         "delivery_profile",
+        "lexical_avoidances",
     }:
         raise ValueError("content-plan stage fields are not exact")
     content_plan = _bounded_text(value["content_plan"], "content plan", 1000)
@@ -577,7 +541,15 @@ def _validate_content_plan_result(
     delivery_profile = _validate_delivery_profile_result(
         value["delivery_profile"]
     )
-    return content_plan, content_requirements, delivery_profile
+    lexical_avoidances = validate_lexical_avoidances(
+        value["lexical_avoidances"]
+    )
+    return (
+        content_plan,
+        content_requirements,
+        delivery_profile,
+        lexical_avoidances,
+    )
 
 
 def _validate_delivery_profile_result(value: object) -> dict[str, str]:
@@ -608,11 +580,11 @@ def _validate_preference_result(
         "addressee_plan",
     }:
         raise ValueError("preference stage fields are not exact")
-    visible_boundaries = _bounded_text_list(
-        value["visible_boundaries"],
-        "visible boundaries",
-        minimum=0,
-    )
+    if value["visible_boundaries"] != []:
+        raise ValueError(
+            "visible boundaries must remain empty until a typed source contract exists"
+        )
+    visible_boundaries: list[str] = []
     addressee_plan = value["addressee_plan"]
     validate_surface_addressee_plan(addressee_plan)
     return visible_boundaries, [dict(row) for row in addressee_plan]
@@ -627,15 +599,22 @@ def _validate_dialog_compliance_repair_result(
         "content_plan",
         "content_requirements",
         "delivery_profile",
+        "lexical_avoidances",
         "visible_boundaries",
         "addressee_plan",
     }:
         raise ValueError("dialog compliance surface repair fields are not exact")
-    content_plan, content_requirements, delivery_profile = (
+    (
+        content_plan,
+        content_requirements,
+        delivery_profile,
+        lexical_avoidances,
+    ) = (
         _validate_content_plan_result({
             "content_plan": value["content_plan"],
             "content_requirements": value["content_requirements"],
             "delivery_profile": value["delivery_profile"],
+            "lexical_avoidances": value["lexical_avoidances"],
         })
     )
     visible_boundaries, addressee_plan = _validate_preference_result({
@@ -646,6 +625,7 @@ def _validate_dialog_compliance_repair_result(
         "content_plan": content_plan,
         "content_requirements": content_requirements,
         "delivery_profile": delivery_profile,
+        "lexical_avoidances": lexical_avoidances,
         "visible_boundaries": visible_boundaries,
         "addressee_plan": addressee_plan,
     }

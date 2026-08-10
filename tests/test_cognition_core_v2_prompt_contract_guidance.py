@@ -11,6 +11,9 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from kazusa_ai_chatbot.cognition_core_v2.branch_activation import (
     DEFAULT_BRANCH_DEFINITIONS,
 )
+from kazusa_ai_chatbot.cognition_core_v2.action_selection import (
+    ACTION_PLANNING_PROMPT,
+)
 from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
     _ACTIVE_REQUIRED_SELECTION_GOAL_PROMPT,
     GENERIC_GOAL_REPAIR_INSTRUCTIONS,
@@ -23,6 +26,9 @@ from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
     _fit_goal_prompt_payload,
     run_goal_cognition,
 )
+from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
+    project_state_for_prompt,
+)
 from kazusa_ai_chatbot.cognition_core_v2.semantic_appraisal import (
     SEMANTIC_APPRAISAL_PROMPT,
     _appraisal_repair_messages,
@@ -30,6 +36,13 @@ from kazusa_ai_chatbot.cognition_core_v2.semantic_appraisal import (
     _compact_semantic_contract_error,
     _fit_appraisal_payload,
 )
+from kazusa_ai_chatbot.cognition_core_v2.surface_stages import (
+    CONTENT_PLAN_SYSTEM_PROMPT,
+    DIALOG_COMPLIANCE_REPAIR_SYSTEM_PROMPT,
+    PREFERENCE_SYSTEM_PROMPT,
+)
+from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
+from tests.cognition_core_v2_test_helpers import canonical_identity_context
 
 
 def test_core_v2_prompts_fit_local_model_guidance_targets() -> None:
@@ -39,6 +52,90 @@ def test_core_v2_prompts_fit_local_model_guidance_targets() -> None:
     assert len(GOAL_COGNITION_PROMPT) <= 3_000
     assert len(NON_ORDINARY_GOAL_COGNITION_PROMPT) <= 3_000
     assert len(REQUIRED_SELECTION_GOAL_PROMPT) <= 2_600
+
+
+def test_static_prompt_policy_audit_removes_application_owned_policy() -> None:
+    """Active prompts and rendered context contain no removed policy defaults."""
+
+    prompt_sources = (
+        SEMANTIC_APPRAISAL_PROMPT,
+        GOAL_COGNITION_PROMPT,
+        NON_ORDINARY_GOAL_COGNITION_PROMPT,
+        REQUIRED_SELECTION_GOAL_PROMPT,
+        " ".join(GENERIC_GOAL_REPAIR_INSTRUCTIONS),
+        " ".join(SELECTION_GOAL_REPAIR_INSTRUCTIONS),
+        ACTION_PLANNING_PROMPT,
+        CONTENT_PLAN_SYSTEM_PROMPT,
+        PREFERENCE_SYSTEM_PROMPT,
+        DIALOG_COMPLIANCE_REPAIR_SYSTEM_PROMPT,
+        dialog_module._V2_DIALOG_GENERATOR_PROMPT,
+        dialog_module._V2_DIALOG_HARD_FAILURE_REPAIR_PROMPT,
+        dialog_module._V2_DIALOG_SEMANTIC_FIDELITY_PROMPT,
+        dialog_module._V2_DIALOG_ROLE_DIRECTION_PROMPT,
+        dialog_module._V2_DIALOG_SURFACE_INTEGRITY_PROMPT,
+    )
+    removed_policy_fragments = (
+        "当前 episode 明确写出的角色拒绝、排斥或边界条件优先于",
+        "当前 episode 的角色自我边界、明确拒绝、威胁或强迫条件优先于",
+        "不把 compliance 当作意愿或同意",
+        "不代表意愿或同意",
+        "unestablished` 只能配 `reject`",
+        "developing_or_uncertain` 不能 accept",
+        "established` 才可按边界选择",
+        "安全、内容审查、亲密程度或通用礼貌边界",
+        "隐私、保密、同意、安全、内容审查或可见披露限制",
+    )
+    for prompt in prompt_sources:
+        for fragment in removed_policy_fragments:
+            assert fragment not in prompt
+
+    projection = project_state_for_prompt(
+        {
+            "state_scope": "user",
+            "updated_at": "2026-07-14T00:00:00Z",
+            "owner_user_id": "user-prompt-audit",
+            "goals": [],
+            "threats": [],
+            "active_events": [],
+            "knowledge_gaps": [],
+            "affect_activations": [],
+            "drives": {},
+        },
+        character_constraints={
+            "drives": {},
+            "standards": [{
+                "standard_id": "standard-1",
+                "description": "保持诚实",
+                "importance": 0.8,
+            }],
+            "meaning_state": {
+                "purpose_coherence": 50,
+                "agency": 50,
+                "identity_continuity": 50,
+                "salience": 50,
+            },
+            "personality_judgment": {
+                "logic": "analytical",
+                "defense": "reserved",
+                "quirks": "precise",
+                "taboos": "stay in character",
+            },
+        },
+        character_identity_context=canonical_identity_context(),
+    )
+    rendered_context = json.dumps(
+        projection.payload,
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    assert projection.payload["character_constraints"]["standards"] == []
+    assert all(
+        not (handle.startswith("s") and handle[1:].isdigit())
+        for handle in projection.handle_to_ref
+    )
+    assert "保持诚实" not in rendered_context
+    for fragment in removed_policy_fragments:
+        assert fragment not in rendered_context
 
 
 def test_core_v2_prompts_keep_one_authoritative_handle_domain() -> None:
@@ -60,9 +157,9 @@ def test_core_v2_prompts_keep_one_authoritative_handle_domain() -> None:
     goal_prompt = GOAL_COGNITION_PROMPT
     for required_text in (
         "独立的目标认知分支",
-        "当前 episode 比进度更新",
-        "角色拒绝、排斥或边界条件优先于旧关系",
-        "当前 episode 的 semantic_text 明确写出当前角色排斥、拒绝或不愿意",
+        "当前 episode 是当前场景事实，进度和旧关系是补充语境",
+        "不要把任何单一来源自动升级为最终立场",
+        "对三个真实关系状态，`reject`、`deflect`、`negotiate`、`conditional_accept` 和 `accept` 都是可选的角色立场",
         "每个元素必须逐个等于一个已提供的 handle",
         "不得使用范围、通配符、组合写法或 source ID",
         "不写最终对话",
@@ -396,7 +493,7 @@ def test_goal_repair_feedback_preserves_cross_namespace_authority() -> None:
     assert "required_evidence_handles" in " ".join(
         SELECTION_GOAL_REPAIR_INSTRUCTIONS
     )
-    assert "current_user_relationship_state" in " ".join(
+    assert "三个真实状态都可配合五种敏感立场" in " ".join(
         GENERIC_GOAL_REPAIR_INSTRUCTIONS
     )
 

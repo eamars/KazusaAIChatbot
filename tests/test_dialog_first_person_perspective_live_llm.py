@@ -102,7 +102,7 @@ def _surface_payload(
             'schema_version': 'text_surface_output.v2',
             'content_plan': content_plan,
             'content_requirements': [selected_surface_intent],
-            'visible_boundaries': visible_boundaries,
+            'visible_boundaries': [],
             'addressee_plan': [{
                 'handle': 'current_user',
                 'display_name': user_name,

@@ -41,7 +41,7 @@ class _LLM:
         })
         if "visible_boundaries" in system and "addressee_plan" in system:
             result = {
-                "visible_boundaries": ["visible boundary"],
+                "visible_boundaries": [],
                 "addressee_plan": [{
                     "handle": "current_user",
                     "display_name": "current participant",
@@ -60,6 +60,7 @@ class _LLM:
                     "hesitation": "occasional",
                     "punctuation": "restrained",
                 },
+                "lexical_avoidances": [],
             }
         elif "visual_directives" in system:
             result = {"visual_directives": "private image composition"}
@@ -131,6 +132,61 @@ def test_l3_builder_uses_only_committed_v2_surface_fields() -> None:
     assert payload["character_expression_context"]["tempo"] == "moderate"
     assert "Current Character" in payload["visual_character_context"]
     assert "entity_id" not in json.dumps(payload)
+
+
+def test_l3_builder_projects_bounded_recent_character_dialog() -> None:
+    """Recent visible character wording reaches the expression-only context."""
+
+    state = _state()
+    state.update({
+        "platform_user_id": "user-platform",
+        "platform_bot_id": "character-platform",
+        "global_user_id": "user-global",
+        "chat_history_recent": [
+            {
+                "role": "user",
+                "platform_user_id": "user-platform",
+                "global_user_id": "user-global",
+                "broadcast": False,
+                "addressed_to_global_user_ids": [],
+                "body_text": "继续说。",
+            },
+            {
+                "role": "assistant",
+                "platform_user_id": "character-platform",
+                "global_user_id": "character-global",
+                "broadcast": True,
+                "addressed_to_global_user_ids": [],
+                "body_text": "先让我想想。",
+            },
+            {
+                "role": "assistant",
+                "platform_user_id": "character-platform",
+                "global_user_id": "character-global",
+                "broadcast": True,
+                "addressed_to_global_user_ids": [],
+                "body_text": "我会认真回答。",
+            },
+            {
+                "role": "assistant",
+                "platform_user_id": "character-platform",
+                "global_user_id": "character-global",
+                "broadcast": True,
+                "addressed_to_global_user_ids": [],
+                "body_text": "这条不应进入最近两条。",
+            },
+        ],
+    })
+
+    payload = l3_surface.build_text_surface_input_from_global_state(
+        state,
+        interaction_style_context="brief and natural",
+    )
+
+    assert payload["recent_character_dialog"] == [
+        "我会认真回答。",
+        "这条不应进入最近两条。",
+    ]
 
 
 def test_l3_builder_prefers_latest_surface_snapshot_over_stale_profile() -> None:

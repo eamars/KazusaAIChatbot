@@ -310,7 +310,7 @@ async def test_clean_text_surface_output_has_no_capsule_write(
     async def content(
         payload: object,
         services: object,
-    ) -> tuple[str, list[str], dict[str, str]]:
+    ) -> tuple[str, list[str], dict[str, str], list[str]]:
         del payload
         del services
         return (
@@ -323,6 +323,7 @@ async def test_clean_text_surface_output_has_no_capsule_write(
                 "hesitation": "light",
                 "punctuation": "restrained",
             },
+            [],
         )
 
     async def preference(

@@ -181,7 +181,6 @@ def _base_case(case_id: str) -> dict[str, Any]:
         'relationship_state': 520,
         'relationship_insight': '熟悉但仍保持边界的群聊协作对象',
         'accepted_user_preferences': [],
-        'forbidden_phrases': [],
         'chat_history': [],
         'expected_message_count': None,
         'must_include_all': [],
@@ -205,7 +204,6 @@ def _state_from_case(case: dict[str, Any]) -> dict[str, Any]:
                 'linguistic_style': case['linguistic_style'],
                 'accepted_user_preferences': case['accepted_user_preferences'],
                 'content_plan': case['content_plan'],
-                'forbidden_phrases': case['forbidden_phrases'],
             },
             'contextual_directives': case['contextual_directives'],
             'visual_directives': {},
@@ -564,13 +562,6 @@ def _case_technical_numeric_comparison() -> dict[str, Any]:
         'internal_monologue': '技术对比要把数字说全，语气可以轻一点但不能省事实。',
         'rhetorical_strategy': '正面对比两张卡，先结论再数字依据。',
         'linguistic_style': '群聊技术回答，信息密度优先，不点名当前用户。',
-        'forbidden_phrases': [
-            '@Jigsaw',
-            '完全不是一个量级',
-            '不是一个量级',
-            '碾压',
-            '吊打',
-        ],
         'content_plan': {
             'visible_goal': '正面对比 GB300 和 Pro6000。',
             'semantic_content': (

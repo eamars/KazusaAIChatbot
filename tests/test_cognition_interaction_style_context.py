@@ -188,7 +188,7 @@ async def test_surface_handler_passes_loaded_style_to_v2_planner(
     async def _plan(payload: dict[str, Any], services: object) -> dict[str, Any]:
         del services
         captured.update(payload)
-        return {
+        result = {
             "schema_version": "text_surface_output.v2",
             "content_plan": "Acknowledge the exchange.",
             "content_requirements": ["Address the current participant."],
@@ -209,6 +209,11 @@ async def test_surface_handler_passes_loaded_style_to_v2_planner(
             "selected_surface_intent": "acknowledge the current participant",
             "permitted_action_results": [],
         }
+        if "relational_willingness" in captured:
+            result["relational_willingness"] = dict(
+                captured["relational_willingness"]
+            )
+        return result
 
     monkeypatch.setattr(surface_module, "run_text_surface_planning", _plan)
 

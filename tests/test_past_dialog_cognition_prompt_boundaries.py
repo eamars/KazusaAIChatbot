@@ -44,7 +44,7 @@ class _PromptCaptureLLM:
             }
         elif stage_name == "past_dialog_preference":
             result = {
-                "visible_boundaries": ["bounded"],
+                "visible_boundaries": [],
                 "addressee_plan": [{
                     "handle": "current_user",
                     "display_name": "bounded",

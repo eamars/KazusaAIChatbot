@@ -101,17 +101,7 @@ def test_state_projection_separates_user_state_and_character_constraints() -> No
     ] == "极低"
     assert "owner_user_id" not in projection.payload
     assert "updated_at" not in projection.payload
-    standard_text = [
-        row["description"]
-        for row in projection.payload["character_constraints"]["standards"]
-    ]
-    assert standard_text == [
-        "保持诚实",
-        "避免造成不必要的伤害",
-        "尊重个人边界",
-        "履行已经接受的承诺",
-        "保护尊严与自主性",
-    ]
+    assert projection.payload["character_constraints"]["standards"] == []
     assert projection.payload["character_constraints"][
         "personality_judgment"
     ] == _constraints()["personality_judgment"]
@@ -125,7 +115,12 @@ def test_state_projection_separates_user_state_and_character_constraints() -> No
         isinstance(value, str)
         for value in projected_identity["boundaries"].values()
     )
-    assert "不代表意愿或同意" in (
+    assert projected_identity["boundaries"]["compliance_strategy"] in {
+        "压力下抵抗",
+        "压力下回避",
+        "压力下顺从",
+    }
+    assert "不代表意愿或同意" not in (
         projected_identity["boundaries"]["compliance_strategy"]
     )
     assert set(projection.payload["character_identity"]) == {

@@ -90,8 +90,8 @@ def _surface(
     return {
         "schema_version": "text_surface_output.v2",
         "content_plan": content_plan,
-        "content_requirements": [requirement],
-        "visible_boundaries": [limitation],
+        "content_requirements": [requirement, limitation],
+        "visible_boundaries": [],
         "addressee_plan": [{
             "handle": "current_user",
             "display_name": "current user",

@@ -146,7 +146,7 @@ async def _run_fresh_owner_surface_case(
         content_plan_config=services.content_plan_config,
         preference_config=services.preference_config,
     )
-    content_plan, content_requirements, delivery_profile = (
+    content_plan, content_requirements, delivery_profile, lexical_avoidances = (
         await run_content_plan_stage(stage_payload, services)
     )
     case_contract = {
@@ -155,6 +155,7 @@ async def _run_fresh_owner_surface_case(
         'forbidden_effects': forbidden_effects,
         'content_plan': content_plan,
         'content_requirements': content_requirements,
+        'lexical_avoidances': lexical_avoidances,
     }
     quality_response = await capturing_llm.ainvoke(
         [
@@ -280,7 +281,7 @@ async def _run_blocked_content_plan_case(case_id: str) -> None:
         content_plan_config=services.content_plan_config,
         preference_config=services.preference_config,
     )
-    content_plan, content_requirements, delivery_profile = (
+    content_plan, content_requirements, delivery_profile, lexical_avoidances = (
         await run_content_plan_stage(
             stage_payload,
             services,
@@ -439,7 +440,7 @@ async def test_c12_content_plan_uses_persisted_coding_status_result() -> None:
         content_plan_config=services.content_plan_config,
         preference_config=services.preference_config,
     )
-    content_plan, content_requirements, delivery_profile = (
+    content_plan, content_requirements, delivery_profile, lexical_avoidances = (
         await run_content_plan_stage(
             stage_payload,
             services,
@@ -531,7 +532,7 @@ async def test_c13_content_plan_preserves_pending_queue_only_boundary() -> None:
         content_plan_config=services.content_plan_config,
         preference_config=services.preference_config,
     )
-    content_plan, content_requirements, delivery_profile = (
+    content_plan, content_requirements, delivery_profile, lexical_avoidances = (
         await run_content_plan_stage(
             stage_payload,
             services,

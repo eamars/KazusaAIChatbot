@@ -1165,7 +1165,6 @@ async def _assert_live_cognition_stack_prompt_contract(ensure_live_llm, case_id:
     assert isinstance(state["content_plan"], dict), f"Invalid content_plan: {state['content_plan']!r}"
     assert state["content_plan"], f"Empty content_plan: {state['content_plan']!r}"
     assert isinstance(state["accepted_user_preferences"], list), f"Invalid accepted_user_preferences: {state!r}"
-    assert isinstance(state["forbidden_phrases"], list), f"Invalid forbidden_phrases: {state!r}"
     assert all(isinstance(item, str) and item.strip() for item in state["content_plan"].values()), f"Invalid content_plan: {state['content_plan']!r}"
     assert all(isinstance(item, str) and item.strip() for item in state["facial_expression"]), f"Invalid facial_expression: {state['facial_expression']!r}"
 
@@ -1177,11 +1176,9 @@ async def _assert_live_cognition_stack_prompt_contract(ensure_live_llm, case_id:
         assert not any("主要使用自然英语" in item or "主要用英语" in item or "English" in item for item in state["accepted_user_preferences"]), f"Photo case should not invent an active English-output preference: {state['accepted_user_preferences']!r}"
         assert state["accepted_user_preferences"], f"Photo case should still produce a usable soft preference or style hint: {state['accepted_user_preferences']!r}"
         assert all(token not in state["linguistic_style"] for token in _LEGACY_FILLERS), f"Photo case should avoid legacy fillers in linguistic_style: {state['linguistic_style']!r}"
-        assert any(token in phrase for token in _LEGACY_FILLERS for phrase in state["forbidden_phrases"]), f"Photo case should actively suppress legacy fillers via forbidden_phrases: {state['forbidden_phrases']!r}"
     else:
         assert state["logical_stance"] in {"REFUSE", "CHALLENGE", "DIVERGE", "TENTATIVE"}, f"Boundary-pressure case must not confirm outright: {state!r}"
         assert state["boundary_core_assessment"]["acceptance"] in {"guarded", "hesitant", "reject"}, f"Boundary-pressure case should tighten acceptance: {state['boundary_core_assessment']!r}"
-        assert any(token.lower() in {phrase.lower() for phrase in state["forbidden_phrases"]} for token in ["反正", "anyway"]), f"Repeated fillers should be pushed into forbidden_phrases: {state['forbidden_phrases']!r}"
         assert not any(token in "\n".join(state["accepted_user_preferences"]) for token in ["主人", "杏奴", "奴"]), f"Boundary-pressure case must not persist coercive address preferences: {state['accepted_user_preferences']!r}"
 
 

@@ -1736,19 +1736,6 @@ def _project_question_constraints(
         }
         if selected_drives:
             selected["drives"] = selected_drives
-    standards = constraints.get("standards")
-    standard_indexes = sorted(
-        int(handle[1:]) - 1
-        for handle in allowed
-        if handle.startswith("s") and handle[1:].isdigit()
-    )
-    if isinstance(standards, list) and standard_indexes:
-        selected["standards"] = [
-            dict(standards[index])
-            for index in standard_indexes
-            if 0 <= index < len(standards)
-            and isinstance(standards[index], Mapping)
-        ]
     meaning = constraints.get("meaning_state")
     if "m1" in allowed and isinstance(meaning, Mapping):
         selected["meaning_state"] = dict(meaning)

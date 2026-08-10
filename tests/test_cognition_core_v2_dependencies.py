@@ -400,7 +400,7 @@ async def test_goal_bid_gets_one_bounded_schema_repair(
             "applicability": "not_relationship_sensitive",
             "stance": "not_applicable",
             "current_user_relationship_state": "not_applicable",
-            "reason": '当前回合证据不涉及关系许可判断',
+            "reason": '当前回合证据不涉及关系立场判断',
             "evidence_handles": ["e1"],
         },
     }
@@ -1084,7 +1084,7 @@ async def test_required_selection_regenerates_with_the_same_producer() -> None:
             "applicability": "not_relationship_sensitive",
             "stance": "not_applicable",
             "current_user_relationship_state": "not_applicable",
-            "reason": '当前回合证据不涉及关系许可判断',
+            "reason": '当前回合证据不涉及关系立场判断',
             "evidence_handles": ["e1"],
         },
     }
@@ -1204,7 +1204,7 @@ async def test_required_selection_regeneration_excludes_optional_conversation(
             'applicability': 'not_relationship_sensitive',
             'stance': 'not_applicable',
             'current_user_relationship_state': 'not_applicable',
-            'reason': '当前回合证据不涉及关系许可判断',
+            'reason': '当前回合证据不涉及关系立场判断',
             'evidence_handles': ['e1'],
         },
     }
@@ -1625,7 +1625,7 @@ async def test_required_selection_invalid_evidence_fails_after_exhaustion(
             "applicability": "not_relationship_sensitive",
             "stance": "not_applicable",
             "current_user_relationship_state": "not_applicable",
-            "reason": '当前回合证据不涉及关系许可判断',
+            "reason": '当前回合证据不涉及关系立场判断',
             "evidence_handles": ["e1"],
         },
     }

@@ -129,7 +129,6 @@ def _base_state(
                 "linguistic_style": "Concise group chat wording.",
                 "accepted_user_preferences": [],
                 "content_plan": content_plan,
-                "forbidden_phrases": [],
             },
             "contextual_directives": {
                 "social_distance": "friendly",

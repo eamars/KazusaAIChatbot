@@ -28,6 +28,7 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     VisualSurfaceServicesV2,
     validate_cognition_core_input,
     validate_cognition_core_output,
+    validate_lexical_avoidances,
     validate_text_surface_input,
     validate_text_surface_output,
 )
@@ -135,6 +136,7 @@ class _RepairingContentLLM:
                 "content_plan": "修复后的中文内容计划",
                 "content_requirements": ["保持当前角色判断。"],
                 "delivery_profile": _delivery_profile(),
+                "lexical_avoidances": [],
             }
         return SimpleNamespace(content=json.dumps(content, ensure_ascii=False))
 
@@ -970,13 +972,13 @@ def test_text_surface_rejects_private_state_and_branch_fields() -> None:
 
 
 def test_text_surface_output_validates_every_list_entry() -> None:
-    """Visible-boundary and addressee entries are bounded semantic strings."""
+    """Addressee entries are bounded while visible boundaries stay dormant."""
 
     payload = {
         "schema_version": "text_surface_output.v2",
         "content_plan": "acknowledge the current percept",
         "content_requirements": ["Preserve the current addressee."],
-        "visible_boundaries": ["keep the response concise"],
+        "visible_boundaries": [],
         "addressee_plan": [{
             "handle": "current_user",
             "display_name": "current participant",
@@ -994,9 +996,22 @@ def test_text_surface_output_validates_every_list_entry() -> None:
     }
     validate_text_surface_output(payload)
 
-    payload["visible_boundaries"] = [""]
+    payload["visible_boundaries"] = ["keep the response concise"]
     with pytest.raises(CognitionContractError):
         validate_text_surface_output(payload)
+
+
+def test_lexical_avoidances_are_bounded_expression_fragments() -> None:
+    """Keep expression continuity bounded and independent of topic policy."""
+
+    assert validate_lexical_avoidances(["嗯"]) == ["嗯"]
+
+    with pytest.raises(CognitionContractError):
+        validate_lexical_avoidances(["same", "same"])
+    with pytest.raises(CognitionContractError):
+        validate_lexical_avoidances(["fragment"] * 9)
+    with pytest.raises(CognitionContractError):
+        validate_lexical_avoidances(["x" * 121])
 
 
 @pytest.mark.asyncio
@@ -1068,6 +1083,7 @@ async def test_surface_stage_repairs_invalid_candidate_with_same_context() -> No
         "修复后的中文内容计划",
         ["保持当前角色判断。"],
         _delivery_profile(),
+        [],
     )
     assert llm.calls == 2
     repair_system = str(getattr(llm.messages[1][0], "content", ""))

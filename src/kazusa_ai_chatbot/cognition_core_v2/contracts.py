@@ -42,7 +42,7 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     MAX_RESOLVER_EVIDENCE_EXCERPT_CHARS,
     MAX_RESOLVER_EVIDENCE_EXCERPTS,
     RESOLVER_EVIDENCE_STATE_VERSION,
-    CurrentTurnRelationalWillingnessV1,
+    CurrentTurnRelationalWillingnessV2,
     RequiredResolverEvidenceDependencyV1,
     ResolverValidationError,
     validate_current_turn_relational_willingness,
@@ -203,33 +203,18 @@ RELATIONAL_STANCE_VALUES = frozenset({
     "conditional_accept",
     "accept",
 })
-RELATIONAL_SENSITIVE_STANCES = (
-    "reject",
-    "deflect",
-    "negotiate",
-    "conditional_accept",
-    "accept",
-)
-RELATIONAL_NON_ACCEPTING_STANCES = frozenset({
-    "reject",
-    "deflect",
-    "negotiate",
-    "conditional_accept",
-})
 RELATIONAL_CURRENT_USER_RELATIONSHIP_STATE_VALUES = frozenset({
     "not_applicable",
     "unestablished",
     "developing_or_uncertain",
     "established",
 })
-RELATIONAL_DEVELOPING_OR_UNCERTAIN_STANCES = frozenset({
-    "reject",
-    "deflect",
-    "negotiate",
-    "conditional_accept",
-})
 RELATIONAL_WILLINGNESS_MAX_REASON_CHARS = 300
 MAX_RELATIONAL_WILLINGNESS_EVIDENCE_HANDLES = 4
+MAX_RECENT_CHARACTER_DIALOG_ROWS = 2
+MAX_RECENT_CHARACTER_DIALOG_CHARS = 600
+MAX_LEXICAL_AVOIDANCES = 8
+MAX_LEXICAL_AVOIDANCE_CHARS = 120
 RELATIONAL_PROVENANCE_ROLE_VALUES = frozenset({
     "current_episode",
     "current_user_history_only",
@@ -854,7 +839,7 @@ class CognitionCoreInputV2(TypedDict):
         RequiredResolverEvidenceDependencyV1
     ]
     current_turn_relational_willingness: NotRequired[
-        CurrentTurnRelationalWillingnessV1
+        CurrentTurnRelationalWillingnessV2
     ]
     resolver_cycle_index: NotRequired[int]
     pending_resolver_resume: NotRequired[dict[str, Any]]
@@ -969,6 +954,7 @@ class TextSurfaceInputV2(TypedDict):
     interaction_style_context: str
     character_expression_context: CharacterExpressionContextV2
     visual_character_context: str
+    recent_character_dialog: NotRequired[list[str]]
     relational_willingness: NotRequired[RelationalWillingnessV2]
     addressee_plan: NotRequired[list[SurfaceAddresseePlanV1]]
 
@@ -1010,6 +996,8 @@ class TextSurfaceOutputV2(TypedDict):
     delivery_profile: DeliveryProfileV2
     selected_surface_intent: str
     permitted_action_results: list[SemanticActionResultV2]
+    lexical_avoidances: NotRequired[list[str]]
+    relational_willingness: NotRequired[RelationalWillingnessV2]
     resolver_result: NotRequired[SurfaceResolverResultV2]
     runtime_capability_limits: NotRequired[list[str]]
 
@@ -1402,6 +1390,11 @@ def validate_text_surface_input(
             {"addressee_plan"}
             if "addressee_plan" in payload
             else set()
+        )
+        | (
+            {"recent_character_dialog"}
+            if "recent_character_dialog" in payload
+            else set()
         ),
         "text surface input",
     )
@@ -1435,6 +1428,8 @@ def validate_text_surface_input(
         "visual character context",
         maximum=1500,
     )
+    if "recent_character_dialog" in payload:
+        _validate_recent_character_dialog(payload["recent_character_dialog"])
     _validate_canonical_episode(payload["episode"])
     if "primary_bid" in payload:
         _validate_surface_bid(payload["primary_bid"])
@@ -1507,6 +1502,16 @@ def validate_text_surface_output(
             if "runtime_capability_limits" in payload
             else set()
         )
+        | (
+            {"relational_willingness"}
+            if "relational_willingness" in payload
+            else set()
+        )
+        | (
+            {"lexical_avoidances"}
+            if "lexical_avoidances" in payload
+            else set()
+        )
         | ({"resolver_result"} if "resolver_result" in payload else set())
     )
     _require_exact_keys(payload, required | optional, "text surface output")
@@ -1525,6 +1530,8 @@ def validate_text_surface_output(
         raise CognitionContractError("content_requirements contains duplicates")
     for index, item in enumerate(requirements):
         _require_text(item, f"content_requirements[{index}]", maximum=500)
+    if "lexical_avoidances" in payload:
+        validate_lexical_avoidances(payload["lexical_avoidances"])
     for field_name in ("visible_boundaries", "addressee_plan"):
         items = payload[field_name]
         if not isinstance(items, list) or len(items) > 8:
@@ -1532,6 +1539,10 @@ def validate_text_surface_output(
                 f"{field_name} must contain 0-8 items"
             )
         if field_name == "visible_boundaries":
+            if items:
+                raise CognitionContractError(
+                    "visible_boundaries must remain empty until a typed source contract exists"
+                )
             if len(items) != len(set(items)):
                 raise CognitionContractError(
                     f"{field_name} contains duplicates"
@@ -1551,10 +1562,50 @@ def validate_text_surface_output(
         )
     for row in action_results:
         _validate_action_result(row)
+    if "relational_willingness" in payload:
+        validate_relational_willingness(payload["relational_willingness"])
     if "resolver_result" in payload:
         _validate_surface_resolver_result(payload["resolver_result"])
     _validate_runtime_capability_limits(payload)
     return dict(payload)  # type: ignore[return-value]
+
+
+def _validate_recent_character_dialog(value: Any) -> None:
+    """Validate the bounded recent visible-character wording projection."""
+
+    if (
+        not isinstance(value, list)
+        or len(value) > MAX_RECENT_CHARACTER_DIALOG_ROWS
+    ):
+        raise CognitionContractError(
+            "recent_character_dialog must contain 0-2 items"
+        )
+    for index, item in enumerate(value):
+        _require_text(
+            item,
+            f"recent_character_dialog[{index}]",
+            maximum=MAX_RECENT_CHARACTER_DIALOG_CHARS,
+        )
+
+
+def validate_lexical_avoidances(value: Any) -> list[str]:
+    """Validate current-turn expression-only wording avoidances."""
+
+    if not isinstance(value, list) or len(value) > MAX_LEXICAL_AVOIDANCES:
+        raise CognitionContractError(
+            "lexical_avoidances must contain 0-8 items"
+        )
+    if any(not isinstance(item, str) or not item.strip() for item in value):
+        raise CognitionContractError("lexical_avoidances must contain text")
+    if len(value) != len(set(value)):
+        raise CognitionContractError("lexical_avoidances contains duplicates")
+    for index, item in enumerate(value):
+        _require_text(
+            item,
+            f"lexical_avoidances[{index}]",
+            maximum=MAX_LEXICAL_AVOIDANCE_CHARS,
+        )
+    return list(value)
 
 
 def _validate_delivery_profile(value: Any) -> None:
@@ -1685,8 +1736,8 @@ def validate_relational_willingness(
         A shallow validated copy of the decision.
 
     Raises:
-        CognitionContractError: When any exact field, pairing, bound, handle,
-            or coverage rule is violated.
+        CognitionContractError: When any exact field, enum, bound, handle, or
+            coverage rule is violated.
     """
 
     if not isinstance(value, Mapping):
@@ -1744,24 +1795,6 @@ def validate_relational_willingness(
         raise CognitionContractError(
             "sensitive relational willingness requires an ordered stance "
             "and a real relationship state"
-        )
-    elif (
-        relationship_state == "unestablished"
-        and stance != "reject"
-    ):
-        raise CognitionContractError(
-            "unestablished relational willingness allows only reject"
-        )
-    elif (
-        relationship_state == "developing_or_uncertain"
-        and stance not in RELATIONAL_DEVELOPING_OR_UNCERTAIN_STANCES
-    ):
-        raise CognitionContractError(
-            "developing or uncertain relational willingness cannot accept"
-        )
-    elif stance == "accept" and relationship_state != "established":
-        raise CognitionContractError(
-            "accept requires an established current-user relationship state"
         )
     _require_simplified_chinese_reason(
         value["reason"],

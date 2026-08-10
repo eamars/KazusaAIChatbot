@@ -46,7 +46,7 @@ class _SurfaceLLM:
         self.calls.append((system, payload))
         if "visible_boundaries" in system and "addressee_plan" in system:
             result = {
-                "visible_boundaries": ["Use visible speech only."],
+                "visible_boundaries": [],
                 "addressee_plan": list(payload.get("addressee_plan", [])),
             }
         elif "content_plan" in system and "content_requirements" in system:
@@ -60,6 +60,7 @@ class _SurfaceLLM:
                     "hesitation": "light",
                     "punctuation": "restrained",
                 },
+                "lexical_avoidances": [],
             }
         elif "visual_directives" in system:
             result = {
@@ -124,7 +125,7 @@ def _surface_output() -> dict[str, object]:
         "content_requirements": [
             "Preserve the requested response operation and current time scope.",
         ],
-        "visible_boundaries": ["Return only literal visible speech."],
+        "visible_boundaries": [],
         "addressee_plan": [{
             "handle": "current_user",
             "display_name": "Current User",
@@ -140,6 +141,7 @@ def _surface_output() -> dict[str, object]:
         },
         "selected_surface_intent": "answer by inference",
         "permitted_action_results": [],
+        "lexical_avoidances": [],
     }
 
 
@@ -218,6 +220,7 @@ async def test_text_and_visual_planners_are_terminal_siblings() -> None:
         "delivery_profile",
         "selected_surface_intent",
         "permitted_action_results",
+        "lexical_avoidances",
     }
     assert len(llm.calls) == 2
     for system, payload in llm.calls:
@@ -315,10 +318,11 @@ def test_runtime_prompts_define_live_speech_and_hard_error_contracts() -> None:
     assert "current_visible_percepts" not in repair_prompt
     assert "text_surface_output_v2" in repair_prompt
     assert "repair_context" in repair_prompt
-    assert "visible_boundaries 的具体来源类型" in surface_repair_prompt
-    assert "隐私" in surface_repair_prompt
-    assert "安全" in surface_repair_prompt
-    assert "内容审查" in surface_repair_prompt
+    assert "visible_boundaries 必须返回空列表" in surface_repair_prompt
+    assert "不要自行添加未绑定来源的通用边界" in surface_repair_prompt
+    assert "隐私" not in surface_repair_prompt
+    assert "安全" not in surface_repair_prompt
+    assert "内容审查" not in surface_repair_prompt
     assert "权威语境" in surface_repair_prompt
     assert "l3" not in repair_prompt
     assert "surface owner" not in repair_prompt
@@ -567,13 +571,14 @@ async def test_verifier_receives_bounded_visible_percepts(
         "content_requirements": [
             "Preserve the requested response operation and current time scope.",
         ],
-        "visible_boundaries": ["Return only literal visible speech."],
+        "visible_boundaries": [],
         "addressee_plan": [{
             "handle": "current_user",
             "display_name": "Current User",
             "semantic_role": "direct_recipient",
             "wording_policy": "second_person_allowed",
         }],
+        "lexical_avoidances": [],
     }
     surface_payload = json.loads(
         surface_llm.ainvoke.await_args.args[0][1].content,
@@ -647,6 +652,27 @@ async def test_dialog_preserves_explicit_high_risk_language_when_aligned(
     assert surface_payload["candidate_final_dialog"] == [candidate]
     semantic_llm.ainvoke.assert_awaited_once()
     surface_llm.ainvoke.assert_awaited_once()
+
+
+def test_expression_continuity_check_is_literal_and_topic_neutral() -> None:
+    """Only surface-provided wording fragments can produce this verdict."""
+
+    surface_output = _surface_output()
+    surface_output["content_plan"] = "角色可以完整表达成人性内容与伤害主题。"
+
+    aligned = dialog_module._verify_dialog_lexical_avoidances(
+        surface_output=surface_output,
+        generated_dialog=["角色可以完整表达成人性内容与伤害主题。"],
+    )
+    assert aligned == {"status": "aligned", "issues": []}
+
+    surface_output["lexical_avoidances"] = ["嗯"]
+    misaligned = dialog_module._verify_dialog_lexical_avoidances(
+        surface_output=surface_output,
+        generated_dialog=["嗯，我会继续说。"],
+    )
+    assert misaligned["status"] == "misaligned"
+    assert misaligned["issues"][0]["kind"] == "lexical_avoidance"
 
 
 @pytest.mark.asyncio
@@ -723,6 +749,10 @@ async def test_focused_verifiers_merge_four_issues_each(
         "surface_integrity": {
             "status": "misaligned",
             "issues": surface_issue_rows,
+        },
+        "lexical_avoidance": {
+            "status": "aligned",
+            "issues": [],
         },
     }
     assert dialog_module._dialog_verifier_aggregate_repair_issues(
@@ -1175,6 +1205,10 @@ async def test_non_selection_role_reversal_remains_semantic_owned(
             "status": "aligned",
             "issues": [],
         },
+        "lexical_avoidance": {
+            "status": "aligned",
+            "issues": [],
+        },
     }
     semantic_llm.ainvoke.assert_awaited_once()
     role_llm.ainvoke.assert_not_awaited()
@@ -1490,10 +1524,10 @@ async def test_false_execution_verdict_uses_one_grounded_llm_repair(
 
 
 @pytest.mark.asyncio
-async def test_second_rejection_uses_terminal_unverified_candidate(
+async def test_second_rejection_withholds_unverified_candidate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A bounded third candidate remains deliverable after two rejections."""
+    """A bounded third candidate is withheld after repeated rejection."""
 
     invalid_dialog = "Ask me what to do next; I will follow your choice."
     generator_llm = MagicMock()
@@ -1523,15 +1557,15 @@ async def test_second_rejection_uses_terminal_unverified_candidate(
         surface_llm,
     )
 
-    result = await dialog_generator(_dialog_state())
+    with pytest.raises(
+        dialog_module.DialogGenerationContractError,
+        match="terminal verification",
+    ):
+        await dialog_generator(_dialog_state())
 
-    assert result == {
-        "final_dialog": [invalid_dialog],
-        "text_surface_output_v2": _surface_output(),
-    }
     assert generator_llm.ainvoke.await_count == 3
-    assert semantic_llm.ainvoke.await_count == 2
-    assert surface_llm.ainvoke.await_count == 2
+    assert semantic_llm.ainvoke.await_count == 3
+    assert surface_llm.ainvoke.await_count == 3
     repair_payload = json.loads(
         generator_llm.ainvoke.await_args_list[1].args[0][1].content,
     )
@@ -1562,9 +1596,8 @@ async def test_surface_owner_repair_replaces_all_owned_fields() -> None:
                 "content_requirements": [
                     "由当前角色作出选择并告诉当前用户。",
                 ],
-                "visible_boundaries": [
-                    "角色可以拒绝、协商或附加条件。",
-                ],
+                "lexical_avoidances": [],
+                "visible_boundaries": [],
                 "addressee_plan": [{
                     "handle": "current_user",
                     "display_name": "当前用户",
@@ -1603,9 +1636,7 @@ async def test_surface_owner_repair_replaces_all_owned_fields() -> None:
     assert repaired["content_requirements"] == [
         "由当前角色作出选择并告诉当前用户。",
     ]
-    assert repaired["visible_boundaries"] == [
-        "角色可以拒绝、协商或附加条件。",
-    ]
+    assert repaired["visible_boundaries"] == []
     assert repaired["addressee_plan"] == [{
         "handle": "current_user",
         "display_name": "当前用户",
@@ -1658,6 +1689,7 @@ async def test_surface_owner_repair_regenerates_invalid_contract_once() -> None:
                 response = SimpleNamespace(content=json.dumps({
                     "content_plan": "当前角色明确选择下一步并告诉当前用户。",
                     "content_requirements": ["保持选择所有者为当前角色。"],
+                    "lexical_avoidances": [],
                     "visible_boundaries": [],
                     "addressee_plan": [{
                         "handle": "current_user",
@@ -1788,10 +1820,10 @@ async def test_dialog_repair_uses_l3_replacement_as_rendering_authority(
 
 
 @pytest.mark.asyncio
-async def test_dialog_semantic_exhaustion_delivers_bounded_candidate(
+async def test_dialog_semantic_exhaustion_withholds_unverified_candidates(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Two rejected candidates finish with normal terminal dialog delivery."""
+    """Repeated semantic rejection withholds every unverified candidate."""
 
     invalid_dialog = "你来替我决定我想让你做什么。"
     generator_llm = MagicMock()
@@ -1832,12 +1864,12 @@ async def test_dialog_semantic_exhaustion_delivers_bounded_candidate(
     state = _dialog_state()
     state["text_surface_input_v2"] = _surface_input()
 
-    result = await dialog_generator(state)
+    with pytest.raises(
+        dialog_module.DialogGenerationContractError,
+        match="terminal verification",
+    ):
+        await dialog_generator(state)
 
-    assert result == {
-        "final_dialog": [invalid_dialog],
-        "text_surface_output_v2": _surface_output(),
-    }
     assert generator_llm.ainvoke.await_count == 3
-    assert semantic_llm.ainvoke.await_count == 2
-    assert surface_llm.ainvoke.await_count == 2
+    assert semantic_llm.ainvoke.await_count == 3
+    assert surface_llm.ainvoke.await_count == 3

@@ -95,7 +95,7 @@ _DEGRADABLE_APPRAISAL_ERROR_CODES = frozenset({
     "semantic_appraisal_contract_exhausted",
 })
 AUTHORITATIVE_RELATIONAL_COLLAPSE_REASON = (
-    "authoritative_relational_willingness_preserved_ordinary_response"
+    "authoritative_relational_stance_preserved_ordinary_response"
 )
 
 
@@ -839,6 +839,9 @@ def _branch_handler(
                 "entity_id": goal["entity_id"],
             }
         context = dict(semantic_context)
+        episode = state.get("cognitive_episode")
+        if isinstance(episode, Mapping):
+            context["_episode_id"] = episode["episode_id"]
         context["goal_projection"] = _goal_projection(goal, definition.goal_kind)
         if isinstance(relational_carrier, Mapping):
             context["current_turn_relational_willingness"] = dict(
@@ -1149,7 +1152,7 @@ def _empty_collapse() -> dict[str, Any]:
 def _ordinary_relational_decision(
     bids: Sequence[ActionBidV2],
 ) -> RelationalWillingnessV2 | None:
-    """Copy the validated ordinary relational decision from the bid set."""
+    """Copy the ordinary branch's exact typed stance without arbitration."""
 
     for bid in bids:
         if bid["branch_id"] != "ordinary_response":

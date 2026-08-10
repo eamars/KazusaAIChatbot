@@ -441,6 +441,7 @@ def test_connector_keeps_inline_task_resolution_without_automatic_worker(
     assert snapshot["worker_status"]["accepted_task"] == "healthy"
     assert snapshot["worker_status"]["background_work"] == "degraded"
     assert all("仓库代码读取 owner 不可用" not in item for item in limits)
+    assert any("只有 inline 能力" in item for item in limits)
     assert any(
         row["capability"] == "task_resolution_request"
         for row in connector._available_resolver_affordances(state)
@@ -449,6 +450,31 @@ def test_connector_keeps_inline_task_resolution_without_automatic_worker(
         row["action_kind"] != "accepted_coding_task_request"
         for row in connector._available_action_affordances(state)
     )
+
+
+def test_connector_omits_task_resolver_when_owner_is_unavailable() -> None:
+    """Unavailable task owners are not advertised as usable resolver handles."""
+
+    state = _global_state()
+    state["action_availability_runtime"] = {
+        "worker_status": {
+            "background_work": "unavailable",
+        },
+    }
+
+    resolvers = connector._available_resolver_affordances(state)
+
+    assert all(
+        row["capability"] != "task_resolution_request"
+        for row in resolvers
+    )
+    assert {
+        row["capability"] for row in resolvers
+    } == {
+        "human_clarification",
+        "approval_preparation",
+        "self_goal_resolution",
+    }
 
 
 def test_connector_projects_one_generic_task_resolution_owner() -> None:
@@ -533,6 +559,10 @@ def test_connector_omits_capabilities_with_unavailable_runtime_routes() -> None:
     assert any(
         row["action_kind"] == "accepted_task_status_check"
         for row in actions
+    )
+    assert all(
+        row["capability"] != "task_resolution_request"
+        for row in connector._available_resolver_affordances(state)
     )
 
 

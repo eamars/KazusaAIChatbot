@@ -129,7 +129,6 @@ def _incident_dialog_state() -> dict:
                     'voice': '傲娇地接住赞美后再甩回去，保持你来我往的攻防节奏。',
                     'rendering': '~35字。',
                 },
-                'forbidden_phrases': [],
             },
             'contextual_directives': {
                 'social_distance': '熟悉、轻快、可以调侃',

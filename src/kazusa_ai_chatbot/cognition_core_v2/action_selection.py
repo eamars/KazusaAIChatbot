@@ -82,6 +82,10 @@ semantic_goal 必须忠实保留用户要求的检索或工作效果、目标对
 semantic_goal 才可以是该审计目标。当当前用户明确询问能力、权限或可行性本身，而可信的运行时
 限制和证据不足以回答时，goal_resolution 必须为 requires_required_evidence，并使用
 task_resolution_request 保留该审计目标；不得仅凭 bid 或角色自述将其判为 answerable_now。
+当前用户要求回忆自己的历史对话、承诺、偏好或本地记忆时，缺少的历史事实也属于
+task_resolution_request；即使 resolver_context 使用 `r3`、local_context_recall 或类似旧标签，
+也不能选择 `self_goal_resolution`。`self_goal_resolution` 只处理角色自身符合资格的私有自我认知目标，
+不负责检索当前用户的历史事实。
 
 输出一个语义提案对象。action_requests 与 resolver_requests 互斥，各自最多包含三项。即时可见
 发言不是能力请求，不放入本输出。需要补充证据、持久化澄清或批准步骤时，只选择 resolver；后续
@@ -144,6 +148,8 @@ accepted_coding_task_request 只用于绑定既有 coding_run_ref 的验证、�
 持久化 run 生命周期。当仓库工作 owner 在 runtime_capability_limits 中不可用时，使用
 goal_resolution=blocked、action_requests=[]、resolver_requests=[]，把当前限制交给后续可见 surface；
 不要改用其他 resolver，也不要留下 requires_required_evidence 与空请求的组合。
+向用户说明当前限制并不等于完成仓库分析或修改目标；当原目标仍未完成且 owner 不可用时，
+必须保持 blocked。只有缺少用户能够提供的具体事实时才使用 requires_user_input。
 规划者本轮的推理、记忆回想、回复准备、措辞排练或本轮即可完成的思考不构成 action request。
 先判断当前接纳目标的 goal_resolution：这是对“当前回应是否已经足够回答用户问题”的语义判断，
 不是对某个 RAG 来源是否 resolved 的复述。只能使用以下值：answerable_now（现在即可完成回答）、
@@ -166,10 +172,11 @@ memory/context 为空或失败，也不能把直接自我报告改成 requires_r
 面对身体互动请求，通常由发言表达当前角色立场；只有另一个明确提供的能力确实具有不同且清晰的
 非身体效果时，才选择该能力。
 
-primary bid 携带 relational_willingness 时，它是已经确认的关系许可判断（含当前用户关系状态）：
-reject、deflect、negotiate 或 conditional_accept 表示该关系敏感请求尚未被接受，只能由可见发言
-表达立场，action_requests 与 resolver_requests 必须保持为空；只有 accept 才可进入能力请求。
-请求与关系判断无关（not_relationship_sensitive/not_applicable）时维持一般规划。
+primary bid 携带 relational_willingness 时，它是上游已经选择的角色关系立场（含当前用户关系状态）。
+当敏感请求的 stance 为 reject、deflect、negotiate 或 conditional_accept 时，直接保留该立场并让
+可见发言承载它；action_requests 与 resolver_requests 保持为空。accept 仍只表示角色立场，任何
+能力请求继续经过独立的能力、权限、运行时和证据验证。请求与关系判断无关
+（not_relationship_sensitive/not_applicable）时维持一般规划。
 
 每项请求必须引用一个提供的 bid handle 和一个提供的 capability handle。action request 按
 affordance.decision_mode 填写 decision：
@@ -217,6 +224,8 @@ task_resolution_request 行必须额外给出 start_in_background，且只能使
 前台预算尝试内联执行，只有无法在预算内完成时才转为同一后台继续。选择依据是
 当前请求的效果是否适合在本轮内联完成，还是应当直接持久化后台执行；本阶段不
 选择 worker、队列、时限或执行参数。
+如果 runtime_capability_limits 明确声明通用任务解析只有 inline 能力，必须使用
+start_in_background=false；不得把 inline-only 的 resolver 请求写成后台已经安排。
 
 # 输出格式
 只返回一个 JSON 对象，字段必须恰好是：
@@ -419,15 +428,15 @@ async def plan_actions(
             runtime_capability_limits=runtime_capability_limits,
         )
     relational_decision = primary_bid.get("relational_willingness")
-    relational_permission_denied = False
+    selected_stance_suppresses_effects = False
     if (
         isinstance(relational_decision, Mapping)
         and relational_decision["applicability"] == "relationship_sensitive"
         and relational_decision["stance"] != "accept"
     ):
-        relational_permission_denied = True
+        selected_stance_suppresses_effects = True
         logger.warning(
-            f"Relational willingness denied action effects: "
+            f"Selected relational stance suppresses action effects: "
             f"{relational_decision['stance']}"
         )
         decision["action_requests"] = []
@@ -435,7 +444,7 @@ async def plan_actions(
         decision["goal_resolution"] = "answerable_now"
         decision["resolver_pending_resolution"] = None
         decision["resolver_goal_progress"] = None
-    if relational_permission_denied:
+    if selected_stance_suppresses_effects:
         authorized_action_rows: list[dict[str, str]] = []
     else:
         authorized_action_rows = await authorize_action_requests(
@@ -456,7 +465,10 @@ async def plan_actions(
         decision["goal_resolution"],
         validated_dependency,
     )
-    if relational_permission_denied or goal_resolution == "answerable_now":
+    if (
+        selected_stance_suppresses_effects
+        or goal_resolution == "answerable_now"
+    ):
         resolver_requests = []
     else:
         authorized_resolver_rows = await authorize_resolver_requests(
@@ -590,6 +602,7 @@ async def _invoke_action_planner(
                 required_resolver_evidence_dependency=(
                     required_resolver_evidence_dependency
                 ),
+                runtime_capability_limits=runtime_capability_limits,
             )
         except (ResolverValidationError, ValueError) as exc:
             await _record_action_planning_trace(
@@ -722,6 +735,7 @@ def _validate_action_plan_decision(
     required_resolver_evidence_dependency: (
         RequiredResolverEvidenceDependencyV1 | None
     ) = None,
+    runtime_capability_limits: Sequence[str] = (),
 ) -> dict[str, Any]:
     """Normalize semantic choices into the canonical planner contract."""
 
@@ -745,6 +759,7 @@ def _validate_action_plan_decision(
         resolver_requests,
         bid_handles,
         resolver_handles,
+        runtime_capability_limits=runtime_capability_limits,
     )
     pending_resolution = _validate_pending_resolution_choice(
         parsed.get("resolver_pending_resolution")
@@ -850,13 +865,20 @@ def _normalize_resolver_request_rows(
     values: Sequence[object],
     bids: Mapping[str, ActionBidV2],
     resolvers: Mapping[str, ResolverAffordanceV2],
+    *,
+    runtime_capability_limits: Sequence[str] = (),
 ) -> list[dict[str, Any]]:
     """Keep bounded canonical resolver proposals with valid trusted handles."""
 
     normalized: list[dict[str, Any]] = []
     for value in values:
         try:
-            row = _validate_resolver_request_row(value, bids, resolvers)
+            row = _validate_resolver_request_row(
+                value,
+                bids,
+                resolvers,
+                runtime_capability_limits=runtime_capability_limits,
+            )
         except ValueError as exc:
             logger.warning(
                 f"Action planning dropped an invalid resolver request row: {exc}"
@@ -956,6 +978,8 @@ def _validate_resolver_request_row(
     value: object,
     bids: Mapping[str, ActionBidV2],
     resolvers: Mapping[str, ResolverAffordanceV2],
+    *,
+    runtime_capability_limits: Sequence[str] = (),
 ) -> dict[str, Any]:
     """Validate one resolver row and its admitted-bid provenance.
 
@@ -994,6 +1018,16 @@ def _validate_resolver_request_row(
         if not isinstance(start_in_background, bool):
             raise ValueError(
                 "task resolution start_in_background must be a boolean"
+            )
+        if (
+            start_in_background
+            and any(
+                "当前通用任务解析只有 inline 能力" in limit
+                for limit in runtime_capability_limits
+            )
+        ):
+            raise ValueError(
+                "task resolution background mode is unavailable"
             )
     elif "start_in_background" in value:
         raise ValueError(

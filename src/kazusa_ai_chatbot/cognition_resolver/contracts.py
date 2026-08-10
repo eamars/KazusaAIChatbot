@@ -24,8 +24,29 @@ REQUIRED_RESOLVER_EVIDENCE_DEPENDENCY_VERSION = (
     "required_resolver_evidence_dependency.v1"
 )
 CURRENT_TURN_RELATIONAL_WILLINGNESS_VERSION = (
-    "current_turn_relational_willingness.v1"
+    "current_turn_relational_willingness.v2"
 )
+RELATIONAL_WILLINGNESS_SCHEMA_VERSION = "relational_willingness.v2"
+RELATIONAL_WILLINGNESS_APPLICABILITY_VALUES = frozenset({
+    "not_relationship_sensitive",
+    "relationship_sensitive",
+})
+RELATIONAL_WILLINGNESS_STANCE_VALUES = frozenset({
+    "not_applicable",
+    "reject",
+    "deflect",
+    "negotiate",
+    "conditional_accept",
+    "accept",
+})
+RELATIONAL_WILLINGNESS_RELATIONSHIP_STATE_VALUES = frozenset({
+    "not_applicable",
+    "unestablished",
+    "developing_or_uncertain",
+    "established",
+})
+RELATIONAL_WILLINGNESS_MAX_REASON_CHARS = 300
+MAX_RELATIONAL_WILLINGNESS_EVIDENCE_HANDLES = 4
 
 MAX_RESOLVER_SUMMARY_CHARS = 600
 MAX_RESOLVER_OBJECTIVE_CHARS = 400
@@ -160,13 +181,13 @@ class ResolverEvidenceStateV1(TypedDict):
     remaining_needs: list[str]
 
 
-class CurrentTurnRelationalWillingnessV1(TypedDict):
-    """Immutable current-turn relational decision carried through recurrence."""
+class CurrentTurnRelationalWillingnessV2(TypedDict):
+    """Immutable complete relational decision carried through recurrence."""
 
-    schema_version: Literal["current_turn_relational_willingness.v1"]
+    schema_version: Literal["current_turn_relational_willingness.v2"]
     episode_id: str
     branch_id: Literal["ordinary_response"]
-    decision: dict[str, str]
+    decision: dict[str, object]
 
 
 class RequiredResolverEvidenceDependencyV1(TypedDict):
@@ -281,7 +302,7 @@ class ResolverCycleStateV1(TypedDict):
     pending_resume: NotRequired[ResolverPendingResumeV1]
     goal_progress: NotRequired[ResolverGoalProgressV1]
     current_turn_relational_willingness: NotRequired[
-        CurrentTurnRelationalWillingnessV1
+        CurrentTurnRelationalWillingnessV2
     ]
     required_resolver_evidence_dependency: NotRequired[
         RequiredResolverEvidenceDependencyV1
@@ -315,8 +336,8 @@ def validate_current_turn_relational_willingness(
     value: object,
     *,
     episode_id: str,
-) -> CurrentTurnRelationalWillingnessV1:
-    """Validate the recurrence-only current-turn relational carrier."""
+) -> CurrentTurnRelationalWillingnessV2:
+    """Validate the complete recurrence carrier without semantic rewriting."""
 
     data = _require_mapping(value, "current_turn_relational_willingness")
     _require_exact_keys(
@@ -342,76 +363,79 @@ def validate_current_turn_relational_willingness(
     _require_exact_keys(
         decision,
         {
+            "schema_version",
             "applicability",
-            "current_user_relationship_state",
             "stance",
+            "current_user_relationship_state",
+            "reason",
+            "evidence_handles",
         },
         "current_turn_relational_willingness.decision",
     )
-    allowed_pairs = {
-        (
-            "not_relationship_sensitive",
-            "not_applicable",
-            "not_applicable",
-        ),
-        ("relationship_sensitive", "unestablished", "reject"),
-        ("relationship_sensitive", "unestablished", "deflect"),
-        ("relationship_sensitive", "unestablished", "negotiate"),
-        (
-            "relationship_sensitive",
-            "unestablished",
-            "conditional_accept",
-        ),
-        ("relationship_sensitive", "unestablished", "accept"),
-        (
-            "relationship_sensitive",
-            "developing_or_uncertain",
-            "reject",
-        ),
-        (
-            "relationship_sensitive",
-            "developing_or_uncertain",
-            "deflect",
-        ),
-        (
-            "relationship_sensitive",
-            "developing_or_uncertain",
-            "negotiate",
-        ),
-        (
-            "relationship_sensitive",
-            "developing_or_uncertain",
-            "conditional_accept",
-        ),
-        (
-            "relationship_sensitive",
-            "developing_or_uncertain",
-            "accept",
-        ),
-        ("relationship_sensitive", "established", "reject"),
-        ("relationship_sensitive", "established", "deflect"),
-        ("relationship_sensitive", "established", "negotiate"),
-        ("relationship_sensitive", "established", "conditional_accept"),
-        ("relationship_sensitive", "established", "accept"),
-    }
-    decision_tuple = (
-        decision.get("applicability"),
-        decision.get("current_user_relationship_state"),
-        decision.get("stance"),
-    )
-    if decision_tuple not in allowed_pairs:
+    if decision.get("schema_version") != RELATIONAL_WILLINGNESS_SCHEMA_VERSION:
         raise ResolverValidationError(
-            "current_turn_relational_willingness: decision pairing is invalid"
+            "current_turn_relational_willingness.decision: schema version is invalid"
         )
-    normalized: CurrentTurnRelationalWillingnessV1 = {
+    applicability = decision.get("applicability")
+    if applicability not in RELATIONAL_WILLINGNESS_APPLICABILITY_VALUES:
+        raise ResolverValidationError(
+            "current_turn_relational_willingness.decision: applicability is invalid"
+        )
+    stance = decision.get("stance")
+    if stance not in RELATIONAL_WILLINGNESS_STANCE_VALUES:
+        raise ResolverValidationError(
+            "current_turn_relational_willingness.decision: stance is invalid"
+        )
+    relationship_state = decision.get("current_user_relationship_state")
+    if relationship_state not in RELATIONAL_WILLINGNESS_RELATIONSHIP_STATE_VALUES:
+        raise ResolverValidationError(
+            "current_turn_relational_willingness.decision: relationship state is invalid"
+        )
+    if applicability == "not_relationship_sensitive":
+        if stance != "not_applicable" or relationship_state != "not_applicable":
+            raise ResolverValidationError(
+                "current_turn_relational_willingness.decision: non-sensitive values are invalid"
+            )
+    elif stance == "not_applicable" or relationship_state == "not_applicable":
+        raise ResolverValidationError(
+            "current_turn_relational_willingness.decision: sensitive values are incomplete"
+        )
+    reason = decision.get("reason")
+    if (
+        not isinstance(reason, str)
+        or not reason.strip()
+        or len(reason) > RELATIONAL_WILLINGNESS_MAX_REASON_CHARS
+    ):
+        raise ResolverValidationError(
+            "current_turn_relational_willingness.decision: reason is invalid"
+        )
+    evidence_handles = decision.get("evidence_handles")
+    if not isinstance(evidence_handles, list):
+        raise ResolverValidationError(
+            "current_turn_relational_willingness.decision: evidence handles are invalid"
+        )
+    if not 1 <= len(evidence_handles) <= (
+        MAX_RELATIONAL_WILLINGNESS_EVIDENCE_HANDLES
+    ):
+        raise ResolverValidationError(
+            "current_turn_relational_willingness.decision: evidence handles are invalid"
+        )
+    if any(
+        not isinstance(handle, str) or not handle.strip()
+        for handle in evidence_handles
+    ):
+        raise ResolverValidationError(
+            "current_turn_relational_willingness.decision: evidence handles are invalid"
+        )
+    if len(evidence_handles) != len(set(evidence_handles)):
+        raise ResolverValidationError(
+            "current_turn_relational_willingness.decision: evidence handles are invalid"
+        )
+    normalized: CurrentTurnRelationalWillingnessV2 = {
         "schema_version": CURRENT_TURN_RELATIONAL_WILLINGNESS_VERSION,
         "episode_id": carrier_episode_id,
         "branch_id": "ordinary_response",
-        "decision": {
-            "applicability": decision_tuple[0],
-            "current_user_relationship_state": decision_tuple[1],
-            "stance": decision_tuple[2],
-        },
+        "decision": dict(decision),
     }
     return normalized
 

@@ -1114,13 +1114,7 @@ def _project_output_to_global_state(
             "schema_version": CURRENT_TURN_RELATIONAL_WILLINGNESS_VERSION,
             "episode_id": episode_id,
             "branch_id": "ordinary_response",
-            "decision": {
-                "applicability": relational_decision["applicability"],
-                "current_user_relationship_state": relational_decision[
-                    "current_user_relationship_state"
-                ],
-                "stance": relational_decision["stance"],
-            },
+            "decision": dict(relational_decision),
         }
         validated_carrier = validate_current_turn_relational_willingness(
             carrier,
@@ -1348,6 +1342,11 @@ def build_runtime_capability_limits(
             "当前 coding worker 尚未运行；绑定既有 coding_run_ref 的生命周期动作"
             "可以记录并排队，结果保持待执行，不能表述为 worker 已执行或已完成。"
         )
+    elif worker_status.get("background_work") == "degraded":
+        limits.append(
+            "当前通用任务解析只有 inline 能力；task_resolution_request 必须先在本轮"
+            "预算内尝试，不能写成后台已经安排。"
+        )
     elif any(
         worker_status.get(owner) in unavailable
         for owner in ("accepted_task", "background_work")
@@ -1360,7 +1359,9 @@ def build_runtime_capability_limits(
         for owner in ("accepted_task", "background_work")
     ):
         limits.append(
-            "当前仓库代码读取 owner 不可用；没有实际读取结果时只能说明限制，或请用户提供可访问的代码材料。"
+            "当前仓库代码读取 owner 不可用；尚未完成的仓库分析或修改目标必须保持 "
+            "goal_resolution=blocked、action_requests=[]、resolver_requests=[]；"
+            "说明当前限制不等于 requires_user_input，也不能把请用户提供材料当作原目标已可继续。"
         )
     if any(
         status in unavailable
@@ -1580,7 +1581,28 @@ def _coding_run_blocker_summary(value: object) -> str:
 def _available_resolver_affordances(
     state: Mapping[str, Any],
 ) -> list[ResolverAffordanceV2]:
-    """Project resolver capabilities as availability, not execution authority."""
+    """Project resolver capabilities as availability, not execution authority.
+
+    Generic task resolution remains exposed during worker degradation because
+    the action planner can select its inline mode. An unavailable worker owns
+    neither inline nor background task resolution for the current turn, so
+    the connector must remove that resolver instead of advertising a
+    contradictory available handle beside the runtime limit.
+    """
+
+    snapshot = build_action_availability_snapshot(state)
+    unavailable_worker_states = {"down", "unavailable", "disabled", "blocked"}
+    available_capabilities = set(ALLOWED_RESOLVER_CAPABILITIES)
+    task_resolution_owner_states = (
+        snapshot["worker_status"].get("background_work"),
+        snapshot["route_health"].get("background_work"),
+        snapshot["repository_access"].get("background_work"),
+    )
+    if any(
+        status in unavailable_worker_states
+        for status in task_resolution_owner_states
+    ):
+        available_capabilities.discard("task_resolution_request")
 
     return [
         {
@@ -1588,7 +1610,7 @@ def _available_resolver_affordances(
             "semantic_capability": RESOLVER_CAPABILITY_SEMANTICS[capability],
             "availability": "available",
         }
-        for capability in sorted(ALLOWED_RESOLVER_CAPABILITIES)
+        for capability in sorted(available_capabilities)
     ]
 
 

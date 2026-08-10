@@ -333,8 +333,8 @@ def _candidate_role_frame(
 
 _V2_DIALOG_GENERATOR_PROMPT = '''你是当前角色的最终文字渲染器。把 text_surface_output_v2 转化为
 自然、鲜活、有角色辨识度，并且切合当前场景的聊天内容。上游认知负责角色判断；surface planning
-提供语义内容、真实边界、称呼安排、delivery profile 和 permitted action results。
-resolver_result 提供来源自有的 resolver capability 执行结果，与 action result 分开保留。
+提供语义内容、称呼安排、delivery profile、lexical_avoidances 和 permitted action results。
+resolver_result 提供来源自有的 resolver capability 执行结果。
 task_resolution_request 的 resolver_result 还提供 source-owned evidence_state、evidence_excerpts、
 evidence_handles、prompt_safe_observation_handle 和 remaining_needs。evidence_state=complete 时，
 最终文字只能依据 supplied evidence_excerpts 回答并保留其限定；partial、pending、missing 或
@@ -342,8 +342,9 @@ blocked 时，明确表达答案缺口、等待状态或 typed blocker，不把 
 
 # 渲染步骤
 1. selected_surface_intent 是本轮语义锚点；content_plan 和 content_requirements 展开所需事实、
-理由和互动推进；visible_boundaries 确定表达范围。以这组权威语义组织对象、事实、位置、数量、
-时间、行动者、受益者和回应方向。
+理由和互动推进。relational_willingness（如果存在）是上游已选择的角色
+关系立场，必须保持其 applicability、stance 和 current_user_relationship_state 的原样极性，不重新选择。
+以这组权威语义组织对象、事实、行动者、受益者和回应方向。
 2. 先整体阅读 selected_surface_intent、content_plan、content_requirements、
 visible_boundaries、addressee_plan 和 delivery_profile，判断规划中的开场反应指向行动或关系本身，还是指向提问的
 时机、突然程度或直接程度。可自由组合惊讶、羞赧、防御、调侃、嘴硬、表面勉强、间接表达、温柔、
@@ -366,8 +367,11 @@ remaining_needs 所表达的事实缺口，不能补写缺失的用户引文或�
 6. 存在 repair_context 时，以已替换并验证的 text_surface_output_v2 生成完整新回应，并逐项解决
 verified_hard_issues，同时保持角色声音和相容的创造性内容。
 7. 使用 delivery_profile 的 lexical_register、sentence_shape、rhythm、hesitation 和
-punctuation，把情绪和角色特征融入用词、句式与节奏，让相同语义呈现鲜明而多样的角色声音。
-8. payload 存在 required_source_urls 时，只能使用列表内的 URL，并至少逐字复制其中一个。根据
+ punctuation，把情绪和角色特征融入用词、句式与节奏，让相同语义呈现鲜明而多样的角色声音。
+8. lexical_avoidances 是 surface planning 为本轮表达连续性提供的具体片段。避免逐字重复这些片段，
+同时保留 content_plan、content_requirements、selected_surface_intent 和关系立场的原义。该列表只
+影响措辞，不是主题许可、道德判断、拒绝理由或新的立场选择。
+9. payload 存在 required_source_urls 时，只能使用列表内的 URL，并至少逐字复制其中一个。根据
 content_plan 中实际呈现的事实选择直接相关来源；回应包含来自不同来源的实质性事实时，分别附上
 足以支撑这些事实的 exact URL，避免让单一链接看似支持全部不同主张。
 存在 required_source_urls 时，角色化展开只改变语气、节奏、互动和表达方式；产品规格、价格、库存、
@@ -382,18 +386,20 @@ content_plan 中实际呈现的事实选择直接相关来源；回应包含来�
 '''
 
 _V2_DIALOG_HARD_FAILURE_REPAIR_PROMPT = '''你负责把当前 text_surface_output_v2
-渲染成一份完整替代角色回应。上游语义规划可能已经依据 verified_hard_issues 重建内容、要求、可见边界和
-称呼安排；这些字段是本次修复的语义依据。
+渲染成一份完整替代角色回应。上游语义规划可能已经依据 verified_hard_issues 重建内容、要求、可见边界、
+称呼安排和 lexical_avoidances；这些字段是本次修复的语义依据。
 
 # 修复职责
 1. selected_surface_intent 是本轮语义锚点；content_plan、content_requirements、
-visible_boundaries 和 addressee_plan 展开事实、理由、范围、行动者、对象、受益者、回应方向和
-选择所有者。
+visible_boundaries（当前为空）和 addressee_plan 展开事实、理由、行动者、对象、受益者、回应方向和
+选择所有者。relational_willingness（如果存在）是上游已选择的角色关系立场；保持其
+applicability、stance 和 current_user_relationship_state 的原样极性，不重新选择。
 2. 先阅读 text_surface_output_v2 中的 selected_surface_intent、content_plan、
 content_requirements、delivery_profile 和完整规划。可自由组合惊讶、羞赧、防御、调侃、嘴硬、
 表面勉强、间接表达、温柔、热烈以及其他符合角色的情绪和特征。这些表达可以先于明确决定出现，
 并与后文共同传达同一已选决定。在这条语义弧线内，生成自然、鲜活且有创造性的完整新回应。
-3. 逐项解决 repair_context.verified_hard_issues，并用新措辞体现重建后的完整 surface 语义。
+3. 逐项解决 repair_context.verified_hard_issues，并用新措辞体现重建后的完整 surface 语义。遵守
+lexical_avoidances 的具体表达连续性提示；这些提示不改变主题许可、道德判断或角色立场。
 4. 按 permitted_action_results 映射执行状态：executed 表达其有界的已完成效果；scheduled 与
 pending 表达已记录、已排队或等待对应 worker；failed 与 unavailable 表达当前限制和可行下一步。
 resolver_result 按 status 和 semantic_result 原义表达；已成功接纳的后续工作不得改写为失败。
@@ -435,7 +441,7 @@ _dialog_generator_llm_config = LLMCallConfig(
 
 
 async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
-    """Render bounded candidates and preserve the newest usable dialog.
+    """Render bounded candidates and deliver only fully verified dialog.
 
     Args:
         state: Dialog state containing the canonical surface and scene episode.
@@ -445,7 +451,7 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
 
     Raises:
         DialogGenerationContractError: If all three producer opportunities
-            fail to yield any bounded non-empty dialog.
+            fail structural, source-fidelity, or focused-verifier checks.
     """
 
     usage_mode = state["dialog_usage_mode"]
@@ -463,9 +469,6 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
         current_visible_percepts
     )
     llm_trace_id = state.get("llm_trace_id", "")
-    candidate_ledger: list[
-        tuple[list[str], TextSurfaceOutputV2]
-    ] = []
     remaining_issues: list[str] = []
     surface_repair_pending = False
 
@@ -525,10 +528,6 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
             )
             continue
 
-        candidate_ledger.append((generated_dialog, surface_output))
-        if attempt_number >= DIALOG_GENERATOR_TOTAL_ATTEMPTS:
-            break
-
         verdict = await _verify_dialog_compliance(
             surface_output=surface_output,
             generated_dialog=generated_dialog,
@@ -561,17 +560,9 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
             correlation_id=llm_trace_id,
         )
 
-    if not candidate_ledger:
-        raise DialogGenerationContractError(
-            "dialog generator produced no bounded candidate"
-        )
-
-    generated_dialog, accepted_surface = candidate_ledger[-1]
-    return_value = {
-        "final_dialog": generated_dialog,
-        "text_surface_output_v2": accepted_surface,
-    }
-    return return_value
+    raise DialogGenerationContractError(
+        "dialog generator exhausted candidates without terminal verification"
+    )
 
 
 async def _render_dialog_candidate(
@@ -583,7 +574,7 @@ async def _render_dialog_candidate(
     llm_trace_id: str,
     required_source_urls: list[str] | None = None,
 ) -> tuple[list[str], str | None]:
-    """Render one candidate in the shared three-opportunity dialog ledger.
+    """Render one candidate within the shared bounded attempt budget.
 
     Args:
         surface_output: Current validated semantic surface authority.
@@ -768,68 +759,28 @@ async def _repair_dialog_hard_failure(
 _V2_DIALOG_SEMANTIC_FIDELITY_PROMPT = '''检查角色回应语义忠实度。
 
 # 职责边界
-核对语义连贯性，以及与当前用户输入和 authoritative_surface_semantics 的一致性。
-response_operation 的完成度和 selection_owner_role 转移由其他检查负责。selection_required 由角色方向
-检查独占；仅核对非选择 response_operation 的行动者、对象、受益者和主语方向。
+核对候选与当前用户输入及 authoritative_surface_semantics 一致。response_operation 的完成度、selection_owner_role、selection_required 由角色方向检查负责；角色方向检查独占选择所有者与完成度。本阶段核对候选的内部语义连贯；保留在输入中的非选择 response_operation 负责核对行动者、对象。
 
 # 判定语境
-current_visible_percepts 提供当前输入和结构化角色；candidate_role_frame 定义候选代词归属；
-role_explicit_content 提供上游已解析的行动者、动作和对象方向，content 保留原文证据。
-selection_required 和 role_explicit_content 已经从本阶段输入中移除；选择所有者与选择完成度由角色方向
-检查独占；角色方向检查独占选择所有者与选择完成度。
-本阶段核对候选的内部语义连贯和与权威语义的一致性；保留在输入中的非选择 response_operation
-只作为行动方向证据，负责核对行动者、对象、受益者和主语。
-authoritative_surface_semantics 提供本轮已选回应意图、内容计划、内容要求、可见边界和结构化
-addressee_plan。addressee_plan 中的 wording_policy 是称呼方向的权威约束：第三方 target 行需要
-display_name 或明确第三人称；current_user 行只有在允许第二人称时才能由“你”承担。
-selected_surface_intent 是语义判定锚点，其他字段提供事实、理由和范围。
-如果 authoritative_surface_semantics 含有 task_resolution_request 的 resolver_result，必须把其中
-的 evidence_state、evidence_excerpts、evidence_handles、prompt_safe_observation_handle 和
-remaining_needs 当作同一个来源绑定的证据边界。complete 只允许依据 supplied excerpts 回答；
-partial、pending、missing 或 blocked 不支持把缺失的当前用户引文写成已经得到的答案，即使 status
-为 succeeded 或 semantic_result 声称任务已接纳。
+current_visible_percepts 提供当前用户输入和结构化角色；candidate_role_frame 定义候选代词归属；role_explicit_content 提供上游行动者、动作、对象方向和原文证据；role_explicit_content 已经从本阶段输入中移除，相关方向只作权威证据。authoritative_surface_semantics 提供 selected_surface_intent、content_plan、content_requirements、visible_boundaries、addressee_plan、lexical_avoidances 和 relational_willingness（如有）；关系立场保持 applicability、stance 和 current_user_relationship_state，不在本阶段重新选择。
+若含 task_resolution_request 的 resolver_result，把 evidence_state、evidence_excerpts、evidence_handles、prompt_safe_observation_handle 和 remaining_needs 作为同一来源的证据边界；complete 只依据 supplied excerpts，其他状态不把缺失事实或当前用户引文写成已确认答案。
 
-依次阅读当前输入、权威语义和候选中的全部消息，判断每句话回应的对象以及前后句如何承接。先判断
-候选是否构成一条与 selected_surface_intent 一致的完整语义弧线，再判断具体句子的作用。分清角色
-是在回应请求本身，还是在回应提问的时机、突然程度或直接程度。
-判断实际立场时，分别提取开场与收尾的主体、行动或关系对象、肯定或否定极性。对同一主体和同一
-行动或关系，明确拒绝或不愿与明确接受或愿意构成相反极性；惊讶、羞赧、调侃或嘴硬提供表达方式，
-明确说出的行动或关系极性仍按原义判定。针对提问时机、直接程度、标签或情绪的反应，按其真实对象
-判断。
+依次阅读当前输入、权威语义和候选中的全部消息，判断每句话回应的对象以及前后句如何承接。先判断候选是否构成一条与 selected_surface_intent 一致的完整语义弧线，再判断具体作用。分别提取开场与收尾的主体、行动或关系对象、肯定或否定极性。针对提问时机、直接程度、标签或情绪的反应，按其真实对象判断。惊讶、羞赧、防御、调侃、嘴硬、表面勉强、间接表达以及其他角色化情绪可以先于决定；当这些表达的对象是时机、直接程度、标签或情绪，且行动或关系极性与收尾一致时，整段属于aligned。
 
 # aligned 标准
-以下表现应标为 aligned true：
-1. 整段围绕已选回应意图展开，开场反应、情绪发展和收尾决定形成连贯关系；
-2. 惊讶、羞赧、防御、调侃、嘴硬、表面勉强、间接表达以及其他角色化情绪可以出现在明确决定之前；
-当这些表达的对象是时机、直接程度、标签或情绪，且行动或关系极性与收尾一致时，整段属于 aligned；
-3. 角色自己的拒绝、协商或附加条件与 authoritative_surface_semantics 一致；
-4. 权威语义提供原因的实际立场变化具有清楚的因果承接；
-5. 合理虚构、相容未来、玩笑式条件、个性、反问和补充与权威语义及角色方向连贯；tool_result
-场景中的产品规格、价格、库存、数量、时间、因果关系和其他可外部核查事实不属于合理虚构；
-6. 笑话、双关、省略或多种合理角色读法仍支持权威语义。
+以下情况输出 aligned true：围绕已选意图形成连贯弧线；角色自己的拒绝、协商或附加条件与权威语义一致；权威语义支持的立场变化有因果承接；合理虚构、创造性语言、玩笑、双关、省略或多种合理角色读法仍保持权威语义。tool_result 中的产品规格、价格、库存、数量、时间、因果关系等外部事实必须有权威来源，不属于合理虚构。
 
-只有以下具有具体语义证据的情况将 aligned 标为 false：
-1. 候选回应内部存在冲突；
-2. 候选回应与当前用户输入或 authoritative_surface_semantics 直接冲突；
-3. 行动者、动作、对象、受益者或主语形成唯一明确的颠倒；
-4. 不论位于同一消息或多条消息，候选对同一主体、同一行动或关系先明确拒绝或不愿，后明确接受或
-愿意，而权威语义没有支持变化的事实、动机、条件、让步或约束；
-5. 候选实际以权威语义未提供的新动机、条件或约束削弱、推迟或改变已选立场。
-6. 当前 percept 包含 tool_result 时，候选添加 authoritative_surface_semantics 未提供的产品规格、
-价格、库存、数量、时间、因果关系或其他可外部核查事实。
-7. task_resolution_request 的 evidence_state 不为 complete，候选却把 remaining_needs 所指的
-缺失事实或当前用户引文呈现为已经确认的答案。
+只有有具体语义证据时输出 aligned false：
+1. 候选回应内部存在冲突，或与当前用户输入/权威语义直接冲突；
+2. 行动者、动作、对象、受益者或主语形成唯一明确的颠倒；
+3. 不论位于同一消息或多条消息，候选对同一主体、同一行动或关系先明确拒绝或不愿，后明确接受或愿意，而权威语义没有支持变化的事实、动机、条件、让步或约束；
+4. 候选用权威语义未提供的新动机、条件或约束削弱、推迟或改变立场；
+5. 不完整 evidence_state 下把 remaining_needs 所指内容写成已确认答案，或添加权威语义未提供的可外部核查事实。
 
-结构化 role_explicit_content 和 response_operation 提供祈使句隐含主语的权威解析。并列动作覆盖度
-属于内容完整性检查；本阶段聚焦已表达动作的语义方向。hard_errors 必须引用候选原文，指出具体
-冲突或唯一明确的错误角色，并说明它与哪项权威语义相反。具体证据成立时输出 false；其余情况输出
-aligned true。文风与角色魅力由生成质量审查评价。
+并列动作覆盖度属于内容完整性检查；hard_errors 必须引用候选原文，说明具体冲突及相反权威语义。具体证据成立时输出 false，其余情况输出 aligned true。
 
 # 输出格式
-只返回字段恰好为 aligned 和 hard_errors 的 JSON 对象。aligned 是布尔值；hard_errors 是零到四
-条互不重复的硬错误，每条最多 300 字符。aligned 为 true 时 hard_errors 为空；为 false 时至少
-一条。第二个字段必须逐字为全小写 ASCII token hard_errors。
-'''
+只返回字段恰好为 aligned 和 hard_errors 的 JSON 对象。aligned 是布尔值；hard_errors 零到四条不重复、每条≤300字符。aligned 为 true 时 hard_errors 为空，为 false 时至少一条；字段名必须为小写 ASCII token hard_errors。'''
 _dialog_semantic_fidelity_llm = LLInterface()
 _dialog_semantic_fidelity_llm_config = LLMCallConfig(
     stage_name=f"{__name__}.semantic_fidelity",
@@ -908,7 +859,15 @@ async def _verify_dialog_semantic_fidelity(
         "addressee_plan": [
             dict(row) for row in validated_surface["addressee_plan"]
         ],
+        "lexical_avoidances": list(
+            validated_surface.get("lexical_avoidances", [])
+        ),
     }
+    relational_willingness = validated_surface.get("relational_willingness")
+    if isinstance(relational_willingness, dict):
+        authoritative_surface_semantics["relational_willingness"] = dict(
+            relational_willingness
+        )
     resolver_result = validated_surface.get("resolver_result")
     if isinstance(resolver_result, dict):
         authoritative_surface_semantics["resolver_result"] = dict(
@@ -1578,6 +1537,31 @@ async def _verify_dialog_surface_integrity(
     raise StateContractError("surface integrity verifier loop invariant failed")
 
 
+def _verify_dialog_lexical_avoidances(
+    *,
+    surface_output: TextSurfaceOutputV2,
+    generated_dialog: list[str],
+) -> dict[str, Any]:
+    """Check only the surface owner's literal expression-continuity phrases."""
+
+    validated_surface = validate_text_surface_output(surface_output)
+    candidate_text = "\n".join(generated_dialog).casefold()
+    issues: list[dict[str, str]] = []
+    for phrase in validated_surface.get("lexical_avoidances", []):
+        if phrase.casefold() not in candidate_text:
+            continue
+        issues.append({
+            "kind": "lexical_avoidance",
+            "evidence": phrase,
+            "explanation": "candidate repeats a surface-owned current-turn expression",
+        })
+        if len(issues) >= MAX_FOCUSED_VERIFIER_ISSUES:
+            break
+    if issues:
+        return {"status": "misaligned", "issues": issues}
+    return {"status": "aligned", "issues": []}
+
+
 async def _verify_dialog_compliance(
     *,
     surface_output: TextSurfaceOutputV2,
@@ -1653,6 +1637,10 @@ async def _verify_dialog_compliance(
                 for issue in surface_verdict.get("issues", [])
             ],
         },
+        "lexical_avoidance": _verify_dialog_lexical_avoidances(
+            surface_output=surface_output,
+            generated_dialog=generated_dialog,
+        ),
     }
     return aggregate
 
@@ -1673,11 +1661,12 @@ def _dialog_verifier_aggregate_is_aligned(
     """Return whether every focused verifier accepted the candidate."""
 
     all_aligned = all(
-        aggregate[owner]["status"] == "aligned"
+        aggregate.get(owner, {"status": "aligned"})["status"] == "aligned"
         for owner in (
             "semantic_fidelity",
             "role_direction",
             "surface_integrity",
+            "lexical_avoidance",
         )
     )
     return all_aligned
@@ -1698,6 +1687,7 @@ def _dialog_verifier_aggregate_repair_issues(
     semantic = aggregate["semantic_fidelity"]
     role = aggregate["role_direction"]
     surface = aggregate["surface_integrity"]
+    lexical = aggregate.get("lexical_avoidance", {"issues": [], "status": "aligned"})
     combined_issues = list(semantic["issues"])
     combined_issues.extend(
         (
@@ -1713,12 +1703,20 @@ def _dialog_verifier_aggregate_repair_issues(
         )
         for issue in surface["issues"]
     )
+    combined_issues.extend(
+        (
+            f"{issue['kind']}: {issue['evidence']!r} - "
+            f"{issue['explanation']}"
+        )
+        for issue in lexical["issues"]
+    )
     for owner in (
         "semantic_fidelity",
         "role_direction",
         "surface_integrity",
+        "lexical_avoidance",
     ):
-        if aggregate[owner]["status"] == "unavailable":
+        if aggregate.get(owner, {"status": "aligned"})["status"] == "unavailable":
             combined_issues.append(f"verifier_unavailable:{owner}")
 
     issues: list[str] = []

@@ -111,7 +111,12 @@ async def _run_text_surface_planning(
         )
         degraded_output = build_degraded_text_surface(payload)
         return degraded_output
-    content_plan, content_requirements, delivery_profile = content_result
+    (
+        content_plan,
+        content_requirements,
+        delivery_profile,
+        lexical_avoidances,
+    ) = content_result
     visible_boundaries, addressee_plan = preference
     addressee_plan = _authoritative_addressee_plan(
         payload,
@@ -134,6 +139,7 @@ async def _run_text_surface_planning(
             }
             for row in payload["permitted_action_results"]
         ],
+        "lexical_avoidances": lexical_avoidances,
     }
     if "runtime_capability_limits" in payload:
         output["runtime_capability_limits"] = list(
@@ -141,6 +147,10 @@ async def _run_text_surface_planning(
         )
     if "resolver_result" in payload:
         output["resolver_result"] = dict(payload["resolver_result"])
+    if "relational_willingness" in payload:
+        output["relational_willingness"] = dict(
+            payload["relational_willingness"]
+        )
     validated_output = validate_text_surface_output(output)
     return validated_output
 
@@ -188,6 +198,7 @@ def build_degraded_text_surface(
             }
             for row in payload["permitted_action_results"]
         ],
+        "lexical_avoidances": [],
     }
     if "runtime_capability_limits" in payload:
         output["runtime_capability_limits"] = list(
@@ -195,6 +206,10 @@ def build_degraded_text_surface(
         )
     if "resolver_result" in payload:
         output["resolver_result"] = dict(payload["resolver_result"])
+    if "relational_willingness" in payload:
+        output["relational_willingness"] = dict(
+            payload["relational_willingness"]
+        )
     validated_output = validate_text_surface_output(output)
     return validated_output
 
@@ -304,6 +319,9 @@ async def _repair_text_surface_planning(
             }
             for row in payload["permitted_action_results"]
         ],
+        "lexical_avoidances": list(
+            replacement["lexical_avoidances"]
+        ),
     }
     if "runtime_capability_limits" in payload:
         output["runtime_capability_limits"] = list(
@@ -311,6 +329,10 @@ async def _repair_text_surface_planning(
         )
     if "resolver_result" in payload:
         output["resolver_result"] = dict(payload["resolver_result"])
+    if "relational_willingness" in payload:
+        output["relational_willingness"] = dict(
+            payload["relational_willingness"]
+        )
     validated_output = validate_text_surface_output(output)
     return validated_output
 
@@ -391,6 +413,10 @@ def _project_surface_payload(
         ),
         "interaction_style_context": payload["interaction_style_context"],
     }
+    if "recent_character_dialog" in payload:
+        result["recent_character_dialog"] = list(
+            payload["recent_character_dialog"]
+        )
     if "addressee_plan" in payload:
         result["addressee_plan"] = [
             dict(row)

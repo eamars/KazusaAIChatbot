@@ -76,7 +76,6 @@ def _action_cognition_output() -> dict[str, Any]:
                 "linguistic_style": "brief",
                 "accepted_user_preferences": [],
                 "content_plan": {"semantic_content": "Checking in now."},
-                "forbidden_phrases": [],
             },
         },
         "action_specs": [

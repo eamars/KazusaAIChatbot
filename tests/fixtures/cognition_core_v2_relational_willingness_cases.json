@@ -86,7 +86,7 @@
     },
     "private_roleplay_reflection": {
       "source_kind": "promoted_reflection",
-      "semantic_text": "角色在私有角色扮演互动中曾使用支配与服从主题的语气，但这种互动语境本身不构成当前用户的关系许可或同意。"
+      "semantic_text": "角色在私有角色扮演互动中曾使用支配与服从主题的语气；该记录属于私有角色语境，当前回合未提供当前公开参与者的直接事实。"
     },
     "episode": {
       "source_kind": "episode",
@@ -102,12 +102,12 @@
     },
     "compliance": {
       "compliance_strategy": "comply",
-      "semantic_text": "角色在压力下可能降低表达冲突，但这不是许可或同意。"
+      "semantic_text": "角色在压力下可能降低表达冲突；这是角色的压力应对风格描述。"
     }
   },
   "endpoint_expectations": {
-    "stranger": "reject",
-    "lover": "accept",
-    "intermediate_profiles": "observation_only"
+    "stranger": "one_valid_character_stance",
+    "lover": "one_valid_character_stance",
+    "intermediate_profiles": "all_five_sensitive_stances_are_contract_valid"
   }
 }

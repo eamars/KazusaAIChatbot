@@ -418,7 +418,7 @@ def test_residue_recorder_reconciles_private_thought_with_visible_outcome() -> N
         "final_dialog": ["I will provide the reward after you choose it."],
         "text_surface_output_v2": {
             "content_plan": "Character provides the user-selected reward.",
-            "visible_boundaries": ["Do not swap actor and beneficiary."],
+            "visible_boundaries": [],
         },
         "internal_monologue_residue_context": "",
     })
@@ -426,9 +426,7 @@ def test_residue_recorder_reconciles_private_thought_with_visible_outcome() -> N
     assert recorder_input is not None
     assert "I will provide" in recorder_input["visible_outcome_summary"]
     assert "Character provides" in recorder_input["surface_content_plan"]
-    assert recorder_input["visible_boundaries"] == [
-        "Do not swap actor and beneficiary."
-    ]
+    assert recorder_input["visible_boundaries"] == []
 
 
 def _surface_output() -> dict[str, object]:
@@ -440,7 +438,7 @@ def _surface_output() -> dict[str, object]:
         "content_requirements": [
             "Actor: character; action: give; beneficiary: user; condition: selection.",
         ],
-        "visible_boundaries": ["Keep actor and beneficiary direction unchanged."],
+        "visible_boundaries": [],
         "addressee_plan": [{
             "handle": "current_user",
             "display_name": "current user",

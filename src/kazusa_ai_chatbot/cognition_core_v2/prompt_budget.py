@@ -901,8 +901,10 @@ def reduce_identity_projection(identity: dict[str, Any]) -> bool:
 def reduce_constraints_projection(constraints: dict[str, Any]) -> bool:
     """Apply the next bounded character-constraint reduction step.
 
-    One call middle-truncates every standard description above its floor.
-    Drives, standards rows, and meaning state are never removed.
+    The live semantic projection intentionally carries an empty ``standards``
+    list; it is therefore already at its standards floor. If a bounded test or
+    non-live caller supplies standard rows, one call middle-truncates each
+    description above its floor without changing row ownership.
 
     Args:
         constraints: Prompt-visible character constraints mutated in place.
@@ -913,6 +915,8 @@ def reduce_constraints_projection(constraints: dict[str, Any]) -> bool:
 
     standards = constraints.get("standards")
     if not isinstance(standards, list):
+        return False
+    if not standards:
         return False
     reduced = False
     for standard in standards:

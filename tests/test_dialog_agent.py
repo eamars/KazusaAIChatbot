@@ -13,6 +13,7 @@ import pytest
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
 from kazusa_ai_chatbot.nodes.dialog_agent import (
     DialogAgentState,
+    DialogGenerationContractError,
     StateContractError,
     dialog_agent,
     dialog_generator,
@@ -83,6 +84,40 @@ def _text_surface_output() -> dict[str, object]:
     }
 
 
+def _text_surface_input() -> dict[str, object]:
+    """Build the canonical surface input used by bounded repair."""
+
+    return {
+        "schema_version": "text_surface_input.v2",
+        "episode": canonical_episode(
+            episode_id="dialog-agent-test",
+            content="Greet the current user.",
+        ),
+        "intention": {
+            "route": "speech",
+            "intention": "acknowledge the greeting",
+            "target_roles": [],
+            "reason": "the greeting is directly observed",
+        },
+        "goal_resolution": "answerable_now",
+        "supporting_bids": [],
+        "expression_policy": {
+            "visibility": "visible",
+            "emotional_tone": "warm",
+            "intensity": "restrained",
+            "directness": "balanced",
+        },
+        "semantic_affect": [],
+        "permitted_action_results": [],
+        "interaction_style_context": "brief and natural",
+        "character_expression_context": {
+            "tempo": "measured",
+            "linguistic_texture": "reserved, analytical, and warm",
+        },
+        "visual_character_context": "complete visual character context",
+    }
+
+
 def _character_profile() -> dict[str, object]:
     """Build the dialog renderer's character-only wording context."""
 
@@ -146,6 +181,7 @@ def _dialog_state() -> dict[str, object]:
             "target_broadcast": False,
             "dialog_usage_mode": "unit_test",
             "llm_trace_id": "trace-1",
+            "text_surface_input_v2": _text_surface_input(),
         }
     )
     return state
@@ -176,6 +212,7 @@ def test_v2_prompt_describes_surface_renderer_boundary() -> None:
     assert "action description" not in prompt.casefold()
     assert "动作描写" not in prompt
     assert "final_dialog" in prompt
+    assert "relational_willingness" in prompt
     assert "action_directives" not in prompt
 
 
@@ -399,11 +436,50 @@ async def test_dialog_agent_rejects_total_empty_candidate_exhaustion(
 
     with pytest.raises(
         StateContractError,
-        match="no bounded candidate",
+        match="exhausted candidates",
     ):
         await dialog_agent(_base_global_state())
 
     assert generator_llm.ainvoke.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_dialog_verifies_terminal_candidate_before_delivery(monkeypatch):
+    """A terminal candidate must pass every focused verifier before delivery."""
+
+    generator_llm = MagicMock()
+    generator_llm.ainvoke = AsyncMock(
+        return_value=AIMessage(content='{"final_dialog": ["Candidate."]}')
+    )
+    monkeypatch.setattr(dialog_module, "_dialog_generator_llm", generator_llm)
+    verifier = AsyncMock(return_value={
+        "semantic_fidelity": {
+            "status": "misaligned",
+            "aligned": False,
+            "issues": ["stance mismatch"],
+        },
+        "role_direction": {
+            "status": "aligned",
+            "aligned": True,
+            "violations": [],
+        },
+        "surface_integrity": {
+            "status": "aligned",
+            "aligned": True,
+            "issues": [],
+        },
+    })
+    monkeypatch.setattr(dialog_module, "_verify_dialog_compliance", verifier)
+    monkeypatch.setattr(
+        dialog_module,
+        "repair_text_surface_for_dialog",
+        AsyncMock(return_value=_text_surface_output()),
+    )
+
+    with pytest.raises(DialogGenerationContractError, match="terminal verification"):
+        await dialog_generator(_dialog_state())
+
+    assert verifier.await_count == 3
 
 
 @pytest.mark.asyncio

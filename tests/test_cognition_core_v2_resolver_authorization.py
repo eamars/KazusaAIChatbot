@@ -117,6 +117,58 @@ async def test_initial_missing_evidence_request_is_authorized() -> None:
 
 
 @pytest.mark.asyncio
+async def test_approval_preparation_preserves_approval_owner_contract() -> None:
+    """Approval preparation remains distinct from evidence retrieval."""
+
+    captured: dict[str, object] = {}
+
+    class _LLM:
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config: object,
+        ) -> SimpleNamespace:
+            del config
+            captured.update(json.loads(str(messages[-1].content)))
+            return SimpleNamespace(content=json.dumps({
+                "decisions": {"c1": True},
+            }))
+
+    request = _request(
+        "b1",
+        "r1",
+        "prepare explicit approval before the external submission",
+    )
+    result = await authorize_resolver_requests(
+        resolver_requests=[request],
+        bid_handles={"b1": _bid()},
+        evidence=[_evidence(
+            "e1",
+            "The user explicitly asks to submit the final version to an external reviewer.",
+        )],
+        resolver_handles={
+            "r1": {
+                "capability": "approval_preparation",
+                "semantic_capability": (
+                    "prepare a bounded consequential action for explicit approval"
+                ),
+                "availability": "available",
+            },
+        },
+        resolver_context="resolver_state: status=idle",
+        services=SimpleNamespace(
+            llm=_LLM(),
+            resolver_authorization_config=object(),
+        ),
+    )
+
+    assert result == [request]
+    candidate = captured["candidates"]["c1"]
+    assert "approval_preparation" in candidate["owner_contract"]
+
+
+@pytest.mark.asyncio
 async def test_satisfied_rephrased_request_is_rejected() -> None:
     """Authorization rejects a renamed request after evidence satisfies it."""
 

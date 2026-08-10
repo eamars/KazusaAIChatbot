@@ -176,7 +176,6 @@ def _base_dialog_state(case: dict) -> dict:
                 'linguistic_style': case['linguistic_style'],
                 'accepted_user_preferences': [],
                 'content_plan': case['content_plan'],
-                'forbidden_phrases': [],
             },
             'contextual_directives': case['contextual_directives'],
         },
