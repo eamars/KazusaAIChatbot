@@ -20,9 +20,6 @@ from pymongo.errors import PyMongoError
 from kazusa_ai_chatbot.config import COGNITION_LLM_BASE_URL
 from kazusa_ai_chatbot.db import close_db, get_character_profile
 from kazusa_ai_chatbot.db._client import get_db
-from kazusa_ai_chatbot.db.interaction_style_images import (
-    build_group_engagement_action_context,
-)
 from kazusa_ai_chatbot.reflection_cycle.activity_windows import (
     build_group_activity_windows,
 )
@@ -102,6 +99,35 @@ _CAT_SUBJECT_INVERSION_PATTERNS = tuple(
         r'(?:千纱|杏山千纱).{0,6}(?:像|如同).{0,16}猫',
     )
 )
+
+
+def _fixed_interaction_style_snapshot() -> dict[str, Any]:
+    """Build one injected immutable style snapshot for live replay cases."""
+
+    overlay = {
+        "speech_guidelines": [],
+        "social_guidelines": [],
+        "pacing_guidelines": [],
+        "engagement_guidelines": [],
+        "confidence": "medium",
+    }
+    return {
+        "schema_version": "interaction_style_turn_snapshot.v1",
+        "sources": {},
+        "relevance": {},
+        "cognition": {},
+        "surface": {
+            "user": {"overlay": dict(overlay)},
+            "group_channel": {"overlay": dict(overlay)},
+        },
+        "application_order": ["user", "group_channel"],
+        "user_style": dict(overlay),
+        "group_engagement_action_context": {
+            "engagement_guidelines": [],
+            "confidence": "",
+        },
+        "snapshot_digest": "sensitivity-live-style",
+    }
 
 
 @dataclass(frozen=True)
@@ -284,6 +310,25 @@ async def test_live_self_cognition_cat_side_thread_subject_boundary(
         load_repro_residue,
     )
 
+    async def load_style_snapshot(**kwargs: Any) -> dict[str, Any]:
+        del kwargs
+        return _fixed_interaction_style_snapshot()
+
+    async def discard_cognition_commit(*args: Any, **kwargs: Any) -> None:
+        del args, kwargs
+
+    monkeypatch.setattr(
+        runner,
+        "commit_cognition_output",
+        discard_cognition_commit,
+    )
+
+    monkeypatch.setattr(
+        runner,
+        "build_interaction_style_context",
+        load_style_snapshot,
+    )
+
     artifacts = await runner.build_self_cognition_case_artifacts_async(
         case,
         dialog_client=tracing_dialog_client,
@@ -304,7 +349,7 @@ async def test_live_self_cognition_cat_side_thread_subject_boundary(
             "source_fixture": str(_CAT_FAILURE_TRACE_PATH),
             "source_contract_adjustment": (
                 "Replayed with current neutral digest and "
-                "conversation_progress.thread_reference_context instead of "
+                "source_context.thread_reference_context instead of "
                 "the stale first-person digest stored in the reproduction "
                 "trace."
             ),
@@ -366,15 +411,18 @@ def _cat_case_with_current_subject_boundary_contract(
     )
     assert thread_reference_context is not None
 
-    conversation_progress = case.get("conversation_progress")
-    if not isinstance(conversation_progress, dict):
-        conversation_progress = {}
-    else:
-        conversation_progress = dict(conversation_progress)
-    conversation_progress["thread_reference_context"] = (
-        thread_reference_context
+    source_context = case.get("source_context")
+    if not isinstance(source_context, dict):
+        raise AssertionError(
+            "historical sensitivity fixture must use typed source_context"
+        )
+    source_context = dict(source_context)
+    source_context["schema_version"] = (
+        "self_cognition_group_source_context.v1"
     )
-    conversation_progress["group_scene_digest"] = {
+    source_context["context_kind"] = "group_chat_review"
+    source_context["thread_reference_context"] = thread_reference_context
+    source_context["group_scene_digest"] = {
         "digest": (
             "雪凪先 @杏山千纱 发猪头表情，随后 @灯（23岁）说“摸摸大姐姐”。"
             "灯（23岁）回应“摸到了”，又说“你的头发软软的，"
@@ -383,13 +431,14 @@ def _cat_case_with_current_subject_boundary_contract(
             "之间的侧线处理。杏山千纱随后质问前面的暗示和挑衅；"
             "当前角色可见发言后没有新的文字线索。"
         ),
+        "summary": (
+            "雪凪先点到杏山千纱，随后把摸头话题转给灯（23岁）；"
+            "灯（23岁）的二人称头发描述属于侧线，杏山千纱随后质问暗示。"
+        ),
     }
-    conversation_progress["summary"] = (
-        "雪凪先点到杏山千纱，随后把摸头话题转给灯（23岁）；"
-        "灯（23岁）的二人称头发描述属于侧线，杏山千纱随后质问暗示。"
-    )
-    conversation_progress.pop("conversation_evidence", None)
-    case["conversation_progress"] = conversation_progress
+    source_context["conversation_evidence"] = []
+    case["conversation_progress"] = None
+    case["source_context"] = source_context
     return case
 
 
@@ -790,6 +839,10 @@ async def _run_case_to_l2d(
     cognition_state = runner._build_cognition_state(
         historical_case.case,
         rendered_packet,
+        public_group_scene=runner._build_public_group_scene(
+            historical_case.case,
+        ),
+        interaction_style_context=_fixed_interaction_style_snapshot(),
     )
     l2d_state, stage_outputs = await _run_cognition_stages_before_dialog(
         cognition_state,
@@ -879,11 +932,14 @@ async def _run_cognition_stages_before_dialog(
         **l2c1_output,
         **l2c2_output,
     }
-    group_engagement_context = await build_group_engagement_action_context(
-        channel_type=str(state["channel_type"]),
-        platform=str(state["platform"]),
-        platform_channel_id=str(state["platform_channel_id"]),
+    style_snapshot = state.get("interaction_style_context")
+    if not isinstance(style_snapshot, dict):
+        raise AssertionError("live replay requires an injected style snapshot")
+    group_engagement_context = style_snapshot.get(
+        "group_engagement_action_context"
     )
+    if not isinstance(group_engagement_context, dict):
+        raise AssertionError("live replay requires group engagement context")
     group_engagement_output = {
         "group_engagement_action_context": group_engagement_context,
     }
@@ -930,6 +986,11 @@ def _cognition_initial_state(state: dict[str, Any]) -> dict[str, Any]:
         "indirect_speech_context": state["indirect_speech_context"],
         "channel_topic": state["channel_topic"],
         "conversation_progress": state.get("conversation_progress"),
+        "source_context": state.get("source_context"),
+        "public_group_scene": state.get("public_group_scene", ""),
+        "interaction_style_context": state.get(
+            "interaction_style_context"
+        ),
         "promoted_reflection_context": state.get("promoted_reflection_context"),
         "decontextualized_input": state["decontextualized_input"],
         "referents": state["referents"],
@@ -977,7 +1038,15 @@ def _write_dataset_trace(
                 "raw_window": historical_case.raw_window,
                 "source_refs": historical_case.case["source_refs"],
                 "group_activity_window": (
-                    historical_case.case["group_activity_window"]
+                    historical_case.case.get("source_context", {}).get(
+                        "group_activity_window",
+                        {},
+                    )
+                    if isinstance(
+                        historical_case.case.get("source_context"),
+                        dict,
+                    )
+                    else {}
                 ),
                 "historical_event": historical_case.event,
             }

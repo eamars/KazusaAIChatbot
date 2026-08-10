@@ -63,6 +63,8 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
+| [self_cognition_trigger_state_contract_recovery_bugfix_plan.md](archive/completed/bugfix/self_cognition_trigger_state_contract_recovery_bugfix_plan.md) | Group-chat and commitment self-cognition V2 state-contract recovery | completed |
+| [reflection_recursive_root_timestamp_canonicalization_bugfix_plan.md](archive/completed/bugfix/reflection_recursive_root_timestamp_canonicalization_bugfix_plan.md) | Recursive reflection root timestamp canonicalization and guarded group-ledger recovery | completed |
 | [cognition_core_v2_goal_bid_live_llm_regression_remediation_20260810.md](archive/completed/bugfix/cognition_core_v2_goal_bid_live_llm_regression_remediation_20260810.md) | Goal-bid live-LLM failure classification, frozen-fixture recovery, prompt remediation, and 95% regression gate | completed |
 | [cognition_core_v2_quoted_message_evidence_and_recurrence_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_quoted_message_evidence_and_recurrence_bugfix_plan.md) | Quoted-message resolver evidence continuity, answerability gating, and ordinary-branch recurrence stability | completed |
 | [llm_trace_console_full_web_correlation_surface_bugfix_plan.md](archive/completed/bugfix/llm_trace_console_full_web_correlation_surface_bugfix_plan.md) | Full web-console correlation ID visibility across the existing mapped views | completed |

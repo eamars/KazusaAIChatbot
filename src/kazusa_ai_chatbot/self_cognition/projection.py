@@ -9,6 +9,10 @@ from kazusa_ai_chatbot.channel_scene_projection import (
     project_group_review_instruction_preamble,
 )
 from kazusa_ai_chatbot.config import SELF_COGNITION_SOURCE_PACKET_CHAR_LIMIT
+from kazusa_ai_chatbot.conversation_progress import (
+    project_conversation_progress_evidence,
+    project_conversation_progress_scene,
+)
 from kazusa_ai_chatbot.self_cognition import models
 from kazusa_ai_chatbot.time_boundary import (
     format_storage_utc_for_llm,
@@ -34,6 +38,7 @@ def build_source_packet(
         Source packet containing semantic labels and bounded visible evidence.
     """
 
+    validate_case_contract(case)
     idle_timestamp_utc = _string_field(case, "idle_timestamp_utc")
     last_evidence_timestamp_utc = _string_field(
         case,
@@ -70,13 +75,9 @@ def build_source_packet(
     if isinstance(conversation_progress, dict):
         packet["conversation_progress"] = conversation_progress
 
-    group_activity_window = _group_activity_window(case)
-    if group_activity_window is not None:
-        packet["group_activity_window"] = group_activity_window
-
-    reflection_modifier = case.get("reflection_modifier")
-    if isinstance(reflection_modifier, dict):
-        packet["reflection_modifier"] = reflection_modifier
+    source_context = _source_context(case)
+    if source_context is not None:
+        packet["source_context"] = source_context
 
     return packet
 
@@ -117,11 +118,6 @@ def render_source_packet_text(packet: models.SourcePacket) -> str:
     lines.extend(
         [
             '',
-            (
-                '- reflection_modifier: '
-                f'{_compact_value(packet.get("reflection_modifier", {}))}'
-            ),
-            '',
             '# 聊天位置',
             _render_target_scope(packet['target_scope']),
             '',
@@ -129,8 +125,17 @@ def render_source_packet_text(packet: models.SourcePacket) -> str:
             _render_source_refs(packet['source_refs']),
         ]
     )
-    group_activity_window = packet.get('group_activity_window')
-    if isinstance(group_activity_window, dict):
+    source_context = packet.get('source_context')
+    if isinstance(source_context, dict):
+        lines.extend(
+            [
+                '',
+                '# 来源上下文',
+                _compact_value(source_context),
+            ]
+        )
+    group_activity_window = _group_activity_window_from_packet(packet)
+    if group_activity_window is not None:
         lines.extend(
             [
                 '',
@@ -219,11 +224,11 @@ def _group_review_instruction(case: models.SelfCognitionCase) -> str:
 def _group_scene_digest_text(case: models.SelfCognitionCase) -> str:
     """Extract the scene digest string from a group review case."""
 
-    conversation_progress = case.get("conversation_progress")
-    if not isinstance(conversation_progress, dict):
+    source_context = case.get("source_context")
+    if not isinstance(source_context, dict):
         return_value = ""
         return return_value
-    group_scene_digest = conversation_progress.get("group_scene_digest")
+    group_scene_digest = source_context.get("group_scene_digest")
     if not isinstance(group_scene_digest, dict):
         return_value = ""
         return return_value
@@ -274,42 +279,32 @@ def _group_activity_window(
 ) -> dict[str, Any] | None:
     """Project the semantic group-window source-packet contract."""
 
-    group_activity_window = case.get("group_activity_window")
-    if isinstance(group_activity_window, dict):
-        return_value = _sanitize_group_activity_window(group_activity_window)
+    source_context = case.get("source_context")
+    if not isinstance(source_context, dict):
+        return_value = None
         return return_value
+    group_activity_window = source_context.get("group_activity_window")
+    if not isinstance(group_activity_window, dict):
+        return_value = None
+        return return_value
+    return_value = _sanitize_group_activity_window(group_activity_window)
+    return return_value
 
-    if _string_field(case, "trigger_kind") != models.TRIGGER_GROUP_CHAT_REVIEW:
-        return_value = None
-        return return_value
 
-    conversation_progress = case.get("conversation_progress")
-    if not isinstance(conversation_progress, dict):
-        return_value = None
-        return return_value
-    source = conversation_progress.get("source")
-    window_start = conversation_progress.get("window_start")
-    window_end = conversation_progress.get("window_end")
-    activity_labels = conversation_progress.get("activity_labels")
-    if not isinstance(source, str):
-        return_value = None
-        return return_value
-    if not isinstance(window_start, str):
-        return_value = None
-        return return_value
-    if not isinstance(window_end, str):
-        return_value = None
-        return return_value
-    if not isinstance(activity_labels, dict):
-        return_value = None
-        return return_value
+def _group_activity_window_from_packet(
+    packet: models.SourcePacket,
+) -> dict[str, Any] | None:
+    """Read the projected group-window context from a source packet."""
 
-    return_value = _sanitize_group_activity_window({
-        "source": source,
-        "window_start": window_start,
-        "window_end": window_end,
-        "semantic_labels": activity_labels,
-    })
+    source_context = packet.get("source_context")
+    if not isinstance(source_context, dict):
+        return_value = None
+        return return_value
+    group_activity_window = source_context.get("group_activity_window")
+    if not isinstance(group_activity_window, dict):
+        return_value = None
+        return return_value
+    return_value = group_activity_window
     return return_value
 
 
@@ -345,6 +340,202 @@ def _sanitize_group_activity_window(
         "window_end": window_end,
         "semantic_labels": safe_labels,
     }
+    return return_value
+
+
+def _source_context(
+    case: models.SelfCognitionCase,
+) -> dict[str, Any] | None:
+    """Project source-owned group or scheduled context through allowlists."""
+
+    raw_context = case.get("source_context")
+    if not isinstance(raw_context, dict):
+        return_value = None
+        return return_value
+
+    context_kind = raw_context.get("context_kind")
+    if context_kind == "group_chat_review":
+        group_activity_window = raw_context.get("group_activity_window")
+        if not isinstance(group_activity_window, dict):
+            return_value = None
+            return return_value
+        projected_window = _sanitize_group_activity_window(
+            group_activity_window,
+        )
+        if projected_window is None:
+            return_value = None
+            return return_value
+        projected_context: dict[str, Any] = {
+            "context_kind": context_kind,
+            "group_activity_window": projected_window,
+            "conversation_evidence": _prompt_string_list(
+                raw_context.get("conversation_evidence"),
+            ),
+        }
+        participant_context = _project_participant_context(
+            raw_context.get("participant_context"),
+        )
+        if participant_context is not None:
+            projected_context["participant_context"] = participant_context
+        thread_reference_context = _project_thread_reference_context(
+            raw_context.get("thread_reference_context"),
+        )
+        if thread_reference_context is not None:
+            projected_context["thread_reference_context"] = (
+                thread_reference_context
+            )
+        group_scene_digest = _project_group_scene_digest(
+            raw_context.get("group_scene_digest"),
+        )
+        if group_scene_digest is not None:
+            projected_context["group_scene_digest"] = group_scene_digest
+        return projected_context
+
+    if context_kind == "scheduled_future_cognition":
+        continuation_objective = raw_context.get("continuation_objective")
+        continuation_mode = raw_context.get("continuation_mode")
+        if not isinstance(continuation_objective, str):
+            return_value = None
+            return return_value
+        if not isinstance(continuation_mode, str):
+            return_value = None
+            return return_value
+        return_value = {
+            "context_kind": context_kind,
+            "continuation_objective": continuation_objective,
+            "continuation_mode": continuation_mode,
+        }
+        return return_value
+
+    return_value = None
+    return return_value
+
+
+def _project_participant_context(value: object) -> dict[str, Any] | None:
+    """Keep semantic participant context fields without identity metadata."""
+
+    if not isinstance(value, dict):
+        return_value = None
+        return return_value
+    projected: dict[str, Any] = {}
+    for field_name in (
+        "source",
+        "context_shape",
+        "focus_mode",
+        "guidance",
+    ):
+        field_value = value.get(field_name)
+        if isinstance(field_value, str):
+            projected[field_name] = field_value
+
+    primary = value.get("primary_reply_target")
+    if isinstance(primary, dict):
+        projected_primary: dict[str, Any] = {}
+        for field_name in (
+            "display_name",
+            "reply_target_fit",
+            "relationship_label",
+            "relationship_band",
+        ):
+            field_value = primary.get(field_name)
+            if isinstance(field_value, str):
+                projected_primary[field_name] = field_value
+        role_in_window = _prompt_string_list(primary.get("role_in_window"))
+        if role_in_window:
+            projected_primary["role_in_window"] = role_in_window
+        for field_name in (
+            "engagement_guidelines",
+            "nearby_conversation_evidence",
+            "visible_samples",
+        ):
+            field_value = _prompt_string_list(primary.get(field_name))
+            if field_value:
+                projected_primary[field_name] = field_value
+        if projected_primary:
+            projected["primary_reply_target"] = projected_primary
+
+    background_flow = value.get("background_flow")
+    if isinstance(background_flow, dict):
+        projected_background: dict[str, str] = {}
+        for field_name in (
+            "mode",
+            "summary",
+            "participant_count_label",
+        ):
+            field_value = background_flow.get(field_name)
+            if isinstance(field_value, str):
+                projected_background[field_name] = field_value
+        if projected_background:
+            projected["background_flow"] = projected_background
+
+    if not projected:
+        return_value = None
+        return return_value
+    return projected
+
+
+def _project_thread_reference_context(value: object) -> dict[str, Any] | None:
+    """Keep bounded second-person warnings without row or delivery ids."""
+
+    if not isinstance(value, dict):
+        return_value = None
+        return return_value
+    projected: dict[str, Any] = {}
+    for field_name in ("source", "context_shape", "guidance"):
+        field_value = value.get(field_name)
+        if isinstance(field_value, str):
+            projected[field_name] = field_value
+    raw_rows = value.get("ambiguous_second_person_rows")
+    if isinstance(raw_rows, list):
+        rows: list[dict[str, str]] = []
+        for raw_row in raw_rows[:3]:
+            if not isinstance(raw_row, dict):
+                continue
+            row = {
+                field_name: raw_row[field_name]
+                for field_name in (
+                    "speaker",
+                    "sample",
+                    "referent_status",
+                    "basis",
+                )
+                if isinstance(raw_row.get(field_name), str)
+            }
+            if row:
+                rows.append(row)
+        if rows:
+            projected["ambiguous_second_person_rows"] = rows
+    if not projected:
+        return_value = None
+        return return_value
+    return projected
+
+
+def _project_group_scene_digest(value: object) -> dict[str, str] | None:
+    """Keep the neutral group digest and its optional semantic summary."""
+
+    if not isinstance(value, dict):
+        return_value = None
+        return return_value
+    digest = value.get("digest")
+    if not isinstance(digest, str) or not digest.strip():
+        return_value = None
+        return return_value
+    projected = {"digest": digest}
+    summary = value.get("summary")
+    if isinstance(summary, str) and summary.strip():
+        projected["summary"] = summary
+    return projected
+
+
+def _prompt_string_list(value: object) -> list[str]:
+    """Return bounded prompt text items from an external list value."""
+
+    if not isinstance(value, list):
+        return_value: list[str] = []
+        return return_value
+    values = [item for item in value if isinstance(item, str)]
+    return_value = values
     return return_value
 
 
@@ -412,13 +603,13 @@ def _render_source_state(packet: models.SourcePacket) -> str:
 
 
 def _thread_reference_context(packet: models.SourcePacket) -> dict[str, Any]:
-    """Return prompt-safe thread-reference context from conversation progress."""
+    """Return prompt-safe thread-reference context from source context."""
 
-    conversation_progress = packet.get('conversation_progress')
-    if not isinstance(conversation_progress, dict):
+    source_context = packet.get('source_context')
+    if not isinstance(source_context, dict):
         return_value: dict[str, Any] = {}
         return return_value
-    thread_reference_context = conversation_progress.get(
+    thread_reference_context = source_context.get(
         'thread_reference_context',
     )
     if not isinstance(thread_reference_context, dict):
@@ -460,6 +651,200 @@ def _render_thread_reference_context(context: dict[str, Any]) -> str:
     return rendered
 
 
+_CONVERSATION_PROGRESS_FIELDS = frozenset({
+    'schema_version',
+    'episode_state_id',
+    'status',
+    'continuity',
+    'turn_count',
+    'current_thread',
+    'character_stance',
+    'user_goal',
+    'current_blocker',
+    'emotional_trajectory',
+    'episode_narrative',
+    'events',
+    'overused_moves',
+    'interaction_logical_turns',
+    'compacted_block_refs',
+})
+
+
+def validate_case_contract(case: models.SelfCognitionCase) -> None:
+    """Validate source-owned context before it reaches model projection."""
+
+    trigger_kind = _string_field(case, 'trigger_kind')
+    progress = case.get('conversation_progress')
+    if progress is not None:
+        _validate_conversation_progress(
+            progress,
+            occurred_at=_string_field(case, 'idle_timestamp_utc'),
+        )
+
+    source_context = case.get('source_context')
+    if trigger_kind == models.TRIGGER_GROUP_CHAT_REVIEW:
+        if 'conversation_progress' not in case or progress is not None:
+            raise ValueError(
+                'group review cases require conversation_progress=None'
+            )
+        _validate_group_source_context(source_context)
+        return
+    if trigger_kind == models.TRIGGER_SCHEDULED_FUTURE_COGNITION:
+        if 'conversation_progress' not in case or progress is not None:
+            raise ValueError(
+                'scheduled cognition cases require conversation_progress=None'
+            )
+        _validate_scheduled_source_context(source_context)
+        return
+    if source_context is not None:
+        raise ValueError(
+            'source_context is only valid for group or scheduled cognition'
+        )
+
+
+def _validate_conversation_progress(
+    value: object,
+    *,
+    occurred_at: str,
+) -> None:
+    """Validate the canonical V2 continuity projection when supplied."""
+
+    if not isinstance(value, dict):
+        raise ValueError('conversation_progress must be an object or None')
+    if set(value) != _CONVERSATION_PROGRESS_FIELDS:
+        raise ValueError('conversation_progress fields are not exact')
+    if value.get('schema_version') != 'conversation_progress_prompt.v2':
+        raise ValueError('conversation_progress schema is invalid')
+    for field_name in (
+        'episode_state_id',
+        'status',
+        'continuity',
+        'current_thread',
+        'character_stance',
+        'user_goal',
+        'current_blocker',
+        'emotional_trajectory',
+        'episode_narrative',
+    ):
+        if not isinstance(value.get(field_name), str):
+            raise ValueError(
+                f'conversation_progress.{field_name} must be text'
+            )
+    turn_count = value.get('turn_count')
+    if (
+        not isinstance(turn_count, int)
+        or isinstance(turn_count, bool)
+        or turn_count < 0
+    ):
+        raise ValueError('conversation_progress.turn_count is invalid')
+    for field_name in (
+        'events',
+        'overused_moves',
+        'interaction_logical_turns',
+        'compacted_block_refs',
+    ):
+        if not isinstance(value.get(field_name), list):
+            raise ValueError(
+                f'conversation_progress.{field_name} must be a list'
+            )
+    try:
+        project_conversation_progress_scene(value)
+        project_conversation_progress_evidence(value, occurred_at)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(
+            'conversation_progress nested fields are invalid'
+        ) from exc
+
+
+def _validate_group_source_context(value: object) -> None:
+    """Validate the complete source-owned group context union member."""
+
+    if not isinstance(value, dict):
+        raise ValueError('group review source_context is required')
+    required_fields = {
+        'schema_version',
+        'context_kind',
+        'group_activity_window',
+        'conversation_evidence',
+    }
+    optional_fields = {
+        'participant_context',
+        'thread_reference_context',
+        'group_scene_digest',
+    }
+    if set(value) - required_fields - optional_fields:
+        raise ValueError('group source_context fields are not exact')
+    if value.get('schema_version') != (
+        'self_cognition_group_source_context.v1'
+    ) or value.get('context_kind') != 'group_chat_review':
+        raise ValueError('group source_context schema is invalid')
+
+    activity_window = value.get('group_activity_window')
+    if not isinstance(activity_window, dict):
+        raise ValueError('group activity window is required')
+    if set(activity_window) != {
+        'source',
+        'window_start',
+        'window_end',
+        'semantic_labels',
+    }:
+        raise ValueError('group activity window fields are not exact')
+    for field_name in ('source', 'window_start', 'window_end'):
+        if not isinstance(activity_window.get(field_name), str):
+            raise ValueError(
+                f'group activity window.{field_name} must be text'
+            )
+    semantic_labels = activity_window.get('semantic_labels')
+    if not isinstance(semantic_labels, dict) or any(
+        not isinstance(key, str) or not isinstance(label, str)
+        for key, label in semantic_labels.items()
+    ):
+        raise ValueError('group activity window labels are invalid')
+
+    conversation_evidence = value.get('conversation_evidence')
+    if not isinstance(conversation_evidence, list) or any(
+        not isinstance(item, str) for item in conversation_evidence
+    ):
+        raise ValueError('group conversation evidence is invalid')
+    for field_name in ('participant_context', 'thread_reference_context'):
+        optional_value = value.get(field_name)
+        if optional_value is not None and not isinstance(optional_value, dict):
+            raise ValueError(f'group {field_name} is invalid')
+    digest = value.get('group_scene_digest')
+    if digest is not None:
+        if not isinstance(digest, dict):
+            raise ValueError('group scene digest is invalid')
+        if set(digest) - {'digest', 'summary'}:
+            raise ValueError('group scene digest fields are not exact')
+        if not isinstance(digest.get('digest'), str):
+            raise ValueError('group scene digest text is required')
+        if 'summary' in digest and not isinstance(digest['summary'], str):
+            raise ValueError('group scene digest summary is invalid')
+
+
+def _validate_scheduled_source_context(value: object) -> None:
+    """Validate the complete source-owned scheduled context union member."""
+
+    if not isinstance(value, dict):
+        raise ValueError('scheduled cognition source_context is required')
+    if set(value) != {
+        'schema_version',
+        'context_kind',
+        'continuation_objective',
+        'continuation_mode',
+    }:
+        raise ValueError('scheduled source_context fields are not exact')
+    if value.get('schema_version') != (
+        'self_cognition_scheduled_source_context.v1'
+    ) or value.get('context_kind') != 'scheduled_future_cognition':
+        raise ValueError('scheduled source_context schema is invalid')
+    for field_name in ('continuation_objective', 'continuation_mode'):
+        if not isinstance(value.get(field_name), str):
+            raise ValueError(
+                f'scheduled source_context.{field_name} must be text'
+            )
+
+
 def validate_case_name(case: models.SelfCognitionCase) -> str:
     """Return a supported case name or raise for an unsupported case.
 
@@ -481,50 +866,42 @@ def validate_case_name(case: models.SelfCognitionCase) -> str:
 
 def _target_scope(
     case: models.SelfCognitionCase,
-) -> models.SelfCognitionTargetScope:
-    """Normalize the externally supplied target scope for model input."""
+) -> models.SelfCognitionPromptTargetScope:
+    """Project channel semantics without delivery or identity metadata."""
 
     value = case.get("target_scope")
     if not isinstance(value, dict):
         value = {}
     platform = value.get("platform")
-    platform_channel_id = value.get("platform_channel_id")
     channel_type = value.get("channel_type")
-    user_id = value.get("user_id")
-    scope: models.SelfCognitionTargetScope = {
+    scope: models.SelfCognitionPromptTargetScope = {
         "platform": platform if isinstance(platform, str) else "",
-        "platform_channel_id": (
-            platform_channel_id if isinstance(platform_channel_id, str) else ""
-        ),
         "channel_type": channel_type if isinstance(channel_type, str) else "",
-        "user_id": user_id if isinstance(user_id, str) else None,
     }
     return scope
 
 
 def _source_refs(
     case: models.SelfCognitionCase,
-) -> list[models.SelfCognitionSourceRef]:
-    """Normalize source references while preserving only supported fields."""
+) -> list[models.SelfCognitionPromptSourceRef]:
+    """Project source references without storage or scheduler identifiers."""
 
     value = case.get("source_refs")
     if not isinstance(value, list):
-        return_value: list[models.SelfCognitionSourceRef] = []
+        return_value: list[models.SelfCognitionPromptSourceRef] = []
         return return_value
 
-    refs: list[models.SelfCognitionSourceRef] = []
+    refs: list[models.SelfCognitionPromptSourceRef] = []
     for item in value:
         if not isinstance(item, dict):
             continue
-        source_ref: models.SelfCognitionSourceRef = {
+        source_ref: models.SelfCognitionPromptSourceRef = {
             "source_kind": _string_field(item, "source_kind"),
-            "source_id": _string_field(item, "source_id"),
             "summary": _string_field(item, "summary"),
+            "due_at": None,
         }
         due_at = item.get("due_at")
-        if due_at is None:
-            source_ref["due_at"] = None
-        elif isinstance(due_at, str):
+        if isinstance(due_at, str):
             source_ref["due_at"] = (
                 format_storage_utc_for_llm(due_at) or None
             )
@@ -532,27 +909,43 @@ def _source_refs(
     return refs
 
 
-def _visible_context(case: models.SelfCognitionCase) -> list[dict[str, Any]]:
+def _visible_context(
+    case: models.SelfCognitionCase,
+) -> list[models.SelfCognitionVisibleContextRow]:
     """Copy visible dialog rows and localize storage times for model input."""
 
     value = case.get("visible_context")
     if not isinstance(value, list):
-        return_value: list[dict[str, Any]] = []
+        return_value: list[models.SelfCognitionVisibleContextRow] = []
         return return_value
 
-    rows: list[dict[str, Any]] = []
+    rows: list[models.SelfCognitionVisibleContextRow] = []
     for item in value:
-        if isinstance(item, dict):
-            row = dict(item)
-            raw_timestamp = row.get("timestamp")
-            if isinstance(raw_timestamp, str):
-                row["timestamp"] = format_storage_utc_for_llm(raw_timestamp)
-            rows.append(row)
+        if not isinstance(item, dict):
+            continue
+        body_text = item.get("body_text")
+        if not isinstance(body_text, str) or not body_text.strip():
+            continue
+        raw_timestamp = item.get("timestamp")
+        timestamp = (
+            format_storage_utc_for_llm(raw_timestamp)
+            if isinstance(raw_timestamp, str)
+            else ""
+        )
+        if not timestamp:
+            continue
+        row: models.SelfCognitionVisibleContextRow = {
+            "role": _string_field(item, "role"),
+            "display_name": _string_field(item, "display_name"),
+            "timestamp": timestamp,
+            "body_text": body_text.strip(),
+        }
+        rows.append(row)
     return rows
 
 
 def _render_target_scope(
-    target_scope: models.SelfCognitionTargetScope,
+    target_scope: models.SelfCognitionPromptTargetScope,
 ) -> str:
     """Render normalized target scope into source-packet text."""
 
@@ -565,7 +958,7 @@ def _render_target_scope(
 
 
 def _render_source_refs(
-    source_refs: list[models.SelfCognitionSourceRef],
+    source_refs: list[models.SelfCognitionPromptSourceRef],
 ) -> str:
     """Render source references into source-packet evidence bullets."""
 
@@ -576,10 +969,9 @@ def _render_source_refs(
     lines: list[str] = []
     for source_ref in source_refs:
         source_kind = source_ref.get('source_kind', '')
-        source_id = source_ref.get('source_id', '')
         due_at = source_ref.get('due_at')
         summary = source_ref.get('summary', '')
-        lines.append(f'- {source_kind}:{source_id}')
+        lines.append(f'- {source_kind}')
         if due_at:
             lines.append(f'  due_at: {due_at}')
         if summary:
@@ -588,7 +980,9 @@ def _render_source_refs(
     return rendered
 
 
-def _render_visible_context(rows: list[dict[str, Any]]) -> str:
+def _render_visible_context(
+    rows: list[models.SelfCognitionVisibleContextRow],
+) -> str:
     """Render visible dialog rows into source-packet evidence bullets."""
 
     if not rows:
@@ -601,8 +995,6 @@ def _render_visible_context(rows: list[dict[str, Any]]) -> str:
         role = _string_field(row, 'role')
         display_name = _string_field(row, 'display_name')
         body_text = _string_field(row, 'body_text')
-        if not body_text:
-            body_text = _string_field(row, 'text')
         speaker = display_name or role
         lines.append(f'- {timestamp} {speaker}: {body_text}')
     rendered = '\n'.join(lines)
@@ -612,27 +1004,10 @@ def _render_visible_context(rows: list[dict[str, Any]]) -> str:
 def _render_conversation_progress(
     conversation_progress: dict[str, Any] | object,
 ) -> dict[str, Any] | object:
-    """Return conversation progress without fields already in instruction.
+    """Return the canonical current-user continuity projection unchanged."""
 
-    The ``group_scene_digest`` is promoted to the instruction text for
-    group-review cases, so it is stripped here to avoid duplicating it in
-    the rendered percept body sent to the LLM.  The original structured
-    packet retains the full ``conversation_progress``.
-    """
-
-    if not isinstance(conversation_progress, dict):
-        return_value = conversation_progress
-        return return_value
-    removed_keys = {"group_scene_digest", "thread_reference_context"}
-    if not removed_keys.intersection(conversation_progress):
-        return_value = conversation_progress
-        return return_value
-    rendered = {
-        key: value
-        for key, value in conversation_progress.items()
-        if key not in removed_keys
-    }
-    return rendered
+    return_value = conversation_progress
+    return return_value
 
 
 def _compact_value(value: object) -> str:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionContractError,
+    CURRENT_EPISODE_EVIDENCE_SOURCE_KINDS,
     RELATIONAL_STANCE_VALUES,
     RELATIONAL_CURRENT_USER_RELATIONSHIP_STATE_VALUES,
     validate_relational_willingness,
@@ -53,3 +54,9 @@ def test_contracts_exposes_owned_contract() -> None:
 
     assert CognitionContractError is not None
     assert callable(validate_relational_willingness)
+
+
+def test_scheduler_events_are_current_episode_evidence() -> None:
+    """Scheduled self-cognition can cite its current trigger event."""
+
+    assert "scheduler_event" in CURRENT_EPISODE_EVIDENCE_SOURCE_KINDS

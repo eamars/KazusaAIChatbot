@@ -224,6 +224,7 @@ RELATIONAL_PROVENANCE_ROLE_VALUES = frozenset({
 
 CURRENT_EPISODE_EVIDENCE_SOURCE_KINDS = frozenset({
     "episode",
+    "scheduler_event",
     "tool_result",
 })
 MEMORY_SCOPE_VALUES = frozenset({

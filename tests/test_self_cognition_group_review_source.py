@@ -4,10 +4,19 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import pytest
 
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    CognitionExecutionError,
+)
+from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+    build_character_production_state,
+)
+from kazusa_ai_chatbot.nodes.dialog_agent import StateContractError
+from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition as connector
 from kazusa_ai_chatbot.reflection_cycle.models import (
     ReflectionInputSet,
     ReflectionScopeInput,
@@ -16,6 +25,9 @@ from kazusa_ai_chatbot.reflection_cycle.activity_windows import (
     build_group_activity_windows,
 )
 from kazusa_ai_chatbot.self_cognition import models, projection, runner, sources
+from tests.cognition_core_v2_test_helpers import (
+    canonical_service_character_profile,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -100,7 +112,7 @@ async def test_collect_group_chat_review_cases_builds_same_group_cases(
     addressed_case = next(
         case
         for case in cases
-        if case["conversation_progress"]["window_start"]
+        if case["source_context"]["group_activity_window"]["window_start"]
         == "2026-05-18T04:00:00+00:00"
     )
     assert addressed_case["source_refs"][0]["source_kind"] == (
@@ -111,16 +123,18 @@ async def test_collect_group_chat_review_cases_builds_same_group_cases(
         "2026-05-18T04:00:00+00:00:"
         "2026-05-18T04:15:00+00:00"
     )
-    assert addressed_case["conversation_progress"]["source"] == (
+    assert addressed_case["conversation_progress"] is None
+    assert addressed_case["source_context"]["group_activity_window"]["source"] == (
         "reflection_activity_window"
     )
-    assert addressed_case["group_activity_window"]["source"] == (
-        "reflection_activity_window"
-    )
-    assert addressed_case["group_activity_window"]["semantic_labels"][
+    assert addressed_case["source_context"]["group_activity_window"][
+        "semantic_labels"
+    ][
         "bot_addressing"
     ] == "directly_addressed"
-    assert addressed_case["conversation_progress"]["activity_labels"][
+    assert addressed_case["source_context"]["group_activity_window"][
+        "semantic_labels"
+    ][
         "bot_addressing"
     ] == "directly_addressed"
     assert len(addressed_case["visible_context"]) == 2
@@ -268,7 +282,7 @@ async def test_collect_group_chat_review_cases_skips_empty_windows() -> None:
     )
 
     assert len(cases) == 1
-    assert cases[0]["conversation_progress"]["window_start"] == (
+    assert cases[0]["source_context"]["group_activity_window"]["window_start"] == (
         "2026-05-18T04:30:00+00:00"
     )
 
@@ -321,7 +335,7 @@ async def test_collect_group_chat_review_cases_prefers_newest_windows(
     )
 
     window_starts = [
-        case["conversation_progress"]["window_start"]
+        case["source_context"]["group_activity_window"]["window_start"]
         for case in cases
     ]
     assert window_starts == [
@@ -459,7 +473,8 @@ async def test_collect_group_review_cases_attaches_participant_context(
     assert captured_builder_payload["participant_rows"][0][
         "global_user_id"
     ] == "user-1"
-    assert case["conversation_progress"]["participant_context"]["source"] == (
+    assert case["conversation_progress"] is None
+    assert case["source_context"]["participant_context"]["source"] == (
         "group_review_participant_context"
     )
     assert case["delivery_mention_users"] == [
@@ -569,13 +584,15 @@ async def test_collect_group_review_cases_attaches_scene_digest(
     assert len(cases) == 1
     assert captured_window == windows[0]
     case = cases[0]
-    assert case["conversation_progress"]["group_scene_digest"] == {
+    assert case["conversation_progress"] is None
+    assert case["source_context"]["group_scene_digest"] == {
         "digest": (
             "这段群聊里，user 提了一个问题，"
             "assistant 已经在窗口里接过一次。"
         ),
+        "summary": "user 提问，assistant 已经接过一次。",
     }
-    assert case["conversation_progress"]["summary"] == (
+    assert case["source_context"]["group_scene_digest"]["summary"] == (
         "user 提问，assistant 已经接过一次。"
     )
 
@@ -583,7 +600,6 @@ async def test_collect_group_review_cases_attaches_scene_digest(
     rendered_packet = projection.render_source_packet_text(source_packet)
     serialized_packet = json.dumps(source_packet, ensure_ascii=False)
 
-    assert "group_scene_digest" not in rendered_packet
     assert "user 提了一个问题" in rendered_packet
     assert "user 提问，assistant 已经接过一次" in rendered_packet
     assert "group_scene_digest" in serialized_packet
@@ -636,9 +652,10 @@ async def test_collect_group_review_cases_rejects_stale_scene_digest(
     )
 
     assert len(cases) == 1
-    conversation_progress = cases[0]["conversation_progress"]
-    assert "group_scene_digest" not in conversation_progress
-    assert "summary" not in conversation_progress
+    source_context = cases[0]["source_context"]
+    assert cases[0]["conversation_progress"] is None
+    assert "group_scene_digest" not in source_context
+    assert "summary" not in source_context
 
 
 def test_group_review_summary_conversation_context_bounds_before_window(
@@ -734,10 +751,10 @@ async def test_collect_group_review_cases_attaches_summary_conversation_evidence
         "W 和温格围绕骑行、受凉和拉稀没力气开玩笑。"
     )
     assert captured_evidence_payload["window"] == window
-    assert case["conversation_progress"]["summary"] == (
+    assert case["source_context"]["group_scene_digest"]["summary"] == (
         "W 和温格围绕骑行、受凉和拉稀没力气开玩笑。"
     )
-    assert case["conversation_progress"]["conversation_evidence"] == [
+    assert case["source_context"]["conversation_evidence"] == [
         "温格高艾菲波加查: 山里爬坡 出汗 下坡 那山风呼呼吹肚子上",
         "1816: 那应该就是肠胃保护了",
     ]
@@ -815,8 +832,10 @@ def test_group_review_source_packet_uses_active_group_review_contract() -> None:
     assert "active_group_review_same_channel_no_fallback" in serialized_packet
     assert "group_chat_trigger_review" not in rendered_packet
     assert "active_group_review_same_channel_no_fallback" not in rendered_packet
-    assert "group_activity_window" in serialized_packet
+    assert "source_context" in serialized_packet
     assert "semantic_labels" in serialized_packet
+    assert "legacy_group_metadata" not in serialized_packet
+    assert "conversation_progress" not in serialized_packet
     assert "# 群聊窗口信息" in rendered_packet
     assert "当前自检" not in rendered_packet
     assert "自然路线" not in rendered_packet
@@ -850,10 +869,9 @@ def test_group_review_source_packet_uses_ambient_sentence_when_not_addressed(
     """Ambient group review should not imply anyone addressed the character."""
 
     case = _group_review_case()
-    case["conversation_progress"]["activity_labels"]["bot_addressing"] = (
-        "ambient_group_context"
-    )
-    case["group_activity_window"]["semantic_labels"]["bot_addressing"] = (
+    case["source_context"]["group_activity_window"]["semantic_labels"][
+        "bot_addressing"
+    ] = (
         "ambient_group_context"
     )
 
@@ -878,7 +896,7 @@ def test_group_review_instruction_uses_digest_when_available() -> None:
     """Instruction should prefer the LLM-generated scene digest."""
 
     case = _group_review_case()
-    case["conversation_progress"]["group_scene_digest"] = {
+    case["source_context"]["group_scene_digest"] = {
         "digest": (
             '杏山千纱说：\u201c诶？你居然知道我在用GLM啊？\u201d，'
             '之后蚝爹油说：千纱不可以在有codex的时候悄悄出bug'
@@ -899,7 +917,7 @@ def test_group_review_fallback_when_assistant_presence_absent() -> None:
     """Without assistant_presence label, fallback should report no chiming in."""
 
     case = _group_review_case()
-    case["group_activity_window"]["semantic_labels"].pop(
+    case["source_context"]["group_activity_window"]["semantic_labels"].pop(
         "assistant_presence", None,
     )
 
@@ -912,13 +930,14 @@ def test_group_review_instruction_never_contradicts_assistant_presence() -> None
     """Regression: instruction must not say '没有插话' when bot is present."""
 
     case = _group_review_case()
-    case["conversation_progress"]["activity_labels"]["bot_addressing"] = (
+    case["source_context"]["group_activity_window"]["semantic_labels"][
+        "bot_addressing"
+    ] = (
         "ambient_group_context"
     )
-    case["group_activity_window"]["semantic_labels"]["bot_addressing"] = (
-        "ambient_group_context"
-    )
-    case["group_activity_window"]["semantic_labels"]["assistant_presence"] = (
+    case["source_context"]["group_activity_window"]["semantic_labels"][
+        "assistant_presence"
+    ] = (
         "present"
     )
 
@@ -1006,7 +1025,7 @@ async def test_collect_group_review_cases_attaches_thread_reference_context(
     assert captured_payload["character_profile"]["global_user_id"] == (
         "character-global"
     )
-    context = cases[0]["conversation_progress"]["thread_reference_context"]
+    context = cases[0]["source_context"]["thread_reference_context"]
     assert context["source"] == "group_review_thread_reference"
     assert context["ambiguous_second_person_rows"][0]["speaker"] == "灯（23岁）"
 
@@ -1030,7 +1049,7 @@ def test_group_review_source_packet_renders_thread_reference_before_visible_cont
             "body_text": "你的头发软软的，像rana家那只靠在暖气片旁边的猫。",
         },
     ]
-    case["conversation_progress"]["thread_reference_context"] = {
+    case["source_context"]["thread_reference_context"] = {
         "source": "group_review_thread_reference",
         "context_shape": "bounded_second_person_reference_warnings",
         "guidance": (
@@ -1135,6 +1154,494 @@ def test_non_group_source_packet_omits_group_window_section() -> None:
 
     assert "group_activity_window" not in serialized_packet
     assert "# 群聊窗口信息" not in rendered_packet
+
+
+def test_source_context_contract_accepts_group_and_scheduled_shapes() -> None:
+    """The case model exposes one typed source-context carrier."""
+
+    group_context = _group_review_case()["source_context"]
+    scheduled_context = {
+        "schema_version": "self_cognition_scheduled_source_context.v1",
+        "context_kind": "scheduled_future_cognition",
+        "continuation_objective": "Check the promised follow-up.",
+        "continuation_mode": "scheduled_followup",
+    }
+
+    assert "source_context" in models.SelfCognitionCase.__annotations__
+    assert group_context["schema_version"] == (
+        "self_cognition_group_source_context.v1"
+    )
+    assert group_context["context_kind"] == "group_chat_review"
+    assert scheduled_context["schema_version"] == (
+        "self_cognition_scheduled_source_context.v1"
+    )
+    assert scheduled_context["context_kind"] == (
+        "scheduled_future_cognition"
+    )
+
+
+def test_source_packet_allowlist_strips_ids_and_v2_scaffolding() -> None:
+    """Model-facing source packets contain semantic fields only."""
+
+    case = _group_review_case()
+    case["visible_context"] = [{
+        "role": "user",
+        "display_name": "speaker",
+        "timestamp": "2026-05-18T04:05:00+00:00",
+        "body_text": "A visible group message.",
+        "platform_message_id": "platform-row-001",
+        "database_id": "database-row-001",
+        "delivery_target": "private-target-001",
+    }]
+    case["source_context"]["participant_context"] = {
+        "guidance": "Keep the current group focus.",
+        "current_thread": "should-not-cross",
+    }
+
+    source_packet = projection.build_source_packet(case)
+    visible_row = source_packet["visible_context"][0]
+    serialized_packet = json.dumps(source_packet, ensure_ascii=False)
+
+    assert set(visible_row) == {
+        "role",
+        "display_name",
+        "timestamp",
+        "body_text",
+    }
+    assert source_packet["target_scope"] == {
+        "platform": "qq",
+        "channel_type": "group",
+    }
+    assert set(source_packet["source_refs"][0]) == {
+        "source_kind",
+        "due_at",
+        "summary",
+    }
+    assert "source_context" in source_packet
+    assert "v2_scaffold" not in serialized_packet
+    for forbidden in (
+        "platform_message_id",
+        "database_id",
+        "delivery_target",
+        "current_thread",
+        "platform-row-001",
+        "database-row-001",
+        "private-target-001",
+    ):
+        assert forbidden not in serialized_packet
+
+
+def test_source_context_validator_rejects_wrong_group_schema() -> None:
+    """Malformed source context fails before model-facing projection."""
+
+    case = _group_review_case()
+    case["source_context"]["schema_version"] = "wrong-schema"
+
+    with pytest.raises(ValueError, match="group source_context schema"):
+        projection.validate_case_contract(case)
+
+
+def test_group_scene_uses_chronological_newest_row_as_trigger() -> None:
+    """The newest valid visible row is the structural scene trigger."""
+
+    case = _group_review_case()
+    case["visible_context"] = [
+        {
+            "role": "user",
+            "display_name": "later",
+            "timestamp": "2026-05-18T04:07:00+00:00",
+            "body_text": "Newest trigger message.",
+        },
+        {
+            "role": "user",
+            "display_name": "earlier",
+            "timestamp": "2026-05-18T04:05:00+00:00",
+            "body_text": "Earlier ambient message.",
+        },
+    ]
+
+    scene = runner._build_public_group_scene(case)
+
+    assert scene.index("Earlier ambient message.") < scene.index(
+        "Newest trigger message."
+    )
+    assert scene.index("Before trigger:") < scene.index("At trigger:")
+    assert "earlier" not in scene
+    assert "later" not in scene
+
+
+@pytest.mark.asyncio
+async def test_group_review_case_projects_typed_source_context() -> None:
+    """A selected group window leaves participant progress empty."""
+
+    now = datetime(2026, 5, 18, 4, 45, tzinfo=timezone.utc)
+    windows = build_group_activity_windows(
+        scope=_group_scope(),
+        window_start=datetime(2026, 5, 18, 4, 0, tzinfo=timezone.utc),
+        window_end=datetime(2026, 5, 18, 4, 30, tzinfo=timezone.utc),
+        now=now,
+        character_global_user_id="character-global",
+        platform_bot_id="bot-1",
+    )
+
+    async def no_participant_context(**kwargs: Any) -> None:
+        del kwargs
+        return None
+
+    cases = await sources.collect_group_review_cases(
+        now=now,
+        character_profile={
+            "name": "Character",
+            "global_user_id": "character-global",
+            "platform_bot_id": "bot-1",
+        },
+        windows=windows,
+        max_cases=1,
+        participant_context_builder=no_participant_context,
+    )
+
+    assert len(cases) == 1
+    case = cases[0]
+    source_context = case["source_context"]
+    assert case["conversation_progress"] is None
+    assert source_context["schema_version"] == (
+        "self_cognition_group_source_context.v1"
+    )
+    assert source_context["context_kind"] == "group_chat_review"
+    assert source_context["group_activity_window"]["source"] == (
+        "reflection_activity_window"
+    )
+    assert source_context["conversation_evidence"] == []
+
+
+def test_self_cognition_readme_documents_v2_state_contract() -> None:
+    """The self-cognition ICD names the caller-owned V2 state fields."""
+
+    readme_path = Path(
+        "src/kazusa_ai_chatbot/self_cognition/README.md"
+    )
+    readme = readme_path.read_text(encoding="utf-8")
+
+    for required_text in (
+        "conversation_progress",
+        "source_context",
+        "public_group_scene",
+        "interaction_style_turn_snapshot.v1",
+    ):
+        assert required_text in readme
+
+
+def _test_interaction_style_snapshot() -> dict[str, Any]:
+    """Build the smallest immutable style snapshot accepted by self-cognition."""
+
+    overlay = {
+        "speech_guidelines": [],
+        "social_guidelines": [],
+        "pacing_guidelines": [],
+        "engagement_guidelines": [],
+        "confidence": "medium",
+    }
+    snapshot = {
+        "schema_version": "interaction_style_turn_snapshot.v1",
+        "sources": {},
+        "relevance": {},
+        "cognition": {},
+        "surface": {
+            "user": {"overlay": dict(overlay)},
+            "group_channel": {"overlay": dict(overlay)},
+        },
+        "application_order": ["user", "group_channel"],
+        "user_style": dict(overlay),
+        "group_engagement_action_context": {
+            "engagement_guidelines": ["Stay grounded in the visible scene."],
+            "confidence": "medium",
+        },
+        "snapshot_digest": "test-style-snapshot",
+    }
+    return snapshot
+
+
+@pytest.mark.asyncio
+async def test_prepared_group_review_state_contains_v2_scene_and_style_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The async runner prepares scene and style state before cognition."""
+
+    case = _group_review_case()
+    case["character_profile"] = canonical_service_character_profile(
+        marker="strict-v2-group",
+    )
+    case["visible_context"] = [{
+        "role": "user",
+        "display_name": "speaker",
+        "timestamp": "2026-05-18T04:05:00+00:00",
+        "body_text": "A visible group message.",
+        "platform_message_id": "platform-row-001",
+    }]
+    style_snapshot = _test_interaction_style_snapshot()
+    captured_style_calls: list[dict[str, Any]] = []
+    captured_state: dict[str, Any] = {}
+
+    async def load_style_snapshot(**kwargs: Any) -> dict[str, Any]:
+        captured_style_calls.append(dict(kwargs))
+        return style_snapshot
+
+    async def load_residue(_case: dict[str, Any]) -> str:
+        return ""
+
+    async def cognition_client(state: dict[str, Any]) -> dict[str, Any]:
+        captured_state.update(state)
+        return {
+            "logical_stance": "OBSERVE",
+            "character_intent": "WAIT",
+            "self_cognition_route": models.ROUTE_PROGRESS_MAINTENANCE,
+            "cognition_core_output": {
+                "state_update": {"state_scope": "user"},
+            },
+            "cognition_state_committed": True,
+        }
+
+    monkeypatch.setattr(
+        runner,
+        "build_interaction_style_context",
+        load_style_snapshot,
+    )
+    monkeypatch.setattr(
+        runner,
+        "_load_residue_context_for_case",
+        load_residue,
+    )
+
+    await runner.build_self_cognition_case_artifacts_async(
+        case,
+        cognition_client=cognition_client,
+    )
+
+    assert len(captured_style_calls) == 1
+    assert captured_style_calls[0]["global_user_id"] == ""
+    assert captured_style_calls[0]["channel_type"] == "group"
+    assert captured_state["conversation_progress"] is None
+    assert captured_state["public_group_scene"]
+    assert "A visible group message." in captured_state["public_group_scene"]
+    assert "platform-row-001" not in captured_state["public_group_scene"]
+    assert captured_state["interaction_style_context"] is style_snapshot
+    assert captured_state["global_user_id"] == ""
+    assert captured_state["platform_user_id"] == ""
+
+
+def test_prepared_group_review_state_builds_v2_cognition_input() -> None:
+    """The prepared state exposes every strict V2 caller-owned field."""
+
+    case = _group_review_case()
+    style_snapshot = _test_interaction_style_snapshot()
+    state = runner._build_cognition_state(
+        case,
+        "rendered group source packet",
+        public_group_scene="A bounded public group scene.",
+        interaction_style_context=style_snapshot,
+    )
+
+    assert state["conversation_progress"] is None
+    assert state["public_group_scene"] == (
+        "A bounded public group scene."
+    )
+    assert state["interaction_style_context"] is style_snapshot
+
+
+@pytest.mark.asyncio
+async def test_prepared_group_review_state_rejects_malformed_source_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The runner reports malformed source context as a typed state error."""
+
+    case = _group_review_case()
+    case["source_context"]["schema_version"] = "wrong-schema"
+
+    async def load_residue(_case: dict[str, Any]) -> str:
+        del _case
+        return ""
+
+    monkeypatch.setattr(
+        runner,
+        "_load_residue_context_for_case",
+        load_residue,
+    )
+
+    with pytest.raises(
+        StateContractError,
+        match="source state contract is invalid",
+    ):
+        await runner.build_self_cognition_case_artifacts_async(
+            case,
+            cognition_client=lambda state: {},
+        )
+
+
+@pytest.mark.asyncio
+async def test_prepared_group_review_state_reaches_strict_v2_connector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The connector extracts group guidance from the immutable snapshot."""
+
+    case = _group_review_case()
+    case["character_profile"] = canonical_service_character_profile(
+        marker="strict-v2-group",
+    )
+    style_snapshot = _test_interaction_style_snapshot()
+    state = runner._build_cognition_state(
+        case,
+        "rendered group source packet",
+        public_group_scene="A bounded public group scene.",
+        interaction_style_context=style_snapshot,
+    )
+    state["rag_result"] = {"answer": ""}
+    captured_inputs: list[dict[str, Any]] = []
+
+    async def fake_run_cognition(
+        cognition_input: dict[str, Any],
+        services: object,
+    ) -> dict[str, Any]:
+        del services
+        captured_inputs.append(cognition_input)
+        return {"state_update": {"state_scope": "character"}}
+
+    async def load_character_state() -> dict[str, Any]:
+        return build_character_production_state(
+            updated_at="2026-05-18T04:45:00Z",
+        )
+
+    monkeypatch.setattr(connector, "run_cognition", fake_run_cognition)
+    monkeypatch.setattr(
+        connector,
+        "get_character_cognition_state",
+        load_character_state,
+    )
+    monkeypatch.setattr(
+        connector,
+        "_state_has_episode_identity_snapshot",
+        lambda *args, **kwargs: True,
+    )
+    monkeypatch.setattr(
+        connector,
+        "_project_output_to_global_state",
+        lambda output, current_state: {},
+    )
+    monkeypatch.setattr(
+        connector,
+        "_episode_identity_state_update",
+        lambda current_state: {},
+    )
+
+    await connector.call_cognition_subgraph(state, commit=False)
+
+    assert len(captured_inputs) == 1
+    cognition_input = captured_inputs[0]
+    assert cognition_input["schema_version"] == "cognition_core_input.v2"
+    assert cognition_input["scene_context"]["public_group_scene"] == (
+        "A bounded public group scene."
+    )
+    assert cognition_input["group_engagement_action_context"] == (
+        style_snapshot["group_engagement_action_context"]
+    )
+
+    missing_snapshot_state = dict(state)
+    missing_snapshot_state.pop("interaction_style_context")
+    with pytest.raises(
+        CognitionExecutionError,
+        match="interaction style turn snapshot is required",
+    ):
+        await connector.call_cognition_subgraph(
+            missing_snapshot_state,
+            commit=False,
+        )
+
+
+def test_prepared_style_snapshot_is_reused_by_dialog_handoff() -> None:
+    """The dialog/L3 handoff keeps the exact cognition style object."""
+
+    case = _group_review_case()
+    style_snapshot = _test_interaction_style_snapshot()
+    cognition_state = runner._build_cognition_state(
+        case,
+        "rendered group source packet",
+        public_group_scene="A bounded public group scene.",
+        interaction_style_context=style_snapshot,
+    )
+
+    dialog_state = runner._build_dialog_state(
+        cognition_state,
+        {"action_specs": []},
+        usage_mode="self-cognition-test",
+    )
+
+    assert dialog_state["interaction_style_context"] is style_snapshot
+
+
+def test_interaction_style_snapshot_rejects_bad_contract() -> None:
+    """Malformed immutable style state fails before V2 receives it."""
+
+    wrong_schema = _test_interaction_style_snapshot()
+    wrong_schema["schema_version"] = "wrong-schema"
+    with pytest.raises(
+        StateContractError,
+        match="style snapshot schema is invalid",
+    ):
+        runner._validate_interaction_style_snapshot(
+            wrong_schema,
+            require_group_engagement=True,
+        )
+
+    malformed_overlay = _test_interaction_style_snapshot()
+    malformed_overlay["surface"]["group_channel"]["overlay"][
+        "confidence"
+    ] = None
+    with pytest.raises(
+        StateContractError,
+        match="style confidence is invalid",
+    ):
+        runner._validate_interaction_style_snapshot(
+            malformed_overlay,
+            require_group_engagement=True,
+        )
+
+
+@pytest.mark.parametrize("status", ["missing", "failed"])
+def test_interaction_style_snapshot_allows_unavailable_source_status(
+    status: str,
+) -> None:
+    """Unavailable style sources remain valid empty immutable snapshots."""
+
+    snapshot = _test_interaction_style_snapshot()
+    empty_overlay = {
+        "speech_guidelines": [],
+        "social_guidelines": [],
+        "pacing_guidelines": [],
+        "engagement_guidelines": [],
+        "confidence": "",
+    }
+    for scope_name in ("user", "group_channel"):
+        snapshot["sources"][scope_name] = {
+            "status": status,
+            "revision": 0,
+            "overlay": dict(empty_overlay),
+        }
+        snapshot["surface"][scope_name] = {
+            "status": status,
+            "revision": 0,
+            "overlay": dict(empty_overlay),
+        }
+    snapshot["user_style"] = dict(empty_overlay)
+    snapshot["group_engagement_action_context"] = {
+        "engagement_guidelines": [],
+        "confidence": "",
+    }
+
+    validated = runner._validate_interaction_style_snapshot(
+        snapshot,
+        require_group_engagement=True,
+    )
+
+    assert validated is snapshot
 
 
 def _input_set(scopes: list[ReflectionScopeInput]) -> ReflectionInputSet:
@@ -1432,10 +1939,30 @@ def _group_review_case() -> dict[str, Any]:
             }
         ],
         "visible_context": [],
-        "conversation_progress": {
-            "source": "reflection_activity_window",
-            "window_start": "2026-05-18T04:00:00+00:00",
-            "window_end": "2026-05-18T04:15:00+00:00",
+        "conversation_progress": None,
+        "source_context": {
+            "schema_version": "self_cognition_group_source_context.v1",
+            "context_kind": "group_chat_review",
+            "group_activity_window": {
+                "source": "reflection_activity_window",
+                "window_start": "2026-05-18T04:00:00+00:00",
+                "window_end": "2026-05-18T04:15:00+00:00",
+                "semantic_labels": {
+                    "activity_level": "quiet",
+                    "speaker_diversity": "one_speaker",
+                    "assistant_presence": "present",
+                    "bot_addressing": "directly_addressed",
+                    "message_recency": "recent",
+                    "noise_level": "low",
+                    "response_risk": "low",
+                },
+            },
+            "participant_context": None,
+            "thread_reference_context": None,
+            "group_scene_digest": None,
+            "conversation_evidence": [],
+        },
+        "legacy_group_metadata": {
             "activity_labels": {
                 "activity_level": "quiet",
                 "speaker_diversity": "one_speaker",
@@ -1445,17 +1972,6 @@ def _group_review_case() -> dict[str, Any]:
                 "noise_level": "low",
                 "response_risk": "low",
             },
-        },
-        "group_activity_window": {
-            "source": "reflection_activity_window",
-            "window_start": "2026-05-18T04:00:00+00:00",
-            "window_end": "2026-05-18T04:15:00+00:00",
-            "semantic_labels": {
-                "activity_level": "quiet",
-                "bot_addressing": "directly_addressed",
-                "assistant_presence": "present",
-            },
-            "delivery_target": "dm-1",
         },
         "delivery_target": {
             "schema_version": "self_cognition_delivery_target.v1",

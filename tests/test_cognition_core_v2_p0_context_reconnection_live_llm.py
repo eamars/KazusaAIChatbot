@@ -16,9 +16,6 @@ from kazusa_ai_chatbot import service as brain_service
 from kazusa_ai_chatbot.cognition_core_v2 import facade as cognition_facade
 from kazusa_ai_chatbot.db import build_memory_doc, save_memory
 from kazusa_ai_chatbot.db._client import get_db
-from kazusa_ai_chatbot.db.interaction_style_images import (
-    upsert_group_channel_style_image,
-)
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition as connector
 from kazusa_ai_chatbot.self_cognition import models, projection, runner
 from tests.llm_trace import write_llm_trace
@@ -540,25 +537,64 @@ async def test_live_group_self_cognition_uses_one_advisory_projection(
         }],
         "visible_context": [{
             "role": "user",
-            "text": "Rain makes the street reflections easier to photograph.",
+            "display_name": "speaker",
+            "body_text": (
+                "Rain makes the street reflections easier to photograph."
+            ),
             "timestamp": now,
         }],
+        "conversation_progress": None,
+        "source_context": {
+            "schema_version": "self_cognition_group_source_context.v1",
+            "context_kind": "group_chat_review",
+            "group_activity_window": {
+                "source": "reflection_activity_window",
+                "window_start": now,
+                "window_end": now,
+                "semantic_labels": {
+                    "activity_level": "active",
+                    "assistant_presence": "absent",
+                    "bot_addressing": "ambient_group_context",
+                },
+            },
+            "conversation_evidence": [],
+        },
         "character_profile": character_profile,
         "platform_bot_id": _BOT_ID,
     }
-    original_loader = connector.build_group_engagement_action_context
-    loader_results: list[dict[str, object]] = []
+    def interaction_style_snapshot(
+        engagement_guidelines: list[str],
+        confidence: str,
+    ) -> dict[str, object]:
+        """Build one immutable prompt-safe style snapshot for the case."""
 
-    async def capture_loader(**kwargs) -> dict[str, object]:
-        result = await original_loader(**kwargs)
-        loader_results.append(result)
-        return result
+        overlay = {
+            "speech_guidelines": [],
+            "social_guidelines": [],
+            "pacing_guidelines": [],
+            "engagement_guidelines": list(engagement_guidelines),
+            "confidence": confidence,
+        }
+        return {
+            "schema_version": "interaction_style_turn_snapshot.v1",
+            "sources": {},
+            "relevance": {},
+            "cognition": {},
+            "surface": {
+                "user": {"overlay": dict(overlay)},
+                "group_channel": {"overlay": dict(overlay)},
+            },
+            "application_order": ["user", "group_channel"],
+            "user_style": dict(overlay),
+            "group_engagement_action_context": {
+                "engagement_guidelines": list(engagement_guidelines),
+                "confidence": confidence,
+            },
+            "snapshot_digest": f"p0-style-{confidence or 'empty'}",
+        }
 
-    monkeypatch.setattr(
-        connector,
-        "build_group_engagement_action_context",
-        capture_loader,
-    )
+    style_snapshot = interaction_style_snapshot([guideline], "high")
+    control_snapshot = interaction_style_snapshot([], "")
     original_group_goal = cognition_facade.run_goal_cognition
     captured_group_goal_contexts: list[dict[str, object]] = []
 
@@ -608,45 +644,30 @@ async def test_live_group_self_cognition_uses_one_advisory_projection(
 
     source_packet = projection.build_source_packet(case)
     rendered_packet = projection.render_source_packet_text(source_packet)
-    database = await get_db()
-    try:
-        await upsert_group_channel_style_image(
-            platform=platform,
-            platform_channel_id=platform_channel_id,
-            overlay={
-                "speech_guidelines": [],
-                "social_guidelines": [],
-                "pacing_guidelines": [],
-                "engagement_guidelines": [guideline],
-                "confidence": "high",
-            },
-            source_reflection_run_ids=[f"p0-live-{suffix}"],
-            storage_timestamp_utc=now,
-        )
-        style_trace_id = llm_tracing.build_trace_id()
-        await llm_tracing.ensure_llm_trace_run(
-            trace_id=style_trace_id,
-            platform=platform,
-            platform_channel_id=platform_channel_id,
-            channel_type="group",
-            platform_message_id=f"self_cognition:{case['case_id']}",
-            global_user_id="",
-            started_at=now,
-        )
-        style_state = runner._build_cognition_state(case, rendered_packet)
-        style_state["llm_trace_id"] = style_trace_id
-        style_output = await _run_terminal_self_cognition_trace(
-            style_state,
-            trace_id=style_trace_id,
-        )
-        style_trace = await _trace_documents(style_trace_id)
-        style_goal_context_count = len(captured_group_goal_contexts)
-        style_action_input_count = len(captured_action_inputs)
-    finally:
-        await database.interaction_style_images.delete_many({
-            "platform": platform,
-            "platform_channel_id": platform_channel_id,
-        })
+    style_trace_id = llm_tracing.build_trace_id()
+    await llm_tracing.ensure_llm_trace_run(
+        trace_id=style_trace_id,
+        platform=platform,
+        platform_channel_id=platform_channel_id,
+        channel_type="group",
+        platform_message_id=f"self_cognition:{case['case_id']}",
+        global_user_id="",
+        started_at=now,
+    )
+    style_state = runner._build_cognition_state(
+        case,
+        rendered_packet,
+        public_group_scene=runner._build_public_group_scene(case),
+        interaction_style_context=style_snapshot,
+    )
+    style_state["llm_trace_id"] = style_trace_id
+    style_output = await _run_terminal_self_cognition_trace(
+        style_state,
+        trace_id=style_trace_id,
+    )
+    style_trace = await _trace_documents(style_trace_id)
+    style_goal_context_count = len(captured_group_goal_contexts)
+    style_action_input_count = len(captured_action_inputs)
     control_trace_id = llm_tracing.build_trace_id()
     await llm_tracing.ensure_llm_trace_run(
         trace_id=control_trace_id,
@@ -657,7 +678,12 @@ async def test_live_group_self_cognition_uses_one_advisory_projection(
         global_user_id="",
         started_at=now,
     )
-    control_state = runner._build_cognition_state(case, rendered_packet)
+    control_state = runner._build_cognition_state(
+        case,
+        rendered_packet,
+        public_group_scene=runner._build_public_group_scene(case),
+        interaction_style_context=control_snapshot,
+    )
     control_state["llm_trace_id"] = control_trace_id
     control_output = await _run_terminal_self_cognition_trace(
         control_state,
@@ -687,7 +713,7 @@ async def test_live_group_self_cognition_uses_one_advisory_projection(
             },
             "style_case": {
                 "trace_id": style_trace_id,
-                "loader_result": loader_results[0],
+                "interaction_style_snapshot": style_snapshot,
                 "cognition_output": style_output,
                 "captured_goal_contexts": style_goal_contexts,
                 "captured_action_inputs": style_action_inputs,
@@ -695,7 +721,7 @@ async def test_live_group_self_cognition_uses_one_advisory_projection(
             },
             "empty_control": {
                 "trace_id": control_trace_id,
-                "loader_result": loader_results[1],
+                "interaction_style_snapshot": control_snapshot,
                 "cognition_output": control_output,
                 "captured_goal_contexts": control_goal_contexts,
                 "captured_action_inputs": control_action_inputs,
@@ -704,15 +730,6 @@ async def test_live_group_self_cognition_uses_one_advisory_projection(
         },
     )
 
-    assert len(loader_results) == 2
-    assert loader_results[0] == {
-        "engagement_guidelines": [guideline],
-        "confidence": "high",
-    }
-    assert loader_results[1] == {
-        "engagement_guidelines": [],
-        "confidence": "",
-    }
     style_steps = style_trace["trace_steps"]
     control_steps = control_trace["trace_steps"]
     assert isinstance(style_steps, list)

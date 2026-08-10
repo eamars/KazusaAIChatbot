@@ -195,6 +195,97 @@ class SelfCognitionSourceRef(TypedDict, total=False):
     summary: str
 
 
+class SelfCognitionPromptSourceRef(TypedDict):
+    """Prompt-safe source reference without storage or delivery identity."""
+
+    source_kind: str
+    due_at: str | None
+    summary: str
+
+
+class SelfCognitionPromptTargetScope(TypedDict):
+    """Prompt-safe channel scope without platform or database identifiers."""
+
+    platform: str
+    channel_type: str
+
+
+class SelfCognitionVisibleContextRow(TypedDict):
+    """Prompt-safe visible row used by source projection and scene mapping."""
+
+    role: str
+    display_name: str
+    timestamp: str
+    body_text: str
+
+
+class SelfCognitionGroupActivityWindow(TypedDict):
+    """Semantic activity-window fields owned by the group source collector."""
+
+    source: str
+    window_start: str
+    window_end: str
+    semantic_labels: dict[str, str]
+
+
+class SelfCognitionGroupSceneDigest(TypedDict):
+    """Bounded neutral digest of the selected group activity window."""
+
+    digest: str
+    summary: NotRequired[str]
+
+
+class SelfCognitionGroupSourceContext(TypedDict):
+    """Prompt-safe source context for a group-review case."""
+
+    schema_version: Literal["self_cognition_group_source_context.v1"]
+    context_kind: Literal["group_chat_review"]
+    group_activity_window: SelfCognitionGroupActivityWindow
+    participant_context: NotRequired[dict[str, Any]]
+    thread_reference_context: NotRequired[dict[str, Any]]
+    group_scene_digest: NotRequired[SelfCognitionGroupSceneDigest]
+    conversation_evidence: list[str]
+
+
+class SelfCognitionScheduledSourceContext(TypedDict):
+    """Prompt-safe continuation context for a scheduled-future case."""
+
+    schema_version: Literal["self_cognition_scheduled_source_context.v1"]
+    context_kind: Literal["scheduled_future_cognition"]
+    continuation_objective: str
+    continuation_mode: str
+
+
+SelfCognitionSourceContext = (
+    SelfCognitionGroupSourceContext | SelfCognitionScheduledSourceContext
+)
+
+
+class SelfCognitionPromptGroupSourceContext(TypedDict):
+    """Prompt-safe group source context after schema metadata is removed."""
+
+    context_kind: Literal["group_chat_review"]
+    group_activity_window: SelfCognitionGroupActivityWindow
+    participant_context: NotRequired[dict[str, Any]]
+    thread_reference_context: NotRequired[dict[str, Any]]
+    group_scene_digest: NotRequired[SelfCognitionGroupSceneDigest]
+    conversation_evidence: list[str]
+
+
+class SelfCognitionPromptScheduledSourceContext(TypedDict):
+    """Prompt-safe scheduled source context without storage metadata."""
+
+    context_kind: Literal["scheduled_future_cognition"]
+    continuation_objective: str
+    continuation_mode: str
+
+
+SelfCognitionPromptSourceContext = (
+    SelfCognitionPromptGroupSourceContext
+    | SelfCognitionPromptScheduledSourceContext
+)
+
+
 class SelfCognitionBudget(TypedDict):
     """Local budget counters recorded in self-cognition run records."""
 
@@ -216,10 +307,10 @@ class SelfCognitionCase(TypedDict, total=False):
     source_refs: list[SelfCognitionSourceRef]
     semantic_due_state: str | None
     actionability: str
-    visible_context: list[dict[str, Any]]
+    visible_context: list[SelfCognitionVisibleContextRow]
     delivery_mention_users: list[dict[str, str]]
-    conversation_progress: dict[str, Any]
-    group_activity_window: dict[str, Any]
+    conversation_progress: dict[str, Any] | None
+    source_context: SelfCognitionSourceContext | None
     reflection_modifier: dict[str, Any]
     existing_attempts: list[dict[str, Any]]
     character_profile: dict[str, Any]
@@ -250,9 +341,8 @@ class SourcePacket(TypedDict):
     trigger_kind: str
     semantic_due_state: str | None
     actionability: str
-    target_scope: SelfCognitionTargetScope
-    source_refs: list[SelfCognitionSourceRef]
-    visible_context: list[dict[str, Any]]
+    target_scope: SelfCognitionPromptTargetScope
+    source_refs: list[SelfCognitionPromptSourceRef]
+    visible_context: list[SelfCognitionVisibleContextRow]
     conversation_progress: NotRequired[dict[str, Any]]
-    group_activity_window: NotRequired[dict[str, Any]]
-    reflection_modifier: NotRequired[dict[str, Any]]
+    source_context: NotRequired[SelfCognitionPromptSourceContext]

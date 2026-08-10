@@ -206,6 +206,9 @@ async def collect_group_review_cases(
             character_profile=character_profile,
             now=now,
         )
+        source_context = case["source_context"]
+        if not isinstance(source_context, dict):
+            raise ValueError("group review source context is required")
         participant_context = await _call_maybe_async(
             context_builder,
             participant_rows=[dict(row) for row in window.participant_rows],
@@ -217,9 +220,7 @@ async def collect_group_review_cases(
             current_timestamp_utc=normalize_storage_utc_iso(now.isoformat()),
         )
         if participant_context is not None:
-            case["conversation_progress"]["participant_context"] = (
-                participant_context
-            )
+            source_context["participant_context"] = participant_context
         thread_reference_context = await _call_maybe_async(
             thread_context_builder,
             participant_rows=[dict(row) for row in window.participant_rows],
@@ -228,7 +229,7 @@ async def collect_group_review_cases(
         if _is_group_review_thread_reference_context(
             thread_reference_context,
         ):
-            case["conversation_progress"]["thread_reference_context"] = (
+            source_context["thread_reference_context"] = (
                 thread_reference_context
             )
         scene_digest = await _call_maybe_async(
@@ -237,12 +238,12 @@ async def collect_group_review_cases(
         )
         normalized_scene_digest = _normalize_group_scene_digest(scene_digest)
         if normalized_scene_digest is not None:
-            case["conversation_progress"]["group_scene_digest"] = {
+            source_context["group_scene_digest"] = {
                 "digest": normalized_scene_digest["digest"].strip(),
             }
             summary = _group_scene_summary(normalized_scene_digest)
             if summary:
-                case["conversation_progress"]["summary"] = summary
+                source_context["group_scene_digest"]["summary"] = summary
                 conversation_evidence = await _call_maybe_async(
                     evidence_builder,
                     summary=summary,
@@ -257,9 +258,7 @@ async def collect_group_review_cases(
                     conversation_evidence,
                 )
                 if evidence_items:
-                    case["conversation_progress"]["conversation_evidence"] = (
-                        evidence_items
-                    )
+                    source_context["conversation_evidence"] = evidence_items
         binding = await resolve_self_cognition_delivery_target(
             platform=window.platform,
             source_platform_channel_id=window.platform_channel_id,
@@ -727,17 +726,17 @@ def _build_group_review_case(
         ),
         "source_refs": [dict(source_ref) for source_ref in window.source_refs],
         "visible_context": [dict(row) for row in window.visible_context],
-        "group_activity_window": {
-            "source": "reflection_activity_window",
-            "window_start": window_start,
-            "window_end": window_end,
-            "semantic_labels": semantic_labels,
-        },
-        "conversation_progress": {
-            "source": "reflection_activity_window",
-            "window_start": window_start,
-            "window_end": window_end,
-            "activity_labels": semantic_labels,
+        "conversation_progress": None,
+        "source_context": {
+            "schema_version": "self_cognition_group_source_context.v1",
+            "context_kind": "group_chat_review",
+            "group_activity_window": {
+                "source": "reflection_activity_window",
+                "window_start": window_start,
+                "window_end": window_end,
+                "semantic_labels": semantic_labels,
+            },
+            "conversation_evidence": [],
         },
         "character_profile": _project_character_profile(character_profile),
         "user_profile": {
@@ -1411,10 +1410,16 @@ def _build_scheduled_future_cognition_case(
         },
         "source_refs": source_refs,
         "visible_context": [],
-        "conversation_progress": {
-            "source": "scheduled_future_cognition",
+        "conversation_progress": None,
+        "source_context": {
+            "schema_version": (
+                "self_cognition_scheduled_source_context.v1"
+            ),
+            "context_kind": "scheduled_future_cognition",
             "continuation_objective": continuation_objective,
-            "continuation": safe_continuation,
+            "continuation_mode": text_or_empty(
+                safe_continuation.get("mode"),
+            ),
         },
         "character_profile": _project_character_profile(character_profile),
         "user_profile": case_user_profile,

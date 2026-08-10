@@ -133,6 +133,42 @@ coordination API and not through `/chat`-specific imports.
   review uses the reflection phase invariant
   `REFLECTION_PHASE_GROUPS_PER_SLOT=1` instead of the standalone worker cap.
 
+## Trigger State Contract
+
+`conversation_progress` is reserved for genuine continuity with the current
+user participant. Group review and scheduled-future cases set it to `None`.
+Their source-owned state is carried by the typed `source_context` union:
+
+- `group_chat_review` uses
+  `self_cognition_group_source_context.v1` with the bounded activity window,
+  optional participant/thread/scene hydration, and capped conversation
+  evidence.
+- `scheduled_future_cognition` uses
+  `self_cognition_scheduled_source_context.v1` with only the continuation
+  objective and continuation mode.
+
+Source packets use explicit prompt-safe allowlists. Visible rows contain only
+role, display name, localized timestamp, and body text. Source references and
+target scope contain only prompt-needed fields. Row/platform/database ids,
+delivery metadata, scheduler metadata, and V2 scaffolding stay out of the
+packet and its rendered prompt. Scheduled projections preserve the existing
+forbidden-fragment boundary.
+
+For group review, the caller owns `public_group_scene`. The runner projects
+chronological prompt-safe rows, uses the newest existing valid row as the
+structural trigger, and keeps prior rows ambient. It calls the canonical
+`build_group_scene_context` and `project_group_scene_prompt` path without
+adding a semantic message. Trigger identity, addresses, reply context, and
+roster fields are empty, and the resulting scene remains outside
+`conversation_progress`.
+
+After successful target binding, each bound private/group text-surface case
+and each targetless group case loads exactly one
+`interaction_style_turn_snapshot.v1`; targetless group is the only case that
+passes an empty user id. A valid snapshot may contain missing or failed source
+overlays. Absent, wrong-schema, or malformed snapshot state fails typed state
+preparation. The exact snapshot value/object is shared by Cognition and L3.
+
 ## Public Interface
 
 - `sources.collect_self_cognition_cases(...)`
@@ -164,7 +200,7 @@ coordination API and not through `/chat`-specific imports.
 
 `group_chat_review` is built from reflection-cycle group activity windows. It
 uses neutral chat-window data framing, bounded visible context, deterministic
-semantic labels, and source-aligned delivery metadata.
+semantic labels, and separately bound delivery metadata.
 For ambient group windows, the model-facing source packet says the character
 has just noticed a group scene where she has not yet joined and nobody has
 handed the topic to her. For directly addressed group windows, the source
@@ -179,16 +215,18 @@ as cognition-scene topic.
 Ambient group review keeps `target_scope.user_id=None`: the semantic target is
 the observed group scene, not a fabricated latest speaker. The delivery target
 remains the source group channel. Before V2 goal and route selection,
-canonical targetless group review loads bounded group-channel engagement
-guidance once at resolver cycle zero. The lookup overlaps independent cognition
-state preparation, and later cycles reuse the exact projected value without
-another style read. Goal cognition and action planning may use it to judge how
-to participate in the currently observed scene. The guidance is advisory
-context, not evidence, a response-ratio control, permission, route authority,
-a command to speak, a new topic, or a deterministic silence rule.
+canonical targetless group review loads exactly one
+`interaction_style_turn_snapshot.v1` after target binding. Goal cognition and
+action planning may use its bounded group-channel engagement guidance to judge
+how to participate in the currently observed scene. The snapshot is reused by
+the cognition and L3 text-surface stages as the same value/object. Valid
+missing or failed source overlays remain usable; absent, wrong-schema, or
+malformed snapshot state is a typed preparation failure. The guidance is
+advisory context, not evidence, a response-ratio control, permission, route
+authority, a command to speak, a new topic, or a deterministic silence rule.
 
 Group review also attaches bounded participant context during source
-collection under `conversation_progress.participant_context`. This context is
+collection under `source_context.participant_context`. This context is
 source hydration, not a normal RAG-backed case: it deterministically selects
 one primary social beat from the activity-window participant rows, hydrates
 only that primary participant when a `global_user_id` is already present, and
@@ -198,7 +236,7 @@ identity lookup, background participant profiles, web lookup, and full RAG
 supervisor planning are not used.
 
 Group review may also attach
-`conversation_progress.group_scene_digest = {"digest": str}` with optional
+`source_context.group_scene_digest = {"digest": str}` with optional
 `summary`. This is a single neutral observational string generated from the
 selected activity window to help cognition read noisy group flow. The digest
 preserves visible participant display names and visible assistant rows with
@@ -210,7 +248,7 @@ source hydration only: it does not add a deterministic flow state, route
 decision, response gate, speaker target, or action recommendation.
 
 Group review may also attach
-`conversation_progress.thread_reference_context` when a bounded visible row
+`source_context.thread_reference_context` when a bounded visible row
 contains second-person wording that is not directly addressed to the active
 character. The object shape is:
 

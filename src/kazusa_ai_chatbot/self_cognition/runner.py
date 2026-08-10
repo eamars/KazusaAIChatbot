@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from kazusa_ai_chatbot.action_spec.attempt_ledger import upsert_action_attempt
@@ -34,6 +34,10 @@ from kazusa_ai_chatbot.config import (
     COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS,
     COGNITION_RESOLVER_MAX_CYCLES,
 )
+from kazusa_ai_chatbot.conversation_progress import (
+    build_group_scene_context,
+    project_group_scene_prompt,
+)
 from kazusa_ai_chatbot.cognition_resolver.capabilities import (
     execute_resolver_capability_request,
 )
@@ -57,6 +61,7 @@ from kazusa_ai_chatbot.nodes.dialog_agent import (
 from kazusa_ai_chatbot.consolidation.core import (
     call_consolidation_subgraph,
 )
+from kazusa_ai_chatbot.db import build_interaction_style_context
 from kazusa_ai_chatbot.internal_monologue_residue import (
     load_residue_context,
     record_completed_episode_residue,
@@ -77,6 +82,8 @@ from kazusa_ai_chatbot.self_cognition import models, projection, tracking
 from kazusa_ai_chatbot.time_boundary import (
     build_turn_clock_from_storage_utc,
     format_storage_utc_for_llm,
+    normalize_storage_utc_iso,
+    parse_storage_utc_datetime,
 )
 
 
@@ -186,6 +193,13 @@ async def build_self_cognition_case_artifacts_async(
         )
         return artifact_payloads
 
+    try:
+        projection.validate_case_contract(case)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise StateContractError(
+            f"self-cognition source state contract is invalid: {exc}"
+        ) from exc
+
     if pipeline_run_handle is not None:
         pipeline_run_handle.raise_if_cancelled("before_source_packet")
     source_packet = projection.build_source_packet(case)
@@ -205,10 +219,16 @@ async def build_self_cognition_case_artifacts_async(
     if pipeline_run_handle is not None:
         pipeline_run_handle.raise_if_cancelled("before_cognition_context")
     residue_context = await _load_residue_context_for_case(case)
+    interaction_style_context = await _prepare_interaction_style_context(
+        case,
+    )
+    public_group_scene = _build_public_group_scene(case)
     cognition_state = _build_cognition_state(
         case,
         rendered_packet,
         residue_context=residue_context,
+        public_group_scene=public_group_scene,
+        interaction_style_context=interaction_style_context,
     )
     artifact_payloads[models.RUNTIME_COGNITIVE_EPISODE] = dict(
         cognition_state["cognitive_episode"]
@@ -772,14 +792,262 @@ def _action_specs(cognition_output: dict[str, Any]) -> list[dict[str, Any]]:
     return specs
 
 
+async def _prepare_interaction_style_context(
+    case: models.SelfCognitionCase,
+) -> dict[str, Any] | None:
+    """Load one immutable style snapshot for a bound text-surface case."""
+
+    if case.get("target_binding_status") == "failed":
+        return_value = None
+        return return_value
+    if not isinstance(case.get("delivery_target"), dict):
+        return_value = None
+        return return_value
+
+    target_scope = _target_scope(case)
+    channel_type = target_scope["channel_type"]
+    if channel_type not in {"private", "group"}:
+        return_value = None
+        return return_value
+
+    try:
+        snapshot = await build_interaction_style_context(
+            global_user_id=target_scope["user_id"] or "",
+            channel_type=channel_type,
+            platform=target_scope["platform"],
+            platform_channel_id=target_scope["platform_channel_id"],
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise StateContractError(
+            f"self-cognition interaction style snapshot preparation failed: "
+            f"{exc}"
+        ) from exc
+
+    require_group_engagement = (
+        channel_type == "group" and target_scope["user_id"] == ""
+    )
+    validated_snapshot = _validate_interaction_style_snapshot(
+        snapshot,
+        require_group_engagement=require_group_engagement,
+    )
+    return validated_snapshot
+
+
+def _validate_interaction_style_snapshot(
+    snapshot: object,
+    *,
+    require_group_engagement: bool,
+) -> dict[str, Any]:
+    """Validate the immutable snapshot fields consumed by V2 and L3."""
+
+    if not isinstance(snapshot, dict):
+        raise StateContractError(
+            "self-cognition interaction style snapshot must be an object"
+        )
+    if snapshot.get("schema_version") != (
+        "interaction_style_turn_snapshot.v1"
+    ):
+        raise StateContractError(
+            "self-cognition interaction style snapshot schema is invalid"
+        )
+    application_order = snapshot.get("application_order")
+    surface = snapshot.get("surface")
+    if not isinstance(application_order, list):
+        raise StateContractError(
+            "self-cognition interaction style application order is required"
+        )
+    if not isinstance(surface, Mapping):
+        raise StateContractError(
+            "self-cognition interaction style surface projection is required"
+        )
+    allowed_scopes = {"user", "group_channel"}
+    if any(
+        not isinstance(scope_name, str) or scope_name not in allowed_scopes
+        for scope_name in application_order
+    ):
+        raise StateContractError(
+            "self-cognition interaction style scope is invalid"
+        )
+    if len(set(application_order)) != len(application_order):
+        raise StateContractError(
+            "self-cognition interaction style scopes are duplicated"
+        )
+    surface_scope_names = set(surface)
+    if any(
+        not isinstance(scope_name, str)
+        or scope_name not in allowed_scopes
+        or scope_name not in application_order
+        for scope_name in surface_scope_names
+    ) or surface_scope_names != set(application_order):
+        raise StateContractError(
+            "self-cognition interaction style surface scopes are invalid"
+        )
+
+    for scope_name in application_order:
+        source_projection = surface.get(scope_name)
+        if not isinstance(source_projection, Mapping):
+            raise StateContractError(
+                "self-cognition interaction style source projection is "
+                "required"
+            )
+        overlay = source_projection.get("overlay")
+        if not isinstance(overlay, Mapping):
+            raise StateContractError(
+                "self-cognition interaction style overlay is required"
+            )
+        for field_name in (
+            "speech_guidelines",
+            "social_guidelines",
+            "pacing_guidelines",
+            "engagement_guidelines",
+        ):
+            guidelines = overlay.get(field_name)
+            if not isinstance(guidelines, list):
+                raise StateContractError(
+                    "self-cognition interaction style guidelines are invalid"
+                )
+            if any(
+                not isinstance(guideline, str) or not guideline.strip()
+                for guideline in guidelines
+            ):
+                raise StateContractError(
+                    "self-cognition interaction style guideline is invalid"
+                )
+        confidence = overlay.get("confidence")
+        if not isinstance(confidence, str):
+            raise StateContractError(
+                "self-cognition interaction style confidence is invalid"
+            )
+
+    if require_group_engagement:
+        group_engagement_context = snapshot.get(
+            "group_engagement_action_context"
+        )
+        if not isinstance(group_engagement_context, Mapping):
+            raise StateContractError(
+                "self-cognition group engagement snapshot projection is "
+                "required"
+            )
+        engagement_guidelines = group_engagement_context.get(
+            "engagement_guidelines"
+        )
+        confidence = group_engagement_context.get("confidence")
+        if not isinstance(engagement_guidelines, list):
+            raise StateContractError(
+                "self-cognition group engagement guidelines are invalid"
+            )
+        if any(
+            not isinstance(guideline, str) or not guideline.strip()
+            for guideline in engagement_guidelines
+        ):
+            raise StateContractError(
+                "self-cognition group engagement guideline is invalid"
+            )
+        if not isinstance(confidence, str):
+            raise StateContractError(
+                "self-cognition group engagement confidence is invalid"
+            )
+    return snapshot
+
+
+def _build_public_group_scene(case: models.SelfCognitionCase) -> str:
+    """Project a group review window through the canonical scene contract."""
+
+    if _string_field(case, "trigger_kind") != models.TRIGGER_GROUP_CHAT_REVIEW:
+        return_value = ""
+        return return_value
+    source_context = case.get("source_context")
+    if not isinstance(source_context, dict):
+        return_value = ""
+        return return_value
+    if source_context.get("context_kind") != "group_chat_review":
+        return_value = ""
+        return return_value
+
+    visible_rows = _group_scene_visible_rows(case)
+    if not visible_rows:
+        return_value = ""
+        return return_value
+    ambient_rows = visible_rows[:-1]
+    trigger_row = visible_rows[-1]
+    ambient_logical_turns = [
+        {
+            "occurred_at": row["timestamp"],
+            "role": row["role"],
+            "display_name": "",
+            "fragments": [row["body_text"]],
+            "addressed_to_global_user_ids": [],
+            "reply_context": {},
+        }
+        for row in ambient_rows
+    ]
+    group_scene_context = build_group_scene_context(
+        ambient_logical_turns=ambient_logical_turns,
+        trigger_occurred_at=trigger_row["timestamp"],
+        trigger_speaker_name="",
+        trigger_body_text=trigger_row["body_text"],
+        trigger_addressed_global_user_ids=[],
+        trigger_reply_to_display_name="",
+        scope_users=[],
+    )
+    public_group_scene = project_group_scene_prompt(group_scene_context)
+    return public_group_scene
+
+
+def _group_scene_visible_rows(
+    case: models.SelfCognitionCase,
+) -> list[models.SelfCognitionVisibleContextRow]:
+    """Allowlist and chronologically order rows used for public scene input."""
+
+    value = case.get("visible_context")
+    if not isinstance(value, list):
+        return_value: list[models.SelfCognitionVisibleContextRow] = []
+        return return_value
+
+    valid_rows: list[
+        tuple[object, int, models.SelfCognitionVisibleContextRow]
+    ] = []
+    for index, item in enumerate(value):
+        if not isinstance(item, dict):
+            continue
+        body_text = item.get("body_text")
+        timestamp = item.get("timestamp")
+        if not isinstance(body_text, str) or not body_text.strip():
+            continue
+        if not isinstance(timestamp, str) or not timestamp.strip():
+            continue
+        try:
+            parsed_timestamp = parse_storage_utc_datetime(timestamp)
+        except ValueError:
+            continue
+        safe_row: models.SelfCognitionVisibleContextRow = {
+            "role": (
+                item["role"]
+                if isinstance(item.get("role"), str)
+                else ""
+            ),
+            "display_name": "",
+            "timestamp": normalize_storage_utc_iso(timestamp),
+            "body_text": body_text.strip(),
+        }
+        valid_rows.append((parsed_timestamp, index, safe_row))
+    valid_rows.sort(key=lambda item: (item[0], item[1]))
+    return_value = [item[2] for item in valid_rows]
+    return return_value
+
+
 def _build_cognition_state(
     case: models.SelfCognitionCase,
     rendered_packet: str,
     *,
     residue_context: str = "",
+    public_group_scene: str | None = None,
+    interaction_style_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the shared cognition graph state for an idle source packet."""
 
+    if public_group_scene is None:
+        public_group_scene = _build_public_group_scene(case)
     source_timestamp_utc = _string_field(case, "idle_timestamp_utc")
     turn_clock = build_turn_clock_from_storage_utc(source_timestamp_utc)
     storage_timestamp_utc = turn_clock["storage_timestamp_utc"]
@@ -824,6 +1092,8 @@ def _build_cognition_state(
         "indirect_speech_context": "",
         "channel_topic": _cognition_scene_topic(case),
         "conversation_progress": case.get("conversation_progress"),
+        "source_context": case.get("source_context"),
+        "public_group_scene": public_group_scene,
         "promoted_reflection_context": case.get("promoted_reflection_context"),
         "internal_monologue_residue_context": residue_context,
         "debug_modes": {"no_visual_directives": True},
@@ -838,6 +1108,8 @@ def _build_cognition_state(
         "new_facts": [],
         "future_promises": [],
     }
+    if interaction_style_context is not None:
+        state["interaction_style_context"] = interaction_style_context
     return state
 
 
@@ -859,6 +1131,11 @@ def _build_dialog_state(
 
     dialog_state = dict(cognition_state)
     dialog_state.update(cognition_output)
+    interaction_style_context = cognition_state.get(
+        "interaction_style_context"
+    )
+    if interaction_style_context is not None:
+        dialog_state["interaction_style_context"] = interaction_style_context
     dialog_state["final_dialog"] = []
     dialog_state["dialog_usage_mode"] = usage_mode
     return dialog_state

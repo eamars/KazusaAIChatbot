@@ -267,6 +267,8 @@ def _lifecycle_update_state_from_case(case: dict) -> dict:
     state = self_cognition_runner._build_cognition_state(
         case,
         rendered_packet,
+        public_group_scene="",
+        interaction_style_context=_fixed_interaction_style_snapshot(),
     )
     state.update({
         "decontextualized_input": rendered_packet,
@@ -291,15 +293,38 @@ def _lifecycle_update_state_from_case(case: dict) -> dict:
         "emotional_intensity": '低',
         "vibe_check": '安静维护',
         "relational_dynamic": '关系稳定，当前只做后台承诺整理',
-        "conversation_progress": {
-            "source": "active_commitment_due_check",
-            "current_thread": '私有承诺生命周期复核',
-            "next_affordances": [
-                '如果角色决定放弃承诺，关闭该承诺而不生成文字表层',
-            ],
-        },
+        "conversation_progress": None,
     })
     return state
+
+
+def _fixed_interaction_style_snapshot() -> dict[str, object]:
+    """Build one injected immutable style snapshot for the live fixture."""
+
+    overlay = {
+        "speech_guidelines": [],
+        "social_guidelines": [],
+        "pacing_guidelines": [],
+        "engagement_guidelines": [],
+        "confidence": "medium",
+    }
+    return {
+        "schema_version": "interaction_style_turn_snapshot.v1",
+        "sources": {},
+        "relevance": {},
+        "cognition": {},
+        "surface": {
+            "user": {"overlay": dict(overlay)},
+            "group_channel": {"overlay": dict(overlay)},
+        },
+        "application_order": ["user", "group_channel"],
+        "user_style": dict(overlay),
+        "group_engagement_action_context": {
+            "engagement_guidelines": [],
+            "confidence": "",
+        },
+        "snapshot_digest": "l2d-commitment-style",
+    }
 
 
 def _action_spec_leakage_errors(action_specs: list[dict]) -> list[str]:
