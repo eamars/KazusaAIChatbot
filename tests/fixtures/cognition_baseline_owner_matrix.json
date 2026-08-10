@@ -44,6 +44,7 @@
     {"pattern": "src/kazusa_ai_chatbot/state.py", "owner": "intake_queue", "gate": "graph_state"},
     {"pattern": "src/kazusa_ai_chatbot/task_resolution/**", "owner": "resolver", "gate": "task_resolution"},
     {"pattern": "src/kazusa_ai_chatbot/time_boundary.py", "owner": "runtime_configuration", "gate": "time_boundary"},
+    {"pattern": "src/kazusa_ai_chatbot/version.py", "owner": "runtime_configuration", "gate": "release_metadata"},
     {"pattern": "src/kazusa_ai_chatbot/utils.py", "owner": "cognition", "gate": "llm_contract"}
   ],
   "deleted_baseline_modules": [

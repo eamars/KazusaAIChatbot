@@ -1,20 +1,50 @@
 {
   "schema_version": 1,
   "source_roots": [
+    "src/control_console/__init__.py",
     "src/kazusa_ai_chatbot/cognition_core_v2",
     "src/kazusa_ai_chatbot/cognition_resolver",
+    "src/kazusa_ai_chatbot/version.py",
     "src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition.py",
     "src/kazusa_ai_chatbot/nodes/persona_supervisor2_l3_surface.py",
     "src/kazusa_ai_chatbot/nodes/dialog_agent.py",
-    "src/kazusa_ai_chatbot/nodes/persona_supervisor2_schema.py"
+    "src/kazusa_ai_chatbot/nodes/persona_supervisor2_schema.py",
+    "src/scripts/export_trace_correlation_manifest.py"
   ],
   "entries": [
+    {
+      "source": "src/control_console/__init__.py",
+      "owner": "product release owner",
+      "contract": "console package release identity mirrors package metadata",
+      "required_unit_tests": [
+        "tests/test_release_metadata.py::test_product_release_identity_is_consistent"
+      ],
+      "supplemental_tests": []
+    },
     {
       "source": "src/kazusa_ai_chatbot/cognition_core_v2/action_authorization.py",
       "owner": "cognition_core_v2 owner",
       "contract": "action_authorization public contract",
       "required_unit_tests": [
         "tests/unit/cognition_core_v2/test_action_authorization.py::test_action_authorization_exposes_owned_contract"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/version.py",
+      "owner": "product release owner",
+      "contract": "package release identity is authoritative",
+      "required_unit_tests": [
+        "tests/test_release_metadata.py::test_product_release_identity_is_consistent"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/scripts/export_trace_correlation_manifest.py",
+      "owner": "operational tooling owner",
+      "contract": "trace export uses the public database boundary",
+      "required_unit_tests": [
+        "tests/test_script_db_boundary.py::test_scripts_do_not_import_raw_or_private_db_boundary"
       ],
       "supplemental_tests": []
     },

@@ -27,6 +27,17 @@ def test_manifest_covers_strict_cognition_source_boundary() -> None:
     assert validate_manifest(manifest, REPOSITORY_ROOT) == []
 
 
+def test_manifest_accepts_an_explicit_package_init_source_root() -> None:
+    """Release metadata may be owned by a package initializer explicitly."""
+
+    manifest = load_manifest(REPOSITORY_ROOT)
+
+    assert "src/control_console/__init__.py" in {
+        entry["source"] for entry in manifest["entries"]
+    }
+    assert validate_manifest(manifest, REPOSITORY_ROOT) == []
+
+
 def test_manifest_rejects_empty_unit_mapping() -> None:
     """A semantic source cannot be mapped without a deterministic unit node."""
 

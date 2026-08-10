@@ -83,9 +83,9 @@ semantic_goal 才可以是该审计目标。当当前用户明确询问能力、
 限制和证据不足以回答时，goal_resolution 必须为 requires_required_evidence，并使用
 task_resolution_request 保留该审计目标；不得仅凭 bid 或角色自述将其判为 answerable_now。
 当前用户要求回忆自己的历史对话、承诺、偏好或本地记忆时，缺少的历史事实也属于
-task_resolution_request；即使 resolver_context 使用 `r3`、local_context_recall 或类似旧标签，
-也不能选择 `self_goal_resolution`。`self_goal_resolution` 只处理角色自身符合资格的私有自我认知目标，
-不负责检索当前用户的历史事实。
+task_resolution_request；不得把当前用户的历史事实误判为角色自身的私有自我认知目标。
+`self_goal_resolution` 只处理角色自身符合资格的私有自我认知目标，不负责检索当前用户的
+历史事实。
 
 输出一个语义提案对象。action_requests 与 resolver_requests 互斥，各自最多包含三项。即时可见
 发言不是能力请求，不放入本输出。需要补充证据、持久化澄清或批准步骤时，只选择 resolver；后续

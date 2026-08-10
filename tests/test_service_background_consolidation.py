@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
-from fastapi import BackgroundTasks
+from fastapi import BackgroundTasks, Request
 
 from kazusa_ai_chatbot import service as service_module
 from kazusa_ai_chatbot.action_spec.registry import (
@@ -113,6 +113,12 @@ def _chat_request(
         debug_modes=debug_modes or service_module.DebugModesIn(),
     )
     return request
+
+
+def _chat_http_request() -> Request:
+    """Build the HTTP request context required by the chat authorization seam."""
+
+    return Request({"type": "http", "headers": []})
 
 
 def _consolidation_state() -> dict:
@@ -579,6 +585,7 @@ async def test_chat_queues_background_consolidation_for_mapping_state(monkeypatc
     response = await service_module.chat(
         _chat_request(),
         background_tasks,
+        _chat_http_request(),
     )
 
     assert response.messages == ["ok"]
@@ -621,6 +628,7 @@ async def test_chat_response_uses_true_reply_feature_from_graph(monkeypatch):
     response = await service_module.chat(
         _chat_request(),
         BackgroundTasks(),
+        _chat_http_request(),
     )
 
     assert response.messages == ["ok"]
@@ -657,6 +665,7 @@ async def test_chat_response_adds_inline_delivery_mentions_without_channel_gate(
     response = await service_module.chat(
         _chat_request(),
         BackgroundTasks(),
+        _chat_http_request(),
     )
 
     assert response.messages == ["@Test User ok"]
@@ -700,6 +709,7 @@ async def test_chat_response_reply_feature_keeps_inline_delivery_mentions(
     response = await service_module.chat(
         _chat_request(channel_type="group"),
         BackgroundTasks(),
+        _chat_http_request(),
     )
 
     assert response.messages == ["@Test User ok"]
@@ -750,6 +760,7 @@ async def test_chat_response_adds_multiple_inline_delivery_mentions(
     response = await service_module.chat(
         _chat_request(),
         BackgroundTasks(),
+        _chat_http_request(),
     )
 
     assert response.messages == ["@Test User @Moca ok"]
@@ -804,6 +815,7 @@ async def test_chat_response_keeps_inline_mention_when_scope_repeats_current_use
     response = await service_module.chat(
         _chat_request(),
         BackgroundTasks(),
+        _chat_http_request(),
     )
 
     assert response.messages == ["@Test User ok"]
@@ -856,6 +868,7 @@ async def test_chat_response_preserves_message_sequence_for_inline_mentions(
     response = await service_module.chat(
         _chat_request(),
         BackgroundTasks(),
+        _chat_http_request(),
     )
 
     assert response.messages == ["@Test User first", "second @Moca"]
@@ -901,6 +914,7 @@ async def test_chat_response_tracks_deliverable_assistant_row(monkeypatch):
     response = await service_module.chat(
         _chat_request(),
         BackgroundTasks(),
+        _chat_http_request(),
     )
 
     assert response.messages == ["ok"]
@@ -973,6 +987,7 @@ async def test_chat_response_waits_for_assistant_persistence(monkeypatch):
     chat_task = asyncio.create_task(service_module.chat(
         _chat_request(),
         BackgroundTasks(),
+        _chat_http_request(),
     ))
     await asyncio.wait_for(save_started.wait(), timeout=1.0)
     await asyncio.sleep(0)
@@ -998,6 +1013,7 @@ async def test_chat_response_omits_tracking_id_when_no_message(monkeypatch):
     response = await service_module.chat(
         _chat_request(),
         BackgroundTasks(),
+        _chat_http_request(),
     )
 
     assert response.messages == []
@@ -1038,6 +1054,7 @@ async def test_chat_cognition_silence_skips_user_visible_work(monkeypatch):
     response = await service_module.chat(
         _chat_request(),
         BackgroundTasks(),
+        _chat_http_request(),
     )
 
     assert response.messages == []
@@ -1107,6 +1124,7 @@ async def test_chat_consolidates_private_action_result_without_dialog(monkeypatc
     response = await service_module.chat(
         _chat_request(),
         BackgroundTasks(),
+        _chat_http_request(),
     )
 
     assert response.messages == []
@@ -1169,8 +1187,10 @@ async def test_post_turn_lifecycle_iterates_after_productive_passes() -> None:
         storage_timestamp_utc: str,
         executed_action_attempt_ids: set[str] | None = None,
         record_attempt_func=None,
+        source_llm_trace_id: str = "",
     ) -> list[dict]:
-        del storage_timestamp_utc, executed_action_attempt_ids, record_attempt_func
+        del storage_timestamp_utc, executed_action_attempt_ids
+        del record_attempt_func, source_llm_trace_id
         return [
             _memory_lifecycle_action_result(
                 str(action_spec["params"]["unit_id"]),
@@ -1232,7 +1252,9 @@ async def test_post_turn_lifecycle_skips_structural_blockers() -> None:
         storage_timestamp_utc: str,
         executed_action_attempt_ids: set[str] | None = None,
         record_attempt_func=None,
+        source_llm_trace_id: str = "",
     ) -> list[dict]:
+        del source_llm_trace_id
         raise AssertionError(f"execute should not run: {action_specs}")
 
     cases = [
@@ -1329,6 +1351,7 @@ async def test_chat_runs_post_turn_lifecycle_before_progress_and_consolidation(
     response = await service_module.chat(
         _chat_request(),
         BackgroundTasks(),
+        _chat_http_request(),
     )
 
     assert response.messages == ["ok"]
@@ -1597,6 +1620,7 @@ async def test_next_chat_waits_until_background_consolidation_finishes(monkeypat
     first_response = await service_module.chat(
         _chat_request(message_id="msg-1"),
         first_background_tasks,
+        _chat_http_request(),
     )
     assert first_response.messages == ["ok"]
     assert graph_calls == 1
@@ -1608,6 +1632,7 @@ async def test_next_chat_waits_until_background_consolidation_finishes(monkeypat
     second_chat_runner = asyncio.create_task(service_module.chat(
         _chat_request(message_id="msg-2"),
         second_background_tasks,
+        _chat_http_request(),
     ))
     await asyncio.sleep(0.05)
 
@@ -1660,6 +1685,7 @@ async def test_no_remember_skips_consolidation_but_releases_after_other_writes(m
             debug_modes=service_module.DebugModesIn(no_remember=True),
         ),
         background_tasks,
+        _chat_http_request(),
     )
 
     assert response.messages == ["ok"]
@@ -1679,7 +1705,11 @@ async def test_graph_failure_does_not_stop_queue_worker(monkeypatch):
     _patch_chat_dependencies(monkeypatch, _FailingGraph())
 
     background_tasks = BackgroundTasks()
-    response = await service_module.chat(_chat_request(), background_tasks)
+    response = await service_module.chat(
+        _chat_request(),
+        background_tasks,
+        _chat_http_request(),
+    )
 
     assert response.messages == [service_module.OPERATIONAL_FAILURE_NOTICE]
     assert response.content_type == "operational_error"
@@ -2140,6 +2170,7 @@ async def test_chat_listen_only_drops_before_graph(monkeypatch):
             debug_modes=service_module.DebugModesIn(listen_only=True),
         ),
         background_tasks,
+        _chat_http_request(),
     )
 
     assert response.messages == []

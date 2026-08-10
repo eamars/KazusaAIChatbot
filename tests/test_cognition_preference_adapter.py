@@ -17,7 +17,7 @@ def test_preference_stage_owns_visible_boundaries_only() -> None:
     assert "visible_boundaries 始终返回空列表" in prompt
     assert "相应约束为空时返回空列表" in prompt
     assert "dialog 生成" in prompt
-    assert "本阶段只返回规划字段" in prompt
+    assert "只返回一个 json 对象" in prompt
 
 
 def test_preference_stage_has_no_keyword_based_user_input_adapter() -> None:

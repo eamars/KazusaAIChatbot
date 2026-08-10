@@ -155,9 +155,16 @@ def test_bootstrap_projects_live_health_without_overview_duplication(
     )
 
     class FakeKazusaClient:
-        def __init__(self, *, base_url: str, timeout_seconds: float) -> None:
+        def __init__(
+            self,
+            *,
+            base_url: str,
+            timeout_seconds: float,
+            control_shared_secret: str = "",
+        ) -> None:
             _ = base_url
             _ = timeout_seconds
+            _ = control_shared_secret
 
         async def get_health(self) -> dict:
             return {
@@ -342,9 +349,16 @@ def test_bootstrap_projects_live_health_when_brain_is_unmanaged(
             return [state]
 
     class FakeKazusaClient:
-        def __init__(self, *, base_url: str, timeout_seconds: float) -> None:
+        def __init__(
+            self,
+            *,
+            base_url: str,
+            timeout_seconds: float,
+            control_shared_secret: str = "",
+        ) -> None:
             _ = base_url
             _ = timeout_seconds
+            _ = control_shared_secret
 
         async def get_health(self) -> dict:
             return {"status": "ok", "db": True}
@@ -426,9 +440,16 @@ def test_bootstrap_does_not_query_brain_for_stale_unowned_conflict(
             return [state]
 
     class FailingKazusaClient:
-        def __init__(self, *, base_url: str, timeout_seconds: float) -> None:
+        def __init__(
+            self,
+            *,
+            base_url: str,
+            timeout_seconds: float,
+            control_shared_secret: str = "",
+        ) -> None:
             _ = base_url
             _ = timeout_seconds
+            _ = control_shared_secret
 
         async def get_health(self) -> dict:
             raise AssertionError("stale conflicts must not query brain health")
