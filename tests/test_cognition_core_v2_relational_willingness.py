@@ -10,7 +10,6 @@ from typing import Any
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_core_v2.action_selection import plan_actions
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     BranchDefinition,
     CognitionContractError,
@@ -33,15 +32,10 @@ from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
     project_relationship_context,
     project_state_for_prompt,
 )
-from kazusa_ai_chatbot.cognition_core_v2.workspace import (
-    collapse_authoritative_relational_bid,
-)
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition as connector
-from kazusa_ai_chatbot.nodes import persona_supervisor2_l3_surface as l3_surface
 from tests.cognition_core_v2_test_helpers import (
     canonical_character_identity,
     canonical_cognition_output,
-    canonical_episode,
     canonical_identity_context,
 )
 from tests.test_cognition_chain_connector_mapping import _global_state
@@ -120,33 +114,6 @@ def _evidence_row(
     if memory_scope is not None:
         row['memory_scope'] = memory_scope
     return row
-
-
-def _ordinary_bid(
-    decision: dict[str, object],
-    *,
-    branch_id: str = 'ordinary_response',
-) -> dict[str, object]:
-    """Build one complete ordinary bid carrying the exact decision."""
-
-    return {
-        'branch_id': branch_id,
-        'goal_ref': {
-            'scope': 'user',
-            'kind': 'goal',
-            'entity_id': f'goal:{branch_id}',
-        },
-        'intention': '保持当前回合的清晰边界',
-        'desired_outcome': '让可见回应符合当前关系判断',
-        'concrete_detail': '只使用当前回合的直接证据',
-        'reason': '当前关系证据支持该回应方向',
-        'private_monologue': '先保持与当前判断一致。',
-        'target_roles': [],
-        'evidence_handles': ['e1'],
-        'expected_consequences': ['保留当前回合连续性'],
-        'confidence': 'high',
-        'relational_willingness': deepcopy(decision),
-    }
 
 
 def _output_with_decision(
@@ -261,23 +228,6 @@ def _goal_context() -> dict[str, object]:
         'private_continuity_context': '',
         '_role_bindings': {},
         'role_summaries': {},
-    }
-
-
-def _surface_state(decision: dict[str, object]) -> dict[str, object]:
-    """Build one committed cognition packet for the L3 connector."""
-
-    output = _output_with_decision(decision)
-    return {
-        'storage_timestamp_utc': NOW,
-        'user_input': '当前回合输入',
-        'cognitive_episode': canonical_episode(
-            episode_id='relational-surface-episode',
-            content='当前回合输入',
-        ),
-        'cognition_core_output': output,
-        'pre_surface_action_results': [],
-        'character_profile': canonical_character_identity(marker='surface'),
     }
 
 
@@ -849,114 +799,6 @@ async def test_ordinary_goal_exhaustion_fails_closed_before_commit() -> None:
     assert error_info.value.safe_checkpoint == 'pre_state_commit'
     assert error_info.value.attempt_count == 3
     assert llm.call_count == 3
-
-
-def test_authoritative_collapse_keeps_ordinary_bid_primary() -> None:
-    """Sensitive turns suppress competing bids without another semantic owner."""
-
-    decision = _decision()
-    ordinary = _ordinary_bid(decision)
-    competing = _ordinary_bid(decision, branch_id='autonomy_boundary')
-    collapsed = collapse_authoritative_relational_bid(
-        [ordinary, competing],
-        decision,
-    )
-
-    assert collapsed['primary_branch_id'] == 'ordinary_response'
-    assert collapsed['primary_bid'] == ordinary
-    assert collapsed['supporting_bids'] == []
-    assert collapsed['supporting_branch_ids'] == []
-    assert [bid['branch_id'] for bid in collapsed['competing_bids']] == [
-        'autonomy_boundary',
-    ]
-
-
-@pytest.mark.asyncio
-async def test_non_accepting_willingness_denies_action_effects(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Non-accepting stances stop effects before action authorization."""
-
-    import kazusa_ai_chatbot.cognition_core_v2.action_selection as action_module
-
-    decision = _decision(stance='reject')
-    primary_bid = _ordinary_bid(decision)
-    action_affordance = {
-        'action_kind': 'background_work_request',
-        'capability': 'bounded background work',
-        'permission': 'allowed',
-        'decision_mode': 'optional',
-        'allowed_decisions': [],
-        'default_decision': '',
-        'decision_pattern': '',
-        'context_ref': 'current episode',
-        'target_roles': [],
-    }
-    planner_decision = {
-        'action_requests': [{
-            'bid_handle': 'b1',
-            'action_handle': 'a1',
-            'decision': '',
-            'semantic_goal': 'perform the proposed effect',
-            'reason': 'the planner proposed the effect',
-        }],
-        'resolver_requests': [],
-        'goal_resolution': 'answerable_now',
-        'resolver_pending_resolution': None,
-        'resolver_goal_progress': None,
-    }
-
-    async def fake_planner(**_: object) -> dict[str, object]:
-        return planner_decision
-
-    async def unexpected_authorization(**_: object) -> list[dict[str, str]]:
-        raise AssertionError('relational denial must precede authorization')
-
-    monkeypatch.setattr(action_module, '_invoke_action_planner', fake_planner)
-    monkeypatch.setattr(
-        action_module,
-        'authorize_action_requests',
-        unexpected_authorization,
-    )
-    monkeypatch.setattr(
-        action_module,
-        'authorize_resolver_requests',
-        unexpected_authorization,
-    )
-
-    result = await plan_actions(
-        primary_bid=primary_bid,
-        supporting_bids=[],
-        episode=canonical_episode(content='当前回合输入'),
-        evidence=[
-            _evidence_row(
-                'e1',
-                'episode',
-                '当前用户提出了需要关系判断的请求。',
-            ),
-        ],
-        available_actions=[action_affordance],
-        available_resolvers=[],
-        resolver_context='',
-        services=_core_services(object()),
-    )
-
-    assert result['action_requests'] == []
-    assert result['resolver_requests'] == []
-    assert result['intention']['route'] == 'speech'
-
-
-def test_l3_surface_copies_the_exact_relational_decision() -> None:
-    """L3 receives the decision without inventing a parallel stance field."""
-
-    decision = _decision(stance='conditional_accept')
-    payload = l3_surface.build_text_surface_input_from_global_state(
-        _surface_state(decision),
-        interaction_style_context='brief and natural',
-    )
-
-    assert payload['relational_willingness'] == decision
-    assert 'relationship_willingness' not in payload
 
 
 def test_fixture_request_is_absent_from_production_prompt_sources() -> None:

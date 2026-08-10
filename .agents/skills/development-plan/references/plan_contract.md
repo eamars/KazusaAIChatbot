@@ -49,6 +49,7 @@ combined into sections that fit the work:
 ## Must Do
 ## Deferred
 ## Target State
+## Test Impact And Traceability
 ## Change Surface
 ## Agent Autonomy Boundaries
 ## Verification
@@ -118,6 +119,31 @@ before approval or keep the plan in draft.
 `Must Do` lists fixed, in-scope outcomes. `Deferred` lists explicitly excluded
 work and prevents opportunistic expansion. Both sections use direct,
 observable instructions.
+
+## Test Impact And Traceability
+
+Every executable plan that changes production behavior, a production
+contract, a caller/callee boundary, or test infrastructure that enforces
+production verification contains this section. Use one row per exact source
+or governed artifact path.
+
+Each row contains:
+
+- the repository-relative path;
+- the changed symbol, field, interface, or contract;
+- the semantic owner;
+- one or more exact deterministic pytest node IDs;
+- supplemental integration or live node IDs, or `none`;
+- the test mode; and
+- the observable regression prevented.
+
+An exact node ID includes the test file and test function, for example
+`tests/unit/cognition_core_v2/test_contracts.py::test_exact_contract`.
+Directory paths, test-file-only references, marker/category names, and phrases
+such as "relevant tests" do not satisfy this section. Every semantic owner
+has a deterministic unit node; integration and live evidence is supplemental.
+The matrix is part of the executable scope and must be complete before
+approval.
 
 ## Target state and contracts
 

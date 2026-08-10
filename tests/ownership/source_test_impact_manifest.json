@@ -1,0 +1,363 @@
+{
+  "schema_version": 1,
+  "source_roots": [
+    "src/kazusa_ai_chatbot/cognition_core_v2",
+    "src/kazusa_ai_chatbot/cognition_resolver",
+    "src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition.py",
+    "src/kazusa_ai_chatbot/nodes/persona_supervisor2_l3_surface.py",
+    "src/kazusa_ai_chatbot/nodes/dialog_agent.py",
+    "src/kazusa_ai_chatbot/nodes/persona_supervisor2_schema.py"
+  ],
+  "entries": [
+    {
+      "source": "src/kazusa_ai_chatbot/cognition_core_v2/action_authorization.py",
+      "owner": "cognition_core_v2 owner",
+      "contract": "action_authorization public contract",
+      "required_unit_tests": [
+        "tests/unit/cognition_core_v2/test_action_authorization.py::test_action_authorization_exposes_owned_contract"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/cognition_core_v2/action_selection.py",
+      "owner": "action selection owner",
+      "contract": "stance-to-effect propagation",
+      "required_unit_tests": [
+        "tests/unit/cognition_core_v2/test_action_selection.py::test_non_accepting_stance_suppresses_downstream_effects",
+        "tests/unit/cognition_core_v2/test_action_selection.py::test_action_selection_exposes_owned_contract"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/cognition_core_v2/branch_activation.py",
+      "owner": "cognition_core_v2 owner",
+      "contract": "branch_activation public contract",
+      "required_unit_tests": [
+        "tests/unit/cognition_core_v2/test_branch_activation.py::test_branch_activation_exposes_owned_contract"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/cognition_core_v2/character_carryover.py",
+      "owner": "cognition_core_v2 owner",
+      "contract": "character_carryover public contract",
+      "required_unit_tests": [
+        "tests/unit/cognition_core_v2/test_character_carryover.py::test_character_carryover_exposes_owned_contract"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/cognition_core_v2/contracts.py",
+      "owner": "cognition contract validator",
+      "contract": "sensitive relational willingness validation",
+      "required_unit_tests": [
+        "tests/unit/cognition_core_v2/test_contracts.py::test_sensitive_relational_willingness_accepts_all_real_states_and_stances",
+        "tests/unit/cognition_core_v2/test_contracts.py::test_contracts_exposes_owned_contract"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/cognition_core_v2/dependency_graph.py",
+      "owner": "cognition_core_v2 owner",
+      "contract": "dependency_graph public contract",
+      "required_unit_tests": [
+        "tests/unit/cognition_core_v2/test_dependency_graph.py::test_dependency_graph_exposes_owned_contract"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/cognition_core_v2/diagnostics.py",
+      "owner": "cognition_core_v2 owner",
+      "contract": "diagnostics public contract",
+      "required_unit_tests": [
+        "tests/unit/cognition_core_v2/test_diagnostics.py::test_diagnostics_exposes_owned_contract"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/cognition_core_v2/emotion_definitions.py",
+      "owner": "cognition_core_v2 owner",
+      "contract": "emotion_definitions public contract",
+      "required_unit_tests": [
+        "tests/unit/cognition_core_v2/test_emotion_definitions.py::test_emotion_definitions_exposes_owned_contract"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/cognition_core_v2/emotion_derivation.py",
+      "owner": "cognition_core_v2 owner",
+      "contract": "emotion_derivation public contract",
+      "required_unit_tests": [
+        "tests/unit/cognition_core_v2/test_emotion_derivation.py::test_emotion_derivation_exposes_owned_contract"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/cognition_core_v2/facade.py",
+      "owner": "cognition_core_v2 owner",
+      "contract": "facade public contract",
+      "required_unit_tests": [
+        "tests/unit/cognition_core_v2/test_facade.py::test_facade_exposes_owned_contract"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/cognition_core_v2/goal_cognition.py",
+      "owner": "cognition_core_v2 owner",
+      "contract": "goal_cognition public contract",
+      "required_unit_tests": [
+        "tests/unit/cognition_core_v2/test_goal_cognition.py::test_goal_cognition_exposes_owned_contract"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/cognition_core_v2/model_attempt_policy.py",
+      "owner": "cognition_core_v2 owner",
+      "contract": "model_attempt_policy public contract",
+      "required_unit_tests": [
+        "tests/unit/cognition_core_v2/test_model_attempt_policy.py::test_model_attempt_policy_exposes_owned_contract"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/cognition_core_v2/morning_refresh.py",
+      "owner": "cognition_core_v2 owner",
+      "contract": "morning_refresh public contract",
+      "required_unit_tests": [
+        "tests/unit/cognition_core_v2/test_morning_refresh.py::test_morning_refresh_exposes_owned_contract"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/cognition_core_v2/output_projection.py",
+      "owner": "cognition_core_v2 owner",
+      "contract": "output_projection public contract",
+      "required_unit_tests": [
+        "tests/unit/cognition_core_v2/test_output_projection.py::test_output_projection_exposes_owned_contract"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/cognition_core_v2/parallel_executor.py",
+      "owner": "cognition_core_v2 owner",
+      "contract": "parallel_executor public contract",
+      "required_unit_tests": [
+        "tests/unit/cognition_core_v2/test_parallel_executor.py::test_parallel_executor_exposes_owned_contract"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/cognition_core_v2/prompt_budget.py",
+      "owner": "cognition_core_v2 owner",
+      "contract": "prompt_budget public contract",
+      "required_unit_tests": [
+        "tests/unit/cognition_core_v2/test_prompt_budget.py::test_prompt_budget_exposes_owned_contract"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/cognition_core_v2/resolver_authorization.py",
+      "owner": "cognition_core_v2 owner",
+      "contract": "resolver_authorization public contract",
+      "required_unit_tests": [
+        "tests/unit/cognition_core_v2/test_resolver_authorization.py::test_resolver_authorization_exposes_owned_contract"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/cognition_core_v2/semantic_appraisal.py",
+      "owner": "semantic appraisal",
+      "contract": "character constraint question projection",
+      "required_unit_tests": [
+        "tests/unit/cognition_core_v2/test_semantic_appraisal.py::test_character_constraint_projection_excludes_standard_handles",
+        "tests/unit/cognition_core_v2/test_semantic_appraisal.py::test_semantic_appraisal_exposes_owned_contract"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/cognition_core_v2/semantic_source_planner.py",
+      "owner": "semantic source planner",
+      "contract": "moral_identity permitted role handles",
+      "required_unit_tests": [
+        "tests/unit/cognition_core_v2/test_semantic_source_planner.py::test_moral_identity_questions_exclude_standard_handles",
+        "tests/unit/cognition_core_v2/test_semantic_source_planner.py::test_semantic_source_planner_exposes_owned_contract"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/cognition_core_v2/state_models.py",
+      "owner": "cognition_core_v2 owner",
+      "contract": "state_models public contract",
+      "required_unit_tests": [
+        "tests/unit/cognition_core_v2/test_state_models.py::test_state_models_exposes_owned_contract"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/cognition_core_v2/state_projection.py",
+      "owner": "cognition_core_v2 owner",
+      "contract": "state_projection public contract",
+      "required_unit_tests": [
+        "tests/unit/cognition_core_v2/test_state_projection.py::test_state_projection_exposes_owned_contract"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/cognition_core_v2/state_reducers.py",
+      "owner": "cognition_core_v2 owner",
+      "contract": "state_reducers public contract",
+      "required_unit_tests": [
+        "tests/unit/cognition_core_v2/test_state_reducers.py::test_state_reducers_exposes_owned_contract"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/cognition_core_v2/surface.py",
+      "owner": "surface owner",
+      "contract": "surface output stance propagation",
+      "required_unit_tests": [
+        "tests/unit/cognition_core_v2/test_surface.py::test_surface_output_preserves_relational_willingness_v2",
+        "tests/unit/cognition_core_v2/test_surface.py::test_surface_exposes_owned_contract"
+      ],
+      "supplemental_tests": [
+        "tests/integration/cognition_core_v2/test_relational_stance_propagation.py::test_relational_stance_preserves_polarity_through_surface_and_dialog"
+      ]
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/cognition_core_v2/surface_stages.py",
+      "owner": "cognition_core_v2 owner",
+      "contract": "surface_stages public contract",
+      "required_unit_tests": [
+        "tests/unit/cognition_core_v2/test_surface_stages.py::test_surface_stages_exposes_owned_contract"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/cognition_core_v2/transition_guards.py",
+      "owner": "cognition_core_v2 owner",
+      "contract": "transition_guards public contract",
+      "required_unit_tests": [
+        "tests/unit/cognition_core_v2/test_transition_guards.py::test_transition_guards_exposes_owned_contract"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/cognition_core_v2/validation_cli.py",
+      "owner": "cognition_core_v2 owner",
+      "contract": "validation_cli public contract",
+      "required_unit_tests": [
+        "tests/unit/cognition_core_v2/test_validation_cli.py::test_validation_cli_exposes_owned_contract"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/cognition_core_v2/workspace.py",
+      "owner": "workspace arbitration owner",
+      "contract": "ordinary response stance ownership",
+      "required_unit_tests": [
+        "tests/unit/cognition_core_v2/test_workspace.py::test_ordinary_response_remains_authoritative_stance_owner",
+        "tests/unit/cognition_core_v2/test_workspace.py::test_workspace_exposes_owned_contract"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/cognition_resolver/capabilities.py",
+      "owner": "cognition_resolver owner",
+      "contract": "capabilities public contract",
+      "required_unit_tests": [
+        "tests/unit/cognition_resolver/test_capabilities.py::test_capabilities_exposes_owned_contract"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/cognition_resolver/contracts.py",
+      "owner": "resolver contract validator",
+      "contract": "current-turn relational willingness V2 carrier",
+      "required_unit_tests": [
+        "tests/unit/cognition_resolver/test_contracts.py::test_current_turn_carrier_preserves_complete_v2_decision",
+        "tests/unit/cognition_resolver/test_contracts.py::test_current_turn_carrier_rejects_v1_or_incomplete_decision",
+        "tests/unit/cognition_resolver/test_contracts.py::test_contracts_exposes_owned_contract"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/cognition_resolver/loop.py",
+      "owner": "cognition_resolver owner",
+      "contract": "loop public contract",
+      "required_unit_tests": [
+        "tests/unit/cognition_resolver/test_loop.py::test_loop_exposes_owned_contract"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/cognition_resolver/pending.py",
+      "owner": "cognition_resolver owner",
+      "contract": "pending public contract",
+      "required_unit_tests": [
+        "tests/unit/cognition_resolver/test_pending.py::test_pending_exposes_owned_contract"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/cognition_resolver/state.py",
+      "owner": "resolver state owner",
+      "contract": "current-turn carrier state round trip",
+      "required_unit_tests": [
+        "tests/unit/cognition_resolver/test_state.py::test_current_turn_carrier_round_trips_without_semantic_reconstruction",
+        "tests/unit/cognition_resolver/test_state.py::test_state_exposes_owned_contract"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/cognition_resolver/telemetry.py",
+      "owner": "cognition_resolver owner",
+      "contract": "telemetry public contract",
+      "required_unit_tests": [
+        "tests/unit/cognition_resolver/test_telemetry.py::test_telemetry_exposes_owned_contract"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition.py",
+      "owner": "nodes owner",
+      "contract": "persona_supervisor2_cognition public contract",
+      "required_unit_tests": [
+        "tests/unit/nodes/test_persona_supervisor2_cognition.py::test_persona_supervisor2_cognition_exposes_owned_contract"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/nodes/persona_supervisor2_l3_surface.py",
+      "owner": "surface owner",
+      "contract": "surface output stance propagation",
+      "required_unit_tests": [
+        "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_l3_surface_preserves_relational_willingness_v2",
+        "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_persona_supervisor2_l3_surface_exposes_owned_contract"
+      ],
+      "supplemental_tests": [
+        "tests/integration/cognition_core_v2/test_relational_stance_propagation.py::test_relational_stance_preserves_polarity_through_surface_and_dialog"
+      ]
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/nodes/dialog_agent.py",
+      "owner": "dialog verifier owner",
+      "contract": "terminal candidate semantic fidelity",
+      "required_unit_tests": [
+        "tests/unit/nodes/test_dialog_agent.py::test_terminal_candidate_opposite_polarity_is_withheld",
+        "tests/unit/nodes/test_dialog_agent.py::test_dialog_agent_exposes_owned_contract"
+      ],
+      "supplemental_tests": [
+        "tests/integration/cognition_core_v2/test_terminal_dialog_candidate.py::test_terminal_dialog_candidate_opposite_polarity_is_withheld"
+      ]
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/nodes/persona_supervisor2_schema.py",
+      "owner": "nodes owner",
+      "contract": "persona_supervisor2_schema public contract",
+      "required_unit_tests": [
+        "tests/unit/nodes/test_persona_supervisor2_schema.py::test_persona_supervisor2_schema_exposes_owned_contract"
+      ],
+      "supplemental_tests": []
+    }
+  ]
+}

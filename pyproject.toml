@@ -53,6 +53,7 @@ dev = [
 ]
 
 [project.scripts]
+validate-test-impact = "scripts.validate_test_impact:main"
 create-embeddings = "scripts.create_conversation_history_embedding:async_main"
 search-conversations = "scripts.search_conversation:async_main"
 identify-user-image = "scripts.identify_user_image:async_main"

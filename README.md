@@ -794,6 +794,19 @@ Default test runs exclude live DB and live LLM tests through `pytest.ini`.
 venv\Scripts\python -m pytest -q
 ```
 
+When a production module under the Cognition V2, cognition-resolver, or named
+direct-node ownership boundary changes, run the exact source-to-test impact
+check from the recorded baseline:
+
+```powershell
+venv\Scripts\python -m scripts.validate_test_impact --base-ref HEAD --run
+```
+
+The command validates the ownership manifest, verifies exact pytest node
+collection, and runs the mapped deterministic unit tests. The canonical unit
+layout mirrors source modules under `tests/unit/`; integration and live-LLM
+tests remain supplemental evidence.
+
 Live LLM tests must be run one case at a time with output inspected. Live DB
 tests require MongoDB. See [docs/HOWTO.md](docs/HOWTO.md#testing) for the
 project testing contract.

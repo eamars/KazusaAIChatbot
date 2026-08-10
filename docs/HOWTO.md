@@ -1148,6 +1148,18 @@ pytest -m "not live_db and not live_llm" -q
 venv\Scripts\python -m pytest tests\test_cognition_resolver_contracts.py tests\test_cognition_resolver_loop.py tests\test_cognition_resolver_persona_graph.py tests\test_cognition_resolver_l2d_contract.py -q
 ```
 
+For a production change under the Cognition V2, cognition-resolver, or named
+direct-node ownership boundary, run the manifest-backed exact impact command
+from the captured baseline:
+
+```powershell
+venv\Scripts\python -m scripts.validate_test_impact --base-ref HEAD --run
+```
+
+This command fails for an unmapped source, stale node, or omitted collected
+node. Deterministic owner tests live under `tests/unit/` with source-mirrored
+module names; integration and live-LLM tests provide additional evidence.
+
 Live LLM tests must be run and inspected one at a time:
 
 ```bash

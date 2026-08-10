@@ -39,12 +39,12 @@ long_term/todo.md
 | Document | Type | Status |
 |---|---|---|
 | [coding_agent_assessment_gap_phase_d_plan.md](active/short_term/coding_agent_assessment_gap_phase_d_plan.md) | High-risk coding-agent migration plan for a generic JSON action loop, persistent repository index, exploration-cap removal, and delete/rename | in progress |
-| [development_plan_test_impact_traceability_and_cognition_unit_structure_bigbang_plan.md](active/short_term/development_plan_test_impact_traceability_and_cognition_unit_structure_bigbang_plan.md) | Big-bang development-plan test-impact contract, cognition source ownership manifest, and mirrored deterministic unit-test structure | draft |
 
 ## Completed Short-Term Plans
 
 | Document | Type | Status |
 |---|---|---|
+| [development_plan_test_impact_traceability_and_cognition_unit_structure_bigbang_plan.md](archive/completed/short_term/development_plan_test_impact_traceability_and_cognition_unit_structure_bigbang_plan.md) | Big-bang development-plan test-impact contract, cognition source ownership manifest, and mirrored deterministic unit-test structure | completed |
 | [character_owned_content_judgment_cutover_plan.md](archive/completed/short_term/character_owned_content_judgment_cutover_plan.md) | Cutover removing application-owned semantic safety/refusal policy and relationship gating while preserving character-owned judgment, expression continuity, and operational guards | completed |
 | [cognition_parallel_neutral_weak_tilt_plan.md](archive/completed/short_term/cognition_parallel_neutral_weak_tilt_plan.md) | Branch-owned semantic intent guidance for generic Cognition V2 bid generation; real-model quality explicitly deferred | completed |
 | [august_change_alignment_audit_and_remediation_plan.md](archive/completed/short_term/august_change_alignment_audit_and_remediation_plan.md) | Repository-wide Aug 1+ change alignment audit, bounded remediation, and baseline feature regression map | completed |

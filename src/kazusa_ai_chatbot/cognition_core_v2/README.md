@@ -693,9 +693,22 @@ failures continue through their typed unrecoverable paths.
 
 ## Testing Contract
 
-Run the focused V2 contract, state, emotion-lifecycle, failure, and reflection
-settling suites with the project virtual environment. Live LLM cases run one
-case at a time with their trace artifact inspected.
+Deterministic owner tests mirror source modules under
+`tests/unit/cognition_core_v2/`, `tests/unit/cognition_resolver/`, and
+`tests/unit/nodes/`. The authoritative source-to-test mapping is
+`tests/ownership/source_test_impact_manifest.json`; the verifier requires one
+exact deterministic node for every mapped semantic owner.
+
+When a mapped production source changes, run the impact command from the
+captured baseline:
+
+```powershell
+venv\Scripts\python -m scripts.validate_test_impact --base-ref HEAD --run
+```
+
+The command validates exact node collection before running the impacted tests.
+Cross-boundary propagation tests live under `tests/integration/`, and live LLM
+cases run one case at a time with their trace artifact inspected.
 
 ## Forbidden Paths
 

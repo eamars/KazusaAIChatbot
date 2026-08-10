@@ -11,6 +11,11 @@ and any delegated ownership. The responsible agent owns the implementation
 within that boundary. The parent or designated owner keeps the plan status,
 checkpoints, evidence, and lifecycle record coherent.
 
+Before the first edit, capture the worktree status, changed-path baseline, and
+explicitly owned file set. Pre-existing user changes remain outside the
+execution diff. Every changed production source path is matched to the plan's
+exact source-to-test row before the work item is accepted.
+
 Delegation is optional. When used, follow the current harness and model
 handoff protocol. Keep delegated write scopes explicit and non-overlapping when
 parallel work is used. A reviewer has review authority only unless the plan
@@ -58,6 +63,13 @@ surface needs, not as an automatic repetition after every edit.
 
 Record the checks actually run, their results, relevant artifacts, and any
 residual risk. Do not claim acceptance from an unchecked box alone.
+
+For a source change, resolve the changed paths through the authoritative
+source-to-test manifest or equivalent plan matrix. Run pytest collection for
+the exact mapped node IDs, fail on an unmapped path or stale node, and then run
+those exact deterministic nodes. A broader passing suite cannot waive a
+missing, deselected, or uncollected mapped node. Integration and live tests
+remain additional evidence when the change radius crosses those boundaries.
 
 ## Checkpoints and evidence
 

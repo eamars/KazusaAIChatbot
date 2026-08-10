@@ -16,7 +16,8 @@ boundaries.
    the repository's plan registry when one exists.
 2. Resolve user decisions before producing an executable plan.
 3. State the change direction, target ownership boundary, affected contracts,
-   exact change surface, exclusions, and observable acceptance criteria.
+   exact change surface, exclusions, observable acceptance criteria, and an
+   exact source-to-test impact matrix.
 4. Name only the skills and references relevant to the planned work. Load
    detailed references when their subject applies.
 5. Review the plan for scope, ownership, contract consistency, and unresolved
@@ -45,6 +46,13 @@ unaccepted alternatives, or new scope discovered during execution.
 - If the requested work, current code, or verification exposes a contract or
   scope change, pause and resolve it through a plan amendment or user
   decision before proceeding.
+- Before implementation, capture the execution baseline and the explicitly
+  owned file set. Preserve pre-existing worktree changes and compare the
+  execution diff against that baseline.
+- Before accepting verification for a production source change, resolve every
+  changed source path to the exact deterministic pytest node IDs named by the
+  plan. Confirm those nodes are collected and run. A passing broader suite
+  does not replace a missing or uncollected mapped node.
 
 ## References
 
@@ -62,6 +70,18 @@ unaccepted alternatives, or new scope discovered during execution.
   acceptance criteria explicit.
 - Keep semantic or architectural decisions in the plan; do not leave them to
   implementation agents as open choices.
+- Require a `Test Impact And Traceability` section in every executable plan.
+  Each row names one exact repository-relative source or governed artifact
+  path, the changed symbol or contract, its semantic owner, exact pytest node
+  IDs, test mode, and the regression prevented. Directory-only entries,
+  category-only descriptions, and phrases such as "relevant tests" are not
+  traceability evidence.
+- Require at least one deterministic unit node for every semantic production
+  owner. Integration, live-LLM, static-text, snapshot, and collection tests
+  supplement the owner unit test; they do not replace it.
+- Require direct owner tests and cross-boundary propagation tests when a
+  change touches a caller, callee, carrier, projection, validator, reducer,
+  or output boundary.
 - Keep implementation agents free to choose local mechanics, decomposition,
   command order, and verification breadth that preserve the contract.
 - Do not authorize new architecture, compatibility layers, fallback paths,
@@ -77,6 +97,10 @@ Final plans must not contain unresolved questions or decision points. Avoid
 `TBD`, `maybe`, `consider`, `choose one`, `option A / option B`, and
 open-ended recommendations. Assumptions must be fixed operating inputs, not
 disguised questions.
+
+Final executable plans must not use vague test instructions such as "focused
+tests", "relevant tests", "regression coverage", or "run the affected suite"
+without an adjacent exact source-to-test row and pytest node list.
 
 ## Style
 

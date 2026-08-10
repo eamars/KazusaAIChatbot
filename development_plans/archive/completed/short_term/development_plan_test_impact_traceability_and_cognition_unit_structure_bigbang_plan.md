@@ -5,7 +5,7 @@
 - Goal: prevent a semantic change-radius miss like the archived character-owned
   content judgment cutover, where the plan named cognition-core production
   changes but did not name the unit tests that prove the changed contracts.
-- Status: draft
+- Status: completed.
 - Scope boundary: the development-plan skill contract, the cognition-core and
   cognition-resolver test ownership boundary, the deterministic test layout,
   and the repository checks that enforce source-to-test traceability.
@@ -13,8 +13,9 @@
   every executable plan, mirror deterministic unit tests under their owning
   source package, and fail the required test command when an impacted test
   node is missing or not collected.
-- Acceptance state: approval-ready draft; implementation starts only after
-  this plan is promoted to approved or in_progress.
+- Acceptance state: execution complete; plan-scoped acceptance evidence is
+  recorded below, with unrelated repository-wide residual risks explicitly
+  retained as historical execution evidence.
 
 ## Failure Being Corrected
 
@@ -444,22 +445,79 @@ and retain their one-case, inspected-output contract.
 This checklist is executed as one phase; the rows are work items, not rollout
 phases.
 
-- [ ] Capture baseline and confirm the exact owned file set.
-- [ ] Update skill/reference rules and add the self-plan contract tests.
-- [ ] Add manifest, verifier, project command, and collection enforcement.
-- [ ] Migrate/create the mirrored owner unit tests and propagation tests.
-- [ ] Update documentation and registry evidence.
-- [ ] Run every verification and acceptance gate; record results and residual
+- [x] Capture baseline and confirm the exact owned file set.
+- [x] Update skill/reference rules and add the self-plan contract tests.
+- [x] Add manifest, verifier, project command, and collection enforcement.
+- [x] Migrate/create the mirrored owner unit tests and propagation tests.
+- [x] Update documentation and registry evidence.
+- [x] Run every verification and acceptance gate; record results and residual
   risk.
-- [ ] Promote, complete, and archive only after the acceptance state is
+- [x] Promote, complete, and archive only after the acceptance state is
   evidenced.
 
 ## Execution Evidence
 
-Execution evidence is empty while this document is draft. The execution
-owner records the baseline identifier, changed-path report, manifest report,
-exact node collection result, deterministic test result, diff-scope result,
-review findings, deviations, and residual risk here before completion.
+### Baseline and owned scope
+
+- Execution baseline: `2d7715edf49efcf80b0c270589024891aca436d7`.
+- The pre-execution `git status --short --untracked-files=all` was clean.
+- The owned set was the skill/reference contract, plan registry and document,
+  test-impact verifier and manifest, pytest enforcement hook, mirrored
+  cognition/resolver/node unit tests, cognition integration tests, and the
+  three testing guidance documents. No pre-existing user change was present
+  to exclude.
+
+### Delivered change
+
+- The development-plan skill, plan contract, and execution gates now require
+  exact source-to-test traceability and exact-node collection evidence.
+- `tests/ownership/source_test_impact_manifest.json` contains 37 explicit
+  strict-boundary source entries, 48 deterministic owner nodes, and 3
+  supplemental propagation nodes.
+- `scripts/validate_test_impact.py`, the `validate-test-impact` project entry
+  point, and the enforcement-mode `pytest` collection hook are installed.
+- The canonical unit tree mirrors cognition-core, resolver, and direct node
+  source ownership. Direct workspace, action-effect, and L3 tests were
+  removed from the legacy flat relational-willingness module after their
+  canonical owner tests were established. Canonical surface and dialog
+  fixtures no longer depend on legacy flat test modules.
+- The two missed regressions are directly covered: standard `sN` handles are
+  excluded from `moral_identity` questions, and the resolver preserves a
+  complete V2 current-turn decision while rejecting V1/incomplete carriers.
+
+### Verification evidence
+
+- Plan and manifest contract tests: `13 passed in 0.67s`.
+- Exact manifest collection and run: `48 tests collected`; `48 passed in
+  8.98s`.
+- Plan-scoped canonical unit and cognition integration suite: `50 passed in
+  15.00s`.
+- Explicit propagation nodes: `2 passed in 6.85s`.
+- Legacy relational-willingness regression file plus canonical moved-owner
+  tests: `23 passed in 0.75s`.
+- Baseline-aware command
+  `venv\Scripts\python -m scripts.validate_test_impact --base-ref HEAD --run`
+  reported no changed strict-boundary source paths and exited successfully.
+- Python compilation for all newly created/affected Python files passed;
+  `git diff --check` passed; `git diff --name-only HEAD -- 'src/**/*.py'`
+  was empty, proving no runtime Python source changed.
+
+### Deviations and residual risk
+
+- A repository-wide deterministic run exposed an unrelated flaky control
+  console timing assertion (`Starting Brain service` versus the completed
+  notice); the isolated rerun passed (`1 passed in 11.96s`).
+- The non-E2E repository run reached 910 passing tests before stopping at the
+  unrelated baseline harness case
+  `test_neutral_case_expansion_has_no_asuna_source_contamination`, whose
+  private `test_artifacts/chat_history_638473184_recent.json` fixture is
+  absent. The plan-scoped suite is green, and no control-console or baseline
+  harness source was changed. These repository-wide issues remain recorded
+  for their owning plans rather than being folded into this change.
+- No live-LLM test was run because this execution changes no runtime semantic
+  behavior. The existing terminal-dialog test path emitted the repository's
+  configured test-database connection log while its model calls were mocked;
+  no database data was modified.
 
 ## Independent Plan Review
 

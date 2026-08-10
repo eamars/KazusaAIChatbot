@@ -91,11 +91,14 @@ def test_service_action_click_shows_operator_feedback_while_pending(
         page.evaluate(
             """() => {
               const originalFetch = window.fetch.bind(window);
+              window.__releaseBrainStart = null;
               window.fetch = (input, init) => {
                 const url = String(input);
                 if (url.includes('/api/services/brain/start')) {
                   return new Promise((resolve) => {
-                    setTimeout(() => resolve(originalFetch(input, init)), 650);
+                    window.__releaseBrainStart = () => {
+                      resolve(originalFetch(input, init));
+                    };
                   });
                 }
                 return originalFetch(input, init);
@@ -105,8 +108,28 @@ def test_service_action_click_shows_operator_feedback_while_pending(
 
         _button(page, "brain", "start").click()
 
-        page.wait_for_selector("[data-service='brain'][data-action='start']:disabled")
-        assert "Starting Brain service" in page.locator("#ui-notice").inner_text()
+        page.wait_for_function(
+            """() => {
+              const button = document.querySelector(
+                "[data-service='brain'][data-action='start']"
+              );
+              const notice = document.querySelector("#ui-notice");
+              return button?.disabled === true
+                && notice?.dataset.tone === "info"
+                && notice.textContent?.includes("Starting Brain service");
+            }"""
+        )
+        with page.expect_response(
+            lambda response: "/api/services/brain/start" in response.url
+        ):
+            page.evaluate(
+                """() => {
+                  if (typeof window.__releaseBrainStart !== "function") {
+                    throw new Error("brain start request was not intercepted");
+                  }
+                  window.__releaseBrainStart();
+                }"""
+            )
         page.wait_for_function(
             "() => document.querySelector(\"[data-service-card='brain'] [data-service-status-badge]\")?.textContent === 'running'",
             timeout=10000,
