@@ -22,9 +22,6 @@ import pytest
 from kazusa_ai_chatbot.config import COGNITION_LLM_BASE_URL
 from kazusa_ai_chatbot.db import close_db, get_character_profile
 from kazusa_ai_chatbot.db._client import get_db
-from kazusa_ai_chatbot.db.interaction_style_images import (
-    build_group_engagement_action_context,
-)
 from kazusa_ai_chatbot.reflection_cycle.activity_windows import (
     build_group_activity_windows,
 )
@@ -60,6 +57,35 @@ _DUPLICATE_EVENT_OCCURRED_AT = "2026-06-10T08:30:55.201466+00:00"
 _CHANNEL_ID = "905393941"
 
 
+def _fixed_interaction_style_snapshot() -> dict[str, Any]:
+    """Build one injected immutable style snapshot for the replay case."""
+
+    overlay = {
+        "speech_guidelines": [],
+        "social_guidelines": [],
+        "pacing_guidelines": [],
+        "engagement_guidelines": [],
+        "confidence": "medium",
+    }
+    return {
+        "schema_version": "interaction_style_turn_snapshot.v1",
+        "sources": {},
+        "relevance": {},
+        "cognition": {},
+        "surface": {
+            "user": {"overlay": dict(overlay)},
+            "group_channel": {"overlay": dict(overlay)},
+        },
+        "application_order": ["user", "group_channel"],
+        "user_style": dict(overlay),
+        "group_engagement_action_context": {
+            "engagement_guidelines": [],
+            "confidence": "",
+        },
+        "snapshot_digest": "duplicate-live-style",
+    }
+
+
 async def test_live_sc_duplicate_response_window_with_own_reply() -> None:
     """Replay the window that produced a near-duplicate after a direct reply.
 
@@ -84,7 +110,12 @@ async def test_live_sc_duplicate_response_window_with_own_reply() -> None:
         logger.info("=== RENDERED PACKET (what the LLM sees) ===")
         logger.info("\n%s", rendered_packet)
 
-        cognition_state = runner._build_cognition_state(case, rendered_packet)
+        cognition_state = runner._build_cognition_state(
+            case,
+            rendered_packet,
+            public_group_scene=runner._build_public_group_scene(case),
+            interaction_style_context=_fixed_interaction_style_snapshot(),
+        )
         l2d_state, stage_outputs = await _run_cognition_stages(cognition_state)
         l2d_prompt_payload = build_action_selection_payload_text(l2d_state)
         l2d_output = await select_semantic_actions(l2d_state)
@@ -123,13 +154,24 @@ async def test_live_sc_duplicate_response_window_with_own_reply() -> None:
         logger.info("=== DUPLICATE ANALYSIS ===")
         logger.info("instruction: %s", instruction)
         logger.info("has_own_assistant_msg_in_visible_context: %s", has_own_assistant_msg)
-        logger.info("assistant_presence label: %s",
-            source_packet.get("group_activity_window", {})
-            .get("semantic_labels", {}).get("assistant_presence"),
+        source_context = source_packet.get("source_context", {})
+        group_window = (
+            source_context.get("group_activity_window", {})
+            if isinstance(source_context, dict)
+            else {}
         )
-        logger.info("bot_addressing label: %s",
-            source_packet.get("group_activity_window", {})
-            .get("semantic_labels", {}).get("bot_addressing"),
+        semantic_labels = (
+            group_window.get("semantic_labels", {})
+            if isinstance(group_window, dict)
+            else {}
+        )
+        logger.info(
+            "assistant_presence label: %s",
+            semantic_labels.get("assistant_presence"),
+        )
+        logger.info(
+            "bot_addressing label: %s",
+            semantic_labels.get("bot_addressing"),
         )
 
         if has_own_assistant_msg and "没有插话" in instruction:
@@ -260,7 +302,7 @@ async def _rebuild_historical_case(
     if isinstance(scene_digest, dict) and isinstance(
         scene_digest.get("digest"), str,
     ):
-        case["conversation_progress"]["group_scene_digest"] = {
+        case["source_context"]["group_scene_digest"] = {
             "digest": scene_digest["digest"].strip(),
         }
     return case
@@ -288,11 +330,14 @@ async def _run_cognition_stages(
         **l2c1_output,
         **l2c2_output,
     }
-    group_engagement_context = await build_group_engagement_action_context(
-        channel_type=str(state["channel_type"]),
-        platform=str(state["platform"]),
-        platform_channel_id=str(state["platform_channel_id"]),
+    style_snapshot = state.get("interaction_style_context")
+    if not isinstance(style_snapshot, dict):
+        raise AssertionError("live replay requires an injected style snapshot")
+    group_engagement_context = style_snapshot.get(
+        "group_engagement_action_context"
     )
+    if not isinstance(group_engagement_context, dict):
+        raise AssertionError("live replay requires group engagement context")
     group_engagement_output = {
         "group_engagement_action_context": group_engagement_context,
     }
@@ -338,6 +383,11 @@ def _cognition_initial_state(state: dict[str, Any]) -> dict[str, Any]:
         "indirect_speech_context": state["indirect_speech_context"],
         "channel_topic": state["channel_topic"],
         "conversation_progress": state.get("conversation_progress"),
+        "source_context": state.get("source_context"),
+        "public_group_scene": state.get("public_group_scene", ""),
+        "interaction_style_context": state.get(
+            "interaction_style_context"
+        ),
         "promoted_reflection_context": state.get("promoted_reflection_context"),
         "decontextualized_input": state["decontextualized_input"],
         "referents": state["referents"],

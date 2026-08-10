@@ -2011,6 +2011,16 @@ def _build_self_cognition_case(
         "fallback_reason": "",
     }
     source_text = str(fixture_case.get("input_text") or "")
+    source_context: dict[str, str] | None = None
+    if trigger_kind == models.TRIGGER_SCHEDULED_FUTURE_COGNITION:
+        source_context = {
+            "schema_version": (
+                "self_cognition_scheduled_source_context.v1"
+            ),
+            "context_kind": "scheduled_future_cognition",
+            "continuation_objective": source_text,
+            "continuation_mode": "scheduled_followup",
+        }
     case: dict[str, Any] = {
         "case_name": case_name,
         "case_id": f"{case_id}:{uuid4().hex[:8]}",
@@ -2040,9 +2050,8 @@ def _build_self_cognition_case(
             "display_name": "基线测试用户",
         }],
         "delivery_mention_users": [],
-        "conversation_progress": {},
-        "group_activity_window": {},
-        "reflection_modifier": {},
+        "conversation_progress": None,
+        "source_context": source_context,
         "existing_attempts": [],
         "character_profile": character_profile,
         "user_profile": {

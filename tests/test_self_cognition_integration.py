@@ -12,12 +12,20 @@ import pytest
 
 from kazusa_ai_chatbot.calendar_scheduler import models as calendar_models
 from kazusa_ai_chatbot.action_spec.registry import SPEAK_CAPABILITY
+from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+    build_acquaintance_user_state,
+    build_character_production_state,
+)
 from kazusa_ai_chatbot.db import user_memory_units as memory_units_module
 from kazusa_ai_chatbot.dispatcher import AdapterRegistry, SendResult
 import kazusa_ai_chatbot.dispatcher.handlers as handlers_module
+from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition as connector
 from kazusa_ai_chatbot.nodes.dialog_agent import StateContractError
-from kazusa_ai_chatbot.self_cognition import models, projection, sources
+from kazusa_ai_chatbot.self_cognition import models, projection, runner, sources
 from kazusa_ai_chatbot.self_cognition import tracking, worker
+from tests.cognition_core_v2_test_helpers import (
+    canonical_service_character_profile,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -140,6 +148,36 @@ def _commitment_case() -> dict[str, Any]:
         ],
     }
     return case
+
+
+def _test_interaction_style_snapshot() -> dict[str, Any]:
+    """Build the smallest immutable style snapshot accepted by self-cognition."""
+
+    overlay = {
+        "speech_guidelines": [],
+        "social_guidelines": [],
+        "pacing_guidelines": [],
+        "engagement_guidelines": [],
+        "confidence": "medium",
+    }
+    snapshot = {
+        "schema_version": "interaction_style_turn_snapshot.v1",
+        "sources": {},
+        "relevance": {},
+        "cognition": {},
+        "surface": {
+            "user": {"overlay": dict(overlay)},
+            "group_channel": {"overlay": dict(overlay)},
+        },
+        "application_order": ["user", "group_channel"],
+        "user_style": dict(overlay),
+        "group_engagement_action_context": {
+            "engagement_guidelines": ["Stay grounded in the visible scene."],
+            "confidence": "medium",
+        },
+        "snapshot_digest": "test-style-snapshot",
+    }
+    return snapshot
 
 
 def _delivery_target(
@@ -612,8 +650,8 @@ def _case_runner_with_tracking(
 
 
 @pytest.mark.asyncio
-async def test_collect_scheduled_future_cognition_cases_projects_due_slots() -> None:
-    """Due future-cognition slots become normal prompt-safe trigger cases."""
+async def test_collect_scheduled_future_cognition_cases_projects_typed_source_context() -> None:
+    """Due future-cognition slots use source context, not participant progress."""
 
     now = datetime(2026, 5, 16, 10, 0, tzinfo=timezone.utc)
     calls: list[dict[str, Any]] = []
@@ -659,10 +697,14 @@ async def test_collect_scheduled_future_cognition_cases_projects_due_slots() -> 
     assert case["source_refs"][0]["summary"] == (
         "Re-check whether a natural pause appeared."
     )
-    assert case["conversation_progress"]["continuation_objective"] == (
+    assert case["conversation_progress"] is None
+    assert case["source_context"]["continuation_objective"] == (
         "Re-check whether a natural pause appeared."
     )
-    assert "context_summary" not in case["conversation_progress"]
+    assert case["source_context"]["continuation_mode"] == (
+        "scheduled_followup"
+    )
+    assert "context_summary" not in case["source_context"]
     source_packet = projection.build_source_packet(case)
     rendered_packet = projection.render_source_packet_text(source_packet)
     serialized = json.dumps(source_packet, ensure_ascii=False).lower()
@@ -684,6 +726,99 @@ async def test_collect_scheduled_future_cognition_cases_projects_due_slots() -> 
         "schema_version",
     ):
         assert forbidden not in serialized
+
+
+@pytest.mark.asyncio
+async def test_prepared_commitment_state_contains_public_group_scene(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A group-bound commitment case receives the complete V2 state."""
+
+    case = _commitment_case_with_delivery_target()
+    case["character_profile"] = canonical_service_character_profile(
+        marker="strict-v2-commitment",
+    )
+    case["visible_context"] = [
+        {
+            "role": "user",
+            "display_name": "Target User",
+            "timestamp": "2026-05-12T23:50:00+00:00",
+            "body_text": "Please check back after the appointment.",
+            "platform_message_id": "platform-row-commitment",
+        }
+    ]
+    style_snapshot = _test_interaction_style_snapshot()
+    captured_style_calls: list[dict[str, Any]] = []
+    captured_state: dict[str, Any] = {}
+
+    async def load_style_snapshot(**kwargs: Any) -> dict[str, Any]:
+        captured_style_calls.append(dict(kwargs))
+        return style_snapshot
+
+    async def load_residue(_case: dict[str, Any]) -> str:
+        return ""
+
+    async def cognition_client(state: dict[str, Any]) -> dict[str, Any]:
+        captured_state.update(state)
+        return _progress_cognition_output()
+
+    monkeypatch.setattr(
+        runner,
+        "build_interaction_style_context",
+        load_style_snapshot,
+    )
+    monkeypatch.setattr(
+        runner,
+        "_load_residue_context_for_case",
+        load_residue,
+    )
+
+    await runner.build_self_cognition_case_artifacts_async(
+        case,
+        cognition_client=cognition_client,
+    )
+
+    assert len(captured_style_calls) == 1
+    assert captured_style_calls[0]["global_user_id"] == "global-target"
+    assert captured_style_calls[0]["channel_type"] == "group"
+    assert captured_state["public_group_scene"] == ""
+    assert captured_state["interaction_style_context"] is style_snapshot
+
+
+def test_prepared_commitment_state_reaches_strict_v2_input() -> None:
+    """A due commitment state validates through the strict V2 input boundary."""
+
+    case = _commitment_case_with_delivery_target()
+    case["character_profile"] = canonical_service_character_profile(
+        marker="strict-v2-commitment",
+    )
+    style_snapshot = _test_interaction_style_snapshot()
+    state = runner._build_cognition_state(
+        case,
+        "rendered commitment source packet",
+        public_group_scene="",
+        interaction_style_context=style_snapshot,
+    )
+    state["rag_result"] = {"answer": ""}
+    updated_at = "2026-05-13T00:30:00Z"
+
+    cognition_input = connector.build_cognition_input_from_global_state(
+        state,
+        mutable_state=build_acquaintance_user_state(
+            global_user_id="global-target",
+            updated_at=updated_at,
+        ),
+        character_state=build_character_production_state(
+            updated_at=updated_at,
+        ),
+    )
+
+    assert cognition_input["schema_version"] == "cognition_core_input.v2"
+    assert cognition_input["scene_context"]["public_group_scene"] == ""
+    assert cognition_input["group_engagement_action_context"] == {
+        "engagement_guidelines": [],
+        "confidence": "",
+    }
 
 
 @pytest.mark.asyncio
@@ -2323,6 +2458,74 @@ async def test_worker_default_path_requests_production_consolidation_without_fil
         delivery_tracking_id="",
     )
     assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_worker_default_path_runs_prepared_case_without_state_contract_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The normal worker path passes complete V2 state to cognition."""
+
+    case = _commitment_case_with_delivery_target()
+    style_snapshot = _test_interaction_style_snapshot()
+    captured_state: dict[str, Any] = {}
+
+    async def collect_cases(
+        *,
+        now: datetime,
+        max_cases: int,
+    ) -> list[dict[str, Any]]:
+        del now, max_cases
+        return [case]
+
+    async def read_attempts(*, limit: int) -> list[dict[str, Any]]:
+        del limit
+        return []
+
+    async def cognition_client(state: dict[str, Any]) -> dict[str, Any]:
+        captured_state.update(state)
+        return _progress_cognition_output()
+
+    async def load_residue(_case: dict[str, Any]) -> str:
+        return ""
+
+    monkeypatch.setattr(
+        worker.runner,
+        "_default_cognition_client",
+        cognition_client,
+    )
+    monkeypatch.setattr(
+        worker.runner,
+        "build_interaction_style_context",
+        AsyncMock(return_value=style_snapshot),
+    )
+    monkeypatch.setattr(
+        worker.runner,
+        "_load_residue_context_for_case",
+        load_residue,
+    )
+    monkeypatch.setattr(
+        worker.runner,
+        "record_completed_episode_residue",
+        AsyncMock(return_value={"status": "skipped"}),
+    )
+    monkeypatch.setattr(
+        worker.runner,
+        "_default_consolidation_client",
+        AsyncMock(return_value=_consolidation_result()),
+    )
+
+    result = await worker.run_self_cognition_worker_tick(
+        now=datetime(2026, 5, 13, tzinfo=timezone.utc),
+        is_primary_interaction_busy=lambda: False,
+        collect_cases_func=collect_cases,
+        read_attempts_func=read_attempts,
+        max_cases=1,
+    )
+
+    assert result.processed_count == 1
+    assert captured_state["public_group_scene"] == ""
+    assert captured_state["interaction_style_context"] is style_snapshot
 
 
 @pytest.mark.asyncio

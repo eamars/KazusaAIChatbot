@@ -1044,6 +1044,34 @@ async def _run_self_cognition_case(
     profile["global_user_id"] = CHARACTER_GLOBAL_USER_ID
     scope_type = "group" if trigger_kind == models.TRIGGER_GROUP_CHAT_REVIEW else "private"
     target_user_id = None if scope_type == "group" else "stage3-self-user"
+    source_context: dict[str, Any] | None = None
+    if trigger_kind == models.TRIGGER_GROUP_CHAT_REVIEW:
+        source_context = {
+            "schema_version": "self_cognition_group_source_context.v1",
+            "context_kind": "group_chat_review",
+            "group_activity_window": {
+                "source": "stage3_group_review",
+                "window_start": now,
+                "window_end": now,
+                "semantic_labels": {
+                    "activity_level": "active",
+                    "assistant_presence": "absent",
+                    "bot_addressing": "ambient_group_context",
+                },
+            },
+            "conversation_evidence": [],
+        }
+    elif trigger_kind == models.TRIGGER_SCHEDULED_FUTURE_COGNITION:
+        source_context = {
+            "schema_version": (
+                "self_cognition_scheduled_source_context.v1"
+            ),
+            "context_kind": "scheduled_future_cognition",
+            "continuation_objective": (
+                "Review the grounded continuation objective."
+            ),
+            "continuation_mode": "scheduled_followup",
+        }
     case: dict[str, Any] = {
         "case_name": case_name,
         "case_id": run_case_id,
@@ -1072,9 +1100,8 @@ async def _run_self_cognition_case(
             "display_name": "Stage 3 User",
         }],
         "delivery_mention_users": [],
-        "conversation_progress": {},
-        "group_activity_window": {},
-        "reflection_modifier": {},
+        "conversation_progress": None,
+        "source_context": source_context,
         "existing_attempts": [],
         "character_profile": profile,
         "user_profile": {"display_name": "Stage 3 User"},
@@ -1582,6 +1609,222 @@ async def test_live_group_review_promoted_reflection() -> None:
         case_name="group_chat_review",
         promoted_reflection=True,
     )
+
+
+async def test_live_group_review_worker_records_reviewed_ledger() -> None:
+    """Prove reflection roots and the real group-review ledger path together."""
+
+    _prepare_stage3_runtime()
+    from kazusa_ai_chatbot import service
+    from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
+    from kazusa_ai_chatbot.db import create_user_profile
+    from kazusa_ai_chatbot.db._client import get_db
+    from kazusa_ai_chatbot.reflection_cycle import repository
+    from kazusa_ai_chatbot.reflection_cycle import worker as reflection_worker
+    from kazusa_ai_chatbot.reflection_cycle.models import ReflectionScopeInput
+
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    hour_start = (now - timedelta(hours=2)).replace(
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+    run_token = uuid4().hex[:10]
+    case_id = f"focused_group_review_worker_ledger:{run_token}"
+    scope_ref = f"stage3_group_worker_{run_token}"
+    platform_channel_id = f"stage3-group-worker-{run_token}"
+    source_root_id = f"stage3-settled-root:{run_token}"
+    user_id = f"stage3-group-worker-user-{run_token}"
+
+    def _message(
+        *,
+        role: str,
+        offset_minutes: int,
+        message_suffix: str,
+        body_text: str,
+    ) -> dict[str, object]:
+        timestamp = hour_start + timedelta(minutes=offset_minutes)
+        is_user = role == "user"
+        return {
+            "role": role,
+            "body_text": body_text,
+            "timestamp": timestamp.isoformat(),
+            "source_episode_id": source_root_id,
+            "display_name": "Stage 3 User" if is_user else "Character",
+            "platform_message_id": f"{run_token}-{message_suffix}",
+            "platform_user_id": user_id if is_user else "stage3-bot",
+            "global_user_id": user_id if is_user else CHARACTER_GLOBAL_USER_ID,
+            "addressed_to_global_user_ids": (
+                [CHARACTER_GLOBAL_USER_ID] if is_user else []
+            ),
+            "mentions": [],
+        }
+
+    messages = [
+        _message(
+            role="user",
+            offset_minutes=5,
+            message_suffix="user-1",
+            body_text=(
+                "The shared channel rule is to keep facts separate from "
+                "private details."
+            ),
+        ),
+        _message(
+            role="assistant",
+            offset_minutes=7,
+            message_suffix="assistant-1",
+            body_text=(
+                "I will keep shared facts separate from private details."
+            ),
+        ),
+        _message(
+            role="user",
+            offset_minutes=65,
+            message_suffix="user-2",
+            body_text=(
+                "That boundary should still hold when the conversation "
+                "continues later."
+            ),
+        ),
+        _message(
+            role="assistant",
+            offset_minutes=67,
+            message_suffix="assistant-2",
+            body_text=(
+                "Yes, the same channel boundary should remain consistent."
+            ),
+        ),
+    ]
+    channel_scope = ReflectionScopeInput(
+        scope_ref=scope_ref,
+        platform="debug",
+        platform_channel_id=platform_channel_id,
+        channel_type="group",
+        assistant_message_count=2,
+        user_message_count=2,
+        total_message_count=4,
+        first_timestamp=str(messages[0]["timestamp"]),
+        last_timestamp=str(messages[-1]["timestamp"]),
+        messages=messages,
+    )
+
+    async with service.lifespan(service.app):
+        db = await get_db()
+        await create_user_profile({"global_user_id": user_id})
+        hourly_run_ids: list[str] = []
+        for _ in range(2):
+            hourly_result = (
+                await reflection_worker._run_hourly_reflection_for_scope(
+                    now=now,
+                    channel_scope=channel_scope,
+                    dry_run=False,
+                    is_primary_interaction_busy=lambda: False,
+                )
+            )
+            if hourly_result.succeeded_count != 1 or not hourly_result.run_ids:
+                raise AssertionError(
+                    "guarded group worker hourly reflection did not succeed: "
+                    f"{hourly_result}"
+                )
+            hourly_run_ids.extend(str(run_id) for run_id in hourly_result.run_ids)
+
+        first_hourly = await repository.reflection_run_by_id(hourly_run_ids[0])
+        if first_hourly is None:
+            raise AssertionError("first guarded hourly reflection is missing")
+        character_local_date = str(first_hourly["character_local_date"])
+
+        class _ExpectedGuardedHourlyRuns:
+            """Return both closed hourly runs for the synthetic channel."""
+
+            async def expected_hourly_runs_for_character_local_date(
+                self,
+                *,
+                character_local_date: str,
+            ) -> list[object]:
+                if character_local_date != expected_local_date:
+                    return []
+                return [reflection_worker.ExpectedDailyChannelHourlyRuns(
+                    channel_scope=channel_scope,
+                    expected_run_ids=list(hourly_run_ids),
+                )]
+
+        expected_local_date = character_local_date
+        daily_result = (
+            await reflection_worker._run_daily_channel_reflection_cycle(
+                character_local_date=character_local_date,
+                dry_run=False,
+                is_primary_interaction_busy=lambda: False,
+                phase_run_provider=_ExpectedGuardedHourlyRuns(),
+            )
+        )
+        if daily_result.succeeded_count != 1 or not daily_result.run_ids:
+            raise AssertionError(
+                "guarded group worker daily reflection did not succeed: "
+                f"{daily_result}"
+            )
+        daily_doc = await repository.reflection_run_by_id(
+            str(daily_result.run_ids[0]),
+        )
+        if daily_doc is None:
+            raise AssertionError("guarded daily reflection is missing")
+        source_episode_refs = daily_doc["source_episode_refs"]
+        if len(source_episode_refs) != 1:
+            raise AssertionError(
+                "guarded daily reflection did not deduplicate the settled "
+                f"root: {source_episode_refs}"
+            )
+        expected_captured_at = str(messages[0]["timestamp"])
+        if source_episode_refs[0]["captured_at"] != expected_captured_at:
+            raise AssertionError(
+                "guarded daily reflection did not retain the earliest root "
+                f"timestamp: {source_episode_refs}"
+            )
+
+        worker_result = (
+            await reflection_worker._run_group_self_cognition_review_for_scope(
+                now=now,
+                channel_scope=channel_scope,
+                is_primary_interaction_busy=lambda: False,
+                adapter_registry_provider=lambda: None,
+            )
+        )
+        ledger_rows = await db.self_cognition_group_review_windows.find(
+            {"scope_ref": scope_ref},
+            {"_id": 0},
+        ).to_list(length=10)
+        ledger_statuses = [str(row.get("status", "")) for row in ledger_rows]
+        artifact = {
+            "schema_version": (
+                "self_cognition_group_review_worker_evidence.v1"
+            ),
+            "case_id": case_id,
+            "technical_status": "passed",
+            "guarded_database": os.environ.get("MONGODB_DB_NAME", ""),
+            "hourly_run_count": len(hourly_run_ids),
+            "daily_status": str(daily_doc["status"]),
+            "source_episode_ref_count": len(source_episode_refs),
+            "earliest_root_timestamp_preserved": (
+                source_episode_refs[0]["captured_at"] == expected_captured_at
+            ),
+            "worker_result": {
+                "processed_count": worker_result.processed_count,
+                "failed_count": worker_result.failed_count,
+                "skipped_count": worker_result.skipped_count,
+                "deferred": worker_result.deferred,
+                "defer_reason": worker_result.defer_reason,
+            },
+            "ledger_statuses": ledger_statuses,
+            "ledger_row_count": len(ledger_rows),
+        }
+        _write_evidence("focused_group_review_worker_ledger", artifact)
+
+    assert os.environ.get("MONGODB_DB_NAME") == "_test_kazusa_core_v2"
+    assert worker_result.processed_count == 1
+    assert worker_result.failed_count == 0
+    assert worker_result.deferred is False
+    assert ledger_statuses.count("reviewed") == 1
+    assert set(ledger_statuses) <= {"coalesced_skipped", "reviewed"}
 
 
 async def test_live_media_reply_mentions_preserved() -> None:

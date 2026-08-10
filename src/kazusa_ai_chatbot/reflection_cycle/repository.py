@@ -321,11 +321,20 @@ def _normalize_source_episode_refs(
             "captured_at": captured_at,
         }
         existing = roots.get(root_episode_id)
-        if existing is not None and existing != candidate:
+        if existing is None:
+            roots[root_episode_id] = candidate
+            continue
+        if (
+            existing["correlation_id"] != candidate["correlation_id"]
+            or existing["character_local_date"]
+            != candidate["character_local_date"]
+            or existing["scope_kind"] != candidate["scope_kind"]
+        ):
             raise ValueError(
                 "recursive reflection root metadata is inconsistent"
             )
-        roots[root_episode_id] = candidate
+        if candidate["captured_at"] < existing["captured_at"]:
+            roots[root_episode_id] = candidate
     return sorted(
         roots.values(),
         key=lambda row: (row["captured_at"], row["root_episode_id"]),

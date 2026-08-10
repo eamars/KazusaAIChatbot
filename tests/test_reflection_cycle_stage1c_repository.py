@@ -102,6 +102,10 @@ def test_daily_and_global_runs_recursively_union_episode_roots() -> None:
     second_hourly = dict(first_hourly)
     second_hourly["run_id"] = "hourly-second"
     second_hourly["_id"] = "hourly-second"
+    second_hourly["source_episode_refs"] = [{
+        **first_hourly["source_episode_refs"][0],
+        "captured_at": "2026-05-04T10:06:00+00:00",
+    }]
     daily = repository_module.build_daily_channel_run_document(
         channel_scope=scope,
         hourly_docs=[first_hourly, second_hourly],
@@ -128,6 +132,85 @@ def test_daily_and_global_runs_recursively_union_episode_roots() -> None:
     assert global_run["source_episode_refs"] == daily[
         "source_episode_refs"
     ]
+
+
+def test_recursive_episode_root_union_uses_earliest_captured_at() -> None:
+    """Repeated message timestamps retain the earliest root provenance."""
+
+    later = {
+        "root_episode_id": "episode-root-1",
+        "correlation_id": "episode-root-1",
+        "character_local_date": "2026-05-04",
+        "scope_kind": "group",
+        "captured_at": "2026-05-04T10:06:00+00:00",
+    }
+    earlier = {
+        **later,
+        "captured_at": "2026-05-04T10:05:00+00:00",
+    }
+
+    later_first = repository_module.union_source_episode_refs([{
+        "source_episode_refs": [later, earlier],
+    }])
+    earlier_first = repository_module.union_source_episode_refs([{
+        "source_episode_refs": [earlier, later],
+    }])
+
+    assert later_first == earlier_first == [earlier]
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("correlation_id", "different-correlation"),
+        ("character_local_date", "2026-05-05"),
+        ("scope_kind", "private"),
+    ],
+)
+def test_recursive_episode_root_union_rejects_conflicting_identity_metadata(
+    field: str,
+    value: str,
+) -> None:
+    """Root identity metadata remains fail-closed across reflection levels."""
+
+    base = {
+        "root_episode_id": "episode-root-1",
+        "correlation_id": "episode-root-1",
+        "character_local_date": "2026-05-04",
+        "scope_kind": "group",
+        "captured_at": "2026-05-04T10:05:00+00:00",
+    }
+    conflicting = {**base, field: value}
+
+    with pytest.raises(
+        ValueError,
+        match="recursive reflection root metadata is inconsistent",
+    ):
+        repository_module.union_source_episode_refs([{
+            "source_episode_refs": [base, conflicting],
+        }])
+
+
+def test_recursive_episode_root_union_preserves_distinct_root_ids() -> None:
+    """Different settled roots remain separate recursive evidence rows."""
+
+    first = {
+        "root_episode_id": "episode-root-1",
+        "correlation_id": "episode-root-1",
+        "character_local_date": "2026-05-04",
+        "scope_kind": "group",
+        "captured_at": "2026-05-04T10:05:00+00:00",
+    }
+    second = {
+        **first,
+        "root_episode_id": "episode-root-2",
+        "correlation_id": "episode-root-2",
+        "captured_at": "2026-05-04T10:06:00+00:00",
+    }
+
+    assert repository_module.union_source_episode_refs([{
+        "source_episode_refs": [first, second],
+    }]) == [first, second]
 
 
 @pytest.mark.asyncio

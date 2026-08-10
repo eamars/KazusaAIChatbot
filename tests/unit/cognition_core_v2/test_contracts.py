@@ -6,6 +6,7 @@ import pytest
 
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionContractError,
+    CURRENT_EPISODE_EVIDENCE_SOURCE_KINDS,
     RELATIONAL_STANCE_VALUES,
     RELATIONAL_CURRENT_USER_RELATIONSHIP_STATE_VALUES,
     validate_action_bid,
@@ -122,3 +123,9 @@ def test_selected_response_operation_rejects_missing_required_fields() -> None:
         match="selected_response_operation",
     ):
         validate_action_bid(bid)
+
+
+def test_scheduler_events_are_current_episode_evidence() -> None:
+    """Scheduled self-cognition can cite its current trigger event."""
+
+    assert "scheduler_event" in CURRENT_EPISODE_EVIDENCE_SOURCE_KINDS
