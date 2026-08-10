@@ -28,6 +28,85 @@ class SelfCognitionBudget(TypedDict):
     topic_limit: int
 
 
+SelfCognitionSemanticDisposition = Literal[
+    "cognition_declined",
+    "reply_proposed",
+    "cognition_contract_failed",
+]
+SelfCognitionPolicyDisposition = Literal[
+    "not_evaluated",
+    "approved",
+    "rejected",
+]
+SelfCognitionExecutionDisposition = Literal[
+    "not_requested",
+    "dialog_failed",
+    "dispatch_failed",
+    "delivered",
+]
+SelfCognitionPolicyReason = Literal[
+    "",
+    "stale_source",
+    "invalid_provenance",
+    "unresolved_target",
+    "permission_denied",
+    "duplicate",
+    "cooldown",
+    "policy_risk",
+]
+
+SELF_COGNITION_SEMANTIC_DISPOSITION_VALUES = frozenset({
+    "cognition_declined",
+    "reply_proposed",
+    "cognition_contract_failed",
+})
+SELF_COGNITION_POLICY_DISPOSITION_VALUES = frozenset({
+    "not_evaluated",
+    "approved",
+    "rejected",
+})
+SELF_COGNITION_EXECUTION_DISPOSITION_VALUES = frozenset({
+    "not_requested",
+    "dialog_failed",
+    "dispatch_failed",
+    "delivered",
+})
+SELF_COGNITION_POLICY_REASON_VALUES = frozenset({
+    "",
+    "stale_source",
+    "invalid_provenance",
+    "unresolved_target",
+    "permission_denied",
+    "duplicate",
+    "cooldown",
+    "policy_risk",
+})
+SELF_COGNITION_RESPONSE_GATE_CODE_VALUES = frozenset({
+    "response_contract",
+    "group_source_provenance",
+    "recent_source",
+    "participation_grounding",
+    "bound_group_target",
+    "duplicate_reservation",
+    "approved_for_dialog",
+    "no_admitted_bid",
+    "semantic_declined",
+    "dialog_failed",
+    "dispatch_failed",
+})
+SELF_COGNITION_RESPONSE_GATE_CODE_LIMIT = 8
+
+
+class SelfCognitionResponseTelemetry(TypedDict):
+    """Sanitized self-cognition outcome fields mirrored into event logs."""
+
+    semantic_disposition: SelfCognitionSemanticDisposition
+    policy_disposition: SelfCognitionPolicyDisposition
+    execution_disposition: SelfCognitionExecutionDisposition
+    policy_reason: SelfCognitionPolicyReason
+    response_gate_codes: list[str]
+
+
 class EventRefRecord(TypedDict):
     """Reference to an existing durable runtime artifact."""
 

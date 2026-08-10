@@ -339,6 +339,13 @@ def _future_cognition_case() -> dict[str, Any]:
             }
         ],
         "visible_context": [],
+        "conversation_progress": None,
+        "source_context": {
+            "schema_version": "self_cognition_scheduled_source_context.v1",
+            "context_kind": "scheduled_future_cognition",
+            "continuation_objective": "Re-check the open topic.",
+            "continuation_mode": "observe_then_decide",
+        },
         "source_calendar_run_id": "calendar_run_future_123",
         "target_binding_status": "bound",
         "delivery_target": _delivery_target(

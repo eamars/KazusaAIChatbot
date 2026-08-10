@@ -28,6 +28,7 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     GroupEngagementActionContextV2,
     RelationalWillingnessV2,
     SemanticAppraisalResultV2,
+    is_targetless_group_self_cognition_episode,
     validate_action_bid,
     validate_cognition_core_input,
     validate_cognition_core_output,
@@ -435,6 +436,7 @@ async def _run_cognition(
             group_engagement_action_context=payload[
                 "group_engagement_action_context"
             ],
+            scene_context=payload["scene_context"],
             runtime_capability_limits=payload.get(
                 "runtime_capability_limits",
                 [],
@@ -552,6 +554,17 @@ async def _run_cognition(
         output["relationship_projection"] = relationship
     if relational_decision is not None:
         output["relational_willingness"] = dict(relational_decision)
+    if is_targetless_group_self_cognition_episode(payload["episode"]):
+        response_status = action_plan.get(
+            "self_cognition_response_contract_status"
+        )
+        if isinstance(response_status, str):
+            output["self_cognition_response_contract_status"] = (
+                response_status
+            )
+        response = action_plan.get("self_cognition_response")
+        if isinstance(response, Mapping):
+            output["self_cognition_response"] = dict(response)
     all_branch_definitions = [
         *preliminary_branches,
         *new_branch_definitions,

@@ -11,8 +11,13 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
+from kazusa_ai_chatbot import db, event_logging, llm_tracing
 from kazusa_ai_chatbot.action_spec.results import (
     has_consolidatable_output,
+)
+from kazusa_ai_chatbot.brain_service.post_turn import (
+    build_post_turn_lifecycle_record,
+    settle_runtime_episode_trace,
 )
 from kazusa_ai_chatbot.calendar_scheduler import models as calendar_models
 from kazusa_ai_chatbot.calendar_scheduler import repository as calendar_repository
@@ -22,16 +27,10 @@ from kazusa_ai_chatbot.config import (
     SELF_COGNITION_MAX_CASES_PER_TICK,
     SELF_COGNITION_WORKER_INTERVAL_SECONDS,
 )
-from kazusa_ai_chatbot import db, event_logging
-from kazusa_ai_chatbot.brain_service.post_turn import (
-    build_post_turn_lifecycle_record,
-    settle_runtime_episode_trace,
-)
+from kazusa_ai_chatbot.dispatcher.adapter_iface import AdapterRegistry
 from kazusa_ai_chatbot.internal_monologue_residue import (
     record_completed_episode_residue,
 )
-from kazusa_ai_chatbot import llm_tracing
-from kazusa_ai_chatbot.dispatcher.adapter_iface import AdapterRegistry
 from kazusa_ai_chatbot.nodes.dialog_agent import StateContractError
 from kazusa_ai_chatbot.runtime_coordination import (
     PipelineCancelled,
@@ -39,12 +38,12 @@ from kazusa_ai_chatbot.runtime_coordination import (
     PipelineRunHandle,
     PipelineScope,
 )
+from kazusa_ai_chatbot.self_cognition import models, runner, tracking
+from kazusa_ai_chatbot.self_cognition import sources as source_collectors
 from kazusa_ai_chatbot.self_cognition.delivery import (
     SelfCognitionDeliveryResult,
     deliver_selected_speak,
 )
-from kazusa_ai_chatbot.self_cognition import models, runner, tracking
-from kazusa_ai_chatbot.self_cognition import sources as source_collectors
 from kazusa_ai_chatbot.time_boundary import (
     storage_utc_now,
     storage_utc_now_iso,
@@ -1246,8 +1245,38 @@ async def _handle_case_action_outputs(
         artifact_payloads[models.ARTIFACT_DISPATCH_RESULT] = {
             "status": "not_requested",
         }
+        _update_response_execution_disposition(
+            artifact_payloads,
+            models.EXECUTION_DISPOSITION_NOT_REQUESTED,
+        )
         return_value = "not_requested"
         return return_value
+
+    preexisting_dispatch = artifact_payloads.get(
+        models.ARTIFACT_DISPATCH_RESULT
+    )
+    if (
+        isinstance(preexisting_dispatch, dict)
+        and preexisting_dispatch.get("status") == "dialog_failed"
+    ):
+        action_attempt["status"] = (
+            models.ACTION_ATTEMPT_STATUS_DELIVERY_FAILED
+        )
+        action_attempt["dispatch_status"] = "dialog_failed"
+        if pipeline_run_handle is not None:
+            pipeline_run_handle.raise_if_cancelled(
+                "before_action_attempt_persistence",
+            )
+        await _call_maybe_async(
+            record_attempt_func,
+            _attempt_state(action_attempt, now=now),
+        )
+        _update_response_execution_disposition(
+            artifact_payloads,
+            models.EXECUTION_DISPOSITION_DIALOG_FAILED,
+            gate_code="dialog_failed",
+        )
+        return "dialog_failed"
 
     attempt_status = str(action_attempt.get("status") or "")
     if attempt_status == models.ACTION_ATTEMPT_STATUS_DUPLICATE:
@@ -1260,6 +1289,10 @@ async def _handle_case_action_outputs(
         artifact_payloads[models.ARTIFACT_DISPATCH_RESULT] = {
             "status": "duplicate_suppressed",
         }
+        _update_response_execution_disposition(
+            artifact_payloads,
+            models.EXECUTION_DISPOSITION_NOT_REQUESTED,
+        )
         return_value = "duplicate_suppressed"
         return return_value
     if attempt_status == models.ACTION_ATTEMPT_STATUS_HELD:
@@ -1272,6 +1305,10 @@ async def _handle_case_action_outputs(
         artifact_payloads[models.ARTIFACT_DISPATCH_RESULT] = {
             "status": "held",
         }
+        _update_response_execution_disposition(
+            artifact_payloads,
+            models.EXECUTION_DISPOSITION_NOT_REQUESTED,
+        )
         return_value = "held"
         return return_value
 
@@ -1304,6 +1341,11 @@ async def _handle_case_action_outputs(
         artifact_payloads[models.ARTIFACT_DISPATCH_RESULT] = dict(
             delivery_result
         )
+        _update_response_execution_disposition(
+            artifact_payloads,
+            models.EXECUTION_DISPOSITION_DISPATCH_FAILED,
+            gate_code="dispatch_failed",
+        )
         return_value = delivery_result["status"]
         return return_value
     if (
@@ -1320,6 +1362,10 @@ async def _handle_case_action_outputs(
         artifact_payloads[models.ARTIFACT_DISPATCH_RESULT] = {
             "status": "not_requested",
         }
+        _update_response_execution_disposition(
+            artifact_payloads,
+            models.EXECUTION_DISPOSITION_NOT_REQUESTED,
+        )
         return_value = "not_requested"
         return return_value
 
@@ -1343,8 +1389,50 @@ async def _handle_case_action_outputs(
     )
     await _call_maybe_async(record_attempt_func, attempt_state)
     artifact_payloads[models.ARTIFACT_DISPATCH_RESULT] = dict(delivery_result)
+    _update_response_execution_disposition(
+        artifact_payloads,
+        (
+            models.EXECUTION_DISPOSITION_DELIVERED
+            if delivery_result["status"] == "sent"
+            else models.EXECUTION_DISPOSITION_DISPATCH_FAILED
+        ),
+        gate_code=(
+            None
+            if delivery_result["status"] == "sent"
+            else "dispatch_failed"
+        ),
+    )
     return_value = delivery_result["status"]
     return return_value
+
+
+def _update_response_execution_disposition(
+    artifact_payloads: dict[str, Any],
+    execution_disposition: str,
+    *,
+    gate_code: str | None = None,
+) -> None:
+    """Mirror final execution metadata into bounded worker artifacts."""
+
+    raw_outcome = artifact_payloads.get(models.ARTIFACT_RESPONSE_OUTCOME)
+    if not isinstance(raw_outcome, dict):
+        return
+    outcome = dict(raw_outcome)
+    outcome["execution_disposition"] = execution_disposition
+    raw_gate_codes = outcome.get("response_gate_codes")
+    gate_codes = list(raw_gate_codes) if isinstance(raw_gate_codes, list) else []
+    if gate_code and gate_code not in gate_codes:
+        gate_codes.append(gate_code)
+    outcome["response_gate_codes"] = gate_codes[
+        :models.RESPONSE_GATE_CODE_LIMIT
+    ]
+    artifact_payloads[models.ARTIFACT_RESPONSE_OUTCOME] = outcome
+    run_record = artifact_payloads.get(models.ARTIFACT_RUN_RECORD)
+    if isinstance(run_record, dict):
+        run_record["response_outcome"] = dict(outcome)
+    route_effect = artifact_payloads.get(models.ARTIFACT_ROUTE_EFFECT)
+    if isinstance(route_effect, dict):
+        route_effect["response_outcome"] = dict(outcome)
 
 
 def _action_attempt_with_delivery_result(
@@ -1723,26 +1811,59 @@ async def _record_self_cognition_event_from_artifacts(
     )
     if not isinstance(consolidation_outcome, dict):
         consolidation_outcome = None
+    response_outcome = artifact_payloads.get(
+        models.ARTIFACT_RESPONSE_OUTCOME
+    )
+    if not isinstance(response_outcome, dict):
+        response_outcome = run_record.get("response_outcome")
     budget = run_record["budget"]
-    await event_logging.record_self_cognition_event(
-        component="self_cognition.worker",
-        case_id=str(case.get("case_id") or ""),
-        trigger_kind=str(trigger_record["trigger_kind"]),
-        selected_route=str(run_record["selected_route"]),
-        output_mode=str(run_record["output_mode"]),
-        budget={
+    event_kwargs: dict[str, Any] = {
+        "component": "self_cognition.worker",
+        "case_id": str(case.get("case_id") or ""),
+        "trigger_kind": str(trigger_record["trigger_kind"]),
+        "selected_route": str(run_record["selected_route"]),
+        "output_mode": str(run_record["output_mode"]),
+        "budget": {
             "rag_calls": int(budget["rag_calls"]),
             "cognition_calls": int(budget["cognition_calls"]),
             "dialog_calls": int(budget["dialog_calls"]),
             "topic_limit": int(budget["topic_limit"]),
         },
-        dispatch_status=dispatch_status,
-        status=str(run_record["status"]),
-        trigger_id=str(trigger_record["trigger_id"]),
-        run_id=str(run_record["run_id"]),
-        attempt_id=str(action_attempt.get("attempt_id") or ""),
-        consolidation_outcome=consolidation_outcome,
-    )
+        "dispatch_status": dispatch_status,
+        "status": str(run_record["status"]),
+        "trigger_id": str(trigger_record["trigger_id"]),
+        "run_id": str(run_record["run_id"]),
+        "attempt_id": str(action_attempt.get("attempt_id") or ""),
+        "consolidation_outcome": consolidation_outcome,
+    }
+    if isinstance(response_outcome, dict):
+        event_kwargs.update({
+            "semantic_disposition": str(
+                response_outcome.get(
+                    "semantic_disposition",
+                    models.SEMANTIC_DISPOSITION_COGNITION_CONTRACT_FAILED,
+                )
+            ),
+            "policy_disposition": str(
+                response_outcome.get(
+                    "policy_disposition",
+                    models.POLICY_DISPOSITION_NOT_EVALUATED,
+                )
+            ),
+            "execution_disposition": str(
+                response_outcome.get(
+                    "execution_disposition",
+                    models.EXECUTION_DISPOSITION_NOT_REQUESTED,
+                )
+            ),
+            "policy_reason": str(response_outcome.get("policy_reason") or ""),
+            "response_gate_codes": (
+                response_outcome.get("response_gate_codes", [])
+                if isinstance(response_outcome.get("response_gate_codes"), list)
+                else []
+            ),
+        })
+    await event_logging.record_self_cognition_event(**event_kwargs)
 
 
 async def _publish_latest_cognition_graph(

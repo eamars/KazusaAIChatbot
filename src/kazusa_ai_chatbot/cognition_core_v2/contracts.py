@@ -50,8 +50,8 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     RequiredResolverEvidenceDependencyV1,
     ResolverValidationError,
     validate_current_turn_relational_willingness,
-    validate_resolver_evidence_state,
     validate_required_resolver_evidence_dependency,
+    validate_resolver_evidence_state,
 )
 from kazusa_ai_chatbot.config import (
     L3_INTERACTION_STYLE_GUIDELINES_PER_FIELD_LIMIT,
@@ -61,6 +61,24 @@ from kazusa_ai_chatbot.llm_interface import LLMCallConfig, LLMInvoker
 _CJK_IDEOGRAPH_RE = re.compile(r"[\u4e00-\u9fff]")
 SCENE_PARTICIPANT_HANDLE_RE = re.compile(r"^p[1-9][0-9]*$")
 SURFACE_ROLE_HANDLE_RE = re.compile(r"^(?:current_user|self|p[1-9][0-9]*)$")
+
+SELF_COGNITION_RESPONSE_DECISION_VALUES = frozenset({
+    "stay_silent",
+    "propose_visible_reply",
+})
+SELF_COGNITION_RESPONSE_PARTICIPATION_VALUES = frozenset({
+    "",
+    "direct_address",
+    "explicit_character_reference",
+    "grounded_scene_intervention",
+})
+SELF_COGNITION_RESPONSE_CONTRACT_STATUS_VALUES = frozenset({
+    "not_required",
+    "valid",
+    "failed",
+})
+SELF_COGNITION_RESPONSE_EVIDENCE_LIMIT = 4
+SELF_COGNITION_RESPONSE_TEXT_LIMIT = 300
 
 
 @dataclass(frozen=True)
@@ -492,6 +510,22 @@ class SceneContextV2(TypedDict):
     participant_bindings: NotRequired[list[SceneParticipantBindingV1]]
 
 
+class SelfCognitionResponseDecisionV1(TypedDict):
+    """Semantic group self-cognition decision before route derivation."""
+
+    decision: Literal["stay_silent", "propose_visible_reply"]
+    evidence_handles: list[str]
+    semantic_target_handle: str
+    participation_basis: Literal[
+        "",
+        "direct_address",
+        "explicit_character_reference",
+        "grounded_scene_intervention",
+    ]
+    response_goal: str
+    reason: str
+
+
 class GroupEngagementActionContextV2(TypedDict):
     """Bounded advisory participation guidance for one group scene."""
 
@@ -881,6 +915,10 @@ class CognitionCoreOutputV2(TypedDict):
     diagnostics: CognitionDiagnosticsV2
     cognition_observability: NotRequired[CognitionObservabilityV2]
     relational_willingness: NotRequired[RelationalWillingnessV2]
+    self_cognition_response: NotRequired[SelfCognitionResponseDecisionV1]
+    self_cognition_response_contract_status: NotRequired[
+        Literal["not_required", "valid", "failed"]
+    ]
 
 
 class SurfaceBidProjectionV2(TypedDict):
@@ -1266,6 +1304,148 @@ def validate_cognition_core_input(
     return validated_payload  # type: ignore[return-value]
 
 
+def is_targetless_group_self_cognition_episode(
+    episode: Mapping[str, Any],
+) -> bool:
+    """Identify the targetless group self-cognition route boundary."""
+
+    target_scope = episode.get("target_scope")
+    if not isinstance(target_scope, Mapping):
+        return False
+    if episode.get("trigger_source") != "self_cognition":
+        return False
+    if target_scope.get("channel_type") != "group":
+        return False
+    return not any(
+        isinstance(target_scope.get(field_name), str)
+        and target_scope[field_name].strip()
+        for field_name in (
+            "current_global_user_id",
+            "current_platform_user_id",
+        )
+    )
+
+
+def validate_self_cognition_response_decision(
+    value: Any,
+    *,
+    evidence: Sequence[Mapping[str, Any]] | None = None,
+    target_handles: Sequence[str] | None = None,
+) -> SelfCognitionResponseDecisionV1:
+    """Validate one targetless group self-cognition semantic decision."""
+
+    _require_exact_keys(
+        value,
+        {
+            "decision",
+            "evidence_handles",
+            "semantic_target_handle",
+            "participation_basis",
+            "response_goal",
+            "reason",
+        },
+        "self-cognition response",
+    )
+    decision = value["decision"]
+    if decision not in SELF_COGNITION_RESPONSE_DECISION_VALUES:
+        raise CognitionContractError(
+            "self-cognition response decision is invalid"
+        )
+    evidence_handles = value["evidence_handles"]
+    if (
+        not isinstance(evidence_handles, list)
+        or len(evidence_handles) > SELF_COGNITION_RESPONSE_EVIDENCE_LIMIT
+        or any(
+            not isinstance(handle, str) or not handle.strip()
+            for handle in evidence_handles
+        )
+        or len(evidence_handles) != len(set(evidence_handles))
+    ):
+        raise CognitionContractError(
+            "self-cognition response evidence handles are invalid"
+        )
+    available_evidence = {
+        row.get("evidence_handle")
+        for row in evidence or ()
+        if isinstance(row, Mapping)
+    }
+    if evidence is not None and any(
+        handle not in available_evidence for handle in evidence_handles
+    ):
+        raise CognitionContractError(
+            "self-cognition response evidence handle is unavailable"
+        )
+    _require_bounded_text(
+        value["semantic_target_handle"],
+        "self-cognition response.semantic_target_handle",
+        maximum=120,
+    )
+    participation_basis = value["participation_basis"]
+    if participation_basis not in SELF_COGNITION_RESPONSE_PARTICIPATION_VALUES:
+        raise CognitionContractError(
+            "self-cognition response participation basis is invalid"
+        )
+    _require_bounded_text(
+        value["response_goal"],
+        "self-cognition response.response_goal",
+        maximum=SELF_COGNITION_RESPONSE_TEXT_LIMIT,
+    )
+    _require_text(
+        value["reason"],
+        "self-cognition response.reason",
+        maximum=SELF_COGNITION_RESPONSE_TEXT_LIMIT,
+    )
+    if decision == "stay_silent":
+        if participation_basis != "" or value["response_goal"] != "":
+            raise CognitionContractError(
+                "silent self-cognition response must not carry participation "
+                "or response-goal content"
+            )
+        return dict(value)  # type: ignore[return-value]
+    if not evidence_handles:
+        raise CognitionContractError(
+            "visible self-cognition proposal requires evidence"
+        )
+    if evidence is not None and not any(
+        row.get("evidence_handle") in evidence_handles
+        and row.get("evidence_ref", {}).get("source_kind")
+        in CURRENT_EPISODE_EVIDENCE_SOURCE_KINDS
+        for row in evidence
+        if isinstance(row, Mapping)
+        and isinstance(row.get("evidence_ref"), Mapping)
+    ):
+        raise CognitionContractError(
+            "visible self-cognition proposal requires current-episode evidence"
+        )
+    semantic_target_handle = value["semantic_target_handle"]
+    if not semantic_target_handle:
+        raise CognitionContractError(
+            "visible self-cognition proposal requires a target"
+        )
+    if semantic_target_handle not in {"self", "current_group_scene"} and not (
+        isinstance(semantic_target_handle, str)
+        and SCENE_PARTICIPANT_HANDLE_RE.fullmatch(semantic_target_handle)
+    ):
+        raise CognitionContractError(
+            "visible self-cognition proposal target is invalid"
+        )
+    if target_handles is not None:
+        supplied_targets = set(target_handles)
+        if semantic_target_handle not in supplied_targets:
+            raise CognitionContractError(
+                "visible self-cognition proposal target is unavailable"
+            )
+    if participation_basis == "":
+        raise CognitionContractError(
+            "visible self-cognition proposal requires participation basis"
+        )
+    if not value["response_goal"].strip():
+        raise CognitionContractError(
+            "visible self-cognition proposal requires response goal"
+        )
+    return dict(value)  # type: ignore[return-value]
+
+
 def validate_cognition_core_output(
     payload: Mapping[str, Any],
 ) -> CognitionCoreOutputV2:
@@ -1303,6 +1483,16 @@ def validate_cognition_core_output(
         | (
             {"relational_willingness"}
             if "relational_willingness" in payload
+            else set()
+        )
+        | (
+            {"self_cognition_response"}
+            if "self_cognition_response" in payload
+            else set()
+        )
+        | (
+            {"self_cognition_response_contract_status"}
+            if "self_cognition_response_contract_status" in payload
             else set()
         ),
         "cognition core output",
@@ -1365,6 +1555,24 @@ def validate_cognition_core_output(
         _validate_cognition_observability(payload["cognition_observability"])
     if "relational_willingness" in payload:
         validate_relational_willingness(payload["relational_willingness"])
+    if "self_cognition_response_contract_status" in payload:
+        status = payload["self_cognition_response_contract_status"]
+        if status not in SELF_COGNITION_RESPONSE_CONTRACT_STATUS_VALUES:
+            raise CognitionContractError(
+                "self-cognition response contract status is invalid"
+            )
+        if status == "valid" and "self_cognition_response" not in payload:
+            raise CognitionContractError(
+                "valid self-cognition response status requires a decision"
+            )
+        if status == "failed" and "self_cognition_response" in payload:
+            raise CognitionContractError(
+                "failed self-cognition response status cannot carry a decision"
+            )
+    if "self_cognition_response" in payload:
+        validate_self_cognition_response_decision(
+            payload["self_cognition_response"],
+        )
     _validate_relational_output_consistency(payload)
     _validate_diagnostics(payload["diagnostics"])
     _require_text(

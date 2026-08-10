@@ -16,9 +16,14 @@ from kazusa_ai_chatbot.action_spec.registry import (
     SPEAK_CAPABILITY,
 )
 from kazusa_ai_chatbot.nodes.dialog_agent import StateContractError
-from kazusa_ai_chatbot.self_cognition import models, projection
-from kazusa_ai_chatbot.self_cognition import sources, tracking
-from kazusa_ai_chatbot.self_cognition import runner, worker
+from kazusa_ai_chatbot.self_cognition import (
+    models,
+    projection,
+    runner,
+    sources,
+    tracking,
+    worker,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -225,6 +230,7 @@ def _group_noise_case() -> dict[str, Any]:
                 "timestamp": "2026-05-10T00:29:00+00:00",
             }
         ],
+        "conversation_progress": None,
     }
     return case
 
@@ -234,7 +240,10 @@ def _group_chat_review_case() -> dict[str, Any]:
 
     case = {
         "case_name": models.CASE_GROUP_CHAT_REVIEW,
-        "case_id": "group_activity_window:scope_group:2026-05-18T04:00Z",
+        "case_id": (
+            "scope_group:2026-05-18T04:00:00+00:00:"
+            "2026-05-18T04:15:00+00:00"
+        ),
         "idle_timestamp_utc": "2026-05-18T04:15:00+00:00",
         "last_evidence_timestamp_utc": "2026-05-18T04:10:00+00:00",
         "trigger_kind": models.TRIGGER_GROUP_CHAT_REVIEW,
@@ -244,7 +253,10 @@ def _group_chat_review_case() -> dict[str, Any]:
         "source_refs": [
             {
                 "source_kind": "reflection_activity_window",
-                "source_id": "scope_group:2026-05-18T04:00Z:2026-05-18T04:15Z",
+                "source_id": (
+                    "scope_group:2026-05-18T04:00:00+00:00:"
+                    "2026-05-18T04:15:00+00:00"
+                ),
                 "due_at": None,
                 "summary": "quiet group activity, one speaker, risk low",
             }
@@ -252,10 +264,34 @@ def _group_chat_review_case() -> dict[str, Any]:
         "visible_context": [
             {
                 "role": "user",
-                "text": "A recent group message.",
+                "body_text": "A recent group message.",
                 "timestamp": "2026-05-18T04:10:00+00:00",
             }
         ],
+        "conversation_progress": None,
+        "source_context": {
+            "schema_version": "self_cognition_group_source_context.v1",
+            "context_kind": "group_chat_review",
+            "group_activity_window": {
+                "source": "reflection_activity_window",
+                "window_start": "2026-05-18T04:00:00+00:00",
+                "window_end": "2026-05-18T04:15:00+00:00",
+                "semantic_labels": {
+                    "assistant_presence": "present",
+                    "bot_addressing": "directly_addressed",
+                    "message_recency": "recent",
+                    "response_risk": "low",
+                },
+            },
+            "conversation_evidence": [],
+        },
+        "target_binding_status": "bound",
+        "delivery_target": {
+            "platform": "qq",
+            "platform_channel_id": "54369546",
+            "channel_type": "group",
+            "user_id": None,
+        },
     }
     return case
 
@@ -313,6 +349,15 @@ def _scheduled_future_cognition_case() -> dict[str, Any]:
                 "timestamp": "2026-05-10T00:00:00+00:00",
             }
         ],
+        "conversation_progress": None,
+        "source_context": {
+            "schema_version": (
+                "self_cognition_scheduled_source_context.v1"
+            ),
+            "context_kind": "scheduled_future_cognition",
+            "continuation_objective": "Re-check the open topic.",
+            "continuation_mode": "observe_then_decide",
+        },
         "source_calendar_run_id": "calendar_run_future_001",
     }
     return case
@@ -1875,17 +1920,30 @@ def test_group_review_suppresses_prior_delivery_failed_attempt(
         }
     ]
 
+    cognition_output = _action_cognition_output(
+        "A visible group response.",
+    )
+    cognition_output["cognition_core_output"] = {
+        "admitted_bid": {"evidence_handles": ["e1"]},
+        "self_cognition_response": {
+            "decision": "propose_visible_reply",
+            "evidence_handles": ["e1"],
+            "semantic_target_handle": "current_group_scene",
+            "participation_basis": "grounded_scene_intervention",
+            "response_goal": "answer the current group scene",
+            "reason": "The current scene supports a bounded intervention.",
+        },
+    }
     paths = _build_tracking_records(
         case,
         tmp_path,
-        cognition_client=lambda state: _action_cognition_output(
-            "A visible group response.",
-        ),
+        cognition_client=lambda state: cognition_output,
     )
-    action_attempt = _read_json(paths[models.ARTIFACT_ACTION_ATTEMPT])
+    route_effect = _read_json(paths[models.ARTIFACT_ROUTE_EFFECT])
 
-    assert action_attempt["status"] == models.ACTION_ATTEMPT_STATUS_DUPLICATE
+    assert models.ARTIFACT_ACTION_ATTEMPT not in paths
     assert models.ARTIFACT_ACTION_CANDIDATE not in paths
+    assert route_effect["route"] == models.ROUTE_AUDIT_ONLY
 
 
 def test_duplicate_tick_fixture_supplies_prior_attempt_state() -> None:

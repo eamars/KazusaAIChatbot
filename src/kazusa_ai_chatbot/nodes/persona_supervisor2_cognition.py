@@ -1093,6 +1093,14 @@ def _project_output_to_global_state(
         "should_respond": route != "silence",
         "rag_result": state.get("rag_result", {}),
     }
+    if "self_cognition_response" in output:
+        update["self_cognition_response"] = dict(
+            output["self_cognition_response"]
+        )
+    if "self_cognition_response_contract_status" in output:
+        update["self_cognition_response_contract_status"] = output[
+            "self_cognition_response_contract_status"
+        ]
     resolver_state = state.get("resolver_state")
     relational_decision = output.get("relational_willingness")
     if (

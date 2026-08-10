@@ -10,10 +10,16 @@ from typing import Literal
 from uuid import uuid4
 
 from kazusa_ai_chatbot.character_identity_growth import models as identity_models
-from kazusa_ai_chatbot.event_logging import repository
 from kazusa_ai_chatbot.config import AUDIT_LOG_TTL_DAYS
+from kazusa_ai_chatbot.event_logging import repository
 from kazusa_ai_chatbot.event_logging.models import (
     EVENT_SEVERITIES,
+    SELF_COGNITION_EXECUTION_DISPOSITION_VALUES,
+    SELF_COGNITION_POLICY_DISPOSITION_VALUES,
+    SELF_COGNITION_POLICY_REASON_VALUES,
+    SELF_COGNITION_RESPONSE_GATE_CODE_LIMIT,
+    SELF_COGNITION_RESPONSE_GATE_CODE_VALUES,
+    SELF_COGNITION_SEMANTIC_DISPOSITION_VALUES,
     EventLogWriteResult,
     EventScopeInput,
     EventSeverity,
@@ -21,11 +27,11 @@ from kazusa_ai_chatbot.event_logging.models import (
 )
 from kazusa_ai_chatbot.event_logging.sanitization import (
     build_scope_record,
-    sanitized_failure_reason,
-    sanitized_rejection_reason,
+    sanitize_cognition_v2_event_fields,
     sanitize_short_text,
     sanitize_string_list,
-    sanitize_cognition_v2_event_fields,
+    sanitized_failure_reason,
+    sanitized_rejection_reason,
     unsafe_field_paths,
 )
 from kazusa_ai_chatbot.event_logging.schemas import EventLogEventDoc
@@ -802,6 +808,11 @@ async def record_self_cognition_event(
     attempt_id: str = "",
     consolidation_outcome: Mapping[str, object] | None = None,
     target_binding_failure: Mapping[str, object] | None = None,
+    semantic_disposition: str | None = None,
+    policy_disposition: str | None = None,
+    execution_disposition: str | None = None,
+    policy_reason: str = "",
+    response_gate_codes: Sequence[str] = (),
     severity: EventSeverity = "info",
     occurred_at: datetime | None = None,
 ) -> EventLogWriteResult:
@@ -821,6 +832,35 @@ async def record_self_cognition_event(
         "budget": budget_payload,
         "dispatch_status": sanitize_short_text(dispatch_status, limit=100),
     }
+    if semantic_disposition is not None:
+        payload.update({
+            "semantic_disposition": _closed_self_cognition_value(
+                semantic_disposition,
+                SELF_COGNITION_SEMANTIC_DISPOSITION_VALUES,
+                "cognition_contract_failed",
+            ),
+            "policy_disposition": _closed_self_cognition_value(
+                policy_disposition,
+                SELF_COGNITION_POLICY_DISPOSITION_VALUES,
+                "not_evaluated",
+            ),
+            "execution_disposition": _closed_self_cognition_value(
+                execution_disposition,
+                SELF_COGNITION_EXECUTION_DISPOSITION_VALUES,
+                "not_requested",
+            ),
+            "policy_reason": _closed_self_cognition_value(
+                policy_reason,
+                SELF_COGNITION_POLICY_REASON_VALUES,
+                "",
+            ),
+            "response_gate_codes": [
+                code
+                for code in response_gate_codes
+                if isinstance(code, str)
+                and code in SELF_COGNITION_RESPONSE_GATE_CODE_VALUES
+            ][:SELF_COGNITION_RESPONSE_GATE_CODE_LIMIT],
+        })
     sanitized_consolidation_outcome = (
         _sanitize_self_cognition_consolidation_outcome(
             consolidation_outcome,
@@ -848,6 +888,18 @@ async def record_self_cognition_event(
         occurred_at=occurred_at,
     )
     return result
+
+
+def _closed_self_cognition_value(
+    value: object,
+    allowed_values: frozenset[str],
+    fallback: str,
+) -> str:
+    """Keep one self-cognition event field inside its closed value set."""
+
+    if isinstance(value, str) and value in allowed_values:
+        return value
+    return fallback
 
 
 def _sanitize_self_cognition_target_binding_failure(

@@ -8,6 +8,11 @@ from kazusa_ai_chatbot.event_logging.models import (
     EventScopeInput,
     EventSeverity,
     SelfCognitionBudget,
+    SelfCognitionExecutionDisposition,
+    SelfCognitionPolicyDisposition,
+    SelfCognitionPolicyReason,
+    SelfCognitionResponseTelemetry,
+    SelfCognitionSemanticDisposition,
 )
 from kazusa_ai_chatbot.event_logging.recording import (
     EVENT_LOG_WRITE_TIMEOUT_SECONDS,
@@ -41,6 +46,11 @@ __all__ = [
     "EventScopeInput",
     "EventSeverity",
     "SelfCognitionBudget",
+    "SelfCognitionExecutionDisposition",
+    "SelfCognitionPolicyDisposition",
+    "SelfCognitionPolicyReason",
+    "SelfCognitionResponseTelemetry",
+    "SelfCognitionSemanticDisposition",
     "build_reflection_stats",
     "build_runtime_status",
     "build_self_cognition_stats",

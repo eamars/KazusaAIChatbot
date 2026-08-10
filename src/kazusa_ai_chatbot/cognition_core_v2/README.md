@@ -167,6 +167,17 @@ It helps judge participation in the currently observed group scene; it cannot
 create a topic, fact, relationship belief, permission, route, or unsupported
 reason to speak. Appraisal and workspace collapse receive no copy.
 
+Targetless group self-cognition has one additional model-facing contract:
+self_cognition_response. Cognition chooses exactly stay_silent or
+propose_visible_reply, cites up to four supplied evidence handles, and may
+select only self, current_group_scene, or a supplied pN participant handle. A
+proposal also supplies a closed participation basis, a bounded semantic
+response goal, and a bounded reason. The object contains no route, permission,
+platform identity, adapter instruction, dispatch instruction, or final
+wording. Deterministic code validates this contract and derives the route; the
+canonical speak capability remains excluded from the generic action-planning
+roster and is materialized only through the existing L3 surface path.
+
 For user dialog, the canonical percept may carry bounded
 `role_explicit_content` and structured `response_operation` values authored by
 the existing upstream decontextualizer LLM. The operation identifies the

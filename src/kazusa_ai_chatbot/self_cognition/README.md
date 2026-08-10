@@ -40,6 +40,17 @@ and pass at most one `group_chat_review` case into the normal self-cognition
 runner. Self-cognition then owns routing, dialog rendering, attempt
 persistence, consolidation, and source-bound delivery.
 
+For a targetless group review, cognition returns the dedicated
+self_cognition_response decision. stay_silent records a semantic decline and
+stops before action-candidate, dialog, and dispatch work. A
+propose_visible_reply decision enters ordered deterministic gates for source
+provenance, recency, typed participation grounding, the already-bound group
+target, and atomic source-window reservation before the existing L3/dialog
+surface. The run records semantic_disposition, policy_disposition, and
+execution_disposition independently, together with a capped set of gate codes.
+These fields contain bounded status metadata only; source text and generated
+dialog remain outside event telemetry.
+
 Self-cognition-created episodes set
 `origin_metadata.debug_modes.no_visual_directives=true` by default, so the
 optional V2 visual surface stage is skipped for self-cognition. These episodes do

@@ -5,6 +5,14 @@
     "src/kazusa_ai_chatbot/cognition_episode.py",
     "src/kazusa_ai_chatbot/cognition_core_v2",
     "src/kazusa_ai_chatbot/cognition_resolver",
+    "src/kazusa_ai_chatbot/db/self_cognition.py",
+    "src/kazusa_ai_chatbot/event_logging/__init__.py",
+    "src/kazusa_ai_chatbot/event_logging/models.py",
+    "src/kazusa_ai_chatbot/event_logging/recording.py",
+    "src/kazusa_ai_chatbot/self_cognition/models.py",
+    "src/kazusa_ai_chatbot/self_cognition/runner.py",
+    "src/kazusa_ai_chatbot/self_cognition/tracking.py",
+    "src/kazusa_ai_chatbot/self_cognition/worker.py",
     "src/kazusa_ai_chatbot/version.py",
     "src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition.py",
     "src/kazusa_ai_chatbot/nodes/persona_supervisor2_l3_surface.py",
@@ -34,10 +42,101 @@
       "supplemental_tests": []
     },
     {
+      "source": "src/kazusa_ai_chatbot/db/self_cognition.py",
+      "owner": "self-cognition persistence owner",
+      "contract": "atomic source-window action-attempt reservation",
+      "required_unit_tests": [
+        "tests/test_self_cognition_group_visible_reply_boundary.py::test_duplicate_reservation_is_atomic_before_dialog"
+      ],
+      "supplemental_tests": [
+        "tests/test_action_spec_attempt_ledger.py::test_new_action_attempt_record_extends_existing_collection_shape"
+      ]
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/event_logging/__init__.py",
+      "owner": "event logging contract owner",
+      "contract": "bounded self-cognition telemetry exports",
+      "required_unit_tests": [
+        "tests/test_self_cognition_group_visible_reply_boundary.py::test_self_cognition_event_contract_rejects_raw_response_content"
+      ],
+      "supplemental_tests": [
+        "tests/test_event_logging_interface.py::test_public_module_does_not_export_generic_record_event"
+      ]
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/event_logging/models.py",
+      "owner": "event logging contract owner",
+      "contract": "closed self-cognition outcome telemetry values",
+      "required_unit_tests": [
+        "tests/test_self_cognition_group_visible_reply_boundary.py::test_response_outcome_values_are_closed"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/event_logging/recording.py",
+      "owner": "event logging recording owner",
+      "contract": "sanitized self-cognition event payload",
+      "required_unit_tests": [
+        "tests/test_self_cognition_group_visible_reply_boundary.py::test_self_cognition_event_contract_rejects_raw_response_content"
+      ],
+      "supplemental_tests": [
+        "tests/test_self_cognition_event_logging.py::test_self_cognition_event_logger_sanitizes_consolidation_outcome"
+      ]
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/self_cognition/models.py",
+      "owner": "self-cognition tracking contract owner",
+      "contract": "semantic policy execution outcome dimensions",
+      "required_unit_tests": [
+        "tests/test_self_cognition_group_visible_reply_boundary.py::test_response_outcome_values_are_closed"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/self_cognition/runner.py",
+      "owner": "self-cognition episode runner owner",
+      "contract": "pre-dialog policy and atomic reservation ordering",
+      "required_unit_tests": [
+        "tests/test_self_cognition_group_visible_reply_boundary.py::test_eligible_group_proposal_calls_dialog_once"
+      ],
+      "supplemental_tests": [
+        "tests/test_self_cognition_group_visible_reply_boundary.py::test_policy_rejection_skips_action_attempt_dialog_and_dispatch",
+        "tests/test_self_cognition_group_visible_reply_boundary.py::test_dialog_runs_only_after_atomic_duplicate_reservation"
+      ]
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/self_cognition/tracking.py",
+      "owner": "self-cognition policy owner",
+      "contract": "structured group response policy gates",
+      "required_unit_tests": [
+        "tests/test_self_cognition_group_visible_reply_boundary.py::test_group_proposal_requires_structured_participation_grounding",
+        "tests/test_self_cognition_group_visible_reply_boundary.py::test_missing_group_response_is_a_contract_failure",
+        "tests/test_self_cognition_group_visible_reply_boundary.py::test_high_risk_label_alone_does_not_reject_grounded_proposal",
+        "tests/test_self_cognition_group_visible_reply_boundary.py::test_recent_grounded_group_proposal_is_eligible",
+        "tests/test_self_cognition_group_visible_reply_boundary.py::test_group_proposal_requires_window_provenance_and_channel_only_target",
+        "tests/test_self_cognition_group_visible_reply_boundary.py::test_failed_group_delivery_remains_duplicate_suppressed",
+        "tests/test_self_cognition_group_visible_reply_boundary.py::test_duplicate_group_window_remains_suppressed"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/self_cognition/worker.py",
+      "owner": "self-cognition worker observability owner",
+      "contract": "bounded event projection of response outcomes",
+      "required_unit_tests": [
+        "tests/test_self_cognition_group_visible_reply_boundary.py::test_worker_event_contains_three_dispositions_and_gate_codes_without_raw_content"
+      ],
+      "supplemental_tests": [
+        "tests/test_self_cognition_group_visible_reply_boundary.py::test_worker_event_does_not_infer_response_failure_without_response_outcome"
+      ]
+    },
+    {
       "source": "src/kazusa_ai_chatbot/cognition_core_v2/action_authorization.py",
       "owner": "cognition_core_v2 owner",
       "contract": "action_authorization public contract",
       "required_unit_tests": [
+        "tests/test_self_cognition_group_visible_reply_boundary.py::test_group_action_planning_requires_explicit_silence_or_reply_decision",
+        "tests/unit/cognition_core_v2/test_action_authorization.py::test_group_self_cognition_response_decision_derives_speech_or_silence",
         "tests/unit/cognition_core_v2/test_action_authorization.py::test_action_authorization_exposes_owned_contract"
       ],
       "supplemental_tests": []
@@ -65,11 +164,15 @@
       "owner": "action selection owner",
       "contract": "selected-intention and stance-to-effect propagation",
       "required_unit_tests": [
+        "tests/test_self_cognition_group_visible_reply_boundary.py::test_group_action_planning_requires_explicit_silence_or_reply_decision",
         "tests/unit/cognition_core_v2/test_action_selection.py::test_non_accepting_stance_suppresses_downstream_effects",
         "tests/unit/cognition_core_v2/test_action_selection.py::test_selected_intention_preserves_selected_response_operation",
         "tests/unit/cognition_core_v2/test_action_selection.py::test_action_selection_exposes_owned_contract"
       ],
-      "supplemental_tests": []
+      "supplemental_tests": [
+        "tests/test_self_cognition_group_visible_reply_live_llm.py::test_live_group_self_cognition_latest_case_stays_silent",
+        "tests/test_self_cognition_group_visible_reply_live_llm.py::test_live_group_self_cognition_eligible_case_can_propose_reply"
+      ]
     },
     {
       "source": "src/kazusa_ai_chatbot/cognition_core_v2/branch_activation.py",
@@ -94,6 +197,9 @@
       "owner": "cognition contract validator",
       "contract": "cognition contract and selected response-operation validation",
       "required_unit_tests": [
+        "tests/test_self_cognition_group_visible_reply_boundary.py::test_group_self_cognition_response_contract_requires_exact_decision_shape",
+        "tests/test_self_cognition_group_visible_reply_boundary.py::test_group_self_cognition_response_proposal_requires_current_episode_evidence",
+        "tests/test_self_cognition_group_visible_reply_boundary.py::test_group_self_cognition_response_proposal_requires_target_and_goal",
         "tests/unit/cognition_core_v2/test_contracts.py::test_sensitive_relational_willingness_accepts_all_real_states_and_stances",
         "tests/unit/cognition_core_v2/test_contracts.py::test_selected_response_operation_has_exact_contract",
         "tests/unit/cognition_core_v2/test_contracts.py::test_selected_response_operation_rejects_missing_required_fields",
@@ -370,6 +476,7 @@
       "owner": "nodes owner",
       "contract": "persona_supervisor2_cognition public contract",
       "required_unit_tests": [
+        "tests/unit/nodes/test_persona_supervisor2_cognition.py::test_group_self_cognition_proposal_materializes_existing_speak_surface",
         "tests/unit/nodes/test_persona_supervisor2_cognition.py::test_persona_supervisor2_cognition_exposes_owned_contract"
       ],
       "supplemental_tests": []

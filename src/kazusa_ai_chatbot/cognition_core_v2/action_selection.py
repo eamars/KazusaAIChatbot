@@ -14,38 +14,40 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from openai import OpenAIError
 
 from kazusa_ai_chatbot import llm_tracing
-from kazusa_ai_chatbot.cognition_core_v2.action_authorization import (
-    authorize_action_requests,
-    derive_action_route,
-)
-from kazusa_ai_chatbot.cognition_core_v2.resolver_authorization import (
-    authorize_resolver_requests,
-)
 from kazusa_ai_chatbot.action_spec.registry import (
     APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     SPEAK_CAPABILITY,
 )
+from kazusa_ai_chatbot.cognition_core_v2.action_authorization import (
+    authorize_action_requests,
+    derive_action_route,
+)
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    GOAL_RESOLUTION_VALUES,
     ActionAffordanceV2,
     ActionBidV2,
     CognitionCoreServicesV2,
     CognitionEvidenceV2,
-    GOAL_RESOLUTION_VALUES,
     GoalResolutionV2,
     GroupEngagementActionContextV2,
-    project_evidence_provenance_role,
     ResolverAffordanceV2,
     ResolverCapabilityRequestV2,
     SelectedIntentionV2,
     SemanticActionRequestV2,
+    is_targetless_group_self_cognition_episode,
+    project_evidence_provenance_role,
+    validate_self_cognition_response_decision,
 )
 from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
     V2_MODEL_TOTAL_ATTEMPTS,
 )
+from kazusa_ai_chatbot.cognition_core_v2.resolver_authorization import (
+    authorize_resolver_requests,
+)
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     ALLOWED_PENDING_DECISIONS,
-    RequiredResolverEvidenceDependencyV1,
     RESOLVER_GOAL_PROGRESS_VERSION,
+    RequiredResolverEvidenceDependencyV1,
     ResolverValidationError,
     validate_required_resolver_evidence_dependency,
     validate_resolver_goal_progress,
@@ -227,6 +229,17 @@ task_resolution_request 行必须额外给出 start_in_background，且只能使
 如果 runtime_capability_limits 明确声明通用任务解析只有 inline 能力，必须使用
 start_in_background=false；不得把 inline-only 的 resolver 请求写成后台已经安排。
 
+当 self_cognition_response_context.required 为 true 时，必须额外返回精确的
+self_cognition_response 对象。该对象只表达 stay_silent 或 propose_visible_reply 的语义决定，
+引用当前 episode evidence handle，并使用 context 提供的 self、current_group_scene 或参与者角色
+句柄。它不包含 route、权限、平台标识、adapter、dispatch 或最终对话文本。stay_silent 时
+participation_basis 与 response_goal 返回空字符串；propose_visible_reply 时两者必须有界且非空。
+The exact self_cognition_response keys are decision, evidence_handles,
+semantic_target_handle, participation_basis, response_goal, and reason. Use
+evidence_handles as an array, never episode_evidence_handle. Use
+semantic_target_handle as one string, never target_handles. Do not add or
+remove any key from this object.
+
 # 输出格式
 只返回一个 JSON 对象，字段必须恰好是：
 - action_requests：零到三个对象，每个对象必须恰好包含 bid_handle、action_handle、decision、
@@ -238,6 +251,8 @@ start_in_background=false；不得把 inline-only 的 resolver 请求写成后�
   之一；
 - resolver_pending_resolution：null，或恰好包含 decision 和 reason 的对象；
 - resolver_goal_progress：null，或一个局部语义更新对象。
+当且仅当 self_cognition_response_context.required 为 true 时，再增加
+self_cognition_response 字段；该字段必须满足上述精确合同。
 resolver_requests 非空时 action_requests 必须为空；action_requests 非空时 resolver_requests 必须
 为空。上述 goal_resolution 必须由本阶段 LLM 根据语义上下文决定；不要添加关键词路由、确定性
 后处理、新的 LLM 阶段、更高上限、重试扩展、别名或新的枚举词。不输出其他字段。
@@ -256,6 +271,7 @@ async def plan_actions(
     group_engagement_action_context: (
         GroupEngagementActionContextV2 | None
     ) = None,
+    scene_context: Mapping[str, Any] | None = None,
     runtime_capability_limits: Sequence[str] = (),
     services: CognitionCoreServicesV2,
     current_goal_progress: Mapping[str, Any] | None = None,
@@ -281,6 +297,7 @@ async def plan_actions(
         Selected intention, semantic requests, and resolver lifecycle decisions.
     """
 
+    group_self_cognition = is_targetless_group_self_cognition_episode(episode)
     if primary_bid is None:
         return_value = _silence_result()
         return return_value
@@ -323,6 +340,7 @@ async def plan_actions(
             start=1,
         )
     }
+    target_handles = _self_cognition_target_handles(scene_context)
     projected_bids: dict[str, dict[str, object]] = {}
     for handle, bid in bid_handles.items():
         projected_bid: dict[str, object] = {
@@ -392,6 +410,22 @@ async def plan_actions(
             else None
         ),
     }
+    if group_self_cognition:
+        prompt_payload["self_cognition_response_context"] = {
+            "required": True,
+            "target_handles": target_handles,
+            "allowed_decisions": [
+                "stay_silent",
+                "propose_visible_reply",
+            ],
+            "participation_basis_values": [
+                "direct_address",
+                "explicit_character_reference",
+                "grounded_scene_intervention",
+            ],
+            "response_goal_max_chars": 300,
+            "reason_max_chars": 300,
+        }
     prompt_text = json.dumps(prompt_payload, ensure_ascii=False, sort_keys=True)
     if (
         len(ACTION_PLANNING_PROMPT) + len(prompt_text)
@@ -411,22 +445,38 @@ async def plan_actions(
         len(ACTION_PLANNING_PROMPT) + len(prompt_text)
         > ACTION_PLANNING_PROMPT_CAP
     ):
-        decision = _empty_action_plan_decision()
+        decision = _empty_action_plan_decision(
+            self_cognition_response_required=group_self_cognition,
+            contract_failed=group_self_cognition,
+        )
     else:
         messages: list[BaseMessage] = [
             SystemMessage(content=ACTION_PLANNING_PROMPT),
             HumanMessage(content=prompt_text),
         ]
-        decision = await _invoke_action_planner(
-            services=services,
-            messages=messages,
-            bid_handles=bid_handles,
-            action_handles=action_handles,
-            resolver_handles=resolver_handles,
-            current_goal_progress=current_goal_progress,
-            required_resolver_evidence_dependency=validated_dependency,
-            runtime_capability_limits=runtime_capability_limits,
-        )
+        planner_kwargs: dict[str, Any] = {
+            "services": services,
+            "messages": messages,
+            "bid_handles": bid_handles,
+            "action_handles": action_handles,
+            "resolver_handles": resolver_handles,
+            "current_goal_progress": current_goal_progress,
+            "required_resolver_evidence_dependency": validated_dependency,
+            "runtime_capability_limits": runtime_capability_limits,
+        }
+        if group_self_cognition:
+            planner_kwargs.update({
+                "self_cognition_response_required": True,
+                "evidence": evidence,
+                "target_handles": target_handles,
+            })
+        decision = await _invoke_action_planner(**planner_kwargs)
+    if group_self_cognition:
+        # A targetless group response is the only semantic owner of this
+        # outward contact.  Generic capability requests must not outrank the
+        # dedicated response decision and route it away from L3 speech.
+        decision["action_requests"] = []
+        decision["resolver_requests"] = []
     relational_decision = primary_bid.get("relational_willingness")
     selected_stance_suppresses_effects = False
     if (
@@ -499,6 +549,7 @@ async def plan_actions(
         primary_bid=primary_bid,
         action_requests=action_requests,
         resolver_requests=resolver_requests,
+        self_cognition_response=decision.get("self_cognition_response"),
     )
     intention: SelectedIntentionV2 = {
         "selected_branch_id": primary_bid["branch_id"],
@@ -521,6 +572,14 @@ async def plan_actions(
         ],
         "resolver_goal_progress": decision["resolver_goal_progress"],
     }
+    if group_self_cognition:
+        return_value["self_cognition_response_contract_status"] = decision.get(
+            "self_cognition_response_contract_status",
+            "failed",
+        )
+        response = decision.get("self_cognition_response")
+        if isinstance(response, Mapping):
+            return_value["self_cognition_response"] = dict(response)
     return return_value
 
 
@@ -536,6 +595,9 @@ async def _invoke_action_planner(
         RequiredResolverEvidenceDependencyV1 | None
     ),
     runtime_capability_limits: Sequence[str],
+    self_cognition_response_required: bool = False,
+    evidence: Sequence[CognitionEvidenceV2] = (),
+    target_handles: Sequence[str] = (),
 ) -> dict[str, Any]:
     """Invoke the semantic planner with bounded contract replacements."""
 
@@ -545,7 +607,10 @@ async def _invoke_action_planner(
         for message in base_messages
     )
     if base_prompt_chars > ACTION_PLANNING_PROMPT_CAP:
-        return _empty_action_plan_decision()
+        return _empty_action_plan_decision(
+            self_cognition_response_required=self_cognition_response_required,
+            contract_failed=self_cognition_response_required,
+        )
     current_messages = list(base_messages)
     for attempt_index in range(ACTION_PLANNING_ATTEMPT_LIMIT):
         started_at = perf_counter()
@@ -584,7 +649,12 @@ async def _invoke_action_planner(
                     f"Action planning denied work after provider exhaustion: "
                     f"{exc}"
                 )
-                empty_decision = _empty_action_plan_decision()
+                empty_decision = _empty_action_plan_decision(
+                    self_cognition_response_required=(
+                        self_cognition_response_required
+                    ),
+                    contract_failed=self_cognition_response_required,
+                )
                 return empty_decision
             current_messages = list(base_messages)
             continue
@@ -607,6 +677,11 @@ async def _invoke_action_planner(
                     required_resolver_evidence_dependency
                 ),
                 runtime_capability_limits=runtime_capability_limits,
+                self_cognition_response_required=(
+                    self_cognition_response_required
+                ),
+                evidence=evidence,
+                target_handles=target_handles,
             )
         except (ResolverValidationError, ValueError) as exc:
             await _record_action_planning_trace(
@@ -625,17 +700,30 @@ async def _invoke_action_planner(
                 logger.warning(
                     f"Action planning dropped an unusable replacement: {exc}"
                 )
-                return _empty_action_plan_decision()
+                return _empty_action_plan_decision(
+                    self_cognition_response_required=(
+                        self_cognition_response_required
+                    ),
+                    contract_failed=self_cognition_response_required,
+                )
             repair_message = _action_planning_repair_message(
                 response_text=response_text,
                 contract_error=str(exc),
                 runtime_capability_limits=runtime_capability_limits,
+                self_cognition_response_required=(
+                    self_cognition_response_required
+                ),
             )
             if (
                 base_prompt_chars + len(str(repair_message.content))
                 > ACTION_PLANNING_PROMPT_CAP
             ):
-                return _empty_action_plan_decision()
+                return _empty_action_plan_decision(
+                    self_cognition_response_required=(
+                        self_cognition_response_required
+                    ),
+                    contract_failed=self_cognition_response_required,
+                )
             current_messages = [*base_messages, repair_message]
             continue
 
@@ -661,6 +749,7 @@ def _action_planning_repair_message(
     response_text: str,
     contract_error: str,
     runtime_capability_limits: Sequence[str] = (),
+    self_cognition_response_required: bool = False,
 ) -> HumanMessage:
     """Build one bounded same-owner replacement request."""
 
@@ -707,6 +796,31 @@ def _action_planning_repair_message(
             ),
         },
         "runtime_capability_limits": list(runtime_capability_limits),
+        "self_cognition_response_contract": (
+            {
+                "required": True,
+                "decision_values": [
+                    "stay_silent",
+                    "propose_visible_reply",
+                ],
+                "evidence_handles": "zero_to_four_supplied_handles",
+                "proposal_requires_current_episode_evidence": True,
+                "target_values": [
+                    "self",
+                    "current_group_scene",
+                    "supplied_participant_role_handle",
+                ],
+                "participation_basis_values": [
+                    "direct_address",
+                    "explicit_character_reference",
+                    "grounded_scene_intervention",
+                ],
+                "response_goal_max_chars": 300,
+                "reason_max_chars": 300,
+            }
+            if self_cognition_response_required
+            else None
+        ),
         "contract_error": contract_error[:MODEL_TEXT_CAP],
         "invalid_response": bounded_response,
     }
@@ -740,6 +854,9 @@ def _validate_action_plan_decision(
         RequiredResolverEvidenceDependencyV1 | None
     ) = None,
     runtime_capability_limits: Sequence[str] = (),
+    self_cognition_response_required: bool = False,
+    evidence: Sequence[CognitionEvidenceV2] = (),
+    target_handles: Sequence[str] = (),
 ) -> dict[str, Any]:
     """Normalize semantic choices into the canonical planner contract."""
 
@@ -772,6 +889,21 @@ def _validate_action_plan_decision(
         parsed.get("resolver_goal_progress"),
         current_goal_progress=current_goal_progress,
     )
+    response: dict[str, Any] | None = None
+    response_contract_status = "not_required"
+    if self_cognition_response_required:
+        if "self_cognition_response" not in parsed:
+            raise ValueError(
+                "self-cognition response decision is required"
+            )
+        response = dict(
+            validate_self_cognition_response_decision(
+                parsed["self_cognition_response"],
+                evidence=evidence,
+                target_handles=target_handles,
+            )
+        )
+        response_contract_status = "valid"
     return_value = {
         "action_requests": normalized_actions,
         "resolver_requests": normalized_resolvers,
@@ -784,6 +916,11 @@ def _validate_action_plan_decision(
         "resolver_pending_resolution": pending_resolution,
         "resolver_goal_progress": goal_progress,
     }
+    if self_cognition_response_required:
+        return_value["self_cognition_response"] = response
+        return_value["self_cognition_response_contract_status"] = (
+            response_contract_status
+        )
     return return_value
 
 
@@ -896,16 +1033,25 @@ def _normalize_resolver_request_rows(
     return normalized
 
 
-def _empty_action_plan_decision() -> dict[str, Any]:
+def _empty_action_plan_decision(
+    *,
+    self_cognition_response_required: bool = False,
+    contract_failed: bool = False,
+) -> dict[str, Any]:
     """Return the canonical fail-contained semantic proposal."""
 
-    return {
+    return_value: dict[str, Any] = {
         "action_requests": [],
         "resolver_requests": [],
         "goal_resolution": "blocked",
         "resolver_pending_resolution": None,
         "resolver_goal_progress": None,
     }
+    if self_cognition_response_required:
+        return_value["self_cognition_response_contract_status"] = (
+            "failed" if contract_failed else "not_required"
+        )
+    return return_value
 
 
 def _validate_action_request_row(
@@ -1218,6 +1364,8 @@ async def _record_action_planning_trace(
             "goal_resolution",
             "resolver_pending_resolution",
             "resolver_goal_progress",
+            "self_cognition_response",
+            "self_cognition_response_contract_status",
         ],
         call_config=config,
         attempt_index=attempt_index,
@@ -1260,3 +1408,27 @@ def _silence_result() -> dict[str, Any]:
         "resolver_goal_progress": None,
     }
     return return_value
+
+
+def _self_cognition_target_handles(
+    scene_context: Mapping[str, Any] | None,
+) -> list[str]:
+    """Build prompt-local target handles for group response proposals."""
+
+    target_handles = ["self", "current_group_scene"]
+    if not isinstance(scene_context, Mapping):
+        return target_handles
+    participant_bindings = scene_context.get("participant_bindings")
+    if not isinstance(participant_bindings, list):
+        return target_handles
+    for binding in participant_bindings:
+        if not isinstance(binding, Mapping):
+            continue
+        handle = binding.get("handle")
+        if (
+            isinstance(handle, str)
+            and re.fullmatch(r"p[1-9][0-9]*", handle)
+            and handle not in target_handles
+        ):
+            target_handles.append(handle)
+    return target_handles

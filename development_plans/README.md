@@ -584,6 +584,7 @@ plans.
 
 | Plan |
 |---|
+| [self_cognition_group_visible_reply_capability_bugfix_plan_20260811.md](archive/completed/bugfix/self_cognition_group_visible_reply_capability_bugfix_plan_20260811.md) |
 | [adapter_semantic_identity_boundary_and_memory_pollution_plan.md](archive/completed/bugfix/adapter_semantic_identity_boundary_and_memory_pollution_plan.md) |
 | [action_selection_context_contract_bugfix_plan.md](archive/completed/bugfix/action_selection_context_contract_bugfix_plan.md) |
 | [character_state_lane_integrity_plan.md](archive/completed/bugfix/character_state_lane_integrity_plan.md) |

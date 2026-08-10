@@ -158,11 +158,23 @@ The runtime facade exports helpers for:
 - calendar schedule/run query helpers used by recall and calendar-owned
   repository operations;
 - persistent RAG initializer cache entries;
+- self-cognition action-attempt reads and updates through the runtime facade;
+  the self-cognition runner imports the named reservation owner from
+  `kazusa_ai_chatbot.db.self_cognition` for the conditional source-window
+  reservation used before dialog;
 - legacy shared-memory facade functions that are lazily resolved to avoid
   import cycles.
 
 Callers treat facade helpers as semantic operations. New storage behavior gets a
 named helper.
+
+The self-cognition action-attempt collection is keyed by the existing unique
+idempotency index. The named `db.self_cognition` owner performs one
+conditional update with set-on-insert semantics and returns whether this
+caller inserted the reservation. A duplicate identity returns false without
+changing the existing row. The self-cognition runner owns this reservation
+boundary and invokes the owner before dialog; ordinary commitment and
+live-user routing retain their existing persistence flow.
 
 ## Public Maintenance Interface
 

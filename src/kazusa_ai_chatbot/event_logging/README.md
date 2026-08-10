@@ -147,6 +147,17 @@ class EventLogWriteResult(TypedDict):
 it as `scope.platform_channel_ref`, a deterministic salted hash, and never as
 the raw channel id.
 
+Self-cognition event rows that evaluate a response expose three closed outcome dimensions:
+semantic_disposition (cognition_declined, reply_proposed, or
+cognition_contract_failed), policy_disposition (not_evaluated, approved, or
+rejected), and execution_disposition (not_requested, dialog_failed,
+dispatch_failed, or delivered). policy_reason is empty or one of the bounded
+stale_source, invalid_provenance, unresolved_target, permission_denied,
+duplicate, cooldown, and policy_risk values. response_gate_codes is a capped
+allowlisted list. These fields are status metadata only; raw prompts, source
+packets, evidence text, generated dialog, platform identities, and database
+documents remain rejected by the event boundary.
+
 ## Public Recorder Contract
 
 All public recorder functions are `async def` functions with keyword-only
@@ -353,6 +364,12 @@ async def record_self_cognition_event(
     run_id: str = "",
     attempt_id: str = "",
     consolidation_outcome: Mapping[str, object] | None = None,
+    target_binding_failure: Mapping[str, object] | None = None,
+    semantic_disposition: str | None = None,
+    policy_disposition: str | None = None,
+    execution_disposition: str | None = None,
+    policy_reason: str = "",
+    response_gate_codes: Sequence[str] = (),
     severity: EventSeverity = "info",
     occurred_at: datetime | None = None,
 ) -> EventLogWriteResult: ...
@@ -426,7 +443,7 @@ by the matching public recorder.
 | `dialog_quality` | `record_dialog_quality_event` | `dialog_quality` | `usage_mode`, `quality_status`, `retry_count`, `failure_codes`, `content_plan_entry_count` |
 | `dispatcher` | `record_dispatcher_event` | `action_kind` | `action_kind`, `validation_status`, `adapter_available`, legacy `scheduled_event_ids`, `rejection_codes` |
 | `database_operation` | `record_database_operation_event` | `operation_kind` | `collection`, `operation_kind`, `idempotency_result`, `latency_ms`, `document_ref` |
-| `self_cognition` | `record_self_cognition_event` | `trigger_kind` | `case_id`, `trigger_kind`, `selected_route`, `output_mode`, `budget`, `dispatch_status`, `consolidation_outcome` |
+| `self_cognition` | `record_self_cognition_event` | `trigger_kind` | `case_id`, `trigger_kind`, `selected_route`, `output_mode`, `budget`, `dispatch_status`, optional evaluated-response fields (`semantic_disposition`, `policy_disposition`, `execution_disposition`, `policy_reason`, `response_gate_codes`), `consolidation_outcome`, `target_binding_failure` |
 | `model_contract` | `record_model_contract_event` | `violation_kind` | `stage_name`, `violation_kind`, `missing_fields`, `invalid_fields`, `repair_used` |
 | `resource_health` | `record_resource_health_event` | `resource_kind` | `resource_name`, `resource_kind`, `availability`, `latency_ms`, `failure_class` |
 

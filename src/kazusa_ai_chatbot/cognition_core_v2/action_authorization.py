@@ -19,13 +19,13 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionCoreServicesV2,
     CognitionEvidenceV2,
     CognitionExecutionError,
+    is_targetless_group_self_cognition_episode,
 )
 from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
     V2_MODEL_TOTAL_ATTEMPTS,
 )
 from kazusa_ai_chatbot.llm_interface import LLMCallConfig
 from kazusa_ai_chatbot.utils import parse_llm_json_output
-
 
 ACTION_AUTHORIZATION_PROMPT_CAP = 20000
 ACTION_AUTHORIZATION_ATTEMPT_LIMIT = V2_MODEL_TOTAL_ATTEMPTS
@@ -96,6 +96,7 @@ def derive_action_route(
     primary_bid: ActionBidV2 | None,
     action_requests: Sequence[Mapping[str, Any]],
     resolver_requests: Sequence[Mapping[str, Any]],
+    self_cognition_response: Mapping[str, Any] | None = None,
 ) -> Literal["speech", "evidence", "action", "deferral", "silence"]:
     """Derive protocol route from output mode and validated request sets."""
 
@@ -123,6 +124,15 @@ def derive_action_route(
             return "evidence"
         return "speech" if primary_bid is not None else "silence"
     if output_mode in {"think_only", "preview"}:
+        if is_targetless_group_self_cognition_episode(episode):
+            response_decision = (
+                self_cognition_response.get("decision")
+                if isinstance(self_cognition_response, Mapping)
+                else None
+            )
+            if response_decision != "propose_visible_reply":
+                return "silence"
+            return "speech" if primary_bid is not None else "silence"
         if resolver_requests:
             return "evidence"
         if action_requests:

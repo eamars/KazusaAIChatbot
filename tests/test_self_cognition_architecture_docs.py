@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 _ROOT = Path(__file__).resolve().parents[1]
 _CANONICAL_README = _ROOT / "src/kazusa_ai_chatbot/self_cognition/README.md"
+_COGNITION_README = _ROOT / "src/kazusa_ai_chatbot/cognition_core_v2/README.md"
 _COGNITION_CONTRACTS_DOC = (
     _ROOT / "development_plans/reference/designs/cognition_contracts_design.md"
 )
@@ -85,3 +85,25 @@ def test_canonical_self_cognition_docs_are_single_delivery_authority() -> None:
     content = _read_text(_CANONICAL_README)
     assert "selected `speak`" in content
     assert "must attempt delivery" in content.lower()
+
+
+def test_canonical_self_cognition_readme_documents_outcome_dimensions() -> None:
+    """The canonical README documents bounded response outcome dimensions."""
+
+    content = _read_text(_CANONICAL_README)
+
+    for field_name in (
+        "semantic_disposition",
+        "policy_disposition",
+        "execution_disposition",
+    ):
+        assert field_name in content
+    for phrase in (
+        "stay_silent",
+        "propose_visible_reply",
+        "atomic source-window reservation",
+    ):
+        assert phrase in content
+    assert "canonical speak capability remains excluded" in _read_text(
+        _COGNITION_README
+    )

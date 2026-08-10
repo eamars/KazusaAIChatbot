@@ -6,6 +6,7 @@ import asyncio
 import inspect
 import logging
 from collections.abc import Callable, Mapping
+from datetime import datetime
 from typing import Any
 
 from kazusa_ai_chatbot.action_spec.attempt_ledger import upsert_action_attempt
@@ -48,6 +49,7 @@ from kazusa_ai_chatbot.cognition_resolver.state import (
     ensure_initial_resolver_inputs,
 )
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    is_targetless_group_self_cognition_episode,
     validate_text_surface_output,
 )
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
@@ -62,6 +64,9 @@ from kazusa_ai_chatbot.consolidation.core import (
     call_consolidation_subgraph,
 )
 from kazusa_ai_chatbot.db import build_interaction_style_context
+from kazusa_ai_chatbot.db.self_cognition import (
+    reserve_self_cognition_action_attempt,
+)
 from kazusa_ai_chatbot.internal_monologue_residue import (
     load_residue_context,
     record_completed_episode_residue,
@@ -107,6 +112,7 @@ def build_self_cognition_case_artifacts(
     apply_consolidation: bool = False,
     execute_private_actions: bool = False,
     pipeline_run_handle: PipelineRunHandle | None = None,
+    reserve_action_attempt_func: Callable[..., Any] | None = None,
 ) -> dict[str, Any]:
     """Build one self-cognition case's tracking records in memory.
 
@@ -134,6 +140,7 @@ def build_self_cognition_case_artifacts(
             apply_consolidation=apply_consolidation,
             execute_private_actions=execute_private_actions,
             pipeline_run_handle=pipeline_run_handle,
+            reserve_action_attempt_func=reserve_action_attempt_func,
         )
     )
     return artifact_payloads
@@ -148,6 +155,7 @@ async def build_self_cognition_case_artifacts_async(
     apply_consolidation: bool = False,
     execute_private_actions: bool = False,
     pipeline_run_handle: PipelineRunHandle | None = None,
+    reserve_action_attempt_func: Callable[..., Any] | None = None,
 ) -> dict[str, Any]:
     """Async implementation for building self-cognition records in memory.
 
@@ -251,6 +259,14 @@ async def build_self_cognition_case_artifacts_async(
         if pipeline_run_handle is not None:
             pipeline_run_handle.raise_if_cancelled("after_private_actions")
     existing_attempts = _existing_attempts(case)
+    response_outcome = tracking.evaluate_group_response_policy(
+        case,
+        cognition_output,
+    )
+    if response_outcome is not None:
+        artifact_payloads[models.ARTIFACT_RESPONSE_OUTCOME] = dict(
+            response_outcome
+        )
     selected_route = tracking.classify_route(case, cognition_output)
     action_attempt = None
     action_candidate = None
@@ -268,7 +284,39 @@ async def build_self_cognition_case_artifacts_async(
             cognition_output,
             action_attempt=action_attempt,
         )
-        if action_attempt["status"] == models.ACTION_ATTEMPT_STATUS_CANDIDATE:
+        if (
+            action_attempt["status"]
+            == models.ACTION_ATTEMPT_STATUS_CANDIDATE
+            and response_outcome is not None
+        ):
+            active_reserver = (
+                reserve_action_attempt_func
+                or reserve_self_cognition_action_attempt
+            )
+            reserved = await _call_maybe_async(
+                active_reserver,
+                _attempt_state(
+                    action_attempt,
+                    now=parse_storage_utc_datetime(
+                        cognition_state["cognitive_episode"]["created_at"]
+                    ),
+                ),
+            )
+            if not reserved:
+                action_attempt["status"] = (
+                    models.ACTION_ATTEMPT_STATUS_DUPLICATE
+                )
+                selected_route = models.ROUTE_AUDIT_ONLY
+                response_outcome = _response_outcome_update(
+                    response_outcome,
+                    policy_disposition=models.POLICY_DISPOSITION_REJECTED,
+                    policy_reason="duplicate",
+                    gate_code="duplicate_reservation",
+                )
+        if (
+            action_attempt["status"]
+            == models.ACTION_ATTEMPT_STATUS_CANDIDATE
+        ):
             cognition_output = _materialize_v2_due_speak_action(
                 cognition_state,
                 cognition_output,
@@ -276,24 +324,48 @@ async def build_self_cognition_case_artifacts_async(
             )
             if pipeline_run_handle is not None:
                 pipeline_run_handle.raise_if_cancelled("before_dialog")
-            dialog_state = await _build_dialog_state_with_text_surface(
-                cognition_state,
-                cognition_output,
-                usage_mode=DIALOG_USAGE_MODE_SELF_COGNITION_ACTION_CANDIDATE,
-            )
-            dialog_output = await _call_maybe_async(
-                active_dialog_client,
-                dialog_state,
-            )
-            if pipeline_run_handle is not None:
-                pipeline_run_handle.raise_if_cancelled("after_dialog")
             dialog_calls = models.DIALOG_RENDER_CALL_LIMIT
-            action_text = _dialog_text(dialog_output)
-            action_candidate = tracking.build_action_candidate(
-                case,
-                action_attempt,
-                action_text,
-            )
+            try:
+                dialog_state = await _build_dialog_state_with_text_surface(
+                    cognition_state,
+                    cognition_output,
+                    usage_mode=DIALOG_USAGE_MODE_SELF_COGNITION_ACTION_CANDIDATE,
+                )
+                dialog_output = await _call_maybe_async(
+                    active_dialog_client,
+                    dialog_state,
+                )
+                if pipeline_run_handle is not None:
+                    pipeline_run_handle.raise_if_cancelled("after_dialog")
+                action_text = _dialog_text(dialog_output)
+                action_candidate = tracking.build_action_candidate(
+                    case,
+                    action_attempt,
+                    action_text,
+                )
+            except StateContractError:
+                raise
+            except (
+                ValueError,
+                RuntimeError,
+                TimeoutError,
+                ConnectionError,
+                OSError,
+            ):
+                action_attempt["status"] = (
+                    models.ACTION_ATTEMPT_STATUS_DELIVERY_FAILED
+                )
+                if response_outcome is not None:
+                    response_outcome = _response_outcome_update(
+                        response_outcome,
+                        execution_disposition=(
+                            models.EXECUTION_DISPOSITION_DIALOG_FAILED
+                        ),
+                        gate_code="dialog_failed",
+                    )
+                artifact_payloads[models.ARTIFACT_DISPATCH_RESULT] = {
+                    "status": "dialog_failed",
+                }
         artifact_payloads[models.ARTIFACT_ACTION_ATTEMPT] = action_attempt
         if action_candidate is not None:
             artifact_payloads[models.ARTIFACT_ACTION_CANDIDATE] = (
@@ -308,6 +380,10 @@ async def build_self_cognition_case_artifacts_async(
         created_at=cognition_state["cognitive_episode"]["created_at"],
     )
     artifact_payloads[models.ARTIFACT_COGNITION_OUTPUT] = cognition_output
+    if response_outcome is not None:
+        artifact_payloads[models.ARTIFACT_RESPONSE_OUTCOME] = dict(
+            response_outcome
+        )
 
     consolidation_state, dialog_output, dialog_called = (
         await _build_consolidation_ready_state(
@@ -356,8 +432,13 @@ async def build_self_cognition_case_artifacts_async(
         trigger_record,
         selected_route,
         budget,
+        response_outcome=response_outcome,
     )
-    route_effect = _route_effect_for_route(run_record, selected_route)
+    route_effect = _route_effect_for_route(
+        run_record,
+        selected_route,
+        response_outcome=response_outcome,
+    )
     artifact_payloads[models.ARTIFACT_RUN_RECORD] = run_record
     artifact_payloads[models.ARTIFACT_ROUTE_EFFECT] = route_effect
     artifact_payloads[models.ARTIFACT_LOOP_TRACE] = _loop_trace(
@@ -383,13 +464,20 @@ def _materialize_v2_due_speak_action(
     episode = cognition_state.get("cognitive_episode")
     if not isinstance(episode, dict):
         return cognition_output
-    if episode.get("trigger_source") != "scheduled_tick":
-        return cognition_output
     core_output = cognition_output.get("cognition_core_output")
     if not isinstance(core_output, dict):
         return cognition_output
     intention = core_output.get("intention")
     if not isinstance(intention, dict) or intention.get("route") != "speech":
+        return cognition_output
+    scheduled_speech = episode.get("trigger_source") == "scheduled_tick"
+    group_speech = (
+        is_targetless_group_self_cognition_episode(episode)
+        and isinstance(core_output.get("self_cognition_response"), dict)
+        and core_output["self_cognition_response"].get("decision")
+        == "propose_visible_reply"
+    )
+    if not scheduled_speech and not group_speech:
         return cognition_output
     raw_specs = cognition_output.get("action_specs")
     if raw_specs is not None and not isinstance(raw_specs, list):
@@ -439,7 +527,11 @@ def _materialize_v2_due_speak_action(
             "max_depth": 0,
             "include_result_as": None,
         },
-        "reason": "当前到期认知已选择可见回应。",
+        "reason": (
+            "当前到期认知已选择可见回应。"
+            if scheduled_speech
+            else "当前群组场景认知已选择可见回应。"
+        ),
     }
     updated_output = dict(cognition_output)
     updated_output["action_specs"] = [
@@ -1349,6 +1441,8 @@ def _build_cognitive_episode(
 def _route_effect_for_route(
     run_record: dict[str, Any],
     route: str,
+    *,
+    response_outcome: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the consumer effect for one selected route."""
 
@@ -1377,6 +1471,7 @@ def _route_effect_for_route(
         consumer,
         effect_summary,
         next_topic=models.EMPTY_ROUTE_EFFECT_NEXT_TOPIC,
+        response_outcome=response_outcome,
     )
     return route_effect
 
@@ -1409,6 +1504,55 @@ def _loop_trace(
         lines.append("- action_candidate_written: false")
     trace = "\n".join(lines)
     return trace
+
+
+def _response_outcome_update(
+    outcome: Mapping[str, Any],
+    *,
+    semantic_disposition: str | None = None,
+    policy_disposition: str | None = None,
+    execution_disposition: str | None = None,
+    policy_reason: str | None = None,
+    gate_code: str | None = None,
+) -> dict[str, Any]:
+    """Apply one bounded runtime disposition update to response metadata."""
+
+    updated = dict(outcome)
+    if semantic_disposition is not None:
+        updated["semantic_disposition"] = semantic_disposition
+    if policy_disposition is not None:
+        updated["policy_disposition"] = policy_disposition
+    if execution_disposition is not None:
+        updated["execution_disposition"] = execution_disposition
+    if policy_reason is not None:
+        updated["policy_reason"] = policy_reason
+    raw_codes = updated.get("response_gate_codes")
+    gate_codes = list(raw_codes) if isinstance(raw_codes, list) else []
+    if (
+        policy_disposition == models.POLICY_DISPOSITION_REJECTED
+        and gate_code == "duplicate_reservation"
+    ):
+        gate_codes = [
+            code for code in gate_codes if code != "approved_for_dialog"
+        ]
+    if gate_code and gate_code not in gate_codes:
+        gate_codes.append(gate_code)
+    updated["response_gate_codes"] = gate_codes[
+        :models.RESPONSE_GATE_CODE_LIMIT
+    ]
+    return updated
+
+
+def _attempt_state(
+    action_attempt: dict[str, Any],
+    *,
+    now: datetime,
+) -> dict[str, Any]:
+    """Build the persisted reservation row for one action attempt."""
+
+    attempt_state = dict(action_attempt)
+    attempt_state["recorded_at"] = now.isoformat()
+    return attempt_state
 
 
 def _budget(

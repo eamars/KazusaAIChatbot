@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pymongo.errors import PyMongoError
+from pymongo.errors import DuplicateKeyError, PyMongoError
 
 from kazusa_ai_chatbot.db._client import get_db
 from kazusa_ai_chatbot.db.errors import DatabaseOperationError
@@ -81,6 +81,38 @@ async def upsert_self_cognition_action_attempt(
         raise DatabaseOperationError(
             f"failed to upsert self-cognition action attempt: {exc}"
         ) from exc
+
+
+async def reserve_self_cognition_action_attempt(
+    attempt: SelfCognitionActionAttemptDoc,
+) -> bool:
+    """Atomically reserve one source-window action identity before dialog.
+
+    Args:
+        attempt: Candidate action-attempt row keyed by its idempotency key.
+
+    Returns:
+        True when this call inserted the reservation; False when an existing
+        unique identity already owns the source window.
+
+    Raises:
+        DatabaseOperationError: When MongoDB rejects the reservation.
+    """
+
+    db = await get_db()
+    try:
+        result = await db.self_cognition_action_attempts.update_one(
+            {"idempotency_key": attempt["idempotency_key"]},
+            {"$setOnInsert": dict(attempt)},
+            upsert=True,
+        )
+    except DuplicateKeyError:
+        return False
+    except PyMongoError as exc:
+        raise DatabaseOperationError(
+            f"failed to reserve self-cognition action attempt: {exc}"
+        ) from exc
+    return bool(result.upserted_id)
 
 
 async def list_self_cognition_action_attempts(

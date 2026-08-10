@@ -427,6 +427,43 @@ async def test_scheduled_planning_prompt_carries_typed_output_mode() -> None:
 
 
 @pytest.mark.asyncio
+async def test_scheduled_tick_route_remains_scheduled_action_request() -> None:
+    """Scheduled planning keeps its typed output mode and speech route."""
+
+    class _LLM:
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config: object,
+        ) -> SimpleNamespace:
+            del messages, config
+            return SimpleNamespace(content=json.dumps(_planner_response()))
+
+    result = await plan_actions(
+        primary_bid=_bid("scheduled_reminder"),
+        supporting_bids=[],
+        episode={
+            "episode_id": "episode-scheduled-route",
+            "trigger_source": "scheduled_tick",
+            "output_mode": "scheduled_action_request",
+        },
+        evidence=[],
+        available_actions=[],
+        available_resolvers=[],
+        resolver_context="resolver_status=idle",
+        services=SimpleNamespace(
+            llm=_LLM(),
+            action_planning_config=object(),
+            action_authorization_config=object(),
+            resolver_authorization_config=object(),
+        ),
+    )
+
+    assert result["intention"]["route"] == "speech"
+
+
+@pytest.mark.asyncio
 async def test_invalid_action_plan_receives_one_bounded_replacement() -> None:
     """The same semantic owner can replace one contract-invalid object."""
 

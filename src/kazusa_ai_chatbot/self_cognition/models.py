@@ -75,6 +75,69 @@ ACTION_ATTEMPT_SUPPRESSING_STATUSES = frozenset(
     )
 )
 
+SEMANTIC_DISPOSITION_COGNITION_DECLINED = "cognition_declined"
+SEMANTIC_DISPOSITION_REPLY_PROPOSED = "reply_proposed"
+SEMANTIC_DISPOSITION_COGNITION_CONTRACT_FAILED = (
+    "cognition_contract_failed"
+)
+SEMANTIC_DISPOSITION_VALUES = frozenset(
+    (
+        SEMANTIC_DISPOSITION_COGNITION_DECLINED,
+        SEMANTIC_DISPOSITION_REPLY_PROPOSED,
+        SEMANTIC_DISPOSITION_COGNITION_CONTRACT_FAILED,
+    )
+)
+POLICY_DISPOSITION_NOT_EVALUATED = "not_evaluated"
+POLICY_DISPOSITION_APPROVED = "approved"
+POLICY_DISPOSITION_REJECTED = "rejected"
+POLICY_DISPOSITION_VALUES = frozenset(
+    (
+        POLICY_DISPOSITION_NOT_EVALUATED,
+        POLICY_DISPOSITION_APPROVED,
+        POLICY_DISPOSITION_REJECTED,
+    )
+)
+EXECUTION_DISPOSITION_NOT_REQUESTED = "not_requested"
+EXECUTION_DISPOSITION_DIALOG_FAILED = "dialog_failed"
+EXECUTION_DISPOSITION_DISPATCH_FAILED = "dispatch_failed"
+EXECUTION_DISPOSITION_DELIVERED = "delivered"
+EXECUTION_DISPOSITION_VALUES = frozenset(
+    (
+        EXECUTION_DISPOSITION_NOT_REQUESTED,
+        EXECUTION_DISPOSITION_DIALOG_FAILED,
+        EXECUTION_DISPOSITION_DISPATCH_FAILED,
+        EXECUTION_DISPOSITION_DELIVERED,
+    )
+)
+POLICY_REASON_VALUES = frozenset(
+    (
+        "",
+        "stale_source",
+        "invalid_provenance",
+        "unresolved_target",
+        "permission_denied",
+        "duplicate",
+        "cooldown",
+        "policy_risk",
+    )
+)
+RESPONSE_GATE_CODE_VALUES = frozenset(
+    (
+        "response_contract",
+        "group_source_provenance",
+        "recent_source",
+        "participation_grounding",
+        "bound_group_target",
+        "duplicate_reservation",
+        "approved_for_dialog",
+        "no_admitted_bid",
+        "semantic_declined",
+        "dialog_failed",
+        "dispatch_failed",
+    )
+)
+RESPONSE_GATE_CODE_LIMIT = 8
+
 ARTIFACT_TRIGGER_RECORD = "self_cognition_trigger_record.json"
 ARTIFACT_RUN_RECORD = "self_cognition_run_record.json"
 ARTIFACT_COGNITION_INPUT = "self_cognition_cognition_input.json"
@@ -83,6 +146,7 @@ ARTIFACT_ROUTE_EFFECT = "self_cognition_route_effect.json"
 ARTIFACT_ACTION_ATTEMPT = "self_cognition_action_attempt.json"
 ARTIFACT_ACTION_CANDIDATE = "self_cognition_action_candidate.json"
 ARTIFACT_DISPATCH_RESULT = "self_cognition_dispatch_result.json"
+ARTIFACT_RESPONSE_OUTCOME = "self_cognition_response_outcome.json"
 ARTIFACT_CONSOLIDATION_OUTCOME = "self_cognition_consolidation_outcome.json"
 ARTIFACT_LOOP_TRACE = "self_cognition_loop_trace.md"
 RUNTIME_COGNITIVE_EPISODE = "cognitive_episode"
@@ -98,6 +162,7 @@ TRACKING_ARTIFACT_NAMES = frozenset(
         ARTIFACT_ACTION_ATTEMPT,
         ARTIFACT_ACTION_CANDIDATE,
         ARTIFACT_DISPATCH_RESULT,
+        ARTIFACT_RESPONSE_OUTCOME,
         ARTIFACT_CONSOLIDATION_OUTCOME,
         ARTIFACT_LOOP_TRACE,
     )
@@ -293,6 +358,34 @@ class SelfCognitionBudget(TypedDict):
     cognition_calls: int
     dialog_calls: int
     topic_limit: int
+
+
+class SelfCognitionResponseOutcome(TypedDict):
+    """Closed semantic, policy, and execution dimensions for one proposal."""
+
+    semantic_disposition: Literal[
+        "cognition_declined",
+        "reply_proposed",
+        "cognition_contract_failed",
+    ]
+    policy_disposition: Literal["not_evaluated", "approved", "rejected"]
+    execution_disposition: Literal[
+        "not_requested",
+        "dialog_failed",
+        "dispatch_failed",
+        "delivered",
+    ]
+    policy_reason: Literal[
+        "",
+        "stale_source",
+        "invalid_provenance",
+        "unresolved_target",
+        "permission_denied",
+        "duplicate",
+        "cooldown",
+        "policy_risk",
+    ]
+    response_gate_codes: list[str]
 
 
 class SelfCognitionCase(TypedDict, total=False):

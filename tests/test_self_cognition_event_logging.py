@@ -9,9 +9,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+import kazusa_ai_chatbot.event_logging.recording as recording_module
 from kazusa_ai_chatbot import event_logging
 from kazusa_ai_chatbot.action_spec.registry import SPEAK_CAPABILITY
-import kazusa_ai_chatbot.event_logging.recording as recording_module
 from kazusa_ai_chatbot.self_cognition import models, worker
 
 
@@ -365,6 +365,9 @@ async def test_self_cognition_event_logger_records_target_binding_failure(
         "has_target_global_user_id": True,
         "has_target_platform_user_id": False,
     }
+    assert "semantic_disposition" not in payload
+    assert "policy_disposition" not in payload
+    assert "execution_disposition" not in payload
     serialized = json.dumps(captured, ensure_ascii=False, sort_keys=True)
     assert "secret-global-user-id" not in serialized
 

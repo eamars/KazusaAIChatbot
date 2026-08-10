@@ -4,13 +4,19 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from typing import Any
 
 from kazusa_ai_chatbot.action_spec.registry import SPEAK_CAPABILITY
 from kazusa_ai_chatbot.brain_service.delivery_mentions import (
     build_inline_delivery_mentions,
 )
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    CognitionContractError,
+    validate_self_cognition_response_decision,
+)
 from kazusa_ai_chatbot.self_cognition import models
+from kazusa_ai_chatbot.time_boundary import normalize_storage_utc_iso
 
 PRODUCTION_HANDOFF_ENABLED = False
 
@@ -94,6 +100,7 @@ def build_run_record(
     trigger_record: dict[str, Any],
     selected_route: str,
     budget: dict[str, int],
+    response_outcome: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the run record for the selected route.
 
@@ -110,6 +117,14 @@ def build_run_record(
     output_mode = "scheduled_action_request"
     if selected_route != models.ROUTE_ACTION_CANDIDATE:
         output_mode = "silent"
+    if isinstance(response_outcome, Mapping):
+        if (
+            response_outcome.get("policy_disposition")
+            == models.POLICY_DISPOSITION_APPROVED
+        ):
+            output_mode = "visible_reply_candidate"
+        else:
+            output_mode = "silent"
 
     run_record = {
         "run_id": f"self_cognition_run:{trigger_record['trigger_id']}",
@@ -126,6 +141,10 @@ def build_run_record(
             "topic_limit": int(budget["topic_limit"]),
         },
     }
+    if isinstance(response_outcome, Mapping):
+        run_record["response_outcome"] = _bounded_response_outcome(
+            response_outcome
+        )
     for field_name in ("llm_trace_id", "source_calendar_run_id"):
         field_value = _string_field(case, field_name)
         if field_value:
@@ -139,6 +158,7 @@ def build_route_effect(
     consumer: str,
     effect_summary: str,
     next_topic: dict[str, Any] | None = None,
+    response_outcome: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the route-effect record for the selected consumer.
 
@@ -161,6 +181,10 @@ def build_route_effect(
         "effect_summary": effect_summary,
         "next_topic": next_topic,
     }
+    if isinstance(response_outcome, Mapping):
+        route_effect["response_outcome"] = _bounded_response_outcome(
+            response_outcome
+        )
     return route_effect
 
 
@@ -224,6 +248,120 @@ def build_consolidation_outcome_record(
     return outcome
 
 
+def evaluate_group_response_policy(
+    case: models.SelfCognitionCase,
+    cognition_output: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Evaluate the fixed group-response gates in their declared order."""
+
+    if not _is_targetless_group_case(case):
+        return None
+    core_output = cognition_output.get("cognition_core_output")
+    if not isinstance(core_output, dict):
+        core_output = cognition_output
+    admitted_bid = core_output.get("admitted_bid")
+    if not isinstance(admitted_bid, Mapping):
+        return _response_outcome(
+            semantic_disposition=models.SEMANTIC_DISPOSITION_COGNITION_DECLINED,
+            policy_disposition=models.POLICY_DISPOSITION_NOT_EVALUATED,
+            execution_disposition=models.EXECUTION_DISPOSITION_NOT_REQUESTED,
+            policy_reason="",
+            gate_codes=["no_admitted_bid"],
+        )
+
+    response = core_output.get("self_cognition_response")
+    evidence_handles = admitted_bid.get("evidence_handles")
+    try:
+        validate_self_cognition_response_decision(response)
+    except (CognitionContractError, ValueError):
+        return _response_outcome(
+            semantic_disposition=(
+                models.SEMANTIC_DISPOSITION_COGNITION_CONTRACT_FAILED
+            ),
+            policy_disposition=models.POLICY_DISPOSITION_NOT_EVALUATED,
+            execution_disposition=models.EXECUTION_DISPOSITION_NOT_REQUESTED,
+            policy_reason="",
+            gate_codes=["response_contract"],
+        )
+    if not isinstance(evidence_handles, list) or not any(
+        handle in evidence_handles
+        for handle in response["evidence_handles"]
+    ):
+        return _response_outcome(
+            semantic_disposition=(
+                models.SEMANTIC_DISPOSITION_COGNITION_CONTRACT_FAILED
+            ),
+            policy_disposition=models.POLICY_DISPOSITION_NOT_EVALUATED,
+            execution_disposition=models.EXECUTION_DISPOSITION_NOT_REQUESTED,
+            policy_reason="",
+            gate_codes=["response_contract"],
+        )
+    if response["decision"] == "stay_silent":
+        return _response_outcome(
+            semantic_disposition=models.SEMANTIC_DISPOSITION_COGNITION_DECLINED,
+            policy_disposition=models.POLICY_DISPOSITION_NOT_EVALUATED,
+            execution_disposition=models.EXECUTION_DISPOSITION_NOT_REQUESTED,
+            policy_reason="",
+            gate_codes=["response_contract", "semantic_declined"],
+        )
+
+    gate_codes = ["response_contract"]
+    if not _group_source_provenance_is_valid(case):
+        return _response_outcome(
+            semantic_disposition=models.SEMANTIC_DISPOSITION_REPLY_PROPOSED,
+            policy_disposition=models.POLICY_DISPOSITION_REJECTED,
+            execution_disposition=models.EXECUTION_DISPOSITION_NOT_REQUESTED,
+            policy_reason="invalid_provenance",
+            gate_codes=[*gate_codes, "group_source_provenance"],
+        )
+    gate_codes.append("group_source_provenance")
+    labels = _group_source_labels(case)
+    if labels.get("message_recency") != "recent":
+        return _response_outcome(
+            semantic_disposition=models.SEMANTIC_DISPOSITION_REPLY_PROPOSED,
+            policy_disposition=models.POLICY_DISPOSITION_REJECTED,
+            execution_disposition=models.EXECUTION_DISPOSITION_NOT_REQUESTED,
+            policy_reason="stale_source",
+            gate_codes=[*gate_codes, "recent_source"],
+        )
+    gate_codes.append("recent_source")
+    if not _participation_grounding_is_valid(response, labels):
+        return _response_outcome(
+            semantic_disposition=models.SEMANTIC_DISPOSITION_REPLY_PROPOSED,
+            policy_disposition=models.POLICY_DISPOSITION_REJECTED,
+            execution_disposition=models.EXECUTION_DISPOSITION_NOT_REQUESTED,
+            policy_reason="unresolved_target",
+            gate_codes=[*gate_codes, "participation_grounding"],
+        )
+    gate_codes.append("participation_grounding")
+    if not _bound_group_target_is_valid(case):
+        return _response_outcome(
+            semantic_disposition=models.SEMANTIC_DISPOSITION_REPLY_PROPOSED,
+            policy_disposition=models.POLICY_DISPOSITION_REJECTED,
+            execution_disposition=models.EXECUTION_DISPOSITION_NOT_REQUESTED,
+            policy_reason="unresolved_target",
+            gate_codes=[*gate_codes, "bound_group_target"],
+        )
+    gate_codes.append("bound_group_target")
+    idempotency_key = _case_idempotency_key(case)
+    if _has_duplicate_attempt(case, idempotency_key):
+        return _response_outcome(
+            semantic_disposition=models.SEMANTIC_DISPOSITION_REPLY_PROPOSED,
+            policy_disposition=models.POLICY_DISPOSITION_REJECTED,
+            execution_disposition=models.EXECUTION_DISPOSITION_NOT_REQUESTED,
+            policy_reason="duplicate",
+            gate_codes=[*gate_codes, "duplicate_reservation"],
+        )
+    gate_codes.extend(("duplicate_reservation", "approved_for_dialog"))
+    return _response_outcome(
+        semantic_disposition=models.SEMANTIC_DISPOSITION_REPLY_PROPOSED,
+        policy_disposition=models.POLICY_DISPOSITION_APPROVED,
+        execution_disposition=models.EXECUTION_DISPOSITION_NOT_REQUESTED,
+        policy_reason="",
+        gate_codes=gate_codes,
+    )
+
+
 def classify_route(
     case: models.SelfCognitionCase,
     cognition_output: dict[str, Any],
@@ -239,6 +377,25 @@ def classify_route(
     Returns:
         One supported route name.
     """
+
+    if _is_targetless_group_case(case):
+        response_outcome = evaluate_group_response_policy(
+            case,
+            cognition_output,
+        )
+        if (
+            action_attempt is not None
+            and _action_attempt_status(action_attempt)
+            != models.ACTION_ATTEMPT_STATUS_CANDIDATE
+        ):
+            return models.ROUTE_AUDIT_ONLY
+        if (
+            response_outcome is not None
+            and response_outcome["policy_disposition"]
+            == models.POLICY_DISPOSITION_APPROVED
+        ):
+            return models.ROUTE_ACTION_CANDIDATE
+        return models.ROUTE_AUDIT_ONLY
 
     explicit_route = _explicit_route(cognition_output)
     if explicit_route:
@@ -375,16 +532,9 @@ def _candidate_status(
     for attempt in existing_attempts:
         attempt_key = attempt.get("idempotency_key")
         attempt_status = attempt.get("status")
-        group_retry_status = (
-            _string_field(case, "case_name") == models.CASE_GROUP_CHAT_REVIEW
-            and attempt_status == models.ACTION_ATTEMPT_STATUS_DELIVERY_FAILED
-        )
         if (
             attempt_key == idempotency_key
-            and (
-                attempt_status in models.ACTION_ATTEMPT_SUPPRESSING_STATUSES
-                or group_retry_status
-            )
+            and _attempt_status_is_suppressing(case, attempt_status)
         ):
             return_value = models.ACTION_ATTEMPT_STATUS_DUPLICATE
             return return_value
@@ -399,6 +549,22 @@ def _candidate_status(
     else:
         return_value = models.ACTION_ATTEMPT_STATUS_HELD
     return return_value
+
+
+def _attempt_status_is_suppressing(
+    case: models.SelfCognitionCase,
+    status: object,
+) -> bool:
+    """Apply one duplicate policy to preflight and attempt construction."""
+
+    if isinstance(status, str) and status in (
+        models.ACTION_ATTEMPT_SUPPRESSING_STATUSES
+    ):
+        return True
+    return (
+        _string_field(case, "case_name") == models.CASE_GROUP_CHAT_REVIEW
+        and status == models.ACTION_ATTEMPT_STATUS_DELIVERY_FAILED
+    )
 
 
 def _route_with_action_attempt(
@@ -531,6 +697,231 @@ def _content_plan_values(cognition_output: dict[str, Any]) -> list[str]:
         return_value = []
         return return_value
     return [content_plan]
+
+
+def _is_targetless_group_case(case: models.SelfCognitionCase) -> bool:
+    """Identify group-review cases whose response target is the channel."""
+
+    target_scope = _case_target_scope(case)
+    return (
+        _string_field(case, "case_name") == models.CASE_GROUP_CHAT_REVIEW
+        and _string_field(case, "trigger_kind")
+        == models.TRIGGER_GROUP_CHAT_REVIEW
+        and target_scope["channel_type"] == "group"
+        and target_scope["user_id"] is None
+    )
+
+
+def _response_outcome(
+    *,
+    semantic_disposition: str,
+    policy_disposition: str,
+    execution_disposition: str,
+    policy_reason: str,
+    gate_codes: list[str],
+) -> dict[str, Any]:
+    """Build one bounded response outcome with closed values."""
+
+    return {
+        "semantic_disposition": semantic_disposition,
+        "policy_disposition": policy_disposition,
+        "execution_disposition": execution_disposition,
+        "policy_reason": policy_reason,
+        "response_gate_codes": list(gate_codes),
+    }
+
+
+def _bounded_response_outcome(
+    value: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Project response outcome metadata onto its closed artifact contract."""
+
+    semantic_disposition = value.get("semantic_disposition")
+    if semantic_disposition not in models.SEMANTIC_DISPOSITION_VALUES:
+        semantic_disposition = (
+            models.SEMANTIC_DISPOSITION_COGNITION_CONTRACT_FAILED
+        )
+    policy_disposition = value.get("policy_disposition")
+    if policy_disposition not in models.POLICY_DISPOSITION_VALUES:
+        policy_disposition = models.POLICY_DISPOSITION_NOT_EVALUATED
+    execution_disposition = value.get("execution_disposition")
+    if execution_disposition not in models.EXECUTION_DISPOSITION_VALUES:
+        execution_disposition = models.EXECUTION_DISPOSITION_NOT_REQUESTED
+    policy_reason = value.get("policy_reason")
+    if policy_reason not in models.POLICY_REASON_VALUES:
+        policy_reason = ""
+    raw_gate_codes = value.get("response_gate_codes")
+    gate_codes = [
+        code
+        for code in raw_gate_codes
+        if isinstance(code, str)
+        and code in models.RESPONSE_GATE_CODE_VALUES
+    ][:models.RESPONSE_GATE_CODE_LIMIT] if isinstance(
+        raw_gate_codes,
+        list,
+    ) else []
+    return {
+        "semantic_disposition": semantic_disposition,
+        "policy_disposition": policy_disposition,
+        "execution_disposition": execution_disposition,
+        "policy_reason": policy_reason,
+        "response_gate_codes": gate_codes,
+    }
+
+
+def _group_source_provenance_is_valid(
+    case: models.SelfCognitionCase,
+) -> bool:
+    """Require one current group-review source identity."""
+
+    source_context = case.get("source_context")
+    if not isinstance(source_context, Mapping):
+        return False
+    if source_context.get("context_kind") != "group_chat_review":
+        return False
+    source_window = source_context.get("group_activity_window")
+    if not isinstance(source_window, Mapping):
+        return False
+    if source_window.get("source") != "reflection_activity_window":
+        return False
+    window_start = source_window.get("window_start")
+    window_end = source_window.get("window_end")
+    semantic_labels = source_window.get("semantic_labels")
+    if (
+        not isinstance(window_start, str)
+        or not isinstance(window_end, str)
+        or not isinstance(semantic_labels, Mapping)
+    ):
+        return False
+    try:
+        normalized_window_start = normalize_storage_utc_iso(window_start)
+        normalized_window_end = normalize_storage_utc_iso(window_end)
+    except (TypeError, ValueError):
+        return False
+    source_refs = _case_source_refs(case)
+    if not source_refs:
+        return False
+    source_ref = source_refs[0]
+    source_id = _string_field(source_ref, "source_id")
+    if not source_id or _string_field(source_ref, "source_kind") != (
+        "reflection_activity_window"
+    ):
+        return False
+    if not source_id.endswith(
+        f":{normalized_window_start}:{normalized_window_end}"
+    ):
+        return False
+    case_id = _string_field(case, "case_id")
+    return case_id == source_id or case_id.endswith(f":{source_id}")
+
+
+def _group_source_labels(
+    case: models.SelfCognitionCase,
+) -> dict[str, str]:
+    """Read typed group-window labels without interpreting message prose."""
+
+    source_context = case.get("source_context")
+    if not isinstance(source_context, Mapping):
+        return {}
+    source_window = source_context.get("group_activity_window")
+    if not isinstance(source_window, Mapping):
+        return {}
+    labels = source_window.get("semantic_labels")
+    if not isinstance(labels, Mapping):
+        return {}
+    return {
+        str(key): value
+        for key, value in labels.items()
+        if isinstance(key, str) and isinstance(value, str)
+    }
+
+
+def _participation_grounding_is_valid(
+    response: Mapping[str, Any],
+    labels: Mapping[str, str],
+) -> bool:
+    """Evaluate typed participation relationships in the declared order."""
+
+    basis = response.get("participation_basis")
+    target_handle = response.get("semantic_target_handle")
+    if basis == "direct_address":
+        return labels.get("bot_addressing") == "directly_addressed"
+    if basis == "grounded_scene_intervention":
+        return (
+            labels.get("assistant_presence") == "present"
+            or labels.get("bot_addressing") == "directly_addressed"
+        )
+    if basis == "explicit_character_reference":
+        if target_handle == "self":
+            return True
+        return (
+            isinstance(target_handle, str)
+            and target_handle.startswith("p")
+            and target_handle[1:].isdigit()
+        )
+    return False
+
+
+def _bound_group_target_is_valid(
+    case: models.SelfCognitionCase,
+) -> bool:
+    """Require the existing concrete group delivery binding."""
+
+    if case.get("target_binding_status") != "bound":
+        return False
+    delivery_target = case.get("delivery_target")
+    if not isinstance(delivery_target, Mapping):
+        return False
+    if any(
+        delivery_target.get(field_name) not in {None, ""}
+        for field_name in (
+            "target_global_user_id",
+            "target_platform_user_id",
+        )
+    ):
+        return False
+    target_scope = _case_target_scope(case)
+    return all(
+        delivery_target.get(field_name) == target_scope[field_name]
+        for field_name in (
+            "platform",
+            "platform_channel_id",
+            "channel_type",
+        )
+    ) and delivery_target.get("channel_type") == "group"
+
+
+def _case_idempotency_key(case: models.SelfCognitionCase) -> str:
+    """Build the source-window identity used by policy and reservation."""
+
+    source_ref = _first_source_ref(case)
+    return build_idempotency_key(
+        _string_field(source_ref, "source_kind"),
+        _string_field(source_ref, "source_id"),
+        _optional_string_field(source_ref, "due_at"),
+        _case_target_scope(case),
+        models.ACTION_KIND_SEND_MESSAGE,
+    )
+
+
+def _has_duplicate_attempt(
+    case: models.SelfCognitionCase,
+    idempotency_key: str,
+) -> bool:
+    """Check the bounded attempt history before database reservation."""
+
+    existing_attempts = case.get("existing_attempts")
+    if not isinstance(existing_attempts, list):
+        return False
+    return any(
+        isinstance(attempt, Mapping)
+        and attempt.get("idempotency_key") == idempotency_key
+        and _attempt_status_is_suppressing(
+            case,
+            attempt.get("status"),
+        )
+        for attempt in existing_attempts
+    )
 
 
 def _case_target_scope(case: models.SelfCognitionCase) -> dict[str, Any]:
