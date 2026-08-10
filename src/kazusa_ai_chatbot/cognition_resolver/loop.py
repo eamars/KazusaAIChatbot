@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
 from kazusa_ai_chatbot.action_spec.models import (
@@ -17,6 +17,7 @@ from kazusa_ai_chatbot.action_spec.models import (
 from kazusa_ai_chatbot.action_spec.registry import SPEAK_CAPABILITY
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     RESOLVER_CYCLE_TRACE_VERSION,
+    RESOLVER_EVIDENCE_STATE_VERSION,
     RESOLVER_OBSERVATION_VERSION,
     ResolverCapabilityRequestV1,
     ResolverCycleStateV1,
@@ -28,6 +29,7 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     validate_resolver_goal_progress,
     validate_resolver_observation,
     validate_resolver_pending_resolution,
+    validate_required_resolver_evidence_dependency,
 )
 from kazusa_ai_chatbot.cognition_resolver.pending import (
     apply_pending_resolution,
@@ -65,6 +67,15 @@ PendingResolutionApplyFunc = Callable[
 
 MAX_CYCLE_OBSERVATION_ID = "resolver_obs_max_cycles"
 DUPLICATE_REQUEST_OBSERVATION_ID = "resolver_obs_duplicate_request"
+ANSWERABLE_NOW_TERMINAL_REASON = (
+    "goal answerable now; optional resolver request suppressed"
+)
+USER_INPUT_BLOCKER_TERMINAL_REASON = (
+    "blocked user-input resolver request converted to clarification surface"
+)
+USER_INPUT_BLOCKER_PRIVATE_TERMINAL_REASON = (
+    "blocked user-input resolver request kept private for non-user source"
+)
 BLOCKED_PENDING_CAPABILITIES = frozenset((
     "human_clarification",
     "approval_preparation",
@@ -99,6 +110,16 @@ async def call_cognition_resolver_loop(
         cognition_state = _merge_state(current_state, cognition_output)
         cognition_state = _sync_goal_progress_from_cognition(cognition_state)
         resolver_state = _resolver_state(cognition_state)
+        if _suppress_optional_resolver_request(cognition_state):
+            final_state = await _finalize_without_capability(
+                cognition_state,
+                resolver_state=resolver_state,
+                status_before=status_before,
+                apply_pending_resolution_func=apply_pending_resolution_func,
+                terminal_reason=ANSWERABLE_NOW_TERMINAL_REASON,
+            )
+            return_value = final_state
+            return return_value
         selected_request = _select_immediate_request(cognition_state)
 
         if selected_request is None:
@@ -142,7 +163,32 @@ async def call_cognition_resolver_loop(
             return_value = final_state
             return return_value
 
+        if _is_user_input_blocker_observation(observation):
+            final_state = await _run_user_input_blocker_final_cognition(
+                cognition_state,
+                selected_request=selected_request,
+                observation=observation,
+                status_before=status_before,
+                call_cognition_subgraph_func=call_cognition_subgraph_func,
+                apply_pending_resolution_func=apply_pending_resolution_func,
+            )
+            return_value = final_state
+            return return_value
+
         resolver_state = append_observation(resolver_state, observation)
+        resolver_state = _bind_required_evidence_dependency(
+            resolver_state,
+            selected_request=selected_request,
+            observation=observation,
+            request_ordinal=_resolver_request_ordinal(
+                cognition_state,
+                selected_request,
+            ),
+            required=(
+                cognition_state.get("goal_resolution")
+                == "requires_required_evidence"
+            ),
+        )
         if "rag_result" in observation:
             cognition_state["rag_result"] = observation["rag_result"]
             await _attach_past_dialog_cognition_from_rag_result(
@@ -199,6 +245,7 @@ async def _finalize_without_capability(
     resolver_state: ResolverCycleStateV1,
     status_before: str,
     apply_pending_resolution_func: PendingResolutionApplyFunc,
+    terminal_reason: str = "no resolver capability request",
 ) -> GlobalPersonaState:
     """Attach terminal trace/state when cognition does not need a capability."""
 
@@ -211,7 +258,7 @@ async def _finalize_without_capability(
     updated_resolver_state = dict(resolver_state)
     updated_resolver_state["status"] = "terminal"
     updated_resolver_state["held_action_specs"] = action_specs
-    updated_resolver_state["terminal_reason"] = "no resolver capability request"
+    updated_resolver_state["terminal_reason"] = terminal_reason
     trace = _build_cycle_trace(
         cognition_state,
         resolver_state=updated_resolver_state,
@@ -219,7 +266,7 @@ async def _finalize_without_capability(
         status_before=status_before,
         selected_capability_kind="",
         observation_ids=[],
-        terminal_reason="no resolver capability request",
+        terminal_reason=terminal_reason,
     )
     updated_resolver_state = append_cycle_trace(updated_resolver_state, trace)
     return_value = _with_resolver_state(cognition_state, updated_resolver_state)
@@ -237,6 +284,10 @@ async def _run_max_cycle_final_cognition(
     resolver_state = _resolver_state(state)
     blocker = _max_cycle_observation(state, resolver_state)
     resolver_state = append_observation(resolver_state, blocker)
+    resolver_state = _mark_existing_dependency_blocked(
+        resolver_state,
+        blocker,
+    )
     updated_resolver_state = dict(resolver_state)
     updated_resolver_state["status"] = "max_cycles"
     updated_resolver_state["terminal_reason"] = "maximum resolver cycles reached"
@@ -251,7 +302,14 @@ async def _run_max_cycle_final_cognition(
     final_resolver_state = _resolver_state(cognition_state)
     final_resolver_state = dict(final_resolver_state)
     final_terminal_reason = "maximum resolver cycles reached"
-    final_selected_request = _select_immediate_request(cognition_state)
+    answerable_now = _suppress_optional_resolver_request(cognition_state)
+    final_selected_request = (
+        None
+        if answerable_now
+        else _select_immediate_request(cognition_state)
+    )
+    if answerable_now:
+        final_terminal_reason = ANSWERABLE_NOW_TERMINAL_REASON
     if final_selected_request is not None:
         cognition_state["resolver_capability_requests"] = []
         if cognition_state.get("action_specs"):
@@ -310,6 +368,10 @@ async def _run_duplicate_request_final_cognition(
 
     blocker = _duplicate_request_observation(selected_request, state)
     resolver_state = append_observation(resolver_state, blocker)
+    resolver_state = _mark_existing_dependency_blocked(
+        resolver_state,
+        blocker,
+    )
     updated_resolver_state = dict(resolver_state)
     updated_resolver_state["status"] = "blocked"
     updated_resolver_state["terminal_reason"] = (
@@ -338,7 +400,14 @@ async def _run_duplicate_request_final_cognition(
     final_terminal_reason = (
         "duplicate resolver capability request final cognition completed"
     )
-    final_repeated_request = _select_immediate_request(cognition_state)
+    answerable_now = _suppress_optional_resolver_request(cognition_state)
+    final_repeated_request = (
+        None
+        if answerable_now
+        else _select_immediate_request(cognition_state)
+    )
+    if answerable_now:
+        final_terminal_reason = ANSWERABLE_NOW_TERMINAL_REASON
     if final_repeated_request is not None:
         cognition_state["resolver_capability_requests"] = []
         if cognition_state.get("action_specs"):
@@ -409,6 +478,16 @@ async def _run_blocked_pending_final_cognition(
     )
     resolver_state = _resolver_state(state)
     resolver_state = append_observation(resolver_state, normalized_observation)
+    resolver_state = _bind_required_evidence_dependency(
+        resolver_state,
+        selected_request=selected_request,
+        observation=normalized_observation,
+        request_ordinal=_resolver_request_ordinal(state, selected_request),
+        required=(
+            state.get("goal_resolution")
+            == "requires_required_evidence"
+        ),
+    )
     updated_resolver_state = dict(resolver_state)
     updated_resolver_state["status"] = pending_resume["status"]
     updated_resolver_state["pending_resume"] = pending_resume
@@ -486,6 +565,124 @@ async def _run_blocked_pending_final_cognition(
     return return_value
 
 
+async def _run_user_input_blocker_final_cognition(
+    state: GlobalPersonaState,
+    *,
+    selected_request: ResolverCapabilityRequestV1,
+    observation: ResolverObservationV1,
+    status_before: str,
+    call_cognition_subgraph_func: CognitionSubgraphFunc,
+    apply_pending_resolution_func: PendingResolutionApplyFunc,
+) -> GlobalPersonaState:
+    """Run one final cognition pass after a typed user-input blocker."""
+
+    resolver_state = _resolver_state(state)
+    resolver_state = append_observation(resolver_state, observation)
+    resolver_state = _bind_required_evidence_dependency(
+        resolver_state,
+        selected_request=selected_request,
+        observation=observation,
+        request_ordinal=_resolver_request_ordinal(state, selected_request),
+        required=(
+            state.get("goal_resolution")
+            == "requires_required_evidence"
+        ),
+    )
+    updated_resolver_state = dict(resolver_state)
+    updated_resolver_state["status"] = "blocked"
+    updated_resolver_state["terminal_reason"] = (
+        "blocked user-input observation appended"
+    )
+    trace = _build_cycle_trace(
+        state,
+        resolver_state=updated_resolver_state,
+        cycle_index=updated_resolver_state["cycle_index"],
+        status_before=status_before,
+        selected_capability_kind=selected_request["capability_kind"],
+        observation_ids=[observation["observation_id"]],
+        terminal_reason="blocked user-input observation appended",
+    )
+    updated_resolver_state = append_cycle_trace(updated_resolver_state, trace)
+    cognition_input = _with_resolver_state(state, updated_resolver_state)
+    if "rag_result" in observation:
+        cognition_input["rag_result"] = observation["rag_result"]
+        await _attach_past_dialog_cognition_from_rag_result(
+            cognition_input,
+            observation["rag_result"],
+        )
+
+    cognition_output = await call_cognition_subgraph_func(cognition_input)
+    cognition_state = _merge_state(cognition_input, cognition_output)
+    cognition_state = _sync_goal_progress_from_cognition(cognition_state)
+    await _apply_pending_resolution_if_present(
+        cognition_state,
+        apply_pending_resolution_func=apply_pending_resolution_func,
+    )
+    final_resolver_state = dict(_resolver_state(cognition_state))
+    final_terminal_reason = "blocked user-input final cognition completed"
+    answerable_now = _suppress_optional_resolver_request(cognition_state)
+    final_request = (
+        None
+        if answerable_now
+        else _select_immediate_request(cognition_state)
+    )
+    if answerable_now:
+        final_terminal_reason = ANSWERABLE_NOW_TERMINAL_REASON
+    else:
+        cognition_state["resolver_capability_requests"] = []
+        if final_request is not None and _is_repeated_user_input_blocked_request(
+            final_request,
+            observation,
+        ):
+            if _should_surface_terminal_blocker(cognition_state):
+                logger.warning(
+                    "Resolver converted repeated user-input blocker request "
+                    "to a visible clarification surface"
+                )
+                cognition_state["action_specs"] = [
+                    _user_input_blocker_speak_action_spec(observation),
+                ]
+                final_terminal_reason = USER_INPUT_BLOCKER_TERMINAL_REASON
+            else:
+                logger.warning(
+                    "Resolver kept repeated user-input blocker request private "
+                    "for non-user source"
+                )
+                final_terminal_reason = (
+                    USER_INPUT_BLOCKER_PRIVATE_TERMINAL_REASON
+                )
+        if (
+            not cognition_state.get("action_specs")
+            and _should_surface_terminal_blocker(cognition_state)
+        ):
+            logger.warning(
+                "Resolver converted silent user-input blocker cognition to "
+                "a visible clarification surface"
+            )
+            cognition_state["action_specs"] = [
+                _user_input_blocker_speak_action_spec(observation),
+            ]
+            final_terminal_reason = USER_INPUT_BLOCKER_TERMINAL_REASON
+
+    final_resolver_state["held_action_specs"] = list(
+        cognition_state.get("action_specs", []),
+    )
+    final_resolver_state["status"] = "blocked"
+    final_resolver_state["terminal_reason"] = final_terminal_reason
+    final_trace = _build_cycle_trace(
+        cognition_state,
+        resolver_state=final_resolver_state,
+        cycle_index=final_resolver_state["cycle_index"],
+        status_before="blocked",
+        selected_capability_kind="",
+        observation_ids=[],
+        terminal_reason=final_terminal_reason,
+    )
+    final_resolver_state = append_cycle_trace(final_resolver_state, final_trace)
+    return_value = _with_resolver_state(cognition_state, final_resolver_state)
+    return return_value
+
+
 def _pending_resume_speak_action_spec(
     pending_resume: ResolverPendingResumeV1,
     observation: ResolverObservationV1,
@@ -543,6 +740,60 @@ def _pending_resume_speak_action_spec(
         "reason": (
             "Resolver created a pending row and must surface its prompt-safe "
             "question or approval summary."
+        ),
+    }
+    validated_spec = validate_action_spec(action_spec)
+    return_value = dict(validated_spec)
+    return return_value
+
+
+def _user_input_blocker_speak_action_spec(
+    observation: ResolverObservationV1,
+) -> dict[str, Any]:
+    """Build a prompt-safe clarification action from a typed blocker."""
+
+    action_spec = {
+        "schema_version": ACTION_SPEC_VERSION,
+        "kind": SPEAK_CAPABILITY,
+        "cognition_mode": "deliberative",
+        "source_refs": [
+            {
+                "schema_version": ACTION_SOURCE_REF_VERSION,
+                "ref_kind": "system_event",
+                "ref_id": observation["observation_id"],
+                "owner": "cognition_resolver",
+                "relationship": "basis",
+                "evidence_refs": [],
+            },
+        ],
+        "target": {
+            "schema_version": ACTION_TARGET_VERSION,
+            "target_kind": "current_channel",
+            "target_id": None,
+            "owner": "l3_text",
+            "scope": {"surface": "text"},
+        },
+        "params": {
+            "delivery_mode": "visible_reply",
+            "execute_at": None,
+            "surface_requirements": {
+                "decision": "ask_clarification",
+                "detail": observation["prompt_safe_summary"],
+            },
+        },
+        "urgency": "now",
+        "visibility": "user_visible",
+        "deadline": None,
+        "continuation": {
+            "schema_version": ACTION_CONTINUATION_VERSION,
+            "mode": "none",
+            "episode_type": None,
+            "max_depth": 0,
+            "include_result_as": None,
+        },
+        "reason": (
+            "Resolver requires user input before the blocked capability can "
+            "act and must surface a prompt-safe clarification."
         ),
     }
     validated_spec = validate_action_spec(action_spec)
@@ -711,6 +962,19 @@ def _sync_goal_progress_from_cognition(
     return return_value
 
 
+def _suppress_optional_resolver_request(
+    state: GlobalPersonaState,
+) -> bool:
+    """Apply the validated answerability decision to the loop boundary."""
+
+    if state.get("goal_resolution") != "answerable_now":
+        return_value = False
+        return return_value
+    state["resolver_capability_requests"] = []
+    return_value = True
+    return return_value
+
+
 async def _execute_with_timeout(
     request: ResolverCapabilityRequestV1,
     state: GlobalPersonaState,
@@ -734,12 +998,24 @@ async def _execute_with_timeout(
 def _select_immediate_request(
     state: GlobalPersonaState,
 ) -> ResolverCapabilityRequestV1 | None:
-    """Return the first immediate resolver request selected by cognition."""
+    """Return the first resolver request this cycle must process.
+
+    Priority ``now`` requests execute immediately as before.  A priority
+    ``background`` task-resolution request also executes in the same cycle
+    through the direct durable handoff branch without an inline specialist.
+    """
 
     requests = state.get("resolver_capability_requests", [])
     for request in requests:
         validated_request = validate_resolver_capability_request(request)
         if validated_request["priority"] == "now":
+            return_value = validated_request
+            return return_value
+        if (
+            validated_request["priority"] == "background"
+            and validated_request["capability_kind"]
+            == "task_resolution_request"
+        ):
             return_value = validated_request
             return return_value
     return_value = None
@@ -753,6 +1029,31 @@ def _is_blocked_pending_observation(observation: ResolverObservationV1) -> bool:
         observation["status"] == "blocked"
         and observation["capability_kind"] in BLOCKED_PENDING_CAPABILITIES
     )
+    return return_value
+
+
+def _is_user_input_blocker_observation(
+    observation: ResolverObservationV1,
+) -> bool:
+    """Return whether an observation carries a typed user-input blocker."""
+
+    return_value = (
+        observation["status"] == "blocked"
+        and observation.get("blocker_kind") == "requires_user_input"
+    )
+    return return_value
+
+
+def _is_repeated_user_input_blocked_request(
+    request: ResolverCapabilityRequestV1 | None,
+    observation: ResolverObservationV1,
+) -> bool:
+    """Return whether final cognition repeats the blocked capability kind."""
+
+    if request is None:
+        return_value = False
+        return return_value
+    return_value = request["capability_kind"] == observation["capability_kind"]
     return return_value
 
 
@@ -781,14 +1082,114 @@ def _is_repeated_capability_request(
     for observation in resolver_state["observations"]:
         same_capability = observation["capability_kind"] == request["capability_kind"]
         same_objective = observation["request_objective"] == request["objective"]
-        same_timed_out_capability = (
+        same_failed_capability = (
             same_capability
-            and observation["observation_id"].startswith("resolver_obs_timeout_")
+            and observation["status"] == "failed"
         )
-        if same_capability and (same_objective or same_timed_out_capability):
+        if same_capability and (same_objective or same_failed_capability):
             return_value = True
             return return_value
     return_value = False
+    return return_value
+
+
+def _resolver_request_ordinal(
+    state: GlobalPersonaState,
+    selected_request: ResolverCapabilityRequestV1,
+) -> int:
+    """Return the stable one-based request position selected in this cycle."""
+
+    requests = state.get("resolver_capability_requests")
+    if not isinstance(requests, list):
+        raise ResolverValidationError(
+            "resolver_capability_requests: expected list"
+        )
+    for ordinal, raw_request in enumerate(requests, start=1):
+        validated_request = validate_resolver_capability_request(raw_request)
+        if validated_request == selected_request:
+            return_value = ordinal
+            return return_value
+    raise ResolverValidationError(
+        "selected resolver request was not present in the cognition output"
+    )
+
+
+def _bind_required_evidence_dependency(
+    resolver_state: ResolverCycleStateV1,
+    *,
+    selected_request: ResolverCapabilityRequestV1,
+    observation: ResolverObservationV1,
+    request_ordinal: int,
+    required: bool,
+) -> ResolverCycleStateV1:
+    """Bind one required task request to its exact observation evidence state."""
+
+    if (
+        not required
+        or selected_request["capability_kind"] != "task_resolution_request"
+    ):
+        return_value = resolver_state
+        return return_value
+    evidence_state = observation.get("task_resolution_evidence_state")
+    if not isinstance(evidence_state, Mapping):
+        raise ResolverValidationError(
+            "task observation is missing its evidence state"
+        )
+    cycle_index = resolver_state["cycle_index"]
+    evidence_handles = [
+        f"resolver_evidence_{cycle_index}_{request_ordinal}_{index}"
+        for index, evidence_ref in enumerate(
+            observation["evidence_refs"],
+            start=1,
+        )
+        if isinstance(evidence_ref.get("excerpt"), str)
+        and evidence_ref["excerpt"].strip()
+    ]
+    dependency = {
+        "schema_version": "required_resolver_evidence_dependency.v1",
+        "accepted_request_handle": (
+            f"resolver_request_{cycle_index}_{request_ordinal}"
+        ),
+        "observation_id": observation["observation_id"],
+        "prompt_safe_observation_handle": (
+            f"resolver_observation_{cycle_index}_{request_ordinal}"
+        ),
+        "capability_kind": "task_resolution_request",
+        "state": evidence_state["state"],
+        "evidence_handles": evidence_handles[:4],
+        "remaining_needs": list(evidence_state["remaining_needs"]),
+    }
+    validated_dependency = validate_required_resolver_evidence_dependency(
+        dependency,
+    )
+    updated = dict(resolver_state)
+    updated["required_resolver_evidence_dependency"] = validated_dependency
+    return_value = validate_resolver_state(updated)
+    return return_value
+
+
+def _mark_existing_dependency_blocked(
+    resolver_state: ResolverCycleStateV1,
+    observation: ResolverObservationV1,
+) -> ResolverCycleStateV1:
+    """Carry an existing required dependency into a terminal blocker state."""
+
+    dependency = resolver_state.get("required_resolver_evidence_dependency")
+    if dependency is None:
+        return_value = resolver_state
+        return return_value
+    updated_dependency = dict(dependency)
+    updated_dependency["state"] = "blocked"
+    evidence_state = observation.get("task_resolution_evidence_state")
+    if isinstance(evidence_state, Mapping):
+        updated_dependency["remaining_needs"] = list(
+            evidence_state["remaining_needs"]
+        )
+    updated = dict(resolver_state)
+    updated["required_resolver_evidence_dependency"] = (
+        validate_required_resolver_evidence_dependency(updated_dependency)
+    )
+    return_value = validate_resolver_state(updated)
     return return_value
 
 
@@ -811,6 +1212,12 @@ def _timeout_observation(
         "evidence_refs": [],
         "created_at_utc": _created_at_utc(state),
     }
+    if request["capability_kind"] == "task_resolution_request":
+        observation["task_resolution_evidence_state"] = {
+            "schema_version": RESOLVER_EVIDENCE_STATE_VERSION,
+            "state": "blocked",
+            "remaining_needs": [],
+        }
     return_value = validate_resolver_observation(observation)
     return return_value
 
@@ -836,6 +1243,12 @@ def _duplicate_request_observation(
         "evidence_refs": [],
         "created_at_utc": _created_at_utc(state),
     }
+    if request["capability_kind"] == "task_resolution_request":
+        observation["task_resolution_evidence_state"] = {
+            "schema_version": RESOLVER_EVIDENCE_STATE_VERSION,
+            "state": "blocked",
+            "remaining_needs": [],
+        }
     return_value = validate_resolver_observation(observation)
     return return_value
 
@@ -950,6 +1363,12 @@ def _max_cycle_observation(
         "evidence_refs": [],
         "created_at_utc": _created_at_utc(state),
     }
+    if previous_observation["capability_kind"] == "task_resolution_request":
+        observation["task_resolution_evidence_state"] = {
+            "schema_version": RESOLVER_EVIDENCE_STATE_VERSION,
+            "state": "blocked",
+            "remaining_needs": [],
+        }
     return_value = validate_resolver_observation(observation)
     return return_value
 

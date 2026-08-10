@@ -1,15 +1,10 @@
-"""Action-spec handler for generic background-work queue requests."""
+"""Queue handlers for retained future-speak and bound coding lifecycles."""
 
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
-from kazusa_ai_chatbot.accepted_task import (
-    create_or_return_active_accepted_task,
-    mark_accepted_task_enqueue_failed,
-    mark_accepted_task_pending,
-)
 from kazusa_ai_chatbot.accepted_task.models import AcceptedTaskCreateRequest
 from kazusa_ai_chatbot.action_spec.models import (
     ActionValidationError,
@@ -17,18 +12,23 @@ from kazusa_ai_chatbot.action_spec.models import (
 )
 from kazusa_ai_chatbot.action_spec.registry import (
     ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
-    BACKGROUND_WORK_REQUEST_CAPABILITY,
     FUTURE_SPEAK_CAPABILITY,
 )
 from kazusa_ai_chatbot.background_work import enqueue_background_work_request
 from kazusa_ai_chatbot.background_work.models import (
     BACKGROUND_WORK_REQUESTED_DELIVERY,
+    TASK_ORCHESTRATOR_WORKER,
+    TASK_ORCHESTRATOR_WORKER_PAYLOAD_VERSION,
     BackgroundWorkQueueRequest,
     BackgroundWorkQueueResult,
 )
-from kazusa_ai_chatbot.config import BACKGROUND_WORK_OUTPUT_CHAR_LIMIT
+from kazusa_ai_chatbot.config import (
+    BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
+    CODING_AGENT_WORKSPACE_ROOT,
+)
 from kazusa_ai_chatbot.db import DatabaseOperationError
 from kazusa_ai_chatbot.time_boundary import local_llm_datetime_to_storage_utc_iso
+
 
 BackgroundWorkEnqueueFunc = Callable[
     [BackgroundWorkQueueRequest],
@@ -47,24 +47,7 @@ _REQUIRED_DELIVERY_TARGET_SCOPE_FIELDS = (
     "requester_platform_user_id",
     "requester_display_name",
 )
-_FORBIDDEN_WORKER_LOCAL_PARAMS = frozenset((
-    "worker",
-    "work_kind",
-    "task_type",
-    "tool_args",
-    "artifact_text",
-))
-_CODING_FORBIDDEN_WORKER_LOCAL_PARAMS = (
-    _FORBIDDEN_WORKER_LOCAL_PARAMS | frozenset((
-        "approval",
-        "command",
-        "execution_specs",
-        "local_root",
-        "shell",
-        "workspace_root",
-    ))
-)
-_CODING_ACTIONS_REQUIRING_RUN_REF = frozenset((
+_BOUND_CODING_ACTIONS = frozenset((
     "revise_proposal",
     "summarize",
     "status",
@@ -72,284 +55,70 @@ _CODING_ACTIONS_REQUIRING_RUN_REF = frozenset((
     "respond_to_blocker",
     "cancel",
 ))
-
-
-def validate_background_work_action(
-    action_spec: dict[str, Any],
-) -> dict[str, Any]:
-    """Validate one private generic background-work queue action."""
-
-    validated = validate_action_spec(action_spec)
-    if validated["kind"] != BACKGROUND_WORK_REQUEST_CAPABILITY:
-        raise ActionValidationError("kind: expected background_work_request")
-    if validated["visibility"] != "private":
-        raise ActionValidationError("visibility: expected private")
-    if validated["urgency"] != "background":
-        raise ActionValidationError("urgency: expected background")
-
-    target = validated["target"]
-    if target["owner"] != "background_work":
-        raise ActionValidationError("owner: expected background_work")
-    if target["target_kind"] != "current_user":
-        raise ActionValidationError("target_kind: expected current_user")
-    if target["target_id"] is not None:
-        raise ActionValidationError("target_id: expected null")
-    scope = target["scope"]
-    for field_name in _REQUIRED_DELIVERY_TARGET_SCOPE_FIELDS:
-        _require_non_empty_scope(scope, field_name)
-    _require_user_message_source(scope)
-
-    params = validated["params"]
-    forbidden_params = sorted(
-        field_name
-        for field_name in params
-        if field_name in _FORBIDDEN_WORKER_LOCAL_PARAMS
-    )
-    if forbidden_params:
-        raise ActionValidationError(
-            "params: worker-local fields are not allowed: "
-            f"{', '.join(forbidden_params)}"
-        )
-    requested_delivery = params.get("requested_delivery")
-    if requested_delivery != BACKGROUND_WORK_REQUESTED_DELIVERY:
-        raise ActionValidationError("requested_delivery: unsupported value")
-    _require_non_empty_param(params, "task_brief")
-    max_output_chars = params.get("max_output_chars")
-    if not isinstance(max_output_chars, int):
-        raise ActionValidationError("max_output_chars: expected integer")
-    if max_output_chars < 1:
-        raise ActionValidationError("max_output_chars: expected positive integer")
-    if max_output_chars > BACKGROUND_WORK_OUTPUT_CHAR_LIMIT:
-        raise ActionValidationError("max_output_chars: exceeds configured limit")
-    return validated
+_BOUND_CODING_PARAM_FIELDS = frozenset((
+    "task_brief",
+    "coding_action",
+    "coding_run_ref",
+    "revision_instruction",
+    "execution_request",
+    "approval_evidence",
+    "requested_delivery",
+    "max_output_chars",
+))
 
 
 def validate_future_speak_action(
     action_spec: dict[str, Any],
 ) -> dict[str, Any]:
-    """Validate one private future-speak background-work queue action."""
+    """Validate the retained deterministic future-speak queue action."""
 
     validated = validate_action_spec(action_spec)
     if validated["kind"] != FUTURE_SPEAK_CAPABILITY:
         raise ActionValidationError("kind: expected future_speak")
-    if validated["visibility"] != "private":
-        raise ActionValidationError("visibility: expected private")
-    if validated["urgency"] != "background":
-        raise ActionValidationError("urgency: expected background")
-
-    target = validated["target"]
-    if target["owner"] != "background_work":
-        raise ActionValidationError("owner: expected background_work")
-    if target["target_kind"] != "current_user":
-        raise ActionValidationError("target_kind: expected current_user")
-    if target["target_id"] is not None:
-        raise ActionValidationError("target_id: expected null")
-    scope = target["scope"]
-    for field_name in _REQUIRED_DELIVERY_TARGET_SCOPE_FIELDS:
-        _require_non_empty_scope(scope, field_name)
-    _require_user_message_source(scope)
-
+    _validate_private_background_target(validated)
     params = validated["params"]
-    requested_delivery = params.get("requested_delivery")
-    if requested_delivery != BACKGROUND_WORK_REQUESTED_DELIVERY:
-        raise ActionValidationError("requested_delivery: unsupported value")
-    trigger_at = _param_text(params, "trigger_at")
+    _validate_requested_delivery_and_output_limit(params)
+    trigger_at = _required_param_text(params, "trigger_at")
     try:
         local_llm_datetime_to_storage_utc_iso(trigger_at)
     except ValueError as exc:
         raise ActionValidationError(
             f"trigger_at: expected exact local YYYY-MM-DD HH:MM: {exc}"
         ) from exc
-    _require_non_empty_param(params, "continuation_objective")
-    max_output_chars = params.get("max_output_chars")
-    if not isinstance(max_output_chars, int):
-        raise ActionValidationError("max_output_chars: expected integer")
-    if max_output_chars < 1:
-        raise ActionValidationError("max_output_chars: expected positive integer")
-    if max_output_chars > BACKGROUND_WORK_OUTPUT_CHAR_LIMIT:
-        raise ActionValidationError("max_output_chars: exceeds configured limit")
+    _required_param_text(params, "continuation_objective")
     return validated
 
 
 def validate_accepted_coding_task_action(
     action_spec: dict[str, Any],
 ) -> dict[str, Any]:
-    """Validate one private durable coding-run background action."""
+    """Validate a bound coding-run continuation without widening authority."""
 
     validated = validate_action_spec(action_spec)
     if validated["kind"] != ACCEPTED_CODING_TASK_REQUEST_CAPABILITY:
-        raise ActionValidationError("kind: expected accepted_coding_task_request")
-    if validated["visibility"] != "private":
-        raise ActionValidationError("visibility: expected private")
-    if validated["urgency"] != "background":
-        raise ActionValidationError("urgency: expected background")
-
-    target = validated["target"]
-    if target["owner"] != "background_work":
-        raise ActionValidationError("owner: expected background_work")
-    if target["target_kind"] != "current_user":
-        raise ActionValidationError("target_kind: expected current_user")
-    if target["target_id"] is not None:
-        raise ActionValidationError("target_id: expected null")
-    scope = target["scope"]
-    for field_name in _REQUIRED_DELIVERY_TARGET_SCOPE_FIELDS:
-        _require_non_empty_scope(scope, field_name)
-    _require_user_message_source(scope)
-
-    params = validated["params"]
-    forbidden_params = sorted(
-        field_name
-        for field_name in params
-        if field_name in _CODING_FORBIDDEN_WORKER_LOCAL_PARAMS
-    )
-    if forbidden_params:
         raise ActionValidationError(
-            "params: worker-local fields are not allowed: "
-            f"{', '.join(forbidden_params)}"
+            "kind: expected accepted_coding_task_request"
         )
-    requested_delivery = params.get("requested_delivery")
-    if requested_delivery != BACKGROUND_WORK_REQUESTED_DELIVERY:
-        raise ActionValidationError("requested_delivery: unsupported value")
-    _require_non_empty_param(params, "task_brief")
-    coding_action = _param_text(params, "coding_action")
-    if coding_action not in (
-        "start",
-        "revise_proposal",
-        "summarize",
-        "status",
-        "approve_and_verify",
-        "respond_to_blocker",
-        "cancel",
-    ):
+    _validate_private_background_target(validated)
+    params = validated["params"]
+    unsupported = set(params) - _BOUND_CODING_PARAM_FIELDS
+    if unsupported:
+        raise ActionValidationError("params: unsupported coding fields")
+    _validate_requested_delivery_and_output_limit(params)
+    _required_param_text(params, "task_brief")
+    coding_action = _required_param_text(params, "coding_action")
+    if coding_action not in _BOUND_CODING_ACTIONS:
         raise ActionValidationError("coding_action: unsupported value")
-    if coding_action in _CODING_ACTIONS_REQUIRING_RUN_REF:
-        coding_run_ref = _optional_param_text(params, "coding_run_ref")
-        if not coding_run_ref.startswith("coding_run:"):
-            raise ActionValidationError(
-                "coding_run_ref: expected prompt-safe coding_run:<run_id>"
-            )
-    approval_evidence = params.get("approval_evidence")
+    _coding_run_id(_required_param_text(params, "coding_run_ref"))
+    _validate_optional_param_text(params, "revision_instruction")
+    _validate_optional_param_text(params, "execution_request")
+    if coding_action == "revise_proposal":
+        _required_param_text(params, "revision_instruction")
     if coding_action == "approve_and_verify":
-        _validate_approval_evidence(approval_evidence, scope)
-    elif approval_evidence is not None:
+        _validate_approval_evidence(params.get("approval_evidence"), validated)
+    elif "approval_evidence" in params:
         raise ActionValidationError("approval_evidence: unexpected parameter")
-    max_output_chars = params.get("max_output_chars")
-    if not isinstance(max_output_chars, int):
-        raise ActionValidationError("max_output_chars: expected integer")
-    if max_output_chars < 1:
-        raise ActionValidationError("max_output_chars: expected positive integer")
-    if max_output_chars > BACKGROUND_WORK_OUTPUT_CHAR_LIMIT:
-        raise ActionValidationError("max_output_chars: exceeds configured limit")
     return validated
-
-
-async def enqueue_background_work_action(
-    action_spec: dict[str, Any],
-    *,
-    storage_timestamp_utc: str,
-    action_attempt_id: str,
-    enqueue_background_work_func: BackgroundWorkEnqueueFunc | None = None,
-) -> BackgroundWorkQueueResult:
-    """Persist one validated generic background-work queue action."""
-
-    validated = validate_background_work_action(action_spec)
-    params = validated["params"]
-    task_brief = _param_text(params, "task_brief")
-    result = await _create_or_queue_accepted_task(
-        validated,
-        storage_timestamp_utc=storage_timestamp_utc,
-        action_attempt_id=action_attempt_id,
-        action_kind=BACKGROUND_WORK_REQUEST_CAPABILITY,
-        accepted_task_seed=task_brief,
-        accepted_task_detail=task_brief,
-        accepted_task_summary=task_brief,
-        requested_worker="",
-        worker_payload={},
-        enqueue_background_work_func=enqueue_background_work_func,
-    )
-    return result
-
-
-async def enqueue_accepted_coding_task_action(
-    action_spec: dict[str, Any],
-    *,
-    storage_timestamp_utc: str,
-    action_attempt_id: str,
-    enqueue_background_work_func: BackgroundWorkEnqueueFunc | None = None,
-) -> BackgroundWorkQueueResult:
-    """Persist one validated durable coding-run background action."""
-
-    validated = validate_accepted_coding_task_action(action_spec)
-    params = validated["params"]
-    task_brief = _param_text(params, "task_brief")
-    coding_action = _param_text(params, "coding_action")
-    coding_run_ref = _optional_param_text(params, "coding_run_ref")
-    execution_request = _optional_param_text(params, "execution_request")
-    approval_evidence = params.get("approval_evidence")
-    worker_payload: dict[str, object] = {
-        "schema_version": "coding_agent_worker_payload.v2",
-        "operation": coding_action,
-        "task_brief": task_brief,
-        "coding_run_ref": coding_run_ref,
-        "execution_request": execution_request,
-    }
-    if isinstance(approval_evidence, Mapping):
-        worker_payload["approval_evidence"] = dict(approval_evidence)
-    result = await _create_or_queue_accepted_task(
-        validated,
-        storage_timestamp_utc=storage_timestamp_utc,
-        action_attempt_id=action_attempt_id,
-        action_kind=ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
-        accepted_task_seed=_coding_accepted_task_seed(
-            coding_action=coding_action,
-            coding_run_ref=coding_run_ref,
-            task_brief=task_brief,
-        ),
-        accepted_task_detail=_coding_accepted_task_detail(
-            coding_action=coding_action,
-            coding_run_ref=coding_run_ref,
-            task_brief=task_brief,
-        ),
-        accepted_task_summary=_coding_accepted_task_summary(
-            coding_action=coding_action,
-            coding_run_ref=coding_run_ref,
-            task_brief=task_brief,
-        ),
-        requested_worker="coding_agent",
-        worker_payload=worker_payload,
-        enqueue_background_work_func=enqueue_background_work_func,
-    )
-    return result
-
-
-def _validate_approval_evidence(
-    value: object,
-    scope: Mapping[str, object],
-) -> None:
-    """Validate the trusted current-message evidence required for approval."""
-
-    if not isinstance(value, Mapping):
-        raise ActionValidationError("approval_evidence: required for approval")
-    for field_name in (
-        "source_message_id",
-        "source_trigger_source",
-        "requester_global_user_id",
-        "quote",
-        "storage_timestamp_utc",
-    ):
-        field_value = value.get(field_name)
-        if not isinstance(field_value, str) or not field_value.strip():
-            raise ActionValidationError(
-                f"approval_evidence.{field_name}: required"
-            )
-    if value["source_trigger_source"] != "user_message":
-        raise ActionValidationError(
-            "approval_evidence.source_trigger_source: expected user_message"
-        )
-    if value["requester_global_user_id"] != scope["requester_global_user_id"]:
-        raise ActionValidationError(
-            "approval_evidence.requester_global_user_id: scope mismatch"
-        )
 
 
 async def enqueue_future_speak_action(
@@ -358,24 +127,25 @@ async def enqueue_future_speak_action(
     storage_timestamp_utc: str,
     action_attempt_id: str,
     enqueue_background_work_func: BackgroundWorkEnqueueFunc | None = None,
+    source_llm_trace_id: str = "",
 ) -> BackgroundWorkQueueResult:
-    """Persist one validated future-speak background-work queue action."""
+    """Persist a retained future-speak task and its deterministic worker job."""
 
     validated = validate_future_speak_action(action_spec)
     params = validated["params"]
-    trigger_at = _param_text(params, "trigger_at")
-    continuation_objective = _param_text(params, "continuation_objective")
-    task_summary = (
-        f"Schedule future speak for {trigger_at}: "
-        f"{continuation_objective}"
+    trigger_at = _required_param_text(params, "trigger_at")
+    continuation_objective = _required_param_text(
+        params,
+        "continuation_objective",
     )
-    result = await _create_or_queue_accepted_task(
+    task_summary = f"Schedule future speak for {trigger_at}: {continuation_objective}"
+    return await _create_or_queue_accepted_task(
         validated,
         storage_timestamp_utc=storage_timestamp_utc,
         action_attempt_id=action_attempt_id,
-        action_kind=FUTURE_SPEAK_CAPABILITY,
-        accepted_task_seed=continuation_objective,
-        accepted_task_detail=f"{trigger_at} {continuation_objective}",
+        source_llm_trace_id=source_llm_trace_id,
+        task_kind="future_speak",
+        semantic_objective=continuation_objective,
         accepted_task_summary=continuation_objective,
         requested_worker="future_speak",
         worker_payload={
@@ -385,329 +155,495 @@ async def enqueue_future_speak_action(
         enqueue_background_work_func=enqueue_background_work_func,
         task_brief=task_summary,
     )
-    return result
 
 
-def _coding_accepted_task_seed(
-    *,
-    coding_action: str,
-    coding_run_ref: str,
-    task_brief: str,
-) -> str:
-    """Build duplicate-suppression seed for one coding task request."""
-
-    if coding_action == "start":
-        return task_brief
-    return_value = f"{coding_action}:{coding_run_ref}:{task_brief}"
-    return return_value
-
-
-def _coding_accepted_task_detail(
-    *,
-    coding_action: str,
-    coding_run_ref: str,
-    task_brief: str,
-) -> str:
-    """Build prompt-safe accepted coding task detail."""
-
-    if coding_run_ref:
-        return_value = f"{coding_action} {coding_run_ref}: {task_brief}"
-        return return_value
-    return_value = f"{coding_action}: {task_brief}"
-    return return_value
-
-
-def _coding_accepted_task_summary(
-    *,
-    coding_action: str,
-    coding_run_ref: str,
-    task_brief: str,
-) -> str:
-    """Build prompt-safe accepted coding task summary."""
-
-    if coding_action == "start":
-        return_value = f"Coding task: {task_brief}"
-        return return_value
-    if coding_run_ref:
-        return_value = f"Coding run {coding_run_ref}: {coding_action}"
-        return return_value
-    return_value = f"Coding run: {coding_action}"
-    return return_value
-
-
-async def _create_or_queue_accepted_task(
-    validated: dict[str, Any],
+async def enqueue_accepted_coding_task_action(
+    action_spec: dict[str, Any],
     *,
     storage_timestamp_utc: str,
     action_attempt_id: str,
-    action_kind: str,
-    accepted_task_seed: str,
-    accepted_task_detail: str,
+    enqueue_background_work_func: BackgroundWorkEnqueueFunc | None = None,
+    source_llm_trace_id: str = "",
+) -> BackgroundWorkQueueResult:
+    """Persist one reviewed continuation for an existing coding run."""
+
+    validated = validate_accepted_coding_task_action(action_spec)
+    params = validated["params"]
+    coding_action = _required_param_text(params, "coding_action")
+    coding_run_ref = _required_param_text(params, "coding_run_ref")
+    task_brief = _required_param_text(params, "task_brief")
+    coding_request = _bound_coding_request(
+        params,
+        validated=validated,
+        storage_timestamp_utc=storage_timestamp_utc,
+    )
+    semantic_objective = _coding_semantic_objective(
+        coding_action=coding_action,
+        coding_run_ref=coding_run_ref,
+        task_brief=task_brief,
+    )
+    return await _create_or_queue_accepted_task(
+        validated,
+        storage_timestamp_utc=storage_timestamp_utc,
+        action_attempt_id=action_attempt_id,
+        source_llm_trace_id=source_llm_trace_id,
+        task_kind="coding_continuation",
+        semantic_objective=semantic_objective,
+        accepted_task_summary=semantic_objective,
+        requested_worker=TASK_ORCHESTRATOR_WORKER,
+        worker_payload={
+            "schema_version": TASK_ORCHESTRATOR_WORKER_PAYLOAD_VERSION,
+            "operation": "continue_bound_coding_run",
+            "checkpoint": None,
+            "coding_request": coding_request,
+        },
+        enqueue_background_work_func=enqueue_background_work_func,
+        task_brief=task_brief,
+    )
+
+
+def _validate_private_background_target(validated: Mapping[str, Any]) -> None:
+    """Require the shared private user-scope queue boundary."""
+
+    if validated["visibility"] != "private":
+        raise ActionValidationError("visibility: expected private")
+    if validated["urgency"] != "background":
+        raise ActionValidationError("urgency: expected background")
+    target = validated["target"]
+    if target["owner"] != "background_work":
+        raise ActionValidationError("owner: expected background_work")
+    if target["target_kind"] != "current_user":
+        raise ActionValidationError("target_kind: expected current_user")
+    if target["target_id"] is not None:
+        raise ActionValidationError("target_id: expected null")
+    scope = target["scope"]
+    for field_name in _REQUIRED_DELIVERY_TARGET_SCOPE_FIELDS:
+        _required_scope_text(scope, field_name)
+    if _required_scope_text(scope, "source_trigger_source") != "user_message":
+        raise ActionValidationError(
+            "scope.source_trigger_source: expected user_message"
+        )
+
+
+def _validate_requested_delivery_and_output_limit(
+    params: Mapping[str, object],
+) -> None:
+    """Validate shared accepted-task queue settings."""
+
+    if params.get("requested_delivery") != BACKGROUND_WORK_REQUESTED_DELIVERY:
+        raise ActionValidationError("requested_delivery: unsupported value")
+    max_output_chars = params.get("max_output_chars")
+    if isinstance(max_output_chars, bool) or not isinstance(
+        max_output_chars,
+        int,
+    ):
+        raise ActionValidationError("max_output_chars: expected integer")
+    if max_output_chars < 1:
+        raise ActionValidationError("max_output_chars: expected positive integer")
+    if max_output_chars > BACKGROUND_WORK_OUTPUT_CHAR_LIMIT:
+        raise ActionValidationError("max_output_chars: exceeds configured limit")
+
+
+def _validate_approval_evidence(
+    value: object,
+    validated: Mapping[str, Any],
+) -> None:
+    """Require trusted current-turn approval provenance for coding mutation."""
+
+    if not isinstance(value, Mapping):
+        raise ActionValidationError("approval_evidence: required for approval")
+    scope = validated["target"]["scope"]
+    for field_name in (
+        "source_message_id",
+        "source_trigger_source",
+        "requester_global_user_id",
+        "quote",
+        "storage_timestamp_utc",
+    ):
+        _required_mapping_text(value, field_name, "approval_evidence")
+    if value["source_trigger_source"] != "user_message":
+        raise ActionValidationError(
+            "approval_evidence.source_trigger_source: expected user_message"
+        )
+    if value["requester_global_user_id"] != scope[
+        "requester_global_user_id"
+    ]:
+        raise ActionValidationError(
+            "approval_evidence.requester_global_user_id: scope mismatch"
+        )
+
+
+def _bound_coding_request(
+    params: Mapping[str, object],
+    *,
+    validated: Mapping[str, Any],
+    storage_timestamp_utc: str,
+) -> dict[str, object]:
+    """Build the frozen public continuation request from reviewed state."""
+
+    workspace_root = CODING_AGENT_WORKSPACE_ROOT.strip()
+    if not workspace_root:
+        raise ActionValidationError("coding workspace is unavailable")
+    coding_action = _required_param_text(params, "coding_action")
+    request: dict[str, object] = {
+        "workspace_root": workspace_root,
+        "run_id": _coding_run_id(_required_param_text(params, "coding_run_ref")),
+        "action": coding_action,
+        "reason": str(validated["reason"]).strip(),
+    }
+    revision_instruction = _optional_param_text(params, "revision_instruction")
+    execution_request = _optional_param_text(params, "execution_request")
+    if revision_instruction:
+        request["revision_instruction"] = revision_instruction
+    if execution_request:
+        request["execution_request"] = execution_request
+    if coding_action == "approve_and_verify":
+        approval_evidence = params["approval_evidence"]
+        if not isinstance(approval_evidence, Mapping):
+            raise ActionValidationError("approval_evidence: required for approval")
+        request["approval"] = {
+            "approved": True,
+            "approved_by": _required_mapping_text(
+                approval_evidence,
+                "requester_global_user_id",
+                "approval_evidence",
+            ),
+            "approved_at": _required_mapping_text(
+                approval_evidence,
+                "storage_timestamp_utc",
+                "approval_evidence",
+            ),
+            "approval_reason": _required_mapping_text(
+                approval_evidence,
+                "quote",
+                "approval_evidence",
+            ),
+        }
+    return request
+
+
+async def _create_or_queue_accepted_task(
+    validated: Mapping[str, Any],
+    *,
+    storage_timestamp_utc: str,
+    action_attempt_id: str,
+    source_llm_trace_id: str,
+    task_kind: str,
+    semantic_objective: str,
     accepted_task_summary: str,
     requested_worker: str,
     worker_payload: dict[str, object],
     enqueue_background_work_func: BackgroundWorkEnqueueFunc | None,
-    task_brief: str | None = None,
+    task_brief: str,
 ) -> BackgroundWorkQueueResult:
-    """Create accepted-task state and enqueue one internal background job."""
+    """Create v2 accepted state and enqueue its single approved worker."""
+
+    from kazusa_ai_chatbot.accepted_task.lifecycle import (
+        create_or_return_active_accepted_task,
+        mark_accepted_task_enqueue_failed,
+        mark_accepted_task_pending,
+    )
 
     create_request = _accepted_task_create_request(
         validated,
         storage_timestamp_utc=storage_timestamp_utc,
-        action_kind=action_kind,
-        accepted_task_seed=accepted_task_seed,
-        accepted_task_detail=accepted_task_detail,
+        task_kind=task_kind,
+        semantic_objective=semantic_objective,
         accepted_task_summary=accepted_task_summary,
     )
     create_result = await create_or_return_active_accepted_task(create_request)
     accepted_task = create_result["task"]
-    if create_result["status"] == "already_active":
-        result = _accepted_task_queue_result(
+    active_state = _task_text(accepted_task, "state")
+    if create_result["status"] == "already_active" and active_state not in {
+        "enqueueing",
+        "pending",
+    }:
+        return _accepted_task_queue_result(
             accepted_task,
             accepted_task_state="already_active",
             status="pending",
+            job_id=_task_text(accepted_task, "executor_ref"),
             result_summary="Accepted task is already active.",
             acknowledgement_constraint="progress_report_allowed",
             wait_guidance="non_numeric_wait",
         )
-        return result
 
     queue_request = _queue_request_from_accepted_task(
         validated,
         accepted_task,
         storage_timestamp_utc=storage_timestamp_utc,
         action_attempt_id=action_attempt_id,
-        source_context=validated["reason"],
+        source_llm_trace_id=source_llm_trace_id,
+        semantic_objective=semantic_objective,
         requested_worker=requested_worker,
         worker_payload=worker_payload,
-        task_brief=task_brief or accepted_task_summary,
     )
-    if enqueue_background_work_func is None:
-        enqueue_background_work_func = enqueue_background_work_request
+    job_id = queue_request["job_id"]
+    if active_state == "pending":
+        existing_job_id = _task_text(accepted_task, "executor_ref")
+        if not existing_job_id:
+            raise DatabaseOperationError(
+                "pending accepted task is missing its background job id"
+            )
+        queue_request["job_id"] = existing_job_id
+        job_id = existing_job_id
+    else:
+        pending_task = await mark_accepted_task_pending(
+            accepted_task_id=_task_text(accepted_task, "accepted_task_id"),
+            executor_ref=job_id,
+            updated_at=storage_timestamp_utc,
+        )
+        if pending_task is None:
+            await mark_accepted_task_enqueue_failed(
+                accepted_task_id=_task_text(
+                    accepted_task,
+                    "accepted_task_id",
+                ),
+                failure_summary="Accepted task could not become pending.",
+                updated_at=storage_timestamp_utc,
+            )
+            raise DatabaseOperationError(
+                "accepted task pending transition failed before job insert"
+            )
+    enqueue = enqueue_background_work_func or enqueue_background_work_request
     try:
-        queue_result = await enqueue_background_work_func(queue_request)
+        queue_result = await enqueue(queue_request)
     except (DatabaseOperationError, ValueError) as exc:
         await mark_accepted_task_enqueue_failed(
             accepted_task_id=_task_text(accepted_task, "accepted_task_id"),
-            failure_summary=f"Background work enqueue failed: {exc}",
+            failure_summary="Background task enqueue failed.",
             updated_at=storage_timestamp_utc,
         )
-        result = _accepted_task_queue_result(
-            accepted_task,
-            accepted_task_state="enqueue_failed",
-            status="failed",
-            result_summary=f"Accepted task enqueue failed: {exc}",
-            acknowledgement_constraint="promise_forbidden_explain_failure",
-            wait_guidance="unavailable",
+        raise DatabaseOperationError("accepted task enqueue failed") from exc
+    if queue_result["job_id"] != job_id:
+        await mark_accepted_task_enqueue_failed(
+            accepted_task_id=_task_text(accepted_task, "accepted_task_id"),
+            failure_summary="Background task returned an invalid job id.",
+            updated_at=storage_timestamp_utc,
         )
-        return result
-
-    pending_task = await mark_accepted_task_pending(
-        accepted_task_id=_task_text(accepted_task, "accepted_task_id"),
-        executor_ref=str(queue_result.get("job_id", "")),
-        updated_at=storage_timestamp_utc,
-    )
-    if pending_task is None:
         raise DatabaseOperationError(
-            "accepted task pending transition failed after job insert"
+            "accepted task enqueue returned an unexpected job id"
         )
-    result = _accepted_task_queue_result(
-        pending_task,
+    return _accepted_task_queue_result(
+        accepted_task,
         accepted_task_state="scheduled",
         status="pending",
+        job_id=queue_result["job_id"],
         result_summary="Accepted task scheduled.",
         acknowledgement_constraint="promise_allowed",
         wait_guidance="non_numeric_wait",
     )
-    return result
 
 
 def _accepted_task_create_request(
-    validated: dict[str, Any],
+    validated: Mapping[str, Any],
     *,
     storage_timestamp_utc: str,
-    action_kind: str,
-    accepted_task_seed: str,
-    accepted_task_detail: str,
+    task_kind: str,
+    semantic_objective: str,
     accepted_task_summary: str,
 ) -> AcceptedTaskCreateRequest:
-    """Build the semantic accepted-task creation request."""
+    """Build one trusted v2 accepted-task request from the action scope."""
 
+    if task_kind not in {"future_speak", "coding_continuation"}:
+        raise ActionValidationError("accepted task kind is unsupported")
     params = validated["params"]
     scope = validated["target"]["scope"]
     request: AcceptedTaskCreateRequest = {
-        "action_kind": action_kind,
-        "accepted_task_seed": accepted_task_seed,
-        "accepted_task_detail": accepted_task_detail,
+        "task_kind": task_kind,
+        "semantic_objective": semantic_objective,
         "accepted_task_summary": accepted_task_summary,
-        "source_context": str(validated["reason"]).strip(),
         "requested_delivery": BACKGROUND_WORK_REQUESTED_DELIVERY,
         "max_output_chars": int(params["max_output_chars"]),
-        "source_trigger_source": _scope_text(scope, "source_trigger_source"),
-        "source_platform": _scope_text(scope, "source_platform"),
-        "source_channel_id": _scope_text(scope, "source_channel_id"),
-        "source_channel_type": _scope_text(scope, "source_channel_type"),
-        "source_message_id": _scope_text(scope, "source_message_id"),
-        "source_platform_bot_id": _scope_text(
+        "source_trigger_source": _required_scope_text(
+            scope,
+            "source_trigger_source",
+        ),
+        "source_platform": _required_scope_text(scope, "source_platform"),
+        "source_channel_id": _required_scope_text(scope, "source_channel_id"),
+        "source_channel_type": _required_scope_text(scope, "source_channel_type"),
+        "source_message_id": _required_scope_text(scope, "source_message_id"),
+        "source_platform_bot_id": _required_scope_text(
             scope,
             "source_platform_bot_id",
         ),
-        "source_character_name": _scope_text(scope, "source_character_name"),
-        "requester_global_user_id": _scope_text(
+        "source_character_name": _required_scope_text(
+            scope,
+            "source_character_name",
+        ),
+        "requester_global_user_id": _required_scope_text(
             scope,
             "requester_global_user_id",
         ),
-        "requester_platform_user_id": _scope_text(
+        "requester_platform_user_id": _required_scope_text(
             scope,
             "requester_platform_user_id",
         ),
-        "requester_display_name": _scope_text(scope, "requester_display_name"),
+        "requester_display_name": _required_scope_text(
+            scope,
+            "requester_display_name",
+        ),
         "storage_timestamp_utc": storage_timestamp_utc,
     }
     return request
 
 
 def _queue_request_from_accepted_task(
-    validated: dict[str, Any],
-    accepted_task: dict[str, Any],
+    validated: Mapping[str, Any],
+    accepted_task: Mapping[str, Any],
     *,
     storage_timestamp_utc: str,
     action_attempt_id: str,
-    source_context: str,
+    source_llm_trace_id: str,
+    semantic_objective: str,
     requested_worker: str,
-    worker_payload: dict[str, object],
-    task_brief: str,
+    worker_payload: Mapping[str, object],
 ) -> BackgroundWorkQueueRequest:
-    """Build the internal queue request from accepted-task state."""
+    """Build one internal v2 job request from accepted-task state."""
 
     params = validated["params"]
     scope = validated["target"]["scope"]
     accepted_task_id = _task_text(accepted_task, "accepted_task_id")
     request: BackgroundWorkQueueRequest = {
-        "action_attempt_id": action_attempt_id,
+        "job_id": f"job-{accepted_task_id.removeprefix('task-')}",
+        "source_action_attempt_id": action_attempt_id,
+        "source_llm_trace_id": source_llm_trace_id.strip(),
         "idempotency_key": f"background_work:{accepted_task_id}",
         "accepted_task_id": accepted_task_id,
         "task_identity_key": _task_text(accepted_task, "task_identity_key"),
-        "task_brief": task_brief,
-        "source_context": source_context.strip(),
-        "source_platform": _scope_text(scope, "source_platform"),
-        "source_channel_id": _scope_text(scope, "source_channel_id"),
-        "source_channel_type": _scope_text(scope, "source_channel_type"),
-        "source_message_id": _scope_text(scope, "source_message_id"),
-        "source_platform_bot_id": _scope_text(
+        "semantic_objective": semantic_objective,
+        "requested_worker": requested_worker,
+        "worker_payload": dict(worker_payload),
+        "source_platform": _required_scope_text(scope, "source_platform"),
+        "source_channel_id": _required_scope_text(scope, "source_channel_id"),
+        "source_channel_type": _required_scope_text(scope, "source_channel_type"),
+        "source_message_id": _required_scope_text(scope, "source_message_id"),
+        "source_platform_bot_id": _required_scope_text(
             scope,
             "source_platform_bot_id",
         ),
-        "source_character_name": _scope_text(scope, "source_character_name"),
-        "requester_global_user_id": _scope_text(
+        "source_character_name": _required_scope_text(
+            scope,
+            "source_character_name",
+        ),
+        "requester_global_user_id": _required_scope_text(
             scope,
             "requester_global_user_id",
         ),
-        "requester_platform_user_id": _scope_text(
+        "requester_platform_user_id": _required_scope_text(
             scope,
             "requester_platform_user_id",
         ),
-        "requester_display_name": _scope_text(scope, "requester_display_name"),
+        "requester_display_name": _required_scope_text(
+            scope,
+            "requester_display_name",
+        ),
         "requested_delivery": BACKGROUND_WORK_REQUESTED_DELIVERY,
         "max_output_chars": int(params["max_output_chars"]),
         "storage_timestamp_utc": storage_timestamp_utc,
     }
-    if requested_worker:
-        request["requested_worker"] = requested_worker
-        request["worker_payload"] = dict(worker_payload)
     return request
 
 
 def _accepted_task_queue_result(
-    task: dict[str, Any],
+    task: Mapping[str, Any],
     *,
     accepted_task_state: str,
     status: str,
+    job_id: str,
     result_summary: str,
     acknowledgement_constraint: str,
     wait_guidance: str,
 ) -> BackgroundWorkQueueResult:
-    """Project accepted-task state into a prompt-safe queue result."""
+    """Project durable state into a prompt-safe queue response."""
 
     result: BackgroundWorkQueueResult = {
         "status": status,
+        "job_id": job_id,
+        "job_ref": f"background_work_job:{job_id}" if job_id else "",
         "accepted_task_id": _task_text(task, "accepted_task_id"),
         "task_identity_key": _task_text(task, "task_identity_key"),
-        "accepted_task_state": accepted_task_state,
         "accepted_task_summary": _task_text(task, "accepted_task_summary"),
         "acknowledgement_constraint": acknowledgement_constraint,
         "wait_guidance": wait_guidance,
         "result_summary": result_summary,
     }
+    result["accepted_task_state"] = accepted_task_state
     return result
 
 
-def _require_non_empty_param(params: dict[str, Any], field_name: str) -> None:
-    """Require one non-empty string param."""
+def _coding_semantic_objective(
+    *,
+    coding_action: str,
+    coding_run_ref: str,
+    task_brief: str,
+) -> str:
+    """Build stable task identity material for a bound coding continuation."""
 
-    value = params.get(field_name)
-    if not isinstance(value, str) or not value.strip():
-        raise ActionValidationError(f"{field_name}: expected non-empty string")
+    return f"{coding_action} {coding_run_ref}: {task_brief}"
 
 
-def _require_non_empty_scope(scope: dict[str, Any], field_name: str) -> None:
-    """Require one non-empty trusted target-scope string."""
+def _coding_run_id(coding_run_ref: str) -> str:
+    """Extract the frozen public run id from its prompt-safe reference."""
 
-    value = scope.get(field_name)
-    if not isinstance(value, str) or not value.strip():
+    prefix = "coding_run:"
+    if not coding_run_ref.startswith(prefix):
         raise ActionValidationError(
-            f"scope.{field_name}: expected non-empty string"
+            "coding_run_ref: expected prompt-safe coding_run:<run_id>"
         )
+    run_id = coding_run_ref[len(prefix):].strip()
+    if not run_id:
+        raise ActionValidationError("coding_run_ref: expected a run id")
+    return run_id
 
 
-def _param_text(params: dict[str, Any], field_name: str) -> str:
-    """Return one previously validated text param."""
+def _required_param_text(params: Mapping[str, object], field_name: str) -> str:
+    """Return one required semantic action parameter."""
 
-    value = params[field_name]
-    if not isinstance(value, str):
-        raise ActionValidationError(f"{field_name}: expected string")
-    return_value = value.strip()
-    return return_value
+    return _required_mapping_text(params, field_name, "params")
 
 
-def _optional_param_text(params: dict[str, Any], field_name: str) -> str:
-    """Return one optional text param."""
+def _validate_optional_param_text(
+    params: Mapping[str, object],
+    field_name: str,
+) -> None:
+    """Validate an optional parameter when the caller supplied it."""
 
-    value = params.get(field_name)
-    if not isinstance(value, str):
-        return_value = ""
-        return return_value
-    return_value = value.strip()
-    return return_value
-
-
-def _scope_text(scope: dict[str, Any], field_name: str) -> str:
-    """Return one trusted scope text field."""
-
-    value = scope.get(field_name)
-    if not isinstance(value, str):
-        return_value = ""
-        return return_value
-    return_value = value.strip()
-    return return_value
+    if field_name in params:
+        _required_param_text(params, field_name)
 
 
-def _task_text(task: dict[str, Any], field_name: str) -> str:
-    """Return one accepted-task text field."""
+def _optional_param_text(params: Mapping[str, object], field_name: str) -> str:
+    """Return one optional semantic action parameter."""
+
+    if field_name not in params:
+        return ""
+    return _required_mapping_text(params, field_name, "params")
+
+
+def _required_scope_text(scope: Mapping[str, object], field_name: str) -> str:
+    """Return one required trusted delivery-scope field."""
+
+    return _required_mapping_text(scope, field_name, "scope")
+
+
+def _required_mapping_text(
+    value: Mapping[str, object],
+    field_name: str,
+    label: str,
+) -> str:
+    """Require one non-empty text value from a typed mapping."""
+
+    field_value = value.get(field_name)
+    if not isinstance(field_value, str) or not field_value.strip():
+        raise ActionValidationError(f"{label}.{field_name}: expected non-empty string")
+    return field_value.strip()
+
+
+def _task_text(task: Mapping[str, Any], field_name: str) -> str:
+    """Read one prompt-safe text field from a durable accepted-task row."""
 
     value = task.get(field_name)
     if not isinstance(value, str):
-        return_value = ""
-        return return_value
-    return_value = value.strip()
-    return return_value
-
-
-def _require_user_message_source(scope: dict[str, Any]) -> None:
-    """Reject delayed task creation from autonomous or result-ready sources."""
-
-    trigger_source = _scope_text(scope, "source_trigger_source")
-    if trigger_source != "user_message":
-        raise ActionValidationError(
-            "scope.source_trigger_source: expected user_message"
-        )
+        return ""
+    return value.strip()

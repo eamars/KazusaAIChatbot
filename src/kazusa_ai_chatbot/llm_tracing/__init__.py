@@ -6,7 +6,8 @@ import asyncio
 import hashlib
 import json
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from contextvars import ContextVar, Token
 from typing import Literal, TypedDict
 from uuid import uuid4
 
@@ -14,6 +15,8 @@ from langchain_core.messages import BaseMessage
 
 from kazusa_ai_chatbot.config import DEBUG_LOG_TTL_DAYS, LLM_TRACE_CAPTURE_MODE
 from kazusa_ai_chatbot.db import llm_tracing as db_llm_tracing
+from kazusa_ai_chatbot.llm_interface import LLMCallConfig
+from kazusa_ai_chatbot.llm_tracing import failure_capsule
 from kazusa_ai_chatbot.logging_retention import expiry_from_storage_iso
 from kazusa_ai_chatbot.time_boundary import storage_utc_now_iso
 
@@ -21,6 +24,10 @@ logger = logging.getLogger(__name__)
 
 LLM_TRACE_WRITE_TIMEOUT_SECONDS = 0.25
 TraceWriteStatus = Literal["recorded", "skipped", "failed"]
+_CURRENT_TRACE_ID: ContextVar[str] = ContextVar(
+    "kazusa_llm_trace_id",
+    default="",
+)
 
 
 class LLMTraceWriteResult(TypedDict):
@@ -37,6 +44,24 @@ def build_trace_id() -> str:
 
     trace_id = f"llmtrace_{uuid4().hex}"
     return trace_id
+
+
+def bind_trace_id(trace_id: str) -> Token[str]:
+    """Bind one trace id to the current async turn context."""
+
+    return _CURRENT_TRACE_ID.set(trace_id)
+
+
+def current_trace_id() -> str:
+    """Return the trace id bound to the current async turn context."""
+
+    return _CURRENT_TRACE_ID.get()
+
+
+def reset_trace_id(token: Token[str]) -> None:
+    """Restore the prior async trace context."""
+
+    _CURRENT_TRACE_ID.reset(token)
 
 
 def _write_result(
@@ -128,6 +153,9 @@ async def ensure_llm_trace_run(
     platform_message_id: str,
     global_user_id: str,
     started_at: str | None = None,
+    parent_llm_trace_id: str = "",
+    source_background_work_job_id: str = "",
+    source_calendar_run_id: str = "",
 ) -> LLMTraceWriteResult:
     """Ensure a trace-run row exists for one live turn."""
 
@@ -151,6 +179,9 @@ async def ensure_llm_trace_run(
         "completed_at": "",
         "final_dialog_count": 0,
         "delivery_tracking_id": "",
+        "parent_llm_trace_id": parent_llm_trace_id.strip(),
+        "source_background_work_job_id": source_background_work_job_id.strip(),
+        "source_calendar_run_id": source_calendar_run_id.strip(),
         "created_at": storage_utc_now_iso(),
         "expires_at": expiry_from_storage_iso(
             run_started_at,
@@ -192,9 +223,31 @@ async def record_llm_trace_step(
     duration_ms: int,
     output_state_fields: Sequence[str],
     sequence: int = 0,
+    call_config: LLMCallConfig | None = None,
+    branch_id: str = "",
+    attempt_index: int = 0,
+    validation_error: str = "",
+    attempt_started_at: float | None = None,
+    attempt_metadata: Mapping[str, object] | None = None,
 ) -> LLMTraceWriteResult:
     """Record one LLM stage prompt/response trace."""
 
+    failure_capsule.append_model_attempt(
+        stage_name=stage_name,
+        messages=messages,
+        response_text=response_text,
+        parsed_output=parsed_output,
+        parse_status=parse_status,
+        status=status,
+        config=call_config,
+        route_name=route_name,
+        model_name=model_name,
+        branch_id=branch_id,
+        attempt_index=attempt_index,
+        validation_error=validation_error,
+        started_at=attempt_started_at,
+        attempt_metadata=attempt_metadata,
+    )
     if not trace_id:
         return _write_result(
             accepted=False,

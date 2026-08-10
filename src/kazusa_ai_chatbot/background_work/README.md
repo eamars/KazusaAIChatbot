@@ -1,193 +1,133 @@
-# Background Work
+# Background Work ICD
 
 ## Document Control
 
-This ICD defines the generic background-work subsystem boundary for new
-asynchronous jobs.
+- Owning package: `kazusa_ai_chatbot.background_work`
+- Source of truth: v2 job models, worker runtime, and focused job/delivery tests
+- Document status: current durable-worker contract
 
 ## Purpose
 
-`background_work` owns the internal asynchronous executor behind accepted
-delayed work. The model-facing lifecycle is `accepted_task`; this package keeps
-queue rows, routing, worker-local task classification, generation, scheduling,
-and delivery bookkeeping out of cognition and dialog prompts.
+`background_work` owns reviewed durable jobs, lease recovery, and result-ready
+handoff. It stores only `background_work_job.v2` documents and does not expose
+queue mechanics to cognition or dialog.
 
 ## Boundary
 
-- L2d sees accepted-task affordances. Deterministic materialization converts a
-  new `accepted_task_request` into the internal executable
-  `background_work_request` only after source validation and duplicate
-  rejection.
-- L2d may request `future_speak` for accepted future reminders or delayed
-  follow-up messages; deterministic action execution binds it to an accepted
-  task and then to the `future_speak` worker.
-- L2d may request `accepted_coding_task_request` for durable coding-agent
-  runs; deterministic action execution validates the coding action and queues
-  the `coding_agent` worker with a versioned payload.
-- The background-work router emits only `action`, `worker`, and `reason`.
-- Worker subagents own worker-local semantic parameters and artifacts.
-- L3/dialog remain the only visible wording owners and receive accepted-task
-  state, not queue or worker internals.
-- Workers never send adapter text, call cognition directly, run shell or
-  filesystem work, install packages, process attachments, or mutate
-  persistence outside the public worker result contract.
+The package dispatches only reviewed worker payloads. Task resolution owns
+specialist selection; accepted-task state owns user-facing lifecycle; dialog
+and the dispatcher own visible delivery.
 
-## Public Extension Contract
+## Public Interfaces
 
-New asynchronous capabilities must enter background work through one of two
-stable routes:
-
-1. Model-facing accepted work: L2d selects a semantic accepted-task capability.
-   Deterministic action-spec materialization validates trusted source scope,
-   rejects or reuses duplicate active work, persists an accepted-task row, and
-   creates one internal `background_work_request`.
-2. Internal executor work: trusted code creates a `background_work_request`
-   directly only when the caller already owns the accepted-task or legacy
-   lifecycle boundary.
-
-The queue request contract is intentionally narrow. Callers provide a short
-semantic `task_brief`, optional prompt-safe `source_context`, trusted source
-and requester scope, `requested_delivery="send_result_when_done"`,
-`max_output_chars`, and the storage timestamp. `accepted_task_id` and
-`task_identity_key` are lifecycle audit fields, not worker routing inputs.
-`requested_worker` plus `worker_payload` are allowed only for deterministic
-handoffs where an upstream handler already validated the worker-specific
-contract, such as `future_speak` or durable coding-run follow-up through
-`accepted_coding_task_request`. Generic delayed work should leave the worker
-unset so the background-work router can choose a worker from prompt-safe worker
-descriptions.
-
-A worker is registered through `subagent.discover_background_work_workers()`.
-Each worker module must expose:
-
-```python
-WORKER: str
-DESCRIPTION: str
-
-async def execute(
-    decision: BackgroundWorkWorkerDecision,
-    *,
-    max_output_chars: int,
-) -> BackgroundWorkResult: ...
-```
-
-`DESCRIPTION` is router-facing and must describe only the worker's semantic
-capability. It must not mention adapter ids, persistence fields, filesystem
-paths, shell commands, credentials, or hidden operational options.
-`execute()` receives the selected route decision, trusted `task_brief`,
-optional source summary, and optional deterministic worker payload. It returns
-one `BackgroundWorkResult` with `status`, `worker`, bounded `artifact_text`,
-`failure_summary`, `result_summary`, and audit-only `worker_metadata`.
-
-Worker implementations own their local task classification, argument
-extraction, validation, execution, and refusal. The generic router chooses the
-worker only; it must not infer low-level parameters for a coding agent,
-complex resolver, web task, filesystem task, or any future domain. If a future
-worker needs domain-specific parameters, that worker must derive them inside
-its own bounded prompt or deterministic validator after routing, or receive
-them through a deterministic `requested_worker` handoff whose action-spec
-handler already validated the fields.
-
-Result handoff is also fixed. Text or artifact-producing workers complete the
-job and allow `accepted_task_result_ready` cognition to decide whether and how
-to speak. Scheduled-contact workers such as `future_speak` may set
-`worker_metadata.skip_result_delivery=true` only when they create another
-durable follow-up path, for example a calendar `future_cognition` run. Workers
-must not dispatch messages, call the shared cognition graph directly, write
-conversation rows, or generate prewritten proactive text.
-
-## Future Worker Eligibility
-
-The interface can support additional workers such as a complex resolver, but
-those integrations require their own reviewed action capability and worker
-contract before enablement. A valid future worker must define:
-
-- semantic ownership: the class of delayed work it owns;
-- model-facing entrypoint: accepted-task capability or trusted internal
-  handoff;
-- worker input contract: prompt-safe task brief, optional source summary, and
-  any deterministic payload fields;
-- output contract: bounded artifact text, result summary, failure summary, and
-  audit-only metadata;
-- refusal conditions: unsupported task types, missing permissions, unsafe
-  side effects, or unavailable resources;
-- duplicate identity material: fields used by accepted-task duplicate
-  rejection before any job is queued;
-- side-effect policy: whether it is read-only, writes internal artifacts, uses
-  external tools, or needs explicit user permission;
-- delivery policy: result-ready cognition, calendar follow-up, or no visible
-  delivery;
-- verification: deterministic contract tests, integration tests, and one
-  real LLM test when prompts or model-facing routing are involved.
-
-Coding-agent work enters through the registered `coding_agent` worker in two
-ways. Generic delayed coding tasks still route through the legacy
-`background_work_request` path, where the coding-agent supervisor chooses
-read-versus-write and returns a read answer or review-only proposal. Durable
-coding-run work enters through `accepted_coding_task_request`, which queues
-`requested_worker="coding_agent"` with `coding_agent_worker_payload.v2`.
-That payload supports closed operations `start`, `revise_proposal`,
-`summarize`, `status`, `approve_and_verify`, `respond_to_blocker`, and `cancel`.
-The worker maps
-those actions to the coding-run supervisor and records
-`coding_agent_worker_metadata.v3` with the prompt-safe `coding_run_context.v1`
-`coding_run:<run_id>` reference, public changed-file summaries, attempt
-history, and allowed next actions.
-
-The result source copies only the validated `coding_run_context.v1` into the
-accepted-task lifecycle. Raw worker metadata remains operational audit data and
-does not enter L2d or L3 prompts.
-
-The durable coding path derives its base verification plan inside `coding_run`
-from the stored proposal. The worker forwards only a bounded semantic request
-for additive verification and does not plan primary specs from approval prose.
-It still uses managed apply copies and does not run
-arbitrary shell commands, install packages, mutate original source checkouts,
-or deliver adapter text. Pytest selector paths are protected verification
-paths; stored proposal artifacts touching those paths are omitted before
-approved managed apply so verification tests remain read-only.
-
-Any future worker that can run shell commands, edit files, install packages,
-browse the web, call external tools, or apply patches needs a separate
-permission and sandbox contract before it is added to the registry. The
-background-work queue supplies lifecycle and handoff mechanics; it is not a
-general tool-permission system.
+The reviewed queue API persists one v2 job, the runtime claims jobs under a
+lease, and the worker loop completes or fails them through accepted-task state.
+Callers do not import worker internals or dynamically register workers.
 
 ## Workers
 
-`subagent.text_artifact` handles bounded text artifacts. It has two separate
-LLM stages:
+The runtime recognizes exactly two reviewed worker names:
 
-1. Task router: chooses `coding_snippet`, `text_rewrite`, `summary`,
-   `unsupported`, or `needs_user_input`.
-2. Generator: produces one bounded text artifact or a failure summary.
+| Worker | Owner | Purpose |
+| --- | --- | --- |
+| `task_orchestrator` | task resolution | Resumes one persisted task-resolution checkpoint or one bound coding-run continuation. |
+| `future_speak` | scheduling | Schedules a deterministic future cognition trigger from an exact local time and semantic objective. |
 
-The generic queue and router do not expose those worker-local task labels or
-worker-facing task rewrites.
+There is no generic router, no worker-discovery registry, and no direct generic
+coding or text-artifact worker path. The task orchestrator chooses at most one
+of the four declared specialists for each dispatch: local context, public
+research, coding, or text/computation.
 
-`subagent.future_speak` is deterministic. It receives an exact local trigger
-time and a semantic continuation objective, then schedules a
-`future_cognition` calendar run. It does not store final user-facing text.
-The due self-cognition cycle decides again how to speak.
+## Input And Output Contracts
 
-`subagent.coding_agent` adapts the public standalone coding-agent
-`handle_background_coding_task(...)` interface. It handles accepted coding
-tasks, requires `CODING_AGENT_WORKSPACE_ROOT` at execution time, and returns
-bounded artifact text plus sanitized repository, evidence, and proposal
-metadata. It may produce proposal artifacts, but it does not apply patches,
-run project commands, install packages, or deliver adapter text.
+`task_orchestrator_worker_payload.v1` accepts exactly one reviewed operation:
 
-Completed `future_speak` jobs suppress immediate background-result delivery,
-because the user-facing follow-up belongs to the scheduled self-cognition
-slot. This prevents the scheduling bookkeeping from creating a duplicate
-message before the reminder is due.
+- `resume_task_resolution`, carrying a persisted
+  `task_resolution_checkpoint.v1`; or
+- `continue_bound_coding_run`, carrying a validated frozen public coding-run
+  continuation request.
+
+The bound coding operation is closed to revision, summary, status, approved
+verification, blocker response, and cancellation. It retains trusted approval
+evidence and cannot create a new coding run through the background queue.
+
+Non-success task-resolution delivery composes only the validated prompt-safe
+summary, coding-run blocker summary, and remaining needs into the delivered
+result summary. Coding-run references, raw payloads, and adapter metadata never
+enter that text.
+
+`future_speak` retains its deterministic scheduling payload and does not enter
+the task-resolution specialist loop.
+
+## Runtime Flow
+
+Claim retries resume the stored checkpoint and preserve its dispatch,
+orchestrator-call, and route-correction counters. The worker checkpoints the
+raw-call count before selection, then persists `pending_dispatch` as selected
+and started before a handler begins; completed dispatches clear it and append
+one trace row without double-counting. A recovered started dispatch becomes an
+at-most-once unavailable result and is never invoked again. Terminal resolved
+and evidence-bearing partial results become accepted-task result-ready state;
+limitations remain prompt-safe.
+
+Non-success task-resolution results (`needs_user_input`, `approval_required`,
+`unavailable`, and `failed`) preserve the typed coding-run blocker and remaining
+limitation as exact prompt-safe detail lines in the accepted-task failure and
+job result summaries.
+
+Workers do not call shared cognition or adapters directly. Delivery uses the
+accepted-task result source, normal cognition, dispatcher validation, and the
+usual adapter path. The job's original `source_message_id` is carried
+separately from the synthetic `tool-result:<task_id>` episode identity. At
+accepted-task result delivery, the service resolves the original user row in
+`conversation_history` and selects `reply_to_msg_id` from that source id only
+when the durable server `received_at` age strictly exceeds 120 seconds or an
+intervening same-channel user receipt exists before the delivery cutoff. The
+synthetic tool-result identity remains provenance only and is never passed as
+a reply target.
 
 ## Persistence
 
-Raw MongoDB access lives in `kazusa_ai_chatbot.db.background_work_jobs`.
-Callers use the public queue/runtime exports from `kazusa_ai_chatbot.background_work`.
-Jobs move through queued, in-progress, completed or failed, delivery in
-progress, delivered, and delivery failed states.
-Accepted-task ids and identity keys are copied into new internal job rows for
-audit and lifecycle synchronization only. Prompt-facing progress and result
-state comes from `accepted_task`, not from job ids or queue state.
+The reviewed maintenance command is:
+
+```powershell
+venv\Scripts\python.exe scripts\clear_background_task_history.py
+venv\Scripts\python.exe scripts\clear_background_task_history.py --execute --confirm DELETE_BACKGROUND_WORK_JOBS_AND_ACCEPTED_TASKS
+```
+
+It counts or clears only `background_work_jobs` and `accepted_tasks`; it emits
+counts only and verifies both are empty after execution. Run it only after
+stopping every process that can write either collection.
+
+## Failure Behavior
+
+Lease loss, malformed payloads, and worker failures resolve through the v2 job
+and accepted-task failure state. Queue retries preserve the persisted
+task-resolution checkpoint and never restart its semantic dispatch budget.
+
+## Testing Contract
+
+Run background-work job, delivery, future-speak, task-orchestrator resume, and
+accepted-task lifecycle suites. Execute the destructive maintenance boundary
+only in its explicit isolated live-database rehearsal or approved offline
+cutover.
+
+## Forbidden Paths
+
+Do not add a generic router, dynamic worker discovery, direct adapter delivery,
+or direct shared-cognition invocation. Do not delete collections outside the
+approved accepted-task and background-job history boundary.
+
+## Trace Ownership
+
+Every live job created from a trace-backed action carries the additive
+`source_llm_trace_id` beside `source_action_attempt_id` and
+`accepted_task_id`. A completed job's result episode retains the source trace
+and job id in protected origin metadata. Accepted-task result delivery creates
+a separate child trace with `parent_llm_trace_id` and
+`source_background_work_job_id`; these fields are diagnostic ownership only and
+are excluded from worker payloads and prompt-facing source packets. The
+existing Background Work Jobs, Errors, and Delivery detail cards expose the
+bounded job and trace references mapped for the web control console.
+Idempotent duplicate writes preserve an existing non-empty source trace and
+record a bounded conflict marker when a different source is supplied.

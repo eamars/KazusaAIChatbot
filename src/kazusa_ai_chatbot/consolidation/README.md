@@ -24,7 +24,6 @@
   - `src/kazusa_ai_chatbot/consolidation/lane_router.py`
   - `src/kazusa_ai_chatbot/consolidation/character_self_guidance.py`
   - `src/kazusa_ai_chatbot/consolidation/reflection.py`
-  - `src/kazusa_ai_chatbot/consolidation/images.py`
   - `src/kazusa_ai_chatbot/consolidation/memory_units.py`
   - `src/kazusa_ai_chatbot/consolidation/persistence.py`
   - `src/kazusa_ai_chatbot/db/script_operations.py`
@@ -38,14 +37,22 @@ silently share the user-profile write path.
 ## Purpose
 
 Consolidation turns a completed live or background episode into durable state:
-relationship insights, user memory units, affinity changes, interaction-style
-images, character state, character self-image, accepted character
-self-guidance, group-channel style state, shared-memory promotion admission,
-and audit/internal artifacts.
+user memory units, relationship-state changes, interaction-style overlays,
+reviewed character identity evidence, accepted character self-guidance,
+group-channel style state, shared-memory promotion admission, and
+audit/internal artifacts.
 
 The consolidation package does not decide what the character should say. It
 only processes already produced cognition, dialog, action results, and
 prompt-safe episode traces after the live response decision has been made.
+
+User-memory deduplication, extractor prompt context, and surfaced merge
+candidates consume the canonical RAG `user_memory_unit_candidates` list. The
+consolidation path does not read a legacy `rag_result.user_image` envelope or
+maintain a parallel memory-context vocabulary.
+Once `rag_result` reaches consolidation, `user_memory_unit_candidates` is a
+required list, including when empty. Missing or malformed candidates fail at
+this boundary rather than silently projecting an empty memory context.
 
 The package must preserve these system boundaries:
 
@@ -156,7 +163,7 @@ flowchart TD
     D --> DB1[("conversation history")]
     D --> DB2[("user profiles<br/>user_memory_units")]
     D --> DB3[("shared memory<br/>promoted growth")]
-    D --> DB4[("character state<br/>interaction style images")]
+    D --> DB4[("latest character identity<br/>interaction style images")]
     D --> DB5[("commitments<br/>conversation progress<br/>residue")]
 
     DB1 --> E["Evidence packet"]
@@ -178,8 +185,8 @@ flowchart TD
     N --> O["Persistence helpers<br/>write only validated lane outputs"]
 
     O --> W1[("user_memory_units<br/>facts, patterns, milestones, active commitments")]
-    O --> W2[("user_profiles<br/>relationship insight, affinity")]
-    O --> W3[("character runtime state<br/>mood, vibe, self-state")]
+    O --> W2[("user_profiles<br/>relationship insight, relationship_state")]
+    O --> W3[("character identity ledger<br/>candidate, run, immutable revision")]
     O --> W4[("memory collection<br/>character self-guidance / promoted shared memory")]
     O --> W5[("interaction style images<br/>user or group/channel")]
     O --> W6["Cache2 invalidation<br/>only for actual durable writes"]
@@ -214,15 +221,15 @@ flowchart TD
     K --> L["validate_write_intent<br/>target alias + write lane"]
     L --> M["accepted_lanes<br/>enabled_consolidation_write_lanes"]
 
-    M --> CS["character_state lane"]
-    CS --> CS1["global_state_updater LLM<br/>character-state specialist"]
-    CS1 --> CS2["character_state_reviewer LLM"]
-    CS2 --> CS3["db_writer<br/>upsert_character_state / self-image path"]
+    M --> IG["character_identity_growth lane"]
+    IG --> IG1["identity proposal LLM"]
+    IG1 --> IG2["independent identity review LLM"]
+    IG2 --> IG3["identity runner<br/>policy + immutable ledger"]
 
     M --> RP["relationship_profile lane"]
     RP --> RP1["relationship_recorder LLM<br/>relationship specialist"]
     RP1 --> RP2["relationship_profile_reviewer LLM"]
-    RP2 --> RP3["db_writer<br/>relationship insight + affinity"]
+    RP2 --> RP3["db_writer<br/>relationship insight + relationship_state"]
 
     M --> UM["user_memory_units lane"]
     UM --> UM1["db_writer"]
@@ -250,7 +257,7 @@ flowchart TD
     SM1 --> SM2["promotion admission / audit boundary"]
     SM2 --> SM3["shared memory mutation remains owned by<br/>memory_evolution / reflection promotion flow"]
 
-    CS2 --> R{"Reviewer rejects or empty?"}
+    IG2 --> R{"Reviewer rejects or empty?"}
     RP2 --> R
     SG2 --> R
     R -->|yes| X["Disable accepted lane<br/>no persistence"]
@@ -298,9 +305,9 @@ that may be written.
 
 | Target kind | Durable meaning | Allowed lanes |
 | --- | --- | --- |
-| `user` | Real validated user profile | `relationship_insight`, `user_memory_units`, `active_commitment`, `affinity`, `user_style_image` |
+| `user` | Real validated user profile | `relationship_insight`, `user_memory_units`, `active_commitment`, `relationship_state`, `user_style_image` |
 | `group_channel` | Platform group/channel image | `group_channel_style_image` |
-| `character` | Active character state/self-image and accepted self-guidance | `character_state`, `character_self_image`, `character_self_guidance` |
+| `character` | Reviewed global identity evidence and accepted self-guidance | `character_identity_growth`, `character_self_guidance` |
 | `internal` | Audit/local artifact and approved promotion admission | `audit`, `shared_memory_promotion` |
 
 Real user targets require a runtime user profile with a matching
@@ -346,15 +353,17 @@ memory writes must fail closed.
 Group-channel lanes persist through `consolidation.group_channel` helpers and
 must not call:
 
-- `update_affinity(...)`
-- `update_last_relationship_insight(...)`
+- `update_relationship_state(...)`
+- `update_semantic_relationship_projection(...)`
 - `update_user_memory_units_from_state(...)`
 
-Character lanes may update character state and character self-image through
-their existing database facade helpers. Accepted character-owned behavior rules
-may write `character_self_guidance` through the existing `memory` storage using
-conversation source refs. Ordinary chat must not write generic shared/world
-memory.
+The `character_identity_growth` lane sends one trusted settled-episode root and
+prompt-safe character-owned evidence to the identity runner. That runner alone
+may update a candidate or promote an immutable full revision. It does not use
+the generic consolidation database writer. Accepted character-owned behavior
+rules may write `character_self_guidance` through existing `memory` storage
+using conversation source refs. Ordinary chat must not write generic
+shared/world memory.
 
 Internal lanes may emit audit metadata. `shared_memory_promotion` is allowed
 only for approved reflection or memory-evolution evidence with existing
@@ -372,7 +381,7 @@ entrypoint for synthetic-user lifecycle diagnostics.
 Default mode is read-only. It reports sanitized counts for:
 
 - synthetic `self_cognition` user profiles;
-- user profiles missing required affinity fields;
+- user profiles missing required relationship_state fields;
 - synthetic scheduled events;
 - synthetic user-memory units;
 - future-cognition attempts missing a real user;

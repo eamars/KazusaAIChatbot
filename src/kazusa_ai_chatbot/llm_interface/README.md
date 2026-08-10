@@ -7,7 +7,7 @@
 - Interface boundary: LLM-using runtime modules -> backend-compatible chat LLM
   invocation
 - Runtime consumers: relevance, decontextualization, RAG, cognition,
-  dialog, consolidation, reflection, background work, global character growth,
+  dialog, consolidation, reflection, background work, character identity growth,
   and JSON repair stages
 - Backend owner: `llm_interface` internals, including provider adapters,
   backend/model-family detection, provider session caches, reload retry, and
@@ -319,9 +319,9 @@ cognition chain or audit checklist. L1/L2/L2d/L3 cognition, boundary core,
 dialog rendering, RAG routing/extraction, relevance, decontextualization, and
 JSON repair already have explicit contracts and should normally keep thinking
 disabled. Better candidates are background text artifact generation, difficult
-web evidence finalization, reflection synthesis, or global character-growth
-candidate generation, and even those should be validated by live comparison
-before changing defaults.
+web evidence finalization, reflection synthesis, or character identity
+proposal/review, and even those should be validated by live comparison before
+changing defaults.
 
 ## Provider Adapter Contract
 

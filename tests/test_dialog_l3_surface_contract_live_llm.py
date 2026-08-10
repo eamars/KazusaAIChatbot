@@ -33,7 +33,7 @@ if hasattr(sys.stderr, 'reconfigure'):
 pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm]
 
 _ROOT = Path(__file__).resolve().parents[1]
-_PERSONALITY_PATH = _ROOT / 'personalities' / 'kazusa.json'
+_PERSONALITY_PATH = _ROOT / 'personalities' / 'asuna.json'
 _TRACE_SUITE = 'dialog_l3_surface_contract_live_llm'
 _COLLECT_ONLY_ENV = 'DIALOG_LIVE_COLLECT_ONLY'
 _PHASE_ENV = 'DIALOG_LIVE_PHASE'
@@ -139,12 +139,12 @@ def _stub_dialog_event_logging(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _character_profile() -> dict[str, Any]:
-    """Load the runtime Kazusa profile with prompt-safe default mood fields."""
+    """Load the active profile with prompt-safe default mood fields."""
 
     profile = load_personality(_PERSONALITY_PATH)
     profile.setdefault('mood', 'Neutral')
-    profile.setdefault('global_vibe', 'Calm')
-    profile.setdefault('reflection_summary', '')
+    profile.setdefault('vibe_check', 'Calm')
+    profile.setdefault('character_reflection', '')
     return profile
 
 
@@ -189,7 +189,6 @@ def _base_state(case: dict[str, Any]) -> dict[str, Any]:
                     [],
                 ),
                 'content_plan': case['content_plan'],
-                'forbidden_phrases': case.get('forbidden_phrases', []),
             },
             'contextual_directives': case['contextual_directives'],
             'visual_directives': {},
@@ -206,8 +205,8 @@ def _base_state(case: dict[str, Any]) -> dict[str, Any]:
         ),
         'user_name': case.get('user_name', 'Jigsaw'),
         'user_profile': {
-            'affinity': case.get('affinity', 500),
-            'last_relationship_insight': case.get(
+            'relationship_state': case.get('relationship_state', 500),
+            'semantic_relationship_projection': case.get(
                 'relationship_insight',
                 '熟悉但仍会互相调侃的群友',
             ),
@@ -776,7 +775,7 @@ _CASES: dict[str, dict[str, Any]] = {
         },
         'chat_history': _chat_history(('user', '你是不是想歪了？')),
         'user_name': '蚝爹油',
-        'affinity': 700,
+        'relationship_state': 700,
         'must_include_any': [('想歪', '乱想'), ('看穿', '欺负', '狡猾', '戳中')],
         'must_not_include': [
             '盯着我看',

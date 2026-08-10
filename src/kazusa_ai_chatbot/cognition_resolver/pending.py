@@ -133,6 +133,8 @@ async def load_matching_pending_resume(
             continue
         if _is_source_message_for_current_turn(pending_resume, state):
             continue
+        if not _is_reply_to_pending_source_message(pending_resume, state):
+            continue
         if _is_created_after_current_turn(pending_resume, current_timestamp_utc):
             continue
         if _is_expired(pending_resume, current_timestamp_utc):
@@ -176,7 +178,7 @@ async def load_matching_pending_resume_into_state(
         updated_resolver_state["goal_progress"] = goal_progress
     original_goal = pending_resume["prompt_safe_original_goal"]
     if original_goal:
-        updated_resolver_state["original_decontexualized_input"] = original_goal
+        updated_resolver_state["original_decontextualized_input"] = original_goal
     updated_state = dict(state)
     updated_state["resolver_state"] = updated_resolver_state
     updated_state["pending_resolver_resume"] = pending_resume
@@ -247,7 +249,7 @@ def _pending_resume(
     if goal_progress is not None:
         original_goal = goal_progress["original_goal"]
     else:
-        original_goal = _state_text(state, "decontexualized_input")
+        original_goal = _state_text(state, "decontextualized_input")
     pending_resume = {
         "schema_version": RESOLVER_PENDING_RESUME_VERSION,
         "resume_id": resume_id,
@@ -295,7 +297,7 @@ def _approval_summary_for_pending_resume(
 ) -> str:
     """Build an approval summary scoped to the original user request."""
 
-    approval_target = _state_text(state, "decontexualized_input")
+    approval_target = _state_text(state, "decontextualized_input")
     if not approval_target:
         approval_target = observation["request_objective"]
     approval_summary = (
@@ -443,6 +445,21 @@ def _is_source_message_for_current_turn(
     return_value = (
         pending_resume["source_message_id"]
         == _state_text(state, "platform_message_id")
+    )
+    return return_value
+
+
+def _is_reply_to_pending_source_message(
+    pending_resume: ResolverPendingResumeV1,
+    state: GlobalPersonaState,
+) -> bool:
+    """Return whether the current turn replies to the pending source message."""
+
+    reply_context = state["reply_context"]
+    reply_to_message_id = reply_context.get("reply_to_message_id")
+    return_value = (
+        isinstance(reply_to_message_id, str)
+        and reply_to_message_id == pending_resume["source_message_id"]
     )
     return return_value
 

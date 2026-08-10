@@ -5,13 +5,13 @@ from __future__ import annotations
 from typing import Any
 
 from kazusa_ai_chatbot.background_work.models import (
+    FUTURE_SPEAK_WORKER,
+    TASK_ORCHESTRATOR_WORKER,
     BackgroundWorkJobDoc,
     BackgroundWorkJobRef,
     BackgroundWorkQueueRequest,
     BackgroundWorkQueueResult,
-    BackgroundWorkResult,
-    BackgroundWorkRouterDecision,
-    BackgroundWorkWorkerDecision,
+    TaskOrchestratorWorkerPayloadV1,
 )
 
 __all__ = [
@@ -19,9 +19,9 @@ __all__ = [
     "BackgroundWorkJobRef",
     "BackgroundWorkQueueRequest",
     "BackgroundWorkQueueResult",
-    "BackgroundWorkResult",
-    "BackgroundWorkRouterDecision",
-    "BackgroundWorkWorkerDecision",
+    "FUTURE_SPEAK_WORKER",
+    "TASK_ORCHESTRATOR_WORKER",
+    "TaskOrchestratorWorkerPayloadV1",
     "BackgroundWorkRuntimeHandle",
     "enqueue_background_work_request",
     "run_background_work_runtime_tick",

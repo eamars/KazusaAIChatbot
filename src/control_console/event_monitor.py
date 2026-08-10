@@ -1,4 +1,4 @@
-"""Bounded merged event monitor for console, process, and Kazusa events."""
+"""Bounded structured event monitor for Kazusa application events."""
 
 from __future__ import annotations
 
@@ -11,34 +11,41 @@ from control_console.redaction import redact_mapping
 
 
 EventReader = Callable[[OperationalEventQuery], Awaitable[list[dict[str, Any]]]]
+DEFAULT_AGGREGATE_EVENT_TYPES = frozenset({
+    "load_residue_context",
+    "tick",
+})
+ATTENTION_LEVELS = frozenset({"error", "warning"})
+ATTENTION_STATUSES = frozenset({
+    "deferred",
+    "degraded",
+    "failed",
+    "unavailable",
+    "warning",
+})
 
 
 class EventMonitor:
-    """Merge bounded operational event sources with deterministic redaction."""
+    """Expose bounded structured application events with deterministic redaction."""
 
     def __init__(
         self,
         *,
-        read_audit_events: EventReader,
-        read_process_logs: EventReader,
         read_kazusa_events: EventReader,
     ) -> None:
-        """Create a merged event monitor."""
+        """Create an application-event monitor."""
 
-        self._read_audit_events = read_audit_events
-        self._read_process_logs = read_process_logs
         self._read_kazusa_events = read_kazusa_events
 
     async def query(self, query: OperationalEventQuery) -> OperationalEventPage:
-        """Return a bounded merged event page."""
+        """Return bounded application events without aggregate-owned chatter."""
 
-        rows: list[dict[str, Any]] = []
-        if query.source in {"all", "console"}:
-            rows.extend(await self._read_audit_events(query))
-        if query.source in {"all", "process"}:
-            rows.extend(await self._read_process_logs(query))
-        if query.source in {"all", "kazusa"}:
-            rows.extend(await self._read_kazusa_events(query))
+        rows = await self._read_kazusa_events(query)
+        rows = [
+            row
+            for row in rows
+            if _include_default_event(row, query=query)
+        ]
 
         redacted_rows = [redact_mapping(row) for row in rows]
         redacted_rows.sort(key=lambda row: str(row.get("created_at", "")), reverse=True)
@@ -46,6 +53,47 @@ class EventMonitor:
         page = OperationalEventPage(
             generated_at=datetime.now(timezone.utc),
             items=bounded_rows,
+            facets=_event_facets(bounded_rows),
+            query=query.model_dump(mode="json"),
             next_cursor=None,
         )
         return page
+
+
+def _include_default_event(
+    row: dict[str, Any],
+    *,
+    query: OperationalEventQuery,
+) -> bool:
+    """Keep aggregate-owned event types only when filtered or actionable."""
+
+    if query.event_type:
+        return True
+    event_type = str(row.get("event_type", "")).strip()
+    if event_type not in DEFAULT_AGGREGATE_EVENT_TYPES:
+        return True
+    level = str(row.get("level", "")).strip().lower()
+    status = str(row.get("status", "")).strip().lower()
+    return level in ATTENTION_LEVELS or status in ATTENTION_STATUSES
+
+
+def _event_facets(rows: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
+    """Count dynamic structured-event dimensions in the bounded result."""
+
+    field_map = {
+        "sources": "source",
+        "levels": "level",
+        "statuses": "status",
+        "components": "component",
+        "event_types": "event_type",
+    }
+    facets: dict[str, dict[str, int]] = {}
+    for facet_name, field_name in field_map.items():
+        counts: dict[str, int] = {}
+        for row in rows:
+            value = str(row.get(field_name, "")).strip()
+            if not value:
+                continue
+            counts[value] = counts.get(value, 0) + 1
+        facets[facet_name] = counts
+    return facets

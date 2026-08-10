@@ -178,7 +178,7 @@ async def test_resolve_local_context_runs_standalone_public_io(
     assert "raw-message-id" not in str(rag_result)
     assert "scope_global_user_id" not in str(rag_result)
     assert "2026-07-04T09:30:00Z" not in str(rag_result)
-    assert "local_context_recall" not in str(packet["trace_summary"])
+    assert "task_resolution_request" not in str(packet["trace_summary"])
 
 
 @pytest.mark.asyncio

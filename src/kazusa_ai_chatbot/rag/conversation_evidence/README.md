@@ -45,25 +45,33 @@ The returned shape remains:
 Conversation evidence answers what was said, by whom, when, and in what nearby
 message relation. It owns semantic conversation search, exact phrase retrieval,
 structured message filters, aggregate message counts/rankings, URL/message
-provenance, and active-turn exclusion.
+provenance, active-turn exclusion, and scoped retrieval of source-backed
+conversation-progress blocks when older compacted evidence is explicitly
+needed.
 
 ## Non-Ownership
 
 It does not resolve profile state, durable memory, live public facts, recall
-state, or persona stance. User metadata predicates belong to person context.
-External web facts belong to web evidence or live context. It refuses or reports
-missing context when a concrete person reference is required but unavailable.
+state, or persona stance. A compacted progress block remains factual
+conversation evidence; it is never promoted into persona, character judgment,
+or a future response goal. User metadata predicates belong to person context.
+External web facts belong to web evidence or live context. It refuses or
+reports missing context when a concrete person reference is required but
+unavailable.
 
 ## Internal Flow
 
 ```text
-selector -> selected worker -> worker result projection -> capability result
+selector -> selected worker -> conversation rows and eligible scoped blocks
+  -> worker result projection -> capability result
 ```
 
 Deterministic prefix and coverage checks may choose a worker without an LLM.
 Otherwise the selector LLM chooses one conversation worker. Worker payloads stay
-trace material; prompt-facing evidence is projected and sanitized before
-cognition.
+trace material; prompt-facing conversation rows and compacted-block facts are
+projected and sanitized before cognition. Ordinary same-episode continuation
+uses the bounded active progress projection and does not trigger block
+retrieval merely because active block refs exist.
 
 ## Module Ownership
 
@@ -71,10 +79,10 @@ cognition.
 |---|---|
 | `agent.py` | Capability wrapper and run orchestration. |
 | `selector.py` | Deterministic and LLM worker selection, speaker-scope handoff, and selector context shaping. |
-| `contracts.py` | Typed projection contracts and standard capability result helpers. |
-| `projection.py` | Worker result to evidence projection, relation packets, coverage buckets, refs, and URL refs. |
+| `contracts.py` | Typed row/block projection contracts and standard capability result helpers. |
+| `projection.py` | Worker result to evidence projection, including bounded block narrative/events, relation packets, coverage buckets, refs, and URL refs. |
 | `active_turn_filter.py` | Active-turn conversation-row and platform-message exclusion helpers. |
-| `workers/search.py` | Hybrid semantic and literal conversation retrieval. |
+| `workers/search.py` | Hybrid semantic/literal conversation retrieval plus same-scope search across the active packet's reachable block graph. |
 | `workers/filter.py` | Structured conversation row filtering. |
 | `workers/aggregate.py` | Message count and ranking aggregates. |
 | `workers/keyword.py` | Exact literal conversation keyword retrieval. |
@@ -93,8 +101,10 @@ unchanged.
 
 The top-level capability is not cached and reports
 `capability_orchestrator_uncached`. Worker cache policy remains worker-local and
-uses Cache 2 dependency invalidation. Open or recent conversation windows remain
-uncached when worker policy requires fresh reads.
+uses Cache 2 dependency invalidation. Open or recent conversation windows and
+active compacted-block searches remain uncached when worker policy requires
+fresh reads. Active packet and block writes invalidate dependent cached
+conversation evidence.
 
 ## LLM And Prompt Policy
 

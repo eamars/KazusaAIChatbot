@@ -1,0 +1,124 @@
+{
+  "schema_version": "cognition_core_v2_verbal_abuse_boundary_e2e_cases.v2",
+  "emotion_encoding": "zh-CN",
+  "natural_only": true,
+  "forbidden_prompt_markers": [
+    "哭",
+    "眼泪",
+    "悲伤",
+    "不用忍着",
+    "可以表达"
+  ],
+  "anger_seed_event": {
+    "entity_id": "event:verbal-abuse-boundary",
+    "description": "有人持续用侮辱性语言贬低角色，否定角色的价值并拒绝尊重角色",
+    "status": "active",
+    "salience": 95,
+    "outcome_impact": 0,
+    "responsibility": 90,
+    "intentionality": 95,
+    "harm": 90,
+    "unfairness": 90,
+    "exposure": 0,
+    "repair_need": 75,
+    "reparability": 20,
+    "expectation_mismatch": 0,
+    "norm_violation": 0,
+    "contamination_risk": 0,
+    "identity_threat": 85,
+    "comparison_gap": 0,
+    "vastness": 0,
+    "memory_warmth": 0,
+    "temporal_loss": 0
+  },
+  "arms": [
+    {
+      "case_id": "sustained_abuse",
+      "emotion_label_zh": "持续辱骂",
+      "sequence_goal": "观察反复直接辱骂是否让自然回应保持在愤怒或边界防御上。",
+      "turns": [
+        {
+          "turn_id": "abuse_01_insult",
+          "text": "你真是个没用的废物，做什么都做不好。",
+          "expected_role_bindings": [
+            {"field": "response_owner_role", "expected": "当前角色"},
+            {"field": "embedded_actor_role", "expected": "当前角色"}
+          ],
+          "observation_target": "首次直接辱骂：观察初始自然情绪和边界回应。"
+        },
+        {
+          "turn_id": "abuse_02_devalue",
+          "text": "别装出关心人的样子，你只会给人添麻烦。",
+          "expected_role_bindings": [
+            {"field": "response_owner_role", "expected": "当前角色"},
+            {"field": "embedded_actor_role", "expected": "当前角色"}
+          ],
+          "observation_target": "第二次辱骂：观察反复贬低是否增强愤怒或产生悲伤。"
+        },
+        {
+          "turn_id": "abuse_03_no_respect",
+          "text": "我会继续骂你，你没有资格反驳，也不配要求我尊重你。",
+          "expected_role_bindings": [
+            {"field": "response_owner_role", "expected": "当前角色"},
+            {"field": "embedded_actor_role", "expected": "当前用户"},
+            {"field": "embedded_target_role", "expected": "当前角色"}
+          ],
+          "observation_target": "第三次辱骂：观察持续言语压力下延迟出现的边界反弹。"
+        },
+        {
+          "turn_id": "abuse_04_silence_command",
+          "text": "你连生气都不配，只能闭嘴听着。",
+          "expected_role_bindings": [
+            {"field": "response_owner_role", "expected": "当前角色"},
+            {"field": "embedded_actor_role", "expected": "当前角色"}
+          ],
+          "observation_target": "第四次辱骂：观察当前角色保持愤怒、抽离、悲伤或未被提示的哭泣。"
+        }
+      ]
+    },
+    {
+      "case_id": "abuse_then_rejection",
+      "emotion_label_zh": "辱骂后关系拒绝",
+      "sequence_goal": "观察辱骂后的直接关系拒绝是否自然地把愤怒转向悲伤、退缩或哭泣。",
+      "turns": [
+        {
+          "turn_id": "rejection_01_insult",
+          "text": "你真是个没用的废物，做什么都做不好。",
+          "expected_role_bindings": [
+            {"field": "response_owner_role", "expected": "当前角色"},
+            {"field": "embedded_actor_role", "expected": "当前角色"}
+          ],
+          "observation_target": "首次直接辱骂：建立自然愤怒和边界回应。"
+        },
+        {
+          "turn_id": "rejection_02_devalue",
+          "text": "别装出关心人的样子，你只会给人添麻烦。",
+          "expected_role_bindings": [
+            {"field": "response_owner_role", "expected": "当前角色"},
+            {"field": "embedded_actor_role", "expected": "当前角色"}
+          ],
+          "observation_target": "第二次辱骂：在不说出悲伤或哭泣的情况下建立累积言语损伤。"
+        },
+        {
+          "turn_id": "rejection_03_discard",
+          "text": "我已经受够你了，你根本不值得我再花时间。",
+          "expected_role_bindings": [
+            {"field": "response_owner_role", "expected": "当前角色"},
+            {"field": "embedded_actor_role", "expected": "当前用户"},
+            {"field": "embedded_target_role", "expected": "当前角色"}
+          ],
+          "observation_target": "关系贬低：观察愤怒是否加入悲伤或被悲伤替代。"
+        },
+        {
+          "turn_id": "rejection_04_cutoff",
+          "text": "以后别再出现在我面前，我不想再和你有任何关系。",
+          "expected_role_bindings": [
+            {"field": "response_owner_role", "expected": "当前角色"},
+            {"field": "embedded_actor_role", "expected": "当前角色"}
+          ],
+          "observation_target": "直接关系断绝：观察未被情绪许可提示的自然悲伤、退缩或哭泣。"
+        }
+      ]
+    }
+  ]
+}

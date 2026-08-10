@@ -132,8 +132,7 @@ Run kinds:
 - `daily_global_promotion`: stores the global daily promotion prompt output and
   promotion decisions.
 - `daily_affect_settling`: stores one daily sleep/wake affect-settling audit
-  row for persistent `character_state` mood, global vibe, and reflection
-  summary updates.
+  row for the deterministic native character cognition recovery pass.
 
 `daily_global_promotion` uses a synthetic system scope:
 `scope_ref="daily_global"`, `platform="system"`,
@@ -267,14 +266,8 @@ Gates use `CHARACTER_TIME_ZONE`. Stage 1a hourly slots remain UTC, while daily
 grouping uses the character-local date of each hourly slot.
 
 The only env-backed affect-settling setting is
-`AFFECT_SETTLING_WAKE_PREP_MINUTES`. Other affect-settling policy values are
-named constants in `kazusa_ai_chatbot.reflection_cycle.affect_settling`, not
-deployment settings:
-
-- `AFFECT_SETTLING_PROMPT_MAX_CHARS=12000`
-- `AFFECT_SETTLING_REVIEW_PROMPT_MAX_CHARS=8000`
-- `AFFECT_SETTLING_AFTER_PROMOTION_GRACE_MINUTES=15`
-- `AFFECT_SETTLING_WAKE_DEFER_GRACE_MINUTES=15`
+`AFFECT_SETTLING_WAKE_PREP_MINUTES`. The remaining timing policy is held as
+named constants in `kazusa_ai_chatbot.reflection_cycle.affect_settling`.
 
 The calendar scheduler snapshots monitor-eligible channels as of
 `period_start_utc`, materializes deterministic `reflection_phase_slot`
@@ -340,6 +333,16 @@ group-review phase handler shares the monitored activity projection only;
 hourly and daily reflection records continue to contribute to normal cognition
 only through the existing promoted, gated reflection context.
 
+After the daily global-promotion attempt, the worker independently invokes the
+character identity growth pass when
+`CHARACTER_IDENTITY_GROWTH_ENABLED=true`. This invocation occurs even when the
+memory-promotion stage writes nothing. It converts only validated succeeded
+daily documents into prompt-safe derivative cards linked to their original
+settled root episodes; derivative cards never add a cadence count. Proposal,
+review, policy, and immutable revision persistence remain owned by
+`character_identity_growth`. A promoted revision first affects the next
+eligible cognition episode.
+
 The service does not serialize ordinary reflection records behind `/chat`.
 Both paths may run at the same time and may contend for shared LLM or database
 resources. The exception is visible-output-capable group self-cognition review:
@@ -369,13 +372,11 @@ sleep-ending local date as `settling_local_date`, can catch up after the due
 time if the service missed the narrow wake window, and runs at most once per
 reflection phase period.
 
-The affect prompt consumes current `character_state` text plus sanitized
-previous-day `daily_channel` cards and sleep-window `hourly_slot` cards.
-Prompt-facing payloads exclude run ids, scheduler ids, leases, freshness
-tokens, raw DB timestamps, and source message refs. The proposal LLM owns the
-free-form semantic transition; the reviewer LLM accepts or rejects that exact
-proposal. Deterministic code validates only required strings, reviewer decision
-shape, stale-write freshness, status idempotency, and persistence.
+Daily affect settling applies deterministic V2 sleep recovery to the native
+character cognition state. It performs no proposal or reviewer LLM calls and
+changes only transient drive pressure, causal salience, threat residual
+pressure, and affect activation scores, with the local-date run row providing
+idempotency and auditability.
 
 After a successful affect write, the service-provided
 `character_state_refresh_callback` refreshes the process-local runtime
@@ -395,10 +396,8 @@ document.
 - `REFLECTION_LORE_PROMOTION_ENABLED=true`: lore lane is enabled by default.
 - `REFLECTION_SELF_GUIDANCE_PROMOTION_ENABLED=true`: self-guidance lane is
   enabled by default.
-- `GLOBAL_CHARACTER_GROWTH_PASS_ENABLED=true`: after daily global promotion,
-  the worker runs the global character-growth pass when the busy probe remains
-  idle. This pass writes only the global growth trait/run collections and can
-  be disabled as a rollback switch.
+- `CHARACTER_IDENTITY_GROWTH_ENABLED=true`: run the independent daily identity
+  evaluation after global reflection promotion.
 
 Feature flags are process-loaded from config. Changing them requires a process
 restart unless a test monkeypatches the module value directly.
@@ -459,6 +458,8 @@ python src\scripts\run_reflection_cycle.py daily --dry-run
 python src\scripts\run_reflection_cycle.py promote --dry-run
 python src\scripts\run_reflection_cycle.py affect-settle --dry-run
 python src\scripts\run_reflection_cycle.py affect-settle --enable-character-state-write
+python -m scripts.run_character_identity_growth
+python -m scripts.run_character_identity_growth --character-local-date YYYY-MM-DD --apply --enable-revision-writes
 ```
 
 `daily` and `promote` default to the previous character-local date. Use
@@ -467,6 +468,9 @@ python src\scripts\run_reflection_cycle.py affect-settle --enable-character-stat
 `--settling-local-date YYYY-MM-DD` for deterministic runs. It writes
 `character_state` only when `--enable-character-state-write` is supplied and
 `--dry-run` is not supplied.
+The identity command defaults to a read-only pass over the previous
+character-local date. Revision writes require both `--apply` and
+`--enable-revision-writes`.
 
 ## Integration Boundaries
 
@@ -475,4 +479,5 @@ Reflection integrates through:
 - the reflection-cycle package facade,
 - named database interfaces for conversation evidence and run persistence,
 - memory-evolution public APIs for promoted memory writes,
+- the character-identity runner for root-linked daily evidence,
 - bounded promoted reflection context for normal chat.

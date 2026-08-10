@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
+from tests.cognition_core_v2_test_helpers import canonical_user_message_episode
 from kazusa_ai_chatbot.cognition_resolver import capabilities as capabilities_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2 as supervisor_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_supervisor2 as rag2_module
@@ -237,7 +237,7 @@ def _rag_evidence_snapshot_state() -> dict:
         Persona graph state subset with a valid text-chat cognitive episode.
     """
     turn_clock = build_turn_clock("2026-04-27 00:00:00")
-    episode = build_text_chat_cognitive_episode(
+    episode = canonical_user_message_episode(
         episode_id="episode-rag-snapshot",
         percept_id="percept-rag-snapshot",
         storage_timestamp_utc=turn_clock["storage_timestamp_utc"],
@@ -257,7 +257,7 @@ def _rag_evidence_snapshot_state() -> dict:
         target_broadcast=False,
     )
     state = {
-        "decontexualized_input": "Need current evidence.",
+        "decontextualized_input": "Need current evidence.",
         "referents": [],
         "character_profile": {"name": "Kazusa", "global_user_id": "character-1"},
         "platform": "qq",
@@ -266,7 +266,7 @@ def _rag_evidence_snapshot_state() -> dict:
         "platform_bot_id": "bot-1",
         "global_user_id": "user-1",
         "user_name": "User",
-        "user_profile": {"affinity": 500},
+        "user_profile": {"relationship_state": 500},
         "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
         "local_time_context": turn_clock["local_time_context"],
         "message_envelope": {
@@ -313,7 +313,7 @@ def _minimal_text_chat_episode() -> dict:
         Valid user-message cognitive episode with no active-turn collapse ids.
     """
     turn_clock = build_turn_clock("2026-04-27 00:00:00")
-    episode = build_text_chat_cognitive_episode(
+    episode = canonical_user_message_episode(
         episode_id="episode-rag-direct",
         percept_id="percept-rag-direct",
         storage_timestamp_utc=turn_clock["storage_timestamp_utc"],
@@ -1058,7 +1058,7 @@ async def test_rag_evidence_helper_calls_rag3_and_projects_payload(monkeypatch) 
 
     turn_clock = build_turn_clock("2026-04-27 00:00:00")
     rag_result = await supervisor_module.run_rag_evidence_for_persona_state({
-        "decontexualized_input": "你记得我喜欢什么吗？",
+        "decontextualized_input": "你记得我喜欢什么吗？",
         "referents": [],
         "character_profile": {"name": "Kazusa", "global_user_id": "character-1"},
         "platform": "qq",
@@ -1067,7 +1067,7 @@ async def test_rag_evidence_helper_calls_rag3_and_projects_payload(monkeypatch) 
         "platform_bot_id": "bot-1",
         "global_user_id": "user-1",
         "user_name": "User",
-        "user_profile": {"affinity": 500},
+        "user_profile": {"relationship_state": 500},
         "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
         "local_time_context": turn_clock["local_time_context"],
         "message_envelope": {
@@ -1255,7 +1255,7 @@ async def test_rag_evidence_skips_for_unresolved_referents(monkeypatch) -> None:
 
     turn_clock = build_turn_clock("2026-04-27 00:00:00")
     rag_result = await supervisor_module.run_rag_evidence_for_persona_state({
-        "decontexualized_input": "这些是什么意思？",
+        "decontextualized_input": "这些是什么意思？",
         "referents": [
             {"phrase": "这些", "referent_role": "object", "status": "unresolved"},
         ],
@@ -1266,7 +1266,7 @@ async def test_rag_evidence_skips_for_unresolved_referents(monkeypatch) -> None:
         "platform_bot_id": "bot-1",
         "global_user_id": "user-1",
         "user_name": "User",
-        "user_profile": {"affinity": 500},
+        "user_profile": {"relationship_state": 500},
         "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
         "local_time_context": turn_clock["local_time_context"],
         "message_envelope": {
@@ -1318,7 +1318,7 @@ async def test_rag_evidence_runs_for_mixed_referents(monkeypatch) -> None:
 
     turn_clock = build_turn_clock("2026-04-27 00:00:00")
     rag_result = await supervisor_module.run_rag_evidence_for_persona_state({
-        "decontexualized_input": "他上次说的那些关于X的话是什么意思？",
+        "decontextualized_input": "他上次说的那些关于X的话是什么意思？",
         "referents": [
             {"phrase": "他", "referent_role": "subject", "status": "resolved"},
             {"phrase": "那些话", "referent_role": "object", "status": "unresolved"},
@@ -1330,7 +1330,7 @@ async def test_rag_evidence_runs_for_mixed_referents(monkeypatch) -> None:
         "platform_bot_id": "bot-1",
         "global_user_id": "user-1",
         "user_name": "User",
-        "user_profile": {"affinity": 500},
+        "user_profile": {"relationship_state": 500},
         "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
         "local_time_context": turn_clock["local_time_context"],
         "message_envelope": {
@@ -1372,7 +1372,7 @@ async def test_rag_evidence_skips_when_referents_are_all_unresolved(monkeypatch)
 
     turn_clock = build_turn_clock("2026-04-27 00:00:00")
     rag_result = await supervisor_module.run_rag_evidence_for_persona_state({
-        "decontexualized_input": "这些是什么意思？",
+        "decontextualized_input": "这些是什么意思？",
         "referents": [
             {"phrase": "这些", "referent_role": "object", "status": "unresolved"},
         ],
@@ -1383,7 +1383,7 @@ async def test_rag_evidence_skips_when_referents_are_all_unresolved(monkeypatch)
         "platform_bot_id": "bot-1",
         "global_user_id": "user-1",
         "user_name": "User",
-        "user_profile": {"affinity": 500},
+        "user_profile": {"relationship_state": 500},
         "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
         "local_time_context": turn_clock["local_time_context"],
         "message_envelope": {

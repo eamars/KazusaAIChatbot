@@ -11,6 +11,38 @@ from kazusa_ai_chatbot.message_envelope import INLINE_ATTACHMENT_BYTE_LIMIT
 
 
 @pytest.mark.asyncio
+async def test_save_conversation_rejects_prompt_empty_row(
+    monkeypatch,
+) -> None:
+    """Conversation storage must reject rows with no text or attachment."""
+
+    get_db = AsyncMock()
+    monkeypatch.setattr(conversation_module, "get_db", get_db)
+
+    with pytest.raises(
+        ValueError,
+        match="body_text or a storable attachment",
+    ):
+        await conversation_module.save_conversation({
+            "platform": "qq",
+            "platform_channel_id": "chan-1",
+            "role": "user",
+            "platform_user_id": "platform-user",
+            "global_user_id": "user-1",
+            "display_name": "User",
+            "body_text": "",
+            "raw_wire_text": "",
+            "addressed_to_global_user_ids": [],
+            "mentions": [],
+            "broadcast": False,
+            "attachments": [],
+            "timestamp": "2026-04-30T00:00:00+00:00",
+        })
+
+    get_db.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_save_conversation_writes_typed_fields_and_embedding_source(
     monkeypatch,
 ) -> None:
@@ -168,6 +200,79 @@ async def test_get_conversation_history_returns_typed_rows(monkeypatch) -> None:
     assert rows[0]["body_text"] == "body text"
     assert rows[0]["raw_wire_text"].startswith("[CQ:at")
     assert rows[0]["addressed_to_global_user_ids"] == ["character-global"]
+
+
+@pytest.mark.asyncio
+async def test_list_recent_group_summaries_aggregates_metadata_only(
+    monkeypatch,
+) -> None:
+    """Group discovery should expose bounded activity metadata without text."""
+
+    db = MagicMock()
+    cursor = AsyncMock()
+    cursor.to_list = AsyncMock(return_value=[{
+        "platform": "qq",
+        "platform_channel_id": "group-1",
+        "channel_name": "Review group",
+        "last_activity_at": "2026-07-27T00:00:00Z",
+        "message_count": 12,
+        "participant_count": 3,
+    }])
+    db.conversation_history.aggregate = MagicMock(return_value=cursor)
+    monkeypatch.setattr(conversation_module, "get_db", AsyncMock(return_value=db))
+
+    rows = await conversation_module.list_recent_group_summaries(
+        platform="qq",
+        platform_channel_id=None,
+        limit=5,
+    )
+
+    assert rows == [{
+        "platform": "qq",
+        "platform_channel_id": "group-1",
+        "channel_name": "Review group",
+        "last_activity_at": "2026-07-27T00:00:00Z",
+        "message_count": 12,
+        "participant_count": 3,
+    }]
+    pipeline = db.conversation_history.aggregate.call_args.args[0]
+    assert pipeline[0] == {
+        "$match": {
+            "channel_type": "group",
+            "role": "user",
+            "platform": "qq",
+            "platform_channel_id": {"$type": "string", "$ne": ""},
+        }
+    }
+    assert pipeline[-2] == {
+        "$sort": {
+            "last_activity_at": -1,
+            "platform": 1,
+            "platform_channel_id": 1,
+        }
+    }
+    assert pipeline[-1] == {"$limit": 5}
+    projected_fields = set(
+        next(stage["$project"] for stage in pipeline if "$project" in stage)
+    )
+    assert projected_fields == {
+        "_id",
+        "platform",
+        "platform_channel_id",
+        "channel_name",
+        "last_activity_at",
+        "message_count",
+        "participant_count",
+    }
+    serialized_pipeline = repr(pipeline)
+    for forbidden in (
+        "body_text",
+        "raw_wire_text",
+        "attachments",
+        "global_user_id",
+    ):
+        assert forbidden not in serialized_pipeline
+    cursor.to_list.assert_awaited_once_with(length=5)
 
 
 @pytest.mark.asyncio

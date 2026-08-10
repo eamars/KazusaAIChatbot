@@ -264,6 +264,25 @@ async def build_snapshot_source_counts(
                 ],
             },
         }),
+        "cognition_v2_events": await _count({
+            **base_filter,
+            "event_family": "cognition_v2",
+        }),
+        "cognition_v2_committed": await _count({
+            **base_filter,
+            "event_family": "cognition_v2",
+            "cognition_v2.state_commit_status": "committed",
+        }),
+        "cognition_v2_commit_failed": await _count({
+            **base_filter,
+            "event_family": "cognition_v2",
+            "cognition_v2.state_commit_status": "failed",
+        }),
+        "cognition_v2_stage_failed": await _count({
+            **base_filter,
+            "event_family": "cognition_v2",
+            "cognition_v2.stage_status": "failed",
+        }),
     }
     return source_counts
 

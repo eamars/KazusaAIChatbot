@@ -220,6 +220,15 @@ async def test_commitment_due_handler_skips_stale_due_payload() -> None:
         "status": "skipped",
         "reason": "stale_active_commitment_due_at",
         "unit_id": "commitment-1",
+        "cognition_source": {
+            "source_kind": "scheduler_event",
+            "source_id": "run-commitment-1",
+            "occurred_at": DUE_AT,
+            "semantic_summary": (
+                "scheduled commitment was skipped: "
+                "stale_active_commitment_due_at"
+            ),
+        },
     }
     assert built_cases == []
 
@@ -474,5 +483,13 @@ async def test_commitment_due_handler_skips_structural_mismatches(
         "status": "skipped",
         "reason": expected_reason,
         "unit_id": "commitment-1",
+        "cognition_source": {
+            "source_kind": "scheduler_event",
+            "source_id": "run-commitment-1",
+            "occurred_at": DUE_AT,
+            "semantic_summary": (
+                f"scheduled commitment was skipped: {expected_reason}"
+            ),
+        },
     }
     assert built_cases == []

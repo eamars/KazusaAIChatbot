@@ -72,13 +72,19 @@ DispatchContext(
     bot_permission_role=str,
     now=datetime,
     source_channel_type=str,
+    source_platform_bot_id=str,
+    source_character_name=str,
 )
 ```
 
 `source_platform`, `source_channel_id`, and `source_channel_type` preserve the
-trusted source context. Semantic decisions about whether a promise should be
-scheduled or whether a character should speak belong upstream in cognition and
-self-cognition, not in this package.
+trusted source context. `source_platform_bot_id` is the required native
+transport identity, and `source_character_name` is the required current
+brain-owned display name. The handler fails closed for empty values and never
+uses adapter-side naming attributes or a generic assistant label. Semantic
+decisions about whether a promise should be scheduled or whether a character
+should speak belong upstream in cognition and self-cognition, not in this
+package.
 
 ## `send_message`
 

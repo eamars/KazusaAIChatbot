@@ -1,22 +1,26 @@
-"""Runtime worker loop for generic background work."""
+"""Leased worker loop for reviewed v2 background-work payloads."""
 
 from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
-from typing import Any
+from importlib import import_module
+from typing import Literal
 from uuid import uuid4
 
 from kazusa_ai_chatbot.accepted_task import (
-    mark_accepted_task_delivered,
     mark_accepted_task_failure_ready,
-    mark_accepted_task_result_ready,
+    mark_future_speak_accepted_task_delivered,
     mark_accepted_task_running,
+    mark_tool_result_ready,
 )
-from kazusa_ai_chatbot.background_work.providers import dispatch_background_work
-from kazusa_ai_chatbot.coding_agent.coding_run.ledger import sanitize_coding_run_context
-from kazusa_ai_chatbot.background_work.router import route_background_work
-from kazusa_ai_chatbot.background_work.subagent import worker_descriptions
+from kazusa_ai_chatbot.background_work.models import (
+    FUTURE_SPEAK_WORKER,
+    TASK_ORCHESTRATOR_WORKER,
+)
+from kazusa_ai_chatbot.background_work.subagent.task_orchestrator import (
+    execute_task_orchestrator_job,
+)
 from kazusa_ai_chatbot.config import (
     BACKGROUND_WORK_WORKER_CLAIM_LIMIT,
     BACKGROUND_WORK_WORKER_LEASE_SECONDS,
@@ -27,7 +31,13 @@ from kazusa_ai_chatbot.db.background_work_jobs import (
     complete_background_work_job,
     fail_background_work_job,
 )
+from kazusa_ai_chatbot.db.errors import DatabaseOperationError
+from kazusa_ai_chatbot.task_resolution.contracts import (
+    TaskResolutionContractError,
+    TaskResolutionResultV1,
+)
 from kazusa_ai_chatbot.time_boundary import storage_utc_now_iso
+
 
 logger = logging.getLogger(__name__)
 
@@ -41,138 +51,83 @@ async def run_background_work_worker_tick(
     max_attempts: int = BACKGROUND_WORK_WORKER_MAX_ATTEMPTS,
     worker_id: str | None = None,
 ) -> dict[str, int]:
-    """Claim and process a bounded batch of queued background-work jobs."""
+    """Claim and process a bounded batch of reviewed v2 background jobs.
 
-    if worker_id is None:
-        worker_id = f"background-work-worker-{uuid4().hex}"
+    Args:
+        claim_limit: Maximum jobs processed during this runtime tick.
+        lease_seconds: Durable claim lease for each job.
+        max_attempts: Maximum process retries allowed by the queue.
+        worker_id: Stable test or runtime owner token. A unique token is
+            created when the caller does not provide one.
+
+    Returns:
+        Counts of claimed jobs that reached a terminal worker disposition.
+    """
+
+    lease_token = worker_id or f"background-work-worker-{uuid4().hex}"
     processed_count = 0
     succeeded_count = 0
     failed_count = 0
     for _ in range(max(0, int(claim_limit))):
-        now_utc = storage_utc_now_iso()
+        claimed_at = storage_utc_now_iso()
         job = await claim_background_work_job(
-            lease_owner=worker_id,
+            lease_owner=lease_token,
             lease_seconds=lease_seconds,
-            now_utc=now_utc,
+            now_utc=claimed_at,
             max_attempts=max_attempts,
         )
         if job is None:
             break
         processed_count += 1
-        task_brief = _job_text(job, "task_brief")
-        source_summary = _job_text(job, "source_context")
-        if not source_summary:
-            source_summary = task_brief
         accepted_task_id = _job_text(job, "accepted_task_id")
         if accepted_task_id:
-            await mark_accepted_task_running(
+            running_task = await mark_accepted_task_running(
                 accepted_task_id=accepted_task_id,
-                started_at=now_utc,
+                started_at=claimed_at,
             )
+            if running_task is None:
+                await fail_background_work_job(
+                    job_id=job["job_id"],
+                    lease_owner=lease_token,
+                    failure_summary=(
+                        "The accepted task was not ready for execution."
+                    ),
+                    result_summary=(
+                        "The accepted task could not enter running state."
+                    ),
+                    failed_at=claimed_at,
+                    skip_result_delivery=True,
+                )
+                failed_count += 1
+                continue
         try:
-            requested_worker = _job_text(job, "requested_worker")
-            if requested_worker:
-                router_decision = _requested_worker_decision(
-                    job,
-                    requested_worker=requested_worker,
-                    task_brief=task_brief,
-                    source_summary=source_summary,
-                )
-                worker_decision = dict(router_decision)
-            else:
-                router_decision = await route_background_work(
-                    task_brief=task_brief,
-                    source_summary=source_summary,
-                    worker_descriptions=_routable_worker_descriptions(),
-                    max_output_chars=int(job["max_output_chars"]),
-                )
-                worker_decision = dict(router_decision)
-                worker_decision["task_brief"] = task_brief
-                worker_decision["source_summary"] = source_summary
-            worker_result = await dispatch_background_work(
-                worker_decision,
-                max_output_chars=int(job["max_output_chars"]),
+            disposition = await _run_claimed_job(
+                job,
+                lease_owner=lease_token,
             )
         except Exception as exc:
             logger.exception(
-                f"Background-work job {job['job_id']} failed during "
-                f"routing or dispatch: {exc}"
+                f"Background-work job {job['job_id']} could not complete: {exc}",
             )
+            failed_at = storage_utc_now_iso()
             await fail_background_work_job(
                 job_id=job["job_id"],
-                lease_owner=worker_id,
-                failure_summary=f"Unhandled error during routing or dispatch: {type(exc).__name__}: {str(exc)[:200]}",
-                failed_at=storage_utc_now_iso(),
+                lease_owner=lease_token,
+                failure_summary="The background task could not complete.",
+                result_summary="The accepted task could not complete.",
+                failed_at=failed_at,
             )
             if accepted_task_id:
                 await mark_accepted_task_failure_ready(
                     accepted_task_id=accepted_task_id,
-                    failure_summary=(
-                        "Unhandled error during routing or dispatch: "
-                        f"{type(exc).__name__}: {str(exc)[:200]}"
-                    ),
-                    completed_at=storage_utc_now_iso(),
+                    failure_summary="The accepted task could not complete.",
+                    completed_at=failed_at,
                 )
             failed_count += 1
             continue
-        completed_at = storage_utc_now_iso()
-        if worker_result["status"] == "succeeded":
-            skip_result_delivery = _skip_result_delivery(worker_result)
-            await complete_background_work_job(
-                job_id=job["job_id"],
-                lease_owner=worker_id,
-                router_action=router_decision["action"],
-                worker=worker_result["worker"],
-                routed_task=source_summary,
-                router_reason=router_decision["reason"],
-                artifact_text=worker_result["artifact_text"],
-                result_summary=worker_result["result_summary"],
-                worker_metadata=worker_result["worker_metadata"],
-                completed_at=completed_at,
-                skip_result_delivery=skip_result_delivery,
-            )
-            if accepted_task_id:
-                if skip_result_delivery:
-                    await mark_accepted_task_delivered(
-                        accepted_task_id=accepted_task_id,
-                        delivered_conversation_message_id="",
-                        delivered_at=completed_at,
-                    )
-                else:
-                    worker_metadata = worker_result.get("worker_metadata")
-                    coding_run_context = None
-                    if isinstance(worker_metadata, Mapping):
-                        metadata_context = worker_metadata.get("coding_run_context")
-                        coding_run_context = sanitize_coding_run_context(
-                            metadata_context
-                        )
-                    await mark_accepted_task_result_ready(
-                        accepted_task_id=accepted_task_id,
-                        artifact_text=worker_result["artifact_text"],
-                        result_summary=worker_result["result_summary"],
-                        completed_at=completed_at,
-                        coding_run_context=coding_run_context,
-                    )
+        if disposition == "completed":
             succeeded_count += 1
         else:
-            await fail_background_work_job(
-                job_id=job["job_id"],
-                lease_owner=worker_id,
-                router_action=router_decision["action"],
-                worker=worker_result["worker"],
-                routed_task=source_summary,
-                router_reason=router_decision["reason"],
-                failure_summary=worker_result["failure_summary"],
-                result_summary=worker_result["result_summary"],
-                worker_metadata=worker_result["worker_metadata"],
-                failed_at=completed_at,
-            )
-            if accepted_task_id:
-                await mark_accepted_task_failure_ready(
-                    accepted_task_id=accepted_task_id,
-                    failure_summary=worker_result["failure_summary"],
-                    completed_at=completed_at,
-                )
             failed_count += 1
 
     result = {
@@ -183,91 +138,219 @@ async def run_background_work_worker_tick(
     return result
 
 
-def _requested_worker_decision(
-    job: Mapping[str, Any],
+async def _run_claimed_job(
+    job: Mapping[str, object],
     *,
-    requested_worker: str,
-    task_brief: str,
-    source_summary: str,
-) -> dict[str, object]:
-    """Build the deterministic worker decision for bound background actions."""
+    lease_owner: str,
+) -> Literal["completed", "failed"]:
+    """Execute one validated v2 payload through its deterministic worker."""
 
-    worker_payload = _job_mapping(job, "worker_payload")
-    worker_payload["source_action_attempt_id"] = _job_text(
-        job,
-        "source_action_attempt_id",
+    requested_worker = _job_text(job, "requested_worker")
+    if requested_worker == TASK_ORCHESTRATOR_WORKER:
+        result = await execute_task_orchestrator_job(
+            job,
+            lease_owner=lease_owner,
+        )
+        await _complete_task_orchestrator_job(
+            job,
+            lease_owner=lease_owner,
+            result=result,
+        )
+        return "completed"
+    if requested_worker == FUTURE_SPEAK_WORKER:
+        result = await _execute_future_speak_job(job)
+        completed_at = storage_utc_now_iso()
+        accepted_task_id = _job_text(job, "accepted_task_id")
+        if accepted_task_id:
+            delivered_task = await mark_future_speak_accepted_task_delivered(
+                accepted_task_id=accepted_task_id,
+                delivered_at=completed_at,
+            )
+            if delivered_task is None:
+                raise DatabaseOperationError(
+                    "future-speak accepted task transition is missing"
+                )
+        completed_job = await complete_background_work_job(
+            job_id=_required_job_text(job, "job_id"),
+            lease_owner=lease_owner,
+            task_resolution_result=None,
+            artifact_text=result["artifact_text"],
+            result_summary=result["result_summary"],
+            completed_at=completed_at,
+            skip_result_delivery=True,
+        )
+        if completed_job is None:
+            raise DatabaseOperationError(
+                "future-speak job completion lost its worker lease"
+            )
+        return "completed"
+    raise ValueError("requested_worker is not supported")
+
+
+async def _complete_task_orchestrator_job(
+    job: Mapping[str, object],
+    *,
+    lease_owner: str,
+    result: TaskResolutionResultV1,
+) -> None:
+    """Persist terminal task resolution and its accepted-task delivery state."""
+
+    completed_at = storage_utc_now_iso()
+    result_status = result["status"]
+    if result_status not in {
+        "resolved",
+        "partial",
+        "needs_user_input",
+        "approval_required",
+        "unavailable",
+        "failed",
+    }:
+        raise TaskResolutionContractError(
+            "background task resolution must return a terminal result"
+        )
+    summary = _task_result_delivery_summary(result)
+    artifact_text = _bounded_artifact_text(job, summary)
+    accepted_task_id = _job_text(job, "accepted_task_id")
+    if accepted_task_id:
+        if result_status in {"resolved", "partial"}:
+            accepted_task = await mark_tool_result_ready(
+                accepted_task_id=accepted_task_id,
+                artifact_text=artifact_text,
+                result_summary=summary,
+                completed_at=completed_at,
+                result_kind=result_status,
+                completion_status=result_status,
+                remaining_needs=list(result["remaining_needs"]),
+                coding_run_context=dict(result["coding_run_context"]),
+            )
+        else:
+            accepted_task = await mark_accepted_task_failure_ready(
+                accepted_task_id=accepted_task_id,
+                failure_summary=summary,
+                completed_at=completed_at,
+                result_kind=result_status,
+                remaining_needs=list(result["remaining_needs"]),
+                coding_run_context=dict(result["coding_run_context"]),
+            )
+        if accepted_task is None:
+            raise DatabaseOperationError(
+                "task-resolution accepted task transition is missing"
+            )
+    completed_job = await complete_background_work_job(
+        job_id=_required_job_text(job, "job_id"),
+        lease_owner=lease_owner,
+        task_resolution_result=result,
+        artifact_text=artifact_text,
+        result_summary=summary,
+        completed_at=completed_at,
     )
-    worker_payload["source_scope"] = _source_scope_from_job(job)
-    storage_timestamp_utc = _job_text(job, "updated_at")
-    if not storage_timestamp_utc:
-        storage_timestamp_utc = _job_text(job, "created_at")
-    if storage_timestamp_utc:
-        worker_payload["storage_timestamp_utc"] = storage_timestamp_utc
-    decision: dict[str, object] = {
-        "action": "execute",
-        "worker": requested_worker,
-        "reason": "Validated background action requested this worker.",
-        "task_brief": task_brief,
-        "source_summary": source_summary,
-        "worker_payload": worker_payload,
-    }
-    return decision
+    if completed_job is None:
+        raise DatabaseOperationError(
+            "task-resolution job completion lost its worker lease"
+        )
 
 
-def _routable_worker_descriptions() -> dict[str, str]:
-    """Return workers that can run without deterministic worker payloads."""
+def _bounded_artifact_text(job: Mapping[str, object], summary: str) -> str:
+    """Constrain the result artifact to the v2 job's declared output budget."""
 
-    descriptions = worker_descriptions()
-    descriptions.pop("future_speak", None)
-    return descriptions
-
-
-def _skip_result_delivery(worker_result: Mapping[str, Any]) -> bool:
-    """Return whether a worker result has its own user-visible follow-up path."""
-
-    worker_metadata = worker_result.get("worker_metadata")
-    if not isinstance(worker_metadata, Mapping):
-        return_value = False
-        return return_value
-    return_value = worker_metadata.get("skip_result_delivery") is True
-    return return_value
+    max_output_chars = job.get("max_output_chars")
+    if not isinstance(max_output_chars, int) or max_output_chars < 1:
+        raise ValueError("background job max_output_chars is invalid")
+    artifact_text = summary[:max_output_chars]
+    return artifact_text
 
 
-def _source_scope_from_job(job: Mapping[str, Any]) -> dict[str, object]:
-    """Project trusted delivery scope into the future-cognition source scope."""
+def _task_result_delivery_summary(result: TaskResolutionResultV1) -> str:
+    """Project validated task evidence into prompt-safe delivery text."""
 
-    source_scope: dict[str, object] = {
-        "source_platform": _job_text(job, "source_platform"),
-        "source_channel_id": _job_text(job, "source_channel_id"),
-        "source_channel_type": _job_text(job, "source_channel_type"),
-        "source_user_id": _job_text(job, "requester_global_user_id"),
-        "source_platform_bot_id": _job_text(job, "source_platform_bot_id"),
-        "source_character_name": _job_text(job, "source_character_name"),
-        "source_message_id": _job_text(job, "source_message_id"),
-    }
-    return source_scope
+    if result["status"] not in {"resolved", "partial"}:
+        summary = _non_success_delivery_summary(result)
+        return summary
+
+    summary_rows: list[str] = []
+    source_urls: list[str] = []
+    for evidence in reversed(result["evidence"]):
+        evidence_summary = evidence["summary"].strip()
+        if evidence_summary and evidence_summary not in summary_rows:
+            summary_rows.append(evidence_summary)
+        for provenance_ref in evidence["provenance_refs"]:
+            if len(source_urls) >= 8:
+                break
+            if (
+                provenance_ref.startswith(("http://", "https://"))
+                and provenance_ref not in source_urls
+            ):
+                source_urls.append(provenance_ref)
+    if source_urls:
+        summary_rows.append(f"Sources: {' '.join(source_urls)}")
+    if result["status"] == "partial" and result["remaining_needs"]:
+        remaining_text = "; ".join(result["remaining_needs"])
+        summary_rows.append(f"Remaining limitations: {remaining_text}")
+    if not summary_rows:
+        raise TaskResolutionContractError(
+            "successful background task result is missing delivery evidence"
+        )
+    summary = "\n".join(summary_rows)
+    return summary
 
 
-def _job_mapping(
-    job: Mapping[str, Any],
-    field_name: str,
-) -> dict[str, object]:
-    """Return one trusted job mapping as a plain dict."""
+def _non_success_delivery_summary(result: TaskResolutionResultV1) -> str:
+    """Compose prompt-safe blocker detail for a non-success task result.
 
-    value = job.get(field_name)
-    if not isinstance(value, Mapping):
-        return_value: dict[str, object] = {}
-        return return_value
-    return_value = dict(value)
-    return return_value
+    The validated prompt-safe summary opens the text, followed by the declared
+    coding-run blocker and remaining needs as exact detail lines. Empty or
+    already-present detail is omitted without inventing replacement wording.
+    """
+
+    summary_rows = [result["prompt_safe_summary"]]
+    present_text: set[str] = set(summary_rows)
+    blocker_summary = ""
+    coding_run_context = result["coding_run_context"]
+    if coding_run_context:
+        blocker_summary = coding_run_context["summary"].strip()
+    if blocker_summary and blocker_summary not in present_text:
+        present_text.add(blocker_summary)
+        summary_rows.append(f"Specific blocker: {blocker_summary}")
+    remaining_needs: list[str] = []
+    for raw_need in result["remaining_needs"]:
+        need = raw_need.strip()
+        if need and need not in present_text:
+            present_text.add(need)
+            remaining_needs.append(need)
+    if remaining_needs:
+        remaining_text = "; ".join(remaining_needs)
+        summary_rows.append(f"Remaining limitation: {remaining_text}")
+    summary = "\n".join(summary_rows)
+    return summary
 
 
-def _job_text(job: Mapping[str, Any], field_name: str) -> str:
-    """Return one trusted job text field."""
+def _job_text(job: Mapping[str, object], field_name: str) -> str:
+    """Read one optional trusted text field from a validated v2 job."""
 
     value = job.get(field_name)
     if not isinstance(value, str):
-        return_value = ""
-        return return_value
-    return_value = value.strip()
-    return return_value
+        return ""
+    text = value.strip()
+    return text
+
+
+def _required_job_text(job: Mapping[str, object], field_name: str) -> str:
+    """Require one non-empty trusted text field from a validated v2 job."""
+
+    text = _job_text(job, field_name)
+    if not text:
+        raise ValueError(f"background job {field_name} is required")
+    return text
+
+
+async def _execute_future_speak_job(
+    job: Mapping[str, object],
+) -> dict[str, str]:
+    """Load deterministic scheduling only for a claimed future-speak job."""
+
+    module = import_module(
+        "kazusa_ai_chatbot.background_work.subagent.future_speak",
+    )
+    execute_job = getattr(module, "execute_future_speak_job")
+    result = await execute_job(job)
+    return result

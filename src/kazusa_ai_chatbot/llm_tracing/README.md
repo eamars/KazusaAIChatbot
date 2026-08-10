@@ -50,6 +50,22 @@ sanitized event-log exports.
 - `full`: stores raw prompt messages, raw response text, and parsed output in
   protected trace collections.
 
+While `metadata` or `full` capture is enabled, Cognition Core V2 keeps one
+invocation-local exact-input and model-attempt buffer. A clean invocation
+discards that buffer without a capsule write. A terminal, recovered, partial,
+or degraded invocation schedules one protected `llm_trace_steps` row with
+`capture_reason="cognition_failure_capsule"`. The row contains the raw public
+entrypoint input, ordered attempts, concrete validation errors, and the final
+failure disposition. `cognition_failure_capsule.v3` adds an optional bounded
+attempt ledger. Goal-attempt rows identify the cognition invocation, service
+graph attempt, branch, producing stage, local attempt, cumulative producer
+attempt, configured limit, and attempt disposition; the ledger also records
+final branch dispositions. Failure events may include an outermost-first
+exception cause chain capped at four entries. Every cause message passes
+through the protected session's secret redaction before persistence. Model
+configuration excludes API keys. Historical V2 capsule rows remain immutable
+and exportable as recorded evidence.
+
 Past-dialog cognition residual can only use selected `parsed_output` fields
 from protected full-capture trace steps. Metadata-mode trace steps
 intentionally store empty parsed output for this purpose, so a past dialog with
@@ -67,12 +83,22 @@ Trace storage must preserve the distinction between protected trace payloads
 and sanitized audit/event-log payloads. Event-log rows may reference trace ids;
 they must not duplicate protected trace bodies.
 
+Failure capsules reuse the trace-step collection, indexes, and
+`DEBUG_LOG_TTL_DAYS` expiry. Their `cognition_invocation_id` distinguishes safe
+retries and concurrent Cognition V2 calls under the same turn trace.
+
 ## Failure Behavior
 
 Trace capture must not be required for normal chat delivery. Capture failures
 should degrade diagnostics and be visible through operational logging or
 event-log metadata, but they must not expose raw prompts or outputs through
 fallback public paths.
+
+Cognition failure-capsule persistence is scheduled in the background and is
+never awaited by the response path. Snapshot, scheduling, and persistence
+failures emit sanitized warnings containing no protected input, model output,
+API key, or exception message. The original cognition output or exception
+continues unchanged.
 
 ## Testing Contract
 
@@ -94,3 +120,31 @@ Tests should cover:
 - Do not treat metadata-mode trace rows as usable past-dialog residual
   content.
 - Do not bypass `DEBUG_LOG_TTL_DAYS` for protected trace retention.
+
+## Correlation Contract
+
+`trace_correlation_context.v1` carries only source ownership:
+
+```json
+{
+  "schema_version": "trace_correlation_context.v1",
+  "source_llm_trace_id": "",
+  "source_episode_id": "",
+  "source_background_work_job_id": "",
+  "source_calendar_run_id": ""
+}
+```
+
+Action attempts, background jobs, calendar schedules, and calendar runs use
+`source_llm_trace_id`. Child trace runs use `parent_llm_trace_id` plus the
+applicable `source_background_work_job_id` or `source_calendar_run_id`.
+Historical rows may be empty and are reported as `not_captured`; the runtime
+does not backfill them. The bounded
+`scripts.export_trace_correlation_manifest` command is the exact typed lookup
+boundary for a value copied from the Control Console. It reports zero,
+multiple, conflict, and protected-read-unavailable outcomes explicitly before
+the separate raw trace exporter is used.
+
+Conflict metadata is identifier-only: a durable owner keeps its first non-empty
+`source_llm_trace_id`, while the rejected competing value is retained as
+`correlation_conflict_source_llm_trace_id` for bounded diagnostic review.

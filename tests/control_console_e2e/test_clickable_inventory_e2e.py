@@ -104,7 +104,7 @@ def test_operator_actions_use_in_page_feedback_not_blocking_alerts(
             {
                 "page": "users",
                 "button": "#refresh-users",
-                "endpoint": "/api/entities/user",
+                "endpoint": "/api/entities/users",
                 "loading": "Searching user",
                 "setup": """() => {
                   document.querySelector('#user-platform').value = 'qq';
@@ -114,7 +114,7 @@ def test_operator_actions_use_in_page_feedback_not_blocking_alerts(
             {
                 "page": "groups",
                 "button": "#refresh-groups",
-                "endpoint": "/api/entities/group",
+                "endpoint": "/api/entities/groups",
                 "loading": "Searching group",
                 "setup": """() => {
                   document.querySelector('#group-platform').value = 'debug';
@@ -131,7 +131,7 @@ def test_operator_actions_use_in_page_feedback_not_blocking_alerts(
             {
                 "page": "background",
                 "button": "#refresh-background",
-                "endpoint": "/api/lookups/background",
+                "endpoint": "/api/lookups/background-work",
                 "loading": "Loading background work",
                 "setup": "() => {}",
             },

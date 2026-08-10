@@ -9,7 +9,7 @@
 - Baseline review commit:
   `690f973 Record coding agent final integration gate review`.
 - Review artifact:
-  `development_plans/active/short_term/coding_agent_final_integration_gate_reviews.md`.
+  `development_plans/archive/completed/short_term/coding_agent_final_integration_gate_reviews.md`.
 - Test file:
   `tests/test_coding_agent_full_workflow_integration_live_llm.py`.
 - Entry boundary: real L2d action selection, action-spec execution,
@@ -38,4 +38,3 @@ for the Ornith/Qwen-compatible model run.
 The raw trace files are local test artifacts under
 `test_artifacts/llm_traces/` and may be regenerated. The committed review
 artifact above is the stable baseline evidence.
-

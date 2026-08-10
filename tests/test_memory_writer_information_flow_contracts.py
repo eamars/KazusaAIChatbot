@@ -20,7 +20,6 @@ def test_projection_module_exposes_stage_specific_functions() -> None:
     }
 
     assert public_names == {
-        "project_character_image_prompt_payload",
         "project_memory_unit_extractor_prompt_payload",
         "project_memory_unit_rewrite_prompt_payload",
         "project_reflection_promotion_prompt_payload",

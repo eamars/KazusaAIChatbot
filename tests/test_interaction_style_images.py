@@ -383,7 +383,7 @@ async def test_build_interaction_style_context_private_omits_group_key(
         platform_channel_id="private-1",
     )
 
-    assert context["application_order"] == ["user_style"]
+    assert context["application_order"] == ["user"]
     assert context["user_style"]["speech_guidelines"] == ["Use light teasing."]
     assert "group_channel_style" not in context
 
@@ -429,7 +429,7 @@ async def test_build_interaction_style_context_group_applies_user_then_group(
         platform_channel_id="group-1",
     )
 
-    assert context["application_order"] == ["user_style", "group_channel_style"]
+    assert context["application_order"] == ["user", "group_channel"]
     assert context["user_style"]["speech_guidelines"] == ["Use light teasing."]
     assert context["group_channel_style"]["social_guidelines"] == [
         "Keep group replies compact."
@@ -467,7 +467,7 @@ async def test_build_interaction_style_context_group_allows_missing_user_id(
         platform_channel_id="group-1",
     )
 
-    assert context["application_order"] == ["user_style", "group_channel_style"]
+    assert context["application_order"] == ["user", "group_channel"]
     assert context["user_style"] == style_store.empty_interaction_style_overlay()
     assert context["group_channel_style"]["engagement_guidelines"] == [
         "Join when the current group topic gives a clear opening."

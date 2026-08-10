@@ -58,11 +58,28 @@
         <div class="page-intro">
           <div>
             <h2>Overview</h2>
-            <p>Service graph, current session, stream state, and bounded runtime summaries.</p>
+            <p>Managed-service totals, internal readiness, recent exceptions, and state changes.</p>
           </div>
           <span class="badge" id="session-state" data-component="Badge">signed out</span>
         </div>
-        <div class="overview-grid" id="overview-grid"></div>
+        <div class="content-grid two">
+          <article class="card" data-component="Card">
+            <div class="card-header"><h3>Managed services</h3><span class="badge" id="overview-service-status">not loaded</span></div>
+            <div class="table-wrap flush"><table><tbody id="overview-service-summary-table"><tr><td>Status</td><td>Sign in to load service totals.</td></tr></tbody></table></div>
+          </article>
+          <article class="card" data-component="Card">
+            <div class="card-header"><h3>Internal readiness</h3><span class="badge" id="overview-readiness-status">not loaded</span></div>
+            <div class="table-wrap flush"><table><tbody id="overview-readiness-table"><tr><td>Status</td><td>Sign in to load readiness.</td></tr></tbody></table></div>
+          </article>
+          <article class="card" data-component="Card">
+            <div class="card-header"><h3>Recent failures</h3><span class="badge" id="overview-failures-status">not loaded</span></div>
+            <div class="table-wrap flush"><table><thead><tr><th>Time</th><th>Target</th><th>Outcome</th><th>Reason</th></tr></thead><tbody id="overview-failures-table"><tr><td colspan="4">Sign in to load recent failures.</td></tr></tbody></table></div>
+          </article>
+          <article class="card" data-component="Card">
+            <div class="card-header"><h3>Recent changes</h3><span class="badge" id="overview-changes-status">not loaded</span></div>
+            <div class="table-wrap flush"><table><thead><tr><th>Time</th><th>Action</th><th>Target</th><th>Outcome</th></tr></thead><tbody id="overview-changes-table"><tr><td colspan="4">Sign in to load recent changes.</td></tr></tbody></table></div>
+          </article>
+        </div>
         <article class="card cognition-card" data-component="Card">
           <div class="card-header"><h3>Latest cognition run</h3><span class="badge" id="overview-cognition-status">not reported</span></div>
           <div class="card-content">
@@ -79,34 +96,6 @@
             </div>
           </div>
         </article>
-        <div class="content-grid two">
-          <article class="card" data-component="Card">
-            <div class="card-header"><h3>Runtime Summary</h3><span class="badge">bounded</span></div>
-            <div class="card-content table-wrap flush"><table><tbody id="overview-runtime-table"><tr><td>Session</td><td>Sign in to load service state.</td></tr><tr><td>Stream</td><td>Starts after authentication.</td></tr></tbody></table></div>
-          </article>
-          <article class="card" data-component="Card">
-            <div class="card-header"><h3>Recent Audit</h3><span class="badge">local JSONL</span></div>
-            <div class="card-content table-wrap flush"><table><thead><tr><th>Time</th><th>Event</th><th>Target</th><th>Status</th></tr></thead><tbody id="overview-audit-table"><tr><td>Status</td><td>Audit rows appear after sign in.</td><td>redacted</td><td>-</td></tr></tbody></table></div>
-          </article>
-        </div>
-        <div class="content-grid two">
-          <article class="card" data-component="Card">
-            <div class="card-header"><h3>Lifecycle Guardrails</h3><span class="badge">deterministic</span></div>
-            <div class="table-wrap flush"><table><tbody><tr><td>Start order</td><td>brain before adapters</td></tr><tr><td>Stop order</td><td>dependent adapters before brain</td></tr><tr><td>Ownership</td><td>console-owned PID, generation, fingerprint</td></tr></tbody></table></div>
-          </article>
-          <article class="card" data-component="Card">
-            <div class="card-header"><h3>Available Workflows</h3><span class="badge">operator ready</span></div>
-            <div class="table-wrap flush"><table><tbody id="overview-capability-table"><tr><td>Status</td><td>Sign in to load available workflows.</td></tr></tbody></table></div>
-          </article>
-          <article class="card" data-component="Card">
-            <div class="card-header"><h3>Unavailable Workflows</h3><span class="badge">hidden from nav</span></div>
-            <div class="table-wrap flush"><table><tbody id="overview-unavailable-table"><tr><td>Status</td><td>Sign in to load unavailable workflows.</td></tr></tbody></table></div>
-          </article>
-          <article class="card" data-component="Card">
-            <div class="card-header"><h3>Data Safety</h3><span class="badge">redacted</span></div>
-            <div class="table-wrap flush"><table><tbody><tr><td>Excluded</td><td>secrets, prompts, embeddings</td></tr><tr><td>Live path</td><td>compact status stream plus bounded log stream</td></tr><tr><td>Details</td><td>bounded REST fetch on demand</td></tr></tbody></table></div>
-          </article>
-        </div>
       </section>
 
       <section class="page" data-page="services">
@@ -159,13 +148,13 @@
         </div>
         <div class="chat-layout">
           <article class="card" data-component="Card">
-            <div class="card-header"><h3>History</h3><span class="badge">redacted</span></div>
+            <div class="card-header"><h3>History</h3><span class="badge">current browser session</span></div>
             <div class="chat-history" id="chat-history">
               <article class="message"><div class="meta">system</div><p>Debug history appears here after authenticated sends.</p></article>
             </div>
           </article>
           <form class="card" id="debug-form" data-component="FieldGroup">
-            <div class="card-header"><h3>Composer</h3><span class="badge">POST + CSRF</span></div>
+            <div class="card-header"><h3>Composer</h3><span class="badge">current request</span></div>
             <div class="card-content field-group">
               <label class="field">Channel<input class="input" name="channel_id" value="debug" data-debug-input disabled /></label>
               <label class="field">User<input class="input" name="user_id" value="operator" data-debug-input disabled /></label>
@@ -195,74 +184,57 @@
             </div>
           </div>
         </article>
-        <div class="content-grid two">
-          <article class="card" data-component="Card">
-            <div class="card-header"><h3>Request Contract</h3><span class="badge">/chat</span></div>
-            <div class="table-wrap flush"><table><tbody><tr><td>Transport</td><td>control console POST to brain /chat</td></tr><tr><td>Unavailable state</td><td>composer stays disabled or returns explicit safe unavailable response</td></tr><tr><td>Audit</td><td>debug send with operator and request id</td></tr></tbody></table></div>
-          </article>
-          <article class="card" data-component="Card">
-            <div class="card-header"><h3>Visible Fields</h3><span class="badge">bounded</span></div>
-            <div class="table-wrap flush"><table><tbody><tr><td>Input</td><td>channel, user, display name, run mode, persistence, message</td></tr><tr><td>Output</td><td>reply summary, tracking id, latency</td></tr><tr><td>Excluded</td><td>prompts, raw memory, embeddings</td></tr></tbody></table></div>
-          </article>
-        </div>
       </section>
 
       <section class="page" data-page="events">
         <div class="page-intro">
           <div>
             <h2>Event monitor</h2>
-            <p>Local console audit, process logs, and sanitized application event-log telemetry.</p>
+            <p>Structured application runtime events with bounded correlation detail.</p>
           </div>
           <button class="btn" id="refresh-events" type="button">Refresh</button>
         </div>
         <article class="card" data-component="Card">
-          <div class="card-header"><h3>Filters</h3><span class="badge">limit 200</span></div>
+          <div class="card-header"><h3>Filters</h3></div>
           <div class="card-content filter-row" data-component="FieldGroup">
-            <label class="field">Source<select class="input" id="event-source"><option value="all">all</option><option value="console">console</option><option value="process">process</option><option value="kazusa">application event log</option></select></label>
+            <label class="field">Source<select class="input" id="event-source"><option value="all">all application sources</option><option value="kazusa">application</option></select></label>
+            <label class="field">Component / service<input class="input" id="event-service-id" placeholder="component or service" /></label>
+            <label class="field">Event type<input class="input" id="event-type" placeholder="exact event type" /></label>
+            <label class="field">Severity<input class="input" id="event-level" placeholder="info, warning, error" /></label>
             <label class="field">Request id<input class="input" id="event-request-id" placeholder="cc-req-..." /></label>
             <label class="field">Tracking id<input class="input" id="event-tracking-id" placeholder="delivery tracking id" /></label>
+            <label class="field">Since<input class="input" id="event-since" type="datetime-local" /></label>
           </div>
         </article>
         <div class="content-grid three">
-          <article class="metric" data-component="Card"><div class="metric-label">Console audit</div><div class="metric-value">local</div><div class="metric-label">JSONL source of truth</div></article>
-          <article class="metric" data-component="Card"><div class="metric-label">Process logs</div><div class="metric-value">tail</div><div class="metric-label">bounded stdout/stderr</div></article>
-          <article class="metric" data-component="Card"><div class="metric-label">Application events</div><div class="metric-value">log</div><div class="metric-label">sanitized event_log_events</div></article>
+          <article class="card" data-component="Card"><div class="card-header"><h3>Severity</h3></div><div class="table-wrap flush"><table><tbody id="event-severity-facets"><tr><td>Status</td><td>Refresh to load counts.</td></tr></tbody></table></div></article>
+          <article class="card" data-component="Card"><div class="card-header"><h3>Outcome</h3></div><div class="table-wrap flush"><table><tbody id="event-status-facets"><tr><td>Status</td><td>Refresh to load counts.</td></tr></tbody></table></div></article>
+          <article class="card" data-component="Card"><div class="card-header"><h3>Component</h3></div><div class="table-wrap flush"><table><tbody id="event-component-facets"><tr><td>Status</td><td>Refresh to load counts.</td></tr></tbody></table></div></article>
         </div>
         <article class="card" data-component="Card">
-          <div class="card-header"><h3>Events</h3><span class="badge">redacted</span></div>
-          <div class="table-wrap flush"><table><thead><tr><th>Source</th><th>Component</th><th>Event</th><th>Status</th><th>Created</th></tr></thead><tbody id="event-table"><tr><td>Ready</td><td>Select filters and refresh for audit, process, or application event-log rows.</td><td>redacted</td><td>-</td><td>-</td></tr><tr><td>Sources</td><td>console audit, process logs, sanitized event_log_events</td><td>limit 200</td><td>-</td><td>-</td></tr></tbody></table></div>
+          <div class="card-header"><h3>Events</h3><span class="badge" id="event-result-count">not loaded</span></div>
+          <div class="table-wrap flush"><table><thead><tr><th>Time</th><th>Severity</th><th>Component</th><th>Event</th><th>Outcome</th><th>Duration</th><th>Error</th></tr></thead><tbody id="event-table"><tr><td colspan="7">Select filters and refresh for structured events.</td></tr></tbody></table></div>
         </article>
       </section>
 
       <section class="page" data-page="character">
-        <div class="page-intro"><div><h2>Character</h2><p>Character-owned profile, state, self-image, growth, memory, and background learning stay read-only.</p></div><span class="badge" id="character-status">not loaded</span></div>
-        <div class="content-grid three">
-          <article class="metric" data-component="Card"><div class="metric-label">Owner</div><div class="metric-value">character</div><div class="metric-label">profile and runtime state</div></article>
-          <article class="metric" data-component="Card"><div class="metric-label">Learning</div><div class="metric-value">safe</div><div class="metric-label">promoted summaries only</div></article>
-          <article class="metric" data-component="Card"><div class="metric-label">Excluded</div><div class="metric-value">private</div><div class="metric-label">raw prompts, embeddings, raw reflection text</div></article>
-        </div>
+        <div class="page-intro"><div><h2>Character</h2><p>Latest identity and Cognition Core V2 state, with redacted growth lineage and runtime-consumption health.</p></div><span class="badge" id="character-status">not loaded</span></div>
         <div class="content-grid two">
-          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Promoted Global Growth Prompt View</h3><span class="badge">Prompt View</span></div><div class="card-content prompt-panel" id="character-growth-prompt-table"><p class="panel-empty">Open this page after login to load promoted growth prompt context.</p></div></article>
-          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Character Carry-over Prompt View</h3><span class="badge">Prompt View</span></div><div class="card-content prompt-panel" id="character-carry-over-table"><p class="panel-empty">Open this page after login to load current carry-over.</p></div></article>
-          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Growth Runs Audit</h3><span class="badge">Operational Backing</span></div><div class="card-content operational-list" id="character-growth-runs-table"><p class="panel-empty">Open this page after login to load growth run audit rows.</p></div></article>
-          <article class="card" data-component="Card"><div class="card-header"><h3>Latest State</h3><span class="badge">runtime</span></div><div class="table-wrap flush"><table><tbody id="character-state-table"><tr><td>Status</td><td>Open this page after login to refresh character status.</td></tr></tbody></table></div></article>
-          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Growth</h3><span class="badge">active traits</span></div><div class="card-content trait-list" id="character-growth-table"><p class="panel-empty">Open this page after login to refresh growth traits.</p></div></article>
           <article class="card span-two" data-component="Card"><div class="card-header"><h3>Profile</h3><span class="badge">character</span></div><div class="card-content character-panel" id="character-profile-table"><p class="panel-empty">Open this page after login to load character profile.</p></div></article>
-          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Self Image</h3><span class="badge">profile</span></div><div class="card-content character-panel" id="character-self-image-table"><p class="panel-empty">Open this page after login to load self-image summary.</p></div></article>
-          <article class="card" data-component="Card"><div class="card-header"><h3>Background Learning</h3><span class="badge">summary</span></div><div class="table-wrap flush"><table><tbody id="character-learning-table"><tr><td>Status</td><td>Open this page after login to inspect promoted learning summaries.</td></tr></tbody></table></div></article>
+          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Cognition state</h3><span class="badge">V2</span></div><div class="card-content character-panel" id="character-cognition-state-table"><p class="panel-empty">Open this page after login to load native cognition state.</p></div></article>
+          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Operational posture</h3><span class="badge">persisted · effective · consumed</span></div><div class="card-content character-panel" id="character-operational-posture-table"><p class="panel-empty">Open this page after login to load redacted operational posture.</p></div></article>
+          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Self-image</h3><span class="badge">latest revision</span></div><div class="card-content character-panel" id="character-self-image-table"><p class="panel-empty">Open this page after login to load the current self-image.</p></div></article>
+          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Growth candidates and outcomes</h3><span class="badge">redacted process</span></div><div class="card-content trait-list" id="character-growth-table"><p class="panel-empty">Open this page after login to load growth candidates and routed outcomes.</p></div></article>
+          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Identity lineage and health</h3><span class="badge">global character carry-over</span></div><div class="card-content character-panel" id="character-carry-over-table"><p class="panel-empty">Open this page after login to load revision continuity and health.</p></div></article>
         </div>
       </section>
 
       <section class="page" data-page="health">
-        <div class="page-intro"><div><h2>Health/cache</h2><p>Brain health, Cache2 stats, DB readiness, and worker liveness.</p></div><span class="badge">aggregate</span></div>
-        <div class="content-grid three">
-          <article class="card"><div class="card-header"><h3>Brain</h3></div><div class="card-content metric small"><div class="metric-value" id="health-brain-status">locked</div><div class="metric-label" id="health-brain-detail">sign in to load health</div></div></article>
-          <article class="card"><div class="card-header"><h3>Cache2</h3></div><div class="card-content metric small"><div class="metric-value" id="health-cache-status">locked</div><div class="metric-label">per-agent stats from /health when available</div></div></article>
-          <article class="card"><div class="card-header"><h3>Runtime</h3></div><div class="card-content metric small"><div class="metric-value" id="health-runtime-status">locked</div><div class="metric-label">from /ops/runtime-status when available</div></div></article>
-        </div>
+        <div class="page-intro"><div><h2>Health/cache</h2><p>Dependency readiness, worker liveness, semantic error level, and complete Cache2 metrics.</p></div><span class="badge" id="health-status">not loaded</span></div>
         <div class="content-grid two">
-          <article class="card"><div class="card-header"><h3>Readiness Matrix</h3><span class="badge">aggregate</span></div><div class="table-wrap flush"><table><tbody id="health-runtime-table"><tr><td>Status</td><td>sign in to load runtime state</td></tr></tbody></table></div></article>
-          <article class="card"><div class="card-header"><h3>Cache Surfaces</h3><span class="badge">per-agent</span></div><div class="table-wrap flush"><table><tbody id="health-cache-table"><tr><td>Status</td><td>sign in to load Cache2 stats</td></tr></tbody></table></div></article>
+          <article class="card"><div class="card-header"><h3>Readiness</h3><span class="badge" id="health-readiness-status">not loaded</span></div><div class="table-wrap flush"><table><tbody id="health-readiness-table"><tr><td>Status</td><td>Sign in to load dependency readiness.</td></tr></tbody></table></div></article>
+          <article class="card span-two"><div class="card-header"><h3>Workers</h3><span class="badge" id="health-workers-status">not loaded</span></div><div class="table-wrap flush"><table><thead><tr><th>Worker</th><th>Enabled</th><th>Task alive</th><th>Last status</th><th>Last event</th></tr></thead><tbody id="health-workers-table"><tr><td colspan="5">Sign in to load worker state.</td></tr></tbody></table></div></article>
+          <article class="card span-two"><div class="card-header"><h3>Cache agents</h3><span class="badge" id="health-cache-status">not loaded</span></div><div class="table-wrap flush"><table><thead><tr><th>Agent</th><th>Hits</th><th>Misses</th><th>Total</th><th>Hit rate</th></tr></thead><tbody id="health-cache-table"><tr><td colspan="5">Sign in to load Cache2 statistics.</td></tr></tbody></table></div></article>
         </div>
       </section>
 
@@ -270,12 +242,16 @@
         <div class="page-intro">
           <div>
             <h2>Users</h2>
-            <p>Platform-user lookup for profile, relationship, memory, and user-scoped interaction style.</p>
+            <p>Known-user directory with native V2 relationship, cognition, memory, style, and continuity.</p>
           </div>
           <span class="badge" id="users-status">needs input</span>
         </div>
         <article class="card" data-component="Card">
-          <div class="card-header"><h3>Platform User Lookup</h3><span class="badge">limit 25</span></div>
+          <div class="card-header"><h3>Known users</h3><span class="badge" id="user-directory-status">not loaded</span></div>
+          <div class="table-wrap flush"><table><thead><tr><th>Account</th><th>Display name</th><th>Aliases</th><th>Updated</th><th></th></tr></thead><tbody id="user-directory-table"><tr><td colspan="5">Open this page to load recently updated users.</td></tr></tbody></table></div>
+        </article>
+        <article class="card" data-component="Card">
+          <div class="card-header"><h3>Selected user scope</h3></div>
           <div class="card-content filter-row" data-component="FieldGroup">
             <label class="field">Platform<select class="input" id="user-platform"><option value="">Select platform</option><option value="qq">QQ (NapCat)</option><option value="discord">Discord</option><option value="debug">Debug</option></select></label>
             <label class="field">Platform user ID<input class="input" id="user-platform-user-id" placeholder="platform account id" /></label>
@@ -285,17 +261,15 @@
             <button class="btn primary" id="refresh-users" type="button">Search</button>
           </div>
         </article>
-        <div class="content-grid three">
-          <article class="metric" id="user-summary-identity" data-component="Card"><div class="metric-label">Identity</div><div class="metric-value">needs input</div><div class="metric-label">enter platform user</div></article>
-          <article class="metric" id="user-summary-memory" data-component="Card"><div class="metric-label">Memory</div><div class="metric-value">0</div><div class="metric-label">rows loaded</div></article>
-          <article class="metric" id="user-summary-style" data-component="Card"><div class="metric-label">Style</div><div class="metric-value">needs input</div><div class="metric-label">guidance status</div></article>
-        </div>
         <div class="content-grid two">
-          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Conversation Progress Prompt View</h3><span class="badge">Prompt View</span></div><div class="card-content prompt-panel" id="user-conversation-progress-table"><p class="panel-empty">Enter platform, user, channel, and channel type to load prompt context.</p></div></article>
-          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Current Carry-over Prompt View</h3><span class="badge">Prompt View</span></div><div class="card-content prompt-panel" id="user-carry-over-table"><p class="panel-empty">Enter platform, user, channel, and channel type to load carry-over.</p></div></article>
-          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Profile</h3><span class="badge">identity + relationship</span></div><div class="table-wrap flush"><table><tbody id="user-profile-table"><tr><td>Status</td><td>Enter platform and platform user ID to load profile.</td></tr></tbody></table></div></article>
-          <article class="card span-two" data-component="Card"><div class="card-header"><h3>User Memory</h3><span class="badge">redacted</span></div><div class="card-content record-list" id="user-memory-table"><p class="panel-empty">Enter platform and platform user ID to load recent memory units.</p></div></article>
-          <article class="card" data-component="Card"><div class="card-header"><h3>User Style</h3><span class="badge">guidance</span></div><div class="table-wrap flush"><table><tbody id="user-style-table"><tr><td>Status</td><td>Enter platform and platform user ID to load interaction-style guidance.</td></tr></tbody></table></div></article>
+          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Profile</h3><span class="badge">safe account identity</span></div><div class="card-content record-list" id="user-profile-table"><p class="panel-empty">Select a known user or enter an exact account.</p></div></article>
+          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Relationship</h3><span class="badge">V2 axes</span></div><div class="table-wrap flush"><table><thead><tr><th>Axis</th><th>Value</th><th>Band</th></tr></thead><tbody id="user-relationship-table"><tr><td colspan="3">Select a user to load relationship state.</td></tr></tbody></table></div></article>
+          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Causal relationship context</h3><span class="badge">native V2</span></div><div class="card-content record-list" id="user-relationship-operational-table"><p class="panel-empty">Select a user to load causal relationship context.</p></div></article>
+          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Cognition state</h3><span class="badge">V2</span></div><div class="card-content record-list" id="user-cognition-state-table"><p class="panel-empty">Select a user to load cognition state.</p></div></article>
+          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Memory</h3><span class="badge">recent units</span></div><div class="card-content record-list" id="user-memory-table"><p class="panel-empty">Select a user to load recent memory.</p></div></article>
+          <article class="card" data-component="Card"><div class="card-header"><h3>Style</h3><span class="badge">relevance · cognition · surface</span></div><div class="card-content record-list" id="user-style-table"><p class="panel-empty">Select a user to load style guidance.</p></div></article>
+          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Conversation progress</h3><span class="badge">selected thread</span></div><div class="card-content record-list" id="user-conversation-progress-table"><p class="panel-empty">Select a user and optional channel scope.</p></div></article>
+          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Carry-over</h3><span class="badge">selected thread</span></div><div class="card-content record-list" id="user-carry-over-table"><p class="panel-empty">Select a user and optional channel scope.</p></div></article>
         </div>
       </section>
 
@@ -303,12 +277,16 @@
         <div class="page-intro">
           <div>
             <h2>Groups</h2>
-            <p>Platform-group lookup for group-channel style, progress, and safe reflection-derived context.</p>
+            <p>Active-group directory with activity, review, style, continuity, and participant progress.</p>
           </div>
           <span class="badge" id="groups-status">needs input</span>
         </div>
         <article class="card" data-component="Card">
-          <div class="card-header"><h3>Platform Group Lookup</h3><span class="badge">limit 25</span></div>
+          <div class="card-header"><h3>Active groups</h3><span class="badge" id="group-directory-status">not loaded</span></div>
+          <div class="table-wrap flush"><table><thead><tr><th>Group</th><th>Platform</th><th>Messages</th><th>Participants</th><th>Last activity</th><th></th></tr></thead><tbody id="group-directory-table"><tr><td colspan="6">Open this page to load recently active groups.</td></tr></tbody></table></div>
+        </article>
+        <article class="card" data-component="Card">
+          <div class="card-header"><h3>Selected group scope</h3></div>
           <div class="card-content filter-row" data-component="FieldGroup">
             <label class="field">Platform<select class="input" id="group-platform"><option value="">Select platform</option><option value="qq">QQ (NapCat)</option><option value="discord">Discord</option><option value="debug">Debug</option></select></label>
             <label class="field">Group ID<input class="input" id="group-id" placeholder="platform group or channel id" /></label>
@@ -316,15 +294,12 @@
             <button class="btn primary" id="refresh-groups" type="button">Search</button>
           </div>
         </article>
-        <div class="content-grid three">
-          <article class="metric" id="group-summary-identity" data-component="Card"><div class="metric-label">Identity</div><div class="metric-value">needs input</div><div class="metric-label">enter group id</div></article>
-          <article class="metric" id="group-summary-carry-over" data-component="Card"><div class="metric-label">Carry-over</div><div class="metric-value">0</div><div class="metric-label">selected rows</div></article>
-          <article class="metric" id="group-summary-participant" data-component="Card"><div class="metric-label">Participant</div><div class="metric-value">needs input</div><div class="metric-label">progress status</div></article>
-        </div>
-        <div class="content-grid">
-          <article class="card" data-component="Card"><div class="card-header"><h3>Group Carry-over Prompt View</h3><span class="badge">Prompt View</span></div><div class="card-content prompt-panel" id="group-carry-over-table"><p class="panel-empty">Enter platform and group ID to load group carry-over.</p></div></article>
-          <article class="card" data-component="Card"><div class="card-header"><h3>Participant Progress Prompt View</h3><span class="badge">Prompt View</span></div><div class="card-content prompt-panel" id="group-participant-progress-table"><p class="panel-empty">Enter participant user ID to load participant progress.</p></div></article>
-          <article class="card" data-component="Card"><div class="card-header"><h3>Group Style</h3><span class="badge">guidance</span></div><div class="table-wrap flush"><table><tbody id="group-style-table"><tr><td>Status</td><td>Enter platform and group ID to load group-channel style.</td></tr></tbody></table></div></article>
+        <div class="content-grid two">
+          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Activity</h3><span class="badge">conversation metadata</span></div><div class="card-content record-list" id="group-activity-table"><p class="panel-empty">Select a group to load activity.</p></div></article>
+          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Review</h3><span class="badge">latest review</span></div><div class="card-content record-list" id="group-review-table"><p class="panel-empty">Select a group to load review state.</p></div></article>
+          <article class="card" data-component="Card"><div class="card-header"><h3>Style</h3><span class="badge">relevance · cognition · surface</span></div><div class="card-content record-list" id="group-style-table"><p class="panel-empty">Select a group to load style guidance.</p></div></article>
+          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Carry-over</h3><span class="badge">promoted continuity</span></div><div class="card-content record-list" id="group-carry-over-table"><p class="panel-empty">Select a group to load carry-over.</p></div></article>
+          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Participant progress</h3><span class="badge">optional participant</span></div><div class="card-content record-list" id="group-participant-progress-table"><p class="panel-empty">Select a group and optional participant.</p></div></article>
         </div>
       </section>
 
@@ -332,12 +307,12 @@
         <div class="page-intro">
           <div>
             <h2>Calendar</h2>
-            <p>Calendar prompt candidates, schedule definitions, and due-run backing rows.</p>
+            <p>Schedule state, bounded recent outcomes, and separately scoped cognition visibility.</p>
           </div>
           <span class="badge" id="calendar-status">not loaded</span>
         </div>
         <article class="card" data-component="Card">
-          <div class="card-header"><h3>Calendar Lookup</h3><span class="badge">limit 25</span></div>
+          <div class="card-header"><h3>Calendar Lookup</h3></div>
           <div class="card-content filter-row" data-component="FieldGroup">
             <label class="field">Platform<select class="input" id="calendar-platform"><option value="">Select platform</option><option value="qq">QQ (NapCat)</option><option value="discord">Discord</option><option value="debug">Debug</option></select></label>
             <label class="field">Channel ID<input class="input" id="calendar-platform-channel-id" placeholder="platform channel id" /></label>
@@ -346,15 +321,11 @@
             <button class="btn primary" id="refresh-calendar" type="button">Refresh</button>
           </div>
         </article>
-        <div class="content-grid three">
-          <article class="metric" data-component="Card"><div class="metric-label">Source</div><div class="metric-value">runs</div><div class="metric-label">calendar_runs due queue</div></article>
-          <article class="metric" data-component="Card"><div class="metric-label">Actions</div><div class="metric-value">read</div><div class="metric-label">no claiming or schedule edits</div></article>
-          <article class="metric" data-component="Card"><div class="metric-label">Excluded</div><div class="metric-value">safe</div><div class="metric-label">payloads, source scope, idempotency keys</div></article>
-        </div>
         <div class="content-grid two">
-          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Cognition Pending Runs Prompt View</h3><span class="badge">Prompt View</span></div><div class="card-content prompt-panel" id="calendar-prompt-runs-table"><p class="panel-empty">Enter scope to load pending calendar prompt candidates.</p></div></article>
-          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Schedule Definitions</h3><span class="badge">Operational Backing</span></div><div class="card-content operational-list" id="calendar-schedules-table"><p class="panel-empty">Open this page after login to load schedule definitions.</p></div></article>
-          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Due Runs</h3><span class="badge">Operational Backing</span></div><div class="card-content operational-list" id="calendar-due-runs-table"><p class="panel-empty">Open this page after login to load due calendar runs.</p></div></article>
+          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Summary</h3><span class="badge" id="calendar-summary-status">not loaded</span></div><div class="table-wrap flush"><table><tbody id="calendar-summary-table"><tr><td>Status</td><td>Open this page to load calendar counts.</td></tr></tbody></table></div></article>
+          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Schedules</h3><span class="badge" id="calendar-schedules-status">not loaded</span></div><div class="card-content record-list" id="calendar-schedules-table"><p class="panel-empty">Open this page to load schedule definitions.</p></div></article>
+          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Recent runs</h3><span class="badge" id="calendar-runs-status">not loaded</span></div><div class="card-content record-list" id="calendar-runs-table"><p class="panel-empty">Open this page to load recent execution outcomes.</p></div></article>
+          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Cognition visibility</h3><span class="badge" id="calendar-cognition-status">needs scope</span></div><div class="card-content record-list" id="calendar-cognition-visibility-table"><p class="panel-empty">Enter a user and channel scope to inspect visible pending candidates.</p></div></article>
         </div>
       </section>
 
@@ -362,37 +333,38 @@
         <div class="page-intro">
           <div>
             <h2>Background work</h2>
-            <p>Result-ready cognition deliveries, job queue backing rows, and sanitized worker telemetry.</p>
+            <p>Queue outcomes, one canonical job row, aggregate worker activity, errors, and delivery readiness.</p>
           </div>
-          <span class="badge" id="background-status">not loaded</span>
-        </div>
-        <article class="card" data-component="Card">
-          <div class="card-header"><h3>Worker Event Lookup</h3><span class="badge">limit 25</span></div>
-          <div class="card-content filter-row" data-component="FieldGroup">
-            <div class="field"><span>Component</span><strong>background_work.worker</strong></div>
-            <button class="btn primary" id="refresh-background" type="button">Refresh</button>
-          </div>
-        </article>
-        <div class="content-grid three">
-          <article class="metric" data-component="Card"><div class="metric-label">Source</div><div class="metric-value">events</div><div class="metric-label">event_log_events telemetry</div></article>
-          <article class="metric" data-component="Card"><div class="metric-label">Activity</div><div class="metric-value">worker</div><div class="metric-label">recent sanitized events</div></article>
-          <article class="metric" data-component="Card"><div class="metric-label">Excluded</div><div class="metric-value">safe</div><div class="metric-label">task briefs, artifacts, raw messages</div></article>
+          <div class="topbar-actions"><span class="badge" id="background-status">not loaded</span><button class="btn primary" id="refresh-background" type="button">Refresh</button></div>
         </div>
         <div class="content-grid two">
-          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Result-Ready Cognition Deliveries Prompt View</h3><span class="badge">Prompt View</span></div><div class="card-content prompt-panel" id="background-result-ready-table"><p class="panel-empty">Open this page after login to load result-ready cognition deliveries.</p></div></article>
-          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Job Queue</h3><span class="badge">Operational Backing</span></div><div class="card-content operational-list" id="background-job-queue-table"><p class="panel-empty">Open this page after login to load recent jobs.</p></div></article>
-          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Worker Events</h3><span class="badge">Operational Backing</span></div><div class="card-content operational-list" id="background-worker-events-table"><p class="panel-empty">Open this page after login to load worker telemetry.</p></div></article>
+          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Summary</h3><span class="badge" id="background-summary-status">not loaded</span></div><div class="table-wrap flush"><table><tbody id="background-summary-table"><tr><td>Status</td><td>Open this page to load queue counts.</td></tr></tbody></table></div></article>
+          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Jobs</h3><span class="badge" id="background-jobs-status">not loaded</span></div><div class="card-content record-list" id="background-jobs-table"><p class="panel-empty">Open this page to load recent jobs.</p></div></article>
+          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Worker activity</h3><span class="badge" id="background-worker-status">not loaded</span></div><div class="table-wrap flush"><table><thead><tr><th>Worker</th><th>Events</th><th>Processed</th><th>Succeeded</th><th>Failed</th><th>Skipped</th><th>Deferred</th><th>Last status</th></tr></thead><tbody id="background-worker-table"><tr><td colspan="8">Open this page to load aggregate worker activity.</td></tr></tbody></table></div></article>
+          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Errors</h3><span class="badge" id="background-errors-status">not loaded</span></div><div class="card-content record-list" id="background-errors-table"><p class="panel-empty">Open this page to load recent worker errors.</p></div></article>
+          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Delivery detail</h3><span class="badge" id="background-delivery-status">not loaded</span></div><div class="card-content record-list" id="background-delivery-table"><p class="panel-empty">Open this page to load delivery-ready jobs.</p></div></article>
         </div>
       </section>
 
       <section class="page" data-page="audit">
-        <div class="page-intro"><div><h2>Audit</h2><p>Privileged actions, auth failures, lookups, log views, and lifecycle events.</p></div><span class="badge">sanitized</span></div>
-        <div class="content-grid three">
-          <article class="metric" data-component="Card"><div class="metric-label">Privileged actions</div><div class="metric-value">all</div><div class="metric-label">start, stop, restart, debug, lookup</div></article>
-          <article class="metric" data-component="Card"><div class="metric-label">Storage</div><div class="metric-value">local</div><div class="metric-label">JSONL audit source</div></article>
-          <article class="metric" data-component="Card"><div class="metric-label">Fields</div><div class="metric-value">safe</div><div class="metric-label">operator, target, reason, request id</div></article>
+        <div class="page-intro"><div><h2>Audit</h2><p>Collapsed operator and security actions, explicit outcomes, and separately summarized page views.</p></div><button class="btn" id="refresh-audit" type="button">Refresh</button></div>
+        <article class="card" data-component="Card">
+          <div class="card-header"><h3>Filters</h3></div>
+          <div class="card-content filter-row" data-component="FieldGroup">
+            <label class="field">Category<input class="input" id="audit-category" placeholder="service, model, auth" /></label>
+            <label class="field">Event type<input class="input" id="audit-event-type" placeholder="exact event type" /></label>
+            <label class="field">Service<input class="input" id="audit-service-id" placeholder="service id" /></label>
+            <label class="field">Operator<input class="input" id="audit-operator-id" placeholder="operator id" /></label>
+            <label class="field">Outcome<select class="input" id="audit-outcome"><option value="">all outcomes</option><option value="failed">failed</option><option value="succeeded">succeeded</option><option value="requested">requested</option><option value="recorded">recorded</option></select></label>
+            <label class="field">Request id<input class="input" id="audit-request-id" placeholder="exact request id" /></label>
+            <label class="field">Since<input class="input" id="audit-since" type="datetime-local" /></label>
+          </div>
+        </article>
+        <div class="content-grid two">
+          <article class="card"><div class="card-header"><h3>Action outcomes</h3></div><div class="table-wrap flush"><table><tbody id="audit-outcome-facets"><tr><td>Status</td><td>Refresh to load counts.</td></tr></tbody></table></div></article>
+          <article class="card"><div class="card-header"><h3>Page views</h3></div><div class="table-wrap flush"><table><tbody id="audit-view-summary"><tr><td>Status</td><td>Refresh to load summarized views.</td></tr></tbody></table></div></article>
         </div>
-        <article class="card"><div class="card-header"><h3>Audit List</h3><span class="badge">local JSONL</span></div><div class="table-wrap flush"><table><thead><tr><th>Time</th><th>Event</th><th>Target</th><th>Status</th></tr></thead><tbody id="audit-table"></tbody></table></div></article>
+        <article class="card"><div class="card-header"><h3>Actions</h3><span class="badge" id="audit-action-count">not loaded</span></div><div class="table-wrap flush"><table><thead><tr><th>Time</th><th>Action</th><th>Target</th><th>Outcome</th><th>Operator</th><th>Reason</th></tr></thead><tbody id="audit-table"><tr><td colspan="6">Refresh to load collapsed actions.</td></tr></tbody></table></div></article>
       </section>
 
     </main>

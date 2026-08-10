@@ -9,7 +9,7 @@
 - Storage readers:
   - `kazusa_ai_chatbot.db.conversation.list_conversation_rows_by_row_ids`
   - `kazusa_ai_chatbot.db.llm_tracing.list_llm_trace_steps_for_trace_ids`
-- Prompt consumer: L2a consciousness only, via
+- Prompt consumer: Cognition Core V2 goal cognition only, via
   `past_dialog_cognition_context`
 - Non-goals: durable memory, public RAG evidence, dialog planning, L3 surface
   rendering, adapter delivery, scheduler/reflection input, trace backfill, and
@@ -26,10 +26,10 @@ connects to the current conversation.
 Visible prior dialog text can be insufficient because it shows only the final
 surface sentence, not the private cognition that produced it. When protected
 full-capture LLM traces are available, this package can recover a compact
-residual from selected parsed cognition-stage outputs and give L2a enough
-continuity to interpret the current turn. When traces are unavailable, the
-system intentionally projects nothing. That is treated as normal forgetting,
-not as an error state for the live response path.
+residual from selected parsed cognition-stage outputs and give goal cognition
+enough continuity to interpret the current turn. When traces are unavailable,
+the system intentionally projects nothing. That is treated as normal
+forgetting, not as an error state for the live response path.
 
 This package is not a memory system. It does not retrieve arbitrary old
 thoughts, search by user wording, infer whether the user is asking about the
@@ -51,7 +51,7 @@ User: "What did you mean by that?"
 The service already has a `reply_to_message_id`. This package can load the
 replied conversation row, confirm it is a Kazusa-authored assistant row with an
 `llm_trace_id`, read selected trace steps, and project a bounded
-`past_dialog_cognition_context` for L2a.
+`past_dialog_cognition_context` for V2 goal cognition.
 
 This private lookup is separate from visible reply hydration. It still runs
 when adapter-supplied reply metadata is complete and `_hydrate_reply_context`
@@ -87,7 +87,7 @@ The package returns an empty context when:
 - MongoDB read failures prevent row or trace lookup.
 
 The caller should continue the normal response path with no
-`past_dialog_cognition_context` projected to L2a.
+`past_dialog_cognition_context` projected to V2 goal cognition.
 
 ## Ownership Boundary
 
@@ -109,9 +109,10 @@ The package does not own:
 - semantic or keyword matching over user text;
 - RAG retrieval planning or public evidence wording;
 - direct reply visible metadata hydration;
-- L2a prompt wording outside the `past_dialog_cognition_context` contract;
-- L2b, L2c1, L2c2, L2d, L3, dialog, consolidation, scheduler, reflection, or
-  adapter behavior.
+- V2 goal-cognition prompt wording outside the
+  `past_dialog_cognition_context` contract;
+- semantic appraisal, workspace collapse, action planning, L3, dialog,
+  consolidation, scheduler, reflection, or adapter behavior.
 
 ## Public Facade
 
@@ -279,7 +280,7 @@ include:
 The current caps are:
 
 - at most `3` dialogs;
-- at most `1800` characters for the combined L2a context;
+- at most `1800` characters for the combined goal-cognition context;
 - bounded per-field and visible-dialog snippets in projection.
 
 ## Runtime Integration
@@ -312,14 +313,15 @@ resolver observations or resolver state projections.
 
 ### Cognition And Surface Boundary
 
-`past_dialog_cognition_context` is part of the private cognition input lane.
-The persona connector may carry it into `ConversationContextPromptV1` so the
-cognition core can place it in L2a. L2a includes the field in the human payload
-only when it is non-empty.
+`past_dialog_cognition_context` is a distinct optional
+`CognitionCoreInputV2` field. The persona connector maps the producer-owned
+state field separately from `private_continuity_context` and caps it at 1,800
+characters. V2 input validation canonicalizes omission to `""`.
 
-Selected L3 text-surface construction must strip the field from the nested
-chain input before building `CognitionTextSurfaceInputV1`. L3, dialog, and
-surface planning receive only the normal cognition outputs produced after L2a.
+The V2 facade projects the field only into goal-cognition branch context.
+Semantic appraisal, workspace collapse, action planning, output projection,
+L3, dialog, and surface planning receive only the normal cognition outputs
+produced after goal judgment.
 
 ## Failure Behavior
 
@@ -345,7 +347,7 @@ cognition summary. It must preserve these boundaries:
 - no private residual in dialog text or adapter payloads;
 - no residual in durable memory, reflection, scheduler, dispatcher, or
   message-envelope projections;
-- no diagnostic ids in L2a prompt context;
+- no diagnostic ids in goal-cognition prompt context;
 - no ordinary UI display of diagnostics or trace linkage.
 
 The package may expose diagnostics to deterministic tests and protected debug
@@ -356,11 +358,9 @@ inspection only.
 Do not feed `past_dialog_cognition_context`, raw trace steps, or residual
 diagnostics to:
 
-- L1 subconscious cognition;
-- L2b boundary appraisal;
-- L2c1 judgment synthesis;
-- L2c2 social context appraisal;
-- L2d action selection;
+- semantic appraisal;
+- workspace collapse;
+- action planning;
 - L3 surface planning;
 - dialog rendering;
 - public RAG projection or RAG finalizer text;
@@ -369,7 +369,7 @@ diagnostics to:
 - adapters or delivery receipts;
 - dispatcher, scheduler, proactive output, or reflection cycle.
 
-Only L2a may consume the non-empty prompt-facing
+Only V2 goal cognition may consume the non-empty prompt-facing
 `past_dialog_cognition_context`.
 
 ## Verification Expectations
@@ -380,19 +380,21 @@ Deterministic verification should cover:
 - metadata-mode empty `parsed_output` returns empty context;
 - DB read failures are treated as forgetting;
 - non-Kazusa and non-assistant rows are filtered before trace lookup;
-- only approved L2a and L2c1 parsed fields are projected;
+- only the approved historical cognition-stage parsed fields are projected;
 - raw trace fields and ids never appear in prompt context;
 - max dialog and character caps are enforced;
 - direct reply lookup works even when visible reply metadata is complete;
 - RAG source refs use row ids, not unscoped platform message ids;
 - public `rag_result` and `conversation_evidence` are not mutated;
 - `ResolverObservationV1` has no residual field;
-- L2a receives non-empty context and omits empty context;
-- L1, L2c1, L3, dialog, public RAG, consolidation, scheduler, reflection, and
-  adapters do not receive the field.
+- V2 goal cognition receives non-empty context and accepts the canonical empty
+  value;
+- semantic appraisal, workspace collapse, action planning, L3, dialog, public
+  RAG, consolidation, scheduler, reflection, and adapters do not receive the
+  field.
 
 Real LLM validation is separate from deterministic contract verification. A
 quality test for the motivating use case should seed or select a prior Kazusa
 dialog with full parsed trace output, send a reply-style "what did you mean?"
-turn, inspect the L2a trace, and confirm the final response uses the residual
-for continuity without exposing private monologue verbatim.
+turn, inspect the V2 goal-cognition trace, and confirm the final response uses
+the residual for continuity without exposing private monologue verbatim.

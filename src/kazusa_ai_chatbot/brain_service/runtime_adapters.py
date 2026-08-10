@@ -14,6 +14,7 @@ def register_runtime_adapter_payload(
     req: RuntimeAdapterRegistrationRequest,
     *,
     status: str,
+    character_name: str,
     register_remote_runtime_adapter_func: Callable[..., None],
 ) -> RuntimeAdapterRegistrationResponse:
     """Register one remote adapter payload and return a normalized response.
@@ -21,6 +22,7 @@ def register_runtime_adapter_payload(
     Args:
         req: Remote adapter registration or heartbeat payload.
         status: Response status string to return to the caller.
+        character_name: Active brain-owned character display name.
         register_remote_runtime_adapter_func: Service-level registration hook.
 
     Returns:
@@ -30,18 +32,16 @@ def register_runtime_adapter_payload(
     registration_kwargs = {
         "platform": req.platform,
         "callback_url": req.callback_url,
+        "platform_bot_id": req.platform_bot_id,
         "shared_secret": req.shared_secret,
         "timeout_seconds": req.timeout_seconds,
     }
-    if req.platform_bot_id:
-        registration_kwargs["platform_bot_id"] = req.platform_bot_id
-    if req.display_name:
-        registration_kwargs["display_name"] = req.display_name
 
     register_remote_runtime_adapter_func(**registration_kwargs)
     response = RuntimeAdapterRegistrationResponse(
         status=status,
         platform=req.platform,
         callback_url=req.callback_url,
+        character_name=character_name,
     )
     return response

@@ -61,7 +61,7 @@ At a high level, Kazusa provides:
 | Bounded live response path       | Typed intake, frontline relevance, turn settlement, settled relevance, the cognition resolver, selected evidence capabilities, action routing, and L3 surfaces are explicit stages with caps and inspectable payloads. |
 | Multi-horizon memory             | Recent chat, short-term conversation flow, retrieved evidence, durable memory, and scheduled commitments remain separate.          |
 | Internal monologue residue       | A short private residue lane carries bounded first-person reasons from completed episodes into the next L2a cognition pass.       |
-| RAG3 local context recall        | Demand-driven graph resolver dispatches local evidence subagents and projects prompt-safe local/private evidence, including session image observations, when cognition asks through `local_context_recall`. |
+| Task resolution                  | One resolver capability runs a bounded inline session over local context, public research, coding, and text/computation specialists, then returns evidence or promotes the same checkpoint. |
 | Layered cognition                | Cognition decides stance, boundaries, judgment, style, action needs, and response goals before selected L3 surfaces render output. |
 | Background consolidation         | Completed episodes update durable memory, relationship state, Cache2 invalidation, images, and progress from text plus action/surface traces. |
 | Accepted delayed work            | Accepted reminders, text tasks, and coding tasks are persisted, routed to internal background workers, and returned through cognition rather than sent directly. |
@@ -104,7 +104,19 @@ HOWTO. One working-style configuration looks like this:
 | `RAG_SUBAGENT_LLM`         | `local-model`                            | `http://localhost:1234/v1` |
 | `WEB_SEARCH_LLM`           | `local-model`                            | `http://localhost:1234/v1` |
 | `COGNITION_LLM`            | `local-model`                            | `http://localhost:1234/v1` |
-| `BOUNDARY_CORE_LLM`        | `local-model`                            | `http://localhost:1234/v1` |
+| `COGNITION_LLM_CHARACTER_CARRYOVER` | `local-model`                     | `http://localhost:1234/v1` |
+| `COGNITION_LLM_APPRAISAL_EVENT_AGENCY` | `local-model`                | `http://localhost:1234/v1` |
+| `COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL` | `local-model`          | `http://localhost:1234/v1` |
+| `COGNITION_LLM_APPRAISAL_MORAL_IDENTITY` | `local-model`              | `http://localhost:1234/v1` |
+| `COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME` | `local-model`          | `http://localhost:1234/v1` |
+| `COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY` | `local-model` | `http://localhost:1234/v1` |
+| `COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE` | `local-model`            | `http://localhost:1234/v1` |
+| `COGNITION_LLM_GOAL_ORDINARY_RESPONSE` | `local-model`                 | `http://localhost:1234/v1` |
+| `COGNITION_LLM_GOAL_ACTIVE_BRANCH` | `local-model`                      | `http://localhost:1234/v1` |
+| `COGNITION_LLM_WORKSPACE_COLLAPSE` | `local-model`                       | `http://localhost:1234/v1` |
+| `COGNITION_LLM_ACTION_PLANNING` | `local-model`                          | `http://localhost:1234/v1` |
+| `COGNITION_LLM_ACTION_AUTHORIZATION` | `local-model`                     | `http://localhost:1234/v1` |
+| `COGNITION_LLM_RESOLVER_AUTHORIZATION` | `local-model`                   | `http://localhost:1234/v1` |
 | `BACKGROUND_WORK_LLM`      | `local-model`                            | `http://localhost:1234/v1` |
 | `CODING_AGENT_PM_LLM`      | `local-model`                            | `http://localhost:1234/v1` |
 | `CODING_AGENT_PROGRAMMER_LLM` | `local-model`                          | `http://localhost:1234/v1` |
@@ -116,6 +128,18 @@ HOWTO. One working-style configuration looks like this:
 The table is an example, not a fixed requirement. Any route can point to any
 OpenAI-compatible endpoint that can satisfy that stage's latency and quality
 needs.
+
+`COGNITION_LLM` remains the generic cognition route for callers outside
+Cognition Core V2. Core V2 uses the thirteen independent stage routes above;
+each route owns a complete endpoint, credential, model, completion-budget, and
+thinking bundle with no route inheritance or fallback.
+`COGNITION_LLM_CHARACTER_CARRYOVER` is the dedicated state-only background
+operational carry-over route and has a maximum completion budget of 8,192
+tokens.
+Typed required-selection goal turns deliberately use
+`COGNITION_LLM_GOAL_ORDINARY_RESPONSE` for every branch, so configure that
+route with the denser goal model. Active persistent-goal turns without a typed
+required selection continue to use `COGNITION_LLM_GOAL_ACTIVE_BRANCH`.
 
 Code-reading uses separate required routes for PM decisions and programmer
 workers. Final synthesis intentionally reuses `CODING_AGENT_PM_LLM`; there is
@@ -166,6 +190,12 @@ owns open-slot projection, bounded silent-prelude promotion, enqueue-time
 deadlines, and the pre-deadline ingress barrier. One response owner receives
 the assembled reply; appended request futures complete silently. A valid
 `proceed` is atomically claimed before persona preparation and cognition run.
+For group chat, admission requires either evidence-grounded interaction
+relevance—such as typed addressing, an explicit group invitation, complete-name
+address, or grounded continuity—or a concrete intersection with bounded active
+character state. Relevance owns that semantic judgment. Recipient identity is
+kept separate from the reason to speak, allowing a believable state-driven
+interjection without treating another participant as the character.
 Coalesced private fragments are shown to frontline as one logical input. The
 four-image description budget is shared across reassessments, and omitted
 media is explicit so settled relevance can fail closed before cognition.
@@ -236,22 +266,19 @@ flowchart TD
 
     subgraph ResolverCaps["Cognition-selected resolver capabilities"]
         RC0["Deterministic capability executor [deterministic]<br/>one immediate request per cycle"]
-        RC1["local_context_recall<br/>RAG3 local context evidence"]
-        RC2["public_answer_research<br/>complex task resolver"]
-        RC3["human_clarification<br/>pending HIL row"]
-        RC4["approval_preparation<br/>pending approval row"]
-        RC5["self_goal_resolution<br/>private internal-source handling"]
-        RC6["Resolver observation<br/>prompt-safe result for next cycle"]
+        RC1["task_resolution_request<br/>bounded inline or durable evidence session"]
+        RC2["human_clarification<br/>pending HIL row"]
+        RC3["approval_preparation<br/>pending approval row"]
+        RC4["self_goal_resolution<br/>private internal-source handling"]
+        RC5["Resolver observation<br/>prompt-safe result for next cycle"]
         RC0 --> RC1
         RC0 --> RC2
         RC0 --> RC3
         RC0 --> RC4
-        RC0 --> RC5
-        RC1 --> RC6
-        RC2 --> RC6
-        RC3 --> RC6
-        RC4 --> RC6
-        RC5 --> RC6
+        RC1 --> RC5
+        RC2 --> RC5
+        RC3 --> RC5
+        RC4 --> RC5
     end
 
     subgraph RAG3["RAG3 local context resolver"]
@@ -300,20 +327,18 @@ flowchart TD
 
     subgraph Actions["Action spec, accepted tasks, and background workers"]
         A0["ActionSpec materialization and evaluator [deterministic]"]
-        A1["Visible/private capabilities<br/>speak<br/>memory_lifecycle_update<br/>accepted_task_request<br/>accepted_task_status_check<br/>future_speak<br/>trigger_future_cognition"]
-        A2["Internal executable actions<br/>apply_memory_lifecycle_update<br/>background_work_request"]
+        A1["Visible/private capabilities<br/>speak<br/>memory_lifecycle_update<br/>accepted_coding_task_request<br/>accepted_task_status_check<br/>future_speak<br/>trigger_future_cognition"]
+        A2["Internal executable actions<br/>apply_memory_lifecycle_update"]
         AT["accepted_task lifecycle<br/>identity, duplicate rejection, result-ready state"]
-        BW0["background_work runtime [LLM route only]<br/>router chooses worker only"]
-        BW1["text_artifact worker [worker]<br/>task router + generator"]
+        BW0["background_work runtime [deterministic dispatch]"]
+        BW1["task_orchestrator worker<br/>resumes checkpoints and bound coding runs"]
         BW2["future_speak worker [deterministic worker]<br/>schedules future cognition"]
-        BW3["coding_agent worker [worker]<br/>code-reading answers / new-artifact proposals<br/>no patch apply or command execution"]
         A0 --> A1
         A1 --> A2
         A2 --> AT
         AT --> BW0
         BW0 --> BW1
         BW0 --> BW2
-        BW0 --> BW3
     end
 
     subgraph Maintenance["Background and durable subsystems"]
@@ -321,19 +346,20 @@ flowchart TD
         SC["self_cognition worker<br/>active commitment, recent dialog, topic follow-up, group review cases"]
         REF["reflection_cycle worker<br/>hourly slot, daily channel, global promotion, affect settling"]
         ME["memory_evolution<br/>shared memory insert, supersede, merge, seed reset"]
-        GG["global_character_growth<br/>promoted trait drift"]
+        IG["character_identity_growth<br/>reviewed immutable identity revisions"]
         CONS["consolidation<br/>target plan -> source views -> lane router -> lane review -> write-intent validation -> persistence"]
         DISP["dispatcher [deterministic]<br/>registered adapter callback delivery for trusted sends"]
-        PRO["proactive_output<br/>permissioned preview/outbox contract, no production send path"]
+        TR["EpisodeTraceV2 + post-turn lifecycle<br/>immutable terminal evidence and idempotent audit"]
         CAL --> SC
         CAL --> REF
         REF --> ME
-        REF --> GG
+        REF --> IG
         REF --> SC
         SC --> DISP
         SC --> CONS
+        CONS --> IG
         CONS --> ME
-        GG --> H
+        IG --> H
         ME --> H
     end
 
@@ -343,8 +369,8 @@ flowchart TD
     R5 -->|terminal semantic action requests| A0
     A0 --> P2
     P2A --> AT
-    BW1 -->|accepted_task_result_ready| P1
-    BW3 -->|accepted_task_result_ready| P1
+    BW1 -->|tool_result| P1
+    BW3 -->|tool_result| P1
     BW2 --> CAL
     CAL -->|future or due source case| SC
     SC -->|shared cognition path| P0
@@ -370,29 +396,48 @@ generic tool harness. Adapters normalize platform events into the typed service
 contract; the brain service owns queueing, identity, reply hydration, history,
 episode construction, and graph execution.
 
+### Short-horizon operational carry-over
+
+The singleton character `CharacterCognitionStateV2` is the only persistent
+short-horizon global posture. A settled turn first waits for the bounded
+predecessor barrier, then reuses one immutable interaction-style snapshot for
+relevance, V2 cognition, and L3 surface. Eligible background consolidation may
+derive one source-free character operational update through the dedicated
+carry-over route; current message, history, and conversation progress remain
+the authority for facts and topic.
+
+The latest cognition graph exposes only its source-owned,
+`cognition_context_consumption.v1` projection under
+`l2.reasoning.detail.context_consumption`. It records bounded consumed
+character/relationship/style selections and typed health without source ids,
+raw messages, evidence references, prompts, or private facts. The Control
+Console renders that payload directly alongside persisted and elapsed-effective
+character posture.
+
 The named specialist boxes are family-local subagents and workers, not one
 universal runtime abstraction. RAG3 resolves local context through
 resolver-local stage agents and projects retained `rag_result` evidence;
 retired RAG2 helper modules remain source-level evidence tooling and tests.
 `web_agent3` owns its
 source subagents; the complex-task resolver owns resolver-local evidence and
-algorithmic subagents; background work owns delayed-work workers. The
-top-level map keeps the coding-agent worker coarse; its fetching, reading,
-writing, PM, and programmer roles are owned by the
+algorithmic subagents; task resolution owns the bounded cross-domain session;
+and background work owns durable resumption. The coding specialist consumes
+only the frozen public coding-run boundary documented in the
 [Coding Agent ICD](src/kazusa_ai_chatbot/coding_agent/README.md).
 
 The resolver preserves the same L1 -> L2 -> L2d cognition stack on every
 cycle. L2d may finish with selected action specs, or it may request one bounded
-capability observation through `local_context_recall`, `public_answer_research`,
+capability observation through `task_resolution_request`,
 `human_clarification`, `approval_preparation`, or `self_goal_resolution`. The
-observation is projected into the next cognition cycle; evidence never speaks
-as persona by itself.
+task-resolution service owns local/public/coding/text-computation specialist
+selection and returns one prompt-safe observation to the next cognition cycle;
+evidence never speaks as persona by itself.
 
-RAG3 local context recall runs only when L2d selects
-`local_context_recall`. The separate first-cycle shared-memory prewarm may
-project confirmed shared-memory rows into L2a before the first cognition pass;
-it is not a resolver capability observation and it does not let retrieved
-evidence become persona.
+The task-resolution local-context specialist invokes the RAG3 local resolver
+when its bounded orchestrator selects that domain. The separate first-cycle
+shared-memory prewarm may project confirmed shared-memory rows into L2a before
+the first cognition pass; it is not a resolver capability observation and it
+does not let retrieved evidence become persona.
 
 Selected visible text surfaces go back to adapters through `ChatResponse` and
 delivery receipts. Private action results, no-visible-output decisions, and
@@ -400,18 +445,14 @@ surface traces can still feed post-turn progress, consolidation, Cache2
 invalidation, residue recording, calendar state, reflection, and
 self-cognition without creating a platform send.
 
-Delayed user work is selected by cognition as an accepted task. L2d sees the
-semantic `accepted_task_request` and `accepted_task_status_check` affordances;
-deterministic action-spec execution materializes new accepted tasks into the
-internal `background_work` executor only after duplicate rejection and durable
-lifecycle persistence. A route-only background-work router chooses the worker
-after the live turn. Worker-local classification stays inside the selected
-worker: the text-artifact worker has its own task router/generator, and the
-coding-agent worker has its own read-versus-write supervisor before returning
-bounded answers or proposal artifacts. Completed accepted tasks return as
-`accepted_task_result_ready` cognition rather than being sent directly by
-workers. Legacy background-artifact and legacy background-work rows remain
-compatibility data, not the new model-facing runtime contract.
+Generic evidence work is selected through the resolver and begins inline as a
+task-resolution session. Deterministic budget exhaustion promotes the same
+checkpoint to an accepted task and a task-orchestrator job. `future_speak` and
+bound coding continuations are retained action lifecycles; status checks read
+existing accepted-task state without creating work. The task orchestrator
+chooses one specialist per dispatch and resumes its persisted counters after a
+lease retry. Completed accepted tasks return as the canonical `tool_result`
+cognition source rather than being sent directly by workers.
 
 ## Real Debug Example Flows
 
@@ -509,12 +550,11 @@ flowchart TD
 The important transfer is the future task, not the queue machinery. Cognition
 decides whether Kazusa should accept the reminder. After that decision,
 deterministic code stores the accepted task and queues the internal future
-work. In implementation terms, cognition selects an `accepted_task_request`
-action spec; deterministic execution persists it, creates the internal
-`background_work` request, and `future_speak` schedules a `future_cognition`
-calendar run. At due time, self-cognition, dialog, and dispatcher decide
-whether and how to send the reminder. The background worker does not write
-final chat text directly.
+work. In implementation terms, cognition selects a `future_speak` action spec;
+deterministic execution persists its accepted task and schedules a
+`future_cognition` calendar run. At due time, self-cognition, dialog, and
+dispatcher decide whether and how to send the reminder. The background worker
+does not write final chat text directly.
 
 ### Example 4: Complex Public Research Packet
 
@@ -621,12 +661,13 @@ cognition, and calendar scheduling remain in the platform-neutral core.
 | Conversation progress    | Short-term episode state used by cognition to avoid loops and stale reopenings          | [Conversation Progress](src/kazusa_ai_chatbot/conversation_progress/README.md)         |
 | Internal monologue residue | Short-lived private first-person residue loaded only into L2a cognition               | [Internal Monologue Residue ICD](src/kazusa_ai_chatbot/internal_monologue_residue/README.md) |
 | Cognition resolver       | Bounded recurrence state, capability observations, HIL/pending resume, and cycle traces | [Cognition Resolver ICD](src/kazusa_ai_chatbot/cognition_resolver/README.md)            |
-| Local context resolver   | RAG3 local/private evidence graph, projection, and production `local_context_recall`    | [Local Context Resolver ICD](src/kazusa_ai_chatbot/local_context_resolver/README.md)   |
+| Task resolution          | Inline-first generic evidence session and durable checkpoint promotion                   | [Task Resolution ICD](src/kazusa_ai_chatbot/task_resolution/README.md)                 |
+| Local context resolver   | RAG3 local/private evidence graph and task-resolution specialist public IO               | [Local Context Resolver ICD](src/kazusa_ai_chatbot/local_context_resolver/README.md)   |
 | Retired RAG 2 helpers    | Historical slot-driven helper-agent retrieval and Cache2 evidence projection           | [Retired RAG 2](src/kazusa_ai_chatbot/rag/README.md)                                  |
 | Cognition and dialog     | Character stance, boundaries, judgment, style, visual directives, and final wording     | [Cognition Nodes](src/kazusa_ai_chatbot/nodes/README.md)                              |
 | Action spec              | L2d action residues, capability registry, evaluator, results, surfaces, and traces      | [Action Spec](src/kazusa_ai_chatbot/action_spec/README.md)                            |
 | Accepted task            | User-facing lifecycle for delayed work accepted by the character                        | [Accepted Task ICD](src/kazusa_ai_chatbot/accepted_task/README.md)                    |
-| Background work          | Internal delayed-work executor, worker routing, and result handoff                      | [Background Work ICD](src/kazusa_ai_chatbot/background_work/README.md)                |
+| Background work          | Internal task-orchestrator/future-speak execution and result handoff                    | [Background Work ICD](src/kazusa_ai_chatbot/background_work/README.md)                |
 | Coding agent             | Standalone coding-task supervisor, source fetching, read-only answers, and new-artifact proposals | [Coding Agent ICD](src/kazusa_ai_chatbot/coding_agent/README.md)            |
 | Consolidation            | Durable target planning, lane routing/review, write-intent validation, and target-specific persistence | [Consolidation ICD](src/kazusa_ai_chatbot/consolidation/README.md)                    |
 | Database                 | MongoDB collection ownership, embeddings, indexes, public persistence helpers           | [Database ICD](src/kazusa_ai_chatbot/db/README.md)                                     |
@@ -636,8 +677,8 @@ cognition, and calendar scheduling remain in the platform-neutral core.
 | Self-cognition           | Idle source collection, self-cognition episodes, route tracking, and source-bound delivery | [Self-Cognition](src/kazusa_ai_chatbot/self_cognition/README.md)                    |
 | Reflection cycle         | Background reflection runs, promotion gates, prompt-safe reflection context             | [Reflection Cycle ICD](src/kazusa_ai_chatbot/reflection_cycle/README.md)               |
 | Memory evolution         | Curated shared memory lifecycle, lineage, seed reset, promoted memory writes            | [Memory Evolution ICD](src/kazusa_ai_chatbot/memory_evolution/README.md)               |
-| Global character growth  | Slow promoted-trait drift from approved reflection memory                               | [Global Character Growth ICD](src/kazusa_ai_chatbot/global_character_growth/README.md) |
-| Proactive output         | Permissioned preview/outbox contracts for future autonomous contact paths               | [Proactive Output ICD](src/kazusa_ai_chatbot/proactive_output/README.md)               |
+| Character identity growth | Reviewed, root-counted global identity revisions and latest-only runtime projection     | [Character Identity Growth](src/kazusa_ai_chatbot/character_identity_growth/README.md) |
+| Episode trace and lifecycle | Immutable `episode_trace.v2` settlement and idempotent post-turn audit records       | [Brain Service ICD](src/kazusa_ai_chatbot/brain_service/README.md)                    |
 
 Other project documents:
 
@@ -664,11 +705,17 @@ pip install -U pip
 pip install -e ".[dev]"
 ```
 
-Load a character profile before starting the brain:
+The service requires a manually seeded character identity ledger. Before the
+first startup against a clean database, load one complete canonical profile:
 
 ```powershell
-python -m scripts.load_character_profile personalities/kazusa.json
+venv\Scripts\python -m scripts.load_character_profile personalities\example.json
 ```
+
+Startup reads the latest immutable identity revision and fails before intake
+when no revision exists. Existing ledgers remain database-authoritative. A
+replacement profile requires the explicit revisioned operator-reset command
+documented in [docs/HOWTO.md](docs/HOWTO.md#character-profile).
 
 Normal local operation starts the buildless Python/FastAPI control console,
 then uses the console to start or stop the brain and adapters:
@@ -712,7 +759,8 @@ src/
     nodes/                     Persona, cognition, and dialog stages
     action_spec/               Modality-neutral action contracts, registry, results
     accepted_task/             User-facing accepted delayed-work lifecycle
-    background_work/           Internal delayed-work executor and workers
+    background_work/           Internal task-orchestrator and future-speak execution
+    task_resolution/           Inline-first semantic evidence orchestration
     coding_agent/              Standalone coding-task supervisor and subagents
     consolidation/             Durable consolidation helpers, lane routing, and ICD
     local_context_resolver/    RAG3 local/private evidence graph and retained projection
@@ -726,8 +774,9 @@ src/
     self_cognition/            Idle self-cognition triggers, tracking, and delivery
     reflection_cycle/          Background reflection and promotion
     memory_evolution/          Shared memory lifecycle and seed reset
-    global_character_growth/   Slow promoted character-growth traits
-    proactive_output/          Permissioned proactive preview contracts
+    character_identity_growth/ Reviewed identity semantics and runtime projection
+    character_profile.py       Canonical manual-seed profile validation
+    db/internal_action_latches.py  Durable internal-thought continuation latches
   scripts/                     Operator and maintenance CLIs
 docs/
   HOWTO.md                     Setup, runtime commands, environment, tests
@@ -744,6 +793,19 @@ Default test runs exclude live DB and live LLM tests through `pytest.ini`.
 ```powershell
 venv\Scripts\python -m pytest -q
 ```
+
+When a production module under the Cognition V2, cognition-resolver, or named
+direct-node ownership boundary changes, run the exact source-to-test impact
+check from the recorded baseline:
+
+```powershell
+venv\Scripts\python -m scripts.validate_test_impact --base-ref HEAD --run
+```
+
+The command validates the ownership manifest, verifies exact pytest node
+collection, and runs the mapped deterministic unit tests. The canonical unit
+layout mirrors source modules under `tests/unit/`; integration and live-LLM
+tests remain supplemental evidence.
 
 Live LLM tests must be run one case at a time with output inspected. Live DB
 tests require MongoDB. See [docs/HOWTO.md](docs/HOWTO.md#testing) for the

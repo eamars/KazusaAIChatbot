@@ -66,6 +66,7 @@ def e2e_console(
         brain_base_url: str | None = None,
         service_registry_path: Path | None = None,
         sse_interval_seconds: float = 2.0,
+        use_live_project_db: bool = False,
     ) -> E2EConsoleProcess:
         nonlocal registry_counter
         effective_brain_url = brain_base_url
@@ -86,6 +87,7 @@ def e2e_console(
             artifact_dir=e2e_artifact_dir,
             service_registry_path=effective_registry_path,
             sse_interval_seconds=sse_interval_seconds,
+            use_live_project_db=use_live_project_db,
         )
         console = E2EConsoleProcess(config)
         return console

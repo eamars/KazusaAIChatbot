@@ -41,7 +41,12 @@ async def test_proceed_requires_claim_before_downstream_cognition() -> None:
         return {"conversation_episode_state": None}
 
     async def _persona(_state):
-        return {"final_dialog": ["claimed"]}
+        return {
+            "final_dialog": ["claimed"],
+            "cognition_state_committed": True,
+            "cognition_core_output": {"intention": {"route": "speech"}},
+            "cognition_state_update": {},
+        }
 
     async def _multimedia(_state):
         raise AssertionError("media node should not run for this text case")

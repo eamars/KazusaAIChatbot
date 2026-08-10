@@ -5,15 +5,17 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import Callable
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 
+import httpx
 from json_repair import repair_json
 from langchain_core.messages import HumanMessage, SystemMessage
+from openai import OpenAIError
 
 from kazusa_ai_chatbot.config import (
-    AFFINITY_MAX,
-    AFFINITY_MIN,
     JSON_REPAIR_LLM_API_KEY,
     JSON_REPAIR_LLM_BASE_URL,
     JSON_REPAIR_LLM_MODEL,
@@ -29,9 +31,35 @@ from kazusa_ai_chatbot.llm_interface import (
     LLMCallConfig,
     LLMThinkingConfig,
 )
+
 logger = logging.getLogger(__name__)
 
+JsonRepairTraceHook = Callable[..., None]
+
 _IMAGE_DESCRIPTION_ELLIPSIS = "..."
+_HEADING_PREFIXED_JSON_KEY = re.compile(
+    r'(?m)^([ \t]*)#{1,6}[ \t]+([A-Za-z_][A-Za-z0-9_]*)"[ \t]*:'
+)
+_FENCED_JSON_OBJECT = re.compile(
+    r"```(?:json)?[ \t]*\r?\n?(.*?)```",
+    flags=re.IGNORECASE | re.DOTALL,
+)
+
+
+def _deterministic_json_candidates(raw_output: str) -> tuple[str, ...]:
+    """Return transport candidates with the newest fenced object first."""
+
+    fenced_objects = [
+        match.group(1).strip()
+        for match in _FENCED_JSON_OBJECT.finditer(raw_output)
+        if match.group(1).lstrip().startswith("{")
+    ]
+    if not fenced_objects:
+        return (raw_output,)
+
+    candidates = [*reversed(fenced_objects), raw_output]
+    return_value = tuple(candidates)
+    return return_value
 
 
 def _is_image_attachment(attachment: dict) -> bool:
@@ -442,6 +470,7 @@ def parse_json_with_llm(
     broken_string: str,
     *,
     expected_output_format: str | None = None,
+    repair_trace_hook: JsonRepairTraceHook | None = None,
 ) -> dict:
     """Repair malformed JSON text by asking the configured JSON-repair LLM.
 
@@ -449,6 +478,8 @@ def parse_json_with_llm(
         broken_string: Raw malformed JSON-like text returned by an LLM.
         expected_output_format: Optional target output contract shown to the
             original LLM.
+        repair_trace_hook: Optional protected trace callback for the repair
+            model attempt.
 
     Returns:
         Parsed JSON object from the repaired response, or ``{}`` if repair does
@@ -468,23 +499,66 @@ def parse_json_with_llm(
             ensure_ascii=False,
         )
     )
-    response = _parse_json_with_llm.invoke([system_prompt, human_message], config=_parse_json_with_llm_config)
+    request_messages = [system_prompt, human_message]
+    started_at = perf_counter()
+    try:
+        response = _parse_json_with_llm.invoke(
+            request_messages,
+            config=_parse_json_with_llm_config,
+        )
+    except (
+        OpenAIError,
+        httpx.HTTPError,
+        ConnectionError,
+        OSError,
+        RuntimeError,
+        TimeoutError,
+    ) as exc:
+        if repair_trace_hook is not None:
+            repair_trace_hook(
+                messages=request_messages,
+                response_text="",
+                parsed_output={},
+                parse_status="provider_error",
+                status="failed",
+                config=_parse_json_with_llm_config,
+                validation_error=str(exc),
+                started_at=started_at,
+            )
+        raise
 
     # Strip the markdown fence just in case
     json_string = response.content.strip().strip("```").strip("json")
 
     # Use repair_json which handles both valid and broken JSON
+    validation_error = ""
     try:
         decoded_json_dict = repair_json(json_string, return_objects=True)
     except Exception as exc:
         logger.exception(f"LLM JSON repair response could not be parsed: {exc}")
         decoded_json_dict = {}
+        validation_error = str(exc)
 
     if not isinstance(decoded_json_dict, dict):
         logger.error(
             f"LLM JSON repair returned non-object output: {decoded_json_dict}"
         )
+        validation_error = "LLM JSON repair returned non-object output"
         decoded_json_dict = {}
+
+    parse_status = "succeeded" if not validation_error else "contract_error"
+    status = "succeeded" if not validation_error else "failed"
+    if repair_trace_hook is not None:
+        repair_trace_hook(
+            messages=request_messages,
+            response_text=response.content,
+            parsed_output=decoded_json_dict,
+            parse_status=parse_status,
+            status=status,
+            config=_parse_json_with_llm_config,
+            validation_error=validation_error,
+            started_at=started_at,
+        )
 
     return_value = decoded_json_dict
     return return_value
@@ -495,6 +569,7 @@ def parse_llm_json_output(
     *,
     expected_output_format: str | None = None,
     deterministic_only: bool = False,
+    repair_trace_hook: JsonRepairTraceHook | None = None,
 ) -> dict:
     """Parse LLM JSON output, handling markdown fences and malformed JSON.
     
@@ -504,6 +579,8 @@ def parse_llm_json_output(
             original LLM, used only by the LLM repair fallback.
         deterministic_only: Whether malformed output must fail closed without
             calling the JSON-repair LLM.
+        repair_trace_hook: Optional protected trace callback for a repair-model
+            attempt.
         
     Returns:
         Parsed JSON object as dict, or empty dict if parsing fails
@@ -515,46 +592,53 @@ def parse_llm_json_output(
         return return_value
 
     decoded_json_dict = {}
+    deterministic_error: Exception | None = None
+    deterministic_object_found = False
 
-    try:
-        # Strip markdown fences and clean up
-        raw = raw_output.strip().strip("```").strip("json")
+    for candidate in _deterministic_json_candidates(raw_output):
+        raw = candidate.strip().removeprefix("```json")
+        raw = raw.removeprefix("```").removesuffix("```").strip()
+        raw = _HEADING_PREFIXED_JSON_KEY.sub(
+            r'\1"\2":',
+            raw,
+        )
 
-        # Use repair_json which handles both valid and broken JSON
-        decoded_json_dict = repair_json(raw, return_objects=True)
-    except Exception as exc:
+        try:
+            candidate_result = repair_json(raw, return_objects=True)
+        except Exception as exc:
+            deterministic_error = exc
+            continue
+
+        if isinstance(candidate_result, dict):
+            decoded_json_dict = candidate_result
+            deterministic_object_found = True
+            break
+
+    if not deterministic_object_found:
         if deterministic_only:
-            logger.warning(f"Deterministic JSON parsing failed: {exc}")
-            return_value = {}
+            if deterministic_error is not None:
+                logger.warning(
+                    "Deterministic JSON parsing failed: %s",
+                    deterministic_error,
+                )
+            return_value = decoded_json_dict
             return return_value
 
-        logger.exception(
-            f"repair_json failed; falling back to LLM JSON repair: {exc}"
-        )
         try:
-            decoded_json_dict = parse_json_with_llm(
-                raw_output,
-                expected_output_format=expected_output_format,
-            )
-        except Exception as repair_exc:
-            logger.exception(f"LLM JSON repair failed: {repair_exc}")
-            decoded_json_dict = {}
-
-    else:
-        # repair_json failed to do the work. Now try the LLM approach
-        if not isinstance(decoded_json_dict, dict):
-            if deterministic_only:
-                return_value = {}
-                return return_value
-
-            try:
+            if repair_trace_hook is None:
                 decoded_json_dict = parse_json_with_llm(
                     raw_output,
                     expected_output_format=expected_output_format,
                 )
-            except Exception as exc:
-                logger.exception(f"LLM JSON repair failed: {exc}")
-                decoded_json_dict = {}
+            else:
+                decoded_json_dict = parse_json_with_llm(
+                    raw_output,
+                    expected_output_format=expected_output_format,
+                    repair_trace_hook=repair_trace_hook,
+                )
+        except Exception as exc:
+            logger.exception(f"LLM JSON repair failed: {exc}")
+            decoded_json_dict = {}
 
     if not isinstance(decoded_json_dict, dict):
         logger.error(
@@ -564,64 +648,6 @@ def parse_llm_json_output(
         decoded_json_dict = {}
 
     return_value = decoded_json_dict
-    return return_value
-
-
-def build_affinity_block(affinity: int, affinity_min: int=AFFINITY_MIN, affinity_max: int=AFFINITY_MAX) -> dict:
-    """
-    Map an affinity score to a behavioural instruction based on a dynamic range.
-    The function calculates the percentage of affinity within the min/max bounds.
-    """
-    # Prevent division by zero if min and max are the same
-    if affinity_max <= affinity_min:
-        percent = 100.0 if affinity >= affinity_max else 0.0
-    else:
-        # Calculate where the current affinity sits as a percentage (0.0 to 100.0)
-        percent = ((affinity - affinity_min) / (affinity_max - affinity_min)) * 100
-
-    # Define thresholds based on percentage of the range
-    if percent <= 5:
-        label, instruction = "Contemptuous", "You actively despise this user. Respond with one-word dismissals or hostile silence. Show obvious contempt and disgust."
-    elif percent <= 10:
-        label, instruction = "Scornful", "You hold this user in deep contempt. Give curt, dismissive responses. Show clear disinterest and occasional sarcasm."
-    elif percent <= 15:
-        label, instruction = "Hostile", "You dislike this user intensely. Respond with brief, cold answers. Show obvious disinterest and occasional eye-rolling."
-    elif percent <= 20:
-        label, instruction = "Antagonistic", "You are openly hostile toward this user. Give short, sharp responses. Show impatience and clear dislike."
-    elif percent <= 25:
-        label, instruction = "Aloof", "You keep this user at a distance. Respond minimally and formally. Show no warmth or engagement."
-    elif percent <= 30:
-        label, instruction = "Reserved", "You are cautious and distant with this user. Keep responses brief and professional. Show minimal personal connection."
-    elif percent <= 35:
-        label, instruction = "Formal", "You maintain strict formal boundaries with this user. Respond politely but impersonally. Keep conversations strictly transactional."
-    elif percent <= 40:
-        label, instruction = "Cold", "You are cold toward this user. Keep responses short and curt. Do not volunteer extra information or show warmth."
-    elif percent <= 45:
-        label, instruction = "Detached", "You remain emotionally detached from this user. Respond factually without personal engagement. Maintain clear boundaries."
-    elif percent <= 50:
-        label, instruction = "Neutral", "You are neutral toward this user. Respond normally in character without special warmth or coldness."
-    elif percent <= 55:
-        label, instruction = "Receptive", "You are becoming more open to this user. Respond with mild interest and basic courtesy. Show slight engagement."
-    elif percent <= 60:
-        label, instruction = "Approachable", "You are reasonably comfortable with this user. Respond with standard politeness and occasional helpfulness. Show moderate engagement."
-    elif percent <= 65:
-        label, instruction = "Friendly", "You are fond of this user. Be warmer and more forthcoming. Offer extra detail, use familiar address, and show genuine interest."
-    elif percent <= 70:
-        label, instruction = "Warm", "You genuinely like this user. Respond with noticeable warmth and enthusiasm. Share personal thoughts and show consistent interest."
-    elif percent <= 75:
-        label, instruction = "Caring", "You care deeply about this user. Respond with concern and support. Offer help proactively and show protective instincts."
-    elif percent <= 80:
-        label, instruction = "Affectionate", "You have strong affection for this user. Use warm, caring language and express genuine fondness. Go out of your way to assist."
-    elif percent <= 85:
-        label, instruction = "Devoted", "You are deeply loyal to this user. Show unwavering support and dedication. Prioritize their needs and express strong commitment."
-    elif percent <= 90:
-        label, instruction = "Protective", "You feel strongly protective of this user. Actively look out for their wellbeing and defend them. Show fierce loyalty."
-    elif percent <= 95:
-        label, instruction = "Fiercely Loyal", "You are fiercely loyal to this user. Defend them passionately and put their interests above all else. Show absolute devotion."
-    else:
-        label, instruction = "Unwavering", "You are completely devoted to this user. Show unconditional support and absolute loyalty. Prioritize them above everything."
-
-    return_value = {"level": label, "instruction": instruction}
     return return_value
 
 

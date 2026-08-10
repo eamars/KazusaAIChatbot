@@ -15,6 +15,13 @@ def test_production_code_imports_only_public_conversation_progress_facade() -> N
         "kazusa_ai_chatbot.conversation_progress.cache",
         "kazusa_ai_chatbot.conversation_progress.projection",
         "kazusa_ai_chatbot.conversation_progress.recorder",
+        "kazusa_ai_chatbot.conversation_progress.history",
+        "kazusa_ai_chatbot.conversation_progress.compaction",
+        "kazusa_ai_chatbot.conversation_progress.delta_merge",
+        "kazusa_ai_chatbot.conversation_progress.migration",
+        "kazusa_ai_chatbot.conversation_progress.projection_v2",
+        "kazusa_ai_chatbot.conversation_progress.silent_turn",
+        "kazusa_ai_chatbot.conversation_progress.block_retrieval",
     }
     violations = []
     for path in source_root.rglob("*.py"):

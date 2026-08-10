@@ -4,7 +4,12 @@ from pathlib import Path
 import sys
 
 from browser_harness import DEFAULT_E2E_OPERATOR_TOKEN
-from fake_brain import FakeBrainServer, graph_snapshot, write_conflict_brain_registry
+from fake_brain import (
+    FakeBrainServer,
+    graph_snapshot,
+    native_v2_graph_snapshot,
+    write_conflict_brain_registry,
+)
 
 
 def test_overview_cognition_graph_updates_from_latest_brain_run(
@@ -12,6 +17,7 @@ def test_overview_cognition_graph_updates_from_latest_brain_run(
     unused_tcp_port_factory,
     e2e_console,
     e2e_browser_page,
+    e2e_artifact_dir,
     e2e_summary_writer,
 ) -> None:
     """Verify Overview graph states, refresh, page switch, and SSE update."""
@@ -28,7 +34,7 @@ def test_overview_cognition_graph_updates_from_latest_brain_run(
         with e2e_console(
             brain_base_url=fake_brain.base_url,
             service_registry_path=registry_path,
-            sse_interval_seconds=0.2,
+            sse_interval_seconds=5.0,
         ) as console:
             page = e2e_browser_page(console.base_url)
             _login(page)
@@ -40,44 +46,89 @@ def test_overview_cognition_graph_updates_from_latest_brain_run(
                 "#overview-self-cognition-card"
             ).is_hidden()
 
-            fake_brain.set_graph(
-                graph_snapshot(
-                    status="running",
-                    run_id="run-live",
-                    trigger_source="user_message",
-                    input_sources=["dialog_text"],
-                )
+            fake_brain.set_graph(graph_snapshot(status="running", run_id="run-live"))
+            fake_brain.set_self_graph(
+                graph_snapshot(status="completed", run_id="self-run-complete")
             )
             page.reload(wait_until="domcontentloaded")
             page.wait_for_selector("body[data-auth-state='authenticated']")
             _assert_graph_status(page, "running")
             assert page.locator("#overview-cognition-graph .graph-node").count() == 6
             assert page.locator("#overview-cognition-graph .graph-stage-group").count() == 4
-            assert "run-live" in page.locator(
+            run_summary = page.locator(
                 "#overview-cognition-graph .graph-run-summary"
-            ).inner_text()
-            assert page.locator("#overview-cognition-graph .graph-edge-layer").count() == 0
+            )
+            assert "Latest conversation cognition" in run_summary.inner_text()
+            assert "run-live" not in run_summary.inner_text()
+            run_reference = run_summary.locator(".graph-run-reference")
+            run_reference.locator("summary").click()
+            run_reference_text = run_reference.inner_text()
+            assert "run-live" in run_reference_text
+            assert "llm-trace-run-live" in run_reference_text
+            assert "cognition-invocation-run-live" in run_reference_text
+            conversation_reference_screenshot = (
+                e2e_artifact_dir / "conversation_cognition_run_reference.png"
+            )
+            run_reference.screenshot(path=str(conversation_reference_screenshot))
+            dependency_panel = page.locator(
+                "#overview-cognition-graph .graph-dependency-panel"
+            )
+            assert dependency_panel.count() == 1
+            assert "fork" in dependency_panel.inner_text()
+            assert "join" in dependency_panel.inner_text()
             assert page.locator("#overview-cognition-graph .node-detail").count() == 0
             assert page.locator(
                 "#overview-self-cognition-graph .graph-node"
-            ).count() == 0
+            ).count() == 6
             assert page.locator(
                 "#overview-self-cognition-card"
-            ).is_hidden()
-            latest_payload = page.evaluate(
-                """async () => (await fetch('/api/bootstrap')).json()"""
+            ).is_visible()
+            self_reference = page.locator(
+                "#overview-self-cognition-graph .graph-run-reference"
             )
-            assert latest_payload["latest_cognition_graph"]["trigger_source"] == (
-                "user_message"
+            self_reference.locator("summary").click()
+            self_reference_text = self_reference.inner_text()
+            assert "self-run-complete" in self_reference_text
+            assert "llm-trace-self-run-complete" in self_reference_text
+            assert "calendar-run-self-run-complete" in self_reference_text
+            self_reference_screenshot = (
+                e2e_artifact_dir / "self_cognition_run_reference.png"
+            )
+            self_reference.screenshot(path=str(self_reference_screenshot))
+            cognition_reference_screenshot = (
+                e2e_artifact_dir / "cognition_id_references.png"
+            )
+            page.screenshot(
+                path=str(cognition_reference_screenshot),
+                full_page=True,
             )
             assert page.locator(
                 "#overview-cognition-graph .graph-latest-event"
             ).count() == 0
             page.locator(
-                "#overview-cognition-graph [data-node-id='l3.visual_directives']"
+                "#overview-cognition-graph [data-node-id='l2.memory']"
+            ).click()
+            memory_detail = page.locator(
+                "#overview-cognition-graph .graph-inspector"
+            )
+            memory_labels = memory_detail.locator(
+                ".graph-inspector-row > span"
+            ).all_text_contents()
+            assert memory_labels.index("Conversation progress") + 1 == (
+                memory_labels.index("Public group scene")
+            )
+            assert "The current public group scene." in (
+                memory_detail.inner_text()
+            )
+            l2_memory_screenshot = (
+                e2e_artifact_dir / "l2_memory_public_group_scene.png"
+            )
+            page.screenshot(path=str(l2_memory_screenshot), full_page=True)
+            page.locator(
+                "#overview-self-cognition-graph [data-node-id='l3.visual_directives']"
             ).click()
             assert "focused" in page.locator(
-                "#overview-cognition-graph .graph-inspector"
+                "#overview-self-cognition-graph .graph-inspector"
             ).inner_text()
             assert page.locator(
                 "#overview-cognition-graph [data-node-id='l2.reasoning']"
@@ -128,39 +179,38 @@ def test_overview_cognition_graph_updates_from_latest_brain_run(
 
             page.locator("[data-page-link='services']").click()
             fake_brain.set_graph(
-                graph_snapshot(
-                    status="completed",
-                    run_id="run-complete",
-                    trigger_source="accepted_task_result_ready",
-                    input_sources=["accepted_task_result"],
-                )
+                graph_snapshot(status="completed", run_id="run-complete")
             )
             page.locator("[data-page-link='overview']").click()
             page.wait_for_function(
-                "() => document.querySelector('#overview-cognition-status')?.textContent === 'completed'"
+                """() => (
+                  document.querySelector(
+                    '#overview-cognition-graph .cognition-graph-shell'
+                  )?.dataset.graphRunId === 'run-complete'
+                )"""
             )
-            assert "run-complete" in page.locator(
+            completed_summary = page.locator(
                 "#overview-cognition-graph .graph-run-summary"
-            ).inner_text()
+            )
+            assert "Latest conversation cognition" in (
+                completed_summary.inner_text()
+            )
+            assert "run-complete" not in completed_summary.inner_text()
+            completed_reference = completed_summary.locator(
+                ".graph-run-reference"
+            )
+            completed_reference_text = completed_reference.evaluate(
+                """element => {
+                  element.open = true;
+                  return element.innerText;
+                }"""
+            )
+            assert "run-complete" in completed_reference_text
             assert "Final node detail" in page.locator(
                 "#overview-cognition-graph .graph-inspector"
             ).inner_text()
-            latest_payload = page.evaluate(
-                """async () => (await fetch('/api/bootstrap')).json()"""
-            )
-            assert latest_payload["latest_cognition_graph"]["trigger_source"] == (
-                "accepted_task_result_ready"
-            )
-            assert "latest_self_cognition_graph" not in latest_payload
 
-            fake_brain.set_graph(
-                graph_snapshot(
-                    status="failed",
-                    run_id="run-failed",
-                    trigger_source="internal_thought",
-                    input_sources=["internal_monologue"],
-                )
-            )
+            fake_brain.set_graph(graph_snapshot(status="failed", run_id="run-failed"))
             page.wait_for_function(
                 "() => document.querySelector('#overview-cognition-status')?.textContent === 'failed'"
             )
@@ -173,7 +223,7 @@ def test_overview_cognition_graph_updates_from_latest_brain_run(
             })
             page.reload(wait_until="domcontentloaded")
             page.wait_for_selector("body[data-auth-state='authenticated']")
-            _assert_graph_status(page, "partial")
+            _assert_graph_status(page, "not reported")
 
             summary = e2e_summary_writer(
                 name="overview_cognition_graph_states",
@@ -186,7 +236,7 @@ def test_overview_cognition_graph_updates_from_latest_brain_run(
                         "running",
                         "completed",
                         "failed",
-                        "partial_missing_source",
+                        "invalid_payload",
                     ],
                     "checked_paths": [
                         "initial bootstrap",
@@ -199,6 +249,225 @@ def test_overview_cognition_graph_updates_from_latest_brain_run(
                         "stable inspector detail",
                         "graph stage no horizontal overflow",
                     ],
+                    "screenshots": {
+                        "conversation_reference": str(
+                            conversation_reference_screenshot
+                        ),
+                        "cognition_references": str(
+                            cognition_reference_screenshot
+                        ),
+                        "l2_memory": str(l2_memory_screenshot),
+                        "self_reference": str(self_reference_screenshot),
+                    },
+                },
+            )
+
+    assert summary.exists()
+
+
+def test_native_v2_graph_renders_parallel_results_and_final_surface(
+    tmp_path: Path,
+    unused_tcp_port_factory,
+    e2e_console,
+    e2e_browser_page,
+    e2e_artifact_dir: Path,
+    e2e_summary_writer,
+) -> None:
+    """Verify every native V2 result is visible and selectable in the console."""
+
+    brain_port = unused_tcp_port_factory()
+    with FakeBrainServer(brain_port) as fake_brain:
+        registry_path = write_conflict_brain_registry(
+            path=tmp_path / "brain_conflict_registry.json",
+            fake_brain_base_url=fake_brain.base_url,
+            python_executable=sys.executable,
+        )
+        fake_brain.set_graph(
+            native_v2_graph_snapshot(
+                status="completed",
+                run_id="native-v2-console-run",
+            )
+        )
+
+        with e2e_console(
+            brain_base_url=fake_brain.base_url,
+            service_registry_path=registry_path,
+            sse_interval_seconds=0.2,
+        ) as console:
+            page = e2e_browser_page(console.base_url)
+            page.set_viewport_size({"width": 1600, "height": 1000})
+            _login(page)
+
+            graph = page.locator("#overview-cognition-graph")
+            screenshot_paths = {
+                "overview": e2e_artifact_dir / "native_v2_overview.png",
+            }
+            page.screenshot(
+                path=str(screenshot_paths["overview"]),
+                full_page=True,
+            )
+            assert "Parallel cognition results" in graph.inner_text()
+            assert "maximum concurrency" in graph.inner_text()
+            assert "2" in graph.locator(
+                ".graph-parallel-metric"
+            ).first.inner_text()
+            assert graph.locator(".graph-parallel-result").count() == 2
+            assert "fork" in graph.locator(
+                ".graph-dependency-panel"
+            ).inner_text()
+            assert "join" in graph.locator(
+                ".graph-dependency-panel"
+            ).inner_text()
+            dependency_text = graph.locator(
+                ".graph-dependency-panel"
+            ).inner_text()
+            assert "Parallel cognition" in dependency_text
+            assert "Goal branch 1" in dependency_text
+
+            for node_id, expected_text in (
+                ("v2.parallel", "maximum concurrency"),
+                ("v2.appraisal", '持续贬低削弱了关系安全感'),
+                ("v2.branch.1", "保护重要关系中的边界"),
+                ("v2.branch.2", "立即反击"),
+                ("v2.collapse", "主目标保留了受伤事实"),
+                ("v2.affect", "悲伤"),
+                ("l3.surface", "final visible message"),
+            ):
+                graph.locator(
+                    f"[data-node-id='{node_id}']"
+                ).last.click()
+                assert expected_text in graph.locator(
+                    ".graph-inspector"
+                ).inner_text()
+                screenshot_key = node_id.replace('.', '_')
+                screenshot_paths[screenshot_key] = (
+                    e2e_artifact_dir / f"native_v2_{screenshot_key}.png"
+                )
+                page.screenshot(
+                    path=str(screenshot_paths[screenshot_key]),
+                    full_page=True,
+                )
+
+            summary = e2e_summary_writer(
+                name="native_v2_parallel_result_rendering",
+                conclusion="pass",
+                details={
+                    "console_url": console.base_url,
+                    "fake_brain": fake_brain.base_url,
+                    "checked_paths": [
+                        "parallel execution metrics",
+                        "parallel execution inspector",
+                        "appraisal result inspector",
+                        "primary branch",
+                        "suppressed branch",
+                        "workspace collapse",
+                        "affect projection",
+                        "final visible dialog",
+                        "fork and join dependency list",
+                    ],
+                    "screenshots": {
+                        key: str(path)
+                        for key, path in screenshot_paths.items()
+                    },
+                },
+            )
+
+    assert summary.exists()
+
+
+def test_native_v2_failure_states_render_with_typed_evidence(
+    tmp_path: Path,
+    unused_tcp_port_factory,
+    e2e_console,
+    e2e_browser_page,
+    e2e_artifact_dir: Path,
+    e2e_summary_writer,
+) -> None:
+    """Verify partial branch failure remains visible in the browser surface."""
+
+    brain_port = unused_tcp_port_factory()
+    with FakeBrainServer(brain_port) as fake_brain:
+        registry_path = write_conflict_brain_registry(
+            path=tmp_path / "brain_conflict_registry.json",
+            fake_brain_base_url=fake_brain.base_url,
+            python_executable=sys.executable,
+        )
+        fake_brain.set_graph(
+            native_v2_graph_snapshot(
+                status="failed",
+                run_id="native-v2-failure-console-run",
+            )
+        )
+
+        with e2e_console(
+            brain_base_url=fake_brain.base_url,
+            service_registry_path=registry_path,
+            sse_interval_seconds=0.2,
+        ) as console:
+            page = e2e_browser_page(console.base_url)
+            page.set_viewport_size({"width": 1600, "height": 1000})
+            _login(page)
+
+            graph = page.locator("#overview-cognition-graph")
+            _assert_graph_status(page, "failed")
+            assert "partial" in graph.locator(
+                "[data-node-id='v2.parallel']"
+            ).inner_text()
+            assert "1" in graph.locator(
+                ".graph-parallel-metric"
+            ).all_inner_texts()[1]
+
+            graph.locator(
+                "[data-node-id='v2.branch.1']"
+            ).last.click()
+            failure_detail = graph.locator(".graph-inspector").inner_text()
+            assert "failed" in failure_detail
+            assert "model_contract_invalid" in failure_detail
+
+            failure_screenshot = e2e_artifact_dir / "native_v2_failure_branch.png"
+            page.screenshot(path=str(failure_screenshot), full_page=True)
+
+            graph.locator(
+                "[data-node-id='v2.failure']"
+            ).last.click()
+            terminal_failure_detail = graph.locator(
+                ".graph-inspector"
+            ).inner_text()
+            assert "Native V2 failure" in terminal_failure_detail
+            assert "goal_cognition" in terminal_failure_detail
+            assert "pre_state_commit" in terminal_failure_detail
+            terminal_screenshot = e2e_artifact_dir / "native_v2_terminal_failure.png"
+            page.screenshot(path=str(terminal_screenshot), full_page=True)
+
+            graph.locator(
+                "[data-node-id='v2.parallel']"
+            ).last.click()
+            parallel_detail = graph.locator(".graph-inspector").inner_text()
+            assert "failed" in parallel_detail
+            assert "1" in parallel_detail
+
+            parallel_screenshot = e2e_artifact_dir / "native_v2_failure_parallel.png"
+            page.screenshot(path=str(parallel_screenshot), full_page=True)
+            assert getattr(page, "kazusa_console_messages", []) == []
+
+            summary = e2e_summary_writer(
+                name="native_v2_failure_state_rendering",
+                conclusion="pass",
+                details={
+                    "console_url": console.base_url,
+                    "fake_brain": fake_brain.base_url,
+                    "checked_paths": [
+                        "outer failed status",
+                        "partial parallel status",
+                        "typed branch failure code",
+                        "parallel failure metrics",
+                        "browser console diagnostics",
+                    ],
+                    "screenshots": {
+                        "branch": str(failure_screenshot),
+                        "terminal": str(terminal_screenshot),
+                        "parallel": str(parallel_screenshot),
+                    },
                 },
             )
 
@@ -326,7 +595,12 @@ def _login(page) -> None:
 
     page.locator("#token").fill(DEFAULT_E2E_OPERATOR_TOKEN)
     page.locator("#login").click()
-    page.wait_for_selector("#overview-grid .metric")
+    page.wait_for_function(
+        """() => (
+          document.querySelector('#overview-service-status')?.textContent
+          !== 'not loaded'
+        )"""
+    )
 
 
 def _assert_graph_status(page, expected_status: str) -> None:
@@ -347,8 +621,6 @@ def _option_a_state_graph() -> dict:
     return {
         "status": "running",
         "run_id": "option-a-state-treatment",
-        "trigger_source": "user_message",
-        "input_sources": ["dialog_text"],
         "nodes": [
             {
                 "id": "input.message",

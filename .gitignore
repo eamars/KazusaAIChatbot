@@ -61,6 +61,7 @@ htmlcov/
 coverage.xml
 *.cover
 .hypothesis/
+test_runs/
 test_artifacts/
 !test_artifacts/
 test_artifacts/*
@@ -75,6 +76,8 @@ test_artifacts/llm_traces/*
 *.log
 logs/
 .kazusa_control/
+.kazusa_control_live/
+.runtime_logs/
 
 # Database
 *.db

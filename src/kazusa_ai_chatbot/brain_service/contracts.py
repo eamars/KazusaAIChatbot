@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal, TypedDict
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from kazusa_ai_chatbot.message_envelope import MentionEntityKind
 
@@ -56,6 +56,13 @@ class MessageEnvelopeIn(BaseModel):
     broadcast: bool
 
 
+class ChatRequestReceiptMetadata(TypedDict, total=False):
+    """Service-internal durable receipt identity attached before queue admission."""
+
+    conversation_row_id: str
+    received_at: str
+
+
 class ChatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -72,6 +79,9 @@ class ChatRequest(BaseModel):
     local_timestamp: str = ""
     debug_modes: DebugModesIn = Field(default_factory=DebugModesIn)
 
+    _receipt_metadata: ChatRequestReceiptMetadata | None = None
+    _console_trace_authorized: bool = PrivateAttr(default=False)
+
 
 class AttachmentOut(BaseModel):
     media_type: str = ""
@@ -79,6 +89,20 @@ class AttachmentOut(BaseModel):
     base64_data: str = ""
     description: str = ""
     size_bytes: int | None = None
+
+
+class OperationalErrorOut(BaseModel):
+    """Machine-readable metadata for a user-visible operational response."""
+
+    error_code: str
+    status: Literal["failed", "exhausted"]
+    retryable: bool
+    exhausted: bool
+    attempt_count: int = Field(ge=1)
+    correlation_id: str
+    trace_id: str
+    branch_id: str = ""
+    stage: str = ""
 
 
 class ChatResponse(BaseModel):
@@ -89,11 +113,14 @@ class ChatResponse(BaseModel):
     delivery_mentions: list[dict[str, Any]] = Field(default_factory=list)
     scheduled_followups: int = 0
     delivery_tracking_id: str = ""
+    trace_id: str = ""
     cognition_graph: dict[str, Any] | None = None
+    operational_error: OperationalErrorOut | None = None
 
 
 class OpsLatestCognitionGraphResponse(BaseModel):
     cognition_graph: dict[str, Any] | None = None
+    self_cognition_graph: dict[str, Any] | None = None
 
 
 class DeliveryReceiptRequest(BaseModel):
@@ -208,16 +235,17 @@ class OpsSelfCognitionStatsResponse(OpsStatsResponse):
 
 
 class RuntimeAdapterRegistrationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     platform: str
     callback_url: str
-
+    platform_bot_id: str = Field(min_length=1)
     shared_secret: str = ""
     timeout_seconds: float = 10.0
-    platform_bot_id: str = ""
-    display_name: str = ""
 
 
 class RuntimeAdapterRegistrationResponse(BaseModel):
     status: str
     platform: str
     callback_url: str
+    character_name: str = Field(min_length=1)

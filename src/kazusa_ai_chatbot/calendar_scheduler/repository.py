@@ -14,16 +14,64 @@ from kazusa_ai_chatbot.time_boundary import local_date_bounds_to_storage_utc_iso
 
 CALENDAR_SCHEDULES_COLLECTION = "calendar_schedules"
 CALENDAR_RUNS_COLLECTION = "calendar_runs"
+MAX_RECENT_CALENDAR_RUN_LIMIT = 100
+
+
+async def _record_source_trace_conflict(
+    collection: Any,
+    *,
+    key_filter: dict[str, Any],
+    incoming_source: str,
+    write_result: Any,
+) -> None:
+    """Record a conflicting source trace while preserving the stored value."""
+
+    if (
+        not incoming_source
+        or getattr(write_result, "upserted_id", None) is not None
+    ):
+        return
+    existing = await collection.find_one(
+        key_filter,
+        {"_id": 0, "source_llm_trace_id": 1},
+    )
+    if isinstance(existing, dict):
+        existing_source = str(
+            existing.get("source_llm_trace_id") or ""
+        ).strip()
+    else:
+        existing_source = ""
+    if not existing_source or existing_source == incoming_source:
+        return
+    await collection.update_one(
+        {
+            **key_filter,
+            "source_llm_trace_id": existing_source,
+        },
+        {
+            "$set": {
+                "correlation_write_status": "conflict",
+                "correlation_conflict_source_llm_trace_id": incoming_source,
+            },
+        },
+    )
 
 
 async def upsert_calendar_schedule(schedule: dict[str, Any]) -> object:
     """Insert a schedule once, keyed by idempotency key."""
 
     db = await get_db()
+    key_filter = {"idempotency_key": schedule["idempotency_key"]}
     result = await db.calendar_schedules.update_one(
-        {"idempotency_key": schedule["idempotency_key"]},
+        key_filter,
         {"$setOnInsert": schedule},
         upsert=True,
+    )
+    await _record_source_trace_conflict(
+        db.calendar_schedules,
+        key_filter=key_filter,
+        incoming_source=str(schedule.get("source_llm_trace_id") or "").strip(),
+        write_result=result,
     )
     return result
 
@@ -35,14 +83,27 @@ async def refresh_calendar_schedule_state(
 
     set_doc = dict(schedule)
     created_at = set_doc.pop("created_at")
+    incoming_source = str(set_doc.pop("source_llm_trace_id", "") or "").strip()
+    # Schedule refreshes preserve the immutable source trace on existing rows.
+    # A source value is supplied only when this call creates the row.
+    set_on_insert = {"created_at": created_at}
+    if incoming_source:
+        set_on_insert["source_llm_trace_id"] = incoming_source
+    key_filter = {"idempotency_key": schedule["idempotency_key"]}
     db = await get_db()
     result = await db.calendar_schedules.update_one(
-        {"idempotency_key": schedule["idempotency_key"]},
+        key_filter,
         {
             "$set": set_doc,
-            "$setOnInsert": {"created_at": created_at},
+            "$setOnInsert": set_on_insert,
         },
         upsert=True,
+    )
+    await _record_source_trace_conflict(
+        db.calendar_schedules,
+        key_filter=key_filter,
+        incoming_source=incoming_source,
+        write_result=result,
     )
     return result
 
@@ -51,10 +112,17 @@ async def upsert_calendar_run(run: dict[str, Any]) -> object:
     """Insert a run once, keyed by idempotency key."""
 
     db = await get_db()
+    key_filter = {"idempotency_key": run["idempotency_key"]}
     result = await db.calendar_runs.update_one(
-        {"idempotency_key": run["idempotency_key"]},
+        key_filter,
         {"$setOnInsert": run},
         upsert=True,
+    )
+    await _record_source_trace_conflict(
+        db.calendar_runs,
+        key_filter=key_filter,
+        incoming_source=str(run.get("source_llm_trace_id") or "").strip(),
+        write_result=result,
     )
     return result
 
@@ -112,6 +180,35 @@ async def list_calendar_schedules_for_inspection(
     async for schedule in cursor:
         schedules.append(schedule)
     return schedules
+
+
+async def list_recent_calendar_runs(
+    *,
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Return recent calendar run outcomes for bounded operator inspection.
+
+    Args:
+        limit: Maximum number of runs to return.
+
+    Returns:
+        Runs ordered by latest update with a deterministic run-id tie-breaker.
+    """
+
+    effective_limit = max(1, min(limit, MAX_RECENT_CALENDAR_RUN_LIMIT))
+    db = await get_db()
+    cursor = (
+        db.calendar_runs.find({}, {"_id": 0})
+        .sort([
+            ("updated_at", -1),
+            ("run_id", 1),
+        ])
+        .limit(effective_limit)
+    )
+    runs: list[dict[str, Any]] = []
+    async for run in cursor:
+        runs.append(run)
+    return runs
 
 
 async def list_pending_calendar_runs_for_source(

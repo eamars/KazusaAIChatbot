@@ -22,14 +22,13 @@
 
 ## Kazusa 能实现什么
 
-Kazusa 不是一个通用助手外壳。它是一套承载自演化角色大脑的认知运行时：
-把身份、关系连续性、检索、认知、对话、记忆、反思和未来跟进
-放在同一个可检查的服务核心里。
+Kazusa 不是一个通用助手外壳，而是一套自演化角色大脑的认知模型：一个把身份、
+关系连续性、检索、认知、对话、记忆、反思和未来跟进都放进同一个可检查
+服务核心的运行时。
 
-同一个大脑可以被 Discord、NapCat QQ、浏览器调试界面，或者任何遵守
-服务 API 的新适配器调用。适配器保持轻量，只负责平台接入与投递边界。大脑服务
-消费的是类型化的消息信封字段，而不是把 Discord、QQ 或调试通道协议的
-原始语法当作认知主输入来解析。
+同一个大脑可以被 Discord、NapCat QQ、浏览器调试界面，或者任何遵守服务 API 的
+新适配器调用。适配器保持轻量。大脑服务消费类型化的消息信封字段，而不是解析
+Discord、QQ 或调试通道的原始语法。
 
 如果只是想本地跑起来，可以直接看 [快速开始](#快速开始) 和
 [运行指南](docs/HOWTO.md)。如果想理解子系统所有权，可以看
@@ -37,54 +36,55 @@ Kazusa 不是一个通用助手外壳。它是一套承载自演化角色大脑�
 
 本文会反复用到几个核心术语：
 
-- **适配器**：平台传输边界，把 Discord、QQ、调试界面或未来平台事件
+- **适配器**：平台传输层，把 Discord、QQ、调试界面或未来平台事件
   规范化成大脑服务 API。
 - **MessageEnvelope**：类型化入站消息合约，供大脑、RAG 和认知阶段消费。
-- **RAG 2**：返回证据的检索辅助智能体；它不决定角色立场，也不写最终措辞。
-- **认知解析器**：有上限的 L1/L2/L2d 循环，决定立场、动作需求，以及是否还需要证据。
-- **L3/dialog**：认知决定输出类型之后，负责最终可见措辞的阶段。
-- **输出表面（surface）**：系统可产出的结果通道，例如可见文本、私有动作或无回复轨迹。
-- **已接受任务（accepted task）/后台工作（background work）**：角色接受的持久延迟任务，由确定性代码持久化，
-  路由给内部 worker，再通过认知重新进入系统。
+- **RAG3 本地上下文解析器**：由认知选中的本地/私有上下文证据解析器；
+  它返回证据，但不决定角色立场或最终措辞。
+- **认知解析器**：有边界的 L1/L2/L2d 循环，决定立场、动作需求，
+  以及是否还需要更多证据。
+- **L3/dialog**：认知决定应存在哪种输出表面之后，负责最终可见措辞的阶段。
+- **已接受任务（accepted task）/后台工作（background work）**：角色接受的
+  持久延迟任务，由确定性代码持久化，并通过认知重新进入系统。
 
 从高层看，Kazusa 提供：
 
 | 能力 | 含义 |
 | --- | --- |
 | 平台无关的角色大脑 | Discord、QQ、调试界面和未来适配器都接入同一个 FastAPI 大脑服务。 |
-| 类型化消息边界 | 平台语法先被规范化为 `MessageEnvelope` 字段，再进入认知或 RAG。 |
-| 有边界的实时回复路径 | 队列、相关性、认知解析器、被选择的证据能力、动作路由和 L3 输出表面都是显式阶段，有上限，也能检查负载。 |
-| 多时间尺度记忆 | 最近聊天、短期对话进展、检索证据、持久记忆和已调度承诺彼此分开。 |
-| 私念残留 | 已完成回合会留下很短的第一人称私人原因，只投给下一次 L2a 认知。 |
-| RAG 2 证据检索 | 当认知提出需要时，辅助智能体检索用户资料、记忆、历史对话、实时事实、网页证据和召回状态。 |
-| 分层认知 | 认知先决定立场、边界、判断、风格、动作需求和回复目标，再由被选择的 L3 输出表面渲染结果。 |
-| 后台整合 | 已完成回合会根据文本、动作轨迹和输出表面更新持久记忆、关系状态、Cache2 失效、图片和进展。 |
-| 已接受的延迟任务 | 已接受的提醒、文本任务和代码任务会被持久化、路由给内部后台 worker，并通过认知返回，而不是由 worker 直接发送。 |
-| 聊天外反思 | 小时、每日和已提升反思作为审计记录保存；只有被提升后的上下文可以进入普通认知。 |
-| 空闲自我认知 | 后台来源案例可以进入同一套解析器支持的角色路径，并遵守来源绑定投递和普通整合规则。 |
+| 类型化消息边界 | 平台语法在进入认知或 RAG 之前，先被规范化为 `MessageEnvelope` 字段。 |
+| 有边界的实时回复路径 | 类型化入口、前沿相关性、回合结算、结算后的相关性、认知解析器、被选中的证据能力、动作路由和 L3 输出表面都是显式阶段，带有限额，且负载可检查。 |
+| 多时间尺度记忆 | 最近聊天、短期对话流、检索证据、持久记忆和已调度承诺彼此分离。 |
+| 私念残留 | 一条简短的私人残留通道，把已完成回合中有边界的第一人称理由带入下一次 L2a 认知。 |
+| 任务解析 | 一个解析器能力运行有界的内联会话，覆盖本地上下文、公开研究、编码和文本/计算专门组件，然后返回证据或提升同一检查点。 |
+| 分层认知 | 认知先决定立场、边界、判断、风格、动作需求和回复目标，再由被选中的 L3 输出表面渲染结果。 |
+| 后台整合 | 已完成回合根据文本以及动作/输出表面轨迹，更新持久记忆、关系状态、Cache2 失效、图片和进展。 |
+| 已接受的延迟任务 | 已接受的提醒、文本任务和编码任务会被持久化，路由给内部后台 worker，并通过认知返回，而不是直接发送。 |
+| 聊天外反思 | 小时级、每日和已提升的反思运行作为审计记录保存；只有被提升的上下文可以进入普通认知。 |
+| 空闲自我认知 | 后台来源案例可以进入同一套由解析器支撑的角色路径，并遵守来源绑定投递和常规整合规则。 |
 | 日历式后续行动 | 已接受的未来承诺和到期约定可以成为持久日历触发器，稍后运行新的认知。 |
-| 事件日志可观测性 | 运行时、LLM、RAG、动作路由、输出表面、反思、自我认知、dispatcher、整合和数据库操作都会发出脱敏运行事件。 |
+| 事件日志可观测性 | 运行时、LLM、RAG、动作路由、输出表面、反思、自我认知、dispatcher、整合和数据库操作都会发出脱敏的运行事件。 |
 
 ## 你可以用它构建什么
 
 | 场景 | 为什么适合 |
 | --- | --- |
-| 长期陪伴型角色 | 关系记忆、短期对话流、角色状态和反思系统相互分离，但能在回复中协同。 |
-| 群聊角色机器人 | 队列裁剪、类型化被提及对象、原生回复补全和适配器级投递，让大脑能承受嘈杂频道。 |
+| 长期陪伴型角色 | 运行时让关系记忆、短期对话流、角色状态和反思彼此分离但又相互连通。 |
+| 群聊角色机器人 | 前沿相关性和回合结算负责应对嘈杂频道。 |
 | 本地模型角色实验室 | 路由级 OpenAI 兼容模型配置，让较弱的本地模型处理更窄、更分阶段的提示词。 |
-| 记忆和 RAG 实验 | RAG 2、Cache2、用户作用域记忆、共享记忆演化和历史对话搜索都足够模块化，便于单独检查。 |
-| 跨平台适配器实验 | 新适配器只需要把平台事件规范化成服务合约，并渲染返回消息。 |
-| 空闲认知和反思实验 | 自我认知和反思使用有边界的来源包与共享认知边界，不把平台适配器变成代理。 |
-| 承诺与后续行动流程 | 已接受的未来承诺可以被校验、持久化、去重，并在之后通过持久日历触发重新进入系统。 |
+| 记忆和 RAG 实验 | RAG3、Cache2、已退役的 RAG2 辅助智能体、作用域化用户记忆、共享记忆演化和历史对话搜索都足够模块化，可以独立检查。 |
+| 跨平台适配器实验 | 新适配器只需要把平台事件规范化成服务合约，并渲染返回的消息。 |
+| 空闲认知和反思实验 | 自我认知和反思使用有边界的来源包和共享认知边界，不会把适配器变成代理。 |
+| 承诺与后续行动流程 | 已接受的未来承诺可以被校验、持久化、去重，并在之后通过持久日历触发器重新进入系统。 |
 
 ## 支持的 LLM
 
-Kazusa 围绕 OpenAI 兼容接口设计，而不是绑定某一个托管供应商。技术上，
-所有 OpenAI 兼容的聊天补全接口都可以接入；路由级配置也允许不同阶段使用不同模型。
+Kazusa 围绕 OpenAI 兼容端点设计，而不是绑定某个托管供应商。所有 OpenAI 兼容的
+聊天补全端点技术上都可以接入；路由级配置让不同阶段在需要时可以使用不同模型。
 
-实践中，可以把 Kazusa 配成一张模型路由表：轻量或本地模型处理大部分
-结构化推理；在更看重表达或生成质量的阶段，可以换用另一个托管模型。
-下面这些路由名就是运行指南中记录的配置句柄。一种可运行的配置示例如下：
+实践中，可以把 Kazusa 配置成一张模型路由表：轻量或本地模型处理大部分
+结构化推理，而在你更看重表达或生成质量的阶段，可以指派另一个托管模型。
+下面的路由名就是运行指南中记录的配置句柄。一种可运行的配置示例如下：
 
 | 路由 | 示例模型 | 示例来源 |
 | --- | --- | --- |
@@ -95,7 +95,19 @@ Kazusa 围绕 OpenAI 兼容接口设计，而不是绑定某一个托管供应�
 | `RAG_SUBAGENT_LLM` | `local-model` | `http://localhost:1234/v1` |
 | `WEB_SEARCH_LLM` | `local-model` | `http://localhost:1234/v1` |
 | `COGNITION_LLM` | `local-model` | `http://localhost:1234/v1` |
-| `BOUNDARY_CORE_LLM` | `local-model` | `http://localhost:1234/v1` |
+| `COGNITION_LLM_CHARACTER_CARRYOVER` | `local-model` | `http://localhost:1234/v1` |
+| `COGNITION_LLM_APPRAISAL_EVENT_AGENCY` | `local-model` | `http://localhost:1234/v1` |
+| `COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL` | `local-model` | `http://localhost:1234/v1` |
+| `COGNITION_LLM_APPRAISAL_MORAL_IDENTITY` | `local-model` | `http://localhost:1234/v1` |
+| `COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME` | `local-model` | `http://localhost:1234/v1` |
+| `COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY` | `local-model` | `http://localhost:1234/v1` |
+| `COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE` | `local-model` | `http://localhost:1234/v1` |
+| `COGNITION_LLM_GOAL_ORDINARY_RESPONSE` | `local-model` | `http://localhost:1234/v1` |
+| `COGNITION_LLM_GOAL_ACTIVE_BRANCH` | `local-model` | `http://localhost:1234/v1` |
+| `COGNITION_LLM_WORKSPACE_COLLAPSE` | `local-model` | `http://localhost:1234/v1` |
+| `COGNITION_LLM_ACTION_PLANNING` | `local-model` | `http://localhost:1234/v1` |
+| `COGNITION_LLM_ACTION_AUTHORIZATION` | `local-model` | `http://localhost:1234/v1` |
+| `COGNITION_LLM_RESOLVER_AUTHORIZATION` | `local-model` | `http://localhost:1234/v1` |
 | `BACKGROUND_WORK_LLM` | `local-model` | `http://localhost:1234/v1` |
 | `CODING_AGENT_PM_LLM` | `local-model` | `http://localhost:1234/v1` |
 | `CODING_AGENT_PROGRAMMER_LLM` | `local-model` | `http://localhost:1234/v1` |
@@ -107,17 +119,26 @@ Kazusa 围绕 OpenAI 兼容接口设计，而不是绑定某一个托管供应�
 这张表只是示例，不是固定要求。任何路由都可以指向任意 OpenAI 兼容端点，
 前提是它能满足该阶段的延迟和质量需求。
 
-代码代理使用独立的一等 PM 和 programmer 路由。最终综合有意复用
-`CODING_AGENT_PM_LLM`；没有单独的代码综合器路由。每个代码代理路由都必须配置
-base URL、API key 和模型。
+`COGNITION_LLM` 保留为 Cognition Core V2 边界之外调用方使用的通用认知路由。
+Core V2 使用上面的十三个独立阶段路由；每个路由都拥有完整的端点、凭据、模型、
+生成预算和 thinking 配置，不继承其他路由，也没有回退。
+`COGNITION_LLM_CHARACTER_CARRYOVER` 是专用的仅状态后台运营延续路由，
+最大生成预算为 8,192 tokens。
+需要类型化必选选择的目标回合会在所有分支上刻意使用
+`COGNITION_LLM_GOAL_ORDINARY_RESPONSE`，因此请为该路由配置更稠密的目标模型；
+没有类型化必选选择的活跃持久目标回合继续使用 `COGNITION_LLM_GOAL_ACTIVE_BRANCH`。
 
-聊天 LLM 调用统一通过 `LLInterface`。每个模块通过 `LLMCallConfig`
+代码阅读使用独立的一等 PM 和 programmer 路由。最终综合有意复用
+`CODING_AGENT_PM_LLM`，不存在独立的综合器路由。每个代码阅读路由都必须定义
+自己的 base URL、API key 和模型。
+
+聊天 LLM 调用统一经由 `LLInterface` 路由。每个模块通过 `LLMCallConfig`
 拥有自己的路由、模型、生成预算和 thinking 开关；接口层负责后端识别、
-provider 会话、请求映射、响应归一化和模型卸载重试。公开的 token 预算
+provider 会话、请求映射、响应归一化和模型重载重试。公开的 token 预算
 配置使用 `max_completion_tokens`。Thinking 默认关闭。启用后，接口目前会
 为 Gemma 4、Qwen3 系列模型名，以及 Qwen 兼容的 Qwopus 3.x 模型名映射
-provider 专属 thinking 控制。运行时合约见
-[LLM 接口文档](src/kazusa_ai_chatbot/llm_interface/README.md)。
+provider 专属的 thinking 控制。运行时合约见
+[LLM 接口 ICD](src/kazusa_ai_chatbot/llm_interface/README.md)。
 
 已测试的聊天模型家族：
 
@@ -133,22 +154,37 @@ Kazusa 还需要一个 OpenAI 兼容的嵌入端点，用于历史对话、记�
 这是完整的顶层地图，不是单个聊天回合的最短路径。先读这条实线实时路径：
 `adapter -> brain service -> queue/intake -> evidence -> cognition -> dialog -> persistence/scheduler`。
 然后再把各个子图当作所有权地图：辅助智能体、解析器能力、网页来源、
-复杂任务研究、已接受任务、后台 worker 和持久后台系统分别由谁负责。
+复杂任务研究、已接受任务、后台 worker 和持久维护系统。
 
 节点标签里的所有权标记是有意保留的：`[LLM]` 节点做语义判断，
 `[deterministic]` 节点负责校验或移动状态，`[worker]` 节点执行有边界的
 延迟工作。精确的子智能体命名和文档词汇见
 [子智能体接口指南](docs/SUBAGENT_INTERFACES.md)。
 
+活跃聊天的入口路径包含两次有边界的相关性判断。前沿路由是一个紧凑的逐消息
+`discard/start/append` 判断器。被接受的群消息会在六秒静默窗口内完成结算，
+并受十秒硬性截止时间约束；结算后的路由再选择 `ignore/proceed/wait`。
+私聊的即时时序和仅限邻接的私聊合并保持不变。结算协调器负责空闲槽位预测、
+有边界的静默前奏提升、入队截止时间和截止前入站屏障。只有一个回复所有者
+接收汇总后的回复；追加的请求 future 会静默完成。有效的 `proceed` 会在角色
+准备和认知运行之前被原子化认领。对于群聊，准入需要满足以下任一条件：
+有证据支撑的互动相关性——例如类型化点名、明确的群邀请、完整名称点名或
+有据可循的连续性——或者与有边界的活动角色状态存在具体交集。相关性拥有
+这一语义判断。收件人身份与发言理由彼此分离，从而可以在不把其他参与者当作
+角色本人的情况下，做出可信的、由状态驱动的插话。合并后的私聊碎片会作为
+一条逻辑输入交给前沿路由。四张图片的描述预算在所有重新评估之间共享；
+被省略的媒体会被显式标记，使结算后的相关性判断可以在认知之前安全失败
+（fail closed）。
+
 ```mermaid
 flowchart TD
     A["适配器<br/>Discord、NapCat QQ、调试界面、未来适配器"]
     B["FastAPI 大脑服务<br/>/chat、health、ops 快照、发送回执、运行时适配器注册表"]
-    C["进程内聊天队列<br/>丢弃/合并策略、入站持久化"]
-    D["入口处理与类型化回合组装<br/>MessageEnvelope、回复补全、历史、媒体、来源作用域"]
+    C["进程内聊天队列<br/>私聊邻接合并、入站持久化"]
+    D["类型化片段入口与回合结算<br/>MessageEnvelope、前沿相关性、截止时间、版本认领"]
     E{"服务图"}
-    F["媒体描述器<br/>图片/音频观察"]
-    G["相关性门控"]
+    F["媒体描述器<br/>已接受媒体、最多四张不重复图片"]
+    G["结算后的相关性门控<br/>ignore/proceed/wait"]
     H["提示词安全上下文通道<br/>conversation_progress<br/>internal_monologue_residue<br/>past_dialog_cognition<br/>已提升反思和成长上下文"]
     N["不进入角色回合<br/>空 ChatResponse"]
     J["适配器投递边界<br/>ChatResponse messages、mentions、delivery receipts"]
@@ -206,49 +242,34 @@ flowchart TD
 
     subgraph ResolverCaps["认知选择的解析器能力"]
         RC0["确定性能力执行器 [deterministic]<br/>每轮一个即时请求"]
-        RC1["local_context_recall<br/>RAG 2 证据"]
-        RC2["public_answer_research<br/>复杂任务解析器"]
-        RC3["human_clarification<br/>待处理 HIL 行"]
-        RC4["approval_preparation<br/>待审批行"]
-        RC5["self_goal_resolution<br/>私有内部来源处理"]
-        RC6["解析器观察<br/>下一轮使用的提示词安全结果"]
+        RC1["task_resolution_request<br/>有界的内联或持久证据会话"]
+        RC2["human_clarification<br/>待处理 HIL 行"]
+        RC3["approval_preparation<br/>待审批行"]
+        RC4["self_goal_resolution<br/>私有内部来源处理"]
+        RC5["解析器观察<br/>下一轮使用的提示词安全结果"]
         RC0 --> RC1
         RC0 --> RC2
         RC0 --> RC3
         RC0 --> RC4
-        RC0 --> RC5
-        RC1 --> RC6
-        RC2 --> RC6
-        RC3 --> RC6
-        RC4 --> RC6
-        RC5 --> RC6
+        RC1 --> RC5
+        RC2 --> RC5
+        RC3 --> RC5
+        RC4 --> RC5
     end
 
-    subgraph RAG2["RAG 2 辅助智能体家族"]
-        RG0["call_quote_aware_rag_supervisor"]
-        RG1["rag_initializer<br/>slot planning"]
-        RG2["rag_dispatcher / executor / evaluator<br/>清空 unknown slots"]
-        RG3["rag_finalizer<br/>紧凑证据答案"]
-        RA1["live_context_agent<br/>runtime_context_provider、目标解析、网页委派"]
-        RA2["conversation_evidence_agent<br/>conversation_search_agent<br/>conversation_filter_agent<br/>conversation_aggregate_agent<br/>conversation_keyword_agent"]
-        RA3["memory_evidence_agent<br/>persistent_memory_search_agent<br/>persistent_memory_keyword_agent<br/>user_memory_evidence_agent"]
-        RA4["person_context_agent<br/>user_lookup_agent<br/>user_list_agent<br/>user_profile_agent<br/>relationship_agent<br/>user_image_retriever_agent"]
-        RA5["web_agent3"]
-        RA6["recall_agent<br/>ProgressCollector<br/>ActiveCommitmentCollector<br/>CalendarRunCollector<br/>HistoryEvidenceCollector"]
-        RG0 --> RG1
-        RG1 --> RG2
-        RG2 --> RA1
-        RG2 --> RA2
-        RG2 --> RA3
-        RG2 --> RA4
-        RG2 --> RA5
-        RG2 --> RA6
-        RA1 --> RG3
-        RA2 --> RG3
-        RA3 --> RG3
-        RA4 --> RG3
-        RA5 --> RG3
-        RA6 --> RG3
+    subgraph RAG3["RAG3 本地上下文解析器"]
+        LC0["resolve_local_context<br/>稳定的公开 IO"]
+        LC1["图规划器<br/>有边界的语义任务"]
+        LC2["活动节点解析器<br/>每次一个依赖就绪的节点"]
+        LC3["折叠审查<br/>可选的重复节点合并"]
+        LC4["自底向上综合<br/>known/lacking/boundary 信息包"]
+        LC5["rag_result 投影<br/>保留的面向提示词的证据"]
+        LC0 --> LC1
+        LC1 --> LC2
+        LC2 --> LC3
+        LC3 --> LC2
+        LC2 --> LC4
+        LC4 --> LC5
     end
 
     subgraph Web3["web_agent3 来源子智能体"]
@@ -282,20 +303,18 @@ flowchart TD
 
     subgraph Actions["动作规格、已接受任务和后台 worker"]
         A0["ActionSpec 物化和评估器 [deterministic]"]
-        A1["可见/私有能力<br/>speak<br/>memory_lifecycle_update<br/>accepted_task_request<br/>accepted_task_status_check<br/>future_speak<br/>trigger_future_cognition"]
-        A2["内部可执行动作<br/>apply_memory_lifecycle_update<br/>background_work_request"]
+        A1["可见/私有能力<br/>speak<br/>memory_lifecycle_update<br/>accepted_coding_task_request<br/>accepted_task_status_check<br/>future_speak<br/>trigger_future_cognition"]
+        A2["内部可执行动作<br/>apply_memory_lifecycle_update"]
         AT["accepted_task 生命周期<br/>身份、重复拒绝、result-ready 状态"]
-        BW0["background_work 运行时 [LLM route only]<br/>router 只选择 worker"]
-        BW1["text_artifact worker [worker]<br/>任务 router + generator"]
+        BW0["background_work 运行时 [deterministic dispatch]"]
+        BW1["task_orchestrator worker<br/>恢复检查点和有边界的编码运行"]
         BW2["future_speak worker [deterministic worker]<br/>调度未来认知"]
-        BW3["coding_agent worker [worker]<br/>代码阅读答案 / 新 artifact 提案<br/>不应用 patch、不执行命令"]
         A0 --> A1
         A1 --> A2
         A2 --> AT
         AT --> BW0
         BW0 --> BW1
         BW0 --> BW2
-        BW0 --> BW3
     end
 
     subgraph Maintenance["后台和持久子系统"]
@@ -303,19 +322,20 @@ flowchart TD
         SC["self_cognition worker<br/>active commitment、recent dialog、topic follow-up、group review cases"]
         REF["reflection_cycle worker<br/>hourly slot、daily channel、global promotion、affect settling"]
         ME["memory_evolution<br/>共享记忆插入、替换、合并、种子重置"]
-        GG["global_character_growth<br/>已提升特质漂移"]
+        IG["character_identity_growth<br/>经审核的不可变身份修订"]
         CONS["consolidation<br/>目标计划 -> 来源视图 -> 通道路由 -> 通道审查 -> 写入意图校验 -> 持久化"]
         DISP["dispatcher [deterministic]<br/>可信发送的已注册适配器回调投递"]
-        PRO["proactive_output<br/>带权限的预览/outbox 合约，无生产发送路径"]
+        TR["EpisodeTraceV2 + 回合后生命周期<br/>不可变终态证据和幂等审计"]
         CAL --> SC
         CAL --> REF
         REF --> ME
-        REF --> GG
+        REF --> IG
         REF --> SC
         SC --> DISP
         SC --> CONS
+        CONS --> IG
         CONS --> ME
-        GG --> H
+        IG --> H
         ME --> H
     end
 
@@ -325,16 +345,15 @@ flowchart TD
     R5 -->|terminal semantic action requests| A0
     A0 --> P2
     P2A --> AT
-    BW1 -->|accepted_task_result_ready| P1
-    BW3 -->|accepted_task_result_ready| P1
+    BW1 -->|tool_result| P1
+    BW3 -->|tool_result| P1
     BW2 --> CAL
     CAL -->|future or due source case| SC
     SC -->|shared cognition path| P0
-    RC1 --> RG0
-    RG3 --> RC6
+    RC1 --> LC0
+    LC5 --> RC6
     RC2 --> X0
     X4 --> RC6
-    RA5 --> W0
     X5 --> W0
     CONS --> DB
     AT --> DB
@@ -344,55 +363,69 @@ flowchart TD
     ME --> DB
     GG --> DB
     SUP -.-> R1
-    SUP -.-> RG0
+    SUP -.-> LC0
     SUP -.-> K
 ```
 
-Kazusa 的实时回复路径是一个认知核心，不是聊天机器人外壳，也不是通用工具
+Kazusa 的实时回复路径是认知核心，不是聊天机器人外壳，也不是通用工具
 执行框架。适配器把平台事件规范化成类型化服务合约；大脑服务负责队列、
 身份、回复补全、历史、回合构造和图执行。
 
+### 短时运行状态与可观测性
+
+单例角色状态 `CharacterCognitionStateV2` 是唯一的持久短时全局姿态。结算后的
+回合先等待有界的前序屏障，然后复用同一份不可变的互动风格快照，用于相关性、
+V2 认知和 L3 输出表面。符合条件的后台整合可以通过专用的 carry-over 路由，
+派生出一条不带来源信息的角色运行状态更新；当前消息、历史和对话进展仍然是
+事实与话题的权威。
+
+最新认知图只在 `l2.reasoning.detail.context_consumption` 下暴露来源端拥有的
+`cognition_context_consumption.v1` 投影。它只记录有边界的已消费角色/关系/风格
+选择与类型化健康信息，不含来源 ID、原始消息、证据引用、提示词或私有事实。
+控制台直接渲染这份负载，并与持久化和随时间生效（elapsed-effective）的
+角色姿态并列显示。
+
 图中命名的专门组件是各自家族内部的子智能体和 worker，不是一套全局通用的
-运行时抽象。RAG 辅助智能体检索本地、资料、记忆、对话、召回、实时和网页
-证据；`web_agent3` 拥有自己的来源子智能体；复杂任务解析器拥有解析器内部的
-证据和算法子智能体；后台工作拥有延迟任务 worker。顶层地图只粗略呈现
-coding-agent worker；它内部的 fetching、reading、writing、PM 和 programmer
-角色由 [Coding Agent ICD](src/kazusa_ai_chatbot/coding_agent/README.md) 负责。
+运行时抽象。RAG3 通过解析器内部的阶段智能体解析本地上下文，并投射保留的
+`rag_result` 证据；已退役的 RAG2 辅助模块仍然是源码层面的证据工具和测试。
+`web_agent3` 拥有自己的来源子智能体；复杂任务解析器拥有解析器内部的证据和
+算法子智能体；任务解析拥有有边界的跨域会话；后台工作拥有持久恢复能力。
+编码专门组件只消费
+[Coding Agent ICD](src/kazusa_ai_chatbot/coding_agent/README.md) 中记录的
+冻结公开 coding-run 边界。
 
-解析器在每个循环里都保留同一套 L1 -> L2 -> L2d 认知栈。L2d 可以用被选择的
-动作规格结束，也可以通过 `local_context_recall`、`public_answer_research`、
-`human_clarification`、`approval_preparation` 或 `self_goal_resolution` 请求
-一次有边界的能力观察。观察会投射进下一轮认知；证据永远不会自己作为角色说话。
+解析器在每个循环里都保留同一套 L1 -> L2 -> L2d 认知栈。L2d 可以用被选中的
+动作规格结束，也可以通过 `task_resolution_request`、`human_clarification`、
+`approval_preparation` 或 `self_goal_resolution` 请求一次有边界的能力观察。
+任务解析服务负责本地/公开/编码/文本计算专门组件的选择，并向下一轮认知
+返回一条提示词安全的观察；证据永远不会自己作为角色说话。
 
-完整 RAG 2 只在 L2d 选择 `local_context_recall` 时运行。另有一条独立的
-第一轮共享记忆预热通道，可能会在第一次认知前把已确认的共享记忆行投射到
-L2a；它不是解析器能力观察，也不会让检索证据变成角色人格。
+当任务解析的有界编排器选中本地上下文领域时，其本地上下文专门组件会调用
+RAG3 本地解析器。另有一条独立的第一轮共享记忆预热通道，可能在第一次认知
+之前把已确认的共享记忆行投射到 L2a；它不是解析器能力观察，也不会让检索
+证据变成角色人格。
 
-被选择的可见文本输出会通过 `ChatResponse` 和发送回执返回给适配器。私有动作
-结果、无可见输出的决定和输出表面轨迹，仍然可以进入回合后进展、整合、
-Cache2 失效、残留记录、日历状态、反思和自我认知，而不会创建平台发送。
+被选中的可见文本输出表面通过 `ChatResponse` 和发送回执返回适配器。私有动作
+结果、无可见输出的决定和输出表面轨迹，仍然可以在不创建平台发送的情况下，
+进入回合后进展、整合、Cache2 失效、残留记录、日历状态、反思和自我认知。
 
-延迟用户任务由认知选择为已接受任务。L2d 看到的是语义化的
-`accepted_task_request` 和 `accepted_task_status_check` affordance；确定性
-ActionSpec 执行只有在重复拒绝和持久生命周期保存之后，才会把新的已接受任务
-物化到内部 `background_work` 执行器。只负责路由的 background-work router
-会在实时回合之后只选择 worker。worker 本地分类留在被选中的 worker 内：
-text-artifact worker 有自己的任务 router/generator，coding-agent worker 有自己的
-读/写主管，再返回有边界的答案或提案 artifact。已完成的 accepted task 会作为
-`accepted_task_result_ready` 认知返回，而不是由 worker 直接发送。旧的
-background-artifact 和旧的 background-work 行仍然只是兼容数据，不是新的
-面向模型的运行时合约。
+通用证据工作通过解析器被选中，并先以任务解析会话的形式内联开始。确定性
+预算耗尽后，同一检查点会被提升为已接受任务和 task-orchestrator 作业。
+`future_speak` 和有边界的编码延续是保留的动作生命周期；状态检查只读取
+现有的已接受任务状态，不创建工作。task orchestrator 每次分发选择一个
+专门组件，并在租约重试后恢复其持久化的计数器。完成的已接受任务作为规范的
+`tool_result` 认知来源返回，而不是由 worker 直接发送。
 
 ## 真实调试示例流程
 
-下面前三个例子来自真实 debug `/chat` 接口。这个本地调试路径会把与运行时
+下面的前三个例子来自真实 debug `/chat` 接口。这个本地调试路径会把与运行时
 适配器相同形状的类型化聊天请求送进大脑服务。例 4 来自复杂任务解析器入口，
-它返回的是研究信息包（packet），而不是可见聊天文本。这些例子采集于 2026 年 7 月 2 日，
-之后翻译成中文并为 README 读者压缩。它们不是完整 trace dump。内部 id、
+它返回研究信息包（packet），而不是可见聊天文本。这些例子采集于 2026 年
+7 月 2 日，之后为 README 读者翻译并压缩。它们不是完整的 trace dump。内部 id、
 cache key、原始数据库行和实现字段名都被有意省略。图里把类型化 payload
 渲染成可读文本。
 
-每张图从左往右读。所有例子都使用同样五个检查点：
+每张图从左往右读。所有例子都使用同样的五个检查点：
 
 1. **消息 / 请求** 是聊天平台、调试客户端或解析器入口收到的内容。
 2. **抽取** 是大脑收到的类型化、平台无关消息信封和已补全上下文的人类可读摘要。
@@ -401,7 +434,8 @@ cache key、原始数据库行和实现字段名都被有意省略。图里把�
 5. **输出** 是用户看到的内容、为后续工作创建的持久交接，或返回给下一阶段的语义信息包。
 
 这对应系统边界：适配器规范化平台事件，RAG 返回证据，认知决定角色立场，
-dialog 拥有可见措辞，确定性子系统拥有校验、持久化、调度、适配器投递和持久任务生命周期。
+dialog 拥有可见措辞，确定性子系统拥有校验、持久化、调度、适配器投递和
+持久任务生命周期。
 
 ### 示例 1：私聊连续性召回
 
@@ -461,10 +495,9 @@ flowchart TD
 
 关键传递的是未来任务，而不是队列机制。认知决定 Kazusa 是否应该接受提醒。
 做出这个决定之后，确定性代码保存 accepted task，并把内部未来工作入队。
-实现上，认知选择 `accepted_task_request` action spec；确定性执行持久化它，
-创建内部 `background_work` 请求，并由 `future_speak` 调度一次
-`future_cognition` 日历运行。到期时，自我认知、dialog 和 dispatcher 再决定
-是否以及如何发送提醒。后台 worker 不直接写最终聊天文本。
+实现上，认知选择 `future_speak` action spec；确定性执行持久化对应的已接受
+任务，并调度一次 `future_cognition` 日历运行。到期时，自我认知、dialog 和
+dispatcher 再决定是否以及如何发送提醒。后台 worker 不直接写最终聊天文本。
 
 ### 示例 4：复杂公开研究信息包
 
@@ -478,7 +511,7 @@ flowchart TD
     B["2. 抽取<br/>公开基准任务。把 R9700 视为采集证据中使用的 AMD 32GB GPU 目标。比较 RTX 5090 和 R9700 在 Qwen3.6 27B/35B、Gemma4 31B/26B 上的表现；有证据时纳入 Q4 量化。"]
     C["3. 上下文 / 证据<br/>RTX 5090 分支：双 RTX 5090 FP8 下 Qwen3.6 27B 约 130 tokens/s；某个编码任务中 Gemma4 31B 约 231 tokens/s；Gemma4 26B Q4_K_M 可运行，约需 16GB VRAM。<br/>R9700 分支：来源报告 Qwen3.6 35B 和 27B 吞吐大约在 40 tokens/s 出头；Gemma4 31B 约 39 tokens/s；Gemma4 26B 有可用性信息，但精确 R9700 吞吐不清楚。"]
     D["4. 决策<br/>返回有边界的知识包。只比较来源支持的数值，保留 caveat，并标出缺失的同提示词正面对比数据。"]
-    E["5. 输出<br/>调查信息包：采集到的来源片段当时更支持 RTX 5090 的速度和配置成熟度；R9700 仍可运行，但性能受后端实现、驱动和运行栈影响较大。直接同提示词 Q4 对比和若干模型专属吞吐仍然缺失。"]
+    E["5. 输出<br/>调查信息包：采集到的来源片段当时更支持 RTX 5090 的速度和配置成熟度；R9700 仍可运行，但对后端较为敏感。直接同提示词 Q4 对比和若干模型专属吞吐仍然缺失。"]
 
     A --> B --> C --> D --> E
 ```
@@ -517,33 +550,33 @@ flowchart TD
 **LLM 负责语义，确定性代码负责机制**
 
 LLM 阶段判断意义：回复相关性、缺失证据、记忆含义、已接受承诺、角色立场、
-动作选择和输出意图。确定性代码负责校验、持久化、限制、缓存失效、调度、
+动作选择和输出表面意图。确定性代码负责校验、持久化、限制、缓存失效、调度、
 适配器投递和可审计性。
 
 **证据不是人格**
 
 RAG 回答“我们知道什么？”认知回答“这对当前 Kazusa 意味着什么？”
-L2d 回答“需要哪些动作或输出表面？”L3/dialog 回答“被选择的输出应该如何渲染？”
+L2d 回答“需要哪些动作或输出表面？”L3/dialog 回答“被选择的输出表面应该如何渲染？”
 
 **记忆有所有权边界**
 
 Kazusa 不把所有上下文压平成一个提示词。即时表面文本、对话进展、检索证据、
 持久记忆、已提升反思和日历调度承诺，各自有独立生命周期。
 
-私念残留通道是一个单独的短期通道。它保存已完成回合中的一条紧凑第一人称原因，
+私念残留通道是一条独立的短期通道。它保存已完成回合中的一条紧凑第一人称原因，
 并且只作为 `internal_monologue_residue_context` 投射到 L2a。它不是
 `reflection_summary`，不是持久记忆，不是可见 dialog 计划，也不是日历输入。
 
 **反思不能绕过实时聊天**
 
-反思是更慢的意义整理工作。原始反思输出会保存以供检查，但普通认知只接收有边界、
-已提升、经过门控的上下文。反思 worker 还拥有每日睡眠/醒来情绪沉降流程，
-在实时回复路径之外平滑持久角色心情和整体气氛。
+反思是更慢的意义整理工作。原始反思输出会保存以供检查，但普通认知只接收
+有边界、已提升、经过门控的上下文。反思 worker 还拥有每日睡眠/醒来情绪
+沉降流程，在实时回复路径之外平滑持久角色心情和整体气氛。
 
 **适配器是传输边缘**
 
 平台适配器解析平台事件，规范化类型化信封，调用大脑服务，并投递返回消息。
-角色身份、记忆、RAG、认知和日历调度都留在平台无关核心里。
+角色身份、记忆、RAG、认知和日历调度都留在平台无关的核心里。
 
 ## 运行分层
 
@@ -553,26 +586,28 @@ Kazusa 不把所有上下文压平成一个提示词。即时表面文本、对�
 | 控制台 | 本地操作者认证、服务生命周期、进程日志、审计、静态 UI、调试聊天交接 | [控制台 ICD](src/control_console/README.md) |
 | 大脑服务 | HTTP API、队列、图启动、健康检查、发送回执、运行时适配器注册 | [大脑服务 ICD](src/kazusa_ai_chatbot/brain_service/README.md) |
 | 消息信封 | 类型化入站内容、提及、回复、附件、收件人和广播状态 | [消息信封 ICD](src/kazusa_ai_chatbot/message_envelope/README.md) |
-| LLM 接口 | 后端兼容聊天 LLM 调用、provider 会话、诊断和卸载重试 | [LLM 接口 ICD](src/kazusa_ai_chatbot/llm_interface/README.md) |
-| 对话进展 | 认知使用的短期回合状态，用来避免循环和过时重开 | [对话进展](src/kazusa_ai_chatbot/conversation_progress/README.md) |
+| LLM 接口 | 后端兼容的聊天 LLM 调用、provider 会话、诊断和模型重载重试 | [LLM 接口 ICD](src/kazusa_ai_chatbot/llm_interface/README.md) |
+| 对话进展 | 认知用来避免循环和过时重开的短期回合状态 | [对话进展](src/kazusa_ai_chatbot/conversation_progress/README.md) |
 | 私念残留 | 只加载到 L2a 认知的短期私人第一人称残留 | [私念残留 ICD](src/kazusa_ai_chatbot/internal_monologue_residue/README.md) |
 | 认知解析器 | 有边界的循环状态、能力观察、HIL/待恢复项和循环 trace | [认知解析器 ICD](src/kazusa_ai_chatbot/cognition_resolver/README.md) |
-| RAG 2 | slot 驱动的辅助智能体检索和 Cache2 证据投射 | [RAG 2](src/kazusa_ai_chatbot/rag/README.md) |
+| 任务解析 | 优先内联的通用证据会话和持久检查点提升 | [任务解析 ICD](src/kazusa_ai_chatbot/task_resolution/README.md) |
+| 本地上下文解析器 | RAG3 本地/私有证据图和任务解析专门组件的公开 IO | [本地上下文解析器 ICD](src/kazusa_ai_chatbot/local_context_resolver/README.md) |
+| 已退役的 RAG 2 辅助智能体 | 历史上的 slot 驱动辅助智能体检索和 Cache2 证据投射 | [已退役的 RAG 2](src/kazusa_ai_chatbot/rag/README.md) |
 | 认知和 dialog | 角色立场、边界、判断、风格、视觉指令和最终措辞 | [认知节点](src/kazusa_ai_chatbot/nodes/README.md) |
 | 动作规格 | L2d 动作残留、能力注册表、评估器、结果、输出表面和 trace | [动作规格](src/kazusa_ai_chatbot/action_spec/README.md) |
-| 已接受任务 | 角色接受的用户延迟工作生命周期 | [已接受任务 ICD](src/kazusa_ai_chatbot/accepted_task/README.md) |
-| 后台工作 | 内部延迟工作执行器、worker 路由和结果交接 | [后台工作 ICD](src/kazusa_ai_chatbot/background_work/README.md) |
-| 代码代理 | 独立代码任务主管、源码获取、只读代码答案和新 artifact 提案 | [Coding Agent ICD](src/kazusa_ai_chatbot/coding_agent/README.md) |
+| 已接受任务 | 角色接受的延迟工作的用户侧生命周期 | [已接受任务 ICD](src/kazusa_ai_chatbot/accepted_task/README.md) |
+| 后台工作 | 内部 task-orchestrator/future-speak 执行和结果交接 | [后台工作 ICD](src/kazusa_ai_chatbot/background_work/README.md) |
+| 代码代理 | 独立编码任务主管、源码获取、只读回答和新 artifact 提案 | [Coding Agent ICD](src/kazusa_ai_chatbot/coding_agent/README.md) |
 | 整合 | 持久目标规划、通道路由/审查、写入意图校验和按目标分离的持久化 | [整合 ICD](src/kazusa_ai_chatbot/consolidation/README.md) |
 | 数据库 | MongoDB 集合所有权、embeddings、索引和公开持久化 helper | [数据库 ICD](src/kazusa_ai_chatbot/db/README.md) |
 | 事件日志 | 脱敏运行遥测、状态快照、统计和导出合约 | [事件日志 ICD](src/kazusa_ai_chatbot/event_logging/README.md) |
 | 日历调度器 | 未来认知、到期承诺检查和反思阶段槽位的持久类型化触发时间 | [日历调度器 ICD](src/kazusa_ai_chatbot/calendar_scheduler/README.md) |
 | Dispatcher | 面向适配器的投递校验和回调传输 helper | [Dispatcher](src/kazusa_ai_chatbot/dispatcher/README.md) |
 | 自我认知 | 空闲来源收集、自我认知回合、路由追踪和来源绑定投递 | [自我认知](src/kazusa_ai_chatbot/self_cognition/README.md) |
-| 反思循环 | 后台反思运行、提升门控、提示词安全反思上下文 | [反思循环 ICD](src/kazusa_ai_chatbot/reflection_cycle/README.md) |
-| 记忆演化 | curated 共享记忆生命周期、谱系、种子重置、已提升记忆写入 | [记忆演化 ICD](src/kazusa_ai_chatbot/memory_evolution/README.md) |
-| 全局角色成长 | 从已批准反思记忆中缓慢漂移出的已提升特质 | [全局角色成长 ICD](src/kazusa_ai_chatbot/global_character_growth/README.md) |
-| 主动输出 | 未来自主联系路径的权限化预览/outbox 合约 | [主动输出 ICD](src/kazusa_ai_chatbot/proactive_output/README.md) |
+| 反思循环 | 后台反思运行、提升门控、提示词安全的反思上下文 | [反思循环 ICD](src/kazusa_ai_chatbot/reflection_cycle/README.md) |
+| 记忆演化 | curated 共享记忆生命周期、谱系、种子重置和已提升记忆写入 | [记忆演化 ICD](src/kazusa_ai_chatbot/memory_evolution/README.md) |
+| 角色身份成长 | 经审核、按根事件计数的全局身份修订与最新版本运行时投影 | [角色身份成长](src/kazusa_ai_chatbot/character_identity_growth/README.md) |
+| 回合 trace 和生命周期 | 不可变 `episode_trace.v2` 结算和幂等回合后审计记录 | [Brain Service ICD](src/kazusa_ai_chatbot/brain_service/README.md) |
 
 其他项目文档：
 
@@ -598,11 +633,17 @@ pip install -U pip
 pip install -e ".[dev]"
 ```
 
-启动大脑之前，先加载角色档案：
+服务需要手动植入的角色身份账本。在干净数据库上首次启动之前，先载入一份
+完整的规范角色档案：
 
 ```powershell
-python -m scripts.load_character_profile personalities/kazusa.json
+venv\Scripts\python -m scripts.load_character_profile personalities\example.json
 ```
+
+启动时会读取最新的不可变身份修订；如果没有修订存在，会在入口处理之前失败。
+已有的账本继续以数据库内容为准。替换角色档案需要使用
+[docs/HOWTO.md](docs/HOWTO.md#character-profile) 中记录的有版本号的
+操作者重置命令。
 
 普通本地运行会先启动 buildless Python/FastAPI 控制台，再通过控制台启动或停止
 大脑和适配器：
@@ -644,11 +685,13 @@ src/
     cognition_resolver/        有边界的解析器循环、能力观察、HIL 状态
     nodes/                     角色人格、认知和 dialog 阶段
     action_spec/               模态无关动作合约、注册表、结果
-    accepted_task/             用户可见的已接受延迟任务生命周期
-    background_work/           内部延迟工作执行器和 worker
-    coding_agent/              独立代码任务主管和子智能体
+    accepted_task/             用户侧的已接受延迟任务生命周期
+    background_work/           内部 task-orchestrator 和 future-speak 执行
+    task_resolution/           优先内联的语义证据编排
+    coding_agent/              独立编码任务主管和子智能体
     consolidation/             持久整合 helper、通道路由和 ICD
-    rag/                       RAG 2 辅助智能体、混合检索、Cache2
+    local_context_resolver/    RAG3 本地/私有证据图和保留投影
+    rag/                       已退役的 RAG2 辅助智能体、混合检索、Cache2
     conversation_progress/     短期回合记忆
     internal_monologue_residue/ L2a 使用的私念残留通道
     db/                        MongoDB facade、schema、集合所有者
@@ -658,8 +701,9 @@ src/
     self_cognition/            空闲自我认知触发、追踪和投递
     reflection_cycle/          后台反思和提升
     memory_evolution/          共享记忆生命周期和种子重置
-    global_character_growth/   缓慢的已提升角色成长特质
-    proactive_output/          权限化主动输出预览合约
+    character_identity_growth/ 经审核的角色身份成长与运行时投影
+    character_profile.py       规范手动植入档案的校验
+    db/internal_action_latches.py  内部思绪延续的持久锁存器
   scripts/                     运维和维护 CLI
 docs/
   HOWTO.md                     设置、运行命令、环境变量、测试

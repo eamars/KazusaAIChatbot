@@ -20,6 +20,10 @@ class FakeBrainServer(AbstractContextManager["FakeBrainServer"]):
         self.base_url = f"http://127.0.0.1:{port}"
         self._lock = Lock()
         self._graph = graph_snapshot(status="not_reported", run_id="not-reported")
+        self._self_graph = graph_snapshot(
+            status="not_reported",
+            run_id="self-not-reported",
+        )
         self._chat_requests: list[dict[str, Any]] = []
         self._chat_status_code = 200
         self._chat_delay_seconds = 0.0
@@ -56,11 +60,24 @@ class FakeBrainServer(AbstractContextManager["FakeBrainServer"]):
         with self._lock:
             self._graph = graph
 
+    def set_self_graph(self, graph: dict[str, Any]) -> None:
+        """Replace the latest self-cognition graph returned by the fake brain."""
+
+        with self._lock:
+            self._self_graph = graph
+
     def latest_graph(self) -> dict[str, Any]:
         """Return a copy of the latest graph."""
 
         with self._lock:
             graph = dict(self._graph)
+        return graph
+
+    def latest_self_graph(self) -> dict[str, Any]:
+        """Return a copy of the latest self-cognition graph."""
+
+        with self._lock:
+            graph = dict(self._self_graph)
         return graph
 
     def chat_requests(self) -> list[dict[str, Any]]:
@@ -141,12 +158,18 @@ class FakeBrainServer(AbstractContextManager["FakeBrainServer"]):
                     body = self.rfile.read(content_length)
                     payload = json.loads(body.decode("utf-8"))
                 owner.record_chat_request(payload)
-                graph = graph_snapshot(status="completed", run_id="debug-run-1")
+                graph = graph_snapshot(
+                    status="completed",
+                    run_id="debug-run-1",
+                    llm_trace_id="llm-trace-debug-1",
+                    cognition_invocation_id="cognition-invocation-debug-1",
+                )
                 owner.set_graph(graph)
                 _write_json(
                     self,
                     {
                         "delivery_tracking_id": "debug-run-1",
+                        "trace_id": "llm-trace-debug-1",
                         "messages": [{"text": "fake brain reply"}],
                         "cognition_graph": graph,
                     },
@@ -185,6 +208,7 @@ class FakeBrainServer(AbstractContextManager["FakeBrainServer"]):
 
         return {
             "cognition_graph": self.latest_graph(),
+            "self_cognition_graph": self.latest_self_graph(),
         }
 
 
@@ -192,19 +216,29 @@ def graph_snapshot(
     *,
     status: str,
     run_id: str,
-    trigger_source: str = "user_message",
-    input_sources: list[str] | None = None,
+    llm_trace_id: str = "",
+    cognition_invocation_id: str = "",
+    source_calendar_run_id: str = "",
 ) -> dict[str, Any]:
-    """Return a source-bearing cognition graph snapshot with parallel branches."""
+    """Return a cognition graph snapshot with parallel branches."""
 
-    active_input_sources = input_sources or ["dialog_text"]
+    llm_trace_id = llm_trace_id or f"llm-trace-{run_id}"
+    cognition_invocation_id = (
+        cognition_invocation_id or f"cognition-invocation-{run_id}"
+    )
+    if not source_calendar_run_id and run_id.startswith("self-"):
+        source_calendar_run_id = f"calendar-run-{run_id}"
+    metadata = {
+        "llm_trace_id": llm_trace_id,
+        "cognition_invocation_id": cognition_invocation_id,
+        "source_calendar_run_id": source_calendar_run_id,
+    }
 
     if status == "not_reported":
         return {
             "status": "not_reported",
             "run_id": run_id,
-            "trigger_source": "not_reported",
-            "input_sources": [],
+            **metadata,
             "nodes": [],
             "edges": [],
         }
@@ -216,8 +250,7 @@ def graph_snapshot(
     return {
         "status": status,
         "run_id": run_id,
-        "trigger_source": trigger_source,
-        "input_sources": active_input_sources,
+        **metadata,
         "nodes": [
             {
                 "id": "input.message",
@@ -250,7 +283,7 @@ def graph_snapshot(
                 },
             },
             {
-                "id": "memory.lookup",
+                "id": "l2.memory",
                 "label": "Memory",
                 "stage": "Memory",
                 "lane": "memory",
@@ -262,6 +295,13 @@ def graph_snapshot(
                     "memory_evidence": [
                         {"fact": "the operator wants useful detail"},
                     ],
+                    "conversation_progress": {
+                        "current_thread": "The operator's current thread.",
+                    },
+                    "public_group_scene": (
+                        "Participants: Ari, Operator\n"
+                        "At trigger: The current public group scene."
+                    ),
                 },
             },
             {
@@ -310,13 +350,226 @@ def graph_snapshot(
         ],
         "edges": [
             {"source": "input.message", "target": "l2.reasoning", "kind": "fork"},
-            {"source": "input.message", "target": "memory.lookup", "kind": "fork"},
+            {"source": "input.message", "target": "l2.memory", "kind": "fork"},
             {"source": "l2.reasoning", "target": "decision.reply", "kind": "join"},
-            {"source": "memory.lookup", "target": "decision.reply", "kind": "join"},
+            {"source": "l2.memory", "target": "decision.reply", "kind": "join"},
             {"source": "decision.reply", "target": "l3.visual_directives", "kind": "fork"},
             {"source": "decision.reply", "target": "l3.surface", "kind": "fork"},
         ],
     }
+
+
+def native_v2_graph_snapshot(*, status: str, run_id: str) -> dict[str, Any]:
+    """Return a graph containing native V2 branch and affect semantics."""
+
+    graph = graph_snapshot(status=status, run_id=run_id)
+    if status == 'not_reported':
+        return graph
+    node_status = 'running' if status == 'running' else 'completed'
+    if status == 'failed':
+        node_status = 'partial'
+        branch_one_status = 'failed'
+        branch_two_status = 'completed'
+    else:
+        branch_one_status = node_status
+        branch_two_status = node_status
+    branch_one_selection = 'unselected' if status == 'failed' else 'primary'
+    branch_two_selection = 'primary' if status == 'failed' else 'suppressed'
+    graph['nodes'].extend([
+        {
+            'id': 'v2.parallel',
+            'label': 'Parallel cognition',
+            'stage': 'V2',
+            'lane': 'cognition',
+            'column': 3,
+            'branch': 'parallel',
+            'status': node_status,
+            'detail': {
+                'parallel_execution': {
+                    'selected_question_count': 2,
+                    'dispatched_question_count': 2,
+                    'selected_branch_count': 2,
+                    'dispatched_branch_count': 2,
+                    'completed_branch_count': 1 if status == 'failed' else 2,
+                    'failed_branch_count': 1 if status == 'failed' else 0,
+                    'maximum_concurrency': 2,
+                    'overlap_ms': 42,
+                    'dependency_wait_ms': 0,
+                    'total_ms': 188,
+                },
+                'branch_results': [
+                    {
+                        'branch_index': 1,
+                        'selection': branch_one_selection,
+                        'status': branch_one_status,
+                        'intention': '保护重要关系中的边界',
+                    },
+                    {
+                        'branch_index': 2,
+                        'selection': branch_two_selection,
+                        'status': branch_two_status,
+                        'intention': '立即反击',
+                    },
+                ],
+            },
+        },
+        {
+            'id': 'v2.appraisal',
+            'label': 'Appraisal results',
+            'stage': 'V2',
+            'lane': 'cognition',
+            'column': 3,
+            'branch': 'appraisal',
+            'status': node_status,
+            'detail': {
+                'appraisal_results': [
+                    {
+                        'question_kind': 'relationship_social',
+                        'semantic_question': '这次行为怎样改变了关系中的安全感？',
+                        'status': 'completed',
+                        'explanation': '持续贬低削弱了关系安全感。',
+                        'propositions': [
+                            {
+                                'proposition_kind': 'relationship_shift',
+                                'semantic_value': '亲近关系中的信任受到伤害。',
+                            },
+                        ],
+                        'deltas': [
+                            {'delta': -20, 'reason': '关系安全感下降。'},
+                        ],
+                    },
+                ],
+            },
+        },
+        {
+            'id': 'v2.branch.1',
+            'label': 'Goal branch 1',
+            'stage': 'V2',
+            'lane': 'cognition',
+            'column': 4,
+            'branch': 'branch-1',
+            'status': branch_one_status,
+            'detail': {
+                'phase': 'preliminary',
+                'branch_index': 1,
+                'goal_kind': 'bond_protection',
+                'status': 'failed' if status == 'failed' else 'completed',
+                'selection': branch_one_selection,
+                'intention': '保护重要关系中的边界',
+                'desired_outcome': '让伤害被看见',
+                'concrete_detail': '说明这句话造成的伤害',
+                'reason': '重要关系中的持续贬低需要回应。',
+                'private_monologue': '我不想假装没受伤。',
+                'expected_consequences': ['边界变得清楚'],
+                'confidence': '高',
+                'failure_code': 'model_contract_invalid' if status == 'failed' else '',
+            },
+        },
+        {
+            'id': 'v2.branch.2',
+            'label': 'Goal branch 2',
+            'stage': 'V2',
+            'lane': 'cognition',
+            'column': 4,
+            'branch': 'branch-2',
+            'status': branch_two_status,
+            'detail': {
+                'phase': 'preliminary',
+                'branch_index': 2,
+                'goal_kind': 'autonomy_boundary',
+                'status': 'completed',
+                'selection': branch_two_selection,
+                'intention': '立即反击',
+                'desired_outcome': '结束当前攻击',
+                'concrete_detail': '用更强硬的话顶回去',
+                'reason': '被冒犯会自然地产生反击冲动。',
+                'private_monologue': '我很想马上反击，但这会让关系更糟。',
+                'expected_consequences': ['冲突可能进一步升级'],
+                'confidence': '中',
+            },
+        },
+        {
+            'id': 'v2.collapse',
+            'label': 'Workspace collapse',
+            'stage': 'V2',
+            'lane': 'decision',
+            'column': 5,
+            'branch': 'collapse',
+            'status': node_status,
+            'detail': {
+                'collapse': {
+                    'primary_branch_index': 2 if status == 'failed' else 1,
+                    'supporting_branch_indices': [],
+                    'suppressed_branch_indices': [] if status == 'failed' else [2],
+                    'selection_reason': '主目标保留了受伤事实，反击目标被压下。',
+                },
+                'selected_intention': {
+                    'route': 'speech',
+                    'intention': '回应当前关系中的受伤感受',
+                    'reason': '当前事件足以支持直接回应',
+                },
+                'selected_bid_reason': '她先承认这次伤害，再决定如何回应。',
+                'private_monologue': '我确实被这句话刺痛了，但我想先把感受说清楚。',
+                'goal_resolution': 'answerable_now',
+            },
+        },
+        {
+            'id': 'v2.affect',
+            'label': 'Affect projection',
+            'stage': 'V2',
+            'lane': 'cognition',
+            'column': 5,
+            'branch': 'affect',
+            'status': node_status,
+            'detail': {
+                'affect_projection': [
+                    {
+                        'emotion': '悲伤',
+                        'phase': '激活',
+                        'intensity': '高',
+                        'trend': '上升',
+                        'cause_summary': '关系伤害带来失落。',
+                    },
+                ],
+            },
+        },
+    ])
+    graph['edges'].extend([
+        {'source': 'l2.reasoning', 'target': 'v2.parallel', 'kind': 'fork'},
+        {'source': 'v2.parallel', 'target': 'v2.appraisal', 'kind': 'fork'},
+        {'source': 'v2.parallel', 'target': 'v2.branch.1', 'kind': 'fork'},
+        {'source': 'v2.parallel', 'target': 'v2.branch.2', 'kind': 'fork'},
+        {'source': 'v2.appraisal', 'target': 'v2.collapse', 'kind': 'join'},
+        {'source': 'v2.branch.1', 'target': 'v2.collapse', 'kind': 'join'},
+        {'source': 'v2.branch.2', 'target': 'v2.collapse', 'kind': 'join'},
+        {'source': 'v2.collapse', 'target': 'v2.affect', 'kind': 'sequence'},
+        {'source': 'v2.affect', 'target': 'l3.surface', 'kind': 'join'},
+    ])
+    if status == 'failed':
+        graph['nodes'].append({
+            'id': 'v2.failure',
+            'label': 'Native V2 failure',
+            'stage': 'V2',
+            'lane': 'cognition',
+            'column': 3,
+            'branch': 'failure',
+            'status': 'failed',
+            'detail': {
+                'failure': {
+                    'failure_code': 'model_contract_invalid',
+                    'stage': 'goal_cognition',
+                    'attempt_count': 2,
+                    'safe_checkpoint': 'pre_state_commit',
+                    'retryable': False,
+                },
+            },
+        })
+        graph['edges'].append({
+            'source': 'l2.reasoning',
+            'target': 'v2.failure',
+            'kind': 'fork',
+        })
+    return graph
 
 
 def write_conflict_brain_registry(

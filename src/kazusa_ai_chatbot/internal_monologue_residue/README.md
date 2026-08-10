@@ -27,8 +27,10 @@ context only through the public facade.
 
 Runtime callers use:
 
-- `load_residue_context(trigger_scope, current_timestamp_utc)` to return one
-  bounded prompt-facing string plus sanitized load metadata.
+- `load_residue_context(trigger_scope, current_timestamp_utc,
+  record_telemetry=True)` to return one bounded prompt-facing string plus
+  sanitized load metadata. Read-only inspection callers may set
+  `record_telemetry=False` so the inspection does not create an event row.
 - `record_completed_episode_residue(completed_state, current_timestamp_utc)` to
   record one post-episode residue row or skip cleanly.
 - `project_residue_window(rows, current_timestamp_utc, context_char_limit)` for
@@ -46,7 +48,7 @@ The MongoDB collection is `internal_monologue_residue_state`. Rows contain:
 - `residue_id`
 - `character_id`
 - `scope_key`
-- `scope_kind`: `user_thread`, `group_scene`, or `character_global`
+- `scope_kind`: `user_thread` or `group_scene`
 - `platform`, `platform_channel_id`, `channel_type`, `global_user_id`
 - `residue_text`: one short first-person private residue string
 - `source_kind`: `chat` or `self_cognition`
@@ -62,7 +64,6 @@ The loader builds candidate scopes from the current trigger:
 
 1. Exact `user_thread`
 2. Matching `group_scene`
-3. `character_global`
 
 It ranks eligible rows by that scope priority, then by recency, and caps the
 selected window by `INTERNAL_MONOLOGUE_RESIDUE_WINDOW_SIZE`.
@@ -82,6 +83,14 @@ The recorder receives a minimal current-run payload:
 - `ambient_evidence_summary`
 - `incoming_residue_context`
 - `source_reliability_notes`
+- `visible_outcome_summary`: bounded dialog that was actually selected
+- `surface_content_plan`: bounded semantic plan used for the response
+- `visible_boundaries`: bounded expression constraints applied to that response
+
+The recorder reconciles first-person cognition with the visible outcome and
+surface constraints. This lets it distinguish a reason that was already
+expressed, a thought intentionally retained by a boundary, and a private
+reason that still has short-term continuity value.
 
 The system prompt carries runtime `character_name` and `ambient_condition`.
 It asks for strict JSON with only:
@@ -114,9 +123,10 @@ completed episode in post-turn/background work. For self-cognition, writing
 runs after the completed self-cognition state is available. The normal visible
 `/chat` response path does not gain an extra foreground LLM call.
 
-L2a receives only `internal_monologue_residue_context`. L1, L2b, L2d, L3,
-dialog, adapters, scheduler, and generic persistence paths must not receive raw
-prior residue rows.
+V2 goal-cognition branches receive only the bounded
+`internal_monologue_residue_context` projection. Appraisal, L3, dialog,
+adapters, scheduler, and generic persistence paths must not receive raw prior
+residue rows or the projected private continuity string.
 
 ## Config
 
@@ -145,4 +155,5 @@ Do not feed raw residue rows or raw prior residue text to:
 - durable memory writers
 - reflection promotion
 
-Only L2a may consume the projected `internal_monologue_residue_context`.
+Only V2 goal-cognition branches may consume the projected
+`internal_monologue_residue_context`.

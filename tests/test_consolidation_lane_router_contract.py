@@ -10,13 +10,15 @@ import pytest
 from kazusa_ai_chatbot.consolidation.target import (
     build_consolidation_target_plan,
 )
+from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+    build_acquaintance_user_state,
+)
 
 
 EXPECTED_LANES = {
-    "character_state",
-    "relationship_profile",
     "user_memory_units",
     "active_commitment",
+    "character_identity_growth",
     "character_self_guidance",
     "interaction_style_image",
     "shared_memory_promotion",
@@ -47,7 +49,10 @@ def _base_state() -> dict[str, Any]:
         "user_name": "Test User",
         "user_profile": {
             "global_user_id": "global-user-1",
-            "affinity": 500,
+            "cognition_state": build_acquaintance_user_state(
+                global_user_id="global-user-1",
+                updated_at="2026-07-03T00:00:00Z",
+            ),
         },
         "platform": "qq",
         "platform_channel_id": "private-1",
@@ -102,20 +107,8 @@ def _reflection_target_plan_without_user() -> dict[str, Any]:
     state = _base_state()
     state["global_user_id"] = ""
     state["user_profile"] = {}
-    state["cognitive_episode"] = {
-        "episode_id": "episode-router-reflection-1",
-        "trigger_source": "reflection_signal",
-        "input_sources": ["reflection_artifact"],
-        "output_mode": "visible_reply",
-        "target_scope": {
-            "platform": "qq",
-            "platform_channel_id": "private-1",
-            "channel_type": "private",
-            "current_global_user_id": "",
-            "current_display_name": "reflection",
-            "target_broadcast": False,
-        },
-    }
+    state.pop("cognitive_episode")
+    state["origin_kind"] = "reflection_run"
     return build_consolidation_target_plan(state)
 
 
@@ -225,9 +218,20 @@ def test_lane_roster_includes_character_self_guidance_for_chat() -> None:
     roster_lanes = {entry["lane"] for entry in roster}
 
     assert "character_self_guidance" in roster_lanes
-    assert "character_state" in roster_lanes
+    assert "character_identity_growth" in roster_lanes
     assert "user_memory_units" in roster_lanes
     assert "active_commitment" in roster_lanes
+
+
+def test_relationship_experience_can_route_character_owned_identity() -> None:
+    """Close relationships may shape identity without globalizing details."""
+
+    module = _lane_router_module()
+    prompt = module._ROUTER_PROMPT
+
+    assert "亲密关系经历也可能促成角色自己的持久变化" in prompt
+    assert "关系对象、关系事实与私密细节仍归原有作用域" in prompt
+    assert "角色自己的抽象变化" in prompt
 
 
 def test_router_output_accepts_only_coarse_lane_tasks() -> None:
@@ -243,12 +247,94 @@ def test_router_output_accepts_only_coarse_lane_tasks() -> None:
                 "reason": "user stated a durable personal fact",
                 "source_keys": ["current_turn_user_message"],
             }
-        ]
+        ],
+        "character_operational_state_task": None,
     }
 
     validated = module.validate_lane_router_output(output, roster)
 
     assert validated == output
+
+
+def test_identity_route_requires_one_closed_semantic_evidence_card() -> None:
+    """Identity routing owns summaries while repositories own opaque roots."""
+
+    module = _lane_router_module()
+    target_plan = build_consolidation_target_plan(_base_state())
+    roster = module.build_lane_roster(target_plan)
+    output = {
+        "lane_tasks": [{
+            "lane": "character_identity_growth",
+            "reason": "the character expressed a potentially durable change",
+            "source_keys": [
+                "assistant_final_dialog",
+                "internal_thought",
+            ],
+            "identity_evidence": {
+                "decontextualized_event": (
+                    "The character reconsidered a recurring response pattern."
+                ),
+                "character_cognition_summary": (
+                    "The character framed the change as her own judgment."
+                ),
+                "visible_self_expression_summary": (
+                    "The character explicitly described a changed self-view."
+                ),
+            },
+        }],
+        "character_operational_state_task": None,
+    }
+
+    validated = module.validate_lane_router_output(output, roster)
+
+    assert validated == output
+    assert "episode_id" not in str(validated["lane_tasks"][0][
+        "identity_evidence"
+    ])
+
+
+@pytest.mark.asyncio
+async def test_router_prompt_excludes_repository_refs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The lane model receives semantic source views without raw identifiers."""
+
+    module = _lane_router_module()
+    captured_messages: list[Any] = []
+
+    class _Response:
+        content = (
+            '{"lane_tasks":[],"character_operational_state_task":null}'
+        )
+
+    async def _invoke(messages, *, config):
+        del config
+        captured_messages.extend(messages)
+        return _Response()
+
+    monkeypatch.setattr(module._lane_router_llm, "ainvoke", _invoke)
+    state = _base_state()
+    state["consolidation_target_plan"] = build_consolidation_target_plan(state)
+    await module.call_lane_router_llm(
+        state,
+        source_views=[{
+            "source_key": "assistant_final_dialog",
+            "source_kind": "assistant_final_dialog",
+            "summary": "A bounded visible response.",
+            "source_refs": [{
+                "episode_id": "episode-private-root",
+                "platform_message_id": "private-message",
+            }],
+        }],
+        roster=module.build_lane_roster(
+            state["consolidation_target_plan"]
+        ),
+    )
+
+    human_prompt = str(captured_messages[1].content)
+    assert "source_refs" not in human_prompt
+    assert "episode-private-root" not in human_prompt
+    assert "private-message" not in human_prompt
 
 
 @pytest.mark.parametrize(
@@ -291,4 +377,10 @@ def test_router_output_rejects_non_coarse_fields(
     roster = module.build_lane_roster(target_plan)
 
     with pytest.raises(ValueError):
-        module.validate_lane_router_output({"lane_tasks": [bad_task]}, roster)
+        module.validate_lane_router_output(
+            {
+                "lane_tasks": [bad_task],
+                "character_operational_state_task": None,
+            },
+            roster,
+        )

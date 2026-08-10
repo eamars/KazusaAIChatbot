@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
+import json
 import logging
 import re
+from collections.abc import Mapping
+from typing import Any
 
 from pymongo.errors import PyMongoError
 
@@ -461,8 +466,8 @@ async def build_interaction_style_context(
     channel_type: str,
     platform: str,
     platform_channel_id: str,
-) -> dict:
-    """Build the L3-facing style context for the active chat turn.
+) -> dict[str, Any]:
+    """Build the immutable all-stage style snapshot for one chat turn.
 
     Args:
         global_user_id: Current speaker's internal user UUID.
@@ -471,54 +476,203 @@ async def build_interaction_style_context(
         platform_channel_id: Platform channel or group id.
 
     Returns:
-        Prompt-facing style context. Private chats omit group-channel style.
+        One prompt-safe snapshot with source-labelled relevance, cognition,
+        and surface projections. Private chats omit group-channel style.
     """
 
     clean_global_user_id = text_or_empty(global_user_id).strip()
     if channel_type != "group" and not clean_global_user_id:
         raise ValueError("global_user_id is required")
 
-    user_style = empty_interaction_style_overlay()
-    if clean_global_user_id:
-        try:
-            user_document = await get_user_style_image(clean_global_user_id)
-        except _STYLE_LOAD_ERRORS as exc:
-            logger.exception(f"User interaction style load failed: {exc}")
-        else:
-            try:
-                user_style = _project_l3_overlay(
-                    _runtime_overlay(user_document)
-                )
-            except _STYLE_PROJECTION_ERRORS as exc:
-                logger.exception(
-                    f"User interaction style projection failed: {exc}"
-                )
+    user_task = (
+        get_user_style_image(clean_global_user_id)
+        if clean_global_user_id
+        else None
+    )
+    group_task = (
+        get_group_channel_style_image(
+            platform=platform,
+            platform_channel_id=platform_channel_id,
+        )
+        if channel_type == "group"
+        else None
+    )
+    user_document, group_document = await _load_style_snapshot_documents(
+        user_task=user_task,
+        group_task=group_task,
+    )
+    user_source = _snapshot_style_source(user_document)
+    group_source = (
+        _snapshot_style_source(group_document)
+        if channel_type == "group"
+        else None
+    )
+    sources: dict[str, dict[str, Any]] = {"user": user_source}
+    if group_source is not None:
+        sources["group_channel"] = group_source
 
-    context: dict = {
-        "user_style": user_style,
-        "application_order": ["user_style"],
+    surface = {
+        source_name: _style_surface_projection(source)
+        for source_name, source in sources.items()
     }
-    if channel_type == "group":
-        group_style = empty_interaction_style_overlay()
-        try:
-            group_document = await get_group_channel_style_image(
-                platform=platform,
-                platform_channel_id=platform_channel_id,
-            )
-        except _STYLE_LOAD_ERRORS as exc:
-            logger.exception(f"Group interaction style load failed: {exc}")
-        else:
-            try:
-                group_style = _project_l3_overlay(
-                    _runtime_overlay(group_document)
-                )
-            except _STYLE_PROJECTION_ERRORS as exc:
-                logger.exception(
-                    f"Group interaction style projection failed: {exc}"
-                )
-        context["group_channel_style"] = group_style
-        context["application_order"] = ["user_style", "group_channel_style"]
-    return context
+    application_order = ["user"]
+    if group_source is not None:
+        application_order.append("group_channel")
+
+    snapshot: dict[str, Any] = {
+        "schema_version": "interaction_style_turn_snapshot.v1",
+        "sources": sources,
+        "relevance": {
+            source_name: _style_relevance_projection(source)
+            for source_name, source in sources.items()
+        },
+        "cognition": {
+            source_name: _style_cognition_projection(source)
+            for source_name, source in sources.items()
+        },
+        "surface": surface,
+        "application_order": application_order,
+        "user_style": surface["user"]["overlay"],
+    }
+    if group_source is not None:
+        snapshot["group_channel_style"] = surface["group_channel"]["overlay"]
+    snapshot["group_engagement_action_context"] = (
+        _group_engagement_action_projection(group_source)
+    )
+    snapshot["snapshot_digest"] = _style_snapshot_digest(snapshot)
+    return snapshot
+
+
+async def _load_style_snapshot_documents(
+    *,
+    user_task: Any,
+    group_task: Any,
+) -> tuple[InteractionStyleImageDoc | BaseException | None, InteractionStyleImageDoc | BaseException | None]:
+    """Load user and optional group documents concurrently for one snapshot."""
+
+    tasks = [task for task in (user_task, group_task) if task is not None]
+    if not tasks:
+        return None, None
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    index = 0
+    user_result: InteractionStyleImageDoc | BaseException | None = None
+    group_result: InteractionStyleImageDoc | BaseException | None = None
+    if user_task is not None:
+        user_result = results[index]
+        index += 1
+    if group_task is not None:
+        group_result = results[index]
+    return user_result, group_result
+
+
+def _snapshot_style_source(
+    result: InteractionStyleImageDoc | BaseException | None,
+) -> dict[str, Any]:
+    """Project one document result into a bounded source-labelled snapshot."""
+
+    empty_overlay = empty_interaction_style_overlay()
+    if result is None:
+        return {
+            "status": "missing",
+            "revision": 0,
+            "overlay": empty_overlay,
+        }
+    if isinstance(result, BaseException):
+        logger.warning(
+            "Interaction style snapshot load failed: %s",
+            type(result).__name__,
+        )
+        return {
+            "status": "failed",
+            "revision": 0,
+            "overlay": empty_overlay,
+        }
+    try:
+        overlay = _runtime_overlay(result)
+        revision = result.get("revision")
+        if isinstance(revision, bool) or not isinstance(revision, int):
+            raise ValueError("style image revision is invalid")
+        status = "active" if _overlay_has_guidelines(overlay) else "empty"
+        return {
+            "status": status,
+            "revision": revision,
+            "overlay": overlay,
+        }
+    except _STYLE_PROJECTION_ERRORS as exc:
+        logger.warning(
+            "Interaction style snapshot projection failed: %s",
+            type(exc).__name__,
+        )
+        return {
+            "status": "failed",
+            "revision": 0,
+            "overlay": empty_overlay,
+        }
+
+
+def _style_relevance_projection(source: Mapping[str, Any]) -> dict[str, Any]:
+    """Project up to three engagement guidelines for settled relevance."""
+
+    overlay = source["overlay"]
+    return {
+        "status": source["status"],
+        "revision": source["revision"],
+        "engagement_guidelines": list(
+            overlay["engagement_guidelines"][
+                :RELEVANCE_USER_ENGAGEMENT_GUIDELINES_LIMIT
+            ]
+        ),
+        "confidence": overlay["confidence"],
+    }
+
+
+def _style_cognition_projection(source: Mapping[str, Any]) -> dict[str, Any]:
+    """Project the declared social and engagement guidance for Core V2."""
+
+    overlay = source["overlay"]
+    return {
+        "status": source["status"],
+        "revision": source["revision"],
+        "social_guidelines": list(overlay["social_guidelines"][:2]),
+        "engagement_guidelines": list(overlay["engagement_guidelines"][:2]),
+        "confidence": overlay["confidence"],
+    }
+
+
+def _style_surface_projection(source: Mapping[str, Any]) -> dict[str, Any]:
+    """Project one existing L3-sized overlay together with source status."""
+
+    return {
+        "status": source["status"],
+        "revision": source["revision"],
+        "overlay": _project_l3_overlay(source["overlay"]),
+    }
+
+
+def _group_engagement_action_projection(
+    group_source: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Reuse group cognition engagement guidance for eligible self-cognition."""
+
+    if group_source is None:
+        return {"engagement_guidelines": [], "confidence": ""}
+    projection = _style_cognition_projection(group_source)
+    return {
+        "engagement_guidelines": projection["engagement_guidelines"],
+        "confidence": projection["confidence"],
+    }
+
+
+def _style_snapshot_digest(snapshot: Mapping[str, Any]) -> str:
+    """Hash the exact redacted snapshot without a self-referential digest."""
+
+    encoded = json.dumps(
+        snapshot,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 async def build_group_engagement_action_context(

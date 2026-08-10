@@ -109,38 +109,6 @@ def test_compare_requires_specific_action_params() -> None:
     assert report["errors"] == []
 
 
-def test_compare_accepts_background_work_route_only_request() -> None:
-    """New background-work fixtures should require route-only params."""
-
-    case = _case(
-        source_kind="background_work_poc",
-        expectations={
-            "required_action_kinds": ["background_work_request"],
-            "required_visibility_by_kind": {
-                "background_work_request": "private",
-            },
-            "required_params_by_kind": {
-                "background_work_request": {
-                    "task_brief": "Generate a Fibonacci function snippet.",
-                    "requested_delivery": "send_result_when_done",
-                }
-            },
-            "forbidden_action_kinds": [
-                "send_message",
-                "trigger_future_cognition",
-            ],
-        },
-    )
-
-    report = compare_action_specs_to_expectations(
-        case,
-        [_background_work_action()],
-    )
-
-    assert report["ok"] is True
-    assert report["errors"] == []
-
-
 def test_compare_rejects_wrong_action_params() -> None:
     """Lifecycle fixtures should fail when the review kind differs."""
 
@@ -297,40 +265,6 @@ def _action_spec(kind: str, visibility: str) -> dict[str, object]:
         },
         "reason": "routing test",
     }
-    return action
-
-
-def _background_work_action() -> dict[str, object]:
-    """Build a generic background-work route action for comparison tests."""
-
-    action = _action_spec("background_work_request", "private")
-    action["target"] = {
-        "schema_version": "action_target.v1",
-        "target_kind": "current_user",
-        "target_id": None,
-        "owner": "background_work",
-        "scope": {
-            "source_platform": "debug",
-            "source_channel_id": "debug:user:test-user",
-            "source_channel_type": "private",
-            "source_message_id": "message-001",
-            "source_platform_bot_id": "debug-bot-001",
-            "source_character_name": "Test Character",
-            "source_trigger_source": "user_message",
-            "requester_global_user_id": (
-                "00000000-0000-4000-8000-000000000002"
-            ),
-            "requester_platform_user_id": "debug-user-001",
-            "requester_display_name": "Test User",
-        },
-    }
-    action["params"] = {
-        "task_brief": "Generate a Fibonacci function snippet.",
-        "requested_delivery": "send_result_when_done",
-        "max_output_chars": 3000,
-    }
-    action["urgency"] = "background"
-    action["reason"] = "The character accepted bounded async text work."
     return action
 
 

@@ -19,7 +19,6 @@ from kazusa_ai_chatbot.action_spec.handlers.accepted_task import (
 )
 from kazusa_ai_chatbot.action_spec.handlers.background_work import (
     validate_accepted_coding_task_action,
-    validate_background_work_action,
     validate_future_speak_action,
 )
 from kazusa_ai_chatbot.action_spec.models import (
@@ -27,13 +26,13 @@ from kazusa_ai_chatbot.action_spec.models import (
     ActionValidationError,
     CapabilitySpecV1,
     validate_action_spec,
+    validate_semantic_action_request_v2,
     validate_capability_spec,
 )
 from kazusa_ai_chatbot.action_spec.registry import (
     ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
     ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
     APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
-    BACKGROUND_WORK_REQUEST_CAPABILITY,
     FUTURE_SPEAK_CAPABILITY,
     MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     SPEAK_CAPABILITY,
@@ -96,6 +95,32 @@ class ActionSpecEvaluator:
         }
         return result
 
+    def evaluate_v2_request(
+        self,
+        request: object,
+        *,
+        available_action_kinds: set[str] | None = None,
+    ) -> dict[str, object]:
+        """Validate a V2 route request before legacy execution materialization."""
+
+        available = available_action_kinds or set(self._capabilities)
+        try:
+            validated = validate_semantic_action_request_v2(
+                request,
+                available_action_kinds=available,
+            )
+        except ActionValidationError as exc:
+            return {
+                "ok": False,
+                "request": None,
+                "errors": [str(exc)],
+            }
+        return {
+            "ok": True,
+            "request": validated,
+            "errors": [],
+        }
+
 
 def _rejected(
     errors: list[str],
@@ -130,8 +155,6 @@ def _validate_kind_specific_contract(action_spec: dict[str, Any]) -> None:
         _validate_speak_contract(action_spec)
     elif kind == TRIGGER_FUTURE_COGNITION_CAPABILITY:
         validate_future_cognition_action(action_spec)
-    elif kind == BACKGROUND_WORK_REQUEST_CAPABILITY:
-        validate_background_work_action(action_spec)
     elif kind == FUTURE_SPEAK_CAPABILITY:
         validate_future_speak_action(action_spec)
     elif kind == ACCEPTED_CODING_TASK_REQUEST_CAPABILITY:

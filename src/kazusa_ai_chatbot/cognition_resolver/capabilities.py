@@ -3,32 +3,33 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 from openai import OpenAIError
 
 from kazusa_ai_chatbot import event_logging
-from kazusa_ai_chatbot.complex_task_resolver import (
-    COMPLEX_TASK_RESOLVER_CONTEXT_VERSION,
-    COMPLEX_TASK_RESOLVER_OPTIONS_VERSION,
-    COMPLEX_TASK_RESOLVER_REQUEST_VERSION,
-    ComplexTaskValidationError,
-    project_complex_task_packet,
-    resolve_complex_task,
-    validate_complex_task_resolver_context,
-    validate_complex_task_resolver_options,
-    validate_complex_task_resolver_request,
-)
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
+    RESOLVER_EVIDENCE_STATE_VERSION,
     RESOLVER_OBSERVATION_VERSION,
     ResolverCapabilityRequestV1,
     ResolverObservationV1,
     ResolverValidationError,
     validate_resolver_capability_request,
     validate_resolver_observation,
+)
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    CognitionEvidenceV2,
+    DirectFactV2,
+    EVIDENCE_SOURCE_QUESTION_IDS,
+)
+from kazusa_ai_chatbot.config import (
+    BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
+    CODING_AGENT_WORKSPACE_ROOT,
+    TASK_RESOLUTION_INLINE_BUDGET_SECONDS,
 )
 from kazusa_ai_chatbot.db.errors import DatabaseBackendError
 from kazusa_ai_chatbot.local_context_resolver import (
@@ -62,6 +63,20 @@ from kazusa_ai_chatbot.rag.memory_evidence.workers.persistent_search import (
 from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import (
     empty_user_memory_context,
 )
+from kazusa_ai_chatbot.task_resolution.contracts import (
+    MAX_TASK_RESOLUTION_TEXT_CHARS,
+    MAX_TASK_RESOLUTION_TEXT_ITEMS,
+    TASK_RESOLUTION_EXECUTION_CONTEXT_VERSION,
+    TaskResolutionContractError,
+    TaskResolutionExecutionContextV1,
+    TaskResolutionResultV1,
+    validate_task_resolution_execution_context,
+)
+from kazusa_ai_chatbot.task_resolution.service import (
+    promote_deferred_task_resolution,
+    resolve_task_inline,
+    start_task_resolution_in_background,
+)
 from kazusa_ai_chatbot.utils import log_preview, text_or_empty
 
 MILLISECONDS_PER_SECOND = 1000
@@ -81,6 +96,77 @@ SHARED_MEMORY_SUMMARY_FIELDS = (
 logger = logging.getLogger(__name__)
 
 RecordRagEventFunc = Callable[..., Awaitable[None]]
+
+
+def project_resolver_observation_for_cognition(
+    observation: Mapping[str, object],
+    *,
+    occurred_at: str,
+) -> tuple[CognitionEvidenceV2, list[DirectFactV2]]:
+    """Project one resolver result into typed evidence without state authority."""
+
+    observation_id = text_or_empty(observation.get("observation_id")).strip()
+    summary = text_or_empty(
+        observation.get("semantic_summary")
+        or observation.get("prompt_safe_summary")
+    ).strip()
+    capability = text_or_empty(
+        observation.get("capability")
+        or observation.get("capability_kind")
+    ).strip()
+    if not observation_id:
+        raise ResolverValidationError("resolver observation id is required")
+    if not summary:
+        raise ResolverValidationError("resolver observation summary is required")
+    semantic_segments = [
+        f"{capability}: {summary}" if capability else summary,
+    ]
+    evidence_state = observation.get("task_resolution_evidence_state")
+    if isinstance(evidence_state, Mapping):
+        state = text_or_empty(evidence_state.get("state")).strip()
+        if state:
+            semantic_segments.append(f"evidence_state={state}")
+        remaining_needs = evidence_state.get("remaining_needs")
+        if isinstance(remaining_needs, list):
+            needs = [
+                item.strip()
+                for item in remaining_needs
+                if isinstance(item, str) and item.strip()
+            ]
+            if needs:
+                semantic_segments.append(
+                    "remaining_needs=" + " | ".join(needs[:4])
+                )
+    raw_evidence_refs = observation.get("evidence_refs")
+    if isinstance(raw_evidence_refs, list):
+        evidence_excerpts = [
+            excerpt.strip()
+            for evidence_ref in raw_evidence_refs
+            if isinstance(evidence_ref, Mapping)
+            for excerpt in [evidence_ref.get("excerpt")]
+            if isinstance(excerpt, str) and excerpt.strip()
+        ][:4]
+        if evidence_excerpts:
+            semantic_segments.append(
+                "evidence_excerpts=" + " | ".join(evidence_excerpts)
+            )
+    semantic_text = "; ".join(semantic_segments)
+    evidence = CognitionEvidenceV2(
+        evidence_handle="e1",
+        evidence_ref={
+            "source_kind": "resolver_observation",
+            "source_id": observation_id,
+            "occurred_at": occurred_at,
+            "semantic_summary": summary[:500],
+        },
+        semantic_text=semantic_text[:1000],
+        visible_to=list(
+            EVIDENCE_SOURCE_QUESTION_IDS["resolver_observation"]
+        ),
+    )
+    direct_facts: list[DirectFactV2] = []
+    return_value = (evidence, direct_facts)
+    return return_value
 
 
 async def run_rag_evidence_for_persona_state(
@@ -110,7 +196,7 @@ async def run_rag_evidence_for_persona_state(
             f'Local context recall skipped metadata: platform={state["platform"]} '
             f'channel={state["platform_channel_id"] or "<dm>"} '
             f'user={state["global_user_id"]} '
-            f'query={log_preview(state["decontexualized_input"])} '
+            f'query={log_preview(state["decontextualized_input"])} '
             f"rag_result={log_preview(rag_result)}"
         )
         await _record_rag_event(
@@ -128,7 +214,7 @@ async def run_rag_evidence_for_persona_state(
 
     fresh_query = _fresh_query_for_objective(
         objective,
-        fallback_query=state["decontexualized_input"],
+        fallback_query=state["decontextualized_input"],
     )
     request_reason = text_or_empty(reason)
     if not request_reason:
@@ -177,12 +263,13 @@ async def run_rag_evidence_for_persona_state(
         if safety_recovery_incidents
         else ""
     )
+    execution_status = _local_context_execution_status(rag_result)
     await _record_rag_event(
         record_rag_stage_event_func,
         component=component,
         correlation_id=correlation_id,
         agent_name=agent_name,
-        status="succeeded",
+        status=execution_status,
         slot_count=_local_context_evidence_node_count(packet),
         retrieval_count=retrieval_count,
         latency_ms=_elapsed_ms(started_at),
@@ -210,12 +297,32 @@ async def run_first_cycle_shared_memory_prewarm(
     """
 
     empty_rag_result = _empty_projected_rag_result(state)
+    prewarm_task = state["decontextualized_input"]
+    prompt_message_context = state["prompt_message_context"]
+    for mention in prompt_message_context["mentions"]:
+        if not isinstance(mention, Mapping):
+            continue
+        if mention.get("entity_kind") != "bot":
+            continue
+        display_name = mention.get("display_name")
+        if not isinstance(display_name, str) or not display_name.strip():
+            continue
+        mention_token = f"@{display_name.strip()}"
+        mention_pattern = re.compile(
+            rf"(?<!\S){re.escape(mention_token)}(?!\S)"
+        )
+        prewarm_task = mention_pattern.sub("", prewarm_task, count=1)
+    prewarm_task = prewarm_task.strip()
+    if not prewarm_task:
+        return_value = empty_rag_result
+        return return_value
+
     rag_request = build_text_chat_rag_request(
         episode=state["cognitive_episode"],
-        decontexualized_input=state["decontexualized_input"],
+        decontextualized_input=prewarm_task,
         character_profile=state["character_profile"],
         user_profile=state["user_profile"],
-        prompt_message_context=state["prompt_message_context"],
+        prompt_message_context=prompt_message_context,
         channel_topic=state["channel_topic"],
         chat_history_recent=state["chat_history_recent"],
         chat_history_wide=state["chat_history_wide"],
@@ -329,14 +436,8 @@ async def execute_resolver_capability_request(
 
     validated_request = validate_resolver_capability_request(request)
     capability_kind = validated_request["capability_kind"]
-    if capability_kind == "local_context_recall":
-        observation = await _execute_local_context_recall(
-            validated_request,
-            state,
-        )
-        return observation
-    if capability_kind == "public_answer_research":
-        observation = await _execute_public_answer_research(
+    if capability_kind == "task_resolution_request":
+        observation = await _execute_task_resolution_request(
             validated_request,
             state,
         )
@@ -362,98 +463,292 @@ async def execute_resolver_capability_request(
     raise ResolverValidationError(f"unsupported capability: {capability_kind}")
 
 
-async def _execute_local_context_recall(
+async def _execute_task_resolution_request(
     request: ResolverCapabilityRequestV1,
     state: GlobalPersonaState,
 ) -> ResolverObservationV1:
-    """Execute local/private context recall through the local-context resolver."""
+    """Run the one L2d-visible task-resolution capability route.
 
-    rag_result = await run_rag_evidence_for_persona_state(
-        state,
-        agent_name=f"resolver_{request['capability_kind']}",
-        objective=request["objective"],
-        reason=request["reason"],
-    )
-    observation = _observation_base(
-        request,
-        state,
-        status="succeeded",
-        prompt_safe_summary=_rag_observation_summary(rag_result),
-    )
-    observation["rag_result"] = rag_result
-    return_value = validate_resolver_observation(observation)
-    return return_value
+    A background-priority request enters the direct durable handoff path with
+    no inline specialist invocation.  A now-priority request runs inline first
+    under the approximate foreground budget and defers only when it cannot
+    finish.
+    """
 
-
-async def _execute_public_answer_research(
-    request: ResolverCapabilityRequestV1,
-    state: GlobalPersonaState,
-) -> ResolverObservationV1:
-    """Execute public answer research through the complex resolver IO."""
-
-    resolver_request = validate_complex_task_resolver_request({
-        "schema_version": COMPLEX_TASK_RESOLVER_REQUEST_VERSION,
-        "objective": request["objective"],
+    execution_context = _task_resolution_execution_context_from_state(state)
+    task_request = {
+        "capability": "task_resolution_request",
+        "semantic_goal": request["objective"],
         "reason": request["reason"],
-        "source": "l2d",
-        "priority": "normal",
-    })
-    resolver_context = validate_complex_task_resolver_context({
-        "schema_version": COMPLEX_TASK_RESOLVER_CONTEXT_VERSION,
-        "conversation_summary": text_or_empty(state.get("decontexualized_input")),
-        "persona_context_summary": _complex_task_persona_context_summary(state),
-        "time_context": _complex_task_time_context(state),
-        "available_evidence": [],
-    })
-    resolver_options = validate_complex_task_resolver_options({
-        "schema_version": COMPLEX_TASK_RESOLVER_OPTIONS_VERSION,
-        "limits": {},
-    })
-
-    try:
-        packet = await resolve_complex_task(
-            resolver_request,
-            resolver_context,
-            resolver_options,
+        "evidence_handles": [],
+    }
+    if request["priority"] == "background":
+        try:
+            deferred_result = await start_task_resolution_in_background(
+                task_request,
+                execution_context,
+                source_trigger_source=_cognitive_episode_trigger_source(state),
+                source_platform_bot_id=_required_state_text(
+                    state,
+                    "platform_bot_id",
+                ),
+                requester_display_name=_required_state_text(state, "user_name"),
+                source_llm_trace_id=text_or_empty(state.get("llm_trace_id")),
+            )
+        except TaskResolutionContractError as exc:
+            return _task_resolution_failure_observation(request, state, exc)
+        return _task_resolution_observation(
+            request,
+            state,
+            deferred_result,
+            durably_promoted=True,
         )
-    except ComplexTaskValidationError as exc:
-        observation = _complex_task_failure_observation(request, state, exc)
-        return observation
-
     try:
-        packet_projection = project_complex_task_packet(packet)
-    except ComplexTaskValidationError as exc:
-        observation = _complex_task_failure_observation(request, state, exc)
-        return observation
+        result = await resolve_task_inline(
+            task_request,
+            execution_context,
+            inline_budget_seconds=TASK_RESOLUTION_INLINE_BUDGET_SECONDS,
+        )
+    except TaskResolutionContractError as exc:
+        return _task_resolution_failure_observation(request, state, exc)
 
+    if result["status"] == "deferred":
+        try:
+            await promote_deferred_task_resolution(
+                result,
+                execution_context,
+                source_trigger_source=_cognitive_episode_trigger_source(state),
+                source_platform_bot_id=_required_state_text(
+                    state,
+                    "platform_bot_id",
+                ),
+                requester_display_name=_required_state_text(state, "user_name"),
+                source_llm_trace_id=text_or_empty(state.get("llm_trace_id")),
+            )
+        except TaskResolutionContractError as exc:
+            return _task_resolution_failure_observation(request, state, exc)
+    return _task_resolution_observation(
+        request,
+        state,
+        result,
+        durably_promoted=result["status"] == "deferred",
+    )
+
+
+def _task_resolution_execution_context_from_state(
+    state: GlobalPersonaState,
+) -> TaskResolutionExecutionContextV1:
+    """Project trusted persona state into the exact specialist context shape."""
+
+    character_profile = state["character_profile"]
+    character_name = text_or_empty(character_profile.get("name"))
+    if not character_name:
+        raise ResolverValidationError("character_profile.name: expected string")
+    conversation_progress = state.get("conversation_progress")
+    progress_context = (
+        dict(conversation_progress)
+        if isinstance(conversation_progress, Mapping)
+        else {}
+    )
+    context: TaskResolutionExecutionContextV1 = {
+        "schema_version": TASK_RESOLUTION_EXECUTION_CONTEXT_VERSION,
+        "character_name": character_name,
+        "platform": _required_state_text(state, "platform"),
+        "channel_id": _required_state_text(state, "platform_channel_id"),
+        "channel_type": _required_state_text(state, "channel_type"),
+        "requester_global_user_id": _required_state_text(
+            state,
+            "global_user_id",
+        ),
+        "requester_platform_user_id": _required_state_text(
+            state,
+            "platform_user_id",
+        ),
+        "source_message_id": _required_state_text(
+            state,
+            "platform_message_id",
+        ),
+        "local_time_context": dict(state["local_time_context"]),
+        "prompt_message_context": dict(state["prompt_message_context"]),
+        "chat_history_recent": _history_rows(state["chat_history_recent"])[
+            -MAX_TASK_RESOLUTION_TEXT_ITEMS:
+        ],
+        "chat_history_wide": _history_rows(state["chat_history_wide"])[
+            -MAX_TASK_RESOLUTION_TEXT_ITEMS:
+        ],
+        "conversation_progress": progress_context,
+        "persona_summary": _task_resolution_persona_summary(state),
+        "conversation_summary": text_or_empty(
+            state.get("decontextualized_input"),
+        )[:MAX_TASK_RESOLUTION_TEXT_CHARS],
+        "current_timestamp_utc": _required_state_text(
+            state,
+            "storage_timestamp_utc",
+        ),
+        "active_turn_platform_message_ids": (
+            _active_turn_platform_message_ids(state)
+        ),
+        "active_turn_conversation_row_ids": _string_list(
+            state.get("active_turn_conversation_row_ids"),
+        ),
+        "session_media_refs": list_session_media_refs((
+            state["platform"],
+            state["platform_channel_id"],
+            state["global_user_id"],
+        )),
+        "coding_workspace_root": text_or_empty(CODING_AGENT_WORKSPACE_ROOT),
+        "max_output_chars": BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
+    }
+    validated_context = validate_task_resolution_execution_context(context)
+    return validated_context
+
+
+def _task_resolution_observation(
+    request: ResolverCapabilityRequestV1,
+    state: GlobalPersonaState,
+    result: TaskResolutionResultV1,
+    *,
+    durably_promoted: bool,
+) -> ResolverObservationV1:
+    """Map one validated task result into the resolver recurrence contract."""
+
+    status = result["status"]
+    if status == "deferred":
+        if not durably_promoted:
+            raise ResolverValidationError(
+                "deferred task result requires durable promotion"
+            )
+        observation = _observation_base(
+            request,
+            state,
+            status="succeeded",
+            prompt_safe_summary=(
+                "The bounded task was accepted for continued work; its later "
+                "result will return through the normal conversation path."
+            ),
+        )
+        observation["task_resolution_evidence_state"] = {
+            "schema_version": RESOLVER_EVIDENCE_STATE_VERSION,
+            "state": "pending",
+            "remaining_needs": list(result["remaining_needs"]),
+        }
+        if result["evidence"]:
+            observation["evidence_refs"] = _task_resolution_evidence_refs(
+                result,
+                observed_at=_created_at_utc(state),
+            )
+            observation["knowledge_projection"] = {
+                "investigation_summary": result["prompt_safe_summary"],
+                "knowledge_we_know_so_far": [
+                    evidence["summary"]
+                    for evidence in result["evidence"]
+                ],
+                "knowledge_still_lacking": list(result["remaining_needs"]),
+                "recommended_next_iteration": [],
+                "evidence_boundary_notes": _task_resolution_limitations(
+                    result,
+                ),
+            }
+        validated_observation = validate_resolver_observation(observation)
+        return validated_observation
+    if status in {"resolved", "partial"}:
+        observation = _observation_base(
+            request,
+            state,
+            status="succeeded",
+            prompt_safe_summary=result["prompt_safe_summary"],
+        )
+        observation["task_resolution_evidence_state"] = {
+            "schema_version": RESOLVER_EVIDENCE_STATE_VERSION,
+            "state": "complete" if status == "resolved" else "partial",
+            "remaining_needs": list(result["remaining_needs"]),
+        }
+        observation["evidence_refs"] = _task_resolution_evidence_refs(
+            result,
+            observed_at=_created_at_utc(state),
+        )
+        observation["knowledge_projection"] = {
+            "investigation_summary": result["prompt_safe_summary"],
+            "knowledge_we_know_so_far": [
+                evidence["summary"]
+                for evidence in result["evidence"]
+            ],
+            "knowledge_still_lacking": list(result["remaining_needs"]),
+            "recommended_next_iteration": [],
+            "evidence_boundary_notes": _task_resolution_limitations(result),
+        }
+        validated_observation = validate_resolver_observation(observation)
+        return validated_observation
+    if status == "needs_user_input":
+        observation = _observation_base(
+            request,
+            state,
+            status="blocked",
+            prompt_safe_summary=result["prompt_safe_summary"],
+        )
+        observation["blocker_kind"] = "requires_user_input"
+        observation["task_resolution_evidence_state"] = {
+            "schema_version": RESOLVER_EVIDENCE_STATE_VERSION,
+            "state": "blocked",
+            "remaining_needs": list(result["remaining_needs"]),
+        }
+        validated_observation = validate_resolver_observation(observation)
+        return validated_observation
+    if status == "approval_required":
+        observation = _observation_base(
+            request,
+            state,
+            status="blocked",
+            prompt_safe_summary=result["prompt_safe_summary"],
+        )
+        observation["task_resolution_evidence_state"] = {
+            "schema_version": RESOLVER_EVIDENCE_STATE_VERSION,
+            "state": "blocked",
+            "remaining_needs": list(result["remaining_needs"]),
+        }
+        validated_observation = validate_resolver_observation(observation)
+        return validated_observation
+    if status in {"unavailable", "failed"}:
+        observation = _observation_base(
+            request,
+            state,
+            status="failed",
+            prompt_safe_summary=result["prompt_safe_summary"],
+        )
+        observation["task_resolution_evidence_state"] = {
+            "schema_version": RESOLVER_EVIDENCE_STATE_VERSION,
+            "state": "blocked",
+            "remaining_needs": list(result["remaining_needs"]),
+        }
+        validated_observation = validate_resolver_observation(observation)
+        return validated_observation
+    raise ResolverValidationError("task-resolution result status is unsupported")
+
+
+def _task_resolution_failure_observation(
+    request: ResolverCapabilityRequestV1,
+    state: GlobalPersonaState,
+    exc: TaskResolutionContractError,
+) -> ResolverObservationV1:
+    """Return a bounded failure observation without exposing internal errors."""
+
+    logger.warning(f"Task-resolution capability failed validation: {exc}")
     observation = _observation_base(
         request,
         state,
-        status="succeeded",
-        prompt_safe_summary=_complex_task_observation_summary(
-            packet_projection,
+        status="failed",
+        prompt_safe_summary=(
+            "The bounded task could not complete through its available "
+            "resolution path."
         ),
     )
-    observation["evidence_refs"] = _complex_task_evidence_refs(packet)
-    observation["knowledge_projection"] = {
-        "investigation_summary": text_or_empty(
-            packet_projection["investigation_summary"],
-        ),
-        "knowledge_we_know_so_far": _string_list(
-            packet_projection["knowledge_we_know_so_far"],
-        ),
-        "knowledge_still_lacking": _string_list(
-            packet_projection["knowledge_still_lacking"],
-        ),
-        "recommended_next_iteration": _string_list(
-            packet_projection["recommended_next_iteration"],
-        ),
-        "evidence_boundary_notes": _string_list(
-            packet_projection["evidence_boundary_notes"],
-        ),
+    observation["task_resolution_evidence_state"] = {
+        "schema_version": RESOLVER_EVIDENCE_STATE_VERSION,
+        "state": "blocked",
+        "remaining_needs": [],
     }
-    return_value = validate_resolver_observation(observation)
-    return return_value
+    validated_observation = validate_resolver_observation(observation)
+    return validated_observation
 
 
 def _blocked_observation(
@@ -515,21 +810,83 @@ def _self_goal_resolution_observation(
     return return_value
 
 
-def _complex_task_failure_observation(
-    request: ResolverCapabilityRequestV1,
-    state: GlobalPersonaState,
-    exc: ComplexTaskValidationError,
-) -> ResolverObservationV1:
-    """Build a failed observation when public research packet IO is invalid."""
+def _history_rows(rows: object) -> list[dict[str, object]]:
+    """Copy required prompt-safe conversation rows for specialist adapters."""
 
-    observation = _observation_base(
-        request,
-        state,
-        status="failed",
-        prompt_safe_summary=f"public_answer_research failed: {exc}",
-    )
-    return_value = validate_resolver_observation(observation)
-    return return_value
+    if not isinstance(rows, list):
+        raise ResolverValidationError("chat history: expected list")
+    copied_rows: list[dict[str, object]] = []
+    for row in rows:
+        if not isinstance(row, Mapping):
+            raise ResolverValidationError("chat history: expected mapping rows")
+        copied_rows.append(dict(row))
+    return copied_rows
+
+
+def _task_resolution_persona_summary(state: GlobalPersonaState) -> str:
+    """Build compact character context without raw adapter identifiers."""
+
+    character_profile = state["character_profile"]
+    character_name = text_or_empty(character_profile.get("name"))
+    if not character_name:
+        raise ResolverValidationError("character_profile.name: expected string")
+    segments = [f"active_character={character_name}"]
+    channel_type = text_or_empty(state.get("channel_type"))
+    if channel_type:
+        segments.append(f"channel_type={channel_type}")
+    user_name = text_or_empty(state.get("user_name"))
+    if user_name:
+        segments.append(f"current_user_display_name={user_name}")
+    relationship_context = text_or_empty(state.get("logical_stance"))
+    if relationship_context:
+        segments.append(f"current_stance={relationship_context[:400]}")
+    summary = "; ".join(segments)
+    return summary
+
+
+def _task_resolution_evidence_refs(
+    result: TaskResolutionResultV1,
+    *,
+    observed_at: str,
+) -> list[dict[str, object]]:
+    """Project validated specialist evidence into resolver-safe references."""
+
+    references: list[dict[str, object]] = []
+    for evidence in result["evidence"]:
+        references.append({
+            "schema_version": "evidence_ref.v1",
+            "evidence_kind": "tool_result",
+            "evidence_id": evidence["evidence_id"],
+            "owner": evidence["specialist"],
+            "excerpt": evidence["summary"],
+            "observed_at": observed_at,
+        })
+    return references
+
+
+def _task_resolution_limitations(
+    result: TaskResolutionResultV1,
+) -> list[str]:
+    """Deduplicate bounded evidence limitations for cognition context."""
+
+    limitations: list[str] = []
+    for evidence in result["evidence"]:
+        for limitation in evidence["limitations"]:
+            if limitation not in limitations:
+                limitations.append(limitation)
+    return limitations
+
+
+def _required_state_text(state: GlobalPersonaState, field_name: str) -> str:
+    """Require one trusted non-empty persona-state text field."""
+
+    value = state.get(field_name)
+    if not isinstance(value, str) or not value.strip():
+        raise ResolverValidationError(
+            f"{field_name}: expected non-empty state text"
+        )
+    text = value.strip()
+    return text
 
 
 def _cognitive_episode_trigger_source(state: GlobalPersonaState) -> str:
@@ -567,91 +924,13 @@ def _observation_base(
         "evidence_refs": [],
         "created_at_utc": _created_at_utc(state),
     }
+    if request["capability_kind"] == "task_resolution_request":
+        observation["task_resolution_evidence_state"] = {
+            "schema_version": RESOLVER_EVIDENCE_STATE_VERSION,
+            "state": "missing" if status == "succeeded" else "blocked",
+            "remaining_needs": [],
+        }
     return observation
-
-
-def _complex_task_persona_context_summary(state: GlobalPersonaState) -> str:
-    """Build a compact persona summary without raw platform identifiers."""
-
-    segments: list[str] = []
-    character_profile = state.get("character_profile")
-    if isinstance(character_profile, Mapping):
-        character_name = text_or_empty(character_profile.get("name"))
-        if character_name:
-            segments.append(f"active_character={character_name}")
-    user_name = text_or_empty(state.get("user_name"))
-    if user_name:
-        segments.append(f"current_user_display_name={user_name}")
-    channel_type = text_or_empty(state.get("channel_type"))
-    if channel_type:
-        segments.append(f"channel_type={channel_type}")
-    summary = "; ".join(segments)
-    return summary
-
-
-def _complex_task_time_context(state: GlobalPersonaState) -> dict[str, object]:
-    """Return prompt-safe time context for public answer research."""
-
-    raw_time_context = state.get("local_time_context")
-    if isinstance(raw_time_context, Mapping):
-        time_context = dict(raw_time_context)
-        return time_context
-    storage_timestamp = text_or_empty(state.get("storage_timestamp_utc"))
-    if storage_timestamp:
-        time_context = {"storage_timestamp_utc": storage_timestamp}
-        return time_context
-    time_context: dict[str, object] = {}
-    return time_context
-
-
-def _complex_task_observation_summary(
-    packet_projection: dict[str, object],
-) -> str:
-    """Build the prompt-safe semantic summary shown to cognition."""
-
-    summary = text_or_empty(packet_projection["investigation_summary"])
-    if summary:
-        return_value = summary
-        return return_value
-
-    segments = ["public_answer_research returned semantic knowledge"]
-    lacking_items = _string_list(packet_projection["knowledge_still_lacking"])
-    if lacking_items:
-        segments.append("lacking=" + " | ".join(lacking_items))
-    recommendations = _string_list(
-        packet_projection["recommended_next_iteration"]
-    )
-    if recommendations:
-        segments.append("next=" + " | ".join(recommendations))
-    trace_summary = packet_projection.get("trace_summary")
-    if isinstance(trace_summary, Mapping):
-        failure_reason = text_or_empty(trace_summary.get("failure_reason"))
-        if failure_reason:
-            segments.append(f"failure_reason={failure_reason}")
-    summary = "; ".join(segments)
-    return summary
-
-
-def _complex_task_evidence_refs(packet: object) -> list[dict[str, object]]:
-    """Collect typed evidence refs from a complex resolver packet."""
-
-    if not isinstance(packet, Mapping):
-        evidence_refs: list[dict[str, object]] = []
-        return evidence_refs
-
-    evidence_refs = _mapping_list_items(packet.get("evidence_refs"))
-    graph = packet.get("graph")
-    if not isinstance(graph, Mapping):
-        return evidence_refs
-    nodes = graph.get("nodes")
-    if not isinstance(nodes, Mapping):
-        return evidence_refs
-    for node in nodes.values():
-        if not isinstance(node, Mapping):
-            continue
-        node_refs = _mapping_list_items(node.get("evidence_refs"))
-        evidence_refs.extend(node_refs)
-    return evidence_refs
 
 
 def _string_list(value: object) -> list[str]:
@@ -732,6 +1011,13 @@ def _rag_observation_summary(rag_result: dict[str, Any]) -> str:
 
     answer = str(rag_result.get("answer", "")).strip()
     retrieval_count = _retrieval_count(rag_result)
+    execution_status = _local_context_execution_status(rag_result)
+    if execution_status == "failed":
+        summary = (
+            "Local context evidence failed with no projected rows; continue "
+            "without treating it as source-backed truth."
+        )
+        return summary
     no_confirmed_fact_markers = (
         "没有找到已确认事实",
         "没有找到相关证据",
@@ -762,6 +1048,22 @@ def _rag_observation_summary(rag_result: dict[str, Any]) -> str:
         f"Local context evidence succeeded with {retrieval_count} projected rows."
     )
     return summary
+
+
+def _local_context_execution_status(
+    rag_result: dict[str, Any],
+) -> Literal["succeeded", "failed"]:
+    """Derive capability truth from projected evidence and resolver status."""
+
+    supervisor_trace = rag_result.get("supervisor_trace")
+    blocked_node_count = 0
+    if isinstance(supervisor_trace, Mapping):
+        raw_blocked_count = supervisor_trace.get("blocked_node_count", 0)
+        if isinstance(raw_blocked_count, int):
+            blocked_node_count = raw_blocked_count
+    if _retrieval_count(rag_result) == 0 and blocked_node_count > 0:
+        return "failed"
+    return "succeeded"
 
 
 def _retrieval_count(rag_result: dict[str, Any]) -> int:
@@ -822,7 +1124,7 @@ def _local_context_resolver_context_from_state(
         "chat_history_recent": list(state["chat_history_recent"]),
         "chat_history_wide": list(state["chat_history_wide"]),
         "conversation_progress": progress_context,
-        "original_user_request": state["decontexualized_input"],
+        "original_user_request": state["decontextualized_input"],
         "current_timestamp_utc": state["storage_timestamp_utc"],
         "current_platform_message_id": text_or_empty(
             state.get("platform_message_id")

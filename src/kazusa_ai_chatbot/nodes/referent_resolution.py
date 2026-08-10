@@ -3,9 +3,9 @@
 This module owns validation and derived clarification decisions for the
 ``referents`` list emitted by the message decontextualizer. Inputs are graph
 state dictionaries or raw LLM fields; outputs are plain dictionaries and
-booleans consumed by RAG gating and cognition prompts. The extension slot is
-the shared referent dictionary shape: future ambiguity producers can plug into
-the same consumers by emitting ``phrase``, ``referent_role``, and ``status`` fields.
+booleans consumed by RAG gating and cognition prompts. Episode-local
+participant handles are preserved when the model resolves a visible scene
+participant.
 """
 
 from __future__ import annotations
@@ -54,11 +54,17 @@ def normalize_referents(value: object) -> list[dict[str, str]]:
         if status not in _REFERENT_STATUSES:
             continue
 
-        normalized_referents.append({
+        normalized_referent = {
             "phrase": phrase,
             "referent_role": referent_role,
             "status": status,
-        })
+        }
+        participant_handle = raw_referent.get("participant_handle")
+        if isinstance(participant_handle, str) and participant_handle.strip():
+            normalized_referent["participant_handle"] = (
+                participant_handle.strip()
+            )
+        normalized_referents.append(normalized_referent)
 
     return_value = normalized_referents
     return return_value

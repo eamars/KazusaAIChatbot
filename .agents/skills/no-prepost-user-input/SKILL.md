@@ -14,7 +14,7 @@ This skill protects a specific architectural rule in this workspace:
 
 Use this skill when working on any code path that:
 
-- reads `decontexualized_input`
+- reads `decontextualized_input`
 - transforms LLM outputs like `accepted_user_preferences`, `new_facts`, or `future_promises`
 - decides whether a user request was accepted
 - converts accepted commands into commitments or operational state

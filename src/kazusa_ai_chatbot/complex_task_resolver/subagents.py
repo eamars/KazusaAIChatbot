@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import re
 
+from kazusa_ai_chatbot.action_spec.models import EVIDENCE_REF_VERSION
 from kazusa_ai_chatbot.rag.web_agent3 import WebAgent3
 
 from .constants import (
@@ -19,6 +21,12 @@ from .contracts import (
 )
 
 logger = logging.getLogger(__name__)
+
+_HTTP_URL_PATTERN = re.compile(
+    r"https?://[^\s\\)>\]}\"']+",
+    re.IGNORECASE,
+)
+_MAX_WEB_EVIDENCE_REFS = 8
 
 
 class ComplexTaskEvidenceSubagent:
@@ -97,6 +105,11 @@ class ComplexTaskEvidenceSubagent:
         summary = str(web_result.get("result", ""))
         status = "resolved" if resolved else _unresolved_status(raw_attempts)
         result_payload: dict[str, object] = {"summary": summary}
+        evidence_refs: list[dict[str, object]] = []
+        if web_status in ("", "success", "partial"):
+            evidence_refs = _web_evidence_refs(summary, knowledge_metadata)
+        if evidence_refs:
+            result_payload["evidence_refs"] = evidence_refs
         if web_status:
             result_payload["source_quality"] = web_status
         if web_reason:
@@ -134,6 +147,40 @@ class ComplexTaskEvidenceSubagent:
         }
         validated_result = validate_complex_task_subagent_result(result)
         return validated_result
+
+
+def _web_evidence_refs(
+    summary: str,
+    knowledge_metadata: dict[str, object],
+) -> list[dict[str, object]]:
+    """Project source URLs from grounded web output into canonical refs."""
+
+    evidence_refs: list[dict[str, object]] = []
+    seen_urls: set[str] = set()
+    source_texts = [summary]
+    raw_source_urls = knowledge_metadata.get("source_urls", [])
+    if isinstance(raw_source_urls, list):
+        source_texts.extend(
+            source_url
+            for source_url in raw_source_urls
+            if isinstance(source_url, str)
+        )
+    for match in _HTTP_URL_PATTERN.finditer("\n".join(source_texts)):
+        source_url = match.group(0).rstrip(".,;:")
+        if source_url in seen_urls:
+            continue
+        seen_urls.add(source_url)
+        evidence_refs.append({
+            "schema_version": EVIDENCE_REF_VERSION,
+            "evidence_kind": "external_document",
+            "evidence_id": source_url,
+            "owner": "web_agent3",
+            "excerpt": source_url,
+            "observed_at": None,
+        })
+        if len(evidence_refs) >= _MAX_WEB_EVIDENCE_REFS:
+            break
+    return evidence_refs
 
 
 class UnavailableEvidenceSubagent(ComplexTaskEvidenceSubagent):

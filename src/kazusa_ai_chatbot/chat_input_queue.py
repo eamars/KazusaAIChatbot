@@ -30,12 +30,15 @@ class QueuedChatItem:
         collapsed_items: Later queued items collapsed into this survivor.
         conversation_row_id: Committed conversation-history row ID when the
             queued user message has already been persisted.
+        received_at: Server-generated UTC arrival instant of the committed
+            conversation-history receipt.
         pipeline_run_handle: Optional foreground coordination handle released
             by the service worker after this queued item is resolved.
         enqueue_monotonic: Process-local monotonic arrival time used by turn
             settlement deadlines.
         llm_trace_id: Protected trace run shared by this input's relevance and
             downstream cognition stages.
+        llm_trace_recorded: Whether the protected trace-run write succeeded.
     """
 
     sequence: int
@@ -48,11 +51,13 @@ class QueuedChatItem:
     combined_content: str | None = None
     collapsed_items: list[QueuedChatItem] = field(default_factory=list)
     conversation_row_id: str = ""
+    received_at: str = ""
     pipeline_run_handle: Any | None = None
     global_user_id: str = ""
     user_profile: dict[str, Any] = field(default_factory=dict)
     resolved_message_envelope: Any | None = None
     llm_trace_id: str = ""
+    llm_trace_recorded: bool = False
 
 
 @dataclass
@@ -115,6 +120,7 @@ class ChatInputQueue:
         condition = self._get_condition()
         future: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
         turn_clock = build_turn_clock(request.local_timestamp or None)
+        receipt_metadata = getattr(request, "_receipt_metadata", None) or {}
 
         async with condition:
             self._sequence += 1
@@ -125,6 +131,10 @@ class ChatInputQueue:
                 local_timestamp=turn_clock["local_timestamp"],
                 local_time_context=turn_clock["local_time_context"],
                 future=future,
+                conversation_row_id=str(
+                    receipt_metadata.get("conversation_row_id", "")
+                ),
+                received_at=str(receipt_metadata.get("received_at", "")),
                 pipeline_run_handle=pipeline_run_handle,
             )
             self._queue.append(item)

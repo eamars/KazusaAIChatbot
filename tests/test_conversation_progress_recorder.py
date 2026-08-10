@@ -1,264 +1,804 @@
-"""Recorder boundary-profile tests for conversation progress."""
+"""Independent recorder-owner, failure-isolation, and budget contracts."""
 
 from __future__ import annotations
 
+import asyncio
 import json
-from unittest.mock import AsyncMock
+from copy import deepcopy
 
 import pytest
 
+from kazusa_ai_chatbot.config import (
+    CONSOLIDATION_LLM_MAX_COMPLETION_TOKENS,
+)
 from kazusa_ai_chatbot.conversation_progress import recorder
-from kazusa_ai_chatbot.conversation_progress import runtime
-from kazusa_ai_chatbot.conversation_progress.models import (
-    ConversationProgressRecordInput,
-    ConversationProgressScope,
+from kazusa_ai_chatbot.conversation_progress.delta_merge import (
+    ConversationProgressContractError,
+    event_handle_map,
+    source_handle_map,
+    validate_event_observation_batch,
 )
-from kazusa_ai_chatbot.nodes.boundary_profile import (
-    get_boundary_recovery_description,
-    get_relationship_priority_description,
-    get_self_integrity_description,
+from kazusa_ai_chatbot.conversation_progress.policy import (
+    MAX_EVENT_OUTCOME_CHARS,
 )
-from kazusa_ai_chatbot.config import DEFAULT_LLM_MAX_COMPLETION_TOKENS
+from kazusa_ai_chatbot.time_boundary import format_storage_utc_for_llm
+from tests.conversation_progress_v2_helpers import (
+    changed_event_observation,
+    event,
+    event_observation_batch,
+    new_event_observation,
+    packet,
+    record_input,
+    scene_observation,
+    unchanged_event_observation,
+)
 
 
-_BOUNDARY_PROFILE = {
-    "self_integrity": 0.82,
-    "control_sensitivity": 0.3,
-    "compliance_strategy": "comply",
-    "relational_override": 0.24,
-    "control_intimacy_misread": 0.2,
-    "boundary_recovery": "rebound",
-    "authority_skepticism": 0.35,
-}
+class _Response:
+    """Small provider response with inspectable usage."""
 
-_VALID_RECORDER_OUTPUT = {
-    "continuity": "same_episode",
-    "status": "active",
-    "episode_label": "clarified_reference",
-    "conversation_mode": "casual_chat",
-    "episode_phase": "resolving",
-    "topic_momentum": "stable",
-    "current_thread": "clarified referent",
-    "user_goal": "",
-    "current_blocker": "",
-    "user_state_updates": [],
-    "assistant_moves": ["clarified referent"],
-    "overused_moves": [],
-    "open_loops": [],
-    "resolved_threads": ["referent clarified"],
-    "avoid_reopening": [],
-    "emotional_trajectory": "settled",
-    "next_affordances": ["continue normally"],
-    "progression_guidance": "continue without carrying old suspicion",
-}
+    def __init__(self, payload: object) -> None:
+        self.content = (
+            payload
+            if isinstance(payload, str)
+            else json.dumps(payload, ensure_ascii=False)
+        )
+        self.usage_metadata = {
+            'input_tokens': 50,
+            'output_tokens': 20,
+        }
 
 
-class _FakeResponse:
-    """Small LLM response stand-in."""
+class _OneResponseLLM:
+    """Return or raise one configured result and retain every call."""
 
-    def __init__(self, payload: dict):
-        self.content = json.dumps(payload)
-
-
-class _CapturingLLM:
-    """Capture recorder messages while returning a fixed JSON payload."""
-
-    def __init__(self, payload: dict):
-        self.payload = payload
-        self.messages = []
+    def __init__(self, response: object) -> None:
+        self.response = response
+        self.calls: list[tuple[list[object], object]] = []
 
     async def ainvoke(self, messages, *, config):
-        del config
-        self.messages = messages
-        response = _FakeResponse(self.payload)
-        return response
+        self.calls.append((list(messages), config))
+        if isinstance(self.response, BaseException):
+            raise self.response
+        return _Response(self.response)
 
 
-def _record_input(
-    boundary_profile: dict,
-) -> ConversationProgressRecordInput:
-    """Build a recorder input fixture.
+class _BarrierLLM(_OneResponseLLM):
+    """Require the peer producer to start before either call can finish."""
 
-    Args:
-        boundary_profile: Boundary configuration to include.
+    def __init__(
+        self,
+        response: object,
+        *,
+        started: asyncio.Event,
+        peer_started: asyncio.Event,
+    ) -> None:
+        super().__init__(response)
+        self.started = started
+        self.peer_started = peer_started
 
-    Returns:
-        Recorder input fixture.
-    """
-
-    record_input: ConversationProgressRecordInput = {
-        "scope": ConversationProgressScope("qq", "channel-1", "user-1"),
-        "storage_timestamp_utc": "2026-05-01T04:00:00+00:00",
-        "character_name": "TestCharacter",
-        "prior_episode_state": None,
-        "decontexualized_input": "I meant the other thing.",
-        "chat_history_recent": [],
-        "content_plan": {
-            "semantic_content": "Accept the clarification.",
-            "rendering": "One ordinary text message; concise.",
-        },
-        "logical_stance": "CONFIRM",
-        "character_intent": "PROVIDE",
-        "final_dialog": ["Got it, then I will use that meaning."],
-        "boundary_profile": boundary_profile,
-    }
-    return record_input
+    async def ainvoke(self, messages, *, config):
+        self.calls.append((list(messages), config))
+        self.started.set()
+        await self.peer_started.wait()
+        return _Response(self.response)
 
 
-def test_render_recorder_prompt_requires_absolute_or_omit_temporal_state() -> None:
-    """Recorder prompt declares producer-owned temporal grounding."""
+def _validate_event_batch(
+    candidate: dict,
+    *,
+    submitted=None,
+) -> list[dict]:
+    """Validate one batch against its exact private handle domains."""
 
-    prompt = recorder.render_recorder_prompt("测试角色")
-
-    assert "测试角色" in prompt
-    assert "{character_name}" not in prompt
-    assert "下一轮可以直接使用的短期进度" in prompt
-    assert "默认删除" in prompt
-    assert "不要把旧的、不确定的、相对时间的事项污染到下一轮" in prompt
-    assert "用户项目名、产品名、文件名、频道名等专名可以保留" in prompt
-    assert "请务必返回合法的 JSON 字符串" in prompt
-    assert "当前角色" not in prompt
-    assert "紧凑 assistant" not in prompt
-
-
-def test_recorder_llm_uses_shared_completion_token_budget() -> None:
-    """Recorder calls should inherit the shared output cap."""
-
-    assert recorder._recorder_llm_config.max_completion_tokens == (
-        DEFAULT_LLM_MAX_COMPLETION_TOKENS
+    actual_input = submitted if submitted is not None else record_input()
+    return validate_event_observation_batch(
+        candidate,
+        record_input=actual_input,
+        supplied_event_handles=set(event_handle_map(actual_input)),
+        supplied_source_handles=set(source_handle_map(actual_input)),
     )
 
 
-def test_render_recorder_prompt_shows_concrete_list_string_shapes() -> None:
-    """Recorder prompt must show string-list fields with literal string examples."""
+def test_recorder_prompts_keep_scene_and_event_authority_disjoint() -> None:
+    """Keep each producer limited to one semantic responsibility."""
 
-    prompt = recorder.render_recorder_prompt("测试角色")
+    scene_prompt = recorder.render_scene_recorder_prompt()
+    event_prompt = recorder.render_event_recorder_prompt()
 
-    assert "# 生成步骤" in prompt
-    assert "# 输入格式" in prompt
-    assert "# 输出格式" in prompt
-    assert "# 连续性判断" not in prompt
-    assert "# Generation Procedure" not in prompt
-    assert "# Input Format" not in prompt
-    assert "# Output Format" not in prompt
-    assert "枚举取值" not in prompt
-    assert "活跃操作状态" not in prompt
-    assert "短期工作记忆" not in prompt
-    assert "open loop" not in prompt
-    assert "不要照抄旧状态里的 `task_support`" in prompt
-    assert '"conversation_mode": "任务协助"' in prompt
-    assert '"assistant_moves": ["旧动作标签"]' in prompt
-    assert "不是带 `text` 或 `first_seen_at` 的对象数组" in prompt
-    assert '"user_state_updates": ["观察1", "..."]' in prompt
-    assert '"assistant_moves": ["标签1", "..."]' in prompt
-    assert '"overused_moves": ["标签1", "..."]' in prompt
-    assert '"open_loops": ["事项1", "..."]' in prompt
-    assert '"resolved_threads": ["事项1", "..."]' in prompt
-    assert '"avoid_reopening": ["事项1", "..."]' in prompt
-    assert '"next_affordances": ["动作1", "..."]' in prompt
-    assert '"assistant_moves": ["紧凑话语动作标签"]' not in prompt
+    assert 'conversation_progress_scene_observation.v2' in scene_prompt
+    assert 'event_handle' not in scene_prompt
+    assert 'lifecycle_change' not in scene_prompt
+    assert 'source_turn_handles' not in scene_prompt
+
+    assert (
+        'conversation_progress_event_observation_batch.v2'
+        in event_prompt
+    )
+    assert '"observation": "unchanged"' in event_prompt
+    assert '"object": ""' in event_prompt
+    assert 'episode_narrative' not in event_prompt
+    assert 'character_stance' not in event_prompt
+
+    combined = scene_prompt + event_prompt
+    for forbidden in (
+        'discard_event_ids',
+        'next_affordances',
+        'progression_guidance',
+        'source_ref_allowlist',
+        '"compaction"',
+    ):
+        assert forbidden not in combined
+    assert not hasattr(recorder, '_RECORDER_REPAIR_PROMPT')
+
+
+def test_recorder_payload_preserves_identity_and_semantic_clock() -> None:
+    """Give both owners safe speaker identity and temporal context."""
+
+    submitted = record_input()
+    submitted['character_name'] = 'Test Character'
+    assistant_turn = deepcopy(submitted['interaction_logical_turns'][0])
+    assistant_turn['turn_id'] = 'trace:prior-response'
+    assistant_turn['role'] = 'assistant'
+    assistant_turn['display_name'] = 'machine-role-label'
+    assistant_turn['conversation_row_ids'] = ['assistant-row']
+    assistant_turn['llm_trace_id'] = 'prior-response'
+    submitted['interaction_logical_turns'] = [assistant_turn]
+
+    event_context = recorder.build_event_recorder_context(submitted)
+    scene_payload = recorder.build_scene_recorder_human_payload(submitted)
+    expected_local_time = format_storage_utc_for_llm(
+        submitted['storage_timestamp_utc']
+    )
+
+    for payload in (event_context.payload, scene_payload):
+        assert payload['semantic_context'] == {
+            'character_name': 'Test Character',
+            'current_local_time': expected_local_time,
+        }
+
+    for turn in (
+        event_context.payload['source_turns'][0],
+        scene_payload['recent_turns'][0],
+    ):
+        assert 'role' not in turn
+        assert turn['speaker_kind'] == 'character'
+        assert turn['speaker_name'] == 'Test Character'
+
+    for prompt in (
+        recorder.render_scene_recorder_prompt(),
+        recorder.render_event_recorder_prompt(),
+    ):
+        assert 'semantic_context.character_name' in prompt
+        assert 'semantic_context.current_local_time' in prompt
+        assert 'YYYY-MM-DD' in prompt
+
+
+def test_event_payload_coverage_uses_authoritative_prior_packet(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A fitter mutation cannot redefine the required prior-event domain."""
+
+    submitted = record_input(prior_packet=packet(events=[
+        event(event_id='event-one'),
+        event(event_id='event-two'),
+    ]))
+
+    def _drop_prior_event(payload: dict[str, object]) -> None:
+        prior_events = payload['prior_events']
+        assert isinstance(prior_events, list)
+        prior_events.pop()
+
+    monkeypatch.setattr(recorder, '_fit_event_payload', _drop_prior_event)
+
+    with pytest.raises(
+        ConversationProgressContractError,
+        match='complete prior-event ledger',
+    ):
+        recorder.build_event_recorder_context(submitted)
+
+
+def test_event_validator_rejects_caller_reduced_prior_domain() -> None:
+    """Canonical validation cannot accept a caller-defined ledger subset."""
+
+    submitted = record_input(prior_packet=packet(events=[
+        event(event_id='event-one'),
+        event(event_id='event-two'),
+    ]))
+    candidate = event_observation_batch(existing_events=[
+        unchanged_event_observation(event_handle='e1'),
+    ])
+
+    with pytest.raises(
+        ConversationProgressContractError,
+        match='complete prior-event ledger',
+    ):
+        validate_event_observation_batch(
+            candidate,
+            record_input=submitted,
+            supplied_event_handles={'e1'},
+            supplied_source_handles=set(source_handle_map(submitted)),
+        )
+
+
+def test_event_validator_requires_prior_input_order() -> None:
+    """Exact coverage remains ordered for inspectable weak-model output."""
+
+    submitted = record_input(prior_packet=packet(events=[
+        event(event_id='event-one'),
+        event(event_id='event-two'),
+    ]))
+    candidate = event_observation_batch(existing_events=[
+        unchanged_event_observation(event_handle='e2'),
+        unchanged_event_observation(event_handle='e1'),
+    ])
+
+    with pytest.raises(
+        ConversationProgressContractError,
+        match='prior-event input order',
+    ):
+        _validate_event_batch(candidate, submitted=submitted)
+
+
+def test_both_recorder_owners_use_the_consolidation_route_budget() -> None:
+    """Keep the split calls on the approved existing post-turn route."""
+
+    configs = (
+        recorder._scene_recorder_llm_config,
+        recorder._event_recorder_llm_config,
+    )
+    assert {config.route_name for config in configs} == {
+        'CONSOLIDATION_LLM'
+    }
+    assert {
+        config.max_completion_tokens for config in configs
+    } == {CONSOLIDATION_LLM_MAX_COMPLETION_TOKENS}
+    assert {config.temperature for config in configs} == {0.0}
 
 
 @pytest.mark.asyncio
-async def test_recorder_prompt_requires_character_name_and_prompt_safe_history_projection(
-    monkeypatch,
+async def test_scene_and_event_calls_are_dispatched_concurrently(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Recorder prompt renders character identity without payload duplication."""
+    """Prove both owners start without either waiting for the other."""
 
-    fake_llm = _CapturingLLM(_VALID_RECORDER_OUTPUT)
-    monkeypatch.setattr(recorder, "_recorder_llm", fake_llm)
-    record_input = _record_input(_BOUNDARY_PROFILE)
-    record_input["character_name"] = '测试角色'
-    record_input["chat_history_recent"] = [
+    scene_started = asyncio.Event()
+    event_started = asyncio.Event()
+    scene_llm = _BarrierLLM(
+        scene_observation(),
+        started=scene_started,
+        peer_started=event_started,
+    )
+    event_llm = _BarrierLLM(
+        event_observation_batch(
+            new_events=[new_event_observation()],
+        ),
+        started=event_started,
+        peer_started=scene_started,
+    )
+    monkeypatch.setattr(recorder, '_scene_recorder_llm', scene_llm)
+    monkeypatch.setattr(recorder, '_event_recorder_llm', event_llm)
+
+    result = await asyncio.wait_for(
+        recorder.record_with_llm(record_input()),
+        timeout=1.0,
+    )
+
+    assert len(scene_llm.calls) == 1
+    assert len(event_llm.calls) == 1
+    assert result.recorder_call_count == 2
+    assert result.scene_attempt_count == 1
+    assert result.event_attempt_count == 1
+    assert result.scene_disposition == 'accepted'
+    assert result.event_disposition == 'accepted'
+    assert len(result.delta['event_updates']) == 1
+
+
+@pytest.mark.asyncio
+async def test_invalid_event_output_fails_closed_after_both_calls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reject silent prior-event omission without a repair call."""
+
+    submitted = record_input(
+        prior_packet=packet(events=[
+            event(event_id='prior-event'),
+        ]),
+    )
+    scene_llm = _OneResponseLLM(scene_observation())
+    event_llm = _OneResponseLLM(event_observation_batch())
+    monkeypatch.setattr(recorder, '_scene_recorder_llm', scene_llm)
+    monkeypatch.setattr(recorder, '_event_recorder_llm', event_llm)
+
+    with pytest.raises(
+        recorder.ConversationProgressRecorderOutputError,
+        match='coverage',
+    ) as exc_info:
+        await recorder.record_with_llm(submitted)
+
+    error = exc_info.value
+    assert len(scene_llm.calls) == 1
+    assert len(event_llm.calls) == 1
+    assert error.recorder_call_count == 2
+    assert error.event_attempt_count == 1
+    assert error.scene_attempt_count == 1
+    assert error.event_disposition == 'failed_contract_or_provider'
+    assert error.scene_disposition == 'accepted'
+
+
+@pytest.mark.asyncio
+async def test_invalid_scene_preserves_prior_scene_and_writes_valid_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Degrade only the lower-authority scene lane."""
+
+    prior = packet(events=[event(event_id='prior-event')])
+    submitted = record_input(prior_packet=prior)
+    scene_llm = _OneResponseLLM({'invalid': True})
+    event_llm = _OneResponseLLM(event_observation_batch(
+        existing_events=[unchanged_event_observation()],
+    ))
+    monkeypatch.setattr(recorder, '_scene_recorder_llm', scene_llm)
+    monkeypatch.setattr(recorder, '_event_recorder_llm', event_llm)
+
+    result = await recorder.record_with_llm(submitted)
+
+    assert result.recorder_call_count == 2
+    assert result.scene_attempt_count == 1
+    assert result.scene_disposition == 'preserved_prior'
+    assert result.delta['episode_narrative'] == prior['episode_narrative']
+    assert result.delta['current_thread'] == prior['current_thread']
+    assert result.delta['event_updates'] == []
+
+
+@pytest.mark.asyncio
+async def test_scene_context_limit_counts_only_the_event_provider_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep diagnostics equal to actual provider invocations."""
+
+    monkeypatch.setattr(
+        recorder,
+        'MAX_SCENE_RECORDER_HUMAN_PAYLOAD_CHARS',
+        1,
+    )
+    event_llm = _OneResponseLLM(event_observation_batch(
+        new_events=[new_event_observation()],
+    ))
+    monkeypatch.setattr(recorder, '_event_recorder_llm', event_llm)
+
+    result = await recorder.record_with_llm(record_input())
+
+    assert result.recorder_call_count == 1
+    assert result.scene_attempt_count == 0
+    assert result.event_attempt_count == 1
+    assert result.scene_disposition == 'initialized_from_accepted_turn'
+    assert len(event_llm.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_event_context_limit_retains_concurrent_scene_telemetry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Report the scene call even when the event lane fails preflight."""
+
+    monkeypatch.setattr(
+        recorder,
+        'MAX_RECORDER_HUMAN_PAYLOAD_CHARS',
+        1,
+    )
+    scene_llm = _OneResponseLLM(scene_observation())
+    monkeypatch.setattr(recorder, '_scene_recorder_llm', scene_llm)
+
+    with pytest.raises(
+        recorder.ConversationProgressContextLimitError,
+    ) as exc_info:
+        await recorder.record_with_llm(record_input())
+
+    error = exc_info.value
+    assert error.owner == 'event'
+    assert error.recorder_call_count == 1
+    assert error.event_attempt_count == 0
+    assert error.scene_attempt_count == 1
+    assert error.event_disposition == 'context_limit'
+    assert error.scene_disposition == 'accepted'
+    assert len(scene_llm.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_event_provider_failure_has_no_semantic_repair_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Translate one provider failure into one fail-closed disposition."""
+
+    scene_llm = _OneResponseLLM(scene_observation())
+    event_llm = _OneResponseLLM(RuntimeError('provider unavailable'))
+    monkeypatch.setattr(recorder, '_scene_recorder_llm', scene_llm)
+    monkeypatch.setattr(recorder, '_event_recorder_llm', event_llm)
+
+    with pytest.raises(
+        recorder.ConversationProgressRecorderOutputError,
+        match='provider call failed',
+    ):
+        await recorder.record_with_llm(record_input())
+
+    assert len(scene_llm.calls) == 1
+    assert len(event_llm.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_canonical_transport_cleanup_does_not_add_model_calls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Accept fenced JSON through deterministic canonical parsing."""
+
+    scene_payload = json.dumps(scene_observation(), ensure_ascii=False)
+    event_payload = json.dumps(
+        event_observation_batch(
+            new_events=[new_event_observation()],
+        ),
+        ensure_ascii=False,
+    )
+    scene_llm = _OneResponseLLM(f'```json\n{scene_payload}\n```')
+    event_llm = _OneResponseLLM(f'```json\n{event_payload}\n```')
+    monkeypatch.setattr(recorder, '_scene_recorder_llm', scene_llm)
+    monkeypatch.setattr(recorder, '_event_recorder_llm', event_llm)
+
+    result = await recorder.record_with_llm(record_input())
+
+    assert result.recorder_call_count == 2
+    assert len(scene_llm.calls) == 1
+    assert len(event_llm.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_recoverable_event_bound_is_clamped_and_reported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Normalize declared bounds without changing semantic ownership."""
+
+    candidate = new_event_observation()
+    candidate['outcome'] = 'x' * (MAX_EVENT_OUTCOME_CHARS + 25)
+    scene_llm = _OneResponseLLM(scene_observation())
+    event_llm = _OneResponseLLM(event_observation_batch(
+        new_events=[candidate],
+    ))
+    monkeypatch.setattr(recorder, '_scene_recorder_llm', scene_llm)
+    monkeypatch.setattr(recorder, '_event_recorder_llm', event_llm)
+
+    result = await recorder.record_with_llm(record_input())
+
+    assert len(result.delta['event_updates'][0]['outcome']) == (
+        MAX_EVENT_OUTCOME_CHARS
+    )
+    assert {
+        'owner': 'event',
+        'field_path': 'new_events[0].outcome',
+        'original_length': MAX_EVENT_OUTCOME_CHARS + 25,
+        'normalized_length': MAX_EVENT_OUTCOME_CHARS,
+    } in result.bound_normalizations
+
+
+def test_event_payload_exposes_handles_without_storage_metadata() -> None:
+    """Keep persistence IDs, timestamps, and source objects private."""
+
+    prior = packet(events=[
+        event(
+            event_id='private-event-id',
+            state='completed',
+            retention='decision_critical',
+        ),
+    ])
+    context = recorder.build_event_recorder_context(
+        record_input(prior_packet=prior),
+    )
+    payload_text = json.dumps(
+        context.payload,
+        ensure_ascii=False,
+        default=str,
+    )
+    prior_projection = context.payload['prior_events'][0]
+
+    assert prior_projection['event_handle'] == 'e1'
+    assert prior_projection['object']
+    assert 'lifecycle_fact' in prior_projection
+    assert 'relevance_fact' in prior_projection
+    assert 'private-event-id' not in payload_text
+    for forbidden in (
+        'event_id',
+        'source_refs',
+        'first_seen_at',
+        'updated_at',
+        'retention',
+        'state',
+        'boundary_profile',
+        'content_plan',
+        'logical_stance',
+        'character_intent',
+    ):
+        assert forbidden not in payload_text
+
+
+def test_scene_payload_contains_no_event_or_storage_authority() -> None:
+    """Keep the scene owner independent from event reconciliation."""
+
+    payload = recorder.build_scene_recorder_human_payload(
+        record_input(
+            prior_packet=packet(events=[event(event_id='private-event-id')]),
+        ),
+    )
+    payload_text = json.dumps(payload, ensure_ascii=False, default=str)
+
+    assert 'prior_scene' in payload
+    assert 'accepted_turn' in payload
+    assert 'content_plan' in payload['accepted_turn']
+    assert 'prior_events' not in payload
+    assert 'private-event-id' not in payload_text
+    assert 'source_refs' not in payload_text
+    assert 'boundary_profile' not in payload_text
+
+
+def test_exact_changed_observation_preserves_stable_event_definition() -> None:
+    """Permit semantic change without rewriting actor/action/object identity."""
+
+    prior_event = event(
+        event_id='stable-event',
+        summary='specific prior event',
+    )
+    prior_event.update({
+        'actor': 'the character',
+        'action': 'evaluate',
+        'object': 'the user-selected implementation',
+        'beneficiary': 'the user',
+        'precondition': 'the implementation is submitted',
+    })
+    submitted = record_input(
+        prior_packet=packet(events=[prior_event]),
+    )
+    updates = _validate_event_batch(
+        event_observation_batch(existing_events=[
+            changed_event_observation(
+                summary='the implementation received a conclusive evaluation',
+                lifecycle_change='concluded',
+                relevance='decision',
+            ),
+        ]),
+        submitted=submitted,
+    )
+
+    assert updates[0]['event_id'] == 'stable-event'
+    assert updates[0]['actor'] == 'the character'
+    assert updates[0]['action'] == 'evaluate'
+    assert updates[0]['object'] == 'the user-selected implementation'
+    assert updates[0]['beneficiary'] == 'the user'
+    assert updates[0]['state'] == 'completed'
+
+
+def test_changed_observation_rejects_definition_rewrite_fields() -> None:
+    """Reject duplicated identity ownership in an existing-event row."""
+
+    submitted = record_input(
+        prior_packet=packet(events=[event(event_id='stable-event')]),
+    )
+    candidate = changed_event_observation()
+    candidate['object'] = 'a replacement object'
+
+    with pytest.raises(
+        ConversationProgressContractError,
+        match='fields are not exact',
+    ):
+        _validate_event_batch(
+            event_observation_batch(existing_events=[candidate]),
+            submitted=submitted,
+        )
+
+
+def test_new_event_requires_concrete_actor_action_and_object() -> None:
+    """Reject generic event identities before persistence."""
+
+    candidate = new_event_observation(object_='')
+
+    with pytest.raises(
+        ConversationProgressContractError,
+        match='requires actor, action, and object',
+    ):
+        _validate_event_batch(
+            event_observation_batch(new_events=[candidate]),
+        )
+
+
+@pytest.mark.parametrize(
+    ('lifecycle_change', 'expected_state'),
+    [
+        ('none', 'open'),
+        ('began', 'in_progress'),
+        ('concluded', 'completed'),
+        ('declined', 'rejected'),
+        ('replaced', 'superseded'),
+    ],
+)
+def test_new_event_lifecycle_is_mapped_deterministically(
+    lifecycle_change: str,
+    expected_state: str,
+) -> None:
+    """Map one semantic lifecycle observation without interpreting text."""
+
+    updates = _validate_event_batch(event_observation_batch(new_events=[
+        new_event_observation(lifecycle_change=lifecycle_change),
+    ]))
+
+    assert updates[0]['state'] == expected_state
+
+
+def test_none_preserves_existing_lifecycle() -> None:
+    """Prevent relevance-only updates from regressing lifecycle state."""
+
+    submitted = record_input(prior_packet=packet(events=[
+        event(event_id='active-event', state='in_progress'),
+    ]))
+    updates = _validate_event_batch(
+        event_observation_batch(existing_events=[
+            changed_event_observation(
+                lifecycle_change='none',
+                relevance='decision',
+            ),
+        ]),
+        submitted=submitted,
+    )
+
+    assert updates[0]['state'] == 'in_progress'
+
+
+def test_reopened_requires_a_prior_terminal_event() -> None:
+    """Accept reopening only when the semantic transition has a target."""
+
+    nonterminal = record_input(prior_packet=packet(events=[
+        event(event_id='active-event', state='in_progress'),
+    ]))
+    candidate = event_observation_batch(existing_events=[
+        changed_event_observation(lifecycle_change='reopened'),
+    ])
+
+    with pytest.raises(
+        ConversationProgressContractError,
+        match='prior terminal',
+    ):
+        _validate_event_batch(candidate, submitted=nonterminal)
+
+    terminal = record_input(prior_packet=packet(events=[
+        event(event_id='done-event', state='completed'),
+    ]))
+    updates = _validate_event_batch(candidate, submitted=terminal)
+    assert updates[0]['state'] == 'open'
+
+
+@pytest.mark.parametrize(
+    ('relevance', 'expected_retention'),
+    [
+        ('decision', 'decision_critical'),
+        ('scene', 'active_scene'),
+        ('history', 'background'),
+    ],
+)
+def test_relevance_is_mapped_deterministically(
+    relevance: str,
+    expected_retention: str,
+) -> None:
+    """Map model-owned relevance without lexical classification."""
+
+    updates = _validate_event_batch(event_observation_batch(new_events=[
+        new_event_observation(relevance=relevance),
+    ]))
+    assert updates[0]['retention'] == expected_retention
+
+
+def test_event_payload_pressure_preserves_every_prior_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Remove old turn text while retaining exact full-ledger coverage."""
+
+    prior = packet(events=[
+        event(
+            event_id='critical-event',
+            summary='critical ' + ('x' * 180),
+            retention='decision_critical',
+        ),
+        event(
+            event_id='background-event',
+            summary='background ' + ('y' * 180),
+            retention='background',
+        ),
+    ])
+    submitted = record_input(prior_packet=prior)
+    submitted['interaction_logical_turns'][0]['fragments'] = [
+        'older source detail ' + ('z' * 1900)
+    ]
+    full_context = recorder.build_event_recorder_context(submitted)
+    mandatory_payload = deepcopy(full_context.payload)
+    mandatory_payload['source_turns'] = []
+    mandatory_chars = len(json.dumps(
+        mandatory_payload,
+        ensure_ascii=False,
+        sort_keys=True,
+    ))
+    monkeypatch.setattr(
+        recorder,
+        'MAX_RECORDER_HUMAN_PAYLOAD_CHARS',
+        mandatory_chars,
+    )
+
+    context = recorder.build_event_recorder_context(submitted)
+
+    assert context.event_handles == frozenset({'e1', 'e2'})
+    assert [
+        row['event_handle'] for row in context.payload['prior_events']
+    ] == ['e1', 'e2']
+    assert context.payload['source_turns'] == []
+
+
+def test_event_payload_fails_closed_when_required_context_cannot_fit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Refuse to truncate current accepted-turn authority."""
+
+    monkeypatch.setattr(
+        recorder,
+        'MAX_RECORDER_HUMAN_PAYLOAD_CHARS',
+        1,
+    )
+
+    with pytest.raises(
+        recorder.ConversationProgressContextLimitError,
+    ) as exc_info:
+        recorder.build_event_recorder_context(record_input())
+
+    assert exc_info.value.owner == 'event'
+
+
+def test_event_handle_domains_are_private_and_exact() -> None:
+    """Map short handles to prior IDs and canonical refs only in code."""
+
+    submitted = record_input(prior_packet=packet(events=[
+        event(event_id='private-id'),
+    ]))
+    handles = event_handle_map(submitted)
+    sources = source_handle_map(submitted)
+
+    assert handles['e1']['event_id'] == 'private-id'
+    assert set(sources) == {'t1', 'current_input', 'current_response'}
+    updates = _validate_event_batch(
+        event_observation_batch(existing_events=[
+            deepcopy(unchanged_event_observation()),
+        ]),
+        submitted=submitted,
+    )
+    assert updates == []
+
+
+def test_current_input_handle_preserves_all_collapsed_row_lineage() -> None:
+    """One semantic input handle resolves to every exact collapsed row."""
+
+    submitted = record_input()
+    submitted['current_turn_source_refs'] = [
         {
-            "role": "assistant",
-            "display_name": "助手",
-            "body_text": '别急，我已经听到了。',
-        }
+            'ref_kind': 'conversation_row',
+            'ref_id': 'current-row-one',
+            'occurred_at': '2026-07-28T09:30:00+00:00',
+        },
+        {
+            'ref_kind': 'conversation_row',
+            'ref_id': 'current-row-two',
+            'occurred_at': '2026-07-28T09:30:09+00:00',
+        },
+        {
+            'ref_kind': 'llm_trace',
+            'ref_id': 'trace-current',
+            'occurred_at': '2026-07-28T09:30:10+00:00',
+        },
     ]
 
-    await recorder.record_with_llm(record_input)
+    sources = source_handle_map(submitted)
 
-    system_prompt = fake_llm.messages[0].content
-    human_payload = json.loads(fake_llm.messages[1].content)
-    projected_history = human_payload["chat_history_recent"]
-    assert "character_name" not in human_payload
-    assert '测试角色' in system_prompt
-    assert '{character_name}' not in system_prompt
-    assert '"character_name": "本轮人设名"' not in system_prompt
-    assert len(projected_history) == 1
-    assert isinstance(projected_history[0], str)
-    assert '助手' in projected_history[0]
-    assert '别急，我已经听到了。' in projected_history[0]
-
-
-@pytest.mark.asyncio
-async def test_record_with_llm_sends_boundary_descriptors_not_config_values(monkeypatch) -> None:
-    """Recorder prompt payload contains descriptors, not boundary config values."""
-
-    fake_llm = _CapturingLLM(_VALID_RECORDER_OUTPUT)
-    monkeypatch.setattr(recorder, "_recorder_llm", fake_llm)
-
-    result = await recorder.record_with_llm(_record_input(_BOUNDARY_PROFILE))
-
-    human_payload = json.loads(fake_llm.messages[1].content)
-    profile_payload = human_payload["character_boundary_profile"]
-    assert human_payload["current_turn_timestamp"] == "2026-05-01 16:00"
-    assert profile_payload == {
-        "boundary_recovery_description": get_boundary_recovery_description(
-            _BOUNDARY_PROFILE["boundary_recovery"],
-        ),
-        "self_integrity_description": get_self_integrity_description(
-            _BOUNDARY_PROFILE["self_integrity"],
-        ),
-        "relationship_priority_description": get_relationship_priority_description(
-            _BOUNDARY_PROFILE["relational_override"],
-        ),
-    }
-    assert "boundary_recovery" not in profile_payload
-    assert "self_integrity" not in profile_payload
-    assert "relational_override" not in profile_payload
-    serialized_profile = json.dumps(profile_payload, ensure_ascii=False)
-    assert "rebound" not in serialized_profile
-    assert "0.82" not in serialized_profile
-    assert "0.24" not in serialized_profile
-    assert result["progression_guidance"] == (
-        "continue without carrying old suspicion"
-    )
-
-
-@pytest.mark.asyncio
-async def test_runtime_record_accepts_boundary_profile_without_schema_change(monkeypatch) -> None:
-    """Runtime writes a normal episode document when boundary_profile is supplied."""
-
-    recorder_callable = AsyncMock(return_value=dict(_VALID_RECORDER_OUTPUT))
-    stored_documents = []
-
-    def _store_completed_document(*, scope, document) -> None:
-        stored_documents.append(document)
-
-    monkeypatch.setattr(
-        runtime.repository,
-        "upsert_episode_state_guarded",
-        AsyncMock(return_value=True),
-    )
-    monkeypatch.setattr(
-        runtime.cache,
-        "store_completed_document",
-        _store_completed_document,
-    )
-    progress_runtime = runtime.ConversationProgressRuntime(
-        recorder_callable=recorder_callable,
-    )
-
-    result = await progress_runtime.record_turn_progress(
-        record_input=_record_input(_BOUNDARY_PROFILE),
-    )
-
-    recorder_callable.assert_awaited_once()
-    assert recorder_callable.await_args.args[0]["boundary_profile"] == (
-        _BOUNDARY_PROFILE
-    )
-    assert result["written"] is True
-    assert stored_documents[0]["next_affordances"] == ["continue normally"]
-    assert "boundary_profile" not in stored_documents[0]
+    assert sources['current_input'] == submitted[
+        'current_turn_source_refs'
+    ][:2]

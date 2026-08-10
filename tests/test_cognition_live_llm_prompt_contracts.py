@@ -6,28 +6,17 @@ import logging
 import httpx
 import pytest
 
-from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
+from kazusa_ai_chatbot.cognition_episode import (
+    project_text_chat_compatibility_fields,
+)
+from tests.cognition_core_v2_test_helpers import canonical_user_message_episode
 from kazusa_ai_chatbot.time_boundary import (
     build_turn_clock_from_storage_utc,
     storage_utc_now_iso,
 )
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
 from kazusa_ai_chatbot.config import COGNITION_LLM_BASE_URL
-from kazusa_ai_chatbot.cognition_chain_core.stages.l1 import call_cognition_subconscious
-from kazusa_ai_chatbot.cognition_chain_core.stages.l2 import (
-    call_boundary_core_agent,
-    call_cognition_consciousness,
-    call_judgment_core_agent,
-)
-from kazusa_ai_chatbot.cognition_chain_core.stages.l3 import (
-    call_surface_directive_collector,
-    call_content_plan_agent,
-    call_preference_adapter,
-    call_style_agent,
-    call_visual_agent,
-)
-from kazusa_ai_chatbot.cognition_chain_core.stages.l2c2 import call_social_context_appraisal
-from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer import call_msg_decontexualizer
+from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer import call_msg_decontextualizer
 from kazusa_ai_chatbot.utils import load_personality
 from tests.llm_trace import write_llm_trace
 
@@ -36,7 +25,7 @@ logger = logging.getLogger(__name__)
 pytestmark = pytest.mark.live_llm
 
 _ROOT = Path(__file__).resolve().parents[1]
-_PERSONALITY_PATH = _ROOT / "personalities" / "kazusa.json"
+_PERSONALITY_PATH = _ROOT / "personalities" / "asuna.json"
 _ALLOWED_LOGICAL_STANCES = {"CONFIRM", "REFUSE", "TENTATIVE", "DIVERGE", "CHALLENGE"}
 _ALLOWED_CHARACTER_INTENTS = {"PROVIDE", "BANTAR", "REJECT", "EVADE", "CONFRONT", "DISMISS", "CLARIFY"}
 _LEGACY_FILLERS = ("反正", "而已", "罢了")
@@ -56,6 +45,10 @@ async def _skip_if_llm_unavailable() -> None:
 
 @pytest.fixture()
 async def ensure_live_llm() -> None:
+    if not _PERSONALITY_PATH.is_file():
+        pytest.skip(
+            f"live personality fixture is unavailable: {_PERSONALITY_PATH}"
+        )
     await _skip_if_llm_unavailable()
 
 
@@ -102,8 +95,8 @@ def _user_memory_context(objective_facts: str, recent_shift: str) -> dict:
 def _build_character_profile() -> dict:
     profile = load_personality(_PERSONALITY_PATH)
     profile.setdefault("mood", "Neutral")
-    profile.setdefault("global_vibe", "Calm")
-    profile.setdefault("reflection_summary", "刚才只是普通的一轮对话，没有留下特别强烈的情绪余波。")
+    profile.setdefault("vibe_check", "Calm")
+    profile.setdefault("character_reflection", "刚才只是普通的一轮对话，没有留下特别强烈的情绪余波。")
     return profile
 
 
@@ -117,7 +110,7 @@ def _text_chat_episode(
     """Build a valid text-chat episode for direct live node calls."""
 
     turn_clock = build_turn_clock_from_storage_utc(storage_timestamp_utc)
-    episode = build_text_chat_cognitive_episode(
+    episode = canonical_user_message_episode(
         episode_id="live-prompt-contracts-episode",
         percept_id="live-prompt-contracts-percept",
         storage_timestamp_utc=turn_clock["storage_timestamp_utc"],
@@ -173,8 +166,8 @@ def _make_state(
     memory_evidence_text: str = "最近聊天主要围绕日常和轻度社交互动。",
     external_evidence_text: str = "",
     indirect_speech_context: str = "",
-    affinity: int = 680,
-    last_relationship_insight: str = "对方目前让人放松，可以正常交流。",
+    relationship_state: int = 680,
+    semantic_relationship_projection: str = "对方目前让人放松，可以正常交流。",
     user_name: str = "LivePromptUser",
     global_user_id: str = "live-prompt-user",
 ) -> dict:
@@ -204,24 +197,26 @@ def _make_state(
     state = {
         "character_profile": _build_character_profile(),
         "storage_timestamp_utc": storage_timestamp_utc,
-        "local_time_context": cognitive_episode["local_time_context"],
+        "local_time_context": project_text_chat_compatibility_fields(
+            cognitive_episode,
+        )["local_time_context"],
         "cognitive_episode": cognitive_episode,
         "user_input": user_input,
         "global_user_id": global_user_id,
         "user_name": user_name,
         "platform_user_id": "live-user",
         "user_profile": {
-            "affinity": affinity,
+            "relationship_state": relationship_state,
             "active_commitments": [],
             "facts": [],
-            "last_relationship_insight": last_relationship_insight,
+            "semantic_relationship_projection": semantic_relationship_projection,
         },
         "platform_bot_id": "live-bot",
         "chat_history_wide": list(chat_history_recent),
         "chat_history_recent": chat_history_recent,
         "indirect_speech_context": indirect_speech_context,
         "channel_topic": channel_topic,
-        "decontexualized_input": user_input,
+        "decontextualized_input": user_input,
         "referents": [],
         "rag_result": _rag_result(
             objective_facts=objective_facts,
@@ -318,17 +313,8 @@ def _assert_no_legacy_fillers(text: str) -> None:
         assert token not in lowered, f"Legacy English filler leaked into dialog: {text!r}"
 
 
-_CHARACTER_PUBLIC_FACTS_DATA = {
-    "name": "杏山千纱 (Kyōyama Kazusa)",
-    "description": "杏山千纱是三一综合学园15岁的学生，放学后甜点部成员及'Sugar Rush'乐队主唱兼贝斯手。",
-    "gender": "女",
-    "age": 15,
-    "birthday": "8月5日 (狮子座)",
-    "backstory": "中学时期是令人畏惧的不良少女'凯茜·帕鲁格'，如今努力过上普通高中生活。",
-}
-
-
 def _build_character_public_facts_text() -> str:
+    profile = load_personality(_PERSONALITY_PATH)
     lines = ["### 角色公开资料"]
     labels = {
         "name": "姓名",
@@ -338,12 +324,16 @@ def _build_character_public_facts_text() -> str:
         "birthday": "生日",
         "backstory": "背景故事",
     }
-    for key in ("name", "description", "gender", "age", "birthday", "backstory"):
-        lines.append(f"- {labels[key]}: {_CHARACTER_PUBLIC_FACTS_DATA[key]}")
+    for key in (
+        "name",
+        "description",
+        "gender",
+        "age",
+        "birthday",
+        "backstory",
+    ):
+        lines.append(f"- {labels[key]}: {profile[key]}")
     return "\n".join(lines)
-
-
-_CHARACTER_PUBLIC_FACTS = _build_character_public_facts_text()
 
 
 _DECONTEXT_CASES = [
@@ -482,15 +472,15 @@ def _decontext_case_by_id(case_id: str) -> dict:
     raise AssertionError(f"Unknown decontext case: {case_id}")
 
 
-async def _assert_live_msg_decontexualizer_prompt_contract(ensure_live_llm, case_id: str) -> None:
+async def _assert_live_msg_decontextualizer_prompt_contract(ensure_live_llm, case_id: str) -> None:
     """Run one inspectable decontextualizer live prompt-contract case."""
     del ensure_live_llm
     state = _decontext_case_by_id(case_id)
     _debug_snapshot(f"prompt_contracts.decontext.input.{case_id}", state)
-    result = await call_msg_decontexualizer(state)
+    result = await call_msg_decontextualizer(state)
     _debug_snapshot(f"prompt_contracts.decontext.output.{case_id}", result)
 
-    output = result["decontexualized_input"]
+    output = result["decontextualized_input"]
     assert output.strip(), f"Empty decontext output for {case_id}: {result!r}"
 
     if case_id == "resolve_recent_referent":
@@ -522,38 +512,38 @@ async def _assert_live_msg_decontexualizer_prompt_contract(ensure_live_llm, case
         assert "他" in output, f"Indirect speech case should keep third-person pronoun: {output!r}"
 
 
-async def test_live_msg_decontexualizer_resolves_recent_referent(ensure_live_llm) -> None:
-    await _assert_live_msg_decontexualizer_prompt_contract(ensure_live_llm, "resolve_recent_referent")
+async def test_live_msg_decontextualizer_resolves_recent_referent(ensure_live_llm) -> None:
+    await _assert_live_msg_decontextualizer_prompt_contract(ensure_live_llm, "resolve_recent_referent")
 
 
-async def test_live_msg_decontexualizer_keeps_complete_sentence(ensure_live_llm) -> None:
-    await _assert_live_msg_decontexualizer_prompt_contract(ensure_live_llm, "keep_complete_sentence")
+async def test_live_msg_decontextualizer_keeps_complete_sentence(ensure_live_llm) -> None:
+    await _assert_live_msg_decontextualizer_prompt_contract(ensure_live_llm, "keep_complete_sentence")
 
 
-async def test_live_msg_decontexualizer_preserves_third_person_indirect_speech(ensure_live_llm) -> None:
-    await _assert_live_msg_decontexualizer_prompt_contract(
+async def test_live_msg_decontextualizer_preserves_third_person_indirect_speech(ensure_live_llm) -> None:
+    await _assert_live_msg_decontextualizer_prompt_contract(
         ensure_live_llm,
         "preserve_third_person_in_indirect_speech",
     )
 
 
-async def test_live_msg_decontexualizer_preserves_literal_url_anchor(ensure_live_llm) -> None:
-    await _assert_live_msg_decontexualizer_prompt_contract(ensure_live_llm, "preserve_literal_url_anchor")
+async def test_live_msg_decontextualizer_preserves_literal_url_anchor(ensure_live_llm) -> None:
+    await _assert_live_msg_decontextualizer_prompt_contract(ensure_live_llm, "preserve_literal_url_anchor")
 
 
-async def test_live_msg_decontexualizer_recovers_reply_only_confirmation_flow(ensure_live_llm) -> None:
-    await _assert_live_msg_decontexualizer_prompt_contract(ensure_live_llm, "reply_only_confirmation_flow")
+async def test_live_msg_decontextualizer_recovers_reply_only_confirmation_flow(ensure_live_llm) -> None:
+    await _assert_live_msg_decontextualizer_prompt_contract(ensure_live_llm, "reply_only_confirmation_flow")
 
 
-async def test_live_msg_decontexualizer_marks_unresolved_reference(ensure_live_llm) -> None:
-    await _assert_live_msg_decontexualizer_prompt_contract(
+async def test_live_msg_decontextualizer_marks_unresolved_reference(ensure_live_llm) -> None:
+    await _assert_live_msg_decontextualizer_prompt_contract(
         ensure_live_llm,
         "unresolved_reference",
     )
 
 
-async def test_live_msg_decontexualizer_resolves_reply_excerpt_reference(ensure_live_llm) -> None:
-    await _assert_live_msg_decontexualizer_prompt_contract(
+async def test_live_msg_decontextualizer_resolves_reply_excerpt_reference(ensure_live_llm) -> None:
+    await _assert_live_msg_decontextualizer_prompt_contract(
         ensure_live_llm,
         "reply_excerpt_resolves_reference",
     )
@@ -779,7 +769,7 @@ async def test_live_CONTENT_PLAN_uses_character_public_facts_for_birthday_questi
             {"role": "user", "content": "想提前准备一下。"},
         ],
         channel_topic="询问角色公开资料",
-        objective_facts=_CHARACTER_PUBLIC_FACTS,
+        objective_facts=_build_character_public_facts_text(),
         memory_evidence_text="",
     )
     state.update(
@@ -806,7 +796,7 @@ async def test_live_CONTENT_PLAN_does_not_leak_character_public_facts_on_unrelat
             {"role": "user", "content": "就是想问问你。"},
         ],
         channel_topic="日常关心",
-        objective_facts=_CHARACTER_PUBLIC_FACTS,
+        objective_facts=_build_character_public_facts_text(),
         memory_evidence_text="最近聊天主要围绕日常状态和轻松闲聊。",
     )
     state.update(
@@ -921,7 +911,7 @@ async def test_live_CONTENT_PLAN_answers_from_direct_conversation_evidence(ensur
         ],
         channel_topic="用户确认刚刚提到的旧线缆内容",
         memory_evidence_text="",
-        last_relationship_insight="可以一起进行毫无意义的日常消磨。",
+        semantic_relationship_projection="可以一起进行毫无意义的日常消磨。",
     )
     state.update(
         {
@@ -1081,7 +1071,7 @@ async def test_live_boundary_core_ignores_low_pressure_fact_recall_context(ensur
         ],
         channel_topic="用户确认刚刚提到的旧线缆内容",
         memory_evidence_text="",
-        last_relationship_insight="可以一起进行毫无意义的日常消磨。",
+        semantic_relationship_projection="可以一起进行毫无意义的日常消磨。",
     )
     state.update(
         {
@@ -1127,7 +1117,7 @@ _STACK_CASES = [
             channel_topic="照片闲聊",
             objective_facts="",
             memory_evidence_text="最近聊天主要围绕图片内容和日常观察。",
-            last_relationship_insight="对方只是轻松聊天，没有明显压迫感。",
+            semantic_relationship_projection="对方只是轻松聊天，没有明显压迫感。",
         ),
         id="stack-photo-request-chinese",
     ),
@@ -1143,8 +1133,8 @@ _STACK_CASES = [
             channel_topic="边界施压",
             objective_facts="用户没有获得任何可强制改变称呼方式的许可。",
             memory_evidence_text="最近聊天出现了轻微的称呼施压。",
-            affinity=520,
-            last_relationship_insight="对方最近有点试探边界，需要保持分寸。",
+            relationship_state=520,
+            semantic_relationship_projection="对方最近有点试探边界，需要保持分寸。",
         ),
         id="stack-boundary-command-repeated-fillers",
     ),
@@ -1175,7 +1165,6 @@ async def _assert_live_cognition_stack_prompt_contract(ensure_live_llm, case_id:
     assert isinstance(state["content_plan"], dict), f"Invalid content_plan: {state['content_plan']!r}"
     assert state["content_plan"], f"Empty content_plan: {state['content_plan']!r}"
     assert isinstance(state["accepted_user_preferences"], list), f"Invalid accepted_user_preferences: {state!r}"
-    assert isinstance(state["forbidden_phrases"], list), f"Invalid forbidden_phrases: {state!r}"
     assert all(isinstance(item, str) and item.strip() for item in state["content_plan"].values()), f"Invalid content_plan: {state['content_plan']!r}"
     assert all(isinstance(item, str) and item.strip() for item in state["facial_expression"]), f"Invalid facial_expression: {state['facial_expression']!r}"
 
@@ -1187,11 +1176,9 @@ async def _assert_live_cognition_stack_prompt_contract(ensure_live_llm, case_id:
         assert not any("主要使用自然英语" in item or "主要用英语" in item or "English" in item for item in state["accepted_user_preferences"]), f"Photo case should not invent an active English-output preference: {state['accepted_user_preferences']!r}"
         assert state["accepted_user_preferences"], f"Photo case should still produce a usable soft preference or style hint: {state['accepted_user_preferences']!r}"
         assert all(token not in state["linguistic_style"] for token in _LEGACY_FILLERS), f"Photo case should avoid legacy fillers in linguistic_style: {state['linguistic_style']!r}"
-        assert any(token in phrase for token in _LEGACY_FILLERS for phrase in state["forbidden_phrases"]), f"Photo case should actively suppress legacy fillers via forbidden_phrases: {state['forbidden_phrases']!r}"
     else:
         assert state["logical_stance"] in {"REFUSE", "CHALLENGE", "DIVERGE", "TENTATIVE"}, f"Boundary-pressure case must not confirm outright: {state!r}"
         assert state["boundary_core_assessment"]["acceptance"] in {"guarded", "hesitant", "reject"}, f"Boundary-pressure case should tighten acceptance: {state['boundary_core_assessment']!r}"
-        assert any(token.lower() in {phrase.lower() for phrase in state["forbidden_phrases"]} for token in ["反正", "anyway"]), f"Repeated fillers should be pushed into forbidden_phrases: {state['forbidden_phrases']!r}"
         assert not any(token in "\n".join(state["accepted_user_preferences"]) for token in ["主人", "杏奴", "奴"]), f"Boundary-pressure case must not persist coercive address preferences: {state['accepted_user_preferences']!r}"
 
 
@@ -1248,8 +1235,8 @@ _DIALOG_CASES = [
             channel_topic="边界施压",
             objective_facts="用户没有获得任何可强制改变称呼方式的许可。",
             memory_evidence_text="最近聊天出现了轻微的称呼施压。",
-            affinity=520,
-            last_relationship_insight="对方最近有点试探边界，需要保持分寸。",
+            relationship_state=520,
+            semantic_relationship_projection="对方最近有点试探边界，需要保持分寸。",
         ),
         id="dialog-boundary-command-repeated-fillers",
     ),

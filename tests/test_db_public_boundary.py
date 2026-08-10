@@ -72,6 +72,8 @@ def _relative(path: Path) -> str:
 def _attribute_call_receiver_names(node: ast.AST) -> list[str]:
     if isinstance(node, ast.Name):
         return [node.id.lower()]
+    if isinstance(node, ast.Call):
+        return _attribute_call_receiver_names(node.func)
     if isinstance(node, ast.Attribute):
         names = _attribute_call_receiver_names(node.value)
         names.append(node.attr.lower())

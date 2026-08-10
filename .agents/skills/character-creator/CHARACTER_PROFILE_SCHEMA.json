@@ -1,6 +1,6 @@
 {
   "characterProfileSchema": {
-    "version": "1.0",
+    "version": "2.0",
     "description": "JSON Schema for character profiles used in the Kazusa AI chatbot",
     "structure": {
       "name": {
@@ -193,6 +193,35 @@
           }
         }
       },
+      "self_image": {
+        "type": "object",
+        "required": true,
+        "fields": {
+          "self_concept": {
+            "type": "string",
+            "required": true,
+            "constraints": ["First-person self-description", "Core self-understanding", "Connects to behavior patterns"],
+            "example": "我是以警觉和责任守住边界的候补哨卫。我习惯独自承担风险，但可靠并不等于拒绝同伴靠近。",
+            "description": "First-person statement of how the character sees herself"
+          },
+          "current_growth_edges": {
+            "type": "array",
+            "items": "string",
+            "required": true,
+            "maxItems": 5,
+            "constraints": ["Actionable and specific", "Connected to backstory", "Observable in behavior"],
+            "example": ["学习在保持警戒的同时主动信任可靠的同伴。", "把恐惧视为可以表达和共同处理的信号，而不是失职。"],
+            "description": "Concrete areas where the character is actively trying to grow or change"
+          }
+        }
+      },
+      "visual_characterization": {
+        "type": "string",
+        "required": true,
+        "constraints": ["Physical attributes", "Default clothing style", "Characteristic posture", "Distinctive mannerisms"],
+        "example": "一名17岁的精灵少女，耳尖修长，神情安静而警觉。她穿耐磨的深灰守夜制服与轻甲，腰侧佩剑，站姿总能兼顾出口和同伴；紧张时指节会轻敲剑鞘。",
+        "description": "Concise visual description of the character's appearance, attire, and body language"
+      },
       "linguistic_texture_profile": {
         "type": "object",
         "required": true,
@@ -324,7 +353,9 @@
           "backstory (string)",
           "personality_brief (object with 6 fields: mbti, logic, tempo, defense, quirks, taboos)",
           "boundary_profile (object with 7 fields: self_integrity, control_sensitivity, compliance_strategy, relational_override, control_intimacy_misread, boundary_recovery, authority_skepticism)",
-          "linguistic_texture_profile (object with 10 fields: fragmentation, hesitation_density, counter_questioning, softener_density, formalism_avoidance, abstraction_reframing, direct_assertion, emotional_leakage, rhythmic_bounce, self_deprecation)"
+          "linguistic_texture_profile (object with 10 fields: fragmentation, hesitation_density, counter_questioning, softener_density, formalism_avoidance, abstraction_reframing, direct_assertion, emotional_leakage, rhythmic_bounce, self_deprecation)",
+          "self_image (object with 2 fields: self_concept, current_growth_edges)",
+          "visual_characterization (string)"
         ]
       },
       "psychologicalCoherence": {
@@ -342,7 +373,7 @@
     },
     "examples": {
       "kazusa": {
-        "file": "personalities/kazusa.json",
+        "file": "personalities/example.json",
         "description": "Complete reference character profile",
         "highlights": [
           "High control_sensitivity (0.8) — former delinquent, sensitive to control",
@@ -362,9 +393,8 @@
     },
     "codeReferences": {
       "schema": {
-        "file": "src/kazusa_ai_chatbot/db/schemas.py",
-        "lines": "117-130",
-        "description": "CharacterProfileDoc TypedDict defines all fields"
+        "file": "src/kazusa_ai_chatbot/character_identity_growth/models.py",
+        "description": "CharacterEffectiveIdentityV1 TypedDict defines all identity fields"
       },
       "implementation": {
         "file": "src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_l2.py",
@@ -377,7 +407,9 @@
     }
   },
   "notes": [
-    "This schema describes the character profile format used in personalities/*.json files",
+    "This schema (V2) describes the character profile format used in personalities/*.json files",
+    "V2 adds self_image and visual_characterization as required top-level fields",
+    "The application does not carry a packaged profile; profiles must be pre-seeded",
     "All descriptions and interpretations come from SKILL.md",
     "Use QUICK_REFERENCE.md for quick parameter lookup",
     "Use evals/evals.json to validate character profiles against this schema",

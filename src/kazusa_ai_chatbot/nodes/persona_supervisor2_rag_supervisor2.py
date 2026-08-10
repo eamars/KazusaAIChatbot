@@ -505,7 +505,6 @@ async def test_main():
         "description": "一个温柔的AI角色",
     }
     user_profile = {
-        "affinity": 800,
         "display_name": "<current user>",
     }
 

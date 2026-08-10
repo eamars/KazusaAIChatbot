@@ -77,6 +77,7 @@ class ProcessSupervisor:
         self._refresh_process_exit(service_id)
         self._refresh_persisted_process_record(service_id)
         self._refresh_endpoint_conflict(service_id)
+        self._refresh_dependency_availability(service_id)
         spec = self._services[service_id]
         snapshot = self._store.load_snapshot()
         raw_service = snapshot["services"].get(service_id, {})
@@ -319,6 +320,49 @@ class ProcessSupervisor:
                 raise ServiceLifecycleError(
                     f"dependency {dependency_id} is not running for {service_id}"
                 )
+
+    def _refresh_dependency_availability(self, service_id: str) -> None:
+        """Reconcile dependency-owned unavailable state with current services."""
+
+        spec = self._services[service_id]
+        if not spec.dependencies or service_id in self._processes:
+            return
+
+        snapshot = self._store.load_snapshot()
+        raw_service = snapshot["services"].get(service_id, {})
+        if raw_service.get("actual_state") != "unavailable":
+            return
+        if _pid_or_none(raw_service.get("pid")) is not None:
+            return
+
+        last_error_preview = raw_service.get("last_error_preview")
+        dependency_errors = {
+            f"dependency {dependency_id} is not running"
+            for dependency_id in spec.dependencies
+        }
+        if last_error_preview not in dependency_errors:
+            return
+
+        for dependency_id in spec.dependencies:
+            dependency_state = self.service_state(dependency_id)
+            if _dependency_is_available(dependency_state):
+                continue
+            current_error = f"dependency {dependency_id} is not running"
+            if current_error != last_error_preview:
+                self._store.update_service(
+                    service_id,
+                    {"last_error_preview": current_error},
+                )
+            return
+
+        self._store.update_service(
+            service_id,
+            {
+                "actual_state": "stopped",
+                "pid": None,
+                "last_error_preview": None,
+            },
+        )
 
     def _ensure_endpoint_available(self, service_id: str) -> None:
         """Refuse to spawn over a configured endpoint already in use."""

@@ -71,8 +71,6 @@ async def test_collect_group_chat_review_cases_builds_same_group_cases(
             "name": "Character",
             "global_user_id": "character-global",
             "platform_bot_id": "bot-1",
-            "mood": "focused",
-            "global_vibe": "steady",
         },
         max_cases=3,
         collect_reflection_inputs_func=collect_inputs,
@@ -97,8 +95,8 @@ async def test_collect_group_chat_review_cases_builds_same_group_cases(
         "self_cognition_source_channel"
     )
     assert newest_case["delivery_target"]["fallback_reason"] == ""
-    assert newest_case["current_mood"] == "focused"
-    assert newest_case["global_vibe"] == "steady"
+    assert "current_mood" not in newest_case
+    assert "vibe_check" not in newest_case
     addressed_case = next(
         case
         for case in cases
@@ -427,7 +425,7 @@ async def test_collect_group_review_cases_attaches_participant_context(
                 "role_in_window": ["direct_cue"],
                 "relationship_label": "Neutral",
                 "relationship_band": "neutral",
-                "last_relationship_insight": "",
+                "semantic_relationship_projection": "",
                 "engagement_guidelines": [],
                 "nearby_conversation_evidence": [],
                 "visible_samples": ["Can you look at this in the group?"],
@@ -952,7 +950,7 @@ async def test_collect_group_review_cases_attaches_thread_reference_context(
                 "role_in_window": ["direct_cue"],
                 "relationship_label": "Neutral",
                 "relationship_band": "neutral",
-                "last_relationship_insight": "",
+                "semantic_relationship_projection": "",
                 "engagement_guidelines": [],
                 "nearby_conversation_evidence": [],
                 "visible_samples": ["@杏山千纱 🐷"],

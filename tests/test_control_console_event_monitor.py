@@ -6,58 +6,138 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_event_monitor_merges_and_redacts_bounded_sources() -> None:
-    """Operator event views should merge sources without leaking sensitive data."""
+async def test_event_monitor_owns_application_events_without_audit_views() -> None:
+    """Event monitor should exclude Audit-owned control-console records."""
 
+    from pydantic import ValidationError
     from control_console.contracts import OperationalEventQuery
     from control_console.event_monitor import EventMonitor
 
-    async def read_audit_events(query):
-        _ = query
+    async def read_kazusa_events(query):
+        assert query.limit == 5
+        if query.event_type == "tick":
+            return [{
+                "source": "kazusa",
+                "event_type": "tick",
+                "component": "background_work.worker",
+                "level": "info",
+                "status": "succeeded",
+                "created_at": "2026-06-17T00:00:01+00:00",
+            }]
         rows = [{
-            "source": "console",
-            "event_type": "lookup_executed",
-            "message": "token=secret prompt hidden",
+            "source": "kazusa",
+            "event_type": "resource_health",
+            "component": "brain_service",
+            "level": "warning",
+            "status": "degraded",
+            "embedding": [0.1, 0.2],
+            "created_at": "2026-06-17T00:00:02+00:00",
+        }, {
+            "source": "kazusa",
+            "event_type": "tick",
+            "component": "background_work.worker",
+            "level": "info",
+            "status": "succeeded",
+            "created_at": "2026-06-17T00:00:01+00:00",
+        }, {
+            "source": "kazusa",
+            "event_type": "load_residue_context",
+            "component": "internal_monologue_residue",
+            "level": "info",
+            "status": "empty",
             "created_at": "2026-06-17T00:00:00+00:00",
         }]
         return rows
 
-    async def read_process_logs(query):
-        _ = query
-        rows = [{
-            "source": "process",
-            "event_type": "stderr",
-            "line": "api_key=abc raw_message=hello",
-            "created_at": "2026-06-17T00:00:01+00:00",
-        }]
-        return rows
-
-    async def read_kazusa_events(query):
-        _ = query
-        rows = [{
-            "source": "kazusa",
-            "event_type": "resource_health",
-            "embedding": [0.1, 0.2],
-            "created_at": "2026-06-17T00:00:02+00:00",
-        }]
-        return rows
-
-    monitor = EventMonitor(
-        read_audit_events=read_audit_events,
-        read_process_logs=read_process_logs,
-        read_kazusa_events=read_kazusa_events,
-    )
+    monitor = EventMonitor(read_kazusa_events=read_kazusa_events)
     result = await monitor.query(
-        OperationalEventQuery.model_validate({"source": "all", "limit": 2})
+        OperationalEventQuery.model_validate({"source": "all", "limit": 5})
     )
 
+    assert len(result.items) == 1
+    assert result.items[0]["event_type"] == "resource_health"
+    assert result.facets["sources"] == {"kazusa": 1}
+    assert result.facets["levels"] == {"warning": 1}
+    assert result.facets["statuses"] == {"degraded": 1}
     rendered = repr(result)
-    assert len(result.items) == 2
     assert "secret" not in rendered
     assert "hidden" not in rendered
-    assert "abc" not in rendered
-    assert "hello" not in rendered
     assert "0.1" not in rendered
+    assert "process" not in rendered
+
+    tick_result = await monitor.query(
+        OperationalEventQuery.model_validate({
+            "source": "kazusa",
+            "event_type": "tick",
+            "limit": 5,
+        })
+    )
+    assert len(tick_result.items) == 1
+    assert tick_result.items[0]["event_type"] == "tick"
+
+    with pytest.raises(ValidationError):
+        OperationalEventQuery.model_validate({"source": "process", "limit": 5})
+    with pytest.raises(ValidationError):
+        OperationalEventQuery.model_validate({"source": "console", "limit": 5})
+
+
+@pytest.mark.asyncio
+async def test_kazusa_event_reader_pushes_default_noise_filter_to_database() -> None:
+    """Routine aggregate events must not consume the bounded database window."""
+
+    from control_console import app as app_module
+    from control_console.contracts import OperationalEventQuery
+
+    calls: list[dict] = []
+
+    async def find_events(filter_doc, *, sort, limit):
+        calls.append({
+            "filter_doc": filter_doc,
+            "sort": sort,
+            "limit": limit,
+        })
+        return [{
+            "event_id": "evt-meaningful",
+            "event_type": "queue_intake",
+            "component": "brain_service",
+            "severity": "info",
+            "status": "accepted",
+            "occurred_at": "2026-06-17T00:00:00+00:00",
+        }]
+
+    query = OperationalEventQuery.model_validate({
+        "source": "all",
+        "limit": 5,
+    })
+
+    rows = await app_module._read_kazusa_events(query, find_events=find_events)
+
+    assert calls == [{
+        "filter_doc": {
+            "$or": [
+                {
+                    "event_type": {
+                        "$nin": ["load_residue_context", "tick"],
+                    },
+                },
+                {"severity": {"$in": ["error", "warning"]}},
+                {
+                    "status": {
+                        "$in": [
+                            "deferred",
+                            "degraded",
+                            "failed",
+                            "unavailable",
+                            "warning",
+                        ],
+                    },
+                },
+            ],
+        },
+        "sort": [("occurred_at", -1)],
+        "limit": 5,
+    }]
+    assert [row["event_type"] for row in rows] == ["queue_intake"]
 
 
 @pytest.mark.asyncio
@@ -89,7 +169,17 @@ async def test_kazusa_event_reader_projects_event_log_rows() -> None:
             "occurred_at": "2026-06-17T00:00:00+00:00",
             "created_at": "2026-06-17T00:00:01+00:00",
             "duration_ms": 42,
-            "payload": {"raw_output": "do not expose"},
+            "payload": {
+                "processed_count": 4,
+                "succeeded_count": 3,
+                "failed_count": 0,
+                "skipped_count": 1,
+                "deferred": True,
+                "defer_reason": "worker capacity reached",
+                "run_kind": "background_tick",
+                "worker_name": "text_artifact",
+                "raw_output": "do not expose",
+            },
             "human_prompt": "do not expose",
             "embedding": [0.1],
         }]
@@ -130,6 +220,14 @@ async def test_kazusa_event_reader_projects_event_log_rows() -> None:
         "attempt_id": "attempt-1",
         "created_at": "2026-06-17T00:00:00+00:00",
         "duration_ms": 42,
+        "processed_count": 4,
+        "succeeded_count": 3,
+        "failed_count": 0,
+        "skipped_count": 1,
+        "deferred": True,
+        "defer_reason": "worker capacity reached",
+        "run_kind": "background_tick",
+        "worker_name": "text_artifact",
     }]
     rendered = repr(rows)
     assert "human_prompt" not in rendered
@@ -146,11 +244,36 @@ async def test_kazusa_event_reader_handles_tracking_filters_and_failures() -> No
 
     async def find_events(filter_doc, *, sort, limit):
         assert filter_doc == {
-            "$or": [
-                {"run_id": "tracking-1"},
-                {"trigger_id": "tracking-1"},
-                {"attempt_id": "tracking-1"},
-                {"refs.ref_id": "tracking-1"},
+            "$and": [
+                {
+                    "$or": [
+                        {"run_id": "tracking-1"},
+                        {"trigger_id": "tracking-1"},
+                        {"attempt_id": "tracking-1"},
+                        {"refs.ref_id": "tracking-1"},
+                    ],
+                },
+                {
+                    "$or": [
+                        {
+                            "event_type": {
+                                "$nin": ["load_residue_context", "tick"],
+                            },
+                        },
+                        {"severity": {"$in": ["error", "warning"]}},
+                        {
+                            "status": {
+                                "$in": [
+                                    "deferred",
+                                    "degraded",
+                                    "failed",
+                                    "unavailable",
+                                    "warning",
+                                ],
+                            },
+                        },
+                    ],
+                },
             ],
             "occurred_at": {"$gte": "2026-06-17T00:00:00+00:00"},
         }

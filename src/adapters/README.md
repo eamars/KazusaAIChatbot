@@ -98,6 +98,25 @@ service through `/runtime/adapters/register` and refresh it through
 when present. Registration and heartbeat failures are logged and retried by
 adapter startup or heartbeat behavior.
 
+Registration and heartbeat use one strict big-bang contract. The adapter
+request contains only transport-owned registration data:
+
+- required `platform`, `callback_url`, and `platform_bot_id`;
+- optional/configured `shared_secret` and `timeout_seconds`;
+- no adapter-fetched character `display_name`.
+
+The brain response contains `status`, `platform`, `callback_url`, and the
+required brain-owned `character_name`. Discord and NapCat retain the last
+successfully validated response name and use it for every platform-bot mention
+and reply label. Human sender, human mention, role, and channel labels remain
+platform-owned.
+
+Startup registration fails when `character_name` is missing, not a string, or
+empty. A malformed heartbeat is logged and leaves the last validated brain
+name unchanged. The debug adapter has no platform bot display-name lookup or
+runtime registration name cache, so this synchronization contract does not
+apply to it.
+
 ## Forbidden Adapter Behavior
 
 Adapters must not own character judgment, cognition policy, prompt decisions,

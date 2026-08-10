@@ -47,17 +47,17 @@ patch request, the supervisor may fall back to bounded safe source/test/doc
 file evidence. If patch review validation fails, the supervisor may perform
 one validation-feedback modifying retry before returning the proposal result.
 
-`handle_background_coding_task(...)` is the accepted-task background interface.
-It receives one background coding task, asks the coding-agent supervisor route
-to choose reading, writing, modifying, or unsupported, and then calls the
-public code-reading or patch-proposal interface. The operation decision belongs
-here, not in L2d or the generic background-work router.
+`handle_background_coding_task(...)` remains a standalone one-shot interface.
+The accepted-task background adapter uses the same coding-agent supervisor
+route to choose reading, writing, modifying, or unsupported, then starts a
+durable coding run. The operation decision belongs in the coding worker, not in
+L2d or the generic background-work router.
 
 `decide_background_coding_operation(...)` exposes the same supervisor route
-decision without running the legacy one-shot task. The background-work
-`accepted_coding_task_request` path uses it to choose the durable
-`start_coding_run(...)` objective, so durable accepted coding work does not
-double-run the legacy background task before creating a ledger.
+decision without running the standalone one-shot task. The generic
+accepted-task coding worker uses it to choose the durable
+`start_coding_run(...)` objective, so one new task receives one worker-owned
+classification before its ledger is created.
 
 `apply_approved_patch(...)` is the direct trusted patch-apply interface. It
 requires structured approval, verifies source identity, copies the source tree
@@ -103,10 +103,11 @@ planning.
 
 The background-work `coding_agent` adapter has two modes:
 
-- Legacy generic delayed coding work receives no worker payload and calls
-  `handle_background_coding_task(...)`.
-- Durable coding-run work receives `coding_agent_worker_payload.v2` from the
-  `accepted_coding_task_request` action handler. It supports `start`,
+- New generic delayed coding work receives no worker payload, classifies the
+  operation inside the worker, and calls `start_coding_run(...)`.
+- Existing durable coding-run work receives
+  `coding_agent_worker_payload.v2` from the
+  `accepted_coding_task_request` action handler. It supports
   `revise_proposal`, `summarize`, `status`, `approve_and_verify`,
   `respond_to_blocker`, and `cancel`, maps them to the durable run APIs, and returns
   `coding_agent_worker_metadata.v3` with a prompt-safe `coding_run_context.v1`
@@ -151,9 +152,9 @@ session memory remain inspectable.
 
 This package has a standalone direct interface and one background-work adapter.
 The background-work router chooses only the `coding_agent` worker. The
-read-versus-write decision is owned by `handle_background_coding_task(...)`;
-worker routing, L2d, and L3/dialog do not choose coding-agent subagent
-parameters.
+read-versus-write decision is owned by the coding-agent supervisor inside that
+worker; the generic background router, L2d, and L3/dialog do not choose
+coding-agent subagent parameters.
 
 ```mermaid
 flowchart TD
@@ -166,9 +167,9 @@ flowchart TD
     B1["background_work router LLM<br/>selects worker only"]
     B2["providers.dispatch_background_work<br/>worker registry dispatch"]
     B3["background_work.subagent.coding_agent.execute<br/>injects CODING_AGENT_WORKSPACE_ROOT<br/>maps sanitized result metadata"]
-    B4["handle_background_coding_task(...)<br/>coding-agent supervisor LLM<br/>operation: code_reading / code_writing / code_modifying / unsupported"]
-    B5["accepted_coding_task_request<br/>deterministic requested_worker payload"]
-    B6["coding_agent_worker_payload.v2<br/>start / revise_proposal / summarize / status / approve_and_verify / respond_to_blocker / cancel"]
+    B4["coding-agent supervisor LLM<br/>operation: code_reading / code_writing / code_modifying / unsupported<br/>then start_coding_run(...)"]
+    B5["accepted_coding_task_request<br/>existing coding_run_ref only"]
+    B6["coding_agent_worker_payload.v2<br/>revise_proposal / summarize / status / approve_and_verify / respond_to_blocker / cancel"]
     O0["unsupported or failed response<br/>no coding subagent call"]
     O1["CodingAgentResponse<br/>public-safe answer and evidence"]
     O2["CodingPatchProposalResponse<br/>review-only patch proposal"]
@@ -455,15 +456,16 @@ Kazusa background work registers:
 `BackgroundWorkResult` mapping:
 
 - `worker`: `coding_agent`
-- `status`: `CodingAgentBackgroundResponse.status`
-- `artifact_text`: bounded `CodingAgentBackgroundResponse.answer_text` on
-  success
-- `failure_summary`: first limitation or a compact generic failure
-- `result_summary`: bounded status, selected coding operation, repository
-  identity, evidence count, and proposal file count
-- `worker_metadata`: public repository summary, source scope, bounded evidence
-  references without excerpts, proposal summaries without raw diffs,
-  validation summary, limitations, and trace summary
+- `status`: the public durable-run status mapped to worker success, rejection,
+  or failure
+- `artifact_text`: bounded run reference, run status, and public answer text
+- `failure_summary`: first public limitation or a compact generic failure
+- `result_summary`: bounded worker operation, run status, and prompt-safe run
+  reference
+- `worker_metadata`: `coding_agent_worker_metadata.v3` with public run context,
+  repository summary, source scope, bounded evidence references without
+  excerpts, proposal summaries without raw diffs, attempts, limitations, and
+  trace summary
 
 The coding-agent worker supplies the configured coding workspace root. It must
 not parse workspace paths from user text, fall back to worker-local temp paths,

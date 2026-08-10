@@ -2,9 +2,14 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal, NotRequired, TypedDict
 
-from kazusa_ai_chatbot.cognition_episode import CognitiveEpisode
-from kazusa_ai_chatbot.conversation_progress import ConversationProgressPromptDoc
-from kazusa_ai_chatbot.db.schemas import ConversationEpisodeStateDoc
+from kazusa_ai_chatbot.cognition_episode import CognitiveEpisodeV1
+from kazusa_ai_chatbot.conversation_progress import (
+    ConversationLogicalTurnV1,
+    ConversationProgressLoadDiagnosticsV2,
+    ConversationProgressPromptV2,
+    ConversationProgressSourceRefV2,
+    ConversationProgressStateV2,
+)
 from kazusa_ai_chatbot.message_envelope import MessageEnvelope, PromptMessageContext
 from kazusa_ai_chatbot.time_boundary import LocalTimeContextDoc
 
@@ -83,6 +88,9 @@ class IMProcessState(TypedDict):
     platform_message_id: str     # Original platform message ID when available
     active_turn_platform_message_ids: NotRequired[list[str]]
     active_turn_conversation_row_ids: NotRequired[list[str]]
+    active_turn_conversation_source_refs: NotRequired[
+        list[ConversationProgressSourceRefV2]
+    ]
     platform_user_id: str        # Original platform user ID (e.g. Discord snowflake)
     global_user_id: str          # Internal UUID4 from user_profiles collection
 
@@ -91,15 +99,22 @@ class IMProcessState(TypedDict):
     user_input: str  # Body text plus current attachment descriptions.
     message_envelope: MessageEnvelope
     prompt_message_context: PromptMessageContext
-    cognitive_episode: NotRequired[CognitiveEpisode]
+    cognitive_episode: NotRequired[CognitiveEpisodeV1]
     user_multimedia_input: list[MultiMediaDoc]
     additional_media_present: NotRequired[bool]
     media_prepared: NotRequired[bool]
-    user_profile: dict  # used to extract affinity score.
+    user_profile: dict  # carries the prompt-safe user projection.
 
     platform_bot_id: str  # Bot's ID on the current platform (provided by the adapter)
     character_name: str
     character_profile: dict
+    character_identity_revision_number: NotRequired[int]
+    character_identity_context: NotRequired[dict[str, object]]
+    character_identity_surface_context: NotRequired[dict[str, object]]
+    character_identity_projection_digest: NotRequired[str]
+    character_identity_consumer_kinds: NotRequired[list[str]]
+    character_identity_episode_id: NotRequired[str]
+    character_identity_epistemic_core_included: NotRequired[bool]
 
     platform_channel_id: str  # Original channel/group/DM ID from the platform
     channel_type: str  # "group" | "private" | "system"
@@ -134,16 +149,27 @@ class IMProcessState(TypedDict):
     use_reply_feature: Annotated[bool, keep_true]
     channel_topic: str
     indirect_speech_context: str  # Only populated for Situation B (user talks about the character to others)
-    conversation_episode_state: NotRequired[ConversationEpisodeStateDoc | None]
-    conversation_progress: NotRequired[ConversationProgressPromptDoc]
+    conversation_episode_state: NotRequired[ConversationProgressStateV2 | None]
+    conversation_progress: NotRequired[ConversationProgressPromptV2]
+    ambient_logical_turns: NotRequired[list[ConversationLogicalTurnV1]]
+    interaction_logical_turns: NotRequired[list[ConversationLogicalTurnV1]]
+    conversation_progress_diagnostics: NotRequired[
+        ConversationProgressLoadDiagnosticsV2
+    ]
     promoted_reflection_context: NotRequired[dict]
     internal_monologue_residue_context: NotRequired[str]
     past_dialog_cognition_context: NotRequired[str]
+    action_availability_runtime: NotRequired[dict[str, Any]]
+    interaction_style_context: NotRequired[dict[str, Any]]
+    settled_relevance_context_consumption: NotRequired[dict[str, Any]]
 
     # Debug modes (optional, passed from ChatRequest)
     debug_modes: DebugModes
 
     # Output from Persona Supervisor
+    cognition_core_output: NotRequired[dict[str, Any]]
+    cognition_state_update: NotRequired[dict[str, Any]]
+    cognition_state_committed: NotRequired[bool]
     final_dialog: list[str]
     target_addressed_user_ids: NotRequired[list[str]]
     target_broadcast: NotRequired[bool]

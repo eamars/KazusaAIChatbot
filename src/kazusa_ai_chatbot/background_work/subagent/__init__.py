@@ -1,62 +1,33 @@
-"""Worker discovery for background-work subagents."""
+"""Owned execution entrypoints for reviewed background-work payloads."""
 
 from __future__ import annotations
 
-from typing import Protocol, TypedDict
+from importlib import import_module
+from typing import Any
 
-from kazusa_ai_chatbot.background_work.models import (
-    BackgroundWorkResult,
-    BackgroundWorkWorkerDecision,
-)
-from kazusa_ai_chatbot.background_work.subagent import (
-    coding_agent,
-    future_speak,
-    text_artifact,
-)
+__all__ = [
+    "execute_future_speak_job",
+    "execute_task_orchestrator_job",
+]
 
 
-class BackgroundWorkWorker(TypedDict):
-    """Public worker registry row."""
-
-    worker: str
-    description: str
-    execute: "BackgroundWorkExecute"
-
-
-class BackgroundWorkExecute(Protocol):
-    """Callable contract for one background-work worker entrypoint."""
-
-    async def __call__(
-        self,
-        decision: BackgroundWorkWorkerDecision,
-        *,
-        max_output_chars: int,
-    ) -> BackgroundWorkResult:
-        """Execute one route decision with deterministic runtime context."""
+_ENTRYPOINT_MODULES = {
+    "execute_future_speak_job": (
+        "kazusa_ai_chatbot.background_work.subagent.future_speak"
+    ),
+    "execute_task_orchestrator_job": (
+        "kazusa_ai_chatbot.background_work.subagent.task_orchestrator"
+    ),
+}
 
 
-def discover_background_work_workers() -> dict[str, BackgroundWorkWorker]:
-    """Return the enabled background-work worker registry."""
+def __getattr__(name: str) -> Any:
+    """Resolve a worker implementation only when its payload is claimed."""
 
-    workers: dict[str, BackgroundWorkWorker] = {}
-    for module in (coding_agent, future_speak, text_artifact):
-        worker_name = str(getattr(module, "WORKER"))
-        description = str(getattr(module, "DESCRIPTION"))
-        execute_func = getattr(module, "execute")
-        workers[worker_name] = {
-            "worker": worker_name,
-            "description": description,
-            "execute": execute_func,
-        }
-    return workers
-
-
-def worker_descriptions() -> dict[str, str]:
-    """Return prompt-safe worker descriptions for the router."""
-
-    workers = discover_background_work_workers()
-    descriptions = {
-        worker_name: str(worker["description"])
-        for worker_name, worker in workers.items()
-    }
-    return descriptions
+    module_name = _ENTRYPOINT_MODULES.get(name)
+    if module_name is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module = import_module(module_name)
+    resolved_value = getattr(module, name)
+    globals()[name] = resolved_value
+    return resolved_value

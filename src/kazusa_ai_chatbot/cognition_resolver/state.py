@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Mapping
 
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     ALLOWED_RESOLVER_STATES,
@@ -17,9 +17,11 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     project_observations_for_cognition,
     project_pending_resume_for_cognition,
     validate_resolver_cycle_trace,
+    validate_current_turn_relational_willingness,
     validate_resolver_goal_progress,
     validate_resolver_observation,
     validate_resolver_pending_resume,
+    validate_required_resolver_evidence_dependency,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
 from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import (
@@ -31,24 +33,26 @@ MAX_PROJECTED_RESOLVER_OBSERVATIONS = 4
 
 def new_resolver_state(
     *,
-    decontexualized_input: str,
+    decontextualized_input: str,
     max_cycles: int,
+    episode_id: str,
 ) -> ResolverCycleStateV1:
     """Create the initial resolver state for a decontextualized user turn."""
 
-    _require_non_empty_text(decontexualized_input, "decontexualized_input")
+    _require_non_empty_text(decontextualized_input, "decontextualized_input")
     validated_max_cycles = _require_positive_int(max_cycles, "max_cycles")
+    _require_non_empty_text(episode_id, "episode_id")
     return_value: ResolverCycleStateV1 = {
         "schema_version": RESOLVER_CYCLE_STATE_VERSION,
         "cycle_index": 0,
         "max_cycles": validated_max_cycles,
         "status": "running",
-        "original_decontexualized_input": decontexualized_input,
+        "original_decontextualized_input": decontextualized_input,
         "observations": [],
         "cycle_traces": [],
         "held_action_specs": [],
         "goal_progress": new_empty_goal_progress(
-            original_goal=decontexualized_input,
+            original_goal=decontextualized_input,
         ),
         "terminal_reason": "",
     }
@@ -149,7 +153,7 @@ def ensure_initial_resolver_inputs(
     initialized = dict(state)
     rag_result = initialized.get("rag_result")
     if rag_result is None:
-        current_user_id = _require_state_text(initialized, "global_user_id")
+        current_user_id = _initial_rag_current_user_id(initialized)
         character_user_id = _require_character_user_id(initialized)
         initialized["rag_result"] = build_empty_rag_result(
             current_user_id=current_user_id,
@@ -160,15 +164,15 @@ def ensure_initial_resolver_inputs(
 
     resolver_state = initialized.get("resolver_state")
     if resolver_state is None:
-        raw_input = initialized.get("decontexualized_input")
+        raw_input = initialized.get("decontextualized_input")
         if not isinstance(raw_input, str):
             raise ResolverValidationError(
-                "decontexualized_input: expected non-empty string",
+                "decontextualized_input: expected non-empty string",
             )
         if raw_input.strip():
-            decontexualized_input = raw_input
+            decontextualized_input = raw_input
         else:
-            decontexualized_input = ""
+            decontextualized_input = ""
             cognitive_episode = initialized.get("cognitive_episode")
             if isinstance(cognitive_episode, dict):
                 percepts = cognitive_episode.get("percepts")
@@ -176,25 +180,32 @@ def ensure_initial_resolver_inputs(
                     for percept in percepts:
                         if not isinstance(percept, dict):
                             continue
-                        input_source = percept.get("input_source")
-                        visibility = percept.get("visibility")
+                        source_kind = percept.get("source_kind")
                         content = percept.get("content")
-                        if input_source != "image_observation":
+                        if source_kind != "image_observation":
                             continue
-                        if visibility != "model_visible":
+                        if not isinstance(content, dict):
                             continue
-                        if not isinstance(content, str) or not content.strip():
+                        if content.get("visibility", "model_visible") != (
+                            "model_visible"
+                        ):
                             continue
-                        image_summary = content.strip()
-                        decontexualized_input = (
+                        image_summary = content.get("description")
+                        if not isinstance(image_summary, str):
+                            continue
+                        image_summary = image_summary.strip()
+                        if not image_summary:
+                            continue
+                        decontextualized_input = (
                             f'当前输入包含图片观察：{image_summary}'
                         )
                         break
-            if not decontexualized_input:
-                _require_non_empty_text(raw_input, "decontexualized_input")
+            if not decontextualized_input:
+                _require_non_empty_text(raw_input, "decontextualized_input")
         resolver_state = new_resolver_state(
-            decontexualized_input=decontexualized_input,
+            decontextualized_input=decontextualized_input,
             max_cycles=max_cycles,
+            episode_id=_cognitive_episode_id(initialized),
         )
     else:
         resolver_state = validate_resolver_state(resolver_state)
@@ -202,6 +213,49 @@ def ensure_initial_resolver_inputs(
     initialized["resolver_state"] = resolver_state
     initialized["resolver_context"] = project_resolver_context(resolver_state)
     return_value = initialized
+    return return_value
+
+
+def _initial_rag_current_user_id(state: dict) -> str:
+    """Return the bootstrap owner without inventing a group target."""
+
+    current_user_id = state.get("global_user_id")
+    if isinstance(current_user_id, str) and current_user_id.strip():
+        return_value = current_user_id
+        return return_value
+    if not _is_targetless_group_self_cognition(state):
+        _require_non_empty_text(current_user_id, "global_user_id")
+    character_profile = state.get("character_profile")
+    if not isinstance(character_profile, dict):
+        raise ResolverValidationError("character_profile: expected object")
+    character_user_id = character_profile.get("global_user_id")
+    _require_non_empty_text(
+        character_user_id,
+        "character_profile.global_user_id",
+    )
+    return_value = character_user_id
+    return return_value
+
+
+def _is_targetless_group_self_cognition(state: dict) -> bool:
+    """Return whether empty participant identity is a valid source contract."""
+
+    episode = state.get("cognitive_episode")
+    if not isinstance(episode, Mapping):
+        return_value = False
+        return return_value
+    if episode.get("trigger_source") != "self_cognition":
+        return_value = False
+        return return_value
+    target_scope = episode.get("target_scope")
+    if not isinstance(target_scope, Mapping):
+        return_value = False
+        return return_value
+    return_value = (
+        target_scope.get("channel_type") == "group"
+        and not target_scope.get("current_global_user_id")
+        and not target_scope.get("current_platform_user_id")
+    )
     return return_value
 
 
@@ -224,7 +278,7 @@ def project_resolver_context(
             f"max_cycles={normalized_state['max_cycles']}; "
             f"terminal_reason={normalized_state['terminal_reason']}; "
             "original_goal="
-            f"{normalized_state['original_decontexualized_input']}"
+            f"{normalized_state['original_decontextualized_input']}"
         ),
     ]
     observations = normalized_state["observations"][-validated_limit:]
@@ -240,6 +294,17 @@ def project_resolver_context(
     pending_context = project_pending_resume_for_cognition(pending_resume)
     if pending_context:
         lines.append(pending_context)
+    dependency = normalized_state.get(
+        "required_resolver_evidence_dependency"
+    )
+    if dependency is not None:
+        lines.append(
+            "required_resolver_evidence_dependency: "
+            f"observation_handle={dependency['prompt_safe_observation_handle']}; "
+            f"state={dependency['state']}; "
+            f"evidence_handles={','.join(dependency['evidence_handles'])}; "
+            f"remaining_needs={' | '.join(dependency['remaining_needs'])}"
+        )
     return_value = "\n".join(lines)
     return return_value
 
@@ -252,7 +317,7 @@ def validate_resolver_state(value: object) -> ResolverCycleStateV1:
     cycle_index = _require_non_negative_int(data.get("cycle_index"), "cycle_index")
     max_cycles = _require_positive_int(data.get("max_cycles"), "max_cycles")
     status = _require_state_enum(data, "status")
-    original_input = _require_state_text(data, "original_decontexualized_input")
+    original_input = _require_state_text(data, "original_decontextualized_input")
     raw_observations = _require_list(data, "observations")
     observations = [
         validate_resolver_observation(observation)
@@ -275,19 +340,64 @@ def validate_resolver_state(value: object) -> ResolverCycleStateV1:
         "cycle_index": cycle_index,
         "max_cycles": max_cycles,
         "status": status,
-        "original_decontexualized_input": original_input,
+        "original_decontextualized_input": original_input,
         "observations": observations,
         "cycle_traces": cycle_traces,
         "held_action_specs": held_action_specs,
         "goal_progress": goal_progress,
         "terminal_reason": terminal_reason,
     }
+    current_turn_carrier = data.get("current_turn_relational_willingness")
+    if current_turn_carrier is not None:
+        carrier_episode_id = (
+            _carrier_episode_id(current_turn_carrier)
+        )
+        normalized["current_turn_relational_willingness"] = (
+            validate_current_turn_relational_willingness(
+                current_turn_carrier,
+                episode_id=carrier_episode_id,
+            )
+        )
+    evidence_dependency = data.get(
+        "required_resolver_evidence_dependency"
+    )
+    if evidence_dependency is not None:
+        normalized["required_resolver_evidence_dependency"] = (
+            validate_required_resolver_evidence_dependency(
+                evidence_dependency,
+            )
+        )
     pending_resume = data.get("pending_resume")
     if pending_resume is not None:
         normalized["pending_resume"] = validate_resolver_pending_resume(
             pending_resume,
         )
     return_value = normalized
+    return return_value
+
+
+def _cognitive_episode_id(state: Mapping[str, Any]) -> str:
+    """Require the canonical episode identity for new resolver state."""
+
+    episode = state.get("cognitive_episode")
+    if not isinstance(episode, Mapping):
+        raise ResolverValidationError("cognitive_episode: expected object")
+    episode_id = episode.get("episode_id")
+    _require_non_empty_text(episode_id, "cognitive_episode.episode_id")
+    return_value = episode_id
+    return return_value
+
+
+def _carrier_episode_id(value: object) -> str:
+    """Read the carrier episode identity before validating its exact shape."""
+
+    if not isinstance(value, Mapping):
+        raise ResolverValidationError(
+            "current_turn_relational_willingness: expected object"
+        )
+    episode_id = value.get("episode_id")
+    _require_non_empty_text(episode_id, "current_turn_relational_willingness.episode_id")
+    return_value = episode_id
     return return_value
 
 

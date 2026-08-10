@@ -1,5 +1,4 @@
-"""One-shot startup routine that ensures collections, indices, and seeded
-documents exist.
+"""One-shot startup routine that ensures collections and indices exist.
 
 All operations are idempotent — safe to run on every service start.
 """
@@ -10,6 +9,10 @@ import logging
 
 from kazusa_ai_chatbot.config import (
     MEDIA_DESCRIPTOR_CACHE_MAX_PERSISTENT_ENTRIES,
+)
+from kazusa_ai_chatbot.conversation_progress.policy import (
+    BLOCK_COLLECTION_NAME,
+    BLOCK_VECTOR_INDEX_NAME,
 )
 from kazusa_ai_chatbot.db._client import enable_vector_index, get_db
 from kazusa_ai_chatbot.background_work.models import (
@@ -31,10 +34,18 @@ from kazusa_ai_chatbot.db.internal_monologue_residue import (
     INTERNAL_MONOLOGUE_RESIDUE_COLLECTION,
     ensure_internal_monologue_residue_indexes,
 )
-from kazusa_ai_chatbot.db.global_character_growth import (
-    GLOBAL_CHARACTER_GROWTH_RUNS_COLLECTION,
-    GLOBAL_CHARACTER_GROWTH_TRAITS_COLLECTION,
-    ensure_global_character_growth_indexes,
+from kazusa_ai_chatbot.db.internal_action_latches import (
+    INTERNAL_ACTION_LATCHES_COLLECTION,
+    ensure_internal_action_latch_indexes,
+)
+from kazusa_ai_chatbot.db.post_turn_lifecycle import (
+    POST_TURN_LIFECYCLE_RECORDS_COLLECTION,
+    ensure_post_turn_lifecycle_record_indexes,
+    expire_character_operational_receipts,
+)
+from kazusa_ai_chatbot.db.character_identity_growth import (
+    GROWTH_COLLECTION_NAMES,
+    ensure_character_identity_growth_indexes,
 )
 from kazusa_ai_chatbot.db.event_logging import (
     EVENT_LOG_EVENTS_COLLECTION,
@@ -66,28 +77,13 @@ CALENDAR_SCHEDULES_COLLECTION = "calendar_schedules"
 CALENDAR_RUNS_COLLECTION = "calendar_runs"
 
 
-def _now_iso() -> str:
-    return_value = storage_utc_now_iso()
-    return return_value
-
-
 async def db_bootstrap() -> None:
-    """Create all required collections, indices, and seeded documents.
+    """Create all required collections and indices.
 
     Called once at service startup. Safe to call repeatedly.
     """
     db = await get_db()
     existing = set(await db.list_collection_names())
-
-    for legacy in (
-        "rag_cache_index",
-        "rag_metadata_index",
-        "background_artifact_jobs",
-    ):
-        if legacy in existing:
-            await db.drop_collection(legacy)
-            logger.info(f'Dropped legacy collection \'{legacy}\'')
-            existing.discard(legacy)
 
     required_collections = [
         "conversation_history",
@@ -101,8 +97,7 @@ async def db_bootstrap() -> None:
         "conversation_episode_state",
         "character_reflection_runs",
         "interaction_style_images",
-        GLOBAL_CHARACTER_GROWTH_TRAITS_COLLECTION,
-        GLOBAL_CHARACTER_GROWTH_RUNS_COLLECTION,
+        *GROWTH_COLLECTION_NAMES,
         PERSISTENT_CACHE_COLLECTION,
         EVENT_LOG_EVENTS_COLLECTION,
         EVENT_LOG_SNAPSHOTS_COLLECTION,
@@ -113,6 +108,9 @@ async def db_bootstrap() -> None:
         ACCEPTED_TASKS_COLLECTION,
         BACKGROUND_WORK_JOBS_COLLECTION,
         INTERNAL_MONOLOGUE_RESIDUE_COLLECTION,
+        INTERNAL_ACTION_LATCHES_COLLECTION,
+        POST_TURN_LIFECYCLE_RECORDS_COLLECTION,
+        BLOCK_COLLECTION_NAME,
     ]
     for name in required_collections:
         if name not in existing:
@@ -120,18 +118,6 @@ async def db_bootstrap() -> None:
             logger.info(f'Created collection \'{name}\'')
         else:
             logger.debug(f'Collection \'{name}\' already exists')
-
-    # ── Seed singleton character_state ─────────────────────────────
-    existing_state = await db.character_state.find_one({"_id": "global"})
-    if existing_state is None:
-        await db.character_state.insert_one({
-            "_id": "global",
-            "mood": "neutral",
-            "global_vibe": "",
-            "reflection_summary": "",
-            "updated_at": _now_iso(),
-        })
-        logger.info("Seeded default character_state document")
 
     # ── Standard regular indexes (idempotent) ──────────────────────
     await db.conversation_history.create_index(
@@ -177,6 +163,19 @@ async def db_bootstrap() -> None:
         ],
         name="conv_delivery_tracking_logical_index",
     )
+    await db.conversation_history.create_index(
+        [
+            ("platform", 1),
+            ("platform_channel_id", 1),
+            ("role", 1),
+            ("received_at", 1),
+        ],
+        name="conversation_history_ingress_received_at_v1",
+    )
+    await db.conversation_history.create_index(
+        "llm_trace_id",
+        name="conversation_history_llm_trace_id",
+    )
     await db.user_profiles.create_index(
         "global_user_id", unique=True, name="user_global_id_unique",
     )
@@ -198,6 +197,10 @@ async def db_bootstrap() -> None:
         [("status", 1), ("next_run_at", 1), ("trigger_kind", 1)],
         name="calendar_schedule_status_next_trigger",
     )
+    await db[CALENDAR_SCHEDULES_COLLECTION].create_index(
+        [("source_llm_trace_id", 1), ("updated_at", 1)],
+        name="calendar_schedule_source_trace_updated",
+    )
     await db[CALENDAR_RUNS_COLLECTION].create_index(
         "idempotency_key",
         unique=True,
@@ -211,6 +214,10 @@ async def db_bootstrap() -> None:
     await db[CALENDAR_RUNS_COLLECTION].create_index(
         [("status", 1), ("due_at", 1), ("trigger_kind", 1)],
         name="calendar_run_status_due_trigger",
+    )
+    await db[CALENDAR_RUNS_COLLECTION].create_index(
+        [("source_llm_trace_id", 1), ("updated_at", 1)],
+        name="calendar_run_source_trace_updated",
     )
     await db[CALENDAR_RUNS_COLLECTION].create_index(
         [("lease_expires_at", 1), ("status", 1)],
@@ -229,6 +236,10 @@ async def db_bootstrap() -> None:
         [("status", 1), ("recorded_at", -1)],
         name="self_cognition_attempt_status_recorded",
     )
+    await db[SELF_COGNITION_ACTION_ATTEMPTS_COLLECTION].create_index(
+        [("source_llm_trace_id", 1), ("recorded_at", -1)],
+        name="self_cognition_attempt_source_trace_recorded",
+    )
     await db[SELF_COGNITION_GROUP_REVIEW_WINDOWS_COLLECTION].create_index(
         "source_id",
         unique=True,
@@ -244,15 +255,81 @@ async def db_bootstrap() -> None:
     )
     await ensure_accepted_task_indexes()
     await ensure_background_work_job_indexes()
+    await ensure_internal_action_latch_indexes()
+    await ensure_post_turn_lifecycle_record_indexes()
+    await expire_character_operational_receipts(
+        now=storage_utc_now_iso().replace("+00:00", "Z"),
+    )
     await db.conversation_episode_state.create_index(
         [("platform", 1), ("platform_channel_id", 1), ("global_user_id", 1)],
         unique=True,
         name="conversation_episode_scope_unique",
     )
     await db.conversation_episode_state.create_index(
-        "expires_at",
+        "purge_after",
         expireAfterSeconds=0,
-        name="conversation_episode_expires_at_ttl",
+        name="conversation_episode_purge_after_ttl",
+    )
+    await db.conversation_history.create_index(
+        [
+            ("platform", 1),
+            ("platform_channel_id", 1),
+            ("role", 1),
+            ("global_user_id", 1),
+            ("timestamp", -1),
+        ],
+        name="conversation_history_participant_user_v1",
+    )
+    await db.conversation_history.create_index(
+        [
+            ("platform", 1),
+            ("platform_channel_id", 1),
+            ("role", 1),
+            ("platform_user_id", 1),
+            ("addressed_to_global_user_ids", 1),
+            ("timestamp", -1),
+        ],
+        name="conversation_history_participant_assistant_addressed_v1",
+    )
+    await db.conversation_history.create_index(
+        [
+            ("platform", 1),
+            ("platform_channel_id", 1),
+            ("role", 1),
+            ("platform_user_id", 1),
+            ("broadcast", 1),
+            ("timestamp", -1),
+        ],
+        name="conversation_history_participant_assistant_broadcast_v1",
+    )
+    await db[BLOCK_COLLECTION_NAME].create_index(
+        "block_id",
+        unique=True,
+        name="conversation_episode_block_id_unique",
+    )
+    await db[BLOCK_COLLECTION_NAME].create_index(
+        [
+            ("platform", 1),
+            ("platform_channel_id", 1),
+            ("global_user_id", 1),
+            ("episode_state_id", 1),
+            ("source_turn_count", 1),
+        ],
+        name="conversation_episode_block_scope_turn_v1",
+    )
+    await db[BLOCK_COLLECTION_NAME].create_index(
+        [
+            ("episode_state_id", 1),
+            ("superseded_by_block_id", 1),
+            ("level", 1),
+            ("source_ended_at", 1),
+        ],
+        name="conversation_episode_block_active_lineage_v1",
+    )
+    await db[BLOCK_COLLECTION_NAME].create_index(
+        "purge_after",
+        expireAfterSeconds=0,
+        name="conversation_episode_block_purge_after_ttl",
     )
     await db.memory.create_index(
         "memory_name", name="memory_name_idx",
@@ -298,7 +375,7 @@ async def db_bootstrap() -> None:
     )
     await ensure_reflection_run_indexes()
     await ensure_interaction_style_image_indexes()
-    await ensure_global_character_growth_indexes()
+    await ensure_character_identity_growth_indexes()
     await ensure_event_log_indexes()
     await ensure_llm_trace_indexes()
     await ensure_internal_monologue_residue_indexes()
@@ -313,6 +390,7 @@ async def db_bootstrap() -> None:
         ("conversation_history", CONVERSATION_VECTOR_INDEX_NAME, "embedding"),
         ("memory",               "memory_vector_index",              "embedding"),
         ("user_memory_units",     "user_memory_units_vector",         "embedding"),
+        (BLOCK_COLLECTION_NAME, BLOCK_VECTOR_INDEX_NAME, "embedding"),
     ):
         try:
             filter_paths = None
@@ -329,6 +407,15 @@ async def db_bootstrap() -> None:
                 ]
             if collection == "user_memory_units":
                 filter_paths = ["global_user_id", "unit_type", "status"]
+            if collection == BLOCK_COLLECTION_NAME:
+                filter_paths = [
+                    "platform",
+                    "platform_channel_id",
+                    "global_user_id",
+                    "episode_state_id",
+                    "block_id",
+                    "superseded_by_block_id",
+                ]
             await enable_vector_index(collection, index_name, path=path, filter_paths=filter_paths)
         except Exception as exc:
             logger.exception(

@@ -58,7 +58,7 @@ def _state() -> dict[str, Any]:
     state: dict[str, Any] = {
         "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
         "local_time_context": turn_clock["local_time_context"],
-        "decontexualized_input": "I now work in Auckland.",
+        "decontextualized_input": "I now work in Auckland.",
         "final_dialog": ["Kazusa acknowledges the user's update."],
         "internal_monologue": "The user gave a concrete personal fact.",
         "chat_history_recent": [
@@ -189,6 +189,35 @@ def test_character_self_guidance_requires_acceptance_source() -> None:
 
     assert user_only["accepted"] is False
     assert accepted["accepted"] is True
+
+
+def test_character_identity_growth_requires_character_owned_source() -> None:
+    """A user message alone cannot satisfy identity-growth provenance."""
+
+    module = _source_policy_module()
+
+    user_only = module.validate_lane_source_policy(
+        "character_identity_growth",
+        [_source("current_turn_user_message", "user_message")],
+    )
+    character_expression = module.validate_lane_source_policy(
+        "character_identity_growth",
+        [
+            _source("current_turn_user_message", "user_message"),
+            _source("assistant_final_dialog", "assistant_final_dialog"),
+        ],
+    )
+    internal_judgment = module.validate_lane_source_policy(
+        "character_identity_growth",
+        [_source("internal_thought", "internal_thought")],
+    )
+
+    assert user_only == {
+        "accepted": False,
+        "reason": "source_class_not_allowed",
+    }
+    assert character_expression["accepted"] is True
+    assert internal_judgment["accepted"] is True
 
 
 def test_shared_memory_promotion_rejects_ordinary_chat_sources() -> None:
@@ -366,7 +395,7 @@ def test_source_policy_does_not_make_text_semantic_decisions() -> None:
     forbidden_fragments = (
         'get("summary")',
         "['summary']",
-        "decontexualized_input",
+        "decontextualized_input",
         "decontextualized_input",
         "final_dialog",
         "喜欢",

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from kazusa_ai_chatbot.action_spec.attempt_ledger import (
@@ -15,7 +15,6 @@ from kazusa_ai_chatbot.action_spec.handlers.future_cognition import (
 from kazusa_ai_chatbot.action_spec.handlers.background_work import (
     BackgroundWorkEnqueueFunc,
     enqueue_accepted_coding_task_action,
-    enqueue_background_work_action,
     enqueue_future_speak_action,
 )
 from kazusa_ai_chatbot.action_spec.handlers.accepted_task import (
@@ -24,25 +23,35 @@ from kazusa_ai_chatbot.action_spec.handlers.accepted_task import (
 from kazusa_ai_chatbot.action_spec.handlers.memory_lifecycle import (
     execute_user_memory_lifecycle_action,
 )
-from kazusa_ai_chatbot.action_spec.models import ActionValidationError
+from kazusa_ai_chatbot.action_spec.models import (
+    ActionAvailabilityContextV1,
+    ActionValidationError,
+    RuntimeCapabilitySnapshotV1,
+)
 from kazusa_ai_chatbot.action_spec.registry import (
     ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
     ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
     APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
-    BACKGROUND_WORK_REQUEST_CAPABILITY,
     FUTURE_SPEAK_CAPABILITY,
     SPEAK_CAPABILITY,
     TRIGGER_FUTURE_COGNITION_CAPABILITY,
+    build_runtime_capability_snapshot,
+    recheck_action_affordance,
 )
 from kazusa_ai_chatbot.action_spec.results import (
     ActionResultV1,
     action_attempt_id_from_eval_result,
     build_action_result,
+    project_trace_action_result_v2,
 )
 from kazusa_ai_chatbot.db import DatabaseOperationError
 from kazusa_ai_chatbot.time_boundary import normalize_storage_utc_iso
 
 ActionAttemptRecorder = Callable[[dict[str, Any]], Any]
+AvailabilitySnapshotFactory = Callable[
+    [ActionAvailabilityContextV1],
+    RuntimeCapabilitySnapshotV1,
+]
 
 
 async def execute_action_specs_for_trace(
@@ -52,6 +61,8 @@ async def execute_action_specs_for_trace(
     executed_action_attempt_ids: set[str] | None = None,
     record_attempt_func: ActionAttemptRecorder | None = None,
     enqueue_background_work_func: BackgroundWorkEnqueueFunc | None = None,
+    availability_snapshot_factory: AvailabilitySnapshotFactory | None = None,
+    source_llm_trace_id: str = "",
 ) -> list[ActionResultV1]:
     """Validate and execute selected actions into auditable trace rows.
 
@@ -66,6 +77,10 @@ async def execute_action_specs_for_trace(
             preview paths.
         enqueue_background_work_func: Optional queue helper seam for generic
             background-work requests.
+        availability_snapshot_factory: Optional fresh runtime snapshot factory.
+        source_llm_trace_id: Protected trace owned by the state that selected
+            these actions. Empty values are retained for deterministic preview
+            paths that do not persist live companion rows.
 
     Returns:
         Prompt-safe action results for episode trace and consolidation.
@@ -86,12 +101,39 @@ async def execute_action_specs_for_trace(
         prompt_result_fields: dict[str, Any] = {}
         action_attempt_id = action_attempt_id_from_eval_result(eval_result)
         validated_spec = eval_result["action_spec"] or action_spec
+        availability_result = None
+        if eval_result["ok"]:
+            availability_context = _action_availability_context(validated_spec)
+            if availability_snapshot_factory is None:
+                fresh_snapshot = build_runtime_capability_snapshot()
+            else:
+                fresh_snapshot = availability_snapshot_factory(
+                    availability_context,
+                )
+            availability_result = await recheck_action_affordance(
+                validated_spec["kind"],
+                availability_context,
+                fresh_snapshot,
+            )
         if not eval_result["ok"]:
             status = "rejected"
             result_summary = "; ".join(eval_result["errors"])
             execution_result = {
                 "status": status,
                 "errors": list(eval_result["errors"]),
+            }
+        elif (
+            availability_result is not None
+            and availability_result["status"] == "unavailable"
+        ):
+            status = "rejected"
+            result_summary = (
+                f"{validated_spec['kind']} unavailable: "
+                f"{availability_result['reason_code']}"
+            )
+            execution_result = {
+                "status": status,
+                "availability": dict(availability_result),
             }
         elif validated_spec["kind"] == APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY:
             try:
@@ -144,10 +186,17 @@ async def execute_action_specs_for_trace(
                 }
         elif validated_spec["kind"] == TRIGGER_FUTURE_COGNITION_CAPABILITY:
             try:
+                future_kwargs: dict[str, Any] = {
+                    "storage_timestamp_utc": normalized_storage_timestamp_utc,
+                    "action_attempt_id": action_attempt_id,
+                }
+                if source_llm_trace_id.strip():
+                    future_kwargs["source_llm_trace_id"] = (
+                        source_llm_trace_id.strip()
+                    )
                 future_result = await execute_future_cognition_action(
                     validated_spec,
-                    storage_timestamp_utc=normalized_storage_timestamp_utc,
-                    action_attempt_id=action_attempt_id,
+                    **future_kwargs,
                 )
             except ActionValidationError as exc:
                 status = "rejected"
@@ -184,11 +233,18 @@ async def execute_action_specs_for_trace(
                 }
         elif validated_spec["kind"] == FUTURE_SPEAK_CAPABILITY:
             try:
+                queue_kwargs: dict[str, Any] = {
+                    "storage_timestamp_utc": normalized_storage_timestamp_utc,
+                    "action_attempt_id": action_attempt_id,
+                    "enqueue_background_work_func": enqueue_background_work_func,
+                }
+                if source_llm_trace_id.strip():
+                    queue_kwargs["source_llm_trace_id"] = (
+                        source_llm_trace_id.strip()
+                    )
                 queue_result = await enqueue_future_speak_action(
                     validated_spec,
-                    storage_timestamp_utc=normalized_storage_timestamp_utc,
-                    action_attempt_id=action_attempt_id,
-                    enqueue_background_work_func=enqueue_background_work_func,
+                    **queue_kwargs,
                 )
             except ActionValidationError as exc:
                 status = "rejected"
@@ -241,11 +297,18 @@ async def execute_action_specs_for_trace(
                 }
         elif validated_spec["kind"] == ACCEPTED_CODING_TASK_REQUEST_CAPABILITY:
             try:
+                queue_kwargs = {
+                    "storage_timestamp_utc": normalized_storage_timestamp_utc,
+                    "action_attempt_id": action_attempt_id,
+                    "enqueue_background_work_func": enqueue_background_work_func,
+                }
+                if source_llm_trace_id.strip():
+                    queue_kwargs["source_llm_trace_id"] = (
+                        source_llm_trace_id.strip()
+                    )
                 queue_result = await enqueue_accepted_coding_task_action(
                     validated_spec,
-                    storage_timestamp_utc=normalized_storage_timestamp_utc,
-                    action_attempt_id=action_attempt_id,
-                    enqueue_background_work_func=enqueue_background_work_func,
+                    **queue_kwargs,
                 )
             except ActionValidationError as exc:
                 status = "rejected"
@@ -264,63 +327,6 @@ async def execute_action_specs_for_trace(
             except ValueError as exc:
                 status = "rejected"
                 result_summary = f"accepted_coding_task_request rejected: {exc}"
-                execution_result = {
-                    "status": status,
-                    "error": str(exc),
-                }
-            else:
-                status = _accepted_task_execution_status(queue_result)
-                result_summary = queue_result["result_summary"]
-                execution_result = {
-                    "status": status,
-                    "accepted_task_state": (
-                        queue_result["accepted_task_state"]
-                    ),
-                    "accepted_task_summary": (
-                        queue_result["accepted_task_summary"]
-                    ),
-                    "acknowledgement_constraint": (
-                        queue_result["acknowledgement_constraint"]
-                    ),
-                    "wait_guidance": queue_result["wait_guidance"],
-                }
-                prompt_result_fields = {
-                    "accepted_task_state": (
-                        queue_result["accepted_task_state"]
-                    ),
-                    "accepted_task_summary": (
-                        queue_result["accepted_task_summary"]
-                    ),
-                    "acknowledgement_constraint": (
-                        queue_result["acknowledgement_constraint"]
-                    ),
-                    "wait_guidance": queue_result["wait_guidance"],
-                }
-        elif validated_spec["kind"] == BACKGROUND_WORK_REQUEST_CAPABILITY:
-            try:
-                queue_result = await enqueue_background_work_action(
-                    validated_spec,
-                    storage_timestamp_utc=normalized_storage_timestamp_utc,
-                    action_attempt_id=action_attempt_id,
-                    enqueue_background_work_func=enqueue_background_work_func,
-                )
-            except ActionValidationError as exc:
-                status = "rejected"
-                result_summary = f"background_work_request rejected: {exc}"
-                execution_result = {
-                    "status": status,
-                    "error": str(exc),
-                }
-            except DatabaseOperationError as exc:
-                status = "failed"
-                result_summary = f"background_work_request failed: {exc}"
-                execution_result = {
-                    "status": status,
-                    "error": str(exc),
-                }
-            except ValueError as exc:
-                status = "rejected"
-                result_summary = f"background_work_request rejected: {exc}"
                 execution_result = {
                     "status": status,
                     "error": str(exc),
@@ -404,6 +410,9 @@ async def execute_action_specs_for_trace(
         )
         if prompt_result_fields:
             action_result.update(prompt_result_fields)
+        action_result["semantic_result_v2"] = project_trace_action_result_v2(
+            action_result,
+        )
         if record_attempt_func is not None:
             await _record_action_attempt(
                 record_attempt_func,
@@ -411,9 +420,38 @@ async def execute_action_specs_for_trace(
                 eval_result,
                 storage_timestamp_utc=normalized_storage_timestamp_utc,
                 execution_result=execution_result,
+                source_llm_trace_id=source_llm_trace_id,
             )
         action_results.append(action_result)
     return action_results
+
+
+def _action_availability_context(
+    action_spec: Mapping[str, object],
+) -> ActionAvailabilityContextV1:
+    """Project trusted action identity into the registry probe context."""
+
+    context: ActionAvailabilityContextV1 = {
+        "permission_ref": str(action_spec.get("kind") or ""),
+    }
+    source_refs = action_spec.get("source_refs")
+    if isinstance(source_refs, list) and source_refs:
+        source_ref = source_refs[0]
+        if isinstance(source_ref, Mapping):
+            source_kind = source_ref.get("ref_kind")
+            if isinstance(source_kind, str):
+                context["source_kind"] = source_kind
+    target = action_spec.get("target")
+    if isinstance(target, Mapping):
+        scope = target.get("scope")
+        if isinstance(scope, Mapping):
+            context["target_scope"] = dict(scope)
+    params = action_spec.get("params")
+    if isinstance(params, Mapping):
+        requested_work_kind = params.get("work_kind")
+        if isinstance(requested_work_kind, str):
+            context["requested_work_kind"] = requested_work_kind
+    return context
 
 
 async def _record_action_attempt(
@@ -423,6 +461,7 @@ async def _record_action_attempt(
     *,
     storage_timestamp_utc: str,
     execution_result: dict[str, Any],
+    source_llm_trace_id: str = "",
 ) -> None:
     """Record one action attempt through the existing idempotency ledger."""
 
@@ -431,6 +470,7 @@ async def _record_action_attempt(
         eval_result,
         recorded_at=storage_timestamp_utc,
         execution_result=execution_result,
+        source_llm_trace_id=source_llm_trace_id,
     )
     result = record_attempt_func(attempt_record)
     if hasattr(result, "__await__"):
@@ -477,6 +517,9 @@ def _accepted_task_status_prompt_fields(
         return fields
     task = status_result["task"]
     accepted_task_state = _accepted_task_prompt_state(str(task["state"]))
+    coding_run_context = _project_coding_run_context(
+        task.get("coding_run_context")
+    )
     fields = {
         "result_summary": _accepted_task_result_summary(task),
         "accepted_task_state": accepted_task_state,
@@ -484,6 +527,8 @@ def _accepted_task_status_prompt_fields(
         "acknowledgement_constraint": "progress_report_allowed",
         "wait_guidance": _accepted_task_wait_guidance(accepted_task_state),
     }
+    if coding_run_context is not None:
+        fields["coding_run_context"] = coding_run_context
     return fields
 
 
@@ -529,11 +574,69 @@ def _accepted_task_result_summary(task: dict[str, Any]) -> str:
     if state in ("result_ready", "delivered"):
         result_summary = str(task.get("result_summary", "")).strip()
         if result_summary:
-            return result_summary
+            summary = f"任务已有结果：{result_summary}"
+            return _append_coding_run_summary(summary, task)
     if state in ("failure_ready", "enqueue_failed", "delivery_retryable"):
         failure_summary = str(task.get("failure_summary", "")).strip()
         if failure_summary:
-            return failure_summary
+            summary = f"任务失败：{failure_summary}"
+            return _append_coding_run_summary(summary, task)
     if summary:
-        return f"Accepted task is {state}: {summary}"
-    return f"Accepted task is {state}."
+        result_summary = f"已接纳任务当前状态为 {state}：{summary}"
+    else:
+        result_summary = f"已接纳任务当前状态为 {state}。"
+    return _append_coding_run_summary(result_summary, task)
+
+
+def _append_coding_run_summary(
+    summary: str,
+    task: Mapping[str, Any],
+) -> str:
+    """Append bounded coding-run facts without exposing persistence details."""
+
+    context = _project_coding_run_context(task.get("coding_run_context"))
+    if context is None:
+        return summary
+    status = str(context["status"])
+    fragments = [f"代码任务状态为 {status}"]
+    actions = context.get("allowed_next_actions")
+    if isinstance(actions, list) and actions:
+        fragments.append(f"后续可用动作：{'、'.join(str(item) for item in actions)}")
+    blocker = context.get("active_blocker")
+    fragments.append(
+        "当前阻塞：无" if blocker is None else "当前存在已记录阻塞"
+    )
+    return f"{summary}；{'；'.join(fragments)}"
+
+
+def _project_coding_run_context(value: object) -> dict[str, object] | None:
+    """Project only bounded coding lifecycle facts for later cognition."""
+
+    if not isinstance(value, Mapping):
+        return None
+    status = value.get("status")
+    if not isinstance(status, str) or not status.strip():
+        return None
+    context: dict[str, object] = {"status": status.strip()[:80]}
+    raw_actions = value.get("allowed_next_actions")
+    if isinstance(raw_actions, list):
+        actions = [
+            item.strip()[:80]
+            for item in raw_actions
+            if isinstance(item, str) and item.strip()
+        ]
+        if actions:
+            context["allowed_next_actions"] = list(dict.fromkeys(actions[:8]))
+    blocker = value.get("active_blocker")
+    if blocker is None:
+        context["active_blocker"] = None
+    elif isinstance(blocker, Mapping):
+        blocker_kind = blocker.get("blocker_kind")
+        context["active_blocker"] = {
+            "blocker_kind": str(blocker_kind).strip()[:80]
+            if isinstance(blocker_kind, str) and blocker_kind.strip()
+            else "recorded_blocker",
+        }
+    else:
+        context["active_blocker"] = "recorded_blocker"
+    return context

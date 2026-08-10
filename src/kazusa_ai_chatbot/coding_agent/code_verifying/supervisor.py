@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 from collections.abc import Mapping
 from pathlib import Path
@@ -236,7 +237,7 @@ async def verify_and_repair_code_change(
         return response
 
     if not _has_source_fields(request):
-        response = _verify_source_free_candidate(request)
+        response = await asyncio.to_thread(_verify_source_free_candidate, request)
         return response
 
     fetching_result = await code_fetching.run(request)
@@ -323,15 +324,18 @@ async def verify_and_repair_code_change(
     ]
 
     for attempt_index in range(1, repair_attempt_limit + 2):
-        apply_response = apply_approved_patch({
-            "workspace_root": request["workspace_root"],
-            "source_root": repository["local_root"],
-            "source_identity": source_identity,
-            "expected_source_identity": expected_identity,
-            "patch_artifacts": patch_artifacts,
-            "approval": request["approval"],
-            "max_diff_chars": request.get("max_artifact_chars"),
-        })
+        apply_response = await asyncio.to_thread(
+            apply_approved_patch,
+            {
+                "workspace_root": request["workspace_root"],
+                "source_root": repository["local_root"],
+                "source_identity": source_identity,
+                "expected_source_identity": expected_identity,
+                "patch_artifacts": patch_artifacts,
+                "approval": request["approval"],
+                "max_diff_chars": request.get("max_artifact_chars"),
+            },
+        )
         final_apply = _sanitize_public_value(
             apply_response,
             source_root=Path(repository["local_root"]),
@@ -361,7 +365,8 @@ async def verify_and_repair_code_change(
             )
             return response
 
-        execution_results = _run_execution_specs(
+        execution_results = await asyncio.to_thread(
+            _run_execution_specs,
             request=request,
             apply_response=apply_response,
         )

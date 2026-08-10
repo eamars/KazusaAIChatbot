@@ -2,15 +2,11 @@
 
 from __future__ import annotations
 
+import pytest
+
 import json
 import logging
 
-from kazusa_ai_chatbot.cognition_chain_core.stages.l2 import (
-    _cognition_rag_result as _l2_cognition_rag_result,
-)
-from kazusa_ai_chatbot.cognition_chain_core.stages.l3 import (
-    _cognition_rag_result as _l3_cognition_rag_result,
-)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_projection import project_known_facts
 
 
@@ -655,84 +651,6 @@ def test_project_known_facts_drops_unrecoverable_external_evidence() -> None:
     assert result["supervisor_trace"]["safety_recovery"]
 
 
-def test_cognition_rag_result_omits_safety_recovery_trace() -> None:
-    rag_result = {
-        "answer": "safe answer",
-        "memory_evidence": [],
-        "recall_evidence": [],
-        "conversation_evidence": [],
-        "external_evidence": [],
-        "supervisor_trace": {
-            "loop_count": 1,
-            "unknown_slots": [],
-            "dispatched": [],
-            "safety_recovery": ["dropped_text:rag_result.answer"],
-        },
-    }
-
-    l2_payload = _l2_cognition_rag_result(rag_result)
-    l3_payload = _l3_cognition_rag_result(rag_result)
-
-    assert l2_payload["supervisor_trace"] == {
-        "loop_count": 1,
-        "unknown_slots": [],
-        "dispatched": [],
-    }
-    assert l3_payload["supervisor_trace"] == {
-        "loop_count": 1,
-        "unknown_slots": [],
-        "dispatched": [],
-    }
-
-
-def test_l2_cognition_rag_result_omits_raw_supervisor_source_refs() -> None:
-    """L2 should receive evidence trace shape without raw durable ids."""
-
-    rag_result = {
-        "answer": "safe answer",
-        "memory_evidence": [],
-        "recall_evidence": [],
-        "conversation_evidence": [],
-        "external_evidence": [],
-        "supervisor_trace": {
-            "loop_count": 1,
-            "dispatched": [
-                {
-                    "slot": "conversation evidence",
-                    "agent": "conversation_search",
-                    "resolved": True,
-                    "source_refs": [
-                        {
-                            "conversation_row_id": "raw-row-id",
-                            "platform_message_id": "raw-message-id",
-                            "unit_id": "raw-unit-id",
-                        },
-                    ],
-                    "nested": {
-                        "raw_refs": [{"_id": "raw-object-id"}],
-                        "summary": "kept",
-                    },
-                },
-            ],
-        },
-    }
-
-    l2_payload = _l2_cognition_rag_result(rag_result)
-    rendered_payload = json.dumps(l2_payload, ensure_ascii=False)
-    dispatched = l2_payload["supervisor_trace"]["dispatched"][0]
-
-    assert "source_refs" not in dispatched
-    assert "raw_refs" not in dispatched["nested"]
-    assert dispatched["nested"]["summary"] == "kept"
-    for raw_id in (
-        "raw-row-id",
-        "raw-message-id",
-        "raw-unit-id",
-        "raw-object-id",
-    ):
-        assert raw_id not in rendered_payload
-
-
 def test_project_known_facts_sanitizes_third_party_profile_source_ids() -> None:
     """Third-party profile summaries should not expose source ids to cognition."""
 
@@ -1241,31 +1159,6 @@ def test_project_known_facts_keeps_raw_refs_trace_only() -> None:
     assert "message-1" not in repr(public_payload)
     assert "row-1" in repr(result["supervisor_trace"])
     assert "message-1" in repr(result["supervisor_trace"])
-
-
-def test_cognition_rag_result_preserves_public_recall_payload() -> None:
-    """Existing cognition payload shaping should not strip Recall evidence."""
-
-    rag_result = {
-        "answer": "The active agreement is pickup at 9:30.",
-        "recall_evidence": [
-            {
-                "selected_summary": "The active agreement is pickup at 9:30.",
-                "primary_source": "conversation_progress",
-            }
-        ],
-        "user_memory_unit_candidates": [{"unit_id": "internal-1"}],
-    }
-
-    l2_payload = _l2_cognition_rag_result(rag_result)
-    l3_payload = _l3_cognition_rag_result(rag_result)
-
-    assert l2_payload["answer"] == "The active agreement is pickup at 9:30."
-    assert l3_payload["answer"] == "The active agreement is pickup at 9:30."
-    assert l2_payload["recall_evidence"][0]["primary_source"] == "conversation_progress"
-    assert l3_payload["recall_evidence"][0]["primary_source"] == "conversation_progress"
-    assert "user_memory_unit_candidates" not in l2_payload
-    assert "user_memory_unit_candidates" not in l3_payload
 
 
 def test_project_known_facts_replaces_bare_id_in_conversation_evidence() -> None:

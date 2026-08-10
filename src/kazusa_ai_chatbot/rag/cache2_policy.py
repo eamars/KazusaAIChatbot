@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from kazusa_ai_chatbot.rag.cache2_events import CacheDependency
@@ -38,7 +39,7 @@ USER_PROFILE_CACHE_NAME = "rag2_user_profile_agent"
 USER_PROFILE_POLICY_VERSION = "user_profile:v2"
 
 RELATIONSHIP_CACHE_NAME = "rag2_relationship_agent"
-RELATIONSHIP_POLICY_VERSION = "relationship:v1"
+RELATIONSHIP_POLICY_VERSION = "relationship:v2-native-cognition-state"
 
 CONVERSATION_FILTER_CACHE_NAME = "rag2_conversation_filter_agent"
 CONVERSATION_FILTER_POLICY_VERSION = "conversation_filter:v1"
@@ -193,6 +194,30 @@ def build_user_lookup_cache_key(display_name: str, context: dict[str, Any]) -> s
     return return_value
 
 
+def _active_progress_block_signature(
+    context: Mapping[str, object],
+) -> list[str]:
+    """Return exact active block refs for cache-key isolation and inspection."""
+
+    progress = context.get('conversation_progress')
+    packet = context.get('conversation_episode_state')
+    if not isinstance(progress, Mapping) or not isinstance(packet, Mapping):
+        return []
+    block_ids = progress.get('compacted_block_refs')
+    if (
+        packet.get('schema_version') != 'conversation_progress.v2'
+        or packet.get('status') != 'active'
+        or not isinstance(block_ids, list)
+        or block_ids != packet.get('compacted_block_refs')
+    ):
+        return []
+    return sorted(
+        block_id
+        for block_id in block_ids
+        if isinstance(block_id, str) and block_id
+    )
+
+
 def build_user_lookup_dependencies(
     global_user_id: str,
     context: dict[str, Any],
@@ -342,7 +367,7 @@ def build_character_profile_cache_key(global_user_id: str) -> str:
         USER_PROFILE_CACHE_NAME,
         {
             "policy_version": USER_PROFILE_POLICY_VERSION,
-            "profile_source": "character_state",
+            "profile_source": "character_identity",
             "global_user_id": global_user_id.strip(),
         },
     )
@@ -400,7 +425,8 @@ def build_relationship_dependencies(context: dict[str, Any]) -> list[CacheDepend
 
     Returns:
         A user-profile dependency scoped to the current runtime platform/channel
-        where available. Any profile or affinity update can affect the ranking.
+        where available. Any native relationship-state update can affect the
+        ranking.
     """
     scope = _context_scope(context)
     return_value = [
@@ -443,6 +469,9 @@ def _build_conversation_cache_key(
             "task": normalize_cache_text(task),
             "platform": scope["platform"],
             "platform_channel_id": scope["platform_channel_id"],
+            "active_progress_blocks": _active_progress_block_signature(
+                context
+            ),
         },
     )
     return return_value
@@ -575,6 +604,9 @@ def build_conversation_search_cache_key(task: str, context: dict[str, Any]) -> s
             "current_slot": normalize_cache_text(context.get("current_slot")),
             "platform": scope["platform"],
             "platform_channel_id": scope["platform_channel_id"],
+            "active_progress_blocks": _active_progress_block_signature(
+                context
+            ),
         },
     )
     return return_value

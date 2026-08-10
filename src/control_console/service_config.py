@@ -12,11 +12,13 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 NAPCAT_ACTIVE_GROUP_PATTERN = r"^[0-9]{1,32}$"
 DEFAULT_MAX_ITEMS = 50
 DEFAULT_MAX_ITEM_LENGTH = 120
-MAX_DESCRIPTOR_FIELDS = 64
+MAX_DESCRIPTOR_FIELDS = 96
+MAX_SERVICE_CONFIG_FIELD_KEY_LENGTH = 80
 
 ConfigValue = str | int | bool | list[str]
 CommandRenderer = Callable[[list[str], dict[str, object]], list[str]]
 EnvironmentRenderer = Callable[[dict[str, object]], dict[str, str]]
+ValuesValidator = Callable[[dict[str, ConfigValue]], None]
 
 
 class ServiceConfigValidationError(ValueError):
@@ -32,7 +34,9 @@ class StrictConfigModel(BaseModel):
 class ServiceConfigField(StrictConfigModel):
     """One operator-editable field in a service configuration descriptor."""
 
-    key: str = Field(pattern=r"^[a-z][a-z0-9_]{0,63}$")
+    key: str = Field(
+        pattern=rf"^[a-z][a-z0-9_]{{0,{MAX_SERVICE_CONFIG_FIELD_KEY_LENGTH - 1}}}$"
+    )
     label: str = Field(min_length=1, max_length=80)
     description: str = Field(min_length=1, max_length=240)
     value_type: Literal["string_list", "string", "boolean", "integer", "enum"]
@@ -188,6 +192,7 @@ class ServiceConfigRegistry:
         descriptors: list[ServiceConfigDescriptor],
         command_renderers: dict[str, CommandRenderer] | None = None,
         environment_renderers: dict[str, EnvironmentRenderer] | None = None,
+        values_validators: dict[str, ValuesValidator] | None = None,
     ) -> None:
         """Create a registry from descriptors and optional command renderers."""
 
@@ -200,6 +205,7 @@ class ServiceConfigRegistry:
             self._descriptors[descriptor.service_id] = descriptor
         self._command_renderers = dict(command_renderers or {})
         self._environment_renderers = dict(environment_renderers or {})
+        self._values_validators = dict(values_validators or {})
 
     def has_descriptor(self, service_id: str) -> bool:
         """Return whether a service has an operator config descriptor."""
@@ -246,6 +252,14 @@ class ServiceConfigRegistry:
             )
             fields.append(snapshot)
 
+        effective_values = {
+            field.key: field.effective_value
+            for field in fields
+        }
+        self._validate_cross_fields(
+            service_id=service_id,
+            values=effective_values,
+        )
         state: Literal["default", "override_active", "apply_failed"] = "default"
         if overrides.apply_failed(service_id):
             state = "apply_failed"
@@ -279,7 +293,18 @@ class ServiceConfigRegistry:
             validated_value = _validate_value(field=field, value=value)
             validated_values[key] = validated_value
 
-        _ = environment
+        effective_values = {
+            field.key: self._default_value(
+                field=field,
+                environment=environment,
+            )
+            for field in descriptor.fields
+        }
+        effective_values.update(validated_values)
+        self._validate_cross_fields(
+            service_id=service_id,
+            values=effective_values,
+        )
         return validated_values
 
     def render_start_command(
@@ -346,6 +371,18 @@ class ServiceConfigRegistry:
             )
         return descriptor
 
+    def _validate_cross_fields(
+        self,
+        *,
+        service_id: str,
+        values: dict[str, ConfigValue],
+    ) -> None:
+        """Run an optional descriptor-owned cross-field validator."""
+
+        validator = self._values_validators.get(service_id)
+        if validator is not None:
+            validator(values)
+
     def _default_value(
         self,
         *,
@@ -373,9 +410,14 @@ def build_default_service_config_registry() -> ServiceConfigRegistry:
 
     brain_descriptor = ServiceConfigDescriptor(
         service_id="brain",
-        title="Brain model routes",
-        description="Restart-applied model routing for Brain chat LLM stages.",
-        fields=_brain_model_route_fields(),
+        title="Brain runtime configuration",
+        description=(
+            "Restart-applied model routing and character identity growth pace."
+        ),
+        fields=[
+            *_brain_model_route_fields(),
+            *_identity_growth_fields(),
+        ],
     )
     napcat_descriptor = ServiceConfigDescriptor(
         service_id="adapter.napcat",
@@ -398,6 +440,7 @@ def build_default_service_config_registry() -> ServiceConfigRegistry:
         descriptors=[brain_descriptor, napcat_descriptor],
         command_renderers={"adapter.napcat": _render_napcat_command},
         environment_renderers={"brain": _render_brain_environment},
+        values_validators={"brain": _validate_brain_config_values},
     )
     return registry
 
@@ -655,6 +698,110 @@ def _brain_model_route_fields() -> list[ServiceConfigField]:
     return fields
 
 
+def _identity_growth_fields() -> list[ServiceConfigField]:
+    """Return the five bounded character identity pace controls."""
+
+    return [
+        ServiceConfigField(
+            key="character_identity_growth_enabled",
+            label="Character identity growth",
+            description=(
+                "Whether settled episodes and daily reflection may evaluate "
+                "character identity growth."
+            ),
+            value_type="boolean",
+            default_env="CHARACTER_IDENTITY_GROWTH_ENABLED",
+            default_literal="true",
+            restart_required=True,
+        ),
+        ServiceConfigField(
+            key="character_identity_growth_inferred_min_episodes",
+            label="Inferred growth episode roots",
+            description=(
+                "Distinct settled episode roots required for inferred growth."
+            ),
+            value_type="integer",
+            default_env="CHARACTER_IDENTITY_GROWTH_INFERRED_MIN_EPISODES",
+            default_literal="3",
+            min_value=2,
+            max_value=8,
+            restart_required=True,
+        ),
+        ServiceConfigField(
+            key="character_identity_growth_inferred_min_local_dates",
+            label="Inferred growth local dates",
+            description=(
+                "Distinct character-local dates required; this cannot exceed "
+                "the episode-root threshold."
+            ),
+            value_type="integer",
+            default_env="CHARACTER_IDENTITY_GROWTH_INFERRED_MIN_LOCAL_DATES",
+            default_literal="2",
+            min_value=1,
+            max_value=7,
+            restart_required=True,
+        ),
+        ServiceConfigField(
+            key=(
+                "character_identity_growth_"
+                "max_inferred_promotions_per_local_day"
+            ),
+            label="Daily inferred promotion cap",
+            description=(
+                "Maximum inferred identity revisions promoted per "
+                "character-local day."
+            ),
+            value_type="integer",
+            default_env=(
+                "CHARACTER_IDENTITY_GROWTH_"
+                "MAX_INFERRED_PROMOTIONS_PER_LOCAL_DAY"
+            ),
+            default_literal="1",
+            min_value=0,
+            max_value=3,
+            restart_required=True,
+        ),
+        ServiceConfigField(
+            key="character_identity_growth_prompt_char_budget",
+            label="Identity review prompt budget",
+            description=(
+                "Character budget shared by each background identity "
+                "proposal or review prompt."
+            ),
+            value_type="integer",
+            default_env="CHARACTER_IDENTITY_GROWTH_PROMPT_CHAR_BUDGET",
+            default_literal="18000",
+            min_value=8000,
+            max_value=30000,
+            restart_required=True,
+        ),
+    ]
+
+
+def _validate_brain_config_values(
+    values: dict[str, ConfigValue],
+) -> None:
+    """Validate cross-field character identity pace constraints."""
+
+    episode_key = "character_identity_growth_inferred_min_episodes"
+    local_date_key = "character_identity_growth_inferred_min_local_dates"
+    episode_count = values.get(episode_key)
+    local_date_count = values.get(local_date_key)
+    if (
+        not isinstance(episode_count, int)
+        or isinstance(episode_count, bool)
+        or not isinstance(local_date_count, int)
+        or isinstance(local_date_count, bool)
+    ):
+        raise ServiceConfigValidationError(
+            "character identity growth pace values must be integers"
+        )
+    if local_date_count > episode_count:
+        raise ServiceConfigValidationError(
+            f"{local_date_key} cannot exceed {episode_key}"
+        )
+
+
 def _render_brain_environment(
     effective_values: dict[str, object],
 ) -> dict[str, str]:
@@ -675,6 +822,34 @@ def _render_brain_environment(
             value = effective_values[key]
             env_name = route_env_name(route, field_name)
             environment[env_name] = _environment_value(key=key, value=value)
+    identity_growth_environment = {
+        "character_identity_growth_enabled": (
+            "CHARACTER_IDENTITY_GROWTH_ENABLED"
+        ),
+        "character_identity_growth_inferred_min_episodes": (
+            "CHARACTER_IDENTITY_GROWTH_INFERRED_MIN_EPISODES"
+        ),
+        "character_identity_growth_inferred_min_local_dates": (
+            "CHARACTER_IDENTITY_GROWTH_INFERRED_MIN_LOCAL_DATES"
+        ),
+        (
+            "character_identity_growth_"
+            "max_inferred_promotions_per_local_day"
+        ): (
+            "CHARACTER_IDENTITY_GROWTH_"
+            "MAX_INFERRED_PROMOTIONS_PER_LOCAL_DAY"
+        ),
+        "character_identity_growth_prompt_char_budget": (
+            "CHARACTER_IDENTITY_GROWTH_PROMPT_CHAR_BUDGET"
+        ),
+    }
+    for key, environment_name in identity_growth_environment.items():
+        if key not in effective_values:
+            continue
+        environment[environment_name] = _environment_value(
+            key=key,
+            value=effective_values[key],
+        )
     return environment
 
 

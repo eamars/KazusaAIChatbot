@@ -7,9 +7,16 @@ from collections.abc import Awaitable, Callable
 
 from kazusa_ai_chatbot.channel_scene_projection import usable_channel_label
 from kazusa_ai_chatbot.chat_input_queue import QueuedChatItem
+from kazusa_ai_chatbot.conversation_progress import (
+    ConversationProgressSourceRefV2,
+)
 from kazusa_ai_chatbot.message_envelope import MessageEnvelope
 from kazusa_ai_chatbot.message_envelope import validate_semantic_storage_fields
 from kazusa_ai_chatbot.state import ReplyContext
+from kazusa_ai_chatbot.time_boundary import (
+    build_turn_clock,
+    parse_storage_utc_datetime,
+)
 
 from .contracts import ChatRequest
 
@@ -17,6 +24,7 @@ from .contracts import ChatRequest
 ResolveGlobalUserId = Callable[..., Awaitable[str]]
 GetUserProfile = Callable[[str], Awaitable[dict]]
 SaveConversation = Callable[[dict], Awaitable[str | None]]
+SaveConversationReceipt = Callable[[dict], Awaitable[str]]
 ResolveEnvelope = Callable[[ChatRequest], Awaitable[MessageEnvelope]]
 
 
@@ -198,6 +206,109 @@ def active_turn_conversation_row_ids(item: QueuedChatItem) -> list[str]:
     return active_ids
 
 
+def active_turn_conversation_source_refs(
+    item: QueuedChatItem,
+) -> list[ConversationProgressSourceRefV2]:
+    """Preserve each active conversation row's exact storage timestamp.
+
+    Args:
+        item: Surviving queued item that will run through the chat graph.
+
+    Returns:
+        Canonical row references from the survivor and collapsed follow-ups,
+        deduplicated in arrival order.
+    """
+
+    timestamps_by_row_id: dict[str, str] = {}
+    source_refs: list[ConversationProgressSourceRefV2] = []
+    for queued_item in [item, *item.collapsed_items]:
+        row_id = str(queued_item.conversation_row_id or "").strip()
+        if not row_id:
+            continue
+        occurred_at = str(queued_item.storage_timestamp_utc or "").strip()
+        parse_storage_utc_datetime(occurred_at)
+        prior_timestamp = timestamps_by_row_id.get(row_id)
+        if prior_timestamp is not None:
+            if prior_timestamp != occurred_at:
+                raise ValueError(
+                    "one conversation row has conflicting timestamps"
+                )
+            continue
+        timestamps_by_row_id[row_id] = occurred_at
+        source_refs.append({
+            "ref_kind": "conversation_row",
+            "ref_id": row_id,
+            "occurred_at": occurred_at,
+        })
+
+    return source_refs
+
+
+def build_user_conversation_doc(
+    req: ChatRequest,
+    *,
+    global_user_id: str,
+    reply_context: ReplyContext,
+    message_envelope: MessageEnvelope,
+    timestamp: str,
+    llm_trace_id: str,
+    received_at: str = "",
+) -> dict:
+    """Build the canonical durable user conversation row.
+
+    Args:
+        req: Incoming chat request from an adapter.
+        global_user_id: Resolved global user identifier.
+        reply_context: Adapter-supplied reply metadata after compacting.
+        message_envelope: Service-side resolved typed envelope.
+        timestamp: Existing event/local-time storage field for the row.
+        llm_trace_id: Turn-scoped trace id when known at build time.
+        received_at: Server-generated UTC arrival instant; stored only when
+            provided so legacy rows keep their historical shape.
+
+    Returns:
+        Conversation-history document ready for persistence.
+    """
+
+    validate_semantic_storage_fields(
+        platform=req.platform,
+        display_name=req.display_name,
+        envelope=message_envelope,
+    )
+    attachment_docs = list(message_envelope["attachments"])
+    conversation_doc = {
+        "platform": req.platform,
+        "platform_channel_id": req.platform_channel_id,
+        "role": "user",
+        "platform_message_id": req.platform_message_id,
+        "platform_user_id": req.platform_user_id,
+        "global_user_id": global_user_id,
+        "display_name": req.display_name,
+        "channel_type": req.channel_type,
+        "body_text": message_envelope["body_text"],
+        "raw_wire_text": message_envelope["raw_wire_text"],
+        "content_type": req.content_type,
+        "addressed_to_global_user_ids": message_envelope[
+            "addressed_to_global_user_ids"
+        ],
+        "mentions": message_envelope["mentions"],
+        "broadcast": False,
+        "attachments": attachment_docs,
+        "reply_context": reply_context,
+        "timestamp": timestamp,
+        "llm_trace_id": llm_trace_id,
+    }
+    if received_at:
+        conversation_doc["received_at"] = received_at
+    channel_name = usable_channel_label(
+        channel_type=req.channel_type,
+        channel_name=req.channel_name,
+    )
+    if channel_name:
+        conversation_doc["channel_name"] = channel_name
+    return conversation_doc
+
+
 async def save_user_message_from_item(
     item: QueuedChatItem,
     *,
@@ -226,44 +337,76 @@ async def save_user_message_from_item(
     req = item.request
     if message_envelope is None:
         message_envelope = await resolve_message_envelope_identities_func(req)
-    validate_semantic_storage_fields(
-        platform=req.platform,
-        display_name=req.display_name,
-        envelope=message_envelope,
+    conversation_doc = build_user_conversation_doc(
+        req,
+        global_user_id=global_user_id,
+        reply_context=reply_context,
+        message_envelope=message_envelope,
+        timestamp=item.storage_timestamp_utc,
+        llm_trace_id=item.llm_trace_id,
     )
-    attachment_docs = list(message_envelope["attachments"])
-    conversation_doc = {
-        "platform": req.platform,
-        "platform_channel_id": req.platform_channel_id,
-        "role": "user",
-        "platform_message_id": req.platform_message_id,
-        "platform_user_id": req.platform_user_id,
-        "global_user_id": global_user_id,
-        "display_name": req.display_name,
-        "channel_type": req.channel_type,
-        "body_text": message_envelope["body_text"],
-        "raw_wire_text": message_envelope["raw_wire_text"],
-        "content_type": req.content_type,
-        "addressed_to_global_user_ids": message_envelope[
-            "addressed_to_global_user_ids"
-        ],
-        "mentions": message_envelope["mentions"],
-        "broadcast": False,
-        "attachments": attachment_docs,
-        "reply_context": reply_context,
-        "timestamp": item.storage_timestamp_utc,
-    }
-    channel_name = usable_channel_label(
-        channel_type=req.channel_type,
-        channel_name=req.channel_name,
-    )
-    if channel_name:
-        conversation_doc["channel_name"] = channel_name
 
     try:
         inserted_row_id = await save_conversation_func(conversation_doc)
     except Exception as exc:
         logger.exception(f"Failed to save queued user message: {exc}")
+        return_value = None
+        return return_value
+
+    return_value = inserted_row_id
+    return return_value
+
+
+async def save_ingress_receipt(
+    req: ChatRequest,
+    *,
+    global_user_id: str,
+    reply_context: ReplyContext,
+    save_conversation_receipt_func: SaveConversationReceipt,
+    resolve_message_envelope_identities_func: ResolveEnvelope,
+    received_at: str,
+    message_envelope: MessageEnvelope | None = None,
+    logger: logging.Logger,
+) -> str | None:
+    """Commit the canonical pre-queue user receipt with server arrival time.
+
+    The receipt row is committed before queue admission so later queue
+    pruning, shutdown drain, coalescing, or frontline discard cannot erase it.
+
+    Args:
+        req: Incoming chat request from an adapter.
+        global_user_id: Resolved global user identifier.
+        reply_context: Adapter-supplied reply metadata after compacting.
+        save_conversation_receipt_func: Receipt persistence function that
+            commits the row before enrichment.
+        resolve_message_envelope_identities_func: Envelope identity resolver.
+        received_at: Server-generated UTC arrival instant for the receipt.
+        message_envelope: Already-resolved envelope, when available.
+        logger: Logger used for compatibility with service logging.
+
+    Returns:
+        Inserted conversation row ID string when committed; otherwise None.
+    """
+
+    if message_envelope is None:
+        message_envelope = await resolve_message_envelope_identities_func(req)
+    turn_clock = build_turn_clock(req.local_timestamp or None)
+    conversation_doc = build_user_conversation_doc(
+        req,
+        global_user_id=global_user_id,
+        reply_context=reply_context,
+        message_envelope=message_envelope,
+        timestamp=turn_clock["storage_timestamp_utc"],
+        llm_trace_id="",
+        received_at=received_at,
+    )
+
+    try:
+        inserted_row_id = await save_conversation_receipt_func(
+            conversation_doc
+        )
+    except Exception as exc:
+        logger.exception(f"Failed to commit ingress receipt: {exc}")
         return_value = None
         return return_value
 

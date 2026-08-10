@@ -5,6 +5,22 @@ from __future__ import annotations
 import pytest
 
 
+def _brain_service_environment() -> dict[str, str]:
+    """Provide valid route defaults while testing non-route Brain config."""
+
+    from control_console.brain_model_routes import (
+        route_descriptors,
+        route_env_name,
+    )
+
+    environment: dict[str, str] = {}
+    for route in route_descriptors():
+        environment[route_env_name(route, "model")] = "test-model"
+        environment[route_env_name(route, "max_completion_tokens")] = "8192"
+        environment[route_env_name(route, "thinking_enabled")] = "false"
+    return environment
+
+
 def test_snapshot_uses_environment_default_and_ephemeral_override() -> None:
     """A descriptor snapshot separates default, override, and effective values."""
 
@@ -273,3 +289,127 @@ def test_command_renderers_are_generic_and_append_napcat_channels() -> None:
     )
 
     assert fake_command == ["python", "-m", "adapter.fake", "--enabled", "true"]
+
+
+def test_brain_config_exposes_identity_growth_pace_and_renders_overrides() -> None:
+    """All five bounded pace controls should restart-apply to Brain."""
+
+    from control_console.service_config import (
+        ServiceConfigOverrideStore,
+        build_default_service_config_registry,
+    )
+
+    registry = build_default_service_config_registry()
+    overrides = ServiceConfigOverrideStore()
+    environment = _brain_service_environment()
+
+    snapshot = registry.snapshot_for_service(
+        service_id="brain",
+        environment=environment,
+        overrides=overrides,
+    )
+    fields = {field.key: field for field in snapshot.fields}
+    expected = {
+        "character_identity_growth_enabled": (
+            "CHARACTER_IDENTITY_GROWTH_ENABLED",
+            True,
+            {},
+        ),
+        "character_identity_growth_inferred_min_episodes": (
+            "CHARACTER_IDENTITY_GROWTH_INFERRED_MIN_EPISODES",
+            3,
+            {"min_value": 2, "max_value": 8},
+        ),
+        "character_identity_growth_inferred_min_local_dates": (
+            "CHARACTER_IDENTITY_GROWTH_INFERRED_MIN_LOCAL_DATES",
+            2,
+            {"min_value": 1, "max_value": 7},
+        ),
+        "character_identity_growth_max_inferred_promotions_per_local_day": (
+            "CHARACTER_IDENTITY_GROWTH_MAX_INFERRED_PROMOTIONS_PER_LOCAL_DAY",
+            1,
+            {"min_value": 0, "max_value": 3},
+        ),
+        "character_identity_growth_prompt_char_budget": (
+            "CHARACTER_IDENTITY_GROWTH_PROMPT_CHAR_BUDGET",
+            18_000,
+            {"min_value": 8_000, "max_value": 30_000},
+        ),
+    }
+
+    for field_key, (
+        environment_name,
+        default_value,
+        validation,
+    ) in expected.items():
+        field = fields[field_key]
+        assert field.default_source == environment_name
+        assert field.default_value == default_value
+        assert field.effective_value == default_value
+        assert field.validation == validation
+        assert field.restart_required is True
+
+    overrides.set_override(
+        service_id="brain",
+        values={
+            "character_identity_growth_enabled": False,
+            "character_identity_growth_inferred_min_episodes": 6,
+            "character_identity_growth_inferred_min_local_dates": 4,
+            "character_identity_growth_max_inferred_promotions_per_local_day": 2,
+            "character_identity_growth_prompt_char_budget": 24_000,
+        },
+        registry=registry,
+        environment=environment,
+    )
+    overlay = registry.render_environment_overlay(
+        service_id="brain",
+        environment=environment,
+        overrides=overrides,
+    )
+
+    assert overlay == {
+        "CHARACTER_IDENTITY_GROWTH_ENABLED": "false",
+        "CHARACTER_IDENTITY_GROWTH_INFERRED_MIN_EPISODES": "6",
+        "CHARACTER_IDENTITY_GROWTH_INFERRED_MIN_LOCAL_DATES": "4",
+        "CHARACTER_IDENTITY_GROWTH_MAX_INFERRED_PROMOTIONS_PER_LOCAL_DAY": "2",
+        "CHARACTER_IDENTITY_GROWTH_PROMPT_CHAR_BUDGET": "24000",
+    }
+
+
+def test_brain_identity_growth_pace_rejects_bounds_and_cross_field_values() -> None:
+    """Pace settings should fail before an invalid Brain restart."""
+
+    from control_console.service_config import (
+        ServiceConfigOverrideStore,
+        ServiceConfigValidationError,
+        build_default_service_config_registry,
+    )
+
+    registry = build_default_service_config_registry()
+    invalid_values = (
+        {"character_identity_growth_inferred_min_episodes": 1},
+        {"character_identity_growth_inferred_min_episodes": 9},
+        {"character_identity_growth_inferred_min_local_dates": 0},
+        {"character_identity_growth_inferred_min_local_dates": 8},
+        {
+            "character_identity_growth_max_inferred_promotions_per_local_day": -1,
+        },
+        {
+            "character_identity_growth_max_inferred_promotions_per_local_day": 4,
+        },
+        {"character_identity_growth_prompt_char_budget": 7_999},
+        {"character_identity_growth_prompt_char_budget": 30_001},
+        {
+            "character_identity_growth_inferred_min_episodes": 2,
+            "character_identity_growth_inferred_min_local_dates": 3,
+        },
+    )
+
+    for values in invalid_values:
+        with pytest.raises(ServiceConfigValidationError):
+            ServiceConfigOverrideStore().set_override(
+                service_id="brain",
+                values=values,
+                registry=registry,
+                environment=_brain_service_environment(),
+            )

@@ -79,8 +79,9 @@ def test_debug_chat_returns_brain_unavailable_without_cognition_when_stopped(
 
     audit_response = client.get("/api/bootstrap")
     event_types = [
-        event["event_type"]
-        for event in audit_response.json()["recent_audit_events"]
+        event_type
+        for action in audit_response.json()["recent_audit_events"]
+        for event_type in action["event_types"]
     ]
     assert "debug_chat_unavailable" in event_types
 
@@ -114,9 +115,16 @@ def test_debug_chat_uses_live_unmanaged_brain_endpoint(
             return state
 
     class FakeKazusaClient:
-        def __init__(self, *, base_url: str, timeout_seconds: float) -> None:
+        def __init__(
+            self,
+            *,
+            base_url: str,
+            timeout_seconds: float,
+            control_shared_secret: str = "",
+        ) -> None:
             _ = base_url
             _ = timeout_seconds
+            _ = control_shared_secret
 
         async def send_debug_chat(self, request):
             return {
@@ -125,6 +133,7 @@ def test_debug_chat_uses_live_unmanaged_brain_endpoint(
                 "request": request.model_dump(mode="json"),
                 "response": {"messages": [{"text": "hello operator"}]},
                 "tracking_id": "tracking-1",
+                "trace_id": "trace-debug-1",
                 "latency_ms": 12,
                 "sent_at": "2026-06-17T00:00:00+00:00",
                 "error": None,
@@ -155,6 +164,7 @@ def test_debug_chat_uses_live_unmanaged_brain_endpoint(
     payload = response.json()
     assert payload["brain_available"] is True
     assert payload["response"]["messages"][0]["text"] == "hello operator"
+    assert payload["trace_id"] == "trace-debug-1"
 
 
 def test_debug_chat_rejects_stale_unowned_brain_conflict(
@@ -184,9 +194,16 @@ def test_debug_chat_rejects_stale_unowned_brain_conflict(
             return state
 
     class FailingKazusaClient:
-        def __init__(self, *, base_url: str, timeout_seconds: float) -> None:
+        def __init__(
+            self,
+            *,
+            base_url: str,
+            timeout_seconds: float,
+            control_shared_secret: str = "",
+        ) -> None:
             _ = base_url
             _ = timeout_seconds
+            _ = control_shared_secret
 
         async def send_debug_chat(self, request):
             _ = request

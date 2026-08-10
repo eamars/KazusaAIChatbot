@@ -7,6 +7,20 @@ import sys
 
 from kazusa_ai_chatbot.llm_interface.diagnostics import RouteDiagnostic
 
+COGNITION_CORE_V2_ROUTE_ROWS = (
+    "COGNITION_LLM_APPRAISAL_EVENT_AGENCY",
+    "COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL",
+    "COGNITION_LLM_APPRAISAL_MORAL_IDENTITY",
+    "COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME",
+    "COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY",
+    "COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE",
+    "COGNITION_LLM_GOAL_ORDINARY_RESPONSE",
+    "COGNITION_LLM_GOAL_ACTIVE_BRANCH",
+    "COGNITION_LLM_WORKSPACE_COLLAPSE",
+    "COGNITION_LLM_ACTION_PLANNING",
+    "COGNITION_LLM_ACTION_AUTHORIZATION",
+    "COGNITION_LLM_RESOLVER_AUTHORIZATION",
+)
 EXPECTED_ROUTE_TABLE_ROWS = (
     "RELEVANCE_AGENT_LLM",
     "VISION_DESCRIPTOR_LLM",
@@ -15,7 +29,7 @@ EXPECTED_ROUTE_TABLE_ROWS = (
     "RAG_SUBAGENT_LLM",
     "WEB_SEARCH_LLM",
     "COGNITION_LLM",
-    "BOUNDARY_CORE_LLM",
+    *COGNITION_CORE_V2_ROUTE_ROWS,
     "DIALOG_GENERATOR_LLM",
     "CONSOLIDATION_LLM",
     "JSON_REPAIR_LLM",
@@ -190,21 +204,11 @@ def test_llm_route_table_omits_api_keys() -> None:
         assert route_name in table
 
     api_keys = (
-        config.RELEVANCE_AGENT_LLM_API_KEY,
-        config.VISION_DESCRIPTOR_LLM_API_KEY,
-        config.MSG_DECONTEXTUALIZER_LLM_API_KEY,
-        config.RAG_PLANNER_LLM_API_KEY,
-        config.RAG_SUBAGENT_LLM_API_KEY,
-        config.WEB_SEARCH_LLM_API_KEY,
-        config.COGNITION_LLM_API_KEY,
-        config.BOUNDARY_CORE_LLM_API_KEY,
-        config.DIALOG_GENERATOR_LLM_API_KEY,
-        config.CONSOLIDATION_LLM_API_KEY,
-        config.JSON_REPAIR_LLM_API_KEY,
-        config.BACKGROUND_WORK_LLM_API_KEY,
-        config.CODING_AGENT_PM_LLM_API_KEY,
-        config.CODING_AGENT_PROGRAMMER_LLM_API_KEY,
-        config.CODING_AGENT_ACTION_LOOP_LLM_API_KEY,
+        *(
+            getattr(config, f"{route_name}_API_KEY")
+            for route_name in EXPECTED_ROUTE_TABLE_ROWS
+            if route_name != "EMBEDDING"
+        ),
         config.EMBEDDING_API_KEY,
     )
     for api_key in api_keys:
@@ -212,16 +216,18 @@ def test_llm_route_table_omits_api_keys() -> None:
             assert api_key not in table
 
 
-def test_boundary_core_node_uses_boundary_route(tmp_path) -> None:
-    """Boundary Core binds its LLM client to the dedicated route."""
+def test_cognition_builder_uses_independent_stage_routes(tmp_path) -> None:
+    """The production connector preserves independent stage route values."""
 
     from tests.test_config import _configured_subprocess_env_without_dotenv
 
     env = _configured_subprocess_env_without_dotenv()
-    env["COGNITION_LLM_BASE_URL"] = "http://cognition.example/v1"
-    env["COGNITION_LLM_MODEL"] = "cognition-model"
-    env["BOUNDARY_CORE_LLM_BASE_URL"] = "http://boundary.example/v1/"
-    env["BOUNDARY_CORE_LLM_MODEL"] = "boundary-model"
+    event_prefix = "COGNITION_LLM_APPRAISAL_EVENT_AGENCY"
+    social_prefix = "COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL"
+    env[f"{event_prefix}_BASE_URL"] = "http://event.example/v1"
+    env[f"{event_prefix}_MODEL"] = "event-model"
+    env[f"{social_prefix}_BASE_URL"] = "http://social.example/v1/"
+    env[f"{social_prefix}_MODEL"] = "social-model"
 
     result = subprocess.run(
         [
@@ -230,8 +236,14 @@ def test_boundary_core_node_uses_boundary_route(tmp_path) -> None:
                 (
                     "from kazusa_ai_chatbot.nodes "
                     "import persona_supervisor2_cognition as c; "
-                    "config = c._boundary_core_llm_config; "
-                    "print('|'.join((config.base_url.rstrip('/'), config.model)))"
+                    "services = c.build_cognition_core_services(); "
+                    "configs = ("
+                    "services.appraisal_event_agency_config, "
+                    "services.appraisal_relationship_social_config"
+                    "); "
+                    "print(';'.join('|'.join(("
+                    "config.route_name, config.base_url.rstrip('/'), config.model"
+                    ")) for config in configs))"
                 ),
             ],
         cwd=tmp_path,
@@ -242,4 +254,9 @@ def test_boundary_core_node_uses_boundary_route(tmp_path) -> None:
     )
 
     assert result.returncode == 0
-    assert result.stdout.strip() == "http://boundary.example/v1|boundary-model"
+    assert result.stdout.strip() == (
+        "COGNITION_LLM_APPRAISAL_EVENT_AGENCY|"
+        "http://event.example/v1|event-model;"
+        "COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL|"
+        "http://social.example/v1|social-model"
+    )

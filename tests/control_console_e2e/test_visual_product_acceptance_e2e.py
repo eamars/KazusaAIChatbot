@@ -15,9 +15,14 @@ def test_desktop_visual_acceptance_for_cards_buttons_and_branding(
         page.set_viewport_size({"width": 1600, "height": 900})
         page.locator("#token").fill(DEFAULT_E2E_OPERATOR_TOKEN)
         page.locator("#login").click()
-        page.wait_for_selector("#overview-grid .metric")
+        page.wait_for_function(
+            """() => (
+              document.querySelector('#overview-service-status')?.textContent
+              !== 'not loaded'
+            )"""
+        )
         assert page.locator("#login-form").is_hidden()
-        assert "Kazusa" not in page.locator("#brand-name").inner_text()
+        assert page.locator("#brand-name").inner_text().strip()
 
         pages = [
             "overview",
@@ -105,7 +110,7 @@ def test_desktop_visual_acceptance_for_cards_buttons_and_branding(
                 "checked_pages": pages,
                 "checked_invariants": [
                     "token field hidden after login",
-                    "database fallback brand does not say Kazusa",
+                    "database identity brand is non-empty",
                     "active page cards do not horizontally overflow",
                     "visible buttons do not clip labels",
                     "live-log copy button keeps fixed width",

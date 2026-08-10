@@ -13,8 +13,6 @@ def test_cognition_graph_snapshot_projects_parallel_branches_and_redacts() -> No
         "cognition_graph": {
             "run_id": "run-123",
             "status": "completed",
-            "trigger_source": "internal_thought",
-            "input_sources": ["internal_monologue"],
             "nodes": [
                 {
                     "id": "intake",
@@ -80,8 +78,6 @@ def test_cognition_graph_snapshot_projects_parallel_branches_and_redacts() -> No
 
     assert graph.status == "completed"
     assert graph.run_id == "run-123"
-    assert graph.trigger_source == "internal_thought"
-    assert graph.input_sources == ["internal_monologue"]
     assert {node.branch for node in graph.nodes} >= {"l2a", "l2b"}
     assert {edge.kind for edge in graph.edges} == {"fork", "join"}
     graph_text = repr(graph.model_dump(mode="json"))
@@ -140,6 +136,13 @@ def test_cognition_graph_semantic_projection_preserves_full_approved_values() ->
                     "detail": {
                         "retrieval_answer": long_text,
                         "memory_evidence": evidence_rows,
+                        "conversation_progress": {
+                            "current_thread": "Current participant thread.",
+                        },
+                        "public_group_scene": (
+                            "Participants: Ari, Operator\n"
+                            "At trigger: The public group scene."
+                        ),
                         "supervisor_trace": ["trace must be excluded"],
                     },
                 },
@@ -170,10 +173,187 @@ def test_cognition_graph_semantic_projection_preserves_full_approved_values() ->
     assert len(memory_detail["memory_evidence"]) == 55
     assert memory_detail["memory_evidence"][0]["excerpt"] == long_text
     assert memory_detail["memory_evidence"][54]["fact"] == "fact-54"
+    assert memory_detail["conversation_progress"]["current_thread"] == (
+        "Current participant thread."
+    )
+    assert memory_detail["public_group_scene"].startswith(
+        "Participants: Ari"
+    )
     assert "prompt" not in repr(memory_detail)
     assert "embedding" not in repr(memory_detail)
     assert "supervisor_trace" not in memory_detail
     assert graph.nodes[2].detail["messages"] == [long_text, "duplicate"]
+
+
+def test_cognition_graph_projection_preserves_native_v2_results_and_redacts_handles() -> None:
+    """Native V2 branch results remain inspectable without protected handles."""
+
+    from control_console.kazusa_client import project_cognition_graph_snapshot
+
+    payload = {
+        'cognition_graph': {
+            'run_id': 'native-v2-run',
+            'status': 'completed',
+            'nodes': [
+                {
+                    'id': 'v2.parallel',
+                    'label': '并行认知',
+                    'stage': 'V2',
+                    'lane': 'cognition',
+                    'column': 3,
+                    'status': 'completed',
+                    'detail': {
+                        'parallel_execution': {
+                            'maximum_concurrency': 2,
+                            'completed_branch_count': 2,
+                            'prompt': '必须删除',
+                        },
+                        'branch_results': [
+                            {
+                                'branch_index': 1,
+                                'selection': 'primary',
+                                'intention': '保护关系边界',
+                                'private_monologue': '我不想假装没受伤。',
+                                'branch_id': '必须删除',
+                                'evidence_handles': ['e1'],
+                            },
+                        ],
+                    },
+                },
+                {
+                    'id': 'v2.branch.1',
+                    'label': '目标候选 1',
+                    'stage': 'V2',
+                    'lane': 'cognition',
+                    'column': 4,
+                    'status': 'completed',
+                    'detail': {
+                        'selection': 'primary',
+                        'intention': '保护关系边界',
+                        'desired_outcome': '让伤害被看见',
+                        'concrete_detail': '说明这句话造成的伤害',
+                        'reason': '重要关系中的持续贬低需要回应。',
+                        'private_monologue': '我不想假装没受伤。',
+                        'expected_consequences': ['边界变得清楚'],
+                        'confidence': '高',
+                        'branch_id': '必须删除',
+                    },
+                },
+                {
+                    'id': 'v2.affect',
+                    'label': '情绪投影',
+                    'stage': 'V2',
+                    'lane': 'cognition',
+                    'column': 5,
+                    'status': 'completed',
+                    'detail': {
+                        'affect_projection': [
+                            {
+                                'emotion': '悲伤',
+                                'phase': '激活',
+                                'intensity': '高',
+                                'trend': '上升',
+                                'cause_summary': '关系伤害带来失落。',
+                            },
+                        ],
+                    },
+                },
+            ],
+            'edges': [
+                {'source': 'v2.parallel', 'target': 'v2.branch.1', 'kind': 'fork'},
+                {'source': 'v2.branch.1', 'target': 'v2.affect', 'kind': 'join'},
+            ],
+        },
+    }
+
+    graph = project_cognition_graph_snapshot(
+        source='debug_latest',
+        payload=payload,
+    )
+
+    parallel = graph.nodes[0].detail
+    assert parallel['parallel_execution']['maximum_concurrency'] == 2
+    assert parallel['branch_results'][0]['intention'] == '保护关系边界'
+    branch = graph.nodes[1].detail
+    assert branch['desired_outcome'] == '让伤害被看见'
+    assert branch['expected_consequences'] == ['边界变得清楚']
+    affect = graph.nodes[2].detail['affect_projection'][0]
+    assert affect['emotion'] == '悲伤'
+    detail_text = repr([node.detail for node in graph.nodes])
+    assert 'branch_id' not in detail_text
+    assert 'evidence_handles' not in detail_text
+    assert 'prompt' not in detail_text
+
+
+def test_cognition_graph_projection_preserves_native_failure_state() -> None:
+    """Console projection keeps partial status and typed failure evidence."""
+
+    from control_console.kazusa_client import project_cognition_graph_snapshot
+
+    graph = project_cognition_graph_snapshot(
+        source='debug_latest',
+        payload={
+            'cognition_graph': {
+                'run_id': 'native-v2-partial-run',
+                'status': 'partial',
+                'nodes': [
+                    {
+                        'id': 'v2.parallel',
+                        'label': '并行认知',
+                        'stage': 'V2',
+                        'lane': 'cognition',
+                        'column': 3,
+                        'status': 'partial',
+                        'detail': {
+                            'parallel_execution': {
+                                'completed_branch_count': 1,
+                                'failed_branch_count': 1,
+                            },
+                        },
+                    },
+                    {
+                        'id': 'v2.failure',
+                        'label': 'Native V2 failure',
+                        'stage': 'V2',
+                        'lane': 'cognition',
+                        'column': 3,
+                        'status': 'failed',
+                        'detail': {
+                            'failure': {
+                                'failure_code': 'model_contract_invalid',
+                                'stage': 'goal_cognition',
+                                'attempt_count': 2,
+                                'safe_checkpoint': 'pre_state_commit',
+                                'retryable': False,
+                            },
+                        },
+                    },
+                ],
+                'edges': [
+                    {
+                        'source': 'v2.parallel',
+                        'target': 'v2.failure',
+                        'kind': 'fork',
+                    },
+                    {
+                        'source': 'v2.parallel',
+                        'target': 'missing.node',
+                        'kind': 'fork',
+                    },
+                ],
+            },
+        },
+    )
+
+    assert graph.status == 'partial'
+    parallel = next(node for node in graph.nodes if node.id == 'v2.parallel')
+    assert parallel.status == 'partial'
+    failure = next(node for node in graph.nodes if node.id == 'v2.failure')
+    assert failure.status == 'failed'
+    assert failure.detail['failure']['failure_code'] == 'model_contract_invalid'
+    assert failure.detail['failure']['stage'] == 'goal_cognition'
+    assert len(graph.edges) == 1
+    assert graph.edges[0].target == 'v2.failure'
 
 
 def test_cognition_graph_projection_handles_malformed_detail_without_throwing() -> None:
@@ -206,9 +386,7 @@ def test_cognition_graph_projection_handles_malformed_detail_without_throwing() 
         },
     )
 
-    assert graph.status == "partial"
-    assert graph.trigger_source == "not_reported"
-    assert graph.redaction["reason"] == "trigger_source_missing"
+    assert graph.status == "completed"
     detail = graph.nodes[0].detail
     assert "retrieval_answer" not in detail
     assert "memory_evidence" not in detail
@@ -276,9 +454,8 @@ def test_cognition_graph_projection_handles_invalid_and_inferred_payloads() -> N
         },
     )
 
-    assert invalid.status == "partial"
+    assert invalid.status == "not_reported"
     assert invalid.run_id == "bad-run"
-    assert invalid.redaction["reason"] == "trigger_source_missing"
     assert inferred.status == "partial"
     assert [node.id for node in inferred.nodes] == [
         "l2.reasoning",
@@ -286,31 +463,6 @@ def test_cognition_graph_projection_handles_invalid_and_inferred_payloads() -> N
         "l3.surface",
     ]
     assert [edge.kind for edge in inferred.edges] == ["sequence", "sequence"]
-
-
-def test_cognition_graph_projection_fails_closed_for_unknown_source_metadata() -> None:
-    """The console keeps malformed source metadata bounded and explicit."""
-
-    from control_console.kazusa_client import project_cognition_graph_snapshot
-
-    graph = project_cognition_graph_snapshot(
-        source="overview_latest",
-        payload={
-            "cognition_graph": {
-                "run_id": "source-check",
-                "status": "completed",
-                "trigger_source": "<script>unknown</script>" * 40,
-                "input_sources": ["dialog_text", {"bad": "source"}],
-                "nodes": [],
-                "edges": [],
-            },
-        },
-    )
-
-    assert graph.trigger_source == "not_reported"
-    assert graph.input_sources == ["dialog_text"]
-    assert graph.status == "partial"
-    assert "<script>" not in repr(graph.model_dump(mode="json"))
 
 
 def test_bootstrap_and_debug_unavailable_return_graph_contract(tmp_path) -> None:
@@ -350,7 +502,7 @@ def test_bootstrap_and_debug_unavailable_return_graph_contract(tmp_path) -> None
     assert bootstrap.status_code == 200
     bootstrap_payload = bootstrap.json()
     assert bootstrap_payload["latest_cognition_graph"]["status"] == "not_reported"
-    assert bootstrap_payload["overview"]["latest_cognition_graph"]["nodes"] == []
+    assert bootstrap_payload["latest_cognition_graph"]["nodes"] == []
 
     debug = client.post(
         "/api/debug-chat",

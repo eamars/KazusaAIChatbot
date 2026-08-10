@@ -58,6 +58,12 @@ class _StaticStoppedSupervisor:
                 return state
         raise KeyError(service_id)
 
+    def service_version(self, service_id: str) -> int:
+        """Return the stable version used by stopped config tests."""
+
+        _ = self.service_state(service_id)
+        return 0
+
 
 def _client_with_login(tmp_path, *, supervisor=None):
     """Create a test client and return authenticated CSRF metadata."""
@@ -95,16 +101,33 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
             "source": "character_state",
         }
 
+    async def list_group_entities(self, *, limit):
+        _ = self
+        assert limit == 7
+        return {
+            "status": "empty",
+            "generated_at": "2026-07-27T00:00:00+00:00",
+            "items": [],
+            "next_cursor": None,
+            "reason": "no recent group activity is available",
+        }
+
     monkeypatch.setattr(
         repository_module.ControlConsoleRepository,
         "application_identity",
         application_identity,
+    )
+    monkeypatch.setattr(
+        repository_module.ControlConsoleRepository,
+        "list_group_entities",
+        list_group_entities,
     )
 
     client, _ = _client_with_login(tmp_path, supervisor=_StaticStoppedSupervisor())
 
     index = client.get("/")
     assert index.status_code == 200
+    assert index.headers["cache-control"] == "no-cache, must-revalidate"
     assert "<title>not connected</title>" in index.text
     assert '<body data-theme="bright" data-auth-state="locked">' in index.text
     assert 'id="brand-name">not connected</strong>' in index.text
@@ -140,27 +163,38 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     assert 'id="user-query"' in index.text
     assert 'id="refresh-users"' in index.text
     assert 'id="refresh-users" type="button">Search</button>' in index.text
+    assert 'id="user-directory-table"' in index.text
     assert 'id="user-profile-table"' in index.text
-    assert 'id="user-relationship-table"' not in index.text
+    assert 'id="user-relationship-table"' in index.text
+    assert 'id="user-cognition-state-table"' in index.text
     assert 'id="user-memory-table"' in index.text
     assert 'id="user-style-table"' in index.text
+    assert index.text.count("relevance · cognition · surface") == 2
+    assert 'id="user-conversation-progress-table"' in index.text
+    assert 'id="user-carry-over-table"' in index.text
     assert '<select class="input" id="group-platform"' in index.text
     assert 'id="group-id"' in index.text
     assert 'id="refresh-groups"' in index.text
     assert 'id="refresh-groups" type="button">Search</button>' in index.text
+    assert 'id="group-directory-table"' in index.text
+    assert 'id="group-activity-table"' in index.text
+    assert 'id="group-review-table"' in index.text
     assert 'id="group-style-table"' in index.text
-    assert 'id="group-progress-table"' not in index.text
-    assert 'id="group-guidance-table"' not in index.text
+    assert 'id="group-carry-over-table"' in index.text
+    assert 'id="group-participant-progress-table"' in index.text
     assert 'id="calendar-status"' in index.text
     assert 'id="refresh-calendar"' in index.text
-    assert 'id="calendar-prompt-runs-table"' in index.text
+    assert 'id="calendar-summary-table"' in index.text
     assert 'id="calendar-schedules-table"' in index.text
-    assert 'id="calendar-due-runs-table"' in index.text
+    assert 'id="calendar-runs-table"' in index.text
+    assert 'id="calendar-cognition-visibility-table"' in index.text
     assert 'id="background-status"' in index.text
     assert 'id="refresh-background"' in index.text
-    assert 'id="background-result-ready-table"' in index.text
-    assert 'id="background-job-queue-table"' in index.text
-    assert 'id="background-worker-events-table"' in index.text
+    assert 'id="background-summary-table"' in index.text
+    assert 'id="background-jobs-table"' in index.text
+    assert 'id="background-worker-table"' in index.text
+    assert 'id="background-errors-table"' in index.text
+    assert 'id="background-delivery-table"' in index.text
     assert '<input class="input" id="token"' in index.text
     assert 'data-theme-choice="bright"' in index.text
     assert 'data-theme-choice="dark"' in index.text
@@ -175,9 +209,13 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     assert 'name="debug_mode" value="think_only"' in index.text
     assert 'name="debug_mode" value="listen_only"' in index.text
     assert 'name="debug_modes" value="no_remember" checked' in index.text
-    assert '<option value="kazusa">application event log</option>' in index.text
-    assert 'id="overview-capability-table"' in index.text
-    assert 'id="overview-unavailable-table"' in index.text
+    assert '<option value="kazusa">application</option>' in index.text
+    assert '<option value="console">' not in index.text
+    assert '<span class="badge">limit ' not in index.text
+    assert 'id="overview-service-summary-table"' in index.text
+    assert 'id="overview-readiness-table"' in index.text
+    assert 'id="overview-failures-table"' in index.text
+    assert 'id="overview-changes-table"' in index.text
     assert 'id="overview-cognition-graph"' in index.text
     assert 'data-cognition-graph="overview_latest"' in index.text
     assert 'id="event-request-id"' in index.text
@@ -198,15 +236,35 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     assert "source refs" not in index.text
     assert "Mongo secondary" not in index.text
     assert "until brain starts" not in index.text
-    assert 'id="health-brain-status"' in index.text
+    assert 'id="health-readiness-table"' in index.text
+    assert 'id="health-workers-table"' in index.text
     assert 'id="health-cache-table"' in index.text
-    assert 'id="health-runtime-table"' in index.text
     assert 'id="character-profile-table"' in index.text
-    assert 'id="character-state-table"' in index.text
+    assert 'id="character-cognition-state-table"' in index.text
     assert 'id="character-self-image-table"' in index.text
     assert 'id="character-growth-table"' in index.text
-    assert 'id="character-memory-table"' not in index.text
-    assert 'id="character-learning-table"' in index.text
+    assert 'id="character-carry-over-table"' in index.text
+    for obsolete_copy in (
+        "Event stream",
+        "Growth Runs Audit",
+        "Prompt View",
+        "Operational Backing",
+    ):
+        assert obsolete_copy not in index.text
+    for obsolete_id in (
+        "overview-capability-table",
+        "overview-unavailable-table",
+        "health-brain-status",
+        "health-runtime-table",
+        "character-state-table",
+        "character-learning-table",
+        "calendar-prompt-runs-table",
+        "calendar-due-runs-table",
+        "background-result-ready-table",
+        "background-job-queue-table",
+        "background-worker-events-table",
+    ):
+        assert f'id="{obsolete_id}"' not in index.text
     assert "promoted only" not in index.text
     assert "Character Memory" not in index.text
     assert "Job browser" not in index.text
@@ -236,12 +294,14 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
 
     script = client.get("/static/console.js")
     assert script.status_code == 200
+    assert script.headers["cache-control"] == "no-cache, must-revalidate"
     assert "resumeSession()" in script.text
     assert "/api/auth/session" in script.text
     assert "lockSession()" in script.text
     assert "renderBrand(payload.application_identity" in script.text
     assert "state.csrfToken = payload.csrf_token" in script.text
-    assert "renderCapabilitySummary" in script.text
+    assert "renderOverview" in script.text
+    assert "renderHealth" in script.text
     assert "renderShellStatus(payload)" in script.text
     assert "Brain endpoint already running outside the console" in (
         script.text
@@ -266,10 +326,21 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     assert "alert(" not in script.text
     assert "Searching user..." in script.text
     assert "refreshUsers" in script.text
-    assert "/api/entities/user" in script.text
+    assert "/api/entities/users" in script.text
     assert "Searching group..." in script.text
     assert "refreshGroups" in script.text
-    assert "/api/entities/group" in script.text
+    assert "/api/entities/groups" in script.text
+    assert 'new URLSearchParams({source, limit: "25"})' in script.text
+    assert "item.delivery_state === item.status ? \"\" : item.delivery_state" in (
+        script.text
+    )
+    assert "item.updated_at === item.completed_at ? \"\" : item.updated_at" in (
+        script.text
+    )
+    assert (
+        "[item.completed_at, item.failed_at, item.skipped_at].includes("
+        in script.text
+    )
     assert "renderLookupTable" in script.text
     assert "renderPanelState" in script.text
     assert "Loading calendar..." in script.text
@@ -277,9 +348,18 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     assert "/api/lookups/calendar" in script.text
     assert "Loading background work..." in script.text
     assert "refreshBackground" in script.text
-    assert "/api/lookups/background" in script.text
+    assert "/api/lookups/background-work" in script.text
     assert "/api/entities/character" in script.text
-    assert "#health-brain-status" in script.text
+    assert "/api/overview" in script.text
+    assert "/api/health" in script.text
+    assert "#health-readiness-table" in script.text
+    assert "panel_contract" not in script.text
+    assert "projection_owner" not in script.text
+    assert "scope_order" not in script.text
+    assert "scope_summary" not in script.text
+    assert "/api/entities/user?" not in script.text
+    assert "/api/entities/group?" not in script.text
+    assert "/api/lookups/background?" not in script.text
     assert "debugResponseBody(result)" in script.text
     assert "function renderCognitionGraph" in script.text
     assert "function renderOverviewCognitionGraph" in script.text
@@ -287,6 +367,12 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     assert "function cognitionGraphModel" in script.text
     assert "function cognitionGraphCurrentNode" in script.text
     assert "function cognitionGraphInspectorMarkup" in script.text
+    assert '["public_group_scene", "Public group scene"]' in script.text
+    assert script.text.index(
+        '["conversation_progress", "Conversation progress"]'
+    ) < script.text.index(
+        '["public_group_scene", "Public group scene"]'
+    )
     assert "function setCognitionGraphPinnedNode" in script.text
     assert "GRAPH_STALE_AFTER_MS = 10000" in script.text
     assert "Return to current" in script.text
@@ -317,6 +403,8 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     assert "Manual model " + "ID" not in script.text
     assert "provider model " + "id" not in script.text
     assert "data-brain-route-key" in script.text
+    assert "const currentValue = `" in script.text
+    assert 'const currentValue = isSelected ? "" :' not in script.text
     assert "/api/services/brain/model-routes" in script.text
     assert "function renderServiceConfigDialog" in script.text
     assert "function applyServiceConfig" in script.text
@@ -336,6 +424,7 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
 
     stylesheet = client.get("/static/console.css")
     assert stylesheet.status_code == 200
+    assert stylesheet.headers["cache-control"] == "no-cache, must-revalidate"
     assert '.status-dot[data-state="conflict"]' in stylesheet.text
     assert ".cognition-graph" in stylesheet.text
     assert ".cognition-graph-shell" in stylesheet.text
@@ -382,8 +471,25 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     )
     assert ".service-card.brain-service-card" in stylesheet.text
     assert ".brain-service-layout" in stylesheet.text
+    assert (
+        ".brain-service-layout { display: grid; grid-template-columns: "
+        "1fr; gap: 12px; align-items: start;"
+    ) in stylesheet.text
     assert ".brain-route-matrix" in stylesheet.text
     assert ".brain-route-editor" in stylesheet.text
+    assert (
+        ".brain-route-tile.selected { border-color: "
+        "var(--nav-active-border);"
+    ) in stylesheet.text
+    assert (
+        ".brain-route-tile.selected { border-color: "
+        "var(--nav-active-border); background: var(--nav-active-bg); }"
+    ) in stylesheet.text
+    assert (
+        ".brain-route-tile.selected { border-color: "
+        "var(--nav-active-border); box-shadow:"
+        not in stylesheet.text
+    )
     assert ".content-grid { display: grid; gap: 12px; align-items: start; }" in (
         stylesheet.text
     )
@@ -401,23 +507,21 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     assert bootstrap.status_code == 200
     capabilities = bootstrap.json()["page_capabilities"]
     assert capabilities["debug"]["label"] == "brain gated"
-    assert capabilities["health"]["label"] == "runtime gated"
+    assert capabilities["health"]["label"] == "live readiness"
     assert "memory" not in capabilities
     assert "style" not in capabilities
-    assert capabilities["users"]["label"] == "platform lookup"
-    assert capabilities["groups"]["label"] == "group lookup"
+    assert capabilities["users"]["label"] == "directory + V2"
+    assert capabilities["groups"]["label"] == "activity + review"
 
     favicon = client.get("/favicon.ico")
     assert favicon.status_code == 200
     assert favicon.headers["content-type"] == "image/png"
 
-    lookup = client.get("/api/entities/group?limit=7")
+    lookup = client.get("/api/entities/groups?limit=7")
     assert lookup.status_code == 200
     payload = lookup.json()
-    assert payload["status"] == "needs_input"
-    assert payload["owner"] == "group"
-    assert payload["panels"]["style"]["items"] == []
-    assert payload["redaction"]["model_inputs"] == "excluded"
+    assert payload["status"] in {"available", "empty", "unavailable"}
+    assert "items" in payload
 
 
 def test_event_stream_refresh_does_not_reconnect_stream(tmp_path) -> None:
@@ -546,13 +650,21 @@ def test_web_api_outputs_for_logs_events_audit_character_and_debug_error(
             }]
         return rows
 
-    async def latest_character_status(self):
+    async def character_entity(self, **kwargs):
         _ = self
-        return {"status": "empty", "items": []}
-
-    async def global_growth_summary(self):
-        _ = self
-        return {"status": "empty", "items": []}
+        assert kwargs["limit"] == 5
+        return {
+            "status": "empty",
+            "owner": "character",
+            "identity": {},
+            "panels": {
+                "profile": {"status": "empty", "items": []},
+                "cognition_state": {"status": "empty", "items": []},
+                "self_image": {"status": "empty", "items": []},
+                "growth": {"status": "empty", "items": []},
+                "carry_over": {"status": "empty", "items": []},
+            },
+        }
 
     async def lookup_calendar(
         self,
@@ -574,17 +686,50 @@ def test_web_api_outputs_for_logs_events_audit_character_and_debug_error(
         return {
             "status": "empty",
             "panels": {
-                "cognition_pending_runs": {"items": [], "prompt_view": True},
-                "schedule_definitions": {"items": [], "prompt_view": False},
-                "due_runs": {"items": [], "prompt_view": False},
+                "summary": {"status": "available", "items": [{}]},
+                "schedules": {"status": "empty", "items": []},
+                "runs": {"status": "empty", "items": []},
+                "cognition_visibility": {
+                    "status": "needs_input",
+                    "items": [],
+                },
+            },
+            "next_cursor": None,
+        }
+
+    async def lookup_background_work(self, *, worker_event_rows, limit):
+        _ = self
+        assert limit == 5
+        assert worker_event_rows[0]["component"] == "background_work.worker"
+        return {
+            "status": "available",
+            "panels": {
+                "summary": {"status": "available", "items": [{}]},
+                "jobs": {"status": "empty", "items": []},
+                "worker_activity": {
+                    "status": "available",
+                    "items": [{
+                        "worker_name": "background_work.worker",
+                        "event_count": 1,
+                    }],
+                },
+                "errors": {"status": "empty", "items": []},
+                "delivery_detail": {"status": "empty", "items": []},
             },
             "next_cursor": None,
         }
 
     class FakeKazusaClient:
-        def __init__(self, *, base_url: str, timeout_seconds: float) -> None:
+        def __init__(
+            self,
+            *,
+            base_url: str,
+            timeout_seconds: float,
+            control_shared_secret: str = "",
+        ) -> None:
             _ = base_url
             _ = timeout_seconds
+            _ = control_shared_secret
 
         async def send_debug_chat(self, request):
             _ = request
@@ -592,18 +737,20 @@ def test_web_api_outputs_for_logs_events_audit_character_and_debug_error(
 
     monkeypatch.setattr(
         repository_module.ControlConsoleRepository,
-        "latest_character_status",
-        latest_character_status,
-    )
-    monkeypatch.setattr(
-        repository_module.ControlConsoleRepository,
-        "global_growth_summary",
-        global_growth_summary,
+        "character_entity",
+        character_entity,
+        raising=False,
     )
     monkeypatch.setattr(
         repository_module.ControlConsoleRepository,
         "lookup_calendar",
         lookup_calendar,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        repository_module.ControlConsoleRepository,
+        "lookup_background_work",
+        lookup_background_work,
         raising=False,
     )
     monkeypatch.setattr(
@@ -632,20 +779,15 @@ def test_web_api_outputs_for_logs_events_audit_character_and_debug_error(
     filtered_events = client.get(
         "/api/events?source=console&request_id=missing-request-id&limit=5",
     )
-    assert filtered_events.status_code == 200
-    assert filtered_events.json()["items"] == []
+    assert filtered_events.status_code == 422
 
     audit = client.get("/api/audit?limit=10")
     assert audit.status_code == 200
     assert "generated_at" in audit.json()
 
-    character = client.get("/api/character/status")
+    character = client.get("/api/entities/character?limit=5")
     assert character.status_code == 200
     assert character.json()["status"] in {"available", "empty", "unavailable"}
-
-    growth = client.get("/api/character/growth")
-    assert growth.status_code == 200
-    assert growth.json()["status"] in {"available", "empty", "unavailable"}
 
     calendar = client.get("/api/lookups/calendar?limit=5")
     assert calendar.status_code == 200
@@ -653,13 +795,12 @@ def test_web_api_outputs_for_logs_events_audit_character_and_debug_error(
     assert calendar_payload["status"] in {"available", "empty", "unavailable"}
     assert calendar_payload["next_cursor"] is None
 
-    background = client.get("/api/lookups/background?limit=5")
+    background = client.get("/api/lookups/background-work?limit=5")
     assert background.status_code == 200
     background_payload = background.json()
     assert background_payload["status"] == "available"
-    assert background_payload["panels"]["worker_events"]["items"][0]["component"] == (
-        "background_work.worker"
-    )
+    worker_rows = background_payload["panels"]["worker_activity"]["items"]
+    assert worker_rows[0]["worker_name"] == "background_work.worker"
     assert background_payload["next_cursor"] is None
 
     debug = client.post(
@@ -691,6 +832,232 @@ def test_web_api_outputs_for_logs_events_audit_character_and_debug_error(
     payload = failing_debug.json()
     assert payload["brain_available"] is False
     assert payload["error"]["code"] == "brain_unavailable"
+
+
+def test_audit_api_collapses_actions_and_summarizes_views(tmp_path) -> None:
+    """Audit should present one human action instead of raw JSONL machinery."""
+
+    from control_console.audit import LocalAuditWriter
+
+    client, _ = _client_with_login(
+        tmp_path,
+        supervisor=_StaticStoppedSupervisor(),
+    )
+    writer = LocalAuditWriter(tmp_path / "audit.jsonl")
+    writer.write_event(
+        event_type="service_start_requested",
+        operator_id="local-operator",
+        service_id="brain",
+        target={"service_id": "brain", "expected_version": 2},
+        previous_state={"actual_state": "stopped"},
+        reason="operator requested start",
+        request_id="cc-req-start-1",
+    )
+    writer.write_event(
+        event_type="service_started",
+        operator_id="local-operator",
+        service_id="brain",
+        target={"service_id": "brain"},
+        previous_state={"actual_state": "stopped"},
+        new_state={"actual_state": "running"},
+        request_id="cc-req-start-1",
+    )
+    writer.write_event(
+        event_type="lookup_view",
+        operator_id="local-operator",
+        target={"namespace": "entity.user"},
+        request_id="cc-req-view-1",
+    )
+    writer.write_event(
+        event_type="lookup_view",
+        operator_id="local-operator",
+        target={"namespace": "entity.group"},
+        request_id="cc-req-view-2",
+    )
+    writer.write_event(
+        event_type="lookup_view",
+        operator_id="local-operator",
+        target={"namespace": "entity.users"},
+        request_id="cc-req-view-3",
+    )
+    writer.write_event(
+        event_type="lookup_view",
+        operator_id="local-operator",
+        target={"namespace": "entity.groups"},
+        request_id="cc-req-view-4",
+    )
+    writer.write_event(
+        event_type="brain_model_routes_view",
+        operator_id="local-operator",
+        request_id="cc-req-view-5",
+    )
+    writer.write_event(
+        event_type="brain_model_route_models_view",
+        operator_id="local-operator",
+        request_id="cc-req-view-6",
+    )
+
+    response = client.get("/api/audit?limit=20")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert set(payload) >= {
+        "generated_at",
+        "actions",
+        "view_summary",
+        "facets",
+        "next_cursor",
+    }
+    assert len(payload["actions"]) == 1
+    action = payload["actions"][0]
+    assert action["request_id"] == "cc-req-start-1"
+    assert action["action"] == "service start"
+    assert action["target_label"] == "brain"
+    assert action["outcome"] == "succeeded"
+    assert action["event_count"] == 2
+    summaries = {
+        item["view"]: item["count"]
+        for item in payload["view_summary"]
+    }
+    assert summaries == {
+        "Groups": 2,
+        "Services": 2,
+        "Users": 2,
+    }
+    assert payload["facets"]["outcomes"] == {"succeeded": 1}
+    rendered = repr(payload)
+    assert "[object Object]" not in rendered
+    assert "lookup_view" not in repr(payload["view_summary"])
+    assert "'status':" not in repr(action)
+    assert "audit_view" not in repr(payload["actions"])
+
+
+def test_owner_directory_and_detail_routes_use_plural_safe_contracts(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """User and group pages should discover records before opening detail."""
+
+    from control_console import repository as repository_module
+
+    async def list_user_entities(self, *, limit: int):
+        _ = self
+        assert limit == 5
+        return {
+            "status": "available",
+            "items": [{
+                "display_name": "Operator",
+                "accounts": [{
+                    "platform": "qq",
+                    "platform_user_id": "platform-user-1",
+                    "display_name": "Operator",
+                }],
+                "account_count": 1,
+                "alias_count": 0,
+                "updated_at": "2026-07-27T00:00:00Z",
+            }],
+        }
+
+    async def list_group_entities(self, *, limit: int):
+        _ = self
+        assert limit == 5
+        return {
+            "status": "available",
+            "items": [{
+                "platform": "qq",
+                "group_id": "group-1",
+                "channel_name": "Review group",
+                "last_activity_at": "2026-07-27T00:00:00Z",
+                "message_count": 12,
+                "participant_count": 3,
+            }],
+        }
+
+    async def lookup_user_entity(
+        self,
+        *,
+        platform: str,
+        platform_user_id: str,
+        **kwargs,
+    ):
+        _ = self
+        _ = kwargs
+        assert platform == "qq"
+        assert platform_user_id == "platform-user-1"
+        return {
+            "status": "available",
+            "owner": "user",
+            "identity": {
+                "platform": "qq",
+                "platform_user_id": "platform-user-1",
+                "display_name": "Operator",
+            },
+            "panels": {},
+            "redaction": {"internal_global_ids": "excluded"},
+        }
+
+    async def lookup_group_entity(
+        self,
+        *,
+        platform: str,
+        group_id: str,
+        **kwargs,
+    ):
+        _ = self
+        _ = kwargs
+        assert platform == "qq"
+        assert group_id == "group-1"
+        return {
+            "status": "available",
+            "owner": "group",
+            "identity": {"platform": "qq", "group_id": "group-1"},
+            "panels": {},
+            "redaction": {"raw_messages": "excluded"},
+        }
+
+    monkeypatch.setattr(
+        repository_module.ControlConsoleRepository,
+        "list_user_entities",
+        list_user_entities,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        repository_module.ControlConsoleRepository,
+        "list_group_entities",
+        list_group_entities,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        repository_module.ControlConsoleRepository,
+        "lookup_user_entity",
+        lookup_user_entity,
+    )
+    monkeypatch.setattr(
+        repository_module.ControlConsoleRepository,
+        "lookup_group_entity",
+        lookup_group_entity,
+    )
+
+    client, _ = _client_with_login(
+        tmp_path,
+        supervisor=_StaticStoppedSupervisor(),
+    )
+
+    users = client.get("/api/entities/users?limit=5")
+    user = client.get("/api/entities/users/qq/platform-user-1?limit=5")
+    groups = client.get("/api/entities/groups?limit=5")
+    group = client.get("/api/entities/groups/qq/group-1?limit=5")
+
+    assert users.status_code == 200
+    assert users.json()["items"][0]["display_name"] == "Operator"
+    assert user.status_code == 200
+    assert user.json()["identity"]["platform_user_id"] == "platform-user-1"
+    assert groups.status_code == 200
+    assert groups.json()["items"][0]["group_id"] == "group-1"
+    assert group.status_code == 200
+    assert group.json()["identity"]["group_id"] == "group-1"
+    assert client.get("/api/entities/user?limit=5").status_code == 404
+    assert client.get("/api/entities/group?limit=5").status_code == 404
 
 
 def test_lifecycle_stop_and_restart_responses(tmp_path) -> None:
@@ -751,6 +1118,11 @@ def test_background_lookup_reports_empty_and_unavailable(
     """Background telemetry route should distinguish empty from unavailable."""
 
     from control_console import app as app_module
+    from control_console import repository as repository_module
+
+    async def empty_jobs(*, limit: int):
+        assert limit == 5
+        return []
 
     async def empty_events(query):
         assert query.service_id == "background_work.worker"
@@ -766,20 +1138,31 @@ def test_background_lookup_reports_empty_and_unavailable(
         }]
 
     monkeypatch.setattr(app_module, "_read_kazusa_events", empty_events)
+    monkeypatch.setattr(
+        repository_module.background_work_job_store,
+        "find_deliverable_background_work_jobs",
+        empty_jobs,
+    )
+    monkeypatch.setattr(
+        repository_module.background_work_job_store,
+        "list_recent_background_work_jobs",
+        empty_jobs,
+    )
     client, _ = _client_with_login(tmp_path)
 
-    empty = client.get("/api/lookups/background?limit=5")
+    empty = client.get("/api/lookups/background-work?limit=5")
     assert empty.status_code == 200
     empty_payload = empty.json()
-    assert empty_payload["panels"]["worker_events"]["status"] == "empty"
+    assert empty_payload["panels"]["worker_activity"]["status"] == "empty"
 
     monkeypatch.setattr(app_module, "_read_kazusa_events", unavailable_events)
-    unavailable = client.get("/api/lookups/background?limit=5")
+    unavailable = client.get("/api/lookups/background-work?limit=5")
     assert unavailable.status_code == 200
     payload = unavailable.json()
-    assert payload["panels"]["worker_events"]["status"] == "unavailable"
-    assert payload["panels"]["worker_events"]["items"][0]["event_type"] == (
-        "event_log.unavailable"
+    assert payload["panels"]["worker_activity"]["status"] == "unavailable"
+    assert payload["panels"]["worker_activity"]["items"] == []
+    assert "telemetry is unavailable" in (
+        payload["panels"]["worker_activity"]["reason"]
     )
 
 
@@ -848,10 +1231,12 @@ def test_app_uses_live_debug_chat_timeout(monkeypatch, tmp_path) -> None:
             *,
             base_url: str,
             timeout_seconds: float,
+            control_shared_secret: str = "",
         ) -> None:
             """Capture the configured timeout without making network calls."""
 
             _ = base_url
+            _ = control_shared_secret
             captured["timeout_seconds"] = timeout_seconds
 
     monkeypatch.setattr(app_module, "KazusaClient", FakeKazusaClient)
@@ -903,3 +1288,77 @@ def test_main_invokes_uvicorn_with_cli_arguments(monkeypatch) -> None:
             "timeout_graceful_shutdown": 3,
         },
     ]
+
+
+def test_character_identity_surface_and_pace_api_contract(
+    tmp_path,
+) -> None:
+    """The authenticated browser surface should expose bounded identity growth."""
+
+    client, login = _client_with_login(
+        tmp_path,
+        supervisor=_StaticStoppedSupervisor(),
+    )
+
+    index = client.get("/")
+    script = client.get("/static/console.js")
+
+    assert index.status_code == 200
+    assert script.status_code == 200
+    assert "Identity lineage and health" in index.text
+    assert "Growth candidates and outcomes" in index.text
+    assert "renderIdentityLineagePanel" in script.text
+    assert "renderIdentityGrowthPanel" in script.text
+    assert "renderCharacterLoadingState" in script.text
+    assert "renderCharacterErrorState" in script.text
+    assert "Loading character identity" in script.text
+    assert "Character identity could not be loaded" in script.text
+    for health_label in (
+        "healthy idle",
+        "waiting for evidence",
+        "semantic rejection",
+        "promotion ready",
+        "awaiting consumption",
+        "healthy active",
+        "pipeline error",
+        "consumption error",
+    ):
+        assert health_label in script.text
+    assert "character_global" not in index.text
+    assert "character_global" not in script.text
+    assert "No character-global carry-over" not in script.text
+    assert "validation.min_value" in script.text
+    assert "validation.max_value" in script.text
+
+    config = client.get("/api/services/brain/config")
+
+    assert config.status_code == 200
+    fields = {
+        field["key"]: field
+        for field in config.json()["fields"]
+    }
+    assert (
+        fields["character_identity_growth_inferred_min_episodes"][
+            "validation"
+        ]
+        == {"min_value": 2, "max_value": 8}
+    )
+    assert fields["character_identity_growth_enabled"][
+        "restart_required"
+    ] is True
+
+    headers = {login["csrf_header_name"]: login["csrf_token"]}
+    invalid = client.put(
+        "/api/services/brain/config",
+        headers=headers,
+        json={
+            "reason": "test cross-field validation",
+            "values": {
+                "character_identity_growth_inferred_min_episodes": 2,
+                "character_identity_growth_inferred_min_local_dates": 3,
+            },
+        },
+    )
+
+    assert invalid.status_code == 422
+    assert "cannot exceed" in invalid.json()["detail"]["message"]

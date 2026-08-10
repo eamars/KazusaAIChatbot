@@ -42,18 +42,33 @@ CQ mentions become readable mention tokens. CQ replies are removed from body
 text and represented through typed reply metadata. Known QQ face ids become
 `<image>{description}</image>` text through the static catalog.
 
-QQ display labels use the adapter's canonical selection order:
+Human QQ display labels use the adapter's canonical selection order:
 `nickname -> name -> card -> user`. The `card` group alias is only used when
-profile nickname/name are unavailable. If a mentioned user lookup fails, the
+profile nickname/name are unavailable. If a mentioned human lookup fails, the
 semantic fallback is platform-neutral, for example `@user`; occurrence
 placeholders such as `@mentioned-user-1` and platform-qualified labels such as
 `@qq-user:<id>` are not valid envelope text.
+
+The QQ bot account is different: `get_login_info.user_id` supplies transport
+identity, while its nickname is ignored for character semantics. Registration
+and heartbeat obtain required `character_name` from the brain. Bot-id mentions,
+reply targets, reply excerpts, and final envelope labels always use that
+brain-provided value, including when NapCat returns an older nickname. Human
+label lookup and its bounded cache remain unchanged.
 
 ## Runtime API Binding Contract
 
 `runtime_api.py` is importable without `ws_adapter.py`. The websocket adapter
 binds itself when its callback server starts and clears the binding on close
 only when it still owns the active binding.
+
+## Operational Response Contract
+
+When `/chat` returns `content_type="operational_error"`, the adapter logs the
+structured `operational_error` metadata and sends only the first system notice.
+It omits native reply rendering, inline mentions, normal delivery receipts, and
+delayed follow-up sends so infrastructure failure text is never treated as
+Kazusa dialog.
 
 ## Unknown Face Omission Contract
 

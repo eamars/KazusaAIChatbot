@@ -129,7 +129,6 @@ def _base_state(
                 "linguistic_style": "Concise group chat wording.",
                 "accepted_user_preferences": [],
                 "content_plan": content_plan,
-                "forbidden_phrases": [],
             },
             "contextual_directives": {
                 "social_distance": "friendly",
@@ -147,7 +146,7 @@ def _base_state(
         "platform_bot_id": "bot-1",
         "global_user_id": "global-alex",
         "user_name": user_name,
-        "user_profile": {"affinity": 700},
+        "user_profile": {"relationship_state": 700},
     }
 
 

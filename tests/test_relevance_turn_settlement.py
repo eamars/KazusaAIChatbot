@@ -231,6 +231,71 @@ async def test_wait_uses_one_extension_and_reaches_complete_phase() -> None:
 
 
 @pytest.mark.asyncio
+async def test_failed_assessment_closes_current_turn_without_semantic_ignore() -> None:
+    """An operational settlement failure must release its pending turn."""
+
+    clock = _FakeClock()
+    coordinator = _coordinator(clock)
+    start = await coordinator.apply_frontline_decision(
+        _fragment(1),
+        {
+            "intake_action": "start",
+            "append_target": "none",
+            "prelude_targets": [],
+            "reason": "new candidate",
+        },
+    )
+    clock.advance(6.0)
+    lease = await coordinator.wait_for_assessment_ready()
+
+    closed = await coordinator.complete_failed_assessment(lease)
+
+    assert closed is True
+    assert start.turn_id not in coordinator._pending_turns
+    next_state = await coordinator.build_frontline_state(
+        _fragment(2, enqueue_monotonic=clock()),
+    )
+    assert next_state["open_turns"] == []
+
+
+@pytest.mark.asyncio
+async def test_failed_stale_assessment_preserves_newer_turn_version() -> None:
+    """A stale operational failure cannot close a newer assembled turn."""
+
+    clock = _FakeClock()
+    coordinator = _coordinator(clock)
+    start = await coordinator.apply_frontline_decision(
+        _fragment(1),
+        {
+            "intake_action": "start",
+            "append_target": "none",
+            "prelude_targets": [],
+            "reason": "new candidate",
+        },
+    )
+    clock.advance(6.0)
+    stale_lease = await coordinator.wait_for_assessment_ready()
+    append = await coordinator.apply_frontline_decision(
+        _fragment(2, body="newer intent", enqueue_monotonic=clock()),
+        {
+            "intake_action": "append",
+            "append_target": "open_1",
+            "prelude_targets": [],
+            "reason": "same candidate",
+        },
+    )
+
+    closed = await coordinator.complete_failed_assessment(stale_lease)
+
+    assert closed is False
+    assert coordinator._pending_turns[start.turn_id].version == append.version
+    clock.advance(4.0)
+    current_lease = await coordinator.wait_for_assessment_ready()
+    assert current_lease.version == append.version
+    assert current_lease.observation_status == "observation_complete"
+
+
+@pytest.mark.asyncio
 async def test_stale_assessment_cannot_claim_after_append() -> None:
     """A version change during assessment rejects the stale cognition entry."""
 

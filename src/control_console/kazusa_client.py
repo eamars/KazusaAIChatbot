@@ -12,17 +12,23 @@ import httpx
 from pydantic import ValidationError
 
 from control_console.contracts import (
+    CognitionContextConsumption,
     CognitionRunGraphEdge,
     CognitionRunGraphNode,
     CognitionRunGraphSnapshot,
     ConsoleDebugChatRequest,
 )
-from control_console.redaction import redact_mapping, redact_value
+from control_console.redaction import (
+    redact_context_consumption,
+    redact_mapping,
+    redact_value,
+)
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
 
 COGNITION_GRAPH_DETAIL_KEYS = frozenset(
     {
         "input",
+        "summary",
         "reply_context",
         "decision",
         "reasoning",
@@ -38,21 +44,45 @@ COGNITION_GRAPH_DETAIL_KEYS = frozenset(
         "media_evidence",
         "user_continuity",
         "conversation_progress",
+        "public_group_scene",
         "active_commitments",
         "selected_actions",
         "action_results",
         "action_continuation",
+        "parallel_execution",
+        "appraisal_results",
+        "branch_results",
+        "collapse",
+        "selected_intention",
+        "selected_bid_reason",
+        "goal_resolution",
+        "expression_policy",
+        "affect_projection",
+        "phase",
+        "goal_kind",
+        "selection",
+        "intention",
+        "desired_outcome",
+        "concrete_detail",
+        "reason",
+        "private_monologue",
+        "confidence",
+        "expected_consequences",
         "facial_expression",
         "body_language",
         "gaze_direction",
         "visual_vibe",
         "messages",
         "empty_state",
+        "failure",
+        "failure_code",
+        "context_consumption",
     }
 )
 COGNITION_GRAPH_SCALAR_DETAIL_KEYS = frozenset(
     {
         "input",
+        "summary",
         "decision",
         "reasoning",
         "internal_monologue",
@@ -60,7 +90,24 @@ COGNITION_GRAPH_SCALAR_DETAIL_KEYS = frozenset(
         "character_intent",
         "judgment_note",
         "retrieval_answer",
+        "public_group_scene",
         "empty_state",
+        "failure_code",
+        "failure_stage",
+        "safe_checkpoint",
+        "attempt_count",
+        "retryable",
+        "selected_bid_reason",
+        "goal_resolution",
+        "phase",
+        "goal_kind",
+        "selection",
+        "intention",
+        "desired_outcome",
+        "concrete_detail",
+        "reason",
+        "private_monologue",
+        "confidence",
     }
 )
 COGNITION_GRAPH_TEXT_LIST_DETAIL_KEYS = frozenset(
@@ -70,6 +117,7 @@ COGNITION_GRAPH_TEXT_LIST_DETAIL_KEYS = frozenset(
         "gaze_direction",
         "visual_vibe",
         "messages",
+        "expected_consequences",
     }
 )
 COGNITION_GRAPH_MAPPING_DETAIL_KEYS = frozenset(
@@ -77,6 +125,11 @@ COGNITION_GRAPH_MAPPING_DETAIL_KEYS = frozenset(
         "reply_context",
         "user_continuity",
         "conversation_progress",
+        "parallel_execution",
+        "collapse",
+        "selected_intention",
+        "expression_policy",
+        "failure",
     }
 )
 COGNITION_GRAPH_ROW_DETAIL_KEYS = frozenset(
@@ -90,6 +143,9 @@ COGNITION_GRAPH_ROW_DETAIL_KEYS = frozenset(
         "selected_actions",
         "action_results",
         "action_continuation",
+        "appraisal_results",
+        "branch_results",
+        "affect_projection",
     }
 )
 COGNITION_GRAPH_NESTED_DETAIL_KEYS = frozenset(
@@ -123,8 +179,6 @@ COGNITION_GRAPH_NESTED_DETAIL_KEYS = frozenset(
         "resolved_threads",
         "avoid_reopening",
         "overused_moves",
-        "next_affordances",
-        "progression_guidance",
         "current_goal",
         "progress_note",
         "goal",
@@ -168,6 +222,50 @@ COGNITION_GRAPH_NESTED_DETAIL_KEYS = frozenset(
         "scheduled_event_count",
         "cache_evicted_count",
         "write_success",
+        "question_kind",
+        "semantic_question",
+        "explanation",
+        "propositions",
+        "deltas",
+        "proposition_kind",
+        "semantic_value",
+        "delta",
+        "phase",
+        "branch_index",
+        "goal_kind",
+        "selection",
+        "intention",
+        "desired_outcome",
+        "concrete_detail",
+        "private_monologue",
+        "expected_consequences",
+        "failure_code",
+        "stage",
+        "failure_stage",
+        "safe_checkpoint",
+        "retryable",
+        "primary_branch_index",
+        "supporting_branch_indices",
+        "suppressed_branch_indices",
+        "selection_reason",
+        "selected_question_count",
+        "dispatched_question_count",
+        "selected_branch_count",
+        "dispatched_branch_count",
+        "completed_branch_count",
+        "failed_branch_count",
+        "maximum_concurrency",
+        "overlap_ms",
+        "dependency_wait_ms",
+        "total_ms",
+        "emotion",
+        "intensity",
+        "trend",
+        "cause_summary",
+        "route",
+        "visibility",
+        "emotional_tone",
+        "directness",
     }
 )
 COGNITION_GRAPH_FORBIDDEN_DETAIL_KEYS = frozenset(
@@ -197,33 +295,15 @@ COGNITION_GRAPH_FORBIDDEN_DETAIL_PARTS = (
 )
 COGNITION_GRAPH_RAW_KEYS = (
     "cognition_graph",
+    "cognition_snapshot",
+    "self_cognition_graph",
 )
 CognitionGraphSource = Literal[
     "overview_latest",
     "debug_latest",
+    "self_latest",
     "historical",
 ]
-COGNITION_TRIGGER_SOURCES = frozenset(
-    {
-        "user_message",
-        "reflection_signal",
-        "internal_thought",
-        "scheduled_recall",
-        "system_probe",
-        "accepted_task_result_ready",
-    }
-)
-COGNITION_INPUT_SOURCES = frozenset(
-    {
-        "dialog_text",
-        "image_observation",
-        "audio_observation",
-        "internal_monologue",
-        "reflection_artifact",
-        "retrieved_memory",
-        "accepted_task_result",
-    }
-)
 
 
 class KazusaClient:
@@ -234,12 +314,14 @@ class KazusaClient:
         *,
         base_url: str,
         timeout_seconds: float,
+        control_shared_secret: str = "",
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         """Create a client for one brain base URL."""
 
         self._base_url = base_url.rstrip("/")
         self._timeout_seconds = timeout_seconds
+        self._control_shared_secret = control_shared_secret.strip()
         self._transport = transport
 
     async def get_health(self) -> dict[str, Any]:
@@ -273,6 +355,19 @@ class KazusaClient:
         )
         return graph
 
+    async def get_latest_self_cognition_graph(self) -> CognitionRunGraphSnapshot:
+        """Read and project the brain latest self-cognition graph endpoint."""
+
+        async with self._client() as client:
+            response = await client.get("/ops/latest-cognition-graph")
+        response.raise_for_status()
+        payload = response.json()
+        graph = project_cognition_graph_snapshot(
+            source="self_latest",
+            payload=payload if isinstance(payload, dict) else {},
+        )
+        return graph
+
     async def send_debug_chat(
         self,
         request: ConsoleDebugChatRequest,
@@ -281,8 +376,9 @@ class KazusaClient:
 
         started_at = time.perf_counter()
         payload = _debug_chat_payload(request)
+        headers = _debug_chat_headers(self._control_shared_secret)
         async with self._client() as client:
-            response = await client.post("/chat", json=payload)
+            response = await client.post("/chat", json=payload, headers=headers)
         response.raise_for_status()
         response_payload = response.json()
         elapsed_ms = int((time.perf_counter() - started_at) * 1000)
@@ -292,6 +388,13 @@ class KazusaClient:
             "request": redact_mapping(payload),
             "response": _project_debug_chat_response(response_payload),
             "tracking_id": response_payload.get("delivery_tracking_id"),
+            "trace_id": _safe_optional_text(response_payload.get("trace_id")) or "",
+            "delivery_tracking_id": response_payload.get(
+                "delivery_tracking_id",
+            ),
+            "llm_trace_id": _safe_optional_text(
+                response_payload.get("trace_id"),
+            ) or "",
             "latency_ms": elapsed_ms,
             "sent_at": datetime.now(timezone.utc).isoformat(),
             "error": None,
@@ -352,6 +455,18 @@ def _debug_chat_payload(request: ConsoleDebugChatRequest) -> dict[str, Any]:
     return payload
 
 
+def _debug_chat_headers(shared_secret: str) -> dict[str, str]:
+    """Build the Brain-side authorization headers for Debug Chat only."""
+
+    clean_secret = shared_secret.strip()
+    if not clean_secret:
+        return {}
+    return {
+        "X-Kazusa-Control-Console": "debug-v1",
+        "X-Kazusa-Control-Console-Auth": clean_secret,
+    }
+
+
 def _project_debug_chat_response(response_payload: dict[str, Any]) -> dict[str, Any]:
     """Project a brain chat response into a safe operator-debug summary."""
 
@@ -394,8 +509,6 @@ def not_reported_cognition_graph(
     snapshot = CognitionRunGraphSnapshot(
         source=source,
         status="not_reported",
-        trigger_source="not_reported",
-        input_sources=[],
         run_id=run_id,
         generated_at=datetime.now(timezone.utc),
         nodes=[],
@@ -431,21 +544,23 @@ def project_cognition_graph_snapshot(
         )
         return inferred_graph
 
-    trigger_source, input_sources, metadata_reason = (
-        _project_graph_source_metadata(raw_graph)
-    )
-    graph_status = raw_graph.get("status", "partial")
-    if metadata_reason:
-        graph_status = "partial"
     normalized = {
         "source": source,
-        "status": graph_status,
-        "trigger_source": trigger_source,
-        "input_sources": input_sources,
+        "status": raw_graph.get("status", "partial"),
         "run_id": _safe_optional_text(raw_graph.get("run_id")) or inferred_run_id,
+        "llm_trace_id": (
+            _safe_optional_text(raw_graph.get("llm_trace_id"))
+            or _safe_optional_text(payload.get("trace_id"))
+        ),
+        "cognition_invocation_id": _safe_optional_text(
+            raw_graph.get("cognition_invocation_id")
+        ),
+        "source_calendar_run_id": _safe_optional_text(
+            raw_graph.get("source_calendar_run_id")
+        ),
         "generated_at": datetime.now(timezone.utc),
         "nodes": _project_graph_nodes(raw_graph.get("nodes")),
-        "edges": _project_graph_edges(raw_graph.get("edges")),
+        "edges": [],
         "redaction": {
             "detail": (
                 "approved cognition semantic fields preserve full text; "
@@ -459,8 +574,10 @@ def project_cognition_graph_snapshot(
             ],
         },
     }
-    if metadata_reason:
-        normalized["redaction"]["reason"] = metadata_reason
+    normalized["edges"] = _project_graph_edges(
+        raw_graph.get("edges"),
+        node_ids={node["id"] for node in normalized["nodes"]},
+    )
     try:
         snapshot = CognitionRunGraphSnapshot.model_validate(normalized)
     except ValidationError:
@@ -479,7 +596,12 @@ def _first_graph_payload(
 ) -> dict[str, Any] | None:
     """Return the first raw graph-like payload if one is present."""
 
-    for key in COGNITION_GRAPH_RAW_KEYS:
+    keys = (
+        ("self_cognition_graph",)
+        if source == "self_latest"
+        else COGNITION_GRAPH_RAW_KEYS[:2]
+    )
+    for key in keys:
         value = payload.get(key)
         if isinstance(value, dict):
             return value
@@ -514,7 +636,11 @@ def _project_graph_nodes(raw_nodes: Any) -> list[dict[str, Any]]:
     return nodes
 
 
-def _project_graph_edges(raw_edges: Any) -> list[dict[str, Any]]:
+def _project_graph_edges(
+    raw_edges: Any,
+    *,
+    node_ids: set[str] | None = None,
+) -> list[dict[str, Any]]:
     """Project bounded graph edges from external telemetry."""
 
     if not isinstance(raw_edges, list):
@@ -530,6 +656,11 @@ def _project_graph_edges(raw_edges: Any) -> list[dict[str, Any]]:
             "kind": str(raw_edge.get("kind", "sequence")),
             "label": str(raw_edge.get("label", "")),
         }
+        if node_ids is not None and (
+            projected_edge["source"] not in node_ids
+            or projected_edge["target"] not in node_ids
+        ):
+            continue
         try:
             edge = CognitionRunGraphEdge.model_validate(projected_edge)
         except ValidationError:
@@ -550,7 +681,10 @@ def _project_node_detail(raw_detail: Any) -> dict[str, Any]:
             continue
         if raw_key not in COGNITION_GRAPH_DETAIL_KEYS:
             continue
-        if _cognition_graph_key_is_forbidden(raw_key):
+        if (
+            raw_key != "context_consumption"
+            and _cognition_graph_key_is_forbidden(raw_key)
+        ):
             continue
         projected_value = _project_cognition_graph_detail_value(
             raw_key,
@@ -582,6 +716,8 @@ def _project_cognition_graph_detail_value(
 ) -> Any:
     """Project one selected-detail field using its semantic shape."""
 
+    if field_name == "context_consumption":
+        return _project_context_consumption(value)
     if field_name in COGNITION_GRAPH_SCALAR_DETAIL_KEYS:
         return _project_cognition_graph_scalar(value)
     if field_name in COGNITION_GRAPH_TEXT_LIST_DETAIL_KEYS:
@@ -591,6 +727,21 @@ def _project_cognition_graph_detail_value(
     if field_name in COGNITION_GRAPH_ROW_DETAIL_KEYS:
         return _project_cognition_graph_rows(value)
     return None
+
+
+def _project_context_consumption(value: Any) -> dict[str, Any] | None:
+    """Validate the dedicated public context-consumption graph contract."""
+
+    if not isinstance(value, Mapping):
+        return None
+    redacted = redact_context_consumption(value)
+    if not redacted:
+        return None
+    try:
+        consumption = CognitionContextConsumption.model_validate(redacted)
+    except ValidationError:
+        return None
+    return consumption.model_dump(mode="json")
 
 
 def _project_cognition_graph_scalar(value: Any) -> Any:
@@ -751,22 +902,21 @@ def _project_known_cognition_fields(
             "label": "",
         })
 
-    trigger_source, input_sources, metadata_reason = (
-        _project_graph_source_metadata(payload)
-    )
     if not nodes:
-        snapshot = not_reported_cognition_graph(
-            source=source,
-            run_id=run_id,
-        )
+        snapshot = not_reported_cognition_graph(source=source, run_id=run_id)
         return snapshot
 
     snapshot = CognitionRunGraphSnapshot(
         source=source,
         status="partial",
-        trigger_source=trigger_source,
-        input_sources=input_sources,
         run_id=run_id,
+        llm_trace_id=_safe_optional_text(payload.get("trace_id")),
+        cognition_invocation_id=_safe_optional_text(
+            payload.get("cognition_invocation_id")
+        ),
+        source_calendar_run_id=_safe_optional_text(
+            payload.get("source_calendar_run_id")
+        ),
         generated_at=datetime.now(timezone.utc),
         nodes=[
             CognitionRunGraphNode.model_validate(node)
@@ -784,56 +934,9 @@ def _project_known_cognition_fields(
                 "raw messages",
                 "message envelopes",
             ],
-            **({"reason": metadata_reason} if metadata_reason else {}),
         },
     )
     return snapshot
-
-
-def _project_graph_source_metadata(
-    raw_graph: Mapping[str, Any],
-) -> tuple[str, list[str], str | None]:
-    """Project bounded trigger metadata without source inference."""
-
-    raw_trigger_source = raw_graph.get("trigger_source")
-    if raw_trigger_source is None:
-        trigger_source = "not_reported"
-        trigger_reason = "trigger_source_missing"
-    elif raw_trigger_source == "not_reported":
-        trigger_source = "not_reported"
-        trigger_reason = None
-    elif (
-        isinstance(raw_trigger_source, str)
-        and raw_trigger_source in COGNITION_TRIGGER_SOURCES
-    ):
-        trigger_source = raw_trigger_source
-        trigger_reason = None
-    else:
-        trigger_source = "not_reported"
-        trigger_reason = "trigger_source_invalid"
-
-    raw_input_sources = raw_graph.get("input_sources")
-    input_sources: list[str] = []
-    input_reason: str | None = None
-    if raw_input_sources is None:
-        input_reason = None
-    elif not isinstance(raw_input_sources, list):
-        input_reason = "input_sources_invalid"
-    else:
-        if len(raw_input_sources) > 8:
-            input_reason = "input_sources_bounded"
-        for raw_input_source in raw_input_sources[:8]:
-            if (
-                isinstance(raw_input_source, str)
-                and raw_input_source in COGNITION_INPUT_SOURCES
-            ):
-                if raw_input_source not in input_sources:
-                    input_sources.append(raw_input_source)
-            else:
-                input_reason = "input_sources_invalid"
-
-    reason = trigger_reason or input_reason
-    return trigger_source, input_sources, reason
 
 
 def _has_any(payload: dict[str, Any], keys: tuple[str, ...]) -> bool:

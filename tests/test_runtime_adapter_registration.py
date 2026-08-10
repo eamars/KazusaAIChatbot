@@ -10,10 +10,12 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
+from pydantic import ValidationError
 
 import adapters.delivery_receipts as delivery_receipts_module
 import adapters.discord_adapter as discord_module
@@ -439,12 +441,79 @@ def test_register_remote_runtime_adapter_registers_proxy_in_service(monkeypatch)
         callback_url="http://127.0.0.1:8011",
         shared_secret="secret-token",
         timeout_seconds=7.5,
+        platform_bot_id="3768713357",
     )
 
     assert registry.has("qq")
     adapter = registry.get("qq")
     assert isinstance(adapter, RemoteHttpAdapter)
     assert adapter.platform == "qq"
+    assert adapter.platform_bot_id == "3768713357"
+    assert not hasattr(adapter, "display_name")
+
+
+def test_runtime_registration_request_rejects_adapter_display_name() -> None:
+    """The big-bang request must reject the removed adapter name field."""
+
+    with pytest.raises(ValidationError):
+        service_module.RuntimeAdapterRegistrationRequest(
+            platform="qq",
+            callback_url="http://127.0.0.1:8011",
+            platform_bot_id="3768713357",
+            display_name='杏山千纱',
+        )
+
+
+def test_runtime_registration_request_requires_platform_bot_id() -> None:
+    """Every registered adapter must identify its native bot account."""
+
+    with pytest.raises(ValidationError):
+        service_module.RuntimeAdapterRegistrationRequest(
+            platform="qq",
+            callback_url="http://127.0.0.1:8011",
+        )
+
+
+def test_runtime_registration_response_requires_character_name() -> None:
+    """Every successful registration response must carry the brain name."""
+
+    with pytest.raises(ValidationError):
+        service_module.RuntimeAdapterRegistrationResponse(
+            status="registered",
+            platform="qq",
+            callback_url="http://127.0.0.1:8011",
+        )
+
+
+def test_runtime_registration_rejects_non_string_active_name(
+    monkeypatch,
+) -> None:
+    """The brain must reject malformed configured character identity."""
+
+    payload = service_module.RuntimeAdapterRegistrationRequest(
+        platform="qq",
+        callback_url="http://127.0.0.1:8011",
+        platform_bot_id="3768713357",
+    )
+    register_remote = MagicMock()
+    monkeypatch.setattr(
+        service_module,
+        "register_remote_runtime_adapter",
+        register_remote,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_active_character_name_snapshot",
+        None,
+    )
+
+    with pytest.raises(ValueError, match="character profile name must be a string"):
+        service_module._register_runtime_adapter_payload(
+            payload,
+            status="registered",
+        )
+
+    register_remote.assert_not_called()
 
 
 def test_register_runtime_adapter_payload_reuses_remote_registration(monkeypatch):
@@ -455,9 +524,15 @@ def test_register_runtime_adapter_payload_reuses_remote_registration(monkeypatch
         callback_url="http://127.0.0.1:8011",
         shared_secret="secret-token",
         timeout_seconds=9.0,
+        platform_bot_id="3768713357",
     )
     register_remote = MagicMock()
     monkeypatch.setattr(service_module, "register_remote_runtime_adapter", register_remote)
+    monkeypatch.setattr(
+        service_module,
+        "_active_character_name_snapshot",
+        '一之濑明日奈',
+    )
 
     response = service_module._register_runtime_adapter_payload(payload, status="heartbeat_ok")
 
@@ -466,9 +541,45 @@ def test_register_runtime_adapter_payload_reuses_remote_registration(monkeypatch
         callback_url="http://127.0.0.1:8011",
         shared_secret="secret-token",
         timeout_seconds=9.0,
+        platform_bot_id="3768713357",
     )
     assert response.status == "heartbeat_ok"
     assert response.platform == "qq"
+    assert response.character_name == '一之濑明日奈'
+
+
+@pytest.mark.asyncio
+async def test_adapter_heartbeat_refreshes_latest_identity_name(
+    monkeypatch,
+) -> None:
+    """Adapter-visible naming should refresh before each heartbeat response."""
+
+    payload = service_module.RuntimeAdapterRegistrationRequest(
+        platform="qq",
+        callback_url="http://127.0.0.1:8011",
+        platform_bot_id="bot-1",
+    )
+
+    async def refresh_profile():
+        service_module._active_character_name_snapshot = "revision-new-name"
+        return {"name": "revision-new-name"}
+
+    monkeypatch.setattr(
+        service_module,
+        "_load_latest_character_profile_snapshot",
+        AsyncMock(side_effect=refresh_profile),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "register_remote_runtime_adapter",
+        MagicMock(),
+    )
+
+    response = await service_module.runtime_adapter_heartbeat_endpoint(
+        payload,
+    )
+
+    assert response.character_name == "revision-new-name"
 
 
 def test_self_cognition_uses_registered_runtime_adapter() -> None:
@@ -493,6 +604,7 @@ async def test_remote_http_adapter_posts_send_message_payload(monkeypatch):
     adapter = RemoteHttpAdapter(
         platform="qq",
         callback_url="http://127.0.0.1:8011",
+        platform_bot_id="3768713357",
         shared_secret="secret-token",
         timeout_seconds=7.5,
     )
@@ -536,6 +648,7 @@ async def test_remote_http_adapter_posts_send_message_capability_payload(
     adapter = RemoteHttpAdapter(
         platform="qq",
         callback_url="http://127.0.0.1:8011",
+        platform_bot_id="3768713357",
         shared_secret="secret-token",
         timeout_seconds=7.5,
     )
@@ -677,6 +790,7 @@ async def test_napcat_hydrates_reply_target_from_platform_get_msg():
         debug_modes={},
     )
     adapter.bot_id = "3768713357"
+    adapter.character_name = '一之濑明日奈'
     ws = _FakeNapCatWebSocket({
         "message_id": 1733223276,
         "user_id": 3768713357,
@@ -690,7 +804,7 @@ async def test_napcat_hydrates_reply_target_from_platform_get_msg():
     assert reply_context == {
         "reply_to_message_id": "1733223276",
         "reply_to_platform_user_id": "3768713357",
-        "reply_to_display_name": '杏山千纱',
+        "reply_to_display_name": '一之濑明日奈',
         "reply_excerpt": '上一条千纱消息',
     }
     assert ws.sent_payloads[0]["action"] == "get_msg"
@@ -748,7 +862,7 @@ async def test_napcat_handle_event_forwards_typed_bot_reply_metadata():
         debug_modes={},
     )
     adapter.bot_id = "3768713357"
-    adapter.bot_name = '杏山千纱'
+    adapter.character_name = '一之濑明日奈'
     adapter.brain_client.post = AsyncMock(return_value=_DummyResponse({
         "messages": [],
         "use_reply_feature": False,
@@ -787,6 +901,7 @@ async def test_napcat_handle_event_forwards_typed_bot_reply_metadata():
     assert payload["message_envelope"]["reply"]["platform_user_id"] == "3768713357"
     assert payload["message_envelope"]["reply"]["platform_message_id"] == "1733223276"
     assert payload["message_envelope"]["reply"]["global_user_id"]
+    assert payload["message_envelope"]["reply"]["display_name"] == '一之濑明日奈'
     assert payload["message_envelope"]["addressed_to_global_user_ids"]
     await adapter.close()
 
@@ -807,7 +922,7 @@ async def test_napcat_handle_event_sends_readable_bot_mention_and_typed_envelope
         debug_modes={},
     )
     adapter.bot_id = "3768713357"
-    adapter.bot_name = "Kazusa"
+    adapter.character_name = '一之濑明日奈'
     adapter.brain_client.post = AsyncMock(return_value=_DummyResponse({
         "messages": [],
         "use_reply_feature": False,
@@ -840,13 +955,16 @@ async def test_napcat_handle_event_sends_readable_bot_mention_and_typed_envelope
     assert "content" not in payload
     assert all(key != "mentioned" + "_bot" for key in payload)
     assert payload["message_envelope"]["body_text"] == (
-        '@Kazusa what does this mean? <image>大怨种表情</image>'
+        '@一之濑明日奈 what does this mean? <image>大怨种表情</image>'
     )
     assert payload["message_envelope"]["raw_wire_text"].startswith(
         "[CQ:reply,id=1733223276]"
     )
     assert payload["message_envelope"]["mentions"][0]["entity_kind"] == "bot"
-    assert payload["message_envelope"]["mentions"][0]["display_name"] == "Kazusa"
+    assert (
+        payload["message_envelope"]["mentions"][0]["display_name"]
+        == '一之濑明日奈'
+    )
     assert payload["message_envelope"]["addressed_to_global_user_ids"]
     await adapter.close()
 
@@ -867,7 +985,7 @@ async def test_napcat_handle_event_projects_segment_list_face_to_body_text():
         debug_modes={},
     )
     adapter.bot_id = "3768713357"
-    adapter.bot_name = "Kazusa"
+    adapter.character_name = "Kazusa"
     adapter.brain_client.post = AsyncMock(return_value=_DummyResponse({
         "messages": [],
         "use_reply_feature": False,
@@ -917,7 +1035,7 @@ async def test_napcat_handle_event_omits_unknown_segment_list_face() -> None:
         debug_modes={},
     )
     adapter.bot_id = "3768713357"
-    adapter.bot_name = "Kazusa"
+    adapter.character_name = "Kazusa"
     adapter.brain_client.post = AsyncMock(return_value=_DummyResponse({
         "messages": [],
         "use_reply_feature": False,
@@ -961,7 +1079,7 @@ async def test_napcat_handle_event_uses_segment_nickname_without_lookup():
         debug_modes={},
     )
     adapter.bot_id = "3768713357"
-    adapter.bot_name = "Kazusa"
+    adapter.character_name = "Kazusa"
     adapter.brain_client.post = AsyncMock(return_value=_DummyResponse({
         "messages": [],
         "use_reply_feature": False,
@@ -1015,7 +1133,7 @@ async def test_napcat_handle_event_hydrates_human_mention_nickname_and_cache():
         debug_modes={},
     )
     adapter.bot_id = "3768713357"
-    adapter.bot_name = "Kazusa"
+    adapter.character_name = "Kazusa"
     adapter.brain_client.post = AsyncMock(return_value=_DummyResponse({
         "messages": [],
         "use_reply_feature": False,
@@ -1127,7 +1245,7 @@ async def test_napcat_handle_event_uses_platform_neutral_label_when_lookup_fails
         debug_modes={},
     )
     adapter.bot_id = "3768713357"
-    adapter.bot_name = "Kazusa"
+    adapter.character_name = "Kazusa"
     adapter.brain_client.post = AsyncMock(return_value=_DummyResponse({
         "messages": [],
         "use_reply_feature": False,
@@ -1175,7 +1293,7 @@ async def test_napcat_reply_excerpt_reuses_hydrated_current_mention_label():
         debug_modes={},
     )
     adapter.bot_id = "3768713357"
-    adapter.bot_name = "Kazusa"
+    adapter.character_name = "Kazusa"
     adapter.brain_client.post = AsyncMock(return_value=_DummyResponse({
         "messages": [],
         "use_reply_feature": False,
@@ -1240,7 +1358,7 @@ async def test_napcat_reply_excerpt_hydrates_reply_only_mentions():
         debug_modes={},
     )
     adapter.bot_id = "3768713357"
-    adapter.bot_name = "Kazusa"
+    adapter.character_name = "Kazusa"
     adapter.brain_client.post = AsyncMock(return_value=_DummyResponse({
         "messages": [],
         "use_reply_feature": False,
@@ -1322,7 +1440,7 @@ async def test_napcat_handle_event_bounds_duplicate_timeout_lookups(
         debug_modes={},
     )
     adapter.bot_id = "3768713357"
-    adapter.bot_name = "Kazusa"
+    adapter.character_name = "Kazusa"
     adapter.brain_client.post = AsyncMock(return_value=_DummyResponse({
         "messages": [],
         "use_reply_feature": False,
@@ -1372,7 +1490,7 @@ async def test_napcat_handle_event_sends_reply_as_message_segments():
         debug_modes={},
     )
     adapter.bot_id = "3768713357"
-    adapter.bot_name = "Kazusa"
+    adapter.character_name = "Kazusa"
     adapter.brain_client.post = AsyncMock(return_value=_DummyResponse({
         "messages": ["hello there"],
         "use_reply_feature": True,
@@ -1424,7 +1542,7 @@ async def test_napcat_handle_event_replaces_inline_delivery_mention_from_brain()
         debug_modes={},
     )
     adapter.bot_id = "3768713357"
-    adapter.bot_name = "Kazusa"
+    adapter.character_name = "Kazusa"
     adapter.brain_client.post = AsyncMock(return_value=_DummyResponse({
         "messages": ["@Target User hello there"],
         "use_reply_feature": False,
@@ -1483,7 +1601,7 @@ async def test_napcat_handle_event_sends_brain_messages_as_sequence_with_first_r
         debug_modes={},
     )
     adapter.bot_id = "3768713357"
-    adapter.bot_name = "Kazusa"
+    adapter.character_name = "Kazusa"
     adapter.brain_client.post = AsyncMock(side_effect=[
         _DummyResponse({
             "messages": ["first", "second"],
@@ -1556,7 +1674,7 @@ async def test_napcat_handle_event_replaces_inline_delivery_mentions_across_mess
         debug_modes={},
     )
     adapter.bot_id = "3768713357"
-    adapter.bot_name = "Kazusa"
+    adapter.character_name = "Kazusa"
     adapter.brain_client.post = AsyncMock(side_effect=[
         _DummyResponse({
             "messages": ["@Target User first", "second @Target User"],
@@ -1632,7 +1750,7 @@ async def test_napcat_handle_event_does_not_wait_for_followup_delay(
         debug_modes={},
     )
     adapter.bot_id = "3768713357"
-    adapter.bot_name = "Kazusa"
+    adapter.character_name = "Kazusa"
     adapter.brain_client.post = AsyncMock(side_effect=[
         _DummyResponse({
             "messages": ["first", "second"],
@@ -1696,7 +1814,7 @@ async def test_napcat_handle_event_posts_delivery_receipt_after_send():
         debug_modes={},
     )
     adapter.bot_id = "3768713357"
-    adapter.bot_name = "Kazusa"
+    adapter.character_name = "Kazusa"
     adapter.brain_client.post = AsyncMock(side_effect=[
         _DummyResponse({
             "messages": ["hello there"],
@@ -1734,6 +1852,70 @@ async def test_napcat_handle_event_posts_delivery_receipt_after_send():
 
 
 @pytest.mark.asyncio
+async def test_napcat_operational_response_is_sent_without_normal_receipt():
+    """QQ should deliver an operational notice without normal-chat follow-up."""
+
+    adapter = NapCatWSAdapter(
+        ws_url="ws://napcat.local/ws",
+        ws_token="token",
+        brain_url="http://127.0.0.1:8000",
+        brain_response_timeout=30,
+        runtime_host="127.0.0.1",
+        runtime_port=8011,
+        runtime_public_url="http://127.0.0.1:8011",
+        channel_ids=["905393941"],
+        debug_modes={},
+    )
+    adapter.bot_id = "3768713357"
+    adapter.character_name = "Kazusa"
+    adapter.brain_client.post = AsyncMock(return_value=_DummyResponse({
+        "messages": ["operational notice"],
+        "content_type": "operational_error",
+        "operational_error": {
+            "error_code": "goal_bid_structure_exhausted",
+            "status": "exhausted",
+            "retryable": True,
+            "exhausted": True,
+            "attempt_count": 2,
+            "correlation_id": "chat:qq:correlation:message",
+            "trace_id": "trace-1",
+            "branch_id": "ordinary_response",
+            "stage": "goal_cognition",
+        },
+        "delivery_tracking_id": "",
+    }))
+    ws = _FakeNapCatWebSocket({
+        "message_id": 1602974844,
+        "user_id": 2787858400,
+        "sender": {"nickname": "User A"},
+        "raw_message": " hi",
+    })
+
+    await adapter.handle_event(
+        {
+            "post_type": "message",
+            "message_type": "group",
+            "message_id": 1602974844,
+            "group_id": 905393941,
+            "user_id": 2787858400,
+            "sender": {"nickname": "User A"},
+            "message": [{"type": "text", "data": {"text": " hi"}}],
+        },
+        ws,
+    )
+
+    send_payloads = [
+        payload
+        for payload in ws.sent_payloads
+        if payload["action"] == "send_msg"
+    ]
+    assert len(send_payloads) == 1
+    assert adapter.brain_client.post.await_count == 1
+    assert send_payloads[0]["params"]["message"] == "operational notice"
+    await adapter.close()
+
+
+@pytest.mark.asyncio
 async def test_napcat_delivery_receipt_retries_once_on_not_found(monkeypatch):
     """A not-found receipt should retry and stop after an updated response."""
 
@@ -1751,7 +1933,7 @@ async def test_napcat_delivery_receipt_retries_once_on_not_found(monkeypatch):
         debug_modes={},
     )
     adapter.bot_id = "3768713357"
-    adapter.bot_name = "Kazusa"
+    adapter.character_name = "Kazusa"
     adapter.brain_client.post = AsyncMock(side_effect=[
         _DummyResponse({
             "messages": ["hello there"],
@@ -1806,7 +1988,7 @@ async def test_napcat_delivery_receipt_stops_after_three_not_found(
         debug_modes={},
     )
     adapter.bot_id = "3768713357"
-    adapter.bot_name = "Kazusa"
+    adapter.character_name = "Kazusa"
     adapter.brain_client.post = AsyncMock(side_effect=[
         _DummyResponse({
             "messages": ["hello there"],
@@ -1861,7 +2043,7 @@ async def test_napcat_delivery_receipt_transport_failure_does_not_retry(
         debug_modes={},
     )
     adapter.bot_id = "3768713357"
-    adapter.bot_name = "Kazusa"
+    adapter.character_name = "Kazusa"
     adapter.brain_client.post = AsyncMock(side_effect=[
         _DummyResponse({
             "messages": ["hello there"],
@@ -1910,7 +2092,7 @@ async def test_napcat_delivery_receipt_skips_empty_tracking_id():
         debug_modes={},
     )
     adapter.bot_id = "3768713357"
-    adapter.bot_name = "Kazusa"
+    adapter.character_name = "Kazusa"
     adapter.brain_client.post = AsyncMock(return_value=_DummyResponse({
         "messages": ["hello there"],
         "use_reply_feature": False,
@@ -1951,7 +2133,7 @@ async def test_napcat_delivery_receipt_skips_when_send_fails():
         debug_modes={},
     )
     adapter.bot_id = "3768713357"
-    adapter.bot_name = "Kazusa"
+    adapter.character_name = "Kazusa"
     adapter.brain_client.post = AsyncMock(return_value=_DummyResponse({
         "messages": ["hello there"],
         "use_reply_feature": False,
@@ -1992,7 +2174,7 @@ async def test_napcat_suppresses_normal_response_for_unlisted_group() -> None:
         debug_modes={},
     )
     adapter.bot_id = "3768713357"
-    adapter.bot_name = "Kazusa"
+    adapter.character_name = "Kazusa"
     adapter.brain_client.post = AsyncMock(return_value=_DummyResponse({
         "messages": ["this should stay local"],
         "use_reply_feature": False,
@@ -2383,7 +2565,13 @@ async def test_napcat_register_with_brain_posts_runtime_callback(monkeypatch):
         channel_ids=["54369546"],
         debug_modes={},
     )
-    post = AsyncMock(return_value=_DummyResponse({"status": "registered"}))
+    adapter.bot_id = "3768713357"
+    post = AsyncMock(return_value=_DummyResponse({
+        "status": "registered",
+        "platform": "qq",
+        "callback_url": "http://127.0.0.1:8011",
+        "character_name": '一之濑明日奈',
+    }))
     adapter.brain_client.post = post
 
     await adapter._register_with_brain()
@@ -2395,8 +2583,10 @@ async def test_napcat_register_with_brain_posts_runtime_callback(monkeypatch):
             "callback_url": "http://127.0.0.1:8011",
             "shared_secret": "secret-token",
             "timeout_seconds": 10.0,
+            "platform_bot_id": "3768713357",
         },
     )
+    assert adapter.character_name == '一之濑明日奈'
     await adapter.close()
 
 
@@ -2417,7 +2607,14 @@ async def test_napcat_heartbeat_posts_runtime_callback(monkeypatch):
         channel_ids=["54369546"],
         debug_modes={},
     )
-    post = AsyncMock(return_value=_DummyResponse({"status": "heartbeat_ok"}))
+    adapter.bot_id = "3768713357"
+    adapter.character_name = '杏山千纱'
+    post = AsyncMock(return_value=_DummyResponse({
+        "status": "heartbeat_ok",
+        "platform": "qq",
+        "callback_url": "http://127.0.0.1:8011",
+        "character_name": '一之濑明日奈',
+    }))
     adapter.brain_client.post = post
 
     await adapter._send_heartbeat_once()
@@ -2429,8 +2626,72 @@ async def test_napcat_heartbeat_posts_runtime_callback(monkeypatch):
             "callback_url": "http://127.0.0.1:8011",
             "shared_secret": "secret-token",
             "timeout_seconds": 10.0,
+            "platform_bot_id": "3768713357",
         },
     )
+    assert adapter.character_name == '一之濑明日奈'
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_napcat_rejects_registration_response_without_brain_name():
+    """NapCat must not replace a validated brain name with platform state."""
+
+    adapter = NapCatWSAdapter(
+        ws_url="ws://napcat.local/ws",
+        ws_token="token",
+        brain_url="http://127.0.0.1:8000",
+        brain_response_timeout=30,
+        runtime_host="127.0.0.1",
+        runtime_port=8011,
+        runtime_public_url="http://127.0.0.1:8011",
+        runtime_shared_secret="secret-token",
+        channel_ids=["54369546"],
+        debug_modes={},
+    )
+    adapter.bot_id = "3768713357"
+    adapter.character_name = '一之濑明日奈'
+    adapter.brain_client.post = AsyncMock(return_value=_DummyResponse({
+        "status": "heartbeat_ok",
+        "platform": "qq",
+        "callback_url": "http://127.0.0.1:8011",
+    }))
+
+    with pytest.raises(ValueError, match="character_name"):
+        await adapter._send_heartbeat_once()
+
+    assert adapter.character_name == '一之濑明日奈'
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_napcat_login_info_ignores_platform_bot_nickname():
+    """NapCat login discovery should retain only transport account identity."""
+
+    adapter = NapCatWSAdapter(
+        ws_url="ws://napcat.local/ws",
+        ws_token="token",
+        brain_url="http://127.0.0.1:8000",
+        brain_response_timeout=30,
+        runtime_host="127.0.0.1",
+        runtime_port=8011,
+        runtime_public_url="http://127.0.0.1:8011",
+        channel_ids=["54369546"],
+        debug_modes={},
+    )
+    adapter._call_api = AsyncMock(return_value={
+        "status": "ok",
+        "data": {
+            "user_id": 3768713357,
+            "nickname": '杏山千纱',
+        },
+    })
+
+    await adapter._fetch_bot_info(object())
+
+    assert adapter.bot_id == "3768713357"
+    assert adapter.character_name == ""
+    assert not hasattr(adapter, "bot_name")
     await adapter.close()
 
 
@@ -2447,7 +2708,16 @@ async def test_discord_register_with_brain_posts_runtime_callback():
         channel_ids=["12345"],
         debug_modes={},
     )
-    post = AsyncMock(return_value=_DummyResponse({"status": "registered"}))
+    adapter._connection.user = SimpleNamespace(
+        id=123456789,
+        display_name='杏山千纱',
+    )
+    post = AsyncMock(return_value=_DummyResponse({
+        "status": "registered",
+        "platform": "discord",
+        "callback_url": "http://127.0.0.1:8012",
+        "character_name": '一之濑明日奈',
+    }))
     adapter._http_client.post = post
 
     await adapter._register_with_brain()
@@ -2459,8 +2729,10 @@ async def test_discord_register_with_brain_posts_runtime_callback():
             "callback_url": "http://127.0.0.1:8012",
             "shared_secret": "secret-token",
             "timeout_seconds": 10.0,
+            "platform_bot_id": "123456789",
         },
     )
+    assert adapter.character_name == '一之濑明日奈'
     await adapter.close()
 
 
@@ -2478,7 +2750,17 @@ async def test_discord_heartbeat_posts_runtime_callback():
         channel_ids=["12345"],
         debug_modes={},
     )
-    post = AsyncMock(return_value=_DummyResponse({"status": "heartbeat_ok"}))
+    adapter._connection.user = SimpleNamespace(
+        id=123456789,
+        display_name='杏山千纱',
+    )
+    adapter.character_name = '杏山千纱'
+    post = AsyncMock(return_value=_DummyResponse({
+        "status": "heartbeat_ok",
+        "platform": "discord",
+        "callback_url": "http://127.0.0.1:8012",
+        "character_name": '一之濑明日奈',
+    }))
     adapter._http_client.post = post
 
     await adapter._send_heartbeat_once()
@@ -2490,8 +2772,45 @@ async def test_discord_heartbeat_posts_runtime_callback():
             "callback_url": "http://127.0.0.1:8012",
             "shared_secret": "secret-token",
             "timeout_seconds": 10.0,
+            "platform_bot_id": "123456789",
         },
     )
+    assert adapter.character_name == '一之濑明日奈'
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_discord_heartbeat_loop_retains_name_when_account_id_is_unavailable(
+    monkeypatch,
+) -> None:
+    """A transient missing Discord account id must not stop heartbeats."""
+
+    adapter = DiscordAdapter(
+        brain_url="http://127.0.0.1:8000",
+        runtime_host="127.0.0.1",
+        runtime_port=8012,
+        runtime_public_url="http://127.0.0.1:8012",
+        runtime_shared_secret="secret-token",
+        heartbeat_seconds=30.0,
+        channel_ids=["12345"],
+        debug_modes={},
+    )
+    adapter.character_name = '一之濑明日奈'
+    adapter._send_heartbeat_once = AsyncMock(side_effect=[
+        RuntimeError("Discord bot account id is required"),
+        asyncio.CancelledError(),
+    ])
+
+    async def no_heartbeat_delay(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(discord_module.asyncio, "sleep", no_heartbeat_delay)
+
+    with pytest.raises(asyncio.CancelledError):
+        await adapter._run_brain_heartbeat()
+
+    assert adapter._send_heartbeat_once.await_count == 2
+    assert adapter.character_name == '一之濑明日奈'
     await adapter.close()
 
 
@@ -2515,6 +2834,8 @@ async def test_discord_handle_message_posts_first_delivery_receipt(
         channel_ids=["12345"],
         debug_modes={},
     )
+    adapter.character_name = "Character"
+    adapter._connection.user = SimpleNamespace(id=123456789)
     adapter._http_client.post = AsyncMock(side_effect=[
         _DummyResponse({
             "messages": ["first chunk\nsecond chunk"],
@@ -2555,6 +2876,8 @@ async def test_discord_on_message_replaces_inline_delivery_mention_from_brain():
         channel_ids=["12345"],
         debug_modes={},
     )
+    adapter.character_name = "Character"
+    adapter._connection.user = SimpleNamespace(id=123456789)
     adapter._http_client.post = AsyncMock(return_value=_DummyResponse({
         "messages": ["@Target User hello there"],
         "use_reply_feature": False,
@@ -2589,6 +2912,8 @@ async def test_discord_handle_message_sends_brain_messages_as_sequence_with_firs
         channel_ids=["12345"],
         debug_modes={},
     )
+    adapter.character_name = "Character"
+    adapter._connection.user = SimpleNamespace(id=123456789)
     adapter._http_client.post = AsyncMock(side_effect=[
         _DummyResponse({
             "messages": ["first", "second"],
@@ -2638,6 +2963,8 @@ async def test_discord_on_message_replaces_inline_delivery_mentions_across_messa
         channel_ids=["12345"],
         debug_modes={},
     )
+    adapter.character_name = "Character"
+    adapter._connection.user = SimpleNamespace(id=123456789)
     adapter._http_client.post = AsyncMock(side_effect=[
         _DummyResponse({
             "messages": ["@Target User first", "second @Target User"],
@@ -2690,6 +3017,8 @@ async def test_discord_on_message_does_not_wait_for_followup_delay(
         channel_ids=["12345"],
         debug_modes={},
     )
+    adapter.character_name = "Character"
+    adapter._connection.user = SimpleNamespace(id=123456789)
     adapter._http_client.post = AsyncMock(side_effect=[
         _DummyResponse({
             "messages": ["first", "second"],
@@ -2727,6 +3056,8 @@ async def test_discord_suppresses_normal_response_for_unlisted_group() -> None:
         channel_ids=["12345"],
         debug_modes={},
     )
+    adapter.character_name = "Character"
+    adapter._connection.user = SimpleNamespace(id=123456789)
     adapter._http_client.post = AsyncMock(return_value=_DummyResponse({
         "messages": ["this should stay local"],
         "use_reply_feature": False,
@@ -3029,6 +3360,8 @@ async def test_discord_delivery_receipt_transport_failure_does_not_retry(
         channel_ids=["12345"],
         debug_modes={},
     )
+    adapter.character_name = "Character"
+    adapter._connection.user = SimpleNamespace(id=123456789)
     adapter._http_client.post = AsyncMock(side_effect=[
         _DummyResponse({
             "messages": ["hello there"],
@@ -3064,6 +3397,8 @@ async def test_discord_delivery_receipt_skips_empty_tracking_id():
         channel_ids=["12345"],
         debug_modes={},
     )
+    adapter.character_name = "Character"
+    adapter._connection.user = SimpleNamespace(id=123456789)
     adapter._http_client.post = AsyncMock(return_value=_DummyResponse({
         "messages": ["hello there"],
         "use_reply_feature": False,

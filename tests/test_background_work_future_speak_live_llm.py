@@ -24,19 +24,12 @@ from kazusa_ai_chatbot.action_spec.registry import (
     project_prompt_affordances,
 )
 from kazusa_ai_chatbot.background_work.worker import run_background_work_worker_tick
-from kazusa_ai_chatbot.cognition_chain_core.contracts import LLMStageBinding
-from kazusa_ai_chatbot.cognition_chain_core.stages import l2d
-from kazusa_ai_chatbot.cognition_chain_core.stages.l2d import (
-    build_action_selection_payload_text,
-    select_semantic_actions,
-)
 from kazusa_ai_chatbot.config import COGNITION_LLM_BASE_URL
 from kazusa_ai_chatbot.db import (
     close_db,
     db_bootstrap,
     get_character_profile,
     resolve_global_user_id,
-    split_character_profile_runtime_state,
 )
 from kazusa_ai_chatbot.db._client import get_db
 from kazusa_ai_chatbot.db.background_work_jobs import (
@@ -48,7 +41,7 @@ from kazusa_ai_chatbot.nodes import (
     persona_supervisor2_cognition_actions as action_connector,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
-    build_cognition_chain_services,
+    build_cognition_core_services,
 )
 from kazusa_ai_chatbot.self_cognition import worker as self_cognition_worker
 from kazusa_ai_chatbot.utils import parse_llm_json_output
@@ -81,10 +74,10 @@ async def test_live_l2d_future_speak_runs_real_background_worker() -> None:
     run_id = uuid4().hex
     frozen_state = _future_speak_l2d_state(run_id)
     prompt_payload = build_action_selection_payload_text(frozen_state)
-    services = build_cognition_chain_services()
+    services = build_cognition_core_services()
     capturing_llm = _CapturingLLM(services.llm)
     token = l2d.set_action_selection_llm(
-        LLMStageBinding(capturing_llm, services.action_selection_config)
+        LLMStageBinding(capturing_llm, services.action_planning_config)
     )
 
     job_id = ""
@@ -302,10 +295,7 @@ async def test_live_user_message_future_speak_e2e_feedback_handover() -> None:
         character_profile = await get_character_profile()
         if not character_profile.get("name"):
             pytest.fail("Character profile is missing from MongoDB.")
-        (
-            brain_service._static_character_profile,
-            brain_service._runtime_character_state,
-        ) = split_character_profile_runtime_state(character_profile)
+        brain_service._adopt_character_profile_snapshot(character_profile)
         brain_service._graph = brain_service._build_graph()
 
         request = _future_speak_chat_request(
@@ -712,7 +702,7 @@ def _future_speak_l2d_state(run_id: str) -> dict[str, Any]:
         "character_profile": {
             "name": "杏山千纱",
             "mood": "calm",
-            "global_vibe": "focused and helpful",
+            "vibe_check": "focused and helpful",
         },
         "storage_timestamp_utc": "2026-07-02T00:00:00+00:00",
         "local_time_context": {
@@ -738,8 +728,8 @@ def _future_speak_l2d_state(run_id: str) -> dict[str, Any]:
         "user_name": "Live Future Speak User",
         "user_profile": {
             "display_name": "Live Future Speak User",
-            "affinity": 100,
-            "last_relationship_insight": "Test user for future-speak proof.",
+            "relationship_state": 100,
+            "semantic_relationship_projection": "Test user for future-speak proof.",
         },
         "platform_bot_id": "debug-bot-future-speak-live",
         "chat_history_recent": [],
@@ -747,7 +737,7 @@ def _future_speak_l2d_state(run_id: str) -> dict[str, Any]:
         "indirect_speech_context": "",
         "channel_topic": "private reminder request",
         "referents": [],
-        "decontexualized_input": (
+        "decontextualized_input": (
             "The user asks Kazusa to remind them tomorrow at 09:00 to drink "
             "water."
         ),

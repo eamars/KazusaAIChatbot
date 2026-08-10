@@ -6,52 +6,44 @@ import os
 import subprocess
 import sys
 
+import pytest
 
-REQUIRED_ROUTE_ENV_VARS = (
-    "RELEVANCE_AGENT_LLM_BASE_URL",
-    "RELEVANCE_AGENT_LLM_API_KEY",
-    "RELEVANCE_AGENT_LLM_MODEL",
-    "VISION_DESCRIPTOR_LLM_BASE_URL",
-    "VISION_DESCRIPTOR_LLM_API_KEY",
-    "VISION_DESCRIPTOR_LLM_MODEL",
-    "MSG_DECONTEXTUALIZER_LLM_BASE_URL",
-    "MSG_DECONTEXTUALIZER_LLM_API_KEY",
-    "MSG_DECONTEXTUALIZER_LLM_MODEL",
-    "RAG_PLANNER_LLM_BASE_URL",
-    "RAG_PLANNER_LLM_API_KEY",
-    "RAG_PLANNER_LLM_MODEL",
-    "RAG_SUBAGENT_LLM_BASE_URL",
-    "RAG_SUBAGENT_LLM_API_KEY",
-    "RAG_SUBAGENT_LLM_MODEL",
-    "WEB_SEARCH_LLM_BASE_URL",
-    "WEB_SEARCH_LLM_API_KEY",
-    "WEB_SEARCH_LLM_MODEL",
-    "COGNITION_LLM_BASE_URL",
-    "COGNITION_LLM_API_KEY",
-    "COGNITION_LLM_MODEL",
-    "BOUNDARY_CORE_LLM_BASE_URL",
-    "BOUNDARY_CORE_LLM_API_KEY",
-    "BOUNDARY_CORE_LLM_MODEL",
-    "DIALOG_GENERATOR_LLM_BASE_URL",
-    "DIALOG_GENERATOR_LLM_API_KEY",
-    "DIALOG_GENERATOR_LLM_MODEL",
-    "CONSOLIDATION_LLM_BASE_URL",
-    "CONSOLIDATION_LLM_API_KEY",
-    "CONSOLIDATION_LLM_MODEL",
-    "JSON_REPAIR_LLM_BASE_URL",
-    "JSON_REPAIR_LLM_API_KEY",
-    "JSON_REPAIR_LLM_MODEL",
-    "BACKGROUND_WORK_LLM_BASE_URL",
-    "BACKGROUND_WORK_LLM_API_KEY",
-    "BACKGROUND_WORK_LLM_MODEL",
-    "CODING_AGENT_PM_LLM_BASE_URL",
-    "CODING_AGENT_PM_LLM_API_KEY",
-    "CODING_AGENT_PM_LLM_MODEL",
-    "CODING_AGENT_PROGRAMMER_LLM_BASE_URL",
-    "CODING_AGENT_PROGRAMMER_LLM_API_KEY",
-    "CODING_AGENT_PROGRAMMER_LLM_MODEL",
+
+REQUIRED_ROUTE_PREFIXES = (
+    "RELEVANCE_AGENT_LLM",
+    "VISION_DESCRIPTOR_LLM",
+    "MSG_DECONTEXTUALIZER_LLM",
+    "RAG_PLANNER_LLM",
+    "RAG_SUBAGENT_LLM",
+    "WEB_SEARCH_LLM",
+    "COGNITION_LLM",
+    "COGNITION_LLM_CHARACTER_CARRYOVER",
+    "COGNITION_LLM_APPRAISAL_EVENT_AGENCY",
+    "COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL",
+    "COGNITION_LLM_APPRAISAL_MORAL_IDENTITY",
+    "COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME",
+    "COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY",
+    "COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE",
+    "COGNITION_LLM_GOAL_ORDINARY_RESPONSE",
+    "COGNITION_LLM_GOAL_ACTIVE_BRANCH",
+    "COGNITION_LLM_WORKSPACE_COLLAPSE",
+    "COGNITION_LLM_ACTION_PLANNING",
+    "COGNITION_LLM_ACTION_AUTHORIZATION",
+    "COGNITION_LLM_RESOLVER_AUTHORIZATION",
+    "DIALOG_GENERATOR_LLM",
+    "CONSOLIDATION_LLM",
+    "JSON_REPAIR_LLM",
+    "BACKGROUND_WORK_LLM",
+    "CODING_AGENT_PM_LLM",
+    "CODING_AGENT_PROGRAMMER_LLM",
+)
+REQUIRED_ROUTE_ENV_VARS = tuple(
+    f"{route_prefix}_{suffix}"
+    for route_prefix in REQUIRED_ROUTE_PREFIXES
+    for suffix in ("BASE_URL", "API_KEY", "MODEL")
 )
 REMOVED_RESOLVER_ENABLE_FLAG = "COGNITION_" + "RESOLVER_ENABLED"
+REMOVED_BOUNDARY_ROUTE = "BOUNDARY_CORE_" + "LLM"
 
 
 def _subprocess_env_without_dotenv() -> dict[str, str]:
@@ -86,46 +78,6 @@ def _configured_subprocess_env_without_dotenv() -> dict[str, str]:
     return env
 
 
-class TestAffinityConstants:
-    def test_affinity_default_within_bounds(self):
-        from kazusa_ai_chatbot.config import AFFINITY_DEFAULT, AFFINITY_MIN, AFFINITY_MAX
-        assert AFFINITY_MIN <= AFFINITY_DEFAULT <= AFFINITY_MAX
-
-    def test_affinity_min_less_than_max(self):
-        from kazusa_ai_chatbot.config import AFFINITY_MIN, AFFINITY_MAX
-        assert AFFINITY_MIN < AFFINITY_MAX
-
-    def test_affinity_min_is_zero(self):
-        from kazusa_ai_chatbot.config import AFFINITY_MIN
-        assert AFFINITY_MIN == 0
-
-    def test_affinity_max_is_1000(self):
-        from kazusa_ai_chatbot.config import AFFINITY_MAX
-        assert AFFINITY_MAX == 1000
-
-
-class TestBreakpoints:
-    def test_increment_breakpoints_sorted_by_threshold(self):
-        from kazusa_ai_chatbot.config import AFFINITY_INCREMENT_BREAKPOINTS
-        thresholds = [bp[0] for bp in AFFINITY_INCREMENT_BREAKPOINTS]
-        assert thresholds == sorted(thresholds)
-
-    def test_decrement_breakpoints_sorted_by_threshold(self):
-        from kazusa_ai_chatbot.config import AFFINITY_DECREMENT_BREAKPOINTS
-        thresholds = [bp[0] for bp in AFFINITY_DECREMENT_BREAKPOINTS]
-        assert thresholds == sorted(thresholds)
-
-    def test_increment_breakpoints_all_positive_scales(self):
-        from kazusa_ai_chatbot.config import AFFINITY_INCREMENT_BREAKPOINTS
-        for _, scale in AFFINITY_INCREMENT_BREAKPOINTS:
-            assert scale > 0
-
-    def test_decrement_breakpoints_all_positive_scales(self):
-        from kazusa_ai_chatbot.config import AFFINITY_DECREMENT_BREAKPOINTS
-        for _, scale in AFFINITY_DECREMENT_BREAKPOINTS:
-            assert scale > 0
-
-
 class TestRetryLimits:
     def test_retry_limits_are_positive(self):
         from kazusa_ai_chatbot.config import (
@@ -134,6 +86,77 @@ class TestRetryLimits:
         )
         assert MAX_MEMORY_RETRIEVER_AGENT_RETRY > 0
         assert MAX_WEB_SEARCH_AGENT_RETRY > 0
+
+
+class TestCognitionCompletionBudgets:
+    @pytest.mark.parametrize(
+        ("environment_name", "maximum"),
+        [
+            ("COGNITION_LLM_MAX_COMPLETION_TOKENS", 8192),
+            (
+                "COGNITION_LLM_CHARACTER_CARRYOVER_MAX_COMPLETION_TOKENS",
+                8192,
+            ),
+            (
+                "COGNITION_LLM_APPRAISAL_EVENT_AGENCY_MAX_COMPLETION_TOKENS",
+                2048,
+            ),
+            (
+                "COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL_MAX_COMPLETION_TOKENS",
+                2048,
+            ),
+            (
+                "COGNITION_LLM_APPRAISAL_MORAL_IDENTITY_MAX_COMPLETION_TOKENS",
+                2048,
+            ),
+            (
+                "COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME_MAX_COMPLETION_TOKENS",
+                2048,
+            ),
+            (
+                "COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY_MAX_COMPLETION_TOKENS",
+                2048,
+            ),
+            (
+                "COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE_MAX_COMPLETION_TOKENS",
+                2048,
+            ),
+            ("COGNITION_LLM_GOAL_ORDINARY_RESPONSE_MAX_COMPLETION_TOKENS", 8192),
+            ("COGNITION_LLM_GOAL_ACTIVE_BRANCH_MAX_COMPLETION_TOKENS", 8192),
+            ("COGNITION_LLM_WORKSPACE_COLLAPSE_MAX_COMPLETION_TOKENS", 1024),
+            ("COGNITION_LLM_ACTION_PLANNING_MAX_COMPLETION_TOKENS", 8192),
+            ("COGNITION_LLM_ACTION_AUTHORIZATION_MAX_COMPLETION_TOKENS", 1024),
+            ("COGNITION_LLM_RESOLVER_AUTHORIZATION_MAX_COMPLETION_TOKENS", 1024),
+        ],
+    )
+    def test_cognition_completion_budget_caps_values_above_ceiling(
+        self,
+        tmp_path,
+        environment_name: str,
+        maximum: int,
+    ) -> None:
+        """Every Core V2 route caps a completion budget above its ceiling."""
+
+        env = _configured_subprocess_env_without_dotenv()
+        env[environment_name] = str(maximum + 1)
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import kazusa_ai_chatbot.config as config; "
+                    f"print(getattr(config, '{environment_name}'))"
+                ),
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0
+        assert result.stdout.strip() == str(maximum)
 
 
 class TestMcpServersDefault:
@@ -548,6 +571,23 @@ class TestRouteLlmConfig:
 
         for name in REQUIRED_ROUTE_ENV_VARS:
             assert getattr(config, name)
+        stage_prefixes = (
+            route_prefix
+            for route_prefix in REQUIRED_ROUTE_PREFIXES
+            if route_prefix.startswith("COGNITION_LLM_")
+        )
+        for route_prefix in stage_prefixes:
+            assert getattr(
+                config,
+                f"{route_prefix}_MAX_COMPLETION_TOKENS",
+            ) > 0
+            assert isinstance(
+                getattr(config, f"{route_prefix}_THINKING_ENABLED"),
+                bool,
+            )
+        assert not hasattr(config, f"{REMOVED_BOUNDARY_ROUTE}_BASE_URL")
+        assert not hasattr(config, f"{REMOVED_BOUNDARY_ROUTE}_API_KEY")
+        assert not hasattr(config, f"{REMOVED_BOUNDARY_ROUTE}_MODEL")
 
     def test_background_work_worker_config_values_are_present(self):
         import kazusa_ai_chatbot.config as config
@@ -568,7 +608,8 @@ class TestRouteLlmConfig:
         env["EMBEDDING_API_KEY"] = "configured"
         env["EMBEDDING_MODEL"] = "configured"
         env["CHARACTER_GLOBAL_USER_ID"] = "character-global"
-        del env["COGNITION_LLM_MODEL"]
+        missing_name = "COGNITION_LLM_ACTION_PLANNING_MODEL"
+        del env[missing_name]
 
         result = subprocess.run(
             [sys.executable, "-c", "import kazusa_ai_chatbot.config"],
@@ -580,7 +621,7 @@ class TestRouteLlmConfig:
         )
 
         assert result.returncode != 0
-        assert "COGNITION_LLM_MODEL" in result.stderr
+        assert missing_name in result.stderr
 
     def test_missing_character_global_user_id_uses_default(self, tmp_path):
         env = _configured_subprocess_env_without_dotenv()
@@ -623,7 +664,7 @@ class TestRouteLlmConfig:
 
 
 class TestCognitionVisualDirectivesConfig:
-    def test_visual_directives_enabled_defaults_to_true(self, tmp_path):
+    def test_visual_directives_enabled_defaults_to_false(self, tmp_path):
         env = _configured_subprocess_env_without_dotenv()
         env.pop("COGNITION_VISUAL_DIRECTIVES_ENABLED", None)
 
@@ -644,7 +685,7 @@ class TestCognitionVisualDirectivesConfig:
         )
 
         assert result.returncode == 0
-        assert result.stdout.strip() == "True"
+        assert result.stdout.strip() == "False"
 
     def test_visual_directives_enabled_parses_false(self, tmp_path):
         env = _configured_subprocess_env_without_dotenv()
@@ -668,96 +709,6 @@ class TestCognitionVisualDirectivesConfig:
 
         assert result.returncode == 0
         assert result.stdout.strip() == "False"
-
-
-class TestCognitionTaskWillingnessBoundaryConfig:
-    def test_task_willingness_boundary_defaults_to_true(self, tmp_path):
-        env = _configured_subprocess_env_without_dotenv()
-        env.pop("COGNITION_TASK_WILLINGNESS_BOUNDARY_ENABLED", None)
-
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-c",
-                (
-                    "import kazusa_ai_chatbot.config as config; "
-                    "print(config.COGNITION_TASK_WILLINGNESS_BOUNDARY_ENABLED)"
-                ),
-            ],
-            cwd=tmp_path,
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-
-        assert result.returncode == 0
-        assert result.stdout.strip() == "True"
-
-    def test_task_willingness_boundary_parses_true(self, tmp_path):
-        env = _configured_subprocess_env_without_dotenv()
-        env["COGNITION_TASK_WILLINGNESS_BOUNDARY_ENABLED"] = "true"
-
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-c",
-                (
-                    "import kazusa_ai_chatbot.config as config; "
-                    "print(config.COGNITION_TASK_WILLINGNESS_BOUNDARY_ENABLED)"
-                ),
-            ],
-            cwd=tmp_path,
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-
-        assert result.returncode == 0
-        assert result.stdout.strip() == "True"
-
-    def test_task_willingness_boundary_parses_false(self, tmp_path):
-        env = _configured_subprocess_env_without_dotenv()
-        env["COGNITION_TASK_WILLINGNESS_BOUNDARY_ENABLED"] = "false"
-
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-c",
-                (
-                    "import kazusa_ai_chatbot.config as config; "
-                    "print(config.COGNITION_TASK_WILLINGNESS_BOUNDARY_ENABLED)"
-                ),
-            ],
-            cwd=tmp_path,
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-
-        assert result.returncode == 0
-        assert result.stdout.strip() == "False"
-
-    def test_task_willingness_boundary_rejects_invalid_value(self, tmp_path):
-        env = _configured_subprocess_env_without_dotenv()
-        env["COGNITION_TASK_WILLINGNESS_BOUNDARY_ENABLED"] = "sometimes"
-
-        result = subprocess.run(
-            [sys.executable, "-c", "import kazusa_ai_chatbot.config"],
-            cwd=tmp_path,
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-
-        assert result.returncode != 0
-        assert (
-            "COGNITION_TASK_WILLINGNESS_BOUNDARY_ENABLED must be a bool string"
-            in result.stderr
-        )
 
 
 class TestCognitionResolverConfig:
@@ -1121,49 +1072,6 @@ class TestReflectionCycleConfig:
             "wake defer grace"
         ) in result.stderr
 
-
-class TestGlobalCharacterGrowthConfig:
-    def test_prompt_char_budget_defaults_to_32000(self, tmp_path):
-        env = _configured_subprocess_env_without_dotenv()
-        env.pop("GLOBAL_CHARACTER_GROWTH_PROMPT_CHAR_BUDGET", None)
-
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-c",
-                (
-                    "import kazusa_ai_chatbot.config as config; "
-                    "print(config.GLOBAL_CHARACTER_GROWTH_PROMPT_CHAR_BUDGET)"
-                ),
-            ],
-            cwd=tmp_path,
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-
-        assert result.returncode == 0
-        assert result.stdout.strip() == "32000"
-
-    def test_prompt_char_budget_fails_fast_when_invalid(self, tmp_path):
-        env = _configured_subprocess_env_without_dotenv()
-        env["GLOBAL_CHARACTER_GROWTH_PROMPT_CHAR_BUDGET"] = "0"
-
-        result = subprocess.run(
-            [sys.executable, "-c", "import kazusa_ai_chatbot.config"],
-            cwd=tmp_path,
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-
-        assert result.returncode != 0
-        assert (
-            "GLOBAL_CHARACTER_GROWTH_PROMPT_CHAR_BUDGET must be >= 1"
-            in result.stderr
-        )
 
 
 class TestSelfCognitionConfig:

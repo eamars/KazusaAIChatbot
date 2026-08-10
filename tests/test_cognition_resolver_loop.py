@@ -8,10 +8,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_episode import (
-    build_text_chat_cognitive_episode,
-    validate_cognitive_episode,
-)
 from kazusa_ai_chatbot.cognition_resolver import capabilities as capabilities_module
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     RESOLVER_CAPABILITY_REQUEST_VERSION,
@@ -39,20 +35,13 @@ from kazusa_ai_chatbot.cognition_resolver.telemetry import (
     build_resolver_terminal_event,
     write_human_readable_resolver_trace,
 )
-from kazusa_ai_chatbot.local_context_resolver import (
-    LOCAL_CONTEXT_GRAPH_VERSION,
-    LOCAL_CONTEXT_NODE_VERSION,
-    LOCAL_CONTEXT_RESOLUTION_PACKET_VERSION,
-)
-from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import (
-    empty_user_memory_context,
-)
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
+from tests.cognition_core_v2_test_helpers import canonical_episode
 
 
 def _resolver_request(
     *,
-    capability_kind: str = "local_context_recall",
+    capability_kind: str = "task_resolution_request",
     objective: str = "检索当前用户与这个问题有关的关系和记忆证据。",
 ) -> dict:
     return {
@@ -64,29 +53,50 @@ def _resolver_request(
     }
 
 
+def _task_result(
+    *,
+    status: str = "resolved",
+    specialist: str = "local_context",
+    summary: str = "找到一条相关证据。",
+) -> dict[str, object]:
+    """Build one canonical task-resolution result for resolver tests."""
+
+    evidence = []
+    if status in {"resolved", "partial"}:
+        evidence = [{
+            "schema_version": "task_resolution_evidence.v1",
+            "evidence_id": "evidence-1",
+            "task_node_id": "node-1",
+            "specialist": specialist,
+            "summary": summary,
+            "provenance_refs": ["source:item-1"],
+            "limitations": [],
+        }]
+    return {
+        "schema_version": "task_resolution_result.v1",
+        "status": status,
+        "prompt_safe_summary": summary,
+        "evidence": evidence,
+        "completed_subgoals": [],
+        "remaining_needs": (
+            ["需要用户补充缺失指代。"]
+            if status == "needs_user_input"
+            else []
+        ),
+        "checkpoint": {},
+        "coding_run_context": {},
+    }
+
+
 def _resolver_state() -> dict:
     turn_clock = build_turn_clock("2026-05-30 09:00:00")
-    episode = build_text_chat_cognitive_episode(
+    episode = canonical_episode(
         episode_id="resolver-capability-episode",
-        percept_id="resolver-capability-percept",
-        storage_timestamp_utc=turn_clock["storage_timestamp_utc"],
-        local_time_context=turn_clock["local_time_context"],
-        user_input="Need an evidence-backed answer.",
-        platform="debug",
-        platform_channel_id="channel-123",
-        channel_type="private",
-        platform_message_id="message-123",
-        platform_user_id="platform-user-123",
-        global_user_id="global-user-123",
-        user_name="Test User",
-        active_turn_platform_message_ids=["message-123"],
-        active_turn_conversation_row_ids=["row-123"],
-        debug_modes={},
-        target_addressed_user_ids=["character-123"],
-        target_broadcast=False,
+        content="Need an evidence-backed answer.",
+        current_global_user_id="global-user-123",
     )
     return {
-        "decontexualized_input": "Original user request about trust.",
+        "decontextualized_input": "Original user request about trust.",
         "referents": [],
         "character_profile": {
             "name": "Kazusa",
@@ -98,8 +108,9 @@ def _resolver_state() -> dict:
         "platform_message_id": "message-123",
         "platform_bot_id": "bot-123",
         "global_user_id": "global-user-123",
+        "platform_user_id": "platform-user-123",
         "user_name": "Test User",
-        "user_profile": {"affinity": 500},
+        "user_profile": {"relationship_state": 500},
         "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
         "local_time_context": turn_clock["local_time_context"],
         "prompt_message_context": {
@@ -129,118 +140,15 @@ def _internal_thought_resolver_state() -> dict:
     """Return resolver state for a private internal-thought cognition source."""
 
     state = _resolver_state()
-    episode = dict(state["cognitive_episode"])
-    episode["trigger_source"] = "internal_thought"
-    episode["input_sources"] = ["internal_monologue"]
-    episode["output_mode"] = "think_only"
-    episode["percepts"] = [{
-        "percept_id": "resolver-internal-thought",
-        "input_source": "internal_monologue",
-        "content": "整理一个内部目标。",
-        "visibility": "internal_only",
-        "metadata": {},
-    }]
-    validate_cognitive_episode(episode)
+    episode = canonical_episode(
+        episode_id="resolver-internal-thought-episode",
+        trigger_source="internal_thought",
+        content="整理一个内部目标。",
+    )
     state["cognitive_episode"] = episode
     state["channel_type"] = "group"
     return_value = state
     return return_value
-
-
-def _local_context_node(
-    *,
-    node_id: str,
-    node_kind: str,
-    parent_id: str | None,
-    children: list[str],
-) -> dict:
-    """Build a minimal valid local-context node for capability tests."""
-
-    node = {
-        "schema_version": LOCAL_CONTEXT_NODE_VERSION,
-        "node_id": node_id,
-        "node_kind": node_kind,
-        "objective": "Resolve local context evidence.",
-        "parent_id": parent_id,
-        "children": children,
-        "depends_on": [],
-        "consumes": {},
-        "produces": [],
-        "status": "resolved",
-        "investigation_summary": [],
-        "knowledge_we_know_so_far": [],
-        "knowledge_still_lacking": [],
-        "recommended_next_iteration": [],
-        "evidence_boundary_notes": [],
-        "attempts": [],
-        "collapsed_into": None,
-    }
-    return node
-
-
-def _local_context_packet(
-    *,
-    answer: str,
-    memory_evidence: list[dict] | None = None,
-    conversation_evidence: list[dict] | None = None,
-) -> dict:
-    """Build a minimal valid RAG3 packet for capability tests."""
-
-    root = _local_context_node(
-        node_id="root",
-        node_kind="synthesis",
-        parent_id=None,
-        children=["task_1"],
-    )
-    task = _local_context_node(
-        node_id="task_1",
-        node_kind="memory_evidence",
-        parent_id="root",
-        children=[],
-    )
-    packet = {
-        "schema_version": LOCAL_CONTEXT_RESOLUTION_PACKET_VERSION,
-        "investigation_summary": ["RAG3 resolved local context."],
-        "knowledge_we_know_so_far": ["RAG3 resolved local context."],
-        "knowledge_still_lacking": [],
-        "recommended_next_iteration": [],
-        "evidence_boundary_notes": [],
-        "rag_result": {
-            "answer": answer,
-            "user_image": {
-                "user_memory_context": empty_user_memory_context(),
-            },
-            "user_memory_unit_candidates": [],
-            "character_image": {},
-            "third_party_profiles": [],
-            "memory_evidence": list(memory_evidence or []),
-            "recall_evidence": [],
-            "conversation_evidence": list(conversation_evidence or []),
-            "external_evidence": [],
-            "supervisor_trace": {
-                "resolver": "local_context_resolver",
-                "node_count": 2,
-            },
-        },
-        "graph": {
-            "schema_version": LOCAL_CONTEXT_GRAPH_VERSION,
-            "root_node_id": "root",
-            "active_node_id": "task_1",
-            "nodes": {
-                "root": root,
-                "task_1": task,
-            },
-            "traversal_order": ["root", "task_1"],
-            "collapse_events": [],
-            "max_nodes": 8,
-            "max_depth": 3,
-        },
-        "trace_summary": {
-            "iterations": 1,
-            "node_count": 2,
-        },
-    }
-    return packet
 
 
 def _cognition_result(
@@ -248,6 +156,7 @@ def _cognition_result(
     internal_monologue: str,
     action_specs: list[dict] | None = None,
     resolver_requests: list[dict] | None = None,
+    goal_resolution: str = "requires_required_evidence",
 ) -> dict:
     return {
         "internal_monologue": internal_monologue,
@@ -262,6 +171,7 @@ def _cognition_result(
         "relational_dynamic": "trusted",
         "action_specs": action_specs or [],
         "resolver_capability_requests": resolver_requests or [],
+        "goal_resolution": goal_resolution,
     }
 
 
@@ -373,12 +283,17 @@ def test_resolver_context_projects_original_goal_and_objectives() -> None:
         {
             "schema_version": RESOLVER_OBSERVATION_VERSION,
             "observation_id": "resolver_obs_web_1",
-            "capability_kind": "public_answer_research",
+            "capability_kind": "task_resolution_request",
             "request_objective": "检索奥克兰 CBD 餐厅当前营业状态。",
             "request_reason": "需要当前营业证据。",
             "status": "failed",
             "prompt_safe_summary": "搜索工具未返回已确认事实。",
             "evidence_refs": [],
+            "task_resolution_evidence_state": {
+                "schema_version": "resolver_evidence_state.v1",
+                "state": "blocked",
+                "remaining_needs": [],
+            },
             "created_at_utc": "2026-05-29T21:00:00+00:00",
         },
     ]
@@ -490,6 +405,11 @@ async def test_loop_runs_cognition_capability_then_cognition_again() -> None:
                 ],
             },
             "evidence_refs": [],
+            "task_resolution_evidence_state": {
+                "schema_version": "resolver_evidence_state.v1",
+                "state": "missing",
+                "remaining_needs": [],
+            },
             "created_at_utc": "2026-05-29T21:00:00+00:00",
         }
 
@@ -517,7 +437,7 @@ async def test_loop_runs_cognition_capability_then_cognition_again() -> None:
     assert len(resolver_state["observations"]) == 1
     assert len(resolver_state["cycle_traces"]) == 2
     assert resolver_state["cycle_traces"][0]["selected_capability_kind"] == (
-        "local_context_recall"
+        "task_resolution_request"
     )
     assert resolver_state["cycle_traces"][0]["observation_ids"] == [
         "resolver_obs_trust_memory"
@@ -529,6 +449,96 @@ async def test_loop_runs_cognition_capability_then_cognition_again() -> None:
     assert resolver_state["cycle_traces"][1]["terminal_reason"] == (
         "no resolver capability request"
     )
+
+
+@pytest.mark.asyncio
+async def test_answerable_now_terminates_without_executing_optional_resolver() -> None:
+    """Goal sufficiency ends recurrence even if planning proposed extra recall."""
+
+    request = _resolver_request(
+        objective='检索一个并非回答所必需的关系例子。',
+    )
+    cognition_inputs: list[dict] = []
+    capability_inputs: list[dict] = []
+
+    async def call_cognition(state: dict) -> dict:
+        cognition_inputs.append(dict(state))
+        return _cognition_result(
+            internal_monologue='当前问题已有足够依据，可以直接回答。',
+            resolver_requests=[request],
+            goal_resolution="answerable_now",
+            action_specs=[_speak_action_spec('当前输入已经足够完成回答。')],
+        )
+
+    async def execute_capability(
+        capability_request: dict,
+        _state: dict,
+    ) -> dict:
+        capability_inputs.append(capability_request)
+        raise AssertionError("optional resolver must not execute")
+
+    result = await call_cognition_resolver_loop(
+        _resolver_state(),
+        call_cognition_subgraph_func=call_cognition,
+        execute_capability_func=execute_capability,
+        max_cycles=3,
+        capability_timeout_seconds=1.0,
+    )
+
+    assert len(cognition_inputs) == 1
+    assert capability_inputs == []
+    assert result["resolver_capability_requests"] == []
+    assert result["resolver_state"]["status"] == "terminal"
+    assert result["resolver_state"]["terminal_reason"] == (
+        "goal answerable now; optional resolver request suppressed"
+    )
+
+
+@pytest.mark.asyncio
+async def test_answerable_now_is_independent_of_unresolved_conversation_source() -> None:
+    """Source coverage false must not override an answerable goal decision."""
+
+    state = _resolver_state()
+    state["rag_result"] = {
+        "conversation_evidence": [{
+            "resolved": False,
+            "missing_context": ["conversation_evidence"],
+        }],
+    }
+    request = _resolver_request(
+        objective="retrieve optional conversation evidence",
+    )
+    cognition_inputs: list[dict] = []
+    capability_inputs: list[dict] = []
+
+    async def call_cognition(current_state: dict) -> dict:
+        cognition_inputs.append(dict(current_state))
+        return _cognition_result(
+            internal_monologue="The current bid and input are sufficient.",
+            resolver_requests=[request],
+            goal_resolution="answerable_now",
+            action_specs=[_speak_action_spec("Answer from the current goal.")],
+        )
+
+    async def execute_capability(
+        capability_request: dict,
+        _state: dict,
+    ) -> dict:
+        capability_inputs.append(capability_request)
+        raise AssertionError("unresolved optional source must not execute")
+
+    result = await call_cognition_resolver_loop(
+        state,
+        call_cognition_subgraph_func=call_cognition,
+        execute_capability_func=execute_capability,
+        max_cycles=3,
+        capability_timeout_seconds=1.0,
+    )
+
+    assert len(cognition_inputs) == 1
+    assert capability_inputs == []
+    assert result["resolver_capability_requests"] == []
+    assert result["resolver_state"]["status"] == "terminal"
 
 
 @pytest.mark.asyncio
@@ -574,6 +584,11 @@ async def test_loop_projects_goal_progress_across_iterations() -> None:
             "status": "failed",
             "prompt_safe_summary": "没有确认到每家店当前营业状态。",
             "evidence_refs": [],
+            "task_resolution_evidence_state": {
+                "schema_version": "resolver_evidence_state.v1",
+                "state": "blocked",
+                "remaining_needs": [],
+            },
             "created_at_utc": "2026-05-29T21:00:00+00:00",
         }
 
@@ -634,7 +649,7 @@ async def test_loop_records_timeout_observation_then_returns_to_cognition() -> N
     assert "timed out" in cognition_inputs[1]["resolver_context"]
     observation = result["resolver_state"]["observations"][0]
     assert observation["status"] == "failed"
-    assert observation["capability_kind"] == "local_context_recall"
+    assert observation["capability_kind"] == "task_resolution_request"
     assert observation["request_objective"] == request["objective"]
     assert "timed out" in observation["prompt_safe_summary"]
     terminal_event = build_resolver_terminal_event(result, duration_ms=1)
@@ -650,7 +665,7 @@ async def test_loop_blocks_duplicate_capability_objective_before_execution() -> 
     """Exact repeated resolver objectives should not execute indefinitely."""
 
     request = _resolver_request(
-        capability_kind="public_answer_research",
+        capability_kind="task_resolution_request",
         objective="检索同一个外部证据目标。",
     )
     execute_count = 0
@@ -682,6 +697,11 @@ async def test_loop_blocks_duplicate_capability_objective_before_execution() -> 
             "status": "failed",
             "prompt_safe_summary": "没有找到已确认事实。",
             "evidence_refs": [],
+            "task_resolution_evidence_state": {
+                "schema_version": "resolver_evidence_state.v1",
+                "state": "blocked",
+                "remaining_needs": [],
+            },
             "created_at_utc": "2026-05-29T21:00:00+00:00",
         }
 
@@ -706,11 +726,11 @@ async def test_loop_blocks_same_capability_retry_after_timeout() -> None:
     """Timed-out capability work should not be retried with renamed objective."""
 
     first_request = _resolver_request(
-        capability_kind="public_answer_research",
+        capability_kind="task_resolution_request",
         objective="检索当前外部事实。",
     )
     renamed_request = _resolver_request(
-        capability_kind="public_answer_research",
+        capability_kind="task_resolution_request",
         objective="换一种说法再次检索当前外部事实。",
     )
     execute_count = 0
@@ -755,11 +775,81 @@ async def test_loop_blocks_same_capability_retry_after_timeout() -> None:
 
 
 @pytest.mark.asyncio
+async def test_loop_blocks_renamed_retry_after_failed_observation() -> None:
+    """Failed capability work cannot be retried under a renamed objective."""
+
+    first_request = _resolver_request(
+        capability_kind="task_resolution_request",
+        objective="Retrieve the prior agreement.",
+    )
+    renamed_request = _resolver_request(
+        capability_kind="task_resolution_request",
+        objective="Confirm the earlier agreement with different wording.",
+    )
+    execute_count = 0
+
+    async def call_cognition(state: dict) -> dict:
+        resolver_context = state["resolver_context"]
+        if "duplicate capability request" in resolver_context:
+            return _cognition_result(
+                internal_monologue="The failed retry has been blocked.",
+                action_specs=[_speak_action_spec("Continue without the evidence.")],
+            )
+        if "status=failed" in resolver_context:
+            return _cognition_result(
+                internal_monologue="Try the same capability with new wording.",
+                resolver_requests=[renamed_request],
+            )
+        return _cognition_result(
+            internal_monologue="The prior agreement needs evidence.",
+            resolver_requests=[first_request],
+        )
+
+    async def execute_capability(
+        capability_request: dict,
+        _state: dict,
+    ) -> dict:
+        nonlocal execute_count
+        execute_count += 1
+        return {
+            "schema_version": RESOLVER_OBSERVATION_VERSION,
+            "observation_id": f"resolver_obs_failed_{execute_count}",
+            "capability_kind": capability_request["capability_kind"],
+            "request_objective": capability_request["objective"],
+            "request_reason": capability_request["reason"],
+            "status": "failed",
+            "prompt_safe_summary": "Local context resolution failed.",
+            "evidence_refs": [],
+            "task_resolution_evidence_state": {
+                "schema_version": "resolver_evidence_state.v1",
+                "state": "blocked",
+                "remaining_needs": [],
+            },
+            "created_at_utc": "2026-05-29T21:00:00+00:00",
+        }
+
+    result = await call_cognition_resolver_loop(
+        _resolver_state(),
+        call_cognition_subgraph_func=call_cognition,
+        execute_capability_func=execute_capability,
+        max_cycles=3,
+        capability_timeout_seconds=1.0,
+    )
+
+    observations = result["resolver_state"]["observations"]
+    assert execute_count == 1
+    assert result["resolver_state"]["status"] == "blocked"
+    assert observations[-1]["observation_id"] == "resolver_obs_duplicate_request"
+    assert observations[-1]["request_objective"] == renamed_request["objective"]
+    assert result["action_specs"][0]["kind"] == "speak"
+
+
+@pytest.mark.asyncio
 async def test_duplicate_final_cognition_repeated_request_gets_terminal_speak() -> None:
     """Terminal duplicate handling should not leave the user with silence."""
 
     request = _resolver_request(
-        capability_kind="public_answer_research",
+        capability_kind="task_resolution_request",
         objective="检索同一个当前外部事实目标。",
     )
     execute_count = 0
@@ -785,6 +875,11 @@ async def test_duplicate_final_cognition_repeated_request_gets_terminal_speak() 
             "status": "failed",
             "prompt_safe_summary": "没有找到已确认事实。",
             "evidence_refs": [],
+            "task_resolution_evidence_state": {
+                "schema_version": "resolver_evidence_state.v1",
+                "state": "blocked",
+                "remaining_needs": [],
+            },
             "created_at_utc": "2026-05-29T21:00:00+00:00",
         }
 
@@ -823,11 +918,11 @@ async def test_duplicate_final_cognition_changed_request_gets_terminal_speak() -
     """Terminal duplicate handling should not run a rephrased tool request."""
 
     original_request = _resolver_request(
-        capability_kind="public_answer_research",
+        capability_kind="task_resolution_request",
         objective="检索同一个当前外部事实目标。",
     )
     rephrased_request = _resolver_request(
-        capability_kind="public_answer_research",
+        capability_kind="task_resolution_request",
         objective="Search for the same current external evidence with new words.",
     )
     cognition_call_count = 0
@@ -861,6 +956,11 @@ async def test_duplicate_final_cognition_changed_request_gets_terminal_speak() -
             "status": "failed",
             "prompt_safe_summary": "没有找到已确认事实。",
             "evidence_refs": [],
+            "task_resolution_evidence_state": {
+                "schema_version": "resolver_evidence_state.v1",
+                "state": "blocked",
+                "remaining_needs": [],
+            },
             "created_at_utc": "2026-05-29T21:00:00+00:00",
         }
 
@@ -968,6 +1068,11 @@ async def test_loop_runs_final_cognition_with_max_cycle_blocker() -> None:
             "status": "failed",
             "prompt_safe_summary": "证据仍不足。",
             "evidence_refs": [],
+            "task_resolution_evidence_state": {
+                "schema_version": "resolver_evidence_state.v1",
+                "state": "blocked",
+                "remaining_needs": [],
+            },
             "created_at_utc": "2026-05-29T21:00:00+00:00",
         }
 
@@ -994,7 +1099,7 @@ async def test_loop_converts_max_cycle_request_to_visible_blocker() -> None:
     """A terminal resolver request should not silently suppress final output."""
 
     request = _resolver_request(
-        capability_kind="public_answer_research",
+        capability_kind="task_resolution_request",
         objective="继续验证餐厅当前营业和排队情况。",
     )
     cognition_inputs: list[dict] = []
@@ -1019,6 +1124,11 @@ async def test_loop_converts_max_cycle_request_to_visible_blocker() -> None:
             "status": "failed",
             "prompt_safe_summary": "搜索超时，但已有部分约束可说明。",
             "evidence_refs": [],
+            "task_resolution_evidence_state": {
+                "schema_version": "resolver_evidence_state.v1",
+                "state": "blocked",
+                "remaining_needs": [],
+            },
             "created_at_utc": "2026-05-29T21:00:00+00:00",
         }
 
@@ -1724,6 +1834,9 @@ async def test_hil_follow_up_can_continue_original_goal_after_answer() -> None:
         max_cycles=3,
     )
     follow_up_state["platform_message_id"] = "message-follow-up-123"
+    follow_up_state["reply_context"] = {
+        "reply_to_message_id": "message-123",
+    }
 
     async def list_pending_rows(*, limit: int = 1000) -> list[dict]:
         del limit
@@ -1786,6 +1899,11 @@ async def test_hil_follow_up_can_continue_original_goal_after_answer() -> None:
                 },
             },
             "evidence_refs": [],
+            "task_resolution_evidence_state": {
+                "schema_version": "resolver_evidence_state.v1",
+                "state": "missing",
+                "remaining_needs": [],
+            },
             "created_at_utc": "2026-05-29T21:00:00+00:00",
         }
 
@@ -1857,6 +1975,9 @@ async def test_pending_helpers_load_and_close_matching_pending_rows() -> None:
     follow_up_state = dict(state)
     follow_up_state["platform_message_id"] = "follow-up-message-id"
     follow_up_state["storage_timestamp_utc"] = "2026-05-29T21:05:00+00:00"
+    follow_up_state["reply_context"] = {
+        "reply_to_message_id": "message-123",
+    }
 
     loaded = await load_matching_pending_resume(
         follow_up_state,
@@ -1981,6 +2102,39 @@ async def test_pending_loader_ignores_same_source_message_rows() -> None:
 
 
 @pytest.mark.asyncio
+async def test_pending_loader_ignores_unrelated_same_scope_messages() -> None:
+    """A new same-scope message must not inherit an unrelated pending goal."""
+
+    state = _resolver_state()
+    observation = {
+        "schema_version": RESOLVER_OBSERVATION_VERSION,
+        "observation_id": "resolver_obs_unrelated_hil",
+        "capability_kind": "human_clarification",
+        "request_objective": "确认原始计划所需的用户信息。",
+        "request_reason": "原始计划缺少用户输入。",
+        "status": "blocked",
+        "prompt_safe_summary": "Human clarification required: 确认原始计划所需的用户信息。",
+        "evidence_refs": [],
+        "created_at_utc": "2026-05-29T21:00:00+00:00",
+    }
+    pending_record = build_pending_resume_record(state, observation)
+    unrelated_state = dict(state)
+    unrelated_state["platform_message_id"] = "unrelated-message-456"
+    unrelated_state["decontextualized_input"] = "我今天心情变好了，谢谢你陪我说话。"
+
+    async def list_rows(*, limit: int = 1000) -> list[dict]:
+        del limit
+        return [pending_record]
+
+    loaded = await load_matching_pending_resume(
+        unrelated_state,
+        list_action_attempts_func=list_rows,
+    )
+
+    assert loaded is None
+
+
+@pytest.mark.asyncio
 async def test_pending_resume_load_restores_original_goal_progress() -> None:
     """HIL follow-up turns should inherit the first-turn deliverable checklist."""
 
@@ -2002,7 +2156,10 @@ async def test_pending_resume_load_restores_original_goal_progress() -> None:
     record = build_pending_resume_record(state, observation)
     follow_up_state = _resolver_state()
     follow_up_state["platform_message_id"] = "message-456"
-    follow_up_state["decontexualized_input"] = "就在奥克兰 CBD。"
+    follow_up_state["decontextualized_input"] = "就在奥克兰 CBD。"
+    follow_up_state["reply_context"] = {
+        "reply_to_message_id": "message-123",
+    }
     follow_up_state = ensure_initial_resolver_inputs(
         follow_up_state,
         max_cycles=3,
@@ -2028,46 +2185,35 @@ async def test_pending_resume_load_restores_original_goal_progress() -> None:
     assert loaded_progress["deliverables"][1]["description"] == (
         "两小时散步路线和时间切分"
     )
-    assert loaded_state["resolver_state"]["original_decontexualized_input"] == (
+    assert loaded_state["resolver_state"]["original_decontextualized_input"] == (
         "今晚安排一个两小时低预算计划。"
     )
     assert "就在奥克兰 CBD" not in loaded_state["resolver_context"]
 
 
 @pytest.mark.asyncio
-async def test_rag_capability_uses_objective_and_preserves_original_request(
+async def test_task_resolution_uses_objective_and_preserves_context(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """RAG3 execution should use objective while preserving original context."""
+    """Unified task resolution receives the semantic goal and trusted context."""
 
     captured: dict = {}
 
-    async def resolve_local_context(
+    async def resolve_task_inline(
         request: dict,
         context: dict,
-        options: dict,
+        *,
+        inline_budget_seconds: float,
     ) -> dict[str, object]:
         captured["request"] = request
         captured["context"] = context
-        captured["options"] = options
-        result = _local_context_packet(
-            answer="找到一条关系记忆。",
-            memory_evidence=[{
-                "summary": "存在一条信任相关记忆。",
-                "source_system": "memory",
-            }],
-        )
-        return result
+        captured["inline_budget_seconds"] = inline_budget_seconds
+        return _task_result(summary="存在一条信任相关记忆。")
 
     monkeypatch.setattr(
         capabilities_module,
-        "resolve_local_context",
-        resolve_local_context,
-    )
-    monkeypatch.setattr(
-        capabilities_module.event_logging,
-        "record_rag_stage_event",
-        AsyncMock(),
+        "resolve_task_inline",
+        resolve_task_inline,
     )
     request = _resolver_request()
 
@@ -2076,10 +2222,10 @@ async def test_rag_capability_uses_objective_and_preserves_original_request(
         _resolver_state(),
     )
 
-    assert captured["request"]["source"] == "l2d"
-    assert captured["request"]["objective"] == request["objective"]
+    assert captured["request"]["capability"] == "task_resolution_request"
+    assert captured["request"]["semantic_goal"] == request["objective"]
     assert captured["request"]["reason"] == request["reason"]
-    assert captured["context"]["original_user_request"] == (
+    assert captured["context"]["conversation_summary"] == (
         "Original user request about trust."
     )
     assert captured["context"]["prompt_message_context"]["body_text"] == (
@@ -2089,47 +2235,265 @@ async def test_rag_capability_uses_objective_and_preserves_original_request(
         "trust question"
     )
     assert observation["status"] == "succeeded"
-    assert observation["capability_kind"] == "local_context_recall"
+    assert observation["capability_kind"] == "task_resolution_request"
     assert observation["request_objective"] == request["objective"]
     assert observation["request_reason"] == request["reason"]
-    assert observation["rag_result"]["answer"] == "找到一条关系记忆。"
-    assert "memory_evidence" in observation["rag_result"]
-    assert "user_image" in observation["rag_result"]
+    assert observation["prompt_safe_summary"] == "存在一条信任相关记忆。"
+    assert observation["evidence_refs"][0]["owner"] == "local_context"
 
 
 @pytest.mark.asyncio
-async def test_internal_thought_rag_capability_uses_existing_rag_path(
+async def test_task_resolution_bounds_history_to_its_context_contract(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Selected internal-thought RAG should execute through RAG3."""
+    """Task resolution receives the newest eight interaction turns."""
 
     captured: dict = {}
 
-    async def resolve_local_context(
+    async def resolve_task_inline(
         request: dict,
         context: dict,
-        options: dict,
+        *,
+        inline_budget_seconds: float,
     ) -> dict[str, object]:
-        captured["request"] = request
         captured["context"] = context
-        captured["options"] = options
-        result = _local_context_packet(
-            answer="找到一条群聊前文证据。",
-            conversation_evidence=[{
-                "content": "前文提到同一个话题。",
-            }],
-        )
-        return result
+        return _task_result(summary="Bounded history accepted.")
 
     monkeypatch.setattr(
         capabilities_module,
-        "resolve_local_context",
-        resolve_local_context,
+        "resolve_task_inline",
+        resolve_task_inline,
     )
+    state = _resolver_state()
+    history = [
+        {"role": "user", "body_text": f"turn-{index}"}
+        for index in range(10)
+    ]
+    state["chat_history_recent"] = history
+    state["chat_history_wide"] = history
+
+    observation = await capabilities_module.execute_resolver_capability_request(
+        _resolver_request(),
+        state,
+    )
+
+    expected_history = history[-8:]
+    assert captured["context"]["chat_history_recent"] == expected_history
+    assert captured["context"]["chat_history_wide"] == expected_history
+    assert observation["status"] == "succeeded"
+
+
+@pytest.mark.asyncio
+async def test_task_resolution_bounds_decontextualized_summary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Result-ready text is bounded before task-resolution validation."""
+
+    captured: dict = {}
+
+    async def resolve_task_inline(
+        request: dict,
+        context: dict,
+        *,
+        inline_budget_seconds: float,
+    ) -> dict[str, object]:
+        del request, inline_budget_seconds
+        captured["context"] = context
+        return _task_result(summary="Bounded summary accepted.")
+
     monkeypatch.setattr(
-        capabilities_module.event_logging,
-        "record_rag_stage_event",
-        AsyncMock(),
+        capabilities_module,
+        "resolve_task_inline",
+        resolve_task_inline,
+    )
+    state = _resolver_state()
+    state["decontextualized_input"] = "A" * 1300
+
+    observation = await capabilities_module.execute_resolver_capability_request(
+        _resolver_request(),
+        state,
+    )
+
+    assert captured["context"]["conversation_summary"] == "A" * 1200
+    assert observation["status"] == "succeeded"
+
+
+@pytest.mark.asyncio
+async def test_task_resolution_user_input_result_is_blocked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A semantic user-input result becomes a typed resolver blocker."""
+
+    resolve_task_inline = AsyncMock(return_value=_task_result(
+        status="needs_user_input",
+        summary="需要用户补充缺失指代。",
+    ))
+    monkeypatch.setattr(
+        capabilities_module,
+        "resolve_task_inline",
+        resolve_task_inline,
+    )
+
+    observation = await capabilities_module.execute_resolver_capability_request(
+        _resolver_request(),
+        _resolver_state(),
+    )
+
+    assert observation["status"] == "blocked"
+    assert observation["blocker_kind"] == "requires_user_input"
+    assert observation["prompt_safe_summary"] == "需要用户补充缺失指代。"
+    resolve_task_inline.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_user_input_blocker_converges_after_one_final_cognition() -> None:
+    """A blocked local recall cannot cause repeated resolver cognition."""
+
+    request = _resolver_request(
+        objective="retrieve the missing referent context",
+    )
+    cognition_inputs: list[dict] = []
+    capability_inputs: list[dict] = []
+
+    async def call_cognition(state: dict) -> dict:
+        cognition_inputs.append(dict(state))
+        return _cognition_result(
+            internal_monologue="The referent is still missing.",
+            resolver_requests=[request],
+        )
+
+    async def execute_capability(
+        capability_request: dict,
+        _state: dict,
+    ) -> dict:
+        capability_inputs.append(capability_request)
+        return {
+            "schema_version": RESOLVER_OBSERVATION_VERSION,
+            "observation_id": "resolver_obs_missing_referent",
+            "capability_kind": capability_request["capability_kind"],
+            "request_objective": capability_request["objective"],
+            "request_reason": capability_request["reason"],
+            "status": "blocked",
+            "blocker_kind": "requires_user_input",
+            "prompt_safe_summary": (
+                "Local context recall requires user input: missing referent."
+            ),
+            "evidence_refs": [],
+            "task_resolution_evidence_state": {
+                "schema_version": "resolver_evidence_state.v1",
+                "state": "blocked",
+                "remaining_needs": [],
+            },
+            "created_at_utc": "2026-05-29T21:00:00+00:00",
+        }
+
+    result = await call_cognition_resolver_loop(
+        _resolver_state(),
+        call_cognition_subgraph_func=call_cognition,
+        execute_capability_func=execute_capability,
+        max_cycles=3,
+        capability_timeout_seconds=1.0,
+    )
+
+    assert len(cognition_inputs) == 2
+    assert len(capability_inputs) == 1
+    assert result["resolver_capability_requests"] == []
+    assert result["action_specs"][0]["params"]["surface_requirements"] == {
+        "decision": "ask_clarification",
+        "detail": "Local context recall requires user input: missing referent.",
+    }
+    assert result["resolver_state"]["status"] == "blocked"
+    assert result["resolver_state"]["terminal_reason"] == (
+        "blocked user-input resolver request converted to clarification surface"
+    )
+
+
+@pytest.mark.asyncio
+async def test_user_input_blocker_without_final_action_surfaces_clarification() -> None:
+    """A silent final cognition pass cannot suppress a needed clarification."""
+
+    request = _resolver_request(
+        objective="retrieve the missing referent context",
+    )
+    cognition_inputs: list[dict] = []
+
+    async def call_cognition(state: dict) -> dict:
+        cognition_inputs.append(dict(state))
+        if len(cognition_inputs) == 1:
+            return _cognition_result(
+                internal_monologue="The referent is still missing.",
+                resolver_requests=[request],
+            )
+        return _cognition_result(
+            internal_monologue="The final pass selected no visible action.",
+        )
+
+    async def execute_capability(
+        capability_request: dict,
+        _state: dict,
+    ) -> dict:
+        return {
+            "schema_version": RESOLVER_OBSERVATION_VERSION,
+            "observation_id": "resolver_obs_missing_referent_no_action",
+            "capability_kind": capability_request["capability_kind"],
+            "request_objective": capability_request["objective"],
+            "request_reason": capability_request["reason"],
+            "status": "blocked",
+            "blocker_kind": "requires_user_input",
+            "prompt_safe_summary": (
+                "Local context recall requires user input: missing referent."
+            ),
+            "evidence_refs": [],
+            "task_resolution_evidence_state": {
+                "schema_version": "resolver_evidence_state.v1",
+                "state": "blocked",
+                "remaining_needs": [],
+            },
+            "created_at_utc": "2026-05-29T21:00:00+00:00",
+        }
+
+    result = await call_cognition_resolver_loop(
+        _resolver_state(),
+        call_cognition_subgraph_func=call_cognition,
+        execute_capability_func=execute_capability,
+        max_cycles=3,
+        capability_timeout_seconds=1.0,
+    )
+
+    assert len(cognition_inputs) == 2
+    assert result["resolver_capability_requests"] == []
+    assert result["action_specs"][0]["params"]["surface_requirements"] == {
+        "decision": "ask_clarification",
+        "detail": "Local context recall requires user input: missing referent.",
+    }
+    assert result["resolver_state"]["terminal_reason"] == (
+        "blocked user-input resolver request converted to clarification surface"
+    )
+
+
+@pytest.mark.asyncio
+async def test_internal_thought_uses_unified_task_resolution_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Internal-thought evidence work uses the same task-resolution boundary."""
+
+    captured: dict = {}
+
+    async def resolve_task_inline(
+        request: dict,
+        context: dict,
+        *,
+        inline_budget_seconds: float,
+    ) -> dict[str, object]:
+        captured["request"] = request
+        captured["context"] = context
+        captured["inline_budget_seconds"] = inline_budget_seconds
+        return _task_result(summary="前文提到同一个话题。")
+
+    monkeypatch.setattr(
+        capabilities_module,
+        "resolve_task_inline",
+        resolve_task_inline,
     )
     request = _resolver_request(
         objective="回看群聊前文，判断这个内部想法是否有足够证据。",
@@ -2140,25 +2504,26 @@ async def test_internal_thought_rag_capability_uses_existing_rag_path(
         _internal_thought_resolver_state(),
     )
 
-    assert captured["request"]["objective"] == request["objective"]
-    assert captured["request"]["source"] == "l2d"
-    assert captured["context"]["original_user_request"] == (
+    assert captured["request"]["semantic_goal"] == request["objective"]
+    assert captured["request"]["capability"] == "task_resolution_request"
+    assert captured["context"]["conversation_summary"] == (
         "Original user request about trust."
     )
     assert captured["context"]["platform"] == "debug"
-    assert captured["context"]["global_user_id"] == "global-user-123"
+    assert captured["context"]["requester_global_user_id"] == (
+        "global-user-123"
+    )
     assert captured["context"]["character_name"] == "Kazusa"
     assert captured["context"]["prompt_message_context"]["body_text"] == (
         "Need an evidence-backed answer."
     )
     assert observation["status"] == "succeeded"
-    assert observation["capability_kind"] == "local_context_recall"
-    assert observation["rag_result"]["answer"] == "找到一条群聊前文证据。"
-    assert "conversation_evidence" in observation["rag_result"]
+    assert observation["capability_kind"] == "task_resolution_request"
+    assert observation["prompt_safe_summary"] == "前文提到同一个话题。"
 
 
 @pytest.mark.asyncio
-async def test_public_answer_research_uses_complex_resolver(
+async def test_public_evidence_projects_through_task_resolution(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Public answer research should run the complex resolver boundary."""
@@ -2234,14 +2599,27 @@ async def test_public_answer_research_uses_complex_resolver(
         }
         return result
 
+    async def resolve_task_inline(
+        request: dict,
+        context: dict,
+        *,
+        inline_budget_seconds: float,
+    ) -> dict[str, object]:
+        captured["request"] = request
+        captured["context"] = context
+        captured["inline_budget_seconds"] = inline_budget_seconds
+        return _task_result(
+            specialist="public_research",
+            summary="网页证据显示当前事实可用。",
+        )
+
     monkeypatch.setattr(
         capabilities_module,
-        "resolve_complex_task",
-        resolve_complex_task,
-        raising=False,
+        "resolve_task_inline",
+        resolve_task_inline,
     )
     request = _resolver_request(
-        capability_kind="public_answer_research",
+        capability_kind="task_resolution_request",
         objective="查询当前公共网页事实。",
     )
 
@@ -2250,37 +2628,37 @@ async def test_public_answer_research_uses_complex_resolver(
         _resolver_state(),
     )
 
-    assert captured["request"]["objective"] == request["objective"]
-    assert captured["request"]["source"] == "l2d"
+    assert captured["request"]["semantic_goal"] == request["objective"]
+    assert captured["request"]["capability"] == "task_resolution_request"
     assert captured["context"]["conversation_summary"] == (
         "Original user request about trust."
     )
     assert observation["status"] == "succeeded"
-    assert observation["capability_kind"] == "public_answer_research"
-    assert observation["prompt_safe_summary"] == "找到一条网页证据。"
+    assert observation["capability_kind"] == "task_resolution_request"
+    assert observation["prompt_safe_summary"] == (
+        "网页证据显示当前事实可用。"
+    )
     assert observation["knowledge_projection"] == {
-        "investigation_summary": "找到一条网页证据。",
+        "investigation_summary": "网页证据显示当前事实可用。",
         "knowledge_we_know_so_far": ["网页证据显示当前事实可用。"],
         "knowledge_still_lacking": [],
-        "recommended_next_iteration": [
-            "由 cognition 判断是否足够进入可见回答。",
-        ],
+        "recommended_next_iteration": [],
         "evidence_boundary_notes": [],
     }
-    assert observation["evidence_refs"][0]["owner"] == "complex_task_resolver"
+    assert observation["evidence_refs"][0]["owner"] == "public_research"
 
 
 @pytest.mark.asyncio
-async def test_empty_resolver_objective_fails_before_rag_dispatch(
+async def test_empty_resolver_objective_fails_before_task_dispatch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Malformed resolver requests must fail before invoking RAG."""
+    """Malformed resolver requests fail before unified task dispatch."""
 
-    resolve_local_context = AsyncMock()
+    resolve_task_inline = AsyncMock()
     monkeypatch.setattr(
         capabilities_module,
-        "resolve_local_context",
-        resolve_local_context,
+        "resolve_task_inline",
+        resolve_task_inline,
     )
     request = _resolver_request(objective=" ")
 
@@ -2290,7 +2668,7 @@ async def test_empty_resolver_objective_fails_before_rag_dispatch(
             _resolver_state(),
         )
 
-    resolve_local_context.assert_not_awaited()
+    resolve_task_inline.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -2345,18 +2723,11 @@ async def test_self_goal_resolution_allows_internal_thought_source() -> None:
     """Internal thought may produce a private self-resolution observation."""
 
     state = _resolver_state()
-    episode = dict(state["cognitive_episode"])
-    episode["trigger_source"] = "internal_thought"
-    episode["input_sources"] = ["internal_monologue"]
-    episode["output_mode"] = "think_only"
-    episode["percepts"] = [{
-        "percept_id": "resolver-internal-thought",
-        "input_source": "internal_monologue",
-        "content": "整理一个内部目标。",
-        "visibility": "internal_only",
-        "metadata": {},
-    }]
-    validate_cognitive_episode(episode)
+    episode = canonical_episode(
+        episode_id="resolver-internal-thought-episode",
+        trigger_source="internal_thought",
+        content="整理一个内部目标。",
+    )
     state["cognitive_episode"] = episode
 
     observation = await capabilities_module.execute_resolver_capability_request(

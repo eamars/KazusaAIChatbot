@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
+from tests.cognition_core_v2_test_helpers import canonical_user_message_episode
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     MAX_RESOLVER_SUMMARY_CHARS,
     MAX_RESOLVER_TRACE_CHARS,
@@ -26,6 +26,9 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     validate_resolver_pending_resolution,
     validate_resolver_pending_resume,
 )
+from kazusa_ai_chatbot.cognition_resolver.capabilities import (
+    project_resolver_observation_for_cognition,
+)
 from kazusa_ai_chatbot.cognition_resolver.state import (
     MAX_PROJECTED_RESOLVER_OBSERVATIONS,
     append_cycle_trace,
@@ -41,18 +44,40 @@ from kazusa_ai_chatbot.time_boundary import build_turn_clock
 def _capability_request() -> dict:
     return {
         "schema_version": RESOLVER_CAPABILITY_REQUEST_VERSION,
-        "capability_kind": "local_context_recall",
+        "capability_kind": "task_resolution_request",
         "objective": "Retrieve relationship evidence for the current question.",
         "reason": "The current cognition cycle lacks enough evidence.",
         "priority": "now",
     }
 
 
+def test_v2_observation_projection_has_typed_evidence_without_state_authority(
+) -> None:
+    """Capability outcomes should re-enter V2 as evidence, not state writes."""
+
+    evidence, direct_facts = project_resolver_observation_for_cognition(
+        {
+            "observation_id": "resolver-observation:1",
+            "capability": "task_resolution_request",
+            "semantic_summary": "A prior promise is relevant.",
+            "replacement_state": {"forbidden": True},
+        },
+        occurred_at="2026-05-16T00:00:00Z",
+    )
+
+    assert evidence["evidence_ref"]["source_kind"] == "resolver_observation"
+    assert evidence["semantic_text"] == (
+        "task_resolution_request: A prior promise is relevant."
+    )
+    assert direct_facts == []
+    assert "replacement_state" not in evidence
+
+
 def _observation() -> dict:
     return {
         "schema_version": RESOLVER_OBSERVATION_VERSION,
         "observation_id": "raw-tool-run-123",
-        "capability_kind": "local_context_recall",
+        "capability_kind": "task_resolution_request",
         "request_objective": "Retrieve relationship evidence.",
         "request_reason": "The current cycle lacks enough evidence.",
         "status": "succeeded",
@@ -67,6 +92,11 @@ def _observation() -> dict:
                 "observed_at": "2026-05-30T00:00:00+00:00",
             }
         ],
+        "task_resolution_evidence_state": {
+            "schema_version": "resolver_evidence_state.v1",
+            "state": "complete",
+            "remaining_needs": [],
+        },
         "created_at_utc": "2026-05-30T00:00:00+00:00",
     }
 
@@ -108,7 +138,7 @@ def _cycle_trace() -> dict:
         "l2_judgment_note": "Evidence is missing.",
         "l2d_resolver_capability_requests": [_capability_request()],
         "l2d_action_specs_summary": ["speak:" + ("x" * 700)],
-        "selected_capability_kind": "local_context_recall",
+        "selected_capability_kind": "task_resolution_request",
         "observation_ids": ["resolver_obs_1"],
         "final_surface_decision": "continue",
         "terminal_reason": "",
@@ -162,7 +192,7 @@ def _goal_progress() -> dict:
         ],
         "missing_user_inputs": [],
         "evidence_dependencies": ["当前营业状态和路线锚点"],
-        "attempted_paths": ["public_answer_research: CBD 平价晚餐"],
+        "attempted_paths": ["task_resolution_request: CBD 平价晚餐"],
         "source_backed_facts": ["用户预算 20 NZD；地点奥克兰 CBD"],
         "assumptions_or_inferences": ["散步路线可以用公开海滨路线骨架给出"],
         "blockers": ["无法确认每家店 19:30 仍营业"],
@@ -175,9 +205,10 @@ def _goal_progress() -> dict:
 
 def _minimal_global_state() -> dict:
     return {
-        "decontexualized_input": "User asks for evidence-backed judgment.",
+        "decontextualized_input": "User asks for evidence-backed judgment.",
         "global_user_id": "user-1",
         "character_profile": {"global_user_id": "character-1"},
+        "cognitive_episode": {"episode_id": "resolver-test-episode"},
     }
 
 
@@ -187,7 +218,7 @@ def _minimal_global_state_with_media(
     """Build an empty-text resolver state with current-turn media percepts."""
 
     turn_clock = build_turn_clock("2026-06-02 16:04:32")
-    episode = build_text_chat_cognitive_episode(
+    episode = canonical_user_message_episode(
         episode_id="resolver-image-only-episode",
         percept_id="resolver-image-only-percept",
         storage_timestamp_utc=turn_clock["storage_timestamp_utc"],
@@ -208,7 +239,7 @@ def _minimal_global_state_with_media(
         media_description_rows=media_description_rows,
     )
     state = _minimal_global_state()
-    state["decontexualized_input"] = ""
+    state["decontextualized_input"] = ""
     state["cognitive_episode"] = episode
     return state
 
@@ -216,7 +247,7 @@ def _minimal_global_state_with_media(
 def _first_image_observation_percept(state: dict) -> dict:
     episode = state["cognitive_episode"]
     for percept in episode["percepts"]:
-        if percept["input_source"] == "image_observation":
+        if percept["source_kind"] == "image_observation":
             return percept
     raise AssertionError("expected image observation percept")
 
@@ -228,7 +259,7 @@ def test_capability_request_validator_accepts_known_contract() -> None:
     expected_objective = "Retrieve relationship evidence for the current question."
 
     assert validated["schema_version"] == RESOLVER_CAPABILITY_REQUEST_VERSION
-    assert validated["capability_kind"] == "local_context_recall"
+    assert validated["capability_kind"] == "task_resolution_request"
     assert validated["objective"] == expected_objective
 
 
@@ -264,6 +295,34 @@ def test_observation_validator_clips_prompt_safe_summary() -> None:
     assert set(validated["prompt_safe_summary"]) == {"x"}
 
 
+def test_observation_validator_projects_typed_user_input_blocker() -> None:
+    """Blocked observations may expose a bounded user-input reason."""
+
+    observation = _observation()
+    observation["status"] = "blocked"
+    observation["blocker_kind"] = "requires_user_input"
+    observation["task_resolution_evidence_state"] = {
+        "schema_version": "resolver_evidence_state.v1",
+        "state": "blocked",
+        "remaining_needs": [],
+    }
+
+    validated = validate_resolver_observation(observation)
+    projection = project_observations_for_cognition([validated])
+
+    assert validated["blocker_kind"] == "requires_user_input"
+    assert "blocker_kind=requires_user_input" in projection
+
+    observation["status"] = "succeeded"
+    observation["task_resolution_evidence_state"] = {
+        "schema_version": "resolver_evidence_state.v1",
+        "state": "complete",
+        "remaining_needs": [],
+    }
+    with pytest.raises(ResolverValidationError, match="blocker_kind"):
+        validate_resolver_observation(observation)
+
+
 def test_observation_projection_hides_raw_ids() -> None:
     """Cognition projection should expose aliases and summaries, not raw ids."""
 
@@ -284,7 +343,7 @@ def test_observation_projection_preserves_semantic_knowledge_context() -> None:
     """Knowledge projections should read as evidence context, not judgment."""
 
     observation = _observation()
-    observation["capability_kind"] = "public_answer_research"
+    observation["capability_kind"] = "task_resolution_request"
     observation["prompt_safe_summary"] = "Public research returned context."
     observation["knowledge_projection"] = {
         "investigation_summary": "Research found partial public evidence.",
@@ -298,7 +357,7 @@ def test_observation_projection_preserves_semantic_knowledge_context() -> None:
 
     projection = project_observations_for_cognition([observation])
 
-    assert "capability=public_answer_research" in projection
+    assert "capability=task_resolution_request" in projection
     assert "status=succeeded" not in projection
     assert "knowledge_we_know_so_far" in projection
     assert "The public source confirms fact A." in projection
@@ -398,8 +457,9 @@ def test_new_resolver_state_initializes_cycle_zero() -> None:
     """A new resolver state should be empty and ready for cycle 0."""
 
     state = new_resolver_state(
-        decontexualized_input="Need a deliberate answer.",
+        decontextualized_input="Need a deliberate answer.",
         max_cycles=3,
+        episode_id="resolver-test-episode",
     )
 
     assert state["schema_version"] == RESOLVER_CYCLE_STATE_VERSION
@@ -418,8 +478,9 @@ def test_append_observation_projects_alias_and_caps_context() -> None:
     """Observation projection should expose bounded aliases, not raw ids."""
 
     state = new_resolver_state(
-        decontexualized_input="Need repeated evidence.",
+        decontextualized_input="Need repeated evidence.",
         max_cycles=3,
+        episode_id="resolver-test-episode",
     )
     for index in range(MAX_PROJECTED_RESOLVER_OBSERVATIONS + 2):
         observation = _observation()
@@ -440,8 +501,9 @@ def test_append_cycle_trace_stores_bounded_trace_row() -> None:
     """Cycle traces should be normalized before they enter resolver state."""
 
     state = new_resolver_state(
-        decontexualized_input="Need one resolver cycle.",
+        decontextualized_input="Need one resolver cycle.",
         max_cycles=3,
+        episode_id="resolver-test-episode",
     )
     trace = _cycle_trace()
     trace["terminal_reason"] = "x" * (MAX_RESOLVER_TRACE_CHARS + 50)
@@ -487,6 +549,28 @@ def test_ensure_initial_resolver_inputs_adds_first_cycle_context() -> None:
     assert "resolver_observations:" not in initialized["resolver_context"]
 
 
+def test_targetless_group_self_cognition_bootstraps_without_user_owner() -> None:
+    """Group review should keep its semantic targetless contract at bootstrap."""
+
+    state = _minimal_global_state()
+    state["global_user_id"] = ""
+    state["cognitive_episode"] = {
+        "episode_id": "targetless-self-cognition-episode",
+        "trigger_source": "self_cognition",
+        "target_scope": {
+            "channel_type": "group",
+            "current_global_user_id": "",
+            "current_platform_user_id": "",
+        },
+    }
+
+    initialized = ensure_initial_resolver_inputs(state, max_cycles=3)
+
+    assert initialized["global_user_id"] == ""
+    assert initialized["rag_result"]["answer"] == ""
+    assert initialized["rag_result"]["memory_evidence"] == []
+
+
 def test_initial_resolver_inputs_uses_image_observation_when_text_empty() -> None:
     """Image-only turns should bootstrap resolver goal from image observation."""
 
@@ -502,20 +586,22 @@ def test_initial_resolver_inputs_uses_image_observation_when_text_empty() -> Non
 
     expected_goal = f'当前输入包含图片观察：{image_summary}'
     resolver_state = initialized["resolver_state"]
-    assert initialized["decontexualized_input"] == ""
-    assert resolver_state["original_decontexualized_input"] == expected_goal
+    assert initialized["decontextualized_input"] == ""
+    assert resolver_state["original_decontextualized_input"] == expected_goal
     assert resolver_state["goal_progress"]["original_goal"] == expected_goal
     assert expected_goal in initialized["resolver_context"]
-    assert _first_image_observation_percept(state)["content"] == image_summary
+    assert _first_image_observation_percept(state)["content"]["description"] == (
+        image_summary
+    )
 
 
 def test_initial_resolver_inputs_rejects_empty_text_without_image_goal() -> None:
     """Empty text without image evidence remains invalid for the resolver."""
 
     state = _minimal_global_state()
-    state["decontexualized_input"] = ""
+    state["decontextualized_input"] = ""
 
-    with pytest.raises(ResolverValidationError, match="decontexualized_input"):
+    with pytest.raises(ResolverValidationError, match="decontextualized_input"):
         ensure_initial_resolver_inputs(state, max_cycles=3)
 
 
@@ -529,7 +615,7 @@ def test_initial_resolver_inputs_rejects_audio_only_empty_text() -> None:
         },
     ])
 
-    with pytest.raises(ResolverValidationError, match="decontexualized_input"):
+    with pytest.raises(ResolverValidationError, match="decontextualized_input"):
         ensure_initial_resolver_inputs(state, max_cycles=3)
 
 
@@ -543,9 +629,9 @@ def test_initial_resolver_inputs_rejects_audit_only_image_empty_text() -> None:
         },
     ])
     image_percept = _first_image_observation_percept(state)
-    image_percept["visibility"] = "audit_only"
+    image_percept["content"]["visibility"] = "audit_only"
 
-    with pytest.raises(ResolverValidationError, match="decontexualized_input"):
+    with pytest.raises(ResolverValidationError, match="decontextualized_input"):
         ensure_initial_resolver_inputs(state, max_cycles=3)
 
 
@@ -559,7 +645,7 @@ def test_initial_resolver_inputs_rejects_empty_image_content_empty_text() -> Non
         },
     ])
     image_percept = _first_image_observation_percept(state)
-    image_percept["content"] = " "
+    image_percept["content"]["description"] = " "
 
-    with pytest.raises(ResolverValidationError, match="decontexualized_input"):
+    with pytest.raises(ResolverValidationError, match="decontextualized_input"):
         ensure_initial_resolver_inputs(state, max_cycles=3)

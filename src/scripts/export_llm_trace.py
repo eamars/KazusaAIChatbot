@@ -16,6 +16,9 @@ from typing import Any
 
 from kazusa_ai_chatbot.db import close_db
 from kazusa_ai_chatbot.db import script_operations
+from kazusa_ai_chatbot.llm_tracing.correlation import (
+    merge_trace_candidates,
+)
 from kazusa_ai_chatbot.time_boundary import storage_utc_now, storage_utc_now_iso
 
 
@@ -62,6 +65,11 @@ def _build_parser() -> argparse.ArgumentParser:
         default="",
         help="Conversation platform_message_id used to resolve a trace id.",
     )
+    parser.add_argument(
+        "--cognition-invocation-id",
+        default="",
+        help="Optional Cognition V2 invocation id to select from the trace.",
+    )
     parser.add_argument("--output", type=Path, help="Destination JSON path.")
     return parser
 
@@ -92,24 +100,40 @@ async def resolve_trace_id(
             }
         })
 
+    candidate_sets: list[list[dict[str, Any]]] = []
     for filter_doc in filters:
         rows = await script_operations.export_collection_rows(
             collection_name="conversation_history",
             filter_doc=filter_doc,
             projection={"_id": 0, "llm_trace_id": 1},
             sort_doc={"timestamp": -1},
-            limit=1,
+            limit=64,
         )
-        if not rows:
-            continue
-        row_trace_id = str(rows[0].get("llm_trace_id", "")).strip()
-        if row_trace_id:
-            return row_trace_id
+        candidate_sets.append([
+            {"trace_id": row.get("llm_trace_id", "")}
+            for row in rows
+        ])
+
+    resolution = merge_trace_candidates(
+        source_surface="protected_llm_trace_id",
+        identifier="conversation_metadata",
+        candidate_sets=candidate_sets,
+    )
+    if resolution.trace_id:
+        return resolution.trace_id
+    if resolution.status == "ambiguous":
+        raise ValueError(
+            "candidate metadata maps to multiple llm_trace_id values"
+        )
 
     raise ValueError("could not resolve llm_trace_id")
 
 
-async def build_trace_export(*, trace_id: str) -> dict[str, Any]:
+async def build_trace_export(
+    *,
+    trace_id: str,
+    cognition_invocation_id: str = "",
+) -> dict[str, Any]:
     """Build the complete trace export document."""
 
     trace_filter = {"trace_id": trace_id}
@@ -138,11 +162,29 @@ async def build_trace_export(*, trace_id: str) -> dict[str, Any]:
         sort_doc={"timestamp": 1},
         limit=100,
     )
+    clean_invocation_id = cognition_invocation_id.strip()
+    cognition_failure_capsules = [
+        step["capsule"]
+        for step in steps
+        if (
+            step.get("capture_reason") == "cognition_failure_capsule"
+            and isinstance(step.get("capsule"), dict)
+            and (
+                not clean_invocation_id
+                or step["capsule"].get("cognition_invocation_id")
+                == clean_invocation_id
+            )
+        )
+    ]
+    query = {"trace_id": trace_id}
+    if clean_invocation_id:
+        query["cognition_invocation_id"] = clean_invocation_id
     document = {
         "generated_at": storage_utc_now_iso(),
-        "query": {"trace_id": trace_id},
+        "query": query,
         "llm_trace_runs": runs,
         "llm_trace_steps": steps,
+        "cognition_failure_capsules": cognition_failure_capsules,
         "event_log_events": events,
         "conversation_history": conversation_rows,
     }
@@ -164,11 +206,15 @@ def write_trace_export(
 async def export_trace(
     *,
     trace_id: str,
+    cognition_invocation_id: str = "",
     output_path: Path | None = None,
 ) -> Path:
     """Build and write a trace export."""
 
-    export_document = await build_trace_export(trace_id=trace_id)
+    export_document = await build_trace_export(
+        trace_id=trace_id,
+        cognition_invocation_id=cognition_invocation_id,
+    )
     destination = output_path or _default_output_path(trace_id)
     write_trace_export(output_path=destination, export_document=export_document)
     return destination
@@ -189,6 +235,7 @@ async def main() -> None:
         )
         output_path = await export_trace(
             trace_id=trace_id,
+            cognition_invocation_id=args.cognition_invocation_id,
             output_path=args.output,
         )
         print(f"wrote LLM trace export to {output_path}")

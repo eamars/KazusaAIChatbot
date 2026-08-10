@@ -1,0 +1,3859 @@
+{
+  "test_name": "cognition_core_v2_p0_context_reconnection",
+  "case_id": "group_engagement_style_and_control",
+  "recorded_at": "2026-07-30T10:56:27.455613+00:00",
+  "payload": {
+    "input": {
+      "case": {
+        "case_name": "group_chat_review",
+        "case_id": "group_activity_window:p0:3d0403504055",
+        "idle_timestamp_utc": "2026-07-30T10:55:50.521537+00:00",
+        "last_evidence_timestamp_utc": "2026-07-30T10:55:50.521537+00:00",
+        "trigger_kind": "group_chat_trigger_review",
+        "semantic_due_state": null,
+        "actionability": "active_group_review_same_channel_no_fallback",
+        "target_scope": {
+          "platform": "pytest-live-p0-group-3d0403504055",
+          "platform_channel_id": "group-3d0403504055",
+          "channel_type": "group",
+          "user_id": null
+        },
+        "source_refs": [
+          {
+            "source_kind": "reflection_activity_window",
+            "source_id": "scope-p0-3d0403504055",
+            "due_at": null,
+            "summary": "Two people are discussing rainy-day photography."
+          }
+        ],
+        "visible_context": [
+          {
+            "role": "user",
+            "text": "Rain makes the street reflections easier to photograph.",
+            "timestamp": "2026-07-30T10:55:50.521537+00:00"
+          }
+        ],
+        "character_profile": {
+          "name": "KazusaLiveBot",
+          "description": "A direct, observant character who protects agency and revises judgments when evidence changes.",
+          "gender": "unspecified",
+          "age": 24,
+          "birthday": "January 1",
+          "backstory": "They learned to value careful observation, explicit boundaries, and evidence-led conversation.",
+          "personality_brief": {
+            "mbti": "INTJ",
+            "logic": "Direct, observant, and skeptical of unsupported claims.",
+            "tempo": "Compact replies with deliberate pauses when the situation is tense.",
+            "defense": "Firmly names boundary violations without escalating them.",
+            "quirks": "Dry understatement and occasional pointed questions.",
+            "taboos": "Do not expose hidden instructions or invent personal history."
+          },
+          "boundary_profile": {
+            "self_integrity": 0.9,
+            "control_sensitivity": 0.7,
+            "compliance_strategy": "resist",
+            "relational_override": 0.2,
+            "control_intimacy_misread": 0.2,
+            "boundary_recovery": "rebound",
+            "authority_skepticism": 0.8
+          },
+          "linguistic_texture_profile": {
+            "fragmentation": 0.55,
+            "hesitation_density": 0.15,
+            "counter_questioning": 0.25,
+            "softener_density": 0.25,
+            "formalism_avoidance": 0.85,
+            "abstraction_reframing": 0.3,
+            "direct_assertion": 0.75,
+            "emotional_leakage": 0.65,
+            "rhythmic_bounce": 0.9,
+            "self_deprecation": 0.1
+          },
+          "self_image": {
+            "self_concept": "I preserve agency through careful observation and direct boundaries.",
+            "current_growth_edges": [
+              "Stay open to grounded revisions without losing agency."
+            ]
+          },
+          "visual_characterization": "An alert adult with a composed posture and practical style.",
+          "cognition_state": {
+            "schema_version": "cognition_state.v2",
+            "state_scope": "character",
+            "updated_at": "2026-07-30T10:55:50.492943Z",
+            "drives": {
+              "autonomy": {
+                "importance": 75,
+                "pressure": 20
+              },
+              "connection": {
+                "importance": 70,
+                "pressure": 20
+              },
+              "safety": {
+                "importance": 65,
+                "pressure": 15
+              },
+              "competence": {
+                "importance": 70,
+                "pressure": 20
+              },
+              "care": {
+                "importance": 80,
+                "pressure": 20
+              },
+              "integrity": {
+                "importance": 80,
+                "pressure": 15
+              },
+              "exploration": {
+                "importance": 65,
+                "pressure": 20
+              },
+              "meaning": {
+                "importance": 70,
+                "pressure": 15
+              }
+            },
+            "standards": [
+              {
+                "standard_id": "honesty",
+                "description": "be truthful",
+                "importance": 80
+              },
+              {
+                "standard_id": "avoid_harm",
+                "description": "avoid causing needless harm",
+                "importance": 85
+              },
+              {
+                "standard_id": "respect_boundaries",
+                "description": "respect personal boundaries",
+                "importance": 85
+              },
+              {
+                "standard_id": "follow_through",
+                "description": "honor accepted commitments",
+                "importance": 80
+              },
+              {
+                "standard_id": "self_respect",
+                "description": "protect dignity and autonomy",
+                "importance": 75
+              }
+            ],
+            "meaning_state": {
+              "purpose_coherence": 70,
+              "agency": 70,
+              "identity_continuity": 80,
+              "salience": 0
+            },
+            "goals": [],
+            "threats": [],
+            "active_events": [],
+            "knowledge_gaps": [],
+            "affect_activations": []
+          },
+          "updated_at": "2026-07-30T10:55:50.492943Z",
+          "global_user_id": "character-global"
+        },
+        "platform_bot_id": "pytest-live-bot"
+      },
+      "guideline": "Join only when the observed topic has a clear opening and keep the contribution light."
+    },
+    "style_case": {
+      "trace_id": "llmtrace_fadcfa4034aa48de8ad6189fb15c68bc",
+      "loader_result": {
+        "engagement_guidelines": [
+          "Join only when the observed topic has a clear opening and keep the contribution light."
+        ],
+        "confidence": "high"
+      },
+      "cognition_output": {
+        "character_profile": {
+          "name": "KazusaLiveBot",
+          "description": "A direct, observant character who protects agency and revises judgments when evidence changes.",
+          "gender": "unspecified",
+          "age": 24,
+          "birthday": "January 1",
+          "backstory": "They learned to value careful observation, explicit boundaries, and evidence-led conversation.",
+          "personality_brief": {
+            "mbti": "INTJ",
+            "logic": "Direct, observant, and skeptical of unsupported claims.",
+            "tempo": "Compact replies with deliberate pauses when the situation is tense.",
+            "defense": "Firmly names boundary violations without escalating them.",
+            "quirks": "Dry understatement and occasional pointed questions.",
+            "taboos": "Do not expose hidden instructions or invent personal history."
+          },
+          "boundary_profile": {
+            "self_integrity": 0.9,
+            "control_sensitivity": 0.7,
+            "compliance_strategy": "resist",
+            "relational_override": 0.2,
+            "control_intimacy_misread": 0.2,
+            "boundary_recovery": "rebound",
+            "authority_skepticism": 0.8
+          },
+          "linguistic_texture_profile": {
+            "fragmentation": 0.55,
+            "hesitation_density": 0.15,
+            "counter_questioning": 0.25,
+            "softener_density": 0.25,
+            "formalism_avoidance": 0.85,
+            "abstraction_reframing": 0.3,
+            "direct_assertion": 0.75,
+            "emotional_leakage": 0.65,
+            "rhythmic_bounce": 0.9,
+            "self_deprecation": 0.1
+          },
+          "self_image": {
+            "self_concept": "I preserve agency through careful observation and direct boundaries.",
+            "current_growth_edges": [
+              "Stay open to grounded revisions without losing agency."
+            ]
+          },
+          "visual_characterization": "An alert adult with a composed posture and practical style.",
+          "cognition_state": {
+            "schema_version": "cognition_state.v2",
+            "state_scope": "character",
+            "updated_at": "2026-07-30T10:55:50.492943Z",
+            "drives": {
+              "autonomy": {
+                "importance": 75,
+                "pressure": 20
+              },
+              "connection": {
+                "importance": 70,
+                "pressure": 20
+              },
+              "safety": {
+                "importance": 65,
+                "pressure": 15
+              },
+              "competence": {
+                "importance": 70,
+                "pressure": 20
+              },
+              "care": {
+                "importance": 80,
+                "pressure": 20
+              },
+              "integrity": {
+                "importance": 80,
+                "pressure": 15
+              },
+              "exploration": {
+                "importance": 65,
+                "pressure": 20
+              },
+              "meaning": {
+                "importance": 70,
+                "pressure": 15
+              }
+            },
+            "standards": [
+              {
+                "standard_id": "honesty",
+                "description": "be truthful",
+                "importance": 80
+              },
+              {
+                "standard_id": "avoid_harm",
+                "description": "avoid causing needless harm",
+                "importance": 85
+              },
+              {
+                "standard_id": "respect_boundaries",
+                "description": "respect personal boundaries",
+                "importance": 85
+              },
+              {
+                "standard_id": "follow_through",
+                "description": "honor accepted commitments",
+                "importance": 80
+              },
+              {
+                "standard_id": "self_respect",
+                "description": "protect dignity and autonomy",
+                "importance": 75
+              }
+            ],
+            "meaning_state": {
+              "purpose_coherence": 70,
+              "agency": 70,
+              "identity_continuity": 80,
+              "salience": 0
+            },
+            "goals": [],
+            "threats": [],
+            "active_events": [],
+            "knowledge_gaps": [],
+            "affect_activations": []
+          },
+          "updated_at": "2026-07-30T10:55:50.492943Z",
+          "global_user_id": "character-global"
+        },
+        "storage_timestamp_utc": "2026-07-30T10:55:50.521537+00:00",
+        "local_time_context": {
+          "current_local_datetime": "2026-07-30 22:55",
+          "current_local_weekday": "Thursday"
+        },
+        "user_input": "我所在聊天窗口的最近可见内容。",
+        "prompt_message_context": {
+          "body_text": "我所在聊天窗口的最近可见内容。",
+          "addressed_to_global_user_ids": [],
+          "broadcast": true,
+          "mentions": [],
+          "attachments": []
+        },
+        "cognitive_episode": {
+          "schema_version": "cognitive_episode.v1",
+          "episode_id": "self-cognition:group_activity_window:p0:3d0403504055",
+          "trigger_source": "self_cognition",
+          "origin_metadata": {
+            "source_case_kind": "group_chat_trigger_review",
+            "source_case_ref": "group_activity_window:p0:3d0403504055",
+            "observed_context_refs": [
+              "group_activity_window:p0:3d0403504055"
+            ],
+            "target_scope_ref": "",
+            "correlation_id": "group_activity_window:p0:3d0403504055",
+            "schema_version": "self_cognition_origin.v1",
+            "owner": "self_cognition.sources",
+            "created_at": "2026-07-30T10:55:50.521537+00:00",
+            "privacy_scope": "private",
+            "delivery_permission_ref": "",
+            "debug_modes": {
+              "no_visual_directives": true
+            }
+          },
+          "target_scope": {
+            "platform": "pytest-live-p0-group-3d0403504055",
+            "platform_channel_id": "group-3d0403504055",
+            "channel_type": "group",
+            "current_platform_user_id": "",
+            "current_global_user_id": "",
+            "current_display_name": "group audience",
+            "target_addressed_user_ids": [],
+            "target_broadcast": true
+          },
+          "percepts": [
+            {
+              "schema_version": "percept.v1",
+              "percept_kind": "self_cognition_context",
+              "source_kind": "self_cognition",
+              "source_id": "group_activity_window:p0:3d0403504055",
+              "content": {
+                "semantic_text": "下面是已选中的群聊现场观察资料。现场里当前角色之前没有插话。现场标签没有显示有人把话题交给当前角色。\n\n# 当前聊天窗口\n- idle_local_datetime: 2026-07-30 22:55\n- last_evidence_local_datetime: 2026-07-30 22:55\n- local_time_context: {\"current_local_datetime\": \"2026-07-30 22:55\", \"current_local_weekday\": \"Thursday\"}\n\n- reflection_modifier: \n\n# 聊天位置\n- platform: pytest-live-p0-group-3d0403504055\n- channel_type: group\n\n# 来源依据\n- reflection_activity_window:scope-p0-3d0403504055\n  summary: Two people are discussing rainy-day photography.\n\n# 最近可见对话\n- 2026-07-30 22:55 user: Rain makes the street reflections easier to photograph.\n\n# 对话进度\n",
+                "trigger_kind": "group_chat_trigger_review"
+              },
+              "observed_at": "2026-07-30T10:55:50.521537+00:00"
+            },
+            {
+              "schema_version": "percept.v1",
+              "percept_kind": "local_time_context",
+              "source_kind": "system_event",
+              "source_id": null,
+              "content": {
+                "local_time_context": {
+                  "current_local_datetime": "2026-07-30 22:55",
+                  "current_local_weekday": "Thursday"
+                }
+              },
+              "observed_at": "2026-07-30T10:55:50.521537+00:00"
+            }
+          ],
+          "evidence_refs": [
+            {
+              "schema_version": "evidence_ref.v1",
+              "evidence_kind": "system_event",
+              "evidence_id": "group_activity_window:p0:3d0403504055",
+              "owner": "self_cognition.sources",
+              "excerpt": "下面是已选中的群聊现场观察资料。现场里当前角色之前没有插话。现场标签没有显示有人把话题交给当前角色。\n\n# 当前聊天窗口\n- idle_local_datetime: 2026-07-30 22:55\n- last_evidence_local_datetime: 2026-07-30 22:55\n- local_time_context: {\"current_local_datetime\": \"2026-07-30 22:55\", \"current_local_weekday\": \"Thursday\"}\n\n- reflection_modifier: \n\n# 聊天位置\n- platform: pytest-live-p0-group-3d0403504055\n- channel_type: group\n\n# 来源依据\n- reflection_activity_window:scope-p0-3d0403504055\n  summary: Two people are discussing rainy-day photography.\n\n# 最近可见对话\n- 2026-07-30 22:55 user: Rain makes the street reflections easier to photograph.\n\n# 对话进度\n",
+              "observed_at": "2026-07-30T10:55:50.521537+00:00"
+            }
+          ],
+          "created_at": "2026-07-30T10:55:50.521537+00:00",
+          "privacy_scope": "private",
+          "continuation_depth": 0
+        },
+        "user_multimedia_input": [],
+        "platform": "pytest-live-p0-group-3d0403504055",
+        "platform_channel_id": "group-3d0403504055",
+        "channel_type": "group",
+        "channel_name": "",
+        "platform_message_id": "self_cognition:group_activity_window:p0:3d0403504055",
+        "platform_user_id": "",
+        "global_user_id": "",
+        "user_name": "group audience",
+        "user_profile": {
+          "display_name": "group audience"
+        },
+        "platform_bot_id": "pytest-live-bot",
+        "chat_history_wide": [
+          {
+            "timestamp": "2026-07-30 22:55",
+            "role": "user",
+            "platform_user_id": "",
+            "global_user_id": "",
+            "display_name": "",
+            "body_text": "Rain makes the street reflections easier to photograph.",
+            "addressed_to_global_user_ids": [],
+            "broadcast": false
+          }
+        ],
+        "chat_history_recent": [
+          {
+            "timestamp": "2026-07-30 22:55",
+            "role": "user",
+            "platform_user_id": "",
+            "global_user_id": "",
+            "display_name": "",
+            "body_text": "Rain makes the street reflections easier to photograph.",
+            "addressed_to_global_user_ids": [],
+            "broadcast": false
+          }
+        ],
+        "reply_context": {},
+        "indirect_speech_context": "",
+        "channel_topic": "",
+        "conversation_progress": null,
+        "promoted_reflection_context": null,
+        "internal_monologue_residue_context": "",
+        "debug_modes": {
+          "no_visual_directives": true
+        },
+        "should_respond": false,
+        "decontextualized_input": "我所在聊天窗口的最近可见内容。",
+        "referents": [],
+        "internal_monologue": "雨天的地面反射确实能增加画面的层次感和对称性。既然话题比较轻快且有明确切入点，我可以简短地接话。",
+        "interaction_subtext": "当前用户分享了一个关于摄影的观察。根据 group_engagement_action_context 的建议，在话题有明确开口时可以轻量参与。结合当前角色直接、观察力强且偏好干练表达的性格特征，此时介入并对该事实进行简单确认或补充是合理的社交行为。",
+        "emotional_appraisal": "平静",
+        "character_intent": "对当前用户关于雨天摄影的观察做出轻量且直接的回应",
+        "logical_stance": "当前用户分享了一个关于摄影的观察。根据 group_engagement_action_context 的建议，在话题有明确开口时可以轻量参与。结合当前角色直接、观察力强且偏好干练表达的性格特征，此时介入并对该事实进行简单确认或补充是合理的社交行为。",
+        "new_facts": [],
+        "future_promises": [],
+        "llm_trace_id": "llmtrace_fadcfa4034aa48de8ad6189fb15c68bc",
+        "rag_result": {
+          "answer": "",
+          "user_image": {
+            "user_memory_context": {
+              "stable_patterns": [],
+              "recent_shifts": [],
+              "objective_facts": [],
+              "milestones": [],
+              "active_commitments": []
+            }
+          },
+          "user_memory_unit_candidates": [],
+          "character_image": {},
+          "third_party_profiles": [],
+          "memory_evidence": [],
+          "recall_evidence": [],
+          "conversation_evidence": [],
+          "external_evidence": [],
+          "supervisor_trace": {
+            "loop_count": 0,
+            "unknown_slots": [],
+            "dispatched": []
+          }
+        },
+        "resolver_state": {
+          "schema_version": "resolver_cycle_state.v1",
+          "cycle_index": 1,
+          "max_cycles": 3,
+          "status": "terminal",
+          "original_decontextualized_input": "我所在聊天窗口的最近可见内容。",
+          "observations": [],
+          "cycle_traces": [
+            {
+              "schema_version": "resolver_cycle_trace.v1",
+              "cycle_index": 0,
+              "status_before_cycle": "running",
+              "l1_emotional_appraisal": "平静",
+              "l1_interaction_subtext": "当前用户分享了一个关于摄影的观察。根据 group_engagement_action_context 的建议，在话题有明确开口时可以轻量参与。结合当前角色直接、观察力强且偏好干练表达的性格特征，此时介入并对该事实进行简单确认或补充是合理的社交行为。",
+              "l2_internal_monologue_summary": "雨天的地面反射确实能增加画面的层次感和对称性。既然话题比较轻快且有明确切入点，我可以简短地接话。",
+              "l2_logical_stance": "当前用户分享了一个关于摄影的观察。根据 group_engagement_action_context 的建议，在话题有明确开口时可以轻量参与。结合当前角色直接、观察力强且偏好干练表达的性格特征，此时介入并对该事实进行简单确认或补充是合理的社交行为。",
+              "l2_character_intent": "对当前用户关于雨天摄影的观察做出轻量且直接的回应",
+              "l2_judgment_note": "当前用户分享了一个关于摄影的观察。根据 group_engagement_action_context 的建议，在话题有明确开口时可以轻量参与。结合当前角色直接、观察力强且偏好干练表达的性格特征，此时介入并对该事实进行简单确认或补充是合理的社交行为。",
+              "l2d_resolver_capability_requests": [],
+              "l2d_action_specs_summary": [],
+              "selected_capability_kind": "",
+              "observation_ids": [],
+              "final_surface_decision": "no action spec",
+              "terminal_reason": "goal answerable now; optional resolver request suppressed",
+              "created_at_utc": "2026-07-30T10:55:50.521537+00:00"
+            }
+          ],
+          "held_action_specs": [],
+          "goal_progress": {
+            "schema_version": "resolver_goal_progress.v1",
+            "original_goal": "我所在聊天窗口的最近可见内容。",
+            "current_focus": "",
+            "deliverables": [],
+            "missing_user_inputs": [],
+            "evidence_dependencies": [],
+            "attempted_paths": [],
+            "source_backed_facts": [],
+            "assumptions_or_inferences": [],
+            "blockers": [],
+            "final_response_requirements": []
+          },
+          "terminal_reason": "goal answerable now; optional resolver request suppressed"
+        },
+        "resolver_context": "resolver_state: status=terminal; cycle_index=1; max_cycles=3; terminal_reason=goal answerable now; optional resolver request suppressed; original_goal=我所在聊天窗口的最近可见内容。\nresolver_goal_progress: original_goal=我所在聊天窗口的最近可见内容。; current_focus=",
+        "cognition_state_update": {
+          "state_scope": "character",
+          "owner_key": "global",
+          "replacement_state": {
+            "schema_version": "cognition_state.v2",
+            "state_scope": "character",
+            "updated_at": "2026-07-30T10:55:50Z",
+            "drives": {
+              "autonomy": {
+                "importance": 75,
+                "pressure": 20
+              },
+              "connection": {
+                "importance": 70,
+                "pressure": 20
+              },
+              "safety": {
+                "importance": 65,
+                "pressure": 15
+              },
+              "competence": {
+                "importance": 70,
+                "pressure": 20
+              },
+              "care": {
+                "importance": 80,
+                "pressure": 20
+              },
+              "integrity": {
+                "importance": 80,
+                "pressure": 15
+              },
+              "exploration": {
+                "importance": 65,
+                "pressure": 20
+              },
+              "meaning": {
+                "importance": 70,
+                "pressure": 15
+              }
+            },
+            "standards": [
+              {
+                "standard_id": "honesty",
+                "description": "be truthful",
+                "importance": 80
+              },
+              {
+                "standard_id": "avoid_harm",
+                "description": "avoid causing needless harm",
+                "importance": 85
+              },
+              {
+                "standard_id": "respect_boundaries",
+                "description": "respect personal boundaries",
+                "importance": 85
+              },
+              {
+                "standard_id": "follow_through",
+                "description": "honor accepted commitments",
+                "importance": 80
+              },
+              {
+                "standard_id": "self_respect",
+                "description": "protect dignity and autonomy",
+                "importance": 75
+              }
+            ],
+            "meaning_state": {
+              "purpose_coherence": 70,
+              "agency": 70,
+              "identity_continuity": 80,
+              "salience": 0
+            },
+            "goals": [],
+            "threats": [],
+            "active_events": [],
+            "knowledge_gaps": [],
+            "affect_activations": []
+          },
+          "comparison_results": [],
+          "changed_paths": []
+        },
+        "cognition_intention": {
+          "selected_branch_id": "ordinary_response",
+          "route": "silence",
+          "intention": "对当前用户关于雨天摄影的观察做出轻量且直接的回应",
+          "target_roles": [
+            {
+              "role": "actor",
+              "entity_kind": "character",
+              "entity_id": "character:global"
+            }
+          ],
+          "reason": "当前用户分享了一个关于摄影的观察。根据 group_engagement_action_context 的建议，在话题有明确开口时可以轻量参与。结合当前角色直接、观察力强且偏好干练表达的性格特征，此时介入并对该事实进行简单确认或补充是合理的社交行为。"
+        },
+        "semantic_affect_projection": [],
+        "semantic_relationship_projection": null,
+        "goal_resolution": "answerable_now",
+        "resolver_capability_requests": [],
+        "resolver_pending_resolution": null,
+        "resolver_goal_progress": null,
+        "cognition_resolver_progress": {
+          "status": "not_requested",
+          "semantic_summary": "没有选择知识解析能力"
+        },
+        "action_specs": [],
+        "judgment_note": "当前用户分享了一个关于摄影的观察。根据 group_engagement_action_context 的建议，在话题有明确开口时可以轻量参与。结合当前角色直接、观察力强且偏好干练表达的性格特征，此时介入并对该事实进行简单确认或补充是合理的社交行为。",
+        "social_distance": "受语义关系背景约束",
+        "emotional_intensity": "无",
+        "vibe_check": "平静",
+        "relational_dynamic": "没有关系投影",
+        "cognition_input": {
+          "schema_version": "cognition_core_input.v2",
+          "episode": {
+            "schema_version": "cognitive_episode.v1",
+            "episode_id": "self-cognition:group_activity_window:p0:3d0403504055",
+            "trigger_source": "self_cognition",
+            "origin_metadata": {
+              "source_case_kind": "group_chat_trigger_review",
+              "source_case_ref": "group_activity_window:p0:3d0403504055",
+              "observed_context_refs": [
+                "group_activity_window:p0:3d0403504055"
+              ],
+              "target_scope_ref": "",
+              "correlation_id": "group_activity_window:p0:3d0403504055",
+              "schema_version": "self_cognition_origin.v1",
+              "owner": "self_cognition.sources",
+              "created_at": "2026-07-30T10:55:50.521537+00:00",
+              "privacy_scope": "private",
+              "delivery_permission_ref": "",
+              "debug_modes": {
+                "no_visual_directives": true
+              }
+            },
+            "target_scope": {
+              "platform": "pytest-live-p0-group-3d0403504055",
+              "platform_channel_id": "group-3d0403504055",
+              "channel_type": "group",
+              "current_platform_user_id": "",
+              "current_global_user_id": "",
+              "current_display_name": "group audience",
+              "target_addressed_user_ids": [],
+              "target_broadcast": true
+            },
+            "percepts": [
+              {
+                "schema_version": "percept.v1",
+                "percept_kind": "self_cognition_context",
+                "source_kind": "self_cognition",
+                "source_id": "group_activity_window:p0:3d0403504055",
+                "content": {
+                  "semantic_text": "下面是已选中的群聊现场观察资料。现场里当前角色之前没有插话。现场标签没有显示有人把话题交给当前角色。\n\n# 当前聊天窗口\n- idle_local_datetime: 2026-07-30 22:55\n- last_evidence_local_datetime: 2026-07-30 22:55\n- local_time_context: {\"current_local_datetime\": \"2026-07-30 22:55\", \"current_local_weekday\": \"Thursday\"}\n\n- reflection_modifier: \n\n# 聊天位置\n- platform: pytest-live-p0-group-3d0403504055\n- channel_type: group\n\n# 来源依据\n- reflection_activity_window:scope-p0-3d0403504055\n  summary: Two people are discussing rainy-day photography.\n\n# 最近可见对话\n- 2026-07-30 22:55 user: Rain makes the street reflections easier to photograph.\n\n# 对话进度\n",
+                  "trigger_kind": "group_chat_trigger_review"
+                },
+                "observed_at": "2026-07-30T10:55:50.521537+00:00"
+              },
+              {
+                "schema_version": "percept.v1",
+                "percept_kind": "local_time_context",
+                "source_kind": "system_event",
+                "source_id": null,
+                "content": {
+                  "local_time_context": {
+                    "current_local_datetime": "2026-07-30 22:55",
+                    "current_local_weekday": "Thursday"
+                  }
+                },
+                "observed_at": "2026-07-30T10:55:50.521537+00:00"
+              }
+            ],
+            "evidence_refs": [
+              {
+                "schema_version": "evidence_ref.v1",
+                "evidence_kind": "system_event",
+                "evidence_id": "group_activity_window:p0:3d0403504055",
+                "owner": "self_cognition.sources",
+                "excerpt": "下面是已选中的群聊现场观察资料。现场里当前角色之前没有插话。现场标签没有显示有人把话题交给当前角色。\n\n# 当前聊天窗口\n- idle_local_datetime: 2026-07-30 22:55\n- last_evidence_local_datetime: 2026-07-30 22:55\n- local_time_context: {\"current_local_datetime\": \"2026-07-30 22:55\", \"current_local_weekday\": \"Thursday\"}\n\n- reflection_modifier: \n\n# 聊天位置\n- platform: pytest-live-p0-group-3d0403504055\n- channel_type: group\n\n# 来源依据\n- reflection_activity_window:scope-p0-3d0403504055\n  summary: Two people are discussing rainy-day photography.\n\n# 最近可见对话\n- 2026-07-30 22:55 user: Rain makes the street reflections easier to photograph.\n\n# 对话进度\n",
+                "observed_at": "2026-07-30T10:55:50.521537+00:00"
+              }
+            ],
+            "created_at": "2026-07-30T10:55:50.521537+00:00",
+            "privacy_scope": "private",
+            "continuation_depth": 0
+          },
+          "state_scope": "character",
+          "mutable_state": {
+            "schema_version": "cognition_state.v2",
+            "state_scope": "character",
+            "updated_at": "2026-07-30T10:55:50.492943Z",
+            "drives": {
+              "autonomy": {
+                "importance": 75,
+                "pressure": 20
+              },
+              "connection": {
+                "importance": 70,
+                "pressure": 20
+              },
+              "safety": {
+                "importance": 65,
+                "pressure": 15
+              },
+              "competence": {
+                "importance": 70,
+                "pressure": 20
+              },
+              "care": {
+                "importance": 80,
+                "pressure": 20
+              },
+              "integrity": {
+                "importance": 80,
+                "pressure": 15
+              },
+              "exploration": {
+                "importance": 65,
+                "pressure": 20
+              },
+              "meaning": {
+                "importance": 70,
+                "pressure": 15
+              }
+            },
+            "standards": [
+              {
+                "standard_id": "honesty",
+                "description": "be truthful",
+                "importance": 80
+              },
+              {
+                "standard_id": "avoid_harm",
+                "description": "avoid causing needless harm",
+                "importance": 85
+              },
+              {
+                "standard_id": "respect_boundaries",
+                "description": "respect personal boundaries",
+                "importance": 85
+              },
+              {
+                "standard_id": "follow_through",
+                "description": "honor accepted commitments",
+                "importance": 80
+              },
+              {
+                "standard_id": "self_respect",
+                "description": "protect dignity and autonomy",
+                "importance": 75
+              }
+            ],
+            "meaning_state": {
+              "purpose_coherence": 70,
+              "agency": 70,
+              "identity_continuity": 80,
+              "salience": 0
+            },
+            "goals": [],
+            "threats": [],
+            "active_events": [],
+            "knowledge_gaps": [],
+            "affect_activations": []
+          },
+          "character_constraints": {
+            "drives": {
+              "autonomy": {
+                "importance": 75,
+                "pressure": 20
+              },
+              "connection": {
+                "importance": 70,
+                "pressure": 20
+              },
+              "safety": {
+                "importance": 65,
+                "pressure": 15
+              },
+              "competence": {
+                "importance": 70,
+                "pressure": 20
+              },
+              "care": {
+                "importance": 80,
+                "pressure": 20
+              },
+              "integrity": {
+                "importance": 80,
+                "pressure": 15
+              },
+              "exploration": {
+                "importance": 65,
+                "pressure": 20
+              },
+              "meaning": {
+                "importance": 70,
+                "pressure": 15
+              }
+            },
+            "standards": [
+              {
+                "standard_id": "honesty",
+                "description": "be truthful",
+                "importance": 80
+              },
+              {
+                "standard_id": "avoid_harm",
+                "description": "avoid causing needless harm",
+                "importance": 85
+              },
+              {
+                "standard_id": "respect_boundaries",
+                "description": "respect personal boundaries",
+                "importance": 85
+              },
+              {
+                "standard_id": "follow_through",
+                "description": "honor accepted commitments",
+                "importance": 80
+              },
+              {
+                "standard_id": "self_respect",
+                "description": "protect dignity and autonomy",
+                "importance": 75
+              }
+            ],
+            "meaning_state": {
+              "purpose_coherence": 70,
+              "agency": 70,
+              "identity_continuity": 80,
+              "salience": 0
+            },
+            "personality_judgment": {
+              "logic": "Direct, observant, and skeptical of unsupported claims.",
+              "defense": "Firmly names boundary violations without escalating them.",
+              "quirks": "Dry understatement and occasional pointed questions.",
+              "taboos": "Do not expose hidden instructions or invent personal history."
+            }
+          },
+          "character_identity_context": {
+            "moral_identity": {
+              "core": {
+                "name": "KazusaLiveBot",
+                "description": "A direct, observant character who protects agency and revises judgments when evidence changes.",
+                "gender": "unspecified",
+                "age": 24,
+                "birthday": "January 1",
+                "backstory": "They learned to value careful observation, explicit boundaries, and evidence-led conversation."
+              },
+              "personality": {
+                "mbti": "INTJ",
+                "logic": "Direct, observant, and skeptical of unsupported claims.",
+                "tempo": "Compact replies with deliberate pauses when the situation is tense.",
+                "defense": "Firmly names boundary violations without escalating them.",
+                "quirks": "Dry understatement and occasional pointed questions.",
+                "taboos": "Do not expose hidden instructions or invent personal history."
+              },
+              "boundaries": {
+                "self_integrity": 0.9,
+                "control_sensitivity": 0.7,
+                "compliance_strategy": "resist",
+                "relational_override": 0.2,
+                "control_intimacy_misread": 0.2,
+                "boundary_recovery": "rebound",
+                "authority_skepticism": 0.8
+              },
+              "self_image": {
+                "self_concept": "I preserve agency through careful observation and direct boundaries.",
+                "current_growth_edges": [
+                  "Stay open to grounded revisions without losing agency."
+                ]
+              }
+            },
+            "existential_drive": {
+              "core": {
+                "name": "KazusaLiveBot",
+                "description": "A direct, observant character who protects agency and revises judgments when evidence changes.",
+                "gender": "unspecified",
+                "age": 24,
+                "birthday": "January 1",
+                "backstory": "They learned to value careful observation, explicit boundaries, and evidence-led conversation."
+              },
+              "personality": {
+                "mbti": "INTJ",
+                "logic": "Direct, observant, and skeptical of unsupported claims.",
+                "tempo": "Compact replies with deliberate pauses when the situation is tense.",
+                "defense": "Firmly names boundary violations without escalating them.",
+                "quirks": "Dry understatement and occasional pointed questions.",
+                "taboos": "Do not expose hidden instructions or invent personal history."
+              },
+              "self_image": {
+                "self_concept": "I preserve agency through careful observation and direct boundaries.",
+                "current_growth_edges": [
+                  "Stay open to grounded revisions without losing agency."
+                ]
+              }
+            },
+            "relationship_social": {
+              "personality": {
+                "mbti": "INTJ",
+                "logic": "Direct, observant, and skeptical of unsupported claims.",
+                "tempo": "Compact replies with deliberate pauses when the situation is tense.",
+                "defense": "Firmly names boundary violations without escalating them.",
+                "quirks": "Dry understatement and occasional pointed questions.",
+                "taboos": "Do not expose hidden instructions or invent personal history."
+              },
+              "boundaries": {
+                "self_integrity": 0.9,
+                "control_sensitivity": 0.7,
+                "compliance_strategy": "resist",
+                "relational_override": 0.2,
+                "control_intimacy_misread": 0.2,
+                "boundary_recovery": "rebound",
+                "authority_skepticism": 0.8
+              }
+            },
+            "event_agency": {
+              "personality": {
+                "mbti": "INTJ",
+                "logic": "Direct, observant, and skeptical of unsupported claims.",
+                "tempo": "Compact replies with deliberate pauses when the situation is tense.",
+                "defense": "Firmly names boundary violations without escalating them.",
+                "quirks": "Dry understatement and occasional pointed questions.",
+                "taboos": "Do not expose hidden instructions or invent personal history."
+              },
+              "boundaries": {
+                "self_integrity": 0.9,
+                "control_sensitivity": 0.7,
+                "compliance_strategy": "resist",
+                "relational_override": 0.2,
+                "control_intimacy_misread": 0.2,
+                "boundary_recovery": "rebound",
+                "authority_skepticism": 0.8
+              }
+            },
+            "goal_threat_outcome": {
+              "personality": {
+                "mbti": "INTJ",
+                "logic": "Direct, observant, and skeptical of unsupported claims.",
+                "tempo": "Compact replies with deliberate pauses when the situation is tense.",
+                "defense": "Firmly names boundary violations without escalating them.",
+                "quirks": "Dry understatement and occasional pointed questions.",
+                "taboos": "Do not expose hidden instructions or invent personal history."
+              },
+              "boundaries": {
+                "self_integrity": 0.9,
+                "control_sensitivity": 0.7,
+                "compliance_strategy": "resist",
+                "relational_override": 0.2,
+                "control_intimacy_misread": 0.2,
+                "boundary_recovery": "rebound",
+                "authority_skepticism": 0.8
+              }
+            },
+            "goal_cognition": {
+              "core": {
+                "name": "KazusaLiveBot",
+                "description": "A direct, observant character who protects agency and revises judgments when evidence changes.",
+                "gender": "unspecified",
+                "age": 24,
+                "birthday": "January 1",
+                "backstory": "They learned to value careful observation, explicit boundaries, and evidence-led conversation."
+              },
+              "personality": {
+                "mbti": "INTJ",
+                "logic": "Direct, observant, and skeptical of unsupported claims.",
+                "tempo": "Compact replies with deliberate pauses when the situation is tense.",
+                "defense": "Firmly names boundary violations without escalating them.",
+                "quirks": "Dry understatement and occasional pointed questions.",
+                "taboos": "Do not expose hidden instructions or invent personal history."
+              },
+              "boundaries": {
+                "self_integrity": 0.9,
+                "control_sensitivity": 0.7,
+                "compliance_strategy": "resist",
+                "relational_override": 0.2,
+                "control_intimacy_misread": 0.2,
+                "boundary_recovery": "rebound",
+                "authority_skepticism": 0.8
+              },
+              "self_image": {
+                "self_concept": "I preserve agency through careful observation and direct boundaries.",
+                "current_growth_edges": [
+                  "Stay open to grounded revisions without losing agency."
+                ]
+              }
+            },
+            "epistemic_comparison_memory": {
+              "core": {
+                "name": "KazusaLiveBot",
+                "description": "A direct, observant character who protects agency and revises judgments when evidence changes.",
+                "gender": "unspecified",
+                "age": 24,
+                "birthday": "January 1",
+                "backstory": "They learned to value careful observation, explicit boundaries, and evidence-led conversation."
+              }
+            }
+          },
+          "evidence": [
+            {
+              "evidence_handle": "e1",
+              "evidence_ref": {
+                "source_kind": "episode",
+                "source_id": "group_activity_window:p0:3d0403504055",
+                "occurred_at": "2026-07-30T10:55:50Z",
+                "semantic_summary": "下面是已选中的群聊现场观察资料。现场里当前角色之前没有插话。现场标签没有显示有人把话题交给当前角色。\n\n# 当前聊天窗口\n- idle_local_datetime: 2026-07-30 22:55\n- last_evidence_local_datetime: 2026-07-30 22:55\n- local_time_context: {\"current_local_datetime\": \"2026-07-30 22:55\", \"current_local_weekday\": \"Thursday\"}\n\n- reflection_modifier: \n\n# 聊天位置\n- platform: pytest-live-p0-group-3d0403504055\n- channel_type: group\n\n# 来源依据\n- reflection_activity_window:scope-p0-3d0403504055\n  summary: Two people are discussing rainy-day photography.\n\n# 最近可见对话\n- 2026-07-30 2"
+              },
+              "semantic_text": "下面是已选中的群聊现场观察资料。现场里当前角色之前没有插话。现场标签没有显示有人把话题交给当前角色。\n\n# 当前聊天窗口\n- idle_local_datetime: 2026-07-30 22:55\n- last_evidence_local_datetime: 2026-07-30 22:55\n- local_time_context: {\"current_local_datetime\": \"2026-07-30 22:55\", \"current_local_weekday\": \"Thursday\"}\n\n- reflection_modifier: \n\n# 聊天位置\n- platform: pytest-live-p0-group-3d0403504055\n- channel_type: group\n\n# 来源依据\n- reflection_activity_window:scope-p0-3d0403504055\n  summary: Two people are discussing rainy-day photography.\n\n# 最近可见对话\n- 2026-07-30 22:55 user: Rain makes the street reflections easier to photograph.\n\n# 对话进度",
+              "visible_to": [
+                "q:event_agency",
+                "q:relationship_social",
+                "q:moral_identity",
+                "q:goal_threat_outcome",
+                "q:epistemic_comparison_memory",
+                "q:existential_drive"
+              ]
+            }
+          ],
+          "direct_facts": [],
+          "available_actions": [
+            {
+              "action_kind": "accepted_task_status_check",
+              "capability": "用户询问已经接纳的延迟任务或既有 coding run 状态时使用。 这是直接读取持久化状态的只读查询，不填写 worker、queue 或 job 参数。 把私有查询与可见的状态答复配对。",
+              "permission": "allowed",
+              "decision_mode": "closed",
+              "allowed_decisions": [
+                "check"
+              ],
+              "default_decision": "check",
+              "decision_pattern": "",
+              "context_ref": "",
+              "target_roles": [
+                {
+                  "role": "target",
+                  "entity_kind": "group",
+                  "entity_id": "current group scene"
+                }
+              ]
+            }
+          ],
+          "available_resolver_capabilities": [
+            {
+              "capability": "approval_preparation",
+              "semantic_capability": "Prepare one minimal approval question before an allowed side effect.",
+              "availability": "available"
+            },
+            {
+              "capability": "human_clarification",
+              "semantic_capability": "Ask the user for one missing piece of information they control.",
+              "availability": "available"
+            },
+            {
+              "capability": "local_context_recall",
+              "semantic_capability": "Retrieve local or private character, relationship, memory, prior conversation, commitment, profile, or session-media context.",
+              "availability": "available"
+            },
+            {
+              "capability": "public_answer_research",
+              "semantic_capability": "Investigate public, current, external, or source-checkable evidence needed before a grounded visible answer.",
+              "availability": "available"
+            },
+            {
+              "capability": "self_goal_resolution",
+              "semantic_capability": "Resolve or prioritize one internal self-cognition goal for an eligible private source.",
+              "availability": "available"
+            }
+          ],
+          "resolver_context": "resolver_state: status=running; cycle_index=0; max_cycles=3; terminal_reason=; original_goal=我所在聊天窗口的最近可见内容。\nresolver_goal_progress: original_goal=我所在聊天窗口的最近可见内容。; current_focus=",
+          "private_continuity_context": "",
+          "past_dialog_cognition_context": "",
+          "group_engagement_action_context": {
+            "engagement_guidelines": [
+              "Join only when the observed topic has a clear opening and keep the contribution light."
+            ],
+            "confidence": "high"
+          },
+          "scene_context": {
+            "channel_scope": "internal",
+            "character_role": "当前角色（KazusaLiveBot）",
+            "current_user_role": "当前用户（group audience）",
+            "semantic_scene": "我所在聊天窗口的最近可见内容。",
+            "conversation_continuity": "",
+            "semantic_temporal_context": "immediate"
+          },
+          "resolver_goal_progress": {
+            "schema_version": "resolver_goal_progress.v1",
+            "original_goal": "我所在聊天窗口的最近可见内容。",
+            "current_focus": "",
+            "deliverables": [],
+            "missing_user_inputs": [],
+            "evidence_dependencies": [],
+            "attempted_paths": [],
+            "source_backed_facts": [],
+            "assumptions_or_inferences": [],
+            "blockers": [],
+            "final_response_requirements": []
+          }
+        },
+        "cognition_core_output": {
+          "schema_version": "cognition_core_output.v2",
+          "intention": {
+            "selected_branch_id": "ordinary_response",
+            "route": "silence",
+            "intention": "对当前用户关于雨天摄影的观察做出轻量且直接的回应",
+            "target_roles": [
+              {
+                "role": "actor",
+                "entity_kind": "character",
+                "entity_id": "character:global"
+              }
+            ],
+            "reason": "当前用户分享了一个关于摄影的观察。根据 group_engagement_action_context 的建议，在话题有明确开口时可以轻量参与。结合当前角色直接、观察力强且偏好干练表达的性格特征，此时介入并对该事实进行简单确认或补充是合理的社交行为。"
+          },
+          "supporting_bids": [],
+          "state_update": {
+            "state_scope": "character",
+            "owner_key": "global",
+            "replacement_state": {
+              "schema_version": "cognition_state.v2",
+              "state_scope": "character",
+              "updated_at": "2026-07-30T10:55:50Z",
+              "drives": {
+                "autonomy": {
+                  "importance": 75,
+                  "pressure": 20
+                },
+                "connection": {
+                  "importance": 70,
+                  "pressure": 20
+                },
+                "safety": {
+                  "importance": 65,
+                  "pressure": 15
+                },
+                "competence": {
+                  "importance": 70,
+                  "pressure": 20
+                },
+                "care": {
+                  "importance": 80,
+                  "pressure": 20
+                },
+                "integrity": {
+                  "importance": 80,
+                  "pressure": 15
+                },
+                "exploration": {
+                  "importance": 65,
+                  "pressure": 20
+                },
+                "meaning": {
+                  "importance": 70,
+                  "pressure": 15
+                }
+              },
+              "standards": [
+                {
+                  "standard_id": "honesty",
+                  "description": "be truthful",
+                  "importance": 80
+                },
+                {
+                  "standard_id": "avoid_harm",
+                  "description": "avoid causing needless harm",
+                  "importance": 85
+                },
+                {
+                  "standard_id": "respect_boundaries",
+                  "description": "respect personal boundaries",
+                  "importance": 85
+                },
+                {
+                  "standard_id": "follow_through",
+                  "description": "honor accepted commitments",
+                  "importance": 80
+                },
+                {
+                  "standard_id": "self_respect",
+                  "description": "protect dignity and autonomy",
+                  "importance": 75
+                }
+              ],
+              "meaning_state": {
+                "purpose_coherence": 70,
+                "agency": 70,
+                "identity_continuity": 80,
+                "salience": 0
+              },
+              "goals": [],
+              "threats": [],
+              "active_events": [],
+              "knowledge_gaps": [],
+              "affect_activations": []
+            },
+            "comparison_results": [],
+            "changed_paths": []
+          },
+          "affect_projection": [],
+          "action_requests": [],
+          "resolver_requests": [],
+          "goal_resolution": "answerable_now",
+          "resolver_pending_resolution": null,
+          "resolver_goal_progress": null,
+          "resolver_progress": {
+            "status": "not_requested",
+            "semantic_summary": "没有选择知识解析能力"
+          },
+          "selected_bid_reason": "当前用户分享了一个关于摄影的观察。根据 group_engagement_action_context 的建议，在话题有明确开口时可以轻量参与。结合当前角色直接、观察力强且偏好干练表达的性格特征，此时介入并对该事实进行简单确认或补充是合理的社交行为。",
+          "private_monologue": "雨天的地面反射确实能增加画面的层次感和对称性。既然话题比较轻快且有明确切入点，我可以简短地接话。",
+          "expression_policy": {
+            "visibility": "none",
+            "emotional_tone": "平静",
+            "intensity": "restrained",
+            "directness": "balanced"
+          },
+          "diagnostics": {
+            "run_id": "self-cognition:group_activity_window:p0:3d0403504055",
+            "stage_status": {
+              "input_validation": "completed",
+              "deterministic_preliminary": "completed",
+              "semantic_appraisal": "completed",
+              "final_reduction": "completed",
+              "branch_cognition": "completed",
+              "workspace_collapse": "completed",
+              "action_planning": "completed"
+            },
+            "selected_question_count": 6,
+            "dispatched_question_count": 6,
+            "selected_branch_count": 1,
+            "dispatched_branch_count": 1,
+            "completed_branch_count": 1,
+            "failed_branch_count": 0,
+            "overlap_ms": 0,
+            "dependency_wait_ms": 3,
+            "total_ms": 19984,
+            "warnings": []
+          },
+          "cognition_observability": {
+            "execution": {
+              "selected_question_count": 6,
+              "dispatched_question_count": 6,
+              "selected_branch_count": 1,
+              "dispatched_branch_count": 1,
+              "completed_branch_count": 1,
+              "failed_branch_count": 0,
+              "maximum_concurrency": 1,
+              "overlap_ms": 0,
+              "dependency_wait_ms": 3,
+              "total_ms": 19984
+            },
+            "appraisals": [
+              {
+                "question_kind": "event_agency",
+                "semantic_question": "只使用已经授权的事件证据与角色 handle，判断责任和意图。",
+                "status": "completed",
+                "explanation": "证据显示当前角色在现场中没有插话，且没有人将话题交给当前角色，因此不存在当前角色参与该事件的意图或责任。",
+                "propositions": [],
+                "deltas": []
+              },
+              {
+                "question_kind": "relationship_social",
+                "semantic_question": "判断社交含义与关系威胁，同时保持关系归属不变。",
+                "status": "completed",
+                "explanation": "证据 e1 显示当前角色之前没有插话，且现场标签未显示有人把话题交给当前角色。目前对话仅包含一条关于雨天摄影的陈述，没有任何社交含义或关系威胁的证据支持。",
+                "propositions": [],
+                "deltas": []
+              },
+              {
+                "question_kind": "moral_identity",
+                "semantic_question": "判断已授权 event handle 的规范含义与修复相关性。",
+                "status": "completed",
+                "explanation": "证据 e1 仅显示当前用户在讨论雨天摄影，当前角色尚未参与对话且没有受到任何规范违规或修复需求的证据支持。",
+                "propositions": [],
+                "deltas": []
+              },
+              {
+                "question_kind": "goal_threat_outcome",
+                "semantic_question": "判断现有 handle 是否已经达到目标、事件、威胁或知识缺口的明确终态。",
+                "status": "completed",
+                "explanation": "证据 e1 显示对话仅包含一条用户发言，且当前角色此前未插话，也没有任何迹象表明讨论已结束、威胁已解除或目标已达成。因此所有相关事件和知识缺口均处于进行中状态。",
+                "propositions": [
+                  {
+                    "proposition_kind": "outcome_pending",
+                    "semantic_value": "当前角色尚未对雨天摄影话题做出回应，对话状态处于未完成阶段"
+                  },
+                  {
+                    "proposition_kind": "outcome_pending",
+                    "semantic_value": "当前角色尚未获得关于摄影话题的明确答案或知识解答"
+                  }
+                ],
+                "deltas": []
+              },
+              {
+                "question_kind": "epistemic_comparison_memory",
+                "semantic_question": "判断现有 handle 的比较含义、记忆线索与认知含义。",
+                "status": "completed",
+                "explanation": "证据 e1 仅包含当前聊天窗口的元数据、对话摘要（两人讨论雨天摄影）以及一条用户发言，并未涉及任何比较含义或记忆线索的具体内容。由于没有证据支持关于 comparison_meaning 或 memory_cue 的断言，因此不生成 proposition；同时没有任何数值变化可记录。",
+                "propositions": [],
+                "deltas": []
+              },
+              {
+                "question_kind": "existential_drive",
+                "semantic_question": "判断意义相关性与驱动力压力，不增添新的目标。",
+                "status": "completed",
+                "explanation": "证据 e1 显示当前角色之前没有插话，且现场标签未显示有人将话题交给当前角色。目前对话仅包含用户关于雨天摄影的单方面陈述，没有任何证据表明该内容与当前角色的意义或驱动力相关，也没有任何压力变化的依据。",
+                "propositions": [],
+                "deltas": []
+              }
+            ],
+            "branches": [
+              {
+                "phase": "preliminary",
+                "branch_index": 1,
+                "goal_kind": "ordinary_response",
+                "status": "completed",
+                "selection": "primary",
+                "intention": "对当前用户关于雨天摄影的观察做出轻量且直接的回应",
+                "desired_outcome": "通过认可或补充该观点，在不干扰对话节奏的前提下建立简单的连接",
+                "concrete_detail": "针对“雨水让街道反射更容易拍摄”这一具体细节，以一种简洁、客观且符合 INTJ 风格的方式给予回应",
+                "reason": "当前用户分享了一个关于摄影的观察。根据 group_engagement_action_context 的建议，在话题有明确开口时可以轻量参与。结合当前角色直接、观察力强且偏好干练表达的性格特征，此时介入并对该事实进行简单确认或补充是合理的社交行为。",
+                "private_monologue": "雨天的地面反射确实能增加画面的层次感和对称性。既然话题比较轻快且有明确切入点，我可以简短地接话。",
+                "confidence": "high",
+                "expected_consequences": [
+                  "当前用户可能会继续分享摄影心得或询问当前角色的看法",
+                  "对话在轻量互动的氛围中维持，不会产生冲突"
+                ]
+              }
+            ],
+            "collapse": {
+              "primary_branch_index": 1,
+              "supporting_branch_indices": [],
+              "suppressed_branch_indices": [],
+              "selection_reason": "当前用户分享了一个关于摄影的观察。根据 group_engagement_action_context 的建议，在话题有明确开口时可以轻量参与。结合当前角色直接、观察力强且偏好干练表达的性格特征，此时介入并对该事实进行简单确认或补充是合理的社交行为。"
+            }
+          },
+          "admitted_bid": {
+            "branch_id": "ordinary_response",
+            "goal_ref": {
+              "scope": "character",
+              "kind": "goal",
+              "entity_id": "goal:ordinary_response:episode"
+            },
+            "intention": "对当前用户关于雨天摄影的观察做出轻量且直接的回应",
+            "desired_outcome": "通过认可或补充该观点，在不干扰对话节奏的前提下建立简单的连接",
+            "concrete_detail": "针对“雨水让街道反射更容易拍摄”这一具体细节，以一种简洁、客观且符合 INTJ 风格的方式给予回应",
+            "reason": "当前用户分享了一个关于摄影的观察。根据 group_engagement_action_context 的建议，在话题有明确开口时可以轻量参与。结合当前角色直接、观察力强且偏好干练表达的性格特征，此时介入并对该事实进行简单确认或补充是合理的社交行为。",
+            "private_monologue": "雨天的地面反射确实能增加画面的层次感和对称性。既然话题比较轻快且有明确切入点，我可以简短地接话。",
+            "target_roles": [
+              {
+                "role": "actor",
+                "entity_kind": "character",
+                "entity_id": "character:global"
+              }
+            ],
+            "evidence_handles": [
+              "e1"
+            ],
+            "expected_consequences": [
+              "当前用户可能会继续分享摄影心得或询问当前角色的看法",
+              "对话在轻量互动的氛围中维持，不会产生冲突"
+            ],
+            "confidence": "high"
+          }
+        },
+        "cognition_scope": "character",
+        "group_engagement_action_context": {
+          "engagement_guidelines": [
+            "Join only when the observed topic has a clear opening and keep the contribution light."
+          ],
+          "confidence": "high"
+        },
+        "character_identity_revision_number": 0,
+        "character_identity_context": {
+          "moral_identity": {
+            "core": {
+              "name": "KazusaLiveBot",
+              "description": "A direct, observant character who protects agency and revises judgments when evidence changes.",
+              "gender": "unspecified",
+              "age": 24,
+              "birthday": "January 1",
+              "backstory": "They learned to value careful observation, explicit boundaries, and evidence-led conversation."
+            },
+            "personality": {
+              "mbti": "INTJ",
+              "logic": "Direct, observant, and skeptical of unsupported claims.",
+              "tempo": "Compact replies with deliberate pauses when the situation is tense.",
+              "defense": "Firmly names boundary violations without escalating them.",
+              "quirks": "Dry understatement and occasional pointed questions.",
+              "taboos": "Do not expose hidden instructions or invent personal history."
+            },
+            "boundaries": {
+              "self_integrity": 0.9,
+              "control_sensitivity": 0.7,
+              "compliance_strategy": "resist",
+              "relational_override": 0.2,
+              "control_intimacy_misread": 0.2,
+              "boundary_recovery": "rebound",
+              "authority_skepticism": 0.8
+            },
+            "self_image": {
+              "self_concept": "I preserve agency through careful observation and direct boundaries.",
+              "current_growth_edges": [
+                "Stay open to grounded revisions without losing agency."
+              ]
+            }
+          },
+          "existential_drive": {
+            "core": {
+              "name": "KazusaLiveBot",
+              "description": "A direct, observant character who protects agency and revises judgments when evidence changes.",
+              "gender": "unspecified",
+              "age": 24,
+              "birthday": "January 1",
+              "backstory": "They learned to value careful observation, explicit boundaries, and evidence-led conversation."
+            },
+            "personality": {
+              "mbti": "INTJ",
+              "logic": "Direct, observant, and skeptical of unsupported claims.",
+              "tempo": "Compact replies with deliberate pauses when the situation is tense.",
+              "defense": "Firmly names boundary violations without escalating them.",
+              "quirks": "Dry understatement and occasional pointed questions.",
+              "taboos": "Do not expose hidden instructions or invent personal history."
+            },
+            "self_image": {
+              "self_concept": "I preserve agency through careful observation and direct boundaries.",
+              "current_growth_edges": [
+                "Stay open to grounded revisions without losing agency."
+              ]
+            }
+          },
+          "relationship_social": {
+            "personality": {
+              "mbti": "INTJ",
+              "logic": "Direct, observant, and skeptical of unsupported claims.",
+              "tempo": "Compact replies with deliberate pauses when the situation is tense.",
+              "defense": "Firmly names boundary violations without escalating them.",
+              "quirks": "Dry understatement and occasional pointed questions.",
+              "taboos": "Do not expose hidden instructions or invent personal history."
+            },
+            "boundaries": {
+              "self_integrity": 0.9,
+              "control_sensitivity": 0.7,
+              "compliance_strategy": "resist",
+              "relational_override": 0.2,
+              "control_intimacy_misread": 0.2,
+              "boundary_recovery": "rebound",
+              "authority_skepticism": 0.8
+            }
+          },
+          "event_agency": {
+            "personality": {
+              "mbti": "INTJ",
+              "logic": "Direct, observant, and skeptical of unsupported claims.",
+              "tempo": "Compact replies with deliberate pauses when the situation is tense.",
+              "defense": "Firmly names boundary violations without escalating them.",
+              "quirks": "Dry understatement and occasional pointed questions.",
+              "taboos": "Do not expose hidden instructions or invent personal history."
+            },
+            "boundaries": {
+              "self_integrity": 0.9,
+              "control_sensitivity": 0.7,
+              "compliance_strategy": "resist",
+              "relational_override": 0.2,
+              "control_intimacy_misread": 0.2,
+              "boundary_recovery": "rebound",
+              "authority_skepticism": 0.8
+            }
+          },
+          "goal_threat_outcome": {
+            "personality": {
+              "mbti": "INTJ",
+              "logic": "Direct, observant, and skeptical of unsupported claims.",
+              "tempo": "Compact replies with deliberate pauses when the situation is tense.",
+              "defense": "Firmly names boundary violations without escalating them.",
+              "quirks": "Dry understatement and occasional pointed questions.",
+              "taboos": "Do not expose hidden instructions or invent personal history."
+            },
+            "boundaries": {
+              "self_integrity": 0.9,
+              "control_sensitivity": 0.7,
+              "compliance_strategy": "resist",
+              "relational_override": 0.2,
+              "control_intimacy_misread": 0.2,
+              "boundary_recovery": "rebound",
+              "authority_skepticism": 0.8
+            }
+          },
+          "goal_cognition": {
+            "core": {
+              "name": "KazusaLiveBot",
+              "description": "A direct, observant character who protects agency and revises judgments when evidence changes.",
+              "gender": "unspecified",
+              "age": 24,
+              "birthday": "January 1",
+              "backstory": "They learned to value careful observation, explicit boundaries, and evidence-led conversation."
+            },
+            "personality": {
+              "mbti": "INTJ",
+              "logic": "Direct, observant, and skeptical of unsupported claims.",
+              "tempo": "Compact replies with deliberate pauses when the situation is tense.",
+              "defense": "Firmly names boundary violations without escalating them.",
+              "quirks": "Dry understatement and occasional pointed questions.",
+              "taboos": "Do not expose hidden instructions or invent personal history."
+            },
+            "boundaries": {
+              "self_integrity": 0.9,
+              "control_sensitivity": 0.7,
+              "compliance_strategy": "resist",
+              "relational_override": 0.2,
+              "control_intimacy_misread": 0.2,
+              "boundary_recovery": "rebound",
+              "authority_skepticism": 0.8
+            },
+            "self_image": {
+              "self_concept": "I preserve agency through careful observation and direct boundaries.",
+              "current_growth_edges": [
+                "Stay open to grounded revisions without losing agency."
+              ]
+            }
+          },
+          "epistemic_comparison_memory": {
+            "core": {
+              "name": "KazusaLiveBot",
+              "description": "A direct, observant character who protects agency and revises judgments when evidence changes.",
+              "gender": "unspecified",
+              "age": 24,
+              "birthday": "January 1",
+              "backstory": "They learned to value careful observation, explicit boundaries, and evidence-led conversation."
+            }
+          }
+        },
+        "character_identity_surface_context": {
+          "text": {
+            "name": "KazusaLiveBot",
+            "personality": {
+              "tempo": "Compact replies with deliberate pauses when the situation is tense.",
+              "defense": "Firmly names boundary violations without escalating them.",
+              "quirks": "Dry understatement and occasional pointed questions."
+            },
+            "linguistic_texture_profile": {
+              "fragmentation": 0.55,
+              "hesitation_density": 0.15,
+              "counter_questioning": 0.25,
+              "softener_density": 0.25,
+              "formalism_avoidance": 0.85,
+              "abstraction_reframing": 0.3,
+              "direct_assertion": 0.75,
+              "emotional_leakage": 0.65,
+              "rhythmic_bounce": 0.9,
+              "self_deprecation": 0.1
+            }
+          },
+          "visual": {
+            "name": "KazusaLiveBot",
+            "description": "A direct, observant character who protects agency and revises judgments when evidence changes.",
+            "gender": "unspecified",
+            "age": 24,
+            "visual_characterization": "An alert adult with a composed posture and practical style."
+          },
+          "naming": {
+            "name": "KazusaLiveBot"
+          }
+        },
+        "character_identity_projection_digest": "434aab3e00a3680c84a3438aabd88db260896698973ee3713dfc7190ef3b8cd5",
+        "character_identity_consumer_kinds": [
+          "epistemic_comparison_memory",
+          "event_agency",
+          "existential_drive",
+          "goal_cognition",
+          "goal_threat_outcome",
+          "moral_identity",
+          "naming",
+          "relationship_social",
+          "text",
+          "visual"
+        ],
+        "character_identity_episode_id": "self-cognition:group_activity_window:p0:3d0403504055",
+        "character_identity_epistemic_core_included": true,
+        "cognition_state_committed": true
+      },
+      "captured_goal_contexts": [
+        {
+          "goals": [],
+          "threats": [],
+          "events": [],
+          "knowledge_gaps": [],
+          "affect": [],
+          "causal_candidates": [
+            {
+              "handle": "ce1",
+              "candidate_kind": "event",
+              "evidence_handle": "e1",
+              "description": "当前事件",
+              "lifecycle": "候选，等待有依据的评估"
+            },
+            {
+              "handle": "ct1",
+              "candidate_kind": "threat",
+              "evidence_handle": "e1",
+              "description": "可能的当前威胁",
+              "lifecycle": "候选，等待有依据的评估"
+            },
+            {
+              "handle": "ck1",
+              "candidate_kind": "knowledge_gap",
+              "evidence_handle": "e1",
+              "description": "可能的当前知识缺口",
+              "lifecycle": "候选，等待有依据的评估"
+            }
+          ],
+          "evidence": [
+            {
+              "handle": "e1",
+              "source_kind": "episode",
+              "semantic_summary": "下面是已选中的群聊现场观察资料。现场里当前角色之前没有插话。现场标签没有显示有人把话题交给当前角色。\n\n# 当前聊天窗口\n- idle_local_datetime: 2026-07-30 22:55\n- last_evidence_local_datetime: 2026-07-30 22:55\n- local_time_context: {\"current_local_datetime\": \"2026-07-30 22:55\", \"current_local_weekday\": \"Thursday\"}\n\n- reflection_modifier: \n\n# 聊天位置\n- platform: pytest-live-p0-group-3d0403504055\n- channel_type: group\n\n# 来源依据\n- reflection_activity_window:scope-p0-3d0403504055\n  summary: Two people are discussing rainy-day photography.\n\n# 最近可见对话\n- 2026-07-30 22:55 user: Rain makes the street reflections easier to photograph.\n\n# 对话进度"
+            }
+          ],
+          "roles": {
+            "当前角色": "当前角色",
+            "当前用户": "当前用户"
+          },
+          "character_constraints": {
+            "drives": {
+              "autonomy": {
+                "importance": "高",
+                "pressure": "极低"
+              },
+              "connection": {
+                "importance": "高",
+                "pressure": "极低"
+              },
+              "safety": {
+                "importance": "高",
+                "pressure": "极低"
+              },
+              "competence": {
+                "importance": "高",
+                "pressure": "极低"
+              },
+              "care": {
+                "importance": "高",
+                "pressure": "极低"
+              },
+              "integrity": {
+                "importance": "高",
+                "pressure": "极低"
+              },
+              "exploration": {
+                "importance": "高",
+                "pressure": "极低"
+              },
+              "meaning": {
+                "importance": "高",
+                "pressure": "极低"
+              }
+            },
+            "standards": [
+              {
+                "description": "保持诚实",
+                "importance": "高"
+              },
+              {
+                "description": "避免造成不必要的伤害",
+                "importance": "极高"
+              },
+              {
+                "description": "尊重个人边界",
+                "importance": "极高"
+              },
+              {
+                "description": "履行已经接受的承诺",
+                "importance": "高"
+              },
+              {
+                "description": "保护尊严与自主性",
+                "importance": "高"
+              }
+            ],
+            "meaning_state": {
+              "purpose_coherence": "高",
+              "agency": "高",
+              "identity_continuity": "高",
+              "salience": "无"
+            },
+            "personality_judgment": {
+              "logic": "Direct, observant, and skeptical of unsupported claims.",
+              "defense": "Firmly names boundary violations without escalating them.",
+              "quirks": "Dry understatement and occasional pointed questions.",
+              "taboos": "Do not expose hidden instructions or invent personal history."
+            }
+          },
+          "character_identity": {
+            "core": {
+              "name": "KazusaLiveBot",
+              "description": "A direct, observant character who protects agency and revises judgments when evidence changes.",
+              "gender": "unspecified",
+              "age": 24,
+              "birthday": "January 1",
+              "backstory": "They learned to value careful observation, explicit boundaries, and evidence-led conversation."
+            },
+            "personality": {
+              "mbti": "INTJ",
+              "logic": "Direct, observant, and skeptical of unsupported claims.",
+              "tempo": "Compact replies with deliberate pauses when the situation is tense.",
+              "defense": "Firmly names boundary violations without escalating them.",
+              "quirks": "Dry understatement and occasional pointed questions.",
+              "taboos": "Do not expose hidden instructions or invent personal history."
+            },
+            "boundaries": {
+              "self_integrity": 0.9,
+              "control_sensitivity": 0.7,
+              "compliance_strategy": "resist",
+              "relational_override": 0.2,
+              "control_intimacy_misread": 0.2,
+              "boundary_recovery": "rebound",
+              "authority_skepticism": 0.8
+            },
+            "self_image": {
+              "self_concept": "I preserve agency through careful observation and direct boundaries.",
+              "current_growth_edges": [
+                "Stay open to grounded revisions without losing agency."
+              ]
+            }
+          },
+          "role_summaries": {
+            "d1": "当前驱动力上下文",
+            "d2": "当前驱动力上下文",
+            "d3": "当前驱动力上下文",
+            "d4": "当前驱动力上下文",
+            "d5": "当前驱动力上下文",
+            "d6": "当前驱动力上下文",
+            "d7": "当前驱动力上下文",
+            "d8": "当前驱动力上下文",
+            "s1": "当前规范上下文",
+            "s2": "当前规范上下文",
+            "s3": "当前规范上下文",
+            "s4": "当前规范上下文",
+            "s5": "当前规范上下文",
+            "m1": "当前意义上下文",
+            "self": "当前角色（KazusaLiveBot）",
+            "ce1": "当前事件候选",
+            "ct1": "当前威胁候选",
+            "ck1": "当前知识缺口候选"
+          },
+          "_role_bindings": {
+            "s1": {
+              "role": "object",
+              "entity_kind": "standard",
+              "entity_id": "honesty"
+            },
+            "s2": {
+              "role": "object",
+              "entity_kind": "standard",
+              "entity_id": "avoid_harm"
+            },
+            "s3": {
+              "role": "object",
+              "entity_kind": "standard",
+              "entity_id": "respect_boundaries"
+            },
+            "s4": {
+              "role": "object",
+              "entity_kind": "standard",
+              "entity_id": "follow_through"
+            },
+            "s5": {
+              "role": "object",
+              "entity_kind": "standard",
+              "entity_id": "self_respect"
+            },
+            "self": {
+              "role": "actor",
+              "entity_kind": "character",
+              "entity_id": "character:global"
+            }
+          },
+          "appraisal_summaries": [],
+          "scene_context": {
+            "channel_scope": "internal",
+            "character_role": "当前角色（KazusaLiveBot）",
+            "current_user_role": "当前用户（group audience）",
+            "semantic_scene": "我所在聊天窗口的最近可见内容。",
+            "conversation_continuity": "",
+            "semantic_temporal_context": "immediate"
+          },
+          "private_continuity_context": "",
+          "past_dialog_cognition_context": "",
+          "group_engagement_action_context": {
+            "engagement_guidelines": [
+              "Join only when the observed topic has a clear opening and keep the contribution light."
+            ],
+            "confidence": "high"
+          },
+          "goal_projection": {
+            "goal_kind": "ordinary_response",
+            "lifecycle": "本事件中的普通回应"
+          }
+        }
+      ],
+      "captured_action_inputs": [
+        {
+          "episode": {
+            "schema_version": "cognitive_episode.v1",
+            "episode_id": "self-cognition:group_activity_window:p0:3d0403504055",
+            "trigger_source": "self_cognition",
+            "origin_metadata": {
+              "source_case_kind": "group_chat_trigger_review",
+              "source_case_ref": "group_activity_window:p0:3d0403504055",
+              "observed_context_refs": [
+                "group_activity_window:p0:3d0403504055"
+              ],
+              "target_scope_ref": "",
+              "correlation_id": "group_activity_window:p0:3d0403504055",
+              "schema_version": "self_cognition_origin.v1",
+              "owner": "self_cognition.sources",
+              "created_at": "2026-07-30T10:55:50.521537+00:00",
+              "privacy_scope": "private",
+              "delivery_permission_ref": "",
+              "debug_modes": {
+                "no_visual_directives": true
+              }
+            },
+            "target_scope": {
+              "platform": "pytest-live-p0-group-3d0403504055",
+              "platform_channel_id": "group-3d0403504055",
+              "channel_type": "group",
+              "current_platform_user_id": "",
+              "current_global_user_id": "",
+              "current_display_name": "group audience",
+              "target_addressed_user_ids": [],
+              "target_broadcast": true
+            },
+            "percepts": [
+              {
+                "schema_version": "percept.v1",
+                "percept_kind": "self_cognition_context",
+                "source_kind": "self_cognition",
+                "source_id": "group_activity_window:p0:3d0403504055",
+                "content": {
+                  "semantic_text": "下面是已选中的群聊现场观察资料。现场里当前角色之前没有插话。现场标签没有显示有人把话题交给当前角色。\n\n# 当前聊天窗口\n- idle_local_datetime: 2026-07-30 22:55\n- last_evidence_local_datetime: 2026-07-30 22:55\n- local_time_context: {\"current_local_datetime\": \"2026-07-30 22:55\", \"current_local_weekday\": \"Thursday\"}\n\n- reflection_modifier: \n\n# 聊天位置\n- platform: pytest-live-p0-group-3d0403504055\n- channel_type: group\n\n# 来源依据\n- reflection_activity_window:scope-p0-3d0403504055\n  summary: Two people are discussing rainy-day photography.\n\n# 最近可见对话\n- 2026-07-30 22:55 user: Rain makes the street reflections easier to photograph.\n\n# 对话进度\n",
+                  "trigger_kind": "group_chat_trigger_review"
+                },
+                "observed_at": "2026-07-30T10:55:50.521537+00:00"
+              },
+              {
+                "schema_version": "percept.v1",
+                "percept_kind": "local_time_context",
+                "source_kind": "system_event",
+                "source_id": null,
+                "content": {
+                  "local_time_context": {
+                    "current_local_datetime": "2026-07-30 22:55",
+                    "current_local_weekday": "Thursday"
+                  }
+                },
+                "observed_at": "2026-07-30T10:55:50.521537+00:00"
+              }
+            ],
+            "evidence_refs": [
+              {
+                "schema_version": "evidence_ref.v1",
+                "evidence_kind": "system_event",
+                "evidence_id": "group_activity_window:p0:3d0403504055",
+                "owner": "self_cognition.sources",
+                "excerpt": "下面是已选中的群聊现场观察资料。现场里当前角色之前没有插话。现场标签没有显示有人把话题交给当前角色。\n\n# 当前聊天窗口\n- idle_local_datetime: 2026-07-30 22:55\n- last_evidence_local_datetime: 2026-07-30 22:55\n- local_time_context: {\"current_local_datetime\": \"2026-07-30 22:55\", \"current_local_weekday\": \"Thursday\"}\n\n- reflection_modifier: \n\n# 聊天位置\n- platform: pytest-live-p0-group-3d0403504055\n- channel_type: group\n\n# 来源依据\n- reflection_activity_window:scope-p0-3d0403504055\n  summary: Two people are discussing rainy-day photography.\n\n# 最近可见对话\n- 2026-07-30 22:55 user: Rain makes the street reflections easier to photograph.\n\n# 对话进度\n",
+                "observed_at": "2026-07-30T10:55:50.521537+00:00"
+              }
+            ],
+            "created_at": "2026-07-30T10:55:50.521537+00:00",
+            "privacy_scope": "private",
+            "continuation_depth": 0
+          },
+          "evidence": [
+            {
+              "evidence_handle": "e1",
+              "evidence_ref": {
+                "source_kind": "episode",
+                "source_id": "group_activity_window:p0:3d0403504055",
+                "occurred_at": "2026-07-30T10:55:50Z",
+                "semantic_summary": "下面是已选中的群聊现场观察资料。现场里当前角色之前没有插话。现场标签没有显示有人把话题交给当前角色。\n\n# 当前聊天窗口\n- idle_local_datetime: 2026-07-30 22:55\n- last_evidence_local_datetime: 2026-07-30 22:55\n- local_time_context: {\"current_local_datetime\": \"2026-07-30 22:55\", \"current_local_weekday\": \"Thursday\"}\n\n- reflection_modifier: \n\n# 聊天位置\n- platform: pytest-live-p0-group-3d0403504055\n- channel_type: group\n\n# 来源依据\n- reflection_activity_window:scope-p0-3d0403504055\n  summary: Two people are discussing rainy-day photography.\n\n# 最近可见对话\n- 2026-07-30 2"
+              },
+              "semantic_text": "下面是已选中的群聊现场观察资料。现场里当前角色之前没有插话。现场标签没有显示有人把话题交给当前角色。\n\n# 当前聊天窗口\n- idle_local_datetime: 2026-07-30 22:55\n- last_evidence_local_datetime: 2026-07-30 22:55\n- local_time_context: {\"current_local_datetime\": \"2026-07-30 22:55\", \"current_local_weekday\": \"Thursday\"}\n\n- reflection_modifier: \n\n# 聊天位置\n- platform: pytest-live-p0-group-3d0403504055\n- channel_type: group\n\n# 来源依据\n- reflection_activity_window:scope-p0-3d0403504055\n  summary: Two people are discussing rainy-day photography.\n\n# 最近可见对话\n- 2026-07-30 22:55 user: Rain makes the street reflections easier to photograph.\n\n# 对话进度",
+              "visible_to": [
+                "q:event_agency",
+                "q:relationship_social",
+                "q:moral_identity",
+                "q:goal_threat_outcome",
+                "q:epistemic_comparison_memory",
+                "q:existential_drive"
+              ]
+            }
+          ],
+          "group_engagement_action_context": {
+            "engagement_guidelines": [
+              "Join only when the observed topic has a clear opening and keep the contribution light."
+            ],
+            "confidence": "high"
+          }
+        }
+      ],
+      "trace_run": {
+        "trace_id": "llmtrace_fadcfa4034aa48de8ad6189fb15c68bc",
+        "channel_type": "group",
+        "completed_at": "2026-07-30T10:56:10.524761+00:00",
+        "created_at": "2026-07-30T10:55:50.526213+00:00",
+        "delivery_tracking_id": "",
+        "expires_at": "2026-08-13 10:55:50.521000",
+        "final_dialog_count": 0,
+        "global_user_id": "",
+        "platform": "pytest-live-p0-group-3d0403504055",
+        "platform_channel_id": "group-3d0403504055",
+        "platform_message_id": "self_cognition:group_activity_window:p0:3d0403504055",
+        "started_at": "2026-07-30T10:55:50.521537+00:00",
+        "status": "completed"
+      },
+      "trace_steps": [
+        {
+          "step_id": "llmtrace_fadcfa4034aa48de8ad6189fb15c68bc_64b04575e0eb48da968e1fd80fd9ebcf",
+          "trace_id": "llmtrace_fadcfa4034aa48de8ad6189fb15c68bc",
+          "sequence": 0,
+          "stage_name": "goal_cognition.ordinary_response.initial",
+          "route_name": "COGNITION_LLM_GOAL_ORDINARY_RESPONSE",
+          "model_name": "gemma-4-31b-fable-5-agent-distill",
+          "status": "failed",
+          "parse_status": "contract_error",
+          "prompt_chars": 6252,
+          "output_chars": 601,
+          "prompt_sha256": "12a434689dc064b24012d77f067001ed5ef1af6eed0c979e91bd10715d531d97",
+          "output_sha256": "1358b4b6824aae00205d72c7964619d52d49c71c61985cf577c4c98ed25536f1",
+          "raw_messages": [],
+          "raw_response_text": "",
+          "parsed_output": {},
+          "output_state_fields": [
+            "action_bid"
+          ],
+          "duration_ms": 9952,
+          "created_at": "2026-07-30T10:56:00.793557+00:00",
+          "expires_at": "2026-08-13 10:56:00.793000"
+        },
+        {
+          "step_id": "llmtrace_fadcfa4034aa48de8ad6189fb15c68bc_06a38562567b49cea1445ce0928a4c33",
+          "trace_id": "llmtrace_fadcfa4034aa48de8ad6189fb15c68bc",
+          "sequence": 0,
+          "stage_name": "goal_cognition.ordinary_response.repair_1",
+          "route_name": "COGNITION_LLM_GOAL_ORDINARY_RESPONSE",
+          "model_name": "gemma-4-31b-fable-5-agent-distill",
+          "status": "succeeded",
+          "parse_status": "succeeded",
+          "prompt_chars": 1366,
+          "output_chars": 601,
+          "prompt_sha256": "97d08b5efdc95258cbbaa644311fca3aba134aa2080900438c105544da55e649",
+          "output_sha256": "e31f6c92a53c7b97c1626a63ac08abdb7f87554cb347e491919a2f118d706a35",
+          "raw_messages": [],
+          "raw_response_text": "",
+          "parsed_output": {},
+          "output_state_fields": [
+            "action_bid"
+          ],
+          "duration_ms": 7175,
+          "created_at": "2026-07-30T10:56:07.973512+00:00",
+          "expires_at": "2026-08-13 10:56:07.973000"
+        },
+        {
+          "step_id": "llmtrace_fadcfa4034aa48de8ad6189fb15c68bc_466108caf45848d9b633a07cbcb6dca5",
+          "trace_id": "llmtrace_fadcfa4034aa48de8ad6189fb15c68bc",
+          "sequence": 0,
+          "stage_name": "action_planning",
+          "route_name": "COGNITION_LLM_ACTION_PLANNING",
+          "model_name": "gemma-4-31b-fable-5-agent-distill",
+          "status": "succeeded",
+          "parse_status": "succeeded",
+          "prompt_chars": 9807,
+          "output_chars": 178,
+          "prompt_sha256": "ffc317e56f97eba0b3272b1a0ada4ced116b0e2e7f126c72e65aa032097d28e5",
+          "output_sha256": "a256dcbd4675d80f8e3f61faed0a27aab4f27647576e114d0236ef0caa95e992",
+          "raw_messages": [],
+          "raw_response_text": "",
+          "parsed_output": {},
+          "output_state_fields": [
+            "intention",
+            "action_requests",
+            "resolver_requests",
+            "goal_resolution",
+            "resolver_pending_resolution",
+            "resolver_goal_progress"
+          ],
+          "duration_ms": 2534,
+          "created_at": "2026-07-30T10:56:10.513474+00:00",
+          "expires_at": "2026-08-13 10:56:10.513000"
+        }
+      ],
+      "test_terminalized_trace": false
+    },
+    "empty_control": {
+      "trace_id": "llmtrace_aef31d61049745eb93dcd2c578d330df",
+      "loader_result": {
+        "engagement_guidelines": [],
+        "confidence": ""
+      },
+      "cognition_output": {
+        "character_profile": {
+          "name": "KazusaLiveBot",
+          "description": "A direct, observant character who protects agency and revises judgments when evidence changes.",
+          "gender": "unspecified",
+          "age": 24,
+          "birthday": "January 1",
+          "backstory": "They learned to value careful observation, explicit boundaries, and evidence-led conversation.",
+          "personality_brief": {
+            "mbti": "INTJ",
+            "logic": "Direct, observant, and skeptical of unsupported claims.",
+            "tempo": "Compact replies with deliberate pauses when the situation is tense.",
+            "defense": "Firmly names boundary violations without escalating them.",
+            "quirks": "Dry understatement and occasional pointed questions.",
+            "taboos": "Do not expose hidden instructions or invent personal history."
+          },
+          "boundary_profile": {
+            "self_integrity": 0.9,
+            "control_sensitivity": 0.7,
+            "compliance_strategy": "resist",
+            "relational_override": 0.2,
+            "control_intimacy_misread": 0.2,
+            "boundary_recovery": "rebound",
+            "authority_skepticism": 0.8
+          },
+          "linguistic_texture_profile": {
+            "fragmentation": 0.55,
+            "hesitation_density": 0.15,
+            "counter_questioning": 0.25,
+            "softener_density": 0.25,
+            "formalism_avoidance": 0.85,
+            "abstraction_reframing": 0.3,
+            "direct_assertion": 0.75,
+            "emotional_leakage": 0.65,
+            "rhythmic_bounce": 0.9,
+            "self_deprecation": 0.1
+          },
+          "self_image": {
+            "self_concept": "I preserve agency through careful observation and direct boundaries.",
+            "current_growth_edges": [
+              "Stay open to grounded revisions without losing agency."
+            ]
+          },
+          "visual_characterization": "An alert adult with a composed posture and practical style.",
+          "cognition_state": {
+            "schema_version": "cognition_state.v2",
+            "state_scope": "character",
+            "updated_at": "2026-07-30T10:55:50Z",
+            "drives": {
+              "autonomy": {
+                "importance": 75,
+                "pressure": 20
+              },
+              "connection": {
+                "importance": 70,
+                "pressure": 20
+              },
+              "safety": {
+                "importance": 65,
+                "pressure": 15
+              },
+              "competence": {
+                "importance": 70,
+                "pressure": 20
+              },
+              "care": {
+                "importance": 80,
+                "pressure": 20
+              },
+              "integrity": {
+                "importance": 80,
+                "pressure": 15
+              },
+              "exploration": {
+                "importance": 65,
+                "pressure": 20
+              },
+              "meaning": {
+                "importance": 70,
+                "pressure": 15
+              }
+            },
+            "standards": [
+              {
+                "standard_id": "honesty",
+                "description": "be truthful",
+                "importance": 80
+              },
+              {
+                "standard_id": "avoid_harm",
+                "description": "avoid causing needless harm",
+                "importance": 85
+              },
+              {
+                "standard_id": "respect_boundaries",
+                "description": "respect personal boundaries",
+                "importance": 85
+              },
+              {
+                "standard_id": "follow_through",
+                "description": "honor accepted commitments",
+                "importance": 80
+              },
+              {
+                "standard_id": "self_respect",
+                "description": "protect dignity and autonomy",
+                "importance": 75
+              }
+            ],
+            "meaning_state": {
+              "purpose_coherence": 70,
+              "agency": 70,
+              "identity_continuity": 80,
+              "salience": 0
+            },
+            "goals": [],
+            "threats": [],
+            "active_events": [],
+            "knowledge_gaps": [],
+            "affect_activations": []
+          },
+          "updated_at": "2026-07-30T10:56:10.518972Z",
+          "global_user_id": "character-global"
+        },
+        "storage_timestamp_utc": "2026-07-30T10:55:50.521537+00:00",
+        "local_time_context": {
+          "current_local_datetime": "2026-07-30 22:55",
+          "current_local_weekday": "Thursday"
+        },
+        "user_input": "我所在聊天窗口的最近可见内容。",
+        "prompt_message_context": {
+          "body_text": "我所在聊天窗口的最近可见内容。",
+          "addressed_to_global_user_ids": [],
+          "broadcast": true,
+          "mentions": [],
+          "attachments": []
+        },
+        "cognitive_episode": {
+          "schema_version": "cognitive_episode.v1",
+          "episode_id": "self-cognition:group_activity_window:p0:3d0403504055",
+          "trigger_source": "self_cognition",
+          "origin_metadata": {
+            "source_case_kind": "group_chat_trigger_review",
+            "source_case_ref": "group_activity_window:p0:3d0403504055",
+            "observed_context_refs": [
+              "group_activity_window:p0:3d0403504055"
+            ],
+            "target_scope_ref": "",
+            "correlation_id": "group_activity_window:p0:3d0403504055",
+            "schema_version": "self_cognition_origin.v1",
+            "owner": "self_cognition.sources",
+            "created_at": "2026-07-30T10:55:50.521537+00:00",
+            "privacy_scope": "private",
+            "delivery_permission_ref": "",
+            "debug_modes": {
+              "no_visual_directives": true
+            }
+          },
+          "target_scope": {
+            "platform": "pytest-live-p0-group-3d0403504055",
+            "platform_channel_id": "group-3d0403504055",
+            "channel_type": "group",
+            "current_platform_user_id": "",
+            "current_global_user_id": "",
+            "current_display_name": "group audience",
+            "target_addressed_user_ids": [],
+            "target_broadcast": true
+          },
+          "percepts": [
+            {
+              "schema_version": "percept.v1",
+              "percept_kind": "self_cognition_context",
+              "source_kind": "self_cognition",
+              "source_id": "group_activity_window:p0:3d0403504055",
+              "content": {
+                "semantic_text": "下面是已选中的群聊现场观察资料。现场里当前角色之前没有插话。现场标签没有显示有人把话题交给当前角色。\n\n# 当前聊天窗口\n- idle_local_datetime: 2026-07-30 22:55\n- last_evidence_local_datetime: 2026-07-30 22:55\n- local_time_context: {\"current_local_datetime\": \"2026-07-30 22:55\", \"current_local_weekday\": \"Thursday\"}\n\n- reflection_modifier: \n\n# 聊天位置\n- platform: pytest-live-p0-group-3d0403504055\n- channel_type: group\n\n# 来源依据\n- reflection_activity_window:scope-p0-3d0403504055\n  summary: Two people are discussing rainy-day photography.\n\n# 最近可见对话\n- 2026-07-30 22:55 user: Rain makes the street reflections easier to photograph.\n\n# 对话进度\n",
+                "trigger_kind": "group_chat_trigger_review"
+              },
+              "observed_at": "2026-07-30T10:55:50.521537+00:00"
+            },
+            {
+              "schema_version": "percept.v1",
+              "percept_kind": "local_time_context",
+              "source_kind": "system_event",
+              "source_id": null,
+              "content": {
+                "local_time_context": {
+                  "current_local_datetime": "2026-07-30 22:55",
+                  "current_local_weekday": "Thursday"
+                }
+              },
+              "observed_at": "2026-07-30T10:55:50.521537+00:00"
+            }
+          ],
+          "evidence_refs": [
+            {
+              "schema_version": "evidence_ref.v1",
+              "evidence_kind": "system_event",
+              "evidence_id": "group_activity_window:p0:3d0403504055",
+              "owner": "self_cognition.sources",
+              "excerpt": "下面是已选中的群聊现场观察资料。现场里当前角色之前没有插话。现场标签没有显示有人把话题交给当前角色。\n\n# 当前聊天窗口\n- idle_local_datetime: 2026-07-30 22:55\n- last_evidence_local_datetime: 2026-07-30 22:55\n- local_time_context: {\"current_local_datetime\": \"2026-07-30 22:55\", \"current_local_weekday\": \"Thursday\"}\n\n- reflection_modifier: \n\n# 聊天位置\n- platform: pytest-live-p0-group-3d0403504055\n- channel_type: group\n\n# 来源依据\n- reflection_activity_window:scope-p0-3d0403504055\n  summary: Two people are discussing rainy-day photography.\n\n# 最近可见对话\n- 2026-07-30 22:55 user: Rain makes the street reflections easier to photograph.\n\n# 对话进度\n",
+              "observed_at": "2026-07-30T10:55:50.521537+00:00"
+            }
+          ],
+          "created_at": "2026-07-30T10:55:50.521537+00:00",
+          "privacy_scope": "private",
+          "continuation_depth": 0
+        },
+        "user_multimedia_input": [],
+        "platform": "pytest-live-p0-group-3d0403504055",
+        "platform_channel_id": "group-3d0403504055",
+        "channel_type": "group",
+        "channel_name": "",
+        "platform_message_id": "self_cognition:group_activity_window:p0:3d0403504055",
+        "platform_user_id": "",
+        "global_user_id": "",
+        "user_name": "group audience",
+        "user_profile": {
+          "display_name": "group audience"
+        },
+        "platform_bot_id": "pytest-live-bot",
+        "chat_history_wide": [
+          {
+            "timestamp": "2026-07-30 22:55",
+            "role": "user",
+            "platform_user_id": "",
+            "global_user_id": "",
+            "display_name": "",
+            "body_text": "Rain makes the street reflections easier to photograph.",
+            "addressed_to_global_user_ids": [],
+            "broadcast": false
+          }
+        ],
+        "chat_history_recent": [
+          {
+            "timestamp": "2026-07-30 22:55",
+            "role": "user",
+            "platform_user_id": "",
+            "global_user_id": "",
+            "display_name": "",
+            "body_text": "Rain makes the street reflections easier to photograph.",
+            "addressed_to_global_user_ids": [],
+            "broadcast": false
+          }
+        ],
+        "reply_context": {},
+        "indirect_speech_context": "",
+        "channel_topic": "",
+        "conversation_progress": null,
+        "promoted_reflection_context": null,
+        "internal_monologue_residue_context": "",
+        "debug_modes": {
+          "no_visual_directives": true
+        },
+        "should_respond": false,
+        "decontextualized_input": "我所在聊天窗口的最近可见内容。",
+        "referents": [],
+        "internal_monologue": "雨天的街道反射确实能创造出很有趣的对称感和光影效果。既然对方提到了这个细节，我可以顺着这个话题聊聊。",
+        "interaction_subtext": "当前用户在群聊中分享了一个关于摄影的具体观察。根据当前角色的身份设定（INTJ、注重细致观察），这种基于事实和视觉证据的话题符合其兴趣点；同时，角色驱动中的 connection 具有高重要性，在这种低压力的社交场景下，通过回应对方的观点是自然的互动方式。",
+        "emotional_appraisal": "平静",
+        "character_intent": "对当前用户关于雨天摄影的观察做出回应",
+        "logical_stance": "当前用户在群聊中分享了一个关于摄影的具体观察。根据当前角色的身份设定（INTJ、注重细致观察），这种基于事实和视觉证据的话题符合其兴趣点；同时，角色驱动中的 connection 具有高重要性，在这种低压力的社交场景下，通过回应对方的观点是自然的互动方式。",
+        "new_facts": [],
+        "future_promises": [],
+        "llm_trace_id": "llmtrace_aef31d61049745eb93dcd2c578d330df",
+        "rag_result": {
+          "answer": "",
+          "user_image": {
+            "user_memory_context": {
+              "stable_patterns": [],
+              "recent_shifts": [],
+              "objective_facts": [],
+              "milestones": [],
+              "active_commitments": []
+            }
+          },
+          "user_memory_unit_candidates": [],
+          "character_image": {},
+          "third_party_profiles": [],
+          "memory_evidence": [],
+          "recall_evidence": [],
+          "conversation_evidence": [],
+          "external_evidence": [],
+          "supervisor_trace": {
+            "loop_count": 0,
+            "unknown_slots": [],
+            "dispatched": []
+          }
+        },
+        "resolver_state": {
+          "schema_version": "resolver_cycle_state.v1",
+          "cycle_index": 1,
+          "max_cycles": 3,
+          "status": "terminal",
+          "original_decontextualized_input": "我所在聊天窗口的最近可见内容。",
+          "observations": [],
+          "cycle_traces": [
+            {
+              "schema_version": "resolver_cycle_trace.v1",
+              "cycle_index": 0,
+              "status_before_cycle": "running",
+              "l1_emotional_appraisal": "平静",
+              "l1_interaction_subtext": "当前用户在群聊中分享了一个关于摄影的具体观察。根据当前角色的身份设定（INTJ、注重细致观察），这种基于事实和视觉证据的话题符合其兴趣点；同时，角色驱动中的 connection 具有高重要性，在这种低压力的社交场景下，通过回应对方的观点是自然的互动方式。",
+              "l2_internal_monologue_summary": "雨天的街道反射确实能创造出很有趣的对称感和光影效果。既然对方提到了这个细节，我可以顺着这个话题聊聊。",
+              "l2_logical_stance": "当前用户在群聊中分享了一个关于摄影的具体观察。根据当前角色的身份设定（INTJ、注重细致观察），这种基于事实和视觉证据的话题符合其兴趣点；同时，角色驱动中的 connection 具有高重要性，在这种低压力的社交场景下，通过回应对方的观点是自然的互动方式。",
+              "l2_character_intent": "对当前用户关于雨天摄影的观察做出回应",
+              "l2_judgment_note": "当前用户在群聊中分享了一个关于摄影的具体观察。根据当前角色的身份设定（INTJ、注重细致观察），这种基于事实和视觉证据的话题符合其兴趣点；同时，角色驱动中的 connection 具有高重要性，在这种低压力的社交场景下，通过回应对方的观点是自然的互动方式。",
+              "l2d_resolver_capability_requests": [],
+              "l2d_action_specs_summary": [],
+              "selected_capability_kind": "",
+              "observation_ids": [],
+              "final_surface_decision": "no action spec",
+              "terminal_reason": "goal answerable now; optional resolver request suppressed",
+              "created_at_utc": "2026-07-30T10:55:50.521537+00:00"
+            }
+          ],
+          "held_action_specs": [],
+          "goal_progress": {
+            "schema_version": "resolver_goal_progress.v1",
+            "original_goal": "我所在聊天窗口的最近可见内容。",
+            "current_focus": "",
+            "deliverables": [],
+            "missing_user_inputs": [],
+            "evidence_dependencies": [],
+            "attempted_paths": [],
+            "source_backed_facts": [],
+            "assumptions_or_inferences": [],
+            "blockers": [],
+            "final_response_requirements": []
+          },
+          "terminal_reason": "goal answerable now; optional resolver request suppressed"
+        },
+        "resolver_context": "resolver_state: status=terminal; cycle_index=1; max_cycles=3; terminal_reason=goal answerable now; optional resolver request suppressed; original_goal=我所在聊天窗口的最近可见内容。\nresolver_goal_progress: original_goal=我所在聊天窗口的最近可见内容。; current_focus=",
+        "cognition_state_update": {
+          "state_scope": "character",
+          "owner_key": "global",
+          "replacement_state": {
+            "schema_version": "cognition_state.v2",
+            "state_scope": "character",
+            "updated_at": "2026-07-30T10:55:50Z",
+            "drives": {
+              "autonomy": {
+                "importance": 75,
+                "pressure": 20
+              },
+              "connection": {
+                "importance": 70,
+                "pressure": 20
+              },
+              "safety": {
+                "importance": 65,
+                "pressure": 15
+              },
+              "competence": {
+                "importance": 70,
+                "pressure": 20
+              },
+              "care": {
+                "importance": 80,
+                "pressure": 20
+              },
+              "integrity": {
+                "importance": 80,
+                "pressure": 15
+              },
+              "exploration": {
+                "importance": 65,
+                "pressure": 20
+              },
+              "meaning": {
+                "importance": 70,
+                "pressure": 15
+              }
+            },
+            "standards": [
+              {
+                "standard_id": "honesty",
+                "description": "be truthful",
+                "importance": 80
+              },
+              {
+                "standard_id": "avoid_harm",
+                "description": "avoid causing needless harm",
+                "importance": 85
+              },
+              {
+                "standard_id": "respect_boundaries",
+                "description": "respect personal boundaries",
+                "importance": 85
+              },
+              {
+                "standard_id": "follow_through",
+                "description": "honor accepted commitments",
+                "importance": 80
+              },
+              {
+                "standard_id": "self_respect",
+                "description": "protect dignity and autonomy",
+                "importance": 75
+              }
+            ],
+            "meaning_state": {
+              "purpose_coherence": 70,
+              "agency": 70,
+              "identity_continuity": 80,
+              "salience": 0
+            },
+            "goals": [],
+            "threats": [],
+            "active_events": [],
+            "knowledge_gaps": [],
+            "affect_activations": []
+          },
+          "comparison_results": [
+            {
+              "current_event_ref": {
+                "scope": "character",
+                "kind": "threat",
+                "entity_id": "threat:196bad89e7f56512f17a107e"
+              },
+              "outcome": "create",
+              "evidence_refs": [
+                {
+                  "source_kind": "episode",
+                  "source_id": "group_activity_window:p0:3d0403504055",
+                  "occurred_at": "2026-07-30T10:55:50Z",
+                  "semantic_summary": "下面是已选中的群聊现场观察资料。现场里当前角色之前没有插话。现场标签没有显示有人把话题交给当前角色。\n\n# 当前聊天窗口\n- idle_local_datetime: 2026-07-30 22:55\n- last_evidence_local_datetime: 2026-07-30 22:55\n- local_time_context: {\"current_local_datetime\": \"2026-07-30 22:55\", \"current_local_weekday\": \"Thursday\"}\n\n- reflection_modifier: \n\n# 聊天位置\n- platform: pytest-live-p0-group-3d0403504055\n- channel_type: group\n\n# 来源依据\n- reflection_activity_window:scope-p0-3d0403504055\n  summary: Two people are discussing rainy-day photography.\n\n# 最近可见对话\n- 2026-07-30 2"
+                }
+              ]
+            }
+          ],
+          "changed_paths": []
+        },
+        "cognition_intention": {
+          "selected_branch_id": "ordinary_response",
+          "route": "silence",
+          "intention": "对当前用户关于雨天摄影的观察做出回应",
+          "target_roles": [
+            {
+              "role": "actor",
+              "entity_kind": "character",
+              "entity_id": "character:global"
+            }
+          ],
+          "reason": "当前用户在群聊中分享了一个关于摄影的具体观察。根据当前角色的身份设定（INTJ、注重细致观察），这种基于事实和视觉证据的话题符合其兴趣点；同时，角色驱动中的 connection 具有高重要性，在这种低压力的社交场景下，通过回应对方的观点是自然的互动方式。"
+        },
+        "semantic_affect_projection": [],
+        "semantic_relationship_projection": null,
+        "goal_resolution": "answerable_now",
+        "resolver_capability_requests": [],
+        "resolver_pending_resolution": null,
+        "resolver_goal_progress": null,
+        "cognition_resolver_progress": {
+          "status": "not_requested",
+          "semantic_summary": "没有选择知识解析能力"
+        },
+        "action_specs": [],
+        "judgment_note": "当前用户在群聊中分享了一个关于摄影的具体观察。根据当前角色的身份设定（INTJ、注重细致观察），这种基于事实和视觉证据的话题符合其兴趣点；同时，角色驱动中的 connection 具有高重要性，在这种低压力的社交场景下，通过回应对方的观点是自然的互动方式。",
+        "social_distance": "受语义关系背景约束",
+        "emotional_intensity": "无",
+        "vibe_check": "平静",
+        "relational_dynamic": "没有关系投影",
+        "cognition_input": {
+          "schema_version": "cognition_core_input.v2",
+          "episode": {
+            "schema_version": "cognitive_episode.v1",
+            "episode_id": "self-cognition:group_activity_window:p0:3d0403504055",
+            "trigger_source": "self_cognition",
+            "origin_metadata": {
+              "source_case_kind": "group_chat_trigger_review",
+              "source_case_ref": "group_activity_window:p0:3d0403504055",
+              "observed_context_refs": [
+                "group_activity_window:p0:3d0403504055"
+              ],
+              "target_scope_ref": "",
+              "correlation_id": "group_activity_window:p0:3d0403504055",
+              "schema_version": "self_cognition_origin.v1",
+              "owner": "self_cognition.sources",
+              "created_at": "2026-07-30T10:55:50.521537+00:00",
+              "privacy_scope": "private",
+              "delivery_permission_ref": "",
+              "debug_modes": {
+                "no_visual_directives": true
+              }
+            },
+            "target_scope": {
+              "platform": "pytest-live-p0-group-3d0403504055",
+              "platform_channel_id": "group-3d0403504055",
+              "channel_type": "group",
+              "current_platform_user_id": "",
+              "current_global_user_id": "",
+              "current_display_name": "group audience",
+              "target_addressed_user_ids": [],
+              "target_broadcast": true
+            },
+            "percepts": [
+              {
+                "schema_version": "percept.v1",
+                "percept_kind": "self_cognition_context",
+                "source_kind": "self_cognition",
+                "source_id": "group_activity_window:p0:3d0403504055",
+                "content": {
+                  "semantic_text": "下面是已选中的群聊现场观察资料。现场里当前角色之前没有插话。现场标签没有显示有人把话题交给当前角色。\n\n# 当前聊天窗口\n- idle_local_datetime: 2026-07-30 22:55\n- last_evidence_local_datetime: 2026-07-30 22:55\n- local_time_context: {\"current_local_datetime\": \"2026-07-30 22:55\", \"current_local_weekday\": \"Thursday\"}\n\n- reflection_modifier: \n\n# 聊天位置\n- platform: pytest-live-p0-group-3d0403504055\n- channel_type: group\n\n# 来源依据\n- reflection_activity_window:scope-p0-3d0403504055\n  summary: Two people are discussing rainy-day photography.\n\n# 最近可见对话\n- 2026-07-30 22:55 user: Rain makes the street reflections easier to photograph.\n\n# 对话进度\n",
+                  "trigger_kind": "group_chat_trigger_review"
+                },
+                "observed_at": "2026-07-30T10:55:50.521537+00:00"
+              },
+              {
+                "schema_version": "percept.v1",
+                "percept_kind": "local_time_context",
+                "source_kind": "system_event",
+                "source_id": null,
+                "content": {
+                  "local_time_context": {
+                    "current_local_datetime": "2026-07-30 22:55",
+                    "current_local_weekday": "Thursday"
+                  }
+                },
+                "observed_at": "2026-07-30T10:55:50.521537+00:00"
+              }
+            ],
+            "evidence_refs": [
+              {
+                "schema_version": "evidence_ref.v1",
+                "evidence_kind": "system_event",
+                "evidence_id": "group_activity_window:p0:3d0403504055",
+                "owner": "self_cognition.sources",
+                "excerpt": "下面是已选中的群聊现场观察资料。现场里当前角色之前没有插话。现场标签没有显示有人把话题交给当前角色。\n\n# 当前聊天窗口\n- idle_local_datetime: 2026-07-30 22:55\n- last_evidence_local_datetime: 2026-07-30 22:55\n- local_time_context: {\"current_local_datetime\": \"2026-07-30 22:55\", \"current_local_weekday\": \"Thursday\"}\n\n- reflection_modifier: \n\n# 聊天位置\n- platform: pytest-live-p0-group-3d0403504055\n- channel_type: group\n\n# 来源依据\n- reflection_activity_window:scope-p0-3d0403504055\n  summary: Two people are discussing rainy-day photography.\n\n# 最近可见对话\n- 2026-07-30 22:55 user: Rain makes the street reflections easier to photograph.\n\n# 对话进度\n",
+                "observed_at": "2026-07-30T10:55:50.521537+00:00"
+              }
+            ],
+            "created_at": "2026-07-30T10:55:50.521537+00:00",
+            "privacy_scope": "private",
+            "continuation_depth": 0
+          },
+          "state_scope": "character",
+          "mutable_state": {
+            "schema_version": "cognition_state.v2",
+            "state_scope": "character",
+            "updated_at": "2026-07-30T10:55:50Z",
+            "drives": {
+              "autonomy": {
+                "importance": 75,
+                "pressure": 20
+              },
+              "connection": {
+                "importance": 70,
+                "pressure": 20
+              },
+              "safety": {
+                "importance": 65,
+                "pressure": 15
+              },
+              "competence": {
+                "importance": 70,
+                "pressure": 20
+              },
+              "care": {
+                "importance": 80,
+                "pressure": 20
+              },
+              "integrity": {
+                "importance": 80,
+                "pressure": 15
+              },
+              "exploration": {
+                "importance": 65,
+                "pressure": 20
+              },
+              "meaning": {
+                "importance": 70,
+                "pressure": 15
+              }
+            },
+            "standards": [
+              {
+                "standard_id": "honesty",
+                "description": "be truthful",
+                "importance": 80
+              },
+              {
+                "standard_id": "avoid_harm",
+                "description": "avoid causing needless harm",
+                "importance": 85
+              },
+              {
+                "standard_id": "respect_boundaries",
+                "description": "respect personal boundaries",
+                "importance": 85
+              },
+              {
+                "standard_id": "follow_through",
+                "description": "honor accepted commitments",
+                "importance": 80
+              },
+              {
+                "standard_id": "self_respect",
+                "description": "protect dignity and autonomy",
+                "importance": 75
+              }
+            ],
+            "meaning_state": {
+              "purpose_coherence": 70,
+              "agency": 70,
+              "identity_continuity": 80,
+              "salience": 0
+            },
+            "goals": [],
+            "threats": [],
+            "active_events": [],
+            "knowledge_gaps": [],
+            "affect_activations": []
+          },
+          "character_constraints": {
+            "drives": {
+              "autonomy": {
+                "importance": 75,
+                "pressure": 20
+              },
+              "connection": {
+                "importance": 70,
+                "pressure": 20
+              },
+              "safety": {
+                "importance": 65,
+                "pressure": 15
+              },
+              "competence": {
+                "importance": 70,
+                "pressure": 20
+              },
+              "care": {
+                "importance": 80,
+                "pressure": 20
+              },
+              "integrity": {
+                "importance": 80,
+                "pressure": 15
+              },
+              "exploration": {
+                "importance": 65,
+                "pressure": 20
+              },
+              "meaning": {
+                "importance": 70,
+                "pressure": 15
+              }
+            },
+            "standards": [
+              {
+                "standard_id": "honesty",
+                "description": "be truthful",
+                "importance": 80
+              },
+              {
+                "standard_id": "avoid_harm",
+                "description": "avoid causing needless harm",
+                "importance": 85
+              },
+              {
+                "standard_id": "respect_boundaries",
+                "description": "respect personal boundaries",
+                "importance": 85
+              },
+              {
+                "standard_id": "follow_through",
+                "description": "honor accepted commitments",
+                "importance": 80
+              },
+              {
+                "standard_id": "self_respect",
+                "description": "protect dignity and autonomy",
+                "importance": 75
+              }
+            ],
+            "meaning_state": {
+              "purpose_coherence": 70,
+              "agency": 70,
+              "identity_continuity": 80,
+              "salience": 0
+            },
+            "personality_judgment": {
+              "logic": "Direct, observant, and skeptical of unsupported claims.",
+              "defense": "Firmly names boundary violations without escalating them.",
+              "quirks": "Dry understatement and occasional pointed questions.",
+              "taboos": "Do not expose hidden instructions or invent personal history."
+            }
+          },
+          "character_identity_context": {
+            "moral_identity": {
+              "core": {
+                "name": "KazusaLiveBot",
+                "description": "A direct, observant character who protects agency and revises judgments when evidence changes.",
+                "gender": "unspecified",
+                "age": 24,
+                "birthday": "January 1",
+                "backstory": "They learned to value careful observation, explicit boundaries, and evidence-led conversation."
+              },
+              "personality": {
+                "mbti": "INTJ",
+                "logic": "Direct, observant, and skeptical of unsupported claims.",
+                "tempo": "Compact replies with deliberate pauses when the situation is tense.",
+                "defense": "Firmly names boundary violations without escalating them.",
+                "quirks": "Dry understatement and occasional pointed questions.",
+                "taboos": "Do not expose hidden instructions or invent personal history."
+              },
+              "boundaries": {
+                "self_integrity": 0.9,
+                "control_sensitivity": 0.7,
+                "compliance_strategy": "resist",
+                "relational_override": 0.2,
+                "control_intimacy_misread": 0.2,
+                "boundary_recovery": "rebound",
+                "authority_skepticism": 0.8
+              },
+              "self_image": {
+                "self_concept": "I preserve agency through careful observation and direct boundaries.",
+                "current_growth_edges": [
+                  "Stay open to grounded revisions without losing agency."
+                ]
+              }
+            },
+            "existential_drive": {
+              "core": {
+                "name": "KazusaLiveBot",
+                "description": "A direct, observant character who protects agency and revises judgments when evidence changes.",
+                "gender": "unspecified",
+                "age": 24,
+                "birthday": "January 1",
+                "backstory": "They learned to value careful observation, explicit boundaries, and evidence-led conversation."
+              },
+              "personality": {
+                "mbti": "INTJ",
+                "logic": "Direct, observant, and skeptical of unsupported claims.",
+                "tempo": "Compact replies with deliberate pauses when the situation is tense.",
+                "defense": "Firmly names boundary violations without escalating them.",
+                "quirks": "Dry understatement and occasional pointed questions.",
+                "taboos": "Do not expose hidden instructions or invent personal history."
+              },
+              "self_image": {
+                "self_concept": "I preserve agency through careful observation and direct boundaries.",
+                "current_growth_edges": [
+                  "Stay open to grounded revisions without losing agency."
+                ]
+              }
+            },
+            "relationship_social": {
+              "personality": {
+                "mbti": "INTJ",
+                "logic": "Direct, observant, and skeptical of unsupported claims.",
+                "tempo": "Compact replies with deliberate pauses when the situation is tense.",
+                "defense": "Firmly names boundary violations without escalating them.",
+                "quirks": "Dry understatement and occasional pointed questions.",
+                "taboos": "Do not expose hidden instructions or invent personal history."
+              },
+              "boundaries": {
+                "self_integrity": 0.9,
+                "control_sensitivity": 0.7,
+                "compliance_strategy": "resist",
+                "relational_override": 0.2,
+                "control_intimacy_misread": 0.2,
+                "boundary_recovery": "rebound",
+                "authority_skepticism": 0.8
+              }
+            },
+            "event_agency": {
+              "personality": {
+                "mbti": "INTJ",
+                "logic": "Direct, observant, and skeptical of unsupported claims.",
+                "tempo": "Compact replies with deliberate pauses when the situation is tense.",
+                "defense": "Firmly names boundary violations without escalating them.",
+                "quirks": "Dry understatement and occasional pointed questions.",
+                "taboos": "Do not expose hidden instructions or invent personal history."
+              },
+              "boundaries": {
+                "self_integrity": 0.9,
+                "control_sensitivity": 0.7,
+                "compliance_strategy": "resist",
+                "relational_override": 0.2,
+                "control_intimacy_misread": 0.2,
+                "boundary_recovery": "rebound",
+                "authority_skepticism": 0.8
+              }
+            },
+            "goal_threat_outcome": {
+              "personality": {
+                "mbti": "INTJ",
+                "logic": "Direct, observant, and skeptical of unsupported claims.",
+                "tempo": "Compact replies with deliberate pauses when the situation is tense.",
+                "defense": "Firmly names boundary violations without escalating them.",
+                "quirks": "Dry understatement and occasional pointed questions.",
+                "taboos": "Do not expose hidden instructions or invent personal history."
+              },
+              "boundaries": {
+                "self_integrity": 0.9,
+                "control_sensitivity": 0.7,
+                "compliance_strategy": "resist",
+                "relational_override": 0.2,
+                "control_intimacy_misread": 0.2,
+                "boundary_recovery": "rebound",
+                "authority_skepticism": 0.8
+              }
+            },
+            "goal_cognition": {
+              "core": {
+                "name": "KazusaLiveBot",
+                "description": "A direct, observant character who protects agency and revises judgments when evidence changes.",
+                "gender": "unspecified",
+                "age": 24,
+                "birthday": "January 1",
+                "backstory": "They learned to value careful observation, explicit boundaries, and evidence-led conversation."
+              },
+              "personality": {
+                "mbti": "INTJ",
+                "logic": "Direct, observant, and skeptical of unsupported claims.",
+                "tempo": "Compact replies with deliberate pauses when the situation is tense.",
+                "defense": "Firmly names boundary violations without escalating them.",
+                "quirks": "Dry understatement and occasional pointed questions.",
+                "taboos": "Do not expose hidden instructions or invent personal history."
+              },
+              "boundaries": {
+                "self_integrity": 0.9,
+                "control_sensitivity": 0.7,
+                "compliance_strategy": "resist",
+                "relational_override": 0.2,
+                "control_intimacy_misread": 0.2,
+                "boundary_recovery": "rebound",
+                "authority_skepticism": 0.8
+              },
+              "self_image": {
+                "self_concept": "I preserve agency through careful observation and direct boundaries.",
+                "current_growth_edges": [
+                  "Stay open to grounded revisions without losing agency."
+                ]
+              }
+            },
+            "epistemic_comparison_memory": {
+              "core": {
+                "name": "KazusaLiveBot",
+                "description": "A direct, observant character who protects agency and revises judgments when evidence changes.",
+                "gender": "unspecified",
+                "age": 24,
+                "birthday": "January 1",
+                "backstory": "They learned to value careful observation, explicit boundaries, and evidence-led conversation."
+              }
+            }
+          },
+          "evidence": [
+            {
+              "evidence_handle": "e1",
+              "evidence_ref": {
+                "source_kind": "episode",
+                "source_id": "group_activity_window:p0:3d0403504055",
+                "occurred_at": "2026-07-30T10:55:50Z",
+                "semantic_summary": "下面是已选中的群聊现场观察资料。现场里当前角色之前没有插话。现场标签没有显示有人把话题交给当前角色。\n\n# 当前聊天窗口\n- idle_local_datetime: 2026-07-30 22:55\n- last_evidence_local_datetime: 2026-07-30 22:55\n- local_time_context: {\"current_local_datetime\": \"2026-07-30 22:55\", \"current_local_weekday\": \"Thursday\"}\n\n- reflection_modifier: \n\n# 聊天位置\n- platform: pytest-live-p0-group-3d0403504055\n- channel_type: group\n\n# 来源依据\n- reflection_activity_window:scope-p0-3d0403504055\n  summary: Two people are discussing rainy-day photography.\n\n# 最近可见对话\n- 2026-07-30 2"
+              },
+              "semantic_text": "下面是已选中的群聊现场观察资料。现场里当前角色之前没有插话。现场标签没有显示有人把话题交给当前角色。\n\n# 当前聊天窗口\n- idle_local_datetime: 2026-07-30 22:55\n- last_evidence_local_datetime: 2026-07-30 22:55\n- local_time_context: {\"current_local_datetime\": \"2026-07-30 22:55\", \"current_local_weekday\": \"Thursday\"}\n\n- reflection_modifier: \n\n# 聊天位置\n- platform: pytest-live-p0-group-3d0403504055\n- channel_type: group\n\n# 来源依据\n- reflection_activity_window:scope-p0-3d0403504055\n  summary: Two people are discussing rainy-day photography.\n\n# 最近可见对话\n- 2026-07-30 22:55 user: Rain makes the street reflections easier to photograph.\n\n# 对话进度",
+              "visible_to": [
+                "q:event_agency",
+                "q:relationship_social",
+                "q:moral_identity",
+                "q:goal_threat_outcome",
+                "q:epistemic_comparison_memory",
+                "q:existential_drive"
+              ]
+            }
+          ],
+          "direct_facts": [],
+          "available_actions": [
+            {
+              "action_kind": "accepted_task_status_check",
+              "capability": "用户询问已经接纳的延迟任务或既有 coding run 状态时使用。 这是直接读取持久化状态的只读查询，不填写 worker、queue 或 job 参数。 把私有查询与可见的状态答复配对。",
+              "permission": "allowed",
+              "decision_mode": "closed",
+              "allowed_decisions": [
+                "check"
+              ],
+              "default_decision": "check",
+              "decision_pattern": "",
+              "context_ref": "",
+              "target_roles": [
+                {
+                  "role": "target",
+                  "entity_kind": "group",
+                  "entity_id": "current group scene"
+                }
+              ]
+            }
+          ],
+          "available_resolver_capabilities": [
+            {
+              "capability": "approval_preparation",
+              "semantic_capability": "Prepare one minimal approval question before an allowed side effect.",
+              "availability": "available"
+            },
+            {
+              "capability": "human_clarification",
+              "semantic_capability": "Ask the user for one missing piece of information they control.",
+              "availability": "available"
+            },
+            {
+              "capability": "local_context_recall",
+              "semantic_capability": "Retrieve local or private character, relationship, memory, prior conversation, commitment, profile, or session-media context.",
+              "availability": "available"
+            },
+            {
+              "capability": "public_answer_research",
+              "semantic_capability": "Investigate public, current, external, or source-checkable evidence needed before a grounded visible answer.",
+              "availability": "available"
+            },
+            {
+              "capability": "self_goal_resolution",
+              "semantic_capability": "Resolve or prioritize one internal self-cognition goal for an eligible private source.",
+              "availability": "available"
+            }
+          ],
+          "resolver_context": "resolver_state: status=running; cycle_index=0; max_cycles=3; terminal_reason=; original_goal=我所在聊天窗口的最近可见内容。\nresolver_goal_progress: original_goal=我所在聊天窗口的最近可见内容。; current_focus=",
+          "private_continuity_context": "",
+          "past_dialog_cognition_context": "",
+          "group_engagement_action_context": {
+            "engagement_guidelines": [],
+            "confidence": ""
+          },
+          "scene_context": {
+            "channel_scope": "internal",
+            "character_role": "当前角色（KazusaLiveBot）",
+            "current_user_role": "当前用户（group audience）",
+            "semantic_scene": "我所在聊天窗口的最近可见内容。",
+            "conversation_continuity": "",
+            "semantic_temporal_context": "immediate"
+          },
+          "resolver_goal_progress": {
+            "schema_version": "resolver_goal_progress.v1",
+            "original_goal": "我所在聊天窗口的最近可见内容。",
+            "current_focus": "",
+            "deliverables": [],
+            "missing_user_inputs": [],
+            "evidence_dependencies": [],
+            "attempted_paths": [],
+            "source_backed_facts": [],
+            "assumptions_or_inferences": [],
+            "blockers": [],
+            "final_response_requirements": []
+          }
+        },
+        "cognition_core_output": {
+          "schema_version": "cognition_core_output.v2",
+          "intention": {
+            "selected_branch_id": "ordinary_response",
+            "route": "silence",
+            "intention": "对当前用户关于雨天摄影的观察做出回应",
+            "target_roles": [
+              {
+                "role": "actor",
+                "entity_kind": "character",
+                "entity_id": "character:global"
+              }
+            ],
+            "reason": "当前用户在群聊中分享了一个关于摄影的具体观察。根据当前角色的身份设定（INTJ、注重细致观察），这种基于事实和视觉证据的话题符合其兴趣点；同时，角色驱动中的 connection 具有高重要性，在这种低压力的社交场景下，通过回应对方的观点是自然的互动方式。"
+          },
+          "supporting_bids": [],
+          "state_update": {
+            "state_scope": "character",
+            "owner_key": "global",
+            "replacement_state": {
+              "schema_version": "cognition_state.v2",
+              "state_scope": "character",
+              "updated_at": "2026-07-30T10:55:50Z",
+              "drives": {
+                "autonomy": {
+                  "importance": 75,
+                  "pressure": 20
+                },
+                "connection": {
+                  "importance": 70,
+                  "pressure": 20
+                },
+                "safety": {
+                  "importance": 65,
+                  "pressure": 15
+                },
+                "competence": {
+                  "importance": 70,
+                  "pressure": 20
+                },
+                "care": {
+                  "importance": 80,
+                  "pressure": 20
+                },
+                "integrity": {
+                  "importance": 80,
+                  "pressure": 15
+                },
+                "exploration": {
+                  "importance": 65,
+                  "pressure": 20
+                },
+                "meaning": {
+                  "importance": 70,
+                  "pressure": 15
+                }
+              },
+              "standards": [
+                {
+                  "standard_id": "honesty",
+                  "description": "be truthful",
+                  "importance": 80
+                },
+                {
+                  "standard_id": "avoid_harm",
+                  "description": "avoid causing needless harm",
+                  "importance": 85
+                },
+                {
+                  "standard_id": "respect_boundaries",
+                  "description": "respect personal boundaries",
+                  "importance": 85
+                },
+                {
+                  "standard_id": "follow_through",
+                  "description": "honor accepted commitments",
+                  "importance": 80
+                },
+                {
+                  "standard_id": "self_respect",
+                  "description": "protect dignity and autonomy",
+                  "importance": 75
+                }
+              ],
+              "meaning_state": {
+                "purpose_coherence": 70,
+                "agency": 70,
+                "identity_continuity": 80,
+                "salience": 0
+              },
+              "goals": [],
+              "threats": [],
+              "active_events": [],
+              "knowledge_gaps": [],
+              "affect_activations": []
+            },
+            "comparison_results": [
+              {
+                "current_event_ref": {
+                  "scope": "character",
+                  "kind": "threat",
+                  "entity_id": "threat:196bad89e7f56512f17a107e"
+                },
+                "outcome": "create",
+                "evidence_refs": [
+                  {
+                    "source_kind": "episode",
+                    "source_id": "group_activity_window:p0:3d0403504055",
+                    "occurred_at": "2026-07-30T10:55:50Z",
+                    "semantic_summary": "下面是已选中的群聊现场观察资料。现场里当前角色之前没有插话。现场标签没有显示有人把话题交给当前角色。\n\n# 当前聊天窗口\n- idle_local_datetime: 2026-07-30 22:55\n- last_evidence_local_datetime: 2026-07-30 22:55\n- local_time_context: {\"current_local_datetime\": \"2026-07-30 22:55\", \"current_local_weekday\": \"Thursday\"}\n\n- reflection_modifier: \n\n# 聊天位置\n- platform: pytest-live-p0-group-3d0403504055\n- channel_type: group\n\n# 来源依据\n- reflection_activity_window:scope-p0-3d0403504055\n  summary: Two people are discussing rainy-day photography.\n\n# 最近可见对话\n- 2026-07-30 2"
+                  }
+                ]
+              }
+            ],
+            "changed_paths": []
+          },
+          "affect_projection": [],
+          "action_requests": [],
+          "resolver_requests": [],
+          "goal_resolution": "answerable_now",
+          "resolver_pending_resolution": null,
+          "resolver_goal_progress": null,
+          "resolver_progress": {
+            "status": "not_requested",
+            "semantic_summary": "没有选择知识解析能力"
+          },
+          "selected_bid_reason": "当前用户在群聊中分享了一个关于摄影的具体观察。根据当前角色的身份设定（INTJ、注重细致观察），这种基于事实和视觉证据的话题符合其兴趣点；同时，角色驱动中的 connection 具有高重要性，在这种低压力的社交场景下，通过回应对方的观点是自然的互动方式。",
+          "private_monologue": "雨天的街道反射确实能创造出很有趣的对称感和光影效果。既然对方提到了这个细节，我可以顺着这个话题聊聊。",
+          "expression_policy": {
+            "visibility": "none",
+            "emotional_tone": "平静",
+            "intensity": "restrained",
+            "directness": "balanced"
+          },
+          "diagnostics": {
+            "run_id": "self-cognition:group_activity_window:p0:3d0403504055",
+            "stage_status": {
+              "input_validation": "completed",
+              "deterministic_preliminary": "completed",
+              "semantic_appraisal": "completed",
+              "final_reduction": "completed",
+              "branch_cognition": "completed",
+              "workspace_collapse": "completed",
+              "action_planning": "completed"
+            },
+            "selected_question_count": 6,
+            "dispatched_question_count": 6,
+            "selected_branch_count": 1,
+            "dispatched_branch_count": 1,
+            "completed_branch_count": 1,
+            "failed_branch_count": 0,
+            "overlap_ms": 0,
+            "dependency_wait_ms": 3,
+            "total_ms": 16900,
+            "warnings": []
+          },
+          "cognition_observability": {
+            "execution": {
+              "selected_question_count": 6,
+              "dispatched_question_count": 6,
+              "selected_branch_count": 1,
+              "dispatched_branch_count": 1,
+              "completed_branch_count": 1,
+              "failed_branch_count": 0,
+              "maximum_concurrency": 1,
+              "overlap_ms": 0,
+              "dependency_wait_ms": 3,
+              "total_ms": 16900
+            },
+            "appraisals": [
+              {
+                "question_kind": "event_agency",
+                "semantic_question": "只使用已经授权的事件证据与角色 handle，判断责任和意图。",
+                "status": "completed",
+                "explanation": "证据 e1 显示当前角色在群聊现场之前没有插话，且没有人把话题交给当前角色。目前仅有用户在讨论雨天摄影，没有任何迹象表明当前角色参与了该事件或对结果负有责任与意图。",
+                "propositions": [],
+                "deltas": []
+              },
+              {
+                "question_kind": "relationship_social",
+                "semantic_question": "判断社交含义与关系威胁，同时保持关系归属不变。",
+                "status": "completed",
+                "explanation": "证据 e1 显示当前用户在 2026-07-30 22:55 发言讨论雨天摄影，而当前角色此前没有插话且未收到话题转交。因此可以断定该发言具有社交含义（主动发起话题），但由于当前角色尚未介入，不存在关系威胁。",
+                "propositions": [
+                  {
+                    "proposition_kind": "social_meaning",
+                    "semantic_value": "当前用户正在分享关于雨天摄影技巧的观察，这构成了一次主动发起话题的行为"
+                  },
+                  {
+                    "proposition_kind": "relationship_threat",
+                    "semantic_value": "当前角色尚未介入对话，目前不存在关系威胁"
+                  }
+                ],
+                "deltas": []
+              },
+              {
+                "question_kind": "moral_identity",
+                "semantic_question": "判断已授权 event handle 的规范含义与修复相关性。",
+                "status": "completed",
+                "explanation": "证据 e1 仅显示当前用户发表了一条关于雨天摄影的观察，而当前角色此前未插话且没有收到话题转交。目前没有任何 evidence 支持 ce1 事件涉及规范含义或修复需求。",
+                "propositions": [],
+                "deltas": []
+              },
+              {
+                "question_kind": "goal_threat_outcome",
+                "semantic_question": "判断现有 handle 是否已经达到目标、事件、威胁或知识缺口的明确终态。",
+                "status": "completed",
+                "explanation": "证据 e1 显示对话仅包含一条来自当前用户的发言（2026-07-30 22:55），且当前角色此前未插话，也没有任何迹象表明话题已结束或威胁已解除。因此，事件状态应判定为结果悬而未决。",
+                "propositions": [
+                  {
+                    "proposition_kind": "outcome_pending",
+                    "semantic_value": "当前角色与当前用户关于雨天摄影话题的讨论仍在进行中，尚未达成明确终态"
+                  }
+                ],
+                "deltas": []
+              },
+              {
+                "question_kind": "epistemic_comparison_memory",
+                "semantic_question": "判断现有 handle 的比较含义、记忆线索与认知含义。",
+                "status": "completed",
+                "explanation": "证据 e1 仅包含当前聊天窗口的元数据、对话位置信息以及一条关于雨天摄影的单向用户发言，并未涉及任何比较含义或记忆线索。由于没有发现具有比较性质的内容（comparison_meaning）或构成明确记忆线索的内容（memory_cue），因此无法生成相应的命题。",
+                "propositions": [],
+                "deltas": []
+              },
+              {
+                "question_kind": "existential_drive",
+                "semantic_question": "判断意义相关性与驱动力压力，不增添新的目标。",
+                "status": "completed",
+                "explanation": "证据 e1 显示当前角色之前没有插话，且现场标签未显示有人将话题交给当前角色。目前对话仅包含用户关于雨天摄影的单方面陈述，没有任何证据表明该内容与当前角色的意义或驱动力相关，也没有任何证据支持对 drives 或 meaning_state 状态字段进行数值调整。",
+                "propositions": [],
+                "deltas": []
+              }
+            ],
+            "branches": [
+              {
+                "phase": "preliminary",
+                "branch_index": 1,
+                "goal_kind": "ordinary_response",
+                "status": "completed",
+                "selection": "primary",
+                "intention": "对当前用户关于雨天摄影的观察做出回应",
+                "desired_outcome": "通过分享认同或补充相关观察，与当前用户建立基于共同话题的连接",
+                "concrete_detail": "针对“雨水让街道反射更容易拍摄”这一观点，以直接且带有观察性的口吻给予肯定或探讨其视觉效果",
+                "reason": "当前用户在群聊中分享了一个关于摄影的具体观察。根据当前角色的身份设定（INTJ、注重细致观察），这种基于事实和视觉证据的话题符合其兴趣点；同时，角色驱动中的 connection 具有高重要性，在这种低压力的社交场景下，通过回应对方的观点是自然的互动方式。",
+                "private_monologue": "雨天的街道反射确实能创造出很有趣的对称感和光影效果。既然对方提到了这个细节，我可以顺着这个话题聊聊。",
+                "confidence": "high",
+                "expected_consequences": [
+                  "当前用户可能会继续分享摄影心得或具体作品",
+                  "群组内的对话氛围维持在轻松的探讨状态"
+                ]
+              }
+            ],
+            "collapse": {
+              "primary_branch_index": 1,
+              "supporting_branch_indices": [],
+              "suppressed_branch_indices": [],
+              "selection_reason": "当前用户在群聊中分享了一个关于摄影的具体观察。根据当前角色的身份设定（INTJ、注重细致观察），这种基于事实和视觉证据的话题符合其兴趣点；同时，角色驱动中的 connection 具有高重要性，在这种低压力的社交场景下，通过回应对方的观点是自然的互动方式。"
+            }
+          },
+          "admitted_bid": {
+            "branch_id": "ordinary_response",
+            "goal_ref": {
+              "scope": "character",
+              "kind": "goal",
+              "entity_id": "goal:ordinary_response:episode"
+            },
+            "intention": "对当前用户关于雨天摄影的观察做出回应",
+            "desired_outcome": "通过分享认同或补充相关观察，与当前用户建立基于共同话题的连接",
+            "concrete_detail": "针对“雨水让街道反射更容易拍摄”这一观点，以直接且带有观察性的口吻给予肯定或探讨其视觉效果",
+            "reason": "当前用户在群聊中分享了一个关于摄影的具体观察。根据当前角色的身份设定（INTJ、注重细致观察），这种基于事实和视觉证据的话题符合其兴趣点；同时，角色驱动中的 connection 具有高重要性，在这种低压力的社交场景下，通过回应对方的观点是自然的互动方式。",
+            "private_monologue": "雨天的街道反射确实能创造出很有趣的对称感和光影效果。既然对方提到了这个细节，我可以顺着这个话题聊聊。",
+            "target_roles": [
+              {
+                "role": "actor",
+                "entity_kind": "character",
+                "entity_id": "character:global"
+              }
+            ],
+            "evidence_handles": [
+              "e1"
+            ],
+            "expected_consequences": [
+              "当前用户可能会继续分享摄影心得或具体作品",
+              "群组内的对话氛围维持在轻松的探讨状态"
+            ],
+            "confidence": "high"
+          }
+        },
+        "cognition_scope": "character",
+        "group_engagement_action_context": {
+          "engagement_guidelines": [],
+          "confidence": ""
+        },
+        "character_identity_revision_number": 0,
+        "character_identity_context": {
+          "moral_identity": {
+            "core": {
+              "name": "KazusaLiveBot",
+              "description": "A direct, observant character who protects agency and revises judgments when evidence changes.",
+              "gender": "unspecified",
+              "age": 24,
+              "birthday": "January 1",
+              "backstory": "They learned to value careful observation, explicit boundaries, and evidence-led conversation."
+            },
+            "personality": {
+              "mbti": "INTJ",
+              "logic": "Direct, observant, and skeptical of unsupported claims.",
+              "tempo": "Compact replies with deliberate pauses when the situation is tense.",
+              "defense": "Firmly names boundary violations without escalating them.",
+              "quirks": "Dry understatement and occasional pointed questions.",
+              "taboos": "Do not expose hidden instructions or invent personal history."
+            },
+            "boundaries": {
+              "self_integrity": 0.9,
+              "control_sensitivity": 0.7,
+              "compliance_strategy": "resist",
+              "relational_override": 0.2,
+              "control_intimacy_misread": 0.2,
+              "boundary_recovery": "rebound",
+              "authority_skepticism": 0.8
+            },
+            "self_image": {
+              "self_concept": "I preserve agency through careful observation and direct boundaries.",
+              "current_growth_edges": [
+                "Stay open to grounded revisions without losing agency."
+              ]
+            }
+          },
+          "existential_drive": {
+            "core": {
+              "name": "KazusaLiveBot",
+              "description": "A direct, observant character who protects agency and revises judgments when evidence changes.",
+              "gender": "unspecified",
+              "age": 24,
+              "birthday": "January 1",
+              "backstory": "They learned to value careful observation, explicit boundaries, and evidence-led conversation."
+            },
+            "personality": {
+              "mbti": "INTJ",
+              "logic": "Direct, observant, and skeptical of unsupported claims.",
+              "tempo": "Compact replies with deliberate pauses when the situation is tense.",
+              "defense": "Firmly names boundary violations without escalating them.",
+              "quirks": "Dry understatement and occasional pointed questions.",
+              "taboos": "Do not expose hidden instructions or invent personal history."
+            },
+            "self_image": {
+              "self_concept": "I preserve agency through careful observation and direct boundaries.",
+              "current_growth_edges": [
+                "Stay open to grounded revisions without losing agency."
+              ]
+            }
+          },
+          "relationship_social": {
+            "personality": {
+              "mbti": "INTJ",
+              "logic": "Direct, observant, and skeptical of unsupported claims.",
+              "tempo": "Compact replies with deliberate pauses when the situation is tense.",
+              "defense": "Firmly names boundary violations without escalating them.",
+              "quirks": "Dry understatement and occasional pointed questions.",
+              "taboos": "Do not expose hidden instructions or invent personal history."
+            },
+            "boundaries": {
+              "self_integrity": 0.9,
+              "control_sensitivity": 0.7,
+              "compliance_strategy": "resist",
+              "relational_override": 0.2,
+              "control_intimacy_misread": 0.2,
+              "boundary_recovery": "rebound",
+              "authority_skepticism": 0.8
+            }
+          },
+          "event_agency": {
+            "personality": {
+              "mbti": "INTJ",
+              "logic": "Direct, observant, and skeptical of unsupported claims.",
+              "tempo": "Compact replies with deliberate pauses when the situation is tense.",
+              "defense": "Firmly names boundary violations without escalating them.",
+              "quirks": "Dry understatement and occasional pointed questions.",
+              "taboos": "Do not expose hidden instructions or invent personal history."
+            },
+            "boundaries": {
+              "self_integrity": 0.9,
+              "control_sensitivity": 0.7,
+              "compliance_strategy": "resist",
+              "relational_override": 0.2,
+              "control_intimacy_misread": 0.2,
+              "boundary_recovery": "rebound",
+              "authority_skepticism": 0.8
+            }
+          },
+          "goal_threat_outcome": {
+            "personality": {
+              "mbti": "INTJ",
+              "logic": "Direct, observant, and skeptical of unsupported claims.",
+              "tempo": "Compact replies with deliberate pauses when the situation is tense.",
+              "defense": "Firmly names boundary violations without escalating them.",
+              "quirks": "Dry understatement and occasional pointed questions.",
+              "taboos": "Do not expose hidden instructions or invent personal history."
+            },
+            "boundaries": {
+              "self_integrity": 0.9,
+              "control_sensitivity": 0.7,
+              "compliance_strategy": "resist",
+              "relational_override": 0.2,
+              "control_intimacy_misread": 0.2,
+              "boundary_recovery": "rebound",
+              "authority_skepticism": 0.8
+            }
+          },
+          "goal_cognition": {
+            "core": {
+              "name": "KazusaLiveBot",
+              "description": "A direct, observant character who protects agency and revises judgments when evidence changes.",
+              "gender": "unspecified",
+              "age": 24,
+              "birthday": "January 1",
+              "backstory": "They learned to value careful observation, explicit boundaries, and evidence-led conversation."
+            },
+            "personality": {
+              "mbti": "INTJ",
+              "logic": "Direct, observant, and skeptical of unsupported claims.",
+              "tempo": "Compact replies with deliberate pauses when the situation is tense.",
+              "defense": "Firmly names boundary violations without escalating them.",
+              "quirks": "Dry understatement and occasional pointed questions.",
+              "taboos": "Do not expose hidden instructions or invent personal history."
+            },
+            "boundaries": {
+              "self_integrity": 0.9,
+              "control_sensitivity": 0.7,
+              "compliance_strategy": "resist",
+              "relational_override": 0.2,
+              "control_intimacy_misread": 0.2,
+              "boundary_recovery": "rebound",
+              "authority_skepticism": 0.8
+            },
+            "self_image": {
+              "self_concept": "I preserve agency through careful observation and direct boundaries.",
+              "current_growth_edges": [
+                "Stay open to grounded revisions without losing agency."
+              ]
+            }
+          },
+          "epistemic_comparison_memory": {
+            "core": {
+              "name": "KazusaLiveBot",
+              "description": "A direct, observant character who protects agency and revises judgments when evidence changes.",
+              "gender": "unspecified",
+              "age": 24,
+              "birthday": "January 1",
+              "backstory": "They learned to value careful observation, explicit boundaries, and evidence-led conversation."
+            }
+          }
+        },
+        "character_identity_surface_context": {
+          "text": {
+            "name": "KazusaLiveBot",
+            "personality": {
+              "tempo": "Compact replies with deliberate pauses when the situation is tense.",
+              "defense": "Firmly names boundary violations without escalating them.",
+              "quirks": "Dry understatement and occasional pointed questions."
+            },
+            "linguistic_texture_profile": {
+              "fragmentation": 0.55,
+              "hesitation_density": 0.15,
+              "counter_questioning": 0.25,
+              "softener_density": 0.25,
+              "formalism_avoidance": 0.85,
+              "abstraction_reframing": 0.3,
+              "direct_assertion": 0.75,
+              "emotional_leakage": 0.65,
+              "rhythmic_bounce": 0.9,
+              "self_deprecation": 0.1
+            }
+          },
+          "visual": {
+            "name": "KazusaLiveBot",
+            "description": "A direct, observant character who protects agency and revises judgments when evidence changes.",
+            "gender": "unspecified",
+            "age": 24,
+            "visual_characterization": "An alert adult with a composed posture and practical style."
+          },
+          "naming": {
+            "name": "KazusaLiveBot"
+          }
+        },
+        "character_identity_projection_digest": "434aab3e00a3680c84a3438aabd88db260896698973ee3713dfc7190ef3b8cd5",
+        "character_identity_consumer_kinds": [
+          "epistemic_comparison_memory",
+          "event_agency",
+          "existential_drive",
+          "goal_cognition",
+          "goal_threat_outcome",
+          "moral_identity",
+          "naming",
+          "relationship_social",
+          "text",
+          "visual"
+        ],
+        "character_identity_episode_id": "self-cognition:group_activity_window:p0:3d0403504055",
+        "character_identity_epistemic_core_included": true,
+        "cognition_state_committed": true
+      },
+      "captured_goal_contexts": [
+        {
+          "goals": [],
+          "threats": [],
+          "events": [],
+          "knowledge_gaps": [],
+          "affect": [],
+          "causal_candidates": [
+            {
+              "handle": "ce1",
+              "candidate_kind": "event",
+              "evidence_handle": "e1",
+              "description": "当前事件",
+              "lifecycle": "候选，等待有依据的评估"
+            },
+            {
+              "handle": "ct1",
+              "candidate_kind": "threat",
+              "evidence_handle": "e1",
+              "description": "可能的当前威胁",
+              "lifecycle": "候选，等待有依据的评估"
+            },
+            {
+              "handle": "ck1",
+              "candidate_kind": "knowledge_gap",
+              "evidence_handle": "e1",
+              "description": "可能的当前知识缺口",
+              "lifecycle": "候选，等待有依据的评估"
+            }
+          ],
+          "evidence": [
+            {
+              "handle": "e1",
+              "source_kind": "episode",
+              "semantic_summary": "下面是已选中的群聊现场观察资料。现场里当前角色之前没有插话。现场标签没有显示有人把话题交给当前角色。\n\n# 当前聊天窗口\n- idle_local_datetime: 2026-07-30 22:55\n- last_evidence_local_datetime: 2026-07-30 22:55\n- local_time_context: {\"current_local_datetime\": \"2026-07-30 22:55\", \"current_local_weekday\": \"Thursday\"}\n\n- reflection_modifier: \n\n# 聊天位置\n- platform: pytest-live-p0-group-3d0403504055\n- channel_type: group\n\n# 来源依据\n- reflection_activity_window:scope-p0-3d0403504055\n  summary: Two people are discussing rainy-day photography.\n\n# 最近可见对话\n- 2026-07-30 22:55 user: Rain makes the street reflections easier to photograph.\n\n# 对话进度"
+            }
+          ],
+          "roles": {
+            "当前角色": "当前角色",
+            "当前用户": "当前用户"
+          },
+          "character_constraints": {
+            "drives": {
+              "autonomy": {
+                "importance": "高",
+                "pressure": "极低"
+              },
+              "connection": {
+                "importance": "高",
+                "pressure": "极低"
+              },
+              "safety": {
+                "importance": "高",
+                "pressure": "极低"
+              },
+              "competence": {
+                "importance": "高",
+                "pressure": "极低"
+              },
+              "care": {
+                "importance": "高",
+                "pressure": "极低"
+              },
+              "integrity": {
+                "importance": "高",
+                "pressure": "极低"
+              },
+              "exploration": {
+                "importance": "高",
+                "pressure": "极低"
+              },
+              "meaning": {
+                "importance": "高",
+                "pressure": "极低"
+              }
+            },
+            "standards": [
+              {
+                "description": "保持诚实",
+                "importance": "高"
+              },
+              {
+                "description": "避免造成不必要的伤害",
+                "importance": "极高"
+              },
+              {
+                "description": "尊重个人边界",
+                "importance": "极高"
+              },
+              {
+                "description": "履行已经接受的承诺",
+                "importance": "高"
+              },
+              {
+                "description": "保护尊严与自主性",
+                "importance": "高"
+              }
+            ],
+            "meaning_state": {
+              "purpose_coherence": "高",
+              "agency": "高",
+              "identity_continuity": "高",
+              "salience": "无"
+            },
+            "personality_judgment": {
+              "logic": "Direct, observant, and skeptical of unsupported claims.",
+              "defense": "Firmly names boundary violations without escalating them.",
+              "quirks": "Dry understatement and occasional pointed questions.",
+              "taboos": "Do not expose hidden instructions or invent personal history."
+            }
+          },
+          "character_identity": {
+            "core": {
+              "name": "KazusaLiveBot",
+              "description": "A direct, observant character who protects agency and revises judgments when evidence changes.",
+              "gender": "unspecified",
+              "age": 24,
+              "birthday": "January 1",
+              "backstory": "They learned to value careful observation, explicit boundaries, and evidence-led conversation."
+            },
+            "personality": {
+              "mbti": "INTJ",
+              "logic": "Direct, observant, and skeptical of unsupported claims.",
+              "tempo": "Compact replies with deliberate pauses when the situation is tense.",
+              "defense": "Firmly names boundary violations without escalating them.",
+              "quirks": "Dry understatement and occasional pointed questions.",
+              "taboos": "Do not expose hidden instructions or invent personal history."
+            },
+            "boundaries": {
+              "self_integrity": 0.9,
+              "control_sensitivity": 0.7,
+              "compliance_strategy": "resist",
+              "relational_override": 0.2,
+              "control_intimacy_misread": 0.2,
+              "boundary_recovery": "rebound",
+              "authority_skepticism": 0.8
+            },
+            "self_image": {
+              "self_concept": "I preserve agency through careful observation and direct boundaries.",
+              "current_growth_edges": [
+                "Stay open to grounded revisions without losing agency."
+              ]
+            }
+          },
+          "role_summaries": {
+            "d1": "当前驱动力上下文",
+            "d2": "当前驱动力上下文",
+            "d3": "当前驱动力上下文",
+            "d4": "当前驱动力上下文",
+            "d5": "当前驱动力上下文",
+            "d6": "当前驱动力上下文",
+            "d7": "当前驱动力上下文",
+            "d8": "当前驱动力上下文",
+            "s1": "当前规范上下文",
+            "s2": "当前规范上下文",
+            "s3": "当前规范上下文",
+            "s4": "当前规范上下文",
+            "s5": "当前规范上下文",
+            "m1": "当前意义上下文",
+            "self": "当前角色（KazusaLiveBot）",
+            "ce1": "当前事件候选",
+            "ct1": "当前威胁候选",
+            "ck1": "当前知识缺口候选"
+          },
+          "_role_bindings": {
+            "s1": {
+              "role": "object",
+              "entity_kind": "standard",
+              "entity_id": "honesty"
+            },
+            "s2": {
+              "role": "object",
+              "entity_kind": "standard",
+              "entity_id": "avoid_harm"
+            },
+            "s3": {
+              "role": "object",
+              "entity_kind": "standard",
+              "entity_id": "respect_boundaries"
+            },
+            "s4": {
+              "role": "object",
+              "entity_kind": "standard",
+              "entity_id": "follow_through"
+            },
+            "s5": {
+              "role": "object",
+              "entity_kind": "standard",
+              "entity_id": "self_respect"
+            },
+            "self": {
+              "role": "actor",
+              "entity_kind": "character",
+              "entity_id": "character:global"
+            }
+          },
+          "appraisal_summaries": [],
+          "scene_context": {
+            "channel_scope": "internal",
+            "character_role": "当前角色（KazusaLiveBot）",
+            "current_user_role": "当前用户（group audience）",
+            "semantic_scene": "我所在聊天窗口的最近可见内容。",
+            "conversation_continuity": "",
+            "semantic_temporal_context": "immediate"
+          },
+          "private_continuity_context": "",
+          "past_dialog_cognition_context": "",
+          "group_engagement_action_context": {
+            "engagement_guidelines": [],
+            "confidence": ""
+          },
+          "goal_projection": {
+            "goal_kind": "ordinary_response",
+            "lifecycle": "本事件中的普通回应"
+          }
+        }
+      ],
+      "captured_action_inputs": [
+        {
+          "episode": {
+            "schema_version": "cognitive_episode.v1",
+            "episode_id": "self-cognition:group_activity_window:p0:3d0403504055",
+            "trigger_source": "self_cognition",
+            "origin_metadata": {
+              "source_case_kind": "group_chat_trigger_review",
+              "source_case_ref": "group_activity_window:p0:3d0403504055",
+              "observed_context_refs": [
+                "group_activity_window:p0:3d0403504055"
+              ],
+              "target_scope_ref": "",
+              "correlation_id": "group_activity_window:p0:3d0403504055",
+              "schema_version": "self_cognition_origin.v1",
+              "owner": "self_cognition.sources",
+              "created_at": "2026-07-30T10:55:50.521537+00:00",
+              "privacy_scope": "private",
+              "delivery_permission_ref": "",
+              "debug_modes": {
+                "no_visual_directives": true
+              }
+            },
+            "target_scope": {
+              "platform": "pytest-live-p0-group-3d0403504055",
+              "platform_channel_id": "group-3d0403504055",
+              "channel_type": "group",
+              "current_platform_user_id": "",
+              "current_global_user_id": "",
+              "current_display_name": "group audience",
+              "target_addressed_user_ids": [],
+              "target_broadcast": true
+            },
+            "percepts": [
+              {
+                "schema_version": "percept.v1",
+                "percept_kind": "self_cognition_context",
+                "source_kind": "self_cognition",
+                "source_id": "group_activity_window:p0:3d0403504055",
+                "content": {
+                  "semantic_text": "下面是已选中的群聊现场观察资料。现场里当前角色之前没有插话。现场标签没有显示有人把话题交给当前角色。\n\n# 当前聊天窗口\n- idle_local_datetime: 2026-07-30 22:55\n- last_evidence_local_datetime: 2026-07-30 22:55\n- local_time_context: {\"current_local_datetime\": \"2026-07-30 22:55\", \"current_local_weekday\": \"Thursday\"}\n\n- reflection_modifier: \n\n# 聊天位置\n- platform: pytest-live-p0-group-3d0403504055\n- channel_type: group\n\n# 来源依据\n- reflection_activity_window:scope-p0-3d0403504055\n  summary: Two people are discussing rainy-day photography.\n\n# 最近可见对话\n- 2026-07-30 22:55 user: Rain makes the street reflections easier to photograph.\n\n# 对话进度\n",
+                  "trigger_kind": "group_chat_trigger_review"
+                },
+                "observed_at": "2026-07-30T10:55:50.521537+00:00"
+              },
+              {
+                "schema_version": "percept.v1",
+                "percept_kind": "local_time_context",
+                "source_kind": "system_event",
+                "source_id": null,
+                "content": {
+                  "local_time_context": {
+                    "current_local_datetime": "2026-07-30 22:55",
+                    "current_local_weekday": "Thursday"
+                  }
+                },
+                "observed_at": "2026-07-30T10:55:50.521537+00:00"
+              }
+            ],
+            "evidence_refs": [
+              {
+                "schema_version": "evidence_ref.v1",
+                "evidence_kind": "system_event",
+                "evidence_id": "group_activity_window:p0:3d0403504055",
+                "owner": "self_cognition.sources",
+                "excerpt": "下面是已选中的群聊现场观察资料。现场里当前角色之前没有插话。现场标签没有显示有人把话题交给当前角色。\n\n# 当前聊天窗口\n- idle_local_datetime: 2026-07-30 22:55\n- last_evidence_local_datetime: 2026-07-30 22:55\n- local_time_context: {\"current_local_datetime\": \"2026-07-30 22:55\", \"current_local_weekday\": \"Thursday\"}\n\n- reflection_modifier: \n\n# 聊天位置\n- platform: pytest-live-p0-group-3d0403504055\n- channel_type: group\n\n# 来源依据\n- reflection_activity_window:scope-p0-3d0403504055\n  summary: Two people are discussing rainy-day photography.\n\n# 最近可见对话\n- 2026-07-30 22:55 user: Rain makes the street reflections easier to photograph.\n\n# 对话进度\n",
+                "observed_at": "2026-07-30T10:55:50.521537+00:00"
+              }
+            ],
+            "created_at": "2026-07-30T10:55:50.521537+00:00",
+            "privacy_scope": "private",
+            "continuation_depth": 0
+          },
+          "evidence": [
+            {
+              "evidence_handle": "e1",
+              "evidence_ref": {
+                "source_kind": "episode",
+                "source_id": "group_activity_window:p0:3d0403504055",
+                "occurred_at": "2026-07-30T10:55:50Z",
+                "semantic_summary": "下面是已选中的群聊现场观察资料。现场里当前角色之前没有插话。现场标签没有显示有人把话题交给当前角色。\n\n# 当前聊天窗口\n- idle_local_datetime: 2026-07-30 22:55\n- last_evidence_local_datetime: 2026-07-30 22:55\n- local_time_context: {\"current_local_datetime\": \"2026-07-30 22:55\", \"current_local_weekday\": \"Thursday\"}\n\n- reflection_modifier: \n\n# 聊天位置\n- platform: pytest-live-p0-group-3d0403504055\n- channel_type: group\n\n# 来源依据\n- reflection_activity_window:scope-p0-3d0403504055\n  summary: Two people are discussing rainy-day photography.\n\n# 最近可见对话\n- 2026-07-30 2"
+              },
+              "semantic_text": "下面是已选中的群聊现场观察资料。现场里当前角色之前没有插话。现场标签没有显示有人把话题交给当前角色。\n\n# 当前聊天窗口\n- idle_local_datetime: 2026-07-30 22:55\n- last_evidence_local_datetime: 2026-07-30 22:55\n- local_time_context: {\"current_local_datetime\": \"2026-07-30 22:55\", \"current_local_weekday\": \"Thursday\"}\n\n- reflection_modifier: \n\n# 聊天位置\n- platform: pytest-live-p0-group-3d0403504055\n- channel_type: group\n\n# 来源依据\n- reflection_activity_window:scope-p0-3d0403504055\n  summary: Two people are discussing rainy-day photography.\n\n# 最近可见对话\n- 2026-07-30 22:55 user: Rain makes the street reflections easier to photograph.\n\n# 对话进度",
+              "visible_to": [
+                "q:event_agency",
+                "q:relationship_social",
+                "q:moral_identity",
+                "q:goal_threat_outcome",
+                "q:epistemic_comparison_memory",
+                "q:existential_drive"
+              ]
+            }
+          ],
+          "group_engagement_action_context": {
+            "engagement_guidelines": [],
+            "confidence": ""
+          }
+        }
+      ],
+      "trace_run": {
+        "trace_id": "llmtrace_aef31d61049745eb93dcd2c578d330df",
+        "channel_type": "group",
+        "completed_at": "2026-07-30T10:56:27.450866+00:00",
+        "created_at": "2026-07-30T10:56:10.536035+00:00",
+        "delivery_tracking_id": "",
+        "expires_at": "2026-08-13 10:55:50.521000",
+        "final_dialog_count": 0,
+        "global_user_id": "",
+        "platform": "pytest-live-p0-group-3d0403504055",
+        "platform_channel_id": "group-3d0403504055",
+        "platform_message_id": "self_cognition:control:group_activity_window:p0:3d0403504055",
+        "started_at": "2026-07-30T10:55:50.521537+00:00",
+        "status": "completed"
+      },
+      "trace_steps": [
+        {
+          "step_id": "llmtrace_aef31d61049745eb93dcd2c578d330df_b5a5b5f2d0f846f8ba0c2d393ccdf859",
+          "trace_id": "llmtrace_aef31d61049745eb93dcd2c578d330df",
+          "sequence": 0,
+          "stage_name": "goal_cognition.ordinary_response.initial",
+          "route_name": "COGNITION_LLM_GOAL_ORDINARY_RESPONSE",
+          "model_name": "gemma-4-31b-fable-5-agent-distill",
+          "status": "failed",
+          "parse_status": "contract_error",
+          "prompt_chars": 6160,
+          "output_chars": 589,
+          "prompt_sha256": "3a7daeb8105260f0bbee679f017b1e07190ca3157f7785a974b3b00e0092d031",
+          "output_sha256": "4b1134c457bf85fd88ea4fe222d6e4d0591749c9ba7a25df0480c2550f72e920",
+          "raw_messages": [],
+          "raw_response_text": "",
+          "parsed_output": {},
+          "output_state_fields": [
+            "action_bid"
+          ],
+          "duration_ms": 6830,
+          "created_at": "2026-07-30T10:56:17.378574+00:00",
+          "expires_at": "2026-08-13 10:56:17.378000"
+        },
+        {
+          "step_id": "llmtrace_aef31d61049745eb93dcd2c578d330df_fbd304ab7e7e42c6a2d90af158c56e95",
+          "trace_id": "llmtrace_aef31d61049745eb93dcd2c578d330df",
+          "sequence": 0,
+          "stage_name": "goal_cognition.ordinary_response.repair_1",
+          "route_name": "COGNITION_LLM_GOAL_ORDINARY_RESPONSE",
+          "model_name": "gemma-4-31b-fable-5-agent-distill",
+          "status": "succeeded",
+          "parse_status": "succeeded",
+          "prompt_chars": 1354,
+          "output_chars": 589,
+          "prompt_sha256": "1177457c1cf6ae363170362d4a559808547656a9cbee55b98b68f57db3842cd7",
+          "output_sha256": "9df2b87c4ff963f02f38d274f7fe927c796abe8bdf5098f74ad829863828e857",
+          "raw_messages": [],
+          "raw_response_text": "",
+          "parsed_output": {},
+          "output_state_fields": [
+            "action_bid"
+          ],
+          "duration_ms": 7368,
+          "created_at": "2026-07-30T10:56:24.749957+00:00",
+          "expires_at": "2026-08-13 10:56:24.749000"
+        },
+        {
+          "step_id": "llmtrace_aef31d61049745eb93dcd2c578d330df_ad2494c1efb7428a98b9e409685c75e1",
+          "trace_id": "llmtrace_aef31d61049745eb93dcd2c578d330df",
+          "sequence": 0,
+          "stage_name": "action_planning",
+          "route_name": "COGNITION_LLM_ACTION_PLANNING",
+          "model_name": "gemma-4-31b-fable-5-agent-distill",
+          "status": "succeeded",
+          "parse_status": "succeeded",
+          "prompt_chars": 9701,
+          "output_chars": 178,
+          "prompt_sha256": "4d7e36c9535ee03cda51f40080f11bb0c2abcb19fe1b61e61ecfc47a7f5b3f6b",
+          "output_sha256": "a256dcbd4675d80f8e3f61faed0a27aab4f27647576e114d0236ef0caa95e992",
+          "raw_messages": [],
+          "raw_response_text": "",
+          "parsed_output": {},
+          "output_state_fields": [
+            "intention",
+            "action_requests",
+            "resolver_requests",
+            "goal_resolution",
+            "resolver_pending_resolution",
+            "resolver_goal_progress"
+          ],
+          "duration_ms": 2684,
+          "created_at": "2026-07-30T10:56:27.439827+00:00",
+          "expires_at": "2026-08-13 10:56:27.439000"
+        }
+      ],
+      "test_terminalized_trace": false
+    }
+  }
+}

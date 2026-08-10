@@ -53,6 +53,7 @@ def test_one_time_schedule_builder_uses_closed_trigger_contract() -> None:
         source_scope=_source_scope(),
         idempotency_key="future_cognition:action_attempt:future-123",
         storage_timestamp_utc=CREATED_AT,
+        source_llm_trace_id="llmtrace_source-1",
     )
     repeat_schedule = models.build_one_time_calendar_schedule(
         trigger_kind=models.TRIGGER_FUTURE_COGNITION,
@@ -61,6 +62,7 @@ def test_one_time_schedule_builder_uses_closed_trigger_contract() -> None:
         source_scope=_source_scope(),
         idempotency_key="future_cognition:action_attempt:future-123",
         storage_timestamp_utc=CREATED_AT,
+        source_llm_trace_id="llmtrace_source-1",
     )
     serialized = json.dumps(schedule, sort_keys=True)
 
@@ -77,6 +79,7 @@ def test_one_time_schedule_builder_uses_closed_trigger_contract() -> None:
     assert schedule["updated_at"] == CREATED_AT
     assert schedule["payload"] == _future_payload()
     assert schedule["source_scope"] == _source_scope()
+    assert schedule["source_llm_trace_id"] == "llmtrace_source-1"
 
     for forbidden in (
         "callback",
@@ -103,6 +106,7 @@ def test_calendar_run_builder_is_due_run_not_visible_message() -> None:
         source_scope=_source_scope(),
         idempotency_key="future_cognition:action_attempt:future-123",
         storage_timestamp_utc=CREATED_AT,
+        source_llm_trace_id="llmtrace_source-1",
     )
 
     run = models.build_calendar_run_from_schedule(
@@ -125,6 +129,7 @@ def test_calendar_run_builder_is_due_run_not_visible_message() -> None:
     assert run["due_at"] == DUE_AT
     assert run["payload"] == schedule["payload"]
     assert run["source_scope"] == schedule["source_scope"]
+    assert run["source_llm_trace_id"] == "llmtrace_source-1"
     assert run["attempt_count"] == 0
     assert run["max_attempts"] == models.DEFAULT_RUN_MAX_ATTEMPTS
     assert run["claimed_at"] is None

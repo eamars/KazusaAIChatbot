@@ -7,8 +7,12 @@ function signatures across the ``db.*`` submodules. Schemas use
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal, TypedDict
 
+from kazusa_ai_chatbot.character_identity_growth.models import (
+    CharacterEffectiveIdentityV1,
+)
 from kazusa_ai_chatbot.message_envelope.types import (
     ConversationAuthorRole,
     MentionEntityKind,
@@ -99,47 +103,104 @@ class ConversationMessageDoc(TypedDict, total=False):
     delivered_at: str          # ISO timestamp reported by the adapter
     delivery_adapter: str      # Adapter that reported the delivery receipt
     llm_trace_id: str          # Turn-scoped LLM trace id, when available
+    source_episode_id: str     # Settled cognitive episode root for reflection
     timestamp: str             # ISO-8601 UTC timestamp
+    received_at: str           # Server-generated UTC arrival instant for inbound user rows
     embedding: list[float]     # Dense vector (on text content only)
 
 
-class ConversationEpisodeEntryDoc(TypedDict, total=False):
-    """One short-term episode entry with first-seen metadata."""
+class ConversationProgressSourceRefDoc(TypedDict):
+    """Source-lineage alias stored inside one progress event."""
 
-    text: str
+    ref_kind: Literal['conversation_row', 'llm_trace']
+    ref_id: str
+    occurred_at: str
+
+
+class ConversationProgressEventDoc(TypedDict):
+    """Exact stored semantic event snapshot."""
+
+    event_id: str
+    semantic_summary: str
+    is_obligation: bool
+    actor: str
+    action: str
+    object: str
+    beneficiary: str
+    precondition: str
+    state: Literal[
+        'open',
+        'in_progress',
+        'completed',
+        'rejected',
+        'superseded',
+    ]
+    outcome: str
+    retention: Literal[
+        'decision_critical',
+        'active_scene',
+        'background',
+    ]
+    source_refs: list[ConversationProgressSourceRefDoc]
     first_seen_at: str
+    updated_at: str
 
 
-class ConversationEpisodeStateDoc(TypedDict, total=False):
-    """Short-lived operational progress state for one user/channel episode."""
+class ConversationEpisodeStateDoc(TypedDict):
+    """Exact V2 document in ``conversation_episode_state``."""
 
+    schema_version: Literal['conversation_progress.v2']
     episode_state_id: str
     platform: str
     platform_channel_id: str
     global_user_id: str
-    status: str
-    episode_label: str
-    continuity: str
-    conversation_mode: str
-    episode_phase: str
-    topic_momentum: str
+    status: Literal['active', 'suspended', 'closed']
+    continuity: Literal[
+        'same_episode',
+        'related_shift',
+        'sharp_transition',
+    ]
+    turn_count: int
+    episode_narrative: str
     current_thread: str
+    character_stance: str
     user_goal: str
     current_blocker: str
-    user_state_updates: list[ConversationEpisodeEntryDoc]
-    assistant_moves: list[str]
-    overused_moves: list[str]
-    open_loops: list[ConversationEpisodeEntryDoc]
-    resolved_threads: list[ConversationEpisodeEntryDoc]
-    avoid_reopening: list[ConversationEpisodeEntryDoc]
     emotional_trajectory: str
-    next_affordances: list[str]
-    progression_guidance: str
-    turn_count: int
-    last_user_input: str
+    events: list[ConversationProgressEventDoc]
+    overused_moves: list[str]
+    recent_turn_refs: list[str]
+    compacted_block_refs: list[str]
     created_at: str
     updated_at: str
     expires_at: str
+    purge_after: datetime
+
+
+class ConversationEpisodeBlockDoc(TypedDict):
+    """Exact compacted document in ``conversation_episode_blocks``."""
+
+    schema_version: Literal['conversation_progress_block.v1']
+    block_id: str
+    episode_state_id: str
+    platform: str
+    platform_channel_id: str
+    global_user_id: str
+    level: int
+    source_turn_count: int
+    covered_turn_refs: list[str]
+    source_block_ids: list[str]
+    narrative: str
+    events: list[ConversationProgressEventDoc]
+    semantic_keys: list[str]
+    source_started_at: str
+    source_ended_at: str
+    content_hash: str
+    superseded_by_block_id: str
+    embedding: list[float]
+    created_at: str
+    expires_at: str
+    purge_after: datetime
 
 
 class InternalMonologueResidueSourceRefDoc(TypedDict, total=False):
@@ -217,9 +278,7 @@ class UserProfileDoc(TypedDict, total=False):
     platform_accounts: list[PlatformAccountDoc]  # All linked accounts
     suspected_aliases: list[str]                 # Other global_user_ids suspected to be same person
 
-    # ── Relationship metrics ───────────────────────────────────
-    affinity: int                                # 0–1000 affinity score (default 500)
-    last_relationship_insight: str               # Character's instantaneous impression of the user
+    cognition_state: dict                         # Validated cognition_state.v2 user state
 
 
 class UserMemoryUnitSourceRef(TypedDict, total=False):
@@ -328,36 +387,107 @@ class InteractionStyleImageDoc(TypedDict, total=False):
     updated_at: str
 
 
-class CharacterProfileDoc(TypedDict, total=False):
-    """All fields of the singleton ``_id: "global"`` document in
-    the ``character_state`` collection.
+class CharacterProfileDoc(CharacterEffectiveIdentityV1, total=False):
+    """Graph-facing composition of latest identity and operational state."""
 
-    Both personality profile fields **and** runtime state fields live
-    at the top level. The schema is intentionally open-ended
-    (``total=False``) so new fields can be added without migration.
-    """
+    global_user_id: str
+    cognition_state: dict
+    updated_at: str
 
-    # ── personality profile ────────────────────────────────────────
-    name: str
-    description: str
-    gender: str
-    age: int
-    birthday: str
-    tone: str
-    speech_patterns: str
-    backstory: str
-    personality_brief: dict
-    boundary_profile: BoundaryProfileDoc
-    linguistic_texture_profile: LinguisticTextureProfileDoc
 
-    # ── runtime state ─────────────────────────────────────────────
-    mood: str               # e.g. "melancholic", "playful", "irritated"
-    global_vibe: str        # See Cognition Layer
-    reflection_summary: str # See Cognition Layer
-    updated_at: str         # ISO-8601 UTC timestamp of last update
+class InternalActionLatchV1(TypedDict, total=False):
+    """Durable one-shot continuation request emitted by settled cognition."""
 
-    # ── Three-tier character self-image (NEW) ─────────────────
-    self_image: dict        # {milestones, recent_window, historical_summary, meta}
+    schema_version: Literal["internal_action_latch.v1"]
+    latch_id: str
+    idempotency_key: str
+    source_episode_id: str
+    source_action_attempt_id: str
+    continuation_objective: str
+    evidence_refs: list[dict]
+    target_scope: dict
+    privacy_scope: str
+    continuation_depth: int
+    status: Literal["pending", "claimed", "consumed", "expired", "failed"]
+    not_before: str
+    expires_at: str
+    claimed_by: str
+    claim_token: str
+    claim_expires_at: str
+    attempt_count: int
+    max_attempts: Literal[3]
+    last_error_code: str
+    consumed_episode_id: str
+    created_at: str
+    updated_at: str
+    purge_after: str
+
+
+class InternalActionLatchClaimV1(TypedDict, total=False):
+    """Claim result returned to the internal-thought producer."""
+
+    latch: InternalActionLatchV1
+    claim_token: str
+
+
+class PostTurnLifecycleRecordV1(TypedDict, total=False):
+    """Durable post-turn action/consolidation lifecycle projection."""
+
+    schema_version: Literal["post_turn_lifecycle_record.v1"]
+    lifecycle_record_id: str
+    source_episode_id: str
+    delivery_tracking_id: str
+    action_projections: list[dict]
+    status: Literal["skipped", "completed", "partial", "failed"]
+    error_codes: list[str]
+    created_at: str
+    purge_after: str
+
+
+class CharacterOperationalReceiptV1(TypedDict, total=False):
+    """Durable terminal state for one character carry-over episode."""
+
+    schema_version: Literal["character_operational_receipt.v1"]
+    source_episode_id: str
+    status: Literal[
+        "pending",
+        "no_change",
+        "committed",
+        "failed",
+        "timed_out",
+    ]
+    sequence: int
+    durable: bool
+    base_updated_at: str
+    committed_updated_at: str
+    registered_at: str
+    completed_at: str
+    lease_owner: str
+    lease_expires_at: str
+    attempt_count: int
+    error_code: str | None
+
+
+class CharacterOperationalClaimV1(TypedDict, total=False):
+    """Result of atomically claiming one lifecycle receipt."""
+
+    claim_status: Literal["claimed", "in_progress", "terminal"]
+    receipt: CharacterOperationalReceiptV1
+
+
+class PostTurnLifecycleRecordV2(TypedDict, total=False):
+    """Mutable post-turn audit record with an operational receipt."""
+
+    schema_version: Literal["post_turn_lifecycle_record.v2"]
+    lifecycle_record_id: str
+    source_episode_id: str
+    delivery_tracking_id: str
+    action_projections: list[dict]
+    status: Literal["skipped", "completed", "partial", "failed"]
+    error_codes: list[str]
+    character_operational_receipt: CharacterOperationalReceiptV1
+    created_at: str
+    purge_after: str
 
 
 class MemoryDoc(TypedDict, total=False):
@@ -393,7 +523,18 @@ class ReflectionMessageRefDoc(TypedDict, total=False):
     platform_channel_id: str
     channel_type: str
     role: Literal["user", "assistant"]
+    source_episode_id: str
     timestamp: str
+
+
+class ReflectionEpisodeRefDoc(TypedDict):
+    """Recursive settled-episode root carried across reflection levels."""
+
+    root_episode_id: str
+    correlation_id: str
+    character_local_date: str
+    scope_kind: Literal["private", "group", "self_cognition"]
+    captured_at: str
 
 
 class ReflectionScopeDoc(TypedDict):
@@ -430,6 +571,7 @@ class CharacterReflectionRunDoc(TypedDict, total=False):
     hour_end: str
     character_local_date: str
     source_message_refs: list[ReflectionMessageRefDoc]
+    source_episode_refs: list[ReflectionEpisodeRefDoc]
     source_reflection_run_ids: list[str]
     output: dict
     promotion_decisions: list[dict]
@@ -439,56 +581,6 @@ class CharacterReflectionRunDoc(TypedDict, total=False):
     updated_at: str
 
 
-class GlobalCharacterGrowthTraitDoc(TypedDict, total=False):
-    """Durable global character-growth trait row."""
-
-    _id: str
-    trait_id: str
-    lineage_id: str
-    status: Literal["active", "superseded", "rejected"]
-    growth_axis: str
-    trait_name: str
-    guidance: str
-    strength: float
-    maturity_band: Literal["observed", "emerging", "stabilizing", "promoted"]
-    first_observed_date: str
-    last_observed_date: str
-    supporting_dates: list[str]
-    source_memory_unit_ids: list[str]
-    source_reflection_run_ids: list[str]
-    source_candidate_ids: list[str]
-    evidence_count: int
-    version: int
-    supersedes_trait_ids: list[str]
-    merged_from_trait_ids: list[str]
-    created_at: str
-    updated_at: str
-
-
-class GlobalCharacterGrowthRunDoc(TypedDict, total=False):
-    """Audit document for one global character-growth run."""
-
-    _id: str
-    run_id: str
-    run_kind: Literal["global_character_growth"]
-    status: Literal["dry_run", "applied", "skipped", "failed"]
-    dry_run: bool
-    prompt_version: str
-    created_at: str
-    updated_at: str
-    character_local_date: str
-    input_counts: dict
-    input_quality: dict
-    source_memory_unit_ids: list[str]
-    source_reflection_run_ids: list[str]
-    accepted_candidates: list[dict]
-    rejected_candidates: list[dict]
-    trait_updates: list[dict]
-    shadow_projection: list[dict]
-    validation_warnings: list[str]
-    raw_llm_output: str
-    summary: str
-    error: str
 
 
 class RAGCache2PersistentEntryDoc(TypedDict, total=False):
@@ -570,6 +662,9 @@ class CalendarScheduleDoc(TypedDict, total=False):
     recurrence: dict
     payload: dict
     source_scope: dict
+    source_llm_trace_id: str
+    correlation_write_status: str
+    correlation_conflict_source_llm_trace_id: str
     idempotency_key: str
     timezone: str
     legacy_source: dict | None
@@ -591,6 +686,9 @@ class CalendarRunDoc(TypedDict, total=False):
     due_at: str
     payload: dict
     source_scope: dict
+    source_llm_trace_id: str
+    correlation_write_status: str
+    correlation_conflict_source_llm_trace_id: str
     idempotency_key: str
     attempt_count: int
     max_attempts: int
@@ -615,6 +713,9 @@ class SelfCognitionActionAttemptDoc(TypedDict, total=False):
     """Durable action-attempt state for idle self-cognition deduplication."""
 
     attempt_id: str
+    source_llm_trace_id: str
+    correlation_write_status: str
+    correlation_conflict_source_llm_trace_id: str
     run_id: str
     trigger_id: str
     source_kind: str

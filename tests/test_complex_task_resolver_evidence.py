@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from kazusa_ai_chatbot.complex_task_resolver import service as service_module
 from kazusa_ai_chatbot.complex_task_resolver import (
     COMPLEX_TASK_SUBAGENT_REQUEST_VERSION,
     COMPLEX_TASK_SUBAGENT_RESULT_VERSION,
@@ -25,7 +26,10 @@ class _FakeWebAgent:
             "resolved": True,
             "status": "success",
             "reason": "found enough source evidence",
-            "result": "Source-backed product facts found.",
+            "result": (
+                "Source-backed product facts found. "
+                "https://example.test/product"
+            ),
             "attempts": 1,
             "knowledge_metadata": {},
             "cache": {
@@ -81,7 +85,17 @@ async def test_evidence_subagent_calls_web_agent3_declared_io() -> None:
     assert validated["resolved"] is True
     assert validated["status"] == "resolved"
     assert validated["attempts"] == 1
-    assert validated["result"]["summary"] == "Source-backed product facts found."
+    assert validated["result"]["summary"] == (
+        "Source-backed product facts found. https://example.test/product"
+    )
+    assert validated["result"]["evidence_refs"] == [{
+        "schema_version": "evidence_ref.v1",
+        "evidence_kind": "external_document",
+        "evidence_id": "https://example.test/product",
+        "owner": "web_agent3",
+        "excerpt": "https://example.test/product",
+        "observed_at": None,
+    }]
     assert validated["trace"]["web_agent3"]["max_attempts"] == 2
     assert validated["trace"]["web_agent3"]["local_time_context"] == {
         "current_local_datetime": "2026-06-30",
@@ -142,7 +156,10 @@ async def test_evidence_subagent_preserves_partial_web_agent_status() -> None:
         "reason": "source is relevant but lacks current pricing",
         "result": "Found an old product page but no current price.",
         "attempts": 1,
-        "knowledge_metadata": {"source_fit": "partial"},
+        "knowledge_metadata": {
+            "source_fit": "partial",
+            "source_urls": ["https://example.test/archived-product"],
+        },
         "cache": {
             "enabled": False,
             "hit": False,
@@ -164,15 +181,65 @@ async def test_evidence_subagent_preserves_partial_web_agent_status() -> None:
     assert validated["result"]["source_reason"] == (
         "source is relevant but lacks current pricing"
     )
+    assert validated["result"]["evidence_refs"] == [{
+        "schema_version": "evidence_ref.v1",
+        "evidence_kind": "external_document",
+        "evidence_id": "https://example.test/archived-product",
+        "owner": "web_agent3",
+        "excerpt": "https://example.test/archived-product",
+        "observed_at": None,
+    }]
     assert validated["trace"]["web_agent3"]["status"] == "partial"
     assert validated["trace"]["web_agent3"]["reason"] == (
         "source is relevant but lacks current pricing"
     )
     assert validated["trace"]["web_agent3"]["knowledge_metadata"] == {
         "source_fit": "partial",
+        "source_urls": ["https://example.test/archived-product"],
     }
     assert validated["unresolved_items"] == [
         "Found an old product page but no current price.",
+    ]
+
+
+def test_partial_subagent_result_preserves_graph_evidence_refs() -> None:
+    """A source-backed partial attempt keeps provenance on its blocked node."""
+
+    node = service_module._make_graph_node(
+        node_id="evidence_1",
+        parent_id="root",
+        depth=1,
+        objective="Fetch current product pricing.",
+        node_kind="evidence_need",
+        status="resolving",
+        children=[],
+    )
+    subagent_result = validate_complex_task_subagent_result({
+        "schema_version": COMPLEX_TASK_SUBAGENT_RESULT_VERSION,
+        "resolved": False,
+        "status": "partial",
+        "result": {
+            "summary": "One retailer source was found; stock is uncertain.",
+            "evidence_refs": [{
+                "schema_version": "evidence_ref.v1",
+                "evidence_kind": "external_document",
+                "evidence_id": "https://example.test/partial-source",
+                "owner": "web_agent3",
+                "excerpt": "https://example.test/partial-source",
+                "observed_at": None,
+            }],
+        },
+        "attempts": 1,
+        "cache": {"enabled": False},
+        "trace": {"source": "web_agent3"},
+        "unresolved_items": ["Confirm live stock."],
+    })
+
+    service_module._apply_subagent_result(node, subagent_result)
+
+    assert node["status"] == "blocked"
+    assert node["evidence_refs"] == [
+        subagent_result["result"]["evidence_refs"][0]
     ]
 
 

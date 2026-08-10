@@ -10,9 +10,6 @@ _CANONICAL_README = _ROOT / "src/kazusa_ai_chatbot/self_cognition/README.md"
 _COGNITION_CONTRACTS_DOC = (
     _ROOT / "development_plans/reference/designs/cognition_contracts_design.md"
 )
-_PROACTIVE_OUTPUT_README = (
-    _ROOT / "src/kazusa_ai_chatbot/proactive_output/README.md"
-)
 _LEGACY_DOCS = [
     _ROOT / "development_plans/archive/superseded/self_cognition_tracking_icd.md",
     _ROOT / "development_plans/archive/superseded/self_cognition_reasoning_basis.md",
@@ -82,11 +79,9 @@ def test_cognition_contracts_doc_names_selected_self_cognition_speak_delivery(
     assert "runtime adapter bridge" in content
 
 
-def test_proactive_output_doc_does_not_govern_self_cognition_speak() -> None:
-    """Proactive-output docs should not shadow self-cognition delivery rules."""
+def test_canonical_self_cognition_docs_are_single_delivery_authority() -> None:
+    """Canonical self-cognition docs own the selected delivery contract."""
 
-    content = _read_text(_PROACTIVE_OUTPUT_README)
-
-    assert "does not govern selected self-cognition speech" in content
-    assert "selected self-cognition `speak`" in content
-    assert "runtime adapter bridge" in content
+    content = _read_text(_CANONICAL_README)
+    assert "selected `speak`" in content
+    assert "must attempt delivery" in content.lower()

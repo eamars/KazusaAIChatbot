@@ -74,14 +74,6 @@ def build_source_packet(
     if group_activity_window is not None:
         packet["group_activity_window"] = group_activity_window
 
-    current_mood = case.get("current_mood")
-    if isinstance(current_mood, str) and current_mood:
-        packet["current_mood"] = current_mood
-
-    global_vibe = case.get("global_vibe")
-    if isinstance(global_vibe, str) and global_vibe:
-        packet["global_vibe"] = global_vibe
-
     reflection_modifier = case.get("reflection_modifier")
     if isinstance(reflection_modifier, dict):
         packet["reflection_modifier"] = reflection_modifier
@@ -125,9 +117,6 @@ def render_source_packet_text(packet: models.SourcePacket) -> str:
     lines.extend(
         [
             '',
-            '# 当前心情和氛围',
-            f'- current_mood: {packet.get("current_mood", "")}',
-            f'- global_vibe: {packet.get("global_vibe", "")}',
             (
                 '- reflection_modifier: '
                 f'{_compact_value(packet.get("reflection_modifier", {}))}'

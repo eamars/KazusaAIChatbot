@@ -10,7 +10,7 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from kazusa_ai_chatbot.cognition_resolver import capabilities as capabilities_module
-from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
+from tests.cognition_core_v2_test_helpers import canonical_user_message_episode
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2 as supervisor_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_dispatch as dispatch_module
@@ -46,7 +46,7 @@ def _minimal_episode() -> dict[str, object]:
     """Build a text-chat episode accepted by RAG request construction."""
 
     turn_clock = build_turn_clock("2026-04-27 00:00:00")
-    episode = build_text_chat_cognitive_episode(
+    episode = canonical_user_message_episode(
         episode_id="episode-event-log",
         percept_id="percept-event-log",
         storage_timestamp_utc=turn_clock["storage_timestamp_utc"],
@@ -73,7 +73,7 @@ def _stage_1_state(*, referents: list[dict[str, object]]) -> dict[str, object]:
 
     turn_clock = build_turn_clock("2026-04-27 00:00:00")
     state = {
-        "decontexualized_input": "private query text",
+        "decontextualized_input": "private query text",
         "referents": referents,
         "character_profile": {
             "name": "Kazusa",
@@ -86,7 +86,7 @@ def _stage_1_state(*, referents: list[dict[str, object]]) -> dict[str, object]:
         "platform_bot_id": "bot-1",
         "global_user_id": "user-1",
         "user_name": "User",
-        "user_profile": {"affinity": 500},
+        "user_profile": {"relationship_state": 500},
         "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
         "local_time_context": turn_clock["local_time_context"],
         "prompt_message_context": {
@@ -149,22 +149,27 @@ def _dialog_global_state() -> dict[str, object]:
 
     state = {
         "internal_monologue": "private internal thought",
-        "action_directives": {
-            "contextual_directives": {
-                "social_distance": "casual",
-                "emotional_intensity": "low",
-                "vibe_check": "friendly",
-                "relational_dynamic": "direct reply",
+        "cognitive_episode": _minimal_episode(),
+        "text_surface_output_v2": {
+            "schema_version": "text_surface_output.v2",
+            "content_plan": "Acknowledge the request.",
+            "content_requirements": ["Address the current user."],
+            "visible_boundaries": [],
+            "addressee_plan": [{
+                "handle": "current_user",
+                "display_name": "current user",
+                "semantic_role": "direct_recipient",
+                "wording_policy": "second_person_allowed",
+            }],
+            "delivery_profile": {
+                "lexical_register": "plain",
+                "sentence_shape": "concise",
+                "rhythm": "steady",
+                "hesitation": "minimal",
+                "punctuation": "restrained",
             },
-            "linguistic_directives": {
-                "rhetorical_strategy": "answer directly",
-                "linguistic_style": "concise",
-                "accepted_user_preferences": [],
-                "content_plan": {
-                    "semantic_content": "Acknowledge the request.",
-                },
-                "forbidden_phrases": [],
-            },
+            "selected_surface_intent": "acknowledge",
+            "permitted_action_results": [],
         },
         "chat_history_wide": [],
         "chat_history_recent": [],
@@ -177,7 +182,10 @@ def _dialog_global_state() -> dict[str, object]:
         "platform_bot_id": "bot-1",
         "global_user_id": "user-1",
         "user_name": "User",
-        "user_profile": {"affinity": 500},
+        "user_profile": {
+            "global_user_id": "user-1",
+            "cognition_state": {"owner_user_id": "user-1"},
+        },
         "character_profile": {
             "name": "Kazusa",
             "personality_brief": {
@@ -519,6 +527,20 @@ async def test_dialog_generator_records_llm_metadata_without_generated_text(
         '{"final_dialog": ["secret generated dialog"]}'
     )
     monkeypatch.setattr(dialog_module, "_dialog_generator_llm", llm)
+    verifier_outputs = {
+        "_dialog_semantic_fidelity_llm": (
+            '{"aligned": true, "hard_errors": []}'
+        ),
+        "_dialog_surface_integrity_llm": (
+            '{"aligned": true, "issues": []}'
+        ),
+    }
+    for llm_name, verifier_output in verifier_outputs.items():
+        monkeypatch.setattr(
+            dialog_module,
+            llm_name,
+            _StaticLLM(verifier_output),
+        )
     monkeypatch.setattr(
         dialog_module.event_logging,
         "record_llm_stage_event",
@@ -534,11 +556,19 @@ async def test_dialog_generator_records_llm_metadata_without_generated_text(
     result = await dialog_module.dialog_generator(state)
 
     assert result["final_dialog"] == ["secret generated dialog"]
-    record_llm_stage_event.assert_awaited_once()
+    assert record_llm_stage_event.await_count == 3
     record_model_contract_event.assert_not_awaited()
-    kwargs = record_llm_stage_event.await_args.kwargs
-    assert kwargs["stage_name"] == "dialog_generator"
-    assert "secret generated dialog" not in _serialized(kwargs)
+    event_kwargs = [
+        call.kwargs
+        for call in record_llm_stage_event.await_args_list
+    ]
+    assert {kwargs["stage_name"] for kwargs in event_kwargs} == {
+        "dialog_generator",
+        "dialog_semantic_fidelity",
+        "dialog_surface_integrity",
+    }
+    for kwargs in event_kwargs:
+        assert "secret generated dialog" not in _serialized(kwargs)
 
 
 @pytest.mark.asyncio
@@ -555,6 +585,20 @@ async def test_dialog_agent_records_quality_without_dialog_text(monkeypatch) -> 
             '{"final_dialog": ["secret full graph reply"]}'
         ),
     )
+    verifier_outputs = {
+        "_dialog_semantic_fidelity_llm": (
+            '{"aligned": true, "hard_errors": []}'
+        ),
+        "_dialog_surface_integrity_llm": (
+            '{"aligned": true, "issues": []}'
+        ),
+    }
+    for llm_name, verifier_output in verifier_outputs.items():
+        monkeypatch.setattr(
+            dialog_module,
+            llm_name,
+            _StaticLLM(verifier_output),
+        )
     monkeypatch.setattr(
         dialog_module.event_logging,
         "record_dialog_quality_event",

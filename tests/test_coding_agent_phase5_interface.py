@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-
 def test_patch_apply_public_api_is_exported() -> None:
     """The top-level coding-agent package exposes the trusted apply boundary."""
 
@@ -18,43 +17,6 @@ def test_patch_apply_public_api_is_exported() -> None:
     assert isinstance(apply_approved_patch, Callable)
     assert "patch_artifacts" in CodingPatchApplyRequest.__annotations__
     assert "apply_workspace_ref" in CodingPatchApplyResponse.__annotations__
-
-
-def test_background_metadata_preserves_code_modifying() -> None:
-    """Background worker metadata must preserve the modifying operation."""
-
-    from kazusa_ai_chatbot.background_work.subagent.coding_agent import (
-        _map_coding_agent_response,
-    )
-
-    result = _map_coding_agent_response(
-        {
-            "status": "succeeded",
-            "operation": "code_modifying",
-            "answer_text": "Proposed a repository patch.",
-            "evidence": [],
-            "limitations": [],
-            "repository": {
-                "owner": "fixture",
-                "repo": "demo",
-            },
-            "changed_files": [{
-                "path": "app.py",
-                "change_type": "modify",
-                "summary": "Update app.",
-            }],
-            "trace_summary": ["modifying:succeeded"],
-        },
-        max_output_chars=1000,
-    )
-
-    assert result["worker_metadata"]["coding_operation"] == "code_modifying"
-    assert "code_modifying" in result["result_summary"]
-    assert result["worker_metadata"]["changed_files"] == [{
-        "path": "app.py",
-        "change_type": "modify",
-        "summary": "Update app.",
-    }]
 
 
 def test_modifying_programmer_prompt_requires_requested_tests_docs() -> None:

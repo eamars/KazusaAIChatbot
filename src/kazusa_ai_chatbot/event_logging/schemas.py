@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Any, TypedDict
+from typing import Any, NotRequired, TypedDict
 
-from kazusa_ai_chatbot.event_logging.models import EventRefRecord, EventSeverity
+from kazusa_ai_chatbot.event_logging.models import (
+    CognitionV2EventFields,
+    CognitionV2SnapshotSummary,
+    EventRefRecord,
+    EventSeverity,
+)
 
 EventPayloadRecord = dict[str, Any]
 
@@ -50,6 +55,7 @@ class EventLogEventDoc(TypedDict):
     warning_codes: list[str]
     error: EventErrorRecord
     payload: EventPayloadRecord
+    cognition_v2: NotRequired[CognitionV2EventFields]
 
 
 class EventLogSnapshotDoc(TypedDict):
@@ -65,3 +71,4 @@ class EventLogSnapshotDoc(TypedDict):
     semantic_descriptors: dict[str, str]
     findings: list[dict[str, str]]
     source_event_refs: list[str]
+    cognition_v2_summary: NotRequired[CognitionV2SnapshotSummary]

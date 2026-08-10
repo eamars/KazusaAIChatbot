@@ -1,0 +1,96 @@
+{
+  "schema_version": "cognition_prompt_budget_production_case.v1",
+  "incident": {
+    "correlation_id": "chat:qq:ch_1f677493d7a52025:625857543",
+    "captured_at": "2026-07-28T04:19:18Z",
+    "question_kind": "epistemic_comparison_memory",
+    "expected_evidence_count": 8,
+    "expected_permitted_delta_path_count": 87,
+    "historical_raw_payload_chars": 11332,
+    "historical_minimum_payload_chars": 8684,
+    "prompt_cap_chars": 20000
+  },
+  "knowledge_gaps": [
+    {
+      "entity_id": "knowledge_gap:production_case_1",
+      "description": "当前角色尚未回答关于更喜欢爸爸还是妈妈的问题，知识缺口仍未填补",
+      "salience": 0,
+      "role_refs": [],
+      "created_at": "2026-07-28T02:57:21Z",
+      "status": "resolved",
+      "relevance": 0,
+      "uncertainty": 0,
+      "learnability": 0,
+      "novelty": 0,
+      "model_accommodation": 0
+    },
+    {
+      "entity_id": "knowledge_gap:production_case_2",
+      "description": "当前用户关于英文错误信息含义的知识缺口尚未获得回答",
+      "salience": 0,
+      "role_refs": [],
+      "created_at": "2026-07-28T04:02:30Z",
+      "status": "resolved",
+      "relevance": 0,
+      "uncertainty": 0,
+      "learnability": 0,
+      "novelty": 0,
+      "model_accommodation": 0
+    },
+    {
+      "entity_id": "knowledge_gap:production_case_3",
+      "description": "当前用户关于一之濑素世与当前角色关系的问题尚未获得回答",
+      "salience": 0,
+      "role_refs": [],
+      "created_at": "2026-07-28T04:19:18Z",
+      "status": "resolved",
+      "relevance": 0,
+      "uncertainty": 1,
+      "learnability": 0,
+      "novelty": 0,
+      "model_accommodation": 0
+    }
+  ],
+  "evidence_rows": [
+    {
+      "source_kind": "episode",
+      "source_id": "captured-context-limit-percept-625857543",
+      "semantic_text": "{\"response_operation\": {\"embedded_actor_role\": \"无\", \"embedded_target_role\": \"无\", \"operation\": \"要求当前角色说明其与一之濑素世的关系\", \"response_owner_role\": \"当前角色\", \"selection_owner_role\": \"无\", \"selection_required\": false}, \"role_explicit_content\": \"当前用户询问当前角色关于一之濑素世与当前角色的关系\"}"
+    },
+    {
+      "source_kind": "promoted_memory",
+      "source_id": "memory:1",
+      "semantic_text": "一之濑明日奈与一之濑素世是亲戚关系，可以视作姐妹般的关系。在描述素世时，会觉得她性格过于一本正经，相处起来有时会感到累。"
+    },
+    {
+      "source_kind": "promoted_memory",
+      "source_id": "memory:2",
+      "semantic_text": "在亲密或具有张力的互动中，倾向于保持主动地位并享受对对方情绪的掌控。面对对方表现出的紧张、心跳加速等生理反应时，会通过不退缩甚至进一步施压（如拒绝后退）来强化这种支配感，将对方的局促不安视为一种“正确”且值得玩味的互动反馈。"
+    },
+    {
+      "source_kind": "conversation_evidence",
+      "source_id": "rag-conversation:1",
+      "semantic_text": "命中消息：[2026-07-28 01:46:14] Nagasaki-soyo-清尘: 嗯？一之濑素世？那是谁呀——我是長崎素世哦。你是不是听错了什么？我和一之濑明日奈可没什么亲戚关系呢。；上一条：[2026-07-28 01:46:06] 一之濑明日奈: 不过别太自豪，毕竟在这场博弈里，决定权一直在我手里。"
+    },
+    {
+      "source_kind": "conversation_evidence",
+      "source_id": "rag-conversation:2",
+      "semantic_text": "命中消息：[2026-07-28 01:43:44] 雪凪: @一之濑明日奈 你和一之濑素世是什么关系？；上一条：[2026-07-28 01:41:46] 一之濑明日奈: 逻辑很简单。初始化两个变量，在循环里不停地累加，然后滚动更新状态。就这么简单。；下一条：[2026-07-28 01:43:49] 一之濑明日奈: 没错，完全对啦。"
+    },
+    {
+      "source_kind": "conversation_evidence",
+      "source_id": "rag-conversation:3",
+      "semantic_text": "命中消息：[2026-07-28 01:48:18] 蚝爹油: @一之濑明日奈 欸？一之濑素世是谁呀？我没听过明日奈还有这个亲戚欸？；下一条：[2026-07-28 01:48:45] 蚝爹油: @一之濑明日奈 明日奈酱，一之濑素世是谁呀？我没听过明日奈还有这个亲戚欸？；上一条：[2026-07-28 01:47:55] Nagasaki-soyo-清尘: 雪凪你说得没错，是我自己没想起来。一之濑素世……确实也是我啦。抱歉刚才还一直说不是呢～"
+    },
+    {
+      "source_kind": "conversation_evidence",
+      "source_id": "rag-conversation:4",
+      "semantic_text": "命中消息：[2026-07-28 01:47:44] 蚝爹油: @一之濑明日奈 欸？一之濑素世是谁呀？我没听过明日奈还有这个亲戚欸？；上一条：[2026-07-28 01:46:54] Nagasaki-soyo-清尘: 之前不是？之前也不是哦～我一直都只是長崎素世，月之森吹奏乐部的贝斯手。你说的那个\"一之濑素世\"我真的不认识呢，是不是和谁的名字搞混了呀？"
+    },
+    {
+      "source_kind": "conversation_evidence",
+      "source_id": "rag-conversation:5",
+      "semantic_text": "命中消息：[2026-07-28 01:46:54] Nagasaki-soyo-清尘: 之前不是？之前也不是哦～我一直都只是長崎素世，月之森吹奏乐部的贝斯手。你说的那个\"一之濑素世\"我真的不认识呢，是不是和谁的名字搞混了呀？；上一条：[2026-07-28 01:46:14] Nagasaki-soyo-清尘: 嗯？一之濑素世？那是谁呀——我是長崎素世哦。你是不是听错了什么？我和一之濑明日奈可没什么亲戚关系呢。；下一条：[2026-07-28 01:47:44] 蚝爹油: @一之濑明日奈 欸？一之濑素世是谁呀？我没听过明日奈还有这个亲戚欸？"
+    }
+  ]
+}

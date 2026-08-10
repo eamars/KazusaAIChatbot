@@ -1,259 +1,282 @@
-# Conversation Progress
+# Conversation Progress V2
 
-`conversation_progress` is a short-term conversation-flow memory module.
+`conversation_progress` is bounded short-term continuity memory for one
+character, user, and conversation surface. It preserves established scene facts
+and event lifecycles without asking every response-path LLM to reconstruct the
+whole thread.
 
-It gives the response pipeline a compact view of the current conversation episode: what is still active, what has already been handled, what kind of interaction is happening, and what next conversational moves would feel natural. Its purpose is to help Kazusa continue a conversation like a person without relying on a large raw transcript in every cognition prompt.
+The module is factual memory, not a response planner. Cognition decides what the
+next response should accomplish. Dialog owns final wording.
 
-The module owns short-term episode state for response planning. Long-term user
-memory, profile storage, dialogue management, and final reply generation remain
-separate subsystem responsibilities.
+## Ownership Boundary
 
-## Design Intent
+| Concern | Owner |
+| --- | --- |
+| Factual scene narrative, stance, relation, and episode movement | Scene-observer LLM |
+| Exact prior-event reconciliation, concrete new events, lifecycle/relevance observations, obligation direction, and outcome | Event-reconciler LLM |
+| Future response goals and choices | Cognition |
+| Final visible wording | Dialog |
+| Persisted lifecycle and retention state machines | Deterministic code |
+| Persisted episode status and continuity mapping | Deterministic code |
+| Event IDs, source IDs, and timestamps | Deterministic code |
+| Prompt-safe character identity and semantic local-clock projection | Deterministic code |
+| Temporary-handle mapping | Deterministic code |
+| Validation, limits, persistence, and expiry | Deterministic code |
+| Compaction selection and block construction | Deterministic code |
 
-The chatbot already has durable memory and retrieval systems for stable facts. Conversation progress fills a different gap: short-lived working memory for the current local episode.
+Persisted progress contains no `next_affordances` or
+`progression_guidance`. The recorder describes what has happened; it does not
+plan what cognition should do next.
 
-It exists because raw recent history is a poor primary continuity mechanism. Raw history can preserve exact wording and tone, but it forces every downstream LLM to rediscover the conversation state from scratch. This module instead converts recent interaction into bounded operational state:
+## Public Facade
 
-- whether the user is continuing the same episode, shifting relatedly, or starting a new topic,
-- what thread is currently active,
-- whether the exchange is task support, emotional support, casual chat, playful teasing, meta discussion, group ambient chatter, or a mix,
-- which user states or open loops are still unresolved,
-- which assistant response moves have already been used too much,
-- which threads are resolved or ready to stay closed,
-- what next conversational moves are available without writing the next line for Kazusa.
-
-The target behavior is better flow, not stronger control. The module should make responses less repetitive and more locally aware while preserving the existing cognition/dialog responsibility split.
-
-## Integration Contract
-
-The module exposes a small public boundary:
+Callers use the package facade:
 
 ```python
-scope = ConversationProgressScope(
-    platform=platform,
-    platform_channel_id=platform_channel_id,
-    global_user_id=global_user_id,
-)
-
 load_result = await load_progress_context(
     scope=scope,
     current_timestamp_utc=current_timestamp_utc,
+    platform_bot_id=platform_bot_id,
+    active_turn_conversation_row_ids=active_row_ids,
 )
 
 record_result = await record_turn_progress(
     record_input=record_input,
 )
+
+validated_packet = validate_active_packet(packet)
 ```
 
-`load_progress_context(...)` is called before cognition on turns where the bot will respond. It returns:
+`load_progress_context(...)` concurrently loads the active packet and the
+bounded ambient and participant-history lanes. It returns a prompt projection,
+logical turns, text-free diagnostics, and source telemetry.
 
-- the selected prior episode state for the background recorder,
-- the prompt-facing `conversation_progress` payload for cognition,
-- source telemetry indicating whether the selected state came from durable storage, local cache, or an empty default.
+`record_turn_progress(...)` runs after a visible response is accepted, or after
+an eligible cognition-silence outcome settles. It invokes one scene observer
+and one event reconciler concurrently, composes their independently validated
+outputs, maps exact internal identities, applies deterministic compaction when
+required, and performs one guarded replacement write.
 
-`record_turn_progress(...)` is called after the final assistant response exists. It updates the short-term episode state and returns telemetry about the write. In latency-sensitive runtimes, callers should run it as background work and consume the result only for logs or monitoring.
+`validate_active_packet(...)` is the canonical exact V2 shape validator used
+by runtime and migration boundaries. A schema-version label alone never makes
+a packet valid.
 
-Production integration should depend on the facade and typed payloads, not on storage, cache, recorder, or projection internals.
+For group Cognition, the already-loaded ambient logical-turn lane is projected
+transiently into one bounded public scene. This projection carries visible
+speaker order, addresses, reply names, and the current trigger without adding
+storage or a group packet. `ConversationProgressScope` and every persisted V2
+packet remain keyed to the current platform, channel, and global user; that
+participant continuity is a separate lane from the public group scene.
 
-## Lifecycle
+## Runtime Flow
 
 ```text
-User message
-  -> response eligibility / relevance gate
-       | no response
-       |   -> stop; do not load or record progress
-       |
-       | response allowed
-       v
-  -> load conversation progress
-       produces compact prompt-facing state
-       v
-  -> cognition / response planning
-       uses progress as semantic short-term memory
-       v
-  -> dialog generation
-       writes the actual assistant response
-       v
-  -> response returned to caller
-       v
-  -> background progress recording
-       updates short-term episode state for the next turn
+canonical conversation rows
+  -> deterministic logical-turn assembly
+  -> bounded history selection
+  -> active packet load
+  -> factual prompt projection
+  -> cognition chooses the next response goal
+  -> dialog produces and verifies the visible response
+  -> scene observer + event reconciler (two concurrent post-turn calls)
+  -> deterministic handle/identity/source mapping
+  -> deterministic merge and optional compaction
+  -> guarded packet/block persistence
 ```
 
-The relevance gate is intentionally outside the module. Conversation progress
-helps shape a response after the system has already decided a response should
-happen.
+The response-eligibility decision remains outside this module.
 
-## Prompt-Facing State
+## Post-Turn Observer Contracts
 
-The prompt-facing payload is a compact projection of the episode. It is designed for cognition, not for storage analytics.
+Both observers receive a prompt-safe `semantic_context` containing the exact
+runtime character name and the current configured-local semantic clock.
+Logical turns expose `speaker_kind` and `speaker_name`; character turns always
+use that exact runtime name. The clock supports absolute-or-omit grounding of
+time-dependent operational facts and is distinct from protected source
+timestamps.
 
-Conceptually, it contains:
+The scene observer receives only the prior scene, bounded recent semantic
+turns, semantic context, and the accepted turn. It returns
+`conversation_progress_scene_observation.v2`: one scene relation, one episode
+change, factual narrative/flow fields, and established overused moves. It sees
+no prior-event ledger, source lineage, capacity operation, or future-response
+instruction.
 
-- episode status and continuity,
-- a short episode label,
-- broad conversation mode,
-- local episode phase,
-- topic momentum,
-- current thread,
-- optional user goal and blocker,
-- unresolved user-state updates with relative age hints,
-- prior assistant move labels and overused move labels,
-- open loops,
-- resolved or stale threads,
-- emotional trajectory,
-- suggested next affordances,
-- short progression guidance.
+The event reconciler receives only bounded prior event definitions, bounded
+source turns, semantic context, current input, and the actual accepted
+response. Prior events use temporary handles such as `e1`; source evidence
+uses `t1`, `current_input`, and `current_response`. It returns
+`conversation_progress_event_observation_batch.v2`:
 
-The payload must remain bounded. It should be small enough to fit comfortably in the response-path context budget and clear enough for a local/weaker LLM to use directly.
+- exactly one `unchanged` or `changed` row for every supplied prior handle;
+- no missing, duplicate, unknown, or extra prior handle;
+- changed-event outcome, lifecycle change, relevance, and source handles;
+- separately listed new events with concrete non-empty actor, action, and
+  object identity.
 
-On a sharp transition, stale obligations are suppressed. The next cognition step should see a new-episode style payload rather than being nudged to reopen an old thread.
+Every active prior event is mandatory event-recognizer input, including
+background-retention rows. Payload fitting may remove older source-turn text,
+while the current accepted turn and complete prior ledger remain intact. If
+those mandatory fields exceed the event payload cap, the lane returns a typed
+pre-call context-limit result and retains the last valid packet.
 
-## Storage Model
+For an existing changed event, deterministic merge preserves the prior
+validated obligation flag, actor, action, object, beneficiary, and
+precondition. Every changed or new summary identifies its concrete event
+without relying on an ordinal or pronoun.
 
-The stored state is short-lived operational memory keyed by platform, channel, and user. It is scoped this way to avoid leaking progress across different conversations.
+Neither producer receives or emits database IDs, source-reference objects,
+source timestamps, persisted enums, compaction instructions, discard lists,
+or persistence structure. Each producer has one attempt and no repair prompt.
+An invalid event result fails closed and retains the prior packet. An invalid
+scene result preserves the prior validated scene while a valid event batch
+remains writable; for the first packet, code copies already accepted
+input/stance/surface fields without semantic reinterpretation.
 
-The stored document carries enough information to reconstruct the next prompt-facing projection:
+## Deterministic Mapping and Merge
 
-- continuity and status,
-- episode flow descriptors,
-- unresolved and resolved thread lists,
-- assistant move summaries,
-- first-seen timestamps for age hints,
-- a monotonic turn count,
-- expiry metadata.
+Before the concurrent observer calls, code creates private maps from temporary
+handles to:
 
-A storage implementation should preserve this conceptual shape:
+- exact prior event IDs;
+- canonical conversation-row and LLM-trace references;
+- exact source timestamps.
 
-```python
-{
-    # Scope
-    "episode_state_id": str,
-    "platform": str,
-    "platform_channel_id": str,
-    "global_user_id": str,
+Collapsed current inputs retain one protected conversation-row reference per
+persisted row, with each row's own storage timestamp. The single
+`current_input` semantic handle resolves to that complete ordered row set
+before the existing per-event source cap is applied.
 
-    # Episode identity and lifecycle
-    "status": str,
-    "episode_label": str,
-    "continuity": str,
-    "turn_count": int,
+A grouped assistant logical turn has one canonical source identity: its
+accepted LLM trace. Row-level timestamps are emitted only for a single-row
+`row:<id>` turn, so grouping never fabricates per-fragment timestamps from the
+turn timestamp. Incidental trace metadata on a user row does not replace that
+row's canonical storage identity.
 
-    # Flow descriptors
-    "conversation_mode": str,
-    "episode_phase": str,
-    "topic_momentum": str,
-    "current_thread": str,
-    "user_goal": str,
-    "current_blocker": str,
-    "emotional_trajectory": str,
-    "progression_guidance": str,
+After validation, code resolves the handles and applies the delta:
 
-    # Bounded episode entries
-    "user_state_updates": [{"text": str, "first_seen_at": str}],
-    "open_loops": [{"text": str, "first_seen_at": str}],
-    "resolved_threads": [{"text": str, "first_seen_at": str}],
-    "avoid_reopening": [{"text": str, "first_seen_at": str}],
+- code maps `scene_relation=same|related|new` to stored continuity;
+- code maps `episode_change=none|paused|finished|resumed` onto stored status;
+- every supplied prior event must be explicitly reported; `unchanged` rows
+  create no update;
+- an emitted existing event preserves its validated obligation direction,
+  actor, action, object, beneficiary, and precondition;
+- an existing event keeps its prior lifecycle when `lifecycle_change=none`;
+- `lifecycle_change=reopened` is accepted only for a prior terminal event;
+- code maps the lifecycle classification to `open`, `in_progress`,
+  `completed`, `rejected`, or `superseded`;
+- code maps `relevance=decision|scene|history` to `decision_critical`,
+  `active_scene`, or `background`;
+- an updated event keeps its stable ID and original lineage;
+- new events receive deterministic UUID5 identities;
+- deliberate reopening preserves old and new source lineage;
+- string, list, event, source, packet, and prompt caps are enforced;
+- stale writes cannot replace newer packet state.
 
-    # Assistant move tracking
-    "assistant_moves": [str],
-    "overused_moves": [str],
-    "next_affordances": [str],
+These operations preserve model-authored semantics. They do not classify user
+meaning or invent event outcomes.
 
-    # Operational metadata
-    "last_user_input": str,
-    "created_at": str,
-    "updated_at": str,
-    "expires_at": str,
-}
-```
+## State and Projection
 
-The important contract is behavioral rather than database-specific:
+The active `conversation_progress.v2` packet stores:
 
-- scope fields identify exactly one user's episode within one conversation surface,
-- entry lists preserve `first_seen_at` so prompt projection can produce relative age hints,
-- `turn_count` is monotonic so guarded writes preserve newer progress,
-- expiry metadata ensures this remains short-term working memory,
-- new optional fields should be tolerated so older state can still project safely.
+- scope and episode identity;
+- status, continuity, and monotonic turn count;
+- factual scene narrative, current thread, character stance, user goal,
+  blocker, and emotional trajectory;
+- bounded lifecycle events with exact provenance;
+- established overused response patterns;
+- recent turn references and active compacted-block references;
+- creation, update, expiry, and purge metadata.
 
-`conversation_mode`, `episode_phase`, and `topic_momentum` are intentionally
-bounded semantic descriptors, not closed enums. The response-path consumers
-read the prompt-facing progress payload as LLM context and do not branch
-deterministically on those descriptor values. Deterministic validation
-therefore enforces string shape and the existing 80-character stored label cap
-for these fields; closed-set validation remains reserved for fields that code
-actually uses as stable state, such as `status` and `continuity`.
+The prompt projection is capped independently from storage. It carries the
+factual scene, the most useful active events, bounded logical turns, and block
+references. Raw recent history supplies immediate wording and adjacency;
+progress supplies semantic continuity.
 
-The state is expected to expire naturally as short-term working memory.
+The evidence projection selects at most eight rows first, then assigns each
+selected row a deterministic share of the 1,800-character budget. Every
+selected row preserves its summary, state, retention, actor, action, and
+object before optional detail is admitted, so an early long event cannot erase
+later selected event identities.
 
-Implementations may use any persistence backend that preserves the same behavior: scoped load, guarded newer-turn write, expiry, and a way to tolerate old or partially populated documents.
+For a required-selection cognition call, the outer 24,000-character goal
+fitter preserves the required operation and every active progress-event
+evidence row intact and model-visible. It reduces optional evidence first and
+fails before the model call when those complete facts cannot fit; retaining a
+handle while truncating away its event identity is not an accepted projection.
+Required operation citations remain mandatory. Cognition cites only progress
+rows that materially constrain the current choice and leaves unrelated history
+uncited.
 
-## Cognition Responsibilities
+V2 consumers, including Recall's active-progress collector, read only scene
+fields and `events[].semantic_summary`; deleted V1 list fields have no runtime
+reader.
 
-Conversation progress is semantic short-term memory for response planning.
+## Deterministic Compaction
 
-The cognition layer should use it to decide what the response should accomplish:
+Compaction has no LLM call. Code uses its derived and validated event state and
+retention labels to select only terminal, non-decision-critical events. It
+prefers older `background` events before older `active_scene` events.
 
-- acknowledge ongoing state without treating it as new,
-- avoid repeating an overused assistant move,
-- continue or deepen an active thread,
-- resolve or cool down when the episode is closing,
-- avoid reopening handled material,
-- respect quick pivots and fragmented group-chat flow.
+An immutable `conversation_progress_block.v1` block contains exact archived
+event snapshots, bounded source-turn references, and optional child block IDs.
+Its narrative and semantic keys reuse stored model-authored event or block text;
+code does not write a new interpretation.
 
-`next_affordances` and `progression_guidance` describe possible moves for
-cognition. Dialog generation owns finished reply text.
+When the active block-reference cap is reached, the four lowest-level active
+blocks become children of the new block, ordered oldest-first within the same
+level. This keeps the graph balanced and the active packet bounded while
+retaining transitive lineage to earlier blocks. The complete candidate graph,
+including the new block, must satisfy both the depth and reachable-node caps
+before persistence. At 128 reachable blocks, archival pauses and eligible facts
+remain in the active packet until its own hard limit is reached; a 129th block
+is never published. Conditional historical retrieval expands the active roots
+through that exact same-scope graph before vector search, so a child remains
+retrievable after it is superseded by its parent. Every reachable block also
+receives the episode's sliding expiry refresh.
 
-Raw recent history still has a small surface/tone role: exact recent phrasing,
-local cadence, and immediate adjacency. Conversation progress owns semantic
-episode reconstruction.
+## Capacity Limits
 
-## Dialog Responsibilities
+The policy module is the canonical source of numerical limits. Principal caps
+include:
 
-The dialog layer owns final wording, character voice, rhythm, and surface expression.
+- 24 active events;
+- 16 recent turn references;
+- 8 active compacted-block references;
+- 16,000 characters in the active packet;
+- 8 events and 24 turn references per compacted block;
+- 4 child blocks per higher-level block;
+- 8 block-graph levels and 128 reachable blocks per protected episode graph;
+- 4,000 characters across the two continuation projections;
+- 8,000 characters in the scene-observer payload;
+- 24,000 characters in the event-reconciler payload.
 
-Conversation progress influences the intended response move. Dialog generation
-owns Kazusa's final lines, which keeps the module reusable across host
-chatbots with different voice layers.
+Compaction starts at lower soft limits so the hard active-packet caps remain
+available for current and decision-critical state. At full block capacity, the
+exact storage frontier is 1,024 archived event snapshots plus up to 24 active
+events, subject to the independent packet character cap.
 
-## Semantic Ownership
+## Failure and Diagnostics
 
-LLM judgment owns conversation semantics:
+Structural and contract failures are typed and fail closed. Invalid semantic
+output, unknown handles, unsupported values, missing exact block references,
+or unsafe compaction candidates cannot enter persistence or cognition.
+History rows project authored `body_text` together with stored image
+descriptions. A legacy row that has neither source is omitted from logical-turn
+assembly and increments `incomplete_or_malformed_turn_count`, so one unusable
+row cannot block the current chat turn.
 
-- continuity,
-- current thread,
-- interaction mode,
-- episode phase,
-- unresolved versus resolved threads,
-- overused response moves,
-- natural next affordances.
+Diagnostics contain counts, sizes, compaction level, exact recorder call and
+per-owner attempt counts, scene/event dispositions, and write disposition.
+They contain no conversation text.
 
-Deterministic code owns structure:
+## Storage Lifecycle
 
-- validating payload shape,
-- limiting string and list sizes,
-- generating relative age hints from timestamps,
-- enforcing prompt budget,
-- expiring stale state,
-- preventing stale writes from replacing newer state,
-- selecting a fresher local cache entry when persistence lags.
-
-Semantic judgment belongs in the recorder prompt and schema contract.
-Deterministic code keeps the payload structural and bounded.
-
-## Reusable Contract
-
-Reusable integrations preserve the same capability split: response eligibility
-is decided outside the module, prompt-facing progress informs response
-planning, host cognition/dialog generates the response, and the completed turn
-updates short-term progress for the next interaction.
-
-## Stable Capabilities
-
-- Keep the prompt-facing state compact and capped.
-- Treat missing or expired progress as a normal empty state.
-- Keep old stored states readable when adding new optional fields.
-- Keep relevance independent from progress.
-- Keep long-term memory systems separate from episode progress.
-- Keep deterministic code structural, not semantic.
-- Keep the module reusable by exposing load/record contracts instead of implementation internals.
+The active packet and immutable blocks are scoped by platform, channel, and
+global user. Packet writes are monotonic and replacement-based. Blocks are
+content-addressed and immutable apart from bounded expiry and supersession
+metadata. The default short-term lifetime is 48 hours, with a bounded local
+cache used only when it is fresher than durable state. Each successful write
+refreshes every block reachable from the active roots, including superseded
+children.

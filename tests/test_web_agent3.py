@@ -24,6 +24,31 @@ from kazusa_ai_chatbot.rag.web_agent3 import providers as provider_module
 from kazusa_ai_chatbot.rag.web_agent3 import searxng_tools as searxng_module
 from kazusa_ai_chatbot.time_boundary import build_turn_clock_from_storage_utc
 
+_COGNITION_CORE_V2_ROUTE_PREFIXES = (
+    "COGNITION_LLM_APPRAISAL_EVENT_AGENCY",
+    "COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL",
+    "COGNITION_LLM_APPRAISAL_MORAL_IDENTITY",
+    "COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME",
+    "COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY",
+    "COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE",
+    "COGNITION_LLM_GOAL_ORDINARY_RESPONSE",
+    "COGNITION_LLM_GOAL_ACTIVE_BRANCH",
+    "COGNITION_LLM_WORKSPACE_COLLAPSE",
+    "COGNITION_LLM_ACTION_PLANNING",
+    "COGNITION_LLM_ACTION_AUTHORIZATION",
+    "COGNITION_LLM_RESOLVER_AUTHORIZATION",
+)
+_COGNITION_CORE_V2_ROUTE_ENV = tuple(
+    f"{prefix}_{suffix}"
+    for prefix in _COGNITION_CORE_V2_ROUTE_PREFIXES
+    for suffix in (
+        "BASE_URL",
+        "API_KEY",
+        "MODEL",
+        "MAX_COMPLETION_TOKENS",
+        "THINKING_ENABLED",
+    )
+)
 _WEB_AGENT3_REQUIRED_ROUTE_ENV_VARS = (
     "RELEVANCE_AGENT_LLM_BASE_URL",
     "RELEVANCE_AGENT_LLM_API_KEY",
@@ -46,9 +71,7 @@ _WEB_AGENT3_REQUIRED_ROUTE_ENV_VARS = (
     "COGNITION_LLM_BASE_URL",
     "COGNITION_LLM_API_KEY",
     "COGNITION_LLM_MODEL",
-    "BOUNDARY_CORE_LLM_BASE_URL",
-    "BOUNDARY_CORE_LLM_API_KEY",
-    "BOUNDARY_CORE_LLM_MODEL",
+    *_COGNITION_CORE_V2_ROUTE_ENV,
     "DIALOG_GENERATOR_LLM_BASE_URL",
     "DIALOG_GENERATOR_LLM_API_KEY",
     "DIALOG_GENERATOR_LLM_MODEL",
@@ -97,7 +120,12 @@ def _web_agent3_subprocess_env(
     env["PYTHONPATH"] = os.pathsep.join(python_path_entries)
     env["PYTHON_DOTENV_DISABLED"] = "1"
     for name in _WEB_AGENT3_REQUIRED_ROUTE_ENV_VARS:
-        env[name] = "configured"
+        if name.endswith("_MAX_COMPLETION_TOKENS"):
+            env[name] = "8192"
+        elif name.endswith("_THINKING_ENABLED"):
+            env[name] = "false"
+        else:
+            env[name] = "configured"
     env["EMBEDDING_BASE_URL"] = "configured"
     env["EMBEDDING_API_KEY"] = "configured"
     env["EMBEDDING_MODEL"] = "configured"
@@ -297,6 +325,7 @@ async def test_web_agent3_search_calls_direct_searxng_json_api(
             return response
 
     monkeypatch.setattr(direct_searxng, "SEARXNG_URL", "http://search.test")
+    monkeypatch.setattr(direct_searxng, "SEARXNG_SEARCH_ENGINES", "bing")
     monkeypatch.setattr(direct_searxng, "SEARXNG_SEARCH_TIMEOUT_SECONDS", 12.0)
     monkeypatch.setattr(direct_searxng, "SEARXNG_SEARCH_RESULT_LIMIT", 10)
     monkeypatch.setattr(direct_searxng.httpx, "AsyncClient", FakeSearchClient)
@@ -314,6 +343,7 @@ async def test_web_agent3_search_calls_direct_searxng_json_api(
             "q": "direct search",
             "format": "json",
             "pageno": 2,
+            "engines": "bing",
             "time_range": "month",
             "language": "en",
             "safesearch": 0,
@@ -359,6 +389,7 @@ async def test_web_agent3_search_omits_empty_optional_searxng_params(
             return response
 
     monkeypatch.setattr(direct_searxng, "SEARXNG_URL", "http://search.test")
+    monkeypatch.setattr(direct_searxng, "SEARXNG_SEARCH_ENGINES", "bing")
     monkeypatch.setattr(direct_searxng, "SEARXNG_SEARCH_TIMEOUT_SECONDS", 12.0)
     monkeypatch.setattr(direct_searxng.httpx, "AsyncClient", FakeSearchClient)
 
@@ -375,12 +406,52 @@ async def test_web_agent3_search_omits_empty_optional_searxng_params(
             "q": "direct search",
             "format": "json",
             "pageno": 1,
+            "engines": "bing",
             "safesearch": 0,
         },
         "headers": None,
         "kwargs": {"timeout": 12.0},
     }]
     assert result == "No results found."
+
+
+@pytest.mark.asyncio
+async def test_web_agent3_search_reports_unresponsive_engines(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An empty provider outage must remain distinct from no search matches."""
+
+    direct_searxng = importlib.import_module(
+        "kazusa_ai_chatbot.rag.web_agent3.direct_searxng"
+    )
+
+    class FakeSearchClient:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def get(self, url: str, *, params: dict):
+            del url, params
+            response = _FakeHTTPResponse(json_payload={
+                "results": [],
+                "unresponsive_engines": [["bing", "rate limited"]],
+            })
+            return response
+
+    monkeypatch.setattr(direct_searxng, "SEARXNG_URL", "http://search.test")
+    monkeypatch.setattr(direct_searxng, "SEARXNG_SEARCH_ENGINES", "bing")
+    monkeypatch.setattr(direct_searxng.httpx, "AsyncClient", FakeSearchClient)
+
+    result = await searxng_module.web_search.ainvoke({"query": "RTX 5090"})
+
+    assert result == (
+        "Error: SearXNG search engines unavailable: bing: rate limited"
+    )
 
 
 @pytest.mark.asyncio
@@ -1849,6 +1920,16 @@ async def test_web_agent3_run_subgraph_returns_expected_keys() -> None:
         "final_response": "Here are the results",
         "final_is_empty_result": False,
         "knowledge_metadata": {},
+        "observations": [{
+            "action": "search",
+            "source": "web_search",
+            "query": "search something",
+            "result": (
+                "Title: Product listing\n"
+                "URL: https://example.test/products/rtx-5090\n"
+                "Snippet: Current listing."
+            ),
+        }],
     }
 
     with patch("kazusa_ai_chatbot.rag.web_agent3.agent.StateGraph") as state_graph:
@@ -1894,7 +1975,11 @@ async def test_web_agent3_run_subgraph_returns_expected_keys() -> None:
         "reason": "found info",
         "response": "Here are the results",
         "is_empty_result": False,
-        "knowledge_metadata": {},
+        "knowledge_metadata": {
+            "source_urls": [
+                "https://example.test/products/rtx-5090",
+            ],
+        },
     }
 
 

@@ -21,6 +21,7 @@ def apply_replied_message_metadata(
     message_data: dict,
     *,
     bot_id: str,
+    character_name: str,
 ) -> None:
     """Populate reply target fields from a NapCat/OneBot message document."""
 
@@ -32,9 +33,15 @@ def apply_replied_message_metadata(
     if target_user_id is not None:
         reply_context["reply_to_platform_user_id"] = str(target_user_id)
 
-    target_name = select_qq_display_name(sender)
-    if target_name:
-        reply_context["reply_to_display_name"] = target_name
+    resolved_target_user_id = str(
+        reply_context.get("reply_to_platform_user_id") or ""
+    )
+    if resolved_target_user_id == bot_id:
+        reply_context["reply_to_display_name"] = character_name
+    else:
+        target_name = select_qq_display_name(sender)
+        if target_name:
+            reply_context["reply_to_display_name"] = target_name
 
     message_value = message_data.get("message")
     mention_display_names: dict[str, str] = {}
@@ -63,6 +70,7 @@ async def hydrate_reply_context_from_platform(
     *,
     call_api: ApiCaller,
     bot_id: str,
+    character_name: str,
     logger: Any,
 ) -> None:
     """Resolve reply target metadata from NapCat before calling the brain."""
@@ -70,6 +78,8 @@ async def hydrate_reply_context_from_platform(
     reply_to_message_id = reply_context.get("reply_to_message_id")
     if not reply_to_message_id:
         return
+    if str(reply_context.get("reply_to_platform_user_id") or "") == bot_id:
+        reply_context["reply_to_display_name"] = character_name
     if (
         reply_context.get("reply_to_platform_user_id")
         and reply_context.get("reply_to_display_name")
@@ -105,4 +115,9 @@ async def hydrate_reply_context_from_platform(
         )
         return
 
-    apply_replied_message_metadata(reply_context, message_data, bot_id=bot_id)
+    apply_replied_message_metadata(
+        reply_context,
+        message_data,
+        bot_id=bot_id,
+        character_name=character_name,
+    )

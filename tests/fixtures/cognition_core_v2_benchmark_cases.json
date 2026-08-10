@@ -1,0 +1,26 @@
+[
+  {
+    "case_id": "ordinary_minimal",
+    "origin_summary": "ordinary benchmark question",
+    "user_input": "What is the difference between a list and a tuple in Python?",
+    "decontextualized_input": "The user asks for the difference between a list and a tuple in Python."
+  },
+  {
+    "case_id": "single_emotion_goal",
+    "origin_summary": "single causal benchmark event",
+    "user_input": "I am afraid the deadline will ruin everything because the system is failing.",
+    "decontextualized_input": "The user describes a credible, uncertain threat with serious potential harm and limited control."
+  },
+  {
+    "case_id": "mixed_goal_conflict",
+    "origin_summary": "mixed causal benchmark event",
+    "user_input": "I care about them, but I am angry that they hid the decision from me.",
+    "decontextualized_input": "The user describes a valued relationship alongside obstruction and an interpersonal boundary violation."
+  },
+  {
+    "case_id": "maximum_bounded_parallelism",
+    "origin_summary": "multi-causal benchmark event",
+    "user_input": "The project failed, I may lose the relationship, I hurt someone, and I do not know what to do next.",
+    "decontextualized_input": "The user describes loss, credible relationship threat, self-caused harm, and a valuable unresolved knowledge gap."
+  }
+]

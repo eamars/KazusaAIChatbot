@@ -40,6 +40,9 @@ from adapters.envelope_common import (
 )
 from adapters.inline_mentions import InlineMention, inline_mention_parts
 from adapters.outbound_sequence import followup_delay_seconds
+from adapters.runtime_registration import (
+    character_name_from_registration_response,
+)
 from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
 from kazusa_ai_chatbot.dispatcher import SendResult
 from kazusa_ai_chatbot.logging_config import configure_adapter_logging
@@ -93,12 +96,24 @@ class DiscordEnvelopeNormalizer:
         """
 
         raw_wire_text = str(request.content or "")
-        platform_bot_id = str(request.platform_bot_id)
+        raw_platform_bot_id = request.platform_bot_id
+        if not isinstance(raw_platform_bot_id, str):
+            raise ValueError("platform_bot_id must be a string")
+        platform_bot_id = raw_platform_bot_id.strip()
+        if not platform_bot_id:
+            raise ValueError("platform_bot_id is required")
+        raw_character_name = request.character_name
+        if not isinstance(raw_character_name, str):
+            raise ValueError("character_name must be a string")
+        character_name = raw_character_name.strip()
+        if not character_name:
+            raise ValueError("character_name is required")
         channel_type = str(request.channel_type)
         reply_context = dict(request.reply_context)
         user_display_names = normalize_mention_display_map(
             getattr(request, "user_mention_display_names", {}),
         )
+        user_display_names[platform_bot_id] = character_name
         role_display_names = normalize_mention_display_map(
             getattr(request, "role_mention_display_names", {}),
         )
@@ -116,6 +131,7 @@ class DiscordEnvelopeNormalizer:
         reply = self._reply_target(
             reply_context,
             platform_bot_id,
+            character_name,
             user_display_names,
             role_display_names,
             channel_display_names,
@@ -278,6 +294,7 @@ class DiscordEnvelopeNormalizer:
         self,
         reply_context: dict,
         platform_bot_id: str,
+        character_name: str,
         user_display_names: dict[str, str],
         role_display_names: dict[str, str],
         channel_display_names: dict[str, str],
@@ -293,7 +310,12 @@ class DiscordEnvelopeNormalizer:
             reply["platform_user_id"] = platform_user_id
             if platform_user_id == platform_bot_id:
                 reply["global_user_id"] = CHARACTER_GLOBAL_USER_ID
-        if reply_context.get("reply_to_display_name"):
+                reply["display_name"] = character_name
+            elif reply_context.get("reply_to_display_name"):
+                reply["display_name"] = str(
+                    reply_context["reply_to_display_name"]
+                )
+        elif reply_context.get("reply_to_display_name"):
             reply["display_name"] = str(reply_context["reply_to_display_name"])
         if reply_context.get("reply_excerpt"):
             reply["excerpt"] = self._body_text(
@@ -426,6 +448,7 @@ class DiscordAdapter(discord.Client):
         self._runtime_server: uvicorn.Server | None = None
         self._runtime_server_task: asyncio.Task | None = None
         self._brain_registration_done = False
+        self.character_name = ""
         self._heartbeat_task: asyncio.Task | None = None
         self._normal_chat_delivery_tasks: set[asyncio.Task] = set()
 
@@ -455,11 +478,14 @@ class DiscordAdapter(discord.Client):
         await self._ensure_runtime_server_started()
 
     async def on_ready(self):
-        logger.info(f"Discord adapter logged in as {self.user} (id={self.user.id})")
         if not self._brain_registration_done:
             await self._register_with_brain()
             self._brain_registration_done = True
             self._ensure_heartbeat_started()
+        logger.info(
+            f"Discord adapter logged in as {self.character_name} "
+            f"(id={self.user.id})"
+        )
         if self.channel_ids is not None:
             logger.info(f"Active in channels: {self.channel_ids}. Other channels are listen-only.")
         else:
@@ -493,21 +519,29 @@ class DiscordAdapter(discord.Client):
             json=payload,
         )
         response.raise_for_status()
-        logger.info(f"Registered Discord runtime adapter with brain: callback_url={self.runtime_public_url}")
+        self.character_name = character_name_from_registration_response(
+            response.json()
+        )
+        logger.info(
+            f"Registered Discord runtime adapter with brain: "
+            f"callback_url={self.runtime_public_url}"
+        )
 
     def _runtime_registration_payload(self) -> dict:
         """Return the shared registration payload for startup and heartbeat."""
 
+        user = getattr(self, "user", None)
+        platform_bot_id = getattr(user, "id", None)
+        if platform_bot_id is None:
+            raise RuntimeError("Discord bot account id is required")
+
         return_value = {
             "platform": self.platform,
             "callback_url": self.runtime_public_url,
+            "platform_bot_id": str(platform_bot_id),
             "shared_secret": self.runtime_shared_secret,
             "timeout_seconds": 10.0,
         }
-        user = getattr(self, "user", None)
-        if user is not None:
-            return_value["platform_bot_id"] = str(user.id)
-            return_value["display_name"] = str(user.display_name)
         return return_value
 
     async def _send_heartbeat_once(self) -> None:
@@ -518,6 +552,9 @@ class DiscordAdapter(discord.Client):
             json=self._runtime_registration_payload(),
         )
         response.raise_for_status()
+        self.character_name = character_name_from_registration_response(
+            response.json()
+        )
 
     def _ensure_heartbeat_started(self) -> None:
         """Start the re-registration heartbeat exactly once."""
@@ -533,7 +570,7 @@ class DiscordAdapter(discord.Client):
             await asyncio.sleep(self.heartbeat_seconds)
             try:
                 await self._send_heartbeat_once()
-            except httpx.HTTPError as exc:
+            except (httpx.HTTPError, RuntimeError, ValueError) as exc:
                 logger.warning(f"Discord runtime heartbeat failed: {exc}")
 
     async def _post_delivery_receipt(
@@ -731,6 +768,7 @@ class DiscordAdapter(discord.Client):
             channel_type="private" if is_dm else "group",
             content=message.content,
             platform_bot_id=str(self.user.id) if self.user else "",
+            character_name=self.character_name,
             reply_context=reply_context,
             user_mention_display_names=user_mention_display_names,
             role_mention_display_names=role_mention_display_names,

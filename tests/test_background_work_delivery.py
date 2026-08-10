@@ -9,10 +9,13 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_chain_core.prompt_selection import (
-    build_cognition_prompt_source_payload,
-    select_cognition_prompt_variant,
+from kazusa_ai_chatbot.action_spec.results import build_text_surface_output
+from tests.cognition_core_v2_test_helpers import (
+    canonical_episode_identity_snapshot,
+    canonical_service_character_profile,
 )
+from tests.test_background_work_jobs import _resume_queue_request
+
 
 
 def _completed_job() -> dict:
@@ -48,6 +51,7 @@ def _accepted_task_completed_job() -> dict:
     job = _completed_job()
     job["accepted_task_id"] = "task-001"
     job["task_identity_key"] = "accepted_task:v1:abc"
+    job["source_llm_trace_id"] = "llmtrace-parent-1"
     return job
 
 
@@ -84,8 +88,8 @@ def test_result_source_builder_requires_accepted_task_identity() -> None:
         result_source.build_result_ready_episode_from_job(_completed_job())
 
 
-def test_accepted_task_result_source_builder_creates_prompt_safe_episode() -> None:
-    """Accepted-task jobs should produce accepted-task result-ready cognition."""
+def test_tool_result_source_builder_creates_prompt_safe_episode() -> None:
+    """Accepted-task jobs should produce canonical tool-result cognition."""
 
     result_source = importlib.import_module(
         "kazusa_ai_chatbot.background_work.result_source"
@@ -96,22 +100,35 @@ def test_accepted_task_result_source_builder_creates_prompt_safe_episode() -> No
     )
     serialized = json.dumps(episode, ensure_ascii=False).lower()
 
-    assert episode["trigger_source"] == "accepted_task_result_ready"
-    assert episode["input_sources"] == ["accepted_task_result"]
-    assert episode["output_mode"] == "visible_reply"
-    metadata = episode["percepts"][0]["metadata"]
-    assert metadata["accepted_task_id"] == "task-001"
-    assert metadata["accepted_task_summary"] == (
-        "Generate a Fibonacci function snippet."
+    assert episode["trigger_source"] == "tool_result"
+    assert episode["percepts"][0]["source_kind"] == "tool_result"
+    assert episode["origin_metadata"]["task_id"] == "task-001"
+    assert episode["origin_metadata"]["task_kind"] == "accepted_task"
+    assert episode["origin_metadata"]["platform_message_id"] == (
+        "tool-result:task-001"
     )
-    assert "accepted_task_result_ready" in serialized
-    assert "accepted_task_result" in serialized
+    assert episode["origin_metadata"]["source_message_id"] == "message-1"
+    assert episode["origin_metadata"]["source_llm_trace_id"] == (
+        "llmtrace-parent-1"
+    )
+    assert episode["origin_metadata"]["source_background_work_job_id"] == (
+        "job-001"
+    )
+    assert episode["origin_metadata"]["active_turn_platform_message_ids"] == [
+        "tool-result:task-001"
+    ]
+    assert episode["percepts"][0]["content"]["semantic_summary"] == (
+        "Generated a compact Fibonacci snippet."
+    )
+    assert "tool_result" in serialized
+    retired_result_source = "accepted_" + "task_result_ready"
+    assert retired_result_source not in serialized
     for forbidden in ("worker_metadata", "worker", "job_ref", "queue_state"):
         assert forbidden not in serialized
 
 
-def test_accepted_task_result_payload_uses_semantic_metadata() -> None:
-    """Prompt payload should expose accepted-task result fields only."""
+def test_tool_result_payload_uses_semantic_metadata() -> None:
+    """Result source should expose a typed tool-result cognition outcome."""
 
     result_source = importlib.import_module(
         "kazusa_ai_chatbot.background_work.result_source"
@@ -119,28 +136,40 @@ def test_accepted_task_result_payload_uses_semantic_metadata() -> None:
     episode = result_source.build_result_ready_episode_from_job(
         _accepted_task_completed_job()
     )
-    selection = select_cognition_prompt_variant(
-        episode=episode,
-        stage="l2d_action_selection",
-    )
-
-    payload = build_cognition_prompt_source_payload(
-        episode=episode,
-        selection=selection,
-    )
-
-    result_payload = payload["accepted_task_result"]
-    metadata = result_payload["metadata"]
-    assert metadata == {
-        "accepted_task_summary": "Generate a Fibonacci function snippet.",
-        "failure_summary": "",
-        "result_summary": "Generated a compact Fibonacci snippet.",
-        "source_character_name": "Test Character",
+    metadata = episode["percepts"][0]["content"]
+    assert metadata["cognition_source"] == {
+        "source_kind": "tool_result",
+        "source_id": "task-001",
+        "occurred_at": "2026-06-06T00:01:00+00:00",
+        "semantic_summary": "Generated a compact Fibonacci snippet.",
     }
-    serialized_payload = json.dumps(payload, ensure_ascii=False).lower()
-    assert "accepted_task_result" in serialized_payload
+    serialized_payload = json.dumps(episode, ensure_ascii=False).lower()
+    assert "tool_result" in serialized_payload
+    retired_result_source = "accepted_" + "task_result_ready"
+    assert retired_result_source not in serialized_payload
     for forbidden in ("worker_metadata", "worker", "job_ref", "queue_state"):
         assert forbidden not in serialized_payload
+
+
+def test_tool_result_source_builder_preserves_enriched_blocker_summary() -> None:
+    """Enriched result summaries must stay the tool-result semantic text."""
+
+    result_source = importlib.import_module(
+        "kazusa_ai_chatbot.background_work.result_source"
+    )
+    job = _accepted_task_completed_job()
+    enriched_summary = (
+        "The task needs additional user-provided information.\n"
+        "Specific blocker: Please narrow the question before more source reading.\n"
+        "Remaining limitation: Source-reading report limit would be exceeded."
+    )
+    job["result_summary"] = enriched_summary
+
+    episode = result_source.build_result_ready_episode_from_job(job)
+
+    assert episode["trigger_source"] == "tool_result"
+    assert episode["percepts"][0]["source_kind"] == "tool_result"
+    assert episode["percepts"][0]["content"]["semantic_summary"] == enriched_summary
 
 
 @pytest.mark.asyncio
@@ -163,17 +192,48 @@ async def test_service_result_ready_delivery_uses_dispatcher_boundary(
     })
     persona_supervisor2 = AsyncMock(return_value={
         "final_dialog": ["@Test User Here is the requested result."],
+        "surface_outputs": [build_text_surface_output(
+            fragments=["@Test User Here is the requested result."],
+            created_at=episode["created_at"],
+        )],
         "consolidation_state": {
             "final_dialog": ["@Test User Here is the requested result."],
         },
     })
     post_turn = AsyncMock()
+    ensure_trace = AsyncMock(return_value={"accepted": True})
+    finalize_trace = AsyncMock()
 
     monkeypatch.setattr(service_module, "_adapter_registry", object())
     monkeypatch.setattr(
         service_module,
+        "_active_character_name_snapshot",
+        "Current Character",
+    )
+    monkeypatch.setattr(
+        service_module,
         "_refresh_runtime_character_state",
         AsyncMock(),
+    )
+    character_profile = canonical_service_character_profile(
+        marker="background-result",
+        global_user_id="character-global-1",
+    )
+    identity_snapshot = canonical_episode_identity_snapshot(
+        marker="background-result",
+        global_user_id="character-global-1",
+    )
+    character_profile["name"] = "Current Character"
+    identity_snapshot["character_profile"]["name"] = "Current Character"
+    monkeypatch.setattr(
+        service_module,
+        "_load_latest_character_profile_snapshot",
+        AsyncMock(return_value=character_profile),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "load_latest_identity_for_episode",
+        AsyncMock(return_value=identity_snapshot),
     )
     monkeypatch.setattr(
         service_module,
@@ -187,16 +247,25 @@ async def test_service_result_ready_delivery_uses_dispatcher_boundary(
     )
     monkeypatch.setattr(
         service_module,
-        "compose_character_profile",
-        lambda *_args, **_kwargs: {
-            "name": "Test Character",
-            "global_user_id": "character-global-1",
-        },
+        "get_conversation_history",
+        AsyncMock(return_value=[]),
     )
     monkeypatch.setattr(
         service_module,
-        "get_conversation_history",
-        AsyncMock(return_value=[]),
+        "get_user_message_by_platform_message_id",
+        AsyncMock(return_value={
+            "_id": "source-row-1",
+            "platform": "debug",
+            "platform_channel_id": "debug-private-1",
+            "role": "user",
+            "platform_message_id": "message-1",
+            "received_at": "2026-06-06T00:00:00+00:00",
+        }),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "has_inbound_after",
+        AsyncMock(return_value=False),
     )
     monkeypatch.setattr(
         service_module,
@@ -210,11 +279,25 @@ async def test_service_result_ready_delivery_uses_dispatcher_boundary(
     )
     monkeypatch.setattr(service_module, "persona_supervisor2", persona_supervisor2)
     monkeypatch.setattr(service_module, "handle_send_message", handle_send_message)
-    service_module._clear_latest_cognition_graph()
+    monkeypatch.setattr(
+        service_module.llm_tracing,
+        "ensure_llm_trace_run",
+        ensure_trace,
+    )
+    monkeypatch.setattr(
+        service_module.llm_tracing,
+        "finalize_llm_trace_run",
+        finalize_trace,
+    )
     monkeypatch.setattr(
         service_module,
         "_run_accepted_task_result_post_turn",
         post_turn,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "upsert_post_turn_lifecycle_record",
+        AsyncMock(),
     )
 
     result = await service_module._deliver_accepted_task_result_episode(
@@ -229,13 +312,21 @@ async def test_service_result_ready_delivery_uses_dispatcher_boundary(
     }
     persona_state = persona_supervisor2.await_args.args[0]
     assert persona_state["cognitive_episode"] == episode
-    assert persona_state["reason_to_respond"] == "accepted_task_result_ready"
+    assert persona_state["llm_trace_id"] == (
+        ensure_trace.await_args.kwargs["trace_id"]
+    )
+    assert persona_state["reason_to_respond"] == "tool_result"
+    assert persona_state["platform_message_id"] == "tool-result:task-001"
+    assert persona_state["active_turn_platform_message_ids"] == [
+        "tool-result:task-001"
+    ]
     assert persona_state["user_input"].startswith(
-        "Accepted task result is completed."
+        "Tool result is completed."
     )
     send_args = handle_send_message.await_args.args[0]
     assert send_args["text"] == "@Test User Here is the requested result."
     assert send_args["target_channel"] == "debug-private-1"
+    assert send_args["reply_to_msg_id"] == "message-1"
     assert send_args["delivery_mentions"] == [
         {
             "entity_kind": "user",
@@ -245,17 +336,240 @@ async def test_service_result_ready_delivery_uses_dispatcher_boundary(
     ]
     dispatch_context = handle_send_message.await_args.args[1]
     assert dispatch_context.bot_permission_role == "accepted_task_result"
+    assert dispatch_context.source_message_id == "tool-result:task-001"
     assert dispatch_context.source_platform_bot_id == "bot-1"
-    post_turn.assert_awaited_once()
-    latest = await service_module.ops_latest_cognition_graph()
-    assert latest.cognition_graph is not None
-    assert latest.cognition_graph["trigger_source"] == (
-        "accepted_task_result_ready"
+    assert dispatch_context.source_character_name == "Current Character"
+    assert ensure_trace.await_args.kwargs["parent_llm_trace_id"] == (
+        "llmtrace-parent-1"
     )
-    assert latest.cognition_graph["input_sources"] == [
-        "accepted_task_result",
-    ]
-    assert "reason" not in latest.cognition_graph["redaction"]
+    assert ensure_trace.await_args.kwargs["source_background_work_job_id"] == (
+        "job-001"
+    )
+    finalize_trace.assert_awaited_once()
+    assert finalize_trace.await_args.kwargs["status"] == "succeeded"
+    assert finalize_trace.await_args.kwargs["delivery_tracking_id"] == (
+        "delivery-001"
+    )
+    ensure_identity = service_module._ensure_character_global_identity
+    assert ensure_identity.await_args.kwargs["character_name"] == "Current Character"
+    post_turn.assert_awaited_once()
+    post_turn_state = post_turn.await_args.args[0]
+    assert post_turn_state["conversation_progress_turn_outcome"] == (
+        "visible_response"
+    )
+
+
+@pytest.mark.asyncio
+async def test_background_reply_target_uses_original_source_on_durable_age(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A result older than 120 seconds replies to the original source row."""
+
+    service_module = importlib.import_module("kazusa_ai_chatbot.service")
+    monkeypatch.setattr(
+        service_module,
+        "get_user_message_by_platform_message_id",
+        AsyncMock(return_value={
+            "_id": "source-row-1",
+            "platform": "debug",
+            "platform_channel_id": "debug-private-1",
+            "role": "user",
+            "platform_message_id": "message-1",
+            "received_at": "2026-06-06T00:00:00+00:00",
+        }),
+    )
+    has_inbound_after = AsyncMock(return_value=False)
+    monkeypatch.setattr(
+        service_module,
+        "has_inbound_after",
+        has_inbound_after,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "storage_utc_now_iso",
+        lambda: "2026-06-06T00:02:05+00:00",
+    )
+
+    reply_target = await service_module._resolve_background_reply_target(
+        platform="debug",
+        platform_channel_id="debug-private-1",
+        source_message_id="message-1",
+    )
+
+    assert reply_target == "message-1"
+    has_inbound_after.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_background_reply_target_intervening_qualifies_under_threshold(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An intervening user row qualifies a fresh original-source reply."""
+
+    service_module = importlib.import_module("kazusa_ai_chatbot.service")
+    monkeypatch.setattr(
+        service_module,
+        "get_user_message_by_platform_message_id",
+        AsyncMock(return_value={
+            "_id": "source-row-1",
+            "platform": "debug",
+            "platform_channel_id": "debug-private-1",
+            "role": "user",
+            "platform_message_id": "message-1",
+            "received_at": "2026-06-06T00:01:00+00:00",
+        }),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "has_inbound_after",
+        AsyncMock(return_value=True),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "storage_utc_now_iso",
+        lambda: "2026-06-06T00:02:00+00:00",
+    )
+
+    reply_target = await service_module._resolve_background_reply_target(
+        platform="debug",
+        platform_channel_id="debug-private-1",
+        source_message_id="message-1",
+    )
+
+    assert reply_target == "message-1"
+
+
+@pytest.mark.asyncio
+async def test_background_reply_target_strict_age_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Exactly 120 seconds without interleaving keeps a normal send."""
+
+    service_module = importlib.import_module("kazusa_ai_chatbot.service")
+    monkeypatch.setattr(
+        service_module,
+        "get_user_message_by_platform_message_id",
+        AsyncMock(return_value={
+            "_id": "source-row-1",
+            "platform": "debug",
+            "platform_channel_id": "debug-private-1",
+            "role": "user",
+            "platform_message_id": "message-1",
+            "received_at": "2026-06-06T00:00:00+00:00",
+        }),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "has_inbound_after",
+        AsyncMock(return_value=False),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "storage_utc_now_iso",
+        lambda: "2026-06-06T00:02:00+00:00",
+    )
+
+    reply_target = await service_module._resolve_background_reply_target(
+        platform="debug",
+        platform_channel_id="debug-private-1",
+        source_message_id="message-1",
+    )
+
+    assert reply_target is None
+
+
+@pytest.mark.asyncio
+async def test_background_reply_target_fails_closed_on_missing_source_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing original source row produces a normal send."""
+
+    service_module = importlib.import_module("kazusa_ai_chatbot.service")
+    monkeypatch.setattr(
+        service_module,
+        "get_user_message_by_platform_message_id",
+        AsyncMock(return_value=None),
+    )
+    has_inbound_after = AsyncMock(return_value=True)
+    monkeypatch.setattr(
+        service_module,
+        "has_inbound_after",
+        has_inbound_after,
+    )
+
+    reply_target = await service_module._resolve_background_reply_target(
+        platform="debug",
+        platform_channel_id="debug-private-1",
+        source_message_id="message-1",
+    )
+
+    assert reply_target is None
+    has_inbound_after.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_background_reply_target_fails_closed_without_source_received_at(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A legacy source row without received_at keeps a normal send."""
+
+    service_module = importlib.import_module("kazusa_ai_chatbot.service")
+    monkeypatch.setattr(
+        service_module,
+        "get_user_message_by_platform_message_id",
+        AsyncMock(return_value={
+            "_id": "source-row-1",
+            "platform": "debug",
+            "platform_channel_id": "debug-private-1",
+            "role": "user",
+            "platform_message_id": "message-1",
+        }),
+    )
+    has_inbound_after = AsyncMock(return_value=True)
+    monkeypatch.setattr(
+        service_module,
+        "has_inbound_after",
+        has_inbound_after,
+    )
+
+    reply_target = await service_module._resolve_background_reply_target(
+        platform="debug",
+        platform_channel_id="debug-private-1",
+        source_message_id="message-1",
+    )
+
+    assert reply_target is None
+    has_inbound_after.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_background_reply_target_rejects_synthetic_or_blank_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Synthetic tool-result identities are never reply targets."""
+
+    service_module = importlib.import_module("kazusa_ai_chatbot.service")
+    source_lookup = AsyncMock()
+    monkeypatch.setattr(
+        service_module,
+        "get_user_message_by_platform_message_id",
+        source_lookup,
+    )
+
+    synthetic_target = await service_module._resolve_background_reply_target(
+        platform="debug",
+        platform_channel_id="debug-private-1",
+        source_message_id="tool-result:task-001",
+    )
+    blank_target = await service_module._resolve_background_reply_target(
+        platform="debug",
+        platform_channel_id="debug-private-1",
+        source_message_id="",
+    )
+
+    assert synthetic_target is None
+    assert blank_target is None
+    source_lookup.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -296,6 +610,7 @@ async def test_accepted_task_result_post_turn_skips_consolidation(
         {
             "final_dialog": ["@Test User Here is the requested result."],
             "episode_trace": {},
+            "conversation_progress_turn_outcome": "visible_response",
         },
         visible_response_sent=True,
     )
@@ -303,7 +618,7 @@ async def test_accepted_task_result_post_turn_skips_consolidation(
     lifecycle.assert_awaited_once()
     progress.assert_awaited_once()
     consolidation.assert_not_awaited()
-    residue.assert_awaited_once()
+    residue.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -324,9 +639,11 @@ async def test_delivery_tick_syncs_accepted_task_delivery_state(
         "delivery_tracking_id": "delivery-001",
     })
     mark_job_delivered = AsyncMock(return_value={**job, "status": "delivered"})
-    mark_task_in_progress = AsyncMock()
-    mark_task_delivered = AsyncMock()
-    mark_task_failed = AsyncMock()
+    mark_task_in_progress = AsyncMock(return_value={
+        "state": "delivery_in_progress",
+    })
+    mark_task_delivered = AsyncMock(return_value={"state": "delivered"})
+    mark_task_failed = AsyncMock(return_value={"state": "delivery_retryable"})
     _patch_delivery_recovery(monkeypatch, delivery_module)
     deliver_episode = AsyncMock(return_value={
         "status": "delivered",
@@ -388,7 +705,185 @@ async def test_delivery_tick_syncs_accepted_task_delivery_state(
     ] == "conversation-001"
     mark_task_failed.assert_not_awaited()
     delivered_episode = deliver_episode.await_args.args[0]
-    assert delivered_episode["trigger_source"] == "accepted_task_result_ready"
+    assert delivered_episode["trigger_source"] == "tool_result"
+
+
+@pytest.mark.asyncio
+async def test_delivery_tick_retries_job_when_accepted_task_claim_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A job cannot enter cognition delivery without its accepted-task claim."""
+
+    delivery_module = importlib.import_module(
+        "kazusa_ai_chatbot.background_work.delivery"
+    )
+    job = _accepted_task_completed_job()
+    job["delivery_state"] = "ready"
+    marked_job = {**job, "status": "delivery_in_progress"}
+    deliver_episode = AsyncMock()
+    mark_job_failed = AsyncMock(return_value={
+        **job,
+        "status": "delivery_failed",
+    })
+    _patch_delivery_recovery(monkeypatch, delivery_module)
+    monkeypatch.setattr(
+        delivery_module,
+        "find_deliverable_background_work_jobs",
+        AsyncMock(return_value=[job]),
+    )
+    monkeypatch.setattr(
+        delivery_module,
+        "mark_background_work_delivery_in_progress",
+        AsyncMock(return_value=marked_job),
+    )
+    monkeypatch.setattr(
+        delivery_module,
+        "mark_accepted_task_delivery_in_progress",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        delivery_module,
+        "mark_background_work_delivery_failed",
+        mark_job_failed,
+    )
+
+    result = await delivery_module.run_background_work_delivery_tick(
+        deliver_result_episode_func=deliver_episode,
+        limit=1,
+    )
+
+    assert result == {
+        "processed_count": 1,
+        "delivered_count": 0,
+        "failed_count": 1,
+        "recovered_count": 0,
+    }
+    deliver_episode.assert_not_awaited()
+    mark_job_failed.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_delivery_tick_retries_job_when_accepted_finalization_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing accepted-task terminal write cannot report job delivery."""
+
+    delivery_module = importlib.import_module(
+        "kazusa_ai_chatbot.background_work.delivery"
+    )
+    job = _accepted_task_completed_job()
+    job["delivery_state"] = "ready"
+    marked_job = {**job, "status": "delivery_in_progress"}
+    mark_job_delivered = AsyncMock()
+    mark_job_failed = AsyncMock(return_value={
+        **job,
+        "status": "delivery_failed",
+    })
+    _patch_delivery_recovery(monkeypatch, delivery_module)
+    monkeypatch.setattr(
+        delivery_module,
+        "find_deliverable_background_work_jobs",
+        AsyncMock(return_value=[job]),
+    )
+    monkeypatch.setattr(
+        delivery_module,
+        "mark_background_work_delivery_in_progress",
+        AsyncMock(return_value=marked_job),
+    )
+    monkeypatch.setattr(
+        delivery_module,
+        "mark_accepted_task_delivery_in_progress",
+        AsyncMock(return_value={"state": "delivery_in_progress"}),
+    )
+    monkeypatch.setattr(
+        delivery_module,
+        "mark_accepted_task_delivered",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        delivery_module,
+        "mark_background_work_delivered",
+        mark_job_delivered,
+    )
+    monkeypatch.setattr(
+        delivery_module,
+        "mark_background_work_delivery_failed",
+        mark_job_failed,
+    )
+
+    result = await delivery_module.run_background_work_delivery_tick(
+        deliver_result_episode_func=AsyncMock(return_value={
+            "status": "delivered",
+            "conversation_message_id": "conversation-001",
+        }),
+        limit=1,
+    )
+
+    assert result["delivered_count"] == 0
+    assert result["failed_count"] == 1
+    mark_job_delivered.assert_not_awaited()
+    mark_job_failed.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_delivery_tick_retries_job_when_job_finalization_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing job terminal write remains observable as retryable failure."""
+
+    delivery_module = importlib.import_module(
+        "kazusa_ai_chatbot.background_work.delivery"
+    )
+    job = _accepted_task_completed_job()
+    job["delivery_state"] = "ready"
+    marked_job = {**job, "status": "delivery_in_progress"}
+    mark_job_failed = AsyncMock(return_value={
+        **job,
+        "status": "delivery_failed",
+    })
+    _patch_delivery_recovery(monkeypatch, delivery_module)
+    monkeypatch.setattr(
+        delivery_module,
+        "find_deliverable_background_work_jobs",
+        AsyncMock(return_value=[job]),
+    )
+    monkeypatch.setattr(
+        delivery_module,
+        "mark_background_work_delivery_in_progress",
+        AsyncMock(return_value=marked_job),
+    )
+    monkeypatch.setattr(
+        delivery_module,
+        "mark_accepted_task_delivery_in_progress",
+        AsyncMock(return_value={"state": "delivery_in_progress"}),
+    )
+    monkeypatch.setattr(
+        delivery_module,
+        "mark_accepted_task_delivered",
+        AsyncMock(return_value={"state": "delivered"}),
+    )
+    monkeypatch.setattr(
+        delivery_module,
+        "mark_background_work_delivered",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        delivery_module,
+        "mark_background_work_delivery_failed",
+        mark_job_failed,
+    )
+
+    result = await delivery_module.run_background_work_delivery_tick(
+        deliver_result_episode_func=AsyncMock(return_value={
+            "status": "delivered",
+            "conversation_message_id": "conversation-001",
+        }),
+        limit=1,
+    )
+
+    assert result["delivered_count"] == 0
+    assert result["failed_count"] == 1
+    mark_job_failed.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -459,23 +954,7 @@ def test_delivery_failure_summary_initialized_empty() -> None:
 
     jobs = importlib.import_module("kazusa_ai_chatbot.background_work.jobs")
     build = getattr(jobs, "_build_job_document")
-    request = {
-        "action_attempt_id": "action_attempt:dfs-001",
-        "idempotency_key": "background_work:dfs-001",
-        "task_brief": "Test delivery failure field.",
-        "source_platform": "debug",
-        "source_channel_id": "debug:user:test",
-        "source_channel_type": "private",
-        "source_message_id": "message-001",
-        "source_platform_bot_id": "bot-001",
-        "source_character_name": "Test Character",
-        "requester_global_user_id": "global-user-001",
-        "requester_platform_user_id": "debug-user-001",
-        "requester_display_name": "Test User",
-        "requested_delivery": "send_result_when_done",
-        "max_output_chars": 3000,
-        "storage_timestamp_utc": "2026-06-06T00:00:00+00:00",
-    }
+    request = _resume_queue_request()
     job = build(
         request,
         job_id="job-dfs-001",

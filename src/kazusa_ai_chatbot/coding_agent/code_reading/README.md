@@ -96,6 +96,11 @@ user scope instead of pretending to read a whole project. Full distributed
 master/subsystem PM fan-out is not implemented in the current code-reading
 workflow.
 
+An ordinary request for an identified repository's architecture or highlights
+uses a representative evidence survey within those limits. Explicit requests
+for every file, every subsystem, all behavior, or exhaustive coverage remain
+overloaded when they cannot fit the bounded report budget.
+
 LLM-backed PM calls use `CODING_AGENT_PM_LLM`; final synthesis intentionally
 uses the same PM route. Programmer workers use `CODING_AGENT_PROGRAMMER_LLM`.
 Both routes require base URL, API key, and model settings. Code reading does

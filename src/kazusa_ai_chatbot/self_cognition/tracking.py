@@ -126,6 +126,10 @@ def build_run_record(
             "topic_limit": int(budget["topic_limit"]),
         },
     }
+    for field_name in ("llm_trace_id", "source_calendar_run_id"):
+        field_value = _string_field(case, field_name)
+        if field_value:
+            run_record[field_name] = field_value
     return run_record
 
 
@@ -239,6 +243,11 @@ def classify_route(
     explicit_route = _explicit_route(cognition_output)
     if explicit_route:
         route = _route_with_action_attempt(explicit_route, action_attempt)
+        return route
+
+    v2_route = _v2_route_for_due_schedule(case, cognition_output)
+    if v2_route:
+        route = _route_with_action_attempt(v2_route, action_attempt)
         return route
 
     action_spec_route = _route_from_action_specs(cognition_output)
@@ -447,6 +456,32 @@ def _explicit_route(cognition_output: dict[str, Any]) -> str:
     return return_value
 
 
+def _v2_route_for_due_schedule(
+    case: models.SelfCognitionCase,
+    cognition_output: dict[str, Any],
+) -> str:
+    """Project native V2 scheduled speech into the delivery owner."""
+
+    core_output = cognition_output.get("cognition_core_output")
+    if not isinstance(core_output, dict):
+        return ""
+    intention = core_output.get("intention")
+    if not isinstance(intention, dict):
+        return ""
+    native_route = intention.get("route")
+    source_kind = _first_source_ref(case).get("source_kind")
+    due_state = _optional_string_field(case, "semantic_due_state")
+    if (
+        source_kind == "scheduled_tick"
+        and due_state in models.CONTACT_DUE_STATES
+        and native_route in {"speech", "action"}
+    ):
+        return_value = models.ROUTE_ACTION_CANDIDATE
+        return return_value
+    return_value = ""
+    return return_value
+
+
 def _route_from_action_specs(cognition_output: dict[str, Any]) -> str:
     """Map selected action specs to the self-cognition visible route."""
 
@@ -484,29 +519,18 @@ def _route_from_content_plan(cognition_output: dict[str, Any]) -> str:
 
 
 def _content_plan_values(cognition_output: dict[str, Any]) -> list[str]:
-    """Read non-empty linguistic content-plan values from cognition output."""
+    """Read non-empty content-plan values from the native V2 surface."""
 
-    action_directives = cognition_output.get("action_directives")
-    if not isinstance(action_directives, dict):
+    surface_output = cognition_output.get("text_surface_output_v2")
+    if not isinstance(surface_output, dict):
         return_value: list[str] = []
         return return_value
 
-    linguistic_directives = action_directives.get("linguistic_directives")
-    if not isinstance(linguistic_directives, dict):
+    content_plan = surface_output.get("content_plan")
+    if not isinstance(content_plan, str) or not content_plan.strip():
         return_value = []
         return return_value
-
-    content_plan = linguistic_directives.get("content_plan")
-    if not isinstance(content_plan, dict):
-        return_value = []
-        return return_value
-
-    plan_values = [
-        value
-        for value in content_plan.values()
-        if isinstance(value, str) and value.strip()
-    ]
-    return plan_values
+    return [content_plan]
 
 
 def _case_target_scope(case: models.SelfCognitionCase) -> dict[str, Any]:

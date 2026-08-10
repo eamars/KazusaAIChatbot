@@ -5,29 +5,46 @@ from __future__ import annotations
 import pytest
 
 
+COGNITION_CORE_V2_ROUTES = (
+    "COGNITION_LLM_CHARACTER_CARRYOVER",
+    "COGNITION_LLM_APPRAISAL_EVENT_AGENCY",
+    "COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL",
+    "COGNITION_LLM_APPRAISAL_MORAL_IDENTITY",
+    "COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME",
+    "COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY",
+    "COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE",
+    "COGNITION_LLM_GOAL_ORDINARY_RESPONSE",
+    "COGNITION_LLM_GOAL_ACTIVE_BRANCH",
+    "COGNITION_LLM_WORKSPACE_COLLAPSE",
+    "COGNITION_LLM_ACTION_PLANNING",
+    "COGNITION_LLM_ACTION_AUTHORIZATION",
+    "COGNITION_LLM_RESOLVER_AUTHORIZATION",
+)
+EXPECTED_ROUTE_PREFIXES = (
+    "RELEVANCE_AGENT_LLM",
+    "VISION_DESCRIPTOR_LLM",
+    "MSG_DECONTEXTUALIZER_LLM",
+    "RAG_PLANNER_LLM",
+    "RAG_SUBAGENT_LLM",
+    "WEB_SEARCH_LLM",
+    "COGNITION_LLM",
+    *COGNITION_CORE_V2_ROUTES,
+    "DIALOG_GENERATOR_LLM",
+    "CONSOLIDATION_LLM",
+    "JSON_REPAIR_LLM",
+    "BACKGROUND_WORK_LLM",
+    "CODING_AGENT_PM_LLM",
+    "CODING_AGENT_PROGRAMMER_LLM",
+)
+
+
 def _route_environment() -> dict[str, str]:
     """Return complete route defaults for deterministic model-route tests."""
 
-    routes = [
-        "RELEVANCE_AGENT_LLM",
-        "VISION_DESCRIPTOR_LLM",
-        "MSG_DECONTEXTUALIZER_LLM",
-        "RAG_PLANNER_LLM",
-        "RAG_SUBAGENT_LLM",
-        "WEB_SEARCH_LLM",
-        "COGNITION_LLM",
-        "BOUNDARY_CORE_LLM",
-        "DIALOG_GENERATOR_LLM",
-        "CONSOLIDATION_LLM",
-        "JSON_REPAIR_LLM",
-        "BACKGROUND_WORK_LLM",
-        "CODING_AGENT_PM_LLM",
-        "CODING_AGENT_PROGRAMMER_LLM",
-    ]
     environment = {
         "DEFAULT_LLM_MAX_COMPLETION_TOKENS": "8192",
     }
-    for route in routes:
+    for route in EXPECTED_ROUTE_PREFIXES:
         environment[f"{route}_BASE_URL"] = "http://localhost:1234/v1"
         environment[f"{route}_API_KEY"] = "test-key"
         environment[f"{route}_MODEL"] = f"{route.lower()}-qwen3"
@@ -41,22 +58,14 @@ def test_route_catalog_matches_configured_chat_routes() -> None:
 
     route_prefixes = [route.env_prefix for route in route_descriptors()]
 
-    assert route_prefixes == [
-        "RELEVANCE_AGENT_LLM",
-        "VISION_DESCRIPTOR_LLM",
-        "MSG_DECONTEXTUALIZER_LLM",
-        "RAG_PLANNER_LLM",
-        "RAG_SUBAGENT_LLM",
-        "WEB_SEARCH_LLM",
-        "COGNITION_LLM",
-        "BOUNDARY_CORE_LLM",
-        "DIALOG_GENERATOR_LLM",
-        "CONSOLIDATION_LLM",
-        "JSON_REPAIR_LLM",
-        "BACKGROUND_WORK_LLM",
-        "CODING_AGENT_PM_LLM",
-        "CODING_AGENT_PROGRAMMER_LLM",
+    assert tuple(route_prefixes) == EXPECTED_ROUTE_PREFIXES
+    core_routes = [
+        route
+        for route in route_descriptors()
+        if route.env_prefix in COGNITION_CORE_V2_ROUTES
     ]
+    assert len(core_routes) == 13
+    assert all(route.group == "Cognition Core V2" for route in core_routes)
     assert all(route.editable_fields == (
         "model",
         "max_completion_tokens",
@@ -83,10 +92,10 @@ def test_brain_descriptor_projects_routes_and_environment_overlay() -> None:
         environment=environment,
         overrides=overrides,
     )
-    assert len(snapshot.fields) == 42
+    assert len(snapshot.fields) == 83
 
     routes = project_brain_model_routes(snapshot=snapshot, environment=environment)
-    assert len(routes) == 14
+    assert len(routes) == 26
     cognition = next(route for route in routes if route["route_key"] == "cognition_llm")
     assert cognition["effective"]["model"] == "cognition_llm-qwen3"
     assert cognition["effective"]["max_completion_tokens"] == 8192
@@ -97,9 +106,9 @@ def test_brain_descriptor_projects_routes_and_environment_overlay() -> None:
     overrides.set_override(
         service_id="brain",
         values={
-            "cognition_llm_model": "deepseek-v4-flash",
-            "cognition_llm_max_completion_tokens": 4096,
-            "cognition_llm_thinking_enabled": True,
+            "cognition_llm_action_planning_model": "deepseek-v4-flash",
+            "cognition_llm_action_planning_max_completion_tokens": 4096,
+            "cognition_llm_action_planning_thinking_enabled": True,
         },
         registry=registry,
         environment=environment,
@@ -110,9 +119,9 @@ def test_brain_descriptor_projects_routes_and_environment_overlay() -> None:
         overrides=overrides,
     )
     assert overlay == {
-        "COGNITION_LLM_MODEL": "deepseek-v4-flash",
-        "COGNITION_LLM_MAX_COMPLETION_TOKENS": "4096",
-        "COGNITION_LLM_THINKING_ENABLED": "true",
+        "COGNITION_LLM_ACTION_PLANNING_MODEL": "deepseek-v4-flash",
+        "COGNITION_LLM_ACTION_PLANNING_MAX_COMPLETION_TOKENS": "4096",
+        "COGNITION_LLM_ACTION_PLANNING_THINKING_ENABLED": "true",
     }
     napcat_overlay = registry.render_environment_overlay(
         service_id="adapter.napcat",
@@ -135,11 +144,11 @@ def test_brain_descriptor_validation_rejects_invalid_route_values() -> None:
     overrides = ServiceConfigOverrideStore()
     environment = _route_environment()
     invalid_values = [
-        {"cognition_llm_model": "../bad"},
-        {"cognition_llm_model": "bad model with spaces"},
-        {"cognition_llm_max_completion_tokens": 0},
-        {"cognition_llm_max_completion_tokens": 65537},
-        {"cognition_llm_thinking_enabled": "true"},
+        {"cognition_llm_action_planning_model": "../bad"},
+        {"cognition_llm_action_planning_model": "bad model with spaces"},
+        {"cognition_llm_action_planning_max_completion_tokens": 0},
+        {"cognition_llm_action_planning_max_completion_tokens": 65537},
+        {"cognition_llm_action_planning_thinking_enabled": "true"},
     ]
 
     for values in invalid_values:

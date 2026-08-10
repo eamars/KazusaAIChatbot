@@ -13,7 +13,19 @@ ROUTE_KEYS = (
     "RAG_SUBAGENT_LLM",
     "WEB_SEARCH_LLM",
     "COGNITION_LLM",
-    "BOUNDARY_CORE_LLM",
+    "COGNITION_LLM_CHARACTER_CARRYOVER",
+    "COGNITION_LLM_APPRAISAL_EVENT_AGENCY",
+    "COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL",
+    "COGNITION_LLM_APPRAISAL_MORAL_IDENTITY",
+    "COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME",
+    "COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY",
+    "COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE",
+    "COGNITION_LLM_GOAL_ORDINARY_RESPONSE",
+    "COGNITION_LLM_GOAL_ACTIVE_BRANCH",
+    "COGNITION_LLM_WORKSPACE_COLLAPSE",
+    "COGNITION_LLM_ACTION_PLANNING",
+    "COGNITION_LLM_ACTION_AUTHORIZATION",
+    "COGNITION_LLM_RESOLVER_AUTHORIZATION",
     "BACKGROUND_WORK_LLM",
     "DIALOG_GENERATOR_LLM",
     "CONSOLIDATION_LLM",
@@ -70,7 +82,8 @@ def test_subagent_interface_guide_covers_known_families() -> None:
         "ComplexTaskSubagentV1",
         "SUBAGENT",
         "background_work",
-        "BackgroundWorkWorkerDecision",
+        "task_orchestrator",
+        "background_work_job.v2",
         "WORKER",
         "not a shared runtime base class",
     )
@@ -93,6 +106,11 @@ def test_top_level_readmes_include_current_route_families() -> None:
         if route_key == "EMBEDDING":
             env_name = "EMBEDDING_BASE_URL"
         assert env_name in howto
+
+    removed_route = "BOUNDARY_CORE_" + "LLM"
+    assert removed_route not in english_readme
+    assert removed_route not in chinese_readme
+    assert removed_route not in howto
 
 
 def test_top_level_readmes_link_current_runtime_subsystems() -> None:
@@ -122,8 +140,8 @@ def test_howto_startup_order_matches_service_lifespan() -> None:
         content,
         (
             "db_bootstrap()",
+            "Requires and loads the latest manually seeded immutable identity revision",
             "Hydrates persistent media descriptor cache",
-            "Loads the active character profile",
             "Compiles the top-level LangGraph pipeline",
             "Starts configured MCP servers",
             "Builds the runtime adapter registry and starts the chat input worker",
@@ -137,7 +155,7 @@ def test_howto_startup_order_matches_service_lifespan() -> None:
     _assert_in_order(
         content,
         (
-            "Load a character profile",
+            "## Character Profile",
             "kazusa-control-console",
             "Direct service startup remains available for development fallback",
             "uvicorn kazusa_ai_chatbot.service:app",
@@ -159,7 +177,7 @@ def test_selected_compact_module_readmes_keep_icd_sections() -> None:
             "Testing Contract",
             "Forbidden Paths",
         ),
-        "src/kazusa_ai_chatbot/cognition_chain_core/README.md": (
+        "src/kazusa_ai_chatbot/cognition_core_v2/README.md": (
             "Document Control",
             "Purpose",
             "Boundary",

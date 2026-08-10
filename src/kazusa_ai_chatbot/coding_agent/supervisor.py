@@ -1,5 +1,6 @@
 """Top-level standalone coding-agent supervisor."""
 
+import asyncio
 import inspect
 import json
 import re
@@ -528,7 +529,7 @@ async def answer_code_question(
     if max_answer_chars is not None:
         reading_request["max_answer_chars"] = max_answer_chars
 
-    reading_result = code_reading.run(reading_request)
+    reading_result = await asyncio.to_thread(code_reading.run, reading_request)
 
     limitations = [*fetching_result["limitations"]]
     if repository["dirty_state"] == "dirty":
@@ -709,7 +710,8 @@ async def _propose_new_project_change(
             continue
 
         if writing_result["status"] == "need_reading":
-            reading_result = _run_generated_readback_for_write(
+            reading_result = await asyncio.to_thread(
+                _run_generated_readback_for_write,
                 request=request,
                 writing_result=writing_result,
             )
@@ -869,7 +871,8 @@ async def _propose_existing_repo_change(
 ) -> CodingPatchProposalResponse:
     trace_summary = [*fetching_trace_summary]
 
-    reading_result = _run_initial_reading_for_write(
+    reading_result = await asyncio.to_thread(
+        _run_initial_reading_for_write,
         request=request,
         repository=repository,
         source_scope=source_scope,

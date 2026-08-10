@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import uuid4
 
+from kazusa_ai_chatbot.character_identity_growth import models as identity_models
 from kazusa_ai_chatbot.event_logging import repository
 from kazusa_ai_chatbot.config import AUDIT_LOG_TTL_DAYS
 from kazusa_ai_chatbot.event_logging.models import (
@@ -24,6 +25,7 @@ from kazusa_ai_chatbot.event_logging.sanitization import (
     sanitized_rejection_reason,
     sanitize_short_text,
     sanitize_string_list,
+    sanitize_cognition_v2_event_fields,
     unsafe_field_paths,
 )
 from kazusa_ai_chatbot.event_logging.schemas import EventLogEventDoc
@@ -36,6 +38,14 @@ from kazusa_ai_chatbot.time_boundary import (
 logger = logging.getLogger(__name__)
 
 EVENT_LOG_WRITE_TIMEOUT_SECONDS = 0.25
+_IDENTITY_GROWTH_EVENT_TYPES = frozenset({
+    "routing",
+    "proposal",
+    "review",
+    "policy",
+    "promotion",
+    "consumption",
+})
 
 
 def _iso_from_optional(value: datetime | None) -> str:
@@ -113,6 +123,7 @@ async def _record_event(
     stack_fingerprint: str = "",
     recovered: bool = False,
     occurred_at: datetime | None = None,
+    cognition_v2: Mapping[str, object] | None = None,
 ) -> EventLogWriteResult:
     """Build, sanitize, and persist one event document.
 
@@ -187,6 +198,10 @@ async def _record_event(
         },
         payload=dict(payload),
     )
+    if cognition_v2 is not None:
+        event_doc["cognition_v2"] = sanitize_cognition_v2_event_fields(
+            cognition_v2,
+        )
     unsafe_paths = unsafe_field_paths(event_doc)
     if unsafe_paths:
         reason = sanitized_rejection_reason(unsafe_paths)
@@ -221,6 +236,135 @@ async def _record_event(
         reason="",
     )
     return result
+
+
+async def record_cognition_v2_event(
+    *,
+    component: str,
+    cognition_component: str,
+    status: str,
+    stage_status: Literal["started", "completed", "failed", "skipped"],
+    selected_branch_id: str = "",
+    state_scope: Literal["", "user", "character"] = "",
+    state_commit_status: Literal[
+        "not_started",
+        "committed",
+        "failed",
+        "skipped",
+    ] = "not_started",
+    severity: EventSeverity = "info",
+    warning_codes: Sequence[str] = (),
+    occurred_at: datetime | None = None,
+) -> EventLogWriteResult:
+    """Record one bounded V2 stage or state-commit diagnostic event."""
+
+    fields = {
+        "cognition_component": cognition_component,
+        "selected_branch_id": selected_branch_id,
+        "state_scope": state_scope,
+        "state_commit_status": state_commit_status,
+        "stage_status": stage_status,
+    }
+    result = await _record_event(
+        event_family="cognition_v2",
+        event_type="component_status",
+        component=component,
+        status=status,
+        severity=severity,
+        payload={},
+        warning_codes=warning_codes,
+        occurred_at=occurred_at,
+        cognition_v2=fields,
+    )
+    return result
+
+
+async def record_character_identity_growth_event(
+    *,
+    event_type: Literal[
+        "routing",
+        "proposal",
+        "review",
+        "policy",
+        "promotion",
+        "consumption",
+    ],
+    stage: str,
+    reason_code: str,
+    status: str,
+    correlation_id: str = "",
+    run_id: str = "",
+    revision_number: int | None = None,
+    consumer_count: int = 0,
+    projection_digest: str = "",
+    severity: EventSeverity = "info",
+    warning_codes: Sequence[str] = (),
+    occurred_at: datetime | None = None,
+) -> EventLogWriteResult:
+    """Record sanitized identity funnel, promotion, or consumption metadata."""
+
+    if event_type not in _IDENTITY_GROWTH_EVENT_TYPES:
+        return _rejection_result(uuid4().hex, "invalid identity event type")
+    if reason_code not in identity_models.IDENTITY_GROWTH_REASON_CODES:
+        return _rejection_result(uuid4().hex, "invalid identity reason code")
+    if (
+        revision_number is not None
+        and (
+            not isinstance(revision_number, int)
+            or isinstance(revision_number, bool)
+            or revision_number < 0
+        )
+    ):
+        return _rejection_result(
+            uuid4().hex,
+            "invalid identity revision number",
+        )
+    if (
+        not isinstance(consumer_count, int)
+        or isinstance(consumer_count, bool)
+        or consumer_count < 0
+        or consumer_count > len(identity_models.IDENTITY_CONSUMER_KINDS)
+    ):
+        return _rejection_result(
+            uuid4().hex,
+            "invalid identity consumer count",
+        )
+    normalized_digest = sanitize_short_text(
+        projection_digest,
+        limit=64,
+    )
+    if normalized_digest and (
+        len(normalized_digest) != 64
+        or normalized_digest != normalized_digest.lower()
+        or any(
+            character not in "0123456789abcdef"
+            for character in normalized_digest
+        )
+    ):
+        return _rejection_result(
+            uuid4().hex,
+            "invalid identity projection digest",
+        )
+    payload: dict[str, object] = {
+        "stage": sanitize_short_text(stage, limit=80),
+        "reason_code": reason_code,
+        "consumer_count": consumer_count,
+        "projection_digest": normalized_digest,
+    }
+    if revision_number is not None:
+        payload["revision_number"] = revision_number
+    return await _record_event(
+        event_family="character_identity_growth",
+        event_type=event_type,
+        component="character_identity_growth",
+        status=status,
+        severity=severity,
+        payload=payload,
+        correlation_id=correlation_id,
+        run_id=run_id,
+        warning_codes=warning_codes,
+        occurred_at=occurred_at,
+    )
 
 
 async def record_process_event(

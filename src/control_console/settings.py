@@ -25,6 +25,7 @@ class ControlConsoleSettings(BaseModel):
     state_dir: Path = Path(".kazusa_control")
     service_registry_path: Path | None = None
     brain_base_url: str = "http://127.0.0.1:8000"
+    brain_shared_secret: str = ""
     max_lookup_limit: int = Field(default=100, ge=1, le=500)
     max_log_lines: int = Field(default=500, ge=1, le=2000)
     max_event_limit: int = Field(default=200, ge=1, le=1000)
@@ -66,6 +67,11 @@ class ControlConsoleSettings(BaseModel):
                 dotenv_config,
                 "KAZUSA_CONTROL_BRAIN_BASE_URL",
                 "http://127.0.0.1:8000",
+            ),
+            brain_shared_secret=_control_setting(
+                dotenv_config,
+                "KAZUSA_CONTROL_BRAIN_SHARED_SECRET",
+                "",
             ),
         )
         return settings

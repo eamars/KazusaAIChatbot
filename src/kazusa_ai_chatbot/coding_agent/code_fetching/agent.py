@@ -1,5 +1,6 @@
 """Orchestration for the code-fetching subagent."""
 
+import asyncio
 from pathlib import Path
 
 from kazusa_ai_chatbot.coding_agent.code_fetching import github
@@ -39,12 +40,20 @@ async def run(request: CodeFetchingRequest) -> CodeFetchingResult:
 
     local_path_hint = request.get("local_path_hint")
     if local_path_hint:
-        result = _resolve_local_path(local_path_hint, trace_summary)
+        result = await asyncio.to_thread(
+            _resolve_local_path,
+            local_path_hint,
+            trace_summary,
+        )
         return result
 
     local_root_hint = request.get("local_root_hint")
     if local_root_hint:
-        result = _resolve_local_root(local_root_hint, trace_summary)
+        result = await asyncio.to_thread(
+            _resolve_local_root,
+            local_root_hint,
+            trace_summary,
+        )
         return result
 
     source_selection = await source_resolver.select_source_for_request(
@@ -81,11 +90,10 @@ async def run(request: CodeFetchingRequest) -> CodeFetchingResult:
 
     if isinstance(source, InlineSourceBundle):
         try:
-            repository, source_scope_result = (
-                managed_inline.materialize_inline_source_bundle(
-                    source,
-                    workspace_root,
-                )
+            repository, source_scope_result = await asyncio.to_thread(
+                managed_inline.materialize_inline_source_bundle,
+                source,
+                workspace_root,
             )
         except managed_inline.ManagedInlineSourceError:
             result = _managed_inline_failure_result(trace_summary)
@@ -116,7 +124,8 @@ async def run(request: CodeFetchingRequest) -> CodeFetchingResult:
 
     if github.is_raw_github_source(source):
         try:
-            repository = managed_download.ensure_managed_raw_file_download(
+            repository = await asyncio.to_thread(
+                managed_download.ensure_managed_raw_file_download,
                 source,
                 workspace_root,
             )
@@ -125,7 +134,8 @@ async def run(request: CodeFetchingRequest) -> CodeFetchingResult:
             return result
     else:
         try:
-            repository = managed_clone.ensure_managed_checkout(
+            repository = await asyncio.to_thread(
+                managed_clone.ensure_managed_checkout,
                 source,
                 workspace_root,
             )

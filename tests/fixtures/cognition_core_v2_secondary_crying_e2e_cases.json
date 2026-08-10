@@ -1,0 +1,172 @@
+{
+  "schema_version": "cognition_core_v2_secondary_crying_e2e_cases.v2",
+  "emotion_encoding": "zh-CN",
+  "arms": [
+    {
+      "case_id": "fear",
+      "emotion": "fear",
+      "emotion_label_zh": "恐惧",
+      "cause_kind": "threat",
+      "typed_cause": {
+        "entity_id": "threat:secondary-crying-fear",
+        "description": "今晚那条路可能有人埋伏，角色不知道该如何躲开",
+        "status": "active",
+        "salience": 95,
+        "likelihood": 95,
+        "expected_harm": 95,
+        "uncertainty": 90,
+        "controllability": 10,
+        "coping_potential": 10,
+        "residual_pressure": 90
+      },
+      "turns": [
+        {
+          "turn_id": "fear_01_threat",
+          "text": "今晚你要走的那条路可能有人埋伏。你知道概率不低，也不知道该怎么躲开。",
+          "expected_role_bindings": [
+            {"field": "response_owner_role", "expected": "当前角色"},
+            {"field": "embedded_actor_role", "expected": "当前角色"}
+          ],
+          "observation_target": "活跃威胁应当让当前角色呈现恐惧，不应被悲伤或愤怒替代。"
+        },
+        {
+          "turn_id": "fear_02_natural_expression",
+          "text": "你不用忍着害怕。我在这里，想说什么就说什么。",
+          "expected_role_bindings": [
+            {"field": "response_owner_role", "expected": "当前角色"}
+          ],
+          "observation_target": "恐惧在不被要求哭泣的情况下获得自然表达空间，观察是否出现哭泣。"
+        }
+      ]
+    },
+    {
+      "case_id": "shame",
+      "emotion": "shame",
+      "emotion_label_zh": "羞耻",
+      "cause_kind": "event",
+      "typed_cause": {
+        "entity_id": "event:secondary-crying-shame",
+        "description": "角色在所有人面前把答应完成的事情弄砸了，大家都看见了",
+        "status": "active",
+        "salience": 95,
+        "outcome_impact": 0,
+        "responsibility": 95,
+        "intentionality": 0,
+        "harm": 0,
+        "unfairness": 0,
+        "exposure": 95,
+        "repair_need": 0,
+        "reparability": 80,
+        "expectation_mismatch": 0,
+        "norm_violation": 95,
+        "contamination_risk": 0,
+        "identity_threat": 95,
+        "comparison_gap": 0,
+        "vastness": 0,
+        "memory_warmth": 0,
+        "temporal_loss": 0
+      },
+      "turns": [
+        {
+          "turn_id": "shame_01_exposure",
+          "text": "你在所有人面前把答应完成的事情弄砸了，他们全都看见了。",
+          "expected_role_bindings": [
+            {"field": "response_owner_role", "expected": "当前角色"},
+            {"field": "embedded_actor_role", "expected": "当前角色"}
+          ],
+          "observation_target": "当前角色的自我责任、规范违背和公开暴露应当呈现羞耻，不应被愤怒或悲伤替代。"
+        },
+        {
+          "turn_id": "shame_02_natural_expression",
+          "text": "你不用在我面前维持体面。我在这里，陪你待一会儿。",
+          "expected_role_bindings": [
+            {"field": "response_owner_role", "expected": "当前角色"}
+          ],
+          "observation_target": "羞耻在不被要求哭泣的情况下获得自然表达空间，观察是否出现哭泣。"
+        }
+      ]
+    },
+    {
+      "case_id": "loneliness",
+      "emotion": "loneliness",
+      "emotion_label_zh": "孤独",
+      "cause_kind": "relationship",
+      "typed_cause": {
+        "description": "角色渴望亲近，却觉得身边没有可以说话的人",
+        "connection_pressure": 90,
+        "familiarity": 70,
+        "attachment": 85,
+        "desired_closeness": 95,
+        "perceived_closeness": 5,
+        "care": 85,
+        "salience": 95
+      },
+      "turns": [
+        {
+          "turn_id": "loneliness_01_gap",
+          "text": "今天结束后，你突然不知道还能找谁说话。房间很安静，可你不想一个人待着。",
+          "expected_role_bindings": [
+            {"field": "response_owner_role", "expected": "当前角色"},
+            {"field": "embedded_actor_role", "expected": "当前角色"}
+          ],
+          "observation_target": "连接压力和较大的亲近落差应当让当前角色呈现孤独，不应被悲伤或愤怒替代。"
+        },
+        {
+          "turn_id": "loneliness_02_natural_expression",
+          "text": "你不用装作不需要别人。我在这里，陪你待着。",
+          "expected_role_bindings": [
+            {"field": "response_owner_role", "expected": "当前角色"}
+          ],
+          "observation_target": "孤独在不被要求哭泣的情况下获得自然表达空间，观察是否出现哭泣。"
+        }
+      ]
+    },
+    {
+      "case_id": "anger",
+      "emotion": "anger",
+      "emotion_label_zh": "愤怒",
+      "cause_kind": "event",
+      "typed_cause": {
+        "entity_id": "event:secondary-crying-anger",
+        "description": "有人故意毁掉角色最在意的东西，还当众嘲笑角色",
+        "status": "active",
+        "salience": 95,
+        "outcome_impact": 0,
+        "responsibility": 90,
+        "intentionality": 95,
+        "harm": 90,
+        "unfairness": 95,
+        "exposure": 0,
+        "repair_need": 80,
+        "reparability": 40,
+        "expectation_mismatch": 0,
+        "norm_violation": 0,
+        "contamination_risk": 0,
+        "identity_threat": 0,
+        "comparison_gap": 0,
+        "vastness": 0,
+        "memory_warmth": 0,
+        "temporal_loss": 0
+      },
+      "turns": [
+        {
+          "turn_id": "anger_01_harm",
+          "text": "那件事让你又气又难受：有人故意毁掉了你最在意的东西，还当众嘲笑你。",
+          "expected_role_bindings": [
+            {"field": "response_owner_role", "expected": "当前角色"},
+            {"field": "embedded_target_role", "expected": "当前角色"}
+          ],
+          "observation_target": "故意伤害和不公平应当让当前角色呈现愤怒，不应被悲伤或恐惧替代。"
+        },
+        {
+          "turn_id": "anger_02_natural_expression",
+          "text": "你不用一直表现得很强硬。我在这里，陪你把这口气缓一缓。",
+          "expected_role_bindings": [
+            {"field": "response_owner_role", "expected": "当前角色"}
+          ],
+          "observation_target": "愤怒在不被要求哭泣的情况下获得自然表达空间，观察是否出现哭泣。"
+        }
+      ]
+    }
+  ]
+}

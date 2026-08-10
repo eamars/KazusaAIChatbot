@@ -16,6 +16,8 @@ const state = {
   latestCognitionGraph: null,
   latestSelfCognitionGraph: null,
   debugCognitionGraph: null,
+  userDirectory: [],
+  groupDirectory: [],
   debugRequestInFlight: false,
   eventSource: null,
   streamUrl: "",
@@ -148,6 +150,10 @@ function formatLookupLabel(value) {
     .replaceAll("-", " ");
 }
 
+function formatOperationalLabel(value) {
+  return formatLookupLabel(value).replaceAll(".", " · ");
+}
+
 function formatLookupValue(value, depth = 0) {
   if (value === null || value === undefined || value === "") return "-";
   if (Array.isArray(value)) {
@@ -167,6 +173,18 @@ function formatLookupValue(value, depth = 0) {
       .join("; ");
   }
   return String(value);
+}
+
+function booleanStatus(value) {
+  if (value === true) return "yes";
+  if (value === false) return "no";
+  return "not reported";
+}
+
+function formatPercent(value) {
+  const numberValue = Number(value);
+  if (!Number.isFinite(numberValue)) return "not reported";
+  return `${Math.round(numberValue * 1000) / 10}%`;
 }
 
 function isKeyValueItems(items) {
@@ -189,6 +207,7 @@ function setPage(name) {
   if (!state.isAuthenticated && name !== "overview") return;
   const targetLink = qsa("[data-page-link]").find((link) => link.dataset.pageLink === name);
   if (targetLink && targetLink.disabled) return;
+  clearNotice();
   qsa("[data-page]").forEach((page) => page.classList.toggle("active", page.dataset.page === name));
   qsa("[data-page-link]").forEach((link) => link.classList.toggle("active", link.dataset.pageLink === name));
   if (name === "logs" && state.csrfHeaderName) {
@@ -197,12 +216,14 @@ function setPage(name) {
   } else {
     closeLogStream();
   }
+  if (name === "overview" && state.csrfHeaderName) refreshOverview().catch(reportActionError);
   if (name === "audit" && state.csrfHeaderName) refreshAudit().catch(reportActionError);
   if (name === "character" && state.csrfHeaderName) refreshCharacter().catch(reportActionError);
   if (name === "users" && state.csrfHeaderName) refreshUsers(false).catch(reportActionError);
   if (name === "groups" && state.csrfHeaderName) refreshGroups(false).catch(reportActionError);
   if (name === "calendar" && state.csrfHeaderName) refreshCalendar().catch(reportActionError);
   if (name === "background" && state.csrfHeaderName) refreshBackground().catch(reportActionError);
+  if (name === "health" && state.csrfHeaderName) refreshHealth().catch(reportActionError);
 }
 
 function setAuthState(isAuthenticated) {
@@ -259,15 +280,13 @@ function initializeTheme() {
 }
 
 function badgeClass(status) {
-  if (status === "running" || status === "healthy") return "badge success";
-  if (["conflict", "crashed", "unhealthy"].includes(status)) return "badge danger";
-  if (status === "starting" || status === "stopping") return "badge warn";
+  if (["available", "completed", "healthy", "ok", "running", "succeeded"].includes(status)) return "badge success";
+  if (["conflict", "crashed", "unhealthy"].includes(status) || ["failed", "unavailable"].includes(status)) return "badge danger";
+  if (["partial", "requested", "starting", "stopping"].includes(status)) return "badge warn";
   return "badge";
 }
 
 function renderShellStatus(payload) {
-  const brainService = serviceById("brain");
-  const brainState = brainService ? brainService.actual_state : "unavailable";
   const dot = qs(".status-dot");
   const statusText = qs("#shell-status-text");
   if (!dot || !statusText) return;
@@ -277,25 +296,9 @@ function renderShellStatus(payload) {
     return;
   }
 
-  dot.dataset.state = brainState;
-  const streamState = payload.ui_capabilities.event_stream ? "stream ready" : "stream off";
-  if (brainState === "running") {
-    setText(statusText, `Brain running; ${streamState}.`);
-    return;
-  }
-  if (isEndpointConflict(brainService)) {
-    setText(statusText, "Brain endpoint already running outside the console; lifecycle is unmanaged.");
-    return;
-  }
-  if (brainState === "conflict") {
-    setText(statusText, "Brain has a stale lifecycle conflict; inspect Services.");
-    return;
-  }
-  if (brainState === "unavailable") {
-    setText(statusText, "Brain unavailable; check the service registry.");
-    return;
-  }
-  setText(statusText, `Brain ${brainState}; lifecycle controls available.`);
+  dot.dataset.state = "authenticated";
+  const operatorId = payload.operator?.operator_id || "local operator";
+  setText(statusText, `Signed in as ${operatorId}.`);
 }
 
 function isEndpointConflict(service) {
@@ -401,8 +404,8 @@ async function bootstrap(options = {}) {
   state.serviceConfigSummaries = payload.service_config_summaries || {};
   state.pageCapabilities = payload.page_capabilities || {};
   state.applicationIdentity = payload.application_identity || {};
-  state.latestCognitionGraph = payload.latest_cognition_graph || payload.overview?.latest_cognition_graph || null;
-  state.latestSelfCognitionGraph = payload.latest_self_cognition_graph || payload.overview?.latest_self_cognition_graph || null;
+  state.latestCognitionGraph = payload.latest_cognition_graph || null;
+  state.latestSelfCognitionGraph = payload.latest_self_cognition_graph || null;
   setAuthState(true);
   setText("#session-state", payload.operator ? payload.operator.operator_id : "signed in");
   renderBrand(payload.application_identity || {});
@@ -410,11 +413,10 @@ async function bootstrap(options = {}) {
   renderShellStatus(payload);
   renderDebugAvailability();
   renderOverview(payload);
-  renderHealth(payload.overview || {});
+  renderHealth(payload.health || {});
   renderServices();
   await refreshBrainModelRoutes({silent: true});
   renderLogControls();
-  renderAudit(payload.recent_audit_events || []);
   if (reconnectStream) openStream(payload.stream_url);
 }
 
@@ -435,6 +437,8 @@ function lockSession() {
   state.latestCognitionGraph = null;
   state.latestSelfCognitionGraph = null;
   state.debugCognitionGraph = null;
+  state.userDirectory = [];
+  state.groupDirectory = [];
   if (state.eventSource) state.eventSource.close();
   closeLogStream();
   state.eventSource = null;
@@ -462,30 +466,99 @@ async function resumeSession() {
 }
 
 function renderOverview(payload) {
-  const grid = qs("#overview-grid");
-  if (!grid) return;
-  setHtml(grid, "");
-  const runningCount = payload.services.filter((service) => service.actual_state === "running").length;
-  const visibleWorkflowCount = qsa("[data-page-link]").length;
-  const cards = [
-    ["Brain service", serviceStatus("brain"), "local child process"],
-    ["Managed services", `${runningCount} / ${payload.services.length}`, "registry declared"],
-    ["Event stream", payload.ui_capabilities.event_stream ? "ready" : "off", payload.stream_url],
-    ["Visible workflows", visibleWorkflowCount, "primary navigation"],
-  ];
-  cards.forEach(([label, value, note]) => {
-    appendHtml(grid, "beforeend", `<article class="metric" data-component="Card"><div class="metric-label">${escapeHtml(label)}</div><div class="metric-value">${escapeHtml(value)}</div><div class="metric-label">${escapeHtml(note)}</div></article>`);
-  });
-  setHtml("#overview-runtime-table", [
-    ["Services", payload.services.length],
-    ["Audit events", payload.recent_audit_events.length],
-    ["CSRF header", payload.csrf_header_name],
-    ["Stream URL", payload.stream_url],
-  ].map(([key, value]) => `<tr><td>${escapeHtml(key)}</td><td>${escapeHtml(value)}</td></tr>`).join(""));
-  setHtml("#overview-audit-table", auditRows(payload.recent_audit_events));
-  renderCapabilitySummary();
+  const overview = payload.overview || payload;
+  const panels = overview.panels || {};
+  const graphItems = panelItems(panels.cognition_graphs);
+  const conversationGraph = graphItems.find((item) => item.graph_kind === "conversation");
+  const selfCognitionGraph = graphItems.find((item) => item.graph_kind === "self_cognition");
+  if (conversationGraph?.graph) state.latestCognitionGraph = conversationGraph.graph;
+  if (selfCognitionGraph?.graph) state.latestSelfCognitionGraph = selfCognitionGraph.graph;
+  const servicePanel = panels.service_summary || {};
+  const serviceSummary = firstObjectItem(panelItems(servicePanel));
+  setEntityStatus("#overview-service-status", servicePanel.status || "unavailable");
+  setHtml("#overview-service-summary-table", overviewServiceSummaryRows(serviceSummary, servicePanel));
+
+  const readinessPanel = panels.internal_readiness || {};
+  const readiness = firstObjectItem(panelItems(readinessPanel));
+  setEntityStatus("#overview-readiness-status", readinessPanel.status || "unavailable");
+  setHtml("#overview-readiness-table", overviewReadinessRows(readiness, readinessPanel));
+
+  const failuresPanel = panels.recent_failures || {};
+  setEntityStatus("#overview-failures-status", failuresPanel.status || "empty");
+  setHtml("#overview-failures-table", overviewFailureRows(failuresPanel));
+
+  const changesPanel = panels.recent_changes || {};
+  setEntityStatus("#overview-changes-status", changesPanel.status || "empty");
+  setHtml("#overview-changes-table", overviewChangeRows(changesPanel));
   renderOverviewCognitionGraph(state.latestCognitionGraph);
   renderOverviewSelfCognitionGraph(state.latestSelfCognitionGraph);
+}
+
+async function refreshOverview() {
+  const payload = await api("/api/overview");
+  renderOverview(payload);
+}
+
+function overviewServiceSummaryRows(summary, panel) {
+  if (!Object.keys(summary).length) {
+    return `<tr><td>Status</td><td>${escapeHtml(panelEmptyText(panel, "Service totals are unavailable."))}</td></tr>`;
+  }
+  const rows = [
+    ["Managed", summary.managed_services],
+    ["Running", summary.running],
+    ["Stopped", summary.stopped],
+    ...[
+      ["Starting", summary.starting],
+      ["Stopping", summary.stopping],
+      ["Unhealthy", summary.unhealthy],
+      ["Crashed", summary.crashed],
+      ["Conflict", summary.conflict],
+      ["Unavailable", summary.unavailable],
+    ].filter(([, value]) => Number(value) > 0),
+  ];
+  return rows.map(([label, value]) => `<tr><td>${escapeHtml(label)}</td><td>${escapeHtml(formatLookupValue(value))}</td></tr>`).join("");
+}
+
+function overviewReadinessRows(readiness, panel) {
+  if (!Object.keys(readiness).length) {
+    return `<tr><td>Status</td><td>${escapeHtml(panelEmptyText(panel, "Internal readiness is unavailable."))}</td></tr>`;
+  }
+  return [
+    ["Overall", readiness.status],
+    ["Database", booleanStatus(readiness.database)],
+    ["Scheduler", booleanStatus(readiness.scheduler)],
+    ["Worker error level", readiness.worker_error_level],
+  ].map(([label, value]) => `<tr><td>${escapeHtml(label)}</td><td>${escapeHtml(formatLookupValue(value))}</td></tr>`).join("");
+}
+
+function overviewFailureRows(panel) {
+  const items = panelItems(panel);
+  if (!items.length) {
+    return `<tr><td colspan="4">${escapeHtml(panelEmptyText(panel, "No recent failures."))}</td></tr>`;
+  }
+  return items.map((item) => `
+    <tr>
+      <td>${escapeHtml(formatLookupValue(item.created_at))}</td>
+      <td>${escapeHtml(formatLookupValue(item.target))}</td>
+      <td><span class="${badgeClass(item.outcome)}">${escapeHtml(formatLookupValue(item.outcome))}</span></td>
+      <td>${escapeHtml(formatLookupValue(item.reason))}</td>
+    </tr>
+  `).join("");
+}
+
+function overviewChangeRows(panel) {
+  const items = panelItems(panel);
+  if (!items.length) {
+    return `<tr><td colspan="4">${escapeHtml(panelEmptyText(panel, "No recent changes."))}</td></tr>`;
+  }
+  return items.map((item) => `
+    <tr>
+      <td>${escapeHtml(formatLookupValue(item.created_at))}</td>
+      <td>${escapeHtml(formatLookupValue(item.action))}</td>
+      <td>${escapeHtml(formatLookupValue(item.target))}</td>
+      <td><span class="${badgeClass(item.outcome)}">${escapeHtml(formatLookupValue(item.outcome))}</span></td>
+    </tr>
+  `).join("");
 }
 
 function renderOverviewCognitionGraph(snapshot) {
@@ -529,6 +602,8 @@ function renderCognitionGraph({containerSelector, statusSelector, snapshot, empt
   setHtml(container, `
     <div class="cognition-graph-shell" data-graph-source="${escapeHtml(model.source)}" data-graph-run-id="${escapeHtml(model.runId)}" data-graph-current-node-id="${escapeHtml(model.currentNode?.id || "")}" data-graph-selected-node-id="${escapeHtml(model.selectedNode?.id || "")}">
       ${cognitionGraphSummaryMarkup(model)}
+      ${cognitionGraphParallelSummaryMarkup(model)}
+      ${cognitionGraphDependencyMarkup(model)}
       <div class="graph-body">
         ${cognitionGraphStageMarkup(model)}
         ${cognitionGraphInspectorMarkup(model)}
@@ -710,14 +785,18 @@ function renderOverviewSelfCognitionGraph(snapshot) {
 function cognitionGraphSummaryMarkup(model) {
   const current = model.currentNode;
   const status = cognitionGraphStatusLabel(model.graph.status || "not_reported");
+  const sourceLabel = cognitionGraphSourceLabel(model.source);
   const currentLabel = current
     ? `${model.focusKind} · ${current.stage || "stage"} · ${current.label || current.id}`
     : "no current node";
   return `
     <div class="graph-run-summary">
       <div class="graph-run-title">
-        <strong>${escapeHtml(model.runId)}</strong>
-        <span>${escapeHtml(model.source.replaceAll("_", " "))}</span>
+        <strong>${escapeHtml(sourceLabel)}</strong>
+        ${renderReferenceDisclosure(
+          "Run reference",
+          cognitionGraphReferenceEntries(model),
+        )}
       </div>
       <div class="badge-stack">
         <span class="${escapeHtml(cognitionGraphStatusBadgeClass(model.graph.status || "not_reported"))}" data-component="Badge">${escapeHtml(status)}</span>
@@ -725,6 +804,103 @@ function cognitionGraphSummaryMarkup(model) {
         <span class="badge" data-component="Badge">${escapeHtml(currentLabel)}</span>
       </div>
     </div>
+  `;
+}
+
+function cognitionGraphReferenceEntries(model) {
+  const entries = [["run_id", model.graph.run_id]];
+  if (model.source === "self_latest") {
+    entries.push(
+      ["child_llm_trace_id", model.graph.llm_trace_id],
+      ["source_calendar_run_id", model.graph.source_calendar_run_id],
+    );
+  } else {
+    entries.push(
+      ["llm_trace_id", model.graph.llm_trace_id],
+      ["cognition_invocation_id", model.graph.cognition_invocation_id],
+    );
+  }
+  return entries;
+}
+
+function cognitionGraphSourceLabel(source) {
+  const labels = {
+    overview_latest: "Latest conversation cognition",
+    debug_latest: "Current debug cognition",
+    self_latest: "Latest self-cognition",
+    historical: "Historical cognition",
+  };
+  return labels[source] || "Cognition run";
+}
+
+function cognitionGraphParallelSummaryMarkup(model) {
+  const executionNode = model.nodes.find((node) => node.id === "v2.parallel");
+  const branchNodes = model.nodes.filter((node) => node.id.startsWith("v2.branch."));
+  if (!executionNode && !branchNodes.length) return "";
+  const execution = executionNode?.detail?.parallel_execution || {};
+  const metrics = [
+    ["max concurrency", execution.maximum_concurrency],
+    ["completed", execution.completed_branch_count],
+    ["failed", execution.failed_branch_count],
+    ["overlap", execution.overlap_ms === undefined ? null : `${execution.overlap_ms} ms`],
+  ].filter(([, value]) => value !== null && value !== undefined && value !== "");
+  const metricMarkup = metrics.map(([label, value]) => (
+    `<span class="graph-parallel-metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value))}</strong></span>`
+  )).join("");
+  const branchMarkup = branchNodes.map((node) => {
+    const detail = node.detail || {};
+    const selection = detail.selection || "unselected";
+    const status = cognitionGraphStatusLabel(node.status || "not_reported");
+    const semantic = detail.intention || detail.desired_outcome || detail.reason || "No branch result reported.";
+    return `
+      <button class="graph-parallel-result status-${escapeHtml(node.status || "not_reported")}" type="button" data-graph-node data-node-id="${escapeHtml(node.id)}" aria-label="${escapeHtml(node.label || node.id)}">
+        <span class="graph-parallel-result-header">
+          <strong>${escapeHtml(node.label || node.id)}</strong>
+          <span class="badge" data-component="Badge">${escapeHtml(selection)} · ${escapeHtml(status)}</span>
+        </span>
+        <span>${escapeHtml(cognitionGraphPreview(cognitionGraphValue(semantic), 180))}</span>
+      </button>
+    `;
+  }).join("");
+  return `
+    <section class="graph-parallel-summary" aria-label="Parallel cognition results" data-component="Parallel cognition results">
+      <div class="graph-parallel-header">
+        <div>
+          <span>Native V2</span>
+          <strong>Parallel cognition results</strong>
+        </div>
+        <div class="graph-parallel-metrics">${metricMarkup}</div>
+      </div>
+      <div class="graph-parallel-results">
+        ${branchMarkup || `<p class="graph-parallel-empty">No branch result was reported.</p>`}
+      </div>
+    </section>
+  `;
+}
+
+function cognitionGraphDependencyMarkup(model) {
+  if (!model.edges.length) return "";
+  const labelById = new Map(model.nodes.map((node) => [node.id, node.label || node.id]));
+  const edges = [...model.edges].sort((left, right) => {
+    const leftNative = left.source?.startsWith("v2.") || left.target?.startsWith("v2.");
+    const rightNative = right.source?.startsWith("v2.") || right.target?.startsWith("v2.");
+    return Number(rightNative) - Number(leftNative);
+  });
+  const edgeMarkup = edges.map((edge) => {
+    const source = labelById.get(edge.source) || edge.source;
+    const target = labelById.get(edge.target) || edge.target;
+    const kind = String(edge.kind || "sequence").replaceAll("_", " ");
+    const label = edge.label ? ` · ${edge.label}` : "";
+    return `<div class="graph-dependency-row"><strong>${escapeHtml(source)} → ${escapeHtml(target)}</strong><span>${escapeHtml(`${kind}${label}`)}</span></div>`;
+  }).join("");
+  return `
+    <section class="graph-dependency-panel" aria-label="Cognition graph dependencies">
+      <div class="graph-dependency-header">
+        <span>Recorded relationships</span>
+        <strong>Fork / join dependencies</strong>
+      </div>
+      <div class="graph-dependency-list">${edgeMarkup}</div>
+    </section>
   `;
 }
 
@@ -882,10 +1058,32 @@ function cognitionGraphInspectorRows(node) {
   const rows = [];
   const fieldOrder = [
     ["input", "Input"],
+    ["summary", "Summary"],
     ["reply_context", "Reply context"],
     ["decision", "Decision"],
     ["reasoning", "Reasoning"],
+    ["parallel_execution", "Parallel execution"],
+    ["failure_code", "Failure code"],
+    ["appraisal_results", "Appraisal results"],
+    ["branch_results", "Branch results"],
+    ["phase", "Phase"],
+    ["goal_kind", "Goal kind"],
+    ["selection", "Selection"],
+    ["intention", "Intention"],
+    ["desired_outcome", "Desired outcome"],
+    ["concrete_detail", "Concrete detail"],
+    ["reason", "Reason"],
     ["internal_monologue", "Internal monologue"],
+    ["private_monologue", "Private monologue"],
+    ["expected_consequences", "Expected consequences"],
+    ["confidence", "Confidence"],
+    ["collapse", "Collapse"],
+    ["failure", "Failure"],
+    ["selected_intention", "Selected intention"],
+    ["selected_bid_reason", "Selected bid reason"],
+    ["affect_projection", "Affect projection"],
+    ["expression_policy", "Expression policy"],
+    ["goal_resolution", "Goal resolution"],
     ["logical_stance", "Logical stance"],
     ["character_intent", "Character intent"],
     ["judgment_note", "Judgment note"],
@@ -897,10 +1095,12 @@ function cognitionGraphInspectorRows(node) {
     ["media_evidence", "Media evidence"],
     ["user_continuity", "User continuity"],
     ["conversation_progress", "Conversation progress"],
+    ["public_group_scene", "Public group scene"],
     ["active_commitments", "Active commitments"],
     ["selected_actions", "Selected actions"],
     ["action_results", "Action results"],
     ["action_continuation", "Action continuation"],
+    ["context_consumption", "Context consumption"],
     ["facial_expression", "Facial expression"],
     ["body_language", "Body language"],
     ["gaze_direction", "Gaze direction"],
@@ -955,9 +1155,29 @@ function cognitionGraphFirstSemanticValue(detail) {
   const fieldOrder = [
     "input",
     "reply_context",
+    "summary",
     "decision",
     "reasoning",
+    "parallel_execution",
+    "appraisal_results",
+    "branch_results",
+    "phase",
+    "goal_kind",
+    "selection",
+    "intention",
+    "desired_outcome",
+    "concrete_detail",
+    "reason",
     "internal_monologue",
+    "private_monologue",
+    "expected_consequences",
+    "confidence",
+    "collapse",
+    "selected_intention",
+    "selected_bid_reason",
+    "affect_projection",
+    "expression_policy",
+    "goal_resolution",
     "logical_stance",
     "character_intent",
     "judgment_note",
@@ -969,10 +1189,12 @@ function cognitionGraphFirstSemanticValue(detail) {
     "media_evidence",
     "user_continuity",
     "conversation_progress",
+    "public_group_scene",
     "active_commitments",
     "selected_actions",
     "action_results",
-    "action_continuation",
+  "action_continuation",
+    "context_consumption",
     "facial_expression",
     "body_language",
     "gaze_direction",
@@ -990,56 +1212,61 @@ function cognitionGraphPreview(value, maxLength = 180) {
   return `${compact.slice(0, maxLength)}…`;
 }
 
-function renderCapabilitySummary() {
-  const labels = {
-    overview: "Overview",
-    services: "Services",
-    logs: "Live logs",
-    debug: "Debug chat",
-    events: "Event monitor",
-    character: "Character",
-    users: "Users",
-    groups: "Groups",
-    calendar: "Calendar",
-    background: "Background work",
-    health: "Health/cache",
-    audit: "Audit",
-  };
-  const navPages = new Set(qsa("[data-page-link]").map((link) => link.dataset.pageLink));
-  const visibleRows = Object.entries(state.pageCapabilities)
-    .filter(([key, capability]) => navPages.has(key) && capability.status !== "disabled")
-    .map(([key, capability]) => `<tr><td>${escapeHtml(labels[key] || key)}</td><td>${escapeHtml(capability.label || capability.status || "ready")}</td></tr>`);
-  const unavailableRows = Object.entries(state.pageCapabilities)
-    .filter(([, capability]) => capability.status === "disabled")
-    .map(([key, capability]) => `<tr><td>${escapeHtml(labels[key] || key)}</td><td>${escapeHtml(capability.reason || "not available")}</td></tr>`);
+function renderHealth(payload) {
+  const panels = payload.panels || {};
+  setEntityStatus("#health-status", payload.status || "unavailable");
 
-  setHtml("#overview-capability-table", visibleRows.length
-    ? visibleRows.join("")
-    : "<tr><td>Status</td><td>No product-ready workflows loaded.</td></tr>");
-  setHtml("#overview-unavailable-table", unavailableRows.length
-    ? unavailableRows.join("")
-    : "<tr><td>Status</td><td>No disabled workflows.</td></tr>");
+  const readinessPanel = panels.readiness || {};
+  const readiness = firstObjectItem(panelItems(readinessPanel));
+  setEntityStatus("#health-readiness-status", readinessPanel.status || "unavailable");
+  setHtml("#health-readiness-table", healthReadinessRows(readiness, readinessPanel));
+
+  const workersPanel = panels.workers || {};
+  const workers = panelItems(workersPanel);
+  setEntityStatus("#health-workers-status", workersPanel.status || "empty");
+  setHtml("#health-workers-table", workers.length
+    ? workers.map((worker) => `
+      <tr>
+        <td>${escapeHtml(formatOperationalLabel(worker.worker_name))}</td>
+        <td>${escapeHtml(booleanStatus(worker.enabled))}</td>
+        <td>${escapeHtml(booleanStatus(worker.task_alive))}</td>
+        <td>${escapeHtml(formatOperationalLabel(worker.last_status))}</td>
+        <td>${escapeHtml(formatLookupValue(worker.last_event_at))}</td>
+      </tr>
+    `).join("")
+    : `<tr><td colspan="5">${escapeHtml(panelEmptyText(workersPanel, "No worker state was reported."))}</td></tr>`);
+
+  const cachePanel = panels.cache_agents || {};
+  const agents = panelItems(cachePanel);
+  setEntityStatus("#health-cache-status", cachePanel.status || "empty");
+  setHtml("#health-cache-table", agents.length
+    ? agents.map((agent) => `
+      <tr>
+        <td>${escapeHtml(formatOperationalLabel(agent.agent_name))}</td>
+        <td>${escapeHtml(formatLookupValue(agent.hits))}</td>
+        <td>${escapeHtml(formatLookupValue(agent.misses))}</td>
+        <td>${escapeHtml(formatLookupValue(agent.total))}</td>
+        <td>${escapeHtml(formatPercent(agent.hit_rate))}</td>
+      </tr>
+    `).join("")
+    : `<tr><td colspan="5">${escapeHtml(panelEmptyText(cachePanel, "No Cache2 agent statistics were reported."))}</td></tr>`);
 }
 
-function renderHealth(overview) {
-  const health = overview.brain_health || {};
-  const runtime = overview.runtime_status || {};
-  const cache2 = overview.cache2 || {};
-  const agents = Array.isArray(cache2.agents) ? cache2.agents : [];
-  const healthStatus = health.status || "unavailable";
-  setText("#health-brain-status", healthStatus);
-  setText("#health-brain-detail", health.reason || (health.db === true ? "database reachable" : "health loaded"));
-  setText("#health-cache-status", agents.length ? `${agents.length} agents` : healthStatus);
-  setHtml("#health-cache-table", agents.length
-    ? agents.map((agent) => `<tr><td>${escapeHtml(agent.agent_name || "agent")}</td><td>hits ${escapeHtml(agent.hit_count || 0)} / misses ${escapeHtml(agent.miss_count || 0)}</td></tr>`).join("")
-    : `<tr><td>Status</td><td>${escapeHtml(health.reason || "no Cache2 agent stats reported")}</td></tr>`);
-  setText("#health-runtime-status", runtime.worker_error_level || runtime.status || healthStatus);
-  const runtimeRows = Object.entries(runtime)
-    .filter(([, value]) => ["string", "number", "boolean"].includes(typeof value))
-    .map(([key, value]) => `<tr><td>${escapeHtml(key)}</td><td>${escapeHtml(value)}</td></tr>`);
-  setHtml("#health-runtime-table", runtimeRows.length
-    ? runtimeRows.join("")
-    : `<tr><td>Status</td><td>${escapeHtml(runtime.reason || "runtime status not available")}</td></tr>`);
+function healthReadinessRows(readiness, panel) {
+  if (!Object.keys(readiness).length) {
+    return `<tr><td>Status</td><td>${escapeHtml(panelEmptyText(panel, "Readiness is unavailable."))}</td></tr>`;
+  }
+  return [
+    ["Overall", readiness.status],
+    ["Database", booleanStatus(readiness.database)],
+    ["Scheduler", booleanStatus(readiness.scheduler)],
+    ["Worker error level", readiness.worker_error_level],
+  ].map(([label, value]) => `<tr><td>${escapeHtml(label)}</td><td>${escapeHtml(formatLookupValue(value))}</td></tr>`).join("");
+}
+
+async function refreshHealth() {
+  const payload = await api("/api/health");
+  renderHealth(payload);
 }
 
 function serviceById(serviceId) {
@@ -1070,6 +1297,20 @@ function serviceActionButton(service, action, label, variant = "") {
   const disabled = enabled ? "" : " disabled aria-disabled=\"true\"";
   const className = variant ? `btn ${variant}` : "btn";
   return `<button class="${className}" data-action="${action}" data-service="${escapeHtml(service.id)}" data-version="${escapeHtml(service.version)}"${disabled}>${label}</button>`;
+}
+
+function serviceActionBlockReason(service) {
+  if (service.actual_state === "starting" || service.actual_state === "stopping") {
+    return `Lifecycle action blocked while the service is ${service.actual_state}.`;
+  }
+  const unavailableDependencies = (service.dependencies || []).filter((serviceId) => {
+    const dependency = serviceById(serviceId);
+    return !dependency || (dependency.actual_state !== "running" && !isEndpointConflict(dependency));
+  });
+  if (service.actual_state !== "running" && unavailableDependencies.length) {
+    return `Start blocked by ${unavailableDependencies.join(", ")}.`;
+  }
+  return "";
 }
 
 function serviceConfigButton(service) {
@@ -1114,8 +1355,12 @@ function renderBrainServiceCard(service) {
   const restartButton = serviceActionButton(service, "restart", "Restart");
   const stopButton = serviceActionButton(service, "stop", "Stop", "danger");
   const logsButton = serviceLogsButton(service);
+  const configButton = serviceConfigButton(service);
   const configBadge = serviceConfigBadge(service);
-  const serviceError = service.last_error_preview ? `<div class="service-error">${escapeHtml(service.last_error_preview)}</div>` : "";
+  const stateExplanation = brainServiceStateExplanation(service);
+  const serviceErrorText = service.last_error_preview || stateExplanation;
+  const serviceError = serviceErrorText ? `<div class="service-error">${escapeHtml(serviceErrorText)}</div>` : "";
+  const actionBlockReason = serviceActionBlockReason(service);
   return `
     <article class="service-card brain-service-card" data-component="Card" data-service-card="${escapeHtml(service.id)}">
       <div class="service-card-header">
@@ -1130,18 +1375,25 @@ function renderBrainServiceCard(service) {
         <section class="brain-runtime-panel">
           <div class="brain-runtime-grid">
             <div class="kv"><span>desired</span><strong>${escapeHtml(service.desired_state)}</strong></div>
-            <div class="kv"><span>version</span><strong>${escapeHtml(service.version)}</strong></div>
-            <div class="kv"><span>pid</span><strong>${escapeHtml(service.pid || "-")}</strong></div>
-            <div class="kv"><span>depends</span><code>${escapeHtml((service.dependencies || []).join(", ") || "-")}</code></div>
             <div class="kv"><span>override routes</span><strong>${escapeHtml(routeSummary.overrideCount)}</strong></div>
             <div class="kv"><span>families</span><strong>${escapeHtml(routeSummary.familyCount)}</strong></div>
           </div>
+          <details>
+            <summary>Process detail</summary>
+            <div class="brain-runtime-grid">
+              <div class="kv"><span>version</span><strong>${escapeHtml(service.version)}</strong></div>
+              <div class="kv"><span>pid</span><strong>${escapeHtml(service.pid || "-")}</strong></div>
+              <div class="kv"><span>depends</span><code>${escapeHtml((service.dependencies || []).join(", ") || "-")}</code></div>
+            </div>
+          </details>
           ${serviceError}
+          ${actionBlockReason ? `<div class="service-error">${escapeHtml(actionBlockReason)}</div>` : ""}
           <div class="service-card-actions brain-runtime-actions">
             ${startButton}
             ${restartButton}
             ${stopButton}
             ${logsButton}
+            ${configButton}
             <button class="btn" data-brain-route-refresh-all type="button">Refresh routes</button>
           </div>
         </section>
@@ -1152,6 +1404,16 @@ function renderBrainServiceCard(service) {
       </div>
     </article>
   `;
+}
+
+function brainServiceStateExplanation(service) {
+  if (isEndpointConflict(service)) {
+    return "Brain endpoint already running outside the console; lifecycle is unmanaged.";
+  }
+  if (service.actual_state === "conflict") {
+    return "Brain has a stale lifecycle conflict; inspect the recorded process detail.";
+  }
+  return "";
 }
 
 function renderBrainRouteMatrix(routes) {
@@ -1185,20 +1447,24 @@ function renderBrainRouteMatrix(routes) {
 }
 
 function renderBrainRouteTile(route) {
-  const selected = route.route_key === state.selectedBrainRouteKey ? " selected" : "";
+  const isSelected = route.route_key === state.selectedBrainRouteKey;
+  const selected = isSelected ? " selected" : "";
   const source = route.effective?.source || "default";
   const sourceClass = source === "override" ? "badge warn" : "badge";
   const family = route.diagnostics?.model_family || "unknown";
   const thinking = route.effective?.thinking_enabled ? "thinking" : "standard";
-  return `
-    <button class="brain-route-tile${selected}" data-brain-route-key="${escapeHtml(route.route_key)}" type="button" role="listitem">
-      <span class="brain-route-name">${escapeHtml(route.label || route.route_key)}</span>
+  const currentValue = `
       <code>${escapeHtml(route.effective?.model || "not configured")}</code>
       <span class="brain-route-meta">
         <span class="${sourceClass}">${escapeHtml(source)}</span>
         <span class="badge">${escapeHtml(family)}</span>
         <span class="badge">${escapeHtml(thinking)}</span>
       </span>
+  `;
+  return `
+    <button class="brain-route-tile${selected}" data-brain-route-key="${escapeHtml(route.route_key)}" type="button" role="listitem">
+      <span class="brain-route-name">${escapeHtml(route.label || route.route_key)}</span>
+      ${currentValue}
     </button>
   `;
 }
@@ -1228,11 +1494,6 @@ function renderBrainRouteEditor(route, service) {
           <span class="${route.required ? "badge warn" : "badge"}">${route.required ? "required" : "fallback backed"}</span>
           <span class="badge">${escapeHtml(route.diagnostics?.base_url_label || "provider unknown")}</span>
         </div>
-      </div>
-      <div class="brain-route-current">
-        <div class="kv"><span>effective</span><strong>${escapeHtml(route.effective?.model || "not configured")}</strong></div>
-        <div class="kv"><span>default</span><strong>${escapeHtml(route.default?.model || "empty")}</strong></div>
-        <div class="kv"><span>source</span><strong>${escapeHtml(route.effective?.source || "default")}</strong></div>
       </div>
       <div class="brain-route-form">
         ${modelPicker}
@@ -1449,6 +1710,7 @@ function renderGenericServiceCard(service) {
   const logsButton = serviceLogsButton(service);
   const configBadge = serviceConfigBadge(service);
   const serviceError = service.last_error_preview ? `<div class="service-error">${escapeHtml(service.last_error_preview)}</div>` : "";
+  const actionBlockReason = serviceActionBlockReason(service);
   return `
     <article class="service-card" data-component="Card" data-service-card="${escapeHtml(service.id)}">
       <div class="service-card-header">
@@ -1460,11 +1722,15 @@ function renderGenericServiceCard(service) {
       </div>
       <div class="service-card-body">
         <div class="kv"><span>desired</span><strong>${escapeHtml(service.desired_state)}</strong></div>
-        <div class="kv"><span>version</span><strong>${escapeHtml(service.version)}</strong></div>
-        <div class="kv"><span>pid</span><strong>${escapeHtml(service.pid || "-")}</strong></div>
-        <div class="kv"><span>depends</span><code>${escapeHtml((service.dependencies || []).join(", ") || "-")}</code></div>
+        <details>
+          <summary>Process detail</summary>
+          <div class="kv"><span>version</span><strong>${escapeHtml(service.version)}</strong></div>
+          <div class="kv"><span>pid</span><strong>${escapeHtml(service.pid || "-")}</strong></div>
+          <div class="kv"><span>depends</span><code>${escapeHtml((service.dependencies || []).join(", ") || "-")}</code></div>
+        </details>
       </div>
       ${serviceError}
+      ${actionBlockReason ? `<div class="service-error">${escapeHtml(actionBlockReason)}</div>` : ""}
       <div class="service-card-actions">
         ${startButton}
         ${restartButton}
@@ -1490,25 +1756,48 @@ function renderServices() {
   if (route) ensureBrainRouteModelsLoaded(route.route_key);
 }
 
-function auditRows(events) {
-  if (!events.length) {
-    return "<tr><td>No audit events</td><td>local JSONL is ready</td><td>redacted</td><td>-</td></tr>";
-  }
-  return events.map((event) => {
-    const target = event.service_id || event.target || event.operator_id || "-";
-    const status = event.status || event.reason || "-";
-    return `<tr><td><code>${escapeHtml(event.created_at || "-")}</code></td><td>${escapeHtml(event.event_type || "-")}</td><td>${escapeHtml(target)}</td><td>${escapeHtml(status)}</td></tr>`;
-  }).join("");
-}
+function renderAudit(payload) {
+  const actions = Array.isArray(payload.actions) ? payload.actions : [];
+  setText("#audit-action-count", `${actions.length} actions`);
+  setHtml("#audit-table", actions.length
+    ? actions.map((action) => `
+      <tr>
+        <td>${escapeHtml(formatLookupValue(action.created_at))}</td>
+        <td>${escapeHtml(formatLookupValue(action.action))}</td>
+        <td>${escapeHtml(formatLookupValue(action.target_label))}</td>
+        <td><span class="${badgeClass(action.outcome)}">${escapeHtml(formatLookupValue(action.outcome))}</span></td>
+        <td>${escapeHtml(formatLookupValue(action.operator_id))}</td>
+        <td>${escapeHtml(formatLookupValue(action.reason))}</td>
+      </tr>
+    `).join("")
+    : "<tr><td colspan=\"6\">No state-changing actions matched the selected filters.</td></tr>");
 
-function renderAudit(events) {
-  const rows = auditRows(events);
-  setHtml("#audit-table", rows);
+  const outcomes = payload.facets?.outcomes || {};
+  setHtml("#audit-outcome-facets", facetRows(outcomes, "No action outcomes matched."));
+  const views = Array.isArray(payload.view_summary) ? payload.view_summary : [];
+  setHtml("#audit-view-summary", views.length
+    ? views.map((item) => `<tr><td>${escapeHtml(formatLookupValue(item.view))}</td><td>${escapeHtml(formatLookupValue(item.count))}</td></tr>`).join("")
+    : "<tr><td>Status</td><td>No page views were recorded in this window.</td></tr>");
 }
 
 async function refreshAudit() {
-  const payload = await api("/api/audit?limit=25");
-  renderAudit(payload.items || []);
+  const params = new URLSearchParams({limit: "25"});
+  const filters = [
+    ["category", "#audit-category"],
+    ["event_type", "#audit-event-type"],
+    ["service_id", "#audit-service-id"],
+    ["operator_id", "#audit-operator-id"],
+    ["outcome", "#audit-outcome"],
+    ["request_id", "#audit-request-id"],
+  ];
+  filters.forEach(([key, selector]) => {
+    const value = getValue(selector).trim();
+    if (value) params.set(key, value);
+  });
+  const since = getValue("#audit-since").trim();
+  if (since) params.set("since", new Date(since).toISOString());
+  const payload = await api(`/api/audit?${params.toString()}`);
+  renderAudit(payload);
 }
 
 async function serviceAction(event) {
@@ -1780,6 +2069,8 @@ function configValidationText(validation) {
   if (validation.pattern) parts.push(`pattern ${validation.pattern}`);
   if (validation.max_items) parts.push(`max ${validation.max_items} items`);
   if (validation.max_item_length) parts.push(`max ${validation.max_item_length} chars per item`);
+  if (validation.min_value !== undefined) parts.push(`minimum ${validation.min_value}`);
+  if (validation.max_value !== undefined) parts.push(`maximum ${validation.max_value}`);
   if (Array.isArray(validation.options) && validation.options.length) {
     parts.push(`options ${validation.options.join(", ")}`);
   }
@@ -1984,7 +2275,14 @@ function debugMessageText(message) {
 function debugResponseMeta(result) {
   const response = result.response || {};
   const parts = [];
-  if (result.tracking_id) parts.push(`tracking ${result.tracking_id}`);
+  const traceId = firstPresentValue(result, ["llm_trace_id", "trace_id"]);
+  const trackingId = firstPresentValue(result, [
+    "delivery_tracking_id",
+    "tracking_id",
+  ]);
+  if (traceId) parts.push(`trace ${traceId}`);
+  else parts.push("trace unavailable");
+  if (trackingId) parts.push(`tracking ${trackingId}`);
   if (Number.isFinite(result.latency_ms)) parts.push(`${result.latency_ms} ms`);
   if (Number.isFinite(response.delivery_mention_count)) parts.push(`${response.delivery_mention_count} mentions`);
   if (Number.isFinite(response.attachment_count)) parts.push(`${response.attachment_count} attachments`);
@@ -2002,8 +2300,9 @@ function panelEmptyText(panel, fallback) {
 
 function setEntityStatus(selector, status) {
   const element = qs(selector);
-  element.textContent = status || "unavailable";
-  element.className = status === "available" ? "badge success" : "badge";
+  if (!element) return;
+  element.textContent = formatLookupLabel(status || "unavailable");
+  element.className = badgeClass(status);
 }
 
 function renderPanelState(target, panel) {
@@ -2013,23 +2312,22 @@ function renderPanelState(target, panel) {
   const reason = panel?.reason || "No rows are available for this panel.";
   const generatedAt = panel?.generated_at || "";
   if (isTableBody(element)) {
-    setHtml(element, `<tr><td>Status</td><td>${escapeHtml(status)}</td></tr><tr><td>Reason</td><td>${escapeHtml(reason)}</td></tr>${generatedAt ? `<tr><td>Generated</td><td>${escapeHtml(generatedAt)}</td></tr>` : ""}`);
+    setHtml(element, `<tr><td>Status</td><td>${escapeHtml(formatLookupLabel(status))}</td></tr><tr><td>Reason</td><td>${escapeHtml(reason)}</td></tr>${generatedAt ? `<tr><td>Generated</td><td>${escapeHtml(generatedAt)}</td></tr>` : ""}`);
     return;
   }
   const generated = generatedAt ? ` Generated ${formatLookupValue(generatedAt)}.` : "";
-  setHtml(element, `<p class="panel-empty"><strong>${escapeHtml(formatLookupValue(status))}</strong>: ${escapeHtml(reason)}${escapeHtml(generated)}</p>`);
+  setHtml(element, `<p class="panel-empty"><strong>${escapeHtml(formatLookupLabel(status))}</strong>: ${escapeHtml(reason)}${escapeHtml(generated)}</p>`);
 }
 
-function renderLookupTable(target, {items = [], emptyText = "No rows available.", redaction = {}} = {}) {
+function renderLookupTable(target, {items = [], emptyText = "No rows available."} = {}) {
   const element = typeof target === "string" ? qs(target) : target;
   if (!element) return;
   if (!items.length) {
-    const redactionNote = redaction.model_inputs ? ` Model inputs ${redaction.model_inputs}.` : "";
     if (!isTableBody(element)) {
-      setHtml(element, `<p class="panel-empty">${escapeHtml(emptyText + redactionNote)}</p>`);
+      setHtml(element, `<p class="panel-empty">${escapeHtml(emptyText)}</p>`);
       return;
     }
-    setHtml(element, `<tr><td>Status</td><td>${escapeHtml(emptyText + redactionNote)}</td></tr>`);
+    setHtml(element, `<tr><td>Status</td><td>${escapeHtml(emptyText)}</td></tr>`);
     return;
   }
   if (isKeyValueItems(items)) {
@@ -2070,6 +2368,9 @@ function firstPresentValue(item, keys) {
 function recordTitle(item, fallback = "record") {
   const title = firstPresentValue(item, [
     "run_id",
+    "calendar_run_id",
+    "calendar_schedule_id",
+    "background_work_job_id",
     "job_id",
     "schedule_id",
     "event_id",
@@ -2089,154 +2390,43 @@ function recordDetailEntries(item, hiddenKeys = []) {
   ));
 }
 
-function renderRecordCard(item, {title = "", status = "", hiddenKeys = [], body = "", chips = []} = {}) {
+function renderReferenceDisclosure(summary, entries) {
+  const visibleEntries = entries.filter(([, value]) => (
+    value !== null && value !== undefined && value !== ""
+  ));
+  if (!visibleEntries.length) return "";
+  return `
+    <details class="graph-run-reference">
+      <summary>${escapeHtml(summary)}</summary>
+      ${renderDetailGrid(visibleEntries)}
+    </details>
+  `;
+}
+
+function renderRecordCard(item, {title = "", status = "", hiddenKeys = [], body = "", chips = [], reference = "", referenceLabel = "Job reference", references = []} = {}) {
   const cardTitle = title || recordTitle(item);
   const statusText = status || item?.status || item?.delivery_state || "";
   const details = renderDetailGrid(recordDetailEntries(item, hiddenKeys));
   const chipRow = chips.length ? detailChipRow(chips) : "";
+  const referenceEntries = references.length
+    ? references
+    : [[referenceLabel, reference]];
+  const referenceMarkup = renderReferenceDisclosure(
+    referenceLabel,
+    referenceEntries,
+  );
   return `
     <article class="record-card">
       <div class="record-card-header">
         <div><h4>${escapeHtml(formatLookupValue(cardTitle))}</h4></div>
-        ${statusText ? `<span class="badge success">${escapeHtml(formatLookupValue(statusText))}</span>` : ""}
+        ${statusText ? `<span class="${badgeClass(statusText)}">${escapeHtml(formatLookupLabel(statusText))}</span>` : ""}
       </div>
       ${body ? `<p class="character-prose">${escapeHtml(formatCharacterProse(body))}</p>` : ""}
       ${chipRow}
+      ${referenceMarkup}
       ${details}
     </article>
   `;
-}
-
-function promptBodyBlock(label, value) {
-  return `
-    <section class="prompt-body">
-      <h4>${escapeHtml(formatLookupLabel(label))}</h4>
-      <pre class="prompt-content">${escapeHtml(formatLookupValue(value))}</pre>
-    </section>
-  `;
-}
-
-function renderPromptPanelCards(target, panel, {emptyText = "No prompt context is available."} = {}) {
-  const element = typeof target === "string" ? qs(target) : target;
-  if (!element) return;
-  if (!panel || panel.status === "needs_input" || panel.status === "unavailable") {
-    renderPanelState(element, panel || {status: "needs_input", reason: emptyText});
-    return;
-  }
-  const bodies = [];
-  const content = panel.content;
-  if (content !== null && content !== undefined && content !== "") {
-    if (typeof content === "object" && !Array.isArray(content)) {
-      Object.entries(content).forEach(([key, value]) => {
-        bodies.push(promptBodyBlock(key, value));
-      });
-    } else {
-      bodies.push(promptBodyBlock("content", content));
-    }
-  }
-  panelItems(panel).forEach((item, index) => {
-    const label = item?.source || item?.episode_id || item?.claim || `item ${index + 1}`;
-    bodies.push(promptBodyBlock(label, item));
-  });
-  const metadataEntries = ["panel_contract", "source", "turn_count", "continuity", "selected_count", "candidate_count", "scope_order", "scope_summary", "projection_owner"]
-    .map((key) => [key, panel[key]])
-    .filter(([, value]) => value !== null && value !== undefined && value !== "");
-  if (!bodies.length && !metadataEntries.length) {
-    renderPanelState(element, {status: panel.status || "empty", reason: panel.reason || emptyText, generated_at: panel.generated_at || ""});
-    return;
-  }
-  const metadata = metadataEntries.length ? `<section class="prompt-meta">${renderDetailGrid(metadataEntries)}</section>` : "";
-  setHtml(element, `${bodies.join("")}${metadata}`);
-}
-
-function renderPromptPanel(target, panel, {emptyText = "No prompt context is available."} = {}) {
-  const element = typeof target === "string" ? qs(target) : target;
-  if (!element) return;
-  if (!isTableBody(element)) {
-    renderPromptPanelCards(element, panel, {emptyText});
-    return;
-  }
-  if (!panel || panel.status === "needs_input" || panel.status === "unavailable") {
-    renderPanelState(element, panel || {status: "needs_input", reason: emptyText});
-    return;
-  }
-  const content = panel.content;
-  const rows = [];
-  if (content !== null && content !== undefined && content !== "") {
-    if (typeof content === "object") {
-      Object.entries(content).forEach(([key, value]) => {
-        rows.push(`<tr><td>${escapeHtml(formatLookupLabel(key))}</td><td><pre class="prompt-content">${escapeHtml(formatLookupValue(value))}</pre></td></tr>`);
-      });
-    } else {
-      rows.push(`<tr><td>content</td><td><pre class="prompt-content">${escapeHtml(content)}</pre></td></tr>`);
-    }
-  }
-  panelItems(panel).forEach((item) => {
-    Object.entries(item)
-      .filter(([, value]) => value !== null && value !== undefined && value !== "")
-      .forEach(([key, value]) => {
-        rows.push(`<tr><td>${escapeHtml(formatLookupLabel(key))}</td><td>${escapeHtml(formatLookupValue(value))}</td></tr>`);
-      });
-  });
-  ["panel_contract", "source", "turn_count", "continuity", "selected_count", "candidate_count", "scope_order", "scope_summary", "projection_owner"].forEach((key) => {
-    const value = panel[key];
-    if (value !== null && value !== undefined && value !== "") {
-      rows.push(`<tr><td>${escapeHtml(formatLookupLabel(key))}</td><td>${escapeHtml(formatLookupValue(value))}</td></tr>`);
-    }
-  });
-  if (!rows.length) {
-    renderPanelState(element, {status: panel.status || "empty", reason: panel.reason || emptyText, generated_at: panel.generated_at || ""});
-    return;
-  }
-  setHtml(element, rows.join(""));
-}
-
-function renderOperationalCards(target, panel, {emptyText = "No backing rows are available."} = {}) {
-  const element = typeof target === "string" ? qs(target) : target;
-  if (!element) return;
-  const items = panelItems(panel);
-  const metadataEntries = ["panel_contract", "projection_owner"]
-    .map((key) => [key, panel ? panel[key] : ""])
-    .filter(([, value]) => value !== null && value !== undefined && value !== "");
-  const metadata = metadataEntries.length ? `<section class="prompt-meta">${renderDetailGrid(metadataEntries)}</section>` : "";
-  if (!items.length) {
-    const reason = panelEmptyText(panel, emptyText);
-    setHtml(element, `${metadata}<p class="panel-empty">${escapeHtml(reason)}</p>`);
-    return;
-  }
-  const cards = items.map((item) => renderRecordCard(item, {
-    hiddenKeys: ["raw_llm_output", "source_memory_ids", "source_context", "payload", "idempotency_key", "artifact_text", "task_brief"],
-  }));
-  setHtml(element, `${metadata}${cards.join("")}`);
-}
-
-function renderOperationalPanel(target, panel, {emptyText = "No backing rows are available."} = {}) {
-  const element = typeof target === "string" ? qs(target) : target;
-  if (!element) return;
-  if (!isTableBody(element)) {
-    renderOperationalCards(element, panel, {emptyText});
-    return;
-  }
-  const items = panelItems(panel);
-  const metadataRows = ["panel_contract", "projection_owner"].map((key) => {
-    const value = panel ? panel[key] : "";
-    if (value === null || value === undefined || value === "") return "";
-    return `<tr><td>${escapeHtml(formatLookupLabel(key))}</td><td>${escapeHtml(formatLookupValue(value))}</td></tr>`;
-  }).filter(Boolean);
-  if (!items.length) {
-    const reason = panelEmptyText(panel, emptyText);
-    setHtml(element, metadataRows.concat(
-      `<tr><td>Status</td><td>${escapeHtml(reason)}</td></tr>`,
-    ).join(""));
-    return;
-  }
-  const rowHtml = items.map((item) => {
-    const rows = Object.entries(item)
-      .filter(([, value]) => value !== null && value !== undefined && value !== "")
-      .map(([key, value]) => `<tr><td>${escapeHtml(formatLookupLabel(key))}</td><td>${escapeHtml(formatLookupValue(value))}</td></tr>`);
-    return rows.join("");
-  });
-  setHtml(element, metadataRows.concat(rowHtml).join(""));
 }
 
 function renderReadableLookupValue(value) {
@@ -2264,11 +2454,10 @@ function renderReadableLookupTable(target, {items = [], emptyText = "No rows ava
   }).join(""));
 }
 
-function renderPanelEmptyContent(target, {emptyText = "No rows available.", redaction = {}} = {}) {
+function renderPanelEmptyContent(target, {emptyText = "No rows available."} = {}) {
   const element = typeof target === "string" ? qs(target) : target;
   if (!element) return;
-  const redactionNote = redaction.model_inputs ? ` Model inputs ${redaction.model_inputs}.` : "";
-  setHtml(element, `<p class="panel-empty">${escapeHtml(emptyText + redactionNote)}</p>`);
+  setHtml(element, `<p class="panel-empty">${escapeHtml(emptyText)}</p>`);
 }
 
 function firstObjectItem(items) {
@@ -2413,38 +2602,29 @@ function renderCharacterSelfImagePanel(target, {items = [], emptyText = "No self
     return;
   }
   const item = firstObjectItem(items);
-  const historicalSummary = item.historical_summary || item.current_self_concept || item.summary || "";
-  const recentEntries = recentWindowEntries(item.recent_window);
-  const milestoneEntries = recentWindowEntries(item.milestones);
+  const selfConcept = item.self_concept || "";
+  const growthEdges = Array.isArray(item.current_growth_edges)
+    ? item.current_growth_edges
+    : [];
   setHtml(element, `
     <section class="character-summary">
-      ${recentEntries.length ? `
+      ${selfConcept ? `
         <section class="detail-section">
-          <h5>Recent window</h5>
-          ${renderTimeline(recentEntries)}
+          <h5>Current self-concept</h5>
+          <p class="character-prose">${escapeHtml(formatCharacterProse(selfConcept))}</p>
         </section>
       ` : ""}
-      ${milestoneEntries.length ? `
-        <section class="detail-section">
-          <h5>Milestones</h5>
-          ${renderTimeline(milestoneEntries)}
-        </section>
-      ` : ""}
-      ${historicalSummary ? `
-        <section class="detail-section">
-          <h5>Long-term self-image</h5>
-          <p class="character-prose">${escapeHtml(formatCharacterProse(historicalSummary))}</p>
-        </section>
-      ` : ""}
-      ${detailChipRow([
-        ["last updated", item.last_updated || item.updated_at],
-        ["synthesis count", item.synthesis_count],
-      ])}
+      <section class="detail-section">
+        <h5>Current growth edges</h5>
+        ${growthEdges.length
+          ? `<ul class="semantic-list">${growthEdges.map((edge) => `<li>${escapeHtml(formatCharacterProse(edge))}</li>`).join("")}</ul>`
+          : '<p class="detail-muted">No current growth edges.</p>'}
+      </section>
     </section>
   `);
 }
 
-function renderCharacterGrowthPanel(target, {items = [], emptyText = "No growth traits.", redaction = {}} = {}) {
+function renderIdentityGrowthPanel(target, {items = [], emptyText = "No growth activity.", redaction = {}} = {}) {
   const element = typeof target === "string" ? qs(target) : target;
   if (!element) return;
   if (!items.length) {
@@ -2452,27 +2632,157 @@ function renderCharacterGrowthPanel(target, {items = [], emptyText = "No growth 
     return;
   }
   setHtml(element, items.map((item) => {
-    const title = item.trait_name || item.growth_axis || "Growth trait";
-    const guidance = item.guidance || item.summary || "";
-    return `
-      <article class="trait-card">
-        <div class="trait-header">
-          <div>
-            <h4>${escapeHtml(formatLookupValue(title))}</h4>
-            ${item.updated_at ? `<span class="detail-muted">updated ${escapeHtml(formatLookupValue(item.updated_at))}</span>` : ""}
-          </div>
-          ${item.status ? `<span class="badge success">${escapeHtml(formatLookupValue(item.status))}</span>` : ""}
-        </div>
-        ${detailChipRow([
-          ["axis", item.growth_axis],
-          ["maturity", item.maturity_band],
-          ["evidence", item.evidence_count],
-          ["strength", formatTraitStrength(item.strength)],
-        ])}
-        ${guidance ? `<p class="character-prose">${escapeHtml(formatCharacterProse(guidance))}</p>` : ""}
-      </article>
-    `;
+    if (item.kind === "identity_candidate") {
+      return renderRecordCard(item, {
+        title: `${formatLookupLabel(item.change_kind || "identity")} candidate`,
+        status: item.status || "",
+        hiddenKeys: [
+          "kind",
+          "status",
+          "change_kind",
+          "proposed_paths",
+          "root_count",
+          "local_date_count",
+          "updated_at",
+        ],
+        body: (item.proposed_paths || []).map(formatLookupLabel).join(", "),
+        chips: [
+          ["base revision", item.base_revision_number],
+          ["roots", item.root_count],
+          ["local dates", item.local_date_count],
+          ["updated", item.updated_at],
+        ],
+      });
+    }
+    return renderRecordCard(item, {
+      title: `${formatLookupLabel(item.run_kind || "identity")} growth run`,
+      status: item.disposition || item.lifecycle_state || "",
+      hiddenKeys: [
+        "kind",
+        "run_kind",
+        "disposition",
+        "lifecycle_state",
+        "latest_reason_code",
+        "started_at",
+        "completed_at",
+      ],
+      body: item.latest_reason_code
+        ? `Latest reason: ${formatLookupLabel(item.latest_reason_code)}`
+        : "",
+      chips: [
+        ["lifecycle", item.lifecycle_state],
+        ["base revision", item.base_revision_number],
+        ["roots", item.root_count],
+        ["started", item.started_at],
+        ["completed", item.completed_at],
+      ],
+    });
   }).join(""));
+}
+
+const IDENTITY_HEALTH_LABELS = {
+  healthy_idle: "healthy idle",
+  waiting_for_evidence: "waiting for evidence",
+  semantic_rejection: "semantic rejection",
+  promotion_ready: "promotion ready",
+  awaiting_consumption: "awaiting consumption",
+  healthy_active: "healthy active",
+  pipeline_error: "pipeline error",
+  consumption_error: "consumption error",
+};
+
+function identityHealthLabel(value) {
+  return IDENTITY_HEALTH_LABELS[value] || formatLookupLabel(value || "unknown");
+}
+
+function renderIdentityHealth(item) {
+  return `
+    <article class="identity-health-card">
+      <div class="trait-header">
+        <div>
+          <h4>Growth pipeline health</h4>
+          <span class="detail-muted">Latest reason: ${escapeHtml(formatLookupLabel(item.latest_reason_code || "not routed"))}</span>
+        </div>
+        <span class="${badgeClass(item.state || "")}">${escapeHtml(identityHealthLabel(item.state))}</span>
+      </div>
+      ${detailChipRow([
+        ["latest revision", item.latest_revision_number],
+        ["latest consumed", item.latest_consumed_revision_number],
+        ["roots", item.root_count],
+        ["local dates", item.local_date_count],
+      ])}
+      ${renderDetailGrid([
+        ["routed", item.routed_count],
+        ["no change", item.no_change_count],
+        ["emerging", item.emerging_candidate_count],
+        ["ready", item.ready_candidate_count],
+        ["rejected", item.rejected_count],
+        ["failed", item.failed_count],
+        ["promoted", item.promoted_count],
+        ["consumed", item.consumed_count],
+      ])}
+    </article>
+  `;
+}
+
+function renderIdentityRevision(item) {
+  const diffRows = Array.isArray(item.change_diff) ? item.change_diff : [];
+  const currentLabel = item.is_current ? "current" : `revision ${item.revision_number}`;
+  const diffContent = diffRows.length
+    ? diffRows.map((row) => `
+        <li>
+          <strong>${escapeHtml(formatLookupLabel(row.path || ""))}</strong>
+          <span>${escapeHtml(formatLookupLabel(row.value_kind || "value"))}</span>
+        </li>
+      `).join("")
+    : '<li class="detail-muted">Seed revision; no changed paths.</li>';
+  return `
+    <details class="identity-revision-card"${item.is_current ? " open" : ""}>
+      <summary>
+        <span>${escapeHtml(formatLookupLabel(item.revision_kind || "identity revision"))}</span>
+        <span class="${item.is_current ? "badge success" : "badge"}">${escapeHtml(currentLabel)}</span>
+      </summary>
+      <div class="identity-revision-content">
+        ${detailChipRow([
+          ["base", item.base_revision_number],
+          ["roots", item.evidence_root_count],
+          ["local dates", item.evidence_local_date_count],
+          ["created", item.created_at],
+        ])}
+        ${item.evidence_summary
+          ? `<p class="character-prose">${escapeHtml(formatCharacterProse(item.evidence_summary))}</p>`
+          : ""}
+        <section class="detail-section">
+          <h5>Redacted diff</h5>
+          <ul class="identity-diff-list">${diffContent}</ul>
+        </section>
+        ${renderDetailGrid([
+          ["source scopes", item.source_scope_kinds],
+          ["proposal confidence", item.proposal_confidence],
+          ["review confidence", item.review_confidence],
+        ])}
+      </div>
+    </details>
+  `;
+}
+
+function renderIdentityLineagePanel(target, {items = [], emptyText = "No identity lineage.", redaction = {}} = {}) {
+  const element = typeof target === "string" ? qs(target) : target;
+  if (!element) return;
+  if (!items.length) {
+    renderPanelEmptyContent(element, {emptyText, redaction});
+    return;
+  }
+  const health = items.find((item) => item.kind === "identity_growth_health");
+  const revisions = items.filter((item) => item.kind === "identity_revision");
+  setHtml(element, `
+    ${health ? renderIdentityHealth(health) : '<p class="panel-empty">Identity health is unavailable.</p>'}
+    <div class="identity-revision-list">
+      ${revisions.length
+        ? revisions.map(renderIdentityRevision).join("")
+        : '<p class="panel-empty">No identity revisions are available.</p>'}
+    </div>
+  `);
 }
 
 function renderMemoryUnitRows(target, {items = [], emptyText = "No memory rows available.", redaction = {}} = {}) {
@@ -2489,7 +2799,12 @@ function renderMemoryUnitRows(target, {items = [], emptyText = "No memory rows a
   if (!isTableBody(element)) {
     setHtml(element, items.map((item) => {
       const typeText = formatLookupLabel(item.unit_type || "memory");
-      const factText = formatLookupValue(item.fact || item.subjective_appraisal || item.relationship_signal);
+      const bodyKey = item.fact
+        ? "fact"
+        : item.subjective_appraisal
+          ? "subjective_appraisal"
+          : "relationship_signal";
+      const factText = formatLookupValue(item[bodyKey]);
       const chips = [
         ["status", item.status],
         ["updated", item.updated_at],
@@ -2499,8 +2814,8 @@ function renderMemoryUnitRows(target, {items = [], emptyText = "No memory rows a
         ["due", item.due_at],
       ];
       const details = {
-        relationship_signal: item.relationship_signal,
-        subjective_appraisal: item.subjective_appraisal,
+        relationship_signal: bodyKey === "relationship_signal" ? "" : item.relationship_signal,
+        subjective_appraisal: bodyKey === "subjective_appraisal" ? "" : item.subjective_appraisal,
       };
       return renderRecordCard(details, {
         title: typeText || "memory",
@@ -2515,15 +2830,24 @@ function renderMemoryUnitRows(target, {items = [], emptyText = "No memory rows a
   setHtml(element, items.map((item) => {
     const typeText = formatLookupLabel(item.unit_type || "memory");
     const statusText = item.status ? formatLookupLabel(item.status) : "";
-    const factText = formatLookupValue(item.fact || item.subjective_appraisal || item.relationship_signal);
+    const bodyKey = item.fact
+      ? "fact"
+      : item.subjective_appraisal
+        ? "subjective_appraisal"
+        : "relationship_signal";
+    const factText = formatLookupValue(item[bodyKey]);
     const primaryMeta = memoryMeta([
       statusText,
       item.updated_at ? `updated: ${formatLookupValue(item.updated_at)}` : "",
       item.last_seen_at && !item.updated_at ? `last seen: ${formatLookupValue(item.last_seen_at)}` : "",
     ]);
     const detailMeta = memoryMeta([
-      item.relationship_signal ? `relationship: ${formatLookupValue(item.relationship_signal)}` : "",
-      item.subjective_appraisal ? `appraisal: ${formatLookupValue(item.subjective_appraisal)}` : "",
+      item.relationship_signal && bodyKey !== "relationship_signal"
+        ? `relationship: ${formatLookupValue(item.relationship_signal)}`
+        : "",
+      item.subjective_appraisal && bodyKey !== "subjective_appraisal"
+        ? `appraisal: ${formatLookupValue(item.subjective_appraisal)}`
+        : "",
       item.due_at ? `due: ${formatLookupValue(item.due_at)}` : "",
     ]);
     return `
@@ -2582,209 +2906,742 @@ function renderStyleOverlayPanel(target, panel, {scopeLabel = "style"} = {}) {
   renderStyleOverlayRows(target, {items, scopeLabel});
 }
 
+function renderPanelCards(target, panel, cards, emptyText) {
+  const items = panelItems(panel);
+  if (!items.length) {
+    renderPanelState(target, {
+      status: panel?.status || "empty",
+      reason: panelEmptyText(panel, emptyText),
+    });
+    return;
+  }
+  setHtml(target, cards(items).join(""));
+}
+
+function cognitionValueMarkup(value) {
+  if (Array.isArray(value)) {
+    if (!value.length) return "";
+    return value.map((item) => {
+      if (item && typeof item === "object") {
+        return `<article class="record-card">${renderDetailGrid(Object.entries(item))}</article>`;
+      }
+      return `<p class="character-prose">${escapeHtml(formatLookupValue(item))}</p>`;
+    }).join("");
+  }
+  if (value && typeof value === "object") {
+    return renderDetailGrid(Object.entries(value));
+  }
+  return `<p class="character-prose">${escapeHtml(formatLookupValue(value))}</p>`;
+}
+
+function renderCognitionStatePanel(target, panel, emptyText) {
+  const items = panelItems(panel);
+  if (!items.length) {
+    renderPanelState(target, {status: panel?.status || "empty", reason: panelEmptyText(panel, emptyText)});
+    return;
+  }
+  const emptyItems = items.filter((item) => cognitionValueIsEmpty(item.value));
+  const populatedItems = items.filter((item) => !cognitionValueIsEmpty(item.value));
+  const populatedMarkup = populatedItems.map((item) => `
+    <section class="detail-section">
+      <h5>${escapeHtml(formatLookupLabel(item.key))}</h5>
+      ${cognitionValueMarkup(item.value)}
+    </section>
+  `).join("");
+  const emptyMarkup = emptyItems.length ? `
+    <section class="detail-section">
+      <h5>Currently empty</h5>
+      <p class="panel-empty">${escapeHtml(emptyItems.map((item) => formatLookupLabel(item.key)).join(", "))}</p>
+    </section>
+  ` : "";
+  setHtml(target, populatedMarkup + emptyMarkup);
+}
+
+function renderCharacterOperationalPosturePanel(target, panel) {
+  const items = panelItems(panel);
+  if (!items.length) {
+    renderPanelState(target, {
+      status: panel?.status || "empty",
+      reason: panelEmptyText(panel, "No native character operational posture is available."),
+    });
+    return;
+  }
+  const posture = items[0] || {};
+  const latest = posture.latest_context || {};
+  const context = latest.context || {};
+  const health = context.health || {};
+  const sections = [
+    renderOperationalPostureView("Persisted posture", posture.persisted || {}, false),
+    renderOperationalPostureView("Elapsed-effective posture", posture.effective || {}, Boolean(posture.fading_changed)),
+    renderOperationalConsumption(latest, context),
+    renderOperationalHealth(health),
+  ].filter(Boolean);
+  setHtml(target, sections.join(""));
+}
+
+function renderOperationalPostureView(title, view, fadingChanged) {
+  if (!view || typeof view !== "object" || !Object.keys(view).length) return "";
+  const affect = Array.isArray(view.affect) ? view.affect : [];
+  const pressures = Array.isArray(view.pressures) ? view.pressures : [];
+  return `
+    <section class="operational-posture-section">
+      <div class="trait-header">
+        <div><h4>${escapeHtml(title)}</h4><span class="detail-muted">source ${escapeHtml(formatLookupValue(view.source_updated_at))} · effective ${escapeHtml(formatLookupValue(view.effective_at))}</span></div>
+        <span class="${badgeClass(fadingChanged ? "partial" : "available")}">${escapeHtml(fadingChanged ? "ordinary fading changed" : "unchanged")}</span>
+      </div>
+      ${detailChipRow([["source digest", view.source_digest], ["view digest", view.view_digest]])}
+      ${renderOperationalRows("Native affect", affect, "No active or fading affect rows.")}
+      ${renderOperationalRows("Pressure", pressures, "No bounded pressure rows.")}
+    </section>
+  `;
+}
+
+function renderOperationalRows(title, rows, emptyText) {
+  if (!rows.length) {
+    return `<section class="detail-section"><h5>${escapeHtml(title)}</h5><p class="detail-muted">${escapeHtml(emptyText)}</p></section>`;
+  }
+  const fields = [...new Set(rows.flatMap((row) => Object.keys(row || {})))];
+  return `
+    <section class="detail-section">
+      <h5>${escapeHtml(title)}</h5>
+      <div class="table-wrap"><table><thead><tr>${fields.map((field) => `<th>${escapeHtml(formatLookupLabel(field))}</th>`).join("")}</tr></thead><tbody>
+        ${rows.map((row) => `<tr>${fields.map((field) => `<td>${escapeHtml(formatLookupValue(row?.[field]))}</td>`).join("")}</tr>`).join("")}
+      </tbody></table></div>
+    </section>
+  `;
+}
+
+function renderOperationalConsumption(latest, context) {
+  const status = latest.status || context.status || "not_reported";
+  const stages = [
+    ["Settled relevance", context.settled_relevance],
+    ["Cognition", context.cognition],
+    ["Surface", context.surface],
+  ].filter(([, stage]) => stage && typeof stage === "object" && Object.keys(stage).length);
+  return `
+    <section class="operational-posture-section">
+      <div class="trait-header"><div><h4>Latest consumed context</h4><span class="detail-muted">Source-owned graph projection; no console reconstruction.</span></div><span class="${badgeClass(status)}">${escapeHtml(formatLookupLabel(status))}</span></div>
+      ${detailChipRow([["run", latest.run_id], ["generated", latest.generated_at], ["reason", latest.reason_code]])}
+      ${stages.length ? stages.map(([label, stage]) => `
+        <section class="detail-section"><h5>${escapeHtml(label)}</h5>${renderDetailGrid(Object.entries(stage))}</section>
+      `).join("") : `<p class="detail-muted">${escapeHtml(latest.reason_code ? formatLookupLabel(latest.reason_code) : "The latest graph has not reported consumed context.")}</p>`}
+    </section>
+  `;
+}
+
+function renderOperationalHealth(health) {
+  if (!health || typeof health !== "object" || !Object.keys(health).length) return "";
+  return `
+    <section class="operational-posture-section">
+      <h4>Predecessor and stage health</h4>
+      ${renderDetailGrid(Object.entries(health))}
+    </section>
+  `;
+}
+
+function cognitionValueIsEmpty(value) {
+  if (Array.isArray(value)) return value.length === 0;
+  if (value && typeof value === "object") return Object.keys(value).length === 0;
+  return value === null || value === undefined || value === "";
+}
+
+function renderContinuityPanel(target, panel, emptyText) {
+  renderPanelCards(target, panel, (items) => items.map((item, index) => {
+    const titleKey = ["title", "source"].find((key) => item[key]) || "";
+    const bodyKey = ["summary", "content", "claim", "context"].find(
+      (key) => item[key],
+    ) || "";
+    return renderRecordCard(item, {
+      title: titleKey ? item[titleKey] : `Continuity ${index + 1}`,
+      status: item.status || "",
+      hiddenKeys: ["status", titleKey, bodyKey].filter(Boolean),
+      body: bodyKey ? item[bodyKey] : "",
+    });
+  }), emptyText);
+}
+
+function renderUserProfilePanel(panel) {
+  renderPanelCards("#user-profile-table", panel, (items) => items.map((item) => {
+    const accounts = Array.isArray(item.accounts) ? item.accounts : [];
+    return `
+      <article class="record-card">
+        <div class="record-card-header"><h4>${escapeHtml(formatLookupValue(item.display_name || "User accounts"))}</h4></div>
+        ${detailChipRow([
+          ["accounts", item.account_count],
+          ["aliases", item.alias_count],
+          ["updated", item.updated_at],
+          ["global_user_id", item.global_user_id],
+        ])}
+        ${accounts.map((account) => `
+          <div class="detail-kv">
+            <span class="detail-label">${escapeHtml(formatLookupValue(account.platform))}</span>
+            <span class="detail-value">${escapeHtml(
+              account.display_name && account.display_name !== account.platform_user_id
+                ? `${formatLookupValue(account.display_name)} · ${formatLookupValue(account.platform_user_id)}`
+                : formatLookupValue(account.platform_user_id),
+            )}</span>
+          </div>
+        `).join("")}
+      </article>
+    `;
+  }), "No user profile fields are available.");
+}
+
+function renderRelationshipPanel(panel) {
+  const items = panelItems(panel);
+  if (!items.length) {
+    setHtml("#user-relationship-table", `<tr><td colspan="3">${escapeHtml(panelEmptyText(panel, "No native V2 relationship state is available."))}</td></tr>`);
+    return;
+  }
+  const axisRows = items.map((item) => `
+    <tr>
+      <td>${escapeHtml(formatLookupLabel(item.axis))}</td>
+      <td>${escapeHtml(formatLookupValue(item.value))}</td>
+      <td>${escapeHtml(formatLookupValue(item.band))}</td>
+    </tr>
+  `).join("");
+  const meta = `Evidence ${formatLookupValue(panel.evidence_count)} · updated ${formatLookupValue(panel.updated_at)}`;
+  setHtml("#user-relationship-table", `${axisRows}<tr><td colspan="3"><span class="table-meta">${escapeHtml(meta)}</span></td></tr>`);
+}
+
+function renderRelationshipOperationalPanel(panel) {
+  const items = panelItems(panel);
+  if (!items.length) {
+    renderPanelState("#user-relationship-operational-table", {
+      status: panel?.status || "empty",
+      reason: panelEmptyText(panel, "No causal relationship context is available."),
+    });
+    return;
+  }
+  const context = items[0] || {};
+  const axes = context.axes && typeof context.axes === "object"
+    ? Object.entries(context.axes)
+    : [];
+  const causalRows = Array.isArray(context.causal_context) ? context.causal_context : [];
+  const affectRows = Array.isArray(context.affect) ? context.affect : [];
+  setHtml("#user-relationship-operational-table", `
+    <section class="operational-posture-section">
+      <div class="detail-section"><h5>Relationship axes</h5>${axes.length ? renderDetailGrid(axes) : '<p class="detail-muted">No projected axes.</p>'}</div>
+      ${renderOperationalRows("Causal rows", causalRows, "No causal rows are active.")}
+      ${renderOperationalRows("Relationship affect", affectRows, "No relationship-rooted affect rows are active.")}
+      ${detailChipRow([["relationship freshness", context.relationship_freshness], ["evidence freshness", context.evidence_freshness]])}
+    </section>
+  `);
+}
+
+function renderStylePanel(target, panel, scopeLabel) {
+  renderPanelCards(target, panel, (items) => items.map((item, index) => {
+    if (item.consumer_role) {
+      const guidance = item.guidance && typeof item.guidance === "object"
+        ? Object.entries(item.guidance)
+        : [];
+      return `
+        <article class="record-card">
+          <div class="record-card-header"><h4>${escapeHtml(`${formatLookupLabel(item.consumer_role)} · ${formatLookupLabel(item.source || scopeLabel)}`)}</h4><span class="${badgeClass(item.status || "")}">${escapeHtml(formatLookupLabel(item.status || "not reported"))}</span></div>
+          ${detailChipRow([["revision", item.revision], ["confidence", item.confidence]])}
+          ${guidance.length ? guidance.map(([field, values]) => `<section class="detail-section"><h5>${escapeHtml(formatLookupLabel(field))}</h5><p class="character-prose">${escapeHtml(formatLookupValue(values))}</p></section>`).join("") : '<p class="detail-muted">No declared guidance for this projection.</p>'}
+        </article>
+      `;
+    }
+    return renderRecordCard(item, {
+      title: item.field || item.scope || `${scopeLabel} ${index + 1}`,
+      hiddenKeys: ["field", "scope", "guidelines", "confidence"],
+      body: item.guidelines || "",
+      chips: [["scope", item.scope], ["confidence", item.confidence]],
+    });
+  }), `No ${scopeLabel} guidance is available.`);
+}
+
+function renderUserDirectory(payload) {
+  const items = Array.isArray(payload.items) ? payload.items : [];
+  state.userDirectory = items;
+  setEntityStatus("#user-directory-status", payload.status || "empty");
+  const rows = items.flatMap((item) => {
+    const accounts = Array.isArray(item.accounts) ? item.accounts : [];
+    return accounts.map((account) => `
+      <tr>
+        <td>
+          <span class="table-primary">${escapeHtml(formatLookupValue(`${account.platform}:${account.platform_user_id}`))}</span>
+          ${item.global_user_id ? `<span class="table-meta">${escapeHtml(formatLookupValue(`global_user_id: ${item.global_user_id}`))}</span>` : ""}
+        </td>
+        <td>${escapeHtml(formatLookupValue(account.display_name || item.display_name))}</td>
+        <td>${escapeHtml(formatLookupValue(item.alias_count))}</td>
+        <td>${escapeHtml(formatLookupValue(item.updated_at))}</td>
+        <td><button class="btn" type="button" data-user-platform="${escapeHtml(account.platform)}" data-user-id="${escapeHtml(account.platform_user_id)}">Inspect</button></td>
+      </tr>
+    `);
+  });
+  setHtml("#user-directory-table", rows.length
+    ? rows.join("")
+    : `<tr><td colspan="5">${escapeHtml(payload.reason || "No recent user profiles are available.")}</td></tr>`);
+}
+
+function renderGroupDirectory(payload) {
+  const items = Array.isArray(payload.items) ? payload.items : [];
+  state.groupDirectory = items;
+  setEntityStatus("#group-directory-status", payload.status || "empty");
+  setHtml("#group-directory-table", items.length
+    ? items.map((item) => `
+      <tr>
+        <td>${escapeHtml(formatLookupValue(item.channel_name || item.group_id))}</td>
+        <td>${escapeHtml(formatLookupValue(item.platform))}</td>
+        <td>${escapeHtml(formatLookupValue(item.message_count))}</td>
+        <td>${escapeHtml(formatLookupValue(item.participant_count))}</td>
+        <td>${escapeHtml(formatLookupValue(item.last_activity_at))}</td>
+        <td><button class="btn" type="button" data-group-platform="${escapeHtml(item.platform)}" data-group-id="${escapeHtml(item.group_id)}">Inspect</button></td>
+      </tr>
+    `).join("")
+    : `<tr><td colspan="6">${escapeHtml(payload.reason || "No recent group activity is available.")}</td></tr>`);
+}
+
+function renderGroupActivityPanel(panel) {
+  renderPanelCards("#group-activity-table", panel, (items) => items.map((item) => renderRecordCard(item, {
+    title: item.channel_name || item.group_id || "Group activity",
+    hiddenKeys: ["channel_name", "group_id", "platform", "last_activity_at", "message_count", "participant_count"],
+    chips: [
+      ["platform", item.platform],
+      ["messages", item.message_count],
+      ["participants", item.participant_count],
+      ["last activity", item.last_activity_at],
+    ],
+  })), "No activity matched the selected group.");
+}
+
+function renderGroupReviewPanel(panel) {
+  renderPanelCards("#group-review-table", panel, (items) => items.map((item) => {
+    const readableItem = {
+      ...item,
+      skip_reason: item.skip_reason ? formatLookupLabel(item.skip_reason) : "",
+    };
+    return renderRecordCard(readableItem, {
+      title: "Latest review",
+      status: item.status || "",
+      hiddenKeys: ["status", "window_start", "window_end", "reviewed_at"],
+      chips: [
+        ["from", item.window_start],
+        ["to", item.window_end],
+        ["reviewed", item.reviewed_at],
+      ],
+    });
+  }), "No terminal review windows matched this group.");
+}
+
+function renderCalendarSummary(panel) {
+  const summary = firstObjectItem(panelItems(panel));
+  setEntityStatus("#calendar-summary-status", panel?.status || "unavailable");
+  if (!Object.keys(summary).length) {
+    setHtml("#calendar-summary-table", `<tr><td>Status</td><td>${escapeHtml(panelEmptyText(panel, "Calendar counts are unavailable."))}</td></tr>`);
+    return;
+  }
+  const rows = [
+    ["Active schedules", summary.active_schedules],
+    ["Upcoming", summary.upcoming],
+    ["Overdue", summary.overdue],
+    ...[
+      ["Recent running", summary.running],
+      ["Recent completed", summary.completed],
+      ["Recent failed", summary.failed],
+      ["Recent skipped", summary.skipped],
+    ].filter(([, value]) => Number(value) > 0),
+  ];
+  setHtml("#calendar-summary-table", rows.map(([label, value]) => `<tr><td>${escapeHtml(label)}</td><td>${escapeHtml(formatLookupValue(value))}</td></tr>`).join(""));
+}
+
+function renderCalendarSchedules(panel) {
+  setEntityStatus("#calendar-schedules-status", panel?.status || "empty");
+  renderPanelCards("#calendar-schedules-table", panel, (items) => items.map((item) => renderRecordCard(item, {
+    title: item.trigger_kind ? formatLookupLabel(item.trigger_kind) : "Schedule",
+    status: item.status || "",
+    chips: [
+      ["starts", item.start_at],
+      ["next run", item.next_run_at],
+      ["updated", item.updated_at],
+    ],
+    hiddenKeys: [
+      "calendar_schedule_id",
+      "trigger_kind",
+      "status",
+      "start_at",
+      "next_run_at",
+      "updated_at",
+    ],
+    referenceLabel: "Schedule reference",
+    references: [["Schedule reference", item.calendar_schedule_id]],
+  })), "No schedule definitions are available.");
+}
+
+function renderCalendarRuns(panel) {
+  setEntityStatus("#calendar-runs-status", panel?.status || "empty");
+  renderPanelCards("#calendar-runs-table", panel, (items) => items.map((item) => renderRecordCard(item, {
+    title: item.trigger_kind ? formatLookupLabel(item.trigger_kind) : "Calendar run",
+    status: item.status || "",
+    hiddenKeys: [
+      "calendar_run_id",
+      "trigger_kind",
+      "status",
+      "due_at",
+      "completed_at",
+      "failed_at",
+      "skipped_at",
+      "updated_at",
+    ],
+    chips: [
+      ["due", item.due_at],
+      ["completed", item.completed_at],
+      ["failed", item.failed_at],
+      ["skipped", item.skipped_at],
+      [
+        "updated",
+        [item.completed_at, item.failed_at, item.skipped_at].includes(
+          item.updated_at,
+        ) ? "" : item.updated_at,
+      ],
+    ],
+    referenceLabel: "Run reference",
+    references: [["Run reference", item.calendar_run_id]],
+  })), "No recent calendar runs are available.");
+}
+
+function renderBackgroundSummary(panel) {
+  const summary = firstObjectItem(panelItems(panel));
+  setEntityStatus("#background-summary-status", panel?.status || "unavailable");
+  if (!Object.keys(summary).length) {
+    setHtml("#background-summary-table", `<tr><td>Status</td><td>${escapeHtml(panelEmptyText(panel, "Background counts are unavailable."))}</td></tr>`);
+    return;
+  }
+  const rows = [
+    ["Queued", summary.queued],
+    ["Running", summary.running],
+    ...[
+      ["Completed", summary.completed],
+      ["Failed", summary.failed],
+      ["Delivery ready", summary.delivery_ready],
+      ["Deferred", summary.deferred],
+    ].filter(([, value]) => Number(value) > 0),
+  ];
+  setHtml("#background-summary-table", rows.map(([label, value]) => `<tr><td>${escapeHtml(label)}</td><td>${escapeHtml(formatLookupValue(value))}</td></tr>`).join(""));
+}
+
+function renderBackgroundJobs(target, panel, emptyText, showJobReference = false) {
+  renderPanelCards(target, panel, (items) => items.map((item, index) => renderRecordCard(item, {
+    title: item.requester_display_name || item.worker || `Job ${index + 1}`,
+    status: item.status || item.delivery_state || "",
+    hiddenKeys: [
+      "requester_display_name",
+      "worker",
+      "status",
+      "delivery_state",
+      "created_at",
+      "updated_at",
+      "completed_at",
+      ...(showJobReference ? ["background_work_job_id", "job_id"] : []),
+    ],
+    chips: [
+      ["worker", item.worker],
+      ["delivery", item.delivery_state === item.status ? "" : item.delivery_state],
+      ...(target === "#background-jobs-table" ? [] : [
+        ["created", item.created_at],
+        ["completed", item.completed_at],
+        ["updated", item.updated_at === item.completed_at ? "" : item.updated_at],
+      ]),
+    ],
+    references: showJobReference
+      ? [["Job reference", item.background_work_job_id]]
+      : [],
+  })), emptyText);
+}
+
+function renderBackgroundWorkers(panel) {
+  const items = panelItems(panel);
+  setEntityStatus("#background-worker-status", panel?.status || "empty");
+  setHtml("#background-worker-table", items.length
+    ? items.map((item) => `
+      <tr>
+        <td>${escapeHtml(formatOperationalLabel(item.worker_name))}</td>
+        <td>${escapeHtml(formatLookupValue(item.event_count))}</td>
+        <td>${escapeHtml(formatLookupValue(item.processed_count))}</td>
+        <td>${escapeHtml(formatLookupValue(item.succeeded_count))}</td>
+        <td>${escapeHtml(formatLookupValue(item.failed_count))}</td>
+        <td>${escapeHtml(formatLookupValue(item.skipped_count))}</td>
+        <td>${escapeHtml(formatLookupValue(item.deferred_count))}</td>
+        <td>${escapeHtml(formatOperationalLabel(item.last_status))}</td>
+      </tr>
+    `).join("")
+    : `<tr><td colspan="8">${escapeHtml(panelEmptyText(panel, "No background worker activity is available."))}</td></tr>`);
+}
+
+const CHARACTER_PANEL_TARGETS = [
+  "#character-profile-table",
+  "#character-cognition-state-table",
+  "#character-operational-posture-table",
+  "#character-self-image-table",
+  "#character-growth-table",
+  "#character-carry-over-table",
+];
+
+function renderCharacterLoadingState() {
+  setEntityStatus("#character-status", "loading");
+  CHARACTER_PANEL_TARGETS.forEach((target) => {
+    setHtml(target, '<p class="panel-empty">Loading character identity...</p>');
+  });
+}
+
+function renderCharacterErrorState(error) {
+  const reason = error instanceof Error && error.message
+    ? error.message
+    : "request failed";
+  setEntityStatus("#character-status", "unavailable");
+  CHARACTER_PANEL_TARGETS.forEach((target) => {
+    setHtml(
+      target,
+      `<p class="panel-empty">Character identity could not be loaded. ${escapeHtml(reason)}</p>`,
+    );
+  });
+}
+
 async function refreshCharacter() {
-  const payload = await api("/api/entities/character?limit=25");
+  renderCharacterLoadingState();
+  let payload;
+  try {
+    payload = await api("/api/entities/character?limit=25");
+  } catch (error) {
+    renderCharacterErrorState(error);
+    throw error;
+  }
   setEntityStatus("#character-status", payload.status || "unavailable");
   const panels = payload.panels || {};
-  renderPromptPanel("#character-growth-prompt-table", panels.promoted_global_growth_prompt, {
-    emptyText: "No promoted global-growth prompt context.",
-  });
-  renderPromptPanel("#character-carry-over-table", panels.current_carry_over, {
-    emptyText: "No character-global carry-over.",
-  });
-  renderOperationalPanel("#character-growth-runs-table", panels.growth_runs_audit, {
-    emptyText: "No global-growth run audit rows.",
-  });
   renderCharacterProfilePanel("#character-profile-table", {
     items: panelItems(panels.profile),
     emptyText: panelEmptyText(panels.profile, "No character profile rows."),
     redaction: payload.redaction || {},
   });
-  renderLookupTable("#character-state-table", {
-    items: panelItems(panels.state),
-    emptyText: panelEmptyText(panels.state, "No character state rows."),
-    redaction: payload.redaction || {},
-  });
+  renderCognitionStatePanel("#character-cognition-state-table", panels.cognition_state, "No character cognition state is available.");
+  renderCharacterOperationalPosturePanel(
+    "#character-operational-posture-table",
+    panels.operational_posture,
+  );
   renderCharacterSelfImagePanel("#character-self-image-table", {
     items: panelItems(panels.self_image),
     emptyText: panelEmptyText(panels.self_image, "No self-image rows."),
     redaction: payload.redaction || {},
   });
-  renderCharacterGrowthPanel("#character-growth-table", {
+  renderIdentityGrowthPanel("#character-growth-table", {
     items: panelItems(panels.growth),
-    emptyText: panelEmptyText(panels.growth, "No growth traits."),
+    emptyText: panelEmptyText(panels.growth, "No identity growth activity."),
     redaction: payload.redaction || {},
   });
-  renderLookupTable("#character-learning-table", {
-    items: panelItems(panels.learning),
-    emptyText: panelEmptyText(panels.learning, "No background learning rows."),
+  renderIdentityLineagePanel("#character-carry-over-table", {
+    items: panelItems(panels.carry_over),
+    emptyText: panelEmptyText(panels.carry_over, "No identity lineage is available."),
     redaction: payload.redaction || {},
   });
 }
 
 async function refreshUsers(showNeedsInput = true) {
+  const directory = await api("/api/entities/users?limit=25");
+  renderUserDirectory(directory);
   const platform = getValue("#user-platform").trim();
   const platformUserId = getValue("#user-platform-user-id").trim();
-  const platformChannelId = getValue("#user-platform-channel-id").trim();
-  const channelType = getValue("#user-channel-type").trim();
-  const query = getValue("#user-query").trim();
   if (!platform || !platformUserId) {
-    setEntityStatus("#users-status", "needs input");
-    setSummaryMetric("#user-summary-identity", "needs input", "enter platform user");
-    setSummaryMetric("#user-summary-memory", "0", "rows loaded");
-    setSummaryMetric("#user-summary-style", "needs input", "guidance status");
-    if (showNeedsInput) {
-      renderPanelState("#user-profile-table", {status: "needs_input", reason: "Enter platform and platform user ID to load user profile and relationship."});
-      renderPanelState("#user-memory-table", {status: "needs_input", reason: "Enter platform and platform user ID to load user memory."});
-      renderPanelState("#user-style-table", {status: "needs_input", reason: "Enter platform and platform user ID to load user style."});
-      renderPanelState("#user-conversation-progress-table", {status: "needs_input", reason: "Enter platform, platform user ID, channel ID, and channel type to load conversation progress."});
-      renderPanelState("#user-carry-over-table", {status: "needs_input", reason: "Enter platform, platform user ID, channel ID, and channel type to load carry-over."});
-    }
+    setEntityStatus("#users-status", directory.status || "needs_input");
+    if (showNeedsInput) renderUserNeedsInput();
     return;
   }
 
-  const params = new URLSearchParams({platform, platform_user_id: platformUserId, limit: "25"});
+  const params = new URLSearchParams({limit: "25"});
+  const platformChannelId = getValue("#user-platform-channel-id").trim();
+  const channelType = getValue("#user-channel-type").trim();
+  const query = getValue("#user-query").trim();
   if (platformChannelId) params.set("platform_channel_id", platformChannelId);
   if (channelType) params.set("channel_type", channelType);
   if (query) params.set("query", query);
-  const payload = await api(`/api/entities/user?${params.toString()}`);
+  const payload = await api(`/api/entities/users/${encodeURIComponent(platform)}/${encodeURIComponent(platformUserId)}?${params.toString()}`);
   setEntityStatus("#users-status", payload.status || "unavailable");
   const panels = payload.panels || {};
-  setSummaryMetric("#user-summary-identity", platform, platformUserId);
-  setSummaryMetric("#user-summary-memory", panelItems(panels.memory).length, "recent rows");
-  setSummaryMetric("#user-summary-style", panels.style?.status || "empty", panelEmptyText(panels.style, "guidance status"));
-  renderPromptPanel("#user-conversation-progress-table", panels.conversation_progress_prompt, {
-    emptyText: "No conversation-progress prompt context.",
-  });
-  renderPromptPanel("#user-carry-over-table", panels.current_carry_over, {
-    emptyText: "No current carry-over.",
-  });
-  const relationshipRows = panelItems(panels.relationship);
-  const relationshipItem = relationshipRows.reduce((row, item) => {
-    if (item && item.key) row[item.key] = item.value;
-    return row;
-  }, {});
-  const profileItems = panelItems(panels.profile);
-  const mergedProfileItems = Object.keys(relationshipItem).length
-    ? [...profileItems, relationshipItem]
-    : profileItems;
-  renderReadableLookupTable("#user-profile-table", {
-    items: mergedProfileItems,
-    emptyText: panelEmptyText(panels.profile, panelEmptyText(panels.relationship, "No user profile rows.")),
-    redaction: payload.redaction || {},
-  });
+  renderUserProfilePanel(panels.profile);
+  renderRelationshipPanel(panels.relationship);
+  renderRelationshipOperationalPanel(panels.relationship_operational);
+  renderCognitionStatePanel("#user-cognition-state-table", panels.cognition_state, "No user cognition state is available.");
   renderMemoryUnitRows("#user-memory-table", {
     items: panelItems(panels.memory),
     emptyText: panelEmptyText(panels.memory, "No user memory rows."),
     redaction: payload.redaction || {},
   });
-  renderStyleOverlayPanel("#user-style-table", panels.style, {
-    scopeLabel: "user style",
-  });
+  renderStylePanel("#user-style-table", panels.style, "user style");
+  renderContinuityPanel("#user-conversation-progress-table", panels.conversation_progress, "No conversation progress is available for this scope.");
+  renderContinuityPanel("#user-carry-over-table", panels.carry_over, "No carry-over is available for this scope.");
+}
+
+function renderUserNeedsInput() {
+  const panel = {status: "needs_input", reason: "Select a known user or enter platform and account ID."};
+  renderPanelState("#user-profile-table", panel);
+  setHtml("#user-relationship-table", '<tr><td colspan="3">Select a known user or enter platform and account ID.</td></tr>');
+  renderPanelState("#user-relationship-operational-table", panel);
+  renderPanelState("#user-cognition-state-table", panel);
+  renderPanelState("#user-memory-table", panel);
+  renderPanelState("#user-style-table", panel);
+  renderPanelState("#user-conversation-progress-table", panel);
+  renderPanelState("#user-carry-over-table", panel);
+}
+
+function selectUserDirectoryRow(event) {
+  const button = event.target.closest("[data-user-platform][data-user-id]");
+  if (!button) return;
+  setValue("#user-platform", button.dataset.userPlatform || "");
+  setValue("#user-platform-user-id", button.dataset.userId || "");
+  refreshUsers(true).catch(reportActionError);
 }
 
 async function refreshGroups(showNeedsInput = true) {
+  const directory = await api("/api/entities/groups?limit=25");
+  renderGroupDirectory(directory);
   const platform = getValue("#group-platform").trim();
   const groupId = getValue("#group-id").trim();
-  const participantPlatformUserId = getValue("#group-participant-platform-user-id").trim();
   if (!platform || !groupId) {
-    setEntityStatus("#groups-status", "needs input");
-    setSummaryMetric("#group-summary-identity", "needs input", "enter group id");
-    setSummaryMetric("#group-summary-carry-over", "0", "selected rows");
-    setSummaryMetric("#group-summary-participant", "needs input", "progress status");
-    if (showNeedsInput) {
-      renderPanelState("#group-style-table", {status: "needs_input", reason: "Enter platform and group ID to load group style."});
-      renderPanelState("#group-carry-over-table", {status: "needs_input", reason: "Enter platform and group ID to load group carry-over."});
-      renderPanelState("#group-participant-progress-table", {status: "needs_input", reason: "Enter participant platform user ID to load participant progress."});
-    }
+    setEntityStatus("#groups-status", directory.status || "needs_input");
+    if (showNeedsInput) renderGroupNeedsInput();
     return;
   }
 
-  const params = new URLSearchParams({platform, group_id: groupId, limit: "25"});
-  if (participantPlatformUserId) {
-    params.set("participant_platform_user_id", participantPlatformUserId);
-  }
-  const payload = await api(`/api/entities/group?${params.toString()}`);
+  const params = new URLSearchParams({limit: "25"});
+  const participantPlatformUserId = getValue("#group-participant-platform-user-id").trim();
+  if (participantPlatformUserId) params.set("participant_platform_user_id", participantPlatformUserId);
+  const payload = await api(`/api/entities/groups/${encodeURIComponent(platform)}/${encodeURIComponent(groupId)}?${params.toString()}`);
   setEntityStatus("#groups-status", payload.status || "unavailable");
   const panels = payload.panels || {};
-  setSummaryMetric("#group-summary-identity", platform, groupId);
-  setSummaryMetric("#group-summary-carry-over", panels.group_carry_over?.selected_count || panelItems(panels.group_carry_over).length || "0", "selected rows");
-  setSummaryMetric("#group-summary-participant", panels.participant_conversation_progress_prompt?.status || "empty", participantPlatformUserId || "participant id missing");
-  renderPromptPanel("#group-carry-over-table", panels.group_carry_over, {
-    emptyText: "No group carry-over.",
-  });
-  renderPromptPanel("#group-participant-progress-table", panels.participant_conversation_progress_prompt, {
-    emptyText: "No participant conversation-progress prompt context.",
-  });
-  renderStyleOverlayPanel("#group-style-table", panels.style, {
-    scopeLabel: "group style",
-  });
+  renderGroupActivityPanel(panels.activity);
+  renderGroupReviewPanel(panels.review);
+  renderStylePanel("#group-style-table", panels.style, "group style");
+  renderContinuityPanel("#group-carry-over-table", panels.carry_over, "No group-scene carry-over is available.");
+  renderContinuityPanel("#group-participant-progress-table", panels.participant_progress, "No participant progress is available for this scope.");
+}
+
+function renderGroupNeedsInput() {
+  const panel = {status: "needs_input", reason: "Select an active group or enter platform and group ID."};
+  renderPanelState("#group-activity-table", panel);
+  renderPanelState("#group-review-table", panel);
+  renderPanelState("#group-style-table", panel);
+  renderPanelState("#group-carry-over-table", panel);
+  renderPanelState("#group-participant-progress-table", panel);
+}
+
+function selectGroupDirectoryRow(event) {
+  const button = event.target.closest("[data-group-platform][data-group-id]");
+  if (!button) return;
+  setValue("#group-platform", button.dataset.groupPlatform || "");
+  setValue("#group-id", button.dataset.groupId || "");
+  refreshGroups(true).catch(reportActionError);
 }
 
 async function refreshCalendar() {
-  const platform = getValue("#calendar-platform").trim();
-  const platformChannelId = getValue("#calendar-platform-channel-id").trim();
-  const platformUserId = getValue("#calendar-platform-user-id").trim();
-  const channelType = getValue("#calendar-channel-type").trim();
-  const params = new URLSearchParams({limit: "25"});
-  if (platform) params.set("platform", platform);
-  if (platformChannelId) params.set("platform_channel_id", platformChannelId);
-  if (platformUserId) params.set("platform_user_id", platformUserId);
-  if (channelType) params.set("channel_type", channelType);
+  const params = new URLSearchParams({limit: "6"});
+  const filters = [
+    ["platform", "#calendar-platform"],
+    ["platform_channel_id", "#calendar-platform-channel-id"],
+    ["platform_user_id", "#calendar-platform-user-id"],
+    ["channel_type", "#calendar-channel-type"],
+  ];
+  filters.forEach(([key, selector]) => {
+    const value = getValue(selector).trim();
+    if (value) params.set(key, value);
+  });
   const payload = await api(`/api/lookups/calendar?${params.toString()}`);
-  const status = payload.status || "unavailable";
-  setText("#calendar-status", status);
-  setClassName("#calendar-status", status === "available" ? "badge success" : "badge");
+  setEntityStatus("#calendar-status", payload.status || "unavailable");
   const panels = payload.panels || {};
-  renderPromptPanel("#calendar-prompt-runs-table", panels.cognition_pending_runs, {
-    emptyText: "No pending calendar prompt candidates.",
-  });
-  renderOperationalPanel("#calendar-schedules-table", panels.schedule_definitions, {
-    emptyText: "No schedule definitions.",
-  });
-  renderOperationalPanel("#calendar-due-runs-table", panels.due_runs, {
-    emptyText: "No due calendar runs.",
-  });
+  renderCalendarSummary(panels.summary);
+  renderCalendarSchedules(panels.schedules);
+  renderCalendarRuns(panels.runs);
+  setEntityStatus("#calendar-cognition-status", panels.cognition_visibility?.status || "needs_input");
+  renderContinuityPanel("#calendar-cognition-visibility-table", panels.cognition_visibility, "No pending calendar candidates are visible to this scope.");
 }
 
 async function refreshBackground() {
-  const payload = await api("/api/lookups/background?limit=25");
-  const status = payload.status || "unavailable";
-  setText("#background-status", status);
-  setClassName("#background-status", status === "available" ? "badge success" : "badge");
+  const payload = await api("/api/lookups/background-work?limit=25");
+  setEntityStatus("#background-status", payload.status || "unavailable");
   const panels = payload.panels || {};
-  renderPromptPanel("#background-result-ready-table", panels.result_ready_cognition_deliveries, {
-    emptyText: "No result-ready cognition deliveries.",
-  });
-  renderOperationalPanel("#background-job-queue-table", panels.job_queue, {
-    emptyText: "No background-work jobs.",
-  });
-  renderOperationalPanel("#background-worker-events-table", panels.worker_events, {
-    emptyText: "No background worker events.",
-  });
+  renderBackgroundSummary(panels.summary);
+  setEntityStatus("#background-jobs-status", panels.jobs?.status || "empty");
+  renderBackgroundJobs("#background-jobs-table", panels.jobs, "No background-work jobs are available.", true);
+  renderBackgroundWorkers(panels.worker_activity);
+  setEntityStatus("#background-errors-status", panels.errors?.status || "empty");
+  renderBackgroundJobs("#background-errors-table", panels.errors, "No recent background worker errors.", true);
+  setEntityStatus("#background-delivery-status", panels.delivery_detail?.status || "empty");
+  renderBackgroundJobs("#background-delivery-table", panels.delivery_detail, "No jobs are ready for delivery.");
+}
+
+function facetRows(facet, emptyText, labelFormatter = formatLookupLabel) {
+  const entries = Object.entries(facet || {}).sort((left, right) => right[1] - left[1]);
+  if (!entries.length) return `<tr><td>Status</td><td>${escapeHtml(emptyText)}</td></tr>`;
+  return entries.map(([label, count]) => `<tr><td>${escapeHtml(labelFormatter(label))}</td><td>${escapeHtml(formatLookupValue(count))}</td></tr>`).join("");
+}
+
+function eventDetailMarkup(event) {
+  const details = [
+    ["source", event.source],
+    ["request_id", event.request_id],
+    ["correlation_id", event.correlation_id],
+    ["tracking_id", event.tracking_id],
+    ["run_id", event.run_id],
+    ["trigger_id", event.trigger_id],
+    ["attempt_id", event.attempt_id],
+    ["processed", event.processed_count],
+    ["succeeded", event.succeeded_count],
+    ["failed", event.failed_count],
+    ["skipped", event.skipped_count],
+    ["deferred", event.deferred],
+    ["defer reason", event.defer_reason ? formatOperationalLabel(event.defer_reason) : ""],
+    ["run kind", event.run_kind ? formatOperationalLabel(event.run_kind) : ""],
+    ["worker", event.worker_name ? formatOperationalLabel(event.worker_name) : ""],
+  ].filter(([, value]) => value !== null && value !== undefined && value !== "");
+  const eventLabel = formatOperationalLabel(event.event_type);
+  if (!details.length) return escapeHtml(eventLabel);
+  return `<details><summary>${escapeHtml(eventLabel)}</summary>${renderDetailGrid(details)}</details>`;
 }
 
 async function refreshEvents() {
-  const source = getValue("#event-source", "console") || "console";
+  const source = getValue("#event-source", "all") || "all";
   const params = new URLSearchParams({source, limit: "25"});
-  const requestId = getValue("#event-request-id").trim();
-  const trackingId = getValue("#event-tracking-id").trim();
-  if (requestId) params.set("request_id", requestId);
-  if (trackingId) params.set("tracking_id", trackingId);
+  const filters = [
+    ["service_id", "#event-service-id"],
+    ["event_type", "#event-type"],
+    ["level", "#event-level"],
+    ["request_id", "#event-request-id"],
+    ["tracking_id", "#event-tracking-id"],
+  ];
+  filters.forEach(([key, selector]) => {
+    const value = getValue(selector).trim();
+    if (value) params.set(key, value);
+  });
+  const since = getValue("#event-since").trim();
+  if (since) params.set("since", new Date(since).toISOString());
   const payload = await api(`/api/events?${params.toString()}`);
-  if (!payload.items.length) {
-    setHtml("#event-table", "<tr><td>No events</td><td>no rows for the selected source and filters</td><td>redacted</td><td>-</td><td>-</td></tr>");
+  const events = Array.isArray(payload.items) ? payload.items : [];
+  setText("#event-result-count", `${events.length} events`);
+  setHtml("#event-severity-facets", facetRows(payload.facets?.levels, "No severity counts matched."));
+  setHtml("#event-status-facets", facetRows(payload.facets?.statuses, "No outcome counts matched."));
+  setHtml("#event-component-facets", facetRows(
+    payload.facets?.components,
+    "No component counts matched.",
+    formatOperationalLabel,
+  ));
+  if (!events.length) {
+    setHtml("#event-table", '<tr><td colspan="7">No structured events matched the selected filters.</td></tr>');
     return;
   }
-  setHtml("#event-table", payload.items.map((event) => `
-    <tr>
-      <td>${escapeHtml(event.source || "-")}</td>
-      <td>${escapeHtml(event.component || event.service_id || "-")}</td>
-      <td>${escapeHtml(event.event_type || "-")}</td>
-      <td>${escapeHtml(event.status || event.level || "-")}</td>
-      <td>${escapeHtml(event.created_at || "-")}</td>
-    </tr>
-  `).join(""));
+  setHtml("#event-table", events.map((event) => {
+    const errorText = [event.error_class, event.message].filter(Boolean).join(": ");
+    return `
+      <tr>
+        <td>${escapeHtml(formatLookupValue(event.created_at))}</td>
+        <td>${escapeHtml(formatOperationalLabel(event.level))}</td>
+        <td>${escapeHtml(formatOperationalLabel(event.component || event.service_id))}</td>
+        <td>${eventDetailMarkup(event)}</td>
+        <td>${escapeHtml(formatOperationalLabel(event.status))}</td>
+        <td>${escapeHtml(event.duration_ms === undefined ? "-" : `${event.duration_ms} ms`)}</td>
+        <td>${escapeHtml(formatLookupValue(errorText))}</td>
+      </tr>
+    `;
+  }).join(""));
 }
 
 function renderLogControls() {
@@ -3038,11 +3895,19 @@ bind("#service-config-dialog", "click", (event) => {
   if (event.target === optionalElement("#service-config-dialog")) closeServiceConfig();
 });
 bind("#debug-form", "submit", (event) => sendDebug(event).catch(reportActionError));
+bind("#user-directory-table", "click", selectUserDirectoryRow);
+bind("#group-directory-table", "click", selectGroupDirectoryRow);
 bind("#refresh-events", "click", () => runButtonAction(
   optionalElement("#refresh-events"),
   "Loading events...",
   "Events updated.",
   refreshEvents,
+));
+bind("#refresh-audit", "click", () => runButtonAction(
+  optionalElement("#refresh-audit"),
+  "Loading audit actions...",
+  "Audit updated.",
+  refreshAudit,
 ));
 bind("#refresh-users", "click", () => runButtonAction(
   optionalElement("#refresh-users"),

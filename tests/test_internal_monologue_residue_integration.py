@@ -100,7 +100,7 @@ async def test_self_cognition_load_uses_configured_character_id_fallback(
             "internal_monologue_residue_context": '约1分钟前: 我还有点低落。',
             "selected_count": 1,
             "candidate_count": 1,
-            "scope_order": ["character_global"],
+            "scope_order": [],
             "status": "loaded",
         }
 

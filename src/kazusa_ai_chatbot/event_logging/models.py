@@ -44,6 +44,31 @@ class EventLogWriteResult(TypedDict):
     reason: str
 
 
+class CognitionV2EventFields(TypedDict):
+    """Bounded cognition diagnostics with no raw state or private bids."""
+
+    cognition_component: str
+    selected_branch_id: str
+    state_scope: Literal["", "user", "character"]
+    state_commit_status: Literal[
+        "not_started",
+        "committed",
+        "failed",
+        "skipped",
+    ]
+    stage_status: Literal["started", "completed", "failed", "skipped"]
+
+
+class CognitionV2SnapshotSummary(TypedDict):
+    """Bounded aggregate consumed by later diagnostics."""
+
+    event_count: int
+    component_counts: dict[str, int]
+    branch_counts: dict[str, int]
+    commit_status_counts: dict[str, int]
+    failed_stage_count: int
+
+
 def reflection_health_label(*, failed_count: int, succeeded_count: int) -> str:
     """Return a compact reflection health label for operator summaries.
 

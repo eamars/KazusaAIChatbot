@@ -7,7 +7,10 @@ from unittest.mock import AsyncMock
 import pytest
 
 from kazusa_ai_chatbot.action_spec.evaluator import ActionSpecEvaluator
-from kazusa_ai_chatbot.action_spec.registry import FUTURE_SPEAK_CAPABILITY
+from kazusa_ai_chatbot.action_spec.registry import (
+    ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
+    FUTURE_SPEAK_CAPABILITY,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_actions import (
     materialize_semantic_action_requests,
 )
@@ -18,7 +21,7 @@ def _cognition_state() -> dict[str, object]:
 
     state = {
         "storage_timestamp_utc": "2026-05-15T21:00:00+00:00",
-        "decontexualized_input": (
+        "decontextualized_input": (
             "The user asks the character to remind them tomorrow at 10:00 "
             "to drink water."
         ),
@@ -71,6 +74,29 @@ def test_l2d_materializes_future_speak_as_background_action() -> None:
     assert eval_result["handler_owner"] == "background_work"
 
 
+def test_l2d_materializes_status_check_without_handler_params() -> None:
+    """Status lookup provenance stays outside the empty handler params."""
+
+    action_specs = materialize_semantic_action_requests(
+        [
+            {
+                "capability": ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
+                "decision": "check",
+                "detail": "读取当前作用域中的任务状态。",
+                "reason": "用户询问已经接纳的任务状态。",
+            }
+        ],
+        _cognition_state(),
+    )
+
+    assert len(action_specs) == 1
+    action_spec = action_specs[0]
+    assert action_spec["params"] == {}
+    assert action_spec["cognition_provenance"]["evidence_handles"] == []
+    eval_result = ActionSpecEvaluator().evaluate(action_spec)
+    assert eval_result["ok"] is True
+
+
 def test_scheduled_self_cognition_cannot_reschedule_future_speak() -> None:
     """A due future-speak cognition cycle must not schedule another copy."""
 
@@ -99,9 +125,7 @@ async def test_future_speak_execution_enqueues_requested_worker(
     """Action execution should enqueue a real background job for future_speak."""
 
     from kazusa_ai_chatbot.action_spec import execution as execution_module
-    from kazusa_ai_chatbot.action_spec.handlers import (
-        background_work as background_work_handler,
-    )
+    from kazusa_ai_chatbot.accepted_task import lifecycle
 
     action_spec = materialize_semantic_action_requests(
         [
@@ -115,6 +139,7 @@ async def test_future_speak_execution_enqueues_requested_worker(
         _cognition_state(),
     )[0]
     queued_requests: list[dict[str, object]] = []
+    materialization_events: list[str] = []
     accepted_task = {
         "accepted_task_id": "task-future-speak-001",
         "task_identity_key": "accepted-task-identity-001",
@@ -122,8 +147,11 @@ async def test_future_speak_execution_enqueues_requested_worker(
     }
 
     async def create_accepted_task(request: dict[str, object]) -> dict:
-        assert request["action_kind"] == FUTURE_SPEAK_CAPABILITY
-        assert request["accepted_task_seed"] == (
+        assert request["task_kind"] == FUTURE_SPEAK_CAPABILITY
+        assert request["semantic_objective"] == (
+            "Remind the user to drink water."
+        )
+        assert request["accepted_task_summary"] == (
             "Remind the user to drink water."
         )
         return {
@@ -140,19 +168,23 @@ async def test_future_speak_execution_enqueues_requested_worker(
         assert accepted_task_id == "task-future-speak-001"
         assert executor_ref == "job-future-speak-001"
         assert updated_at == "2026-05-15T21:00:00+00:00"
+        materialization_events.append("accepted_task_pending")
         return {
             **accepted_task,
             "state": "pending",
         }
 
     async def enqueue_background_work(request: dict[str, object]) -> dict:
+        assert materialization_events == ["accepted_task_pending"]
+        materialization_events.append("job_inserted")
+        assert request["job_id"] == "job-future-speak-001"
         queued_requests.append(request)
         return {
             "status": "pending",
             "queue_state": "queued",
             "job_id": "job-future-speak-001",
             "job_ref": "background_work_job:job-future-speak-001",
-            "task_summary": request["task_brief"],
+            "task_summary": request["semantic_objective"],
             "result_summary": "Background work job queued.",
             "operational_owner": "background_work_job",
             "acknowledgement_constraint": "promise_allowed",
@@ -167,12 +199,12 @@ async def test_future_speak_execution_enqueues_requested_worker(
         }
 
     monkeypatch.setattr(
-        background_work_handler,
+        lifecycle,
         "create_or_return_active_accepted_task",
         create_accepted_task,
     )
     monkeypatch.setattr(
-        background_work_handler,
+        lifecycle,
         "mark_accepted_task_pending",
         mark_pending,
     )
@@ -186,6 +218,7 @@ async def test_future_speak_execution_enqueues_requested_worker(
     assert results[0]["status"] == "pending"
     assert results[0]["action_kind"] == FUTURE_SPEAK_CAPABILITY
     assert results[0]["accepted_task_state"] == "scheduled"
+    assert materialization_events == ["accepted_task_pending", "job_inserted"]
     assert results[0]["accepted_task_summary"] == (
         "Remind the user to drink water."
     )
@@ -207,11 +240,11 @@ async def test_worker_tick_dispatches_requested_future_speak_worker(
     from kazusa_ai_chatbot.background_work import worker as worker_module
 
     fake_job = {
+        "schema_version": "background_work_job.v2",
         "job_id": "job-future-speak-001",
         "accepted_task_id": "task-future-speak-001",
-        "task_brief": "Schedule a future reminder.",
+        "semantic_objective": "Schedule a future reminder.",
         "max_output_chars": 3000,
-        "source_context": "The user asked for a delayed reminder.",
         "requested_worker": "future_speak",
         "worker_payload": {
             "trigger_at": "2026-05-16 10:00",
@@ -224,31 +257,24 @@ async def test_worker_tick_dispatches_requested_future_speak_worker(
         "source_platform_bot_id": "debug-bot-001",
         "source_character_name": "Test Character",
         "requester_global_user_id": "global-user-001",
+        "source_message_id": "message-001",
+        "created_at": "2026-05-15T21:00:00+00:00",
+        "updated_at": "2026-05-15T21:00:00+00:00",
     }
-    route_mock = AsyncMock(side_effect=AssertionError("router should not run"))
-    dispatch_mock = AsyncMock(return_value={
-        "status": "succeeded",
-        "worker": "future_speak",
+    execute_mock = AsyncMock(return_value={
         "artifact_text": "Future speak scheduled.",
-        "failure_summary": "",
         "result_summary": "Future speak scheduled.",
-        "worker_metadata": {
-            "trigger_at": "2026-05-15T22:00:00+00:00",
-            "skip_result_delivery": True,
-        },
     })
-    complete_mock = AsyncMock()
-    mark_running_mock = AsyncMock()
-    mark_result_ready_mock = AsyncMock()
-    mark_delivered_mock = AsyncMock()
+    complete_mock = AsyncMock(return_value={"status": "completed"})
+    mark_running_mock = AsyncMock(return_value={"state": "running"})
+    mark_delivered_mock = AsyncMock(return_value={"state": "delivered"})
 
     monkeypatch.setattr(
         worker_module,
         "claim_background_work_job",
         AsyncMock(side_effect=[fake_job, None]),
     )
-    monkeypatch.setattr(worker_module, "route_background_work", route_mock)
-    monkeypatch.setattr(worker_module, "dispatch_background_work", dispatch_mock)
+    monkeypatch.setattr(worker_module, "_execute_future_speak_job", execute_mock)
     monkeypatch.setattr(
         worker_module,
         "mark_accepted_task_running",
@@ -256,12 +282,7 @@ async def test_worker_tick_dispatches_requested_future_speak_worker(
     )
     monkeypatch.setattr(
         worker_module,
-        "mark_accepted_task_result_ready",
-        mark_result_ready_mock,
-    )
-    monkeypatch.setattr(
-        worker_module,
-        "mark_accepted_task_delivered",
+        "mark_future_speak_accepted_task_delivered",
         mark_delivered_mock,
     )
     monkeypatch.setattr(
@@ -279,21 +300,15 @@ async def test_worker_tick_dispatches_requested_future_speak_worker(
 
     assert result["processed_count"] == 1
     assert result["succeeded_count"] == 1
-    route_mock.assert_not_called()
-    dispatch_decision = dispatch_mock.await_args.args[0]
-    assert dispatch_decision["worker"] == "future_speak"
-    assert dispatch_decision["worker_payload"]["trigger_at"] == (
-        "2026-05-16 10:00"
-    )
+    execute_mock.assert_awaited_once_with(fake_job)
     complete_kwargs = complete_mock.await_args.kwargs
-    assert complete_kwargs["worker"] == "future_speak"
+    assert complete_kwargs["task_resolution_result"] is None
     assert complete_kwargs["skip_result_delivery"] is True
     mark_running_mock.assert_awaited_once()
     assert mark_running_mock.await_args.kwargs["accepted_task_id"] == (
         "task-future-speak-001"
     )
     assert mark_running_mock.await_args.kwargs["started_at"]
-    mark_result_ready_mock.assert_not_called()
     mark_delivered_mock.assert_awaited_once()
     assert mark_delivered_mock.await_args.kwargs["accepted_task_id"] == (
         "task-future-speak-001"
@@ -306,6 +321,7 @@ async def test_future_speak_worker_schedules_calendar_future_cognition(
 ) -> None:
     """The future_speak worker should create a future-cognition schedule."""
 
+    from kazusa_ai_chatbot.action_spec.handlers import future_cognition
     from kazusa_ai_chatbot.background_work.subagent import future_speak
 
     execute_future_cognition = AsyncMock(return_value={
@@ -319,40 +335,32 @@ async def test_future_speak_worker_schedules_calendar_future_cognition(
         "reason": "The user asked for a delayed reminder.",
     })
     monkeypatch.setattr(
-        future_speak,
+        future_cognition,
         "execute_future_cognition_action",
         execute_future_cognition,
     )
 
-    result = await future_speak.execute(
-        {
-            "action": "execute",
-            "worker": "future_speak",
-            "reason": "The user asked for a delayed reminder.",
-            "source_summary": "Schedule a future reminder.",
-            "worker_payload": {
-                "trigger_at": "2026-05-16 10:00",
-                "continuation_objective": "Remind the user to drink water.",
-                "source_action_attempt_id": (
-                    "action_attempt:future-speak-001"
-                ),
-                "source_scope": {
-                    "source_platform": "debug",
-                    "source_channel_id": "debug:user:test-user",
-                    "source_channel_type": "private",
-                    "source_user_id": "global-user-001",
-                    "source_platform_bot_id": "debug-bot-001",
-                    "source_character_name": "Test Character",
-                },
-            },
+    result = await future_speak.execute_future_speak_job({
+        "source_action_attempt_id": "action_attempt:future-speak-001",
+        "source_platform": "debug",
+        "source_channel_id": "debug:user:test-user",
+        "source_channel_type": "private",
+        "source_platform_bot_id": "debug-bot-001",
+        "source_character_name": "Test Character",
+        "requester_global_user_id": "global-user-001",
+        "source_message_id": "message-001",
+        "created_at": "2026-05-15T21:00:00+00:00",
+        "updated_at": "2026-05-15T21:00:00+00:00",
+        "worker_payload": {
+            "trigger_at": "2026-05-16 10:00",
+            "continuation_objective": "Remind the user to drink water.",
         },
-        max_output_chars=3000,
-    )
+    })
 
-    assert result["status"] == "succeeded"
-    assert result["worker"] == "future_speak"
-    assert result["worker_metadata"]["calendar_run_id"] == "calendar_run_001"
-    assert result["worker_metadata"]["skip_result_delivery"] is True
+    assert result["artifact_text"] == (
+        "Future speak scheduled for 2026-05-15T22:00:00+00:00."
+    )
+    assert result["result_summary"] == "Future speak scheduled."
     scheduled_spec = execute_future_cognition.await_args.args[0]
     assert scheduled_spec["kind"] == "trigger_future_cognition"
     assert scheduled_spec["params"]["trigger_at"] == "2026-05-16 10:00"

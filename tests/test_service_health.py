@@ -26,6 +26,42 @@ class _FakeCacheRuntime:
         ]
 
 
+class _ReadyAdapterRegistry:
+    """Report the debug adapter as available for runtime projection tests."""
+
+    def has(self, platform: str) -> bool:
+        """Return whether the requested platform is the debug adapter."""
+
+        return platform == "debug"
+
+
+def test_action_availability_separates_queue_admission_from_worker_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A disabled automatic loop leaves durable accepted-task intake usable."""
+
+    monkeypatch.setattr(
+        service_module,
+        "BACKGROUND_WORK_WORKER_ENABLED",
+        False,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_adapter_registry",
+        _ReadyAdapterRegistry(),
+    )
+
+    runtime = service_module._action_availability_runtime_for_target(
+        platform="debug",
+        platform_channel_id="channel-1",
+        channel_type="private",
+    )
+
+    assert runtime["worker_status"]["accepted_task"] == "healthy"
+    assert runtime["worker_status"]["background_work"] == "degraded"
+    assert runtime["adapter_target_status"]["debug"] == "healthy"
+
+
 @pytest.mark.asyncio
 async def test_health_includes_cache2_agent_stats(monkeypatch) -> None:
     """Health response should preserve core fields and include Cache2 stats."""

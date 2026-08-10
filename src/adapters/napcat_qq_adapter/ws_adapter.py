@@ -22,6 +22,9 @@ from adapters.envelope_common import (
     semantic_entity_fallback_label,
 )
 from adapters.outbound_sequence import followup_delay_seconds
+from adapters.runtime_registration import (
+    character_name_from_registration_response,
+)
 from kazusa_ai_chatbot.dispatcher import SendResult
 from kazusa_ai_chatbot.logging_config import configure_adapter_logging
 from kazusa_ai_chatbot.message_envelope import (
@@ -81,7 +84,7 @@ class NapCatWSAdapter:
         self.heartbeat_seconds = heartbeat_seconds
 
         self.bot_id: Optional[str] = None
-        self.bot_name: Optional[str] = None
+        self.character_name = ""
         self._ws = None
         self._api_response_futures: dict[str, asyncio.Future] = {}
         self._api_dispatch_enabled = False
@@ -139,7 +142,10 @@ class NapCatWSAdapter:
                     await self._ensure_runtime_server_started()
                     await self._register_with_brain()
                     self._ensure_heartbeat_started()
-                    logger.info(f"Logged in as {self.bot_name} (ID: {self.bot_id})")
+                    logger.info(
+                        f"Logged in as {self.character_name} "
+                        f"(ID: {self.bot_id})"
+                    )
                     if self.channel_ids is not None:
                         logger.info(
                             f"Active in groups: {self.channel_ids}. "
@@ -196,6 +202,9 @@ class NapCatWSAdapter:
             json=payload,
         )
         response.raise_for_status()
+        self.character_name = character_name_from_registration_response(
+            response.json()
+        )
         logger.info(
             f"Registered NapCat runtime adapter with brain: "
             f"callback_url={self.runtime_public_url}"
@@ -204,16 +213,17 @@ class NapCatWSAdapter:
     def _runtime_registration_payload(self) -> dict:
         """Return the shared registration payload for startup and heartbeat."""
 
+        platform_bot_id = str(self.bot_id or "").strip()
+        if not platform_bot_id:
+            raise RuntimeError("NapCat bot account id is required")
+
         return_value = {
             "platform": self.platform,
             "callback_url": self.runtime_public_url,
+            "platform_bot_id": platform_bot_id,
             "shared_secret": self.runtime_shared_secret,
             "timeout_seconds": 10.0,
         }
-        if self.bot_id:
-            return_value["platform_bot_id"] = self.bot_id
-        if self.bot_name:
-            return_value["display_name"] = self.bot_name
         return return_value
 
     async def _send_heartbeat_once(self) -> None:
@@ -224,6 +234,9 @@ class NapCatWSAdapter:
             json=self._runtime_registration_payload(),
         )
         response.raise_for_status()
+        self.character_name = character_name_from_registration_response(
+            response.json()
+        )
 
     def _ensure_heartbeat_started(self) -> None:
         """Start the re-registration heartbeat exactly once."""
@@ -239,7 +252,7 @@ class NapCatWSAdapter:
             await asyncio.sleep(self.heartbeat_seconds)
             try:
                 await self._send_heartbeat_once()
-            except httpx.HTTPError as exc:
+            except (httpx.HTTPError, RuntimeError, ValueError) as exc:
                 logger.warning(f"NapCat runtime heartbeat failed: {exc}")
 
     async def _fetch_bot_info(self, ws):
@@ -248,12 +261,12 @@ class NapCatWSAdapter:
         response = await self._call_api(ws, "get_login_info")
         if response.get("status") == "ok":
             data = response.get("data", {})
-            self.bot_id = str(data.get("user_id"))
-            self.bot_name = data.get("nickname")
-        else:
-            logger.warning("Could not retrieve bot info, using defaults.")
-            self.bot_id = "unknown"
-            self.bot_name = "NapCat Bot"
+            if isinstance(data, dict) and data.get("user_id") is not None:
+                self.bot_id = str(data["user_id"])
+                return
+
+        logger.warning("Could not retrieve the NapCat bot account id.")
+        self.bot_id = None
 
     def _resolve_api_response(self, data: dict) -> bool:
         """Resolve a pending websocket API call from an echo response."""
@@ -448,6 +461,7 @@ class NapCatWSAdapter:
             reply_context,
             message_data,
             bot_id=str(self.bot_id or ""),
+            character_name=self.character_name,
         )
 
     async def _hydrate_reply_context_from_platform(
@@ -462,6 +476,7 @@ class NapCatWSAdapter:
             ws,
             call_api=self._call_api,
             bot_id=str(self.bot_id or ""),
+            character_name=self.character_name,
             logger=logger,
         )
 
@@ -524,7 +539,7 @@ class NapCatWSAdapter:
             group_id=group_id,
             ws=ws,
             bot_id=self.bot_id,
-            bot_name=self.bot_name,
+            character_name=self.character_name,
             mention_display_cache=self._mention_display_cache,
             call_api=self._call_api,
             logger=logger,
@@ -657,6 +672,7 @@ class NapCatWSAdapter:
             channel_type="group" if is_group else "private",
             content=wire_content,
             platform_bot_id=self.bot_id,
+            character_name=self.character_name,
             reply_context=reply_context,
             mention_display_names=mention_display_names,
             attachments=attachments,
@@ -699,6 +715,21 @@ class NapCatWSAdapter:
             return
 
         replies = brain_data.get("messages", [])
+        content_type = str(brain_data.get("content_type") or "text")
+        operational_error = brain_data.get("operational_error")
+        is_operational_response = content_type == "operational_error"
+        if is_operational_response:
+            if isinstance(operational_error, dict):
+                logger.error(
+                    "Brain returned a structured QQ operational response: "
+                    f"error_code={operational_error.get('error_code')} "
+                    f"status={operational_error.get('status')} "
+                    f"attempt_count={operational_error.get('attempt_count')}"
+                )
+            else:
+                logger.error(
+                    "Brain returned an operational response without metadata"
+                )
         logger.info(f"Brain output: messages={log_list_preview(replies)}")
         logger.debug(
             f'Brain output metadata: use_reply_feature={brain_data.get("use_reply_feature")} '
@@ -716,7 +747,7 @@ class NapCatWSAdapter:
             return
 
         reply_to_msg_id = None
-        if brain_data.get("use_reply_feature"):
+        if not is_operational_response and brain_data.get("use_reply_feature"):
             reply_to_msg_id = str(data["message_id"])
         raw_delivery_mentions = brain_data.get("delivery_mentions")
         delivery_mentions = (
@@ -724,6 +755,8 @@ class NapCatWSAdapter:
             if isinstance(raw_delivery_mentions, list)
             else None
         )
+        if is_operational_response:
+            delivery_mentions = None
         msg_params = self._normal_chat_send_msg_params(
             channel_id=channel_id,
             channel_type=channel_type,
@@ -761,15 +794,16 @@ class NapCatWSAdapter:
         if isinstance(response_data, dict):
             platform_message_id = str(response_data.get("message_id") or "")
         delivery_tracking_id = str(brain_data.get("delivery_tracking_id") or "")
-        await self._post_delivery_receipt(
-            channel_id=channel_id,
-            delivery_tracking_id=delivery_tracking_id,
-            logical_message_index=0,
-            platform_message_id=platform_message_id,
-        )
+        if not is_operational_response:
+            await self._post_delivery_receipt(
+                channel_id=channel_id,
+                delivery_tracking_id=delivery_tracking_id,
+                logical_message_index=0,
+                platform_message_id=platform_message_id,
+            )
 
         followup_messages = replies[1:]
-        if followup_messages:
+        if followup_messages and not is_operational_response:
             followup_task = asyncio.create_task(
                 self._send_normal_chat_followups(
                     messages=followup_messages,

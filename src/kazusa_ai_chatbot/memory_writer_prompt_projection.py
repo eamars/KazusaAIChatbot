@@ -66,25 +66,6 @@ def project_relationship_prompt_payload(
     return projected_payload
 
 
-def project_character_image_prompt_payload(
-    payload: dict,
-    *,
-    character_name: str,
-) -> dict:
-    """Return the image-summary payload as an isolated prompt copy.
-
-    Args:
-        payload: Model-facing character-image payload.
-        character_name: Exact profile name used in prompt metadata.
-
-    Returns:
-        A deep-copied payload. This stage preserves text evidence unchanged.
-    """
-
-    _required_character_name(character_name)
-    projected_payload = copy.deepcopy(payload)
-    return projected_payload
-
 
 def project_reflection_promotion_prompt_payload(
     payload: dict,

@@ -15,17 +15,11 @@ from pymongo.errors import PyMongoError
 
 from kazusa_ai_chatbot.config import COGNITION_LLM_BASE_URL
 from kazusa_ai_chatbot.db import close_db, get_character_profile
-from kazusa_ai_chatbot.cognition_chain_core.stages import l2d as l2d
-from kazusa_ai_chatbot.cognition_chain_core.contracts import LLMStageBinding
-from kazusa_ai_chatbot.cognition_chain_core.stages.l2d import (
-    build_action_selection_payload_text,
-    select_semantic_actions,
-)
 from kazusa_ai_chatbot.nodes import (
     persona_supervisor2_cognition_actions as action_connector,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
-    build_cognition_chain_services,
+    build_cognition_core_services,
 )
 from kazusa_ai_chatbot.self_cognition import runner as self_cognition_runner
 from kazusa_ai_chatbot.self_cognition.sources import (
@@ -79,12 +73,12 @@ async def test_l2d_live_case_against_frozen_upstream(
     frozen_state = case["frozen_l2d_state"]
     prompt_payload = build_action_selection_payload_text(frozen_state)
 
-    services = build_cognition_chain_services()
+    services = build_cognition_core_services()
     capturing_llm = _CapturingLLM(services.llm)
     monkeypatch.setattr(
         l2d,
         "_action_selection_llm",
-        LLMStageBinding(capturing_llm, services.action_selection_config),
+        LLMStageBinding(capturing_llm, services.action_planning_config),
     )
     result = await select_semantic_actions(frozen_state)
     raw_output = capturing_llm.raw_output
@@ -275,7 +269,7 @@ def _lifecycle_update_state_from_case(case: dict) -> dict:
         rendered_packet,
     )
     state.update({
-        "decontexualized_input": rendered_packet,
+        "decontextualized_input": rendered_packet,
         "logical_stance": "CONFIRM",
         "character_intent": "DISMISS",
         "judgment_note": (

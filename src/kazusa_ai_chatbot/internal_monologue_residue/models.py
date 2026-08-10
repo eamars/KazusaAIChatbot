@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Literal, NotRequired, TypedDict
 
 ResidueScopeKind = Literal[
-    "character_global",
     "group_scene",
     "user_thread",
 ]
@@ -88,6 +87,9 @@ class RecorderInput(TypedDict):
     ambient_evidence_summary: str
     incoming_residue_context: str
     source_reliability_notes: list[str]
+    visible_outcome_summary: str
+    surface_content_plan: str
+    visible_boundaries: list[str]
 
 
 class RecorderValidationResult(TypedDict):

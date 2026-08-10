@@ -1,0 +1,1270 @@
+"""Exact public V2 cognition and surface contract tests."""
+
+import json
+from copy import deepcopy
+from dataclasses import fields
+from types import SimpleNamespace
+
+import pytest
+
+from kazusa_ai_chatbot.cognition_core_v2 import (
+    run_cognition,
+    run_text_surface_planning,
+)
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    EVIDENCE_SOURCE_QUESTION_IDS,
+    GROUP_ENGAGEMENT_CONFIDENCE_MAX_CHARS,
+    GROUP_ENGAGEMENT_GUIDELINE_MAX_CHARS,
+    L3_INTERACTION_STYLE_GUIDELINES_PER_FIELD_LIMIT,
+    MAX_BRANCH_INTENT_GUIDANCE_CHARS,
+    BranchDefinition,
+    CognitionContextLimitError,
+    CognitionContractError,
+    CognitionCoreServicesV2,
+    CognitionDiagnosticsV2,
+    CollapsedIntentionV2,
+    EventComparisonResultV2,
+    TextSurfaceServicesV2,
+    VisualSurfaceServicesV2,
+    validate_cognition_core_input,
+    validate_cognition_core_output,
+    validate_lexical_avoidances,
+    validate_text_surface_input,
+    validate_text_surface_output,
+)
+from kazusa_ai_chatbot.cognition_core_v2.facade import (
+    _episode_updated_at,
+)
+from kazusa_ai_chatbot.cognition_core_v2.output_projection import (
+    build_state_update,
+    default_expression_policy,
+)
+from kazusa_ai_chatbot.cognition_core_v2.prompt_budget import canonical_digest
+from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+    build_acquaintance_user_state,
+    build_character_production_state,
+)
+from kazusa_ai_chatbot.cognition_core_v2.surface_stages import (
+    SURFACE_REPAIR_INSTRUCTION,
+    run_content_plan_stage,
+)
+from llm_test_helpers import make_llm_call_config
+from tests.cognition_core_v2_test_helpers import (
+    canonical_cognition_output,
+    canonical_episode,
+    canonical_identity_context,
+)
+
+NOW = "2026-07-14T00:00:00Z"
+
+
+def test_branch_definition_exposes_bounded_neutral_guidance_default() -> None:
+    """Keep custom branch definitions neutral unless guidance is supplied."""
+
+    definition = BranchDefinition("custom", (), ())
+    guidance_field = next(
+        field
+        for field in fields(BranchDefinition)
+        if field.name == "branch_intent_guidance"
+    )
+
+    assert guidance_field.default == ""
+    assert definition.branch_intent_guidance == ""
+    assert MAX_BRANCH_INTENT_GUIDANCE_CHARS == 240
+
+
+def _delivery_profile() -> dict[str, str]:
+    """Build one exact delivery-only surface profile."""
+
+    return {
+        "lexical_register": "自然口语",
+        "sentence_shape": "短句与完整句交替",
+        "rhythm": "节奏平稳",
+        "hesitation": "轻微停顿",
+        "punctuation": "自然标点",
+    }
+
+
+class _NoCallLLM:
+    """Raise when a no-evidence episode reaches a model-owned stage."""
+
+    async def ainvoke(
+        self,
+        messages: list[object],
+        *,
+        config: object,
+    ) -> SimpleNamespace:
+        del messages
+        del config
+        raise AssertionError("a grounded evidence-free episode must stay quiet")
+
+
+class _FallbackSurfaceLLM:
+    """Return a legacy surface fallback shape that the boundary must reject."""
+
+    async def ainvoke(
+        self,
+        messages: list[object],
+        *,
+        config: object,
+    ) -> SimpleNamespace:
+        del messages
+        del config
+        return SimpleNamespace(content=json.dumps({"content": "legacy"}))
+
+
+class _RepairingContentLLM:
+    """Return one invalid content object followed by a valid repair."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.messages: list[list[object]] = []
+
+    async def ainvoke(
+        self,
+        messages: list[object],
+        *,
+        config: object,
+    ) -> SimpleNamespace:
+        del config
+        self.calls += 1
+        self.messages.append(messages)
+        if self.calls == 1:
+            content = {"legacy": "invalid"}
+        else:
+            content = {
+                "content_plan": "修复后的中文内容计划",
+                "content_requirements": ["保持当前角色判断。"],
+                "delivery_profile": _delivery_profile(),
+                "lexical_avoidances": [],
+            }
+        return SimpleNamespace(content=json.dumps(content, ensure_ascii=False))
+
+
+def _services() -> CognitionCoreServicesV2:
+    """Build V2 service bindings for a deterministic no-call case."""
+
+    return CognitionCoreServicesV2(
+        llm=_NoCallLLM(),
+        appraisal_event_agency_config=make_llm_call_config("v2_appraisal"),
+        appraisal_relationship_social_config=make_llm_call_config(
+            "v2_appraisal"
+        ),
+        appraisal_moral_identity_config=make_llm_call_config("v2_appraisal"),
+        appraisal_goal_threat_outcome_config=make_llm_call_config(
+            "v2_appraisal"
+        ),
+        appraisal_epistemic_comparison_memory_config=make_llm_call_config(
+            "v2_appraisal"
+        ),
+        appraisal_existential_drive_config=make_llm_call_config(
+            "v2_appraisal"
+        ),
+        goal_ordinary_response_config=make_llm_call_config("v2_goal"),
+        goal_active_branch_config=make_llm_call_config("v2_goal"),
+        workspace_collapse_config=make_llm_call_config("v2_collapse"),
+        action_planning_config=make_llm_call_config("v2_route"),
+        action_authorization_config=make_llm_call_config("v2_route"),
+        resolver_authorization_config=make_llm_call_config("v2_route"),
+    )
+
+
+def _input() -> dict[str, object]:
+    """Build the exact V2 input without raw prompt-owned state fields."""
+
+    character = build_character_production_state(updated_at=NOW)
+    return {
+        "schema_version": "cognition_core_input.v2",
+        "episode": canonical_episode(
+            episode_id="v2-contract-episode",
+            current_global_user_id="v2-contract-user",
+            content="quiet private greeting",
+        ),
+        "state_scope": "user",
+        "mutable_state": build_acquaintance_user_state(
+            global_user_id="v2-contract-user",
+            updated_at=NOW,
+        ),
+        "character_constraints": {
+            "drives": character["drives"],
+            "standards": character["standards"],
+            "meaning_state": character["meaning_state"],
+            "personality_judgment": {
+                "logic": "analytical",
+                "defense": "reserved",
+                "quirks": "occasionally hesitant",
+                "taboos": "preserve character agency",
+            },
+        },
+        "character_identity_context": canonical_identity_context(),
+        "evidence": [],
+        "direct_facts": [],
+        "available_actions": [],
+        "available_resolver_capabilities": [],
+        "resolver_context": "resolver_status=idle",
+        "scene_context": {
+            "channel_scope": "private",
+            "character_role": "companion",
+            "semantic_scene": "quiet private greeting",
+            "public_group_scene": "",
+            "conversation_continuity": "No unresolved public commitment.",
+            "semantic_temporal_context": "immediate",
+        },
+        "private_continuity_context": "I remain calmly attentive.",
+    }
+
+
+def _oversized_relationship_context() -> dict[str, object]:
+    """Build the operational relationship packet from the RCA shape."""
+
+    state = build_acquaintance_user_state(
+        global_user_id="context-limit-user",
+        updated_at=NOW,
+    )
+    relationship = state["relationship"]
+    return {
+        "schema_version": "relationship_operational_context.v1",
+        "relationship_id": relationship["relationship_id"],
+        "axes": {
+            field_name: relationship[field_name]
+            for field_name in (
+                "familiarity",
+                "positive_regard",
+                "trust",
+                "attachment",
+                "desired_closeness",
+                "perceived_closeness",
+                "care",
+                "boundary_safety",
+                "exclusivity",
+                "unresolved_injury",
+                "salience",
+            )
+        },
+        "causal_context": [
+            {
+                "entity_kind": "event",
+                "semantic_summary": "a" * 160,
+                "salience": "极高",
+                "lifecycle": "active",
+                "freshness": "即时",
+            },
+            {
+                "entity_kind": "event",
+                "semantic_summary": "b" * 155,
+                "salience": "高",
+                "lifecycle": "active",
+                "freshness": "即时",
+            },
+        ],
+        "affect": [],
+        "relationship_freshness": "即时",
+        "evidence_freshness": "无证据",
+    }
+
+
+def _oversized_character_operational_context() -> dict[str, object]:
+    """Build a digest-bearing character packet that requires row reduction."""
+
+    affect_row = {
+        "emotion_id": "emotion",
+        "intensity": "high",
+        "phase": "active",
+        "trend": "stable",
+        "root_kind": "event",
+        "cause_class": "general_activation",
+        "freshness": "f" * 300,
+    }
+    pressure_row = {
+        "kind": "event",
+        "salience": "high",
+        "lifecycle": "active",
+        "cause_class": "general_activation",
+        "freshness": "p" * 300,
+    }
+    return {
+        "schema_version": "character_operational_context.v1",
+        "source_updated_at": NOW,
+        "effective_at": NOW,
+        "view_digest": "v" * 64,
+        "consumer_role": "goal",
+        "affect": [deepcopy(affect_row) for _ in range(3)],
+        "pressures": [deepcopy(pressure_row) for _ in range(4)],
+        "context_digest": "0" * 64,
+    }
+
+
+def _observability() -> dict[str, object]:
+    """Build a complete native observability envelope for contract tests."""
+
+    return {
+        "execution": {
+            "selected_question_count": 1,
+            "dispatched_question_count": 1,
+            "selected_branch_count": 2,
+            "dispatched_branch_count": 2,
+            "completed_branch_count": 2,
+            "failed_branch_count": 0,
+            "maximum_concurrency": 2,
+            "overlap_ms": 4,
+            "dependency_wait_ms": 2,
+            "total_ms": 10,
+        },
+        "appraisals": [
+            {
+                "question_kind": "relationship_social",
+                "semantic_question": "the relationship question",
+                "status": "completed",
+                "explanation": "the evidence supports this result",
+            },
+        ],
+        "branches": [
+            {
+                "phase": "preliminary",
+                "branch_index": 1,
+                "goal_kind": "bond_protection",
+                "status": "completed",
+                "selection": "primary",
+                "intention": "protect the relationship",
+                "desired_outcome": "make the boundary clear",
+                "concrete_detail": "describe the impact",
+                "reason": "the event is grounded",
+                "private_monologue": "I should acknowledge the impact.",
+                "expected_consequences": ["the boundary is understood"],
+                "confidence": "high",
+            },
+            {
+                "phase": "preliminary",
+                "branch_index": 2,
+                "goal_kind": "autonomy_boundary",
+                "status": "completed",
+                "selection": "suppressed",
+                "intention": "end the attack",
+                "desired_outcome": "stop the escalation",
+                "concrete_detail": "answer firmly",
+                "reason": "the attack creates pressure",
+                "private_monologue": "I want to push back.",
+                "expected_consequences": ["the escalation may stop"],
+                "confidence": "medium",
+            },
+        ],
+        "collapse": {
+            "primary_branch_index": 1,
+            "supporting_branch_indices": [],
+            "suppressed_branch_indices": [2],
+            "selection_reason": "the first goal best fits the event",
+        },
+    }
+
+
+def _output_with_observability() -> dict[str, object]:
+    """Attach the native observability envelope to a valid output fixture."""
+
+    output = canonical_cognition_output()
+    output["cognition_observability"] = _observability()
+    return output
+
+
+@pytest.mark.asyncio
+async def test_v2_facade_returns_exact_one_scope_output() -> None:
+    """The public facade returns one validated state update and no legacy shape."""
+
+    output = await run_cognition(_input(), _services())
+    validated = validate_cognition_core_output(output)
+
+    assert validated["schema_version"] == "cognition_core_output.v2"
+    assert validated["state_update"]["state_scope"] == "user"
+    assert validated["intention"]["route"] == "silence"
+    assert "admitted_bid" not in validated
+
+
+@pytest.mark.asyncio
+async def test_character_cognition_does_not_apply_elapsed_decay() -> None:
+    """Character elapsed evolution remains owned by sleep recovery."""
+
+    payload = _input()
+    payload["state_scope"] = "character"
+    payload["mutable_state"] = build_character_production_state(
+        updated_at="2026-07-13T00:00:00Z",
+    )
+
+    output = await run_cognition(payload, _services())
+
+    replacement = output["state_update"]["replacement_state"]
+    assert output["state_update"]["state_scope"] == "character"
+    assert replacement["updated_at"] == NOW
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        ("execution.selected_question_count", 2),
+        ("execution.completed_branch_count", 3),
+        ("execution.failed_branch_count", 3),
+        ("execution.maximum_concurrency", 3),
+        ("execution.overlap_ms", 11),
+        ("execution.dependency_wait_ms", 11),
+    ],
+)
+def test_native_observability_rejects_inconsistent_execution_metrics(
+    path: str,
+    value: int,
+) -> None:
+    """Counter and timing relationships must not produce false telemetry."""
+
+    output = _output_with_observability()
+    execution = output["cognition_observability"]["execution"]
+    execution[path.split(".")[-1]] = value
+
+    with pytest.raises(CognitionContractError):
+        validate_cognition_core_output(output)
+
+
+def test_native_observability_rejects_failed_rows_without_typed_code() -> None:
+    """A failed semantic row must identify its bounded failure category."""
+
+    output = _output_with_observability()
+    appraisal = output["cognition_observability"]["appraisals"][0]
+    appraisal["status"] = "failed"
+
+    with pytest.raises(CognitionContractError):
+        validate_cognition_core_output(output)
+
+
+def test_native_observability_accepts_typed_failed_appraisal() -> None:
+    """A bounded appraisal failure remains visible without semantic output."""
+
+    output = _output_with_observability()
+    appraisal = output["cognition_observability"]["appraisals"][0]
+    appraisal["status"] = "failed"
+    appraisal["failure_code"] = "model_contract_invalid"
+    appraisal.pop("explanation")
+
+    validated = validate_cognition_core_output(output)
+
+    assert validated["cognition_observability"]["appraisals"][0][
+        "failure_code"
+    ] == "model_contract_invalid"
+
+
+def test_native_observability_rejects_failure_code_on_completed_rows() -> None:
+    """Failure metadata cannot be attached to a successful semantic result."""
+
+    output = _output_with_observability()
+    branch = output["cognition_observability"]["branches"][0]
+    branch["failure_code"] = "model_contract_invalid"
+
+    with pytest.raises(CognitionContractError):
+        validate_cognition_core_output(output)
+
+
+def test_native_observability_rejects_collapse_selection_mismatch() -> None:
+    """The selected partition must agree with every branch row."""
+
+    output = _output_with_observability()
+    output["cognition_observability"]["collapse"]["primary_branch_index"] = 2
+
+    with pytest.raises(CognitionContractError):
+        validate_cognition_core_output(output)
+
+
+def test_frozen_public_contract_fields_are_exact() -> None:
+    """Prevent service, collapse, comparison, and diagnostic shape drift."""
+
+    assert [field.name for field in fields(CognitionCoreServicesV2)] == [
+        "llm",
+        "appraisal_event_agency_config",
+        "appraisal_relationship_social_config",
+        "appraisal_moral_identity_config",
+        "appraisal_goal_threat_outcome_config",
+        "appraisal_epistemic_comparison_memory_config",
+        "appraisal_existential_drive_config",
+        "goal_ordinary_response_config",
+        "goal_active_branch_config",
+        "workspace_collapse_config",
+        "action_planning_config",
+        "action_authorization_config",
+        "resolver_authorization_config",
+    ]
+    assert [field.name for field in fields(TextSurfaceServicesV2)] == [
+        "llm",
+        "content_plan_config",
+        "preference_config",
+    ]
+    assert [field.name for field in fields(VisualSurfaceServicesV2)] == [
+        "llm",
+        "visual_config",
+    ]
+    assert set(CollapsedIntentionV2.__annotations__) == {
+        "primary_branch_id",
+        "supporting_branch_ids",
+        "suppressed_branch_ids",
+        "primary_bid",
+        "supporting_bids",
+        "competing_bids",
+    }
+    assert set(EventComparisonResultV2.__annotations__) == {
+        "current_event_ref",
+        "matched_entity_ref",
+        "outcome",
+        "evidence_refs",
+    }
+    assert set(CognitionDiagnosticsV2.__annotations__) == {
+        "run_id",
+        "stage_status",
+        "selected_question_count",
+        "dispatched_question_count",
+        "selected_branch_count",
+        "dispatched_branch_count",
+        "completed_branch_count",
+        "failed_branch_count",
+        "overlap_ms",
+        "dependency_wait_ms",
+        "total_ms",
+        "warnings",
+    }
+
+
+def test_expression_policy_uses_frozen_affect_and_branch_rules() -> None:
+    """Derive intensity, directness, and two-emotion tone deterministically."""
+
+    activations = [
+        {
+            "emotion_id": "fear",
+            "score": 60,
+            "phase": "active",
+            "cause_status": "active",
+            "trend": "rising",
+        },
+        {
+            "emotion_id": "joy",
+            "score": 60,
+            "phase": "active",
+            "cause_status": "active",
+            "trend": "stable",
+        },
+    ]
+    policy = default_expression_policy(
+        "speech",
+        [{"intensity": "高"}],
+        selected_branch_id="autonomy_boundary",
+        activations=activations,
+    )
+
+    assert policy["intensity"] == "strong"
+    assert policy["directness"] == "direct"
+    assert policy["emotional_tone"].startswith("joy (")
+    assert "fear (" in policy["emotional_tone"]
+    assert default_expression_policy(
+        "speech",
+        [{"intensity": "低"}],
+        selected_branch_id="social_care",
+    )["intensity"] == "restrained"
+    assert default_expression_policy(
+        "speech",
+        [{"intensity": "中等"}],
+    )["intensity"] == "moderate"
+
+
+def test_state_update_serializes_entities_and_activations_canonically() -> None:
+    """Make replacement documents independent of parallel completion order."""
+
+    previous = build_acquaintance_user_state(
+        global_user_id="canonical-order-user",
+        updated_at=NOW,
+    )
+    replacement = deepcopy(previous)
+    replacement["goals"] = [
+        {"entity_id": "goal:b", "created_at": "2026-07-14T00:00:01Z"},
+        {"entity_id": "goal:c", "created_at": NOW},
+        {"entity_id": "goal:a", "created_at": NOW},
+    ]
+    replacement["affect_activations"] = [
+        {"emotion_id": "fear"},
+        {"emotion_id": "joy"},
+    ]
+
+    update = build_state_update(previous, replacement)
+
+    assert [
+        row["entity_id"]
+        for row in update["replacement_state"]["goals"]
+    ] == ["goal:a", "goal:c", "goal:b"]
+    assert [
+        row["emotion_id"]
+        for row in update["replacement_state"]["affect_activations"]
+    ] == ["joy", "fear"]
+
+
+def test_evidence_visibility_matches_its_source_question_ids() -> None:
+    """Require exact source-owned semantic question visibility."""
+
+    payload = _input()
+    payload["evidence"] = [{
+        "evidence_handle": "e1",
+        "evidence_ref": {
+            "source_kind": "episode",
+            "source_id": "episode:visibility",
+            "occurred_at": NOW,
+            "semantic_summary": "a current grounded episode",
+        },
+        "semantic_text": "a current grounded episode",
+        "visible_to": list(EVIDENCE_SOURCE_QUESTION_IDS["episode"]),
+    }]
+
+    validate_cognition_core_input(payload)
+    payload["evidence"][0]["visible_to"] = ["cognition", "surface"]
+    with pytest.raises(CognitionContractError):
+        validate_cognition_core_input(payload)
+
+
+def test_private_and_group_contexts_have_exact_bounded_contracts() -> None:
+    """Validate the two restored V2 context lanes without widening input."""
+
+    payload = _input()
+    payload["past_dialog_cognition_context"] = "PAST_DIALOG_SENTINEL"
+    payload["group_engagement_action_context"] = {
+        "engagement_guidelines": ["Join only from an observed social beat."],
+        "confidence": "high",
+    }
+
+    validated = validate_cognition_core_input(payload)
+
+    assert validated["past_dialog_cognition_context"] == (
+        "PAST_DIALOG_SENTINEL"
+    )
+    assert validated["group_engagement_action_context"] == {
+        "engagement_guidelines": [
+            "Join only from an observed social beat."
+        ],
+        "confidence": "high",
+    }
+
+    payload["past_dialog_cognition_context"] = "p" * 1801
+    with pytest.raises(CognitionContractError):
+        validate_cognition_core_input(payload)
+
+
+def test_scene_context_requires_bounded_public_group_scene() -> None:
+    """The public scene field is required and capped for every scope."""
+
+    payload = _input()
+    payload["scene_context"].pop("public_group_scene")
+    with pytest.raises(CognitionContractError):
+        validate_cognition_core_input(payload)
+
+    payload = _input()
+    payload["scene_context"]["public_group_scene"] = "p" * 1801
+    with pytest.raises(CognitionContractError):
+        validate_cognition_core_input(payload)
+
+
+def test_scene_context_character_sleep_phase_is_optional_and_validated() -> None:
+    """The sleep-phase field is optional and bounded text when present."""
+
+    payload = _input()
+    assert "character_sleep_phase" not in payload["scene_context"]
+    validate_cognition_core_input(payload)
+
+    payload = _input()
+    payload["scene_context"]["character_sleep_phase"] = "睡眠中"
+    validated = validate_cognition_core_input(payload)
+    assert validated["scene_context"]["character_sleep_phase"] == "睡眠中"
+
+    payload = _input()
+    payload["scene_context"]["character_sleep_phase"] = 7
+    with pytest.raises(CognitionContractError):
+        validate_cognition_core_input(payload)
+
+
+@pytest.mark.parametrize(
+    "group_context",
+    [
+        [],
+        {
+            "engagement_guidelines": "not-a-list",
+            "confidence": "",
+        },
+        {
+            "engagement_guidelines": [""],
+            "confidence": "",
+        },
+        {
+            "engagement_guidelines": [
+                "g" * (GROUP_ENGAGEMENT_GUIDELINE_MAX_CHARS + 1)
+            ],
+            "confidence": "high",
+        },
+        {
+            "engagement_guidelines": ["bounded"]
+            * (L3_INTERACTION_STYLE_GUIDELINES_PER_FIELD_LIMIT + 1),
+            "confidence": "high",
+        },
+        {
+            "engagement_guidelines": ["bounded"],
+            "confidence": (
+                "c" * (GROUP_ENGAGEMENT_CONFIDENCE_MAX_CHARS + 1)
+            ),
+        },
+        {
+            "engagement_guidelines": [],
+            "confidence": "high",
+        },
+    ],
+)
+def test_group_context_rejects_every_invalid_shape_and_bound(
+    group_context: object,
+) -> None:
+    """Reject every malformed advisory group-context boundary."""
+
+    payload = _input()
+    payload["group_engagement_action_context"] = group_context
+
+    with pytest.raises(CognitionContractError):
+        validate_cognition_core_input(payload)
+
+    payload = _input()
+    payload["group_engagement_action_context"] = {
+        "engagement_guidelines": ["bounded"],
+        "confidence": "high",
+        "unexpected": "forbidden",
+    }
+    with pytest.raises(CognitionContractError):
+        validate_cognition_core_input(payload)
+
+
+@pytest.mark.asyncio
+async def test_malformed_custom_episode_fails_before_any_model_call() -> None:
+    """The public core boundary accepts only canonical CognitiveEpisode."""
+
+    payload = _input()
+    payload["episode"] = {
+        "episode_id": "legacy-projection",
+        "semantic_scene": "custom semantic map",
+    }
+
+    with pytest.raises(CognitionContractError):
+        await run_cognition(payload, _services())
+
+
+def test_relationship_context_uses_exact_native_relationship_contract() -> None:
+    """Optional relationship context keeps native fields and owner exactness."""
+
+    payload = _input()
+    relationship = deepcopy(payload["mutable_state"]["relationship"])
+    payload["relationship_context"] = relationship
+    validate_cognition_core_input(payload)
+
+    relationship["unexpected_axis"] = 50
+    with pytest.raises(CognitionContractError):
+        validate_cognition_core_input(payload)
+
+
+def test_consumer_fits_oversized_relationship_context_without_mutation() -> None:
+    """The validator returns a bounded copy of a legacy operational packet."""
+
+    payload = _input()
+    relationship_context = _oversized_relationship_context()
+    original = deepcopy(relationship_context)
+    payload["relationship_context"] = relationship_context
+
+    validated = validate_cognition_core_input(payload)
+
+    fitted = validated["relationship_context"]
+    assert isinstance(fitted, dict)
+    assert relationship_context == original
+    assert fitted is not relationship_context
+    assert len(json.dumps(
+        fitted,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )) <= 900
+
+
+def test_consumer_keeps_structural_errors_on_oversized_packets() -> None:
+    """Fitting cannot hide malformed rows inside an oversized packet."""
+
+    payload = _input()
+    relationship_context = _oversized_relationship_context()
+    relationship_context["causal_context"][0]["entity_kind"] = "invalid"
+    payload["relationship_context"] = relationship_context
+
+    with pytest.raises(CognitionContractError):
+        validate_cognition_core_input(payload)
+
+
+def test_consumer_keeps_required_field_bound_errors_structural() -> None:
+    """Required identity bounds remain structural contract failures."""
+
+    payload = _input()
+    relationship_context = _oversized_relationship_context()
+    relationship_context["relationship_id"] = "r" * 1000
+    payload["relationship_context"] = relationship_context
+
+    with pytest.raises(CognitionContractError):
+        validate_cognition_core_input(payload)
+
+
+def test_consumer_keeps_required_axis_errors_structural() -> None:
+    """Required relationship axes remain strict on oversized packets."""
+
+    payload = _input()
+    relationship_context = _oversized_relationship_context()
+    relationship_context["axes"]["trust"] = "invalid"
+    payload["relationship_context"] = relationship_context
+
+    with pytest.raises(CognitionContractError):
+        validate_cognition_core_input(payload)
+
+
+def test_consumer_keeps_individual_summary_bound_structural() -> None:
+    """Aggregate fitting cannot hide an over-bound causal summary."""
+
+    payload = _input()
+    relationship_context = _oversized_relationship_context()
+    relationship_context["causal_context"][0]["semantic_summary"] = "x" * 161
+    payload["relationship_context"] = relationship_context
+
+    with pytest.raises(CognitionContractError):
+        validate_cognition_core_input(payload)
+
+
+def test_consumer_reports_irreducible_aggregate_overflow_as_typed_limit() -> None:
+    """Valid required fields can still trigger the aggregate limit invariant."""
+
+    payload = _input()
+    relationship_context = _oversized_relationship_context()
+    relationship_context["causal_context"] = []
+    relationship_context["relationship_id"] = "r" * 200
+    relationship_context["relationship_freshness"] = "f" * 500
+    relationship_context["evidence_freshness"] = "e" * 500
+    payload["relationship_context"] = relationship_context
+
+    with pytest.raises(CognitionContextLimitError):
+        validate_cognition_core_input(payload)
+
+
+def test_consumer_fits_oversized_character_context_with_digest() -> None:
+    """The validator bounds character rows and returns a valid final digest."""
+
+    payload = _input()
+    character_context = _oversized_character_operational_context()
+    original = deepcopy(character_context)
+    payload["character_operational_context"] = character_context
+
+    validated = validate_cognition_core_input(payload)
+
+    fitted = validated["character_operational_context"]
+    assert isinstance(fitted, dict)
+    assert character_context == original
+    assert fitted is not character_context
+    assert len(json.dumps(
+        fitted,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )) <= 1200
+    context_body = {
+        key: value
+        for key, value in fitted.items()
+        if key != "context_digest"
+    }
+    assert fitted["context_digest"] == (
+        canonical_digest(context_body)
+    )
+
+
+def test_consumer_keeps_structural_errors_in_oversized_character_context() -> None:
+    """Fitting cannot hide malformed character rows."""
+
+    payload = _input()
+    character_context = _oversized_character_operational_context()
+    character_context["affect"][0]["phase"] = "invalid"
+    payload["character_operational_context"] = character_context
+
+    with pytest.raises(CognitionContractError):
+        validate_cognition_core_input(payload)
+
+
+def test_consumer_keeps_invalid_character_digest_structural() -> None:
+    """An oversized packet cannot repair a stale character digest."""
+
+    payload = _input()
+    character_context = _oversized_character_operational_context()
+    character_context["context_digest"] = "x" * 64
+    payload["character_operational_context"] = character_context
+
+    with pytest.raises(CognitionContractError):
+        validate_cognition_core_input(payload)
+
+
+def test_consumer_keeps_non_mapping_character_context_structural() -> None:
+    """The fit guard defers non-mapping input to the strict validator."""
+
+    payload = _input()
+    payload["character_operational_context"] = "invalid"
+
+    with pytest.raises(CognitionContractError):
+        validate_cognition_core_input(payload)
+
+
+def test_canonical_episode_timestamp_drives_native_state_time() -> None:
+    """The core uses only canonical storage_timestamp_utc and emits UTC-Z."""
+
+    episode = canonical_episode()
+    episode["created_at"] = "2026-07-14T00:01:02+00:00"
+
+    assert _episode_updated_at(episode) == "2026-07-14T00:01:02Z"
+
+
+def test_text_surface_rejects_private_state_and_branch_fields() -> None:
+    """Keep L3 limited to the frozen semantic surface projection."""
+
+    payload = {
+        "schema_version": "text_surface_input.v2",
+        "episode": canonical_episode(
+            episode_id="v2-surface-contract",
+            content="a quiet private greeting",
+        ),
+        "intention": {
+            "route": "silence",
+            "intention": "remain quiet",
+            "target_roles": [],
+            "reason": "there is no grounded need to speak",
+        },
+        "goal_resolution": "answerable_now",
+        "supporting_bids": [],
+        "expression_policy": {
+            "visibility": "none",
+            "emotional_tone": "calm",
+            "intensity": "restrained",
+            "directness": "balanced",
+        },
+        "semantic_affect": [],
+        "permitted_action_results": [],
+        "interaction_style_context": "brief and natural",
+        "character_expression_context": {
+            "tempo": "measured",
+            "linguistic_texture": "reserved, analytical, and warm",
+        },
+        "visual_character_context": "complete visual character context",
+    }
+    validate_text_surface_input(payload)
+
+    raw_state_payload = deepcopy(payload)
+    raw_state_payload["episode"]["mutable_state"] = {"goals": []}
+    with pytest.raises(CognitionContractError):
+        validate_text_surface_input(raw_state_payload)
+
+    private_bid_payload = deepcopy(payload)
+    private_bid_payload["primary_bid"] = {
+        "branch_id": "ordinary_response",
+        "motive": "respond naturally",
+        "intention": "acknowledge the greeting",
+        "desired_outcome": "maintain rapport",
+        "permitted_detail": "a short greeting",
+        "target_summaries": [],
+        "expected_consequences": [],
+    }
+    with pytest.raises(CognitionContractError):
+        validate_text_surface_input(private_bid_payload)
+
+
+def test_text_surface_output_validates_every_list_entry() -> None:
+    """Addressee entries are bounded while visible boundaries stay dormant."""
+
+    payload = {
+        "schema_version": "text_surface_output.v2",
+        "content_plan": "acknowledge the current percept",
+        "content_requirements": ["Preserve the current addressee."],
+        "visible_boundaries": [],
+        "addressee_plan": [{
+            "handle": "current_user",
+            "display_name": "current participant",
+            "semantic_role": "direct_recipient",
+            "wording_policy": "second_person_allowed",
+        }],
+        "delivery_profile": _delivery_profile(),
+        "selected_surface_intent": "acknowledge",
+        "permitted_action_results": [{
+            "action_kind": "background_work_request",
+            "status": "pending",
+            "semantic_result": "The accepted task remains pending.",
+            "target_roles": [],
+        }],
+    }
+    validate_text_surface_output(payload)
+
+    payload["visible_boundaries"] = ["keep the response concise"]
+    with pytest.raises(CognitionContractError):
+        validate_text_surface_output(payload)
+
+
+def test_lexical_avoidances_are_bounded_expression_fragments() -> None:
+    """Keep expression continuity bounded and independent of topic policy."""
+
+    assert validate_lexical_avoidances(["嗯"]) == ["嗯"]
+
+    with pytest.raises(CognitionContractError):
+        validate_lexical_avoidances(["same", "same"])
+    with pytest.raises(CognitionContractError):
+        validate_lexical_avoidances(["fragment"] * 9)
+    with pytest.raises(CognitionContractError):
+        validate_lexical_avoidances(["x" * 121])
+
+
+@pytest.mark.asyncio
+async def test_surface_stage_degrades_legacy_response_fallbacks() -> None:
+    """Legacy model shapes produce canonical degradation without leaking."""
+
+    input_payload = {
+        "schema_version": "text_surface_input.v2",
+        "episode": canonical_episode(
+            episode_id="surface-exact-result",
+            content="a visible greeting",
+        ),
+        "intention": {
+            "route": "speech",
+            "intention": "acknowledge the greeting",
+            "target_roles": [],
+            "reason": "the greeting is directly observed",
+        },
+        "goal_resolution": "answerable_now",
+        "supporting_bids": [],
+        "expression_policy": {
+            "visibility": "visible",
+            "emotional_tone": "calm",
+            "intensity": "restrained",
+            "directness": "balanced",
+        },
+        "semantic_affect": [],
+        "permitted_action_results": [],
+        "interaction_style_context": "brief and natural",
+        "character_expression_context": {
+            "tempo": "measured",
+            "linguistic_texture": "reserved, analytical, and warm",
+        },
+        "visual_character_context": "complete visual character context",
+    }
+    services = TextSurfaceServicesV2(
+        llm=_FallbackSurfaceLLM(),
+        content_plan_config=make_llm_call_config("v2_content"),
+        preference_config=make_llm_call_config("v2_preference"),
+    )
+
+    output = await run_text_surface_planning(input_payload, services)
+
+    assert output["schema_version"] == "text_surface_output.v2"
+    assert output["content_plan"] == "acknowledge the greeting"
+    assert output["selected_surface_intent"] == "acknowledge the greeting"
+    assert output["content_requirements"]
+    assert output["permitted_action_results"] == []
+    assert "legacy" not in json.dumps(output)
+
+
+@pytest.mark.asyncio
+async def test_surface_stage_repairs_invalid_candidate_with_same_context() -> None:
+    """A malformed candidate receives one bounded Chinese repair request."""
+
+    llm = _RepairingContentLLM()
+    services = TextSurfaceServicesV2(
+        llm=llm,
+        content_plan_config=make_llm_call_config("v2_content"),
+        preference_config=make_llm_call_config("v2_preference"),
+    )
+
+    result = await run_content_plan_stage(
+        {"surface": "当前角色回应当前用户的输入"},
+        services,
+    )
+
+    assert result == (
+        "修复后的中文内容计划",
+        ["保持当前角色判断。"],
+        _delivery_profile(),
+        [],
+    )
+    assert llm.calls == 2
+    repair_system = str(getattr(llm.messages[1][0], "content", ""))
+    repair_payload = json.loads(
+        str(getattr(llm.messages[1][1], "content", "{}"))
+    )
+    assert repair_system == str(
+        getattr(llm.messages[0][0], "content", "")
+    )
+    assert (
+        repair_payload["contract_repair"]["repair_instruction"]
+        == SURFACE_REPAIR_INSTRUCTION
+    )
+    assert repair_payload["contract_repair"]["contract_error"]
+    assert repair_payload["surface"] == {
+        "surface": "当前角色回应当前用户的输入",
+    }
+    assert "当前阶段" in repair_payload["contract_repair"]["reason"]
+
+
+@pytest.mark.asyncio
+async def test_facade_derives_relief_from_direct_threat_resolution() -> None:
+    """Derive relief from the public trusted-fact lane without caller metadata."""
+
+    payload = _input()
+    state = payload["mutable_state"]
+    state["threats"] = [{
+        "entity_id": "threat:resolved-by-action",
+        "description": "an immediate serious risk",
+        "salience": 70,
+        "role_refs": [],
+        "evidence_refs": [{
+            "source_kind": "episode",
+            "source_id": "episode:threat",
+            "occurred_at": NOW,
+            "semantic_summary": "a serious risk was active",
+        }],
+        "created_at": NOW,
+        "updated_at": NOW,
+        "status": "active",
+        "likelihood": 80,
+        "expected_harm": 80,
+        "uncertainty": 70,
+        "controllability": 20,
+        "coping_potential": 20,
+        "residual_pressure": 80,
+    }]
+    payload["direct_facts"] = [{
+        "fact_id": "fact:resolved-by-action",
+        "producer": "action_result",
+        "fact_kind": "threat_resolved",
+        "target_refs": [{
+            "scope": "user",
+            "kind": "threat",
+            "entity_id": "threat:resolved-by-action",
+        }],
+        "evidence_ref": {
+            "source_kind": "action_result",
+            "source_id": "action:resolved-threat",
+            "occurred_at": NOW,
+            "semantic_summary": "the action removed the serious risk",
+        },
+    }]
+
+    output = await run_cognition(payload, _services())
+    activations = output["state_update"]["replacement_state"][
+        "affect_activations"
+    ]
+    relief = next(
+        row for row in activations if row["emotion_id"] == "relief"
+    )
+    assert relief["primary_root"] == {
+        "scope": "user",
+        "kind": "threat",
+        "entity_id": "threat:resolved-by-action",
+    }
+
+
+def _output_with_resolver_request(
+    *,
+    capability: str = "task_resolution_request",
+    start_in_background: object = False,
+    extra_field: str | None = None,
+    include_boolean: bool = True,
+) -> dict[str, object]:
+    """Build a validated output fixture carrying one resolver request."""
+
+    output = canonical_cognition_output()
+    row: dict[str, object] = {
+        "capability": capability,
+        "semantic_goal": "resolve the bounded evidence task",
+        "reason": "the admitted motive has an evidence gap",
+        "evidence_handles": ["e1"],
+    }
+    if include_boolean:
+        row["start_in_background"] = start_in_background
+    if extra_field is not None:
+        row[extra_field] = "background"
+    output["resolver_requests"] = [row]
+    return output
+
+
+@pytest.mark.parametrize("start_in_background", [True, False])
+def test_task_resolution_output_accepts_exact_routing_boolean(
+    start_in_background: bool,
+) -> None:
+    """A validated task-resolution row keeps its exact JSON boolean."""
+
+    output = _output_with_resolver_request(
+        start_in_background=start_in_background,
+    )
+
+    validated = validate_cognition_core_output(output)
+
+    row = validated["resolver_requests"][0]
+    assert row["start_in_background"] is start_in_background
+
+
+@pytest.mark.parametrize(
+    "start_in_background",
+    ["true", 1, 0, None, 1.0],
+)
+def test_task_resolution_output_rejects_non_boolean_route_value(
+    start_in_background: object,
+) -> None:
+    """Strings, numbers, and null cannot select the durable route."""
+
+    output = _output_with_resolver_request(
+        start_in_background=start_in_background,
+    )
+
+    with pytest.raises(
+        CognitionContractError,
+        match="start_in_background must be a boolean",
+    ):
+        validate_cognition_core_output(output)
+
+
+def test_task_resolution_output_requires_routing_boolean() -> None:
+    """A generic task-resolution row cannot omit its required boolean."""
+
+    output = _output_with_resolver_request(include_boolean=False)
+
+    with pytest.raises(CognitionContractError, match="fields are not exact"):
+        validate_cognition_core_output(output)
+
+
+def test_task_resolution_output_rejects_extra_route_field() -> None:
+    """Extra route fields fail closed at the V2 output boundary."""
+
+    output = _output_with_resolver_request(extra_field="priority")
+
+    with pytest.raises(CognitionContractError, match="fields are not exact"):
+        validate_cognition_core_output(output)
+
+
+def test_other_resolver_rows_keep_their_exact_shape() -> None:
+    """Non-task-resolution rows do not carry the routing boolean."""
+
+    output = _output_with_resolver_request(
+        capability="human_clarification",
+        include_boolean=False,
+    )
+
+    validated = validate_cognition_core_output(output)
+
+    assert set(validated["resolver_requests"][0]) == {
+        "capability",
+        "semantic_goal",
+        "reason",
+        "evidence_handles",
+    }
+
+
+def test_other_resolver_rows_reject_the_routing_boolean() -> None:
+    """The routing boolean is exclusive to the generic task-resolution row."""
+
+    output = _output_with_resolver_request(
+        capability="human_clarification",
+        start_in_background=True,
+    )
+
+    with pytest.raises(CognitionContractError, match="fields are not exact"):
+        validate_cognition_core_output(output)

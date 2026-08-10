@@ -50,12 +50,24 @@ class QQEnvelopeNormalizer:
         """
 
         raw_wire_text = str(request.content or "")
-        platform_bot_id = str(request.platform_bot_id)
+        raw_platform_bot_id = request.platform_bot_id
+        if not isinstance(raw_platform_bot_id, str):
+            raise ValueError("platform_bot_id must be a string")
+        platform_bot_id = raw_platform_bot_id.strip()
+        if not platform_bot_id:
+            raise ValueError("platform_bot_id is required")
+        raw_character_name = request.character_name
+        if not isinstance(raw_character_name, str):
+            raise ValueError("character_name must be a string")
+        character_name = raw_character_name.strip()
+        if not character_name:
+            raise ValueError("character_name is required")
         channel_type = str(request.channel_type)
         reply_context = dict(request.reply_context)
         mention_display_names = normalize_mention_display_map(
             getattr(request, "mention_display_names", {}),
         )
+        mention_display_names[platform_bot_id] = character_name
 
         raw_mentions = self._raw_mentions(
             raw_wire_text,
@@ -66,6 +78,7 @@ class QQEnvelopeNormalizer:
             raw_wire_text,
             reply_context,
             platform_bot_id,
+            character_name,
             mention_display_names,
         )
         body_text = project_qq_semantic_text(
@@ -129,6 +142,7 @@ class QQEnvelopeNormalizer:
         raw_wire_text: str,
         reply_context: dict,
         platform_bot_id: str,
+        character_name: str,
         display_names: dict[str, str],
     ) -> ReplyTarget:
         """Extract the typed reply target from CQ text and adapter metadata."""
@@ -147,12 +161,16 @@ class QQEnvelopeNormalizer:
             reply["platform_user_id"] = platform_user_id
             if platform_user_id == platform_bot_id:
                 reply["global_user_id"] = CHARACTER_GLOBAL_USER_ID
-            display_name = str(reply_context.get("reply_to_display_name") or "")
-            if not display_name:
-                display_name = semantic_entity_fallback_label(
-                    entity_kind="user",
-                    mention_context=False,
+                display_name = character_name
+            else:
+                display_name = str(
+                    reply_context.get("reply_to_display_name") or ""
                 )
+                if not display_name:
+                    display_name = semantic_entity_fallback_label(
+                        entity_kind="user",
+                        mention_context=False,
+                    )
             if display_name:
                 reply["display_name"] = display_name
         elif reply_context.get("reply_to_display_name"):

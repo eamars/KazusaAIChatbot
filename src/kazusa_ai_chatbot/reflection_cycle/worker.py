@@ -12,7 +12,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from kazusa_ai_chatbot.config import (
-    GLOBAL_CHARACTER_GROWTH_PASS_ENABLED,
+    CHARACTER_IDENTITY_GROWTH_ENABLED,
     CHARACTER_GLOBAL_USER_ID,
     REFLECTION_DAILY_RUN_AFTER_LOCAL_TIME,
     REFLECTION_HOURLY_SLOTS_PER_TICK,
@@ -24,8 +24,8 @@ from kazusa_ai_chatbot.config import (
     REFLECTION_WORKER_INTERVAL_SECONDS,
 )
 from kazusa_ai_chatbot import event_logging
-from kazusa_ai_chatbot.global_character_growth import (
-    run_global_character_growth_pass,
+from kazusa_ai_chatbot.character_identity_growth.runner import (
+    run_reflection_identity_growth_pass,
 )
 from kazusa_ai_chatbot.db import (
     find_self_cognition_group_review_window,
@@ -666,14 +666,22 @@ async def _run_worker_tick(
         await _record_reflection_worker_result(promotion_result)
         if is_primary_interaction_busy():
             return results
-        if (
-            GLOBAL_CHARACTER_GROWTH_PASS_ENABLED
-            and promotion_result.succeeded_count > 0
-        ):
-            growth_result = await run_global_character_growth_pass(
+        if CHARACTER_IDENTITY_GROWTH_ENABLED:
+            daily_runs = await repository.daily_channel_runs(
                 character_local_date=previous_local_date,
+            )
+            source_reflection_run_ids = sorted({
+                str(document.get("run_id", "")).strip()
+                for document in daily_runs
+                if str(document.get("run_id", "")).strip()
+                if document.get("status") in {None, "succeeded"}
+            })
+            growth_result = await run_reflection_identity_growth_pass(
+                character_local_date=previous_local_date,
+                source_reflection_run_ids=source_reflection_run_ids,
                 dry_run=False,
-                enable_trait_writes=True,
+                enable_revision_writes=True,
+                now=now,
             )
             results.append(growth_result)
 

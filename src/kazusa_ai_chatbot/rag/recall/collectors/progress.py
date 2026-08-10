@@ -6,7 +6,6 @@ from typing import Any
 
 from kazusa_ai_chatbot.rag.recall.contracts import (
     _candidate,
-    _entry_text,
     _safe_parse_datetime,
 )
 from kazusa_ai_chatbot.utils import text_or_empty
@@ -19,6 +18,8 @@ def _progress_is_active(
     """Decide whether conversation progress can serve active recall."""
 
     if not isinstance(progress, dict):
+        return False
+    if progress.get("schema_version") != "conversation_progress_prompt.v2":
         return False
     status = text_or_empty(progress.get("status"))
     continuity = text_or_empty(progress.get("continuity"))
@@ -51,29 +52,27 @@ def _progress_evidence_time(progress: dict, episode_state: object) -> str:
 def _progress_entries(progress: dict) -> list[str]:
     """Extract compact claims from the active progress document."""
 
+    if progress.get("schema_version") != "conversation_progress_prompt.v2":
+        return []
     claims: list[str] = []
     for field in (
         "current_thread",
         "current_blocker",
         "user_goal",
-        "progression_guidance",
+        "episode_narrative",
+        "character_stance",
+        "emotional_trajectory",
     ):
         claim = text_or_empty(progress.get(field))
         if claim:
             claims.append(claim)
 
-    for field in (
-        "open_loops",
-        "resolved_threads",
-        "user_state_updates",
-        "next_affordances",
-        "assistant_moves",
-    ):
-        values = progress.get(field)
-        if not isinstance(values, list):
-            continue
-        for value in values:
-            claim = _entry_text(value)
+    events = progress.get("events")
+    if isinstance(events, list):
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            claim = text_or_empty(event.get("semantic_summary"))
             if claim:
                 claims.append(claim)
 

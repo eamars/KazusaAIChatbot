@@ -14,13 +14,6 @@ import pytest
 from kazusa_ai_chatbot.config import COGNITION_LLM_BASE_URL
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition as cognition_module
-from kazusa_ai_chatbot.cognition_chain_core.stages import (
-    l1 as l1_module,
-    l2 as l2_module,
-    l2c2 as l2c2_module,
-    l2d as l2d_module,
-    l3 as l3_module,
-)
 from kazusa_ai_chatbot.nodes import persona_supervisor2_l3_surface as l3_surface_module
 from tests.cognition_stage_connection_cases import (
     build_cognition_connection_comparison_report,

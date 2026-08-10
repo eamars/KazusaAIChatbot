@@ -19,8 +19,9 @@ selected `speak` through the runtime adapter bridge.
 Self-cognition is an upstream trigger source for the shared persona path. It is
 not a downstream action consumer, private cleanup channel, adapter sender, or
 commitment-retirement executor. Once a case is collected, the rest of the
-workflow follows the same cognition, action initialization, action evaluation,
-surface handling, and consolidation boundaries as other cognitive episodes.
+workflow follows the same V2 cognition, admitted action materialization,
+action evaluation, surface handling, and consolidation boundaries as other
+cognitive episodes.
 
 The current compatibility episode label in some prompt-selection and origin
 metadata code is `internal_thought`; architecturally those cases are
@@ -41,10 +42,10 @@ persistence, consolidation, and source-bound delivery.
 
 Self-cognition-created episodes set
 `origin_metadata.debug_modes.no_visual_directives=true` by default, so the
-shared L3 visual-directive LLM is skipped for self-cognition. These episodes do
+optional V2 visual surface stage is skipped for self-cognition. These episodes do
 not set `no_remember`. Production worker consolidation goes through the shared
 target-aware consolidator policy. Real user-scoped cases may update existing
-relationship, affinity, memory-unit, and cache lanes. Group-scoped or
+relationship, relationship_state, memory-unit, and cache lanes. Group-scoped or
 targetless cases do not fabricate a user id and cannot reach user-profile
 lanes. Self-cognition does not create a separate self-cognition memory or
 progress store.
@@ -116,16 +117,15 @@ coordination API and not through `/chat`-specific imports.
 ## Runtime Engine Budget
 
 - Every case enters the bounded cognition resolver and each resolver cycle
-  invokes the shared L1/L2/L2d cognition graph.
-- If L2d selects `local_context_recall`, the resolver invokes RAG3 local
-  context resolution as a capability observation and feeds the projected result
-  into the next cognition cycle.
-- If L2d selects `public_answer_research`, public/current/external answer
-  investigation is handled by the complex task resolver through declared IO.
-- If L2d selects neither recall nor public answer research, no deterministic
-  self-cognition rule calls either capability on its behalf.
-- If L2d selects visible `speak`, the selected L3 text handler may invoke the
-  existing dialog graph once to render text.
+  invokes the shared V2 appraisal, state-reduction, goal-branch, bid-collapse,
+  and route-selection flow.
+- If V2 cognition selects `task_resolution_request`, the resolver runs the
+  bounded task-resolution session and feeds its prompt-safe evidence or
+  durable-continuation observation into the next cognition cycle.
+- Unsupported resolver requests return a bounded failed observation; they do
+  not invoke an undeclared capability.
+- If V2 cognition selects the `speech` route, the V2 text-surface connector
+  runs after the final state commit and dialog renders once.
 - When consolidation is applied without a selected visible `speak`, the runner
   reuses an empty `final_dialog` and does not invoke dialog.
 - The production worker applies consolidation by default and keeps the existing
@@ -170,19 +170,22 @@ has just noticed a group scene where she has not yet joined and nobody has
 handed the topic to her. For directly addressed group windows, the source
 packet says someone has pointed the topic at her. Empty windows are skipped
 before cognition.
-When the reflection input rows carry a usable sanitized group label,
-group-review projection folds that label into the existing source-instruction
-sentence, for example `下面是我在“动画讨论群”群聊里看到的现场观察资料。`.
+When reflection input rows carry a usable sanitized group label, group-review
+projection folds it into the existing source instruction instead of adding a
+separate source-packet field.
 The label is not rendered as a separate source-packet field and is not reused
 as cognition-scene topic.
 
 Ambient group review keeps `target_scope.user_id=None`: the semantic target is
 the observed group scene, not a fabricated latest speaker. The delivery target
-remains the source group channel. Before L2d action selection, targetless
-group review may load bounded group-channel engagement guidance so the
-character can judge whether the current scene gives enough reason to speak.
-This guidance is evidence only; it is not a response-ratio control, a command
-to speak, or a deterministic silence rule.
+remains the source group channel. Before V2 goal and route selection,
+canonical targetless group review loads bounded group-channel engagement
+guidance once at resolver cycle zero. The lookup overlaps independent cognition
+state preparation, and later cycles reuse the exact projected value without
+another style read. Goal cognition and action planning may use it to judge how
+to participate in the currently observed scene. The guidance is advisory
+context, not evidence, a response-ratio control, permission, route authority,
+a command to speak, a new topic, or a deterministic silence rule.
 
 Group review also attaches bounded participant context during source
 collection under `conversation_progress.participant_context`. This context is
@@ -355,8 +358,8 @@ only carries the minimal identity needed for adapters to replace authored
 
 Self-cognition may produce local delivery-candidate records for duplicate
 suppression and dispatcher handoff. In production worker ticks, selected
-`speak` requires a bound delivery target, L3 text directives, and dialog in the
-shared cognition path, then the worker hands the final text to dispatcher
+`speech` requires a bound delivery target, a validated V2 text-surface output,
+and dialog in the shared cognition path, then the worker hands the final text to dispatcher
 delivery in the same tick.
 
 `trigger_future_cognition` uses the durable calendar scheduler as an internal
@@ -490,3 +493,13 @@ self_cognition_consolidation_outcome = {
     "origin_episode_id": str,
 }
 ```
+
+## Trace Binding
+
+Each live self-cognition case receives a protected `llm_trace_id` before
+Cognition Core V2 starts. The worker binds that id for the case, ensures the
+trace run with platform/message and user metadata, carries the applicable
+`source_calendar_run_id` and source trace, and finalizes the run after the case
+settles. Trace write failure does not become a delivery prerequisite. Action
+attempts and failure capsules retain the same case trace while their existing
+`cognition_invocation_id` and action ownership semantics remain unchanged.

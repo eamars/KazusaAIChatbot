@@ -1,77 +1,104 @@
-"""Tests for the conversation progress last-completed cache."""
+"""Validated active-packet cache contracts."""
 
 from __future__ import annotations
 
+from copy import deepcopy
+
+import pytest
+
 from kazusa_ai_chatbot.conversation_progress import cache
-from kazusa_ai_chatbot.conversation_progress.models import ConversationProgressScope
+from tests.conversation_progress_v2_helpers import SCOPE, packet
 
 
-def test_cache_document_wins_when_turn_count_is_higher() -> None:
-    """A fresher completed write supplies the next-turn load."""
-
-    cache.clear_cache()
-    scope = ConversationProgressScope("qq", "channel-1", "user-1")
-    cache.store_completed_document(
-        scope=scope,
-        document={
-            "turn_count": 3,
-            "platform": "qq",
-            "platform_channel_id": "channel-1",
-            "global_user_id": "user-1",
-            "status": "active",
-            "episode_label": "essay_help",
-            "continuity": "same_episode",
-        },
-        completed_at=100.0,
-    )
-
-    document, used_cache = cache.select_latest_document(
-        scope=scope,
-        db_document={"turn_count": 2},
-        current_time=110.0,
-    )
-
-    assert used_cache is True
-    assert document["turn_count"] == 3
-
-
-def test_db_document_wins_when_cache_is_not_strictly_newer() -> None:
-    """Equal turn counts do not use cache fallback."""
+def setup_function() -> None:
+    """Clear process-local state before every cache contract."""
 
     cache.clear_cache()
-    scope = ConversationProgressScope("qq", "channel-1", "user-1")
-    cache.store_completed_document(
-        scope=scope,
-        document={"turn_count": 2},
-        completed_at=100.0,
+
+
+def test_newer_active_packet_is_copied_into_and_out_of_cache():
+    source = packet(turn_count=3)
+
+    assert cache.put_cached_packet(scope=SCOPE, packet=source) is True
+    source['turn_count'] = 99
+    cached = cache.get_cached_packet(
+        scope=SCOPE,
+        current_timestamp_utc='2026-07-28T09:30:00+00:00',
     )
 
-    document, used_cache = cache.select_latest_document(
-        scope=scope,
-        db_document={"turn_count": 2, "source": "db"},
-        current_time=110.0,
+    assert cached is not None
+    assert cached['turn_count'] == 3
+    cached['turn_count'] = 88
+    second = cache.get_cached_packet(
+        scope=SCOPE,
+        current_timestamp_utc='2026-07-28T09:30:00+00:00',
+    )
+    assert second is not None
+    assert second['turn_count'] == 3
+
+
+def test_equal_or_older_turn_count_cannot_replace_cached_packet():
+    assert cache.put_cached_packet(
+        scope=SCOPE,
+        packet=packet(turn_count=3),
     )
 
-    assert used_cache is False
-    assert document["source"] == "db"
+    assert cache.put_cached_packet(
+        scope=SCOPE,
+        packet=packet(turn_count=3),
+    ) is False
+    assert cache.put_cached_packet(
+        scope=SCOPE,
+        packet=packet(turn_count=2),
+    ) is False
 
 
-def test_stale_cache_entry_is_evicted() -> None:
-    """Expired process-local entries are ignored."""
+def test_closed_packet_invalidates_scope():
+    assert cache.put_cached_packet(
+        scope=SCOPE,
+        packet=packet(turn_count=3),
+    )
+    closed = packet(turn_count=3, status='closed')
 
-    cache.clear_cache()
-    scope = ConversationProgressScope("qq", "channel-1", "user-1")
-    cache.store_completed_document(
-        scope=scope,
-        document={"turn_count": 9},
-        completed_at=100.0,
+    assert cache.put_cached_packet(scope=SCOPE, packet=closed) is False
+    assert cache.get_cached_packet(
+        scope=SCOPE,
+        current_timestamp_utc='2026-07-28T09:30:00+00:00',
+    ) is None
+
+
+def test_expired_semantic_lifecycle_is_evicted():
+    expired = packet()
+    expired['expires_at'] = '2026-07-28T09:30:00+00:00'
+    assert cache.put_cached_packet(scope=SCOPE, packet=expired)
+
+    assert cache.get_cached_packet(
+        scope=SCOPE,
+        current_timestamp_utc='2026-07-28T09:30:00+00:00',
+    ) is None
+
+
+def test_monotonic_ttl_is_enforced(monkeypatch):
+    monkeypatch.setattr(cache.time, 'monotonic', lambda: 100.0)
+    assert cache.put_cached_packet(scope=SCOPE, packet=packet())
+    monkeypatch.setattr(
+        cache.time,
+        'monotonic',
+        lambda: 100.0 + cache.CACHE_TTL_SECONDS,
     )
 
-    document, used_cache = cache.select_latest_document(
-        scope=scope,
-        db_document={"turn_count": 1},
-        current_time=3701.0,
-    )
+    assert cache.get_cached_packet(
+        scope=SCOPE,
+        current_timestamp_utc='2026-07-28T09:30:00+00:00',
+    ) is None
 
-    assert used_cache is False
-    assert document["turn_count"] == 1
+
+def test_scope_mismatch_is_rejected():
+    wrong_scope_packet = deepcopy(packet())
+    wrong_scope_packet['global_user_id'] = 'other-user'
+
+    with pytest.raises(ValueError, match='scope'):
+        cache.put_cached_packet(
+            scope=SCOPE,
+            packet=wrong_scope_packet,
+        )

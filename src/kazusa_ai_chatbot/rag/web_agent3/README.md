@@ -52,7 +52,9 @@ or new RAG supervisor fields.
 Ordinary webpage search is exposed through `web_search` when the direct search
 endpoint is configured by `SEARXNG_URL`. If `SEARXNG_URL` is empty,
 `web_search` is not registered and the router does not see search as an
-available source.
+available source. `SEARXNG_SEARCH_ENGINES` selects the deployment's explicit
+comma-separated engine roster so blocked default engines cannot silently turn
+provider outages into empty search results.
 
 URL-read execution is process-local HTTP(S) fetching. It does not require
 SearXNG or MCP. Localhost, loopback, private LAN addresses, and intranet

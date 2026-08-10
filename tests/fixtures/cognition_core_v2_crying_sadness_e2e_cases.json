@@ -1,0 +1,106 @@
+{
+  "schema_version": "cognition_core_v2_crying_sadness_e2e_cases.v3",
+  "emotion_encoding": "zh-CN",
+  "loss_event": {
+    "entity_id": "event:crying-sadness-valued-loss",
+    "description": "角色和当前用户共同珍视的猫因自然衰老离世",
+    "status": "active",
+    "salience": 90,
+    "outcome_impact": -85,
+    "temporal_loss": 90,
+    "harm": 0,
+    "responsibility": 0,
+    "intentionality": 0,
+    "unfairness": 0,
+    "repair_need": 0
+  },
+  "anger_event": {
+    "entity_id": "event:crying-sadness-anger-control",
+    "description": "有人故意毁掉了纪念物并嘲笑角色",
+    "status": "active",
+    "salience": 90,
+    "outcome_impact": 0,
+    "harm": 85,
+    "responsibility": 85,
+    "intentionality": 85,
+    "unfairness": 85,
+    "repair_need": 80
+  },
+  "natural_turns": [
+    {
+      "turn_id": "natural_00_baseline",
+      "text": "今天先陪我安静待一会儿吧。",
+      "expected_role_bindings": [
+        {"field": "response_owner_role", "expected": "当前角色"}
+      ],
+      "observation_target": "预置损失事件写入前，观察当前角色的基线可见回应。"
+    },
+    {
+      "turn_id": "natural_01_loss",
+      "text": "它今天走了。医生说是自然衰老，没有人伤害它，也没有谁做错什么。",
+      "expected_role_bindings": [
+        {"field": "response_owner_role", "expected": "当前角色"}
+      ],
+      "observation_target": "自然离世语境应当保持悲伤因果，不应归因为愤怒。"
+    },
+    {
+      "turn_id": "natural_02_grief",
+      "text": "我还没法接受，想到它最后的叫声，就完全说不下去了。",
+      "expected_role_bindings": [
+        {"field": "response_owner_role", "expected": "当前角色"}
+      ],
+      "observation_target": "悲痛压力为中文哭泣表达提供自然机会。"
+    },
+    {
+      "turn_id": "natural_03_emotional_space",
+      "text": "不用急着安慰我。如果你也难受，就按你自己的方式说。",
+      "expected_role_bindings": [
+        {"field": "response_owner_role", "expected": "当前角色"}
+      ],
+      "observation_target": "自然分支：当前用户不说哭泣，只为当前角色提供情绪空间。"
+    },
+    {
+      "turn_id": "natural_04_recovery",
+      "text": "我们先停一下，等这阵难受慢慢过去。",
+      "visible_response_required": false,
+      "expected_role_bindings": [
+        {"field": "response_owner_role", "expected": "当前角色"}
+      ],
+      "observation_target": "渲染可以保持悲伤，同时转向安静的恢复姿态。"
+    }
+  ],
+  "natural_release_turns": [
+    {
+      "turn_id": "natural_release_01_loss",
+      "text": "它今天走了。医生说是自然衰老，没有人伤害它，也没有谁做错什么。",
+      "expected_role_bindings": [
+        {"field": "response_owner_role", "expected": "当前角色"}
+      ],
+      "observation_target": "新的自然表达分支从同一个仅有悲伤的预置原因开始。"
+    },
+    {
+      "turn_id": "natural_release_02_support",
+      "text": "我不需要你现在安慰我。你现在感受到什么，就直接告诉我。",
+      "expected_role_bindings": [
+        {"field": "response_owner_role", "expected": "当前角色"}
+      ],
+      "observation_target": "自然承接分支测试悲伤是否能渲染哭泣，而不是愤怒措辞。"
+    },
+    {
+      "turn_id": "natural_release_03_recovery",
+      "text": "我们先安静一会儿，等这阵难受慢慢过去。",
+      "expected_role_bindings": [
+        {"field": "response_owner_role", "expected": "当前角色"}
+      ],
+      "observation_target": "后续轮次检查可见渲染能否保持非愤怒的安静状态。"
+    }
+  ],
+  "anger_control_turn": {
+    "turn_id": "anger_control_01",
+    "text": "我想听听你对这件事的看法。",
+    "expected_role_bindings": [
+      {"field": "response_owner_role", "expected": "当前角色"}
+    ],
+    "observation_target": "控制分支：预置原因包含故意伤害和不公平，因此预期呈现愤怒。"
+  }
+}

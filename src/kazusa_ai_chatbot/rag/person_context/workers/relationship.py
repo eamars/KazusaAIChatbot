@@ -15,7 +15,7 @@ from kazusa_ai_chatbot.config import (
     RAG_SUBAGENT_LLM_MODEL,
     RAG_SUBAGENT_LLM_THINKING_ENABLED,
 )
-from kazusa_ai_chatbot.db import list_users_by_affinity
+from kazusa_ai_chatbot.db import list_users_by_relationship
 from kazusa_ai_chatbot.rag.cache2_policy import (
     RELATIONSHIP_CACHE_NAME,
     build_relationship_cache_key,
@@ -23,7 +23,7 @@ from kazusa_ai_chatbot.rag.cache2_policy import (
 )
 from kazusa_ai_chatbot.rag.helper_agent import BaseRAGHelperAgent
 from kazusa_ai_chatbot.rag.prompt_projection import project_runtime_context_for_llm
-from kazusa_ai_chatbot.utils import build_affinity_block, parse_llm_json_output, text_or_empty
+from kazusa_ai_chatbot.utils import parse_llm_json_output, text_or_empty
 
 from kazusa_ai_chatbot.llm_interface import (
     LLInterface,
@@ -34,35 +34,11 @@ _MAX_RELATIONSHIP_LIMIT = 5
 _RELATIONSHIP_MODES = {"one", "n", "existence"}
 _RELATIONSHIP_RANK_ORDERS = {"top", "bottom"}
 
-_NEGATIVE_LABELS = {
-    "Contemptuous",
-    "Scornful",
-    "Hostile",
-    "Antagonistic",
-    "Aloof",
-    "Reserved",
-    "Formal",
-    "Cold",
-    "Detached",
-}
-_POSITIVE_LABELS = {
-    "Receptive",
-    "Approachable",
-    "Friendly",
-    "Warm",
-    "Caring",
-    "Affectionate",
-    "Devoted",
-    "Protective",
-    "Fiercely Loyal",
-    "Unwavering",
-}
-
 _EXTRACTOR_PROMPT = '''\
 你是 `relationship_agent` 的参数抽取器。
 
 # 能力边界
-本代理按活跃角色的内部关系分数对已建档用户排序。适用于：
+本代理按活跃角色的 native V2 关系状态对已建档用户排序。适用于：
 - 角色最喜欢谁、最偏爱谁、最亲近谁
 - 是否存在被喜欢的人
 - 角色最讨厌或最不喜欢谁
@@ -74,8 +50,8 @@ _EXTRACTOR_PROMPT = '''\
   - "n": 按请求数量返回排名列表
   - "existence": 判断是否存在匹配候选
 - rank_order:
-  - "top": 关系分数最高
-  - "bottom": 关系分数最低
+- "top": 关系连接最强
+- "bottom": 关系连接最弱
 - limit:
   - 保留用户明确请求的数量。
   - mode="one" 时使用 1。
@@ -180,42 +156,24 @@ async def _extract_relationship_args(
     return return_value
 
 
-def _relationship_band(label: str) -> str:
-    """Classify a public affinity label into a coarse relationship band.
-
-    Args:
-        label: Label returned by ``build_affinity_block``.
-
-    Returns:
-        ``"positive"``, ``"negative"``, or ``"neutral"``.
-    """
-    if label in _POSITIVE_LABELS:
-        return "positive"
-    if label in _NEGATIVE_LABELS:
-        return "negative"
-    return "neutral"
-
-
 def _public_candidate(doc: dict[str, Any], rank: int) -> dict[str, Any]:
-    """Convert an affinity-ranked profile row into a prompt-safe candidate.
+    """Convert a native V2 relationship row into a prompt-safe candidate.
 
     Args:
         doc: Raw relationship row returned by the DB helper.
-        rank: One-based rank after affinity sorting.
+        rank: One-based rank after relationship sorting.
 
     Returns:
-        Candidate payload with no raw affinity value.
+        Candidate payload with no raw relationship scalar.
     """
-    affinity_block = build_affinity_block(doc["affinity"])
-    label = affinity_block["level"]
     return_value = {
         "rank": rank,
         "global_user_id": doc["global_user_id"],
         "display_name": doc["display_name"],
         "platform": doc["platform"],
         "platform_user_id": doc["platform_user_id"],
-        "relationship_label": label,
-        "relationship_band": _relationship_band(label),
+        "relationship_label": doc["relationship_label"],
+        "relationship_band": doc["relationship_band"],
     }
     return return_value
 
@@ -249,7 +207,7 @@ class RelationshipAgent(BaseRAGHelperAgent):
 
         Returns:
             Dict with resolved flag, prompt-safe relationship candidates, and
-            cache metadata. Raw affinity values are never included.
+            cache metadata. Raw relationship scores are never included.
         """
         del max_attempts
 
@@ -278,7 +236,7 @@ class RelationshipAgent(BaseRAGHelperAgent):
             return return_value
 
         platform = str(context.get("platform") or "").strip() or None
-        rows = await list_users_by_affinity(
+        rows = await list_users_by_relationship(
             rank_order=args["rank_order"],
             platform=platform,
             limit=args["limit"],

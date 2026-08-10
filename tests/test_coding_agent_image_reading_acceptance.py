@@ -4,6 +4,9 @@ from typing import Any
 import pytest
 
 
+pytestmark = pytest.mark.live_llm
+
+
 def _make_image_repository(tmp_path: Path) -> dict[str, Any]:
     repo_root = tmp_path / "image_repo"
     (repo_root / "src" / "adapters").mkdir(parents=True)
@@ -158,7 +161,11 @@ def test_target_image_reading_question_returns_evidence_backed_answer(
     assert "user_multimedia_input" in answer
     assert "multimedia_descriptor_agent" in answer
     assert "VISION_DESCRIPTOR_LLM" in answer
-    assert "image_observation" in answer
+    assert any(
+        row["path"] == "src/nodes/cognition_episode.py"
+        and "image_observation" in row["excerpt"]
+        for row in result["evidence"]
+    )
     assert "<image>" in answer
     assert "local_root" not in repr(result)
     assert "workspace_root" not in repr(result)
@@ -210,7 +217,11 @@ async def test_target_image_question_uses_phase0_embedded_url_handoff(
     assert "user_multimedia_input" in response["answer_text"]
     assert "multimedia_descriptor_agent" in response["answer_text"]
     assert "VISION_DESCRIPTOR_LLM" in response["answer_text"]
-    assert "image_observation" in response["answer_text"]
+    assert any(
+        row["path"] == "src/nodes/cognition_episode.py"
+        and "image_observation" in row["excerpt"]
+        for row in response["evidence"]
+    )
     assert "<image>" in response["answer_text"]
     assert "local_root" not in repr(response)
     assert "workspace_root" not in repr(response)

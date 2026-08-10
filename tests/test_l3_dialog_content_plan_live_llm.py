@@ -17,11 +17,9 @@ from kazusa_ai_chatbot.config import (
     DIALOG_GENERATOR_LLM_MODEL,
 )
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
-from kazusa_ai_chatbot.cognition_chain_core.contracts import LLMStageBinding
-from kazusa_ai_chatbot.cognition_chain_core.stages import l3 as l3_module
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
-    build_cognition_chain_services,
+from kazusa_ai_chatbot.nodes.persona_supervisor2_l3_surface import (
+    _build_text_surface_services,
 )
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
 from tests.llm_trace import write_llm_trace
@@ -118,8 +116,8 @@ def _character_profile() -> dict:
     profile = {
         'name': 'Kazusa',
         'mood': 'Neutral',
-        'global_vibe': 'Calm',
-        'reflection_summary': '普通聊天，没有额外情绪余波。',
+        'vibe_check': 'Calm',
+        'character_reflection': '普通聊天，没有额外情绪余波。',
         'personality_brief': {
             'logic': '先判断事实、边界和用户意图，再给出克制回应。',
             'tempo': '短句为主，技术内容允许更完整。',
@@ -204,7 +202,7 @@ def _l3_state(case: dict) -> dict:
             'broadcast': case.get('channel_type', 'group') == 'group',
         },
         'reply_context': {},
-        'decontexualized_input': case['decontexualized_input'],
+        'decontextualized_input': case['decontextualized_input'],
         'referents': [],
         'rag_result': {
             'answer': case.get('rag_answer', ''),
@@ -241,7 +239,7 @@ def _l3_state(case: dict) -> dict:
 async def _run_l3_case(case: dict) -> dict:
     """Run one live L3 content-plan case and write a trace."""
 
-    services = build_cognition_chain_services()
+    services = _build_text_surface_services()
     calls: list[dict] = []
     token = l3_module.set_content_plan_agent_llm(
         LLMStageBinding(
@@ -300,7 +298,6 @@ def _dialog_state(case: dict) -> dict:
                 'linguistic_style': case['linguistic_style'],
                 'accepted_user_preferences': [],
                 'content_plan': case['content_plan'],
-                'forbidden_phrases': [],
             },
             'contextual_directives': case['contextual_directives'],
         },
@@ -313,8 +310,8 @@ def _dialog_state(case: dict) -> dict:
         'global_user_id': 'fa874545-02e6-4127-a24e-30819f941d83',
         'user_name': 'Jigsaw',
         'user_profile': {
-            'affinity': 500,
-            'last_relationship_insight': '熟悉但仍会互相调侃的群友',
+            'relationship_state': 500,
+            'semantic_relationship_projection': '熟悉但仍会互相调侃的群友',
         },
     }
     return state
@@ -382,7 +379,7 @@ def _l3_casual_case() -> dict:
         'case_id': 'l3_content_plan_casual_overloaded_source',
         'channel_type': 'group',
         'user_input': '不敢不敢？什么意思啊～',
-        'decontexualized_input': '用户轻松调侃，等角色接住这个玩笑。',
+        'decontextualized_input': '用户轻松调侃，等角色接住这个玩笑。',
         'internal_monologue': 'This should stay as a light tease, not branch into a new Agent topic.',
         'logical_stance': 'CONFIRM',
         'character_intent': 'BANTAR',
@@ -402,7 +399,7 @@ def _l3_technical_case() -> dict:
         'case_id': 'l3_content_plan_technical_comparison',
         'channel_type': 'group',
         'user_input': 'GB300 和 Pro6000 性能怎么比？',
-        'decontexualized_input': '用户要求比较 GB300 和 Pro6000 的性能与适用场景。',
+        'decontextualized_input': '用户要求比较 GB300 和 Pro6000 的性能与适用场景。',
         'internal_monologue': 'The final answer needs all supplied numbers and a clear conclusion.',
         'logical_stance': 'CONFIRM',
         'character_intent': 'PROVIDE',
@@ -428,7 +425,7 @@ def _l3_code_case() -> dict:
         'case_id': 'l3_content_plan_code_block_source',
         'channel_type': 'private',
         'user_input': '给我这个函数，代码别改格式。',
-        'decontexualized_input': '用户要求交付一个固定格式 Python 函数。',
+        'decontextualized_input': '用户要求交付一个固定格式 Python 函数。',
         'internal_monologue': 'The code block must be preserved literally.',
         'logical_stance': 'CONFIRM',
         'character_intent': 'PROVIDE',

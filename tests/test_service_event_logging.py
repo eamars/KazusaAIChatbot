@@ -12,6 +12,10 @@ from kazusa_ai_chatbot import chat_input_queue as queue_module
 from kazusa_ai_chatbot import service as service_module
 from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
+from tests.cognition_core_v2_test_helpers import (
+    canonical_episode_identity_snapshot,
+    canonical_service_character_profile,
+)
 
 
 _TURN_CLOCK = build_turn_clock("2026-05-14 12:00:00")
@@ -63,6 +67,44 @@ def _item(message_id: str, *, body_text: str = "private body"):
     return item
 
 
+def _patch_character_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Patch deterministic latest-profile and episode-snapshot boundaries."""
+
+    profile = canonical_service_character_profile(
+        marker="service-event",
+        global_user_id="character-global-id",
+    )
+    snapshot = canonical_episode_identity_snapshot(
+        marker="service-event",
+        global_user_id="character-global-id",
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_load_latest_character_profile_snapshot",
+        AsyncMock(return_value=profile),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "load_latest_identity_for_episode",
+        AsyncMock(return_value=snapshot),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "set_conversation_source_episode_id",
+        AsyncMock(return_value=1),
+    )
+    monkeypatch.setattr(
+        service_module.llm_tracing,
+        "ensure_llm_trace_run",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        service_module.llm_tracing,
+        "finalize_llm_trace_run",
+        AsyncMock(),
+    )
+
+
 @pytest.mark.asyncio
 async def test_enqueue_suppresses_routine_accepted_queue_event(
     monkeypatch,
@@ -81,6 +123,14 @@ async def test_enqueue_suppresses_routine_accepted_queue_event(
         service_module,
         "_ensure_chat_input_worker_started",
         lambda: None,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_commit_ingress_receipt",
+        AsyncMock(return_value={
+            "conversation_row_id": "row-1",
+            "received_at": "2026-04-29T00:00:00+00:00",
+        }),
     )
 
     chat_task = asyncio.create_task(
@@ -107,6 +157,7 @@ async def test_process_queued_item_suppresses_routine_success_events(
 ) -> None:
     """Successful chat processing should not duplicate history writes."""
 
+    _patch_character_identity(monkeypatch)
     record_database_operation_event = AsyncMock()
     record_pipeline_turn_event = AsyncMock()
     record_runtime_error_event = AsyncMock()
@@ -127,8 +178,8 @@ async def test_process_queued_item_suppresses_routine_success_events(
     )
     monkeypatch.setattr(
         service_module,
-        "_static_character_profile",
-        {"name": "Character"},
+        "_active_character_name_snapshot",
+        "Character",
     )
     monkeypatch.setattr(service_module, "_runtime_character_state", {})
     monkeypatch.setattr(
@@ -181,6 +232,11 @@ async def test_process_queued_item_suppresses_routine_success_events(
         "_save_assistant_message",
         AsyncMock(),
     )
+    monkeypatch.setattr(
+        service_module,
+        "upsert_post_turn_lifecycle_record",
+        AsyncMock(),
+    )
 
     class _Graph:
         """Return a visible response without invoking any LLM."""
@@ -212,6 +268,7 @@ async def test_graph_failure_records_runtime_error_and_failed_pipeline(
 ) -> None:
     """Recoverable graph failures should produce sanitized failure telemetry."""
 
+    _patch_character_identity(monkeypatch)
     record_database_operation_event = AsyncMock()
     record_pipeline_turn_event = AsyncMock()
     record_runtime_error_event = AsyncMock()
@@ -232,8 +289,8 @@ async def test_graph_failure_records_runtime_error_and_failed_pipeline(
     )
     monkeypatch.setattr(
         service_module,
-        "_static_character_profile",
-        {"name": "Character"},
+        "_active_character_name_snapshot",
+        "Character",
     )
     monkeypatch.setattr(service_module, "_runtime_character_state", {})
     monkeypatch.setattr(
@@ -266,10 +323,11 @@ async def test_graph_failure_records_runtime_error_and_failed_pipeline(
         "_save_user_message_from_item",
         AsyncMock(return_value="row-user"),
     )
+    save_conversation = AsyncMock(return_value="row-assistant")
     monkeypatch.setattr(
         service_module,
         "save_conversation",
-        AsyncMock(return_value="row-assistant"),
+        save_conversation,
     )
     monkeypatch.setattr(
         service_module,
@@ -280,6 +338,12 @@ async def test_graph_failure_records_runtime_error_and_failed_pipeline(
         service_module,
         "build_promoted_reflection_context",
         AsyncMock(return_value={}),
+    )
+    finalize_trace = AsyncMock()
+    monkeypatch.setattr(
+        service_module.llm_tracing,
+        "finalize_llm_trace_run",
+        finalize_trace,
     )
 
     class _Graph:
@@ -293,9 +357,19 @@ async def test_graph_failure_records_runtime_error_and_failed_pipeline(
 
     await service_module._process_queued_chat_item(item)
 
-    assert item.future.result().messages == [
-        "Character is busy right now, please try again later."
-    ]
+    response = item.future.result()
+    assert response.messages == [service_module.OPERATIONAL_FAILURE_NOTICE]
+    assert response.content_type == "operational_error"
+    assert response.delivery_tracking_id == ""
+    assert response.operational_error is not None
+    assert response.operational_error.error_code == "internal_invariant"
+    assert response.operational_error.status == "failed"
+    assert response.operational_error.exhausted is False
+    assert response.operational_error.attempt_count == 1
+    save_conversation.assert_not_awaited()
+    finalize_trace.assert_awaited_once()
+    assert finalize_trace.await_args.kwargs["final_dialog_count"] == 0
+    assert finalize_trace.await_args.kwargs["delivery_tracking_id"] == ""
     record_runtime_error_event.assert_awaited_once()
     runtime_kwargs = record_runtime_error_event.await_args.kwargs
     assert runtime_kwargs["error_class"] == "RuntimeError"
@@ -317,6 +391,7 @@ async def test_user_persistence_failure_keeps_failure_telemetry(
 ) -> None:
     """Missing conversation-history commits should still emit failure events."""
 
+    _patch_character_identity(monkeypatch)
     record_database_operation_event = AsyncMock()
     record_pipeline_turn_event = AsyncMock()
     record_runtime_error_event = AsyncMock()
@@ -337,8 +412,8 @@ async def test_user_persistence_failure_keeps_failure_telemetry(
     )
     monkeypatch.setattr(
         service_module,
-        "_static_character_profile",
-        {"name": "Character"},
+        "_active_character_name_snapshot",
+        "Character",
     )
     monkeypatch.setattr(service_module, "_runtime_character_state", {})
     monkeypatch.setattr(
@@ -421,15 +496,42 @@ async def test_lifespan_records_process_and_resource_events(monkeypatch) -> None
         record_resource_health_event,
     )
     monkeypatch.setattr(service_module, "db_bootstrap", AsyncMock())
+    startup_profile = canonical_service_character_profile(
+        marker="startup",
+        global_user_id=CHARACTER_GLOBAL_USER_ID,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_load_startup_character_profile",
+        AsyncMock(return_value=(
+            {
+                key: value
+                for key, value in startup_profile.items()
+                if key not in {"global_user_id", "cognition_state", "updated_at"}
+            },
+            {
+                "cognition_state": startup_profile["cognition_state"],
+                "updated_at": startup_profile["updated_at"],
+            },
+        )),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "reconcile_identity_growth_post_commit",
+        AsyncMock(return_value={
+            "completed_count": 0,
+            "failed_count": 0,
+        }),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_load_latest_character_profile_snapshot",
+        AsyncMock(return_value=startup_profile),
+    )
     monkeypatch.setattr(
         service_module,
         "_hydrate_media_descriptor_cache",
         AsyncMock(return_value=0),
-    )
-    monkeypatch.setattr(
-        service_module,
-        "get_character_profile",
-        AsyncMock(return_value={"name": "Character"}),
     )
     monkeypatch.setattr(
         service_module,

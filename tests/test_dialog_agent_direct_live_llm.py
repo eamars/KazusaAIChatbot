@@ -36,7 +36,7 @@ if hasattr(sys.stderr, 'reconfigure'):
 pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm]
 
 _ROOT = Path(__file__).resolve().parents[1]
-_PERSONALITY_PATH = _ROOT / 'personalities' / 'kazusa.json'
+_PERSONALITY_PATH = _ROOT / 'personalities' / 'asuna.json'
 _TRACE_SUITE = 'dialog_agent_direct_live_llm'
 _CURRENT_USER_NAME = 'Jigsaw'
 _CURRENT_USER_PLATFORM_ID = '411706805'
@@ -178,10 +178,9 @@ def _base_case(case_id: str) -> dict[str, Any]:
         'user_name': _CURRENT_USER_NAME,
         'platform_user_id': _CURRENT_USER_PLATFORM_ID,
         'global_user_id': _CURRENT_USER_GLOBAL_ID,
-        'affinity': 520,
+        'relationship_state': 520,
         'relationship_insight': '熟悉但仍保持边界的群聊协作对象',
         'accepted_user_preferences': [],
-        'forbidden_phrases': [],
         'chat_history': [],
         'expected_message_count': None,
         'must_include_all': [],
@@ -205,7 +204,6 @@ def _state_from_case(case: dict[str, Any]) -> dict[str, Any]:
                 'linguistic_style': case['linguistic_style'],
                 'accepted_user_preferences': case['accepted_user_preferences'],
                 'content_plan': case['content_plan'],
-                'forbidden_phrases': case['forbidden_phrases'],
             },
             'contextual_directives': case['contextual_directives'],
             'visual_directives': {},
@@ -219,8 +217,8 @@ def _state_from_case(case: dict[str, Any]) -> dict[str, Any]:
         'global_user_id': case['global_user_id'],
         'user_name': case['user_name'],
         'user_profile': {
-            'affinity': case['affinity'],
-            'last_relationship_insight': case['relationship_insight'],
+            'relationship_state': case['relationship_state'],
+            'semantic_relationship_projection': case['relationship_insight'],
         },
         'dialog_usage_mode': 'live_visible_reply',
     }
@@ -564,13 +562,6 @@ def _case_technical_numeric_comparison() -> dict[str, Any]:
         'internal_monologue': '技术对比要把数字说全，语气可以轻一点但不能省事实。',
         'rhetorical_strategy': '正面对比两张卡，先结论再数字依据。',
         'linguistic_style': '群聊技术回答，信息密度优先，不点名当前用户。',
-        'forbidden_phrases': [
-            '@Jigsaw',
-            '完全不是一个量级',
-            '不是一个量级',
-            '碾压',
-            '吊打',
-        ],
         'content_plan': {
             'visible_goal': '正面对比 GB300 和 Pro6000。',
             'semantic_content': (

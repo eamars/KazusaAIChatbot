@@ -151,7 +151,7 @@ readable platform-neutral tokens:
 
 | Mention kind | Readable token when label is known | Fallback token when label is unknown |
 | --- | --- | --- |
-| `bot` | `@display name` | `@character` |
+| `bot` | `@brain character_name` | contract failure for registered platform adapters |
 | `user` | `@display name` | `@user` |
 | `platform_role` | `@role name` | `@role` |
 | `channel` | `#channel-name` | `#channel` |
@@ -208,9 +208,13 @@ Only `bot` and `user` mentions can contribute to
 mentions stay as metadata. Consumers ignore `unknown` mentions for addressed
 user resolution.
 
-Mention `display_name` values are labels, not semantic aliases. Adapters may
-trim and collapse whitespace in labels, but they must not translate,
-summarize, infer aliases, or rewrite ordinary authored words.
+Mention `display_name` values are labels, not semantic aliases. For `bot`
+mentions, registered platform adapters must use the required
+brain-provided `character_name`, even when the platform account exposes a
+different name. Human, role, channel, everyone, and unknown labels remain
+adapter-owned. Adapters may trim and collapse whitespace in those labels, but
+they must not translate, summarize, infer aliases, or rewrite ordinary
+authored words.
 
 ### `reply`
 
@@ -228,6 +232,9 @@ summarize, infer aliases, or rewrite ordinary authored words.
 `platform_native` means the platform explicitly supplied a reply target.
 `leading_mention` means the adapter deterministically derived a conversational
 target from a leading mention according to that adapter's platform rules.
+When the target `platform_user_id` is the platform bot id, `display_name` must
+be the brain-provided `character_name`; platform reply metadata and cached
+historical labels cannot override it.
 
 The brain service may project `reply` into a compact internal `reply_context`,
 but `reply_context` is derived data. It is not the source of truth.
@@ -297,12 +304,14 @@ A runtime adapter:
 4. Preserves original text in `raw_wire_text`.
 5. Populates typed mentions and reply targets when available.
 6. Resolves the active bot mention to the active character global user id.
-7. Derives inbound `addressed_to_global_user_ids` deterministically.
-8. Sets inbound envelope `broadcast` to `False`.
-9. Normalizes attachments through registered `AttachmentHandler`
+7. For registered platform adapters, requires the brain-provided
+   `character_name` and applies it to every bot-id mention and reply label.
+8. Derives inbound `addressed_to_global_user_ids` deterministically.
+9. Sets inbound envelope `broadcast` to `False`.
+10. Normalizes attachments through registered `AttachmentHandler`
    implementations.
-10. Removes non-mention platform transport syntax from `body_text`.
-11. Sends only the typed envelope and top-level `ChatRequest` fields to `/chat`.
+11. Removes non-mention platform transport syntax from `body_text`.
+12. Sends only the typed envelope and top-level `ChatRequest` fields to `/chat`.
 
 ## Brain Service Responsibilities
 
@@ -313,6 +322,8 @@ The brain service:
 3. Derives graph `user_input` from `message_envelope.body_text`, preserving
    fragment chronology when adjacent private follow-ups are coalesced.
 4. Derives internal reply context from `message_envelope.reply`.
+   A bot-id target is relabeled with the current active brain name before
+   downstream use.
 5. Persists typed conversation rows with `body_text`, `raw_wire_text`,
    `mentions`, `reply`, `attachments`, `addressed_to_global_user_ids`, and
    `broadcast`.

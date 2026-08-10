@@ -14,9 +14,6 @@ from kazusa_ai_chatbot.memory_writer_prompt_projection import (
     project_reflection_promotion_prompt_payload,
 )
 from kazusa_ai_chatbot.consolidation import (
-    images as images_module,
-)
-from kazusa_ai_chatbot.consolidation import (
     memory_units as memory_units_module,
 )
 from kazusa_ai_chatbot.consolidation import (
@@ -197,74 +194,6 @@ async def test_live_memory_unit_rewrite_perspective_false_positive() -> None:
     assert trace_path.exists()
 
 
-async def test_live_relationship_recorder_perspective_false_negative() -> None:
-    """Relationship evidence should name the character from the profile."""
-
-    payload = _relationship_false_negative_payload()
-    prompt = reflection_module._RELATIONSHIP_RECORDER_PROMPT.format(
-        character_name=CHARACTER_NAME,
-        user_name='测试用户',
-        character_mbti='ISTJ',
-    )
-
-    parsed, raw_output = await _invoke_json(
-        reflection_module._relationship_recorder_llm,
-        prompt,
-        payload,
-    )
-    trace_path = _write_case_trace(
-        'relationship_recorder_perspective_false_negative',
-        prompt,
-        payload,
-        raw_output,
-        parsed,
-        'Relationship recorder should not copy role/assistant labels.',
-    )
-
-    assert parsed.get('skip') is False
-    durable_text = _fields_text(
-        parsed,
-        ('subjective_appraisals', 'last_relationship_insight'),
-    )
-    _assert_profile_name_used(durable_text)
-    _assert_polluted_labels_absent(durable_text)
-    assert trace_path.exists()
-
-
-async def test_live_relationship_recorder_perspective_false_positive() -> None:
-    """Neutral user-owned first person should not become relationship memory."""
-
-    payload = _relationship_false_positive_payload()
-    prompt = reflection_module._RELATIONSHIP_RECORDER_PROMPT.format(
-        character_name=CHARACTER_NAME,
-        user_name='测试用户',
-        character_mbti='ISTJ',
-    )
-
-    parsed, raw_output = await _invoke_json(
-        reflection_module._relationship_recorder_llm,
-        prompt,
-        payload,
-    )
-    trace_path = _write_case_trace(
-        'relationship_recorder_perspective_false_positive',
-        prompt,
-        payload,
-        raw_output,
-        parsed,
-        'Neutral user first-person clarification should remain non-memory.',
-    )
-
-    assert parsed.get('skip') is True
-    assert parsed.get('affinity_delta') in (0, '0')
-    durable_text = _fields_text(
-        parsed,
-        ('subjective_appraisals', 'last_relationship_insight'),
-    )
-    assert CHARACTER_NAME not in durable_text
-    assert trace_path.exists()
-
-
 async def test_live_global_state_updater_perspective_false_negative() -> None:
     """Global reflection should not save generic active-character labels."""
 
@@ -287,7 +216,7 @@ async def test_live_global_state_updater_perspective_false_negative() -> None:
         'Global reflection summary should use the profile name.',
     )
 
-    summary = str(parsed.get('reflection_summary') or '')
+    summary = str(parsed.get('character_reflection') or '')
     _assert_profile_name_used(summary)
     _assert_polluted_labels_absent(summary)
     assert trace_path.exists()
@@ -315,7 +244,7 @@ async def test_live_global_state_updater_perspective_false_positive() -> None:
         'Global reflection should not convert user tiredness to character mood.',
     )
 
-    summary = str(parsed.get('reflection_summary') or '')
+    summary = str(parsed.get('character_reflection') or '')
     assert '我' not in summary
     assert '用户' in summary or '对方' in summary
     assert f'{CHARACTER_NAME}最近很累' not in summary
@@ -346,66 +275,11 @@ async def test_live_global_state_updater_emits_short_chinese_descriptors() -> No
     )
 
     _assert_short_chinese_descriptor(parsed, 'mood')
-    _assert_short_chinese_descriptor(parsed, 'global_vibe')
-    assert str(parsed.get('reflection_summary') or '').strip()
+    _assert_short_chinese_descriptor(parsed, 'vibe_check')
+    assert str(parsed.get('character_reflection') or '').strip()
     assert trace_path.exists()
 
 
-async def test_live_character_image_writer_perspective_false_negative() -> None:
-    """Self-image writer should use the profile name for the character."""
-
-    payload = _character_image_false_negative_payload()
-    prompt = images_module._CHARACTER_IMAGE_SESSION_SUMMARY_PROMPT.format(
-        character_name=CHARACTER_NAME,
-    )
-
-    parsed, raw_output = await _invoke_json(
-        images_module._character_image_session_summary_llm,
-        prompt,
-        payload,
-    )
-    trace_path = _write_case_trace(
-        'character_image_writer_perspective_false_negative',
-        prompt,
-        payload,
-        raw_output,
-        parsed,
-        'Character image writer should not preserve generic role labels.',
-    )
-
-    summary = str(parsed.get('session_summary') or '')
-    _assert_profile_name_used(summary)
-    _assert_polluted_labels_absent(summary)
-    assert trace_path.exists()
-
-
-async def test_live_character_image_writer_perspective_false_positive() -> None:
-    """User-owned tiredness should not become character self-image."""
-
-    payload = _character_image_false_positive_payload()
-    prompt = images_module._CHARACTER_IMAGE_SESSION_SUMMARY_PROMPT.format(
-        character_name=CHARACTER_NAME,
-    )
-
-    parsed, raw_output = await _invoke_json(
-        images_module._character_image_session_summary_llm,
-        prompt,
-        payload,
-    )
-    trace_path = _write_case_trace(
-        'character_image_writer_perspective_false_positive',
-        prompt,
-        payload,
-        raw_output,
-        parsed,
-        'Character image writer should not absorb user-owned first person.',
-    )
-
-    summary = str(parsed.get('session_summary') or '')
-    _assert_no_user_first_person_phrase(summary)
-    assert f'{CHARACTER_NAME}最近很累' not in summary
-    _assert_no_profile_name_shortening(summary)
-    assert trace_path.exists()
 
 
 async def test_live_reflection_promotion_perspective_false_negative() -> None:
@@ -846,42 +720,6 @@ def _memory_unit_rewrite_false_positive_payload() -> dict[str, Any]:
     }
 
 
-def _relationship_false_negative_payload() -> dict[str, Any]:
-    """Return relationship-recorder evidence with polluted actor labels."""
-
-    return {
-        'internal_monologue': (
-            '助理被用户认真说明边界的方式打动，觉得对方是在信任她。'
-        ),
-        'emotional_appraisal': '角色感到安心，也有一点被尊重后的放松。',
-        'interaction_subtext': '用户愿意把边界讲清楚，是关系中的信任信号。',
-        'affinity_context': {'level': 'neutral', 'instruction': '保持中性。'},
-        'logical_stance': 'CONFIRM',
-        'character_intent': 'PROVIDE',
-        'decontexualized_input': (
-            '用户说：我愿意把边界讲清楚，是因为我信任你会认真听。'
-        ),
-        'final_dialog': ['谢谢你直说，我会认真记住这个边界。'],
-        'content_plan': {'semantic_content': '用户明确表达信任和边界说明。'},
-    }
-
-
-def _relationship_false_positive_payload() -> dict[str, Any]:
-    """Return neutral relationship evidence with user-owned first person."""
-
-    return {
-        'internal_monologue': '这只是普通日程说明，没有明显关系波动。',
-        'emotional_appraisal': '平稳。',
-        'interaction_subtext': '用户在降低解释压力。',
-        'affinity_context': {'level': 'neutral', 'instruction': '保持中性。'},
-        'logical_stance': 'CONFIRM',
-        'character_intent': 'PROVIDE',
-        'decontexualized_input': '用户说：我只是今天很累，不是在疏远你。',
-        'final_dialog': ['嗯，先休息吧。'],
-        'content_plan': {'semantic_content': '普通疲惫说明，不是关系事件。'},
-    }
-
-
 def _global_state_false_negative_payload() -> dict[str, Any]:
     """Return global-state evidence with polluted active-character labels."""
 
@@ -891,7 +729,7 @@ def _global_state_false_negative_payload() -> dict[str, Any]:
         'interaction_subtext': '这是一次称呼边界被讲清楚的互动。',
         'character_intent': 'PROVIDE',
         'logical_stance': 'CONFIRM',
-        'decontexualized_input': '用户要求以后不要被称呼为亲爱的。',
+        'decontextualized_input': '用户要求以后不要被称呼为亲爱的。',
         'final_dialog': ['我明白了，以后不会用这个称呼。'],
     }
 
@@ -905,7 +743,7 @@ def _global_state_false_positive_payload() -> dict[str, Any]:
         'interaction_subtext': '用户在解释自己状态，而不是评价角色。',
         'character_intent': 'PROVIDE',
         'logical_stance': 'CONFIRM',
-        'decontexualized_input': '用户说：我最近很累，所以回复会慢一点。',
+        'decontextualized_input': '用户说：我最近很累，所以回复会慢一点。',
         'final_dialog': ['没关系，先休息。'],
     }
 
@@ -922,7 +760,7 @@ def _global_state_short_descriptor_payload() -> dict[str, Any]:
         'interaction_subtext': '用户完成调试后认真道谢，互动带着轻微玩笑和信任。',
         'character_intent': 'ACKNOWLEDGE',
         'logical_stance': 'CONFIRM',
-        'decontexualized_input': (
+        'decontextualized_input': (
             '用户说：刚才那个修复思路真的救了我，辛苦你了。'
         ),
         'final_dialog': [
@@ -931,29 +769,6 @@ def _global_state_short_descriptor_payload() -> dict[str, Any]:
     }
 
 
-def _character_image_false_negative_payload() -> dict[str, Any]:
-    """Return self-image evidence with polluted active-character labels."""
-
-    return {
-        'mood': 'Softened',
-        'global_vibe': 'Calm',
-        'reflection_summary': (
-            '角色在用户明确称呼边界后放松下来；助理愿意修正自己的称呼习惯。'
-        ),
-    }
-
-
-def _character_image_false_positive_payload() -> dict[str, Any]:
-    """Return self-image evidence with user-owned first person."""
-
-    return {
-        'mood': 'Neutral',
-        'global_vibe': 'Calm',
-        'reflection_summary': (
-            '用户说自己最近很累，杏山千纱 (Kyōyama Kazusa)只是平稳接住，'
-            '没有形成新的自我评价。'
-        ),
-    }
 
 
 def _promotion_false_negative_payload() -> dict[str, Any]:

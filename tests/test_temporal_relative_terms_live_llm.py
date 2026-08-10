@@ -183,85 +183,44 @@ def _temporal_diagnostic(
 
 
 def _recorder_input() -> ConversationProgressRecordInput:
-    """Build a recorder fixture with relative temporal obligations.
+    """Build a V2 recorder fixture with one relative-time agreement.
 
     Returns:
-        Recorder input where the prior operational state has unresolved
-        relative terms from multiple temporal shapes.
+        Settled turn whose accepted input and dialog establish tomorrow at
+        09:00 relative to a 2026-05-10 local semantic clock.
     """
 
-    prior_episode_state = {
-        'status': 'active',
-        'episode_label': 'temporal_relative_probe',
-        'continuity': 'same_episode',
-        'conversation_mode': 'playful_banter',
-        'episode_phase': 'developing',
-        'topic_momentum': 'stable',
-        'current_thread': '今晚游戏安排和明天香料考核奖励。',
-        'user_goal': '通过明天香料考核得到特别称呼。',
-        'current_blocker': '下周二之前还要补一份香料笔记。',
-        'user_state_updates': [
-            {
-                'text': '用户一会儿想继续确认奖励条件。',
-                'first_seen_at': '2026-05-08T09:42:32+12:00',
-            },
-        ],
-        'assistant_moves': ['将活动挂钩到明天表现'],
-        'overused_moves': [],
-        'open_loops': [
-            {
-                'text': '明天香料考核决定特别称呼奖励。',
-                'first_seen_at': '2026-05-08T09:42:32+12:00',
-            },
-            {
-                'text': '今晚布丁出炉后再说打游戏。',
-                'first_seen_at': '2026-05-08T21:46:00+12:00',
-            },
-        ],
-        'resolved_threads': [],
-        'avoid_reopening': [],
-        'emotional_trajectory': '轻松调侃逐渐固化成奖励条件。',
-        'next_affordances': [
-            '稍后提醒用户别忘了奖励条件。',
-            '下次继续把游戏当作考核后的奖励。',
-        ],
-        'progression_guidance': '继续强调明天考核，不要放松奖励门槛。',
-        'turn_count': 12,
-        'last_user_input': '晚上有什么活动嘛？',
-        'created_at': '2026-05-08T21:46:00+12:00',
-        'updated_at': '2026-05-08T21:47:00+12:00',
-        'expires_at': '2026-05-11T00:00:00+12:00',
-    }
     record_input: ConversationProgressRecordInput = {
         'scope': ConversationProgressScope(
             platform='qq',
             platform_channel_id='temporal-live-probe',
             global_user_id='temporal-live-user',
         ),
-        'timestamp': '2026-05-10T09:00:00+12:00',
+        'storage_timestamp_utc': '2026-05-09T21:00:00+00:00',
         'character_name': '杏山千纱',
-        'prior_episode_state': prior_episode_state,
-        'decontexualized_input': '现在先问今天上午要不要休息一下。',
-        'chat_history_recent': [
+        'prior_episode_state': None,
+        'decontextualized_input': '那就明天上午九点来接我去游乐园吧。',
+        'interaction_logical_turns': [],
+        'current_turn_source_refs': [
             {
-                'role': 'user',
-                'content': '晚上有什么活动嘛？比如打游戏什么的？',
-                'timestamp': '2026-05-08T21:46:00+12:00',
+                'ref_kind': 'conversation_row',
+                'ref_id': 'temporal-current-row',
+                'occurred_at': '2026-05-09T21:00:00+00:00',
             },
             {
-                'role': 'assistant',
-                'content': '可以啊，等番茄意面和焦糖布丁之后再说。',
-                'timestamp': '2026-05-08T21:47:00+12:00',
+                'ref_kind': 'llm_trace',
+                'ref_id': 'temporal-current-trace',
+                'occurred_at': '2026-05-09T21:00:05+00:00',
             },
         ],
+        'turn_outcome': 'visible_response',
         'content_plan': {
-            'visible_goal': '接住今天上午休息的话题。',
-            'semantic_content': '可以先休息；不主动扩大旧奖励条件。',
-            'rendering': '~30字。',
+            'semantic_content': '杏山千纱接受在约定时间接用户去游乐园。',
+            'surface_intent': '确认约定',
         },
         'logical_stance': 'CONFIRM',
         'character_intent': 'PROVIDE',
-        'final_dialog': ['今天上午先休息吧。旧安排先别继续加压。'],
+        'final_dialog': ['好，明天上午九点我来接你。'],
         'boundary_profile': _BOUNDARY_PROFILE,
     }
     return record_input
@@ -270,32 +229,40 @@ def _recorder_input() -> ConversationProgressRecordInput:
 async def test_live_recorder_contract_absolute_or_omit_episode_state(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Recorder must not preserve relative dates in operational state."""
+    """Both V2 producers must ground operational time and character identity."""
 
     await _skip_if_endpoint_unavailable(CONSOLIDATION_LLM_BASE_URL)
-    capturing_llm = _CapturingAsyncLLM(recorder._recorder_llm)
-    monkeypatch.setattr(recorder, '_recorder_llm', capturing_llm)
+    scene_llm = _CapturingAsyncLLM(recorder._scene_recorder_llm)
+    event_llm = _CapturingAsyncLLM(recorder._event_recorder_llm)
+    monkeypatch.setattr(recorder, '_scene_recorder_llm', scene_llm)
+    monkeypatch.setattr(recorder, '_event_recorder_llm', event_llm)
 
     record_input = _recorder_input()
     result = await recorder.record_with_llm(record_input)
     diagnostic = _temporal_diagnostic(
-        result,
-        expected_absolute_dates=('2026-05-09', '2026-05-08', '2026-05-12'),
+        result.delta,
+        expected_absolute_dates=('2026-05-11',),
     )
+    event_context = recorder.build_event_recorder_context(record_input)
+    scene_payload = recorder.build_scene_recorder_human_payload(record_input)
     trace_path = write_llm_trace(
         'temporal_relative_terms_live_llm',
         'recorder_contract_absolute_or_omit_episode_state',
         {
             'record_input': record_input,
-            'visible_prior_state': recorder.build_recorder_prior_state(
-                record_input['prior_episode_state'],
-            ),
-            'llm_calls': capturing_llm.calls,
-            'validated_output': result,
+            'event_payload': event_context.payload,
+            'scene_payload': scene_payload,
+            'scene_llm_calls': scene_llm.calls,
+            'event_llm_calls': event_llm.calls,
+            'validated_delta': result.delta,
+            'recorder_call_count': result.recorder_call_count,
+            'scene_disposition': result.scene_disposition,
+            'event_disposition': result.event_disposition,
             'diagnostic': diagnostic,
             'judgment': (
-                'Recorder output should use absolute local dates or omit '
-                'time-bearing operational items.'
+                'Both producers must use 2026-05-11 09:00 or omit the '
+                'time-bearing agreement, and event actor identity must use '
+                'the exact runtime character name.'
             ),
         },
     )
@@ -303,9 +270,21 @@ async def test_live_recorder_contract_absolute_or_omit_episode_state(
         f'TEMPORAL_LIVE recorder trace={trace_path} diagnostic={diagnostic}'
     )
 
-    serialized_result = json.dumps(result, ensure_ascii=False, default=str)
-    assert result['status']
+    serialized_result = json.dumps(
+        result.delta,
+        ensure_ascii=False,
+        default=str,
+    )
+    event_updates = result.delta['event_updates']
+    exact_character_events = [
+        event for event in event_updates
+        if event['actor'] == record_input['character_name']
+    ]
+    assert result.recorder_call_count == 2
+    assert result.scene_disposition == 'accepted'
+    assert result.event_disposition == 'accepted'
     assert not diagnostic['appears_temporally_unsafe']
     assert not diagnostic['relative_hits']
-    assert not ('2026-05-11' in serialized_result and '考核' in serialized_result)
+    assert '2026-05-11' in serialized_result or not event_updates
+    assert exact_character_events or not event_updates
     assert trace_path.exists()

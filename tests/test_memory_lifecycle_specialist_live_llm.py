@@ -225,7 +225,7 @@ def _state(
     return {
         "storage_timestamp_utc": "2026-05-17T06:00:49+00:00",
         "user_input": current_input,
-        "decontexualized_input": current_input,
+        "decontextualized_input": current_input,
         "logical_stance": "CONFIRM",
         "character_intent": "UPDATE_MEMORY_LIFECYCLE",
         "judgment_note": "The current turn may change an active commitment.",
@@ -355,7 +355,7 @@ def _write_trace(
         "memory_lifecycle_specialist_live_llm",
         case_id,
         {
-            "current_input": state["decontexualized_input"],
+            "current_input": state["decontextualized_input"],
             "active_commitments": (
                 state["rag_result"]["user_image"]["user_memory_context"][
                     "active_commitments"

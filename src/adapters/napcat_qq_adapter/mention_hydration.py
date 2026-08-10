@@ -132,7 +132,7 @@ async def hydrate_mention_display_names(
     group_id: object,
     ws: object,
     bot_id: str | None,
-    bot_name: str | None,
+    character_name: str,
     mention_display_cache: OrderedDict[tuple[str, str], str],
     call_api: ApiCaller,
     logger: Any,
@@ -140,6 +140,9 @@ async def hydrate_mention_display_names(
     """Hydrate QQ mention labels before the envelope reaches the brain."""
 
     display_names = dict(initial_display_names)
+    character_label = normalize_mention_display_label(character_name)
+    if not character_label:
+        raise ValueError("character_name is required")
     attempted_lookup_keys: set[tuple[str, str]] = set()
     for match in CQ_AT_PATTERN.finditer(raw_wire_text):
         platform_user_id = match.group(1)
@@ -147,9 +150,7 @@ async def hydrate_mention_display_names(
             continue
 
         if bot_id is not None and platform_user_id == bot_id:
-            bot_label = normalize_mention_display_label(bot_name)
-            if bot_label:
-                display_names[platform_user_id] = bot_label
+            display_names[platform_user_id] = character_label
             continue
 
         cache_key = (channel_id, platform_user_id)

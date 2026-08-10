@@ -45,6 +45,9 @@ async def test_save_assistant_message_persists_current_turn_addressee(monkeypatc
             "final_dialog": [dialog],
             "target_addressed_user_ids": [global_user_id],
             "target_broadcast": False,
+            "cognitive_episode": {
+                "episode_id": f"episode-{message_id}",
+            },
         })
 
     addressed_rows = [
@@ -57,6 +60,11 @@ async def test_save_assistant_message_persists_current_turn_addressee(monkeypatc
         "reply to A 1",
         "reply to B 1",
         "reply to A 2",
+    ]
+    assert [doc["source_episode_id"] for doc in saved_docs] == [
+        "episode-msg-a1",
+        "episode-msg-b1",
+        "episode-msg-a2",
     ]
 
 

@@ -2,26 +2,22 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from copy import deepcopy
 
 import pytest
 
 from kazusa_ai_chatbot import cognition_episode as cognition_episode_module
 from kazusa_ai_chatbot.cognition_episode import (
-    CognitiveEpisode,
+    CognitiveEpisodeV1,
     CognitiveEpisodeValidationError,
-    CognitivePercept,
-    OriginMetadata,
-    TargetScope,
+    TargetScopeV1,
     TextChatCompatibilityProjection,
-    build_text_chat_cognitive_episode,
+    build_user_message_episode,
+    project_model_visible_percepts,
     project_text_chat_compatibility_fields,
-    validate_cognitive_episode,
+    validate_cognitive_episode_v1,
 )
-from kazusa_ai_chatbot.consolidation.schema import (
-    ConsolidatorState,
-)
+from kazusa_ai_chatbot.consolidation.schema import ConsolidatorState
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import (
     CognitionState,
     GlobalPersonaState,
@@ -29,51 +25,87 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import (
 from kazusa_ai_chatbot.state import IMProcessState
 
 
+CREATED_AT = "2026-05-09T07:30:00+00:00"
+
+
 def _local_time_context() -> dict[str, str]:
-    local_time_context = {
+    """Return one valid configured-local time context."""
+
+    return {
         "current_local_datetime": "2026-05-09 19:30",
         "current_local_weekday": "Saturday",
     }
-    return local_time_context
 
 
-def _builder_kwargs() -> dict:
-    kwargs = {
-        "episode_id": "episode-1",
-        "percept_id": "percept-1",
-        "storage_timestamp_utc": "2026-05-09T07:30:00+00:00",
-        "local_time_context": _local_time_context(),
-        "user_input": "hello from current text chat",
+def _target_scope() -> TargetScopeV1:
+    """Return the current debug-channel target scope."""
+
+    return {
         "platform": "debug",
         "platform_channel_id": "debug-private-1",
         "channel_type": "private",
-        "platform_message_id": "platform-message-1",
-        "platform_user_id": "platform-user-1",
-        "global_user_id": "global-user-1",
-        "user_name": "Test User",
-        "active_turn_platform_message_ids": ["platform-message-1"],
-        "active_turn_conversation_row_ids": ["conversation-row-1"],
-        "debug_modes": {"think_only": False},
+        "current_platform_user_id": "platform-user-1",
+        "current_global_user_id": "global-user-1",
+        "current_display_name": "Test User",
         "target_addressed_user_ids": ["global-user-1"],
         "target_broadcast": False,
     }
-    return kwargs
 
 
-def _valid_episode() -> CognitiveEpisode:
-    episode = build_text_chat_cognitive_episode(**_builder_kwargs())
-    return episode
+def _dialog_percept() -> dict[str, object]:
+    """Return one prompt-visible current-user percept."""
+
+    return {
+        "schema_version": "percept.v1",
+        "percept_kind": "dialog",
+        "source_kind": "dialog",
+        "source_id": "platform-message-1",
+        "content": {
+            "semantic_text": "hello from current text chat",
+            "text": "hello from current text chat",
+        },
+        "observed_at": CREATED_AT,
+    }
+
+
+def _valid_episode() -> CognitiveEpisodeV1:
+    """Build one canonical user-message episode."""
+
+    return build_user_message_episode(
+        episode_id="episode-1",
+        origin={
+            "platform": "debug",
+            "platform_message_id": "platform-message-1",
+            "active_turn_platform_message_ids": ["platform-message-1"],
+            "active_turn_conversation_row_ids": ["conversation-row-1"],
+            "debug_modes": {"think_only": False},
+        },
+        target_scope=_target_scope(),
+        dialog_percept=_dialog_percept(),
+        media_percepts=[],
+        evidence_refs=[],
+        local_time_context=_local_time_context(),
+        created_at=CREATED_AT,
+        debug_controls={"think_only": False},
+    )
 
 
 def test_public_contract_shapes_expose_expected_fields() -> None:
-    assert set(CognitivePercept.__annotations__) == {
-        "percept_id",
-        "input_source",
-        "content",
-        "visibility",
-        "metadata",
+    """The canonical envelope and state boundaries expose their native fields."""
+
+    assert set(CognitiveEpisodeV1.__annotations__) == {
+        "schema_version",
+        "episode_id",
+        "trigger_source",
+        "origin_metadata",
+        "target_scope",
+        "percepts",
+        "evidence_refs",
+        "created_at",
+        "privacy_scope",
+        "continuation_depth",
     }
-    assert set(TargetScope.__annotations__) == {
+    assert set(TargetScopeV1.__annotations__) == {
         "platform",
         "platform_channel_id",
         "channel_type",
@@ -82,24 +114,7 @@ def test_public_contract_shapes_expose_expected_fields() -> None:
         "current_display_name",
         "target_addressed_user_ids",
         "target_broadcast",
-    }
-    assert set(OriginMetadata.__annotations__) == {
-        "platform",
-        "platform_message_id",
-        "active_turn_platform_message_ids",
-        "active_turn_conversation_row_ids",
-        "debug_modes",
-    }
-    assert set(CognitiveEpisode.__annotations__) == {
-        "episode_id",
-        "trigger_source",
-        "input_sources",
-        "output_mode",
-        "percepts",
-        "target_scope",
-        "origin_metadata",
-        "storage_timestamp_utc",
-        "local_time_context",
+        "permission_ref",
     }
     assert set(TextChatCompatibilityProjection.__annotations__) == {
         "storage_timestamp_utc",
@@ -127,69 +142,59 @@ def test_public_contract_shapes_expose_expected_fields() -> None:
         assert "time_context" not in state_schema.__annotations__
 
 
-def test_text_chat_builder_creates_valid_user_message_episode() -> None:
+def test_user_message_builder_creates_valid_canonical_episode() -> None:
+    """The user-message builder creates the exact five-source envelope."""
+
     episode = _valid_episode()
 
-    validate_cognitive_episode(episode)
-
+    assert validate_cognitive_episode_v1(episode) == episode
+    assert episode["schema_version"] == "cognitive_episode.v1"
     assert episode["episode_id"] == "episode-1"
     assert episode["trigger_source"] == "user_message"
-    assert episode["input_sources"] == ["dialog_text"]
-    assert episode["output_mode"] == "visible_reply"
-    assert episode["storage_timestamp_utc"] == "2026-05-09T07:30:00+00:00"
-    assert episode["local_time_context"] == _local_time_context()
-    assert episode["target_scope"] == {
-        "platform": "debug",
-        "platform_channel_id": "debug-private-1",
-        "channel_type": "private",
-        "current_platform_user_id": "platform-user-1",
-        "current_global_user_id": "global-user-1",
-        "current_display_name": "Test User",
-        "target_addressed_user_ids": ["global-user-1"],
-        "target_broadcast": False,
-    }
-    assert episode["origin_metadata"] == {
-        "platform": "debug",
-        "platform_message_id": "platform-message-1",
-        "active_turn_platform_message_ids": ["platform-message-1"],
-        "active_turn_conversation_row_ids": ["conversation-row-1"],
-        "debug_modes": {"think_only": False},
-    }
-    assert episode["percepts"] == [
-        {
-            "percept_id": "percept-1",
-            "input_source": "dialog_text",
-            "content": "hello from current text chat",
-            "visibility": "model_visible",
-            "metadata": {},
-        }
+    assert episode["created_at"] == CREATED_AT
+    assert episode["privacy_scope"] == "private"
+    assert episode["continuation_depth"] == 0
+    assert episode["target_scope"] == _target_scope()
+    assert [percept["percept_kind"] for percept in episode["percepts"]] == [
+        "dialog",
+        "local_time_context",
     ]
 
 
-def test_text_chat_builder_defaults_optional_collections() -> None:
-    kwargs = _builder_kwargs()
-    del kwargs["active_turn_platform_message_ids"]
-    del kwargs["active_turn_conversation_row_ids"]
-    del kwargs["debug_modes"]
-    del kwargs["target_addressed_user_ids"]
+def test_model_projection_contains_dialog_and_local_time_percepts() -> None:
+    """Model projection preserves content while omitting deterministic ids."""
 
-    episode = build_text_chat_cognitive_episode(**kwargs)
+    episode = _valid_episode()
+    rows = project_model_visible_percepts(episode)
 
-    validate_cognitive_episode(episode)
-    assert episode["target_scope"]["target_addressed_user_ids"] == []
-    assert episode["origin_metadata"]["active_turn_platform_message_ids"] == []
-    assert episode["origin_metadata"]["active_turn_conversation_row_ids"] == []
-    assert episode["origin_metadata"]["debug_modes"] == {}
+    assert rows == [
+        {
+            "input_source": "dialog",
+            "content": {
+                "semantic_text": "hello from current text chat",
+                "text": "hello from current text chat",
+            },
+            "speaker_role": "当前用户",
+            "addressee_role": "当前角色",
+            "first_person_role": "当前用户",
+            "implicit_imperative_subject_role": "当前角色",
+        },
+        {
+            "input_source": "local_time_context",
+            "content": {"local_time_context": _local_time_context()},
+        },
+    ]
+    assert "platform-message-1" not in str(rows)
 
 
 def test_compatibility_projection_returns_current_text_chat_fields_only() -> None:
-    episode = _valid_episode()
+    """RAG receives the bounded adapter-neutral text-chat projection."""
 
-    projection = project_text_chat_compatibility_fields(episode)
+    projection = project_text_chat_compatibility_fields(_valid_episode())
 
     assert set(projection) == set(TextChatCompatibilityProjection.__annotations__)
     assert projection == {
-        "storage_timestamp_utc": "2026-05-09T07:30:00+00:00",
+        "storage_timestamp_utc": CREATED_AT,
         "local_time_context": _local_time_context(),
         "user_input": "hello from current text chat",
         "platform": "debug",
@@ -204,101 +209,61 @@ def test_compatibility_projection_returns_current_text_chat_fields_only() -> Non
     }
 
 
+def test_dialog_semantic_projection_is_model_owned() -> None:
+    """Role meaning is attached to the dialog percept as bounded metadata."""
+
+    role_content = "The current user asks the character to choose the next move."
+    response_operation = {
+        "operation": "Choose one next action for the current user.",
+        "response_owner_role": "当前角色",
+        "selection_owner_role": "当前角色",
+        "selection_required": True,
+        "embedded_actor_role": "当前用户",
+        "embedded_target_role": "当前角色",
+    }
+
+    projected = cognition_episode_module.attach_dialog_semantic_projection(
+        _valid_episode(),
+        role_content,
+        response_operation,
+    )
+
+    dialog_content = projected["percepts"][0]["content"]
+    assert dialog_content["role_explicit_content"] == role_content
+    assert dialog_content["response_operation"] == response_operation
+
+
 def test_validate_rejects_empty_percepts() -> None:
+    """The canonical envelope requires at least one percept."""
+
     episode = deepcopy(_valid_episode())
     episode["percepts"] = []
 
     with pytest.raises(CognitiveEpisodeValidationError):
-        validate_cognitive_episode(episode)
+        validate_cognitive_episode_v1(episode)
 
 
-def test_validate_rejects_unsupported_output_mode() -> None:
+def test_validate_rejects_legacy_episode_fields() -> None:
+    """Legacy parallel time fields cannot enter the canonical envelope."""
+
     episode = deepcopy(_valid_episode())
-    episode["output_mode"] = "send_later"
+    episode["timestamp"] = CREATED_AT
 
     with pytest.raises(CognitiveEpisodeValidationError):
-        validate_cognitive_episode(episode)
+        validate_cognitive_episode_v1(episode)
 
 
-def test_validate_rejects_missing_target_scope() -> None:
-    episode = deepcopy(_valid_episode())
-    del episode["target_scope"]
+def test_validate_rejects_unregistered_source_and_excess_depth() -> None:
+    """Source ownership and bounded continuation depth are deterministic."""
 
-    with pytest.raises(CognitiveEpisodeValidationError):
-        validate_cognitive_episode(episode)
-
-
-def test_validate_rejects_mismatched_input_sources() -> None:
-    episode = deepcopy(_valid_episode())
-    episode["input_sources"] = ["retrieved_memory"]
+    unsupported = deepcopy(_valid_episode())
+    unsupported["trigger_source"] = "unregistered_source"
 
     with pytest.raises(CognitiveEpisodeValidationError):
-        validate_cognitive_episode(episode)
+        validate_cognitive_episode_v1(unsupported)
 
-
-def test_validate_rejects_duplicate_percept_ids() -> None:
-    episode = deepcopy(_valid_episode())
-    second_percept = deepcopy(episode["percepts"][0])
-    second_percept["content"] = "second percept"
-    episode["percepts"].append(second_percept)
+    too_deep = deepcopy(_valid_episode())
+    too_deep["continuation_depth"] = 2
 
     with pytest.raises(CognitiveEpisodeValidationError):
-        validate_cognitive_episode(episode)
-
-
-def test_validate_rejects_missing_time_context_fields() -> None:
-    episode = deepcopy(_valid_episode())
-    del episode["local_time_context"]["current_local_weekday"]
-
-    with pytest.raises(CognitiveEpisodeValidationError):
-        validate_cognitive_episode(episode)
-
-
-def test_validate_rejects_legacy_episode_time_fields() -> None:
-    episode = deepcopy(_valid_episode())
-    episode["timestamp"] = "2026-05-09T07:30:00+00:00"
-    episode["time_context"] = _local_time_context()
-
-    with pytest.raises(CognitiveEpisodeValidationError):
-        validate_cognitive_episode(episode)
-
-
-def _remove_episode_id(episode: dict) -> None:
-    del episode["episode_id"]
-
-
-def _remove_trigger_source(episode: dict) -> None:
-    del episode["trigger_source"]
-
-
-def _use_non_bool_debug_mode(episode: dict) -> None:
-    episode["origin_metadata"]["debug_modes"]["think_only"] = "false"
-
-
-def _use_unsupported_visibility(episode: dict) -> None:
-    episode["percepts"][0]["visibility"] = "public"
-
-
-def _remove_dialog_text_from_user_message(episode: dict) -> None:
-    episode["input_sources"] = ["retrieved_memory"]
-    episode["percepts"][0]["input_source"] = "retrieved_memory"
-
-
-@pytest.mark.parametrize(
-    "mutate_episode",
-    [
-        _remove_episode_id,
-        _remove_trigger_source,
-        _use_non_bool_debug_mode,
-        _use_unsupported_visibility,
-        _remove_dialog_text_from_user_message,
-    ],
-)
-def test_validate_rejects_named_structural_rule_gaps(
-    mutate_episode: Callable[[dict], None],
-) -> None:
-    episode = deepcopy(_valid_episode())
-    mutate_episode(episode)
-
-    with pytest.raises(CognitiveEpisodeValidationError):
-        validate_cognitive_episode(episode)
+        validate_cognitive_episode_v1(too_deep)

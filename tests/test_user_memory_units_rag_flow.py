@@ -824,7 +824,7 @@ def test_extractor_payload_includes_recent_history() -> None:
             "current_global_user_id": "user-1",
             "current_display_name": "User",
         },
-        "decontexualized_input": "The memory lacks factual basis.",
+        "decontextualized_input": "The memory lacks factual basis.",
         "final_dialog": ["That makes sense."],
         "internal_monologue": "Kazusa follows the architecture discussion.",
         "emotional_appraisal": "Kazusa feels focused.",
@@ -839,17 +839,10 @@ def test_extractor_payload_includes_recent_history() -> None:
             }
         ],
         "rag_result": {
-            "user_image": {
-                "user_memory_context": {
-                    **_unit_context(),
-                    "active_commitments": [
-                        {
-                            "fact": "User asked for a reminder.",
-                            "updated_at": "2026-04-28T12:02:00+00:00",
-                        },
-                    ],
-                },
-            },
+            "user_memory_unit_candidates": [{
+                "fact": "User asked for a reminder.",
+                "updated_at": "2026-04-28T12:02:00+00:00",
+            }],
         },
         "new_facts": [],
         "future_promises": [],
@@ -859,8 +852,8 @@ def test_extractor_payload_includes_recent_history() -> None:
     payload = memory_units_module._json_payload(state)
 
     assert "2026-04-29 00:01" in payload["chat_history_recent"][0]
-    commitments = payload["rag_user_memory_context"]["active_commitments"]
-    assert commitments[0]["updated_at"] == "2026-04-29 00:02"
+    candidates = payload["rag_user_memory_unit_candidates"]
+    assert candidates[0]["updated_at"] == "2026-04-29 00:02"
 
 
 def _unit_context() -> dict:

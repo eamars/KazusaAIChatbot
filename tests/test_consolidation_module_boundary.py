@@ -23,7 +23,6 @@ def test_consolidation_helper_modules_live_in_consolidation_package() -> None:
         "lane_router",
         "character_self_guidance",
         "reflection",
-        "images",
         "memory_units",
         "persistence",
     ]

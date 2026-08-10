@@ -1,233 +1,296 @@
-"""Operations against the singleton ``character_state`` document."""
+"""Operational character state and latest-identity composition."""
 
 from __future__ import annotations
 
-from pymongo.errors import PyMongoError
+from collections.abc import Mapping
+from copy import deepcopy
+from typing import Any
 
+from pymongo.errors import DuplicateKeyError
+
+from kazusa_ai_chatbot.character_identity_growth.models import (
+    TOP_LEVEL_IDENTITY_KEYS,
+)
+from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+    build_character_production_state,
+    validate_cognition_state,
+)
+from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
 from kazusa_ai_chatbot.db._client import get_db
+from kazusa_ai_chatbot.db.character_identity_growth import (
+    get_current_identity,
+)
 from kazusa_ai_chatbot.db.errors import DatabaseOperationError
-from kazusa_ai_chatbot.db.schemas import CharacterProfileDoc
-
-
-RUNTIME_CHARACTER_STATE_FIELDS = (
-    "mood",
-    "global_vibe",
-    "reflection_summary",
-    "self_image",
-    "updated_at",
+from kazusa_ai_chatbot.time_boundary import (
+    parse_storage_utc_datetime,
+    storage_utc_now_iso,
 )
 
 
-def split_character_profile_runtime_state(profile: dict) -> tuple[dict, dict]:
-    """Separate static profile fields from mutable runtime character state.
+RUNTIME_CHARACTER_STATE_FIELDS = (
+    "cognition_state",
+    "updated_at",
+)
+_OPERATIONAL_DOCUMENT_KEYS = frozenset({
+    "_id",
+    *RUNTIME_CHARACTER_STATE_FIELDS,
+})
 
-    Args:
-        profile: Full singleton ``character_state`` document with ``_id``
-            already stripped or still present.
 
-    Returns:
-        A ``(static_profile, runtime_state)`` pair. Runtime fields contain only
-        keys present in ``profile``; static fields exclude runtime keys and
-        MongoDB's internal ``_id``.
-    """
-    runtime_field_names = set(RUNTIME_CHARACTER_STATE_FIELDS)
+class LegacyCharacterStateError(DatabaseOperationError):
+    """Raised when semantic profile data remains in ``character_state``."""
+
+
+def split_character_profile_runtime_state(
+    profile: Mapping[str, object],
+) -> tuple[dict[str, object], dict[str, object]]:
+    """Split a composed graph profile into identity and runtime state."""
+
     static_profile = {
-        key: value
-        for key, value in profile.items()
-        if key not in runtime_field_names and key != "_id"
+        key: deepcopy(profile[key])
+        for key in TOP_LEVEL_IDENTITY_KEYS
+        if key in profile
     }
     runtime_state = {
-        key: value
-        for key, value in profile.items()
-        if key in runtime_field_names
+        key: deepcopy(profile[key])
+        for key in RUNTIME_CHARACTER_STATE_FIELDS
+        if key in profile
     }
-    return_value = (static_profile, runtime_state)
-    return return_value
+    return static_profile, runtime_state
 
 
 def compose_character_profile(
-    static_profile: dict,
-    runtime_state: dict,
+    static_profile: Mapping[str, object],
+    runtime_state: Mapping[str, object],
     global_user_id: str,
-) -> dict:
-    """Build the graph-facing character profile for one turn.
+) -> dict[str, object]:
+    """Compose latest semantic identity with operational graph state."""
 
-    Args:
-        static_profile: Process-local immutable profile fields.
-        runtime_state: Current mutable runtime state fields.
-        global_user_id: Internal character identity for the active adapter
-            account.
-
-    Returns:
-        Character profile payload consumed by the persona graph.
-    """
-    character_profile = {
-        **static_profile,
-        **runtime_state,
+    return {
+        **deepcopy(dict(static_profile)),
+        **deepcopy(dict(runtime_state)),
         "global_user_id": global_user_id,
     }
-    return character_profile
 
 
-async def get_character_profile() -> CharacterProfileDoc | dict:
-    """Retrieve the full ``_id: "global"`` document (profile + runtime state).
+async def ensure_operational_character_state() -> str:
+    """Insert or verify the cognition-state-only singleton."""
 
-    Returns:
-        The document with ``_id`` stripped, or an empty dict if missing.
-    """
     db = await get_db()
-    doc = await db.character_state.find_one({"_id": "global"})
-    if doc is None:
-        return_value = {}
-        return return_value
-    doc.pop("_id", None)
-    return doc
+    existing = await db.character_state.find_one({"_id": "global"})
+    if existing is None:
+        updated_at = storage_utc_now_iso().replace("+00:00", "Z")
+        document = {
+            "_id": "global",
+            "cognition_state": build_character_production_state(
+                updated_at=updated_at,
+            ),
+            "updated_at": updated_at,
+        }
+        try:
+            await db.character_state.insert_one(deepcopy(document))
+        except DuplicateKeyError as exc:
+            existing = await db.character_state.find_one({"_id": "global"})
+            if existing is None:
+                raise DatabaseOperationError(
+                    "operational character-state insert raced without "
+                    "a readable singleton"
+                ) from exc
+        else:
+            return "inserted"
+
+    _validate_operational_character_state_document(existing)
+    return "verified"
 
 
-async def get_character_runtime_state() -> dict:
-    """Retrieve only runtime fields from the singleton character document.
+async def get_character_profile(
+    *,
+    character_id: str = CHARACTER_GLOBAL_USER_ID,
+) -> dict[str, object]:
+    """Compose the latest identity revision with operational state."""
 
-    Returns:
-        Runtime state fields with ``_id`` stripped, or an empty dict if the
-        singleton document is missing.
-    """
-    db = await get_db()
-    projection = {field_name: 1 for field_name in RUNTIME_CHARACTER_STATE_FIELDS}
-    doc = await db.character_state.find_one({"_id": "global"}, projection)
-    if doc is None:
-        return_value = {}
-        return return_value
-    doc.pop("_id", None)
-    return doc
-
-
-async def save_character_profile(profile: dict) -> None:
-    """Persist personality profile fields to the global document.
-
-    Each key in ``profile`` is written as a top-level field on
-    ``_id: "global"``. Runtime state fields are untouched.
-    """
-    db = await get_db()
-    await db.character_state.update_one(
-        {"_id": "global"},
-        {"$set": profile},
-        upsert=True,
+    revision = await get_current_identity(character_id=character_id)
+    runtime_state = await get_character_runtime_state()
+    return compose_character_profile(
+        revision["effective_identity"],
+        runtime_state,
+        character_id,
     )
 
 
-async def get_character_state() -> CharacterProfileDoc | dict:
-    """Alias for :func:`get_character_profile` — returns the same document."""
-    return_value = await get_character_profile()
-    return return_value
+async def get_character_runtime_state() -> dict[str, object]:
+    """Retrieve and validate the operational singleton state."""
+
+    db = await get_db()
+    document = await db.character_state.find_one({"_id": "global"})
+    if document is None:
+        return {}
+    validated = _validate_operational_character_state_document(document)
+    validated.pop("_id")
+    return validated
 
 
-async def upsert_character_self_image(image_doc: dict) -> None:
-    """Persist the three-tier character self-image document to ``character_state``.
+async def get_character_state() -> dict[str, object]:
+    """Return the operational singleton without semantic identity."""
 
-    Args:
-        image_doc: The full three-tier image document to write.
-    """
-    if not image_doc:
-        return
-    try:
-        db = await get_db()
-        await db.character_state.update_one(
-            {"_id": "global"},
-            {"$set": {"self_image": image_doc}},
-            upsert=True,
+    return await get_character_runtime_state()
+
+
+async def get_character_cognition_state() -> dict[str, object]:
+    """Read and validate the singleton character cognition state."""
+
+    runtime_state = await get_character_runtime_state()
+    cognition_state = runtime_state.get("cognition_state")
+    if cognition_state is None:
+        raise DatabaseOperationError(
+            "global character state document is missing cognition_state"
         )
-    except PyMongoError as exc:
+    return validate_cognition_state(cognition_state)
+
+
+async def replace_character_cognition_state(state: dict) -> None:
+    """Validate and replace the singleton character cognition state."""
+
+    validated_state = validate_cognition_state(state)
+    if validated_state["state_scope"] != "character":
+        raise ValueError("character cognition state must be character-scoped")
+    db = await get_db()
+    result = await db.character_state.update_one(
+        {"_id": "global"},
+        {
+            "$set": {
+                "cognition_state": validated_state,
+                "updated_at": storage_utc_now_iso().replace("+00:00", "Z"),
+            }
+        },
+        upsert=False,
+    )
+    if result.matched_count != 1:
         raise DatabaseOperationError(
-            f"failed to upsert character self image: {exc}"
-        ) from exc
-
-
-async def upsert_character_state(
-    mood: str,
-    global_vibe: str,
-    reflection_summary: str,
-    updated_at_utc: str,
-) -> None:
-    """Update the runtime character state.
-
-    Empty-string arguments are treated as "leave unchanged" — the existing
-    value for that field is preserved. ``updated_at_utc`` always overwrites
-    ``updated_at``.
-    """
-    try:
-        db = await get_db()
-        existing = await get_character_state()
-    except PyMongoError as exc:
-        raise DatabaseOperationError(
-            f"failed to load character state before update: {exc}"
-        ) from exc
-
-    if mood == "":
-        mood = existing.get("mood", "")
-    if global_vibe == "":
-        global_vibe = existing.get("global_vibe", "")
-    if reflection_summary == "":
-        reflection_summary = existing.get("reflection_summary", "")
-
-    try:
-        await db.character_state.update_one(
-            {"_id": "global"},
-            {
-                "$set": {
-                    "mood": mood,
-                    "global_vibe": global_vibe,
-                    "reflection_summary": reflection_summary,
-                    "updated_at": updated_at_utc,
-                }
-            },
-            upsert=True,
+            "global character state document does not exist"
         )
-    except PyMongoError as exc:
-        raise DatabaseOperationError(
-            f"failed to upsert character state: {exc}"
-        ) from exc
 
 
-async def compare_and_upsert_character_state(
+async def compare_and_replace_character_cognition_state(
     *,
     expected_updated_at: str,
-    mood: str,
-    global_vibe: str,
-    reflection_summary: str,
-    updated_at_utc: str,
+    replacement: Mapping[str, object],
 ) -> bool:
-    """Update runtime character state only if the freshness token still matches.
+    """Atomically replace character cognition state at one known version.
 
-    Args:
-        expected_updated_at: ``updated_at`` value read before the LLM proposal.
-        mood: LLM-authored replacement mood text.
-        global_vibe: LLM-authored replacement global vibe text.
-        reflection_summary: LLM-authored replacement reflection summary text.
-        updated_at_utc: New UTC freshness timestamp to persist.
-
-    Returns:
-        ``True`` when the singleton row matched the expected freshness token,
-        otherwise ``False`` so callers can record a non-retryable stale skip.
+    The nested cognition timestamp is the sole optimistic version token. A
+    replacement must advance it strictly so a successful compare-and-set can
+    never make an older operational posture visible again.
     """
 
-    try:
-        db = await get_db()
-        result = await db.character_state.update_one(
-            {"_id": "global", "updated_at": expected_updated_at},
-            {
-                "$set": {
-                    "mood": mood,
-                    "global_vibe": global_vibe,
-                    "reflection_summary": reflection_summary,
-                    "updated_at": updated_at_utc,
-                }
-            },
-            upsert=False,
-        )
-    except PyMongoError as exc:
-        raise DatabaseOperationError(
-            f"failed to compare-and-upsert character state: {exc}"
-        ) from exc
+    db = await get_db()
+    return await _compare_and_replace_character_cognition_state_in_session(
+        db=db,
+        session=None,
+        expected_updated_at=expected_updated_at,
+        replacement=replacement,
+    )
 
-    return_value = result.matched_count > 0
-    return return_value
+
+async def _compare_and_replace_character_cognition_state_in_session(
+    *,
+    db: Any,
+    session: Any,
+    expected_updated_at: str,
+    replacement: Mapping[str, object],
+) -> bool:
+    """Apply the canonical character CAS through an optional DB session."""
+
+    expected_timestamp = _validate_updated_at(expected_updated_at)
+    validated_state = validate_cognition_state(replacement)
+    if validated_state["state_scope"] != "character":
+        raise ValueError("character cognition state must be character-scoped")
+    replacement_timestamp = _validate_updated_at(validated_state["updated_at"])
+    if (
+        parse_storage_utc_datetime(replacement_timestamp)
+        <= parse_storage_utc_datetime(expected_timestamp)
+    ):
+        raise ValueError(
+            "character cognition replacement updated_at must strictly advance"
+        )
+    update_kwargs: dict[str, Any] = {"upsert": False}
+    if session is not None:
+        update_kwargs["session"] = session
+    result = await db.character_state.update_one(
+        {
+            "_id": "global",
+            "cognition_state.updated_at": expected_timestamp,
+        },
+        {
+            "$set": {
+                "cognition_state": validated_state,
+                "updated_at": replacement_timestamp,
+            }
+        },
+        **update_kwargs,
+    )
+    return result.matched_count == 1
+
+
+def _validate_operational_character_state_document(
+    raw_document: Mapping[str, object],
+) -> dict[str, object]:
+    """Validate the exact operational singleton shape."""
+
+    actual_keys = frozenset(raw_document)
+    unknown_keys = sorted(actual_keys.difference(_OPERATIONAL_DOCUMENT_KEYS))
+    if unknown_keys:
+        raise LegacyCharacterStateError(
+            "character_state contains semantic or legacy fields "
+            f"{unknown_keys}; start from a clean target database"
+        )
+    missing_keys = sorted(_OPERATIONAL_DOCUMENT_KEYS.difference(actual_keys))
+    if missing_keys:
+        raise DatabaseOperationError(
+            f"character_state is missing operational fields {missing_keys}"
+        )
+    if raw_document["_id"] != "global":
+        raise DatabaseOperationError(
+            "character_state singleton must use _id='global'"
+        )
+    cognition_state = validate_cognition_state(
+        raw_document["cognition_state"]
+    )
+    updated_at = _validate_updated_at(raw_document["updated_at"])
+    return {
+        "_id": "global",
+        "cognition_state": cognition_state,
+        "updated_at": updated_at,
+    }
+
+
+def _validate_updated_at(value: object) -> str:
+    """Require one timezone-aware ISO runtime timestamp."""
+
+    if not isinstance(value, str) or not value.strip():
+        raise DatabaseOperationError(
+            "character_state updated_at must be nonempty text"
+        )
+    text = value.strip()
+    try:
+        parse_storage_utc_datetime(text)
+    except ValueError as exc:
+        raise DatabaseOperationError(
+            "character_state updated_at must be a storage UTC datetime"
+        ) from exc
+    return text
+
+
+__all__ = [
+    "LegacyCharacterStateError",
+    "RUNTIME_CHARACTER_STATE_FIELDS",
+    "compose_character_profile",
+    "compare_and_replace_character_cognition_state",
+    "ensure_operational_character_state",
+    "get_character_cognition_state",
+    "get_character_profile",
+    "get_character_runtime_state",
+    "get_character_state",
+    "replace_character_cognition_state",
+    "split_character_profile_runtime_state",
+]

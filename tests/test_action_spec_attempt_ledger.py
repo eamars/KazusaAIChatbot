@@ -121,6 +121,7 @@ def test_new_action_attempt_record_extends_existing_collection_shape() -> None:
         eval_result,
         recorded_at="2026-05-16T00:00:00+00:00",
         execution_result={"status": "accepted", "scheduled_event_ids": ["event-001"]},
+        source_llm_trace_id="llmtrace_source-1",
     )
 
     assert record["action_kind"] == "send_message"
@@ -129,4 +130,5 @@ def test_new_action_attempt_record_extends_existing_collection_shape() -> None:
     assert record["handler_owner"] == "dispatcher"
     assert record["continuation_status"] == "none_requested"
     assert record["execution_result"]["scheduled_event_ids"] == ["event-001"]
+    assert record["source_llm_trace_id"] == "llmtrace_source-1"
     assert record["idempotency_key"] == eval_result["idempotency_key"]

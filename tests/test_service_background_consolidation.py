@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Mapping
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -15,8 +16,22 @@ from kazusa_ai_chatbot.action_spec.registry import (
     APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
 )
 from kazusa_ai_chatbot.brain_service import post_turn as post_turn_module
+from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+    build_character_production_state,
+)
+from kazusa_ai_chatbot.consolidation import (
+    character_operational_state as operational_state_module,
+)
+from kazusa_ai_chatbot.consolidation.character_operational_state import (
+    CharacterOperationalExecutionContext,
+)
 from kazusa_ai_chatbot.chat_input_queue import QueuedChatItem
+from kazusa_ai_chatbot.llm_tracing import failure_capsule
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
+from tests.cognition_core_v2_test_helpers import (
+    canonical_episode_identity_snapshot,
+    canonical_service_character_profile,
+)
 
 
 _CONSOLIDATION_TURN_CLOCK = build_turn_clock("2026-04-25 18:00:58")
@@ -117,7 +132,7 @@ def _consolidation_state() -> dict:
         "platform_message_id": "msg-1",
         "global_user_id": "global-user-1",
         "user_name": "Test User",
-        "user_profile": {"global_user_id": "global-user-1", "affinity": 500},
+        "user_profile": {"global_user_id": "global-user-1", "relationship_state": 500},
         "character_profile": {"name": "Character"},
         "action_directives": {"linguistic_directives": {"content_plan": {}}},
         "internal_monologue": "test",
@@ -127,10 +142,56 @@ def _consolidation_state() -> dict:
         "character_intent": "PROVIDE",
         "logical_stance": "CONFIRM",
         "rag_result": {},
-        "decontexualized_input": "please remember this",
+        "decontextualized_input": "please remember this",
         "chat_history_recent": [],
+        "interaction_logical_turns": [],
+        "active_turn_conversation_row_ids": ["conversation-row-1"],
+        "active_turn_conversation_source_refs": [{
+            "ref_kind": "conversation_row",
+            "ref_id": "conversation-row-1",
+            "occurred_at": "2026-04-24T18:00:00+00:00",
+        }],
+        "llm_trace_id": "trace-background-consolidation",
+        "conversation_episode_state": None,
+        "conversation_progress_turn_outcome": "visible_response",
     }
     return return_value
+
+
+def _settled_visible_trace() -> dict:
+    """Return a minimal canonical settled trace for consumer tests."""
+
+    return {
+        "schema_version": "episode_trace.v2",
+        "episode_id": "episode-001",
+        "trigger_source": "user_message",
+        "terminal_status": "completed_visible",
+        "cognition_refs": [],
+        "action_specs": [],
+        "action_results": [],
+        "surface_outputs": [{
+            "schema_version": "surface_output.v1",
+            "surface_kind": "text",
+            "visibility": "user_visible",
+            "action_attempt_id": None,
+            "fragments": ["ok"],
+            "artifact_refs": [],
+            "delivery_intent": "deliver_now",
+            "created_at": _CONSOLIDATION_TURN_CLOCK[
+                "storage_timestamp_utc"
+            ],
+        }],
+        "attempt_diagnostics": [],
+        "delivery_correlation": {
+            "schema_version": "delivery_correlation.v1",
+            "delivery_intent": "deliver_now",
+            "tracking_id": "delivery-001",
+            "receipt_status": "pending",
+            "receipt_ref": "",
+        },
+        "created_at": _CONSOLIDATION_TURN_CLOCK["storage_timestamp_utc"],
+        "settled_at": _CONSOLIDATION_TURN_CLOCK["storage_timestamp_utc"],
+    }
 
 
 def _boundary_profile() -> dict:
@@ -167,6 +228,7 @@ def _graph_result(consolidation_state: Mapping | dict | None = None) -> dict:
 
     return_value = {
         "should_respond": True,
+        "response_action": "proceed",
         "use_reply_feature": False,
         "final_dialog": ["ok"],
         "future_promises": [],
@@ -259,14 +321,24 @@ def _post_turn_lifecycle_state() -> dict:
         }
     ]
     state["episode_trace"] = {
-        "schema_version": "episode_trace.v1",
+        "schema_version": "episode_trace.v2",
         "episode_id": "episode-001",
         "trigger_source": "user_message",
+        "terminal_status": "completed_visible",
         "cognition_refs": [],
         "action_specs": [],
         "action_results": [],
         "surface_outputs": state["surface_outputs"],
+        "attempt_diagnostics": [],
+        "delivery_correlation": {
+            "schema_version": "delivery_correlation.v1",
+            "delivery_intent": "deliver_now",
+            "tracking_id": "delivery-001",
+            "receipt_status": "pending",
+            "receipt_ref": "",
+        },
         "created_at": state["storage_timestamp_utc"],
+        "settled_at": state["storage_timestamp_utc"],
     }
     return state
 
@@ -290,25 +362,42 @@ def _patch_chat_dependencies(
 
     monkeypatch.setattr(
         service_module,
-        "_static_character_profile",
-        {"name": "Character"},
+        "_active_character_name_snapshot",
+        "Character",
+    )
+    character_profile = canonical_service_character_profile(
+        marker="background-consolidation",
+        global_user_id=service_module.CHARACTER_GLOBAL_USER_ID,
     )
     monkeypatch.setattr(
         service_module,
         "_runtime_character_state",
         {
-            "mood": "old mood",
-            "global_vibe": "old vibe",
-            "reflection_summary": "old reflection",
+            "cognition_state": character_profile["cognition_state"],
+            "updated_at": character_profile["updated_at"],
         },
+    )
+    identity_snapshot = canonical_episode_identity_snapshot(
+        marker="background-consolidation",
+        global_user_id=service_module.CHARACTER_GLOBAL_USER_ID,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_load_latest_character_profile_snapshot",
+        AsyncMock(return_value=character_profile),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "load_latest_identity_for_episode",
+        AsyncMock(return_value=identity_snapshot),
     )
     monkeypatch.setattr(
         service_module,
         "get_character_runtime_state",
         AsyncMock(return_value={
             "mood": "fresh mood",
-            "global_vibe": "fresh vibe",
-            "reflection_summary": "fresh reflection",
+            "vibe_check": "fresh vibe",
+            "character_reflection": "fresh reflection",
         }),
     )
     monkeypatch.setattr(
@@ -325,7 +414,7 @@ def _patch_chat_dependencies(
         service_module,
         "get_user_profile",
         AsyncMock(
-            return_value={"global_user_id": "global-user-1", "affinity": 500},
+            return_value={"global_user_id": "global-user-1", "relationship_state": 500},
         ),
     )
     monkeypatch.setattr(
@@ -335,8 +424,33 @@ def _patch_chat_dependencies(
     )
     monkeypatch.setattr(
         service_module,
+        "get_user_message_by_row_id",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "set_conversation_source_episode_id",
+        AsyncMock(return_value=1),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "build_promoted_reflection_context",
+        AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        service_module,
         "_hydrate_reply_context",
         AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        service_module.llm_tracing,
+        "ensure_llm_trace_run",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        service_module.llm_tracing,
+        "finalize_llm_trace_run",
+        AsyncMock(),
     )
 
     async def _frontline(_state):
@@ -392,6 +506,11 @@ def _patch_chat_dependencies(
         service_module,
         "save_conversation",
         AsyncMock(return_value="conversation-row-1"),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "upsert_post_turn_lifecycle_record",
+        AsyncMock(),
     )
     if patch_post_turn_lifecycle:
         monkeypatch.setattr(
@@ -790,8 +909,6 @@ async def test_chat_response_tracks_deliverable_assistant_row(monkeypatch):
     graph = response.cognition_graph
     assert graph["run_id"] == response.delivery_tracking_id
     assert graph["status"] == "completed"
-    assert graph["trigger_source"] == "user_message"
-    assert graph["input_sources"] == ["dialog_text"]
     node_ids = {node["id"] for node in graph["nodes"]}
     assert {"l2.reasoning", "l2.memory", "l2.actions"} <= node_ids
     edge_kinds = {edge["kind"] for edge in graph["edges"]}
@@ -1081,7 +1198,7 @@ async def test_post_turn_lifecycle_iterates_after_productive_passes() -> None:
         APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
         APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     ]
-    assert updated["episode_trace"]["action_results"] == updated["action_results"]
+    assert updated["episode_trace"]["action_results"] == []
     assert [
         action_spec["params"]["unit_id"]
         for action_spec in updated["action_specs"]
@@ -1265,16 +1382,21 @@ async def test_delivery_receipt_endpoint_returns_updated_and_not_found(monkeypat
 async def test_hydrate_reply_context_fills_missing_metadata_from_delivered_row(
     monkeypatch,
 ) -> None:
-    """Brain-side fallback should hydrate sparse native reply metadata."""
+    """Historical bot replies should use the current active brain name."""
     lookup = AsyncMock(return_value={
         "platform_user_id": "bot-1",
-        "display_name": "Kazusa",
+        "display_name": '杏山千纱',
         "body_text": "previous assistant answer",
     })
     monkeypatch.setattr(
         service_module,
         "get_conversation_by_platform_message_id",
         lookup,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_active_character_name_snapshot",
+        "Character",
     )
     request = _chat_request()
     request.message_envelope.reply = service_module.ReplyTargetIn(
@@ -1285,13 +1407,44 @@ async def test_hydrate_reply_context_fills_missing_metadata_from_delivered_row(
 
     assert reply_context["reply_to_message_id"] == "platform-123"
     assert reply_context["reply_to_platform_user_id"] == "bot-1"
-    assert reply_context["reply_to_display_name"] == "Kazusa"
+    assert reply_context["reply_to_display_name"] == "Character"
     assert reply_context["reply_excerpt"] == "previous assistant answer"
     lookup.assert_awaited_once_with(
         platform="qq",
         platform_channel_id="chan-1",
         platform_message_id="platform-123",
     )
+
+
+@pytest.mark.asyncio
+async def test_hydrate_reply_context_overrides_adapter_bot_display_name(
+    monkeypatch,
+) -> None:
+    """Typed adapter bot metadata should use the active brain character name."""
+
+    lookup = AsyncMock(return_value=None)
+    monkeypatch.setattr(
+        service_module,
+        "get_conversation_by_platform_message_id",
+        lookup,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_active_character_name_snapshot",
+        "Character",
+    )
+    request = _chat_request()
+    request.message_envelope.reply = service_module.ReplyTargetIn(
+        platform_message_id="platform-123",
+        platform_user_id="bot-1",
+        display_name='杏山千纱',
+        excerpt="adapter excerpt",
+    )
+
+    reply_context = await service_module._hydrate_reply_context(request)
+
+    assert reply_context["reply_to_display_name"] == "Character"
+    lookup.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -1528,22 +1681,27 @@ async def test_graph_failure_does_not_stop_queue_worker(monkeypatch):
     background_tasks = BackgroundTasks()
     response = await service_module.chat(_chat_request(), background_tasks)
 
-    assert response.messages == ["Character is busy right now, please try again later."]
+    assert response.messages == [service_module.OPERATIONAL_FAILURE_NOTICE]
+    assert response.content_type == "operational_error"
+    assert response.delivery_tracking_id == ""
+    assert response.operational_error is not None
+    assert response.operational_error.error_code == "internal_invariant"
+    assert response.operational_error.status == "failed"
     assert len(background_tasks.tasks) == 0
     await _reset_queue_state()
 
 
 @pytest.mark.asyncio
 async def test_background_consolidation_refreshes_cached_character_state(monkeypatch):
-    """Successful character-state writes should update the service cache."""
+    """Consolidation cannot author the cognition-owned character state cache."""
 
     monkeypatch.setattr(
         service_module,
         "_runtime_character_state",
         {
             "mood": "old mood",
-            "global_vibe": "old vibe",
-            "reflection_summary": "old reflection",
+            "vibe_check": "old vibe",
+            "character_reflection": "old reflection",
         },
     )
     monkeypatch.setattr(
@@ -1551,8 +1709,8 @@ async def test_background_consolidation_refreshes_cached_character_state(monkeyp
         "call_consolidation_subgraph",
         AsyncMock(return_value={
             "mood": "Curious",
-            "global_vibe": "Focused",
-            "reflection_summary": "The previous turn left her attentive.",
+            "vibe_check": "Focused",
+            "character_reflection": "The previous turn left her attentive.",
             "consolidation_metadata": {
                 "write_success": {
                     "character_state": True,
@@ -1566,12 +1724,11 @@ async def test_background_consolidation_refreshes_cached_character_state(monkeyp
         "local_time_context": _CONSOLIDATION_TURN_CLOCK["local_time_context"],
     })
 
-    assert service_module._runtime_character_state["mood"] == "Curious"
-    assert service_module._runtime_character_state["global_vibe"] == "Focused"
-    assert (
-        service_module._runtime_character_state["reflection_summary"]
-        == "The previous turn left her attentive."
-    )
+    assert service_module._runtime_character_state == {
+        "mood": "old mood",
+        "vibe_check": "old vibe",
+        "character_reflection": "old reflection",
+    }
 
 
 @pytest.mark.asyncio
@@ -1579,6 +1736,7 @@ async def test_progress_background_passes_character_boundary_profile(monkeypatch
     """Progress recorder receives the character boundary profile from the snapshot."""
 
     state = _consolidation_state()
+    state["episode_trace"] = _settled_visible_trace()
     boundary_profile = _boundary_profile()
     state["character_profile"]["boundary_profile"] = boundary_profile
     record_turn_progress = AsyncMock(return_value={
@@ -1600,6 +1758,11 @@ async def test_progress_background_passes_character_boundary_profile(monkeypatch
     record_input = record_turn_progress.await_args.kwargs["record_input"]
     assert record_input["character_name"] == "Character"
     assert record_input["boundary_profile"] == boundary_profile
+    assert record_input["current_turn_source_refs"][0] == {
+        "ref_kind": "conversation_row",
+        "ref_id": "conversation-row-1",
+        "occurred_at": "2026-04-24T18:00:00+00:00",
+    }
 
 
 @pytest.mark.asyncio
@@ -1607,6 +1770,7 @@ async def test_progress_background_requires_character_boundary_profile(monkeypat
     """Missing character boundary configuration is a state-shape bug."""
 
     state = _consolidation_state()
+    state["episode_trace"] = _settled_visible_trace()
     record_turn_progress = AsyncMock()
     monkeypatch.setattr(
         service_module,
@@ -1626,6 +1790,9 @@ async def test_build_graph_preserves_consolidation_state_from_supervisor(monkeyp
 
     async def _persona_supervisor(_state):
         return {
+            "cognition_core_output": {},
+            "cognition_state_update": {},
+            "cognition_state_committed": True,
             "final_dialog": ["好呀。"],
             "future_promises": [],
             "consolidation_state": {
@@ -1634,7 +1801,7 @@ async def test_build_graph_preserves_consolidation_state_from_supervisor(monkeyp
                 ],
                 "local_time_context": _GRAPH_TURN_CLOCK["local_time_context"],
                 "final_dialog": ["好呀。"],
-                "decontexualized_input": "一分钟后发消息",
+                "decontextualized_input": "一分钟后发消息",
             },
         }
 
@@ -1645,16 +1812,25 @@ async def test_build_graph_preserves_consolidation_state_from_supervisor(monkeyp
         AsyncMock(return_value={
             "episode_state": None,
             "conversation_progress": {
-                "status": "new_episode",
-                "episode_label": "",
+                "schema_version": "conversation_progress_prompt.v2",
+                "episode_state_id": "",
+                "status": "empty",
                 "continuity": "sharp_transition",
                 "turn_count": 0,
-                "user_state_updates": [],
-                "assistant_moves": [],
+                "current_thread": "",
+                "character_stance": "",
+                "user_goal": "",
+                "current_blocker": "",
+                "emotional_trajectory": "",
+                "episode_narrative": "",
+                "events": [],
                 "overused_moves": [],
-                "open_loops": [],
-                "progression_guidance": "",
+                "interaction_logical_turns": [],
+                "compacted_block_refs": [],
             },
+            "ambient_logical_turns": [],
+            "interaction_logical_turns": [],
+            "diagnostics": {},
             "source": "empty",
         }),
     )
@@ -1670,7 +1846,7 @@ async def test_build_graph_preserves_consolidation_state_from_supervisor(monkeyp
         "user_name": "蚝爹油",
         "user_input": "一分钟后发消息",
         "user_multimedia_input": [],
-        "user_profile": {"global_user_id": "global-user-1", "affinity": 500},
+        "user_profile": {"global_user_id": "global-user-1", "relationship_state": 500},
         "platform_bot_id": "bot-id",
         "character_name": "Character",
         "character_profile": {"name": "杏山千纱"},
@@ -1686,7 +1862,7 @@ async def test_build_graph_preserves_consolidation_state_from_supervisor(monkeyp
     })
 
     assert result["final_dialog"] == ["好呀。"]
-    assert result["consolidation_state"]["decontexualized_input"] == "一分钟后发消息"
+    assert result["consolidation_state"]["decontextualized_input"] == "一分钟后发消息"
 
 
 @pytest.mark.asyncio
@@ -1695,6 +1871,9 @@ async def test_build_graph_preserves_persona_no_response(monkeypatch):
 
     async def _persona_supervisor(_state):
         return {
+            "cognition_core_output": {},
+            "cognition_state_update": {},
+            "cognition_state_committed": True,
             "should_respond": False,
             "final_dialog": [],
             "target_addressed_user_ids": [],
@@ -1703,7 +1882,7 @@ async def test_build_graph_preserves_persona_no_response(monkeypatch):
             "consolidation_state": {
                 "should_respond": False,
                 "final_dialog": [],
-                "decontexualized_input": "silent turn",
+                "decontextualized_input": "silent turn",
             },
         }
 
@@ -1714,16 +1893,25 @@ async def test_build_graph_preserves_persona_no_response(monkeypatch):
         AsyncMock(return_value={
             "episode_state": None,
             "conversation_progress": {
-                "status": "new_episode",
-                "episode_label": "",
+                "schema_version": "conversation_progress_prompt.v2",
+                "episode_state_id": "",
+                "status": "empty",
                 "continuity": "sharp_transition",
                 "turn_count": 0,
-                "user_state_updates": [],
-                "assistant_moves": [],
+                "current_thread": "",
+                "character_stance": "",
+                "user_goal": "",
+                "current_blocker": "",
+                "emotional_trajectory": "",
+                "episode_narrative": "",
+                "events": [],
                 "overused_moves": [],
-                "open_loops": [],
-                "progression_guidance": "",
+                "interaction_logical_turns": [],
+                "compacted_block_refs": [],
             },
+            "ambient_logical_turns": [],
+            "interaction_logical_turns": [],
+            "diagnostics": {},
             "source": "empty",
         }),
     )
@@ -1739,7 +1927,7 @@ async def test_build_graph_preserves_persona_no_response(monkeypatch):
         "user_name": "Test User",
         "user_input": "ignored message",
         "user_multimedia_input": [],
-        "user_profile": {"global_user_id": "global-user-1", "affinity": 500},
+        "user_profile": {"global_user_id": "global-user-1", "relationship_state": 500},
         "platform_bot_id": "bot-id",
         "character_name": "Character",
         "character_profile": {"name": "Character"},
@@ -1757,6 +1945,20 @@ async def test_build_graph_preserves_persona_no_response(monkeypatch):
     assert result["should_respond"] is False
     assert result["final_dialog"] == []
     assert result["consolidation_state"]["should_respond"] is False
+
+
+def test_brain_terminal_requires_v2_output_update_and_commit_marker() -> None:
+    """Terminal handling should fail closed before an incomplete V2 commit."""
+
+    from kazusa_ai_chatbot.brain_service.graph import validate_v2_terminal_state
+
+    with pytest.raises(ValueError, match="not committed"):
+        validate_v2_terminal_state({})  # type: ignore[arg-type]
+    assert validate_v2_terminal_state({
+        "cognition_core_output": {},
+        "cognition_state_update": {},
+        "cognition_state_committed": True,
+    }) == {}  # type: ignore[arg-type]
 
 
 @pytest.mark.asyncio
@@ -1788,7 +1990,7 @@ async def test_build_graph_skips_episode_state_loader_when_relevance_declines(mo
         "user_name": "Test User",
         "user_input": "third party chat",
         "user_multimedia_input": [],
-        "user_profile": {"global_user_id": "global-user-1", "affinity": 500},
+        "user_profile": {"global_user_id": "global-user-1", "relationship_state": 500},
         "platform_bot_id": "bot-id",
         "character_name": "Character",
         "character_profile": {"name": "Character"},
@@ -1812,25 +2014,43 @@ async def test_chat_listen_only_drops_before_graph(monkeypatch):
     await _reset_queue_state()
     monkeypatch.setattr(
         service_module,
-        "_static_character_profile",
-        {"name": "Character"},
+        "_active_character_name_snapshot",
+        "Character",
     )
     monkeypatch.setattr(
         service_module,
         "_runtime_character_state",
         {
             "mood": "old mood",
-            "global_vibe": "old vibe",
-            "reflection_summary": "old reflection",
+            "vibe_check": "old vibe",
+            "character_reflection": "old reflection",
         },
+    )
+    character_profile = canonical_service_character_profile(
+        marker="listen-only",
+        global_user_id="character-global-id",
+    )
+    identity_snapshot = canonical_episode_identity_snapshot(
+        marker="listen-only",
+        global_user_id="character-global-id",
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_load_latest_character_profile_snapshot",
+        AsyncMock(return_value=character_profile),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "load_latest_identity_for_episode",
+        AsyncMock(return_value=identity_snapshot),
     )
     monkeypatch.setattr(
         service_module,
         "get_character_runtime_state",
         AsyncMock(return_value={
             "mood": "fresh mood",
-            "global_vibe": "fresh vibe",
-            "reflection_summary": "fresh reflection",
+            "vibe_check": "fresh vibe",
+            "character_reflection": "fresh reflection",
         }),
     )
     monkeypatch.setattr(
@@ -1847,13 +2067,18 @@ async def test_chat_listen_only_drops_before_graph(monkeypatch):
         service_module,
         "get_user_profile",
         AsyncMock(
-            return_value={"global_user_id": "global-user-1", "affinity": 500},
+            return_value={"global_user_id": "global-user-1", "relationship_state": 500},
         ),
     )
     monkeypatch.setattr(
         service_module,
         "get_conversation_history",
         AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "set_conversation_source_episode_id",
+        AsyncMock(return_value=1),
     )
     monkeypatch.setattr(
         service_module,
@@ -1877,6 +2102,12 @@ async def test_chat_listen_only_drops_before_graph(monkeypatch):
     )
     save_conversation = AsyncMock()
     monkeypatch.setattr(service_module, "save_conversation", save_conversation)
+    save_receipt = AsyncMock(return_value="row-1")
+    monkeypatch.setattr(
+        service_module,
+        "save_conversation_receipt",
+        save_receipt,
+    )
 
     class _Graph:
         """Expose a mock graph entrypoint for listen-only assertions."""
@@ -1914,5 +2145,253 @@ async def test_chat_listen_only_drops_before_graph(monkeypatch):
     assert response.messages == []
     assert response.use_reply_feature is False
     graph.ainvoke.assert_not_awaited()
-    save_conversation.assert_awaited_once()
+    save_receipt.assert_awaited_once()
+    save_conversation.assert_not_awaited()
     await _reset_queue_state()
+
+
+@pytest.mark.asyncio
+async def test_operational_carryover_failure_persists_protected_capsule(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Background carry-over failures persist only inside the protected capsule."""
+
+    persisted = asyncio.Event()
+    written_rows: list[dict] = []
+    completed_receipts: list[dict] = []
+    now = "2026-08-02T00:00:00Z"
+
+    async def capture_insert_trace_step(document: dict) -> str:
+        written_rows.append(dict(document))
+        persisted.set()
+        return "step"
+
+    async def raising_carryover(**kwargs):
+        del kwargs
+        raise RuntimeError("provider boundary failure")
+
+    async def fake_completion(**kwargs):
+        return {
+            "status": kwargs["status"],
+            "error_code": kwargs["error_code"],
+        }
+
+    monkeypatch.setattr(failure_capsule, "LLM_TRACE_CAPTURE_MODE", "metadata")
+    monkeypatch.setattr(
+        failure_capsule.db_llm_tracing,
+        "insert_trace_step",
+        capture_insert_trace_step,
+    )
+    monkeypatch.setattr(
+        operational_state_module,
+        "run_character_carryover_cognition",
+        raising_carryover,
+    )
+    monkeypatch.setattr(
+        operational_state_module,
+        "_remaining_lease_seconds",
+        lambda context: 30.0,
+    )
+    monkeypatch.setattr(
+        operational_state_module,
+        "_complete_or_in_memory_failure",
+        fake_completion,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "complete_predecessor",
+        lambda token, receipt: completed_receipts.append(dict(receipt)),
+    )
+
+    context = CharacterOperationalExecutionContext(
+        claim={
+            "claim_status": "claimed",
+            "receipt": {"lease_expires_at": "2026-08-02T00:00:30Z"},
+        },
+        base_state=build_character_production_state(updated_at=now),
+        lease_owner="operational-test-lease",
+        registered_at=now,
+    )
+    settled_state = {
+        "character_operational_execution_context": context,
+        "character_operational_predecessor_token": {
+            "protected_episode_id": "episode:protected-capsule",
+            "process_sequence": 1,
+        },
+        "character_operational_episode_id": "episode:protected-capsule",
+        "character_operational_effective_at": now,
+        "llm_trace_id": "trace-background-consolidation",
+    }
+    consolidation_result = {
+        "character_operational_work": {
+            "status": "selected",
+            "evidence": [{
+                "source_key": "episode_trace",
+                "source_kind": "episode",
+                "source_id": "episode:protected-capsule",
+                "occurred_at": now,
+                "semantic_text": "closed operational event",
+            }],
+        },
+    }
+
+    with caplog.at_level(
+        logging.ERROR,
+        logger="kazusa_ai_chatbot.consolidation.character_operational_state",
+    ):
+        await service_module._run_operational_work_from_consolidation(
+            settled_state,
+            consolidation_result,
+        )
+
+    await asyncio.wait_for(persisted.wait(), timeout=1.0)
+
+    capsule_rows = [
+        row
+        for row in written_rows
+        if row.get("capture_reason") == "cognition_failure_capsule"
+    ]
+    assert len(capsule_rows) == 1
+    capsule = capsule_rows[0]["capsule"]
+    assert capsule["trace_id"] == "trace-background-consolidation"
+    assert capsule["entrypoint"] == "character_operational_carryover"
+    assert capsule["outcome"] == "partial_failure"
+    failure_kinds = [
+        event["failure_kind"]
+        for event in capsule["failure_events"]
+    ]
+    assert "carryover_execution_error" in failure_kinds
+    cause_chain = capsule["failure_events"][0]["cause_chain"]
+    assert cause_chain[0]["type"] == "RuntimeError"
+    assert cause_chain[0]["message"] == "provider boundary failure"
+    assert failure_capsule._CURRENT_SESSION.get() is None
+    assert "provider boundary failure" not in caplog.text
+    assert "transaction_failed" in caplog.text
+    assert "RuntimeError" in caplog.text
+    assert completed_receipts[0]["status"] == "failed"
+    assert completed_receipts[0]["error_code"] == "transaction_failed"
+
+
+@pytest.mark.asyncio
+async def test_accepted_task_operational_failure_persists_protected_capsule(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Accepted-task carry-over failures stay inside the protected capsule."""
+
+    persisted = asyncio.Event()
+    written_rows: list[dict] = []
+    completed_receipts: list[dict] = []
+    now = "2026-08-02T00:00:00Z"
+    trace_id = "trace-accepted-task-operational"
+
+    async def capture_insert_trace_step(document: dict) -> str:
+        written_rows.append(dict(document))
+        persisted.set()
+        return "step"
+
+    async def raising_carryover(**kwargs):
+        del kwargs
+        raise RuntimeError("provider boundary failure")
+
+    async def fake_completion(**kwargs):
+        return {
+            "status": kwargs["status"],
+            "error_code": kwargs["error_code"],
+        }
+
+    monkeypatch.setattr(failure_capsule, "LLM_TRACE_CAPTURE_MODE", "metadata")
+    monkeypatch.setattr(
+        failure_capsule.db_llm_tracing,
+        "insert_trace_step",
+        capture_insert_trace_step,
+    )
+    monkeypatch.setattr(
+        operational_state_module,
+        "run_character_carryover_cognition",
+        raising_carryover,
+    )
+    monkeypatch.setattr(
+        operational_state_module,
+        "_remaining_lease_seconds",
+        lambda context: 30.0,
+    )
+    monkeypatch.setattr(
+        operational_state_module,
+        "_complete_or_in_memory_failure",
+        fake_completion,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "complete_predecessor",
+        lambda token, receipt: completed_receipts.append(dict(receipt)),
+    )
+
+    context = CharacterOperationalExecutionContext(
+        claim={
+            "claim_status": "claimed",
+            "receipt": {"lease_expires_at": "2026-08-02T00:00:30Z"},
+        },
+        base_state=build_character_production_state(updated_at=now),
+        lease_owner="operational-test-lease",
+        registered_at=now,
+    )
+    token = {
+        "protected_episode_id": "episode:accepted-task-failure",
+        "process_sequence": 1,
+    }
+    episode = {
+        "schema_version": "cognitive_episode.v1",
+        "episode_id": "episode:accepted-task-failure",
+        "trigger_source": "tool_result",
+        "created_at": now,
+    }
+    settled_trace = {"settled_at": now}
+    operational_state = {
+        "llm_trace_id": trace_id,
+        "internal_monologue": "internal accepted-task thought",
+    }
+
+    with caplog.at_level(
+        logging.ERROR,
+        logger="kazusa_ai_chatbot.consolidation.character_operational_state",
+    ):
+        receipt = await service_module._run_accepted_task_operational_work(
+            context=context,
+            token=token,
+            episode=episode,
+            settled_trace=settled_trace,
+            final_dialog=["accepted task result"],
+            operational_state=operational_state,
+            effective_at=now,
+        )
+
+    await asyncio.wait_for(persisted.wait(), timeout=1.0)
+
+    capsule_rows = [
+        row
+        for row in written_rows
+        if row.get("capture_reason") == "cognition_failure_capsule"
+    ]
+    assert len(capsule_rows) == 1
+    capsule = capsule_rows[0]["capsule"]
+    assert capsule["trace_id"] == trace_id
+    assert capsule["entrypoint"] == "character_operational_carryover"
+    assert capsule["outcome"] == "partial_failure"
+    failure_kinds = [
+        event["failure_kind"]
+        for event in capsule["failure_events"]
+    ]
+    assert "carryover_execution_error" in failure_kinds
+    cause_chain = capsule["failure_events"][0]["cause_chain"]
+    assert cause_chain[0]["type"] == "RuntimeError"
+    assert cause_chain[0]["message"] == "provider boundary failure"
+    assert failure_capsule._CURRENT_SESSION.get() is None
+    assert "provider boundary failure" not in caplog.text
+    assert "transaction_failed" in caplog.text
+    assert "RuntimeError" in caplog.text
+    assert receipt["status"] == "failed"
+    assert receipt["error_code"] == "transaction_failed"
+    assert completed_receipts[0]["status"] == "failed"
+    assert completed_receipts[0]["error_code"] == "transaction_failed"

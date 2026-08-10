@@ -38,11 +38,18 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
-| [coding_agent_assessment_gap_phase_b_plan.md](archive/completed/short_term/coding_agent_assessment_gap_phase_b_plan.md) | Large coding-agent assessment gap plan for preflight execution and structured repair feedback | completed |
-| [coding_agent_assessment_gap_phase_c_plan.md](archive/completed/short_term/coding_agent_assessment_gap_phase_c_plan.md) | High-risk coding-agent assessment gap plan for typed blockers, affordances, approval evidence, locks, and benchmark seam | completed |
 | [coding_agent_assessment_gap_phase_d_plan.md](active/short_term/coding_agent_assessment_gap_phase_d_plan.md) | High-risk coding-agent migration plan for a generic JSON action loop, persistent repository index, exploration-cap removal, and delete/rename | in progress |
-| [coding_agent_full_workflow_hardening_plan_2.md](active/short_term/coding_agent_full_workflow_hardening_plan_2.md) | Large coding-agent full workflow hardening plan | completed |
-| [cognition_graph_semantic_observability_plan.md](active/short_term/cognition_graph_semantic_observability_plan.md) | Large cognition graph semantic observability and shared inspector contract change | completed |
+
+## Completed Short-Term Plans
+
+| Document | Type | Status |
+|---|---|---|
+| [development_plan_test_impact_traceability_and_cognition_unit_structure_bigbang_plan.md](archive/completed/short_term/development_plan_test_impact_traceability_and_cognition_unit_structure_bigbang_plan.md) | Big-bang development-plan test-impact contract, cognition source ownership manifest, and mirrored deterministic unit-test structure | completed |
+| [character_owned_content_judgment_cutover_plan.md](archive/completed/short_term/character_owned_content_judgment_cutover_plan.md) | Cutover removing application-owned semantic safety/refusal policy and relationship gating while preserving character-owned judgment, expression continuity, and operational guards | completed |
+| [cognition_parallel_neutral_weak_tilt_plan.md](archive/completed/short_term/cognition_parallel_neutral_weak_tilt_plan.md) | Branch-owned semantic intent guidance for generic Cognition V2 bid generation; real-model quality explicitly deferred | completed |
+| [august_change_alignment_audit_and_remediation_plan.md](archive/completed/short_term/august_change_alignment_audit_and_remediation_plan.md) | Repository-wide Aug 1+ change alignment audit, bounded remediation, and baseline feature regression map | completed |
+| [legacy_llm_configuration_cleanup_plan.md](archive/completed/short_term/legacy_llm_configuration_cleanup_plan.md) | Removal of ten legacy local environment keys and three stale verifier Compose bindings | completed |
+| [task_resolution_character_background_handoff_plan.md](archive/completed/short_term/task_resolution_character_background_handoff_plan.md) | Character-selected task-resolution background handoff and partial-result continuation | completed |
 | [cognition_graph_multi_source_latest_run_plan.md](archive/completed/short_term/cognition_graph_multi_source_latest_run_plan.md) | Medium source-neutral latest cognition publication and transport contract change | completed |
 
 ## Supporting Experiment Records
@@ -55,11 +62,30 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
-| [action_selection_context_contract_bugfix_plan.md](active/bugfix/action_selection_context_contract_bugfix_plan.md) | Large cognition-chain action-selection context contract bugfix plan | completed |
-| [relevance_native_reply_anchor_guard_bugfix_plan.md](archive/completed/bugfix/relevance_native_reply_anchor_guard_bugfix_plan.md) | Medium settled-relevance native reply semantics and delivery-target guard bugfix plan | completed |
-| [relevance_input_scope_robustness_bugfix_plan.md](archive/completed/bugfix/relevance_input_scope_robustness_bugfix_plan.md) | Medium relevance input-scope and production-projection robustness bugfix plan | completed |
+| [cognition_core_v2_goal_bid_live_llm_regression_remediation_20260810.md](archive/completed/bugfix/cognition_core_v2_goal_bid_live_llm_regression_remediation_20260810.md) | Goal-bid live-LLM failure classification, frozen-fixture recovery, prompt remediation, and 95% regression gate | completed |
+| [cognition_core_v2_quoted_message_evidence_and_recurrence_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_quoted_message_evidence_and_recurrence_bugfix_plan.md) | Quoted-message resolver evidence continuity, answerability gating, and ordinary-branch recurrence stability | completed |
+| [llm_trace_console_full_web_correlation_surface_bugfix_plan.md](archive/completed/bugfix/llm_trace_console_full_web_correlation_surface_bugfix_plan.md) | Full web-console correlation ID visibility across the existing mapped views | completed |
+| [background_work_jobs_console_job_id_visibility_bugfix_plan.md](archive/completed/bugfix/background_work_jobs_console_job_id_visibility_bugfix_plan.md) | Existing Background Work Jobs card job-ID visibility in the web console | completed |
+| [llm_trace_console_correlation_gap_bugfix_plan.md](archive/completed/bugfix/llm_trace_console_correlation_gap_bugfix_plan.md) | Protected trace correlation retrieval, web availability mapping, and forward action/background/future-cognition id propagation | completed |
+| [cognition_core_v2_goal_schema_and_semantic_repair_compaction_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_goal_schema_and_semantic_repair_compaction_bugfix_plan.md) | Non-ordinary goal-schema isolation and semantic repair-envelope compaction | completed |
+| [dialog_third_party_target_binding_and_addressee_fidelity_bugfix_plan.md](archive/completed/bugfix/dialog_third_party_target_binding_and_addressee_fidelity_bugfix_plan.md) | Ephemeral third-party target binding and final-dialog addressee fidelity | completed |
+| [cognition_core_v2_action_planning_request_fidelity_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_action_planning_request_fidelity_bugfix_plan.md) | Action-planning request fidelity and retrieval-goal preservation | completed |
+| [background_task_result_blocker_detail_delivery_bugfix_plan.md](archive/completed/bugfix/background_task_result_blocker_detail_delivery_bugfix_plan.md) | Explicit task-result blocker detail in background delivery | completed |
+| [cognition_size_limit_truncation_and_fallback_scan_plan.md](archive/completed/bugfix/cognition_size_limit_truncation_and_fallback_scan_plan.md) | Project-wide context-size scan and deterministic truncation fallback | completed |
+| [durable_ingress_native_reply_intervening_message_bugfix_plan.md](archive/completed/bugfix/durable_ingress_native_reply_intervening_message_bugfix_plan.md) | Durable inbound ordering for /chat and original-message background replies | completed |
+| [background_tool_result_delivery_current_episode_evidence_bugfix_plan.md](archive/completed/bugfix/background_tool_result_delivery_current_episode_evidence_bugfix_plan.md) | Background tool-result evidence authority and visible result-delivery regression | completed |
+| [background_coding_event_loop_starvation_bugfix_plan.md](archive/completed/bugfix/background_coding_event_loop_starvation_bugfix_plan.md) | Background coding async-boundary responsiveness and deterministic regression coverage | completed |
+| [relevance_native_reply_review_remediation_plan.md](archive/completed/bugfix/relevance_native_reply_review_remediation_plan.md) | Post-review deterministic native-reply coverage, ID validation, and ICD wording remediation | completed |
+| [relevance_native_reply_monotonic_delivery_plan.md](archive/completed/bugfix/relevance_native_reply_monotonic_delivery_plan.md) | Deterministic `/chat` native-reply monotonic delivery and delay promotion | completed |
+| [cognition_core_v2_generation_contract_prompt_projection_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_generation_contract_prompt_projection_bugfix_plan.md) | High-risk Core V2 prompt, model-facing contract, and diagnostic replay bugfix | completed |
+| [control_console_web_availability_followup_plan.md](archive/completed/bugfix/control_console_web_availability_followup_plan.md) | Follow-up bugfix for Control Console operational projections and static asset availability | completed |
+| [cognition_core_v2_relational_willingness_gradient_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_relational_willingness_gradient_bugfix_plan.md) | Core V2 post-prewarm relational-willingness contract for stranger rejection, lover acceptance, scoped-memory authority, and an explicit intermediate gradient | completed |
+| [cognition_core_v2_short_horizon_global_state_composition_bigbang_plan.md](archive/completed/bugfix/cognition_core_v2_short_horizon_global_state_composition_bigbang_plan.md) | Post-identity V2 plan for transient global posture, causal relationship context, scoped style composition, and runtime/UI proof | completed |
+| [character_identity_growth_contract_recovery_bugfix_plan.md](archive/completed/bugfix/character_identity_growth_contract_recovery_bugfix_plan.md) | Follow-up bugfix for identity-growth model contracts, provenance indices, review copying, and bounded retry recovery | completed |
+| [qq_group_public_scene_response_ordering_bugfix_plan.md](archive/completed/bugfix/qq_group_public_scene_response_ordering_bugfix_plan.md) | QQ multi-user public-scene composition and same-group response-ordering bugfix | completed |
+| [cognition_core_v2_first_pass_robustness_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_first_pass_robustness_bugfix_plan.md) | Core V2 first-pass generation grounding, evaluator feedback, per-stage token/character budget rebalance, and deterministic failure-path recovery bugfix plan | completed |
+| [cognition_core_v2_context_fade_and_sleep_phase_plan.md](archive/completed/bugfix/cognition_core_v2_context_fade_and_sleep_phase_plan.md) | Deterministic age-based discard of group-scene turns and conversation-progress topics before projection, plus cognition V2 ownership of the character sleep phase and morning refresh | completed |
 | [relevance_pre_active_answer_attribution_bugfix_plan.md](active/bugfix/relevance_pre_active_answer_attribution_bugfix_plan.md) | Large settled-relevance pre-active answer attribution bugfix plan | completed |
-| [rag2_public_output_contract_leak_bugfix_plan.md](active/bugfix/rag2_public_output_contract_leak_bugfix_plan.md) | Large RAG2 prompt/evidence contract bugfix plan | draft |
 
 ## Reference Documents
 
@@ -284,6 +310,265 @@ and whole-group behavior, and verified the control-console observation surface.
 |---|---|
 | Moved from active bugfix to completed archive | `relevance_native_reply_anchor_guard_bugfix_plan.md` |
 
+### 2026-08-05 relevance native-reply monotonic delivery completion
+
+The follow-up delivery bugfix completed after the bounded DeepSeek
+implementation handoff, deterministic service and adapter regressions, parent
+diff review, and lifecycle closeout. The final `/chat` flag now preserves the
+existing graph latch and may be promoted deterministically for qualifying group
+owner-mismatch or delayed responses without changing the public response schema
+or proactive delivery paths.
+
+| Outcome | Plans |
+|---|---|
+| Moved from active bugfix to completed archive | `relevance_native_reply_monotonic_delivery_plan.md` |
+
+### 2026-08-05 native-reply review remediation completion
+
+The post-review remediation completed after deterministic edge-case coverage,
+whitespace-only message-ID validation, HOWTO clarification, focused and
+affected regressions, and parent closeout review. The archived implementation
+plan remains unchanged.
+
+| Outcome | Plans |
+|---|---|
+| Moved from active bugfix to completed archive | `relevance_native_reply_review_remediation_plan.md` |
+
+### 2026-07-18 Cognition Core V2 Stage 2 closure
+
+The user accepted the Stage 2 release candidate after the sequential fresh
+group/private 20+20 review and the targeted Private-turn-5/Group-turn-15
+technical remediation review. The parent plan, frozen companions, and
+completed bugfix satellites moved to completed history. The earlier strict
+zero-action-narration dialog plan moved to superseded history because the later
+accepted policy uses organic discouragement and pass-through model variation.
+
+| Outcome | Plans |
+|---|---|
+| Moved from active short-term to completed archive | `cognition_core_v2_stage_2_integration_plan.md`, `cognition_core_v2_stage_2_contract_spec.md`, `cognition_core_v2_stage_2_execution_manifest.md` |
+| Moved from active bugfix to completed archive | `action_selection_context_contract_bugfix_plan.md`, `cognition_chain_responsibility_allocation_bugfix_plan.md`, `cognition_core_v2_compositional_action_planning_bugfix_plan.md`, `cognition_core_v2_live_character_judgment_rebalance_plan.md`, `runtime_prompt_chinese_and_dialog_surface_guidance_plan.md` |
+| Moved from active bugfix to superseded archive | `dialog_visible_speech_and_semantic_fidelity_bugfix_plan.md` |
+| Activated planning boundary | `cognition_core_v2_stage_3_system_adoption_plan.md`, its mandatory execution and change-radius companions, and the Stage 4 production-database placeholder |
+
+### 2026-07-23 Cognition Core V2 Stage 3 closure
+
+Stage 3 completed after the repository-wide non-live collection, affected
+console/API/browser gates, static/document checks, fresh-database and real-LLM
+evidence review, failure-mode screenshot acceptance, independent review
+remediation, and explicit user closure. The in-app Browser had no session; the
+user accepted the system-Chrome Playwright screenshots as the visual artifact,
+and that environment disposition remains recorded in the archived plans.
+
+| Outcome | Plans |
+|---|---|
+| Moved from active short-term to completed archive | `cognition_core_v2_stage_3_system_adoption_plan.md`, `cognition_core_v2_stage_3_execution_manifest.md`, `cognition_core_v2_stage_3_change_radius.md` |
+| Stage 4 handoff input | `cognition_core_v2_stage_4_production_database_migration_plan.md` is approved as a one-off database migration; `kazusa_bot_core` stays read-only and later application activation remains user-owned |
+
+### 2026-07-26 Cognition Core V2 transition-coherence completion
+
+The V2-only transition-coherence bugfix completed after unified content and
+delivery ownership, contextual semantic-fidelity verification, full surface
+repair, accepted-surface propagation, deterministic and live quality gates,
+parent review remediation, and explicit user quality sign-off.
+
+| Outcome | Plans |
+|---|---|
+| Moved from active bugfix to completed archive | `cognition_core_v2_intra_turn_transition_coherence_bugfix_plan.md` |
+
+### 2026-07-26 active plan status cleanup
+
+The active directories were reconciled against each plan's declared status,
+completion checklist, execution evidence, and independent review record.
+Stale active-table rows pointing to archived records were removed.
+Completed plan records and their coding-agent gate-review evidence moved to
+completed history. Draft and in-progress plans remain active.
+
+| Outcome | Plans |
+|---|---|
+| Moved from active short-term to completed archive | `coding_agent_full_workflow_hardening_plan_2.md`, `cognition_graph_semantic_observability_plan.md` |
+| Moved from active bugfix to completed archive | `asuna_private_r18_affinity_harness_plan.md`, `real_history_personality_comparison_fixture_bugfix_plan.md` |
+| Moved supporting completion records to completed archive | `coding_agent_full_workflow_hardening_plan_2_llm_gate_reviews.md`, `coding_agent_final_integration_gate_reviews.md` |
+
+### 2026-07-26 Cognition Core V2 baseline hardening accepted closure
+
+The user explicitly accepted the plan's remaining functional and local-LLM
+quality residuals and directed closure. The archived record preserves its
+unchecked historical gates rather than representing them as completed.
+Clean-state deployability passed against the configured `.env`: native database
+bootstrap, caller-supplied local profile seeding, package-only neutral example
+content, ready vector indexes, standalone health and worker checks, one live
+HTTP turn, and a final clean reset and reseed all completed successfully. The
+unavailable local container engine remains an accepted external verification
+item.
+
+| Outcome | Plans |
+|---|---|
+| Moved from active bugfix to completed archive by explicit user acceptance with recorded residuals | `cognition_core_v2_baseline_regression_hardening_plan.md` |
+
+### 2026-07-27 Cognition Core V2 retry continuity completion
+
+The V2-only retry-exhaustion bugfix completed after a 17-owner policy cutover,
+bounded retries, stage-owned degraded delivery, normal-path service
+verification, four one-at-a-time real-model gates, independent review
+remediation, and final scope/static regression gates. Service and adapter
+production code remained at baseline.
+
+| Outcome | Plans |
+|---|---|
+| Moved from active bugfix to completed archive | `cognition_core_v2_retry_exhaustion_continuity_bugfix_plan.md` |
+
+### 2026-07-27 Cognition Core V2 model-assignment evaluation closure
+
+The user explicitly closed the completed 384-sample model-assignment
+experiment despite its procedural and input-shaping flaws. The archived record
+retains its rejected independent-review gate, the rejected aggregate
+recommendation, the valid technical call evidence, the `0/192` wrong-target
+robustness result, and the user-defined goal criterion results. Production
+assignment moved to a separate approved stage-routing plan with exact
+environment and Control Console contracts.
+
+| Outcome | Plans |
+|---|---|
+| Moved from active short-term to completed archive with accepted limitations | `cognition_core_v2_model_assignment_quality_evaluation_plan.md` |
+| Added to active short-term | `cognition_core_v2_stage_llm_endpoint_routing_plan.md` |
+
+### 2026-07-27 Cognition Core V2 stage endpoint routing completion
+
+The stage-owned Core V2 route cutover completed after deterministic routing,
+configuration, diagnostics, Control Console, browser, and full non-live
+verification. The final regression also restored baseline owner-matrix coverage
+for the concurrent character-name cutover's dispatcher and message-envelope
+documentation paths; this was test-only and left routing behavior unchanged.
+
+| Outcome | Plans |
+|---|---|
+| Moved from active short-term to completed archive | `cognition_core_v2_stage_llm_endpoint_routing_plan.md` |
+
+### 2026-07-27 brain-owned adapter character-name completion
+
+The big-bang runtime-adapter cutover made the active process-local brain
+profile the only character display-name authority. Discord and NapCat now
+receive the required name through registration and heartbeat, enforce it for
+platform-bot mention and reply labels, and preserve platform display names
+only for human identities. Dispatcher and background output use current brain
+identity without rewriting historical conversation rows.
+
+| Outcome | Plans |
+|---|---|
+| Moved from active short-term to completed archive | `brain_owned_adapter_character_name_bigbang_plan.md` |
+
+### 2026-07-28 Cognition Core V2 Stage 4 invalidation
+
+| Outcome | Plan |
+|---|---|
+| Moved from active short-term to superseded archive | `cognition_core_v2_stage_4_production_database_migration_plan.md`; invalidated by user before execution |
+
+### 2026-07-30 Conversation Progress V2 closeout replacement
+
+The user replaced the long in-progress implementation plan with a focused
+final-signoff contract. Historical implementation detail remains preserved in
+the superseded record. The active successor requires a human-readable semantic
+proof of the original failure and an explicitly qualified maximum-turn
+projection without requiring raw-data review.
+
+| Outcome | Plans |
+|---|---|
+| Moved from active bugfix to superseded archive | `conversation_progress_v2_long_thread_continuation_bigbang_plan.md` |
+| Added to active bugfix | `conversation_progress_v2_final_signoff_plan.md` |
+
+### 2026-07-31 Cognition Core V2 P0 context reconnection completion
+
+The native V2 conversation graph again consumes cycle-zero globally shared
+memory evidence, private past-dialog residual at goal cognition only, and
+bounded group-engagement guidance for eligible self-cognition goal/action
+judgment. Focused and broader regressions, one-at-a-time live traces, and
+independent review remediation completed before user sign-off.
+
+| Outcome | Plans |
+|---|---|
+| Moved from active bugfix to completed archive | `cognition_core_v2_p0_context_reconnection_bugfix_plan.md` |
+
+### 2026-07-31 Cognition Core V2 prewarm mention-content completion
+
+Cycle-zero shared-memory prewarm now removes only exact typed active-character
+mention tokens from its retrieval task, searches the remaining authored
+content, and skips retrieval for mention-only turns. Focused and connector
+regressions plus independent review completed before archival.
+
+| Outcome | Plans |
+|---|---|
+| Moved from active bugfix to completed archive | `cognition_core_v2_prewarm_mention_content_query_bugfix_plan.md` |
+
+### 2026-08-01 relevance evidence-grounded admission completion
+
+The relevance admission bugfix completed after evidence-grounded recipient and
+character-state validation, focused deterministic and one-at-a-time real-LLM
+verification, full non-live regression, independent review remediation, and
+explicit user sign-off.
+
+| Outcome | Plans |
+|---|---|
+| Moved from active bugfix to completed archive | `relevance_evidence_grounded_admission_over_sensitivity_bugfix_plan.md` |
+
+### 2026-08-01 Conversation Progress V2 final sign-off closure
+
+The Conversation Progress V2 final sign-off work completed with its recorded
+semantic handoff, maximum-turn projection, regression evidence, and explicit
+user approval to archive the plan.
+
+| Outcome | Plans |
+|---|---|
+| Moved from active bugfix to completed archive | `conversation_progress_v2_final_signoff_plan.md` |
+
+### 2026-08-01 RAG2 public-output contract plan closure
+
+The RAG2 public-output contract plan was closed as no longer relevant before
+execution, with no implementation, review, or verification action taken.
+
+| Outcome | Plans |
+|---|---|
+| Moved from active bugfix to superseded archive | `rag2_public_output_contract_leak_bugfix_plan.md` |
+
+### 2026-08-01 unified task-resolution orchestrator completion
+
+The approved big-bang migration completed with one model-facing
+`task_resolution_request`, one bounded resumable orchestrator over four
+specialists, v2 accepted-task/background-job persistence, deterministic
+future-speak retention, normal result-ready delivery, and exact offline
+task-history cutover. Focused, live-LLM, persona, guarded live-DB, production
+smoke, and independent-review remediation gates passed. The coding execution
+branch remained closed throughout verification.
+
+| Outcome | Plans |
+|---|---|
+| Moved from active short-term to completed archive | `unified_task_resolution_orchestrator_bigbang_plan.md` |
+
+### 2026-08-03 Cognition Core V2 short-horizon state composition completion
+
+The post-identity V2 global-state composition plan completed after the final
+DeepSeek remediation, authoritative deterministic regression, independent
+review approval, explicit user acceptance of the documented local-model,
+behavioral, and guarded-database exceptions, and final Stage 11 closeout.
+
+| Outcome | Plan |
+|---|---|
+| Moved from active bugfix to completed archive | `cognition_core_v2_short_horizon_global_state_composition_bigbang_plan.md` |
+
+### 2026-08-04 Cognition Core V2 first-pass robustness accepted closure
+
+The first-pass robustness bugfix completed its production implementation,
+deterministic verification, baseline fixture correction, one-at-a-time live
+LLM evidence collection, human-readable monologue/dialog review, and
+independent code review. The user explicitly approved lifecycle closure while
+accepting the recorded Stage 18 live harness, database-precondition,
+brief-reply-boundary, and baseline-latency residuals. The archived plan keeps
+Stage 18 unchecked as historical evidence rather than representing those
+residuals as passing.
+
+| Outcome | Plan |
+|---|---|
+| Moved from active bugfix to completed archive by explicit user acceptance with recorded residuals | `cognition_core_v2_first_pass_robustness_bugfix_plan.md` |
+
 ## Archive
 
 Completed and superseded records live under `archive/`. Use them for historical
@@ -295,12 +580,32 @@ plans.
 | Plan |
 |---|
 | [adapter_semantic_identity_boundary_and_memory_pollution_plan.md](archive/completed/bugfix/adapter_semantic_identity_boundary_and_memory_pollution_plan.md) |
+| [action_selection_context_contract_bugfix_plan.md](archive/completed/bugfix/action_selection_context_contract_bugfix_plan.md) |
 | [character_state_lane_integrity_plan.md](archive/completed/bugfix/character_state_lane_integrity_plan.md) |
 | [character_self_image_rolling_state_bugfix_plan.md](archive/completed/bugfix/character_self_image_rolling_state_bugfix_plan.md) |
 | [conversation_episode_state_lane_lifecycle_plan.md](archive/completed/bugfix/conversation_episode_state_lane_lifecycle_plan.md) |
+| [conversation_progress_v2_final_signoff_plan.md](archive/completed/bugfix/conversation_progress_v2_final_signoff_plan.md) |
 | [control_console_functional_remediation_plan.md](archive/completed/bugfix/control_console_functional_remediation_plan.md) |
 | [control_console_information_architecture_remediation_plan.md](archive/completed/bugfix/control_console_information_architecture_remediation_plan.md) |
 | [control_console_ui_e2e_acceptance_test_plan.md](archive/completed/bugfix/control_console_ui_e2e_acceptance_test_plan.md) |
+| [cognition_chain_responsibility_allocation_bugfix_plan.md](archive/completed/bugfix/cognition_chain_responsibility_allocation_bugfix_plan.md) |
+| [cognition_core_v2_baseline_regression_hardening_plan.md](archive/completed/bugfix/cognition_core_v2_baseline_regression_hardening_plan.md) |
+| [cognition_core_v2_first_pass_robustness_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_first_pass_robustness_bugfix_plan.md) |
+| [cognition_core_v2_character_identity_growth_bigbang_plan.md](archive/completed/bugfix/cognition_core_v2_character_identity_growth_bigbang_plan.md) |
+| [cognition_core_v2_compositional_action_planning_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_compositional_action_planning_bugfix_plan.md) |
+| [cognition_goal_capability_and_workspace_relevance_bugfix_plan.md](archive/completed/bugfix/cognition_goal_capability_and_workspace_relevance_bugfix_plan.md) |
+| [cognition_core_v2_failure_capsule_plan.md](archive/completed/bugfix/cognition_core_v2_failure_capsule_plan.md) |
+| [cognition_core_v2_live_character_judgment_rebalance_plan.md](archive/completed/bugfix/cognition_core_v2_live_character_judgment_rebalance_plan.md) |
+| [cognition_core_v2_p0_context_reconnection_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_p0_context_reconnection_bugfix_plan.md) |
+| [cognition_core_v2_prewarm_mention_content_query_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_prewarm_mention_content_query_bugfix_plan.md) |
+| [cognition_core_v2_intra_turn_transition_coherence_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_intra_turn_transition_coherence_bugfix_plan.md) |
+| [cognition_core_v2_prompt_budget_and_failure_containment_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_prompt_budget_and_failure_containment_bugfix_plan.md) |
+| [cognition_core_v2_relational_authority_transfer_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_relational_authority_transfer_bugfix_plan.md) |
+| [cognition_core_v2_short_horizon_global_state_composition_bigbang_plan.md](archive/completed/bugfix/cognition_core_v2_short_horizon_global_state_composition_bigbang_plan.md) |
+| [cognition_core_v2_retry_exhaustion_continuity_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_retry_exhaustion_continuity_bugfix_plan.md) |
+| [cognition_core_v2_semantic_appraisal_partial_failure_mitigation_plan.md](archive/completed/bugfix/cognition_core_v2_semantic_appraisal_partial_failure_mitigation_plan.md) |
+| [asuna_private_r18_affinity_harness_plan.md](archive/completed/bugfix/asuna_private_r18_affinity_harness_plan.md) |
+| [real_history_personality_comparison_fixture_bugfix_plan.md](archive/completed/bugfix/real_history_personality_comparison_fixture_bugfix_plan.md) |
 | [cognition_silence_short_circuit_and_dialog_evaluator_quality_plan.md](archive/completed/bugfix/cognition_silence_short_circuit_and_dialog_evaluator_quality_plan.md) |
 | [coding_agent_source_intake_resolution_plan.md](archive/completed/bugfix/coding_agent_source_intake_resolution_plan.md) |
 | [coding_agent_inline_source_bundle_bugfix_plan.md](archive/completed/bugfix/coding_agent_inline_source_bundle_bugfix_plan.md) |
@@ -336,10 +641,15 @@ plans.
 | [rag_conversation_evidence_current_episode_boundary_bugfix_plan.md](archive/completed/bugfix/rag_conversation_evidence_current_episode_boundary_bugfix_plan.md) |
 | [rag_retrieval_top_k_embedding_tuning_plan.md](archive/completed/bugfix/rag_retrieval_top_k_embedding_tuning_plan.md) |
 | [relevance_input_scope_robustness_bugfix_plan.md](archive/completed/bugfix/relevance_input_scope_robustness_bugfix_plan.md) |
+| [relevance_evidence_grounded_admission_over_sensitivity_bugfix_plan.md](archive/completed/bugfix/relevance_evidence_grounded_admission_over_sensitivity_bugfix_plan.md) |
+| [required_selection_partial_recovery_bugfix_plan.md](archive/completed/bugfix/required_selection_partial_recovery_bugfix_plan.md) |
 | [reflection_group_scene_digest_self_cognition_bugfix_plan.md](archive/completed/bugfix/reflection_group_scene_digest_self_cognition_bugfix_plan.md) |
 | [reflection_global_promotion_replay_bugfix_plan.md](archive/completed/bugfix/reflection_global_promotion_replay_bugfix_plan.md) |
 | [relevance_native_reply_anchor_guard_bugfix_plan.md](archive/completed/bugfix/relevance_native_reply_anchor_guard_bugfix_plan.md) |
 | [resolver_image_only_empty_input_bugfix_plan.md](archive/completed/bugfix/resolver_image_only_empty_input_bugfix_plan.md) |
+| [runtime_prompt_chinese_and_dialog_surface_guidance_plan.md](archive/completed/bugfix/runtime_prompt_chinese_and_dialog_surface_guidance_plan.md) |
+| [semantic_appraisal_terminal_transition_reliability_plan.md](archive/completed/bugfix/semantic_appraisal_terminal_transition_reliability_plan.md) |
+| [settled_relevance_logical_history_projection_bugfix_plan.md](archive/completed/bugfix/settled_relevance_logical_history_projection_bugfix_plan.md) |
 | [self_cognition_background_context_budget_bugfix_plan.md](archive/completed/bugfix/self_cognition_background_context_budget_bugfix_plan.md) |
 | [self_cognition_group_digest_context_evidence_bugfix_plan.md](archive/completed/bugfix/self_cognition_group_digest_context_evidence_bugfix_plan.md) |
 | [self_cognition_character_global_id_config_bugfix_plan.md](archive/completed/bugfix/self_cognition_character_global_id_config_bugfix_plan.md) |
@@ -361,15 +671,20 @@ plans.
 
 | Plan |
 |---|
+| [august_change_alignment_audit_and_remediation_plan.md](archive/completed/short_term/august_change_alignment_audit_and_remediation_plan.md) |
 | [backend_control_console_development_plan.md](archive/completed/short_term/backend_control_console_development_plan.md) |
 | [backend_control_console_web_test_plan.md](archive/completed/short_term/backend_control_console_web_test_plan.md) |
 | [background_artifact_handoff_poc_plan.md](archive/completed/short_term/background_artifact_handoff_poc_plan.md) |
 | [background_work_semantic_lifecycle_plan.md](archive/completed/short_term/background_work_semantic_lifecycle_plan.md) |
+| [brain_owned_adapter_character_name_bigbang_plan.md](archive/completed/short_term/brain_owned_adapter_character_name_bigbang_plan.md) |
 | [cache2_agent_stats_health_plan.md](archive/completed/short_term/cache2_agent_stats_health_plan.md) |
 | [channel_name_semantic_projection_plan.md](archive/completed/short_term/channel_name_semantic_projection_plan.md) |
 | [character_local_time_context_plan.md](archive/completed/short_term/character_local_time_context_plan.md) |
 | [character_profile_runtime_state_split_plan.md](archive/completed/short_term/character_profile_runtime_state_split_plan.md) |
 | [coding_agent_assessment_gap_phase_a_plan.md](archive/completed/short_term/coding_agent_assessment_gap_phase_a_plan.md) |
+| [coding_agent_final_integration_gate_reviews.md](archive/completed/short_term/coding_agent_final_integration_gate_reviews.md) |
+| [coding_agent_full_workflow_hardening_plan_2.md](archive/completed/short_term/coding_agent_full_workflow_hardening_plan_2.md) |
+| [coding_agent_full_workflow_hardening_plan_2_llm_gate_reviews.md](archive/completed/short_term/coding_agent_full_workflow_hardening_plan_2_llm_gate_reviews.md) |
 | [coding_agent_phase0_fetching_plan.md](archive/completed/short_term/coding_agent_phase0_fetching_plan.md) |
 | [coding_agent_phase1_code_reading_final_plan.md](archive/completed/short_term/coding_agent_phase1_code_reading_final_plan.md) |
 | [coding_agent_phase1_real_repo_retrieval_remediation_plan.md](archive/completed/short_term/coding_agent_phase1_real_repo_retrieval_remediation_plan.md) |
@@ -385,6 +700,16 @@ plans.
 | [character_reflection_cycle_stage1a_plan.md](archive/completed/short_term/character_reflection_cycle_stage1a_plan.md) |
 | [character_self_words_retrieval_delivery_receipt_plan.md](archive/completed/short_term/character_self_words_retrieval_delivery_receipt_plan.md) |
 | [cognition_chain_module_separation_plan.md](archive/completed/short_term/cognition_chain_module_separation_plan.md) |
+| [cognition_graph_semantic_observability_plan.md](archive/completed/short_term/cognition_graph_semantic_observability_plan.md) |
+| [cognition_core_v2_stage_1_validation_plan.md](archive/completed/short_term/cognition_core_v2_stage_1_validation_plan.md) |
+| [cognition_core_v2_stage_2_contract_spec.md](archive/completed/short_term/cognition_core_v2_stage_2_contract_spec.md) |
+| [cognition_core_v2_stage_2_execution_manifest.md](archive/completed/short_term/cognition_core_v2_stage_2_execution_manifest.md) |
+| [cognition_core_v2_stage_2_integration_plan.md](archive/completed/short_term/cognition_core_v2_stage_2_integration_plan.md) |
+| [cognition_core_v2_stage_3_change_radius.md](archive/completed/short_term/cognition_core_v2_stage_3_change_radius.md) |
+| [cognition_core_v2_stage_3_execution_manifest.md](archive/completed/short_term/cognition_core_v2_stage_3_execution_manifest.md) |
+| [cognition_core_v2_stage_3_system_adoption_plan.md](archive/completed/short_term/cognition_core_v2_stage_3_system_adoption_plan.md) |
+| [cognition_core_v2_model_assignment_quality_evaluation_plan.md](archive/completed/short_term/cognition_core_v2_model_assignment_quality_evaluation_plan.md) |
+| [cognition_core_v2_stage_llm_endpoint_routing_plan.md](archive/completed/short_term/cognition_core_v2_stage_llm_endpoint_routing_plan.md) |
 | [cognition_llm_stage_reconnection_plan.md](archive/completed/short_term/cognition_llm_stage_reconnection_plan.md) |
 | [cognition_visual_directives_control_plan.md](archive/completed/short_term/cognition_visual_directives_control_plan.md) |
 | [cognition_state_integrity_plan.md](archive/completed/short_term/cognition_state_integrity_plan.md) |
@@ -394,6 +719,7 @@ plans.
 | [control_console_brain_model_route_config_plan.md](archive/completed/short_term/control_console_brain_model_route_config_plan.md) |
 | [control_console_cognition_debug_visibility_plan.md](archive/completed/short_term/control_console_cognition_debug_visibility_plan.md) |
 | [control_console_entity_information_architecture_plan.md](archive/completed/short_term/control_console_entity_information_architecture_plan.md) |
+| [control_console_information_contract_v2_remediation_plan.md](archive/completed/short_term/control_console_information_contract_v2_remediation_plan.md) |
 | [control_console_live_logs_plan.md](archive/completed/short_term/control_console_live_logs_plan.md) |
 | [control_console_runtime_service_config_plan.md](archive/completed/short_term/control_console_runtime_service_config_plan.md) |
 | [consolidator_text_dispatch_decommission_plan.md](archive/completed/short_term/consolidator_text_dispatch_decommission_plan.md) |
@@ -478,6 +804,7 @@ plans.
 | [service_module_separation_stage1_plan.md](archive/completed/short_term/service_module_separation_stage1_plan.md) |
 | [typed_message_envelope_stage2_plan.md](archive/completed/short_term/typed_message_envelope_stage2_plan.md) |
 | [unconditional_shared_memory_prewarm_plan.md](archive/completed/short_term/unconditional_shared_memory_prewarm_plan.md) |
+| [unified_task_resolution_orchestrator_bigbang_plan.md](archive/completed/short_term/unified_task_resolution_orchestrator_bigbang_plan.md) |
 | [universal_calendar_scheduler_plan.md](archive/completed/short_term/universal_calendar_scheduler_plan.md) |
 | [universal_chat_history_llm_projection_plan.md](archive/completed/short_term/universal_chat_history_llm_projection_plan.md) |
 | [user_style_engagement_consumer_plan.md](archive/completed/short_term/user_style_engagement_consumer_plan.md) |
@@ -493,14 +820,17 @@ plans.
 |---|
 | [character_reflection_cycle_stage1_plan.md](archive/superseded/character_reflection_cycle_stage1_plan.md) |
 | [conversation_graph_recent_context_plan.md](archive/superseded/conversation_graph_recent_context_plan.md) |
+| [conversation_progress_v2_long_thread_continuation_bigbang_plan.md](archive/superseded/conversation_progress_v2_long_thread_continuation_bigbang_plan.md) |
 | [cognition_preserving_goal_resolver_production_plan.md](archive/superseded/cognition_preserving_goal_resolver_production_plan.md) |
+| [cognition_core_v2_stage_4_production_database_migration_plan.md](archive/superseded/cognition_core_v2_stage_4_production_database_migration_plan.md) |
+| [dialog_visible_speech_and_semantic_fidelity_bugfix_plan.md](archive/superseded/dialog_visible_speech_and_semantic_fidelity_bugfix_plan.md) |
 | [graph_rag_recall_experiment_plan.md](archive/superseded/graph_rag_recall_experiment_plan.md) |
 | [goal_resolver_poc_plan.md](archive/superseded/goal_resolver_poc_plan.md) |
 | [self_cognition_loop_architecture.md](archive/superseded/self_cognition_loop_architecture.md) |
 | [self_cognition_reasoning_basis.md](archive/superseded/self_cognition_reasoning_basis.md) |
 | [self_cognition_tracking_icd.md](archive/superseded/self_cognition_tracking_icd.md) |
 | [rag_supervisor2_inner_loop_agents_plan.md](archive/superseded/rag_supervisor2_inner_loop_agents_plan.md) |
+| [rag2_public_output_contract_leak_bugfix_plan.md](archive/superseded/rag2_public_output_contract_leak_bugfix_plan.md) |
 | [short_circuit_early_stop_plan.md](archive/superseded/short_circuit_early_stop_plan.md) |
 | [coding_agent_phase2_code_writing_plan_superseded_20260623.md](archive/superseded/coding_agent_phase2_code_writing_plan_superseded_20260623.md) |
 | [visual_descriptor_seeded_reference_images_plan.md](archive/superseded/visual_descriptor_seeded_reference_images_plan.md) |
-

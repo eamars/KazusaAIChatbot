@@ -17,22 +17,7 @@ from kazusa_ai_chatbot.accepted_task.models import (
     AcceptedTaskStatusCheckRequest,
     AcceptedTaskStatusResult,
 )
-from kazusa_ai_chatbot.coding_agent.coding_run.models import CodingRunContextV1
-from kazusa_ai_chatbot.db.accepted_tasks import (
-    find_active_accepted_task_for_scope,
-    insert_or_get_active_accepted_task,
-    load_open_coding_run_contexts_for_scope as repository_load_open_contexts,
-    mark_accepted_task_delivered as repository_mark_delivered,
-    mark_accepted_task_delivery_failed as repository_mark_delivery_failed,
-    mark_accepted_task_delivery_in_progress as repository_mark_delivery_in_progress,
-    mark_accepted_task_enqueue_failed as repository_mark_enqueue_failed,
-    mark_accepted_task_failure_ready as repository_mark_failure_ready,
-    mark_accepted_task_pending as repository_mark_pending,
-    mark_accepted_task_result_ready as repository_mark_result_ready,
-    mark_accepted_task_running as repository_mark_running,
-    recover_stale_delivery_in_progress_tasks as repository_recover_delivery,
-    recover_stale_enqueueing_tasks as repository_recover_stale_enqueueing,
-)
+from kazusa_ai_chatbot.db import accepted_tasks as repository
 
 
 def build_task_identity_key(request: Mapping[str, object]) -> str:
@@ -55,7 +40,7 @@ def build_task_identity_key(request: Mapping[str, object]) -> str:
         separators=(",", ":"),
     )
     digest = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
-    identity_key = f"accepted_task:v1:{digest}"
+    identity_key = f"accepted_task:v2:{digest}"
     return identity_key
 
 
@@ -77,7 +62,7 @@ async def create_or_return_active_accepted_task(
         request,
         task_identity_key=task_identity_key,
     )
-    result = await insert_or_get_active_accepted_task(
+    result = await repository.insert_or_get_active_accepted_task(
         task,
         source_message_id=_text(request, "source_message_id"),
         observed_at=_text(request, "storage_timestamp_utc"),
@@ -91,9 +76,9 @@ async def mark_accepted_task_pending(
     executor_ref: str,
     updated_at: str,
 ) -> AcceptedTaskDoc | None:
-    """Move an enqueueing task to pending after worker job insertion."""
+    """Move an enqueueing task to pending before a job becomes claimable."""
 
-    task = await repository_mark_pending(
+    task = await repository.mark_accepted_task_pending(
         accepted_task_id=accepted_task_id,
         executor_ref=executor_ref,
         updated_at=updated_at,
@@ -109,7 +94,7 @@ async def mark_accepted_task_enqueue_failed(
 ) -> AcceptedTaskDoc | None:
     """Mark a task enqueue failure and release its active duplicate key."""
 
-    task = await repository_mark_enqueue_failed(
+    task = await repository.mark_accepted_task_enqueue_failed(
         accepted_task_id=accepted_task_id,
         failure_summary=failure_summary,
         updated_at=updated_at,
@@ -124,7 +109,7 @@ async def recover_stale_enqueueing_tasks(
 ) -> int:
     """Release stale enqueueing locks left by an interrupted queue insert."""
 
-    recovered_count = await repository_recover_stale_enqueueing(
+    recovered_count = await repository.recover_stale_enqueueing_tasks(
         stale_before_utc=stale_before_utc,
         recovered_at=recovered_at,
     )
@@ -138,7 +123,7 @@ async def recover_stale_delivery_in_progress_tasks(
 ) -> int:
     """Recover interrupted delivery claims for a later retry."""
 
-    recovered_count = await repository_recover_delivery(
+    recovered_count = await repository.recover_stale_delivery_in_progress_tasks(
         stale_before_utc=stale_before_utc,
         recovered_at=recovered_at,
     )
@@ -150,7 +135,7 @@ async def check_accepted_task_status(
 ) -> AcceptedTaskStatusResult:
     """Return the newest active task for a trusted progress-check scope."""
 
-    task = await find_active_accepted_task_for_scope(request)
+    task = await repository.find_active_accepted_task_for_scope(request)
     if task is None:
         result: AcceptedTaskStatusResult = {"status": "none"}
         return result
@@ -167,10 +152,10 @@ async def load_open_coding_run_contexts_for_scope(
     source_channel_id: str,
     requester_global_user_id: str,
     limit: int = 3,
-) -> list[CodingRunContextV1]:
+) -> list[dict[str, object]]:
     """Load current prompt-safe coding contexts for a trusted user turn."""
 
-    contexts = await repository_load_open_contexts(
+    contexts = await repository.load_open_coding_run_contexts_for_scope(
         source_platform=source_platform,
         source_channel_id=source_channel_id,
         requester_global_user_id=requester_global_user_id,
@@ -186,28 +171,34 @@ async def mark_accepted_task_running(
 ) -> AcceptedTaskDoc | None:
     """Move a pending accepted task to running when the executor claims it."""
 
-    task = await repository_mark_running(
+    task = await repository.mark_accepted_task_running(
         accepted_task_id=accepted_task_id,
         started_at=started_at,
     )
     return task
 
 
-async def mark_accepted_task_result_ready(
+async def mark_tool_result_ready(
     *,
     accepted_task_id: str,
     artifact_text: str,
     result_summary: str,
     completed_at: str,
-    coding_run_context: CodingRunContextV1 | None = None,
+    result_kind: str = "resolved",
+    completion_status: str = "resolved",
+    remaining_needs: list[str] | None = None,
+    coding_run_context: dict[str, object] | None = None,
 ) -> AcceptedTaskDoc | None:
-    """Record a completed artifact and make it ready for result delivery."""
+    """Record a prompt-safe terminal task result for source-bound delivery."""
 
-    task = await repository_mark_result_ready(
+    task = await repository.mark_tool_result_ready(
         accepted_task_id=accepted_task_id,
         artifact_text=artifact_text,
         result_summary=result_summary,
         completed_at=completed_at,
+        result_kind=result_kind,
+        completion_status=completion_status,
+        remaining_needs=remaining_needs or [],
         coding_run_context=coding_run_context,
     )
     return task
@@ -218,13 +209,19 @@ async def mark_accepted_task_failure_ready(
     accepted_task_id: str,
     failure_summary: str,
     completed_at: str,
+    result_kind: str = "failed",
+    remaining_needs: list[str] | None = None,
+    coding_run_context: dict[str, object] | None = None,
 ) -> AcceptedTaskDoc | None:
     """Record a failed executor result and make it ready for delivery."""
 
-    task = await repository_mark_failure_ready(
+    task = await repository.mark_accepted_task_failure_ready(
         accepted_task_id=accepted_task_id,
         failure_summary=failure_summary,
         completed_at=completed_at,
+        result_kind=result_kind,
+        remaining_needs=remaining_needs or [],
+        coding_run_context=coding_run_context,
     )
     return task
 
@@ -237,10 +234,24 @@ async def mark_accepted_task_delivery_in_progress(
 ) -> AcceptedTaskDoc | None:
     """Claim a ready accepted-task result for dispatcher delivery."""
 
-    task = await repository_mark_delivery_in_progress(
+    task = await repository.mark_accepted_task_delivery_in_progress(
         accepted_task_id=accepted_task_id,
         delivery_tracking_id=delivery_tracking_id,
         updated_at=updated_at,
+    )
+    return task
+
+
+async def mark_future_speak_accepted_task_delivered(
+    *,
+    accepted_task_id: str,
+    delivered_at: str,
+) -> AcceptedTaskDoc | None:
+    """Complete a running future-speak task after scheduling succeeds."""
+
+    task = await repository.mark_future_speak_accepted_task_delivered(
+        accepted_task_id=accepted_task_id,
+        delivered_at=delivered_at,
     )
     return task
 
@@ -253,7 +264,7 @@ async def mark_accepted_task_delivered(
 ) -> AcceptedTaskDoc | None:
     """Mark an accepted task delivered and release duplicate suppression."""
 
-    task = await repository_mark_delivered(
+    task = await repository.mark_accepted_task_delivered(
         accepted_task_id=accepted_task_id,
         delivered_conversation_message_id=delivered_conversation_message_id,
         delivered_at=delivered_at,
@@ -269,7 +280,7 @@ async def mark_accepted_task_delivery_failed(
 ) -> AcceptedTaskDoc | None:
     """Record a delivery failure while keeping the result visible to ops."""
 
-    task = await repository_mark_delivery_failed(
+    task = await repository.mark_accepted_task_delivery_failed(
         accepted_task_id=accepted_task_id,
         failure_summary=failure_summary,
         failed_at=failed_at,
@@ -293,18 +304,19 @@ def _build_enqueueing_task_doc(
         "task_identity_key": task_identity_key,
         "active_identity_key": task_identity_key,
         "task_identity_material": identity_material,
-        "action_kind": _text(request, "action_kind"),
+        "task_kind": _task_kind(request),
+        "semantic_objective": _text(request, "semantic_objective"),
         "first_source_message_id": source_message_id,
         "related_source_message_ids": [source_message_id]
         if source_message_id
         else [],
         "source_trigger_source": _text(request, "source_trigger_source"),
         "state": "enqueueing",
+        "completion_status": "none",
         "result_kind": "none",
         "executor_kind": "background_work",
         "executor_ref": "",
         "accepted_task_summary": _text(request, "accepted_task_summary"),
-        "source_context": _text(request, "source_context"),
         "requested_delivery": ACCEPTED_TASK_REQUESTED_DELIVERY,
         "max_output_chars": int(request["max_output_chars"]),
         "source_platform": _text(request, "source_platform"),
@@ -325,11 +337,13 @@ def _build_enqueueing_task_doc(
         "delivered_at": "",
         "result_summary": "",
         "artifact_text": "",
+        "remaining_needs": [],
         "failure_summary": "",
         "delivery_failure_summary": "",
         "delivery_tracking_id": "",
         "delivered_conversation_message_id": "",
         "last_progress_reported_at": "",
+        "coding_run_context": {},
     }
     return task
 
@@ -348,14 +362,9 @@ def _identity_material(
             request,
             "requester_platform_user_id",
         ),
-        "action_kind": _text(request, "action_kind"),
-        "accepted_task_seed": _normalized_semantic_text(
+        "semantic_objective": _normalized_semantic_text(
             request,
-            "accepted_task_seed",
-        ),
-        "accepted_task_detail": _normalized_semantic_text(
-            request,
-            "accepted_task_detail",
+            "semantic_objective",
         ),
     }
     return material
@@ -379,3 +388,12 @@ def _text(request: Mapping[str, object], field_name: str) -> str:
         return return_value
     return_value = value.strip()
     return return_value
+
+
+def _task_kind(request: Mapping[str, object]) -> str:
+    """Return one declared v2 lifecycle kind from trusted creation material."""
+
+    value = _text(request, "task_kind")
+    if value not in {"task_resolution", "future_speak", "coding_continuation"}:
+        raise ValueError("task_kind is invalid")
+    return value

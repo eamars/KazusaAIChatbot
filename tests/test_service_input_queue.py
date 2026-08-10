@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import BackgroundTasks
@@ -13,6 +13,7 @@ from pydantic import ValidationError
 
 from kazusa_ai_chatbot import chat_input_queue as queue_module
 from kazusa_ai_chatbot import service as service_module
+from kazusa_ai_chatbot.cognition_core_v2 import model_attempt_policy
 from kazusa_ai_chatbot.brain_service import intake as brain_intake
 from kazusa_ai_chatbot.brain_service.turn_settlement import (
     AssessmentLease,
@@ -20,6 +21,10 @@ from kazusa_ai_chatbot.brain_service.turn_settlement import (
 )
 from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
 from kazusa_ai_chatbot.time_boundary import build_turn_clock_from_storage_utc
+from tests.cognition_core_v2_test_helpers import (
+    canonical_episode_identity_snapshot,
+    canonical_service_character_profile,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -233,34 +238,50 @@ def _patch_common_dependencies(monkeypatch, graph) -> None:
 
     monkeypatch.setattr(
         service_module,
-        "_static_character_profile",
-        {
-            "name": "Kazusa",
-            "personality_brief": "static brief",
-        },
+        "_active_character_name_snapshot",
+        "Test Character",
+    )
+    character_profile = canonical_service_character_profile(
+        marker="input-queue",
+        global_user_id=CHARACTER_GLOBAL_USER_ID,
     )
     monkeypatch.setattr(
         service_module,
         "_runtime_character_state",
         {
-            "mood": "old mood",
-            "global_vibe": "old vibe",
-            "reflection_summary": "old reflection",
+            "cognition_state": character_profile["cognition_state"],
+            "updated_at": character_profile["updated_at"],
         },
+    )
+    identity_snapshot = canonical_episode_identity_snapshot(
+        marker="input-queue",
+        global_user_id=CHARACTER_GLOBAL_USER_ID,
+    )
+    character_profile["name"] = "Test Character"
+    identity_snapshot["character_profile"]["name"] = "Test Character"
+    monkeypatch.setattr(
+        service_module,
+        "_load_latest_character_profile_snapshot",
+        AsyncMock(return_value=character_profile),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "load_latest_identity_for_episode",
+        AsyncMock(return_value=identity_snapshot),
     )
     monkeypatch.setattr(
         service_module,
         "get_character_runtime_state",
         AsyncMock(return_value={
             "mood": "fresh mood",
-            "global_vibe": "fresh vibe",
-            "reflection_summary": "fresh reflection",
+            "vibe_check": "fresh vibe",
+            "character_reflection": "fresh reflection",
         }),
     )
     monkeypatch.setattr(
         service_module,
         "_ensure_character_global_identity",
-        AsyncMock(return_value="character-global-id"),
+        AsyncMock(return_value=CHARACTER_GLOBAL_USER_ID),
     )
     monkeypatch.setattr(
         service_module,
@@ -270,7 +291,7 @@ def _patch_common_dependencies(monkeypatch, graph) -> None:
     monkeypatch.setattr(
         service_module,
         "get_user_profile",
-        AsyncMock(return_value={"affinity": 500}),
+        AsyncMock(return_value={"relationship_state": 500}),
     )
     monkeypatch.setattr(
         service_module,
@@ -279,8 +300,33 @@ def _patch_common_dependencies(monkeypatch, graph) -> None:
     )
     monkeypatch.setattr(
         service_module,
+        "has_inbound_after",
+        AsyncMock(return_value=False),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "get_user_message_by_row_id",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "update_conversation_row_llm_trace_id",
+        AsyncMock(return_value=True),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "storage_utc_now_iso",
+        lambda: "2026-04-29T00:20:00+00:00",
+    )
+    monkeypatch.setattr(
+        service_module,
         "get_conversation_by_platform_message_id",
         AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "set_conversation_source_episode_id",
+        AsyncMock(side_effect=lambda **kwargs: len(kwargs["row_ids"])),
     )
     monkeypatch.setattr(
         service_module,
@@ -288,9 +334,24 @@ def _patch_common_dependencies(monkeypatch, graph) -> None:
         AsyncMock(return_value={}),
     )
     monkeypatch.setattr(
+        service_module.llm_tracing,
+        "ensure_llm_trace_run",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        service_module.llm_tracing,
+        "finalize_llm_trace_run",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
         service_module,
         "_run_post_turn_memory_lifecycle_background",
         AsyncMock(side_effect=lambda state: state),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "upsert_post_turn_lifecycle_record",
+        AsyncMock(),
     )
     async def _frontline(_state):
         """Admit deterministic service fixtures through the new contract."""
@@ -424,6 +485,8 @@ async def test_settlement_worker_marks_active_model_work(
     task = asyncio.create_task(service_module._turn_settlement_worker())
     await entered.wait()
     assert observed_busy == [True]
+    await asyncio.sleep(0)
+    assert coordinator.calls == 1
     release.set()
     for _index in range(10):
         await asyncio.sleep(0)
@@ -631,6 +694,40 @@ async def test_active_turn_conversation_row_ids_skip_empty_and_dedupe() -> None:
     row_ids = brain_intake.active_turn_conversation_row_ids(survivor)
 
     assert row_ids == ["row-1"]
+
+
+@pytest.mark.asyncio
+async def test_active_turn_source_refs_preserve_each_row_timestamp() -> None:
+    """Collapsed input lineage keeps each persisted row's own UTC time."""
+
+    survivor = _item(
+        1,
+        storage_timestamp_utc='2026-04-29T00:00:01+00:00',
+    )
+    collapsed = _item(
+        2,
+        storage_timestamp_utc='2026-04-29T00:00:09+00:00',
+    )
+    survivor.conversation_row_id = 'row-1'
+    collapsed.conversation_row_id = 'row-2'
+    survivor.collapsed_items = [collapsed]
+
+    source_refs = brain_intake.active_turn_conversation_source_refs(
+        survivor
+    )
+
+    assert source_refs == [
+        {
+            'ref_kind': 'conversation_row',
+            'ref_id': 'row-1',
+            'occurred_at': '2026-04-29T00:00:01+00:00',
+        },
+        {
+            'ref_kind': 'conversation_row',
+            'ref_id': 'row-2',
+            'occurred_at': '2026-04-29T00:00:09+00:00',
+        },
+    ]
 
 
 @pytest.mark.asyncio
@@ -944,10 +1041,266 @@ async def test_assembled_response_is_delivered_only_to_response_owner() -> None:
 
 
 @pytest.mark.asyncio
-async def test_native_reply_is_suppressed_for_obsolete_response_owner(
+async def test_first_settled_contract_failure_uses_bounded_wait(
     monkeypatch,
 ) -> None:
-    """An assembled answer cannot quote an older opening fragment."""
+    """A malformed first authoritative assessment should reach hard deadline."""
+
+    item = _item(1, direct_address=True)
+    fragment = PersistedChatFragment(
+        arrival_sequence=item.sequence,
+        scope=("qq", "chan-1", "group"),
+        author_platform_user_id="user-1",
+        author_global_user_id="global-user-1",
+        platform_message_id="1",
+        conversation_row_id="row-1",
+        storage_timestamp_utc=item.storage_timestamp_utc,
+        enqueue_monotonic=item.enqueue_monotonic,
+        body_text=item.request.message_envelope.body_text,
+        queue_item=item,
+    )
+    lease = AssessmentLease(
+        turn_id="turn-1",
+        version=1,
+        observation_status="more_time_available",
+        leader_sequence=1,
+        response_owner_sequence=1,
+        fragments=(fragment,),
+    )
+    contract_error = service_module.SettledRelevanceContractError(
+        "authoritative settled output failed its contract",
+        validation_reason="output fields are not exact",
+    )
+    wait_outcome = SimpleNamespace(
+        stale=False,
+        response_action="wait",
+    )
+    coordinator = SimpleNamespace(
+        evaluate_settled=AsyncMock(side_effect=contract_error),
+        apply_settled_decision=AsyncMock(return_value=wait_outcome),
+        complete_failed_assessment=AsyncMock(),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_turn_settlement_coordinator",
+        coordinator,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_prepare_settled_media",
+        AsyncMock(return_value=([], False)),
+    )
+    ambient_history = AsyncMock(return_value=[])
+    monkeypatch.setattr(
+        service_module,
+        "get_ambient_conversation_history",
+        ambient_history,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "get_conversation_history",
+        AsyncMock(
+            side_effect=AssertionError(
+                "settled relevance must use ambient history"
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_settled_state_from_lease",
+        lambda _lease, *, history: {"fresh_history": history},
+    )
+
+    await service_module._process_settlement_lease(lease, item)
+
+    coordinator.apply_settled_decision.assert_awaited_once()
+    applied_decision = coordinator.apply_settled_decision.await_args.args[1]
+    assert applied_decision["response_action"] == "wait"
+    coordinator.complete_failed_assessment.assert_not_awaited()
+    assert item.future.done() is False
+    ambient_history.assert_awaited_once_with(
+        platform="qq",
+        platform_channel_id="chan-1",
+        excluded_row_ids=["row-1"],
+        limit=48,
+    )
+
+
+@pytest.mark.asyncio
+async def test_final_settled_contract_failure_returns_operational_error(
+    monkeypatch,
+) -> None:
+    """A repeated hard-deadline schema failure must close without silence."""
+
+    item = _item(1, direct_address=True)
+    item.llm_trace_id = "trace-1"
+    fragment = PersistedChatFragment(
+        arrival_sequence=item.sequence,
+        scope=("qq", "chan-1", "group"),
+        author_platform_user_id="user-1",
+        author_global_user_id="global-user-1",
+        platform_message_id="1",
+        conversation_row_id="row-1",
+        storage_timestamp_utc=item.storage_timestamp_utc,
+        enqueue_monotonic=item.enqueue_monotonic,
+        body_text=item.request.message_envelope.body_text,
+        queue_item=item,
+    )
+    lease = AssessmentLease(
+        turn_id="turn-1",
+        version=1,
+        observation_status="observation_complete",
+        leader_sequence=1,
+        response_owner_sequence=1,
+        fragments=(fragment,),
+    )
+    contract_error = service_module.SettledRelevanceContractError(
+        "authoritative settled output repair failed",
+        validation_reason="output fields are not exact",
+        attempt_count=2,
+    )
+    coordinator = SimpleNamespace(
+        evaluate_settled=AsyncMock(side_effect=contract_error),
+        apply_settled_decision=AsyncMock(),
+        complete_failed_assessment=AsyncMock(return_value=True),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_turn_settlement_coordinator",
+        coordinator,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_prepare_settled_media",
+        AsyncMock(return_value=([], False)),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "get_ambient_conversation_history",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_settled_state_from_lease",
+        lambda _lease, *, history: {"fresh_history": history},
+    )
+    finalize_trace = AsyncMock()
+    monkeypatch.setattr(
+        service_module.llm_tracing,
+        "finalize_llm_trace_run",
+        finalize_trace,
+    )
+
+    await service_module._process_settlement_lease(lease, item)
+
+    response = await item.future
+    coordinator.complete_failed_assessment.assert_awaited_once_with(lease)
+    coordinator.apply_settled_decision.assert_not_awaited()
+    assert response.messages == [service_module.OPERATIONAL_FAILURE_NOTICE]
+    assert response.content_type == "operational_error"
+    assert response.delivery_tracking_id == ""
+    assert response.operational_error is not None
+    assert response.operational_error.error_code == "model_contract_invalid"
+    assert response.operational_error.attempt_count == 2
+    finalize_trace.assert_awaited_once()
+    assert finalize_trace.await_args.kwargs["status"] == "failed"
+    assert finalize_trace.await_args.kwargs["final_dialog_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_native_reply_promotes_for_intervening_group_answer(
+    monkeypatch,
+) -> None:
+    """A later durable user row promotes the assembled group answer."""
+
+    await _reset_queue_state()
+
+    class _Graph:
+        """Return one visible answer without a semantic native-reply request."""
+
+        async def ainvoke(self, state):
+            assert state["use_reply_feature"] is False
+            return {
+                "should_respond": True,
+                "use_reply_feature": state["use_reply_feature"],
+                "final_dialog": ["assembled answer"],
+                "future_promises": [],
+                "consolidation_state": None,
+            }
+
+    monkeypatch.setattr(
+        service_module,
+        "_save_assistant_message",
+        AsyncMock(),
+    )
+    _patch_common_dependencies(monkeypatch, _Graph())
+    monkeypatch.setattr(
+        service_module,
+        "has_inbound_after",
+        AsyncMock(return_value=True),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "get_user_message_by_row_id",
+        AsyncMock(return_value={
+            "_id": "row-1",
+            "received_at": "2026-04-29T00:19:00+00:00",
+        }),
+    )
+    opening_item = _item(1, direct_address=True)
+    opening_item.received_at = "2026-04-29T00:19:00+00:00"
+    opening_item.conversation_row_id = "row-1"
+    followup_item = _item(
+        2,
+        platform_user_id="user-1",
+        content="Here is the actual question.",
+    )
+    followup_item.received_at = "2026-04-29T00:19:05+00:00"
+    followup_item.conversation_row_id = "row-2"
+    fragments = [
+        PersistedChatFragment(
+            arrival_sequence=queued_item.sequence,
+            scope=("qq", "chan-1", "group"),
+            author_platform_user_id="user-1",
+            author_global_user_id="global-user-1",
+            platform_message_id=str(queued_item.sequence),
+            conversation_row_id=queued_item.conversation_row_id,
+            storage_timestamp_utc=queued_item.storage_timestamp_utc,
+            enqueue_monotonic=queued_item.enqueue_monotonic,
+            body_text=queued_item.request.message_envelope.body_text,
+            queue_item=queued_item,
+        )
+        for queued_item in (opening_item, followup_item)
+    ]
+
+    await service_module._process_queued_chat_item(
+        opening_item,
+        settlement_fragments=fragments,
+        settled_decision={
+            "response_action": "proceed",
+            "reason_to_respond": "specific group question",
+            "use_reply_feature": False,
+            "channel_topic": "question",
+            "indirect_speech_context": "",
+        },
+        settlement_turn_id="turn-1",
+        settlement_version=2,
+        settlement_claimed=True,
+        prepared_media=[],
+        media_prepared=True,
+    )
+
+    response = await opening_item.future
+    assert response.messages == ["assembled answer"]
+    assert response.use_reply_feature is True
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
+async def test_native_reply_true_survives_later_fragments(
+    monkeypatch,
+) -> None:
+    """An existing native-reply request survives later durable fragments."""
 
     await _reset_queue_state()
 
@@ -971,12 +1324,14 @@ async def test_native_reply_is_suppressed_for_obsolete_response_owner(
     )
     _patch_common_dependencies(monkeypatch, _Graph())
     opening_item = _item(1, direct_address=True)
+    opening_item.received_at = "2026-04-29T00:19:00+00:00"
     opening_item.conversation_row_id = "row-1"
     followup_item = _item(
         2,
         platform_user_id="user-1",
         content="Here is the actual question.",
     )
+    followup_item.received_at = "2026-04-29T00:19:05+00:00"
     followup_item.conversation_row_id = "row-2"
     fragments = [
         PersistedChatFragment(
@@ -1004,7 +1359,6 @@ async def test_native_reply_is_suppressed_for_obsolete_response_owner(
             "channel_topic": "question",
             "indirect_speech_context": "",
         },
-        skip_user_persist=True,
         settlement_turn_id="turn-1",
         settlement_version=2,
         settlement_claimed=True,
@@ -1014,7 +1368,7 @@ async def test_native_reply_is_suppressed_for_obsolete_response_owner(
 
     response = await opening_item.future
     assert response.messages == ["assembled answer"]
-    assert response.use_reply_feature is False
+    assert response.use_reply_feature is True
     await _reset_queue_state()
 
 
@@ -1046,6 +1400,7 @@ async def test_native_reply_reaches_single_fragment_response(
     )
     _patch_common_dependencies(monkeypatch, _Graph())
     item = _item(1, direct_address=True)
+    item.received_at = "2026-04-29T00:19:00+00:00"
     item.conversation_row_id = "row-1"
     fragment = PersistedChatFragment(
         arrival_sequence=item.sequence,
@@ -1070,7 +1425,6 @@ async def test_native_reply_reaches_single_fragment_response(
             "channel_topic": "question",
             "indirect_speech_context": "",
         },
-        skip_user_persist=True,
         settlement_turn_id="turn-1",
         settlement_version=1,
         settlement_claimed=True,
@@ -1084,18 +1438,716 @@ async def test_native_reply_reaches_single_fragment_response(
     await _reset_queue_state()
 
 
+@pytest.mark.parametrize("base_reply_feature", [False, True])
+@pytest.mark.asyncio
+async def test_native_reply_is_false_without_visible_dialog(
+    monkeypatch,
+    base_reply_feature,
+) -> None:
+    """An empty dialog exposes no native-reply flag for either base value."""
+
+    await _reset_queue_state()
+
+    class _Graph:
+        """Return no visible answer with the requested base flag."""
+
+        async def ainvoke(self, state):
+            assert state["use_reply_feature"] is base_reply_feature
+            return {
+                "should_respond": True,
+                "use_reply_feature": state["use_reply_feature"],
+                "final_dialog": [],
+                "future_promises": [],
+                "consolidation_state": None,
+            }
+
+    monkeypatch.setattr(
+        service_module,
+        "_save_assistant_message",
+        AsyncMock(),
+    )
+    _patch_common_dependencies(monkeypatch, _Graph())
+    item = _item(1, direct_address=True)
+    item.received_at = "2026-04-29T00:17:58+00:00"
+    item.conversation_row_id = "row-1"
+
+    await service_module._process_queued_chat_item(
+        item,
+        settled_decision={
+            "response_action": "proceed",
+            "reason_to_respond": "direct character request",
+            "use_reply_feature": base_reply_feature,
+            "channel_topic": "",
+            "indirect_speech_context": "",
+        },
+        settlement_turn_id="turn-1",
+        settlement_version=1,
+        settlement_claimed=True,
+        prepared_media=[],
+        media_prepared=True,
+    )
+
+    response = await item.future
+    assert response.messages == []
+    assert response.use_reply_feature is False
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
+async def test_native_reply_promotes_after_delay_threshold(
+    monkeypatch,
+) -> None:
+    """A delayed visible group response promotes a native reply request."""
+
+    await _reset_queue_state()
+
+    class _Graph:
+        """Return one visible answer without a semantic native-reply request."""
+
+        async def ainvoke(self, state):
+            assert state["use_reply_feature"] is False
+            return {
+                "should_respond": True,
+                "use_reply_feature": state["use_reply_feature"],
+                "final_dialog": ["delayed answer"],
+                "future_promises": [],
+                "consolidation_state": None,
+            }
+
+    monkeypatch.setattr(
+        service_module,
+        "_save_assistant_message",
+        AsyncMock(),
+    )
+    _patch_common_dependencies(monkeypatch, _Graph())
+    monkeypatch.setattr(
+        service_module,
+        "get_user_message_by_row_id",
+        AsyncMock(return_value={
+            "_id": "row-1",
+            "received_at": "2026-04-29T00:17:58+00:00",
+        }),
+    )
+    item = _item(1, direct_address=True)
+    item.received_at = "2026-04-29T00:17:58+00:00"
+    item.conversation_row_id = "row-1"
+
+    await service_module._process_queued_chat_item(
+        item,
+        settled_decision={
+            "response_action": "proceed",
+            "reason_to_respond": "direct character request",
+            "use_reply_feature": False,
+            "channel_topic": "",
+            "indirect_speech_context": "",
+        },
+        settlement_turn_id="turn-1",
+        settlement_version=1,
+        settlement_claimed=True,
+        prepared_media=[],
+        media_prepared=True,
+    )
+
+    response = await item.future
+    assert response.messages == ["delayed answer"]
+    assert response.use_reply_feature is True
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
+async def test_native_reply_delay_promotion_requires_strictly_greater_than_threshold(
+    monkeypatch,
+) -> None:
+    """A response at exactly 120 seconds does not promote a native reply."""
+
+    await _reset_queue_state()
+
+    class _Graph:
+        """Return one visible answer without a semantic native-reply request."""
+
+        async def ainvoke(self, state):
+            assert state["use_reply_feature"] is False
+            return {
+                "should_respond": True,
+                "use_reply_feature": state["use_reply_feature"],
+                "final_dialog": ["boundary answer"],
+                "future_promises": [],
+                "consolidation_state": None,
+            }
+
+    monkeypatch.setattr(
+        service_module,
+        "_save_assistant_message",
+        AsyncMock(),
+    )
+    _patch_common_dependencies(monkeypatch, _Graph())
+    item = _item(1, direct_address=True)
+    item.received_at = "2026-04-29T00:18:00+00:00"
+    item.conversation_row_id = "row-1"
+
+    await service_module._process_queued_chat_item(
+        item,
+        settled_decision={
+            "response_action": "proceed",
+            "reason_to_respond": "direct character request",
+            "use_reply_feature": False,
+            "channel_topic": "",
+            "indirect_speech_context": "",
+        },
+        settlement_turn_id="turn-1",
+        settlement_version=1,
+        settlement_claimed=True,
+        prepared_media=[],
+        media_prepared=True,
+    )
+
+    response = await item.future
+    assert response.messages == ["boundary answer"]
+    assert response.use_reply_feature is False
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
+async def test_native_reply_promotion_skips_private_scope(
+    monkeypatch,
+) -> None:
+    """Delay promotion never applies to a private visible response."""
+
+    await _reset_queue_state()
+
+    class _Graph:
+        """Return one visible answer without a semantic native-reply request."""
+
+        async def ainvoke(self, state):
+            assert state["use_reply_feature"] is False
+            return {
+                "should_respond": True,
+                "use_reply_feature": state["use_reply_feature"],
+                "final_dialog": ["private answer"],
+                "future_promises": [],
+                "consolidation_state": None,
+            }
+
+    monkeypatch.setattr(
+        service_module,
+        "_save_assistant_message",
+        AsyncMock(),
+    )
+    _patch_common_dependencies(monkeypatch, _Graph())
+    item = _item(
+        1,
+        channel_type="private",
+        platform_channel_id="dm-1",
+        direct_address=True,
+    )
+    item.received_at = "2026-04-29T00:17:58+00:00"
+    item.conversation_row_id = "row-1"
+
+    await service_module._process_queued_chat_item(
+        item,
+        settled_decision={
+            "response_action": "proceed",
+            "reason_to_respond": "direct character request",
+            "use_reply_feature": False,
+            "channel_topic": "",
+            "indirect_speech_context": "",
+        },
+        settlement_turn_id="turn-1",
+        settlement_version=1,
+        settlement_claimed=True,
+        prepared_media=[],
+        media_prepared=True,
+    )
+
+    response = await item.future
+    assert response.messages == ["private answer"]
+    assert response.use_reply_feature is False
+    await _reset_queue_state()
+
+
+@pytest.mark.parametrize("platform_message_id", ["", " "])
+@pytest.mark.asyncio
+async def test_native_reply_promotion_requires_platform_message_id(
+    monkeypatch,
+    platform_message_id,
+) -> None:
+    """Missing or whitespace-only IDs cannot promote a native reply."""
+
+    await _reset_queue_state()
+
+    class _Graph:
+        """Return one visible answer without a semantic native-reply request."""
+
+        async def ainvoke(self, state):
+            assert state["use_reply_feature"] is False
+            return {
+                "should_respond": True,
+                "use_reply_feature": state["use_reply_feature"],
+                "final_dialog": ["assembled answer"],
+                "future_promises": [],
+                "consolidation_state": None,
+            }
+
+    monkeypatch.setattr(
+        service_module,
+        "_save_assistant_message",
+        AsyncMock(),
+    )
+    _patch_common_dependencies(monkeypatch, _Graph())
+    opening_item = _item(1, direct_address=True)
+    opening_item.request.platform_message_id = platform_message_id
+    opening_item.received_at = "2026-04-29T00:17:58+00:00"
+    opening_item.conversation_row_id = "row-1"
+    followup_item = _item(
+        2,
+        platform_user_id="user-1",
+        content="Here is the actual question.",
+    )
+    followup_item.received_at = "2026-04-29T00:19:05+00:00"
+    followup_item.conversation_row_id = "row-2"
+    fragments = [
+        PersistedChatFragment(
+            arrival_sequence=queued_item.sequence,
+            scope=("qq", "chan-1", "group"),
+            author_platform_user_id="user-1",
+            author_global_user_id="global-user-1",
+            platform_message_id=str(queued_item.sequence),
+            conversation_row_id=queued_item.conversation_row_id,
+            storage_timestamp_utc=queued_item.storage_timestamp_utc,
+            enqueue_monotonic=queued_item.enqueue_monotonic,
+            body_text=queued_item.request.message_envelope.body_text,
+            queue_item=queued_item,
+        )
+        for queued_item in (opening_item, followup_item)
+    ]
+
+    await service_module._process_queued_chat_item(
+        opening_item,
+        settlement_fragments=fragments,
+        settled_decision={
+            "response_action": "proceed",
+            "reason_to_respond": "specific group question",
+            "use_reply_feature": False,
+            "channel_topic": "question",
+            "indirect_speech_context": "",
+        },
+        settlement_turn_id="turn-1",
+        settlement_version=2,
+        settlement_claimed=True,
+        prepared_media=[],
+        media_prepared=True,
+    )
+
+    response = await opening_item.future
+    assert response.messages == ["assembled answer"]
+    assert response.use_reply_feature is False
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
+async def test_native_reply_stays_false_without_promotion_condition(
+    monkeypatch,
+) -> None:
+    """A missing owner row keeps even an old response on normal delivery."""
+
+    await _reset_queue_state()
+
+    class _Graph:
+        """Return one visible answer without a semantic native-reply request."""
+
+        async def ainvoke(self, state):
+            assert state["use_reply_feature"] is False
+            return {
+                "should_respond": True,
+                "use_reply_feature": state["use_reply_feature"],
+                "final_dialog": ["direct answer"],
+                "future_promises": [],
+                "consolidation_state": None,
+            }
+
+    monkeypatch.setattr(
+        service_module,
+        "_save_assistant_message",
+        AsyncMock(),
+    )
+    _patch_common_dependencies(monkeypatch, _Graph())
+    item = _item(1, direct_address=True)
+    item.received_at = "2026-04-29T00:17:58+00:00"
+    item.conversation_row_id = "row-1"
+    fragment = PersistedChatFragment(
+        arrival_sequence=item.sequence,
+        scope=("qq", "chan-1", "group"),
+        author_platform_user_id="user-1",
+        author_global_user_id="global-user-1",
+        platform_message_id="1",
+        conversation_row_id=item.conversation_row_id,
+        storage_timestamp_utc=item.storage_timestamp_utc,
+        enqueue_monotonic=item.enqueue_monotonic,
+        body_text=item.request.message_envelope.body_text,
+        queue_item=item,
+    )
+
+    await service_module._process_queued_chat_item(
+        item,
+        settlement_fragments=[fragment],
+        settled_decision={
+            "response_action": "proceed",
+            "reason_to_respond": "direct character request",
+            "use_reply_feature": False,
+            "channel_topic": "",
+            "indirect_speech_context": "",
+        },
+        settlement_turn_id="turn-1",
+        settlement_version=1,
+        settlement_claimed=True,
+        prepared_media=[],
+        media_prepared=True,
+    )
+
+    response = await item.future
+    assert response.messages == ["direct answer"]
+    assert response.use_reply_feature is False
+    service_module.get_user_message_by_row_id.assert_awaited_once()
+    service_module.has_inbound_after.assert_not_awaited()
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
+async def test_precommit_cognition_failure_retries_once_then_succeeds(
+    monkeypatch,
+) -> None:
+    """A typed pre-commit failure should retry from the original turn state."""
+
+    await _reset_queue_state()
+
+    class _Graph:
+        """Fail once at the safe checkpoint, then return normal dialog."""
+
+        def __init__(self) -> None:
+            self.call_count = 0
+
+        async def ainvoke(self, _state):
+            self.call_count += 1
+            if self.call_count == 1:
+                raise service_module.CognitionExecutionError(
+                    "later cognition stage requested a clean retry",
+                    error_code="workspace_contract_failed",
+                    branch_id="",
+                    stage="workspace_collapse",
+                    attempt_count=3,
+                    safe_checkpoint="pre_state_commit",
+                    retryable=True,
+                )
+            return {
+                "should_respond": True,
+                "use_reply_feature": False,
+                "final_dialog": ["recovered response"],
+                "future_promises": [],
+                "consolidation_state": None,
+            }
+
+    graph = _Graph()
+    save_assistant_message = AsyncMock()
+    monkeypatch.setattr(
+        service_module,
+        "_save_assistant_message",
+        save_assistant_message,
+    )
+    _patch_common_dependencies(monkeypatch, graph)
+    item = _item(1, direct_address=True)
+    item.conversation_row_id = "row-1"
+
+    await service_module._process_queued_chat_item(
+        item,
+        settled_decision={
+            "response_action": "proceed",
+            "reason_to_respond": "direct character request",
+            "use_reply_feature": False,
+            "channel_topic": "",
+            "indirect_speech_context": "",
+        },
+        settlement_turn_id="turn-1",
+        settlement_version=1,
+        settlement_claimed=True,
+        prepared_media=[],
+        media_prepared=True,
+    )
+
+    response = await item.future
+    assert graph.call_count == 2
+    assert response.messages == ["recovered response"]
+    assert response.operational_error is None
+    save_assistant_message.assert_awaited_once()
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
+async def test_service_graph_retry_reuses_goal_attempt_ledger(
+    monkeypatch,
+) -> None:
+    """Both graph invocations consume one shared per-branch producer budget."""
+
+    await _reset_queue_state()
+
+    class _Graph:
+        """Reserve one goal call per graph and fail a later owner once."""
+
+        def __init__(self) -> None:
+            self.coordinates: list[dict[str, object]] = []
+
+        async def ainvoke(self, _state):
+            graph_attempt = len(self.coordinates) + 1
+            self.coordinates.append(
+                model_attempt_policy.reserve_v2_model_attempt(
+                    stage="goal_bid_structure",
+                    branch_id="ordinary_response",
+                    local_attempt=1,
+                )
+            )
+            if graph_attempt == 1:
+                raise service_module.CognitionExecutionError(
+                    "later cognition stage requested a clean retry",
+                    error_code="workspace_contract_failed",
+                    stage="workspace_collapse",
+                    attempt_count=1,
+                    safe_checkpoint="pre_state_commit",
+                    retryable=True,
+                )
+            return {
+                "should_respond": True,
+                "use_reply_feature": False,
+                "final_dialog": ["recovered response"],
+                "future_promises": [],
+                "consolidation_state": None,
+            }
+
+    graph = _Graph()
+    monkeypatch.setattr(
+        service_module,
+        "_save_assistant_message",
+        AsyncMock(),
+    )
+    _patch_common_dependencies(monkeypatch, graph)
+    item = _item(1, direct_address=True)
+    item.conversation_row_id = "row-1"
+
+    await service_module._process_queued_chat_item(
+        item,
+        settled_decision={
+            "response_action": "proceed",
+            "reason_to_respond": "direct character request",
+            "use_reply_feature": False,
+            "channel_topic": "",
+            "indirect_speech_context": "",
+        },
+        settlement_turn_id="turn-1",
+        settlement_version=1,
+        settlement_claimed=True,
+        prepared_media=[],
+        media_prepared=True,
+    )
+
+    response = await item.future
+    assert response.messages == ["recovered response"]
+    assert [row["graph_attempt"] for row in graph.coordinates] == [1, 2]
+    assert [
+        row["cumulative_producer_attempt"]
+        for row in graph.coordinates
+    ] == [1, 2]
+    assert len({
+        row["cognition_invocation_id"]
+        for row in graph.coordinates
+    }) == 1
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
+async def test_postcommit_degraded_dialog_uses_normal_delivery_path(
+    monkeypatch,
+) -> None:
+    """A bounded degraded dialog persists and returns normal tracked text."""
+
+    await _reset_queue_state()
+
+    class _Graph:
+        """Return a terminal V2 dialog without raising to the service."""
+
+        def __init__(self) -> None:
+            self.call_count = 0
+
+        async def ainvoke(self, _state):
+            self.call_count += 1
+            return {
+                "should_respond": True,
+                "use_reply_feature": False,
+                "final_dialog": ["bounded degraded character response"],
+                "future_promises": [],
+                "consolidation_state": None,
+            }
+
+    graph = _Graph()
+    save_assistant_message = AsyncMock()
+    monkeypatch.setattr(
+        service_module,
+        "_save_assistant_message",
+        save_assistant_message,
+    )
+    operational_error_response = MagicMock(
+        wraps=service_module._operational_error_response,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_operational_error_response",
+        operational_error_response,
+    )
+    persist_lifecycle = AsyncMock()
+    monkeypatch.setattr(
+        service_module,
+        "_persist_post_turn_lifecycle_record",
+        persist_lifecycle,
+    )
+    record_bot_continuity = AsyncMock()
+    monkeypatch.setattr(
+        service_module._turn_settlement_coordinator,
+        "record_bot_continuity",
+        record_bot_continuity,
+    )
+    _patch_common_dependencies(monkeypatch, graph)
+    item = _item(1, direct_address=True)
+    item.conversation_row_id = "row-1"
+
+    await service_module._process_queued_chat_item(
+        item,
+        settled_decision={
+            "response_action": "proceed",
+            "reason_to_respond": "direct character request",
+            "use_reply_feature": False,
+            "channel_topic": "",
+            "indirect_speech_context": "",
+        },
+        settlement_turn_id="turn-1",
+        settlement_version=1,
+        settlement_claimed=True,
+        prepared_media=[],
+        media_prepared=True,
+    )
+
+    response = await item.future
+    assert graph.call_count == 1
+    assert response.messages == ["bounded degraded character response"]
+    assert response.content_type == "text"
+    assert response.delivery_tracking_id
+    assert response.operational_error is None
+    operational_error_response.assert_not_called()
+    save_assistant_message.assert_awaited_once()
+    persist_lifecycle.assert_awaited_once()
+    record_bot_continuity.assert_awaited_once()
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
+async def test_goal_cognition_exhaustion_skips_service_retry(
+    monkeypatch,
+) -> None:
+    """Consumed goal budget yields one structured non-character fallback."""
+
+    await _reset_queue_state()
+
+    class _Graph:
+        """Raise one typed non-retryable goal exhaustion."""
+
+        def __init__(self) -> None:
+            self.call_count = 0
+
+        async def ainvoke(self, _state):
+            self.call_count += 1
+            raise service_module.CognitionExecutionError(
+                "selection goal structure exhausted",
+                error_code="goal_bid_structure_exhausted",
+                branch_id="ordinary_response",
+                stage="goal_cognition",
+                attempt_count=3,
+                safe_checkpoint="pre_state_commit",
+                retryable=False,
+            )
+
+    graph = _Graph()
+    save_assistant_message = AsyncMock()
+    monkeypatch.setattr(
+        service_module,
+        "_save_assistant_message",
+        save_assistant_message,
+    )
+    _patch_common_dependencies(monkeypatch, graph)
+    finalize_trace = AsyncMock()
+    monkeypatch.setattr(
+        service_module.llm_tracing,
+        "finalize_llm_trace_run",
+        finalize_trace,
+    )
+    item = _item(1, direct_address=True)
+    item.conversation_row_id = "row-1"
+
+    await service_module._process_queued_chat_item(
+        item,
+        settled_decision={
+            "response_action": "proceed",
+            "reason_to_respond": "direct character request",
+            "use_reply_feature": False,
+            "channel_topic": "",
+            "indirect_speech_context": "",
+        },
+        settlement_turn_id="turn-1",
+        settlement_version=1,
+        settlement_claimed=True,
+        prepared_media=[],
+        media_prepared=True,
+    )
+
+    response = await item.future
+    assert graph.call_count == 1
+    assert response.messages == [service_module.OPERATIONAL_RETRY_NOTICE]
+    assert response.content_type == "operational_error"
+    assert response.delivery_tracking_id == ""
+    assert response.operational_error is not None
+    assert response.operational_error.error_code == (
+        "goal_bid_structure_exhausted"
+    )
+    assert response.operational_error.status == "exhausted"
+    assert response.operational_error.attempt_count == 3
+    save_assistant_message.assert_not_awaited()
+    finalize_trace.assert_awaited_once()
+    assert finalize_trace.await_args.kwargs["final_dialog_count"] == 0
+    await _reset_queue_state()
+
+
 @pytest.mark.asyncio
 async def test_settled_fresh_history_excludes_active_turn_fragments(
     monkeypatch,
 ) -> None:
     """Only external rows can act as fresh-history scene evidence."""
 
+    character_profile = canonical_service_character_profile(
+        marker="settled-relevance",
+        global_user_id=CHARACTER_GLOBAL_USER_ID,
+    )
     monkeypatch.setattr(
         service_module,
-        "_static_character_profile",
-        {"name": "Kazusa"},
+        "_active_character_name_snapshot",
+        "Test Character",
     )
-    item = _item(1)
+    monkeypatch.setattr(
+        service_module,
+        "_runtime_character_state",
+        {
+            "cognition_state": character_profile["cognition_state"],
+            "updated_at": character_profile["updated_at"],
+        },
+    )
+    item = _item(
+        1,
+        storage_timestamp_utc="2026-07-16T00:00:05+00:00",
+    )
     fragment = PersistedChatFragment(
         arrival_sequence=1,
         scope=("qq", "chan-1", "group"),
@@ -1109,7 +2161,10 @@ async def test_settled_fresh_history_excludes_active_turn_fragments(
         semantic_target_labels=("character",),
         queue_item=item,
     )
-    second_item = _item(2)
+    second_item = _item(
+        2,
+        storage_timestamp_utc="2026-07-16T00:00:07+00:00",
+    )
     second_fragment = PersistedChatFragment(
         arrival_sequence=2,
         scope=("qq", "chan-1", "group"),
@@ -1140,63 +2195,140 @@ async def test_settled_fresh_history_excludes_active_turn_fragments(
         "mentions": [],
         "broadcast": False,
         "attachments": [],
-        "timestamp": "2026-07-16T00:00:00+00:00",
     }
     state = service_module._settled_state_from_lease(
         lease,
         history=[
+            *[
+                {
+                    **common,
+                    "_id": f"row-older-{index}",
+                    "platform_message_id": f"message-older-{index}",
+                    "body_text": f"older context {index}",
+                    "timestamp": (
+                        f"2026-07-15T23:59:{50 + index:02d}+00:00"
+                    ),
+                }
+                for index in range(1, 10)
+            ],
             {
                 **common,
                 "_id": "row-active",
                 "platform_message_id": "message-active",
                 "body_text": "active request",
+                "timestamp": "2026-07-16T00:00:05+00:00",
             },
             {
                 **common,
                 "_id": "row-other",
                 "platform_message_id": "message-other",
                 "body_text": "another participant answered",
+                "timestamp": "2026-07-16T00:00:06+00:00",
             },
             {
                 **common,
                 "_id": "row-active-2",
                 "platform_message_id": "message-active-2",
                 "body_text": "active follow-up",
+                "timestamp": "2026-07-16T00:00:07+00:00",
             },
             {
                 **common,
-                "_id": "row-after",
-                "platform_message_id": "message-after",
-                "body_text": "later context",
+                "_id": "row-character-1",
+                "role": "assistant",
+                "platform_user_id": "bot-1",
+                "global_user_id": CHARACTER_GLOBAL_USER_ID,
+                "display_name": "Test Character",
+                "platform_message_id": "message-character-1",
+                "body_text": "first character fragment",
+                "addressed_to_global_user_ids": ["global-user-1"],
+                "llm_trace_id": "trace-character-1",
+                "logical_message_index": 0,
+                "timestamp": "2026-07-16T00:00:08+00:00",
+            },
+            {
+                **common,
+                "_id": "row-character-2",
+                "role": "assistant",
+                "platform_user_id": "bot-1",
+                "global_user_id": CHARACTER_GLOBAL_USER_ID,
+                "display_name": "Test Character",
+                "platform_message_id": "message-character-2",
+                "body_text": "second character fragment",
+                "addressed_to_global_user_ids": ["global-user-1"],
+                "llm_trace_id": "trace-character-1",
+                "logical_message_index": 1,
+                "timestamp": "2026-07-16T00:00:09+00:00",
+            },
+            {
+                **common,
+                "_id": "row-character-3",
+                "role": "assistant",
+                "platform_user_id": "bot-1",
+                "global_user_id": CHARACTER_GLOBAL_USER_ID,
+                "display_name": "Test Character",
+                "platform_message_id": "message-character-3",
+                "body_text": "independent character response",
+                "addressed_to_global_user_ids": ["global-user-1"],
+                "llm_trace_id": "trace-character-2",
+                "logical_message_index": 0,
+                "timestamp": "2026-07-16T00:00:10+00:00",
             },
         ],
     )
 
-    assert [row["platform_message_id"] for row in state["fresh_history"]] == [
-        "message-other",
-        "message-after",
+    assert len(state["fresh_history"]) == 10
+    assert state["fresh_history"][0]["body_text"] == "older context 3"
+    assert [row["body_text"] for row in state["fresh_history"][-3:]] == [
+        "another participant answered",
+        "first character fragment\nsecond character fragment",
+        "independent character response",
     ]
-    assert state["fresh_history"][0]["turn_temporal_relation"] == (
+    assert state["fresh_history"][-3]["turn_temporal_relation"] == (
         "during_active_turn"
     )
-    assert state["fresh_history"][1]["turn_temporal_relation"] == (
+    assert state["fresh_history"][-2]["turn_temporal_relation"] == (
+        "after_active_turn"
+    )
+    assert state["fresh_history"][-1]["turn_temporal_relation"] == (
         "after_active_turn"
     )
     assert state["relationship_context"] == "direct participant"
-    assert state["group_attention"] == "medium_noise"
+    assert state["group_attention"] == "chaotic_noise"
     assert state["conversation_scope"] == "group"
-    assert state["active_character_name"] == "Kazusa"
+    assert state["active_character_name"] == "Test Character"
     assert state["current_author_global_user_id"] == "global-user-1"
     assert state["current_author_platform_user_id"] == "user-1"
     assert state["character_global_user_id"] == CHARACTER_GLOBAL_USER_ID
     assert state["platform_bot_id"] == "bot-1"
+    assert state["character_cognition_state"] == (
+        character_profile["cognition_state"]
+    )
 
 
 @pytest.mark.asyncio
 async def test_settled_history_uses_timestamps_when_active_row_is_outside_window(
+    monkeypatch,
 ) -> None:
     """Intervening rows stay ordered when a busy group evicts the anchor."""
 
+    character_profile = canonical_service_character_profile(
+        marker="settled-clipped-history",
+        global_user_id=CHARACTER_GLOBAL_USER_ID,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_active_character_name_snapshot",
+        "Test Character",
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_runtime_character_state",
+        {
+            "cognition_state": character_profile["cognition_state"],
+            "updated_at": character_profile["updated_at"],
+        },
+    )
     item = _item(
         1,
         storage_timestamp_utc="2026-07-16T00:00:05+00:00",
@@ -1255,18 +2387,21 @@ async def test_settled_history_uses_timestamps_when_active_row_is_outside_window
         history=[
             {
                 **common,
+                "_id": "row-before",
                 "platform_message_id": "message-before",
                 "body_text": "earlier context",
                 "timestamp": "2026-07-16T00:00:04+00:00",
             },
             {
                 **common,
+                "_id": "row-during",
                 "platform_message_id": "message-during",
                 "body_text": "intervening answer",
                 "timestamp": "2026-07-16T00:00:06+00:00",
             },
             {
                 **common,
+                "_id": "row-after",
                 "platform_message_id": "message-after",
                 "body_text": "later context",
                 "timestamp": "2026-07-16T00:00:08+00:00",
@@ -1516,12 +2651,50 @@ async def test_settled_media_budget_is_shared_across_reassessment(
 
 
 @pytest.mark.asyncio
-async def test_chat_enqueue_path_does_not_save_directly(monkeypatch) -> None:
-    """The endpoint should enqueue only; worker code owns user persistence."""
+async def test_chat_enqueue_commits_receipt_before_queue_admission(
+    monkeypatch,
+) -> None:
+    """The endpoint should commit the receipt before the queue accepts input."""
 
     await _reset_queue_state()
-    save_conversation = AsyncMock()
-    monkeypatch.setattr(service_module, "save_conversation", save_conversation)
+    call_order: list[str] = []
+
+    async def _save_receipt(_doc):
+        call_order.append("save")
+        return_value = "row-1"
+        return return_value
+
+    original_enqueue = service_module._chat_input_queue.enqueue
+
+    async def _recording_enqueue(*args, **kwargs):
+        call_order.append("enqueue")
+        return await original_enqueue(*args, **kwargs)
+
+    monkeypatch.setattr(
+        service_module,
+        "save_conversation_receipt",
+        _save_receipt,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "resolve_global_user_id",
+        AsyncMock(return_value="global-user-1"),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_resolve_message_envelope_identities",
+        AsyncMock(return_value=await _resolved_envelope(_request("endpoint"))),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_hydrate_reply_context",
+        AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        service_module._chat_input_queue,
+        "enqueue",
+        _recording_enqueue,
+    )
     monkeypatch.setattr(
         service_module,
         "_ensure_chat_input_worker_started",
@@ -1535,14 +2708,323 @@ async def test_chat_enqueue_path_does_not_save_directly(monkeypatch) -> None:
     await asyncio.sleep(0)
 
     assert service_module._chat_input_queue.pending_count() == 1
-    save_conversation.assert_not_awaited()
+    assert call_order == ["save", "enqueue"]
 
     queued_item = service_module._chat_input_queue.pop_left_for_test()
+    assert queued_item.conversation_row_id == "row-1"
+    assert queued_item.received_at
+    assert queued_item.request._receipt_metadata == {
+        "conversation_row_id": "row-1",
+        "received_at": queued_item.received_at,
+    }
     queued_item.future.set_result(service_module.ChatResponse())
     response = await asyncio.wait_for(chat_task, timeout=1.0)
 
     assert response.messages == []
+    assert call_order == ["save", "enqueue"]
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
+async def test_worker_consumes_precommitted_receipt_without_duplicate(
+    monkeypatch,
+) -> None:
+    """Intake updates the committed row and never inserts a second copy."""
+
+    await _reset_queue_state()
+
+    class _Graph:
+        """Return an empty visible answer for the admitted turn."""
+
+        async def ainvoke(self, state):
+            return {
+                "should_respond": True,
+                "use_reply_feature": state["use_reply_feature"],
+                "final_dialog": [],
+                "future_promises": [],
+                "consolidation_state": None,
+            }
+
+    save_conversation = AsyncMock()
+    save_receipt = AsyncMock(return_value="row-1")
+    monkeypatch.setattr(service_module, "save_conversation", save_conversation)
+    monkeypatch.setattr(
+        service_module,
+        "save_conversation_receipt",
+        save_receipt,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "resolve_global_user_id",
+        AsyncMock(return_value="global-user-1"),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_resolve_message_envelope_identities",
+        AsyncMock(return_value=await _resolved_envelope(_request("endpoint"))),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_hydrate_reply_context",
+        AsyncMock(return_value={}),
+    )
+    _patch_common_dependencies(monkeypatch, _Graph())
+
+    chat_task = asyncio.create_task(service_module.chat(
+        _request(
+            "endpoint",
+            channel_type="private",
+            platform_channel_id="dm-1",
+        ),
+        BackgroundTasks(),
+    ))
+
+    response = await asyncio.wait_for(chat_task, timeout=2.0)
+
+    assert response.messages == []
+    save_receipt.assert_awaited_once()
+    receipt_doc = save_receipt.await_args.args[0]
+    assert receipt_doc["received_at"]
     save_conversation.assert_not_awaited()
+    service_module.update_conversation_row_llm_trace_id.assert_awaited_once()
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
+async def test_listen_only_worker_attaches_trace_to_precommitted_receipt(
+    monkeypatch,
+) -> None:
+    """The listen-only worker path preserves the committed trace link."""
+
+    await _reset_queue_state()
+
+    class _Graph:
+        """Return no visible text for an observation-only turn."""
+
+        async def ainvoke(self, state):
+            return {
+                "should_respond": False,
+                "use_reply_feature": state["use_reply_feature"],
+                "final_dialog": [],
+                "future_promises": [],
+                "consolidation_state": None,
+            }
+
+    _patch_common_dependencies(monkeypatch, _Graph())
+    item = _item(
+        1,
+        channel_type="private",
+        platform_channel_id="dm-1",
+        listen_only=True,
+    )
+    item.conversation_row_id = "row-1"
+
+    await service_module._process_queued_chat_item(
+        item,
+        settled_decision={
+            "response_action": "proceed",
+            "reason_to_respond": "observation-only fixture",
+            "use_reply_feature": False,
+            "channel_topic": "",
+            "indirect_speech_context": "",
+        },
+        settlement_turn_id="turn-1",
+        settlement_version=1,
+        settlement_claimed=True,
+        prepared_media=[],
+        media_prepared=True,
+    )
+
+    response = await item.future
+    assert response.messages == []
+    service_module.update_conversation_row_llm_trace_id.assert_awaited_once()
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
+async def test_listen_only_drop_keeps_precommitted_receipt_without_duplicate(
+    monkeypatch,
+) -> None:
+    """A dropped listen-only packet keeps its committed receipt row."""
+
+    await _reset_queue_state()
+    save_conversation = AsyncMock()
+    save_receipt = AsyncMock(return_value="row-1")
+    monkeypatch.setattr(service_module, "save_conversation", save_conversation)
+    monkeypatch.setattr(
+        service_module,
+        "save_conversation_receipt",
+        save_receipt,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "resolve_global_user_id",
+        AsyncMock(return_value="global-user-1"),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_resolve_message_envelope_identities",
+        AsyncMock(return_value=await _resolved_envelope(_request("endpoint"))),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_hydrate_reply_context",
+        AsyncMock(return_value={}),
+    )
+    _patch_common_dependencies(monkeypatch, AsyncMock())
+
+    chat_task = asyncio.create_task(service_module.chat(
+        _request("endpoint", listen_only=True),
+        BackgroundTasks(),
+    ))
+
+    response = await asyncio.wait_for(chat_task, timeout=2.0)
+
+    assert response.messages == []
+    save_receipt.assert_awaited_once()
+    save_conversation.assert_not_awaited()
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
+async def test_frontline_discard_keeps_precommitted_receipt_without_duplicate(
+    monkeypatch,
+) -> None:
+    """Frontline discard consumes the committed row without a second insert."""
+
+    await _reset_queue_state()
+    save_conversation = AsyncMock()
+    monkeypatch.setattr(service_module, "save_conversation", save_conversation)
+
+    async def _discard(_state):
+        """Discard every deterministic fixture at the frontline boundary."""
+
+        return {
+            "intake_action": "discard",
+            "append_target": "none",
+            "prelude_targets": [],
+            "reason": "fixture discard",
+        }
+
+    _patch_common_dependencies(monkeypatch, AsyncMock())
+    monkeypatch.setattr(
+        service_module,
+        "frontline_relevance_agent",
+        _discard,
+    )
+    item = _item(1, direct_address=True)
+    item.received_at = "2026-04-29T00:19:00+00:00"
+    item.conversation_row_id = "row-1"
+
+    await service_module._frontline_intake_item(item)
+
+    response = await item.future
+    assert response.messages == []
+    save_conversation.assert_not_awaited()
+    assert item.conversation_row_id == "row-1"
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
+async def test_shutdown_drain_keeps_precommitted_receipt(monkeypatch) -> None:
+    """Shutdown drain completes queued work without duplicating the receipt."""
+
+    await _reset_queue_state()
+    save_conversation = AsyncMock()
+    save_receipt = AsyncMock(return_value="row-1")
+    monkeypatch.setattr(service_module, "save_conversation", save_conversation)
+    monkeypatch.setattr(
+        service_module,
+        "save_conversation_receipt",
+        save_receipt,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "resolve_global_user_id",
+        AsyncMock(return_value="global-user-1"),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_resolve_message_envelope_identities",
+        AsyncMock(return_value=await _resolved_envelope(_request("endpoint"))),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_hydrate_reply_context",
+        AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_ensure_chat_input_worker_started",
+        lambda **_kwargs: None,
+    )
+
+    enqueue_task = asyncio.create_task(
+        service_module._enqueue_chat_request(_request("endpoint"))
+    )
+    await asyncio.sleep(0)
+    assert service_module._chat_input_queue.pending_count() == 1
+
+    await service_module._stop_chat_input_worker()
+    response = await asyncio.wait_for(enqueue_task, timeout=1.0)
+
+    assert response.messages == []
+    save_receipt.assert_awaited_once()
+    save_conversation.assert_not_awaited()
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
+async def test_native_reply_fails_closed_without_durable_receipt_time(
+    monkeypatch,
+) -> None:
+    """Missing owner received_at never promotes and never queries history."""
+
+    await _reset_queue_state()
+
+    class _Graph:
+        """Return one visible answer without a semantic native-reply request."""
+
+        async def ainvoke(self, state):
+            assert state["use_reply_feature"] is False
+            return {
+                "should_respond": True,
+                "use_reply_feature": state["use_reply_feature"],
+                "final_dialog": ["legacy answer"],
+                "future_promises": [],
+                "consolidation_state": None,
+            }
+
+    monkeypatch.setattr(
+        service_module,
+        "_save_assistant_message",
+        AsyncMock(),
+    )
+    _patch_common_dependencies(monkeypatch, _Graph())
+    item = _item(1, direct_address=True)
+    item.received_at = ""
+    item.conversation_row_id = "row-1"
+
+    await service_module._process_queued_chat_item(
+        item,
+        settled_decision={
+            "response_action": "proceed",
+            "reason_to_respond": "direct character request",
+            "use_reply_feature": False,
+            "channel_topic": "",
+            "indirect_speech_context": "",
+        },
+        settlement_turn_id="turn-1",
+        settlement_version=1,
+        settlement_claimed=True,
+        prepared_media=[],
+        media_prepared=True,
+    )
+
+    response = await item.future
+    assert response.messages == ["legacy answer"]
+    assert response.use_reply_feature is False
+    service_module.has_inbound_after.assert_not_awaited()
     await _reset_queue_state()
 
 
@@ -1566,6 +3048,14 @@ async def test_enqueue_requests_same_scope_background_cancellation(
         service_module,
         "_ensure_chat_input_worker_started",
         lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_commit_ingress_receipt",
+        AsyncMock(return_value={
+            "conversation_row_id": "row-1",
+            "received_at": "2026-04-29T00:00:00+00:00",
+        }),
     )
 
     enqueue_task = asyncio.create_task(
@@ -1621,6 +3111,14 @@ async def test_cancelled_enqueue_wait_keeps_foreground_handle(
         "_ensure_chat_input_worker_started",
         lambda **_kwargs: None,
     )
+    monkeypatch.setattr(
+        service_module,
+        "_commit_ingress_receipt",
+        AsyncMock(return_value={
+            "conversation_row_id": "row-1",
+            "received_at": "2026-04-29T00:00:00+00:00",
+        }),
+    )
 
     enqueue_task = asyncio.create_task(
         service_module._enqueue_chat_request(_request("foreground"))
@@ -1651,7 +3149,7 @@ async def test_dropped_queue_item_releases_foreground_handle(monkeypatch) -> Non
     monkeypatch.setattr(
         service_module,
         "_resolve_queued_user",
-        AsyncMock(return_value=("global-user-1", {"affinity": 500})),
+        AsyncMock(return_value=("global-user-1", {"relationship_state": 500})),
     )
     monkeypatch.setattr(
         service_module,
@@ -1753,6 +3251,11 @@ async def test_dropped_message_never_invokes_graph(monkeypatch) -> None:
     save_conversation = AsyncMock()
     monkeypatch.setattr(service_module, "save_conversation", save_conversation)
     _patch_common_dependencies(monkeypatch, _Graph())
+    monkeypatch.setattr(
+        service_module,
+        "get_ambient_conversation_history",
+        AsyncMock(return_value=[]),
+    )
 
     dropped = _item(1, listen_only=True)
     tagged = _item(
@@ -1962,6 +3465,18 @@ async def test_worker_saves_collapsed_messages_before_graph(monkeypatch) -> None
         "row-1",
         "row-2",
     ]
+    assert captured_state["active_turn_conversation_source_refs"] == [
+        {
+            "ref_kind": "conversation_row",
+            "ref_id": "row-1",
+            "occurred_at": first.storage_timestamp_utc,
+        },
+        {
+            "ref_kind": "conversation_row",
+            "ref_id": "row-2",
+            "occurred_at": second.storage_timestamp_utc,
+        },
+    ]
     assert first.conversation_row_id == "row-1"
     assert second.conversation_row_id == "row-2"
     assert captured_state["should_respond"] is True
@@ -2044,7 +3559,15 @@ async def test_private_frontline_sees_complete_coalesced_logical_input(
     )
     assert current_message["semantic_target_labels"] == ["character"]
     assert captured_frontline_state["conversation_scope"] == "private"
-    assert captured_frontline_state["active_character_name"] == "Kazusa"
+    assert captured_frontline_state["active_character_name"] == (
+        "Test Character"
+    )
+    character_profile = await (
+        service_module._load_latest_character_profile_snapshot()
+    )
+    assert captured_frontline_state["character_cognition_state"] == (
+        character_profile["cognition_state"]
+    )
 
     await _reset_queue_state()
 
@@ -2155,19 +3678,16 @@ async def test_worker_derives_graph_input_from_message_envelope(monkeypatch) -> 
 
     assert response.messages == []
     assert captured_state["user_input"] == "clean body"
-    assert captured_state["character_profile"]["name"] == "Kazusa"
-    assert (
-        captured_state["character_profile"]["personality_brief"]
-        == "static brief"
+    assert captured_state["character_profile"]["name"] == "Test Character"
+    assert isinstance(
+        captured_state["character_profile"]["personality_brief"],
+        dict,
     )
-    assert captured_state["character_profile"]["mood"] == "fresh mood"
-    assert captured_state["character_profile"]["global_vibe"] == "fresh vibe"
-    assert (
-        captured_state["character_profile"]["reflection_summary"]
-        == "fresh reflection"
-    )
+    assert "mood" not in captured_state["character_profile"]
+    assert "vibe_check" not in captured_state["character_profile"]
+    assert "character_reflection" not in captured_state["character_profile"]
     assert captured_state["character_profile"]["global_user_id"] == (
-        "character-global-id"
+        CHARACTER_GLOBAL_USER_ID
     )
     assert captured_state["message_envelope"]["raw_wire_text"] == "<@bot-1> clean body"
     assert captured_state["response_action"] == "proceed"
@@ -2182,55 +3702,23 @@ async def test_worker_derives_graph_input_from_message_envelope(monkeypatch) -> 
 
 
 @pytest.mark.asyncio
-async def test_worker_skips_graph_for_empty_no_content_turn(monkeypatch) -> None:
-    """Empty turns without prompt-usable media should persist and stop."""
+async def test_enqueue_skips_empty_no_content_turn(monkeypatch) -> None:
+    """Empty turns without attachments should stop before queue persistence."""
 
     await _reset_queue_state()
-    saved_docs = []
-
-    class _Graph:
-        """Expose a mock graph call for no-content assertions."""
-
-        def __init__(self):
-            self.ainvoke = AsyncMock(return_value={
-                "should_respond": False,
-                "use_reply_feature": False,
-                "final_dialog": [],
-                "future_promises": [],
-                "consolidation_state": None,
-            })
-
-    async def _save_conversation(doc):
-        saved_docs.append(doc)
-        return_value = f"row-{doc['platform_message_id']}"
-        return return_value
-
-    graph = _Graph()
-    monkeypatch.setattr(service_module, "save_conversation", _save_conversation)
-    _patch_common_dependencies(monkeypatch, graph)
-
+    enqueue = AsyncMock()
+    monkeypatch.setattr(service_module._chat_input_queue, "enqueue", enqueue)
     item = _item(
         1,
         channel_type="private",
         platform_user_id="user-1",
         content="",
     )
-    service_module._chat_input_queue.extend_for_test([item])
 
-    service_module._ensure_chat_input_worker_started()
-    await service_module._chat_input_queue.notify_for_test()
+    response = await service_module._enqueue_chat_request(item.request)
 
-    response = await asyncio.wait_for(item.future, timeout=1.0)
-
-    assert response.messages == []
-    assert saved_docs[0]["body_text"] == ""
-    graph.ainvoke.assert_not_awaited()
-    pipeline_event = service_module.event_logging.record_pipeline_turn_event
-    pipeline_event.assert_awaited_once()
-    event_kwargs = pipeline_event.await_args.kwargs
-    assert event_kwargs["status"] == "completed"
-    assert event_kwargs["final_outcome"] == "no_content"
-    assert event_kwargs["severity"] == "info"
+    assert response == service_module.ChatResponse()
+    enqueue.assert_not_awaited()
 
     await _reset_queue_state()
 

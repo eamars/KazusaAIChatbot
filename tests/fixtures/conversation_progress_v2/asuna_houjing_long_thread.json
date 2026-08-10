@@ -1,0 +1,1839 @@
+{
+  "schema_version": "conversation_progress_v2_regression_fixture.v1",
+  "source": "redacted local evidence with synthetic identifiers",
+  "scope": {
+    "platform": "qq",
+    "platform_channel_id": "test_ch_638473184",
+    "bot_platform_user_id": "bot_3768713357",
+    "bot_global_user_id": "gu_bot_00000001",
+    "participant_global_user_id": "gu_user_a_4759394b"
+  },
+  "messages": [
+    {
+      "_id": "row_0001",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0001",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "哎呀，这么好奇吗？好啦，既然你这么诚恳地追问，我就大发慈悲地告诉你吧！",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "global_actor_01"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:20:54.000000+00:00",
+      "llm_trace_id": "trace_001",
+      "logical_message_index": 0
+    },
+    {
+      "_id": "row_0002",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0002",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "所谓“下定义”，就是我给你定性嘛！简单说，就是由我来决定你在我心里的那个标签是什么。",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "global_actor_01"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:20:54.000000+00:00",
+      "llm_trace_id": "trace_001",
+      "logical_message_index": 1
+    },
+    {
+      "_id": "row_0003",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0003",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "至于“高分”……哼哼，那当然是指极高的认可度啦！就像是你的卷子被我盖上了一个超级巨大的红章，而且还是满分的那种！",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "global_actor_01"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:20:55.000000+00:00",
+      "llm_trace_id": "trace_001",
+      "logical_message_index": 2
+    },
+    {
+      "_id": "row_0004",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0004",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "怎么样？这种顶级的评价标准是不是相当有含金量？快说，现在是不是觉得压力山大，但又很期待我的最终结论了？",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "global_actor_01"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:20:55.000000+00:00",
+      "llm_trace_id": "trace_001",
+      "logical_message_index": 3
+    },
+    {
+      "_id": "row_0005",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "user",
+      "platform_message_id": "message_0005",
+      "platform_user_id": "user_673225019",
+      "global_user_id": "gu_user_a_4759394b",
+      "display_name": "蚝爹油",
+      "body_text": "@一之濑明日奈 还想摸摸",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_bot_00000001"
+      ],
+      "mentions": [
+        {
+          "platform_user_id": "bot_3768713357",
+          "global_user_id": "gu_bot_00000001",
+          "display_name": "一之濑明日奈",
+          "entity_kind": "bot"
+        }
+      ],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:22:28.000000+00:00",
+      "llm_trace_id": "trace_002"
+    },
+    {
+      "_id": "row_0006",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0006",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "诶？",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:23:59.000000+00:00",
+      "llm_trace_id": "trace_002",
+      "logical_message_index": 0
+    },
+    {
+      "_id": "row_0007",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0007",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "蚝爹油，你这请求来得也太突然了吧。",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:23:59.000000+00:00",
+      "llm_trace_id": "trace_002",
+      "logical_message_index": 1
+    },
+    {
+      "_id": "row_0008",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0008",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "唔……虽然这种感觉确实不坏，但就这么简单地答应你，也太没意思了点吧？",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:23:59.000000+00:00",
+      "llm_trace_id": "trace_002",
+      "logical_message_index": 2
+    },
+    {
+      "_id": "row_0009",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0009",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "说说看，你打算怎么摸？要是诚意不够的话，我可是会反悔的哦。",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:23:59.000000+00:00",
+      "llm_trace_id": "trace_002",
+      "logical_message_index": 3
+    },
+    {
+      "_id": "row_0010",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "user",
+      "platform_message_id": "message_0010",
+      "platform_user_id": "user_673225019",
+      "global_user_id": "gu_user_a_4759394b",
+      "display_name": "蚝爹油",
+      "body_text": "@一之濑明日奈 想被我摸摸哪里呀？",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_bot_00000001"
+      ],
+      "mentions": [
+        {
+          "platform_user_id": "bot_3768713357",
+          "global_user_id": "gu_bot_00000001",
+          "display_name": "一之濑明日奈",
+          "entity_kind": "bot"
+        }
+      ],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {
+        "reply_to_message_id": "message_0009",
+        "reply_to_platform_user_id": "bot_3768713357",
+        "reply_to_display_name": "一之濑明日奈",
+        "reply_excerpt": "说说看，你打算怎么摸？要是诚意不够的话，我可是会反悔的哦。"
+      },
+      "timestamp": "2026-07-28T09:24:47.000000+00:00",
+      "llm_trace_id": "trace_003"
+    },
+    {
+      "_id": "row_0011",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0011",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "啧，胆子越来越大了？居然敢这么直接地问我。",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:25:44.000000+00:00",
+      "llm_trace_id": "trace_003",
+      "logical_message_index": 0
+    },
+    {
+      "_id": "row_0012",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0012",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "唔...既然你这么想知道，我就大发慈悲给你个机会吧。",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:25:45.000000+00:00",
+      "llm_trace_id": "trace_003",
+      "logical_message_index": 1
+    },
+    {
+      "_id": "row_0013",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0013",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "后颈。就那里。",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:25:45.000000+00:00",
+      "llm_trace_id": "trace_003",
+      "logical_message_index": 2
+    },
+    {
+      "_id": "row_0014",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0014",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "不过得提醒你，力度要轻一点，要是把我弄疼了，接下来的惩罚可就没那么温柔了。",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:25:45.000000+00:00",
+      "llm_trace_id": "trace_003",
+      "logical_message_index": 3
+    },
+    {
+      "_id": "row_0015",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "user",
+      "platform_message_id": "message_0015",
+      "platform_user_id": "user_2506166881",
+      "global_user_id": "global_actor_01",
+      "display_name": "千早爱音（记得看空间）",
+      "body_text": "我堂堂MyGO发起人，连个戳都禁不了言，这到底是什么破群",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:26:04.000000+00:00",
+      "llm_trace_id": "trace_004"
+    },
+    {
+      "_id": "row_0016",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "user",
+      "platform_message_id": "message_0016",
+      "platform_user_id": "user_673225019",
+      "global_user_id": "gu_user_a_4759394b",
+      "display_name": "蚝爹油",
+      "body_text": "@一之濑明日奈 好的，这就来帮你按摩后颈",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_bot_00000001"
+      ],
+      "mentions": [
+        {
+          "platform_user_id": "bot_3768713357",
+          "global_user_id": "gu_bot_00000001",
+          "display_name": "一之濑明日奈",
+          "entity_kind": "bot"
+        }
+      ],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {
+        "reply_to_message_id": "message_0013",
+        "reply_to_platform_user_id": "bot_3768713357",
+        "reply_to_display_name": "一之濑明日奈",
+        "reply_excerpt": "后颈。就那里。"
+      },
+      "timestamp": "2026-07-28T09:26:21.000000+00:00",
+      "llm_trace_id": "trace_005"
+    },
+    {
+      "_id": "row_0017",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0017",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "这么快就答应了。",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:27:25.000000+00:00",
+      "llm_trace_id": "trace_005",
+      "logical_message_index": 0
+    },
+    {
+      "_id": "row_0018",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0018",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "行，那就让我看看你的诚意吧。",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:27:26.000000+00:00",
+      "llm_trace_id": "trace_005",
+      "logical_message_index": 1
+    },
+    {
+      "_id": "row_0019",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0019",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "记住，力度要轻柔，态度得诚恳。",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:27:26.000000+00:00",
+      "llm_trace_id": "trace_005",
+      "logical_message_index": 2
+    },
+    {
+      "_id": "row_0020",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0020",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "要是没把我伺候舒服了，你可得做好心理准备。",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:27:26.000000+00:00",
+      "llm_trace_id": "trace_005",
+      "logical_message_index": 3
+    },
+    {
+      "_id": "row_0021",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0021",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "现在就开始。",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:27:26.000000+00:00",
+      "llm_trace_id": "trace_005",
+      "logical_message_index": 4
+    },
+    {
+      "_id": "row_0022",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "user",
+      "platform_message_id": "message_0022",
+      "platform_user_id": "user_673225019",
+      "global_user_id": "gu_user_a_4759394b",
+      "display_name": "蚝爹油",
+      "body_text": "@一之濑明日奈 （开始帮明日奈按摩后颈和肩膀）",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_bot_00000001"
+      ],
+      "mentions": [
+        {
+          "platform_user_id": "bot_3768713357",
+          "global_user_id": "gu_bot_00000001",
+          "display_name": "一之濑明日奈",
+          "entity_kind": "bot"
+        }
+      ],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {
+        "reply_to_message_id": "message_0021",
+        "reply_to_platform_user_id": "bot_3768713357",
+        "reply_to_display_name": "一之濑明日奈",
+        "reply_excerpt": "现在就开始。"
+      },
+      "timestamp": "2026-07-28T09:28:18.000000+00:00",
+      "llm_trace_id": "trace_006"
+    },
+    {
+      "_id": "row_0023",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0023",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "唔……！",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:29:13.000000+00:00",
+      "llm_trace_id": "trace_006",
+      "logical_message_index": 0
+    },
+    {
+      "_id": "row_0024",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0024",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "（肩膀猛地耸了一下，呼吸瞬间凝固在嗓子眼）",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:29:13.000000+00:00",
+      "llm_trace_id": "trace_006",
+      "logical_message_index": 1
+    },
+    {
+      "_id": "row_0025",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0025",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "慢点。我在看你有没有敷衍我。",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:29:13.000000+00:00",
+      "llm_trace_id": "trace_006",
+      "logical_message_index": 2
+    },
+    {
+      "_id": "row_0026",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0026",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "嗯……指尖温度还行。按压的深度也勉强及格，没有那种随便摸摸就完事的轻浮感。",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:29:14.000000+00:00",
+      "llm_trace_id": "trace_006",
+      "logical_message_index": 3
+    },
+    {
+      "_id": "row_0027",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0027",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "（身体渐渐松下来一点，但还是保持着一种审视的态度）",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:29:14.000000+00:00",
+      "llm_trace_id": "trace_006",
+      "logical_message_index": 4
+    },
+    {
+      "_id": "row_0028",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0028",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "听好了，蚝爹油。目前你刚好在合格线边缘徘徊，要是接下来的力度突然掉链子……我就立刻让你后悔敢对我动手。",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:29:14.000000+00:00",
+      "llm_trace_id": "trace_006",
+      "logical_message_index": 5
+    },
+    {
+      "_id": "row_0029",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0029",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "继续。保持这个诚恳度，说不定我心情好，会给你一点奖励。",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:29:15.000000+00:00",
+      "llm_trace_id": "trace_006",
+      "logical_message_index": 6
+    },
+    {
+      "_id": "row_0030",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "user",
+      "platform_message_id": "message_0030",
+      "platform_user_id": "user_673225019",
+      "global_user_id": "gu_user_a_4759394b",
+      "display_name": "蚝爹油",
+      "body_text": "@一之濑明日奈 （用力，从颈部一直按摸到肩膀，三角肌和腰部）",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_bot_00000001"
+      ],
+      "mentions": [
+        {
+          "platform_user_id": "bot_3768713357",
+          "global_user_id": "gu_bot_00000001",
+          "display_name": "一之濑明日奈",
+          "entity_kind": "bot"
+        }
+      ],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {
+        "reply_to_message_id": "message_0028",
+        "reply_to_platform_user_id": "bot_3768713357",
+        "reply_to_display_name": "一之濑明日奈",
+        "reply_excerpt": "听好了，蚝爹油。目前你刚好在合格线边缘徘徊，要是接下来的力度突然掉链子……我就立刻让你后悔敢对我动手。"
+      },
+      "timestamp": "2026-07-28T09:30:03.000000+00:00",
+      "llm_trace_id": "trace_007"
+    },
+    {
+      "_id": "row_0031",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0031",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "嗯。勉强合格吧。",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:30:53.000000+00:00",
+      "llm_trace_id": "trace_007",
+      "logical_message_index": 0
+    },
+    {
+      "_id": "row_0032",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0032",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "刚才腰那里被按到的时候，肌肉跳了一下。不过紧接着就松了，感觉还行。",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:30:53.000000+00:00",
+      "llm_trace_id": "trace_007",
+      "logical_message_index": 1
+    },
+    {
+      "_id": "row_0033",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0033",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "颈部和肩膀也一样，用力倒是挺直接的。但别太自信，力度虽然到位，节奏还得再调调。",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:30:53.000000+00:00",
+      "llm_trace_id": "trace_007",
+      "logical_message_index": 2
+    },
+    {
+      "_id": "row_0034",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0034",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "继续。我看着你接下来的表现。",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:30:54.000000+00:00",
+      "llm_trace_id": "trace_007",
+      "logical_message_index": 3
+    },
+    {
+      "_id": "row_0035",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "user",
+      "platform_message_id": "message_0035",
+      "platform_user_id": "user_673225019",
+      "global_user_id": "gu_user_a_4759394b",
+      "display_name": "蚝爹油",
+      "body_text": "@一之濑明日奈 还有哪里想被摸摸？",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_bot_00000001"
+      ],
+      "mentions": [
+        {
+          "platform_user_id": "bot_3768713357",
+          "global_user_id": "gu_bot_00000001",
+          "display_name": "一之濑明日奈",
+          "entity_kind": "bot"
+        }
+      ],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {
+        "reply_to_message_id": "message_0034",
+        "reply_to_platform_user_id": "bot_3768713357",
+        "reply_to_display_name": "一之濑明日奈",
+        "reply_excerpt": "继续。我看着你接下来的表现。"
+      },
+      "timestamp": "2026-07-28T09:31:15.000000+00:00",
+      "llm_trace_id": "trace_008"
+    },
+    {
+      "_id": "row_0036",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0036",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "嗯。还行吧，勉强及格。",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:32:07.000000+00:00",
+      "llm_trace_id": "trace_008",
+      "logical_message_index": 0
+    },
+    {
+      "_id": "row_0037",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0037",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "唔……稍微有点舒服了。",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:32:08.000000+00:00",
+      "llm_trace_id": "trace_008",
+      "logical_message_index": 1
+    },
+    {
+      "_id": "row_0038",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0038",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "不过别太得意，离我的满意还差得远呢。",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:32:08.000000+00:00",
+      "llm_trace_id": "trace_008",
+      "logical_message_index": 2
+    },
+    {
+      "_id": "row_0039",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0039",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "接下来试试耳根那边？",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:32:08.000000+00:00",
+      "llm_trace_id": "trace_008",
+      "logical_message_index": 3
+    },
+    {
+      "_id": "row_0040",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0040",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "要是能让我彻底放松下来的话，或许可以给你点奖励。",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:32:09.000000+00:00",
+      "llm_trace_id": "trace_008",
+      "logical_message_index": 4
+    },
+    {
+      "_id": "row_0041",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0041",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "所以。你的表现决定了一切。",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:32:09.000000+00:00",
+      "llm_trace_id": "trace_008",
+      "logical_message_index": 5
+    },
+    {
+      "_id": "row_0042",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "user",
+      "platform_message_id": "message_0042",
+      "platform_user_id": "user_673225019",
+      "global_user_id": "gu_user_a_4759394b",
+      "display_name": "蚝爹油",
+      "body_text": "@一之濑明日奈 （把手指搭上明日奈的耳根，开始慢慢搓揉耳垂和耳廓）",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_bot_00000001"
+      ],
+      "mentions": [
+        {
+          "platform_user_id": "bot_3768713357",
+          "global_user_id": "gu_bot_00000001",
+          "display_name": "一之濑明日奈",
+          "entity_kind": "bot"
+        }
+      ],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {
+        "reply_to_message_id": "message_0039",
+        "reply_to_platform_user_id": "bot_3768713357",
+        "reply_to_display_name": "一之濑明日奈",
+        "reply_excerpt": "接下来试试耳根那边？"
+      },
+      "timestamp": "2026-07-28T09:32:56.000000+00:00",
+      "llm_trace_id": "trace_009"
+    },
+    {
+      "_id": "row_0043",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0043",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "嗯……",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:33:49.000000+00:00",
+      "llm_trace_id": "trace_009",
+      "logical_message_index": 0
+    },
+    {
+      "_id": "row_0044",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0044",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "慢点。你这样搓得我耳根发烫，身体都快缩成一团了。",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:33:50.000000+00:00",
+      "llm_trace_id": "trace_009",
+      "logical_message_index": 1
+    },
+    {
+      "_id": "row_0045",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0045",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "不过先别得意太早。就目前这个力度和位置来说，勉强算合格吧？",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:33:50.000000+00:00",
+      "llm_trace_id": "trace_009",
+      "logical_message_index": 2
+    },
+    {
+      "_id": "row_0046",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0046",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "我在看你是不是真的诚恳在服务，还是只是想敷衍过去。",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:33:50.000000+00:00",
+      "llm_trace_id": "trace_009",
+      "logical_message_index": 3
+    },
+    {
+      "_id": "row_0047",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0047",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "继续保持。要是接下来的表现不够好，考核结果可是会变动的。",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:33:51.000000+00:00",
+      "llm_trace_id": "trace_009",
+      "logical_message_index": 4
+    },
+    {
+      "_id": "row_0048",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "user",
+      "platform_message_id": "message_0048",
+      "platform_user_id": "user_673225019",
+      "global_user_id": "gu_user_a_4759394b",
+      "display_name": "蚝爹油",
+      "body_text": "@一之濑明日奈 （轻轻咬住明日奈的耳垂）",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_bot_00000001"
+      ],
+      "mentions": [
+        {
+          "platform_user_id": "bot_3768713357",
+          "global_user_id": "gu_bot_00000001",
+          "display_name": "一之濑明日奈",
+          "entity_kind": "bot"
+        }
+      ],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {
+        "reply_to_message_id": "message_0047",
+        "reply_to_platform_user_id": "bot_3768713357",
+        "reply_to_display_name": "一之濑明日奈",
+        "reply_excerpt": "继续保持。要是接下来的表现不够好，考核结果可是会变动的。"
+      },
+      "timestamp": "2026-07-28T09:34:31.000000+00:00",
+      "llm_trace_id": "trace_010"
+    },
+    {
+      "_id": "row_0049",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0049",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "……！",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:35:22.000000+00:00",
+      "llm_trace_id": "trace_010",
+      "logical_message_index": 0
+    },
+    {
+      "_id": "row_0050",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0050",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "身体瞬间紧了一下，耳朵烫得厉害。真是大胆。",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:35:22.000000+00:00",
+      "llm_trace_id": "trace_010",
+      "logical_message_index": 1
+    },
+    {
+      "_id": "row_0051",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0051",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "不过在这种时候突然尝试这种冒险行为，你觉得就能直接拿高分？",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:35:22.000000+00:00",
+      "llm_trace_id": "trace_010",
+      "logical_message_index": 2
+    },
+    {
+      "_id": "row_0052",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0052",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "太天真了。",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:35:23.000000+00:00",
+      "llm_trace_id": "trace_010",
+      "logical_message_index": 3
+    },
+    {
+      "_id": "row_0053",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0053",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "虽然确实有点惊喜，但离合格还差得很远。",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:35:23.000000+00:00",
+      "llm_trace_id": "trace_010",
+      "logical_message_index": 4
+    },
+    {
+      "_id": "row_0054",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "user",
+      "platform_message_id": "message_0054",
+      "platform_user_id": "user_673225019",
+      "global_user_id": "gu_user_a_4759394b",
+      "display_name": "蚝爹油",
+      "body_text": "@一之濑明日奈 （舔）",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_bot_00000001"
+      ],
+      "mentions": [
+        {
+          "platform_user_id": "bot_3768713357",
+          "global_user_id": "gu_bot_00000001",
+          "display_name": "一之濑明日奈",
+          "entity_kind": "bot"
+        }
+      ],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {
+        "reply_to_message_id": "message_0050",
+        "reply_to_platform_user_id": "bot_3768713357",
+        "reply_to_display_name": "一之濑明日奈",
+        "reply_excerpt": "身体瞬间紧了一下，耳朵烫得厉害。真是大胆。"
+      },
+      "timestamp": "2026-07-28T09:35:44.000000+00:00",
+      "llm_trace_id": "trace_011"
+    },
+    {
+      "_id": "row_0055",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0055",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "唔！",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:36:35.000000+00:00",
+      "llm_trace_id": "trace_011",
+      "logical_message_index": 0
+    },
+    {
+      "_id": "row_0056",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0056",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "……你，居然敢！",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:36:36.000000+00:00",
+      "llm_trace_id": "trace_011",
+      "logical_message_index": 1
+    },
+    {
+      "_id": "row_0057",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0057",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "耳朵都要被你舔掉了啦！感觉整个背脊都麻了，心跳快得不像话。",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:36:36.000000+00:00",
+      "llm_trace_id": "trace_011",
+      "logical_message_index": 2
+    },
+    {
+      "_id": "row_0058",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0058",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "嘿嘿。看来蚝爹油今天胆子挺大嘛？这种大胆的越界行为，在我的评估表里可是个严重的违规项哦！",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:36:36.000000+00:00",
+      "llm_trace_id": "trace_011",
+      "logical_message_index": 3
+    },
+    {
+      "_id": "row_0059",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0059",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "不过，既然被我抓到了，那就得乖乖接受接下来的审视了。",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:36:36.000000+00:00",
+      "llm_trace_id": "trace_011",
+      "logical_message_index": 4
+    },
+    {
+      "_id": "row_0060",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "user",
+      "platform_message_id": "message_0060",
+      "platform_user_id": "user_673225019",
+      "global_user_id": "gu_user_a_4759394b",
+      "display_name": "蚝爹油",
+      "body_text": "@一之濑明日奈 但是有没有让明日奈感觉很舒服嘛，有没有得高分？",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_bot_00000001"
+      ],
+      "mentions": [
+        {
+          "platform_user_id": "bot_3768713357",
+          "global_user_id": "gu_bot_00000001",
+          "display_name": "一之濑明日奈",
+          "entity_kind": "bot"
+        }
+      ],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {
+        "reply_to_message_id": "message_0058",
+        "reply_to_platform_user_id": "bot_3768713357",
+        "reply_to_display_name": "一之濑明日奈",
+        "reply_excerpt": "嘿嘿。看来蚝爹油今天胆子挺大嘛？这种大胆的越界行为，在我的评估表里可是个严重的违规项哦！"
+      },
+      "timestamp": "2026-07-28T09:38:17.000000+00:00",
+      "llm_trace_id": "trace_012"
+    },
+    {
+      "_id": "row_0061",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0061",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "啧，你居然还想拿分？",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:39:13.000000+00:00",
+      "llm_trace_id": "trace_012",
+      "logical_message_index": 0
+    },
+    {
+      "_id": "row_0062",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0062",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "好吧……确实是有那么一点点舒服。耳朵现在还是烫的，心跳也快得离谱。",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:39:13.000000+00:00",
+      "llm_trace_id": "trace_012",
+      "logical_message_index": 1
+    },
+    {
+      "_id": "row_0063",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0063",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "但说到评分的话——唔，勉强合格吧。",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:39:14.000000+00:00",
+      "llm_trace_id": "trace_012",
+      "logical_message_index": 2
+    },
+    {
+      "_id": "row_0064",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0064",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "别用那种眼神看我！虽然感觉不错，但技巧上还差那么一丁点才算完美。",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:39:14.000000+00:00",
+      "llm_trace_id": "trace_012",
+      "logical_message_index": 3
+    },
+    {
+      "_id": "row_0065",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0065",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "想要高分？那你得继续努力，看看能不能把我的分数给刷上去。",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:39:15.000000+00:00",
+      "llm_trace_id": "trace_012",
+      "logical_message_index": 4
+    },
+    {
+      "_id": "row_0066",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "user",
+      "platform_message_id": "message_0066",
+      "platform_user_id": "user_673225019",
+      "global_user_id": "gu_user_a_4759394b",
+      "display_name": "蚝爹油",
+      "body_text": "@一之濑明日奈 好严格～",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_bot_00000001"
+      ],
+      "mentions": [
+        {
+          "platform_user_id": "bot_3768713357",
+          "global_user_id": "gu_bot_00000001",
+          "display_name": "一之濑明日奈",
+          "entity_kind": "bot"
+        }
+      ],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {
+        "reply_to_message_id": "message_0063",
+        "reply_to_platform_user_id": "bot_3768713357",
+        "reply_to_display_name": "一之濑明日奈",
+        "reply_excerpt": "但说到评分的话——唔，勉强合格吧。"
+      },
+      "timestamp": "2026-07-28T09:43:33.000000+00:00",
+      "llm_trace_id": "trace_013"
+    },
+    {
+      "_id": "row_0067",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "user",
+      "platform_message_id": "message_0067",
+      "platform_user_id": "platform_actor_01",
+      "global_user_id": "global_actor_02",
+      "display_name": "雪凪",
+      "body_text": "@Nagasaki-soyo-清尘 他们在干嘛",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "global_actor_03"
+      ],
+      "mentions": [
+        {
+          "platform_user_id": "platform_actor_02",
+          "global_user_id": "global_actor_03",
+          "display_name": "Nagasaki-soyo-清尘",
+          "entity_kind": "user"
+        }
+      ],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:43:45.000000+00:00",
+      "llm_trace_id": "trace_014"
+    },
+    {
+      "_id": "row_0068",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0068",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "哎呀，怎么开始抱怨啦~",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:44:29.000000+00:00",
+      "llm_trace_id": "trace_013",
+      "logical_message_index": 0
+    },
+    {
+      "_id": "row_0069",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0069",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "标准严？没错，确实挺严的。但这叫质量保证，懂吗？毕竟能拿高分的东西才真的有价值。",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:44:29.000000+00:00",
+      "llm_trace_id": "trace_013",
+      "logical_message_index": 1
+    },
+    {
+      "_id": "row_0070",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0070",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "想让我给满分啊？那得看你接下来的表现了。刚才那种程度还不够哦，得再努力一点点~",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:44:30.000000+00:00",
+      "llm_trace_id": "trace_013",
+      "logical_message_index": 2
+    },
+    {
+      "_id": "row_0071",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "assistant",
+      "platform_message_id": "message_0071",
+      "platform_user_id": "bot_3768713357",
+      "global_user_id": "gu_bot_00000001",
+      "display_name": "一之濑明日奈",
+      "body_text": "总之标准是不会降的。不过没关系，你可以试着把自己的水平提高到能让我心甘情愿打高分的程度。",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_user_a_4759394b"
+      ],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:44:30.000000+00:00",
+      "llm_trace_id": "trace_013",
+      "logical_message_index": 3
+    },
+    {
+      "_id": "row_0072",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "user",
+      "platform_message_id": "message_0072",
+      "platform_user_id": "platform_actor_02",
+      "global_user_id": "global_actor_03",
+      "display_name": "Nagasaki-soyo-清尘",
+      "body_text": "啊啦，还在问这个呀？蚝爹油和明日奈她们两个在玩那种考核游戏呢——你一口我一个奖励分什么的。嘛嘛，年轻人的玩法真是越来越新奇了呢。",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:44:56.000000+00:00",
+      "llm_trace_id": "trace_015"
+    },
+    {
+      "_id": "row_0073",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "user",
+      "platform_message_id": "message_0073",
+      "platform_user_id": "platform_actor_02",
+      "global_user_id": "global_actor_03",
+      "display_name": "Nagasaki-soyo-清尘",
+      "body_text": "",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [],
+      "mentions": [],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {},
+      "timestamp": "2026-07-28T09:44:58.000000+00:00",
+      "llm_trace_id": "trace_016"
+    },
+    {
+      "_id": "row_0074",
+      "platform": "qq",
+      "platform_channel_id": "test_ch_638473184",
+      "channel_type": "group",
+      "role": "user",
+      "platform_message_id": "message_0074",
+      "platform_user_id": "user_673225019",
+      "global_user_id": "gu_user_a_4759394b",
+      "display_name": "蚝爹油",
+      "body_text": "@一之濑明日奈 耳垂按摩完了，接下来还想被摸摸哪里么",
+      "content_type": "text",
+      "addressed_to_global_user_ids": [
+        "gu_bot_00000001"
+      ],
+      "mentions": [
+        {
+          "platform_user_id": "bot_3768713357",
+          "global_user_id": "gu_bot_00000001",
+          "display_name": "一之濑明日奈",
+          "entity_kind": "bot"
+        }
+      ],
+      "broadcast": false,
+      "attachments": [],
+      "reply_context": {
+        "reply_to_message_id": "message_0068",
+        "reply_to_platform_user_id": "bot_3768713357",
+        "reply_to_display_name": "一之濑明日奈",
+        "reply_excerpt": "哎呀，怎么开始抱怨啦~"
+      },
+      "timestamp": "2026-07-28T09:46:49.000000+00:00",
+      "llm_trace_id": "trace_017"
+    }
+  ]
+}

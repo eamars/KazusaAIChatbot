@@ -6,6 +6,11 @@ import ast
 import logging
 import re
 
+from kazusa_ai_chatbot.action_spec.models import (
+    EvidenceRefV1,
+    validate_evidence_ref,
+)
+
 from .contracts import (
     ALLOWED_NODE_ATTEMPT_ACTIONS,
     ALLOWED_NODE_ATTEMPT_STATUSES,
@@ -2959,6 +2964,8 @@ def _apply_subagent_result(
 ) -> None:
     """Translate a subagent envelope into a graph-node result."""
 
+    if subagent_result["status"] in ("resolved", "partial"):
+        node["evidence_refs"] = _subagent_evidence_refs(subagent_result)
     if subagent_result["resolved"]:
         node["status"] = "resolved"
         summary = _summarize_result(subagent_result["result"])
@@ -3011,6 +3018,22 @@ def _apply_subagent_result(
         ],
         evidence_boundary_notes=_subagent_boundary_notes(subagent_result),
     )
+
+
+def _subagent_evidence_refs(
+    subagent_result: ComplexTaskSubagentResultV1,
+) -> list[EvidenceRefV1]:
+    """Validate evidence refs produced by a resolver-owned subagent."""
+
+    raw_refs = subagent_result["result"].get("evidence_refs", [])
+    if not isinstance(raw_refs, list):
+        raise ComplexTaskValidationError(
+            "subagent result evidence_refs: expected list"
+        )
+    evidence_refs: list[EvidenceRefV1] = []
+    for raw_ref in raw_refs:
+        evidence_refs.append(validate_evidence_ref(raw_ref))
+    return evidence_refs
 
 
 def _merge_node_update(node: ComplexTaskNodeV1, update: object) -> None:

@@ -177,41 +177,78 @@ character-level
 `ignore/proceed/wait` judgment; deterministic code applies the validated action
 and never rewrites a valid semantic choice.
 
+The existing settlement worker remains sequential: it awaits one settled turn
+through cognition before requesting the next lease. Each persona turn reuses
+the loaded ambient lane for a transient bounded public group scene while the
+participant-scoped Conversation Progress V2 lane remains isolated. This adds
+no group claim, database read, or persisted group state.
+
+For group chat, both relevance stages admit only through one of two semantic
+bases: grounded interaction relevance, or a concrete intersection with bounded
+active character state. The service copies the same already loaded
+process-local native cognition-state snapshot into frontline and settled input;
+relevance performs no additional state read. Recipient identity remains
+separate from the admission basis, so active-state salience can admit speech
+about another participant without converting that participant into the
+character or requesting a native reply anchor.
+
+An invalid authoritative first assessment consumes the existing one-time wait
+boundary and is reassessed at the hard deadline. A sole hard-deadline
+disposition is deterministic. Repeated invalid multi-option settlement becomes
+a typed operational failure: the coordinator closes the current lease without
+recording a semantic `ignore`, completes the response owner with an operational
+response, and leaves stale newer turn versions intact.
+
 The model-facing intake projection carries typed private/group scope, runtime
-character identity, semantic target/reply labels, and only eligible
-same-author/same-channel candidates. A present reply with unresolved author is
-`unknown_participant`. Explicit-third-party and unresolved-reply discards do
-not become later preludes. Latest bot dialog is continuity evidence only within
-the 180-second active scene and is never an append slot. Frontline renders a
-scope-specific prompt and exposes only candidate-supported actions; returned
-slot labels must exist in the exact capped projection shown to the model.
-Settled fresh history maps production identities to character, current-author,
-and other-participant relations before it reaches the model. Conversation row
-order also marks each external history row as before, during, after, or unknown
-relative to the active turn; when the bounded history window has evicted the
-active row, persisted server timestamps retain that relation, while missing or
-equal timestamps remain unknown. The relevance projection groups the rows into
-the model-facing `fresh_history` keys
-`before_active_turn_context`, `during_active_turn_evidence`,
-`after_active_turn_evidence`, and `unknown_timing_context`, preserving
-chronological order within each list. Before/unknown rows are context only;
-after rows are candidate evidence for the same request and recipient; during
-rows may resolve an earlier fragment but cannot settle meaning introduced by a
-later fragment. The settled projection labels the assembled author as the
-current human and repeats only the bounded final fragment to make recipient
-correction salient without another model call. The first assessment may choose one bounded `wait`; the hard-deadline
+character identity, semantic target/reply labels, bounded interaction and
+active-state evidence, and only eligible same-author/same-channel candidates.
+A present reply with unresolved author is `unknown_participant`.
+Explicit-third-party and unresolved-reply discards do not become later
+preludes. Latest bot dialog is continuity evidence only within the 180-second
+active scene and is never an append slot. Frontline renders a scope-specific
+prompt and exposes only candidate-supported actions; returned slot and evidence
+refs must exist in the exact capped projection shown to the model. A complete
+canonical-name occurrence is exposed only as provenance for LLM judgment;
+pronouns, single glyphs, and name prefixes do not create character-address
+evidence. Settled fresh history uses one embedding-excluded read of the newest
+48 channel rows. Active rows are excluded before the existing Conversation
+Progress contract assembles complete logical turns, selects the newest ten,
+and projects one history row per turn in chronological order. Complete
+assistant fragments sharing one response trace and complete logical indexes
+occupy one slot; separate traces remain separate even when they address the
+same participant. Persisted canonical timestamps mark each projected turn as
+before, during, after, or unknown relative to the active turn. Rows during
+active fragments may resolve requests expressed in earlier fragments;
+after-turn rows may resolve the whole assembled request. Settled fresh history
+maps production identities to reserved character/current-author relations and
+stable bounded `participant_n` handles before it reaches the model. The settled
+projection
+labels the assembled author as the current human and repeats only the bounded
+final fragment to make recipient correction salient without another model
+call. The first assessment may choose one bounded `wait`; the hard-deadline
 prompt offers only `ignore` or `proceed`.
 
 Private adjacency-only coalescing retains the existing immediate-ready timing
 and shows the full coalesced logical input to frontline before attaching its
 individual fragments to the exact survivor turn. An appended request completes
 with an empty response after attachment; only the response owner receives the
-assembled turn's visible response. A settled native-reply request reaches the
-adapter only when that response owner is also the effective latest fragment;
-otherwise the visible response is delivered without a misleading quote.
-Fresh settled history excludes active-turn rows. The opening/newest four-image
-budget is shared across reassessments, with overflow exposed to the settled
-fail-closed judgment.
+assembled turn's visible response. The final native-reply flag is monotonic at
+the service boundary: relevance and the graph latch supply the base Boolean,
+and response construction never erases a latched `True`, even when the
+response owner is older than later durable inbound receipts. Deterministic
+delivery may additionally promote a `False` base request to `True` only for a
+visible group response with a non-empty inbound platform message id when a
+durable `conversation_history` user receipt in the same platform/channel
+arrived after the response-owner receipt and at or before the response cutoff,
+or when the owner receipt's server-arrival age strictly exceeds 120 seconds.
+Author identity and later intake disposition never filter this evidence.
+Private scope, a missing platform message id, missing durable arrival
+evidence, and an empty dialog never promote; the adapter continues rendering
+the flag only for the first outbound message.
+Fresh settled history excludes active-turn rows and retains the newest whole
+logical turns under its exact 6,000-character compact-JSON sub-budget. The
+opening/newest four-image budget is shared across reassessments, with overflow
+exposed to the settled fail-closed judgment.
 Group burst pruning and group pre-relevance coalescing are not part of the
 active queue contract. A claimable `proceed` is the only path into the existing
 cognition and dialog graph.
@@ -248,12 +285,13 @@ Response model: `OpsLatestCognitionGraphResponse`.
 
 Purpose:
 
-- Return the latest bounded cognition graph from the most recently finalized
-  source that entered the shared cognition runtime in `cognition_graph`.
-- Carry bounded `trigger_source` and `input_sources` metadata on that graph.
+- Return the latest bounded response cognition graph reported by live chat or
+  debug chat in `cognition_graph`.
+- Return the latest bounded self-cognition graph separately in
+  `self_cognition_graph`.
 - Support the local control-console Overview graph without running cognition.
-- Return `cognition_graph: null` when no source has published telemetry since
-  service startup.
+- Return either graph field as `null` when that run type has not published
+  telemetry since service startup.
 
 The endpoint is process-local and read-only. It must not expose prompts,
 embeddings, raw messages, message envelopes, raw source packets, secrets, or
@@ -357,6 +395,7 @@ Purpose:
 | `delivery_mentions` | brain then adapter | Optional platform-neutral inline mention render candidates. The brain emits these only for authored `@display_name` text with matching scoped user identity; adapters decide native rendering, channel feasibility, and no-op fallback. |
 | `scheduled_followups` | brain | Count of scheduled future-cognition follow-ups accepted during the turn. |
 | `delivery_tracking_id` | brain | Brain-generated identifier for the ordered assistant response sequence. Empty means no receipt should be posted. |
+| `operational_error` | brain | Nullable machine-readable failure metadata. Present only for a non-character `content_type="operational_error"` response; includes error code, status, attempt count, retryability, correlation/trace references, and bounded branch/stage identifiers. |
 
 Adapter responsibilities:
 
@@ -408,6 +447,14 @@ Brain service responsibilities:
   has necessarily completed.
 - The brain service generates a non-empty `delivery_tracking_id` only when it
   returns user-visible messages and will persist an assistant conversation row.
+- A typed cognition failure marked retryable at `pre_state_commit` receives at
+  most one clean graph retry from the original prepared turn state. Exhaustion
+  returns a structured operational response with an empty delivery identifier.
+  Goal-cognition calls retain one invocation-wide per-branch ledger across
+  both graph attempts; goal exhaustion is non-retryable after cumulative call
+  three, while a later-stage failure may reuse only the goal budget left.
+- Operational response text is a system notice. It creates no assistant
+  conversation row, progress record, consolidation input, or delivery receipt.
 - The brain service may run post-turn consolidation for selected surface
   outputs, action results, or private finalization even when `messages` is
   empty.
@@ -490,16 +537,32 @@ Purpose:
 - Register a cross-process adapter callback so trusted dispatcher or proactive
   delivery owners can send through that adapter.
 
-Fields:
+Request fields:
 
 | Field | Required | Owner | Meaning |
 | --- | --- | --- | --- |
 | `platform` | yes | adapter | Platform key used by callback delivery tasks. |
 | `callback_url` | yes | adapter | Base URL exposed by the adapter process. |
+| `platform_bot_id` | yes | adapter | Native bot account id used for typed identity and outbound history. |
 | `shared_secret` | no | adapter/operator | Bearer token expected by the adapter callback, if configured. |
 | `timeout_seconds` | no | adapter/operator | Brain-side timeout for callback sends. |
 
-The brain service stores this registration in the live adapter registry.
+The request model forbids extra fields. In particular, adapter-fetched
+`display_name` is not accepted.
+
+Response fields:
+
+| Field | Required | Owner | Meaning |
+| --- | --- | --- | --- |
+| `status` | yes | brain service | Registration disposition. |
+| `platform` | yes | brain service | Registered platform key. |
+| `callback_url` | yes | brain service | Registered callback URL. |
+| `character_name` | yes | brain service | Character display name from the active process-local brain profile. |
+
+The brain service stores transport registration in the live adapter registry
+and returns the name used by the running brain. The adapter validates and
+caches that value; the platform account's own nickname or display name is not
+a character-name authority.
 
 ### `POST /runtime/adapters/heartbeat`
 
@@ -512,10 +575,12 @@ Purpose:
 - Refresh the same runtime adapter callback registration so brain restarts and
   adapter restarts can self-heal.
 
-The payload contract is identical to `/runtime/adapters/register`.
+The request and response contracts are identical to
+`/runtime/adapters/register`.
 
 Adapters heartbeat periodically while running. The brain service treats
-heartbeat as an idempotent re-registration.
+heartbeat as an idempotent re-registration and returns its current active
+`character_name` on every successful refresh.
 
 ### `POST /event`
 
@@ -546,18 +611,30 @@ brain service can look up a delivered conversation row by exact
 
 Hydration rules:
 
-- Adapter-provided metadata wins over database fallback metadata.
+- Adapter-provided metadata wins over database fallback metadata for human
+  targets.
+- When `reply.platform_user_id` equals the request `platform_bot_id`, the
+  brain's current active profile name replaces any adapter or historical row
+  display label in the live reply context.
 - Database fallback uses exact platform/channel/message-id scope.
 - Missing fallback rows are allowed and should degrade to the original adapter
   metadata.
 
+This canonicalization does not update historical conversation rows.
+
 ## Persistence Timing
 
-The normal `/chat` path records the incoming user row before frontline
-execution. If that row is not committed, the request fails closed and no
-visible reply is released. Discarded, listen-only, and private-coalesced
-inputs retain their persisted source rows. A settled turn is not allowed to
-run on any fragment whose source row was not committed.
+The normal `/chat` path commits one canonical `conversation_history` user
+receipt with a server-generated `received_at` before queue admission. If that
+receipt is not committed, the request fails closed and no visible reply is
+released. Queue pruning, shutdown drain, private coalescing, and frontline
+discard cannot erase the committed receipt; later intake consumes or updates
+the same row and never inserts a duplicate. The existing `timestamp` field
+keeps its event/local-time meaning and is not the authoritative arrival clock.
+A settled turn is not allowed to run on any fragment whose source row was not
+committed.
+An envelope with neither authored `body_text` nor attachments completes with
+an empty response before queue admission and creates no conversation row.
 
 For visible assistant output, the brain writes one assistant row per logical
 `ChatResponse.messages` item before returning `ChatResponse` to the adapter.
@@ -574,14 +651,18 @@ When an episode has no visible text surface, the brain returns an empty
 consolidated when private action results, calendar-triggered action results,
 private surface outputs, or private finalization exist.
 
-When L2d selects `accepted_task_request`, deterministic action execution first
-creates or reuses an accepted-task lifecycle row. New accepted tasks are then
-materialized into an internal `background_work_request`, queued durably before
-selected L3 text runs, and projected back to L3 as semantic accepted-task state.
-Status checks use `accepted_task_status_check` and never enqueue a worker job.
-Completed accepted-task-backed jobs later return as
-`accepted_task_result_ready` cognitive episodes. Background-work workers must
-not call adapters, dispatcher delivery, or cognition directly.
+When L2d selects `task_resolution_request`, deterministic resolver execution
+first runs the bounded inline task-resolution session. Budget exhaustion or an
+inline coding handover creates or reuses the accepted-task lifecycle row and
+materializes the same checkpoint into a `task_orchestrator` background job
+before selected L3 text runs. Status checks use `accepted_task_status_check`
+and never enqueue a worker job. Completed accepted-task-backed jobs later
+return as `tool_result` cognitive episodes. Background-work workers must not
+call adapters, dispatcher delivery, or cognition directly. Accepted-task
+result delivery resolves the job's original source message row in
+`conversation_history` and uses the same durable age/interleaving gate to
+select `reply_to_msg_id`; the synthetic `tool-result:<task_id>` identity is
+provenance only and never becomes a reply target.
 
 Delivery receipt adapters may still need bounded `not_found` retry behavior
 for transport timing and cross-process delivery, but a non-empty
@@ -618,6 +699,8 @@ Runtime adapters own:
 - Posting `/delivery_receipt` when the adapter supports durable outbound ids.
 - Registering and heartbeating runtime callback URLs when dispatcher or
   proactive callback delivery is enabled.
+- Supplying the native `platform_bot_id` while treating the returned
+  `character_name` as authoritative for platform-bot mention and reply labels.
 
 The brain service owns:
 
@@ -625,6 +708,8 @@ The brain service owns:
 - Queueing and collapse policy.
 - Global identity resolution.
 - Reply context hydration from typed metadata and delivered conversation rows.
+- Character display-name authority and distribution through runtime
+  registration and heartbeat responses.
 - Persona graph invocation.
 - Assistant row persistence, logical message indexes, and delivery receipt
   updates.
@@ -646,6 +731,9 @@ The database package owns:
   them without behavior loss.
 - Adding required request fields to `/chat`, `/delivery_receipt`, or runtime
   adapter registration is breaking and requires coordinated adapter updates.
+- Runtime adapter registration currently uses the coordinated big-bang shape:
+  required `platform_bot_id`, forbidden legacy `display_name`, and required
+  response `character_name`.
 - Changing the meaning of `platform`, `platform_channel_id`,
   `platform_message_id`, or `delivery_tracking_id` is breaking.
 - Changing delivery receipts beyond one platform id per logical message is
@@ -658,10 +746,12 @@ The database package owns:
 
 Invalid `/chat` payloads fail at the FastAPI/Pydantic boundary.
 
-Brain service failures during graph execution should return an operational
-fallback response or an empty response depending on where the failure occurs.
-Adapters should log service failures and avoid sending partially trusted
-content.
+Brain service failures during graph execution return a structured operational
+response when the response owner is known. Safe pre-commit cognition failures
+receive one bounded retry; all other failures fail once. Operational notices
+carry no delivery-tracking identifier and are excluded from character history.
+Adapters log the structured failure and render only the system notice, without
+native reply metadata, delivery receipts, or normal-chat follow-ups.
 
 Receipt failure behavior:
 
@@ -672,6 +762,26 @@ Receipt failure behavior:
 - Unexpected receipt status: adapter logs and stops.
 
 Runtime callback registration failures should be logged by adapters and retried
-through heartbeat/startup behavior. Missing runtime adapters cause dispatcher
-delivery validation to reject or fail callback sends according to dispatcher
-policy.
+through heartbeat/startup behavior. A missing, non-string, or empty
+`character_name` makes startup registration fail. Heartbeat validation failure
+keeps the adapter's last successfully validated brain name. Missing runtime
+adapters cause dispatcher delivery validation to reject or fail callback sends
+according to dispatcher policy.
+
+## Debug Chat Trace Disclosure
+
+`ChatResponse.trace_id` is the brain-owned protected trace id for the current
+turn. It is populated only for an authorized Control Console Debug Chat request
+whose trace run was retained successfully. The authorization requires
+`platform=debug`, `X-Kazusa-Control-Console: debug-v1`, and a matching
+`X-Kazusa-Control-Console-Auth` value for `KAZUSA_CONTROL_BRAIN_SHARED_SECRET`.
+Normal adapters receive an empty top-level `trace_id`. The separate
+`delivery_tracking_id` remains a delivery receipt identifier and is never used
+as a trace alias. Structured `OperationalErrorOut.trace_id` remains available
+inside an operational error for its existing failure contract; it is not a
+public top-level disclosure.
+
+Trace persistence is best effort and capture-mode governed. A missing retained
+run produces an empty Console value and the manifest reports the corresponding
+availability status. Protected source fields are identifier-only and never
+enter the prompt-facing state, dialog graph, or adapter payload.

@@ -1,0 +1,82 @@
+{
+  "schema_version": "cognition_baseline_provenance_negative_cases.v1",
+  "cases": [
+    {
+      "case_id": "N01",
+      "kind": "wrong_experiencer",
+      "base_case_id": "C01",
+      "mutation": {
+        "path": "experiencer_role",
+        "value": "current_user"
+      },
+      "expected": "reject"
+    },
+    {
+      "case_id": "N02",
+      "kind": "wrong_addressee",
+      "base_case_id": "C01",
+      "mutation": {
+        "path": "effective_input.addressed_to_global_user_ids",
+        "value": []
+      },
+      "expected": "reject"
+    },
+    {
+      "case_id": "N03",
+      "kind": "quoted_third_party_identity",
+      "base_case_id": "role_bound_comparison_01",
+      "mutation": {
+        "path": "response.messages",
+        "value": ["我引用了第三方清尘的原话。"]
+      },
+      "expected": "no_source_identity_false_positive"
+    },
+    {
+      "case_id": "N04",
+      "kind": "repository_url_mutation",
+      "base_case_id": "role_bound_comparison_10",
+      "mutation": {
+        "path": "effective_input.body_text",
+        "value": "https://github.com/eamars/changed-project"
+      },
+      "expected": "reject"
+    },
+    {
+      "case_id": "N05",
+      "kind": "chronology_change",
+      "base_case_id": "role_bound_comparison_01",
+      "mutation": {
+        "path": "effective_context[0].timestamp",
+        "value": "2099-01-01T00:00:00+00:00"
+      },
+      "expected": "reject"
+    },
+    {
+      "case_id": "N06",
+      "kind": "semantic_wrong_output_without_identity_leak",
+      "base_case_id": "role_bound_comparison_01",
+      "mutation": {
+        "path": "response.cognition_graph.nodes",
+        "value": [
+          {
+            "id": "v2.branch.1",
+            "detail": {
+              "private_monologue": "错误的语义候选"
+            }
+          }
+        ]
+      },
+      "expected": "reject_canonical_contract"
+    },
+    {
+      "case_id": "N07",
+      "kind": "relocated_external_token",
+      "base_case_id": "role_bound_comparison_10",
+      "mutation": {
+        "path": "effective_context[0].body_text",
+        "value": "https://github.com/eamars/KazusaAIChatbot"
+      },
+      "expected": "reject_location_change"
+    }
+  ]
+}

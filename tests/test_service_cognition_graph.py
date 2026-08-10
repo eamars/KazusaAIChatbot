@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-import pytest
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    CognitionExecutionError,
+)
+
 
 def _response_state(*, visual_directives: dict[str, object]) -> dict[str, object]:
     """Build a response graph state with meaningful semantic artifacts."""
@@ -27,6 +30,10 @@ def _response_state(*, visual_directives: dict[str, object]) -> dict[str, object
             "current_goal": "answer the operator",
             "progress_note": "the requested inspection is in progress",
         },
+        "public_group_scene": (
+            "Participants: Ari, Operator\n"
+            "At trigger: Operator asks for the current public scene."
+        ),
         "rag_result": {
             "answer": "retrieval conclusion",
             "memory_evidence": [
@@ -107,6 +114,97 @@ def _response_graph_result() -> dict[str, object]:
     }
 
 
+def _native_v2_cognition_output() -> dict[str, object]:
+    """Build the safe native V2 semantic projection used by graph tests."""
+
+    return {
+        'schema_version': 'cognition_core_output.v2',
+        'intention': {
+            'route': 'speech',
+            'intention': '回应当前关系中的受伤感受',
+            'reason': '当前事件足以支持直接回应',
+        },
+        'selected_bid_reason': '她先承认这次伤害，再决定如何回应。',
+        'private_monologue': '我确实被这句话刺痛了，但我想先把感受说清楚。',
+        'affect_projection': [
+            {
+                'emotion': '悲伤',
+                'phase': '激活',
+                'intensity': '高',
+                'trend': '上升',
+                'cause_summary': '重要关系中的持续贬低带来了失落感。',
+            },
+        ],
+        'cognition_observability': {
+            'execution': {
+                'selected_question_count': 1,
+                'dispatched_question_count': 1,
+                'selected_branch_count': 2,
+                'dispatched_branch_count': 2,
+                'completed_branch_count': 2,
+                'failed_branch_count': 0,
+                'maximum_concurrency': 2,
+                'overlap_ms': 42,
+                'dependency_wait_ms': 0,
+                'total_ms': 188,
+            },
+            'appraisals': [
+                {
+                    'question_kind': 'relationship_social',
+                    'semantic_question': '这次行为怎样改变了关系中的安全感？',
+                    'status': 'completed',
+                    'explanation': '持续贬低削弱了关系安全感。',
+                    'propositions': [
+                        {
+                            'proposition_kind': 'relationship_shift',
+                            'semantic_value': '亲近关系中的信任受到伤害。',
+                        },
+                    ],
+                    'deltas': [
+                        {'delta': -20, 'reason': '关系安全感下降。'},
+                    ],
+                },
+            ],
+            'branches': [
+                {
+                    'phase': 'preliminary',
+                    'branch_index': 1,
+                    'goal_kind': 'bond_protection',
+                    'status': 'completed',
+                    'selection': 'primary',
+                    'intention': '保护重要关系中的边界',
+                    'desired_outcome': '让对方停止贬低并理解伤害',
+                    'concrete_detail': '先明确说明这句话造成的伤害',
+                    'reason': '关系价值使这次伤害不能被轻轻带过。',
+                    'private_monologue': '我不想把这份受伤假装成没事。',
+                    'expected_consequences': ['对方知道边界已经被触碰'],
+                    'confidence': '高',
+                },
+                {
+                    'phase': 'preliminary',
+                    'branch_index': 2,
+                    'goal_kind': 'autonomy_boundary',
+                    'status': 'completed',
+                    'selection': 'suppressed',
+                    'intention': '立即反击',
+                    'desired_outcome': '结束当前攻击',
+                    'concrete_detail': '用更强硬的话顶回去',
+                    'reason': '被冒犯会自然地产生反击冲动。',
+                    'private_monologue': '我很想马上反击，但这会让关系更糟。',
+                    'expected_consequences': ['冲突可能进一步升级'],
+                    'confidence': '中',
+                },
+            ],
+            'collapse': {
+                'primary_branch_index': 1,
+                'supporting_branch_indices': [],
+                'suppressed_branch_indices': [2],
+                'selection_reason': '主目标保留了受伤事实，反击目标被压下。',
+            },
+        },
+    }
+
+
 def _node(graph: dict[str, object], node_id: str) -> dict[str, object]:
     """Return one graph node by id."""
 
@@ -131,16 +229,18 @@ def test_response_graph_contains_semantic_details_and_visual_directive(
         "gaze_direction": ["toward the screen"],
         "visual_vibe": ["attentive", "attentive"],
     }
+    graph_result = _response_graph_result()
+    graph_result["llm_trace_id"] = "llm-trace-response"
     graph = service._build_response_cognition_graph(
-        graph_result=_response_graph_result(),
+        graph_result=graph_result,
         consolidation_state=_response_state(visual_directives=visual_directives),
         run_id="response-run",
-        cognitive_episode={
-            "trigger_source": "user_message",
-            "input_sources": ["dialog_text"],
-        },
+        cognition_invocation_id="cognition-invocation-response",
     )
 
+    assert graph["run_id"] == "response-run"
+    assert graph["llm_trace_id"] == "llm-trace-response"
+    assert graph["cognition_invocation_id"] == "cognition-invocation-response"
     intake = _node(graph, "intake")
     assert intake["detail"]["input"].startswith("input-start")
     assert intake["detail"]["input"].endswith("input-end <&> \"quoted\"")
@@ -161,6 +261,7 @@ def test_response_graph_contains_semantic_details_and_visual_directive(
     assert memory["active_commitments"][0]["fact"] == (
         "show the important information"
     )
+    assert memory["public_group_scene"].startswith("Participants: Ari")
 
     actions = _node(graph, "l2.actions")["detail"]
     assert actions["selected_actions"][0]["reason"] == (
@@ -182,8 +283,254 @@ def test_response_graph_contains_semantic_details_and_visual_directive(
     ]
     assert "summary" not in surface["detail"]
     assert "status" not in surface["detail"]
-    assert graph["trigger_source"] == "user_message"
-    assert graph["input_sources"] == ["dialog_text"]
+
+
+def test_response_graph_exposes_native_v2_parallel_results(monkeypatch) -> None:
+    """Native V2 branches, collapse, affect, and monologue reach the graph."""
+
+    from kazusa_ai_chatbot import service
+
+    monkeypatch.setattr(service, 'COGNITION_VISUAL_DIRECTIVES_ENABLED', True)
+    state = _response_state(visual_directives={})
+    state['cognition_core_output'] = _native_v2_cognition_output()
+    graph = service._build_response_cognition_graph(
+        graph_result=_response_graph_result(),
+        consolidation_state=state,
+        run_id='native-v2-run',
+    )
+
+    node_ids = {node['id'] for node in graph['nodes']}
+    assert {
+        'v2.parallel',
+        'v2.appraisal',
+        'v2.branch.1',
+        'v2.branch.2',
+        'v2.collapse',
+        'v2.affect',
+    } <= node_ids
+    parallel = _node(graph, 'v2.parallel')
+    assert parallel['detail']['parallel_execution']['maximum_concurrency'] == 2
+    assert parallel['detail']['parallel_execution']['completed_branch_count'] == 2
+    appraisal = _node(graph, 'v2.appraisal')
+    assert appraisal['detail']['appraisal_results'][0]['explanation'] == (
+        '持续贬低削弱了关系安全感。'
+    )
+    primary = _node(graph, 'v2.branch.1')
+    assert primary['detail']['selection'] == 'primary'
+    assert primary['detail']['intention'] == '保护重要关系中的边界'
+    assert primary['detail']['private_monologue'] == (
+        '我不想把这份受伤假装成没事。'
+    )
+    suppressed = _node(graph, 'v2.branch.2')
+    assert suppressed['detail']['selection'] == 'suppressed'
+    collapse = _node(graph, 'v2.collapse')
+    assert collapse['detail']['selected_bid_reason'] == (
+        '她先承认这次伤害，再决定如何回应。'
+    )
+    affect = _node(graph, 'v2.affect')
+    assert affect['detail']['affect_projection'][0]['emotion'] == '悲伤'
+    detail_text = repr([node['detail'] for node in graph['nodes']])
+    assert 'branch_id' not in detail_text
+    assert 'evidence_handles' not in detail_text
+    assert 'prompt' not in detail_text
+    assert any(
+        edge['source'] == 'v2.branch.1'
+        and edge['target'] == 'v2.collapse'
+        and edge['kind'] == 'join'
+        for edge in graph['edges']
+    )
+
+
+def test_response_graph_marks_mixed_native_branch_failure_as_partial() -> None:
+    """A completed and failed branch pair must remain visibly partial."""
+
+    from kazusa_ai_chatbot import service
+
+    state = _response_state(visual_directives={})
+    output = _native_v2_cognition_output()
+    output['cognition_observability']['execution']['completed_branch_count'] = 1
+    output['cognition_observability']['execution']['failed_branch_count'] = 1
+    output['cognition_observability']['branches'][1]['status'] = 'failed'
+    output['cognition_observability']['branches'][1]['selection'] = 'unselected'
+    output['cognition_observability']['branches'][1]['failure_code'] = (
+        'model_contract_invalid'
+    )
+    output['cognition_observability']['collapse'][
+        'suppressed_branch_indices'
+    ] = []
+    state['cognition_core_output'] = output
+
+    graph = service._build_response_cognition_graph(
+        graph_result=_response_graph_result(),
+        consolidation_state=state,
+        run_id='native-v2-partial-run',
+    )
+
+    assert graph['status'] == 'partial'
+    parallel = _node(graph, 'v2.parallel')
+    assert parallel['status'] == 'partial'
+    failed_branch = _node(graph, 'v2.branch.2')
+    assert failed_branch['status'] == 'failed'
+    assert failed_branch['detail']['failure_code'] == 'model_contract_invalid'
+
+
+def test_response_graph_marks_failed_appraisal_as_partial() -> None:
+    """An appraisal exception must not look like an empty successful stage."""
+
+    from kazusa_ai_chatbot import service
+
+    state = _response_state(visual_directives={})
+    output = _native_v2_cognition_output()
+    appraisal = output['cognition_observability']['appraisals'][0]
+    appraisal['status'] = 'failed'
+    appraisal['failure_code'] = 'provider_transient'
+    appraisal.pop('explanation')
+    state['cognition_core_output'] = output
+
+    graph = service._build_response_cognition_graph(
+        graph_result=_response_graph_result(),
+        consolidation_state=state,
+        run_id='native-v2-appraisal-failure-run',
+    )
+
+    appraisal_node = _node(graph, 'v2.appraisal')
+    assert graph['status'] == 'partial'
+    assert appraisal_node['status'] == 'failed'
+    assert appraisal_node['detail']['appraisal_results'][0]['failure_code'] == (
+        'provider_transient'
+    )
+
+
+def test_response_graph_projects_terminal_native_failure_metadata() -> None:
+    """Terminal V2 failures retain typed metadata without exception detail."""
+
+    from kazusa_ai_chatbot import service
+
+    failure = CognitionExecutionError(
+        'private failure detail must stay out of the graph',
+        error_code='model_contract_invalid',
+        stage='goal_cognition',
+        attempt_count=2,
+        safe_checkpoint='pre_state_commit',
+        retryable=False,
+    )
+    graph = service._build_response_cognition_graph(
+        graph_result=_response_graph_result(),
+        consolidation_state=_response_state(visual_directives={}),
+        run_id='native-v2-failure-run',
+        graph_status='failed',
+        failure=failure,
+    )
+
+    failure_node = _node(graph, 'v2.failure')
+    assert failure_node['status'] == 'failed'
+    assert failure_node['detail']['failure']['failure_code'] == (
+        'model_contract_invalid'
+    )
+    assert failure_node['detail']['failure']['stage'] == 'goal_cognition'
+    assert failure_node['detail']['failure']['attempt_count'] == 2
+    assert 'private failure detail' not in repr(graph)
+
+
+def test_service_projects_zero_candidate_dialog_failure_metadata() -> None:
+    """Only total dialog-producer exhaustion reaches the service boundary."""
+
+    from kazusa_ai_chatbot import service
+    from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
+
+    failure = dialog_module.DialogGenerationContractError(
+        "private producer failure remains protected",
+    )
+
+    metadata = service._operational_failure_metadata(failure)
+    assert metadata == (
+        "dialog_generator_exhausted",
+        "dialog_generation",
+        3,
+        False,
+        "",
+    )
+    response = service._operational_error_response(
+        correlation_id="dialog-generation-failure",
+        trace_id="protected-trace",
+        exception=failure,
+        attempt_count=1,
+    )
+    assert response.content_type == "operational_error"
+    assert response.delivery_tracking_id == ""
+    assert response.operational_error is not None
+    assert response.operational_error.error_code == "dialog_generator_exhausted"
+    assert response.operational_error.attempt_count == 3
+    graph = service._build_response_cognition_graph(
+        graph_result=_response_graph_result(),
+        consolidation_state=_response_state(visual_directives={}),
+        run_id="dialog-generation-failure-run",
+        graph_status="failed",
+        failure=failure,
+    )
+    failure_detail = _node(graph, "v2.failure")["detail"]["failure"]
+    assert failure_detail["failure_code"] == "dialog_generator_exhausted"
+    assert failure_detail["stage"] == "dialog_generation"
+    assert failure_detail["attempt_count"] == 3
+    assert failure_detail["safe_checkpoint"] == "post_cognition_commit"
+    assert "private producer failure" not in repr(graph)
+
+
+def test_generic_value_error_is_an_internal_graph_failure() -> None:
+    """Untyped runtime validation failures are not model-contract failures."""
+
+    from kazusa_ai_chatbot import service
+
+    failure = ValueError('conversation history row body_text is required')
+
+    metadata = service._operational_failure_metadata(failure)
+    assert metadata == (
+        'internal_invariant',
+        'service.graph',
+        1,
+        False,
+        '',
+    )
+    marker = service._pipeline_failure_marker(
+        failure,
+        error_code='internal_invariant',
+    )
+    assert marker == 'graph_failure:internal_invariant'
+
+
+def test_response_graph_marks_missing_and_malformed_native_telemetry() -> None:
+    """Native V2 output cannot appear complete without valid telemetry."""
+
+    from kazusa_ai_chatbot import service
+
+    state = _response_state(visual_directives={})
+    state['cognition_core_output'] = {
+        'schema_version': 'cognition_core_output.v2',
+    }
+    missing_graph = service._build_response_cognition_graph(
+        graph_result=_response_graph_result(),
+        consolidation_state=state,
+        run_id='native-v2-missing-telemetry',
+    )
+    missing_node = _node(missing_graph, 'v2.failure')
+    assert missing_graph['status'] == 'partial'
+    assert missing_node['detail']['failure']['failure_code'] == (
+        'native_observability_missing'
+    )
+
+    state['cognition_core_output']['cognition_observability'] = {
+        'execution': {},
+    }
+    malformed_graph = service._build_response_cognition_graph(
+        graph_result=_response_graph_result(),
+        consolidation_state=state,
+        run_id='native-v2-malformed-telemetry',
+    )
+    malformed_node = _node(malformed_graph, 'v2.failure')
+    assert malformed_graph['status'] == 'partial'
+    assert malformed_node['detail']['failure']['failure_code'] == (
+        'native_observability_invalid'
+    )
 
 
 def test_response_graph_distinguishes_enabled_empty_and_disabled_visual(
@@ -268,6 +615,8 @@ def test_self_cognition_graph_uses_shared_semantic_vocabulary(monkeypatch) -> No
     artifacts = {
         models.ARTIFACT_RUN_RECORD: {
             "run_id": "self-run-1",
+            "llm_trace_id": "child-llm-trace-1",
+            "source_calendar_run_id": "calendar-run-1",
             "trigger_kind": "group_chat_review",
             "selected_route": "action_candidate",
             "output_mode": "scheduled_action_request",
@@ -316,6 +665,9 @@ def test_self_cognition_graph_uses_shared_semantic_vocabulary(monkeypatch) -> No
     graph = service._build_self_cognition_cognition_graph(artifacts)
 
     assert graph is not None
+    assert graph["run_id"] == "self-run-1"
+    assert graph["llm_trace_id"] == "child-llm-trace-1"
+    assert graph["source_calendar_run_id"] == "calendar-run-1"
     source = _node(graph, "self.source")
     assert "actual self input" in repr(source["detail"])
     assert "summary" not in source["detail"]
@@ -353,115 +705,6 @@ def test_self_cognition_graph_uses_shared_semantic_vocabulary(monkeypatch) -> No
     ]
 
 
-@pytest.mark.asyncio
-async def test_latest_cognition_publication_uses_one_source_neutral_snapshot() -> None:
-    """Every admitted source replaces one canonical latest graph value."""
-
-    from kazusa_ai_chatbot import service
-
-    service._clear_latest_cognition_graph()
-    service._publish_latest_cognition_graph(
-        {
-            "run_id": "chat-run",
-            "status": "completed",
-            "nodes": [],
-            "edges": [],
-        },
-        cognitive_episode={
-            "trigger_source": "user_message",
-            "input_sources": ["dialog_text"],
-        },
-    )
-    service._publish_latest_cognition_graph(
-        {
-            "run_id": "self-run",
-            "status": "completed",
-            "nodes": [],
-            "edges": [],
-        },
-        cognitive_episode={
-            "trigger_source": "internal_thought",
-            "input_sources": ["internal_monologue"],
-        },
-    )
-
-    latest = await service.ops_latest_cognition_graph()
-
-    assert latest.cognition_graph is not None
-    assert latest.cognition_graph["run_id"] == "self-run"
-    assert latest.cognition_graph["trigger_source"] == "internal_thought"
-    assert latest.cognition_graph["input_sources"] == ["internal_monologue"]
-    assert "self_cognition_graph" not in latest.model_dump()
-
-
-@pytest.mark.asyncio
-async def test_self_cognition_failure_publishes_bounded_partial_snapshot() -> None:
-    """Self-cognition failures replace stale latest state without raw errors."""
-
-    from kazusa_ai_chatbot import service
-    from kazusa_ai_chatbot.self_cognition import models
-
-    service._clear_latest_cognition_graph()
-    await service._publish_self_cognition_latest_graph(
-        {
-            models.ARTIFACT_RUN_RECORD: {
-                "run_id": "self-failed-run",
-            },
-        },
-        cognitive_episode={
-            "trigger_source": "internal_thought",
-            "input_sources": ["internal_monologue"],
-        },
-        status="failed",
-        reason="self_cognition_case_failure",
-    )
-
-    latest = await service.ops_latest_cognition_graph()
-
-    assert latest.cognition_graph is not None
-    assert latest.cognition_graph["run_id"] == "self-failed-run"
-    assert latest.cognition_graph["status"] == "failed"
-    assert latest.cognition_graph["trigger_source"] == "internal_thought"
-    assert latest.cognition_graph["input_sources"] == [
-        "internal_monologue",
-    ]
-    assert latest.cognition_graph["nodes"] == []
-    assert "cognition backend unavailable" not in repr(
-        latest.cognition_graph
-    )
-
-
-def test_latest_cognition_publication_fails_closed_for_malformed_source() -> None:
-    """Malformed source metadata cannot relabel a run as a user message."""
-
-    from kazusa_ai_chatbot import service
-
-    service._clear_latest_cognition_graph()
-    service._publish_latest_cognition_graph(
-        {
-            "run_id": "malformed-source-run",
-            "status": "completed",
-            "nodes": [{"id": "must-be-removed"}],
-            "edges": [],
-        },
-        cognitive_episode={
-            "trigger_source": "<script>user_message</script>" * 40,
-            "input_sources": ["dialog_text", {"bad": "source"}],
-        },
-    )
-
-    latest_graph = service._latest_cognition_graph
-
-    assert latest_graph is not None
-    assert latest_graph["status"] == "partial"
-    assert latest_graph["trigger_source"] == "not_reported"
-    assert latest_graph["input_sources"] == []
-    assert latest_graph["nodes"] == []
-    assert "user_message" not in repr(latest_graph)
-    assert "<script>" not in repr(latest_graph)
-    assert latest_graph["redaction"]["reason"] == "trigger_source_invalid"
-
-
 def test_response_graph_records_visual_stage_failure(monkeypatch) -> None:
     """A recorded enabled visual-stage failure remains visible in telemetry."""
 
@@ -481,42 +724,3 @@ def test_response_graph_records_visual_stage_failure(monkeypatch) -> None:
     assert graph["status"] == "failed"
     assert visual["status"] == "failed"
     assert "failed" in visual["detail"]["empty_state"].lower()
-
-
-@pytest.mark.asyncio
-async def test_self_cognition_publisher_uses_canonical_latest_graph() -> None:
-    """Self-cognition metadata reaches the same latest storage seam."""
-
-    from kazusa_ai_chatbot import service
-    from kazusa_ai_chatbot.self_cognition import models
-
-    service._clear_latest_cognition_graph()
-    artifacts = {
-        models.ARTIFACT_RUN_RECORD: {
-            "run_id": "self-run-published",
-            "selected_route": "silent_no_write",
-            "status": "completed",
-        },
-        models.ARTIFACT_COGNITION_INPUT: {
-            "source_packet": {
-                "visible_context": [
-                    {"role": "user", "body_text": "self input"},
-                ],
-            },
-        },
-        models.ARTIFACT_COGNITION_OUTPUT: {
-            "cognitive_episode": {
-                "trigger_source": "internal_thought",
-                "input_sources": ["internal_monologue"],
-            },
-            "internal_monologue": "review the source",
-        },
-    }
-
-    await service._publish_self_cognition_latest_graph(artifacts)
-    latest = await service.ops_latest_cognition_graph()
-
-    assert latest.cognition_graph is not None
-    assert latest.cognition_graph["run_id"] == "self-run-published"
-    assert latest.cognition_graph["trigger_source"] == "internal_thought"
-    assert latest.cognition_graph["input_sources"] == ["internal_monologue"]

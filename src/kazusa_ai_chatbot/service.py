@@ -9,20 +9,25 @@ from __future__ import annotations
 import asyncio
 from copy import deepcopy
 import hashlib
+import hmac
+import json
 import logging
 import os
 import socket
 import time
 import traceback
 from uuid import uuid4
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from contextlib import asynccontextmanager, suppress
-from typing import Any, Literal, get_args
+from typing import Any, Literal
 
-from fastapi import FastAPI, BackgroundTasks
+from fastapi import BackgroundTasks, FastAPI, Request
 
 from kazusa_ai_chatbot.action_spec.execution import execute_action_specs_for_trace
-from kazusa_ai_chatbot.action_spec.results import has_consolidatable_output
+from kazusa_ai_chatbot.action_spec.results import (
+    has_consolidatable_output,
+    project_episode_trace_for_consolidation,
+)
 from kazusa_ai_chatbot.config import (
     CALENDAR_SCHEDULER_CLAIM_LIMIT,
     CALENDAR_SCHEDULER_ENABLED,
@@ -40,6 +45,7 @@ from kazusa_ai_chatbot.config import (
     CHAT_HISTORY_RECENT_LIMIT,
     CONVERSATION_HISTORY_LIMIT,
     COGNITION_VISUAL_DIRECTIVES_ENABLED,
+    KAZUSA_CONTROL_BRAIN_SHARED_SECRET,
     MEDIA_DESCRIPTOR_CACHE_MAX_HYDRATION_ENTRIES,
     REFLECTION_CYCLE_ENABLED,
     REFLECTION_PHASE_MAX_SLOTS_PER_PERIOD,
@@ -63,20 +69,38 @@ from kazusa_ai_chatbot.calendar_scheduler.worker import (
     stop_calendar_scheduler_worker,
 )
 from kazusa_ai_chatbot.cognition_episode import (
-    CognitiveEpisode,
-    InputSource,
-    TriggerSource,
+    CURRENT_CHARACTER_ROLE,
+    CURRENT_USER_ROLE,
+    CognitiveEpisodeV1,
+    EvidenceRefV1,
+    PerceptV1,
+    TargetScopeV1,
     build_reply_media_description_rows,
-    build_text_chat_cognitive_episode,
     build_text_chat_media_description_rows,
+    build_user_message_episode,
 )
-from kazusa_ai_chatbot.cognition_chain_core.stages.l3 import (
-    VisualAgentStageError,
+from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
+    project_character_operational_state,
+    project_operational_relationship_context,
+    project_relationship_context,
+    select_character_operational_context,
 )
 from kazusa_ai_chatbot.conversation_progress import (
     ConversationProgressScope,
+    ConversationProgressSourceRefV2,
+    assemble_logical_turns,
     load_progress_context,
+    logical_turns_as_history_rows,
     record_turn_progress,
+    select_recent_logical_turns,
+    select_recordable_turn_outcome,
+)
+from kazusa_ai_chatbot.character_identity_growth.runtime import (
+    load_latest_identity_for_episode,
+    snapshot_state_update,
+)
+from kazusa_ai_chatbot.character_identity_growth.runner import (
+    reconcile_identity_growth_post_commit,
 )
 from kazusa_ai_chatbot.internal_monologue_residue import (
     load_residue_context,
@@ -88,6 +112,7 @@ from kazusa_ai_chatbot.past_dialog_cognition import (
 )
 from kazusa_ai_chatbot.llm_interface.route_report import render_llm_route_table
 from kazusa_ai_chatbot import llm_tracing
+from kazusa_ai_chatbot.llm_tracing import failure_capsule
 from kazusa_ai_chatbot.reflection_cycle.phase_scheduler import (
     REFLECTION_PHASE_GROUPS_PER_SLOT,
 )
@@ -100,20 +125,32 @@ from kazusa_ai_chatbot.db import (
     backfill_character_conversation_identity,
     check_database_connection,
     close_db,
-    compose_character_profile,
     db_bootstrap,
+    ensure_operational_character_state,
+    issue_internal_action_latch,
     ensure_character_identity,
     apply_assistant_delivery_receipt,
+    build_interaction_style_context,
+    get_current_identity,
     get_character_profile,
     get_character_runtime_state,
+    get_ambient_conversation_history,
     get_conversation_by_platform_message_id,
     get_conversation_history,
     get_user_profile,
+    get_user_message_by_platform_message_id,
+    get_user_message_by_row_id,
+    has_inbound_after,
     load_media_descriptor_entries,
+    complete_character_operational_receipt,
     query_active_commitment_memory_units_for_user,
     resolve_global_user_id,
     save_conversation,
-    split_character_profile_runtime_state,
+    save_conversation_receipt,
+    set_conversation_source_episode_id,
+    update_conversation_row_llm_trace_id,
+    upsert_post_turn_lifecycle_record,
+    IdentityLedgerNotFoundError,
 )
 from kazusa_ai_chatbot.mcp_client import mcp_manager
 from kazusa_ai_chatbot.state import IMProcessState, MultiMediaDoc, DebugModes, ReplyContext
@@ -164,6 +201,7 @@ from kazusa_ai_chatbot.brain_service.contracts import (
     Cache2AgentStatsResponse as Cache2AgentStatsResponse,
     Cache2HealthResponse as Cache2HealthResponse,
     ChatRequest,
+    ChatRequestReceiptMetadata,
     ChatResponse,
     DebugModesIn as DebugModesIn,
     DeliveryReceiptRequest,
@@ -176,24 +214,57 @@ from kazusa_ai_chatbot.brain_service.contracts import (
     OpsRuntimeStatusResponse,
     OpsSelfCognitionStatsResponse,
     OpsStatsResponse,
+    OperationalErrorOut,
     ReplyTargetIn as ReplyTargetIn,
     RuntimeAdapterRegistrationRequest,
     RuntimeAdapterRegistrationResponse,
 )
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    CognitionContextLimitError,
+    CognitionContractError,
+    CognitionExecutionError,
+    validate_cognition_observability,
+)
+from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
+    bind_v2_attempt_ledger,
+    create_v2_attempt_ledger,
+    reset_v2_attempt_ledger,
+)
 from kazusa_ai_chatbot.relevance import (
+    SettledRelevanceContractError,
     build_group_attention_context,
     frontline_relevance_agent,
     relevance_agent,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer import (
+from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer import (
     multimedia_descriptor_agent,
     select_media_for_turn,
+)
+from kazusa_ai_chatbot.nodes.dialog_agent import (
+    DialogComplianceContractError,
+    DialogVerifierContractError,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2 import persona_supervisor2
 from kazusa_ai_chatbot.nodes.persona_supervisor2_memory_lifecycle import (
     call_post_surface_memory_lifecycle_review,
 )
 from kazusa_ai_chatbot.consolidation.core import call_consolidation_subgraph
+from kazusa_ai_chatbot.consolidation.character_operational_state import (
+    CharacterOperationalExecutionContext,
+    prepare_character_operational_target,
+    run_character_operational_target,
+)
+from kazusa_ai_chatbot.cognition_core_v2.character_carryover import (
+    CharacterCarryoverServicesV1,
+    build_character_carryover_services,
+)
+from kazusa_ai_chatbot.brain_service.character_state_ordering import (
+    _registered_predecessor_receipt,
+    await_predecessors,
+    capture_predecessor_watermark,
+    complete_predecessor,
+    register_predecessor,
+)
 from kazusa_ai_chatbot.rag.cache2_policy import (
     MEDIA_DESCRIPTOR_CACHE_NAME,
 )
@@ -222,6 +293,52 @@ logger = logging.getLogger(__name__)
 MILLISECONDS_PER_SECOND = 1000
 SERVICE_COMPONENT = "brain_service"
 CONVERSATION_HISTORY_COLLECTION = "conversation_history"
+COGNITION_SAFE_RETRY_LIMIT = 1
+SETTLED_RELEVANCE_HISTORY_SCAN_LIMIT = 48
+SETTLED_RELEVANCE_LOGICAL_TURN_LIMIT = 10
+NATIVE_REPLY_DELAY_PROMOTION_THRESHOLD_SECONDS = 120.0
+OPERATIONAL_RETRY_NOTICE = (
+    "The character could not complete this turn because its response path "
+    "exhausted a safe internal retry. Please try again."
+)
+OPERATIONAL_FAILURE_NOTICE = (
+    "The character could not complete this turn because of an internal "
+    "response-path error. Please try again."
+)
+CONTROL_CONSOLE_MARKER_HEADER = "x-kazusa-control-console"
+CONTROL_CONSOLE_AUTH_HEADER = "x-kazusa-control-console-auth"
+CONTROL_CONSOLE_MARKER = "debug-v1"
+
+
+def _authorize_console_trace_request(
+    *,
+    request: Request,
+    chat_request: ChatRequest,
+) -> None:
+    """Bind Brain-side trace disclosure authorization to one chat request."""
+
+    supplied_marker = request.headers.get(CONTROL_CONSOLE_MARKER_HEADER, "")
+    supplied_secret = request.headers.get(CONTROL_CONSOLE_AUTH_HEADER, "")
+    configured_secret = KAZUSA_CONTROL_BRAIN_SHARED_SECRET
+    chat_request._console_trace_authorized = bool(
+        chat_request.platform == "debug"
+        and configured_secret
+        and supplied_marker == CONTROL_CONSOLE_MARKER
+        and hmac.compare_digest(supplied_secret, configured_secret)
+    )
+
+
+def _operator_trace_id(
+    *,
+    request: ChatRequest,
+    trace_id: str,
+    trace_recorded: bool,
+) -> str:
+    """Return the trace id only for an authorized retained Debug Chat run."""
+
+    if not trace_recorded or not request._console_trace_authorized:
+        return ""
+    return trace_id
 
 
 def _service_event_scope(req: ChatRequest) -> event_logging.EventScopeInput:
@@ -296,6 +413,39 @@ def _queue_wait_ms(item: QueuedChatItem) -> int:
     return wait_ms
 
 
+def _durable_reply_age_exceeds_threshold(
+    owner_received_at: str,
+    response_cutoff_received_at: str,
+) -> bool:
+    """Return whether durable owner age strictly exceeds the reply threshold.
+
+    Args:
+        owner_received_at: Server arrival instant of the response-owner receipt.
+        response_cutoff_received_at: Server arrival instant captured at the
+            final response boundary.
+
+    Returns:
+        True only when the owner age is strictly greater than 120.0 seconds.
+        Unparseable evidence fails closed to False.
+    """
+
+    try:
+        owner_datetime = parse_storage_utc_datetime(owner_received_at)
+        cutoff_datetime = parse_storage_utc_datetime(
+            response_cutoff_received_at,
+        )
+    except ValueError:
+        return_value = False
+        return return_value
+
+    elapsed_seconds = (cutoff_datetime - owner_datetime).total_seconds()
+    exceeds_threshold = (
+        elapsed_seconds
+        > NATIVE_REPLY_DELAY_PROMOTION_THRESHOLD_SECONDS
+    )
+    return exceeds_threshold
+
+
 def _runtime_error_fields(exc: BaseException) -> tuple[str, str, str, str]:
     """Build sanitized runtime-error metadata from an exception.
 
@@ -331,6 +481,177 @@ def _runtime_error_fields(exc: BaseException) -> tuple[str, str, str, str]:
     return return_value
 
 
+def _operational_failure_metadata(
+    exc: BaseException,
+) -> tuple[str, str, int, bool, str]:
+    """Project one internal failure into bounded response metadata.
+
+    Args:
+        exc: Failure raised at the graph or settled-relevance boundary.
+
+    Returns:
+        Error code, stage, owner attempt count, retryability, and branch id.
+    """
+
+    if isinstance(exc, CognitionContextLimitError):
+        error_code = "context_limit"
+        stage = "cognition"
+        failure_attempt_count = 1
+        retryable = False
+        branch_id = ""
+    elif isinstance(
+        exc,
+        (
+            CognitionExecutionError,
+            DialogComplianceContractError,
+            DialogVerifierContractError,
+            SettledRelevanceContractError,
+        ),
+    ):
+        error_code = str(getattr(exc, "error_code", "internal_invariant"))
+        stage = str(getattr(exc, "stage", ""))
+        failure_attempt_count = int(getattr(exc, "attempt_count", 1))
+        retryable = bool(getattr(exc, "retryable", False))
+        branch_id = str(getattr(exc, "branch_id", ""))
+    elif isinstance(exc, (TimeoutError, ConnectionError)):
+        error_code = "provider_transient"
+        stage = "service.graph"
+        failure_attempt_count = 1
+        retryable = True
+        branch_id = ""
+    elif isinstance(exc, CognitionContractError):
+        error_code = "model_contract_invalid"
+        stage = "service.graph"
+        failure_attempt_count = 1
+        retryable = False
+        branch_id = ""
+    elif isinstance(exc, ValueError):
+        error_code = "internal_invariant"
+        stage = "service.graph"
+        failure_attempt_count = 1
+        retryable = False
+        branch_id = ""
+    else:
+        error_code = "internal_invariant"
+        stage = "service.graph"
+        failure_attempt_count = 1
+        retryable = False
+        branch_id = ""
+    return_value = (
+        error_code,
+        stage,
+        max(1, failure_attempt_count),
+        retryable,
+        branch_id,
+    )
+    return return_value
+
+
+def _pipeline_failure_marker(
+    exception: BaseException,
+    *,
+    error_code: str,
+) -> str:
+    """Label graph failures by their typed semantic owner."""
+
+    cognition_failure = isinstance(
+        exception,
+        (
+            CognitionContextLimitError,
+            CognitionExecutionError,
+            CognitionContractError,
+        ),
+    )
+    failure_kind = (
+        "cognition_failure" if cognition_failure else "graph_failure"
+    )
+    marker = f"{failure_kind}:{error_code}"
+    return marker
+
+
+def _is_visual_surface_failure(exception: BaseException) -> bool:
+    """Identify a failure raised by the V2 visual surface stage."""
+
+    return (
+        isinstance(exception, CognitionExecutionError)
+        and str(getattr(exception, "stage", "")) == "surface.visual"
+    )
+
+
+def _operational_error_response(
+    *,
+    correlation_id: str,
+    trace_id: str,
+    exception: BaseException,
+    attempt_count: int,
+    operator_trace_id: str = "",
+) -> ChatResponse:
+    """Build a transparent structured operational response.
+
+    Args:
+        correlation_id: Sanitized request correlation identifier.
+        trace_id: Protected trace identifier for operator diagnosis.
+        exception: Failure being projected to the service contract.
+        attempt_count: Service-level attempts consumed by this request.
+
+    Returns:
+        Operational response carrying no delivery-tracking identifier.
+    """
+
+    (
+        error_code,
+        stage,
+        failure_attempt_count,
+        retryable,
+        branch_id,
+    ) = _operational_failure_metadata(exception)
+    exhausted = error_code.endswith("_exhausted") or (
+        retryable and attempt_count > COGNITION_SAFE_RETRY_LIMIT
+    )
+    notice = OPERATIONAL_RETRY_NOTICE if exhausted else OPERATIONAL_FAILURE_NOTICE
+    operational_error = OperationalErrorOut(
+        error_code=error_code,
+        status="exhausted" if exhausted else "failed",
+        retryable=retryable,
+        exhausted=exhausted,
+        attempt_count=max(1, attempt_count, failure_attempt_count),
+        correlation_id=correlation_id,
+        trace_id=trace_id,
+        branch_id=branch_id,
+        stage=stage,
+    )
+    return_value = ChatResponse(
+        messages=[notice],
+        content_type="operational_error",
+        delivery_tracking_id="",
+        trace_id=operator_trace_id,
+        operational_error=operational_error,
+    )
+    return return_value
+
+
+def _can_retry_cognition_failure(
+    exception: BaseException,
+    attempt_count: int,
+) -> bool:
+    """Allow one pure cognition retry from the pre-commit checkpoint.
+
+    Args:
+        exception: Graph failure classified by the cognition owner.
+        attempt_count: Number of service graph attempts already consumed.
+
+    Returns:
+        Whether one clean graph invocation is still safe and permitted.
+    """
+
+    return (
+        isinstance(exception, CognitionExecutionError)
+        and exception.retryable
+        and exception.safe_checkpoint == "pre_state_commit"
+        and attempt_count <= COGNITION_SAFE_RETRY_LIMIT
+    )
+
+
 def _register_runtime_adapter_payload(
     req: RuntimeAdapterRegistrationRequest,
     *,
@@ -349,9 +670,22 @@ def _register_runtime_adapter_payload(
     return_value = brain_runtime_registry.register_runtime_adapter_payload(
         req,
         status=status,
+        character_name=_active_character_name(),
         register_remote_runtime_adapter_func=register_remote_runtime_adapter,
     )
     return return_value
+
+
+def _active_character_name() -> str:
+    """Return the validated display name owned by the active brain profile."""
+
+    raw_character_name = _active_character_name_snapshot
+    if not isinstance(raw_character_name, str):
+        raise ValueError("character profile name must be a string")
+    character_name = raw_character_name.strip()
+    if not character_name:
+        raise ValueError("character profile name is required")
+    return character_name
 
 
 # ── Graph builder ───────────────────────────────────────────────────
@@ -386,6 +720,10 @@ async def load_conversation_episode_state(state: IMProcessState) -> dict:
     load_result = await load_progress_context(
         scope=scope,
         current_timestamp_utc=state["storage_timestamp_utc"],
+        platform_bot_id=state["platform_bot_id"],
+        active_turn_conversation_row_ids=list(
+            state.get("active_turn_conversation_row_ids", [])
+        ),
     )
     progress = load_result["conversation_progress"]
     logger.info(
@@ -424,6 +762,11 @@ async def load_conversation_episode_state(state: IMProcessState) -> dict:
     return_value = {
         "conversation_episode_state": load_result["episode_state"],
         "conversation_progress": load_result["conversation_progress"],
+        "ambient_logical_turns": load_result["ambient_logical_turns"],
+        "interaction_logical_turns": load_result[
+            "interaction_logical_turns"
+        ],
+        "conversation_progress_diagnostics": load_result["diagnostics"],
         "internal_monologue_residue_context": (
             residue_result["internal_monologue_residue_context"]
         ),
@@ -547,6 +890,15 @@ async def _hydrate_reply_context(req: ChatRequest) -> ReplyContext:
                 if body_text:
                     reply_context["reply_excerpt"] = body_text
 
+    reply_to_platform_user_id = str(
+        reply_context.get("reply_to_platform_user_id") or ""
+    )
+    if (
+        req.platform_bot_id
+        and reply_to_platform_user_id == req.platform_bot_id
+    ):
+        reply_context["reply_to_display_name"] = _active_character_name()
+
     return_value = _compact_reply_context(reply_context)
     return return_value
 
@@ -622,7 +974,7 @@ async def _save_assistant_message(result: dict) -> None:
 
 # ── Lifespan ────────────────────────────────────────────────────────
 
-_static_character_profile: dict = {}
+_active_character_name_snapshot = ""
 _runtime_character_state: dict = {}
 _graph = None
 _adapter_registry: AdapterRegistry | None = None
@@ -636,8 +988,48 @@ _self_cognition_worker_handle: SelfCognitionWorkerHandle | None = None
 _background_work_worker_handle: BackgroundWorkRuntimeHandle | None = None
 _primary_interaction_active_count = 0
 _latest_cognition_graph: dict[str, Any] | None = None
-_GRAPH_TRIGGER_SOURCES = frozenset(get_args(TriggerSource))
-_GRAPH_INPUT_SOURCES = frozenset(get_args(InputSource))
+_latest_self_cognition_graph: dict[str, Any] | None = None
+
+
+def _action_availability_runtime_for_target(
+    *,
+    platform: str,
+    platform_channel_id: str,
+    channel_type: str,
+) -> dict[str, object]:
+    """Project service-owned worker and adapter readiness for cognition."""
+
+    registry_has = getattr(_adapter_registry, "has", None)
+    adapter_ready = bool(
+        callable(registry_has)
+        and registry_has(platform)
+    )
+    adapter_status = "healthy" if adapter_ready else "unavailable"
+    return {
+        "worker_status": {
+            "accepted_task": "healthy",
+            "background_work": (
+                "healthy"
+                if BACKGROUND_WORK_WORKER_ENABLED
+                else "degraded"
+            ),
+            "orchestrator": (
+                "healthy"
+                if CALENDAR_SCHEDULER_ENABLED
+                else "unavailable"
+            ),
+        },
+        "scheduler_status": (
+            "healthy" if CALENDAR_SCHEDULER_ENABLED else "unavailable"
+        ),
+        "adapter_target_status": {
+            platform: adapter_status,
+            f"{platform}:{channel_type}": adapter_status,
+            f"{platform}:{platform_channel_id}": adapter_status,
+            "default": adapter_status,
+        },
+        "coding_workspace_status": "healthy",
+    }
 
 
 async def _evaluate_frontline_for_service(state: Mapping[str, Any]):
@@ -841,9 +1233,9 @@ async def _build_frontline_state(
     return_value = await _turn_settlement_coordinator.build_frontline_state(
         fragment,
     )
-    return_value["active_character_name"] = _static_character_profile.get(
-        "name",
-        "Character",
+    return_value["active_character_name"] = _active_character_name()
+    return_value["character_cognition_state"] = deepcopy(
+        _runtime_character_state["cognition_state"]
     )
     queue_item = fragment.queue_item
     if isinstance(queue_item, QueuedChatItem):
@@ -895,7 +1287,8 @@ async def _prepare_frontline_fragment(
     """Resolve identities and persist one message before frontline judgment."""
 
     req = item.request
-    character_name = _static_character_profile.get("name", "Character")
+    await _load_latest_character_profile_snapshot()
+    character_name = _active_character_name()
     character_global_user_id = await _ensure_character_global_identity(
         platform=req.platform,
         platform_bot_id=req.platform_bot_id,
@@ -908,7 +1301,7 @@ async def _prepare_frontline_fragment(
     item.resolved_message_envelope = message_envelope
     if not item.llm_trace_id:
         item.llm_trace_id = llm_tracing.build_trace_id()
-    await llm_tracing.ensure_llm_trace_run(
+    trace_write = await llm_tracing.ensure_llm_trace_run(
         trace_id=item.llm_trace_id,
         platform=req.platform,
         platform_channel_id=req.platform_channel_id,
@@ -916,6 +1309,9 @@ async def _prepare_frontline_fragment(
         platform_message_id=req.platform_message_id,
         global_user_id=global_user_id,
         started_at=item.storage_timestamp_utc,
+    )
+    item.llm_trace_recorded = item.llm_trace_recorded or bool(
+        trace_write["accepted"]
     )
     if not item.conversation_row_id:
         conversation_row_id = await _save_user_message_from_item(
@@ -929,6 +1325,17 @@ async def _prepare_frontline_fragment(
                 "frontline message persistence did not commit a row"
             )
         item.conversation_row_id = conversation_row_id
+    elif item.llm_trace_id:
+        try:
+            await update_conversation_row_llm_trace_id(
+                row_id=item.conversation_row_id,
+                llm_trace_id=item.llm_trace_id,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to attach trace metadata to committed ingress row: "
+                f"row={item.conversation_row_id} error={exc}"
+            )
     fragment = _build_frontline_fragment(
         item,
         message_envelope=message_envelope,
@@ -949,7 +1356,7 @@ async def _prepare_frontline_fragments(
     character_global_user_id = await _ensure_character_global_identity(
         platform=item.request.platform,
         platform_bot_id=item.request.platform_bot_id,
-        character_name=_static_character_profile.get("name", "Character"),
+        character_name=_active_character_name(),
     )
     for collapsed_item in sorted(
         item.collapsed_items,
@@ -1153,15 +1560,10 @@ async def _prepare_settled_media(
             message_envelope = await _resolve_message_envelope_identities(
                 queue_item.request,
             )
-        episode = build_text_chat_cognitive_episode(
+        episode = _build_user_message_episode_for_turn(
             episode_id=(
                 f"settlement_media:{fragment.platform_message_id}"
             ),
-            percept_id=(
-                f"settlement_media:{fragment.platform_message_id}:text"
-            ),
-            storage_timestamp_utc=fragment.storage_timestamp_utc,
-            local_time_context=queue_item.local_time_context,
             user_input=fragment.body_text,
             platform=fragment.scope[0],
             platform_channel_id=fragment.scope[1],
@@ -1170,12 +1572,18 @@ async def _prepare_settled_media(
             platform_user_id=fragment.author_platform_user_id,
             global_user_id=fragment.author_global_user_id,
             user_name=queue_item.request.display_name,
+            active_turn_platform_message_ids=[],
+            active_turn_conversation_row_ids=[],
+            local_time_context=queue_item.local_time_context,
+            created_at=fragment.storage_timestamp_utc,
+            debug_modes={},
             target_addressed_user_ids=(
                 [CHARACTER_GLOBAL_USER_ID]
                 if "character" in fragment.semantic_target_labels
                 else []
             ),
             target_broadcast="broadcast" in fragment.semantic_target_labels,
+            media_description_rows=[],
         )
         media_state = {
             "user_name": queue_item.request.display_name,
@@ -1282,42 +1690,28 @@ def _settled_state_from_lease(
         if lease.fragments
         else ""
     )
-    earliest_active_index = -1
-    latest_active_index = -1
-    external_history: list[tuple[int, dict]] = []
-    for history_index, row in enumerate(history):
-        is_active_row = (
-            row.get("platform_message_id") in active_platform_message_ids
-            or str(row.get("_id", "")) in active_conversation_row_ids
-        )
-        if is_active_row:
-            if earliest_active_index < 0:
-                earliest_active_index = history_index
-            latest_active_index = history_index
-            continue
-        external_history.append((history_index, row))
-    recent_external_history = external_history[-10:]
-    fresh_history = trim_history_dict([
-        row for _history_index, row in recent_external_history
-    ])
-    for projected_row, (history_index, _source_row) in zip(
-        fresh_history,
-        recent_external_history,
-        strict=True,
-    ):
-        if latest_active_index < 0:
-            temporal_relation = _history_relation_from_timestamp(
+    external_history = [
+        row
+        for row in history
+        if row.get("platform_message_id") not in active_platform_message_ids
+    ]
+    logical_turns = assemble_logical_turns(
+        rows=external_history,
+        excluded_row_ids=list(active_conversation_row_ids),
+    )
+    recent_logical_turns = select_recent_logical_turns(
+        logical_turns,
+        limit=SETTLED_RELEVANCE_LOGICAL_TURN_LIMIT,
+    )
+    fresh_history = logical_turns_as_history_rows(recent_logical_turns)
+    for projected_row in fresh_history:
+        projected_row["turn_temporal_relation"] = (
+            _history_relation_from_timestamp(
                 row_timestamp=projected_row.get("timestamp"),
                 earliest_active_timestamp=earliest_active_timestamp,
                 latest_active_timestamp=latest_active_timestamp,
             )
-        elif history_index > latest_active_index:
-            temporal_relation = "after_active_turn"
-        elif history_index > earliest_active_index:
-            temporal_relation = "during_active_turn"
-        else:
-            temporal_relation = "before_active_turn"
-        projected_row["turn_temporal_relation"] = temporal_relation
+        )
     leader = lease.fragments[0] if lease.fragments else None
     response_owner = next(
         (
@@ -1347,14 +1741,10 @@ def _settled_state_from_lease(
         "character" in fragment.semantic_target_labels
         for fragment in lease.fragments
     )
-    relationship_context = str(
-        user_profile.get("last_relationship_insight", "")
-    ).strip()
-    if not relationship_context:
-        relationship_context = (
-            "direct participant" if direct_participant
-            else "group participant"
-        )
+    relationship_context = (
+        "direct participant" if direct_participant
+        else "group participant"
+    )
     group_attention = ""
     if request is not None and request.channel_type == "group":
         attention_context = build_group_attention_context(
@@ -1362,15 +1752,24 @@ def _settled_state_from_lease(
             platform_bot_id=request.platform_bot_id,
         )
         group_attention = attention_context["group_attention"]
+    operational_effective_at = (
+        parse_storage_utc_datetime(latest_active_timestamp)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+    character_operational_view = project_character_operational_state(
+        _runtime_character_state["cognition_state"],
+        effective_at=operational_effective_at,
+    )
     return_value = {
         "conversation_scope": (
             response_owner.scope[2]
             if response_owner is not None
             else ""
         ),
-        "active_character_name": _static_character_profile.get(
-            "name",
-            "Character",
+        "active_character_name": _active_character_name(),
+        "character_cognition_state": deepcopy(
+            _runtime_character_state["cognition_state"]
         ),
         "assembled_fragments": fragment_rows,
         "media_descriptions": media_descriptions,
@@ -1382,7 +1781,10 @@ def _settled_state_from_lease(
             else ""
         ),
         "relationship_context": relationship_context,
-        "character_mood": str(_runtime_character_state.get("mood", "")),
+        "character_operational_context": select_character_operational_context(
+            character_operational_view,
+            consumer_role="settled_relevance",
+        ),
         "group_attention": group_attention,
         "bot_continuity": lease.latest_bot_continuity,
         "user_profile": user_profile,
@@ -1408,7 +1810,43 @@ def _settled_state_from_lease(
             else ""
         ),
     }
+    user_cognition_state = user_profile.get("cognition_state")
+    if isinstance(user_cognition_state, Mapping):
+        return_value["relationship_operational_context"] = (
+            project_relationship_context(
+                user_cognition_state,
+                effective_at=operational_effective_at,
+            )
+        )
     return return_value
+
+
+def _settled_relevance_context_consumption(
+    settled_state: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Retain the exact bounded selections supplied to settled relevance."""
+
+    result: dict[str, Any] = {}
+    character_context = settled_state.get("character_operational_context")
+    if isinstance(character_context, Mapping):
+        result["character_operational_context"] = dict(character_context)
+    relationship_context = settled_state.get("relationship_operational_context")
+    if isinstance(relationship_context, Mapping):
+        try:
+            result["relationship_context"] = (
+                project_operational_relationship_context(relationship_context)
+            )
+        except (KeyError, ValueError):
+            pass
+    style_snapshot = settled_state.get("interaction_style_context")
+    if isinstance(style_snapshot, Mapping):
+        relevance = style_snapshot.get("relevance")
+        if isinstance(relevance, Mapping):
+            result["style"] = {"relevance": dict(relevance)}
+    predecessor = settled_state.get("character_operational_predecessor_barrier")
+    if isinstance(predecessor, Mapping):
+        result["predecessor"] = dict(predecessor)
+    return result
 
 
 def _history_relation_from_timestamp(
@@ -1483,6 +1921,48 @@ def _response_owner_item(lease: AssessmentLease) -> QueuedChatItem | None:
     return None
 
 
+async def _complete_settled_operational_failure(
+    lease: AssessmentLease,
+    response_owner: QueuedChatItem,
+    exception: BaseException,
+) -> None:
+    """Complete a settled turn with a structured operational response.
+
+    Args:
+        lease: Failed settled-assessment lease.
+        response_owner: Queue item that owns the logical turn response.
+        exception: Classified operational failure from settlement.
+
+    Returns:
+        None.
+    """
+
+    closed = await _turn_settlement_coordinator.complete_failed_assessment(
+        lease,
+    )
+    if not closed:
+        return
+    response = _operational_error_response(
+        correlation_id=_chat_correlation_id(response_owner.request),
+        trace_id=response_owner.llm_trace_id,
+        exception=exception,
+        attempt_count=max(1, int(getattr(exception, "attempt_count", 1))),
+        operator_trace_id=_operator_trace_id(
+            request=response_owner.request,
+            trace_id=response_owner.llm_trace_id,
+            trace_recorded=response_owner.llm_trace_recorded,
+        ),
+    )
+    await _complete_settled_fragments(lease, response)
+    if response_owner.llm_trace_id:
+        await llm_tracing.finalize_llm_trace_run(
+            trace_id=response_owner.llm_trace_id,
+            status="failed",
+            final_dialog_count=0,
+            delivery_tracking_id="",
+        )
+
+
 async def _frontline_intake_item(item: QueuedChatItem) -> None:
     """Run persistence and frontline admission for one queued item."""
 
@@ -1532,7 +2012,16 @@ async def _frontline_intake_item(item: QueuedChatItem) -> None:
             return
 
         if outcome.action == "append":
-            _chat_input_queue.complete(item, ChatResponse())
+            _chat_input_queue.complete(
+                item,
+                ChatResponse(
+                    trace_id=_operator_trace_id(
+                        request=item.request,
+                        trace_id=item.llm_trace_id,
+                        trace_recorded=item.llm_trace_recorded,
+                    ),
+                ),
+            )
             await _release_queued_pipeline_handle(item)
             await llm_tracing.finalize_llm_trace_run(
                 trace_id=item.llm_trace_id,
@@ -1573,17 +2062,38 @@ async def _process_settlement_lease(
     """Assess and finish one ready turn while the worker owns its activity."""
 
     try:
+        predecessor_barrier = await _await_character_operational_predecessors()
+        await _refresh_runtime_character_state()
         prepared_media, additional_media_present = await _prepare_settled_media(
             lease,
         )
-        history = await get_conversation_history(
+        active_row_ids = [
+            fragment.conversation_row_id
+            for fragment in lease.fragments
+            if fragment.conversation_row_id
+        ]
+        history = await get_ambient_conversation_history(
             platform=response_owner.request.platform,
             platform_channel_id=response_owner.request.platform_channel_id,
-            limit=CONVERSATION_HISTORY_LIMIT,
+            excluded_row_ids=active_row_ids,
+            limit=SETTLED_RELEVANCE_HISTORY_SCAN_LIMIT,
         )
         settled_state = _settled_state_from_lease(
             lease,
             history=history,
+        )
+        settled_state["interaction_style_context"] = (
+            await build_interaction_style_context(
+                global_user_id=response_owner.global_user_id,
+                channel_type=response_owner.request.channel_type,
+                platform=response_owner.request.platform,
+                platform_channel_id=(
+                    response_owner.request.platform_channel_id
+                ),
+            )
+        )
+        settled_state["character_operational_predecessor_barrier"] = (
+            predecessor_barrier
         )
         decision = await _turn_settlement_coordinator.evaluate_settled(
             lease,
@@ -1593,31 +2103,48 @@ async def _process_settlement_lease(
             lease,
             decision,
         )
+    except SettledRelevanceContractError as exc:
+        logger.exception(f"Settled relevance contract failed: {exc}")
+        if lease.observation_status == "more_time_available":
+            wait_decision = {
+                "response_action": "wait",
+                "reason_to_respond": "settled relevance needs one reassessment",
+                "use_reply_feature": False,
+                "channel_topic": "",
+                "indirect_speech_context": "",
+            }
+            try:
+                wait_outcome = (
+                    await _turn_settlement_coordinator.apply_settled_decision(
+                        lease,
+                        wait_decision,
+                    )
+                )
+            except Exception as wait_exc:
+                logger.exception(
+                    f"Settled relevance wait recovery failed: {wait_exc}"
+                )
+                await _complete_settled_operational_failure(
+                    lease,
+                    response_owner,
+                    wait_exc,
+                )
+                return
+            if wait_outcome.stale or wait_outcome.response_action == "wait":
+                return
+        await _complete_settled_operational_failure(
+            lease,
+            response_owner,
+            exc,
+        )
+        return
     except Exception as exc:
         logger.exception(f"Settled relevance failed: {exc}")
-        failure_decision = {
-            "response_action": "ignore",
-            "reason_to_respond": "settled relevance failed closed",
-            "use_reply_feature": False,
-            "channel_topic": "",
-            "indirect_speech_context": "",
-        }
-        failure_outcome = (
-            await _turn_settlement_coordinator.apply_settled_decision(
-                lease,
-                failure_decision,
-            )
+        await _complete_settled_operational_failure(
+            lease,
+            response_owner,
+            exc,
         )
-        if failure_outcome.stale:
-            return
-        await _complete_settled_fragments(lease, ChatResponse())
-        if response_owner.llm_trace_id:
-            await llm_tracing.finalize_llm_trace_run(
-                trace_id=response_owner.llm_trace_id,
-                status="failed",
-                final_dialog_count=0,
-                delivery_tracking_id="",
-            )
         return
 
     if outcome.stale or outcome.response_action == "wait":
@@ -1645,13 +2172,18 @@ async def _process_settlement_lease(
             response_owner,
             settlement_fragments=list(lease.fragments),
             settled_decision=decision,
-            skip_user_persist=True,
             settlement_turn_id=lease.turn_id,
             settlement_version=lease.version,
             settlement_claimed=True,
             prepared_media=prepared_media,
             media_prepared=True,
             additional_media_present=additional_media_present,
+            interaction_style_context=settled_state[
+                "interaction_style_context"
+            ],
+            settled_relevance_context_consumption=(
+                _settled_relevance_context_consumption(settled_state)
+            ),
         )
         await _complete_settled_fragments(
             lease,
@@ -1663,6 +2195,31 @@ async def _process_settlement_lease(
             lease.turn_id,
             lease.version,
         )
+
+
+async def _await_character_operational_predecessors() -> dict[str, Any]:
+    """Release settled relevance only after prior operational work resolves."""
+
+    try:
+        watermark = capture_predecessor_watermark()
+        result = await await_predecessors(
+            before_sequence=watermark + 1,
+        )
+    except Exception:
+        return {
+            "status": "degraded",
+            "watermark": 0,
+            "awaited_count": 0,
+            "timed_out_count": 0,
+            "wait_ms": 0,
+        }
+    return {
+        "status": result.status,
+        "watermark": result.watermark,
+        "awaited_count": result.awaited_count,
+        "timed_out_count": result.timed_out_count,
+        "wait_ms": result.wait_ms,
+    }
 
 
 async def _turn_settlement_worker() -> None:
@@ -1687,132 +2244,32 @@ async def _turn_settlement_worker() -> None:
 def _clear_latest_cognition_graph() -> None:
     """Clear the process-local latest cognition graph snapshot."""
 
-    global _latest_cognition_graph
+    global _latest_cognition_graph, _latest_self_cognition_graph
 
     _latest_cognition_graph = None
+    _latest_self_cognition_graph = None
 
 
-def _publish_latest_cognition_graph(
-    cognition_graph: Mapping[str, Any] | None,
-    *,
-    cognitive_episode: Mapping[str, Any] | None,
-    run_id: str | None = None,
-    status: str = "partial",
-    reason: str = "",
-) -> None:
-    """Publish one source-bearing terminal graph to the latest store."""
+def _record_latest_cognition_graph(cognition_graph: dict[str, Any] | None) -> None:
+    """Store a bounded copy of the latest cognition graph snapshot."""
 
     global _latest_cognition_graph
 
-    trigger_source, input_sources, metadata_reason = (
-        _graph_source_metadata(cognitive_episode)
-    )
-    safe_run_id = _safe_graph_text(run_id, max_chars=120) or None
-    if isinstance(cognition_graph, Mapping):
-        safe_run_id = (
-            _safe_graph_text(cognition_graph.get("run_id"), max_chars=120)
-            or safe_run_id
-        )
-
-    effective_reason = metadata_reason or reason
-    if metadata_reason in {
-        "trigger_source_missing",
-        "trigger_source_invalid",
-    }:
-        snapshot = _minimal_latest_cognition_graph(
-            run_id=safe_run_id,
-            status="partial",
-            trigger_source=trigger_source,
-            input_sources=input_sources,
-            reason=metadata_reason,
-        )
-    elif isinstance(cognition_graph, Mapping):
-        snapshot = deepcopy(dict(cognition_graph))
-        snapshot["trigger_source"] = trigger_source
-        snapshot["input_sources"] = input_sources
-        if effective_reason:
-            redaction = snapshot.get("redaction")
-            if not isinstance(redaction, dict):
-                redaction = {}
-            else:
-                redaction = dict(redaction)
-            redaction["reason"] = effective_reason
-            snapshot["redaction"] = redaction
-    else:
-        snapshot = _minimal_latest_cognition_graph(
-            run_id=safe_run_id,
-            status=status,
-            trigger_source=trigger_source,
-            input_sources=input_sources,
-            reason=reason or "cognition_graph_not_available",
-        )
-    _latest_cognition_graph = snapshot
+    if cognition_graph is None:
+        return
+    _latest_cognition_graph = deepcopy(cognition_graph)
 
 
-def _minimal_latest_cognition_graph(
-    *,
-    run_id: str | None,
-    status: str,
-    trigger_source: str,
-    input_sources: list[str],
-    reason: str,
-) -> dict[str, Any]:
-    """Build an empty bounded snapshot for admitted projection failures."""
+def _record_latest_self_cognition_graph(
+    cognition_graph: dict[str, Any] | None,
+) -> None:
+    """Store the latest self-cognition graph separately for operator views."""
 
-    safe_status = status if status in {"failed", "partial"} else "partial"
-    return {
-        "run_id": run_id,
-        "status": safe_status,
-        "trigger_source": trigger_source,
-        "input_sources": list(input_sources),
-        "nodes": [],
-        "edges": [],
-        "redaction": {
-            "reason": reason,
-            "detail": "no graph-safe stage state was available",
-            "excluded": [
-                "prompts",
-                "embeddings",
-                "raw messages",
-                "message envelopes",
-                "raw exceptions",
-            ],
-        },
-    }
+    global _latest_self_cognition_graph
 
-
-def _graph_source_metadata(
-    cognitive_episode: Mapping[str, Any] | None,
-) -> tuple[str, list[str], str | None]:
-    """Read validated episode source metadata with a fail-closed boundary."""
-
-    if not isinstance(cognitive_episode, Mapping):
-        return "not_reported", [], "trigger_source_missing"
-
-    raw_trigger_source = cognitive_episode.get("trigger_source")
-    if (
-        not isinstance(raw_trigger_source, str)
-        or raw_trigger_source not in _GRAPH_TRIGGER_SOURCES
-    ):
-        return "not_reported", [], "trigger_source_invalid"
-
-    raw_input_sources = cognitive_episode.get("input_sources")
-    if not isinstance(raw_input_sources, list):
-        return raw_trigger_source, [], "input_sources_invalid"
-
-    input_sources: list[str] = []
-    input_sources_invalid = len(raw_input_sources) > 8
-    for raw_input_source in raw_input_sources[:8]:
-        if (
-            isinstance(raw_input_source, str)
-            and raw_input_source in _GRAPH_INPUT_SOURCES
-        ):
-            if raw_input_source not in input_sources:
-                input_sources.append(raw_input_source)
-        else:
-            input_sources_invalid = True
-    reason = "input_sources_invalid" if input_sources_invalid else None
-    return raw_trigger_source, input_sources, reason
+    if cognition_graph is None:
+        return
+    _latest_self_cognition_graph = deepcopy(cognition_graph)
 
 
 def _latest_cognition_graph_response() -> OpsLatestCognitionGraphResponse:
@@ -1820,6 +2277,7 @@ def _latest_cognition_graph_response() -> OpsLatestCognitionGraphResponse:
 
     response = OpsLatestCognitionGraphResponse(
         cognition_graph=deepcopy(_latest_cognition_graph),
+        self_cognition_graph=deepcopy(_latest_self_cognition_graph),
     )
     return response
 
@@ -1960,30 +2418,66 @@ def _ops_self_cognition_stats_payload(
 
 
 async def _refresh_runtime_character_state() -> None:
-    """Replace the process-local runtime state with the current DB projection."""
+    """Refresh the process-local runtime state from a V2 DB projection."""
     global _runtime_character_state
 
     runtime_state = await get_character_runtime_state()
-    _runtime_character_state = runtime_state
+    cognition_state = runtime_state.get("cognition_state")
+    updated_at = runtime_state.get("updated_at")
+    if (
+        not isinstance(cognition_state, Mapping)
+        or not isinstance(updated_at, str)
+        or not updated_at.strip()
+    ):
+        if "cognition_state" in _runtime_character_state:
+            logger.warning(
+                "Ignoring incomplete runtime character-state refresh; "
+                "retaining the current V2 projection"
+            )
+            return
+        raise DatabaseBackendError(
+            "runtime character state is missing V2 cognition_state or updated_at"
+        )
+    _runtime_character_state = {
+        "cognition_state": deepcopy(cognition_state),
+        "updated_at": updated_at.strip(),
+    }
+
+
+async def _load_latest_character_profile_snapshot() -> dict[str, object]:
+    """Load one current composed profile and refresh narrow process snapshots."""
+
+    character_profile = await get_character_profile(
+        character_id=CHARACTER_GLOBAL_USER_ID,
+    )
+    _adopt_character_profile_snapshot(character_profile)
+    return dict(character_profile)
+
+
+def _adopt_character_profile_snapshot(
+    character_profile: Mapping[str, object],
+) -> None:
+    """Refresh process snapshots from one transaction-checked episode profile."""
+
+    global _active_character_name_snapshot, _runtime_character_state
+
+    character_name = character_profile.get("name")
+    if not isinstance(character_name, str) or not character_name.strip():
+        raise ValueError("latest character identity requires a name")
+    _active_character_name_snapshot = character_name.strip()
+    _runtime_character_state = {
+        key: deepcopy(character_profile[key])
+        for key in ("cognition_state", "updated_at")
+        if key in character_profile
+    }
 
 
 async def _update_runtime_character_state_from_consolidation(
     consolidation_result: dict,
 ) -> None:
-    """Merge persisted runtime-state fields from a consolidation result."""
+    """Keep V2 cognition state as the sole runtime character authority."""
     global _runtime_character_state
-
-    runtime_update = {}
-    for field_name in ("mood", "global_vibe", "reflection_summary"):
-        field_value = consolidation_result.get(field_name)
-        if isinstance(field_value, str) and field_value:
-            runtime_update[field_name] = field_value
-
-    if runtime_update:
-        _runtime_character_state = {
-            **_runtime_character_state,
-            **runtime_update,
-        }
+    del consolidation_result
 
 
 def _primary_interaction_busy() -> bool:
@@ -2014,55 +2508,57 @@ async def _release_queued_pipeline_handle(item: QueuedChatItem) -> None:
     await handle.__aexit__(None, None, None)
 
 
-def _current_character_profile_snapshot() -> dict:
-    """Return the current composed character profile for background workers."""
+async def _current_character_profile_snapshot() -> dict:
+    """Return a fresh latest-only profile for background workers."""
 
-    character_profile = compose_character_profile(
-        _static_character_profile,
-        _runtime_character_state,
-        CHARACTER_GLOBAL_USER_ID,
-    )
+    character_profile = await _load_latest_character_profile_snapshot()
     return character_profile
 
 
-def _accepted_task_result_text(episode: CognitiveEpisode) -> str:
-    """Build a compact source summary for accepted-task result cognition."""
+def _accepted_task_result_text(episode: CognitiveEpisodeV1) -> str:
+    """Build a compact source summary for a completed tool-result episode."""
 
     percepts = episode.get("percepts", [])
-    result_percept = {}
+    result_content: Mapping[str, object] = {}
     for percept in percepts:
-        if percept.get("input_source") != "accepted_task_result":
+        if percept.get("source_kind") != "tool_result":
             continue
-        result_percept = percept
+        content = percept.get("content")
+        if isinstance(content, Mapping):
+            result_content = content
         break
 
-    metadata = result_percept.get("metadata", {})
-    if not isinstance(metadata, Mapping):
-        metadata = {}
-    accepted_task_summary = str(
-        metadata.get("accepted_task_summary", "")
-    ).strip()
-    failure_summary = str(metadata.get("failure_summary", "")).strip()
+    semantic_summary = str(result_content.get("semantic_summary", "")).strip()
+    failure_summary = str(result_content.get("failure_text", "")).strip()
     status = "failed" if failure_summary else "completed"
     summary_parts = [
-        f"Accepted task result is {status}.",
+        f"Tool result is {status}.",
     ]
-    if accepted_task_summary:
-        summary_parts.append(f"Task: {accepted_task_summary}.")
+    if semantic_summary:
+        summary_parts.append(f"Result: {semantic_summary}.")
     result_text = " ".join(summary_parts)
     return result_text
 
 
 def _accepted_task_result_metadata(
-    episode: CognitiveEpisode,
+    episode: CognitiveEpisodeV1,
 ) -> Mapping[str, object]:
-    """Return metadata from the accepted-task result percept."""
+    """Return prompt-safe metadata from the tool-result percept."""
 
     for percept in episode["percepts"]:
-        if percept.get("input_source") != "accepted_task_result":
+        if percept.get("source_kind") != "tool_result":
             continue
-        metadata = percept.get("metadata", {})
-        if isinstance(metadata, Mapping):
+        content = percept.get("content", {})
+        if isinstance(content, Mapping):
+            metadata = dict(content)
+            origin_metadata = episode.get("origin_metadata", {})
+            if isinstance(origin_metadata, Mapping):
+                for field_name in (
+                    "source_platform_bot_id",
+                    "source_character_name",
+                ):
+                    if field_name in origin_metadata:
+                        metadata[field_name] = origin_metadata[field_name]
             return metadata
         break
 
@@ -2071,7 +2567,7 @@ def _accepted_task_result_metadata(
 
 
 def _accepted_task_prompt_message_context(
-    episode: CognitiveEpisode,
+    episode: CognitiveEpisodeV1,
 ) -> dict[str, object]:
     """Build prompt-safe message context for an accepted-task result."""
 
@@ -2090,6 +2586,26 @@ def _accepted_task_prompt_message_context(
         "attachments": [],
     }
     return context
+
+
+def _episode_local_time_context(
+    episode: CognitiveEpisodeV1,
+) -> dict[str, str]:
+    """Extract the canonical prompt-safe local-time percept."""
+
+    for percept in episode["percepts"]:
+        if percept.get("percept_kind") != "local_time_context":
+            continue
+        content = percept.get("content")
+        if not isinstance(content, Mapping):
+            continue
+        local_context = content.get("local_time_context")
+        if isinstance(local_context, Mapping):
+            return {
+                str(key): str(value)
+                for key, value in local_context.items()
+            }
+    return {}
 
 
 def _chat_delivery_mention_users(
@@ -2147,7 +2663,7 @@ def _chat_delivery_mention_users(
 def _accepted_task_delivery_mentions(
     *,
     result: Mapping[str, object],
-    episode: CognitiveEpisode,
+    episode: CognitiveEpisodeV1,
 ) -> list[dict[str, str]]:
     """Build inline mention candidates for accepted-task result delivery."""
 
@@ -2181,7 +2697,12 @@ async def _run_accepted_task_result_post_turn(
 
     try:
         has_consolidation_state = bool(consolidation_state)
-        is_consolidatable = has_consolidatable_output(consolidation_state)
+        trace = consolidation_state.get("episode_trace")
+        is_consolidatable = (
+            has_consolidatable_output(trace)
+            if isinstance(trace, dict)
+            else False
+        )
         if visible_response_sent and has_consolidation_state:
             consolidation_state = await _run_post_turn_memory_lifecycle_background(
                 consolidation_state,
@@ -2199,8 +2720,189 @@ async def _run_accepted_task_result_post_turn(
         )
 
 
+async def _settle_runtime_episode_trace(
+    *,
+    episode: CognitiveEpisodeV1,
+    graph_result: Mapping[str, object],
+    response_dialog: list[str],
+    delivery_tracking_id: str,
+    settled_at: str,
+) -> dict[str, object]:
+    """Delegate runtime settlement to the brain post-turn owner."""
+
+    return await brain_post_turn.settle_runtime_episode_trace(
+        episode=episode,
+        graph_result=graph_result,
+        response_dialog=response_dialog,
+        delivery_tracking_id=delivery_tracking_id,
+        settled_at=settled_at,
+        issue_internal_action_latches_func=(
+            _issue_internal_action_latches_from_trace
+        ),
+    )
+
+
+async def _issue_internal_action_latches_from_trace(
+    *,
+    episode: CognitiveEpisodeV1,
+    trace: Mapping[str, object],
+    now: str,
+) -> None:
+    """Issue at most one idempotent latch per qualifying settled action."""
+
+    raw_results = trace.get("action_results", [])
+    if not isinstance(raw_results, list):
+        return
+    for raw_result in raw_results:
+        if not isinstance(raw_result, Mapping):
+            continue
+        continuation = raw_result.get("continuation")
+        if not isinstance(continuation, Mapping):
+            continue
+        if continuation.get("mode") != "immediate_followup":
+            continue
+        if continuation.get("episode_type") != "internal_thought":
+            continue
+        if raw_result.get("status") not in {
+            "executed",
+            "scheduled",
+            "pending",
+        }:
+            continue
+        action_attempt_id = str(raw_result.get("action_attempt_id") or "")
+        if not action_attempt_id:
+            raise ValueError("internal-thought continuation needs an action attempt")
+        objective = str(
+            raw_result.get("objective_summary")
+            or raw_result.get("result_summary")
+            or ""
+        ).strip()
+        if not objective:
+            raise ValueError("internal-thought continuation objective is empty")
+        raw_refs = raw_result.get("result_refs", [])
+        evidence_refs = [
+            dict(ref)
+            for ref in raw_refs
+            if isinstance(ref, Mapping)
+        ] if isinstance(raw_refs, list) else []
+        await issue_internal_action_latch(
+            source_episode_id=episode["episode_id"],
+            source_action_attempt_id=action_attempt_id,
+            continuation_objective=objective,
+            evidence_refs=evidence_refs,
+            target_scope=dict(episode["target_scope"]),
+            privacy_scope=episode["privacy_scope"],
+            continuation_depth=episode["continuation_depth"] + 1,
+            now=now,
+        )
+
+
+async def _persist_post_turn_lifecycle_record(
+    *,
+    episode: CognitiveEpisodeV1,
+    state: Mapping[str, object] | None,
+    fallback_trace: Mapping[str, object],
+    delivery_tracking_id: str,
+) -> None:
+    """Persist the linked lifecycle projection after post-turn consumers run."""
+
+    source = state if isinstance(state, Mapping) else fallback_trace
+    raw_specs = source.get("action_specs", [])
+    raw_results = source.get("action_results", [])
+    action_specs = [
+        dict(row) for row in raw_specs if isinstance(row, Mapping)
+    ] if isinstance(raw_specs, list) else []
+    action_results = [
+        dict(row) for row in raw_results if isinstance(row, Mapping)
+    ] if isinstance(raw_results, list) else []
+    raw_errors = source.get("error_codes", [])
+    error_codes = [
+        str(code) for code in raw_errors if isinstance(code, str)
+    ] if isinstance(raw_errors, list) else []
+    record = brain_post_turn.build_post_turn_lifecycle_record(
+        source_episode_id=episode["episode_id"],
+        delivery_tracking_id=delivery_tracking_id,
+        action_specs=action_specs,
+        action_results=action_results,
+        error_codes=error_codes,
+        created_at=episode["created_at"],
+    )
+    await upsert_post_turn_lifecycle_record(record)
+
+
+async def _resolve_background_reply_target(
+    *,
+    platform: str,
+    platform_channel_id: str,
+    source_message_id: str,
+) -> str | None:
+    """Resolve the durable original-source reply target for result delivery.
+
+    Returns the original source message ID only when a user-role source row
+    with a usable server received_at exists and the deterministic age or
+    interleaving gate qualifies. Missing evidence, blank IDs, and synthetic
+    tool-result identities fail closed to a normal send.
+
+    Args:
+        platform: Runtime platform of the source message.
+        platform_channel_id: Channel/group/DM id of the source message.
+        source_message_id: Original inbound platform message ID retained by the
+            completed background-work job.
+
+    Returns:
+        Original source message ID when the durable gate qualifies, otherwise
+        None.
+    """
+
+    clean_source_message_id = str(source_message_id or "").strip()
+    if (
+        not clean_source_message_id
+        or clean_source_message_id.startswith("tool-result:")
+    ):
+        return_value: str | None = None
+        return return_value
+
+    source_row = await get_user_message_by_platform_message_id(
+        platform=platform,
+        platform_channel_id=platform_channel_id,
+        platform_message_id=clean_source_message_id,
+    )
+    if source_row is None:
+        return_value = None
+        return return_value
+
+    source_received_at = str(source_row.get("received_at") or "").strip()
+    if not source_received_at:
+        return_value = None
+        return return_value
+    source_row_id = str(source_row.get("_id") or "").strip()
+    if not source_row_id:
+        return_value = None
+        return return_value
+
+    response_cutoff_received_at = storage_utc_now_iso()
+    source_age_exceeds_threshold = _durable_reply_age_exceeds_threshold(
+        source_received_at,
+        response_cutoff_received_at,
+    )
+    if not source_age_exceeds_threshold:
+        intervening = await has_inbound_after(
+            platform=platform,
+            platform_channel_id=platform_channel_id,
+            owner_row_id=source_row_id,
+            owner_received_at=source_received_at,
+            response_cutoff_received_at=response_cutoff_received_at,
+        )
+        if not intervening:
+            return_value = None
+            return return_value
+
+    return_value = clean_source_message_id
+    return return_value
+
+
 async def _deliver_accepted_task_result_episode(
-    episode: CognitiveEpisode,
+    episode: CognitiveEpisodeV1,
 ) -> dict[str, Any]:
     """Run accepted-task result cognition and deliver selected dispatcher text."""
 
@@ -2210,10 +2912,10 @@ async def _deliver_accepted_task_result_episode(
             "status": "failed",
             "reason": "adapter registry is unavailable",
         }
-    if episode["trigger_source"] != "accepted_task_result_ready":
+    if episode["trigger_source"] != "tool_result":
         return {
             "status": "failed",
-            "reason": "trigger_source must be accepted_task_result_ready",
+            "reason": "trigger_source must be tool_result",
         }
 
     target_scope = episode["target_scope"]
@@ -2234,16 +2936,51 @@ async def _deliver_accepted_task_result_episode(
             "reason": "delivery channel id is missing",
         }
 
+    source_trace_id = str(
+        episode["origin_metadata"].get("source_llm_trace_id", "")
+    ).strip()
+    source_background_work_job_id = str(
+        episode["origin_metadata"].get(
+            "source_background_work_job_id",
+            "",
+        )
+    ).strip()
+    result_trace_id = llm_tracing.build_trace_id()
+    result_trace_finalized = False
+
+    async def finalize_result_trace(
+        *,
+        status: str,
+        final_dialog_count: int,
+        delivery_tracking_id: str,
+    ) -> None:
+        """Finalize the result-delivery child trace without gating delivery."""
+
+        nonlocal result_trace_finalized
+        if result_trace_finalized:
+            return
+        result_trace_finalized = True
+        try:
+            await llm_tracing.finalize_llm_trace_run(
+                trace_id=result_trace_id,
+                status=status,
+                final_dialog_count=final_dialog_count,
+                delivery_tracking_id=delivery_tracking_id,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Background result trace finalization failed: %s",
+                exc,
+            )
+
+    operational_context: CharacterOperationalExecutionContext | None = None
+    operational_token: dict[str, Any] | None = None
+    operational_effective_at = ""
     try:
-        await _refresh_runtime_character_state()
+        character_profile = await _load_latest_character_profile_snapshot()
         user_profile = await get_user_profile(requester_global_user_id)
-        character_name = _static_character_profile.get("name", "Character")
+        character_name = _active_character_name()
         result_metadata = _accepted_task_result_metadata(episode)
-        source_name = str(
-            result_metadata.get("source_character_name", "")
-        ).strip()
-        if source_name:
-            character_name = source_name
         source_platform_bot_id = str(
             result_metadata.get("source_platform_bot_id", "")
         ).strip()
@@ -2254,11 +2991,13 @@ async def _deliver_accepted_task_result_episode(
             platform_bot_id=source_platform_bot_id,
             character_name=character_name,
         )
-        character_profile = compose_character_profile(
-            _static_character_profile,
-            _runtime_character_state,
-            character_global_user_id,
-        )
+        if (
+            character_profile.get("global_user_id")
+            != character_global_user_id
+        ):
+            raise ValueError(
+                "latest character profile has inconsistent global identity"
+            )
         history = await get_conversation_history(
             platform=platform,
             platform_channel_id=platform_channel_id,
@@ -2280,20 +3019,46 @@ async def _deliver_accepted_task_result_episode(
         debug_modes: DebugModes = {}
         if not COGNITION_VISUAL_DIRECTIVES_ENABLED:
             debug_modes["no_visual_directives"] = True
+        episode["origin_metadata"]["debug_modes"] = dict(debug_modes)
+        episode_id = str(episode["episode_id"])
+        episode_correlation_id = str(
+            episode["origin_metadata"].get("correlation_id", "")
+        ).strip() or episode_id
+        identity_snapshot = await load_latest_identity_for_episode(
+            episode_id=episode_id,
+            correlation_id=episode_correlation_id,
+            include_epistemic_core=False,
+        )
+        character_profile = identity_snapshot["character_profile"]
+        _adopt_character_profile_snapshot(character_profile)
+        character_name = _active_character_name()
+        style_snapshot = await build_interaction_style_context(
+            global_user_id=requester_global_user_id,
+            channel_type=channel_type,
+            platform=platform,
+            platform_channel_id=platform_channel_id,
+        )
         initial_state: IMProcessState = {
-            "storage_timestamp_utc": episode["storage_timestamp_utc"],
-            "local_time_context": episode["local_time_context"],
-            "llm_trace_id": llm_tracing.build_trace_id(),
+            "storage_timestamp_utc": episode["created_at"],
+            "local_time_context": _episode_local_time_context(episode),
+            "llm_trace_id": result_trace_id,
             "platform": platform,
-            "platform_message_id": episode["origin_metadata"][
-                "platform_message_id"
-            ],
+            "platform_message_id": str(
+                episode["origin_metadata"].get("platform_message_id", "")
+            ),
             "active_turn_platform_message_ids": list(
-                episode["origin_metadata"]["active_turn_platform_message_ids"]
+                episode["origin_metadata"].get(
+                    "active_turn_platform_message_ids",
+                    [],
+                )
             ),
             "active_turn_conversation_row_ids": list(
-                episode["origin_metadata"]["active_turn_conversation_row_ids"]
+                episode["origin_metadata"].get(
+                    "active_turn_conversation_row_ids",
+                    [],
+                )
             ),
+            "active_turn_conversation_source_refs": [],
             "platform_user_id": requester_platform_user_id,
             "global_user_id": requester_global_user_id,
             "user_name": requester_display_name,
@@ -2324,99 +3089,73 @@ async def _deliver_accepted_task_result_episode(
             "target_broadcast": False,
             "future_promises": [],
             "consolidation_state": {},
+            "interaction_style_context": style_snapshot,
             "promoted_reflection_context": promoted_reflection_context,
+            "action_availability_runtime": (
+                _action_availability_runtime_for_target(
+                    platform=platform,
+                    platform_channel_id=platform_channel_id,
+                    channel_type=channel_type,
+                )
+            ),
         }
-        progress_update = await load_conversation_episode_state(initial_state)
-        initial_state.update(progress_update)
-        try:
-            result = await persona_supervisor2(initial_state)
-        except Exception as exc:
-            logger.exception(
-                f"Accepted task result cognition failed: {exc}"
-            )
-            failure_run_id = _safe_graph_text(
-                episode.get("episode_id"),
-                max_chars=120,
-            )
-            failure_graph: dict[str, Any] | None = None
-            try:
-                failure_graph = _build_response_cognition_graph(
-                    graph_result=initial_state,
-                    consolidation_state=initial_state,
-                    run_id=failure_run_id,
-                    graph_status="failed",
-                    visual_stage_failed=isinstance(
-                        exc,
-                        VisualAgentStageError,
-                    ),
-                    visual_stage_reached=(
-                        True
-                        if isinstance(exc, VisualAgentStageError)
-                        else False
-                    ),
-                    cognitive_episode=episode,
-                )
-            except Exception as graph_exc:
-                logger.exception(
-                    "Accepted task failure graph projection failed: "
-                    f"{graph_exc}"
-                )
-            _publish_latest_cognition_graph(
-                failure_graph,
-                cognitive_episode=episode,
-                run_id=failure_run_id,
-                status="failed",
-                reason="accepted_task_result_graph_projection_failed",
-            )
-            return {
-                "status": "failed",
-                "reason": "accepted task result cognition failed",
-            }
-
-        cognition_graph: dict[str, Any] | None = None
-        try:
-            cognition_graph = _build_response_cognition_graph(
-                graph_result=result,
-                consolidation_state=(
-                    result.get("consolidation_state")
-                    if isinstance(result.get("consolidation_state"), Mapping)
-                    else None
-                ),
-                run_id=_safe_graph_text(
-                    episode.get("episode_id"),
-                    max_chars=120,
-                ),
-                cognitive_episode=episode,
-            )
-        except Exception as graph_exc:
-            logger.exception(
-                "Accepted task result graph projection failed: "
-                f"{graph_exc}"
-            )
-        publication_status = "completed"
-        publication_reason = ""
-        if cognition_graph is None:
-            publication_status = "failed"
-            publication_reason = (
-                "accepted_task_result_graph_projection_failed"
-            )
-        _publish_latest_cognition_graph(
-            cognition_graph,
-            cognitive_episode=episode,
-            run_id=_safe_graph_text(episode.get("episode_id"), max_chars=120),
-            status=publication_status,
-            reason=publication_reason,
+        await llm_tracing.ensure_llm_trace_run(
+            trace_id=result_trace_id,
+            platform=platform,
+            platform_channel_id=platform_channel_id,
+            channel_type=channel_type,
+            platform_message_id=str(
+                episode["origin_metadata"].get("platform_message_id", "")
+            ),
+            global_user_id=requester_global_user_id,
+            parent_llm_trace_id=source_trace_id,
+            source_background_work_job_id=source_background_work_job_id,
         )
+        trace_token = llm_tracing.bind_trace_id(result_trace_id)
+        try:
+            initial_state.update(snapshot_state_update(
+                identity_snapshot,
+                episode_id=episode_id,
+                include_epistemic_core=False,
+            ))
+            progress_update = await load_conversation_episode_state(initial_state)
+            initial_state.update(progress_update)
+            result = await persona_supervisor2(initial_state)
+        finally:
+            llm_tracing.reset_trace_id(trace_token)
         final_dialog = [
             fragment
             for fragment in result.get("final_dialog", [])
             if isinstance(fragment, str) and fragment.strip()
         ]
         if not final_dialog:
+            await finalize_result_trace(
+                status="failed",
+                final_dialog_count=0,
+                delivery_tracking_id="",
+            )
             return {
                 "status": "failed",
                 "reason": "result-ready cognition selected no visible text",
             }
+
+        (
+            operational_context,
+            operational_token,
+            operational_effective_at,
+        ) = await _prepare_character_operational_predecessor(
+            episode=episode,
+            delivery_tracking_id="",
+        )
+
+        original_source_message_id = str(
+            episode["origin_metadata"].get("source_message_id", "")
+        ).strip()
+        reply_to_msg_id = await _resolve_background_reply_target(
+            platform=platform,
+            platform_channel_id=platform_channel_id,
+            source_message_id=original_source_message_id,
+        )
 
         dispatch_result = await handle_send_message(
             {
@@ -2424,7 +3163,7 @@ async def _deliver_accepted_task_result_episode(
                 "target_channel": platform_channel_id,
                 "target_channel_type": channel_type,
                 "text": "\n".join(final_dialog),
-                "reply_to_msg_id": None,
+                "reply_to_msg_id": reply_to_msg_id,
                 "delivery_mentions": _accepted_task_delivery_mentions(
                     result=result,
                     episode=episode,
@@ -2434,9 +3173,12 @@ async def _deliver_accepted_task_result_episode(
                 source_platform=platform,
                 source_channel_id=platform_channel_id,
                 source_user_id=requester_global_user_id,
-                source_message_id=episode["origin_metadata"][
-                    "platform_message_id"
-                ],
+                source_message_id=str(
+                    episode["origin_metadata"].get(
+                        "platform_message_id",
+                        "",
+                    )
+                ),
                 guild_id=None,
                 bot_permission_role="accepted_task_result",
                 now=storage_utc_now(),
@@ -2447,20 +3189,121 @@ async def _deliver_accepted_task_result_episode(
             adapter_registry,
         )
     except Exception as exc:
+        if (
+            operational_context is not None
+            and operational_token is not None
+        ):
+            sequence = operational_token.get("process_sequence")
+            if isinstance(sequence, int) and not isinstance(sequence, bool):
+                receipt = await _complete_claimed_operational_receipt(
+                    context=operational_context,
+                    source_episode_id=episode["episode_id"],
+                    sequence=sequence,
+                    status="failed",
+                    error_code="route_invalid",
+                )
+                complete_predecessor(operational_token, receipt)
         logger.exception(
             f"Accepted task result delivery failed: {exc}"
+        )
+        await finalize_result_trace(
+            status="failed",
+            final_dialog_count=0,
+            delivery_tracking_id="",
         )
         return {
             "status": "failed",
             "reason": str(exc),
         }
 
+    dispatch_tracking_id = str(
+        dispatch_result.get("delivery_tracking_id") or ""
+    )
+    try:
+        settled_trace = await _settle_runtime_episode_trace(
+            episode=episode,
+            graph_result=result,
+            response_dialog=final_dialog,
+            delivery_tracking_id=dispatch_tracking_id,
+            settled_at=storage_utc_now_iso(),
+        )
+    except Exception:
+        if (
+            operational_context is not None
+            and operational_token is not None
+        ):
+            sequence = operational_token.get("process_sequence")
+            if isinstance(sequence, int) and not isinstance(sequence, bool):
+                receipt = await _complete_claimed_operational_receipt(
+                    context=operational_context,
+                    source_episode_id=episode["episode_id"],
+                    sequence=sequence,
+                    status="failed",
+                    error_code="route_invalid",
+                )
+                complete_predecessor(operational_token, receipt)
+        await finalize_result_trace(
+            status="failed",
+            final_dialog_count=0,
+            delivery_tracking_id="",
+        )
+        raise
+    await finalize_result_trace(
+        status="succeeded",
+        final_dialog_count=len(final_dialog),
+        delivery_tracking_id=dispatch_tracking_id,
+    )
+    result["episode_trace"] = settled_trace
     consolidation_state = result.get("consolidation_state")
+    if isinstance(consolidation_state, dict):
+        consolidation_state["episode_trace"] = settled_trace
+        raw_cognition_output = result.get("cognition_core_output")
+        cognition_output = (
+            raw_cognition_output
+            if isinstance(raw_cognition_output, Mapping)
+            else None
+        )
+        progress_turn_outcome = select_recordable_turn_outcome(
+            final_dialog=final_dialog,
+            episode_trace=settled_trace,
+            cognition_output=cognition_output,
+            relevance_approved=True,
+            consolidatable=has_consolidatable_output(settled_trace),
+            listen_only=False,
+            pruned=False,
+        )
+        consolidation_state["conversation_progress_turn_outcome"] = (
+            progress_turn_outcome
+        )
+    if operational_context is not None and operational_token is not None:
+        operational_receipt = await _run_accepted_task_operational_work(
+            context=operational_context,
+            token=operational_token,
+            episode=episode,
+            settled_trace=settled_trace,
+            final_dialog=final_dialog,
+            operational_state=(
+                consolidation_state
+                if isinstance(consolidation_state, Mapping)
+                else result
+            ),
+            effective_at=operational_effective_at,
+        )
+        if isinstance(consolidation_state, dict):
+            consolidation_state["character_operational_receipt"] = (
+                _public_operational_receipt(operational_receipt)
+            )
     if isinstance(consolidation_state, dict):
         await _run_accepted_task_result_post_turn(
             consolidation_state,
             visible_response_sent=True,
         )
+    await _persist_post_turn_lifecycle_record(
+        episode=episode,
+        state=consolidation_state if isinstance(consolidation_state, Mapping) else None,
+        fallback_trace=settled_trace,
+        delivery_tracking_id=dispatch_tracking_id,
+    )
     delivery_result = {
         "status": "delivered",
         "conversation_message_id": dispatch_result["conversation_message_id"],
@@ -2496,6 +3339,15 @@ def _active_turn_conversation_row_ids(item: QueuedChatItem) -> list[str]:
     """
 
     return_value = brain_intake.active_turn_conversation_row_ids(item)
+    return return_value
+
+
+def _active_turn_conversation_source_refs(
+    item: QueuedChatItem,
+) -> list[ConversationProgressSourceRefV2]:
+    """Build exact row lineage for one survivor and its collapsed inputs."""
+
+    return_value = brain_intake.active_turn_conversation_source_refs(item)
     return return_value
 
 
@@ -2579,6 +3431,117 @@ def _build_text_chat_episode_ids(
     return return_value
 
 
+def _build_user_message_episode_for_turn(
+    *,
+    episode_id: str,
+    user_input: str,
+    platform: str,
+    platform_channel_id: str,
+    channel_type: str,
+    platform_message_id: str,
+    platform_user_id: str,
+    global_user_id: str,
+    user_name: str,
+    active_turn_platform_message_ids: list[str],
+    active_turn_conversation_row_ids: list[str],
+    local_time_context: dict[str, str],
+    created_at: str,
+    debug_modes: Mapping[str, bool],
+    target_addressed_user_ids: list[str],
+    target_broadcast: bool,
+    media_description_rows: list[Mapping[str, object]],
+) -> CognitiveEpisodeV1:
+    """Build the canonical user-message episode for one normalized turn."""
+
+    dialog_percept: PerceptV1 = {
+        "schema_version": "percept.v1",
+        "percept_kind": "dialog",
+        "source_kind": "dialog",
+        "source_id": platform_message_id or None,
+        "content": {
+            "semantic_text": user_input,
+            "speaker_role": CURRENT_USER_ROLE,
+            "addressee_role": CURRENT_CHARACTER_ROLE,
+        },
+        "observed_at": created_at,
+    }
+    media_percepts: list[PerceptV1] = []
+    for index, row in enumerate(media_description_rows, start=1):
+        content_type = str(row.get("content_type", ""))
+        description = str(row.get("description", ""))
+        source_kind = (
+            "image_observation"
+            if content_type.startswith("image/")
+            else "audio_observation"
+        )
+        media_percepts.append({
+            "schema_version": "percept.v1",
+            "percept_kind": source_kind,
+            "source_kind": source_kind,
+            "source_id": f"{episode_id}:media:{index}",
+            "content": {
+                "content_type": content_type,
+                "description": description,
+                "observation": dict(row.get("image_observation", {}))
+                if isinstance(row.get("image_observation"), Mapping)
+                else {},
+            },
+            "observed_at": created_at,
+        })
+    target_scope: TargetScopeV1 = {
+        "platform": platform,
+        "platform_channel_id": platform_channel_id,
+        "channel_type": channel_type,
+        "current_platform_user_id": platform_user_id,
+        "current_global_user_id": global_user_id,
+        "current_display_name": user_name,
+        "target_addressed_user_ids": list(target_addressed_user_ids),
+        "target_broadcast": target_broadcast,
+        "permission_ref": f"{platform}:{platform_channel_id}",
+    }
+    origin = {
+        "schema_version": "user_message_origin.v1",
+        "owner": "brain_service.intake",
+        "platform": platform,
+        "platform_message_id": platform_message_id,
+        "active_turn_platform_message_ids": list(
+            active_turn_platform_message_ids
+        ),
+        "active_turn_conversation_row_ids": list(
+            active_turn_conversation_row_ids
+        ),
+        "debug_modes": dict(debug_modes),
+        "correlation_id": episode_id,
+        "privacy_scope": "conversation",
+        "delivery_permission_ref": f"{platform}:{platform_channel_id}",
+        "created_at": created_at,
+    }
+    evidence_ref: EvidenceRefV1 = {
+        "schema_version": "evidence_ref.v1",
+        "evidence_kind": "conversation_message",
+        "evidence_id": platform_message_id or episode_id,
+        "owner": "brain_service.intake",
+        "excerpt": user_input[:800],
+        "observed_at": created_at,
+    }
+    debug_controls = {
+        "think_only": bool(debug_modes.get("think_only")),
+        "no_remember": bool(debug_modes.get("no_remember")),
+        "no_visual_directives": not COGNITION_VISUAL_DIRECTIVES_ENABLED,
+    }
+    return build_user_message_episode(
+        episode_id=episode_id,
+        origin=origin,
+        target_scope=target_scope,
+        dialog_percept=dialog_percept,
+        media_percepts=media_percepts,
+        evidence_refs=[evidence_ref],
+        local_time_context=local_time_context,
+        created_at=created_at,
+        debug_controls=debug_controls,
+    )
+
+
 async def _save_user_message_from_item(
     item: QueuedChatItem,
     *,
@@ -2644,21 +3607,24 @@ async def _drop_queued_chat_item(item: QueuedChatItem) -> bool:
     save_started_at = 0.0
     persistence_error: BaseException | None = None
     try:
-        global_user_id, user_profile = await _resolve_queued_user(item)
-        message_envelope = await _resolve_message_envelope_identities(
-            item.request,
-        )
-        item.global_user_id = global_user_id
-        item.user_profile = dict(user_profile)
-        item.resolved_message_envelope = message_envelope
-        reply_context = await _hydrate_reply_context(item.request)
-        save_started_at = time.perf_counter()
-        conversation_row_id = await _save_user_message_from_item(
-            item,
-            global_user_id=global_user_id,
-            reply_context=reply_context,
-            message_envelope=message_envelope,
-        )
+        if item.conversation_row_id:
+            conversation_row_id = item.conversation_row_id
+        else:
+            global_user_id, user_profile = await _resolve_queued_user(item)
+            message_envelope = await _resolve_message_envelope_identities(
+                item.request,
+            )
+            item.global_user_id = global_user_id
+            item.user_profile = dict(user_profile)
+            item.resolved_message_envelope = message_envelope
+            reply_context = await _hydrate_reply_context(item.request)
+            save_started_at = time.perf_counter()
+            conversation_row_id = await _save_user_message_from_item(
+                item,
+                global_user_id=global_user_id,
+                reply_context=reply_context,
+                message_envelope=message_envelope,
+            )
         if not conversation_row_id:
             await event_logging.record_database_operation_event(
                 component=SERVICE_COMPONENT,
@@ -2779,21 +3745,24 @@ async def _persist_collapsed_queued_chat_item(
     save_started_at = 0.0
     persistence_error: BaseException | None = None
     try:
-        global_user_id, user_profile = await _resolve_queued_user(item)
-        message_envelope = await _resolve_message_envelope_identities(
-            item.request,
-        )
-        item.global_user_id = global_user_id
-        item.user_profile = dict(user_profile)
-        item.resolved_message_envelope = message_envelope
-        reply_context = await _hydrate_reply_context(item.request)
-        save_started_at = time.perf_counter()
-        conversation_row_id = await _save_user_message_from_item(
-            item,
-            global_user_id=global_user_id,
-            reply_context=reply_context,
-            message_envelope=message_envelope,
-        )
+        if item.conversation_row_id:
+            conversation_row_id = item.conversation_row_id
+        else:
+            global_user_id, user_profile = await _resolve_queued_user(item)
+            message_envelope = await _resolve_message_envelope_identities(
+                item.request,
+            )
+            item.global_user_id = global_user_id
+            item.user_profile = dict(user_profile)
+            item.resolved_message_envelope = message_envelope
+            reply_context = await _hydrate_reply_context(item.request)
+            save_started_at = time.perf_counter()
+            conversation_row_id = await _save_user_message_from_item(
+                item,
+                global_user_id=global_user_id,
+                reply_context=reply_context,
+                message_envelope=message_envelope,
+            )
         if conversation_row_id:
             item.conversation_row_id = conversation_row_id
         else:
@@ -2905,10 +3874,11 @@ def _build_response_cognition_graph(
     graph_result: Mapping[str, Any],
     consolidation_state: Mapping[str, Any] | None,
     run_id: str,
+    cognition_invocation_id: str = "",
     graph_status: str = "completed",
     visual_stage_failed: bool = False,
     visual_stage_reached: bool | None = None,
-    cognitive_episode: Mapping[str, Any] | None = None,
+    failure: BaseException | None = None,
 ) -> dict[str, Any]:
     """Build a bounded cognition graph snapshot for operator inspection."""
 
@@ -2928,6 +3898,13 @@ def _build_response_cognition_graph(
     )
     memory_detail = _graph_memory_detail(state)
     reasoning_detail = _graph_reasoning_detail(state)
+    reasoning_status = "completed" if reasoning_detail else "skipped"
+    reasoning_detail["context_consumption"] = _graph_context_consumption(
+        state=state,
+        graph_result=graph_result,
+        graph_status=graph_status,
+        failure=failure,
+    )
     intake_detail = _graph_intake_detail(state)
     action_detail: dict[str, Any] = {}
     if selected_actions:
@@ -2943,11 +3920,6 @@ def _build_response_cognition_graph(
     action_status = (
         "completed"
         if action_spec_count or action_result_count or future_promise_count
-        else "skipped"
-    )
-    reasoning_status = (
-        "completed"
-        if reasoning_detail
         else "skipped"
     )
     visual_node = _graph_visual_node(
@@ -3046,69 +4018,56 @@ def _build_response_cognition_graph(
         {"source": "l2.memory", "target": "l3.surface", "kind": "join"},
         {"source": "l2.actions", "target": "l3.surface", "kind": "join"},
     ]
-    trigger_source, input_sources, metadata_reason = _graph_source_metadata(
-        cognitive_episode,
+    cognition_output = state.get("cognition_core_output")
+    if not isinstance(cognition_output, Mapping):
+        cognition_output = graph_result.get("cognition_core_output")
+    native_nodes, native_edges = _graph_native_v2_nodes(
+        cognition_output,
+        failure=failure,
     )
-    redaction = {
-        "detail": "bounded graph-result and consolidation-state fields only",
-        "excluded": [
-            "prompts",
-            "embeddings",
-            "raw messages",
-            "message envelopes",
-            "unapproved raw fields",
-        ],
-    }
-    if metadata_reason:
-        redaction["reason"] = metadata_reason
+    nodes.extend(native_nodes)
+    edges.extend(native_edges)
+    if (
+        graph_status == "completed"
+        and any(
+            node["status"] in {"failed", "partial"}
+            for node in native_nodes
+            if node["id"] in {"v2.parallel", "v2.appraisal", "v2.failure"}
+        )
+    ):
+        graph_status = "partial"
     snapshot = {
         "run_id": run_id,
+        "llm_trace_id": _safe_graph_text(
+            graph_result.get("llm_trace_id"),
+            max_chars=120,
+        ),
+        "cognition_invocation_id": _safe_graph_text(
+            cognition_invocation_id,
+            max_chars=120,
+        ),
         "status": graph_status,
-        "trigger_source": trigger_source,
-        "input_sources": input_sources,
         "nodes": nodes,
         "edges": edges,
-        "redaction": redaction,
+        "redaction": {
+            "detail": "bounded graph-result and consolidation-state fields only",
+            "excluded": [
+                "prompts",
+                "embeddings",
+                "raw messages",
+                "message envelopes",
+                "unapproved raw fields",
+            ],
+        },
     }
     return snapshot
 
 
 async def _publish_self_cognition_latest_graph(
     artifact_payloads: dict[str, Any],
-    *,
-    cognitive_episode: Mapping[str, Any] | None = None,
-    status: str | None = None,
-    reason: str = "",
 ) -> None:
-    """Record self-cognition completion or failure as latest telemetry."""
+    """Record a completed self-cognition run as the latest graph snapshot."""
 
-    cognition_output = artifact_payloads.get(
-        self_cognition_models.ARTIFACT_COGNITION_OUTPUT,
-    )
-    if cognitive_episode is None:
-        if isinstance(cognition_output, Mapping):
-            output_episode = cognition_output.get("cognitive_episode")
-            if isinstance(output_episode, Mapping):
-                cognitive_episode = output_episode
-    if not isinstance(cognitive_episode, Mapping):
-        return
-    if not isinstance(cognition_output, Mapping):
-        run_record = artifact_payloads.get(
-            self_cognition_models.ARTIFACT_RUN_RECORD,
-        )
-        run_id = (
-            _safe_graph_text(run_record.get("run_id"), max_chars=120)
-            if isinstance(run_record, Mapping)
-            else None
-        )
-        _publish_latest_cognition_graph(
-            None,
-            cognitive_episode=cognitive_episode,
-            run_id=run_id,
-            status=status or "partial",
-            reason=reason or "self_cognition_cognition_output_unavailable",
-        )
-        return
     visual_stage_reached = artifact_payloads.get("visual_stage_reached")
     if not isinstance(visual_stage_reached, bool):
         visual_stage_reached = None
@@ -3118,32 +4077,10 @@ async def _publish_self_cognition_latest_graph(
             artifact_payloads.get("visual_stage_failed") is True
         ),
         visual_stage_reached=visual_stage_reached,
-        cognitive_episode=cognitive_episode,
     )
     if cognition_graph is None:
-        run_record = artifact_payloads.get(
-            self_cognition_models.ARTIFACT_RUN_RECORD,
-        )
-        run_id = (
-            _safe_graph_text(run_record.get("run_id"), max_chars=120)
-            if isinstance(run_record, Mapping)
-            else None
-        )
-        _publish_latest_cognition_graph(
-            None,
-            cognitive_episode=cognitive_episode,
-            run_id=run_id,
-            status=status or "partial",
-            reason=reason or "self_cognition_graph_projection_unavailable",
-        )
         return
-    if status in {"failed", "partial"}:
-        cognition_graph["status"] = status
-    _publish_latest_cognition_graph(
-        cognition_graph,
-        cognitive_episode=cognitive_episode,
-        reason=reason,
-    )
+    _record_latest_self_cognition_graph(cognition_graph)
 
 
 def _build_self_cognition_cognition_graph(
@@ -3151,7 +4088,6 @@ def _build_self_cognition_cognition_graph(
     *,
     visual_stage_failed: bool = False,
     visual_stage_reached: bool | None = None,
-    cognitive_episode: Mapping[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Build a bounded graph snapshot from self-cognition artifacts."""
 
@@ -3338,33 +4274,29 @@ def _build_self_cognition_cognition_graph(
         {"source": "l3.visual_directives", "target": "self.consolidation", "kind": "join"},
         {"source": "self.surface", "target": "self.consolidation", "kind": "join"},
     ]
-    if cognitive_episode is None:
-        output_episode = cognition_output.get("cognitive_episode")
-        if isinstance(output_episode, Mapping):
-            cognitive_episode = output_episode
-    trigger_source, input_sources, metadata_reason = _graph_source_metadata(
-        cognitive_episode,
-    )
-    redaction = {
-        "detail": "bounded self-cognition artifact fields only",
-        "excluded": [
-            "prompts",
-            "embeddings",
-            "raw messages",
-            "message envelopes",
-            "unapproved raw source fields",
-        ],
-    }
-    if metadata_reason:
-        redaction["reason"] = metadata_reason
     snapshot = {
         "run_id": _safe_graph_text(run_record.get("run_id"), max_chars=120),
+        "llm_trace_id": _safe_graph_text(
+            run_record.get("llm_trace_id"),
+            max_chars=120,
+        ),
+        "source_calendar_run_id": _safe_graph_text(
+            run_record.get("source_calendar_run_id"),
+            max_chars=120,
+        ),
         "status": run_status if run_status in {"completed", "failed"} else "partial",
-        "trigger_source": trigger_source,
-        "input_sources": input_sources,
         "nodes": nodes,
         "edges": edges,
-        "redaction": redaction,
+        "redaction": {
+            "detail": "bounded self-cognition artifact fields only",
+            "excluded": [
+                "prompts",
+                "embeddings",
+                "raw messages",
+                "message envelopes",
+                "unapproved raw source fields",
+            ],
+        },
     }
     return snapshot
 
@@ -3432,8 +4364,6 @@ _GRAPH_PROGRESS_FIELDS = frozenset(
         "resolved_threads",
         "avoid_reopening",
         "overused_moves",
-        "next_affordances",
-        "progression_guidance",
         "current_goal",
         "progress_note",
         "goal",
@@ -3507,6 +4437,84 @@ _GRAPH_FUTURE_FIELDS = _GRAPH_CONTINUATION_FIELDS | frozenset(
         "reason",
         "objective",
         "objective_summary",
+    }
+)
+_GRAPH_V2_EXECUTION_FIELDS = frozenset(
+    {
+        "selected_question_count",
+        "dispatched_question_count",
+        "selected_branch_count",
+        "dispatched_branch_count",
+        "completed_branch_count",
+        "failed_branch_count",
+        "maximum_concurrency",
+        "overlap_ms",
+        "dependency_wait_ms",
+        "total_ms",
+    }
+)
+_GRAPH_V2_APPRAISAL_FIELDS = frozenset(
+    {
+        "question_kind",
+        "semantic_question",
+        "status",
+        "explanation",
+        "propositions",
+        "deltas",
+        "proposition_kind",
+        "semantic_value",
+        "delta",
+        "reason",
+        "failure_code",
+    }
+)
+_GRAPH_V2_BRANCH_FIELDS = frozenset(
+    {
+        "phase",
+        "branch_index",
+        "goal_kind",
+        "status",
+        "selection",
+        "intention",
+        "desired_outcome",
+        "concrete_detail",
+        "reason",
+        "private_monologue",
+        "expected_consequences",
+        "confidence",
+        "failure_code",
+    }
+)
+_GRAPH_V2_COLLAPSE_FIELDS = frozenset(
+    {
+        "primary_branch_index",
+        "supporting_branch_indices",
+        "suppressed_branch_indices",
+        "selection_reason",
+    }
+)
+_GRAPH_V2_SELECTED_INTENTION_FIELDS = frozenset(
+    {
+        "route",
+        "intention",
+        "reason",
+    }
+)
+_GRAPH_V2_EXPRESSION_FIELDS = frozenset(
+    {
+        "visibility",
+        "emotional_tone",
+        "intensity",
+        "directness",
+    }
+)
+_GRAPH_V2_AFFECT_FIELDS = frozenset(
+    {
+        "emotion",
+        "phase",
+        "intensity",
+        "trend",
+        "cause_summary",
     }
 )
 _GRAPH_CONSOLIDATION_FIELDS = frozenset(
@@ -3636,6 +4644,338 @@ def _graph_project_text_list(value: Any) -> list[str]:
     return [item for item in value if isinstance(item, str) and item.strip()]
 
 
+def _graph_v2_failure_node(
+    *,
+    failure_code: str,
+    stage: str,
+    attempt_count: int = 1,
+    safe_checkpoint: str = "unknown",
+    retryable: bool = False,
+    label: str = "Native V2 failure",
+) -> dict[str, Any]:
+    """Build bounded native failure detail without exception text or IDs."""
+
+    return {
+        "id": "v2.failure",
+        "label": label,
+        "stage": "V2",
+        "lane": "cognition",
+        "column": 3,
+        "branch": "failure",
+        "status": "failed",
+        "detail": {
+            "failure": {
+                "failure_code": failure_code,
+                "stage": stage,
+                "attempt_count": max(1, attempt_count),
+                "safe_checkpoint": safe_checkpoint,
+                "retryable": retryable,
+            },
+        },
+    }
+
+
+def _graph_native_v2_nodes(
+    cognition_output: Any,
+    *,
+    failure: BaseException | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Project native V2 branch results into the operator graph."""
+
+    failure_nodes: list[dict[str, Any]] = []
+    failure_edges: list[dict[str, Any]] = []
+    if failure is not None:
+        (
+            failure_code,
+            failure_stage,
+            failure_attempt_count,
+            failure_retryable,
+            _,
+        ) = _operational_failure_metadata(failure)
+        failure_node = _graph_v2_failure_node(
+            failure_code=failure_code,
+            stage=failure_stage,
+            attempt_count=failure_attempt_count,
+            safe_checkpoint=str(
+                getattr(failure, "safe_checkpoint", "unknown")
+            ),
+            retryable=failure_retryable,
+        )
+        failure_nodes.append(failure_node)
+        failure_edges.append({
+            "source": "l1.relevance",
+            "target": "v2.failure",
+            "kind": "fork",
+            "label": "native V2 failure",
+        })
+    if not isinstance(cognition_output, Mapping):
+        return failure_nodes, failure_edges
+    observability = cognition_output.get("cognition_observability")
+    if not isinstance(observability, Mapping):
+        if cognition_output.get("schema_version") == "cognition_core_output.v2":
+            if failure_nodes:
+                return failure_nodes, failure_edges
+            return [
+                _graph_v2_failure_node(
+                    failure_code="native_observability_missing",
+                    stage="cognition_observability",
+                    label="Native V2 telemetry missing",
+                ),
+            ], [
+                {
+                    "source": "l1.relevance",
+                    "target": "v2.failure",
+                    "kind": "fork",
+                    "label": "native V2 telemetry",
+                },
+            ]
+        return failure_nodes, failure_edges
+    try:
+        validate_cognition_observability(observability)
+    except CognitionContractError:
+        if failure_nodes:
+            return failure_nodes, failure_edges
+        return [
+            _graph_v2_failure_node(
+                failure_code="native_observability_invalid",
+                stage="cognition_observability",
+                label="Native V2 telemetry invalid",
+            ),
+        ], [
+            {
+                "source": "l1.relevance",
+                "target": "v2.failure",
+                "kind": "fork",
+                "label": "native V2 telemetry",
+            },
+        ]
+
+    execution = _graph_project_mapping(
+        observability.get("execution"),
+        _GRAPH_V2_EXECUTION_FIELDS,
+    )
+    branch_rows = _graph_project_semantic_rows(
+        observability.get("branches"),
+        _GRAPH_V2_BRANCH_FIELDS,
+    )
+    appraisal_rows = _graph_project_semantic_rows(
+        observability.get("appraisals"),
+        _GRAPH_V2_APPRAISAL_FIELDS,
+    )
+    collapse = _graph_project_mapping(
+        observability.get("collapse"),
+        _GRAPH_V2_COLLAPSE_FIELDS,
+    )
+    nodes: list[dict[str, Any]] = list(failure_nodes)
+    edges: list[dict[str, Any]] = list(failure_edges)
+    failed_branch_count = execution.get("failed_branch_count", 0)
+    completed_branch_count = execution.get("completed_branch_count", 0)
+    parallel_status = (
+        "failed"
+        if failed_branch_count and not completed_branch_count
+        else "partial"
+        if failed_branch_count and completed_branch_count
+        else "completed"
+    )
+    parallel_detail: dict[str, Any] = {}
+    if execution:
+        parallel_detail["parallel_execution"] = execution
+    if branch_rows:
+        parallel_detail["branch_results"] = branch_rows
+    nodes.append({
+        "id": "v2.parallel",
+        "label": "Parallel cognition",
+        "stage": "V2",
+        "lane": "cognition",
+        "column": 3,
+        "branch": "parallel",
+        "status": parallel_status,
+        "detail": parallel_detail,
+    })
+
+    appraisal_detail: dict[str, Any] = {}
+    failed_appraisal_count = sum(
+        1
+        for row in appraisal_rows
+        if isinstance(row, Mapping) and row.get("status") == "failed"
+    )
+    completed_appraisal_count = sum(
+        1
+        for row in appraisal_rows
+        if isinstance(row, Mapping) and row.get("status") == "completed"
+    )
+    if appraisal_rows:
+        appraisal_detail["appraisal_results"] = appraisal_rows
+        appraisal_status = (
+            "failed"
+            if failed_appraisal_count and not completed_appraisal_count
+            else "partial"
+            if failed_appraisal_count
+            else "completed"
+        )
+    else:
+        appraisal_detail["empty_state"] = "No semantic appraisal was reported."
+        appraisal_status = (
+            "not_reported"
+            if execution.get("selected_question_count", 0)
+            else "skipped"
+        )
+    nodes.append({
+        "id": "v2.appraisal",
+        "label": "Appraisal results",
+        "stage": "V2",
+        "lane": "cognition",
+        "column": 3,
+        "branch": "appraisal",
+        "status": appraisal_status,
+        "detail": appraisal_detail,
+    })
+    branch_node_ids: list[str] = []
+    for index, branch_detail in enumerate(branch_rows, start=1):
+        branch_index = branch_detail.get("branch_index")
+        if not isinstance(branch_index, int) or isinstance(branch_index, bool):
+            branch_index = index
+        node_id = f"v2.branch.{branch_index}"
+        if node_id in branch_node_ids:
+            node_id = f"v2.branch.{index}"
+        branch_node_ids.append(node_id)
+        branch_status = branch_detail.get("status")
+        if branch_status not in {"completed", "failed", "not_reported"}:
+            branch_status = "not_reported"
+        nodes.append({
+            "id": node_id,
+            "label": f"Goal branch {branch_index}",
+            "stage": "V2",
+            "lane": "cognition",
+            "column": 4,
+            "branch": f"branch-{branch_index}",
+            "status": branch_status,
+            "detail": branch_detail,
+        })
+
+    collapse_detail: dict[str, Any] = {}
+    if collapse:
+        collapse_detail["collapse"] = collapse
+    selected_intention = _graph_project_mapping(
+        cognition_output.get("intention"),
+        _GRAPH_V2_SELECTED_INTENTION_FIELDS,
+    )
+    if selected_intention:
+        collapse_detail["selected_intention"] = selected_intention
+    selected_bid_reason = _graph_full_text(
+        cognition_output.get("selected_bid_reason")
+    )
+    if selected_bid_reason:
+        collapse_detail["selected_bid_reason"] = selected_bid_reason
+    private_monologue = _graph_full_text(
+        cognition_output.get("private_monologue")
+    )
+    if private_monologue:
+        collapse_detail["private_monologue"] = private_monologue
+    goal_resolution = _safe_graph_text(cognition_output.get("goal_resolution"))
+    if goal_resolution:
+        collapse_detail["goal_resolution"] = goal_resolution
+    expression_policy = _graph_project_mapping(
+        cognition_output.get("expression_policy"),
+        _GRAPH_V2_EXPRESSION_FIELDS,
+    )
+    if expression_policy:
+        collapse_detail["expression_policy"] = expression_policy
+    nodes.append({
+        "id": "v2.collapse",
+        "label": "Workspace collapse",
+        "stage": "V2",
+        "lane": "decision",
+        "column": 5,
+        "branch": "collapse",
+        "status": "completed" if collapse_detail else "not_reported",
+        "detail": collapse_detail,
+    })
+
+    affect_rows = _graph_project_semantic_rows(
+        cognition_output.get("affect_projection"),
+        _GRAPH_V2_AFFECT_FIELDS,
+    )
+    if affect_rows:
+        affect_detail = {"affect_projection": affect_rows}
+        affect_status = "completed"
+    else:
+        affect_detail = {"empty_state": "No affect projection was reported."}
+        affect_status = "skipped"
+    nodes.append({
+        "id": "v2.affect",
+        "label": "Affect projection",
+        "stage": "V2",
+        "lane": "cognition",
+        "column": 5,
+        "branch": "affect",
+        "status": affect_status,
+        "detail": affect_detail,
+    })
+
+    edges.extend([
+        {
+            "source": "l1.relevance",
+            "target": "v2.parallel",
+            "kind": "fork",
+            "label": "native V2",
+        },
+        {
+            "source": "v2.parallel",
+            "target": "v2.appraisal",
+            "kind": "fork",
+            "label": "appraisal",
+        },
+        {
+            "source": "v2.appraisal",
+            "target": "v2.collapse",
+            "kind": "join",
+            "label": "semantic result",
+        },
+        {
+            "source": "v2.collapse",
+            "target": "v2.affect",
+            "kind": "sequence",
+            "label": "state projection",
+        },
+        {
+            "source": "v2.affect",
+            "target": "l3.visual_directives",
+            "kind": "join",
+            "label": "expression",
+        },
+        {
+            "source": "v2.affect",
+            "target": "l3.surface",
+            "kind": "join",
+            "label": "surface",
+        },
+    ])
+    for node_id in branch_node_ids:
+        branch_node = next(
+            node for node in nodes if node["id"] == node_id
+        )
+        branch_detail = branch_node["detail"]
+        selection = (
+            branch_detail.get("selection")
+            if isinstance(branch_detail, Mapping)
+            else ""
+        )
+        edges.append({
+            "source": "v2.parallel",
+            "target": node_id,
+            "kind": "fork",
+            "label": "parallel branch",
+        })
+        edges.append({
+            "source": node_id,
+            "target": "v2.collapse",
+            "kind": "join",
+            "label": str(selection or "branch result"),
+        })
+    return nodes, edges
+
+
 def _graph_messages(value: Any) -> list[str]:
     """Return complete visible message fragments in their original order."""
 
@@ -3675,6 +5015,510 @@ def _graph_reasoning_detail(state: Mapping[str, Any]) -> dict[str, Any]:
         if text:
             detail[field] = text
     return detail
+
+
+def _graph_context_consumption(
+    *,
+    state: Mapping[str, Any],
+    graph_result: Mapping[str, Any],
+    graph_status: str,
+    failure: BaseException | None,
+) -> dict[str, Any]:
+    """Build the exact public context record from one executed graph state."""
+
+    settled_relevance, predecessor = _graph_settled_relevance_consumption(
+        state.get("settled_relevance_context_consumption"),
+    )
+    cognition = _graph_cognition_context_consumption(
+        state.get("cognition_input"),
+    )
+    surface = _graph_surface_context_consumption(
+        state.get("text_surface_input_v2"),
+        state.get("interaction_style_context"),
+    )
+    health = _graph_context_consumption_health(
+        state=state,
+        graph_result=graph_result,
+        predecessor=predecessor,
+        failure=failure,
+    )
+    stages = (settled_relevance, cognition, surface)
+    status = _graph_context_consumption_status(
+        stages=stages,
+        graph_status=graph_status,
+        failure=failure,
+    )
+    return {
+        "schema_version": "cognition_context_consumption.v1",
+        "status": status,
+        "settled_relevance": settled_relevance,
+        "cognition": cognition,
+        "surface": surface,
+        "health": health,
+    }
+
+
+def _graph_settled_relevance_consumption(
+    value: Any,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Project the immutable selections supplied to settled relevance."""
+
+    if not isinstance(value, Mapping):
+        return {}, {}
+    stage: dict[str, Any] = {}
+    character_context = _graph_public_character_operational_context(
+        value.get("character_operational_context"),
+    )
+    if character_context:
+        stage["character_operational_context"] = character_context
+    relationship_context = _graph_public_relationship_context(
+        value.get("relationship_context"),
+    )
+    if relationship_context:
+        stage["relationship_context"] = relationship_context
+    style = value.get("style")
+    if isinstance(style, Mapping):
+        projected_style = _graph_public_style_projection(
+            style,
+            consumer_role="relevance",
+        )
+        if projected_style:
+            stage["style"] = projected_style
+    predecessor = value.get("predecessor")
+    if isinstance(predecessor, Mapping):
+        return stage, _graph_public_predecessor(predecessor)
+    return stage, {}
+
+
+def _graph_cognition_context_consumption(value: Any) -> dict[str, Any]:
+    """Project only the context present in the executed V2 cognition input."""
+
+    if not isinstance(value, Mapping):
+        return {}
+    stage: dict[str, Any] = {}
+    character_context = _graph_public_character_operational_context(
+        value.get("character_operational_context"),
+    )
+    if character_context:
+        stage["character_operational_context"] = character_context
+    relationship_context = _graph_public_relationship_context(
+        value.get("relationship_context"),
+    )
+    if relationship_context:
+        stage["relationship_context"] = relationship_context
+    group_action = _graph_public_group_engagement_context(
+        value.get("group_engagement_action_context"),
+    )
+    if group_action:
+        stage["group_engagement_action_context"] = group_action
+    return stage
+
+
+def _graph_surface_context_consumption(
+    surface_input: Any,
+    style_snapshot: Any,
+) -> dict[str, Any]:
+    """Record the source-labelled style projection accepted by L3."""
+
+    if not isinstance(surface_input, Mapping):
+        return {}
+    if not isinstance(style_snapshot, Mapping):
+        return {}
+    style = _graph_public_style_projection(
+        style_snapshot,
+        consumer_role="surface",
+    )
+    return {"style": style} if style else {}
+
+
+def _graph_context_consumption_health(
+    *,
+    state: Mapping[str, Any],
+    graph_result: Mapping[str, Any],
+    predecessor: Mapping[str, Any],
+    failure: BaseException | None,
+) -> dict[str, Any]:
+    """Expose bounded execution health without trace or receipt identities."""
+
+    health: dict[str, Any] = {}
+    if predecessor:
+        health["predecessor"] = dict(predecessor)
+    cognition_output = state.get("cognition_core_output")
+    if not isinstance(cognition_output, Mapping):
+        cognition_output = graph_result.get("cognition_core_output")
+    if isinstance(cognition_output, Mapping):
+        diagnostics = cognition_output.get("diagnostics")
+        if isinstance(diagnostics, Mapping):
+            stage_status = diagnostics.get("stage_status")
+            projected_status = _graph_public_stage_status(stage_status)
+            if projected_status:
+                health["stage_status"] = projected_status
+
+    trace = state.get("episode_trace")
+    if not isinstance(trace, Mapping):
+        trace = graph_result.get("episode_trace")
+    attempts = _graph_public_attempts(trace)
+    if failure is not None and not attempts:
+        attempts = [{
+            "stage": "service.graph",
+            "error_code": _graph_public_code(
+                getattr(failure, "error_code", "internal_invariant"),
+            ),
+            "attempt_count": 1,
+            "final_status": "failed",
+        }]
+    if attempts:
+        health["attempts"] = attempts
+
+    metadata = state.get("consolidation_metadata")
+    if isinstance(metadata, Mapping):
+        receipt = _graph_public_operational_receipt(
+            metadata.get("character_operational_receipt"),
+        )
+        if receipt:
+            health["operational_receipt"] = receipt
+    return health
+
+
+def _graph_context_consumption_status(
+    *,
+    stages: tuple[dict[str, Any], dict[str, Any], dict[str, Any]],
+    graph_status: str,
+    failure: BaseException | None,
+) -> str:
+    """Classify the public consumption record without changing graph state."""
+
+    if failure is not None or graph_status == "failed":
+        return "degraded"
+    present_count = sum(bool(stage) for stage in stages)
+    if not present_count:
+        return "not_reported"
+    if graph_status == "partial" or present_count < len(stages):
+        return "partial"
+    return "available"
+
+
+def _graph_public_character_operational_context(value: Any) -> dict[str, Any]:
+    """Copy one character selection through a strict public allowlist."""
+
+    if not isinstance(value, Mapping):
+        return {}
+    if value.get("schema_version") != "character_operational_context.v1":
+        return {}
+    result = _graph_public_text_fields(
+        value,
+        (
+            "schema_version",
+            "source_updated_at",
+            "effective_at",
+            "view_digest",
+            "consumer_role",
+            "context_digest",
+        ),
+        maximum=160,
+    )
+    result["affect"] = _graph_public_rows(
+        value.get("affect"),
+        fields=(
+            "emotion_id",
+            "intensity",
+            "phase",
+            "trend",
+            "root_kind",
+            "cause_class",
+            "freshness",
+        ),
+        limit=3,
+    )
+    result["pressures"] = _graph_public_rows(
+        value.get("pressures"),
+        fields=("kind", "salience", "lifecycle", "cause_class", "freshness"),
+        limit=4,
+    )
+    return result
+
+
+def _graph_public_relationship_context(value: Any) -> dict[str, Any]:
+    """Project one relationship selection without an id or event text."""
+
+    if not isinstance(value, Mapping):
+        return {}
+    source: Mapping[str, Any] = value
+    if "relationship_id" in value:
+        try:
+            source = project_operational_relationship_context(value)
+        except (KeyError, ValueError):
+            return {}
+    axes_value = source.get("axes")
+    axes: dict[str, str] = {}
+    if isinstance(axes_value, Mapping):
+        for field_name in (
+            "familiarity",
+            "positive_regard",
+            "trust",
+            "attachment",
+            "desired_closeness",
+            "perceived_closeness",
+            "care",
+            "boundary_safety",
+            "exclusivity",
+            "unresolved_injury",
+            "salience",
+        ):
+            text = _graph_public_text(axes_value.get(field_name), maximum=80)
+            if text:
+                axes[field_name] = text
+    result: dict[str, Any] = {"axes": axes}
+    result["causal_context"] = _graph_public_rows(
+        source.get("causal_context"),
+        fields=("entity_kind", "salience", "lifecycle", "freshness"),
+        limit=2,
+    )
+    result["affect"] = _graph_public_rows(
+        source.get("affect"),
+        fields=("emotion_id", "intensity", "phase", "trend", "freshness"),
+        limit=2,
+    )
+    result.update(_graph_public_text_fields(
+        source,
+        ("relationship_freshness", "evidence_freshness"),
+        maximum=80,
+    ))
+    return result
+
+
+def _graph_public_style_projection(
+    snapshot: Mapping[str, Any],
+    *,
+    consumer_role: str,
+) -> dict[str, Any]:
+    """Copy a source-labelled immutable style projection without provenance."""
+
+    role_projection = snapshot.get(consumer_role)
+    if not isinstance(role_projection, Mapping):
+        return {}
+    sources: dict[str, Any] = {}
+    for source_name in ("user", "group_channel"):
+        source = role_projection.get(source_name)
+        if not isinstance(source, Mapping):
+            continue
+        status = _graph_public_text(source.get("status"), maximum=40)
+        if status not in {"active", "empty", "missing", "failed"}:
+            continue
+        projected: dict[str, Any] = {"status": status}
+        revision = source.get("revision")
+        if isinstance(revision, int) and not isinstance(revision, bool) and revision >= 0:
+            projected["revision"] = revision
+        guidance_source: Mapping[str, Any] = source
+        fields: tuple[str, ...]
+        limit: int
+        if consumer_role == "surface":
+            overlay = source.get("overlay")
+            if not isinstance(overlay, Mapping):
+                continue
+            guidance_source = overlay
+            fields = (
+                "speech_guidelines",
+                "social_guidelines",
+                "pacing_guidelines",
+                "engagement_guidelines",
+            )
+            limit = 8
+        elif consumer_role == "relevance":
+            fields = ("engagement_guidelines",)
+            limit = 3
+        else:
+            fields = ("social_guidelines", "engagement_guidelines")
+            limit = 3
+        for field_name in fields:
+            projected[field_name] = _graph_public_text_list(
+                guidance_source.get(field_name),
+                limit=limit,
+                maximum=240,
+            )
+        confidence = _graph_public_text(
+            guidance_source.get("confidence"),
+            maximum=80,
+        )
+        if confidence:
+            projected["confidence"] = confidence
+        sources[source_name] = projected
+    return {consumer_role: sources} if sources else {}
+
+
+def _graph_public_group_engagement_context(value: Any) -> dict[str, Any]:
+    """Copy the exact group-action selection passed into Core V2."""
+
+    if not isinstance(value, Mapping):
+        return {}
+    result = {
+        "engagement_guidelines": _graph_public_text_list(
+            value.get("engagement_guidelines"),
+            limit=3,
+            maximum=240,
+        ),
+    }
+    confidence = _graph_public_text(value.get("confidence"), maximum=80)
+    if confidence:
+        result["confidence"] = confidence
+    return result if result["engagement_guidelines"] or confidence else {}
+
+
+def _graph_public_predecessor(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Keep only bounded predecessor health counters."""
+
+    result: dict[str, Any] = {}
+    status = _graph_public_text(value.get("status"), maximum=40)
+    if status in {"healthy", "degraded"}:
+        result["status"] = status
+    for field_name in ("watermark", "awaited_count", "timed_out_count", "wait_ms"):
+        field_value = value.get(field_name)
+        if isinstance(field_value, int) and not isinstance(field_value, bool) and field_value >= 0:
+            result[field_name] = field_value
+    return result
+
+
+def _graph_public_stage_status(value: Any) -> dict[str, str]:
+    """Allowlist the stable V2 stage health labels."""
+
+    if not isinstance(value, Mapping):
+        return {}
+    result: dict[str, str] = {}
+    for field_name in (
+        "input_validation",
+        "deterministic_preliminary",
+        "semantic_appraisal",
+        "final_reduction",
+        "branch_cognition",
+        "workspace_collapse",
+        "action_planning",
+    ):
+        status = _graph_public_text(value.get(field_name), maximum=40)
+        if status in {"completed", "failed", "skipped"}:
+            result[field_name] = status
+    return result
+
+
+def _graph_public_attempts(value: Any) -> list[dict[str, Any]]:
+    """Copy bounded typed attempt diagnostics without checkpoints or refs."""
+
+    if not isinstance(value, Mapping):
+        return []
+    raw_attempts = value.get("attempt_diagnostics")
+    if not isinstance(raw_attempts, list):
+        return []
+    attempts: list[dict[str, Any]] = []
+    for raw_attempt in raw_attempts[:8]:
+        if not isinstance(raw_attempt, Mapping):
+            continue
+        attempt: dict[str, Any] = {}
+        for field_name in ("stage", "error_code", "final_status"):
+            field_value = _graph_public_code(raw_attempt.get(field_name))
+            if field_value:
+                attempt[field_name] = field_value
+        count = raw_attempt.get("attempt_count")
+        if isinstance(count, int) and not isinstance(count, bool) and count >= 0:
+            attempt["attempt_count"] = count
+        if attempt:
+            attempts.append(attempt)
+    return attempts
+
+
+def _graph_public_operational_receipt(value: Any) -> dict[str, Any]:
+    """Copy only public receipt health from already-sanitized metadata."""
+
+    if not isinstance(value, Mapping):
+        return {}
+    result = _graph_public_text_fields(
+        value,
+        (
+            "status",
+            "base_updated_at",
+            "committed_updated_at",
+            "registered_at",
+            "completed_at",
+            "error_code",
+        ),
+        maximum=160,
+    )
+    durable = value.get("durable")
+    if isinstance(durable, bool):
+        result["durable"] = durable
+    attempt_count = value.get("attempt_count")
+    if isinstance(attempt_count, int) and not isinstance(attempt_count, bool) and attempt_count >= 0:
+        result["attempt_count"] = attempt_count
+    return result
+
+
+def _graph_public_rows(
+    value: Any,
+    *,
+    fields: tuple[str, ...],
+    limit: int,
+) -> list[dict[str, str]]:
+    """Copy bounded rows using only declared public semantic labels."""
+
+    if not isinstance(value, list):
+        return []
+    rows: list[dict[str, str]] = []
+    for raw_row in value[:limit]:
+        if not isinstance(raw_row, Mapping):
+            continue
+        row = _graph_public_text_fields(raw_row, fields, maximum=160)
+        if row:
+            rows.append(row)
+    return rows
+
+
+def _graph_public_text_fields(
+    value: Mapping[str, Any],
+    fields: tuple[str, ...],
+    *,
+    maximum: int,
+) -> dict[str, str]:
+    """Copy bounded text fields without coercing arbitrary values."""
+
+    result: dict[str, str] = {}
+    for field_name in fields:
+        text = _graph_public_text(value.get(field_name), maximum=maximum)
+        if text:
+            result[field_name] = text
+    return result
+
+
+def _graph_public_text_list(
+    value: Any,
+    *,
+    limit: int,
+    maximum: int,
+) -> list[str]:
+    """Copy one bounded list of prompt-safe learned guidance."""
+
+    if not isinstance(value, list):
+        return []
+    return [
+        text
+        for item in value[:limit]
+        if (text := _graph_public_text(item, maximum=maximum))
+    ]
+
+
+def _graph_public_text(value: Any, *, maximum: int) -> str:
+    """Return bounded strings only for an explicit public allowlist."""
+
+    if not isinstance(value, str):
+        return ""
+    return value.strip()[:maximum]
+
+
+def _graph_public_code(value: Any) -> str:
+    """Return a compact typed status or error code, never exception text."""
+
+    code = _graph_public_text(value, maximum=80)
+    if not code:
+        return ""
+    allowed = set("abcdefghijklmnopqrstuvwxyz0123456789_.-:")
+    return code if all(character in allowed for character in code) else ""
 
 
 def _graph_memory_detail(state: Mapping[str, Any]) -> dict[str, Any]:
@@ -3726,6 +5570,12 @@ def _graph_memory_detail(state: Mapping[str, Any]) -> dict[str, Any]:
         projected_progress = _graph_full_text(conversation_progress)
     if projected_progress not in (None, "", [], {}):
         detail["conversation_progress"] = projected_progress
+
+    public_group_scene = _graph_full_text(
+        state.get("public_group_scene")
+    )
+    if public_group_scene:
+        detail["public_group_scene"] = public_group_scene
 
     active_commitments = state.get("active_commitments")
     if active_commitments is None and isinstance(user_continuity, Mapping):
@@ -4038,13 +5888,14 @@ async def _process_queued_chat_item(
     *,
     settlement_fragments: list[PersistedChatFragment] | None = None,
     settled_decision: Mapping[str, Any] | None = None,
-    skip_user_persist: bool = False,
     settlement_turn_id: str = "",
     settlement_version: int = 0,
     settlement_claimed: bool = False,
     prepared_media: list[MultiMediaDoc] | None = None,
     media_prepared: bool = False,
     additional_media_present: bool = False,
+    interaction_style_context: Mapping[str, Any] | None = None,
+    settled_relevance_context_consumption: Mapping[str, Any] | None = None,
 ) -> None:
     """Run one queued item through the existing chat graph and post-writes.
 
@@ -4056,7 +5907,8 @@ async def _process_queued_chat_item(
     """
 
     req = item.request
-    character_name = _static_character_profile.get("name", "Character")
+    character_profile = await _load_latest_character_profile_snapshot()
+    character_name = _active_character_name()
     correlation_id = _chat_correlation_id(req)
     llm_trace_id = item.llm_trace_id or llm_tracing.build_trace_id()
     item.llm_trace_id = llm_trace_id
@@ -4065,6 +5917,7 @@ async def _process_queued_chat_item(
     stages_reached: list[str] = []
     scheduled_followup_count = 0
     debug_mode_names: list[str] = []
+    settled_trace: dict[str, object] | None = None
     settlement_items = [item]
     if settlement_fragments:
         settlement_items = [
@@ -4094,7 +5947,7 @@ async def _process_queued_chat_item(
         if not isinstance(message_envelope, Mapping):
             message_envelope = await _resolve_message_envelope_identities(req)
         stages_reached.append("identity")
-        await llm_tracing.ensure_llm_trace_run(
+        trace_write = await llm_tracing.ensure_llm_trace_run(
             trace_id=llm_trace_id,
             platform=req.platform,
             platform_channel_id=req.platform_channel_id,
@@ -4103,6 +5956,20 @@ async def _process_queued_chat_item(
             global_user_id=global_user_id,
             started_at=item.storage_timestamp_utc,
         )
+        item.llm_trace_recorded = item.llm_trace_recorded or bool(
+            trace_write["accepted"]
+        )
+        if item.request.debug_modes.listen_only and item.conversation_row_id:
+            try:
+                await update_conversation_row_llm_trace_id(
+                    row_id=item.conversation_row_id,
+                    llm_trace_id=llm_trace_id,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to attach trace metadata to listen-only ingress "
+                    f"row: row={item.conversation_row_id} error={exc}"
+                )
 
         multimedia_input: list[MultiMediaDoc] = []
         media_scope = (
@@ -4171,7 +6038,7 @@ async def _process_queued_chat_item(
         reply_context = await _hydrate_reply_context(req)
         stages_reached.append("history_loaded")
         user_save_started_at = 0.0
-        if skip_user_persist and item.conversation_row_id:
+        if item.conversation_row_id:
             conversation_row_id = item.conversation_row_id
         else:
             user_save_started_at = time.perf_counter()
@@ -4275,7 +6142,16 @@ async def _process_queued_chat_item(
                 f'channel={req.platform_channel_id or "<dm>"} '
                 f'message={req.platform_message_id or "<none>"}'
             )
-            _chat_input_queue.complete(item, ChatResponse())
+            _chat_input_queue.complete(
+                item,
+                ChatResponse(
+                    trace_id=_operator_trace_id(
+                        request=req,
+                        trace_id=llm_trace_id,
+                        trace_recorded=item.llm_trace_recorded,
+                    ),
+                ),
+            )
             stages_reached.append("no_content")
             stages_reached.append("response_completed")
             await event_logging.record_pipeline_turn_event(
@@ -4301,12 +6177,18 @@ async def _process_queued_chat_item(
         is_collapsed_turn = bool(item.collapsed_items)
         active_turn_platform_message_ids = _active_turn_platform_message_ids(item)
         active_turn_conversation_row_ids = _active_turn_conversation_row_ids(item)
-        await _refresh_runtime_character_state()
-        character_profile = compose_character_profile(
-            _static_character_profile,
-            _runtime_character_state,
-            character_global_user_id,
+        active_turn_conversation_source_refs = (
+            _active_turn_conversation_source_refs(item)
         )
+        character_profile = await _load_latest_character_profile_snapshot()
+        character_name = _active_character_name()
+        if (
+            character_profile.get("global_user_id")
+            != character_global_user_id
+        ):
+            raise ValueError(
+                "latest character profile has inconsistent global identity"
+            )
 
         logger.debug(f'Chat request: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"} user={req.platform_user_id} global_user={global_user_id} content_type={req.content_type} attachments={len(message_envelope["attachments"])} media_attachments={len(multimedia_input)} history_wide={len(chat_history_wide)} history_recent={len(chat_history_recent)} reply_context={log_preview(reply_context)} debug_modes={active_flags} collapsed={is_collapsed_turn} collapsed_count={len(item.collapsed_items)} content={log_preview(user_input)}')
 
@@ -4334,25 +6216,15 @@ async def _process_queued_chat_item(
             )
             promoted_reflection_context = {}
 
-        episode_id, percept_id = _build_text_chat_episode_ids(
+        episode_id, _percept_id = _build_text_chat_episode_ids(
             platform=req.platform,
             platform_channel_id=req.platform_channel_id,
             platform_message_id=req.platform_message_id,
             conversation_row_id=item.conversation_row_id or None,
             queue_sequence=item.sequence,
         )
-        episode_output_mode: Literal["silent", "think_only", "visible_reply"]
-        if debug_modes["listen_only"]:
-            episode_output_mode = "silent"
-        elif debug_modes["think_only"]:
-            episode_output_mode = "think_only"
-        else:
-            episode_output_mode = "visible_reply"
-        episode: CognitiveEpisode = build_text_chat_cognitive_episode(
+        episode: CognitiveEpisodeV1 = _build_user_message_episode_for_turn(
             episode_id=episode_id,
-            percept_id=percept_id,
-            storage_timestamp_utc=item.storage_timestamp_utc,
-            local_time_context=local_time_context,
             user_input=user_input,
             platform=req.platform,
             platform_channel_id=req.platform_channel_id,
@@ -4363,8 +6235,9 @@ async def _process_queued_chat_item(
             user_name=req.display_name,
             active_turn_platform_message_ids=active_turn_platform_message_ids,
             active_turn_conversation_row_ids=active_turn_conversation_row_ids,
+            local_time_context=local_time_context,
+            created_at=item.storage_timestamp_utc,
             debug_modes=debug_modes,
-            output_mode=episode_output_mode,
             target_addressed_user_ids=list(
                 prompt_message_context["addressed_to_global_user_ids"]
             ),
@@ -4372,6 +6245,40 @@ async def _process_queued_chat_item(
             media_description_rows=media_description_rows,
         )
         stages_reached.append("episode_built")
+        clean_episode_row_ids = list(dict.fromkeys(
+            str(row_id).strip()
+            for row_id in active_turn_conversation_row_ids
+            if str(row_id).strip()
+        ))
+        if clean_episode_row_ids:
+            linked_row_count = await set_conversation_source_episode_id(
+                row_ids=clean_episode_row_ids,
+                source_episode_id=episode["episode_id"],
+            )
+            if linked_row_count != len(clean_episode_row_ids):
+                raise RuntimeError(
+                    "settled episode lineage did not match every "
+                    "conversation row"
+                )
+        identity_snapshot = await load_latest_identity_for_episode(
+            episode_id=episode["episode_id"],
+            correlation_id=correlation_id,
+            include_epistemic_core=False,
+        )
+        character_profile = identity_snapshot["character_profile"]
+        _adopt_character_profile_snapshot(character_profile)
+        character_name = _active_character_name()
+        if interaction_style_context is None:
+            style_snapshot = await build_interaction_style_context(
+                global_user_id=global_user_id,
+                channel_type=req.channel_type,
+                platform=req.platform,
+                platform_channel_id=req.platform_channel_id,
+            )
+        elif isinstance(interaction_style_context, Mapping):
+            style_snapshot = dict(interaction_style_context)
+        else:
+            raise ValueError("interaction style snapshot is invalid")
 
         initial_state: IMProcessState = {
             "storage_timestamp_utc": item.storage_timestamp_utc,
@@ -4381,6 +6288,9 @@ async def _process_queued_chat_item(
             "platform_message_id": req.platform_message_id,
             "active_turn_platform_message_ids": active_turn_platform_message_ids,
             "active_turn_conversation_row_ids": active_turn_conversation_row_ids,
+            "active_turn_conversation_source_refs": (
+                active_turn_conversation_source_refs
+            ),
             "platform_user_id": req.platform_user_id,
             "global_user_id": global_user_id,
             "user_name": req.display_name,
@@ -4439,159 +6349,245 @@ async def _process_queued_chat_item(
             "target_broadcast": False,
             "future_promises": [],
             "consolidation_state": {},
+            "interaction_style_context": style_snapshot,
             "promoted_reflection_context": promoted_reflection_context,
+            "action_availability_runtime": (
+                _action_availability_runtime_for_target(
+                    platform=req.platform,
+                    platform_channel_id=req.platform_channel_id,
+                    channel_type=req.channel_type,
+                )
+            ),
         }
+        if settled_relevance_context_consumption is not None:
+            if not isinstance(settled_relevance_context_consumption, Mapping):
+                raise ValueError("settled relevance context consumption is invalid")
+            initial_state["settled_relevance_context_consumption"] = dict(
+                settled_relevance_context_consumption,
+            )
+        initial_state.update(snapshot_state_update(
+            identity_snapshot,
+            episode_id=episode["episode_id"],
+            include_epistemic_core=False,
+        ))
 
-        try:
-            result = await _graph.ainvoke(initial_state)
-        except Exception as exc:
-            logger.exception(f"Graph invocation failed: {exc}")
-            fallback_text = (
-                f"{character_name} is busy right now, please try again later."
+        original_initial_state = deepcopy(initial_state)
+        cognition_attempt_count = 0
+        cognition_attempt_ledger = create_v2_attempt_ledger(correlation_id)
+        while True:
+            cognition_attempt_count += 1
+            attempt_ledger_token = bind_v2_attempt_ledger(
+                cognition_attempt_ledger,
+                graph_attempt=cognition_attempt_count,
             )
-            delivery_tracking_id = uuid4().hex
-            fallback_result = {
-                "platform": req.platform,
-                "platform_channel_id": req.platform_channel_id,
-                "channel_type": req.channel_type,
-                "platform_bot_id": req.platform_bot_id,
-                "character_name": character_name,
-                "global_user_id": global_user_id,
-                "final_dialog": [fallback_text],
-                "target_addressed_user_ids": [global_user_id],
-                "target_broadcast": False,
-                "delivery_tracking_id": delivery_tracking_id,
-                "llm_trace_id": llm_trace_id,
-            }
-            failure_graph: dict[str, Any] | None = None
             try:
-                failure_graph = _build_response_cognition_graph(
-                    graph_result={
-                        **initial_state,
-                        **fallback_result,
-                    },
-                    consolidation_state=initial_state,
-                    run_id=delivery_tracking_id,
-                    graph_status="failed",
-                    visual_stage_failed=isinstance(
+                try:
+                    result = await _graph.ainvoke(
+                        deepcopy(original_initial_state),
+                    )
+                finally:
+                    reset_v2_attempt_ledger(attempt_ledger_token)
+                break
+            except Exception as exc:
+                if _can_retry_cognition_failure(
+                    exc,
+                    cognition_attempt_count,
+                ):
+                    stages_reached.append("cognition_safe_retry")
+                    logger.warning(
+                        "Retrying pure cognition after a typed pre-commit "
+                        f"failure: code={getattr(exc, 'error_code', '')} "
+                        f"attempt={cognition_attempt_count}"
+                    )
+                    continue
+                logger.exception(f"Graph invocation failed: {exc}")
+                response = _operational_error_response(
+                    correlation_id=correlation_id,
+                    trace_id=llm_trace_id,
+                    exception=exc,
+                    attempt_count=cognition_attempt_count,
+                    operator_trace_id=_operator_trace_id(
+                        request=req,
+                        trace_id=llm_trace_id,
+                        trace_recorded=item.llm_trace_recorded,
+                    ),
+                )
+                failure_graph: dict[str, Any] | None = None
+                try:
+                    visual_stage_failed = _is_visual_surface_failure(exc)
+                    failure_graph = _build_response_cognition_graph(
+                        graph_result={
+                            **original_initial_state,
+                            "final_dialog": [],
+                            "terminal_status": "failed",
+                        },
+                        consolidation_state=original_initial_state,
+                        run_id=correlation_id,
+                        cognition_invocation_id=(
+                            cognition_attempt_ledger.cognition_invocation_id
+                        ),
+                        graph_status="failed",
+                        visual_stage_failed=visual_stage_failed,
+                        visual_stage_reached=(
+                            True if visual_stage_failed else False
+                        ),
+                        failure=exc,
+                    )
+                    _record_latest_cognition_graph(failure_graph)
+                    response = response.model_copy(
+                        update={"cognition_graph": failure_graph},
+                    )
+                except Exception as graph_exc:
+                    logger.exception(
+                        "Graph failure telemetry projection failed: "
+                        f"{graph_exc}"
+                    )
+                failure_code = (
+                    response.operational_error.error_code
+                    if response.operational_error is not None
+                    else "internal_invariant"
+                )
+                failure_stage = (
+                    response.operational_error.stage
+                    if response.operational_error is not None
+                    and response.operational_error.stage
+                    else "service.graph"
+                )
+                stages_reached.append(
+                    _pipeline_failure_marker(
                         exc,
-                        VisualAgentStageError,
-                    ),
-                    visual_stage_reached=(
-                        True
-                        if isinstance(exc, VisualAgentStageError)
-                        else False
-                    ),
-                    cognitive_episode=episode,
+                        error_code=failure_code,
+                    )
                 )
-            except Exception as graph_exc:
-                logger.exception(
-                    "Graph failure telemetry projection failed: "
-                    f"{graph_exc}"
+                try:
+                    settled_trace = await _settle_runtime_episode_trace(
+                        episode=episode,
+                        graph_result={
+                            "terminal_status": "failed",
+                            "attempt_diagnostics": [{
+                                "schema_version": (
+                                    "episode_attempt_diagnostic.v1"
+                                ),
+                                "stage": failure_stage,
+                                "error_code": failure_code,
+                                "attempt_count": cognition_attempt_count,
+                                "safe_checkpoint": str(
+                                    getattr(
+                                        exc,
+                                        "safe_checkpoint",
+                                        "graph_invocation",
+                                    )
+                                ),
+                                "retryable": False,
+                                "final_status": "failed",
+                            }],
+                        },
+                        response_dialog=[],
+                        delivery_tracking_id="",
+                        settled_at=storage_utc_now_iso(),
+                    )
+                    await _persist_post_turn_lifecycle_record(
+                        episode=episode,
+                        state=None,
+                        fallback_trace=settled_trace,
+                        delivery_tracking_id="",
+                    )
+                except Exception as settlement_exc:
+                    logger.exception(
+                        "Failed to settle cognition failure trace: "
+                        f"{settlement_exc}"
+                    )
+                _chat_input_queue.complete(item, response)
+                (
+                    error_class,
+                    error_preview,
+                    stack_fingerprint,
+                    top_frame_module,
+                ) = _runtime_error_fields(exc)
+                await event_logging.record_runtime_error_event(
+                    component=SERVICE_COMPONENT,
+                    error_class=error_class,
+                    error_preview=error_preview,
+                    stack_fingerprint=stack_fingerprint,
+                    top_frame_module=top_frame_module,
+                    recovered=True,
+                    status="failed",
+                    correlation_id=correlation_id,
                 )
-            _publish_latest_cognition_graph(
-                failure_graph,
-                cognitive_episode=episode,
-                run_id=delivery_tracking_id,
-                status="failed",
-                reason="user_message_graph_projection_failed",
-            )
-            try:
-                await _save_assistant_message(fallback_result)
-                response = ChatResponse(
-                    messages=[fallback_text],
-                    delivery_tracking_id=delivery_tracking_id,
-                    cognition_graph=failure_graph,
+                await event_logging.record_pipeline_turn_event(
+                    component=SERVICE_COMPONENT,
+                    correlation_id=correlation_id,
+                    status="failed",
+                    queue_wait_ms=_queue_wait_ms(item),
+                    stages_reached=stages_reached,
+                    final_outcome="graph_error",
+                    scheduled_followups=0,
+                    debug_modes=debug_mode_names,
+                    scope=scope,
+                    duration_ms=_elapsed_ms(turn_started_at),
+                    severity="error",
                 )
-                stages_reached.append("assistant_persisted")
-            except Exception as save_exc:
-                logger.exception(
-                    "Graph failure fallback suppressed because assistant "
-                    f"history persistence failed: {save_exc}"
+                await llm_tracing.finalize_llm_trace_run(
+                    trace_id=llm_trace_id,
+                    status="failed",
+                    final_dialog_count=0,
+                    delivery_tracking_id="",
                 )
-                response = ChatResponse()
-            _chat_input_queue.complete(item, response)
-            (
-                error_class,
-                error_preview,
-                stack_fingerprint,
-                top_frame_module,
-            ) = _runtime_error_fields(exc)
-            await event_logging.record_runtime_error_event(
-                component=SERVICE_COMPONENT,
-                error_class=error_class,
-                error_preview=error_preview,
-                stack_fingerprint=stack_fingerprint,
-                top_frame_module=top_frame_module,
-                recovered=True,
-                status="failed",
-                correlation_id=correlation_id,
-            )
-            await event_logging.record_pipeline_turn_event(
-                component=SERVICE_COMPONENT,
-                correlation_id=correlation_id,
-                status="failed",
-                queue_wait_ms=_queue_wait_ms(item),
-                stages_reached=stages_reached,
-                final_outcome="graph_error",
-                scheduled_followups=0,
-                debug_modes=debug_mode_names,
-                scope=scope,
-                duration_ms=_elapsed_ms(turn_started_at),
-                severity="error",
-            )
-            await llm_tracing.finalize_llm_trace_run(
-                trace_id=llm_trace_id,
-                status="failed",
-                final_dialog_count=1,
-                delivery_tracking_id=delivery_tracking_id,
-            )
-            return
+                return
 
         stages_reached.append("graph")
         final_dialog = result["final_dialog"]
-        reply_owner_is_effective_latest = (
-            not settlement_fragments
-            or settlement_fragments[-1].arrival_sequence == item.sequence
+        base_reply_feature = bool(result["use_reply_feature"])
+        response_cutoff_received_at = storage_utc_now_iso()
+        owner_received_at = str(item.received_at or "").strip()
+        owner_row_id = str(item.conversation_row_id or "").strip()
+        owner_receipt_available = False
+        if (
+            owner_received_at
+            and owner_row_id
+            and not base_reply_feature
+            and req.channel_type == "group"
+            and bool(req.platform_message_id.strip())
+        ):
+            owner_row = await get_user_message_by_row_id(
+                row_id=owner_row_id,
+                platform=req.platform,
+                platform_channel_id=req.platform_channel_id,
+            )
+            owner_receipt_available = (
+                owner_row is not None
+                and str(owner_row.get("received_at") or "").strip()
+                == owner_received_at
+            )
+        intervening = False
+        if owner_receipt_available:
+            intervening = await has_inbound_after(
+                platform=req.platform,
+                platform_channel_id=req.platform_channel_id,
+                owner_row_id=owner_row_id,
+                owner_received_at=owner_received_at,
+                response_cutoff_received_at=response_cutoff_received_at,
+            )
+        durable_delayed = owner_receipt_available and (
+            _durable_reply_age_exceeds_threshold(
+                owner_received_at,
+                response_cutoff_received_at,
+            )
         )
-        use_reply_feature = (
-            bool(final_dialog)
-            and bool(result["use_reply_feature"])
-            and reply_owner_is_effective_latest
+        native_reply_promotion = (
+            req.channel_type == "group"
+            and bool(req.platform_message_id.strip())
+            and (
+                intervening or durable_delayed
+            )
+        )
+        use_reply_feature = bool(final_dialog) and (
+            base_reply_feature or native_reply_promotion
         )
         consolidation_state = result["consolidation_state"]
         scheduled_followup_count = len(result["future_promises"])
 
         logger.debug(f'Chat result: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"} user={req.platform_user_id} should_respond={result["should_respond"]} use_reply_feature={use_reply_feature} final_dialog_count={len(final_dialog)} future_promises={len(result["future_promises"])} final_dialog={log_list_preview(final_dialog)}')
-
-        consolidation_state_dict: dict | None = None
-        if isinstance(consolidation_state, Mapping):
-            consolidation_state_dict = dict(consolidation_state)
-
-        has_consolidation_state = bool(consolidation_state_dict)
-        is_consolidatable = (
-            has_consolidatable_output(consolidation_state_dict)
-            if consolidation_state_dict is not None
-            else False
-        )
-        should_record_progress = bool(final_dialog) and has_consolidation_state
-        if should_record_progress:
-            logger.debug(f'Background conversation progress recorder queued: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"}')
-        elif not final_dialog:
-            logger.info(f'Background conversation progress recorder skipped: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"} should_respond={result["should_respond"]} final_dialog_count=0')
-        else:
-            logger.warning(f'Background conversation progress recorder skipped: unexpected consolidation_state type={type(consolidation_state).__name__}')
-
-        should_consolidate = False
-        if debug_modes.get("no_remember"):
-            logger.debug("Background consolidation skipped: no_remember is active")
-        elif is_consolidatable and has_consolidation_state:
-            should_consolidate = True
-            logger.debug(f'Background consolidation queued: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"}')
-        elif not is_consolidatable:
-            logger.info(f'Background consolidation skipped: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"} should_respond={result["should_respond"]} consolidatable_output=false final_dialog_count={len(final_dialog)}')
-        else:
-            logger.warning(f'Background consolidation skipped: unexpected consolidation_state type={type(consolidation_state).__name__}')
 
         should_save_assistant_message = bool(final_dialog)
         response_dialog = final_dialog
@@ -4620,16 +6616,75 @@ async def _process_queued_chat_item(
             result["delivery_tracking_id"] = delivery_tracking_id
         result["llm_trace_id"] = llm_trace_id
 
+        settled_trace = await _settle_runtime_episode_trace(
+            episode=episode,
+            graph_result=result,
+            response_dialog=response_dialog,
+            delivery_tracking_id=delivery_tracking_id,
+            settled_at=storage_utc_now_iso(),
+        )
+        result["episode_trace"] = settled_trace
+
+        consolidation_state_dict: dict | None = None
+        if isinstance(consolidation_state, Mapping):
+            consolidation_state_dict = dict(consolidation_state)
+            consolidation_state_dict["episode_trace"] = settled_trace
+
+        has_consolidation_state = (
+            isinstance(consolidation_state, Mapping)
+            and bool(consolidation_state)
+        )
+        is_consolidatable = has_consolidatable_output(settled_trace)
+        raw_cognition_output = result.get("cognition_core_output")
+        cognition_output = (
+            raw_cognition_output
+            if isinstance(raw_cognition_output, Mapping)
+            else None
+        )
+        progress_turn_outcome = select_recordable_turn_outcome(
+            final_dialog=final_dialog,
+            episode_trace=settled_trace,
+            cognition_output=cognition_output,
+            relevance_approved=result.get("response_action") == "proceed",
+            consolidatable=is_consolidatable,
+            listen_only=bool(debug_modes.get("listen_only")),
+            pruned=False,
+        )
+        should_record_progress = (
+            progress_turn_outcome is not None
+            and has_consolidation_state
+        )
+        if consolidation_state_dict is not None:
+            consolidation_state_dict[
+                "conversation_progress_turn_outcome"
+            ] = progress_turn_outcome
+        if should_record_progress:
+            logger.debug(f'Background conversation progress recorder queued: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"}')
+        elif progress_turn_outcome is None:
+            logger.info(f'Background conversation progress recorder skipped: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"} should_respond={result["should_respond"]} final_dialog_count=0')
+        else:
+            logger.warning(f'Background conversation progress recorder skipped: unexpected consolidation_state type={type(consolidation_state).__name__}')
+
+        should_consolidate = False
+        if debug_modes.get("no_remember"):
+            logger.debug("Background consolidation skipped: no_remember is active")
+        elif is_consolidatable and has_consolidation_state:
+            should_consolidate = True
+            logger.debug(f'Background consolidation queued: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"}')
+        elif not is_consolidatable:
+            logger.info(f'Background consolidation skipped: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"} should_respond={result["should_respond"]} consolidatable_output=false final_dialog_count={len(final_dialog)}')
+        else:
+            logger.warning(f'Background consolidation skipped: unexpected consolidation_state type={type(consolidation_state).__name__}')
+
         cognition_graph = _build_response_cognition_graph(
             graph_result=result,
             consolidation_state=consolidation_state_dict,
             run_id=delivery_tracking_id or correlation_id,
-            cognitive_episode=episode,
+            cognition_invocation_id=(
+                cognition_attempt_ledger.cognition_invocation_id
+            ),
         )
-        _publish_latest_cognition_graph(
-            cognition_graph,
-            cognitive_episode=episode,
-        )
+        _record_latest_cognition_graph(cognition_graph)
         response = ChatResponse(
             messages=response_dialog,
             content_type="text",
@@ -4638,6 +6693,11 @@ async def _process_queued_chat_item(
             delivery_mentions=delivery_mentions if response_dialog else [],
             scheduled_followups=0,
             delivery_tracking_id=delivery_tracking_id,
+            trace_id=_operator_trace_id(
+                request=req,
+                trace_id=llm_trace_id,
+                trace_recorded=item.llm_trace_recorded,
+            ),
             cognition_graph=cognition_graph,
         )
 
@@ -4687,6 +6747,28 @@ async def _process_queued_chat_item(
                 author_platform_user_id=req.platform_user_id,
                 dialog_text="\n".join(response_dialog),
             )
+        if should_consolidate and consolidation_state_dict is not None:
+            (
+                operational_context,
+                operational_token,
+                operational_effective_at,
+            ) = await _prepare_character_operational_predecessor(
+                episode=episode,
+                delivery_tracking_id=delivery_tracking_id,
+            )
+            if operational_context is not None:
+                consolidation_state_dict[
+                    "character_operational_execution_context"
+                ] = operational_context
+                consolidation_state_dict[
+                    "character_operational_predecessor_token"
+                ] = operational_token
+                consolidation_state_dict[
+                    "character_operational_episode_id"
+                ] = episode["episode_id"]
+                consolidation_state_dict[
+                    "character_operational_effective_at"
+                ] = operational_effective_at
         _chat_input_queue.complete(item, response)
         stages_reached.append("response_completed")
         visible_response_sent = bool(response_dialog)
@@ -4706,6 +6788,12 @@ async def _process_queued_chat_item(
                     consolidation_state_dict,
                 )
             )
+        await _persist_post_turn_lifecycle_record(
+            episode=episode,
+            state=consolidation_state_dict,
+            fallback_trace=settled_trace,
+            delivery_tracking_id=delivery_tracking_id,
+        )
         if should_record_progress and consolidation_state_dict is not None:
             await _run_conversation_progress_record_background(
                 consolidation_state_dict,
@@ -4717,7 +6805,7 @@ async def _process_queued_chat_item(
         if (
             not debug_modes.get("no_remember")
             and is_consolidatable
-            and consolidation_state_dict is not None
+            and has_consolidation_state
         ):
             await _run_internal_monologue_residue_record_background(
                 consolidation_state_dict,
@@ -4731,6 +6819,43 @@ async def _process_queued_chat_item(
         )
     except Exception as exc:
         logger.exception(f"Queued chat item failed: {exc}")
+        if settled_trace is None and "episode" in locals():
+            try:
+                settled_trace = await _settle_runtime_episode_trace(
+                    episode=episode,
+                    graph_result={
+                        "terminal_status": "failed",
+                        "attempt_diagnostics": [{
+                            "schema_version": (
+                                "episode_attempt_diagnostic.v1"
+                            ),
+                            "stage": "service",
+                            "error_code": getattr(
+                                exc,
+                                "error_code",
+                                "runtime_error",
+                            ),
+                            "attempt_count": 1,
+                            "safe_checkpoint": "service_exception",
+                            "retryable": False,
+                            "final_status": "failed",
+                        }],
+                    },
+                    response_dialog=[],
+                    delivery_tracking_id="",
+                    settled_at=storage_utc_now_iso(),
+                )
+                await _persist_post_turn_lifecycle_record(
+                    episode=episode,
+                    state=None,
+                    fallback_trace=settled_trace,
+                    delivery_tracking_id="",
+                )
+            except Exception as settlement_exc:
+                logger.exception(
+                    "Failed to settle runtime failure trace: "
+                    f"{settlement_exc}"
+                )
         _chat_input_queue.fail(item, exc)
         (
             error_class,
@@ -4903,6 +7028,46 @@ async def _stop_chat_input_worker() -> None:
     _turn_settlement_coordinator = _new_turn_settlement_coordinator()
 
 
+async def _commit_ingress_receipt(req: ChatRequest) -> ChatRequestReceiptMetadata:
+    """Commit the canonical durable user receipt before queue admission.
+
+    Args:
+        req: Incoming chat request from an adapter.
+
+    Returns:
+        Mapping of the committed conversation row ID and its server-generated
+        received_at.
+    """
+
+    received_at = storage_utc_now_iso()
+    global_user_id = await resolve_global_user_id(
+        platform=req.platform,
+        platform_user_id=req.platform_user_id,
+        display_name=req.display_name,
+    )
+    message_envelope = await _resolve_message_envelope_identities(req)
+    reply_context = await _hydrate_reply_context(req)
+    conversation_row_id = await brain_intake.save_ingress_receipt(
+        req,
+        global_user_id=global_user_id,
+        reply_context=reply_context,
+        save_conversation_receipt_func=save_conversation_receipt,
+        resolve_message_envelope_identities_func=(
+            _resolve_message_envelope_identities
+        ),
+        message_envelope=message_envelope,
+        received_at=received_at,
+        logger=logger,
+    )
+    if not conversation_row_id:
+        raise RuntimeError("ingress receipt persistence did not commit a row")
+    receipt: ChatRequestReceiptMetadata = {
+        "conversation_row_id": conversation_row_id,
+        "received_at": received_at,
+    }
+    return receipt
+
+
 async def _enqueue_chat_request(req: ChatRequest) -> ChatResponse:
     """Enqueue one request and wait for the worker-produced response.
 
@@ -4912,6 +7077,13 @@ async def _enqueue_chat_request(req: ChatRequest) -> ChatResponse:
     Returns:
         Chat response produced by the worker or drop/collapse policy.
     """
+
+    if (
+        not req.message_envelope.body_text.strip()
+        and not req.message_envelope.attachments
+    ):
+        response = ChatResponse()
+        return response
 
     scope = PipelineScope(
         platform=req.platform,
@@ -4946,6 +7118,8 @@ async def _enqueue_chat_request(req: ChatRequest) -> ChatResponse:
         )
 
     try:
+        receipt = await _commit_ingress_receipt(req)
+        req._receipt_metadata = receipt
         response = await _chat_input_queue.enqueue(
             req,
             pipeline_run_handle=handle,
@@ -4964,14 +7138,485 @@ async def _run_consolidation_background(state: dict) -> None:
         state: Persona graph state snapshot needed by the consolidator.
     """
 
+    async def _call_consolidation_with_operational_target(
+        settled_state: dict,
+    ) -> dict:
+        try:
+            consolidation_result = await call_consolidation_subgraph(
+                settled_state,
+            )
+        except Exception:
+            await _complete_operational_after_router_failure(settled_state)
+            raise
+        await _run_operational_work_from_consolidation(
+            settled_state,
+            consolidation_result,
+        )
+        return consolidation_result
+
     await brain_post_turn.run_consolidation_background(
         state,
-        call_consolidation_subgraph_func=call_consolidation_subgraph,
+        call_consolidation_subgraph_func=(
+            _call_consolidation_with_operational_target
+        ),
         update_character_runtime_state_func=(
             _update_runtime_character_state_from_consolidation
         ),
         logger=logger,
     )
+
+
+async def _prepare_character_operational_predecessor(
+    *,
+    episode: CognitiveEpisodeV1,
+    delivery_tracking_id: str,
+) -> tuple[
+    CharacterOperationalExecutionContext | None,
+    dict[str, Any],
+    str,
+]:
+    """Claim one receipt and predecessor token before visible completion."""
+
+    registered_at = storage_utc_now_iso()
+    token = register_predecessor(
+        episode["episode_id"],
+        registered_at=registered_at,
+    )
+    sequence = token["process_sequence"]
+    try:
+        context = await prepare_character_operational_target(
+            source_episode_id=episode["episode_id"],
+            sequence=sequence,
+            effective_at=registered_at,
+            delivery_tracking_id=delivery_tracking_id,
+            created_at=episode["created_at"],
+        )
+    except Exception:
+        receipt = _local_operational_failure_receipt(
+            source_episode_id=episode["episode_id"],
+            sequence=sequence,
+            registered_at=registered_at,
+            error_code="persistence_failed",
+        )
+        complete_predecessor(token, receipt)
+        return None, token, registered_at
+
+    registration_receipt = _registered_predecessor_receipt(token)
+    if (
+        registration_receipt is not None
+        and registration_receipt.get("error_code") == "capacity_exceeded"
+    ):
+        if context.claim["claim_status"] == "claimed":
+            receipt = await _complete_claimed_operational_receipt(
+                context=context,
+                source_episode_id=episode["episode_id"],
+                sequence=sequence,
+                status="failed",
+                error_code="capacity_exceeded",
+            )
+            complete_predecessor(token, receipt)
+        return None, token, registered_at
+
+    if context.claim["claim_status"] == "terminal":
+        complete_predecessor(token, context.claim["receipt"])
+        return None, token, registered_at
+    if context.claim["claim_status"] == "in_progress":
+        return None, token, registered_at
+    return context, token, registered_at
+
+
+async def _run_operational_target_with_capsule(
+    *,
+    trace_id: str,
+    source_episode_id: str,
+    sequence: int,
+    evidence: Sequence[Mapping[str, Any]],
+    effective_at: str,
+    services: CharacterCarryoverServicesV1,
+    execution_context: CharacterOperationalExecutionContext,
+) -> Mapping[str, Any]:
+    """Run one carry-over update inside a protected failure capsule.
+
+    Args:
+        trace_id: Owning turn trace identity from the background state.
+        source_episode_id: Episode owning the operational slot.
+        sequence: Process sequence of the claimed receipt.
+        evidence: Validated carry-over evidence rows.
+        effective_at: Storage timestamp anchoring elapsed decay.
+        services: Carry-over cognition services.
+        execution_context: Preclaimed operational receipt context.
+
+    Returns:
+        The terminal receipt from the carry-over target.
+    """
+
+    session = failure_capsule.begin_failure_capsule(
+        trace_id=trace_id,
+        entrypoint="character_operational_carryover",
+        input_payload={
+            "source_episode_id": source_episode_id,
+            "sequence": sequence,
+        },
+    )
+    try:
+        receipt = await run_character_operational_target(
+            source_episode_id=source_episode_id,
+            sequence=sequence,
+            evidence=evidence,
+            effective_at=effective_at,
+            services=services,
+            execution_context=execution_context,
+        )
+    except Exception as exc:
+        failure_capsule.mark_failure(
+            session,
+            failure_kind="carryover_terminal_failure",
+            stage_name="character_operational_carryover",
+            details={},
+            exception=exc,
+        )
+        failure_capsule.finish_failure_capsule(
+            session,
+            outcome="terminal_failure",
+            exception=exc,
+        )
+        raise
+    failure_capsule.finish_failure_capsule(session, outcome=None)
+    return receipt
+
+
+async def _run_operational_work_from_consolidation(
+    settled_state: Mapping[str, Any],
+    consolidation_result: dict,
+) -> None:
+    """Execute or terminalize the one preclaimed operational router slot."""
+
+    context = settled_state.get("character_operational_execution_context")
+    token = settled_state.get("character_operational_predecessor_token")
+    source_episode_id = settled_state.get("character_operational_episode_id")
+    effective_at = settled_state.get("character_operational_effective_at")
+    trace_id = str(settled_state.get("llm_trace_id") or "")
+    if (
+        not isinstance(context, CharacterOperationalExecutionContext)
+        or not isinstance(token, Mapping)
+        or not isinstance(source_episode_id, str)
+        or not isinstance(effective_at, str)
+    ):
+        return
+    sequence = token.get("process_sequence")
+    if isinstance(sequence, bool) or not isinstance(sequence, int):
+        return
+
+    receipt: Mapping[str, Any]
+    try:
+        work = consolidation_result.get("character_operational_work")
+        if not isinstance(work, Mapping):
+            receipt = await _complete_claimed_operational_receipt(
+                context=context,
+                source_episode_id=source_episode_id,
+                sequence=sequence,
+                status="failed",
+                error_code="route_invalid",
+            )
+        else:
+            status = work.get("status")
+            if status == "selected":
+                evidence = work.get("evidence")
+                if not isinstance(evidence, list):
+                    receipt = await _complete_claimed_operational_receipt(
+                        context=context,
+                        source_episode_id=source_episode_id,
+                        sequence=sequence,
+                        status="failed",
+                        error_code="source_policy_rejected",
+                    )
+                else:
+                    receipt = await _run_operational_target_with_capsule(
+                        trace_id=trace_id,
+                        source_episode_id=source_episode_id,
+                        sequence=sequence,
+                        evidence=evidence,
+                        effective_at=effective_at,
+                        services=build_character_carryover_services(),
+                        execution_context=context,
+                    )
+            elif status == "no_change":
+                receipt = await _complete_claimed_operational_receipt(
+                    context=context,
+                    source_episode_id=source_episode_id,
+                    sequence=sequence,
+                    status="no_change",
+                    error_code=None,
+                )
+            else:
+                error_code = work.get("error_code")
+                if error_code not in {
+                    "route_invalid",
+                    "source_policy_rejected",
+                }:
+                    error_code = "route_invalid"
+                receipt = await _complete_claimed_operational_receipt(
+                    context=context,
+                    source_episode_id=source_episode_id,
+                    sequence=sequence,
+                    status="failed",
+                    error_code=error_code,
+                )
+    except Exception:
+        receipt = await _complete_claimed_operational_receipt(
+            context=context,
+            source_episode_id=source_episode_id,
+            sequence=sequence,
+            status="failed",
+            error_code="provider_exhausted",
+        )
+    complete_predecessor(token, receipt)
+    _attach_operational_receipt_metadata(
+        consolidation_result,
+        receipt=receipt,
+    )
+
+
+async def _run_accepted_task_operational_work(
+    *,
+    context: CharacterOperationalExecutionContext,
+    token: Mapping[str, Any],
+    episode: CognitiveEpisodeV1,
+    settled_trace: Mapping[str, Any],
+    final_dialog: list[str],
+    operational_state: Mapping[str, Any],
+    effective_at: str,
+) -> Mapping[str, Any]:
+    """Run the accepted-task direct carry-over path without durable routing."""
+
+    sequence = token.get("process_sequence")
+    if isinstance(sequence, bool) or not isinstance(sequence, int):
+        return _local_operational_failure_receipt(
+            source_episode_id=episode["episode_id"],
+            sequence=0,
+            registered_at=context.registered_at,
+            error_code="persistence_failed",
+        )
+    trace_id = str(operational_state.get("llm_trace_id") or "")
+    evidence = _accepted_task_operational_evidence(
+        episode=episode,
+        settled_trace=settled_trace,
+        final_dialog=final_dialog,
+        operational_state=operational_state,
+    )
+    try:
+        if not evidence:
+            receipt = await _complete_claimed_operational_receipt(
+                context=context,
+                source_episode_id=episode["episode_id"],
+                sequence=sequence,
+                status="no_change",
+                error_code=None,
+            )
+        else:
+            receipt = await _run_operational_target_with_capsule(
+                trace_id=trace_id,
+                source_episode_id=episode["episode_id"],
+                sequence=sequence,
+                evidence=evidence,
+                effective_at=effective_at,
+                services=build_character_carryover_services(),
+                execution_context=context,
+            )
+    except Exception:
+        receipt = await _complete_claimed_operational_receipt(
+            context=context,
+            source_episode_id=episode["episode_id"],
+            sequence=sequence,
+            status="failed",
+            error_code="provider_exhausted",
+        )
+    complete_predecessor(token, receipt)
+    return receipt
+
+
+def _accepted_task_operational_evidence(
+    *,
+    episode: CognitiveEpisodeV1,
+    settled_trace: Mapping[str, Any],
+    final_dialog: list[str],
+    operational_state: Mapping[str, Any],
+) -> list[dict[str, str]]:
+    """Build direct accepted-task evidence in the declared stable order."""
+
+    source_episode_id = episode["episode_id"]
+    occurred_at = str(settled_trace.get("settled_at") or "").strip()
+    if not occurred_at:
+        occurred_at = episode["created_at"]
+    evidence: list[dict[str, str]] = []
+    trace_projection = project_episode_trace_for_consolidation(
+        dict(settled_trace),
+    )
+    trace_text = json.dumps(
+        {
+            "action_results": trace_projection.get("action_results", []),
+            "surface_outputs": trace_projection.get("surface_outputs", []),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    if trace_text not in {"{\"action_results\":[],\"surface_outputs\":[]}", ""}:
+        evidence.append({
+            "source_key": "episode_trace",
+            "source_kind": "episode_trace",
+            "source_id": source_episode_id,
+            "occurred_at": occurred_at,
+            "semantic_text": trace_text,
+        })
+    internal_thought = operational_state.get("internal_monologue")
+    if isinstance(internal_thought, str) and internal_thought.strip():
+        evidence.append({
+            "source_key": "internal_thought",
+            "source_kind": "internal_thought",
+            "source_id": source_episode_id,
+            "occurred_at": occurred_at,
+            "semantic_text": internal_thought.strip(),
+        })
+    dialog_text = "\n".join(
+        fragment.strip()
+        for fragment in final_dialog
+        if fragment.strip()
+    )
+    if dialog_text:
+        evidence.append({
+            "source_key": "assistant_final_dialog",
+            "source_kind": "assistant_final_dialog",
+            "source_id": source_episode_id,
+            "occurred_at": occurred_at,
+            "semantic_text": dialog_text,
+        })
+    return evidence
+
+
+async def _complete_operational_after_router_failure(
+    settled_state: Mapping[str, Any],
+) -> None:
+    """Release a pre-exposure claim when the normal router fails closed."""
+
+    context = settled_state.get("character_operational_execution_context")
+    token = settled_state.get("character_operational_predecessor_token")
+    source_episode_id = settled_state.get("character_operational_episode_id")
+    if (
+        not isinstance(context, CharacterOperationalExecutionContext)
+        or not isinstance(token, Mapping)
+        or not isinstance(source_episode_id, str)
+    ):
+        return
+    sequence = token.get("process_sequence")
+    if isinstance(sequence, bool) or not isinstance(sequence, int):
+        return
+    receipt = await _complete_claimed_operational_receipt(
+        context=context,
+        source_episode_id=source_episode_id,
+        sequence=sequence,
+        status="failed",
+        error_code="route_invalid",
+    )
+    complete_predecessor(token, receipt)
+
+
+async def _complete_claimed_operational_receipt(
+    *,
+    context: CharacterOperationalExecutionContext,
+    source_episode_id: str,
+    sequence: int,
+    status: Literal["no_change", "failed"],
+    error_code: str | None,
+) -> Mapping[str, Any]:
+    """Terminalize a claimed receipt or return a bounded local failure."""
+
+    try:
+        return await complete_character_operational_receipt(
+            source_episode_id=source_episode_id,
+            lease_owner=context.lease_owner,
+            status=status,
+            completed_at=storage_utc_now_iso(),
+            error_code=error_code,
+            attempt_count=0,
+        )
+    except Exception:
+        return _local_operational_failure_receipt(
+            source_episode_id=source_episode_id,
+            sequence=sequence,
+            registered_at=context.registered_at,
+            error_code="persistence_failed",
+        )
+
+
+def _local_operational_failure_receipt(
+    *,
+    source_episode_id: str,
+    sequence: int,
+    registered_at: str,
+    error_code: str,
+) -> dict[str, Any]:
+    """Build the bounded non-durable failure used to release waiters."""
+
+    return {
+        "schema_version": "character_operational_receipt.v1",
+        "source_episode_id": source_episode_id,
+        "status": "failed",
+        "sequence": sequence,
+        "durable": False,
+        "base_updated_at": registered_at,
+        "committed_updated_at": "",
+        "registered_at": registered_at,
+        "completed_at": registered_at,
+        "lease_owner": "",
+        "lease_expires_at": "",
+        "attempt_count": 0,
+        "error_code": error_code,
+    }
+
+
+def _attach_operational_receipt_metadata(
+    consolidation_result: dict,
+    *,
+    receipt: Mapping[str, Any],
+) -> None:
+    """Attach only public operational health to background metadata."""
+
+    metadata = consolidation_result.get("consolidation_metadata")
+    if not isinstance(metadata, Mapping):
+        metadata = {}
+    updated_metadata = dict(metadata)
+    updated_metadata["character_operational_receipt"] = (
+        _public_operational_receipt(receipt)
+    )
+    if receipt.get("status") == "committed":
+        write_success = updated_metadata.get("write_success")
+        if not isinstance(write_success, Mapping):
+            write_success = {}
+        updated_write_success = dict(write_success)
+        updated_write_success["character_state"] = True
+        updated_metadata["write_success"] = updated_write_success
+    consolidation_result["consolidation_metadata"] = updated_metadata
+
+
+def _public_operational_receipt(
+    receipt: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Remove protected episode and lease details from operational telemetry."""
+
+    return {
+        field_name: receipt.get(field_name)
+        for field_name in (
+            "status",
+            "durable",
+            "base_updated_at",
+            "committed_updated_at",
+            "registered_at",
+            "completed_at",
+            "attempt_count",
+            "error_code",
+        )
+    }
 
 
 async def _run_post_turn_memory_lifecycle_background(state: dict) -> dict:
@@ -5035,20 +7680,18 @@ def register_remote_runtime_adapter(
     *,
     platform: str,
     callback_url: str,
+    platform_bot_id: str,
     shared_secret: str = "",
     timeout_seconds: float = 10.0,
-    platform_bot_id: str = "",
-    display_name: str = "",
 ) -> None:
     """Register a cross-process adapter callback for scheduled delivery.
 
     Args:
         platform: Platform key such as ``qq`` or ``discord``.
         callback_url: Base callback URL exposed by the adapter process.
+        platform_bot_id: Platform account id for outbound history rows.
         shared_secret: Optional bearer token used when the brain calls back.
         timeout_seconds: Timeout for one outbound callback request.
-        platform_bot_id: Platform account id for outbound history rows.
-        display_name: Adapter-side display name fallback.
     """
 
     register_runtime_adapter(
@@ -5058,7 +7701,6 @@ def register_remote_runtime_adapter(
             shared_secret=shared_secret,
             timeout_seconds=timeout_seconds,
             platform_bot_id=platform_bot_id,
-            display_name=display_name,
         )
     )
 
@@ -5080,9 +7722,34 @@ async def _hydrate_media_descriptor_cache() -> int:
     return loaded_count
 
 
+async def _load_startup_character_profile() -> tuple[dict, dict]:
+    """Load max identity revision and operational state.
+
+    The identity ledger must be pre-seeded before starting the service.
+    If no revision exists the service crashes with a clear error message
+    so the operator can seed the profile using the maintenance CLI.
+    """
+
+    try:
+        revision = await get_current_identity(
+            character_id=CHARACTER_GLOBAL_USER_ID,
+        )
+    except IdentityLedgerNotFoundError as exc:
+        raise RuntimeError(
+            "No character identity revision found for "
+            f"character_id={CHARACTER_GLOBAL_USER_ID!r}. "
+            "Seed the identity ledger before starting the service "
+            "(see docs/HOWTO.md#character-profile or run "
+            "python -m scripts.load_character_profile <profile.json>)."
+        ) from exc
+    await ensure_operational_character_state()
+    runtime_state = await get_character_runtime_state()
+    return dict(revision["effective_identity"]), runtime_state
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _static_character_profile, _runtime_character_state
+    global _runtime_character_state
     global _graph, _adapter_registry
     global _calendar_worker_handle
     global _reflection_worker_handle, _self_cognition_worker_handle
@@ -5103,7 +7770,27 @@ async def lifespan(app: FastAPI):
             status="ok",
         )
 
-        # 2. Hydrate persistent media descriptor cache
+        # 2. Require a manually seeded identity and operational state
+        startup_identity, _runtime_character_state = (
+            await _load_startup_character_profile()
+        )
+        _adopt_character_profile_snapshot({
+            **startup_identity,
+            **_runtime_character_state,
+            "global_user_id": CHARACTER_GLOBAL_USER_ID,
+        })
+        post_commit_result = (
+            await reconcile_identity_growth_post_commit(
+                character_id=CHARACTER_GLOBAL_USER_ID,
+            )
+        )
+        if post_commit_result["failed_count"]:
+            raise RuntimeError(
+                "identity post-commit startup reconciliation failed"
+            )
+        await _load_latest_character_profile_snapshot()
+
+        # 3. Hydrate persistent media descriptor cache
         media_cache_started_at = time.perf_counter()
         await _hydrate_media_descriptor_cache()
         await event_logging.record_resource_health_event(
@@ -5114,20 +7801,6 @@ async def lifespan(app: FastAPI):
             latency_ms=_elapsed_ms(media_cache_started_at),
             status="ok",
         )
-
-        # 3. Load character profile from database
-        character_profile = await get_character_profile()
-        if not character_profile.get("name"):
-            raise RuntimeError(
-                "No character profile found in the database. "
-                "Please load one first with:  "
-                "python -m scripts.load_character_profile personalities/kazusa.json"
-            )
-        (
-            _static_character_profile,
-            _runtime_character_state,
-        ) = split_character_profile_runtime_state(character_profile)
-        await _refresh_runtime_character_state()
 
         # 4. Build the LangGraph pipeline
         _graph = _build_graph()
@@ -5438,6 +8111,7 @@ async def register_runtime_adapter_endpoint(req: RuntimeAdapterRegistrationReque
         Confirmation payload describing the registered callback.
     """
 
+    await _load_latest_character_profile_snapshot()
     return_value = _register_runtime_adapter_payload(
         req,
         status="registered",
@@ -5456,6 +8130,7 @@ async def runtime_adapter_heartbeat_endpoint(req: RuntimeAdapterRegistrationRequ
         Confirmation payload describing the refreshed callback.
     """
 
+    await _load_latest_character_profile_snapshot()
     return_value = _register_runtime_adapter_payload(
         req,
         status="heartbeat_ok",
@@ -5464,7 +8139,11 @@ async def runtime_adapter_heartbeat_endpoint(req: RuntimeAdapterRegistrationRequ
 
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
+async def chat(
+    req: ChatRequest,
+    background_tasks: BackgroundTasks,
+    request: Request,
+):
     """Enqueue an inbound chat message and wait for queue processing.
 
     Args:
@@ -5477,6 +8156,7 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
     """
 
     _ = background_tasks
+    _authorize_console_trace_request(request=request, chat_request=req)
     response = await _enqueue_chat_request(req)
     return response
 

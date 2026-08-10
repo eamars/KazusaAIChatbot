@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any, Literal, TypedDict
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -20,7 +20,10 @@ from kazusa_ai_chatbot.config import (
     CONSOLIDATION_LLM_THINKING_ENABLED,
 )
 from kazusa_ai_chatbot.db import get_character_profile
-from kazusa_ai_chatbot.db.schemas import CharacterReflectionRunDoc
+from kazusa_ai_chatbot.db.schemas import (
+    CharacterReflectionRunDoc,
+    ReflectionEpisodeRefDoc,
+)
 from kazusa_ai_chatbot.memory_writer_prompt_projection import (
     project_reflection_promotion_prompt_payload,
 )
@@ -74,6 +77,39 @@ PROMOTION_MAX_CHANNEL_CARDS = 25
 PROMOTION_MAX_EVIDENCE_CARDS = 40
 PROMOTION_MAX_CHANNEL_CARD_CHARS = 600
 PROMOTION_MAX_EVIDENCE_CARD_CHARS = 360
+GLOBAL_PROMOTION_ATTEMPT_LIMIT = 3
+_PROMOTION_DECISION_KEYS = frozenset({
+    "lane",
+    "decision",
+    "selected_candidate_id",
+    "sanitized_memory_name",
+    "sanitized_content",
+    "memory_type",
+    "authority",
+    "signal_strength",
+    "character_agreement",
+    "boundary_assessment",
+    "privacy_review",
+    "evidence_refs",
+})
+
+
+class GlobalPromotionContractError(RuntimeError):
+    """Raised after bounded full replacements remain contract-invalid."""
+
+    def __init__(
+        self,
+        *,
+        attempt_count: int,
+        validation_errors: list[str],
+    ) -> None:
+        super().__init__(
+            "global promotion contract failed after "
+            f"{attempt_count} complete replacements: "
+            + "; ".join(validation_errors)
+        )
+        self.attempt_count = attempt_count
+        self.validation_errors = list(validation_errors)
 
 
 class ReflectionBoundaryAssessment(TypedDict):
@@ -295,10 +331,50 @@ async def run_global_promotion_llm(
     raw_output = str(response.content)
     parsed = parse_llm_json_output(raw_output)
     if not isinstance(parsed, dict):
-        return_value: dict[str, Any] = {"promotion_decisions": []}
-        return return_value
+        raise ValueError("global promotion output must be a JSON object")
     return_value = dict(parsed)
     return return_value
+
+
+async def _run_validated_global_promotion_llm(
+    *,
+    prompt: PromptBuildResult,
+    payload: GlobalPromotionPromptPayload,
+) -> tuple[
+    dict[str, Any],
+    list[ReflectionPromotionDecision],
+    int,
+    list[str],
+]:
+    """Request complete replacements until the closed contract validates."""
+
+    prior_errors: list[str] = []
+    latest_errors: list[str] = []
+    for attempt_count in range(1, GLOBAL_PROMOTION_ATTEMPT_LIMIT + 1):
+        parsed_output = await run_global_promotion_llm(prompt=prompt)
+        latest_errors = _global_promotion_contract_errors(parsed_output)
+        if not latest_errors:
+            decisions = _promotion_decisions_from_output(parsed_output)
+            decisions = _attach_repository_evidence_refs(
+                decisions,
+                payload,
+            )
+            latest_errors = validate_promotion_decisions(decisions)
+        if not latest_errors:
+            return (
+                parsed_output,
+                decisions,
+                attempt_count,
+                prior_errors,
+            )
+        prior_errors.extend(
+            f"attempt[{attempt_count}] {error}"
+            for error in latest_errors
+        )
+    raise GlobalPromotionContractError(
+        attempt_count=GLOBAL_PROMOTION_ATTEMPT_LIMIT,
+        validation_errors=latest_errors,
+    )
 
 
 def build_global_promotion_prompt(
@@ -378,12 +454,14 @@ async def _run_global_reflection_promotion(
         character_local_date=character_local_date,
     )
     source_run_ids = [str(document["run_id"]) for document in daily_docs]
+    source_episode_refs = repository.union_source_episode_refs(daily_docs)
     if not daily_docs:
         result.skipped_count = 1
         result.defer_reason = "no daily_channel runs available"
         await _persist_global_run(
             character_local_date=character_local_date,
             source_run_ids=[],
+            source_episode_refs=[],
             output={"promotion_decisions": []},
             promotion_decisions=[],
             status=REFLECTION_STATUS_SKIPPED,
@@ -407,6 +485,7 @@ async def _run_global_reflection_promotion(
             result=result,
             character_local_date=character_local_date,
             source_run_ids=source_run_ids,
+            source_episode_refs=source_episode_refs,
             attempt_count=attempt_count,
             exc=exc,
         )
@@ -436,6 +515,7 @@ async def _run_global_reflection_promotion(
         await _persist_global_run(
             character_local_date=character_local_date,
             source_run_ids=source_run_ids,
+            source_episode_refs=source_episode_refs,
             output={"promotion_decisions": []},
             promotion_decisions=[],
             status=REFLECTION_STATUS_SKIPPED,
@@ -449,22 +529,32 @@ async def _run_global_reflection_promotion(
         )
         return result
 
-    attempt_count = 1
     try:
-        parsed_output = await run_global_promotion_llm(prompt=prompt)
+        (
+            parsed_output,
+            decisions,
+            attempt_count,
+            contract_warnings,
+        ) = await _run_validated_global_promotion_llm(
+            prompt=prompt,
+            payload=payload,
+        )
     except Exception as exc:
+        attempt_count = int(getattr(exc, "attempt_count", 1))
         failed_result = await _fail_global_promotion(
             result=result,
             character_local_date=character_local_date,
             source_run_ids=source_run_ids,
+            source_episode_refs=source_episode_refs,
             attempt_count=attempt_count,
             exc=exc,
         )
         return failed_result
-    decisions = _promotion_decisions_from_output(parsed_output)
-    decisions = _attach_repository_evidence_refs(decisions, payload)
-    validation_warnings = payload_warnings + list(prompt.validation_warnings)
-    validation_warnings.extend(validate_promotion_decisions(decisions))
+    validation_warnings = (
+        payload_warnings
+        + list(prompt.validation_warnings)
+        + contract_warnings
+    )
     result.promotion_decisions = [dict(decision) for decision in decisions]
 
     status = repository.status_for_result(dry_run=dry_run)
@@ -484,6 +574,7 @@ async def _run_global_reflection_promotion(
         global_run_doc = await _persist_global_run(
             character_local_date=character_local_date,
             source_run_ids=source_run_ids,
+            source_episode_refs=source_episode_refs,
             output=parsed_output,
             promotion_decisions=result.promotion_decisions,
             status=persist_status,
@@ -507,6 +598,7 @@ async def _run_global_reflection_promotion(
         global_run_doc = await _persist_global_run(
             character_local_date=character_local_date,
             source_run_ids=source_run_ids,
+            source_episode_refs=source_episode_refs,
             output=parsed_output,
             promotion_decisions=result.promotion_decisions,
             status=REFLECTION_STATUS_SKIPPED,
@@ -540,6 +632,7 @@ async def _run_global_reflection_promotion(
         failed_run = await _persist_global_run(
             character_local_date=character_local_date,
             source_run_ids=source_run_ids,
+            source_episode_refs=source_episode_refs,
             output=parsed_output,
             promotion_decisions=result.promotion_decisions,
             status=REFLECTION_STATUS_FAILED,
@@ -561,6 +654,7 @@ async def _run_global_reflection_promotion(
         await _persist_global_run(
             character_local_date=character_local_date,
             source_run_ids=source_run_ids,
+            source_episode_refs=source_episode_refs,
             output=parsed_output,
             promotion_decisions=result.promotion_decisions,
             status=REFLECTION_STATUS_SKIPPED,
@@ -582,6 +676,7 @@ async def _run_global_reflection_promotion(
         global_run_doc = await _persist_global_run(
             character_local_date=character_local_date,
             source_run_ids=source_run_ids,
+            source_episode_refs=source_episode_refs,
             output=parsed_output,
             promotion_decisions=result.promotion_decisions,
             status=persist_status,
@@ -597,6 +692,7 @@ async def _fail_global_promotion(
     result: ReflectionPromotionResult,
     character_local_date: str,
     source_run_ids: list[str],
+    source_episode_refs: list[ReflectionEpisodeRefDoc],
     attempt_count: int,
     exc: Exception,
 ) -> ReflectionPromotionResult:
@@ -611,6 +707,7 @@ async def _fail_global_promotion(
     failed_run = await _persist_global_run(
         character_local_date=character_local_date,
         source_run_ids=source_run_ids,
+        source_episode_refs=source_episode_refs,
         output={"promotion_decisions": []},
         promotion_decisions=[],
         status=REFLECTION_STATUS_FAILED,
@@ -688,6 +785,7 @@ async def _persist_global_run(
     *,
     character_local_date: str,
     source_run_ids: list[str],
+    source_episode_refs: list[ReflectionEpisodeRefDoc],
     output: dict[str, Any],
     promotion_decisions: list[dict[str, Any]],
     status: str,
@@ -701,6 +799,7 @@ async def _persist_global_run(
         character_local_date=character_local_date,
         prompt_version=GLOBAL_PROMOTION_PROMPT_VERSION,
         source_run_ids=source_run_ids,
+        source_episode_refs=source_episode_refs,
         output=output,
         promotion_decisions=promotion_decisions,
         status=status,
@@ -726,6 +825,75 @@ def _promotion_decisions_from_output(
         if isinstance(item, dict):
             decisions.append(dict(item))
     return decisions
+
+
+def _global_promotion_contract_errors(
+    parsed_output: Mapping[str, Any],
+) -> list[str]:
+    """Return closed root and decision-shape errors for one replacement."""
+
+    errors: list[str] = []
+    if set(parsed_output) != {"promotion_decisions"}:
+        errors.append(
+            "output must contain exactly promotion_decisions"
+        )
+        return errors
+    raw_decisions = parsed_output.get("promotion_decisions")
+    if not isinstance(raw_decisions, list):
+        return ["promotion_decisions must be a list"]
+    if len(raw_decisions) > 2:
+        errors.append("promotion_decisions exceeds the daily limit")
+    for index, raw_decision in enumerate(raw_decisions):
+        if not isinstance(raw_decision, Mapping):
+            errors.append(f"decision[{index}] must be an object")
+            continue
+        if set(raw_decision) != _PROMOTION_DECISION_KEYS:
+            errors.append(f"decision[{index}] has an invalid key set")
+            continue
+        lane = raw_decision.get("lane")
+        if lane not in PROMOTION_LANE_MEMORY_TYPE:
+            errors.append(f"decision[{index}] has an invalid lane")
+            continue
+        action = raw_decision.get("decision")
+        if action not in {
+            "promote_new",
+            "supersede",
+            "merge",
+            "reject",
+            "no_action",
+        }:
+            errors.append(f"decision[{index}] has an invalid action")
+        expected_memory_type = PROMOTION_LANE_MEMORY_TYPE[str(lane)]
+        if raw_decision.get("memory_type") != expected_memory_type:
+            errors.append(
+                f"decision[{index}] memory_type must be "
+                f"{expected_memory_type}"
+            )
+        for field_name in (
+            "selected_candidate_id",
+            "sanitized_memory_name",
+            "sanitized_content",
+            "authority",
+            "signal_strength",
+            "character_agreement",
+        ):
+            if not isinstance(raw_decision.get(field_name), str):
+                errors.append(
+                    f"decision[{index}] {field_name} must be text"
+                )
+        if not isinstance(raw_decision.get("boundary_assessment"), Mapping):
+            errors.append(
+                f"decision[{index}] boundary_assessment must be an object"
+            )
+        if not isinstance(raw_decision.get("privacy_review"), Mapping):
+            errors.append(
+                f"decision[{index}] privacy_review must be an object"
+            )
+        if not isinstance(raw_decision.get("evidence_refs"), list):
+            errors.append(
+                f"decision[{index}] evidence_refs must be a list"
+            )
+    return errors
 
 
 def _attach_repository_evidence_refs(

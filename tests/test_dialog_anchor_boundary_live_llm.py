@@ -29,7 +29,7 @@ if hasattr(sys.stderr, 'reconfigure'):
 pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm]
 
 _ROOT = Path(__file__).resolve().parents[1]
-_PERSONALITY_PATH = _ROOT / 'personalities' / 'kazusa.json'
+_PERSONALITY_PATH = _ROOT / 'personalities' / 'asuna.json'
 
 
 class _CapturingLiveLLM:
@@ -129,7 +129,6 @@ def _incident_dialog_state() -> dict:
                     'voice': '傲娇地接住赞美后再甩回去，保持你来我往的攻防节奏。',
                     'rendering': '~35字。',
                 },
-                'forbidden_phrases': [],
             },
             'contextual_directives': {
                 'social_distance': '熟悉、轻快、可以调侃',
@@ -185,7 +184,7 @@ def _incident_dialog_state() -> dict:
         'platform_bot_id': '3768713357',
         'global_user_id': '256e8a10-c406-47e9-ac8f-efd270d18160',
         'user_name': '蚝爹油',
-        'user_profile': {'affinity': 501},
+        'user_profile': {'relationship_state': 501},
         'dialog_usage_mode': 'live_generator_contract',
         'debug_modes': {},
         'should_respond': True,

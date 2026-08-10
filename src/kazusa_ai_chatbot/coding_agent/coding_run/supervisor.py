@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
@@ -377,7 +378,12 @@ async def _start_propose_patch(
     ledger["limitations"] = result["limitations"]
     ledger["trace_summary"] = result["trace_summary"]
     if result["status"] == "succeeded":
-        _bind_proposal_and_preflight(paths=paths, ledger=ledger, result=result)
+        await asyncio.to_thread(
+            _bind_proposal_and_preflight,
+            paths=paths,
+            ledger=ledger,
+            result=result,
+        )
     if result["repository"] is not None:
         _record_event(
             paths=paths,
@@ -519,7 +525,12 @@ async def _revise_proposal(
     ledger["limitations"] = result["limitations"]
     ledger["trace_summary"] = result["trace_summary"]
     if result["status"] == "succeeded":
-        _bind_proposal_and_preflight(paths=paths, ledger=ledger, result=result)
+        await asyncio.to_thread(
+            _bind_proposal_and_preflight,
+            paths=paths,
+            ledger=ledger,
+            result=result,
+        )
     if ledger["status"] == "awaiting_approval":
         _record_event(
             paths=paths,

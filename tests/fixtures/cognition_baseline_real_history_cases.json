@@ -1,0 +1,29 @@
+{
+  "schema_version": "cognition_baseline_real_history_cases.v1",
+  "source_path": "test_artifacts/chat_history_638473184_recent.json",
+  "source_sha256": "e42ef1a7a454e1208f5723fd3b87ba70d0e64579a68838ede911b5286e576008",
+  "context_window": 8,
+  "category": "direct_kazusa_history",
+  "cases": [
+    {"case_id": "role_bound_comparison_01", "source_message_id": "545603205"},
+    {"case_id": "role_bound_comparison_02", "source_message_id": "1967948388"},
+    {"case_id": "role_bound_comparison_03", "source_message_id": "13162833"},
+    {"case_id": "role_bound_comparison_04", "source_message_id": "282460028"},
+    {"case_id": "role_bound_comparison_05", "source_message_id": "266734559"},
+    {"case_id": "role_bound_comparison_06", "source_message_id": "1983497179"},
+    {"case_id": "role_bound_comparison_07", "source_message_id": "1260193738"},
+    {"case_id": "role_bound_comparison_08", "source_message_id": "1404582988"},
+    {"case_id": "role_bound_comparison_09", "source_message_id": "2001792911"},
+    {"case_id": "role_bound_comparison_10", "source_message_id": "568489473"},
+    {"case_id": "role_bound_comparison_11", "source_message_id": "381796528"},
+    {"case_id": "role_bound_comparison_12", "source_message_id": "1093681008"},
+    {"case_id": "role_bound_comparison_13", "source_message_id": "1774472006"},
+    {"case_id": "role_bound_comparison_14", "source_message_id": "1662444992"},
+    {"case_id": "role_bound_comparison_15", "source_message_id": "925892139"},
+    {"case_id": "role_bound_comparison_16", "source_message_id": "1094354134"},
+    {"case_id": "role_bound_comparison_17", "source_message_id": "1225127345"},
+    {"case_id": "role_bound_comparison_18", "source_message_id": "2023266388"},
+    {"case_id": "role_bound_comparison_19", "source_message_id": "1954506247"},
+    {"case_id": "role_bound_comparison_20", "source_message_id": "796884414"}
+  ]
+}

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from kazusa_ai_chatbot.accepted_task import check_accepted_task_status
 from kazusa_ai_chatbot.accepted_task.models import AcceptedTaskStatusResult
 from kazusa_ai_chatbot.action_spec.models import (
     ActionValidationError,
@@ -55,6 +54,10 @@ async def execute_accepted_task_status_check_action(
     action_spec: dict[str, Any],
 ) -> AcceptedTaskStatusResult:
     """Look up active accepted-task status without queueing new work."""
+
+    from kazusa_ai_chatbot.accepted_task.lifecycle import (
+        check_accepted_task_status,
+    )
 
     validated = validate_accepted_task_status_check_action(action_spec)
     scope = validated["target"]["scope"]

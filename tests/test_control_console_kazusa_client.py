@@ -48,6 +48,10 @@ async def test_kazusa_client_reads_health_and_posts_debug_chat() -> None:
                 },
             )
         if request.url.path == "/chat":
+            assert request.headers["x-kazusa-control-console"] == "debug-v1"
+            assert request.headers["x-kazusa-control-console-auth"] == (
+                "shared-secret"
+            )
             body = json.loads(request.read().decode("utf-8"))
             assert body["message_envelope"]["body_text"] == "hello"
             parse_configured_local_datetime(body["local_timestamp"])
@@ -65,6 +69,7 @@ async def test_kazusa_client_reads_health_and_posts_debug_chat() -> None:
                         },
                     ],
                     "delivery_tracking_id": "tracking-1",
+                    "trace_id": "trace-debug-1",
                 },
             )
         return httpx.Response(404)
@@ -73,6 +78,7 @@ async def test_kazusa_client_reads_health_and_posts_debug_chat() -> None:
     client = KazusaClient(
         base_url="http://brain.local",
         timeout_seconds=1.0,
+        control_shared_secret="shared-secret",
         transport=transport,
     )
 
@@ -99,6 +105,7 @@ async def test_kazusa_client_reads_health_and_posts_debug_chat() -> None:
     assert "global-user-secret" not in repr(chat)
     assert "platform-user-secret" not in repr(chat)
     assert chat["tracking_id"] == "tracking-1"
+    assert chat["trace_id"] == "trace-debug-1"
     assert requests == [
         ("GET", "/health"),
         ("GET", "/ops/latest-cognition-graph"),

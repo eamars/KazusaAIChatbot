@@ -409,8 +409,27 @@ async def _run_lifespan(
     )
     monkeypatch.setattr(
         service_module,
-        "get_character_profile",
+        "_load_startup_character_profile",
+        AsyncMock(return_value=(
+            {"name": "Character"},
+            {"cognition_state": {"state_scope": "character"}},
+        )),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "reconcile_identity_growth_post_commit",
+        AsyncMock(return_value={"failed_count": 0}),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_load_latest_character_profile_snapshot",
         AsyncMock(return_value={"name": "Character"}),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_refresh_runtime_character_state",
+        AsyncMock(),
     )
     monkeypatch.setattr(
         service_module,

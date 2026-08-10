@@ -113,6 +113,7 @@ async def record_assistant_outbound_message(
     delivery_tracking_id: str = "",
     logical_message_index: int = 0,
     llm_trace_id: str = "",
+    source_episode_id: str = "",
     storage_timestamp_utc: str,
     ensure_character_global_identity_func: EnsureCharacterIdentity,
     save_conversation_func: SaveConversation,
@@ -135,6 +136,7 @@ async def record_assistant_outbound_message(
         logical_message_index: Zero-based position inside one logical response
             sequence.
         llm_trace_id: Optional turn-scoped LLM trace id.
+        source_episode_id: Settled cognitive episode root for reflection.
         mentions: Optional outbound mention rows present in this logical
             message.
         storage_timestamp_utc: Storage UTC timestamp for the persisted row.
@@ -188,6 +190,9 @@ async def record_assistant_outbound_message(
     clean_trace_id = str(llm_trace_id or "").strip()
     if clean_trace_id:
         assistant_doc["llm_trace_id"] = clean_trace_id
+    clean_source_episode_id = str(source_episode_id or "").strip()
+    if clean_source_episode_id:
+        assistant_doc["source_episode_id"] = clean_source_episode_id
 
     conversation_row_id = await save_conversation_func(assistant_doc)
     if not conversation_row_id:

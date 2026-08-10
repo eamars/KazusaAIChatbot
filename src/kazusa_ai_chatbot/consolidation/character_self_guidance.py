@@ -232,7 +232,7 @@ def _prompt_payload(
         "timestamp": state.get("local_time_context", {}),
         "character_name": _character_name(state),
         "decontextualized_input": text_or_empty(
-            state.get("decontexualized_input")
+            state.get("decontextualized_input")
         ),
         "final_dialog": project_tool_result_for_llm(
             state.get("final_dialog", [])

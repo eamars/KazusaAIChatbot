@@ -1,894 +1,1018 @@
-"""Tests for persona_supervisor2.py — top-level orchestrator."""
+"""Persona V2 graph routing and resolver-boundary tests."""
 
-from __future__ import annotations
-
-from unittest.mock import AsyncMock, patch
+import inspect
+from unittest.mock import AsyncMock
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
-from kazusa_ai_chatbot.nodes.persona_supervisor2 import (
-    _route_after_cognition,
-    call_action_subgraph,
-    persona_supervisor2,
-    stage_3_no_response,
+from kazusa_ai_chatbot.action_spec.registry import (
+    ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
+    SPEAK_CAPABILITY,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
-    build_cognition_chain_input_from_global_state,
+from kazusa_ai_chatbot.nodes import (
+    persona_supervisor2_msg_decontextualizer as decontextualizer_module,
 )
-from kazusa_ai_chatbot.time_boundary import build_turn_clock_from_storage_utc
+
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    CognitionContractError,
+    CognitionExecutionError,
+)
+from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+    build_acquaintance_user_state,
+)
+from kazusa_ai_chatbot.nodes import persona_supervisor2 as persona_module
+from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition as cognition_module
+from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_actions import (
+    materialize_semantic_action_requests,
+)
+from kazusa_ai_chatbot.cognition_resolver.loop import (
+    _terminal_blocker_speak_action_spec,
+)
+from tests.cognition_core_v2_test_helpers import canonical_episode
 
 
-def _base_discord_state():
-    """Minimal IMProcessState with all required keys."""
-    storage_timestamp_utc = "2024-01-01T00:00:00+00:00"
-    turn_clock = build_turn_clock_from_storage_utc(storage_timestamp_utc)
-    local_time_context = turn_clock["local_time_context"]
+NOW = "2026-07-14T00:00:00Z"
+
+
+def _logical_turn(
+    *,
+    turn_id: str,
+    role: str,
+    body_text: str,
+    platform_user_id: str,
+    global_user_id: str,
+    addressed_to_global_user_ids: list[str],
+) -> dict[str, object]:
+    """Build one complete logical turn for the persona boundary."""
+
     return {
-        "storage_timestamp_utc": storage_timestamp_utc,
-        "local_time_context": local_time_context,
-        "user_name": "TestUser",
-        "platform": "discord",
-        "platform_message_id": "msg_123",
-        "platform_user_id": "user_123",
-        "global_user_id": "uuid-123",
-        "user_input": "Hello",
-        "message_envelope": {
-            "body_text": "Hello",
-            "raw_wire_text": "Hello",
-            "mentions": [],
-            "attachments": [],
-            "addressed_to_global_user_ids": [],
-            "broadcast": True,
+        "turn_id": turn_id,
+        "role": role,
+        "occurred_at": NOW,
+        "display_name": global_user_id,
+        "fragments": [body_text],
+        "conversation_row_ids": [f"row-{turn_id}"],
+        "llm_trace_id": "",
+        "platform_user_id": platform_user_id,
+        "global_user_id": global_user_id,
+        "addressed_to_global_user_ids": addressed_to_global_user_ids,
+        "broadcast": False,
+        "reply_context": {},
+    }
+
+
+def test_decontextualizer_preserves_direct_imperative_roles() -> None:
+    """A clear command keeps its implicit character subject and user pronouns."""
+
+    prompt = decontextualizer_module._MSG_DECONTEXTUALIZER_PROMPT
+
+    assert "祈使句或命令句" in prompt
+    assert "隐含动作主体是{character_name}" in prompt
+    assert "不得添加{character_name}作为语法主语" in prompt
+
+
+def _cognition_output(route: str) -> dict[str, object]:
+    """Build one exact native V2 result for persona routing."""
+
+    return {
+        "schema_version": "cognition_core_output.v2",
+        "intention": {
+            "route": route,
+            "intention": "respond to the grounded episode",
+            "target_roles": [],
+            "reason": "the current episode establishes the selected route",
         },
+        "supporting_bids": [],
+        "state_update": {
+            "state_scope": "user",
+            "owner_key": "user-1",
+            "replacement_state": build_acquaintance_user_state(
+                global_user_id="user-1",
+                updated_at=NOW,
+            ),
+            "comparison_results": [],
+            "changed_paths": [],
+        },
+        "affect_projection": [],
+        "action_requests": [],
+        "resolver_requests": [],
+        "goal_resolution": "answerable_now",
+        "resolver_pending_resolution": None,
+        "resolver_goal_progress": None,
+        "resolver_progress": {
+            "status": "not_requested",
+            "semantic_summary": "no resolver request",
+        },
+        "selected_bid_reason": "the current episode establishes the route",
+        "private_monologue": "I want to respond to this clearly.",
+        "expression_policy": {
+            "visibility": "visible" if route == "speech" else "none",
+            "emotional_tone": "平静",
+            "intensity": "restrained",
+            "directness": "balanced",
+        },
+        "diagnostics": {
+            "run_id": "persona-routing-test",
+            "stage_status": {},
+            "selected_question_count": 0,
+            "dispatched_question_count": 0,
+            "selected_branch_count": 0,
+            "dispatched_branch_count": 0,
+            "completed_branch_count": 0,
+            "failed_branch_count": 0,
+            "overlap_ms": 0,
+            "dependency_wait_ms": 0,
+            "total_ms": 0,
+            "warnings": [],
+        },
+    }
+
+
+def _persona_state() -> dict[str, object]:
+    """Build the adapter-owned state required by the persona graph."""
+
+    return {
+        "storage_timestamp_utc": NOW,
+        "local_time_context": {
+            "current_local_datetime": "2026-07-14 12:00",
+            "current_local_weekday": "Tuesday",
+        },
+        "user_name": "Test User",
+        "platform": "debug",
+        "platform_message_id": "message-1",
+        "active_turn_platform_message_ids": ["message-1"],
+        "active_turn_conversation_row_ids": ["current-row-1"],
+        "active_turn_conversation_source_refs": [{
+            "ref_kind": "conversation_row",
+            "ref_id": "current-row-1",
+            "occurred_at": NOW,
+        }],
+        "platform_user_id": "platform-user-1",
+        "global_user_id": "user-1",
+        "user_input": "hello",
         "prompt_message_context": {
-            "body_text": "Hello",
+            "body_text": "hello",
             "mentions": [],
             "attachments": [],
             "addressed_to_global_user_ids": [],
-            "broadcast": True,
+            "broadcast": False,
         },
-        "user_multimedia_input": [],
-        "user_profile": {"affinity": 500},
-        "platform_bot_id": "bot_456",
-        "character_name": "TestCharacter",
+        "user_profile": {},
+        "platform_bot_id": "debug-bot",
         "character_profile": {
-            "name": "Character",
-            "global_user_id": "character-uuid",
-            "mood": "neutral",
-            "global_vibe": "calm",
-            "reflection_summary": "nothing notable",
+            "name": "Test Character",
+            "global_user_id": "character-1",
+            "personality_brief": {
+                "logic": "Keep present evidence and role ownership clear.",
+                "tempo": "moderate",
+                "defense": "Preserve boundaries and the selected intent.",
+                "quirks": "Use occasional concise, characterful phrasing.",
+                "taboos": "Ground scene facts in available evidence.",
+            },
+            "linguistic_texture_profile": {
+                "hesitation_density": 0.4,
+                "fragmentation": 0.4,
+                "emotional_leakage": 0.4,
+                "rhythmic_bounce": 0.4,
+                "direct_assertion": 0.4,
+                "softener_density": 0.4,
+                "counter_questioning": 0.4,
+                "formalism_avoidance": 0.4,
+                "abstraction_reframing": 0.4,
+                "self_deprecation": 0.4,
+            },
         },
-        "platform_channel_id": "chan_1",
-        "channel_type": "group",
-        "channel_name": "general",
+        "platform_channel_id": "channel-1",
+        "channel_type": "private",
+        "channel_name": "",
         "chat_history_wide": [],
         "chat_history_recent": [],
+        "ambient_logical_turns": [],
+        "interaction_logical_turns": [],
         "reply_context": {},
         "should_respond": True,
-        "reason_to_respond": "user greeted",
-        "use_reply_feature": False,
-        "channel_topic": "greetings",
         "indirect_speech_context": "",
+        "channel_topic": "",
         "debug_modes": {},
-        "cognitive_episode": build_text_chat_cognitive_episode(
-            episode_id="episode-123",
-            percept_id="percept-123",
-            storage_timestamp_utc=storage_timestamp_utc,
-            local_time_context=local_time_context,
-            user_input="Hello",
-            platform="discord",
-            platform_channel_id="chan_1",
-            channel_type="group",
-            platform_message_id="msg_123",
-            platform_user_id="user_123",
-            global_user_id="uuid-123",
-            user_name="TestUser",
-            target_addressed_user_ids=["character-uuid"],
-            target_broadcast=True,
+        "cognitive_episode": canonical_episode(
+            episode_id="persona-episode-1",
+            current_global_user_id="user-1",
+            content="hello",
         ),
     }
 
 
-def _speak_action_spec() -> dict:
+def _text_surface_input() -> dict[str, object]:
+    """Build one exact V2 input retained through dialog rendering."""
+
     return {
-        "schema_version": "action_spec.v1",
-        "kind": "speak",
-        "cognition_mode": "deliberative",
-        "source_refs": [
-            {
-                "schema_version": "action_source_ref.v1",
-                "ref_kind": "cognitive_episode",
-                "ref_id": "episode-123",
-                "owner": "cognition",
-                "relationship": "basis",
-                "evidence_refs": [],
-            }
-        ],
-        "target": {
-            "schema_version": "action_target.v1",
-            "target_kind": "current_channel",
-            "target_id": None,
-            "owner": "l3_text",
-            "scope": {"delivery_mode": "visible_reply"},
+        "schema_version": "text_surface_input.v2",
+        "episode": canonical_episode(
+            episode_id="persona-surface-input",
+            current_global_user_id="user-1",
+            content="hello",
+        ),
+        "intention": {
+            "route": "speech",
+            "intention": "respond to the grounded episode",
+            "target_roles": [],
+            "reason": "the current episode establishes a visible response",
         },
-        "params": {
-            "delivery_mode": "visible_reply",
-            "execute_at": None,
-            "surface_requirements": {"intent": "answer naturally"},
+        "goal_resolution": "answerable_now",
+        "supporting_bids": [],
+        "expression_policy": {
+            "visibility": "visible",
+            "emotional_tone": "calm",
+            "intensity": "restrained",
+            "directness": "balanced",
         },
-        "urgency": "now",
-        "visibility": "user_visible",
-        "deadline": None,
-        "continuation": {
-            "schema_version": "action_continuation.v1",
-            "mode": "none",
-            "episode_type": None,
-            "max_depth": 0,
-            "include_result_as": None,
+        "semantic_affect": [],
+        "permitted_action_results": [],
+        "interaction_style_context": "Keep the response conversational.",
+        "character_expression_context": {
+            "tempo": "moderate",
+            "linguistic_texture": "concise with light hesitation",
         },
-        "reason": "A visible response is needed.",
+        "visual_character_context": "Test Character",
     }
 
 
-def _background_work_action_spec() -> dict:
+def _text_surface_output() -> dict[str, object]:
+    """Build one exact V2 surface accepted by dialog."""
+
     return {
-        "schema_version": "action_spec.v1",
-        "kind": "background_work_request",
-        "cognition_mode": "deliberative",
-        "source_refs": [
-            {
-                "schema_version": "action_source_ref.v1",
-                "ref_kind": "cognitive_episode",
-                "ref_id": "episode-123",
-                "owner": "cognition",
-                "relationship": "basis",
-                "evidence_refs": [],
-            }
-        ],
-        "target": {
-            "schema_version": "action_target.v1",
-            "target_kind": "current_user",
-            "target_id": None,
-            "owner": "background_work",
-            "scope": {"requester_display_name": "TestUser"},
+        "schema_version": "text_surface_output.v2",
+        "content_plan": "Acknowledge the current episode.",
+        "content_requirements": ["Keep the selected stance."],
+        "visible_boundaries": [],
+        "addressee_plan": [{
+            "handle": "current_user",
+            "display_name": "current user",
+            "semantic_role": "direct_recipient",
+            "wording_policy": "second_person_allowed",
+        }],
+        "delivery_profile": {
+            "lexical_register": "plain",
+            "sentence_shape": "compact",
+            "rhythm": "measured",
+            "hesitation": "light",
+            "punctuation": "restrained",
         },
-        "params": {
-            "task_brief": "Generate a Fibonacci function snippet.",
-            "requested_delivery": "send_result_when_done",
-            "max_output_chars": 3000,
-        },
-        "urgency": "background",
-        "visibility": "private",
-        "deadline": None,
-        "continuation": {
-            "schema_version": "action_continuation.v1",
-            "mode": "none",
-            "episode_type": None,
-            "max_depth": 0,
-            "include_result_as": None,
-        },
-        "reason": "The character accepted bounded async background work.",
+        "selected_surface_intent": "acknowledge the current episode",
+        "permitted_action_results": [],
     }
 
 
-def _background_work_pending_result() -> dict:
+def _surface_update() -> dict[str, object]:
+    """Build the exact L3 text-surface handoff."""
+
     return {
-        "schema_version": "action_result.v1",
-        "action_attempt_id": "action_attempt:background-work-001",
-        "action_kind": "background_work_request",
-        "handler_owner": "background_work",
-        "status": "pending",
-        "visibility": "private",
-        "result_summary": "Background work job queued.",
-        "result_refs": [
-            {
-                "schema_version": "evidence_ref.v1",
-                "evidence_kind": "system_event",
-                "evidence_id": "background_work_job:job-001",
-                "owner": "background_work_job",
-                "excerpt": "queued accepted task background work",
-                "observed_at": "2024-01-01T00:00:00+00:00",
-            }
-        ],
-        "continuation": {
-            "schema_version": "action_continuation.v1",
-            "mode": "none",
-            "episode_type": None,
-            "max_depth": 0,
-            "include_result_as": None,
-        },
-        "completed_at": None,
+        "text_surface_input_v2": _text_surface_input(),
+        "text_surface_output_v2": _text_surface_output(),
     }
 
 
-def _action_directives() -> dict:
+def _dialog_result(final_dialog: list[str]) -> dict[str, object]:
+    """Build a dialog result paired with its accepted surface."""
+
     return {
-        "contextual_directives": {
-            "social_distance": "friendly",
-            "emotional_intensity": "low",
-            "vibe_check": "calm",
-            "relational_dynamic": "direct reply",
-        },
-        "linguistic_directives": {
-            "rhetorical_strategy": "answer directly",
-            "linguistic_style": "brief",
-            "accepted_user_preferences": [],
-            "content_plan": {
-                "semantic_content": "answer",
-                "rendering": "short",
+        "final_dialog": final_dialog,
+        "target_addressed_user_ids": ["user-1"] if final_dialog else [],
+        "target_broadcast": False,
+        "text_surface_output_v2": _text_surface_output(),
+    }
+
+
+def test_targetless_group_affordances_use_a_semantic_group_role() -> None:
+    """Group review affordances must not expose an empty user role."""
+
+    state = {
+        "global_user_id": "",
+        "rag_result": {
+            "user_image": {
+                "user_memory_context": {
+                    "active_commitments": [],
+                },
             },
-            "forbidden_phrases": [],
         },
-        "visual_directives": {
-            "facial_expression": [],
-            "body_language": [],
-            "gaze_direction": [],
-            "visual_vibe": [],
+        "cognitive_episode": {
+            "trigger_source": "self_cognition",
+            "target_scope": {
+                "channel_type": "group",
+                "current_global_user_id": "",
+                "current_platform_user_id": "",
+            },
         },
     }
 
+    affordances = cognition_module._available_action_affordances(state)
 
-def _resolver_update(action_specs: list[dict]) -> dict:
-    """Build a patched resolver result for persona graph plumbing tests."""
+    assert affordances
+    assert all(
+        role == {
+            "role": "target",
+            "entity_kind": "group",
+            "entity_id": "current group scene",
+        }
+        for affordance in affordances
+        for role in affordance["target_roles"]
+    )
+
+
+def _resolver_update(route: str) -> dict[str, object]:
+    """Build one committed V2 resolver update for graph plumbing tests."""
 
     return {
+        "cognition_core_output": _cognition_output(route),
+        "cognition_state_committed": True,
+        "action_specs": [],
         "rag_result": {},
-        "internal_monologue": "thinking...",
-        "interaction_subtext": "",
-        "emotional_appraisal": "",
-        "character_intent": "",
-        "logical_stance": "",
-        "judgment_note": "",
-        "social_distance": "",
-        "emotional_intensity": "",
-        "vibe_check": "",
-        "relational_dynamic": "",
-        "action_specs": action_specs,
     }
+
+
+def _accepted_coding_action_spec() -> dict[str, object]:
+    """Build one bound coding-run lifecycle action for handoff tests."""
+
+    state = _persona_state()
+    state["decontextualized_input"] = "Fix the coding worker handoff."
+    state["action_selection_context"] = {
+        "coding_runs": [{
+            "coding_run_ref": "coding_run:run-1",
+            "allowed_next_actions": ["revise_proposal"],
+        }],
+    }
+    specs = materialize_semantic_action_requests(
+        [{
+            "capability": ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
+            "decision": "revise_proposal",
+            "detail": "Revise the accepted coding proposal.",
+            "reason": "The user requested a revision to the existing run.",
+            "context_ref": "coding_run:run-1",
+        }],
+        state,
+    )
+    assert len(specs) == 1
+    return specs[0]
+
+
+def test_route_after_cognition_uses_validated_v2_speech_intention() -> None:
+    """A validated V2 speech intention enters the visible surface path."""
+
+    assert persona_module._route_after_cognition({
+        "cognition_core_output": _cognition_output("speech"),
+    }) == "respond"
+
+
+def test_v2_speech_intention_materializes_one_speak_action() -> None:
+    """The validated speech route must leave one canonical action residue."""
+
+    output = _cognition_output("speech")
+    specs = cognition_module._materialize_v2_action_requests(
+        output,
+        _persona_state(),
+    )
+
+    assert [spec["kind"] for spec in specs] == [SPEAK_CAPABILITY]
+    requirements = specs[0]["params"]["surface_requirements"]
+    assert requirements["decision"] == "visible_reply"
+    assert requirements["detail"] == (
+        "respond to the grounded episode"
+    )
 
 
 @pytest.mark.asyncio
-async def test_call_action_subgraph_returns_final_dialog():
-    """call_action_subgraph wraps dialog_agent output correctly."""
-    mock_dialog_result = {
-        "final_dialog": ["Hello!", "How are you?"],
-        "target_addressed_user_ids": ["uuid-123"],
-        "target_broadcast": False,
+async def test_v2_speech_executes_and_correlates_speak_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Dialog execution must trace the same speak attempt on its surface."""
+
+    state = _persona_state()
+    output = _cognition_output("speech")
+    state.update(_resolver_update("speech"))
+    state["action_specs"] = cognition_module._materialize_v2_action_requests(
+        output,
+        state,
+    )
+    monkeypatch.setattr(
+        persona_module,
+        "call_l3_text_surface_handler",
+        AsyncMock(return_value=_surface_update()),
+    )
+    monkeypatch.setattr(
+        persona_module,
+        "dialog_agent",
+        AsyncMock(return_value=_dialog_result(["Hello."])),
+    )
+
+    result = await persona_module.call_action_subgraph(state)
+
+    speak_results = [
+        row
+        for row in result["action_results"]
+        if row["action_kind"] == SPEAK_CAPABILITY
+    ]
+    assert len(speak_results) == 1
+    assert speak_results[0]["status"] == "executed"
+    assert speak_results[0]["action_attempt_id"]
+    assert result["surface_outputs"][0]["action_attempt_id"] == (
+        speak_results[0]["action_attempt_id"]
+    )
+
+
+def test_route_after_cognition_uses_validated_v2_silence_intention() -> None:
+    """A validated V2 silence intention remains private."""
+
+    assert persona_module._route_after_cognition({
+        "cognition_core_output": _cognition_output("silence"),
+    }) == "silent"
+
+
+def test_route_after_cognition_rejects_missing_v2_output() -> None:
+    """Legacy action specs cannot become routing authority."""
+
+    with pytest.raises(
+        CognitionExecutionError,
+        match="validated V2 cognition output is required",
+    ):
+        persona_module._route_after_cognition({
+            "action_specs": [{"kind": "speak"}],
+        })
+
+
+def test_route_after_cognition_validates_v2_output_before_routing() -> None:
+    """A partial V2-shaped mapping cannot select a surface."""
+
+    with pytest.raises(CognitionContractError):
+        persona_module._route_after_cognition({
+            "cognition_core_output": {
+                "intention": {"route": "speech"},
+            },
+        })
+
+
+@pytest.mark.asyncio
+async def test_live_persona_loads_open_coding_run_contexts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A user-message turn receives the existing trusted run projections."""
+
+    captured: dict[str, object] = {}
+    contexts = [{
+        "schema_version": "coding_run_context.v1",
+        "coding_run_ref": "coding_run:run-1",
+        "status": "blocked",
+        "objective_summary": "repair the scheduler",
+        "allowed_next_actions": ["respond_to_blocker", "status"],
+        "active_blocker": None,
+        "followup_open": True,
+        "updated_at": NOW,
+    }]
+
+    async def load_contexts(**kwargs: object) -> list[dict[str, object]]:
+        captured.update(kwargs)
+        return contexts
+
+    monkeypatch.setattr(
+        persona_module,
+        "load_open_coding_run_contexts_for_scope",
+        load_contexts,
+    )
+
+    result = await persona_module._load_live_action_selection_context(
+        _persona_state(),
+    )
+
+    assert captured == {
+        "source_platform": "debug",
+        "source_channel_id": "channel-1",
+        "requester_global_user_id": "user-1",
+        "limit": 3,
+    }
+    assert result["action_selection_context"] == {"coding_runs": contexts}
+
+
+def test_resolver_owned_speak_spec_overrides_stale_evidence_route() -> None:
+    """A terminal resolver surface remains visible after recurrence."""
+
+    request = {
+        "schema_version": "resolver_capability_request.v1",
+        "capability_kind": "task_resolution_request",
+        "objective": "retrieve grounded breakfast evidence",
+        "reason": "the direct question requested one grounded answer",
+        "priority": "now",
+    }
+    blocker = {
+        "schema_version": "resolver_observation.v1",
+        "observation_id": "resolver_obs_duplicate_request",
+        "capability_kind": "task_resolution_request",
+        "request_objective": "retrieve grounded breakfast evidence",
+        "request_reason": "the direct question requested one grounded answer",
+        "status": "failed",
+        "prompt_safe_summary": "No additional grounded evidence was found.",
+        "evidence_refs": [],
+        "created_at_utc": NOW,
+    }
+    state = {
+        "cognition_core_output": _cognition_output("evidence"),
+        "action_specs": [
+            _terminal_blocker_speak_action_spec(request, blocker)
+        ],
     }
 
-    with (
-        patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_l3_text_surface_handler",
-            new_callable=AsyncMock,
-            return_value={"action_directives": _action_directives()},
-        ),
-        patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.dialog_agent",
-            new_callable=AsyncMock,
-            return_value=mock_dialog_result,
-        ),
-    ):
-        state = _base_discord_state()
-        state["action_specs"] = [_speak_action_spec()]
-        result = await call_action_subgraph(state)
+    assert persona_module._cognition_selects_text_surface(state) is True
 
-    assert result["final_dialog"] == ["Hello!", "How are you?"]
-    assert result["target_addressed_user_ids"] == ["uuid-123"]
+
+@pytest.mark.asyncio
+async def test_persona_stage_uses_canonical_resolver_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The live persona stage enters the shared recurrence and commits once."""
+
+    captured: dict[str, object] = {}
+
+    async def load_action_context(state: dict) -> dict:
+        return {**state, "action_selection_context": {"coding_runs": []}}
+
+    async def load_pending(state: dict) -> dict:
+        return state
+
+    async def run_resolver_loop(state: dict, **kwargs: object) -> dict:
+        captured["state"] = state
+        captured["kwargs"] = kwargs
+        return {
+            **state,
+            "cognition_core_output": _cognition_output("silence"),
+        }
+
+    monkeypatch.setattr(
+        persona_module,
+        "_load_live_action_selection_context",
+        load_action_context,
+    )
+    monkeypatch.setattr(
+        persona_module,
+        "load_matching_pending_resume_into_state",
+        load_pending,
+    )
+    monkeypatch.setattr(
+        persona_module,
+        "ensure_initial_resolver_inputs",
+        lambda state, *, max_cycles: state,
+    )
+    monkeypatch.setattr(
+        persona_module,
+        "call_cognition_resolver_loop",
+        run_resolver_loop,
+    )
+    commit = AsyncMock()
+    monkeypatch.setattr(persona_module, "commit_cognition_output", commit)
+
+    await persona_module.stage_1_goal_resolver({
+        "storage_timestamp_utc": NOW,
+    })
+
+    kwargs = captured["kwargs"]
+    assert callable(kwargs["call_cognition_subgraph_func"])
+    assert callable(kwargs["execute_capability_func"])
+    assert kwargs["max_cycles"] == persona_module.COGNITION_RESOLVER_MAX_CYCLES
+    assert kwargs["capability_timeout_seconds"] == (
+        persona_module.COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS
+    )
+    commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_call_action_subgraph_preserves_dialog_and_trace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The V2 surface path emits components for downstream trace settlement."""
+
+    state = _persona_state()
+    state.update(_resolver_update("speech"))
+    surface_update = _surface_update()
+    surface_update.update({
+        "visual_surface_output_v2": {
+            "schema_version": "visual_surface_output.v2",
+            "visual_directives": "terminal visual scene",
+            "selected_surface_intent": "illustrate the terminal scene",
+        },
+    })
+    surface = AsyncMock(return_value=surface_update)
+    dialog = AsyncMock(return_value=_dialog_result([
+        "Hello.",
+        "How are you?",
+    ]))
+    monkeypatch.setattr(
+        persona_module,
+        "call_l3_text_surface_handler",
+        surface,
+    )
+    monkeypatch.setattr(persona_module, "dialog_agent", dialog)
+
+    result = await persona_module.call_action_subgraph(state)
+
+    assert result["final_dialog"] == ["Hello.", "How are you?"]
+    assert result["target_addressed_user_ids"] == ["user-1"]
     assert result["target_broadcast"] is False
-    retired_field = "mention" + "_target_user"
-    assert retired_field not in result
-    assert result["surface_outputs"][0]["surface_kind"] == "text"
-    assert result["episode_trace"]["surface_outputs"][0]["fragments"] == [
-        "Hello!",
+    assert result["surface_outputs"][0]["fragments"] == [
+        "Hello.",
         "How are you?",
     ]
+    assert result["visual_surface_output_v2"]["visual_directives"] == (
+        "terminal visual scene"
+    )
+    dialog_state = dialog.await_args.args[0]
+    assert "text_surface_output_v2" in dialog_state
+    assert "visual_surface_output_v2" not in dialog_state
+    assert result["surface_outputs"][1]["fragments"] == [
+        "terminal visual scene"
+    ]
+    surface.assert_awaited_once()
+    dialog.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_call_action_subgraph_empty_dialog():
-    """call_action_subgraph handles empty dialog_agent output."""
-    mock_dialog_result = {
-        "final_dialog": [],
-        "target_addressed_user_ids": [],
-        "target_broadcast": False,
-    }
+async def test_coding_enqueue_precedes_visible_speech_dialog(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Coding work is queued once before the acknowledgement reaches dialog."""
 
-    with (
-        patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_l3_text_surface_handler",
-            new_callable=AsyncMock,
-            return_value={"action_directives": _action_directives()},
-        ),
-        patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.dialog_agent",
-            new_callable=AsyncMock,
-            return_value=mock_dialog_result,
-        ),
-    ):
-        state = _base_discord_state()
-        state["action_specs"] = [_speak_action_spec()]
-        result = await call_action_subgraph(state)
+    state = _persona_state()
+    state.update(_resolver_update("speech"))
+    state["action_specs"] = [_accepted_coding_action_spec()]
+    pending_result = {
+        "schema_version": "action_result.v1",
+        "action_attempt_id": "action_attempt:coding-1",
+        "action_kind": ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
+        "handler_owner": "background_work",
+        "status": "pending",
+        "result_summary": "Accepted task scheduled.",
+        "result_refs": [],
+        "completed_at": None,
+        "accepted_task_state": "scheduled",
+    }
+    execute = AsyncMock(side_effect=[[pending_result], []])
+    surface = AsyncMock(return_value=_surface_update())
+    dialog = AsyncMock(return_value=_dialog_result([
+        "I accepted the coding task.",
+    ]))
+    monkeypatch.setattr(
+        persona_module,
+        "execute_action_specs_for_trace",
+        execute,
+    )
+    monkeypatch.setattr(
+        persona_module,
+        "call_l3_text_surface_handler",
+        surface,
+    )
+    monkeypatch.setattr(persona_module, "dialog_agent", dialog)
+
+    enqueue_update = await persona_module.stage_2a_background_work_enqueue(state)
+
+    assert enqueue_update["pre_surface_action_results"] == [pending_result]
+    first_execution_specs = execute.await_args_list[0].args[0]
+    assert [spec["kind"] for spec in first_execution_specs] == [
+        ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
+    ]
+
+    state.update(enqueue_update)
+    result = await persona_module.call_action_subgraph(state)
+
+    assert result["final_dialog"] == ["I accepted the coding task."]
+    surface_state = surface.await_args.args[0]
+    assert surface_state["pre_surface_action_results"] == [pending_result]
+    dialog.assert_awaited_once()
+    coding_execution_calls = [
+        call
+        for call in execute.await_args_list
+        if any(
+            spec.get("kind") == ACCEPTED_CODING_TASK_REQUEST_CAPABILITY
+            for spec in call.args[0]
+        )
+    ]
+    assert len(coding_execution_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_coding_handoff_requires_visible_speech_route(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A private coding action cannot enqueue without an acknowledgement path."""
+
+    state = _persona_state()
+    state.update(_resolver_update("action"))
+    state["action_specs"] = [_accepted_coding_action_spec()]
+    execute = AsyncMock()
+    monkeypatch.setattr(
+        persona_module,
+        "execute_action_specs_for_trace",
+        execute,
+    )
+
+    result = await persona_module.stage_2a_background_work_enqueue(state)
+
+    action_results = result["pre_surface_action_results"]
+    assert len(action_results) == 1
+    assert action_results[0]["action_kind"] == (
+        ACCEPTED_CODING_TASK_REQUEST_CAPABILITY
+    )
+    assert action_results[0]["status"] == "failed"
+    assert "visible acknowledgement missing" in (
+        action_results[0]["result_summary"]
+    )
+    execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_call_action_subgraph_preserves_empty_dialog(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An empty renderer result remains an empty visible surface."""
+
+    state = _persona_state()
+    state.update(_resolver_update("speech"))
+    monkeypatch.setattr(
+        persona_module,
+        "call_l3_text_surface_handler",
+        AsyncMock(return_value=_surface_update()),
+    )
+    monkeypatch.setattr(
+        persona_module,
+        "dialog_agent",
+        AsyncMock(return_value=_dialog_result([])),
+    )
+
+    result = await persona_module.call_action_subgraph(state)
 
     assert result["final_dialog"] == []
     assert result["target_addressed_user_ids"] == []
     assert result["target_broadcast"] is False
-    retired_field = "mention" + "_target_user"
-    assert retired_field not in result
-
-
-def test_route_after_cognition_uses_l2d_speak_selection() -> None:
-    """L2d action specs should own visible text routing when present."""
-
-    state = {
-        "action_specs": [_speak_action_spec()],
-    }
-
-    assert _route_after_cognition(state) == "respond"
-
-
-def test_route_after_cognition_allows_no_visible_action() -> None:
-    """A present but empty L2d action set means no text surface is required."""
-
-    state = {
-        "action_specs": [],
-    }
-
-    assert _route_after_cognition(state) == "silent"
 
 
 @pytest.mark.asyncio
-async def test_background_work_executes_before_l3_acknowledgement() -> None:
-    """L3 acknowledgements should be based on pre-surface enqueue results."""
+async def test_stage_3_no_response_records_private_v2_trace() -> None:
+    """A V2 silence result emits a private surface for trace settlement."""
 
-    state = _base_discord_state()
-    action_specs = [_background_work_action_spec(), _speak_action_spec()]
-    l3_states = []
+    state = _persona_state()
+    state.update(_resolver_update("silence"))
 
-    async def _execute_action_specs(
-        selected_specs,
-        *,
-        storage_timestamp_utc,
-        executed_action_attempt_ids=None,
-        record_attempt_func=None,
-    ):
-        del (
-            storage_timestamp_utc,
-            executed_action_attempt_ids,
-            record_attempt_func,
-        )
-        results = []
-        for selected_spec in selected_specs:
-            if selected_spec["kind"] == "background_work_request":
-                results.append(_background_work_pending_result())
-            elif selected_spec["kind"] == "speak":
-                results.append({
-                    "schema_version": "action_result.v1",
-                    "action_attempt_id": "action_attempt:speak-001",
-                    "action_kind": "speak",
-                    "handler_owner": "l3_text",
-                    "status": "executed",
-                    "visibility": "user_visible",
-                    "result_summary": "Text surface rendered.",
-                    "result_refs": [],
-                    "continuation": {
-                        "schema_version": "action_continuation.v1",
-                        "mode": "none",
-                        "episode_type": None,
-                        "max_depth": 0,
-                        "include_result_as": None,
-                    },
-                    "completed_at": "2024-01-01T00:00:00+00:00",
-                })
-        return results
-
-    async def _l3_text_surface_handler(l3_state):
-        l3_states.append(dict(l3_state))
-        return {"action_directives": _action_directives()}
-
-    with (
-        patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_msg_decontexualizer",
-            new_callable=AsyncMock,
-            return_value={"decontexualized_input": "Hello"},
-        ),
-        patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_cognition_resolver_loop",
-            new_callable=AsyncMock,
-            return_value=_resolver_update(action_specs),
-        ),
-        patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2."
-            "load_matching_pending_resume_into_state",
-            new_callable=AsyncMock,
-            side_effect=lambda persona_state: persona_state,
-        ),
-        patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2."
-            "call_memory_lifecycle_update_handler",
-            new_callable=AsyncMock,
-            return_value={},
-        ),
-        patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2."
-            "execute_action_specs_for_trace",
-            _execute_action_specs,
-        ),
-        patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2."
-            "call_l3_text_surface_handler",
-            _l3_text_surface_handler,
-        ),
-        patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.dialog_agent",
-            new_callable=AsyncMock,
-            return_value={
-                "final_dialog": ["I'll send it when it's ready."],
-                "target_addressed_user_ids": ["uuid-123"],
-                "target_broadcast": False,
-            },
-        ),
-    ):
-        result = await persona_supervisor2(state)
-
-    assert l3_states[0]["pre_surface_action_results"] == [
-        _background_work_pending_result()
-    ]
-    assert result["episode_trace"]["action_results"][0]["action_kind"] == (
-        "background_work_request"
-    )
-
-
-@pytest.mark.asyncio
-async def test_stage_3_no_response_records_private_trace_for_l2d() -> None:
-    """No-speak L2d decisions should still leave consolidation evidence."""
-
-    state = _base_discord_state()
-    state["action_specs"] = []
-
-    result = await stage_3_no_response(state)
+    result = await persona_module.stage_3_no_response(state)
 
     assert result["final_dialog"] == []
     assert result["surface_outputs"][0]["surface_kind"] == "private"
-    assert result["episode_trace"]["trigger_source"] == "user_message"
 
 
-@pytest.mark.asyncio
-async def test_persona_supervisor2_returns_final_dialog_and_consolidation_state():
-    """persona_supervisor2 should return dialog plus the consolidation snapshot."""
-    state = _base_discord_state()
+def _patch_persona_graph_stages(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    route: str,
+) -> tuple[AsyncMock, AsyncMock, AsyncMock]:
+    """Patch external persona stages with deterministic V2 updates."""
 
-    # Mock graph nodes to avoid real LLM calls.
-    with (
-        patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_msg_decontexualizer",
-            new_callable=AsyncMock,
-            return_value={"decontexualized_input": "Hello"},
-        ) as m_decon,
-        patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_cognition_resolver_loop",
-            new_callable=AsyncMock,
-            return_value=_resolver_update([_speak_action_spec()]),
-        ) as m_resolver,
-        patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_l3_text_surface_handler",
-            new_callable=AsyncMock,
-            return_value={"action_directives": _action_directives()},
-        ),
-        patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.dialog_agent",
-            new_callable=AsyncMock,
-            return_value={
-                "final_dialog": ["Hi there!"],
-                "target_addressed_user_ids": ["uuid-123"],
-                "target_broadcast": False,
-            },
-        ),
-    ):
-        result = await persona_supervisor2(state)
-
-    assert "final_dialog" in result
-    assert "future_promises" in result
-    assert result["final_dialog"] == ["Hi there!"]
-    assert result["target_addressed_user_ids"] == ["uuid-123"]
-    assert result["target_broadcast"] is False
-    retired_field = "mention" + "_target_user"
-    assert retired_field not in result
-    assert result["future_promises"] == []
-    assert result["consolidation_state"]["decontexualized_input"] == "Hello"
-    assert result["consolidation_state"]["final_dialog"] == ["Hi there!"]
-    assert retired_field not in result["consolidation_state"]
-    assert result["scope_users"] == result["consolidation_state"]["scope_users"]
-    assert result["consolidation_state"]["reply_context"] == {}
-    assert m_decon.await_args.args[0]["channel_name"] == "general"
-    assert m_resolver.await_args.args[0]["channel_name"] == "general"
-    assert m_resolver.await_args.args[0]["channel_topic"] == "greetings"
-    m_resolver.assert_awaited_once()
-
-
-def test_cognition_chain_input_projects_group_name_into_scene_topic() -> None:
-    """Cognition should receive the named group as existing scene text."""
-
-    state = _base_discord_state()
-    state.update({
-        "channel_name": "动画讨论群",
-        "channel_topic": "新番角色和剧情走向",
-        "decontexualized_input": "Hello",
-        "referents": [],
-        "rag_result": {},
-    })
-
-    chain_input = build_cognition_chain_input_from_global_state(state)
-
-    assert chain_input["scene"]["channel_topic"] == (
-        '“动画讨论群”群聊中正在讨论：新番角色和剧情走向'
+    decontextualizer = AsyncMock(
+        return_value={"decontextualized_input": "hello"},
     )
-    assert "channel_name" not in chain_input["scene"]
-    assert state["channel_topic"] == "新番角色和剧情走向"
+    resolver = AsyncMock(return_value=_resolver_update(route))
+    dialog = AsyncMock(return_value=_dialog_result(["Hello."]))
+    monkeypatch.setattr(
+        persona_module,
+        "call_msg_decontextualizer",
+        decontextualizer,
+    )
+    monkeypatch.setattr(persona_module, "stage_1_goal_resolver", resolver)
+    monkeypatch.setattr(
+        persona_module,
+        "call_memory_lifecycle_update_handler",
+        AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        persona_module,
+        "call_l3_text_surface_handler",
+        AsyncMock(return_value=_surface_update()),
+    )
+    monkeypatch.setattr(persona_module, "dialog_agent", dialog)
+    return decontextualizer, resolver, dialog
 
 
 @pytest.mark.asyncio
-async def test_persona_supervisor2_no_speak_action_skips_dialog():
-    """A no-visible-action L2d decision should skip dialog."""
+async def test_persona_supervisor_returns_dialog_and_consolidation_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The V2 graph returns dialog plus its post-cognition snapshot."""
 
-    state = _base_discord_state()
+    decontextualizer, resolver, _ = _patch_persona_graph_stages(
+        monkeypatch,
+        route="speech",
+    )
 
-    with (
-        patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_msg_decontexualizer",
-            new_callable=AsyncMock,
-            return_value={"decontexualized_input": "Hello"},
-        ),
-        patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_cognition_resolver_loop",
-            new_callable=AsyncMock,
-            return_value={
-                **_resolver_update([]),
-                "internal_monologue": "choosing silence",
-                "character_intent": "DISMISS",
-                "logical_stance": "REFUSE",
-            },
-        ),
-        patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.dialog_agent",
-            new_callable=AsyncMock,
-            return_value={
-                "final_dialog": ["should not be used"],
-                "target_addressed_user_ids": ["uuid-123"],
-                "target_broadcast": False,
-            },
-        ) as m_dialog,
-    ):
-        result = await persona_supervisor2(state)
+    result = await persona_module.persona_supervisor2(_persona_state())
+
+    assert result["final_dialog"] == ["Hello."]
+    assert result["target_addressed_user_ids"] == ["user-1"]
+    assert result["target_broadcast"] is False
+    assert result["cognition_state_committed"] is True
+    assert result["consolidation_state"]["decontextualized_input"] == "hello"
+    assert result["consolidation_state"]["final_dialog"] == ["Hello."]
+    assert result["consolidation_state"][
+        "active_turn_conversation_source_refs"
+    ] == [{
+        "ref_kind": "conversation_row",
+        "ref_id": "current-row-1",
+        "occurred_at": NOW,
+    }]
+    decontextualizer.assert_awaited_once()
+    resolver.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_persona_supervisor_v2_silence_skips_dialog(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A validated V2 silence intention cannot enter the dialog renderer."""
+
+    _, _, dialog = _patch_persona_graph_stages(
+        monkeypatch,
+        route="silence",
+    )
+
+    result = await persona_module.persona_supervisor2(_persona_state())
 
     assert result["should_respond"] is False
     assert result["final_dialog"] == []
     assert result["target_addressed_user_ids"] == []
     assert result["target_broadcast"] is False
-    assert result["future_promises"] == []
     assert result["consolidation_state"]["should_respond"] is False
-    assert result["consolidation_state"]["final_dialog"] == []
-    m_dialog.assert_not_awaited()
+    dialog.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_persona_supervisor2_scopes_group_history_before_persona_stages():
-    """Only the decontextualizer should receive full recent channel history."""
-    state = _base_discord_state()
-    state["platform_user_id"] = "platform-user-a"
-    state["global_user_id"] = "global-user-a"
-    state["platform_bot_id"] = "platform-bot"
-    state["chat_history_wide"] = [
-        {
-            "role": "user",
-            "platform_user_id": "platform-user-a",
-            "global_user_id": "global-user-a",
-            "body_text": "current user secret",
-            "addressed_to_global_user_ids": ["character-uuid"],
-            "broadcast": False,
-            "mentions": [],
-            "reply_context": {},
-            "timestamp": "2026-04-30T00:00:00+00:00",
-        },
-        {
-            "role": "assistant",
-            "platform_user_id": "platform-bot",
-            "global_user_id": "character-uuid",
-            "body_text": "current user reply",
-            "addressed_to_global_user_ids": ["global-user-a"],
-            "broadcast": False,
-            "mentions": [],
-            "reply_context": {},
-            "timestamp": "2026-04-30T00:00:01+00:00",
-        },
-        {
-            "role": "user",
-            "platform_user_id": "platform-user-b",
-            "global_user_id": "global-user-b",
-            "body_text": "other user secret",
-            "addressed_to_global_user_ids": ["character-uuid"],
-            "broadcast": False,
-            "mentions": [],
-            "reply_context": {},
-            "timestamp": "2026-04-30T00:00:02+00:00",
-        },
-        {
-            "role": "assistant",
-            "platform_user_id": "platform-bot",
-            "global_user_id": "character-uuid",
-            "body_text": "other user reply",
-            "addressed_to_global_user_ids": ["global-user-b"],
-            "broadcast": False,
-            "mentions": [],
-            "reply_context": {},
-            "timestamp": "2026-04-30T00:00:03+00:00",
-        },
-    ]
-    state["chat_history_recent"] = list(state["chat_history_wide"])
+async def test_persona_supervisor_scopes_history_before_cognition(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cognition sees only the current user's interaction history."""
 
-    with (
-        patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_msg_decontexualizer",
-            new_callable=AsyncMock,
-            return_value={"decontexualized_input": "Hello"},
-        ) as m_decon,
-        patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_cognition_resolver_loop",
-            new_callable=AsyncMock,
-            return_value=_resolver_update([]),
-        ) as m_resolver,
-        patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.dialog_agent",
-            new_callable=AsyncMock,
-            return_value={
-                "final_dialog": ["Hi there!"],
-                "target_addressed_user_ids": ["global-user-a"],
-                "target_broadcast": False,
-            },
-        ),
-    ):
-        result = await persona_supervisor2(state)
-
-    decon_state = m_decon.await_args.args[0]
-    resolver_state = m_resolver.await_args.args[0]
-    assert [
-        row["body_text"] for row in decon_state["chat_history_recent"]
-    ] == [
-        "current user secret",
-        "current user reply",
-        "other user secret",
-        "other user reply",
+    state = _persona_state()
+    current_user_turn = _logical_turn(
+        turn_id="current-user",
+        role="user",
+        body_text="current user context",
+        platform_user_id="platform-user-1",
+        global_user_id="user-1",
+        addressed_to_global_user_ids=["character-1"],
+    )
+    current_user_reply = _logical_turn(
+        turn_id="current-reply",
+        role="assistant",
+        body_text="current user reply",
+        platform_user_id="debug-bot",
+        global_user_id="character-1",
+        addressed_to_global_user_ids=["user-1"],
+    )
+    other_user_turn = _logical_turn(
+        turn_id="other-user",
+        role="user",
+        body_text="other user private context",
+        platform_user_id="platform-user-2",
+        global_user_id="user-2",
+        addressed_to_global_user_ids=["character-1"],
+    )
+    state["ambient_logical_turns"] = [
+        current_user_turn,
+        current_user_reply,
+        other_user_turn,
     ]
-    assert [
-        row["body_text"]
-        for row in resolver_state["chat_history_recent"]
-    ] == [
-        "current user secret",
-        "current user reply",
+    state["interaction_logical_turns"] = [
+        current_user_turn,
+        current_user_reply,
     ]
-    assert [
-        row["body_text"] for row in resolver_state["chat_history_wide"]
-    ] == [
-        "current user secret",
-        "current user reply",
-    ]
-    assert result["consolidation_state"]["chat_history_recent"] == (
-        resolver_state["chat_history_recent"]
+    decontextualizer, resolver, _ = _patch_persona_graph_stages(
+        monkeypatch,
+        route="silence",
     )
 
+    await persona_module.persona_supervisor2(state)
 
-@pytest.mark.asyncio
-async def test_persona_supervisor2_builds_scope_users_for_first_pass_only():
-    """The decontextualizer should get a neutral roster without retry state."""
-
-    state = _base_discord_state()
-    state["platform"] = "qq"
-    state["user_input"] = "还不报警抓他吗？"
-    state["user_name"] = "Dangal"
-    state["platform_user_id"] = "67889018"
-    state["global_user_id"] = "745d7818-a9d3-4889-b7f3-8555078a2061"
-    state["platform_bot_id"] = "3768713357"
-    state["character_profile"] = {
-        "name": "杏山千纱",
-        "global_user_id": "00000000-0000-4000-8000-000000000001",
-        "mood": "neutral",
-        "global_vibe": "calm",
-        "reflection_summary": "nothing notable",
-    }
-    state["message_envelope"]["body_text"] = state["user_input"]
-    state["message_envelope"]["raw_wire_text"] = state["user_input"]
-    state["message_envelope"]["mentions"] = [
-        {
-            "platform_user_id": "673225019",
-            "global_user_id": "256e8a10-c406-47e9-ac8f-efd270d18160",
-            "display_name": "蚝爹油",
-            "entity_kind": "user",
-        }
+    decontextualizer_text = [
+        fragment
+        for turn in decontextualizer.await_args.args[0][
+            "ambient_logical_turns"
+        ]
+        for fragment in turn["fragments"]
     ]
-    state["message_envelope"]["addressed_to_global_user_ids"] = [
-        "00000000-0000-4000-8000-000000000001",
-        "256e8a10-c406-47e9-ac8f-efd270d18160",
+    resolver_text = [
+        row["body_text"]
+        for row in resolver.await_args.args[0]["chat_history_recent"]
     ]
-    state["prompt_message_context"] = {
-        "body_text": state["user_input"],
-        "mentions": [
-            {
-                "platform_user_id": "673225019",
-                "global_user_id": "256e8a10-c406-47e9-ac8f-efd270d18160",
-                "display_name": "蚝爹油",
-                "entity_kind": "user",
-            }
-        ],
-        "attachments": [],
-        "addressed_to_global_user_ids": state["message_envelope"][
-            "addressed_to_global_user_ids"
-        ],
-        "broadcast": False,
-    }
-    state["reply_context"] = {
-        "reply_to_platform_user_id": "13579",
-        "reply_to_display_name": "回复对象",
-        "reply_excerpt": "前文摘录",
-    }
-    state["chat_history_wide"] = [
-        {
-            "role": "user",
-            "name": "Dangal-old",
-            "display_name": "Dangal-old",
-            "platform_user_id": "67889018",
-            "global_user_id": "745d7818-a9d3-4889-b7f3-8555078a2061",
-            "body_text": "反正现在有AI",
-            "addressed_to_global_user_ids": [
-                "00000000-0000-4000-8000-000000000001",
-            ],
-            "mentions": [],
-            "broadcast": False,
-            "reply_context": {},
-            "timestamp": "2026-05-08T01:48:45+00:00",
-        },
-        {
-            "role": "user",
-            "name": "蚝爹油",
-            "display_name": "蚝爹油",
-            "platform_user_id": "673225019",
-            "global_user_id": "256e8a10-c406-47e9-ac8f-efd270d18160",
-            "body_text": "把对方解决掉也是解决问题的方式之一哦",
-            "addressed_to_global_user_ids": [
-                "00000000-0000-4000-8000-000000000001",
-            ],
-            "mentions": [],
-            "broadcast": False,
-            "reply_context": {},
-            "timestamp": "2026-05-08T01:48:58+00:00",
-        },
-        {
-            "role": "assistant",
-            "name": "杏山千纱",
-            "display_name": "杏山千纱",
-            "platform_user_id": "3768713357",
-            "global_user_id": "00000000-0000-4000-8000-000000000001",
-            "body_text": "这个一点都不好笑。",
-            "addressed_to_global_user_ids": [
-                "256e8a10-c406-47e9-ac8f-efd270d18160",
-            ],
-            "mentions": [],
-            "broadcast": False,
-            "reply_context": {},
-            "timestamp": "2026-05-08T01:49:02+00:00",
-        },
-    ]
-    state["chat_history_recent"] = list(state["chat_history_wide"])
-
-    with (
-        patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_msg_decontexualizer",
-            new_callable=AsyncMock,
-            return_value={
-                "decontexualized_input": "@杏山千纱 还不报警抓他吗？",
-                "referents": [
-                    {
-                        "phrase": "他",
-                        "referent_role": "object",
-                        "status": "unresolved",
-                    },
-                ],
-            },
-        ) as m_decon,
-        patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_cognition_resolver_loop",
-            new_callable=AsyncMock,
-            return_value={
-                **_resolver_update([]),
-                "internal_monologue": "choosing silence",
-                "character_intent": "CLARIFY",
-                "logical_stance": "UNKNOWN_REFERENT",
-            },
-        ),
-        patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_memory_lifecycle_update_handler",
-            new_callable=AsyncMock,
-            return_value={},
-        ),
-    ):
-        await persona_supervisor2(state)
-
-    assert m_decon.await_count == 1
-    decon_state = m_decon.await_args.args[0]
-    scope_users = decon_state["scope_users"]
-    by_global = {
-        row["global_user_id"]: row
-        for row in scope_users
-        if row["global_user_id"]
-    }
-    by_platform = {
-        row["platform_user_id"]: row
-        for row in scope_users
-        if row["platform_user_id"]
-    }
-    assert by_global["00000000-0000-4000-8000-000000000001"] == {
-        "display_name": "杏山千纱",
-        "platform_user_id": "3768713357",
-        "global_user_id": "00000000-0000-4000-8000-000000000001",
-        "aliases": [],
-    }
-    assert by_global["745d7818-a9d3-4889-b7f3-8555078a2061"][
-        "display_name"
-    ] == "Dangal"
-    assert by_global["256e8a10-c406-47e9-ac8f-efd270d18160"][
-        "display_name"
-    ] == "蚝爹油"
-    assert by_platform["13579"] == {
-        "display_name": "回复对象",
-        "platform_user_id": "13579",
-        "global_user_id": "",
-        "aliases": [],
-    }
-    for row in scope_users:
-        assert set(row) == {
-            "display_name",
-            "platform_user_id",
-            "global_user_id",
-            "aliases",
-        }
-    assert all("retry" not in key for key in decon_state)
+    assert "other user private context" in decontextualizer_text
+    assert resolver_text == ["current user context", "current user reply"]
 
 
 @pytest.mark.asyncio
-async def test_persona_supervisor2_no_remember_skips_consolidation():
-    """no_remember stays a service concern; supervisor still returns the consolidation snapshot."""
-    state = _base_discord_state()
+async def test_persona_supervisor_projects_group_scene_alongside_user_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Group cognition receives public scene beside current-user history."""
+
+    state = _persona_state()
+    state["channel_type"] = "group"
+    state["prompt_message_context"]["body_text"] = "current group trigger"
+    state["ambient_logical_turns"] = [
+        _logical_turn(
+            turn_id="public-other",
+            role="user",
+            body_text="other participant public context",
+            platform_user_id="platform-user-2",
+            global_user_id="user-2",
+            addressed_to_global_user_ids=["character-1"],
+        ),
+    ]
+    state["interaction_logical_turns"] = []
+    _, resolver, _ = _patch_persona_graph_stages(
+        monkeypatch,
+        route="silence",
+    )
+
+    await persona_module.persona_supervisor2(state)
+
+    resolver_state = resolver.await_args.args[0]
+    assert "other participant public context" in (
+        resolver_state["public_group_scene"]
+    )
+    assert "current group trigger" in resolver_state["public_group_scene"]
+    assert resolver.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_persona_supervisor_degrades_when_group_scene_projection_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Projection failure keeps Cognition running with an empty public scene."""
+
+    state = _persona_state()
+    state['channel_type'] = 'group'
+    state['prompt_message_context']['body_text'] = 'current group trigger'
+    _, resolver, _ = _patch_persona_graph_stages(
+        monkeypatch,
+        route='silence',
+    )
+
+    def fail_group_scene_projection(*args: object, **kwargs: object) -> object:
+        raise ValueError('synthetic group scene projection failure')
+
+    monkeypatch.setattr(
+        persona_module,
+        'build_group_scene_context',
+        fail_group_scene_projection,
+    )
+
+    await persona_module.persona_supervisor2(state)
+
+    resolver_state = resolver.await_args.args[0]
+    assert resolver_state['public_group_scene'] == ''
+
+
+@pytest.mark.asyncio
+async def test_persona_supervisor_keeps_private_public_scene_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Private cognition receives the required empty public-scene field."""
+
+    _, resolver, _ = _patch_persona_graph_stages(
+        monkeypatch,
+        route="silence",
+    )
+
+    await persona_module.persona_supervisor2(_persona_state())
+
+    resolver_state = resolver.await_args.args[0]
+    assert resolver_state["public_group_scene"] == ""
+
+
+@pytest.mark.asyncio
+async def test_persona_supervisor_preserves_no_remember_for_service(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The supervisor returns no-remember metadata for the service owner."""
+
+    state = _persona_state()
     state["debug_modes"] = {"no_remember": True}
+    _patch_persona_graph_stages(monkeypatch, route="speech")
 
-    with (
-        patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_msg_decontexualizer",
-            new_callable=AsyncMock,
-            return_value={"decontexualized_input": "Hello"},
-        ),
-        patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_cognition_resolver_loop",
-            new_callable=AsyncMock,
-            return_value=_resolver_update([_speak_action_spec()]),
-        ),
-        patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_l3_text_surface_handler",
-            new_callable=AsyncMock,
-            return_value={"action_directives": _action_directives()},
-        ),
-        patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.dialog_agent",
-            new_callable=AsyncMock,
-            return_value={
-                "final_dialog": ["Hi there!"],
-                "target_addressed_user_ids": ["uuid-123"],
-                "target_broadcast": False,
-            },
-        ),
-    ):
-        result = await persona_supervisor2(state)
+    result = await persona_module.persona_supervisor2(state)
 
-    assert result["final_dialog"] == ["Hi there!"]
-    assert result["target_addressed_user_ids"] == ["uuid-123"]
-    assert result["target_broadcast"] is False
-    assert result["future_promises"] == []
-    assert result["consolidation_state"]["debug_modes"] == {"no_remember": True}
+    assert result["final_dialog"] == ["Hello."]
+    assert result["consolidation_state"]["debug_modes"] == {
+        "no_remember": True,
+    }
+
+
+def test_persona_graph_commits_v2_state_before_terminal_surface() -> None:
+    """The graph has one resolver stage and one explicit commit marker path."""
+
+    resolver_source = inspect.getsource(persona_module.stage_1_goal_resolver)
+    terminal_source = inspect.getsource(persona_module.persona_supervisor2)
+
+    assert "call_cognition_resolver_loop" in resolver_source
+    assert "cognition_state_committed" in resolver_source
+    assert "cognition_core_output" in terminal_source
