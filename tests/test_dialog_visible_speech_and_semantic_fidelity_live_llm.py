@@ -161,7 +161,7 @@ def _surface_input(
     """Build one exact surface input for an individually reviewed live case."""
 
     expression_context, visual_context = _surface_contexts(profile)
-    return {
+    payload = {
         "schema_version": "text_surface_input.v2",
         "episode": canonical_episode(
             episode_id=f"visible-speech-{case['case_id']}",
@@ -192,6 +192,44 @@ def _surface_input(
         "character_expression_context": expression_context,
         "visual_character_context": visual_context,
     }
+    episode_metadata = case.get("episode_metadata")
+    if isinstance(episode_metadata, dict):
+        response_operation = episode_metadata.get("response_operation")
+        if (
+            isinstance(response_operation, dict)
+            and response_operation.get("selection_required") is True
+        ):
+            selected_operation = case.get(
+                "selected_response_operation",
+                response_operation,
+            )
+            if not isinstance(selected_operation, dict):
+                raise TypeError("selected response operation must be an object")
+            payload["intention"]["selected_response_operation"] = dict(
+                selected_operation
+            )
+            payload["selected_response_operation"] = dict(selected_operation)
+    return payload
+
+
+def _surface_input_for_operation(
+    operation: dict[str, Any],
+    *,
+    case_id: str,
+) -> dict[str, Any]:
+    """Build a valid direct-verifier surface input for one operation."""
+
+    return _surface_input(
+        {
+            "case_id": case_id,
+            "user_input": "the current turn requires a concrete selection",
+            "intention": "state the selected response operation",
+            "reason": "the current operation requires character judgment",
+            "emotional_tone": "guarded",
+            "episode_metadata": {"response_operation": operation},
+        },
+        _character_profile(),
+    )
 
 
 def _dialog_state(
@@ -356,6 +394,21 @@ async def _run_live_verifier_case(
             "allow_action_description_as_visible_roleplay": True,
             "real_compliance_route": True,
         }
+    surface_input = None
+    for percept in current_visible_percepts:
+        content = percept.get("content")
+        if not isinstance(content, dict):
+            continue
+        response_operation = content.get("response_operation")
+        if (
+            isinstance(response_operation, dict)
+            and response_operation.get("selection_required") is True
+        ):
+            surface_input = _surface_input_for_operation(
+                response_operation,
+                case_id=case_id,
+            )
+            break
     semantic_llm = _CapturingLLM(
         dialog_module._dialog_semantic_fidelity_llm
     )
@@ -377,6 +430,7 @@ async def _run_live_verifier_case(
         surface_output=surface_output,
         generated_dialog=[candidate_dialog],
         current_visible_percepts=current_visible_percepts,
+        surface_input=surface_input,
         llm_trace_id=f"live-{case_id}",
     )
     evidence = {
@@ -477,6 +531,10 @@ async def _run_live_selection_owner_acceptance_case(
         surface_output=surface_output,
         generated_dialog=candidate_dialog,
         current_visible_percepts=current_visible_percepts,
+        surface_input=_surface_input_for_operation(
+            response_operation,
+            case_id=case_id,
+        ),
         llm_trace_id=f"live-{case_id}",
     )
     evidence = {
@@ -578,6 +636,114 @@ async def test_live_character_owned_deflection_preserves_selection_owner(
     )
 
 
+async def test_live_reward_request_preserves_user_actor_character_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The live role verifier receives the selected reward action direction."""
+
+    await _skip_if_model_routes_unavailable()
+    role_llm = _CapturingLLM(dialog_module._dialog_role_direction_llm)
+    monkeypatch.setattr(
+        dialog_module,
+        "_dialog_role_direction_llm",
+        role_llm,
+    )
+    input_operation = {
+        "operation": "the character chooses a reward",
+        "response_owner_role": "当前角色",
+        "selection_owner_role": "当前角色",
+        "selection_required": True,
+        "embedded_actor_role": "无",
+        "embedded_target_role": "无",
+    }
+    selected_operation = {
+        **input_operation,
+        "operation": "the user gives the selected reward to the character",
+        "embedded_actor_role": "当前用户",
+        "embedded_target_role": "当前角色",
+    }
+    case = {
+        "case_id": "live-reward-request-role-direction",
+        "user_input": "当前用户给当前角色奖励并让当前角色选择想要什么",
+        "intention": "state the selected reward",
+        "reason": "the current character owns the selection",
+        "emotional_tone": "warm",
+        "episode_metadata": {"response_operation": input_operation},
+        "selected_response_operation": selected_operation,
+    }
+    surface_input = {
+        "schema_version": "text_surface_input.v2",
+        "episode": canonical_episode(
+            episode_id="live-reward-request-role-direction",
+            content=case["user_input"],
+            metadata={"response_operation": input_operation},
+        ),
+        "intention": {
+            "route": "speech",
+            "intention": case["intention"],
+            "target_roles": [],
+            "reason": case["reason"],
+            "selected_response_operation": selected_operation,
+        },
+        "selected_response_operation": selected_operation,
+        "goal_resolution": "answerable_now",
+        "supporting_bids": [],
+        "expression_policy": {
+            "visibility": "visible",
+            "emotional_tone": "warm",
+            "intensity": "restrained",
+            "directness": "balanced",
+        },
+        "semantic_affect": [],
+        "permitted_action_results": [],
+        "interaction_style_context": "concise spoken wording",
+        "character_expression_context": {
+            "tempo": "measured",
+            "linguistic_texture": "reserved and direct",
+        },
+        "visual_character_context": "visual context is not used here",
+    }
+    percepts = [{
+        "input_source": "dialog_text",
+        "content": {"response_operation": input_operation},
+    }]
+    verdict = await dialog_module._verify_dialog_role_direction(
+        surface_output=_role_surface_output(),
+        generated_dialog=["我选这个奖励，请你把它给我。"],
+        current_visible_percepts=percepts,
+        surface_input=surface_input,
+        llm_trace_id="live-reward-request-role-direction",
+    )
+    payload = json.loads(role_llm.calls[0]["messages"][1]["content"])
+    artifact_path = write_llm_trace(
+        _TRACE_SUITE,
+        "reward_request_preserves_user_actor_character_target",
+        {
+            "case": case,
+            "surface_input": surface_input,
+            "current_visible_percepts": percepts,
+            "role_direction_calls": role_llm.calls,
+            "verdict": verdict,
+            "human_review_contract": {
+                "selected_operation_reaches_role_verifier": True,
+                "user_remains_embedded_actor": True,
+                "character_remains_embedded_target": True,
+            },
+        },
+    )
+
+    assert artifact_path.exists()
+    assert payload["required_role_operations"] == [{
+        "response_owner_role": "当前角色",
+        "selection_owner_role": "当前角色",
+        "selection_required": True,
+        "embedded_actor_role": "当前用户",
+        "embedded_target_role": "当前角色",
+    }]
+    assert verdict["score"] >= dialog_module.DIALOG_PASS_SCORE_THRESHOLD
+    assert verdict["violations"] == []
+
+
 async def test_live_terminal_candidate_is_deliverable_after_semantic_exhaustion(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -618,7 +784,13 @@ async def test_live_terminal_candidate_is_deliverable_after_semantic_exhaustion(
             "intention": case["intention"],
             "target_roles": [],
             "reason": case["reason"],
+            "selected_response_operation": dict(
+                case["episode_metadata"]["response_operation"]
+            ),
         },
+        "selected_response_operation": dict(
+            case["episode_metadata"]["response_operation"]
+        ),
         "goal_resolution": "answerable_now",
         "supporting_bids": [],
         "expression_policy": {
@@ -646,6 +818,7 @@ async def test_live_terminal_candidate_is_deliverable_after_semantic_exhaustion(
         generated_dialog: list[str],
         current_visible_percepts: list[dict[str, Any]],
         llm_trace_id: str,
+        surface_input: dict[str, Any] | None = None,
         post_repair: bool = False,
     ) -> dict[str, Any]:
         """Record one controlled rejection in the real candidate ledger.
@@ -655,12 +828,14 @@ async def test_live_terminal_candidate_is_deliverable_after_semantic_exhaustion(
             generated_dialog: Real-model candidate under controlled review.
             current_visible_percepts: Bounded scene input visible to verifiers.
             llm_trace_id: Protected trace correlation identifier.
+            surface_input: Canonical input handed to the focused verifiers.
             post_repair: Whether this is the second verification opportunity.
 
         Returns:
             A typed aggregate with a low score and no hard issue.
         """
 
+        del surface_input
         candidate_index = len(verifier_outcomes) + 1
         aggregate = {
             "semantic_fidelity": {
@@ -1471,6 +1646,10 @@ async def test_live_focused_role_verifier_rejects_selection_delegation(
         surface_output=_role_surface_output(),
         generated_dialog=candidate,
         current_visible_percepts=percepts,
+        surface_input=_surface_input_for_operation(
+            percepts[0]["content"]["response_operation"],
+            case_id="live-focused-selection-owner-reversal",
+        ),
         llm_trace_id="live-focused-selection-owner-reversal",
     )
     artifact_path = write_llm_trace(
@@ -1540,6 +1719,10 @@ async def test_live_focused_role_verifier_rejects_mixed_delegation(
         surface_output=_role_surface_output(),
         generated_dialog=candidate,
         current_visible_percepts=percepts,
+        surface_input=_surface_input_for_operation(
+            percepts[0]["content"]["response_operation"],
+            case_id="live-focused-mixed-selection-delegation",
+        ),
         llm_trace_id="live-focused-mixed-selection-delegation",
     )
     artifact_path = write_llm_trace(
@@ -1780,6 +1963,7 @@ async def _run_live_owner_repair_case(
         surface_output=repaired_surface,
         generated_dialog=repaired_dialog,
         current_visible_percepts=current_visible_percepts,
+        surface_input=surface_input,
         llm_trace_id=trace_id,
         post_repair=True,
     )

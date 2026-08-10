@@ -507,6 +507,10 @@ async def plan_actions(
         "target_roles": list(primary_bid["target_roles"]),
         "reason": primary_bid["reason"],
     }
+    if "selected_response_operation" in primary_bid:
+        intention["selected_response_operation"] = dict(
+            primary_bid["selected_response_operation"]
+        )
     return_value = {
         "intention": intention,
         "action_requests": action_requests,

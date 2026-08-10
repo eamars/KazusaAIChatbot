@@ -880,11 +880,11 @@ async def test_required_goal_invalid_evidence_stops_before_action_planning(
         "role_explicit_content": "The character must answer.",
         "response_operation": {
             "operation": "The character answers the current question.",
-            "response_owner_role": "current character",
-            "selection_owner_role": "current character",
+            "response_owner_role": "当前角色",
+            "selection_owner_role": "当前角色",
             "selection_required": True,
-            "embedded_actor_role": "current user",
-            "embedded_target_role": "current character",
+            "embedded_actor_role": "当前用户",
+            "embedded_target_role": "当前角色",
         },
     })
     llm = _GoalDegradedLLM()

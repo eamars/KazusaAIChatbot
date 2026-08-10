@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -10,6 +11,10 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot.cognition_core_v2.branch_activation import (
     DEFAULT_BRANCH_DEFINITIONS,
+)
+from kazusa_ai_chatbot.cognition_episode import (
+    CURRENT_CHARACTER_ROLE,
+    CURRENT_USER_ROLE,
 )
 from kazusa_ai_chatbot.cognition_core_v2.action_selection import (
     ACTION_PLANNING_PROMPT,
@@ -20,6 +25,7 @@ from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
     GOAL_COGNITION_PROMPT,
     NON_ORDINARY_GENERIC_GOAL_REPAIR_INSTRUCTIONS,
     NON_ORDINARY_GOAL_COGNITION_PROMPT,
+    ORDINARY_RECURRENCE_SELECTION_GOAL_COGNITION_PROMPT,
     REQUIRED_SELECTION_GOAL_PROMPT,
     SELECTION_GOAL_REPAIR_INSTRUCTIONS,
     _build_goal_repair_feedback,
@@ -52,6 +58,41 @@ def test_core_v2_prompts_fit_local_model_guidance_targets() -> None:
     assert len(GOAL_COGNITION_PROMPT) <= 3_000
     assert len(NON_ORDINARY_GOAL_COGNITION_PROMPT) <= 3_000
     assert len(REQUIRED_SELECTION_GOAL_PROMPT) <= 2_600
+
+
+def test_selected_response_operation_contract_is_documented() -> None:
+    """Documentation distinguishes input provenance from selected authority."""
+
+    repository_root = Path(__file__).resolve().parents[1]
+    cognition_readme = (
+        repository_root
+        / "src"
+        / "kazusa_ai_chatbot"
+        / "cognition_core_v2"
+        / "README.md"
+    ).read_text(encoding="utf-8")
+    nodes_readme = (
+        repository_root
+        / "src"
+        / "kazusa_ai_chatbot"
+        / "nodes"
+        / "README.md"
+    ).read_text(encoding="utf-8")
+
+    assert "episode-level `response_operation` is input provenance" in (
+        cognition_readme
+    )
+    assert "`selected_response_operation` after the character chooses" in (
+        cognition_readme
+    )
+    assert (
+        "nested role and response ownership are resolved once before goal cognition"
+        not in cognition_readme
+    )
+    assert "selected operation" in nodes_readme
+    assert "input-level `response_operation`" in nodes_readme
+    assert "does not rewrite it" in nodes_readme
+    assert "percept.content.response_operation" not in nodes_readme
 
 
 def test_static_prompt_policy_audit_removes_application_owned_policy() -> None:
@@ -217,6 +258,7 @@ def test_active_selection_prompt_keeps_nonordinary_output_contract() -> None:
     prompt = _ACTIVE_REQUIRED_SELECTION_GOAL_PROMPT
     for required_text in (
         "required_selection_operations",
+        "selected_response_operation",
         "conversation_progress_evidence",
         "supporting_evidence",
         "semantic_context.character_identity",
@@ -229,6 +271,31 @@ def test_active_selection_prompt_keeps_nonordinary_output_contract() -> None:
     ):
         assert required_text in prompt
     assert "relational_willingness" not in prompt
+
+    role_contract_prompts = (
+        REQUIRED_SELECTION_GOAL_PROMPT,
+        _ACTIVE_REQUIRED_SELECTION_GOAL_PROMPT,
+        ORDINARY_RECURRENCE_SELECTION_GOAL_COGNITION_PROMPT,
+        " ".join(SELECTION_GOAL_REPAIR_INSTRUCTIONS),
+    )
+    for role_prompt in role_contract_prompts:
+        for required_text in (
+            "response_owner_role",
+            "selection_owner_role",
+            "embedded_actor_role",
+            "embedded_target_role",
+            "selection_required",
+            "当前角色",
+            "当前用户",
+            "其他参与者",
+            "无",
+            "JSON 布尔值",
+            "current_user",
+            "self",
+            "pN",
+            "operation",
+        ):
+            assert required_text in role_prompt
 
 
 def test_prompt_payloads_preserve_contract_order() -> None:
@@ -551,11 +618,11 @@ async def test_active_selection_route_uses_rewritten_prompt_and_repair() -> None
         "role_explicit_content": "The character must choose the next step.",
         "response_operation": {
             "operation": "The character chooses the next step.",
-            "response_owner_role": "current character",
-            "selection_owner_role": "current character",
+            "response_owner_role": CURRENT_CHARACTER_ROLE,
+            "selection_owner_role": CURRENT_CHARACTER_ROLE,
             "selection_required": True,
-            "embedded_actor_role": "current user",
-            "embedded_target_role": "current character",
+            "embedded_actor_role": CURRENT_USER_ROLE,
+            "embedded_target_role": CURRENT_CHARACTER_ROLE,
         },
     })
     evidence = [{
@@ -571,6 +638,14 @@ async def test_active_selection_route_uses_rewritten_prompt_and_repair() -> None
     }]
     valid = {
         "selection": "The character chooses the grounded next step.",
+        "selected_response_operation": {
+            "operation": "the user gives the selected next step to the character",
+            "response_owner_role": CURRENT_CHARACTER_ROLE,
+            "selection_owner_role": CURRENT_CHARACTER_ROLE,
+            "selection_required": True,
+            "embedded_actor_role": CURRENT_USER_ROLE,
+            "embedded_target_role": CURRENT_CHARACTER_ROLE,
+        },
         "reason": "The current operation requires a concrete choice.",
         "private_monologue": "I should choose from the current evidence.",
         "target_role_handles": ["r1"],

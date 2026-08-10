@@ -1814,7 +1814,10 @@ async def test_required_selection_producer_overflow_fails_before_call(
         "response_operation": {
             "operation": "make one concrete selection",
             "selection_required": True,
-            "selection_owner_role": "current character",
+            "response_owner_role": "当前角色",
+            "selection_owner_role": "当前角色",
+            "embedded_actor_role": "当前用户",
+            "embedded_target_role": "当前角色",
         },
     })
     evidence = [{

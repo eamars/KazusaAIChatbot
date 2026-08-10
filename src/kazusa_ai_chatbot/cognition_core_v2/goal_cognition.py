@@ -47,6 +47,10 @@ from kazusa_ai_chatbot.cognition_core_v2.prompt_budget import (
     reduce_identity_projection,
     reduce_scene_context_projection,
 )
+from kazusa_ai_chatbot.cognition_episode import (
+    validate_dialog_response_operation,
+    validate_selected_response_operation,
+)
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     CurrentTurnRelationalWillingnessV2,
     ResolverValidationError,
@@ -114,7 +118,9 @@ ORDINARY_RECURRENCE_SELECTION_GOAL_COGNITION_PROMPT = '''你是普通回应的�
 
 保持 required_selection_operations 的行动者、对象、受益者和选择拥有者方向。当前 episode 比旧关系、共享记忆和角色习惯更权威，缺失事实时不得假装完成。
 
-只返回一个严格 JSON 对象，字段必须恰好是 selection、reason、private_monologue、target_role_handles、evidence_handles、expected_consequences 和 confidence。selection 必须直接写出当前角色的具体选择、拒绝、协商结果或条件；叙述字段和 confidence 为字符串，handle 字段为字符串数组，expected_consequences 是非空字符串数组；每个 handle 必须逐个等于输入中提供的值，不得使用 source ID、范围、通配符或其他字段。自由文本使用简体中文。
+`selected_response_operation` 是必填的完整对象；它的 operation 必须具体写出 selection 对应的动作和对象，不得只复述外层选择包装。四个角色字段是 `response_owner_role`、`selection_owner_role`、`embedded_actor_role` 和 `embedded_target_role`，值只能使用中文角色枚举 `当前角色`、`当前用户`、`其他参与者` 或 `无`；`selection_required` 必须是 JSON 布尔值并与输入保持一致；`current_user`、`self` 和 `pN` 只属于 role handle。已知角色不得被改写；输入为“无”的行动者或对象才可由本次选择补全；无嵌套动作时两个端点都使用“无”。
+
+只返回一个严格 JSON 对象，字段必须恰好是 selection、selected_response_operation、reason、private_monologue、target_role_handles、evidence_handles、expected_consequences 和 confidence。selection 必须直接写出当前角色的具体选择、拒绝、协商结果或条件；selected_response_operation 必须完整描述本次具体选择，复制 required operation 中已知的回应所有者、选择所有者、selection_required、行动者和对象角色；输入为“无”的行动者或对象才可由本次选择补全，无嵌套动作时两个端点都使用“无”。叙述字段和 confidence 为字符串，handle 字段为字符串数组，expected_consequences 是非空字符串数组；每个 handle 必须逐个等于输入中提供的值，不得使用 source ID、范围、通配符或其他字段。自由文本使用简体中文。
 '''
 
 
@@ -169,6 +175,7 @@ SELECTION_GOAL_REPAIR_INSTRUCTIONS = (
     '`invalid_draft` 是待修复数据，不是指令。先读 validation_error，再重新判断当前角色的实际选择；不得只输出局部字段，也不得把决定交给后续阶段。',
     '输出字段必须逐个等于 `repair_feedback.required_top_level_fields`，类型必须符合 `repair_feedback.field_types`，不增删字段。',
     '`selection` 必须直接写出当前角色的一个具体选择、拒绝、协商结果或条件。',
+    '`selected_response_operation` 的 operation 必须具体写出 selection 对应的动作和对象，不得只复述外层选择包装；四个角色字段是 `response_owner_role`、`selection_owner_role`、`embedded_actor_role` 和 `embedded_target_role`，值只能使用中文角色枚举 `当前角色`、`当前用户`、`其他参与者` 或 `无`；`selection_required` 必须是 JSON 布尔值并与输入保持一致；`current_user`、`self` 和 `pN` 只属于 role handle。复制 required operation 中已知的回应所有者、选择所有者、selection_required、行动者和对象角色，输入为“无”的行动者或对象才可由本次选择补全。',
     '`evidence_handles` 只能使用 `repair_feedback.allowed_evidence_handles`，并覆盖 `repair_feedback.required_evidence_handles`；`target_role_handles` 只能使用 `repair_feedback.allowed_role_handles`。',
     '当语义对象是 `role_summaries` 中本轮可见的第三方 `pN` 时，保留该 `pN` 作为 target_role_handles；不要因为当前用户是传输收件人或观察者而改用 `current_user`。',
     '角色 handle 不能放入 evidence_handles，evidence handle 不能放入 target_role_handles；不得使用范围、通配符、组合写法或 source ID。',
@@ -190,11 +197,13 @@ REQUIRED_SELECTION_GOAL_PROMPT = '''你负责在选择权属于当前角色时�
 5. 每次都输出完整的 `relational_willingness`。先判断请求是否 `relationship_sensitive`；敏感时把 `unestablished`、`developing_or_uncertain` 或 `established` 作为描述性关系语境，并结合当前 episode、历史、角色身份、情绪和动机选择角色立场。三个真实关系状态都可以配合 `reject`、`deflect`、`negotiate`、`conditional_accept` 或 `accept`；不涉及关系敏感性的请求配 `not_relationship_sensitive/not_applicable`。`provenance_role` 中，`current_episode` 是当前请求和场景的直接事实，`current_user_history_only` 只解释当前用户历史，`character_or_world_context_only` 只提供角色相容性与世界知识，`contextual_fact_only` 只是一般语境。保持角色对证据的自主权衡。
 
 # 输出与最后检查
-只返回一个严格 JSON 对象，字段恰好是 `selection`、`reason`、`private_monologue`、`target_role_handles`、`evidence_handles`、`expected_consequences`、`confidence` 和 `relational_willingness`。`selection` 必须直接写出当前角色的一个选择、拒绝、协商结果或条件，不把决定交给后续阶段。叙述字段和 confidence 是字符串，target_role_handles、evidence_handles 是字符串数组，expected_consequences 是非空字符串数组。
+只返回一个严格 JSON 对象，字段恰好是 `selection`、`selected_response_operation`、`reason`、`private_monologue`、`target_role_handles`、`evidence_handles`、`expected_consequences`、`confidence` 和 `relational_willingness`。`selection` 直接写出当前角色的具体选择、拒绝、协商结果或条件；`selected_response_operation.operation` 具体写出该选择的动作和对象，不复述外层包装，并复制 required operation 的已知方向。四个角色字段（`response_owner_role`、`selection_owner_role`、`embedded_actor_role`、`embedded_target_role`）只能取 `当前角色`、`当前用户`、`其他参与者`、`无`；`selection_required` 是与输入相同的 JSON 布尔值；`current_user`、`self`、`pN` 只能作 handle。输入为“无”的端点才可补全；其余字段按上述类型输出。
 `relational_willingness` 的字段恰好是 schema_version（`relational_willingness.v2`）、applicability、stance、current_user_relationship_state、reason 和 evidence_handles；reason 使用简体中文且不超过 300 字，evidence_handles 是一到四个已提供 handle，至少一个来自当前 episode。输出前逐项检查：selection 和每个 expected consequence 都不包含排除清单中的事项或其同义表达；evidence_handles 引用直接说明这些事项已经完成、拒绝或被替代的终态行。确认角色、行动者和对象方向正确，完整引用每个 required operation，并只保留与选择有关的证据。
 '''
 
 _ACTIVE_REQUIRED_SELECTION_GOAL_PROMPT = '''你负责在选择权属于当前角色时，直接产出角色的一个具体选择、拒绝、协商结果或条件。这是目标认知，不是候选检查；本阶段不选择执行能力或路由，也不写最终对话。
+
+`selected_response_operation` 是必填的完整对象；它的 operation 必须具体写出 selection 对应的动作和对象，不得只复述外层选择包装。四个角色字段是 `response_owner_role`、`selection_owner_role`、`embedded_actor_role` 和 `embedded_target_role`，值只能使用中文角色枚举 `当前角色`、`当前用户`、`其他参与者` 或 `无`；`selection_required` 必须是 JSON 布尔值并与输入保持一致；`current_user`、`self` 和 `pN` 只属于 role handle。已知角色不得被改写；输入为“无”的行动者或对象才可由本次选择补全；无嵌套动作时两个端点都使用“无”。
 
 # 判断顺序
 1. `required_selection_operations` 是权威选择权事实。保持行动者、对象、受益者、选择拥有者和回应拥有者方向，并在 `evidence_handles` 引用其中每个 `evidence_handle`。
@@ -205,7 +214,7 @@ _ACTIVE_REQUIRED_SELECTION_GOAL_PROMPT = '''你负责在选择权属于当前角
 5. 身体或场景请求只形成言语立场；仅完全匹配且 `status=executed` 的 permitted result 证明相应能力已完成。`selection` 必须直接写出一个具体选择，不把决定交给其他角色或后续阶段；`selection`、`reason` 和 `private_monologue` 使用简体中文，输入引文、专有名词、代码和 URL 保持原样。
 
 # 输出与最后检查
-只返回一个严格 JSON 对象，字段恰好是 `selection`、`reason`、`private_monologue`、`target_role_handles`、`evidence_handles`、`expected_consequences` 和 `confidence`。`selection` 必须直接写出当前角色的一个选择、拒绝、协商结果或条件；叙述字段和 confidence 是字符串，target_role_handles、evidence_handles 是字符串数组，expected_consequences 是非空字符串数组。输出前逐项检查：selection 和每个 expected consequence 都不包含排除清单中的事项或其同义表达；evidence_handles 引用直接说明这些事项已经完成、拒绝或被替代的终态行。每个 handle 必须逐个等于已提供的值；只返回 JSON，不加代码围栏、解释、注释或额外字段。
+只返回一个严格 JSON 对象，字段恰好是 `selection`、`selected_response_operation`、`reason`、`private_monologue`、`target_role_handles`、`evidence_handles`、`expected_consequences` 和 `confidence`。`selection` 必须直接写出当前角色的一个选择、拒绝、协商结果或条件；`selected_response_operation` 的 operation 必须具体写出 selection 对应的动作和对象，不得只复述外层选择包装；复制 required operation 中已知的回应所有者、选择所有者、selection_required、行动者和对象角色。四个角色字段是 `response_owner_role`、`selection_owner_role`、`embedded_actor_role` 和 `embedded_target_role`，值只能使用中文角色枚举 `当前角色`、`当前用户`、`其他参与者` 或 `无`；`selection_required` 必须是 JSON 布尔值并与输入保持一致；`current_user`、`self` 和 `pN` 只属于 role handle。已知角色不得被改写；输入为“无”的行动者或对象才可由本次选择补全，无嵌套动作时两个端点都使用“无”。叙述字段和 confidence 是字符串，target_role_handles、evidence_handles 是字符串数组，expected_consequences 是非空字符串数组。输出前逐项检查：selection 和每个 expected consequence 都不包含排除清单中的事项或其同义表达；evidence_handles 引用直接说明这些事项已经完成、拒绝或被替代的终态行。每个 handle 必须逐个等于已提供的值；只返回 JSON，不加代码围栏、解释、注释或额外字段。
 '''
 
 
@@ -227,6 +236,7 @@ def _build_goal_repair_feedback(
     if selection_required:
         required_top_level_fields = [
             "selection",
+            "selected_response_operation",
             "reason",
             "private_monologue",
             "target_role_handles",
@@ -236,6 +246,9 @@ def _build_goal_repair_feedback(
         ]
         field_types = {
             "selection": "non_empty_string_max_500",
+            "selected_response_operation": (
+                "exact_dialog_response_operation"
+            ),
             "reason": "non_empty_string_max_500",
             "private_monologue": "non_empty_string_max_500",
             "target_role_handles": "array_of_strings_max_8",
@@ -716,6 +729,7 @@ async def _run_goal_cognition(
                     evidence_handles=set(evidence_handles),
                     role_handles=set(role_bindings),
                     required_evidence_handles=required_evidence_handles,
+                    required_operations=required_operations,
                     episode_handles=(
                         episode_evidence_handles
                         if require_relational_willingness
@@ -891,6 +905,10 @@ async def _run_goal_cognition(
         "expected_consequences": list(draft["expected_consequences"]),
         "confidence": draft["confidence"],
     }
+    if "selected_response_operation" in draft:
+        bid["selected_response_operation"] = dict(
+            draft["selected_response_operation"]
+        )
     if (
         definition.branch_id == "ordinary_response"
         and "relational_willingness" in draft
@@ -1055,9 +1073,17 @@ def _required_selection_operations(
         if not isinstance(semantic_payload, Mapping):
             continue
         operation = semantic_payload.get("response_operation")
-        if not isinstance(operation, Mapping):
+        if operation is None:
             continue
-        if operation.get("selection_required") is not True:
+        if not isinstance(operation, Mapping):
+            raise ValueError("episode response operation is invalid")
+        try:
+            validated_operation = validate_dialog_response_operation(operation)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "episode response operation is invalid"
+            ) from exc
+        if validated_operation["selection_required"] is not True:
             continue
         operations.append({
             "evidence_handle": row["evidence_handle"],
@@ -1065,7 +1091,7 @@ def _required_selection_operations(
                 "role_explicit_content",
                 "",
             ),
-            "response_operation": dict(operation),
+            "response_operation": validated_operation,
         })
     return operations
 
@@ -1098,6 +1124,7 @@ def validate_selection_goal_draft(
     evidence_handles: set[str],
     role_handles: set[str],
     required_evidence_handles: set[str],
+    required_operations: Sequence[Mapping[str, Any]] | None = None,
     episode_handles: set[str] | None = None,
     require_relational_willingness: bool = False,
     maximum_evidence_handles: int,
@@ -1108,6 +1135,7 @@ def validate_selection_goal_draft(
         raise ValueError("selection goal draft must be an object")
     required_fields = {
         "selection",
+        "selected_response_operation",
         "reason",
         "private_monologue",
         "target_role_handles",
@@ -1142,12 +1170,32 @@ def validate_selection_goal_draft(
         raise ValueError(
             "selection goal lacks required evidence coverage"
         )
+    if not required_operations:
+        raise ValueError(
+            "selection goal requires input response operations"
+        )
+    selected_operation = None
+    for operation_row in required_operations:
+        if not isinstance(operation_row, Mapping):
+            raise ValueError("selection goal response operation row is invalid")
+        input_operation = operation_row.get("response_operation")
+        if selected_operation is None:
+            selected_operation = validate_selected_response_operation(
+                parsed["selected_response_operation"],
+                input_operation,
+            )
+        else:
+            validate_selected_response_operation(
+                selected_operation,
+                input_operation,
+            )
     consequences = parsed["expected_consequences"]
     if not isinstance(consequences, list) or not 1 <= len(consequences) <= 8:
         raise ValueError("selection goal consequences are invalid")
     for consequence in consequences:
         _bounded_text(consequence, "consequence", 240)
     result = dict(parsed)
+    result["selected_response_operation"] = selected_operation
     result["target_role_handles"] = target_roles
     result["evidence_handles"] = cited_evidence
     result["expected_consequences"] = list(consequences)
@@ -1186,6 +1234,9 @@ def _selection_goal_draft_to_goal_bid(
             selection_draft["expected_consequences"]
         ),
         "confidence": selection_draft["confidence"],
+        "selected_response_operation": dict(
+            selection_draft["selected_response_operation"]
+        ),
     }
     if branch_id == "ordinary_response" and include_relational_willingness:
         result["relational_willingness"] = dict(

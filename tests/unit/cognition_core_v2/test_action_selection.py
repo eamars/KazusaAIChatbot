@@ -10,6 +10,10 @@ from kazusa_ai_chatbot.cognition_core_v2.action_selection import plan_actions
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     EVIDENCE_SOURCE_QUESTION_IDS,
 )
+from kazusa_ai_chatbot.cognition_episode import (
+    CURRENT_CHARACTER_ROLE,
+    CURRENT_USER_ROLE,
+)
 from tests.cognition_core_v2_test_helpers import canonical_episode
 
 
@@ -45,6 +49,14 @@ def _primary_bid() -> dict[str, object]:
         "evidence_handles": ["e1"],
         "expected_consequences": ["preserve response continuity"],
         "confidence": "high",
+        "selected_response_operation": {
+            "operation": "the user gives the selected reward to the character",
+            "response_owner_role": CURRENT_CHARACTER_ROLE,
+            "selection_owner_role": CURRENT_CHARACTER_ROLE,
+            "selection_required": True,
+            "embedded_actor_role": CURRENT_USER_ROLE,
+            "embedded_target_role": CURRENT_CHARACTER_ROLE,
+        },
         "relational_willingness": _decision(),
     }
 
@@ -131,6 +143,43 @@ async def test_non_accepting_stance_suppresses_downstream_effects(
     assert result["action_requests"] == []
     assert result["resolver_requests"] == []
     assert result["intention"]["route"] == "speech"
+
+
+@pytest.mark.asyncio
+async def test_selected_intention_preserves_selected_response_operation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Action selection carries the selected operation into the intention."""
+
+    async def fake_planner(**_: object) -> dict[str, object]:
+        return {
+            "action_requests": [],
+            "resolver_requests": [],
+            "goal_resolution": "answerable_now",
+            "resolver_pending_resolution": None,
+            "resolver_goal_progress": None,
+        }
+
+    import kazusa_ai_chatbot.cognition_core_v2.action_selection as action_module
+
+    monkeypatch.setattr(action_module, "_invoke_action_planner", fake_planner)
+    result = await plan_actions(
+        primary_bid=_primary_bid(),
+        supporting_bids=[],
+        episode=canonical_episode(
+            episode_id="selected-operation-action-episode",
+            content="current request",
+        ),
+        evidence=_evidence(),
+        available_actions=[],
+        available_resolvers=[],
+        resolver_context="",
+        services=SimpleNamespace(),
+    )
+
+    assert result["intention"]["selected_response_operation"] == (
+        _primary_bid()["selected_response_operation"]
+    )
 
 
 def test_action_selection_exposes_owned_contract() -> None:

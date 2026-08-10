@@ -481,6 +481,14 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
     current_visible_percepts = _current_visible_percepts(
         state["cognitive_episode"]
     )
+    surface_input = state.get("text_surface_input_v2")
+    validated_surface_input = None
+    if surface_input is not None:
+        if not isinstance(surface_input, dict):
+            raise StateContractError(
+                "dialog state text_surface_input_v2 must be an object"
+            )
+        validated_surface_input = validate_text_surface_input(surface_input)
     required_source_urls = _completed_tool_result_source_urls(
         current_visible_percepts
     )
@@ -491,14 +499,10 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
 
     for attempt_number in range(1, DIALOG_GENERATOR_TOTAL_ATTEMPTS + 1):
         if surface_repair_pending:
-            surface_input = state.get("text_surface_input_v2")
-            if not isinstance(surface_input, dict):
+            if validated_surface_input is None:
                 raise StateContractError(
                     "dialog repair requires text_surface_input_v2"
                 )
-            validated_surface_input = validate_text_surface_input(
-                surface_input
-            )
             try:
                 repaired_surface = await repair_text_surface_for_dialog(
                     surface_input=validated_surface_input,
@@ -549,6 +553,7 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
             surface_output=surface_output,
             generated_dialog=generated_dialog,
             current_visible_percepts=current_visible_percepts,
+            surface_input=validated_surface_input,
             llm_trace_id=llm_trace_id,
             post_repair=attempt_number > 1,
         )
@@ -1190,17 +1195,19 @@ _dialog_role_direction_llm_config = LLMCallConfig(
 
 def _required_selection_role_operations(
     current_visible_percepts: list[dict[str, Any]],
+    *,
+    selected_response_operation: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
-    """Project typed role tuples that require a semantic selection.
+    """Project the post-selection role tuple for required-selection turns.
 
     Args:
         current_visible_percepts: Bounded model-visible episode percepts.
 
     Returns:
-        Selection-required role tuples without semantic-completeness prose.
+        One selected-operation role tuple without semantic-completeness prose.
     """
 
-    required_operations: list[dict[str, Any]] = []
+    has_required_selection = False
     for percept in current_visible_percepts:
         content = percept.get("content")
         if not isinstance(content, dict):
@@ -1210,27 +1217,35 @@ def _required_selection_role_operations(
             continue
         if operation.get("selection_required") is not True:
             continue
-        projected_operation = {
-            "response_owner_role": operation.get(
-                "response_owner_role",
-                "",
-            ),
-            "selection_owner_role": operation.get(
-                "selection_owner_role",
-                "",
-            ),
-            "selection_required": True,
-            "embedded_actor_role": operation.get(
-                "embedded_actor_role",
-                "",
-            ),
-            "embedded_target_role": operation.get(
-                "embedded_target_role",
-                "",
-            ),
-        }
-        required_operations.append(projected_operation)
-    return required_operations
+        has_required_selection = True
+    if not has_required_selection:
+        if selected_response_operation is not None:
+            raise StateContractError(
+                "selected response operation has no required selection"
+            )
+        return []
+    if selected_response_operation is None:
+        raise StateContractError(
+            "required selection is missing selected response operation"
+        )
+    projected_operation = {
+        "response_owner_role": selected_response_operation[
+            "response_owner_role"
+        ],
+        "selection_owner_role": selected_response_operation[
+            "selection_owner_role"
+        ],
+        "selection_required": selected_response_operation[
+            "selection_required"
+        ],
+        "embedded_actor_role": selected_response_operation[
+            "embedded_actor_role"
+        ],
+        "embedded_target_role": selected_response_operation[
+            "embedded_target_role"
+        ],
+    }
+    return [projected_operation]
 
 
 async def _verify_dialog_role_direction(
@@ -1239,6 +1254,7 @@ async def _verify_dialog_role_direction(
     generated_dialog: list[str],
     current_visible_percepts: list[dict[str, Any]],
     llm_trace_id: str,
+    surface_input: TextSurfaceInputV2 | None = None,
     post_repair: bool = False,
 ) -> dict[str, Any]:
     """Check nested role direction when typed input requires a selection."""
@@ -1248,8 +1264,19 @@ async def _verify_dialog_role_direction(
         if isinstance(surface_output, dict)
         else None
     )
+    validated_surface_input = (
+        validate_text_surface_input(surface_input)
+        if isinstance(surface_input, dict)
+        else None
+    )
+    selected_operation = (
+        validated_surface_input.get("selected_response_operation")
+        if validated_surface_input is not None
+        else None
+    )
     required_operations = _required_selection_role_operations(
-        current_visible_percepts
+        current_visible_percepts,
+        selected_response_operation=selected_operation,
     )
     typed_addressee_plan = [
         dict(row)
@@ -1674,6 +1701,7 @@ async def _verify_dialog_compliance(
     generated_dialog: list[str],
     current_visible_percepts: list[dict[str, Any]],
     llm_trace_id: str,
+    surface_input: TextSurfaceInputV2 | None = None,
     post_repair: bool = False,
 ) -> dict[str, Any]:
     """Run focused checks and preserve each verifier owner's typed result."""
@@ -1690,6 +1718,7 @@ async def _verify_dialog_compliance(
             surface_output=surface_output,
             generated_dialog=generated_dialog,
             current_visible_percepts=current_visible_percepts,
+            surface_input=surface_input,
             llm_trace_id=llm_trace_id,
             post_repair=post_repair,
         ),

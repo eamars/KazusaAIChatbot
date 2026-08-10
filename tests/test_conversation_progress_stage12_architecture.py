@@ -13,6 +13,10 @@ from kazusa_ai_chatbot.cognition_core_v2.branch_activation import (
 )
 from kazusa_ai_chatbot.cognition_core_v2 import goal_cognition
 from kazusa_ai_chatbot.conversation_progress import delta_merge, recorder
+from kazusa_ai_chatbot.cognition_episode import (
+    CURRENT_CHARACTER_ROLE,
+    CURRENT_USER_ROLE,
+)
 from tests.conversation_progress_v2_helpers import (
     event,
     packet,
@@ -268,18 +272,12 @@ def test_scene_observation_and_event_batch_compose_without_semantic_repair(
 def _selection_episode_evidence() -> dict[str, object]:
     """Build one typed selection-required episode row."""
 
+    response_operation = _selection_response_operation()
     semantic_text = json.dumps({
         'role_explicit_content': (
             'The current user asks the current character to choose next.'
         ),
-        'response_operation': {
-            'operation': 'the current character chooses the next option',
-            'response_owner_role': 'current character',
-            'selection_owner_role': 'current character',
-            'selection_required': True,
-            'embedded_actor_role': 'current user',
-            'embedded_target_role': 'current character',
-        },
+        'response_operation': response_operation,
     })
     return {
         'evidence_handle': 'e1',
@@ -292,6 +290,25 @@ def _selection_episode_evidence() -> dict[str, object]:
         'semantic_text': semantic_text,
         'visible_to': ['q:event_agency'],
     }
+
+
+def _selection_response_operation() -> dict[str, object]:
+    """Build the canonical input operation for selection-goal tests."""
+
+    return {
+        'operation': 'the current character chooses the next option',
+        'response_owner_role': CURRENT_CHARACTER_ROLE,
+        'selection_owner_role': CURRENT_CHARACTER_ROLE,
+        'selection_required': True,
+        'embedded_actor_role': CURRENT_USER_ROLE,
+        'embedded_target_role': CURRENT_CHARACTER_ROLE,
+    }
+
+
+def _selection_required_operations() -> list[dict[str, object]]:
+    """Build the required-operation rows consumed by the goal validator."""
+
+    return [{'response_operation': _selection_response_operation()}]
 
 
 def _terminal_conversation_evidence() -> dict[str, object]:
@@ -320,6 +337,7 @@ def _selection_goal_draft() -> dict[str, object]:
 
     return {
         'selection': 'choose the current character palm',
+        'selected_response_operation': _selection_response_operation(),
         'reason': 'the prior neck choice is already complete',
         'private_monologue': 'I want a genuinely different choice.',
         'target_role_handles': [],
@@ -350,6 +368,7 @@ def test_selection_goal_accepts_uncited_unrelated_progress_evidence() -> None:
         evidence_handles={'e1', 'e2'},
         role_handles=set(),
         required_evidence_handles={'e1'},
+        required_operations=_selection_required_operations(),
         require_relational_willingness=True,
         maximum_evidence_handles=9,
     )
@@ -369,6 +388,7 @@ def test_selection_goal_rejects_retired_relation_field() -> None:
             evidence_handles={'e1', 'e2'},
             role_handles=set(),
             required_evidence_handles={'e1'},
+            required_operations=_selection_required_operations(),
             require_relational_willingness=True,
             maximum_evidence_handles=9,
         )
@@ -386,6 +406,7 @@ def test_selection_goal_rejects_missing_mandatory_citation() -> None:
             evidence_handles={'e1', 'e2'},
             role_handles=set(),
             required_evidence_handles={'e1'},
+            required_operations=_selection_required_operations(),
             require_relational_willingness=True,
             maximum_evidence_handles=9,
         )
@@ -406,6 +427,7 @@ def test_selection_goal_accepts_ten_relevant_citations() -> None:
         evidence_handles=evidence_handles,
         role_handles=set(),
         required_evidence_handles={'e1', 'e2'},
+        required_operations=_selection_required_operations(),
         require_relational_willingness=True,
         maximum_evidence_handles=10,
     )

@@ -260,6 +260,65 @@ async def test_live_decontextualizer_resolves_nested_direct_roles(
     assert response_operation["embedded_target_role"] == "当前角色", trace_payload
 
 
+async def test_live_decontextualizer_reward_offer_preserves_user_actor_character_target(
+    ensure_live_llm,
+    monkeypatch,
+) -> None:
+    """An outer reward offer keeps its user-to-character action direction."""
+
+    del ensure_live_llm
+    user_input = (
+        '鉴于你这么可爱，我给你一个奖励，随便要什么都行，'
+        '好好想想你想从我这里得到什么。'
+    )
+    state = _base_state(user_input)
+    state["character_profile"] = {"name": "明日奈"}
+    state["cognitive_episode"] = canonical_user_message_episode(
+        episode_id="reward-offer-role-live-episode",
+        percept_id="reward-offer-role-live-percept",
+        storage_timestamp_utc="2026-07-24T12:00:00+00:00",
+        local_time_context={
+            "current_local_datetime": "2026-07-25 00:00",
+            "current_local_weekday": "Saturday",
+        },
+        user_input=user_input,
+        platform="debug",
+        platform_channel_id="reward-offer-private",
+        channel_type="private",
+        platform_message_id="reward-offer-message",
+        platform_user_id="identity-user",
+        global_user_id="identity-global-user",
+        user_name="测试用户",
+        debug_modes={},
+        target_addressed_user_ids=[],
+        target_broadcast=False,
+    )
+    state.update({
+        "ambient_logical_turns": [],
+        "channel_type": "private",
+        "channel_topic": "",
+        "indirect_speech_context": "",
+        "reply_context": {},
+    })
+
+    result, trace_payload = await _run_case(
+        monkeypatch,
+        "reward_offer_user_actor_character_target",
+        state,
+    )
+
+    content = result["cognitive_episode"]["percepts"][0]["content"]
+    role_explicit_content = content["role_explicit_content"]
+    response_operation = content["response_operation"]
+    assert "当前用户" in role_explicit_content, trace_payload
+    assert "当前角色" in role_explicit_content, trace_payload
+    assert response_operation["response_owner_role"] == "当前角色", trace_payload
+    assert response_operation["selection_owner_role"] == "当前角色", trace_payload
+    assert response_operation["selection_required"] is True, trace_payload
+    assert response_operation["embedded_actor_role"] == "当前用户", trace_payload
+    assert response_operation["embedded_target_role"] == "当前角色", trace_payload
+
+
 async def test_live_decontextualizer_preserves_direct_abuse_roles(
     ensure_live_llm,
     monkeypatch,

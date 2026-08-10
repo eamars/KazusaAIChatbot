@@ -1096,6 +1096,47 @@ def validate_dialog_response_operation(
     }
 
 
+def validate_selected_response_operation(
+    value: object,
+    input_operation: object,
+) -> DialogResponseOperation:
+    """Validate a selected operation against the episode input authority.
+
+    The selected operation may supply the concrete operation text and resolve
+    an input actor or target that was explicitly left ungrounded. Response and
+    selection ownership, the selection flag, and every known actor or target
+    role remain fixed by the episode operation.
+    """
+
+    validated_input = validate_dialog_response_operation(input_operation)
+    validated_selected = validate_dialog_response_operation(value)
+    fixed_fields = (
+        "response_owner_role",
+        "selection_owner_role",
+        "selection_required",
+    )
+    for field_name in fixed_fields:
+        expected_value = validated_input[field_name]
+        actual_value = validated_selected[field_name]
+        if actual_value != expected_value:
+            raise CognitiveEpisodeValidationError(
+                "selected response operation "
+                f"{field_name} conflicts with input: "
+                f"expected={expected_value!r}; actual={actual_value!r}"
+            )
+
+    for field_name in ("embedded_actor_role", "embedded_target_role"):
+        expected_value = validated_input[field_name]
+        actual_value = validated_selected[field_name]
+        if expected_value != NO_ROLE and actual_value != expected_value:
+            raise CognitiveEpisodeValidationError(
+                "selected response operation "
+                f"{field_name} conflicts with known input role: "
+                f"expected={expected_value!r}; actual={actual_value!r}"
+            )
+    return validated_selected
+
+
 def build_text_chat_media_description_rows(
     multimedia_input: list[Mapping[str, object]],
 ) -> list[MediaDescriptionRow]:

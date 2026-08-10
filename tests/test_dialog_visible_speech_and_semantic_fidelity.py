@@ -15,6 +15,10 @@ from kazusa_ai_chatbot.cognition_core_v2 import surface as surface_module
 from kazusa_ai_chatbot.cognition_core_v2 import surface_stages
 from kazusa_ai_chatbot.action_spec import results as action_results
 from kazusa_ai_chatbot.brain_service.post_turn import settle_episode_trace
+from kazusa_ai_chatbot.cognition_episode import (
+    CURRENT_CHARACTER_ROLE,
+    CURRENT_USER_ROLE,
+)
 from kazusa_ai_chatbot.consolidation.source_policy import (
     build_consolidation_source_views,
 )
@@ -680,6 +684,21 @@ def test_expression_continuity_check_is_literal_and_topic_neutral() -> None:
     assert misaligned["issues"][0]["kind"] == "lexical_avoidance"
 
 
+def _surface_input_for_required_operation(
+    operation: dict[str, object],
+) -> dict[str, object]:
+    """Build a valid surface input carrying one selected operation."""
+
+    payload = _surface_input()
+    payload["episode"] = canonical_episode(
+        content="The current turn requires a concrete selection.",
+        metadata={"response_operation": operation},
+    )
+    payload["intention"]["selected_response_operation"] = dict(operation)
+    payload["selected_response_operation"] = dict(operation)
+    return payload
+
+
 @pytest.mark.asyncio
 async def test_focused_verifiers_merge_four_issues_each(
     monkeypatch: pytest.MonkeyPatch,
@@ -910,11 +929,11 @@ async def test_role_verifier_regenerates_invalid_structure_in_place(
             "semantic_text": "Choose the next action.",
             "response_operation": {
                 "operation": "the character chooses the next action",
-                "response_owner_role": "current_character",
-                "selection_owner_role": "current_character",
+                "response_owner_role": CURRENT_CHARACTER_ROLE,
+                "selection_owner_role": CURRENT_CHARACTER_ROLE,
                 "selection_required": True,
-                "embedded_actor_role": "current_character",
-                "embedded_target_role": "current_user",
+                "embedded_actor_role": CURRENT_CHARACTER_ROLE,
+                "embedded_target_role": CURRENT_USER_ROLE,
             },
         },
     }]
@@ -922,6 +941,9 @@ async def test_role_verifier_regenerates_invalid_structure_in_place(
     verdict = await dialog_module._verify_dialog_role_direction(
         generated_dialog=["I choose the next action."],
         current_visible_percepts=percepts,
+        surface_input=_surface_input_for_required_operation(
+            percepts[0]["content"]["response_operation"]
+        ),
         llm_trace_id="role-structure-repair",
     )
 
@@ -945,11 +967,11 @@ async def test_role_verifier_regenerates_invalid_structure_in_place(
     )
     payload = json.loads(first_messages[1].content)
     assert payload["required_role_operations"] == [{
-        "response_owner_role": "current_character",
-        "selection_owner_role": "current_character",
+        "response_owner_role": CURRENT_CHARACTER_ROLE,
+        "selection_owner_role": CURRENT_CHARACTER_ROLE,
         "selection_required": True,
-        "embedded_actor_role": "current_character",
-        "embedded_target_role": "current_user",
+        "embedded_actor_role": CURRENT_CHARACTER_ROLE,
+        "embedded_target_role": CURRENT_USER_ROLE,
     }]
     assert trace_recorder.await_count == 2
     rejected_trace = trace_recorder.await_args_list[0].kwargs
@@ -1071,14 +1093,22 @@ async def test_focused_verifier_exhaustion_returns_unavailable(
                 "input_source": "dialog_text",
                 "content": {
                     "response_operation": {
-                        "response_owner_role": "current_character",
-                        "selection_owner_role": "current_character",
+                        "response_owner_role": CURRENT_CHARACTER_ROLE,
+                        "selection_owner_role": CURRENT_CHARACTER_ROLE,
                         "selection_required": True,
-                        "embedded_actor_role": "current_character",
-                        "embedded_target_role": "current_user",
+                        "embedded_actor_role": CURRENT_CHARACTER_ROLE,
+                        "embedded_target_role": CURRENT_USER_ROLE,
                     },
                 },
             }],
+            surface_input=_surface_input_for_required_operation({
+                "operation": "the character chooses the next action",
+                "response_owner_role": CURRENT_CHARACTER_ROLE,
+                "selection_owner_role": CURRENT_CHARACTER_ROLE,
+                "selection_required": True,
+                "embedded_actor_role": CURRENT_CHARACTER_ROLE,
+                "embedded_target_role": CURRENT_USER_ROLE,
+            }),
             llm_trace_id="role-structure-exhaustion",
         )
     else:
@@ -1335,11 +1365,11 @@ async def test_role_direction_score_accepts_character_owned_deflection(
             "semantic_text": "Analyze the image.",
             "response_operation": {
                 "operation": "the character chooses whether to answer or deflect",
-                "response_owner_role": "current_character",
-                "selection_owner_role": "current_character",
+                "response_owner_role": CURRENT_CHARACTER_ROLE,
+                "selection_owner_role": CURRENT_CHARACTER_ROLE,
                 "selection_required": True,
-                "embedded_actor_role": "current_user",
-                "embedded_target_role": "current_character",
+                "embedded_actor_role": CURRENT_USER_ROLE,
+                "embedded_target_role": CURRENT_CHARACTER_ROLE,
             },
         },
     }
@@ -1351,6 +1381,9 @@ async def test_role_direction_score_accepts_character_owned_deflection(
         surface_output=surface_output,
         generated_dialog=candidate,
         current_visible_percepts=[percept],
+        surface_input=_surface_input_for_required_operation(
+            percept["content"]["response_operation"]
+        ),
         llm_trace_id="role-direction-valid-deflection",
     )
 
@@ -1419,6 +1452,9 @@ async def test_role_direction_verifier_owns_required_selection(
         surface_output=_surface_output(),
         generated_dialog=[candidate],
         current_visible_percepts=[percept],
+        surface_input=_surface_input_for_required_operation(
+            percept["content"]["response_operation"]
+        ),
         llm_trace_id="role-direction-required-selection",
     )
 
@@ -1483,6 +1519,9 @@ async def test_role_direction_verifier_requires_exact_candidate_evidence(
     verdict = await dialog_module._verify_dialog_role_direction(
         generated_dialog=["Next, hold my hand and stay close to me."],
         current_visible_percepts=[percept],
+        surface_input=_surface_input_for_required_operation(
+            percept["content"]["response_operation"]
+        ),
         llm_trace_id="role-direction-candidate-evidence",
     )
 

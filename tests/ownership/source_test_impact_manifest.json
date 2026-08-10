@@ -2,11 +2,13 @@
   "schema_version": 1,
   "source_roots": [
     "src/control_console/__init__.py",
+    "src/kazusa_ai_chatbot/cognition_episode.py",
     "src/kazusa_ai_chatbot/cognition_core_v2",
     "src/kazusa_ai_chatbot/cognition_resolver",
     "src/kazusa_ai_chatbot/version.py",
     "src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition.py",
     "src/kazusa_ai_chatbot/nodes/persona_supervisor2_l3_surface.py",
+    "src/kazusa_ai_chatbot/nodes/persona_supervisor2_msg_decontextualizer.py",
     "src/kazusa_ai_chatbot/nodes/dialog_agent.py",
     "src/kazusa_ai_chatbot/nodes/persona_supervisor2_schema.py",
     "src/scripts/export_trace_correlation_manifest.py"
@@ -18,6 +20,16 @@
       "contract": "console package release identity mirrors package metadata",
       "required_unit_tests": [
         "tests/test_release_metadata.py::test_product_release_identity_is_consistent"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/cognition_episode.py",
+      "owner": "cognitive episode contract owner",
+      "contract": "selected response-operation role authority",
+      "required_unit_tests": [
+        "tests/unit/cognition_core_v2/test_cognition_episode.py::test_selected_response_operation_preserves_fixed_roles",
+        "tests/unit/cognition_core_v2/test_cognition_episode.py::test_selected_response_operation_rejects_conflicting_roles"
       ],
       "supplemental_tests": []
     },
@@ -51,9 +63,10 @@
     {
       "source": "src/kazusa_ai_chatbot/cognition_core_v2/action_selection.py",
       "owner": "action selection owner",
-      "contract": "stance-to-effect propagation",
+      "contract": "selected-intention and stance-to-effect propagation",
       "required_unit_tests": [
         "tests/unit/cognition_core_v2/test_action_selection.py::test_non_accepting_stance_suppresses_downstream_effects",
+        "tests/unit/cognition_core_v2/test_action_selection.py::test_selected_intention_preserves_selected_response_operation",
         "tests/unit/cognition_core_v2/test_action_selection.py::test_action_selection_exposes_owned_contract"
       ],
       "supplemental_tests": []
@@ -79,9 +92,11 @@
     {
       "source": "src/kazusa_ai_chatbot/cognition_core_v2/contracts.py",
       "owner": "cognition contract validator",
-      "contract": "sensitive relational willingness validation",
+      "contract": "cognition contract and selected response-operation validation",
       "required_unit_tests": [
         "tests/unit/cognition_core_v2/test_contracts.py::test_sensitive_relational_willingness_accepts_all_real_states_and_stances",
+        "tests/unit/cognition_core_v2/test_contracts.py::test_selected_response_operation_has_exact_contract",
+        "tests/unit/cognition_core_v2/test_contracts.py::test_selected_response_operation_rejects_missing_required_fields",
         "tests/unit/cognition_core_v2/test_contracts.py::test_contracts_exposes_owned_contract"
       ],
       "supplemental_tests": []
@@ -136,7 +151,9 @@
       "owner": "cognition_core_v2 owner",
       "contract": "goal_cognition public contract",
       "required_unit_tests": [
-        "tests/unit/cognition_core_v2/test_goal_cognition.py::test_goal_cognition_exposes_owned_contract"
+        "tests/unit/cognition_core_v2/test_goal_cognition.py::test_goal_cognition_exposes_owned_contract",
+        "tests/unit/cognition_core_v2/test_goal_cognition.py::test_required_selection_emits_selected_response_operation",
+        "tests/unit/cognition_core_v2/test_goal_cognition.py::test_required_selection_rejects_fixed_role_conflict"
       ],
       "supplemental_tests": []
     },
@@ -244,9 +261,10 @@
     {
       "source": "src/kazusa_ai_chatbot/cognition_core_v2/surface.py",
       "owner": "surface owner",
-      "contract": "surface output stance propagation",
+      "contract": "surface prompt boundary and selected-operation propagation",
       "required_unit_tests": [
         "tests/unit/cognition_core_v2/test_surface.py::test_surface_output_preserves_relational_willingness_v2",
+        "tests/unit/cognition_core_v2/test_surface.py::test_surface_prompt_omits_selected_response_operation",
         "tests/unit/cognition_core_v2/test_surface.py::test_surface_exposes_owned_contract"
       ],
       "supplemental_tests": [
@@ -359,9 +377,10 @@
     {
       "source": "src/kazusa_ai_chatbot/nodes/persona_supervisor2_l3_surface.py",
       "owner": "surface owner",
-      "contract": "surface output stance propagation",
+      "contract": "L3 surface and selected-operation propagation",
       "required_unit_tests": [
         "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_l3_surface_preserves_relational_willingness_v2",
+        "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_l3_surface_preserves_selected_response_operation",
         "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_persona_supervisor2_l3_surface_exposes_owned_contract"
       ],
       "supplemental_tests": [
@@ -371,9 +390,11 @@
     {
       "source": "src/kazusa_ai_chatbot/nodes/dialog_agent.py",
       "owner": "dialog verifier owner",
-      "contract": "numeric dialog verifier scoring and comparable candidate fallback",
+      "contract": "selected-operation role authority and numeric dialog verifier fallback",
       "required_unit_tests": [
         "tests/unit/nodes/test_dialog_agent.py::test_terminal_candidate_opposite_polarity_is_withheld",
+        "tests/unit/nodes/test_dialog_agent.py::test_dialog_role_direction_uses_selected_response_operation",
+        "tests/unit/nodes/test_dialog_agent.py::test_dialog_role_direction_rejects_selected_actor_target_reversal",
         "tests/unit/nodes/test_dialog_agent.py::test_dialog_agent_exposes_owned_contract",
         "tests/test_dialog_agent.py::test_dialog_score_validation_rejects_non_finite_or_out_of_range",
         "tests/test_dialog_agent.py::test_dialog_score_aggregate_uses_available_dimensions",
@@ -383,8 +404,21 @@
       ],
       "supplemental_tests": [
         "tests/integration/cognition_core_v2/test_terminal_dialog_candidate.py::test_terminal_dialog_candidate_opposite_polarity_is_withheld",
+        "tests/integration/cognition_core_v2/test_terminal_dialog_candidate.py::test_reward_offer_required_selection_delivers_visible_dialog",
         "tests/test_dialog_visible_speech_and_semantic_fidelity.py::test_role_direction_score_accepts_character_owned_deflection",
-        "tests/test_dialog_visible_speech_and_semantic_fidelity.py::test_dialog_semantic_exhaustion_withholds_unverified_candidates"
+        "tests/test_dialog_visible_speech_and_semantic_fidelity.py::test_dialog_semantic_exhaustion_withholds_unverified_candidates",
+        "tests/test_dialog_visible_speech_and_semantic_fidelity_live_llm.py::test_live_reward_request_preserves_user_actor_character_target"
+      ]
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/nodes/persona_supervisor2_msg_decontextualizer.py",
+      "owner": "message decontextualizer owner",
+      "contract": "response-operation role direction prompt guidance",
+      "required_unit_tests": [
+        "tests/test_msg_decontextualizer.py::test_decontextualizer_prompt_explains_reply_ellipsis_decision_owner"
+      ],
+      "supplemental_tests": [
+        "tests/test_decontextualizer_live_llm.py::test_live_decontextualizer_reward_offer_preserves_user_actor_character_target"
       ]
     },
     {

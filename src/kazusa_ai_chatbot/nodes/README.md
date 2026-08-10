@@ -53,6 +53,15 @@ normalized by adapters and the brain service into `message_envelope`,
 `prompt_message_context`, `reply_context`, `CognitiveEpisode`, global user ids,
 and bounded history fields.
 
+For a required-selection turn, `persona_supervisor2_msg_decontextualizer.py`
+owns the input-level `response_operation`. Cognition V2 owns the concrete
+`selected_response_operation` emitted by required-selection goal cognition.
+The carrier passes through the complete bid, selected intention, and
+`TextSurfaceInputV2`; the surface model does not rewrite it, and
+`dialog_agent.py` uses it for role-direction verification. Known non-`无`
+roles are preserved deterministically, while missing or conflicting selected
+operations fail closed before dialog consumes its bounded candidate attempts.
+
 ## Canonical Live Flow
 
 The top-level service graph routes into `persona_supervisor2` only after the
@@ -168,10 +177,11 @@ dialog do not. Ordinary user turns and other ineligible episodes receive the
 exact empty value without a connector-owned group style database read.
 
 When Stage 0 supplied a valid semantic projection, the connector forwards its
-`role_explicit_content` and `response_operation` unchanged as current episode
-evidence and semantic scene. Goal cognition, surface planning, and dialog
-verification therefore share one role and ownership meaning instead of
-independently interpreting nested direct pronouns.
+`role_explicit_content` and input-level `response_operation` unchanged as
+current episode evidence and semantic scene. Goal cognition emits the concrete
+`selected_response_operation`; surface planning carries it without rewriting
+it, and dialog verification uses that selected operation as required-selection
+role authority instead of independently interpreting nested direct pronouns.
 
 The V2 core performs deterministic preparation, scoped semantic appraisal,
 state reduction, dependency-ready goal cognition, complete-bid collapse, and
@@ -327,10 +337,12 @@ this semantic authority. Surface integrity receives only permitted action
 results and candidate dialog; it checks false claims of character-brain action
 execution. Source percepts and generated character speech use separate typed
 pronoun frames before actor/action/target comparison. Semantic fidelity owns
-non-selection role direction. The selection-only role verifier receives the five authoritative
-`response_operation` fields and owns selection transfer plus embedded
-actor/target reversal. Those selection-owned fields are removed from the
-semantic-fidelity projection while the raw current-input meaning remains.
+non-selection role direction. The selection-only role verifier receives the
+five authoritative fields from `selected_response_operation` and owns
+selection transfer plus embedded actor/target reversal. The input-level
+`response_operation` remains provenance; the selected-operation fields are
+removed from the semantic-fidelity projection while the raw current-input
+meaning remains.
 Deterministic code merges the three numeric verdicts and the literal
 expression-continuity verdict without rewriting dialog semantics. The aggregate
 is the equal-weight geometric mean of available focused scores; clean lexical
@@ -381,11 +393,12 @@ the selected goal branch to one specialized producer in place of its generic
 goal prompt. The producer emits one authoritative selection and accounts for
 every required-selection handle while retaining complete progress evidence for
 its own relevance judgment. Structural retries reuse that same goal owner; no
-semantic evaluator or replacement owner is added. Dialog's
-corresponding focused check reads the canonical nested
-`percept.content.response_operation` and owns only explicit selection-owner
-transfer and actor/target reversal. Semantic completeness, brevity, and
-specificity remain with semantic fidelity and the L3 surface owner. A
+semantic evaluator or replacement owner is added. Dialog's corresponding
+focused check reads the canonical `selected_response_operation` carrier from
+`TextSurfaceInputV2` and owns only explicit selection-owner transfer and
+actor/target reversal. The episode-level `response_operation` remains input
+provenance. Semantic completeness, brevity, and specificity remain with
+semantic fidelity and the L3 surface owner. A
 character-owned desire, request, or imperative can name the selected action,
 and speaking or sending content counts as an action when the typed operation
 requires it. Turns without the structural flag use the generic goal producer.

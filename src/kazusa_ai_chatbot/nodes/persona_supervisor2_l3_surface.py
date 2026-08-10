@@ -113,6 +113,11 @@ def build_text_surface_input_from_global_state(
             state=state,
         ),
     }
+    selected_operation = validated_output["intention"].get(
+        "selected_response_operation"
+    )
+    if selected_operation is not None:
+        payload["selected_response_operation"] = dict(selected_operation)
     runtime_limits = build_runtime_capability_limits(state)
     if runtime_limits:
         payload["runtime_capability_limits"] = runtime_limits

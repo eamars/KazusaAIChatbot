@@ -50,6 +50,23 @@ dependency-ready goal branches, complete-bid collapse, route validation, and
 one replacement-state update. The caller commits that update before action,
 surface, resolver, or dialog work.
 
+## Required-Selection Role Operation
+
+The episode-level `response_operation` is input provenance. It records who
+responds, who owns an unspecified choice, and any embedded actor/target roles
+fixed by the current input. Required-selection goal cognition emits a separate
+`selected_response_operation` after the character chooses the concrete action.
+Both use the canonical `DialogResponseOperation` shape.
+
+The selected operation is carried through the admitted bid, selected
+intention, and `TextSurfaceInputV2`. Deterministic validators preserve every
+known non-`无` response-owner, selection-owner, actor, and target role. The
+surface prompt projection cannot rewrite this control carrier; dialog role
+verification consumes it as the authority for required-selection turns.
+Missing or conflicting selected operations fail at the cognition contract
+boundary within the existing bounded regeneration policy. Numeric dialog
+scores cannot override a typed role-direction hard gate.
+
 ## Stage Model Routing
 
 Core V2 receives one independent `LLMCallConfig` for each existing semantic
@@ -155,9 +172,11 @@ For user dialog, the canonical percept may carry bounded
 the existing upstream decontextualizer LLM. The operation identifies the
 response owner, any required selection owner, and embedded actor and target.
 The raw sentence and deterministic speaker/addressee frame remain intact. V2
-consumes this semantic projection unchanged as current episode meaning so
-nested role and response ownership are resolved once before goal cognition
-instead of independently by every downstream local-model stage.
+consumes this semantic projection unchanged as current episode meaning. Goal
+cognition owns the concrete required-selection choice and emits
+`selected_response_operation`; downstream stages carry that selected authority
+instead of independently reinterpreting nested roles or reusing the input
+operation for the embedded action.
 
 In a group episode, visible third-party participants use an episode-local
 typed binding such as `p1`, paired with its display name and the

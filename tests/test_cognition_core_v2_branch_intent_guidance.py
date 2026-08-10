@@ -192,6 +192,14 @@ def _selection_bid() -> dict[str, Any]:
 
     return {
         "selection": '当前角色选择先确认事实',
+        "selected_response_operation": {
+            "operation": '当前用户执行当前角色选定的动作',
+            "response_owner_role": '当前角色',
+            "selection_owner_role": '当前角色',
+            "selection_required": True,
+            "embedded_actor_role": '当前用户',
+            "embedded_target_role": '当前角色',
+        },
         "reason": '当前选择操作要求角色直接决定下一步',
         "private_monologue": '我应该先确认当前事实。',
         "target_role_handles": ["r1"],
@@ -493,11 +501,11 @@ async def test_required_selection_prompt_omits_branch_guidance() -> None:
         "role_explicit_content": "The current character must choose.",
         "response_operation": {
             "operation": "The current character chooses the next step.",
-            "response_owner_role": "current character",
-            "selection_owner_role": "current character",
+            "response_owner_role": "当前角色",
+            "selection_owner_role": "当前角色",
             "selection_required": True,
-            "embedded_actor_role": "current user",
-            "embedded_target_role": "current character",
+            "embedded_actor_role": "当前用户",
+            "embedded_target_role": "当前角色",
         },
     })
     llm = _CapturingLLM([_selection_bid()])

@@ -38,6 +38,19 @@ from kazusa_ai_chatbot.cognition_core_v2 import goal_cognition as goal_module
 from kazusa_ai_chatbot.cognition_core_v2.workspace import collapse_bids
 
 
+def _selected_response_operation() -> dict[str, object]:
+    """Build the canonical selected operation for required-selection tests."""
+
+    return {
+        "operation": "当前用户执行当前角色选定的动作",
+        "response_owner_role": "当前角色",
+        "selection_owner_role": "当前角色",
+        "selection_required": True,
+        "embedded_actor_role": "当前用户",
+        "embedded_target_role": "当前角色",
+    }
+
+
 def _bid(branch_id: str) -> dict[str, object]:
     """Build one complete motive bid for workspace tests."""
 
@@ -1073,6 +1086,7 @@ async def test_required_selection_regenerates_with_the_same_producer() -> None:
 
     selected = {
         "selection": "当前角色选择让当前用户继续抱紧她。",
+        "selected_response_operation": _selected_response_operation(),
         "reason": "当前输入把选择权交给当前角色。",
         "private_monologue": "我现在直接作出自己的选择。",
         "target_role_handles": [],
@@ -1193,6 +1207,7 @@ async def test_required_selection_regeneration_excludes_optional_conversation(
 
     valid_selection = {
         'selection': '当前角色选择让当前用户陪她去散步。',
+        'selected_response_operation': _selected_response_operation(),
         'reason': '当前角色根据关系和此刻感受作出具体选择。',
         'private_monologue': '我现在直接说出自己的选择。',
         'target_role_handles': [],
@@ -1314,6 +1329,7 @@ async def test_required_selection_repair_replays_grounding_after_handle_failures
 
     selected = {
         'selection': 'The character makes the current choice directly.',
+        'selected_response_operation': _selected_response_operation(),
         'reason': 'The current operation gives the character the choice.',
         'private_monologue': 'I should make this choice from the current facts.',
         'target_role_handles': ['r1'],
@@ -1373,11 +1389,11 @@ async def test_required_selection_repair_replays_grounding_after_handle_failures
         'role_explicit_content': 'The character must make a choice.',
         'response_operation': {
             'operation': 'The character makes the current choice.',
-            'response_owner_role': 'current character',
-            'selection_owner_role': 'current character',
+            'response_owner_role': '当前角色',
+            'selection_owner_role': '当前角色',
             'selection_required': True,
-            'embedded_actor_role': 'current user',
-            'embedded_target_role': 'current character',
+            'embedded_actor_role': '当前用户',
+            'embedded_target_role': '当前角色',
         },
     })
     evidence = [{
@@ -1473,6 +1489,7 @@ async def test_active_selection_repair_uses_the_same_grounding_contract(
 
     valid = {
         'selection': 'The character chooses the grounded next step.',
+        'selected_response_operation': _selected_response_operation(),
         'reason': 'The current operation requires a concrete choice.',
         'private_monologue': 'I should choose from the current evidence.',
         'target_role_handles': ['r1'],
@@ -1505,11 +1522,11 @@ async def test_active_selection_repair_uses_the_same_grounding_contract(
         'role_explicit_content': 'The character must choose.',
         'response_operation': {
             'operation': 'The character chooses the next step.',
-            'response_owner_role': 'current character',
-            'selection_owner_role': 'current character',
+            'response_owner_role': '当前角色',
+            'selection_owner_role': '当前角色',
             'selection_required': True,
-            'embedded_actor_role': 'current user',
-            'embedded_target_role': 'current character',
+            'embedded_actor_role': '当前用户',
+            'embedded_target_role': '当前角色',
         },
     })
     bid = await run_goal_cognition(
@@ -1614,6 +1631,7 @@ async def test_required_selection_invalid_evidence_fails_after_exhaustion(
 
     selected = {
         "selection": "The character accepts the current question.",
+        "selected_response_operation": _selected_response_operation(),
         "reason": "The current input directly asks for the character's answer.",
         "private_monologue": "I can answer the question directly.",
         "target_role_handles": ["current_user"],
@@ -1651,11 +1669,11 @@ async def test_required_selection_invalid_evidence_fails_after_exhaustion(
         "role_explicit_content": "The character must answer.",
         "response_operation": {
             "operation": "The character answers the current question.",
-            "response_owner_role": "current character",
-            "selection_owner_role": "current character",
+            "response_owner_role": "当前角色",
+            "selection_owner_role": "当前角色",
             "selection_required": True,
-            "embedded_actor_role": "current user",
-            "embedded_target_role": "current character",
+            "embedded_actor_role": "当前用户",
+            "embedded_target_role": "当前角色",
         },
     })
 

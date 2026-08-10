@@ -1153,6 +1153,9 @@ def test_decontextualizer_prompt_explains_reply_ellipsis_decision_owner() -> Non
     assert 'role_explicit_content` 与 `response_operation` 必须描述同一组角色方向' in system_prompt
     assert '当前用户继续辱骂当前角色' in system_prompt
     assert '当前用户直接对当前角色进行评价、命令或否定时' in system_prompt
+    assert '外层回应动作和回应内嵌套动作分开判断' in system_prompt
+    assert '当前用户会把选定的奖励给当前角色' in system_prompt
+    assert '行动者和对象是两个独立字段' in system_prompt
 
 
 @pytest.mark.asyncio

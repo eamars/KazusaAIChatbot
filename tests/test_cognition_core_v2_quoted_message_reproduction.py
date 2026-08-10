@@ -398,6 +398,7 @@ def _surface_input(
         "target_summaries": ["当前用户", "雪凪"],
         "expected_consequences": list(bid["expected_consequences"]),
     }
+    selected_operation = dict(metadata["response_operation"])
     return {
         "schema_version": "text_surface_input.v2",
         "episode": episode,
@@ -406,7 +407,9 @@ def _surface_input(
             "intention": str(action_plan["intention"]["intention"]),
             "target_roles": [],
             "reason": str(action_plan["intention"]["reason"]),
+            "selected_response_operation": selected_operation,
         },
+        "selected_response_operation": selected_operation,
         "goal_resolution": str(action_plan["goal_resolution"]),
         "primary_bid": primary_bid,
         "supporting_bids": [],

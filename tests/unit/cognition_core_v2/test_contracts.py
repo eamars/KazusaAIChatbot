@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+import pytest
+
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionContractError,
     RELATIONAL_STANCE_VALUES,
     RELATIONAL_CURRENT_USER_RELATIONSHIP_STATE_VALUES,
+    validate_action_bid,
     validate_relational_willingness,
+)
+from kazusa_ai_chatbot.cognition_episode import (
+    CURRENT_CHARACTER_ROLE,
+    CURRENT_USER_ROLE,
 )
 
 
@@ -20,6 +27,44 @@ def _decision(stance: str, relationship_state: str) -> dict[str, object]:
         "current_user_relationship_state": relationship_state,
         "reason": '角色根据当前证据作出判断',
         "evidence_handles": ["e1"],
+    }
+
+
+def _selected_operation() -> dict[str, object]:
+    """Build one complete selected response-operation carrier."""
+
+    return {
+        "operation": "the user gives the selected reward to the character",
+        "response_owner_role": CURRENT_CHARACTER_ROLE,
+        "selection_owner_role": CURRENT_CHARACTER_ROLE,
+        "selection_required": True,
+        "embedded_actor_role": CURRENT_USER_ROLE,
+        "embedded_target_role": CURRENT_CHARACTER_ROLE,
+    }
+
+
+def _bid_with_selected_operation(
+    selected_operation: dict[str, object],
+) -> dict[str, object]:
+    """Build a complete non-relational action bid for contract tests."""
+
+    return {
+        "branch_id": "active_branch",
+        "goal_ref": {
+            "scope": "user",
+            "kind": "goal",
+            "entity_id": "goal:selected-operation",
+        },
+        "intention": "preserve the selected response direction",
+        "desired_outcome": "carry the selected operation forward",
+        "concrete_detail": "use the typed selected operation",
+        "reason": "the selected operation is authoritative",
+        "private_monologue": "keep role direction stable",
+        "target_roles": [],
+        "evidence_handles": ["e1"],
+        "expected_consequences": ["the dialog receives the selected operation"],
+        "confidence": "high",
+        "selected_response_operation": selected_operation,
     }
 
 
@@ -53,3 +98,27 @@ def test_contracts_exposes_owned_contract() -> None:
 
     assert CognitionContractError is not None
     assert callable(validate_relational_willingness)
+
+
+def test_selected_response_operation_has_exact_contract() -> None:
+    """Action bids accept the complete selected operation shape."""
+
+    bid = _bid_with_selected_operation(_selected_operation())
+
+    validate_action_bid(bid)
+
+    assert bid["selected_response_operation"]["selection_required"] is True
+
+
+def test_selected_response_operation_rejects_missing_required_fields() -> None:
+    """A partial selected operation cannot cross the bid boundary."""
+
+    selected_operation = _selected_operation()
+    del selected_operation["embedded_target_role"]
+    bid = _bid_with_selected_operation(selected_operation)
+
+    with pytest.raises(
+        CognitionContractError,
+        match="selected_response_operation",
+    ):
+        validate_action_bid(bid)

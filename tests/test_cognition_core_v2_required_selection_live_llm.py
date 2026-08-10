@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
 from dataclasses import replace
 import json
 from typing import Any
@@ -18,6 +17,7 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
 )
 from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
     MAX_GOAL_BID_EVIDENCE_HANDLES,
+    _required_selection_operations,
     run_goal_cognition,
     validate_selection_goal_draft,
 )
@@ -78,27 +78,6 @@ class _CapturingLLM:
         return response
 
 
-def _required_operation_handles(
-    evidence: list[dict[str, Any]],
-) -> set[str]:
-    """Identify typed required-selection rows for live trace diagnostics."""
-
-    required_handles = set()
-    for row in evidence:
-        try:
-            payload = json.loads(row['semantic_text'])
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(payload, Mapping):
-            continue
-        response_operation = payload.get('response_operation')
-        if not isinstance(response_operation, Mapping):
-            continue
-        if response_operation.get('selection_required') is True:
-            required_handles.add(row['evidence_handle'])
-    return required_handles
-
-
 def _add_contract_diagnostics(
     calls: list[dict[str, Any]],
     *,
@@ -108,7 +87,11 @@ def _add_contract_diagnostics(
 ) -> None:
     """Attach canonical parse and strict-validation evidence to live calls."""
 
-    operation_handles = _required_operation_handles(evidence)
+    required_operations = _required_selection_operations(evidence)
+    operation_handles = {
+        row['evidence_handle']
+        for row in required_operations
+    }
     progress_handles = {
         row['evidence_handle']
         for row in evidence
@@ -141,6 +124,7 @@ def _add_contract_diagnostics(
                     evidence_handles=evidence_handles,
                     role_handles=role_handles,
                     required_evidence_handles=operation_handles,
+                    required_operations=required_operations,
                     require_relational_willingness=(
                         require_relational_willingness
                     ),
@@ -288,6 +272,22 @@ async def _run_live_required_selection_case(
         role_handles=set(semantic_context['_role_bindings']),
         require_relational_willingness=(branch_id == 'ordinary_response'),
     )
+    if bid is not None:
+        selected_operation = bid['selected_response_operation']
+        for field_name in (
+            'response_owner_role',
+            'selection_owner_role',
+            'embedded_actor_role',
+            'embedded_target_role',
+        ):
+            assert selected_operation[field_name] == response_operation[
+                field_name
+            ]
+        assert selected_operation['selection_required'] is True
+        assert selected_operation['operation'].strip()
+        assert selected_operation['operation'] != response_operation[
+            'operation'
+        ]
     trace_path = write_llm_trace(
         _TRACE_SUITE,
         case_id,

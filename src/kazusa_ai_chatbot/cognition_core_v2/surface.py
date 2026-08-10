@@ -401,6 +401,8 @@ def _project_surface_payload(
         "intention": intention["intention"],
         "reason": intention["reason"],
     }
+    # The selected operation remains a deterministic role carrier outside the
+    # surface model's writable prompt projection.
     result: dict[str, Any] = {
         "episode": _project_episode(payload["episode"]),
         "intention": projected_intention,

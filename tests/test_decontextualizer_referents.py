@@ -164,7 +164,8 @@ async def test_decontextualizer_prompt_requires_character_name_and_identity_safe
     assert '当前角色说明白' not in system_prompt
     assert '# 正向模式' not in system_prompt
     assert 'user_input =' not in system_prompt
-    assert '例如' not in system_prompt
+    assert '外层回应动作和回应内嵌套动作分开判断' in system_prompt
+    assert '当前用户会把选定的奖励给当前角色' in system_prompt
     assert '可见参与者字面名称' in system_prompt
     assert '按参与者名称处理' in system_prompt
 

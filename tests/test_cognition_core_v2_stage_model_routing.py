@@ -238,6 +238,14 @@ def _selection_goal_draft() -> dict[str, object]:
 
     return {
         "selection": "choose one concrete current action",
+        "selected_response_operation": {
+            "operation": "the user performs the character's selected action",
+            "response_owner_role": "当前角色",
+            "selection_owner_role": "当前角色",
+            "selection_required": True,
+            "embedded_actor_role": "当前用户",
+            "embedded_target_role": "当前角色",
+        },
         "reason": "the typed operation gives the character selection ownership",
         "private_monologue": "I will make this choice directly.",
         "target_role_handles": [],
@@ -487,8 +495,12 @@ async def test_selection_producer_retry_reuses_goal_route_and_trace(
         "semantic_text": json.dumps({
             "role_explicit_content": "the character must make one selection",
             "response_operation": {
+                "operation": "the character chooses one concrete action",
                 "selection_required": True,
-                "selection_owner_role": "character",
+                "response_owner_role": "当前角色",
+                "selection_owner_role": "当前角色",
+                "embedded_actor_role": "当前用户",
+                "embedded_target_role": "当前角色",
             },
         }),
         "visible_to": ["q:event_agency"],

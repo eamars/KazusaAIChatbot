@@ -36,7 +36,11 @@ from kazusa_ai_chatbot.cognition_core_v2.state_models import (
 from kazusa_ai_chatbot.cognition_episode import (
     CognitiveEpisodeV1,
     CognitiveEpisodeValidationError,
+    DialogResponseOperation,
+    project_dialog_response_operation,
     validate_cognitive_episode_v1,
+    validate_dialog_response_operation,
+    validate_selected_response_operation,
 )
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     MAX_RESOLVER_EVIDENCE_EXCERPT_CHARS,
@@ -606,6 +610,7 @@ class ActionBidV2(TypedDict):
     evidence_handles: list[str]
     expected_consequences: list[str]
     confidence: str
+    selected_response_operation: NotRequired[DialogResponseOperation]
     relational_willingness: NotRequired[RelationalWillingnessV2]
 
 
@@ -621,6 +626,7 @@ class GoalBidDraftV2(TypedDict):
     evidence_handles: list[str]
     expected_consequences: list[str]
     confidence: str
+    selected_response_operation: NotRequired[DialogResponseOperation]
     relational_willingness: NotRequired[RelationalWillingnessV2]
 
 
@@ -632,6 +638,7 @@ class SelectedIntentionV2(TypedDict):
     intention: str
     target_roles: list[RoleRefV2]
     reason: str
+    selected_response_operation: NotRequired[DialogResponseOperation]
 
 
 class CollapsedIntentionV2(TypedDict):
@@ -939,6 +946,7 @@ class TextSurfaceInputV2(TypedDict):
     schema_version: Literal["text_surface_input.v2"]
     episode: CognitiveEpisodeV1
     intention: SelectedIntentionV2
+    selected_response_operation: NotRequired[DialogResponseOperation]
     goal_resolution: GoalResolutionV2
     primary_bid: NotRequired[SurfaceBidProjectionV2]
     supporting_bids: list[SurfaceBidProjectionV2]
@@ -1309,6 +1317,25 @@ def validate_cognition_core_output(
         validate_action_bid(bid)
     if "admitted_bid" in payload:
         validate_action_bid(payload["admitted_bid"])
+    intention_operation = payload["intention"].get(
+        "selected_response_operation"
+    )
+    admitted_operation = (
+        payload["admitted_bid"].get("selected_response_operation")
+        if "admitted_bid" in payload
+        else None
+    )
+    if (intention_operation is None) != (admitted_operation is None):
+        raise CognitionContractError(
+            "selected response operation must be copied from the admitted bid"
+        )
+    if (
+        intention_operation is not None
+        and intention_operation != admitted_operation
+    ):
+        raise CognitionContractError(
+            "intention selected response operation conflicts with admitted bid"
+        )
     if not isinstance(payload["state_update"], Mapping):
         raise CognitionContractError("state_update must be a mapping")
     _validate_state_update(payload["state_update"])
@@ -1369,6 +1396,11 @@ def validate_text_surface_input(
             "visual_character_context",
         }
         | ({"primary_bid"} if "primary_bid" in payload else set())
+        | (
+            {"selected_response_operation"}
+            if "selected_response_operation" in payload
+            else set()
+        )
         | ({"semantic_relationship"} if "semantic_relationship" in payload else set())
         | ({"resolver_result"} if "resolver_result" in payload else set())
         | (
@@ -1431,6 +1463,37 @@ def validate_text_surface_input(
     if "recent_character_dialog" in payload:
         _validate_recent_character_dialog(payload["recent_character_dialog"])
     _validate_canonical_episode(payload["episode"])
+    episode_operation = project_dialog_response_operation(payload["episode"])
+    intention_operation = payload["intention"].get(
+        "selected_response_operation"
+    )
+    selected_operation = payload.get("selected_response_operation")
+    if episode_operation is not None and episode_operation["selection_required"]:
+        if intention_operation is None or selected_operation is None:
+            raise CognitionContractError(
+                "required selection needs selected response operation"
+            )
+        try:
+            validated_selected_operation = validate_selected_response_operation(
+                selected_operation,
+                episode_operation,
+            )
+            validated_intention_operation = validate_selected_response_operation(
+                intention_operation,
+                episode_operation,
+            )
+        except CognitiveEpisodeValidationError as exc:
+            raise CognitionContractError(
+                f"selected response operation is invalid: {exc}"
+            ) from exc
+        if validated_selected_operation != validated_intention_operation:
+            raise CognitionContractError(
+                "surface selected response operation conflicts with intention"
+            )
+    elif intention_operation is not None or selected_operation is not None:
+        raise CognitionContractError(
+            "selected response operation requires a required selection"
+        )
     if "primary_bid" in payload:
         _validate_surface_bid(payload["primary_bid"])
     if not isinstance(payload["supporting_bids"], list):
@@ -1931,6 +1994,8 @@ def _validate_intention(value: Any) -> None:
     required = {"route", "intention", "target_roles", "reason"}
     if "selected_branch_id" in value:
         required.add("selected_branch_id")
+    if "selected_response_operation" in value:
+        required.add("selected_response_operation")
     _require_exact_keys(value, required, "intention")
     if value["route"] not in {
         "speech",
@@ -1945,6 +2010,11 @@ def _validate_intention(value: Any) -> None:
     _validate_roles(value["target_roles"], "intention.target_roles")
     if "selected_branch_id" in value:
         _require_text(value["selected_branch_id"], "intention.selected_branch_id")
+    if "selected_response_operation" in value:
+        _validate_response_operation(
+            value["selected_response_operation"],
+            "intention.selected_response_operation",
+        )
 
 
 def validate_action_bid(value: Any) -> None:
@@ -1967,6 +2037,8 @@ def validate_action_bid(value: Any) -> None:
     }
     if value.get("branch_id") == "ordinary_response":
         required.add("relational_willingness")
+    if "selected_response_operation" in value:
+        required.add("selected_response_operation")
     if set(value) != required:
         raise CognitionContractError("action bid fields are not exact")
     for field_name in (
@@ -1986,6 +2058,11 @@ def validate_action_bid(value: Any) -> None:
         value["expected_consequences"],
         "action bid.expected_consequences",
     )
+    if "selected_response_operation" in value:
+        _validate_response_operation(
+            value["selected_response_operation"],
+            "action bid.selected_response_operation",
+        )
     if "relational_willingness" in value:
         validate_relational_willingness(value["relational_willingness"])
 
@@ -3091,6 +3168,21 @@ def _validate_canonical_episode(value: Any) -> CognitiveEpisodeV1:
     except CognitiveEpisodeValidationError as exc:
         raise CognitionContractError(str(exc)) from exc
     return dict(value)  # type: ignore[return-value]
+
+
+def _validate_response_operation(
+    value: Any,
+    label: str,
+) -> DialogResponseOperation:
+    """Validate one control-only response-operation carrier."""
+
+    try:
+        validated_operation = validate_dialog_response_operation(value)
+    except CognitiveEpisodeValidationError as exc:
+        raise CognitionContractError(
+            f"{label} is invalid: {exc}"
+        ) from exc
+    return validated_operation
 
 
 def _validate_relationship_context(

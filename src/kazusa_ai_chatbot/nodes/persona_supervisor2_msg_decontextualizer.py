@@ -665,6 +665,9 @@ _MSG_DECONTEXTUALIZER_PROMPT = '''\
 9. 单独生成 `response_operation`：`response_owner_role` 是本轮应回应的角色。`selection_required` 不取决于原文是否出现“选择”：当回应需要某个角色提供输入中尚未指定的答案、判断、愿望、偏好、猜测、决定或指令时为 true，`selection_owner_role` 是拥有该内容的角色；内容已由输入明确指定时为 false。`embedded_actor_role` 和 `embedded_target_role` 保留回应内容中动作的行动者与对象。字段只描述原意，不替角色作出选择。
 `embedded_actor_role` 不是当前发言人的固定别名，而是每个嵌套动作在语义中的实际行动者。当前用户直接说“你做不好 / 你不配生气 / 你闭嘴听着”时，这些动作的主体是当前角色；当前用户直接说“我会继续骂你”时，行动者是当前用户、对象是当前角色。先按动作主语归属，再决定回应所有者。
 `role_explicit_content` 与 `response_operation` 必须描述同一组角色方向：如果前者写成“当前用户继续辱骂当前角色”，后者的 `embedded_actor_role` 必须是“当前用户”、`embedded_target_role` 必须是“当前角色”；不能因为本轮由当前角色回应，就把回应内动作的行动者和对象对调。
+- 外层回应动作和回应内嵌套动作分开判断。例如“当前用户问当前角色想要什么奖励，当前用户会把选定的奖励给当前角色”时，回应与选择所有者都是当前角色，但奖励动作的 `embedded_actor_role` 是“当前用户”、`embedded_target_role` 是“当前角色”；不能因为回应由当前角色发出就把奖励动作改成当前角色施予当前用户。
+- 如果输入只要求当前角色决定接下来聊什么，没有指定一个嵌套动作，仍可令 `selection_required=true`，但 `embedded_actor_role` 和 `embedded_target_role` 都必须是“无”。不要从“决定”“告诉”或“请你选”这些外层回应词推断嵌套动作。
+- 只有一端在原意中明确时，另一端保留“无”；行动者和对象是两个独立字段，不因一端为“无”而强行补齐或拒绝该组合。
 - 回顾型问句中，“当前用户刚才说 / 提到 / 告诉”的被回忆事实来源属于当前用户；当前角色负责回忆并回答。此时 `response_owner_role` 为“当前角色”，该嵌套陈述动作的 `embedded_actor_role` 为“当前用户”。句子直接称呼当前角色时，`embedded_target_role` 为“当前角色”；受话对象在原意中保持省略时，`embedded_target_role` 为“无”。“当前用户询问当前角色关于当前用户之前提到的门禁卡存放位置”对应的行动者是“当前用户”，不是“当前角色”。
 
 # 主体、省略与代词规则

@@ -16,6 +16,11 @@ from kazusa_ai_chatbot.cognition_resolver.state import (
 from kazusa_ai_chatbot.character_identity_growth.projection import (
     project_identity_for_surface,
 )
+from kazusa_ai_chatbot.cognition_episode import (
+    CURRENT_CHARACTER_ROLE,
+    CURRENT_USER_ROLE,
+    NO_ROLE,
+)
 from kazusa_ai_chatbot.nodes import persona_supervisor2 as persona_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_l3_surface as l3_surface
 from tests.cognition_core_v2_test_helpers import (
@@ -132,6 +137,47 @@ def test_l3_builder_uses_only_committed_v2_surface_fields() -> None:
     assert payload["character_expression_context"]["tempo"] == "moderate"
     assert "Current Character" in payload["visual_character_context"]
     assert "entity_id" not in json.dumps(payload)
+
+
+def test_selected_response_operation_reaches_dialog_unchanged() -> None:
+    """The L3-to-dialog handoff retains the selected operation byte-for-byte."""
+
+    input_operation = {
+        "operation": "the character chooses a reward",
+        "response_owner_role": CURRENT_CHARACTER_ROLE,
+        "selection_owner_role": CURRENT_CHARACTER_ROLE,
+        "selection_required": True,
+        "embedded_actor_role": NO_ROLE,
+        "embedded_target_role": NO_ROLE,
+    }
+    selected_operation = {
+        **input_operation,
+        "operation": "the user gives the selected reward to the character",
+        "embedded_actor_role": CURRENT_USER_ROLE,
+        "embedded_target_role": CURRENT_CHARACTER_ROLE,
+    }
+    state = _state()
+    state["cognitive_episode"] = canonical_episode(
+        episode_id="selected-operation-handoff-episode",
+        content="current reward request",
+        metadata={"response_operation": input_operation},
+    )
+    state["cognition_core_output"]["intention"][
+        "selected_response_operation"
+    ] = selected_operation
+    state["cognition_core_output"]["admitted_bid"][
+        "selected_response_operation"
+    ] = selected_operation
+
+    payload = l3_surface.build_text_surface_input_from_global_state(
+        state,
+        interaction_style_context="brief and natural",
+    )
+
+    assert payload["selected_response_operation"] == selected_operation
+    assert payload["intention"]["selected_response_operation"] == (
+        selected_operation
+    )
 
 
 def test_l3_builder_projects_bounded_recent_character_dialog() -> None:
