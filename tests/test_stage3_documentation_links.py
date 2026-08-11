@@ -63,3 +63,29 @@ def test_stage3_docs_describe_native_startup_and_runtime_ownership() -> None:
     for term in required_terms:
         assert term in combined
     assert "CHARACTER_PROFILE_PATH" not in combined
+
+
+def test_stage3_plan_companions_and_stage4_boundary_are_linked() -> None:
+    """Lifecycle docs must expose the execution companions and handoff."""
+
+    plan = _read(
+        "development_plans/archive/completed/short_term/"
+        "cognition_core_v2_stage_3_system_adoption_plan.md",
+    )
+    manifest = _read(
+        "development_plans/archive/completed/short_term/"
+        "cognition_core_v2_stage_3_execution_manifest.md",
+    )
+    radius = _read(
+        "development_plans/archive/completed/short_term/"
+        "cognition_core_v2_stage_3_change_radius.md",
+    )
+
+    for term in (
+        "cognition_core_v2_stage_3_execution_manifest.md",
+        "cognition_core_v2_stage_3_change_radius.md",
+        "cognition_core_v2_stage_4_production_database_migration_plan.md",
+        "Stage3FreshDatabaseEvidenceV1",
+        "Stage3NativeSchemaManifestV1",
+    ):
+        assert term in plan or term in manifest or term in radius
