@@ -2059,7 +2059,7 @@ async def test_c03_action_planning_selects_local_recall_from_connector_state() -
     runtime_snapshot = {
         'worker_status': {
             'accepted_task': 'unavailable',
-            'background_work': 'unavailable',
+            'background_work': 'degraded',
             'orchestrator': 'unavailable',
         },
         'scheduler_status': 'unavailable',
@@ -2143,7 +2143,7 @@ async def test_c03_action_planning_selects_local_recall_from_connector_state() -
         runtime_capability_limits=[
             '当前调度能力不可用，不能把未来提醒或主动联系说成已经安排、发送或完成。',
             '未来提醒和主动联系只属于 future_speak；该能力不可用时不能用其他能力代替。',
-            '当前后台任务能力不可用，不能把延迟任务说成已经创建、安排或完成。',
+            '当前通用任务解析只有 inline 能力；task_resolution_request 必须先在本轮预算内尝试，不能写成后台已经安排。',
         ],
         services=services,
         current_goal_progress=connector_input['resolver_goal_progress'],

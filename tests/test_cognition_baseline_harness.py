@@ -156,18 +156,30 @@ def test_o03_materializes_public_inline_attachment_bytes() -> None:
 
 
 def _changed_paths() -> list[str]:
-    """Return changed production paths against the frozen origin/main tip."""
+    """Return committed and working-tree changed production paths."""
 
-    completed = subprocess.run(
+    committed = subprocess.run(
         ["git", "diff", "--name-only", "origin/main...HEAD"],
         cwd=_ROOT,
         check=True,
         capture_output=True,
         text=True,
     )
+    working_tree = subprocess.run(
+        ["git", "diff", "--name-only"],
+        cwd=_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    changed_names = {
+        line
+        for output in (committed.stdout, working_tree.stdout)
+        for line in output.splitlines()
+    }
     return [
         line.replace("\\", "/")
-        for line in completed.stdout.splitlines()
+        for line in sorted(changed_names)
         if line.startswith("src/")
     ]
 

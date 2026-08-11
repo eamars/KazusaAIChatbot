@@ -42,6 +42,9 @@ from kazusa_ai_chatbot.cognition_core_v2.prompt_budget import (
     reduce_constraints_projection,
     reduce_identity_projection,
 )
+from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+    CognitionStateError,
+)
 from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
     PromptProjectionV2,
 )
@@ -63,6 +66,7 @@ MAX_APPRAISAL_OBJECT_HANDLES = 8
 MAX_APPRAISAL_SEMANTIC_TEXT_CHARS = 200
 MAX_APPRAISAL_DELTA_REASON_CHARS = 300
 MAX_ERROR_ALLOWLIST_ITEMS = 40
+MAX_SEMANTIC_APPRAISAL_STATE_ERROR_CHARS = 500
 DELTA_LIMIT_NARROW = 10
 DELTA_LIMIT_WIDE = 40
 _DELTA_LIMIT_BY_STATE_FIELD = {
@@ -229,6 +233,9 @@ async def appraise_semantic_question(
             "question_kind": question["question_kind"],
             "semantic_question": question["semantic_question"],
             "permitted_role_handles": question["permitted_role_handles"],
+            "permitted_target_paths": list(
+                question["permitted_delta_paths"]
+            ),
             "candidate_origin_evidence": candidate_origin_evidence,
             "permitted_delta_path_domains": (
                 _compact_permitted_delta_path_domains(
@@ -284,6 +291,9 @@ async def appraise_semantic_question(
                 item_question["permitted_delta_paths"]
             )
         )
+        payload["question"]["permitted_target_paths"] = list(
+            item_question["permitted_delta_paths"]
+        )
         payload["question"]["micro_appraisal"] = {
             "item_index": item_index,
             "maximum_items": SEMANTIC_APPRAISAL_ITEM_LIMIT,
@@ -318,7 +328,7 @@ async def appraise_semantic_question(
         item_question["permitted_delta_paths"] = [
             path
             for path in item_question["permitted_delta_paths"]
-            if len(path.split(".")) == 3
+            if path in set(payload["question"]["permitted_target_paths"])
             and path.split(".")[1] in surviving_role_handles
         ]
         try:
@@ -490,6 +500,68 @@ async def _appraise_semantic_item(
                 evidence,
                 projection.handle_to_ref,
             )
+        except CognitionStateError as exc:
+            ended_at = time.perf_counter()
+            exception_text = str(exc)[
+                :MAX_SEMANTIC_APPRAISAL_STATE_ERROR_CHARS
+            ]
+            disposition = (
+                "accepted_prefix"
+                if accepted_result is not None
+                else "question_omitted"
+            )
+            state_disposition = {
+                "question_id": question["question_id"],
+                "item_index": item_index,
+                "finalization_step": "apply_semantic_appraisals",
+                "error_code": "semantic_appraisal_state_incompatibility",
+                "attempt_count": attempt_index + 1,
+                "disposition": disposition,
+                "exception_text": exception_text,
+            }
+            _record_semantic_appraisal_trace(
+                config=config,
+                question=question,
+                messages=request_messages,
+                response_text=str(raw_output),
+                parsed_output=parsed_output,
+                parse_status="state_incompatibility",
+                status="degraded",
+                started_at=started_at,
+                attempt_index=attempt_index + 1,
+                item_index=item_index,
+                validation_error=exception_text,
+            )
+            capture_validation_stage(
+                stage_id=stage_id,
+                config=config,
+                system_prompt=SEMANTIC_APPRAISAL_PROMPT,
+                human_payload=payload_text,
+                raw_output=raw_output,
+                parsed_output=parsed_output,
+                parse_status="state_incompatibility",
+                started_at=started_at,
+                ended_at=ended_at,
+                error=exception_text,
+            )
+            capture_validation_event(
+                "semantic_appraisal_state_incompatibility",
+                state_disposition,
+            )
+            failure_capsule.mark_current_failure(
+                failure_kind="semantic_appraisal_state_incompatibility",
+                stage_name="semantic_appraisal",
+                details=state_disposition,
+                exception=exc,
+            )
+            raise CognitionExecutionError(
+                "semantic appraisal candidate is incompatible with state",
+                error_code="semantic_appraisal_state_incompatibility",
+                stage="semantic_appraisal",
+                attempt_count=attempt_index + 1,
+                safe_checkpoint="pre_state_commit",
+                retryable=False,
+            ) from exc
         except (AttributeError, KeyError, TypeError, ValueError) as exc:
             ended_at = time.perf_counter()
             _record_semantic_appraisal_trace(
@@ -1545,6 +1617,13 @@ def _fit_appraisal_payload(
                         ]
                 origin_evidence = question["candidate_origin_evidence"]
                 origin_evidence.pop(removed_handle, None)
+                target_paths = question.get("permitted_target_paths")
+                if isinstance(target_paths, list):
+                    question["permitted_target_paths"] = [
+                        path
+                        for path in target_paths
+                        if path.split(".")[1] != removed_handle
+                    ]
                 path_domains = question["permitted_delta_path_domains"]
                 for domain in path_domains:
                     handles = domain["handles"]
@@ -1559,6 +1638,15 @@ def _fit_appraisal_payload(
                     for domain in path_domains
                     if domain["handles"]
                 ]
+                if isinstance(
+                    question.get("permitted_target_paths"),
+                    list,
+                ):
+                    question["permitted_delta_path_domains"] = (
+                        _compact_permitted_delta_path_domains(
+                            question["permitted_target_paths"]
+                        )
+                    )
             continue
         try:
             fitted_payload = fit_evidence_texts_to_budget(

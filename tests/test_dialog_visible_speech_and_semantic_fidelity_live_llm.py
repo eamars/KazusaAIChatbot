@@ -26,9 +26,8 @@ from tests.llm_trace import write_llm_trace
 pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm]
 
 _CHARACTER_PATH = Path(
-    "test_artifacts/cognition_core_v2/real_conversation_replay/"
-    "production_character_state.json"
-)
+    __file__
+).resolve().parents[1] / "personalities" / "asuna.json"
 _TRACE_SUITE = "dialog_visible_speech_and_semantic_fidelity"
 _ROLE_ONLY_DIAGNOSTIC_PROMPT = '''只核对 current_visible_percepts 与
 candidate_final_dialog 之间的行动者、动作、目标、受益者和主语方向。按各自的角色框架解析每段文本。
@@ -105,8 +104,7 @@ async def _skip_if_model_routes_unavailable() -> None:
 def _character_profile() -> dict[str, Any]:
     """Load the frozen production Kazusa character fields used by replay."""
 
-    payload = json.loads(_CHARACTER_PATH.read_text(encoding="utf-8"))
-    profile = payload["character_state"]
+    profile = json.loads(_CHARACTER_PATH.read_text(encoding="utf-8"))
     if not isinstance(profile, dict):
         raise TypeError("frozen character profile must be an object")
     return profile
@@ -1894,6 +1892,63 @@ async def test_live_verifier_rejects_specific_scope_drift(
         }],
         human_review_contract={
             "reject_specific_scope_broadened_to_unrestricted_claim": True,
+            "real_compliance_route": True,
+        },
+        monkeypatch=monkeypatch,
+    )
+
+
+async def test_live_verifier_rejects_incomplete_resolver_evidence_as_confirmed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Incomplete resolver evidence cannot become a confirmed user fact."""
+
+    await _run_live_verifier_case(
+        case_id="verifier_rejects_incomplete_resolver_evidence",
+        candidate_dialog=(
+            "我已经核实过了，你之前明确同意这项安排，相关事情也已经确认完成。"
+        ),
+        surface_output={
+            "schema_version": "text_surface_output.v2",
+            "content_plan": (
+                "State only that the resolver is still working and that the "
+                "source evidence is incomplete."
+            ),
+            "content_requirements": [
+                "Do not present missing user wording as confirmed.",
+                "Do not present the unresolved task as completed.",
+            ],
+            "visible_boundaries": [],
+            "addressee_plan": _current_user_addressee_plan(
+                "Current User"
+            ),
+            "delivery_profile": _delivery_profile(
+                "Natural concise spoken wording."
+            ),
+            "selected_surface_intent": (
+                "preserve incomplete resolver evidence and request the missing source"
+            ),
+            "permitted_action_results": [],
+            "resolver_result": {
+                "capability_kind": "task_resolution_request",
+                "status": "succeeded",
+                "semantic_result": "work continues",
+                "evidence_state": "partial",
+                "evidence_excerpts": [
+                    "No source-backed confirmation was returned.",
+                ],
+                "evidence_handles": [],
+                "prompt_safe_observation_handle": "resolver-observation-1",
+                "remaining_needs": ["the source-backed user wording"],
+            },
+        },
+        current_visible_percepts=[{
+            "input_source": "dialog_text",
+            "content": "请确认我之前是否明确同意了这项安排。",
+        }],
+        human_review_contract={
+            "incomplete_evidence_cannot_be_confirmed": True,
+            "unfinished_resolver_work_cannot_be_completed": True,
             "real_compliance_route": True,
         },
         monkeypatch=monkeypatch,

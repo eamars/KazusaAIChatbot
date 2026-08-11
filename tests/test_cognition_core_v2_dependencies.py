@@ -695,8 +695,8 @@ async def test_nonordinary_goal_repair_keeps_candidate_context_for_handle_error(
         goal_module.NON_ORDINARY_GENERIC_GOAL_REPAIR_INSTRUCTIONS
     )
     assert "relational_willingness" not in repair_feedback[
-        "required_top_level_fields"
-    ]
+        "goal_output_contract"
+    ]["top_level_fields"]
     assert "relational_willingness_contract" not in repair_feedback
     for field_name in (
         "observed_top_level_fields",
@@ -1191,7 +1191,9 @@ async def test_required_selection_regenerates_with_the_same_producer() -> None:
     assert repair_feedback["allowed_evidence_handles"] == ["e1", "e2"]
     assert repair_feedback["current_episode_evidence_handles"] == ["e1"]
     retired_field = "selection_" + "kind"
-    assert retired_field not in repair_feedback["required_top_level_fields"]
+    assert retired_field not in repair_feedback["goal_output_contract"][
+        "top_level_fields"
+    ]
     assert "selection goal draft fields are not exact" in (
         repair_feedback["validation_error"]
     )
@@ -1464,7 +1466,7 @@ async def test_required_selection_repair_replays_grounding_after_handle_failures
         assert feedback['role_handles_forbidden_in_evidence_handles'] == [
             'r1'
         ]
-        assert feedback['required_top_level_fields'][-1] == (
+        assert feedback['goal_output_contract']['top_level_fields'][-1] == (
             'relational_willingness'
         )
         relational_contract = feedback['relational_willingness_contract']
@@ -1570,7 +1572,9 @@ async def test_active_selection_repair_uses_the_same_grounding_contract(
     assert feedback['repair_instruction'] == list(
         goal_module.SELECTION_GOAL_REPAIR_INSTRUCTIONS
     )
-    assert 'relational_willingness' not in feedback['required_top_level_fields']
+    assert 'relational_willingness' not in feedback[
+        'goal_output_contract'
+    ]['top_level_fields']
     assert 'relational_willingness_contract' not in feedback
     assert feedback['required_evidence_handles'] == ['e1']
     assert feedback['role_handles_forbidden_in_evidence_handles'] == ['r1']
@@ -1825,8 +1829,8 @@ def test_required_selection_producer_demands_one_actual_selection() -> None:
     retired_field = "`selection_" + "kind`"
     assert retired_field not in prompt
     assert '`selection`' in prompt
-    assert '必须直接写出当前角色的一个选择' in prompt
-    assert '不把决定交给后续阶段' in prompt
+    assert '当前角色的具体选择' in prompt
+    assert '本阶段不选择执行能力或路由' in prompt
 
 
 def test_required_selection_producer_selects_relevant_progress_evidence(

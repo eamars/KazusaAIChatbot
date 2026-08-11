@@ -39,7 +39,9 @@ from tests.llm_trace import write_llm_trace
 pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm]
 
 _SUITE_NAME = "cognition_core_v2_transition_coherence_live_llm"
-_PROFILE_PATH = Path("personalities/kazusa.json")
+_PROFILE_PATH = (
+    Path(__file__).resolve().parents[1] / "personalities" / "asuna.json"
+)
 _HISTORICAL_GENERATED_BAD_ARTIFACT = Path(
     "test_artifacts/llm_traces/"
     "cognition_core_v2_transition_quality_repro__"
@@ -447,6 +449,13 @@ async def _execute_pipeline(
         l3_module._build_text_surface_services(),
     )
     normal_surface_call_count = len(cognition_capture.calls)
+    surface_stage_call_counts: dict[str, int] = {}
+    for call in cognition_capture.calls:
+        config = call["config"]
+        stage_name = str(config.get("stage_name", ""))
+        surface_stage_call_counts[stage_name] = (
+            surface_stage_call_counts.get(stage_name, 0) + 1
+        )
     dialog_captures = _install_dialog_captures(monkeypatch)
     dialog_result = await dialog_module.dialog_generator(
         _dialog_state(
@@ -464,13 +473,21 @@ async def _execute_pipeline(
         "accepted_surface": accepted_surface,
         "final_dialog": dialog_result["final_dialog"],
         "normal_surface_call_count": normal_surface_call_count,
+        "surface_stage_call_counts": surface_stage_call_counts,
         "surface_model_calls": cognition_capture.calls,
         "dialog_model_calls": {
             owner: capture.calls
             for owner, capture in dialog_captures.items()
         },
     }
-    assert normal_surface_call_count == 2
+    assert set(surface_stage_call_counts) == {
+        "v2_surface_content",
+        "v2_surface_preference",
+    }
+    assert all(
+        1 <= count <= 3
+        for count in surface_stage_call_counts.values()
+    )
     assert result["final_dialog"]
     return result
 

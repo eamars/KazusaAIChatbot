@@ -63,6 +63,7 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
+| [cognition_core_v2_remaining_appraisal_and_goal_bid_contract_bugfix_plan_20260811.md](archive/completed/bugfix/cognition_core_v2_remaining_appraisal_and_goal_bid_contract_bugfix_plan_20260811.md) | Residual Cognition V2 Appraisal boundary, exact path projection, goal-bid contract, and evidence-gated live regression plan | completed |
 | [cognition_core_v2_selected_response_operation_role_contract_bugfix_plan_20260810.md](archive/completed/bugfix/cognition_core_v2_selected_response_operation_role_contract_bugfix_plan_20260810.md) | Post-selection response-operation role contract repair for required-selection dialog exhaustion | completed |
 | [cognition_core_v2_atomic_appraisal_finalization_and_terminal_eligibility_bugfix_plan_20260811.md](archive/completed/bugfix/cognition_core_v2_atomic_appraisal_finalization_and_terminal_eligibility_bugfix_plan_20260811.md) | Atomic Cognition V2 appraisal finalization, lifecycle-eligible terminal planning, and bounded failure evidence | completed |
 | [cognition_surface_score_ranking_followup_plan_20260810.md](archive/completed/bugfix/cognition_surface_score_ranking_followup_plan_20260810.md) | Evidence-gated surface quality ranking follow-up for bounded retry exhaustion | completed |

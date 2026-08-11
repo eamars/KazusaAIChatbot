@@ -1592,18 +1592,20 @@ def test_required_selection_regeneration_feedback_counts_toward_cap() -> None:
     repair_payload = dict(payload)
     repair_payload["repair_feedback"] = {
         "validation_error": "selection goal draft fields are not exact",
-        "required_top_level_fields": [
-            "selection",
-            "reason",
-            "private_monologue",
-            "target_role_handles",
-            "evidence_handles",
-            "expected_consequences",
-            "confidence",
-            "relational_willingness",
-        ],
-        "field_types": {
-            "selection": "non_empty_string_max_500",
+        "goal_output_contract": {
+            "top_level_fields": [
+                "selection",
+                "reason",
+                "private_monologue",
+                "target_role_handles",
+                "evidence_handles",
+                "expected_consequences",
+                "confidence",
+                "relational_willingness",
+            ],
+            "field_types": {
+                "selection": "non_empty_string_max_500",
+            },
         },
         "allowed_evidence_handles": ["e1", "e2", "e3"],
         "required_evidence_handles": ["e1"],
@@ -2351,14 +2353,36 @@ async def test_captured_near_cap_repairs_fit_the_existing_budget(
         "contract_error",
         "allowed_values",
     }
-    assert (
-        "knowledge_gaps.k7.uncertainty"
-        in repair_payload["contract_error"]
-    )
+    assert "selected roles contains unknown handles" in repair_payload[
+        "contract_error"
+    ]
+    assert "knowledge_gaps.k7.uncertainty" not in repair_payload[
+        "contract_error"
+    ]
     assert "permitted paths:" not in repair_payload["contract_error"]
     assert "permitted_delta_path_domains" in repair_payload[
         "allowed_values"
     ]
+    path_domains = repair_payload["allowed_values"][
+        "permitted_delta_path_domains"
+    ]
+    reconstructed_paths = {
+        f"{domain['state_field']}.{handle}.{axis}"
+        for domain in path_domains
+        for handle in domain["handles"]
+        for axis in domain["axes"]
+    }
+    surviving_role_handles = set(
+        repair_payload["allowed_values"]["handle_field_domains"][
+            "subject_handle"
+        ]
+    )
+    expected_paths = {
+        path
+        for path in matching_questions[0]["permitted_delta_paths"]
+        if path.split(".")[1] in surviving_role_handles
+    }
+    assert reconstructed_paths == expected_paths
 
 
 @pytest.mark.asyncio

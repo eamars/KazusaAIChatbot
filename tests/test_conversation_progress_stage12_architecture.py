@@ -335,9 +335,13 @@ def _terminal_conversation_evidence() -> dict[str, object]:
 def _selection_goal_draft() -> dict[str, object]:
     """Build one authoritative selection-goal producer result."""
 
+    selected_operation = {
+        **_selection_response_operation(),
+        'operation': 'the current character chooses the current palm',
+    }
     return {
         'selection': 'choose the current character palm',
-        'selected_response_operation': _selection_response_operation(),
+        'selected_response_operation': selected_operation,
         'reason': 'the prior neck choice is already complete',
         'private_monologue': 'I want a genuinely different choice.',
         'target_role_handles': [],

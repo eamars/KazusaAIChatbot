@@ -340,10 +340,14 @@ def _assert_branch_scoped_requests(
             "goal bid draft fields are not exact"
         ):
             continue
-        assert feedback["required_top_level_fields"] == list(
+        goal_output_contract = feedback.get("goal_output_contract")
+        assert isinstance(goal_output_contract, Mapping)
+        assert goal_output_contract["top_level_fields"] == list(
             _EXPECTED_GENERIC_FIELDS
         )
-        assert set(feedback["field_types"]) == set(_EXPECTED_GENERIC_FIELDS)
+        assert set(goal_output_contract["field_types"]) == set(
+            _EXPECTED_GENERIC_FIELDS
+        )
         for field_name in (
             "observed_top_level_fields",
             "missing_top_level_fields",
@@ -355,7 +359,9 @@ def _assert_branch_scoped_requests(
             "relational_willingness"
         ]
         assert "invalid_draft" not in feedback
-        assert "relational_willingness" not in feedback["field_types"]
+        assert "relational_willingness" not in goal_output_contract[
+            "field_types"
+        ]
         assert "relational_willingness_contract" not in feedback
         assert "relational_willingness" not in " ".join(
             str(item) for item in feedback["repair_instruction"]

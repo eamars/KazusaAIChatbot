@@ -90,7 +90,7 @@ def test_topic_followup_source_packet_does_not_preload_retrieval() -> None:
         "visible_context": [
             {
                 "role": "user",
-                "text": "GraphRAG 能不能补上小数据场景？",
+                "body_text": "GraphRAG 能不能补上小数据场景？",
                 "timestamp": "2026-05-10T00:00:00+00:00",
             }
         ],

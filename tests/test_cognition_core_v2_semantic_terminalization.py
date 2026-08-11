@@ -10,6 +10,9 @@ import pytest
 
 from kazusa_ai_chatbot.cognition_core_v2 import facade
 from kazusa_ai_chatbot.cognition_core_v2 import semantic_source_planner
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    CognitionExecutionError,
+)
 from kazusa_ai_chatbot.cognition_core_v2.semantic_appraisal import (
     appraise_semantic_question,
     validate_semantic_appraisal_result,
@@ -538,8 +541,8 @@ def test_invalid_role_handle_reports_its_structured_domain() -> None:
 
 
 @pytest.mark.asyncio
-async def test_appraisal_retries_a_reducer_incompatible_candidate() -> None:
-    """Native trial reduction keeps transition repair with the producer."""
+async def test_appraisal_classifies_state_incompatibility_without_retry() -> None:
+    """Reducer-owned state conflicts do not consume model repair attempts."""
 
     state = _state_with_goals()
     evidence = [_evidence()]
@@ -563,23 +566,23 @@ async def test_appraisal_retries_a_reducer_incompatible_candidate() -> None:
         ),
         "delta": None,
     }
-    replacement = {
-        "question_id": question["question_id"],
-        "proposition": None,
-        "delta": None,
-    }
-    llm = _CapturingInvoker([invalid, replacement])
+    llm = _CapturingInvoker([invalid])
 
-    result = await appraise_semantic_question(
-        question,
-        evidence,
-        projection,
-        _services(llm),
-        validation_state=state,
-    )
+    with pytest.raises(CognitionExecutionError) as error_info:
+        await appraise_semantic_question(
+            question,
+            evidence,
+            projection,
+            _services(llm),
+            validation_state=state,
+        )
 
-    assert result["propositions"] == []
-    assert len(llm.configs) == 2
+    error = error_info.value
+    assert error.error_code == "semantic_appraisal_state_incompatibility"
+    assert error.attempt_count == 1
+    assert error.retryable is False
+    assert isinstance(error.__cause__, CognitionStateError)
+    assert len(llm.configs) == 1
     first_payload = json.loads(str(llm.messages[0][1].content))
     handle_domains = first_payload["question"]["handle_field_domains"]
     assert handle_domains == {
@@ -598,6 +601,60 @@ async def test_appraisal_retries_a_reducer_incompatible_candidate() -> None:
             "semantic_text_reference": "当前用户",
         },
     }
+    assert first_payload["question"]["permitted_target_paths"] == (
+        question["permitted_delta_paths"]
+    )
+    assert state == _state_with_goals()
+
+
+@pytest.mark.asyncio
+async def test_appraisal_preserves_accepted_prefix_before_later_state_conflict(
+) -> None:
+    """A later reducer conflict keeps the accepted micro-item prefix only."""
+
+    state = _state_with_goals()
+    evidence = [_evidence()]
+    projection = project_state_for_prompt(
+        state,
+        character_constraints=_character_constraints(),
+        character_identity_context=canonical_identity_context(),
+        evidence=evidence,
+    )
+    question = semantic_source_planner.plan_semantic_questions(
+        evidence,
+        state,
+        projection.handle_to_ref,
+    )[0]
+    accepted = {
+        "question_id": question["question_id"],
+        "proposition": _proposition("outcome_pending", "g1"),
+        "delta": None,
+    }
+    later_conflict = {
+        "question_id": question["question_id"],
+        "proposition": _proposition(
+            "goal_supersession",
+            "g1",
+            object_handle="g2",
+        ),
+        "delta": None,
+    }
+    llm = _CapturingInvoker([accepted, later_conflict])
+
+    result = await appraise_semantic_question(
+        question,
+        evidence,
+        projection,
+        _services(llm),
+        validation_state=state,
+    )
+
+    assert len(llm.configs) == 2
+    assert [
+        proposition["proposition_kind"]
+        for proposition in result["propositions"]
+    ] == ["outcome_pending"]
+    assert result["deltas"] == []
     assert state == _state_with_goals()
 
 

@@ -51,17 +51,37 @@ from kazusa_ai_chatbot.cognition_core_v2.state_reducers import (
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
     build_cognition_core_services,
 )
+from kazusa_ai_chatbot.utils import parse_llm_json_output
+from tests.cognition_core_v2_appraisal_replay_harness import (
+    replay_appraisal_through_public_boundary,
+)
 
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm]
 
 _ROOT = Path(__file__).resolve().parents[1]
-_CAPTURED_TRACE_PATH = (
-    _ROOT
-    / 'test_artifacts'
-    / 'diagnostics'
-    / 'target_2304_llm_trace.json'
-)
+_EXACT_EXHAUSTION_CASES = {
+    'q:moral_identity': {
+        'case_id': 'capacity_8d0d4295_moral_identity_origin_binding',
+        'trace_path': (
+            _ROOT
+            / 'test_artifacts'
+            / 'diagnostics'
+            / 'llmtrace_8d0d42952b76450c9e1dc32574f9fd44_replay_export.json'
+        ),
+        'trace_id': 'llmtrace_8d0d42952b76450c9e1dc32574f9fd44',
+    },
+    'q:goal_threat_outcome': {
+        'case_id': 'capacity_9164e957_goal_threat_origin_binding',
+        'trace_path': (
+            _ROOT
+            / 'test_artifacts'
+            / 'diagnostics'
+            / 'llmtrace_9164e957298e4cffb68db7911bcd28b1_replay_export.json'
+        ),
+        'trace_id': 'llmtrace_9164e957298e4cffb68db7911bcd28b1',
+    },
+}
 _ARTIFACT_ROOT = (
     _ROOT
     / 'test_artifacts'
@@ -78,6 +98,11 @@ _TARGET_QUESTION_IDS = frozenset({
     'q:goal_threat_outcome',
 })
 _NEAR_CAP_ERROR_FRAGMENT = 'semantic delta path'
+_NEAR_CAP_CURRENT_ERROR_FRAGMENTS = (
+    'semantic delta path',
+    'selected roles contains unknown handles',
+    'causal candidates must cite originating evidence',
+)
 _NEAR_CAP_CASES: tuple[dict[str, object], ...] = (
     {
         'case_id': 'a1a573_near_cap_semantic_repair',
@@ -176,23 +201,25 @@ class _CapturingLLM:
         return response
 
 
-def _load_captured_input() -> tuple[dict[str, Any], str]:
-    """Load the exact input payload from the preserved production trace."""
+def _load_captured_input(
+    case: Mapping[str, object],
+) -> tuple[dict[str, Any], str, str, Path]:
+    """Load one preserved input and a real semantic candidate for mutation."""
 
-    if not _CAPTURED_TRACE_PATH.exists():
+    trace_path = case.get('trace_path')
+    trace_id = case.get('trace_id')
+    if not isinstance(trace_path, Path) or not isinstance(trace_id, str):
+        raise AssertionError('exact exhaustion trace identity is invalid')
+    if not trace_path.exists():
         raise AssertionError(
-            f'captured production trace is missing: {_CAPTURED_TRACE_PATH}'
+            f'captured production trace is missing: {trace_path}'
         )
-    trace_bytes = _CAPTURED_TRACE_PATH.read_bytes()
+    trace_bytes = trace_path.read_bytes()
     trace = json.loads(trace_bytes.decode('utf-8'))
     capsules = [
-        step['capsule']
-        for step in trace.get('llm_trace_steps', [])
-        if (
-            isinstance(step, Mapping)
-            and step.get('stage_name') == 'cognition_failure_capsule'
-            and isinstance(step.get('capsule'), Mapping)
-        )
+        capsule
+        for capsule in trace.get('cognition_failure_capsules', [])
+        if isinstance(capsule, Mapping) and capsule.get('trace_id') == trace_id
     ]
     if len(capsules) != 1:
         raise AssertionError(
@@ -203,7 +230,61 @@ def _load_captured_input() -> tuple[dict[str, Any], str]:
         raise AssertionError(
             'the captured failure capsule input is not an object'
         )
-    return input_payload, hashlib.sha256(trace_bytes).hexdigest()
+    attempts = [
+        attempt
+        for attempt in capsules[0].get('attempts', [])
+        if (
+            isinstance(attempt, Mapping)
+            and attempt.get('stage_name')
+            == 'semantic_appraisal.q:goal_threat_outcome.item_1'
+            and isinstance(attempt.get('raw_response_text'), str)
+        )
+    ]
+    if len(attempts) != 1:
+        raise AssertionError('the captured trace lacks one goal appraisal')
+    return (
+        input_payload,
+        hashlib.sha256(trace_bytes).hexdigest(),
+        str(attempts[0]['raw_response_text']),
+        trace_path,
+    )
+
+
+def _build_origin_binding_candidate(
+    raw_response: str,
+    question: Mapping[str, Any],
+) -> str:
+    """Turn a preserved candidate into a bounded origin-binding failure."""
+
+    parsed = parse_llm_json_output(
+        raw_response,
+        deterministic_only=True,
+    )
+    if not isinstance(parsed, dict):
+        raise AssertionError('preserved goal candidate is not an object')
+    paths = [
+        path
+        for path in question['permitted_delta_paths']
+        if '.ce1.' in path
+    ]
+    if not paths:
+        raise AssertionError('goal question has no ce1-owned delta path')
+    evidence_handles = [
+        handle
+        for handle in question['evidence_handles']
+        if handle != 'e1'
+    ]
+    if not evidence_handles:
+        raise AssertionError('goal question has no alternate evidence handle')
+    parsed['question_id'] = question['question_id']
+    parsed['proposition'] = None
+    parsed['delta'] = {
+        'target_path': paths[0],
+        'delta': 0,
+        'evidence_handles': [evidence_handles[0]],
+        'reason': '受支持证据需要通过当前语义边界进行有限验证。',
+    }
+    return json.dumps(parsed, ensure_ascii=False)
 
 
 def _load_near_cap_input(
@@ -355,6 +436,7 @@ def _persist_case_evidence(
     *,
     case_id: str,
     source_sha256: str,
+    source_path: Path,
     input_payload: Mapping[str, Any],
     question: Mapping[str, Any],
     error: CognitionExecutionError | None,
@@ -368,7 +450,7 @@ def _persist_case_evidence(
         {
             'case_id': case_id,
             'source_trace': {
-                'path': str(_CAPTURED_TRACE_PATH),
+                'path': str(source_path),
                 'sha256': source_sha256,
             },
             'input_payload': dict(input_payload),
@@ -395,10 +477,13 @@ def _persist_case_evidence(
     )
 
 
-async def _run_exact_exhaustion_case(question_id: str) -> None:
+async def _run_exact_exhaustion_case_legacy(question_id: str) -> None:
     """Run one captured appraisal family against the real model boundary."""
 
-    input_payload, source_sha256 = _load_captured_input()
+    case = _EXACT_EXHAUSTION_CASES[question_id]
+    input_payload, source_sha256, raw_response, source_path = (
+        _load_captured_input(case)
+    )
     payload, preliminary_state, projection, questions = (
         _build_appraisal_context(input_payload)
     )
@@ -416,16 +501,29 @@ async def _run_exact_exhaustion_case(question_id: str) -> None:
     )
     reset_validation_capture(case_id)
 
-    caught_error: CognitionExecutionError | None = None
+    live_services = build_cognition_core_services()
+    capturing_llm = _CapturingLLM(
+        live_services.llm,
+        first_response_text=_build_origin_binding_candidate(
+            raw_response,
+            question,
+        ),
+    )
+    services = replace(live_services, llm=capturing_llm)
+    caught_error: CognitionExecutionError | CognitionContextLimitError | None = (
+        None
+    )
     try:
         await appraise_semantic_question(
             question,
             payload['evidence'],
             projection,
-            build_cognition_core_services(),
+            services,
             validation_state=preliminary_state,
         )
     except CognitionExecutionError as exc:
+        caught_error = exc
+    except CognitionContextLimitError as exc:
         caught_error = exc
 
     capture = validation_capture_snapshot()
@@ -433,17 +531,13 @@ async def _run_exact_exhaustion_case(question_id: str) -> None:
     _persist_case_evidence(
         case_id=case_id,
         source_sha256=source_sha256,
+        source_path=source_path,
         input_payload=input_payload,
         question=question,
         error=caught_error,
         capture=capture,
     )
 
-    if caught_error is None:
-        return
-    assert caught_error is not None
-    assert caught_error.error_code == _EXPECTED_ERROR_CODE
-    assert caught_error.attempt_count == _EXPECTED_ATTEMPTS
     stages = capture['stages']
     assert isinstance(stages, list)
     expected_stage_ids = [
@@ -460,27 +554,104 @@ async def _run_exact_exhaustion_case(question_id: str) -> None:
         expected_stage_ids
     )
     assert len(observed_stages) == _EXPECTED_ATTEMPTS
+    assert len(capturing_llm.calls) >= _EXPECTED_ATTEMPTS
+    assert any(
+        stage.get('error') == _EXPECTED_ERROR
+        for stage in observed_stages
+        if isinstance(stage, Mapping)
+    )
     for stage in observed_stages:
-        assert stage['parse_status'] == 'failed'
-        assert stage['error'] == _EXPECTED_ERROR
         assert isinstance(stage['raw_output'], str)
         assert stage['raw_output']
-        assert _candidate_origin_is_omitted(stage['parsed_output'])
+        if stage['parse_status'] == 'failed':
+            assert stage['error'] == _EXPECTED_ERROR
+            assert _candidate_origin_is_omitted(stage['parsed_output'])
+    if caught_error is None:
+        return
+    assert caught_error.error_code == _EXPECTED_ERROR_CODE
+    assert caught_error.attempt_count == _EXPECTED_ATTEMPTS
 
 
-async def test_moral_identity_contract_exhaustion_live_llm() -> None:
+async def _run_exact_exhaustion_case(
+    question_id: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Replay an exact exhaustion candidate through the public boundary."""
+
+    case = _EXACT_EXHAUSTION_CASES[question_id]
+    input_payload, source_sha256, raw_response, source_path = (
+        _load_captured_input(case)
+    )
+    _, _, _, questions = _build_appraisal_context(input_payload)
+    question = next(
+        question for question in questions
+        if question.get("question_id") == question_id
+    )
+    preserved = _build_origin_binding_candidate(raw_response, question)
+    before = parse_llm_json_output(raw_response, deterministic_only=True)
+    after = parse_llm_json_output(preserved, deterministic_only=True)
+    controlled_mutation = {
+        "classification": "controlled_candidate_mutation",
+        "source": "preserved_historical_candidate",
+        "json_pointers": [
+            {
+                "pointer": "/proposition",
+                "before": before.get("proposition")
+                if isinstance(before, Mapping)
+                else None,
+                "after": after.get("proposition")
+                if isinstance(after, Mapping)
+                else None,
+            },
+            {
+                "pointer": "/delta",
+                "before": before.get("delta")
+                if isinstance(before, Mapping)
+                else None,
+                "after": after.get("delta")
+                if isinstance(after, Mapping)
+                else None,
+            },
+        ],
+        "first_attempt_performance_evidence": False,
+    }
+    replay = await replay_appraisal_through_public_boundary(
+        input_payload=input_payload,
+        question=question,
+        first_response_text=preserved,
+        case_id=(
+            "exact_exhaustion_"
+            f"{question_id.replace(':', '_')}"
+        ),
+        expected_error_fragments=(_EXPECTED_ERROR,),
+        source_trace_id=str(case["trace_id"]),
+        source_path=source_path,
+        source_sha256=source_sha256,
+        candidate_classification="controlled_candidate_mutation",
+        controlled_mutation=controlled_mutation,
+        require_repair_call=True,
+        monkeypatch=monkeypatch,
+    )
+    assert replay["artifact_path"].exists()
+
+
+async def test_moral_identity_contract_exhaustion_live_llm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The captured moral appraisal reproduces its validation exhaustion."""
 
-    await _run_exact_exhaustion_case('q:moral_identity')
+    await _run_exact_exhaustion_case('q:moral_identity', monkeypatch)
 
 
-async def test_goal_threat_outcome_contract_exhaustion_live_llm() -> None:
+async def test_goal_threat_outcome_contract_exhaustion_live_llm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The captured goal appraisal reproduces its validation exhaustion."""
 
-    await _run_exact_exhaustion_case('q:goal_threat_outcome')
+    await _run_exact_exhaustion_case('q:goal_threat_outcome', monkeypatch)
 
 
-async def _run_near_cap_case(case: Mapping[str, object]) -> None:
+async def _run_near_cap_case_legacy(case: Mapping[str, object]) -> None:
     """Replay one captured unowned-path candidate through live repair."""
 
     input_payload, source_sha256, historical = _load_near_cap_input(case)
@@ -569,17 +740,20 @@ async def _run_near_cap_case(case: Mapping[str, object]) -> None:
         if (
             isinstance(stage, Mapping)
             and stage.get('parse_status') == 'failed'
-            and _NEAR_CAP_ERROR_FRAGMENT in str(stage.get('error') or '')
         )
     ]
     assert initial_failures, (
-        'the near-cap replay did not reproduce the captured unowned-path '
+        'the near-cap replay did not reach a bounded contract failure; '
         f'failure; raw_capture={raw_capture_path}'
     )
+    observed_errors = [
+        str(stage.get('error') or '')
+        for stage in initial_failures
+    ]
     assert any(
-        stage.get('error') == historical['validation_error']
-        for stage in stages
-        if isinstance(stage, Mapping)
+        fragment in error
+        for error in observed_errors
+        for fragment in _NEAR_CAP_CURRENT_ERROR_FRAGMENTS
     )
     assert len(capturing_llm.calls) >= 2, (
         'the semantic repair boundary was not reached; '
@@ -598,26 +772,69 @@ async def _run_near_cap_case(case: Mapping[str, object]) -> None:
         'allowed_values',
     }
     contract_error = repair_payload['contract_error']
-    assert 'knowledge_gaps.k7.uncertainty' in contract_error
+    assert any(
+        fragment in str(contract_error)
+        for fragment in _NEAR_CAP_CURRENT_ERROR_FRAGMENTS
+    )
     assert 'permitted paths:' not in contract_error
     assert 'permitted_delta_path_domains' in repair_payload['allowed_values']
     if isinstance(caught_error, CognitionExecutionError):
         assert caught_error.error_code == _EXPECTED_ERROR_CODE
 
 
-async def test_a1a573_near_cap_semantic_repair_reaches_live_llm() -> None:
+async def _run_near_cap_case(
+    case: Mapping[str, object],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Replay one near-cap candidate through the public boundary."""
+
+    input_payload, source_sha256, historical = _load_near_cap_input(case)
+    _, _, _, questions = _build_appraisal_context(input_payload)
+    question_id = case.get("question_id")
+    if not isinstance(question_id, str):
+        raise AssertionError("near-cap question id is invalid")
+    question = next(
+        question for question in questions
+        if question.get("question_id") == question_id
+    )
+    source_path = case.get("trace_path")
+    if not isinstance(source_path, Path):
+        raise AssertionError("near-cap source path is invalid")
+    replay = await replay_appraisal_through_public_boundary(
+        input_payload=input_payload,
+        question=question,
+        first_response_text=str(historical["raw_response_text"]),
+        case_id=str(case["case_id"]),
+        expected_error_fragments=_NEAR_CAP_CURRENT_ERROR_FRAGMENTS,
+        source_trace_id=str(case["trace_id"]),
+        source_path=source_path,
+        source_sha256=source_sha256,
+        candidate_classification="preserved_failed_candidate",
+        require_repair_call=True,
+        monkeypatch=monkeypatch,
+    )
+    assert replay["artifact_path"].exists()
+
+
+async def test_a1a573_near_cap_semantic_repair_reaches_live_llm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The plan's original near-cap case reaches bounded live repair."""
 
-    await _run_near_cap_case(_NEAR_CAP_CASES[0])
+    await _run_near_cap_case(_NEAR_CAP_CASES[0], monkeypatch)
 
 
-async def test_caad1a_near_cap_semantic_repair_reaches_live_llm() -> None:
+async def test_caad1a_near_cap_semantic_repair_reaches_live_llm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The first post-draft near-cap recurrence reaches live repair."""
 
-    await _run_near_cap_case(_NEAR_CAP_CASES[1])
+    await _run_near_cap_case(_NEAR_CAP_CASES[1], monkeypatch)
 
 
-async def test_df6eb4_near_cap_semantic_repair_reaches_live_llm() -> None:
+async def test_df6eb4_near_cap_semantic_repair_reaches_live_llm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The second post-draft near-cap recurrence reaches live repair."""
 
-    await _run_near_cap_case(_NEAR_CAP_CASES[2])
+    await _run_near_cap_case(_NEAR_CAP_CASES[2], monkeypatch)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import replace
 import json
 import sys
@@ -143,6 +144,65 @@ def _semantic_context(user_input: str) -> dict[str, object]:
     }
 
 
+def _inspect_generic_goal_output_contract(
+    prompt_payload: Mapping[str, Any],
+    *,
+    evidence_handles: set[str],
+    role_handles: set[str],
+) -> dict[str, Any]:
+    """Inspect the ordinary goal producer's current-run output contract."""
+
+    diagnostics: dict[str, Any] = {
+        'passed': False,
+        'errors': [],
+    }
+    contract = prompt_payload.get('goal_output_contract')
+    if not isinstance(contract, Mapping):
+        diagnostics['errors'].append(
+            'goal_output_contract is missing from the ordinary goal payload'
+        )
+        return diagnostics
+    expected_fields = {
+        'intention',
+        'desired_outcome',
+        'concrete_detail',
+        'reason',
+        'private_monologue',
+        'target_role_handles',
+        'evidence_handles',
+        'expected_consequences',
+        'confidence',
+        'relational_willingness',
+    }
+    observed_fields = contract.get('top_level_fields')
+    if not isinstance(observed_fields, list) or set(observed_fields) != (
+        expected_fields
+    ):
+        diagnostics['errors'].append(
+            'ordinary goal output fields are not exact: '
+            f'expected={sorted(expected_fields)} observed={observed_fields!r}'
+        )
+    for field_name, expected in (
+        ('allowed_role_handles', role_handles),
+        ('allowed_evidence_handles', evidence_handles),
+        ('required_evidence_handles', set()),
+        ('current_episode_evidence_handles', evidence_handles),
+    ):
+        observed = contract.get(field_name)
+        if not isinstance(observed, list) or set(observed) != set(expected):
+            diagnostics['errors'].append(
+                f'{field_name} is not the exact current-run domain: '
+                f'expected={sorted(expected)} observed={observed!r}'
+            )
+    if contract.get('confidence_type') != 'string_descriptor':
+        diagnostics['errors'].append(
+            'ordinary goal confidence is missing its descriptor-only contract'
+        )
+    diagnostics['passed'] = not diagnostics['errors']
+    diagnostics['contract'] = dict(contract)
+    return diagnostics
+
+
 async def test_live_captured_online_search_goal_preserves_required_evidence(
 ) -> None:
     """The exact search request stays evidence-seeking and capability-neutral."""
@@ -173,6 +233,14 @@ async def test_live_captured_online_search_goal_preserves_required_evidence(
         config=base_services.goal_ordinary_response_config,
     )
     quality = parse_llm_json_output(str(quality_response.content))
+    goal_prompt_payload = json.loads(
+        capturing_llm.calls[0]["prompt_messages"][1]
+    )
+    goal_contract_diagnostics = _inspect_generic_goal_output_contract(
+        goal_prompt_payload,
+        evidence_handles={'e1'},
+        role_handles={'current_user', 'self'},
+    )
     trace_path = write_llm_trace(
         "cognition_core_v2_goal_capability_live_llm",
         "captured_online_search_ordinary_goal",
@@ -184,6 +252,7 @@ async def test_live_captured_online_search_goal_preserves_required_evidence(
             "model_calls": capturing_llm.calls,
             "action_bid": bid,
             "quality_judgment": quality,
+            "goal_output_contract_diagnostics": goal_contract_diagnostics,
         },
     )
 
@@ -199,8 +268,10 @@ async def test_live_captured_online_search_goal_preserves_required_evidence(
     assert quality["preserves_search_goal"]
     assert quality["preserves_evidence_need"]
     assert not quality["invented_no_search_limit"]
-    goal_prompt_payload = json.loads(
-        capturing_llm.calls[0]["prompt_messages"][1]
+    assert goal_contract_diagnostics['passed'], (
+        'ordinary goal dynamic output contract is incomplete; '
+        f'errors={goal_contract_diagnostics["errors"]}; '
+        f'trace={trace_path}'
     )
     assert "runtime_capability_limits" not in goal_prompt_payload[
         "semantic_context"

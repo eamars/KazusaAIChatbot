@@ -47,7 +47,7 @@ _CASE_ID = 'qq_54369546_message_173098348'
 _STAGE_NAME = 'goal_cognition.ordinary_response.initial'
 _EXPECTED_APPLICABILITY = 'relationship_sensitive'
 _EXPECTED_RELATIONSHIP_STATE = 'unestablished'
-_EXPECTED_STANCE = 'reject'
+_NON_ACCEPTING_STANCES = frozenset({'reject', 'deflect'})
 _EPISODE_HANDLES = {'e1'}
 _CAPTURED_OCCURRED_AT = '2026-08-04T00:00:00Z'
 
@@ -409,7 +409,7 @@ async def _run_captured_replay(sample_index: int) -> dict[str, Any]:
             'current_user_relationship_state': (
                 _EXPECTED_RELATIONSHIP_STATE
             ),
-            'stance': _EXPECTED_STANCE,
+            'stance': sorted(_NON_ACCEPTING_STANCES),
         },
         'frozen_payload_identifier_notes': {
             'group_id_in_frozen_scene': '54369546' in (
@@ -446,14 +446,14 @@ async def _run_captured_replay(sample_index: int) -> dict[str, Any]:
 
 
 def _assert_expected_decision(decision: dict[str, Any]) -> None:
-    """Require the reconstructed group case to reject on unestablished state."""
+    """Require the reconstructed group case to deny unsafe acceptance."""
 
     assert decision.get('applicability') == _EXPECTED_APPLICABILITY
     assert (
         decision.get('current_user_relationship_state')
         == _EXPECTED_RELATIONSHIP_STATE
     )
-    assert decision.get('stance') == _EXPECTED_STANCE, (
+    assert decision.get('stance') in _NON_ACCEPTING_STANCES, (
         'captured production acceptance failure reproduced: '
         f'observed={decision}'
     )

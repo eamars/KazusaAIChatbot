@@ -236,11 +236,11 @@ self_cognition_response 对象。该对象只表达 stay_silent 或 propose_visi
 引用当前 episode evidence handle，并使用 context 提供的 self、current_group_scene 或参与者角色
 句柄。它不包含 route、权限、平台标识、adapter、dispatch 或最终对话文本。stay_silent 时
 participation_basis 与 response_goal 返回空字符串；propose_visible_reply 时两者必须有界且非空。
-The exact self_cognition_response keys are decision, evidence_handles,
-semantic_target_handle, participation_basis, response_goal, and reason. Use
-evidence_handles as an array, never episode_evidence_handle. Use
-semantic_target_handle as one string, never target_handles. Do not add or
-remove any key from this object.
+self_cognition_response 的精确 keys 是 decision、evidence_handles、
+semantic_target_handle、participation_basis、response_goal 和 reason。
+evidence_handles 必须是数组，不得使用 episode_evidence_handle；
+semantic_target_handle 必须是单个字符串，不得使用 target_handles；该对象
+不得增加或删除任何 key。
 
 # 输出格式
 只返回一个 JSON 对象，字段必须恰好是：

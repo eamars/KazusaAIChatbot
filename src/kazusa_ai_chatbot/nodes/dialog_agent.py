@@ -832,22 +832,22 @@ _V2_DIALOG_SEMANTIC_FIDELITY_PROMPT = '''检查角色回应语义忠实度，并
 核对候选与当前用户输入及 authoritative_surface_semantics 一致。response_operation 的完成度、selection_owner_role、selection_required 由角色方向检查负责；角色方向检查独占选择所有者和嵌套行动者/对象方向。本阶段核对候选的内部语义连贯；保留在输入中的非选择 response_operation 负责核对行动者、对象。
 
 # 判定语境
-current_visible_percepts 提供当前用户输入和结构化角色；candidate_role_frame 定义候选代词归属；role_explicit_content 提供上游行动者、动作、对象方向和原文证据；selection-required 的 role_explicit_content 和 response_operation 已经从本阶段输入中移除，相关选择方向只作权威证据。authoritative_surface_semantics 提供 selected_surface_intent、content_plan、content_requirements、visible_boundaries、addressee_plan、lexical_avoidances 和 relational_willingness（如有）；关系立场保持 applicability、stance 和 current_user_relationship_state，不在本阶段重新选择。
-若含 task_resolution_request 的 resolver_result，把 evidence_state、evidence_excerpts、evidence_handles、prompt_safe_observation_handle 和 remaining_needs 作为同一来源的证据边界；complete 只依据 supplied excerpts，其他状态不把缺失事实或当前用户引文写成已确认答案。
+current_visible_percepts 提供当前用户输入和结构化角色；candidate_role_frame 定义候选代词归属；role_explicit_content 提供上游行动者、动作、对象方向和原文证据；selection-required 的 role_explicit_content 和 response_operation 已经从本阶段输入中移除，选择方向只作权威证据。authoritative_surface_semantics 提供 selected_surface_intent、content_plan、content_requirements、visible_boundaries、addressee_plan、lexical_avoidances、relational_willingness；保持关系立场。
+含 task_resolution_request 的 resolver_result 中，evidence_state、evidence_excerpts、evidence_handles、prompt_safe_observation_handle 和 remaining_needs 属于同一来源边界；complete 只据 supplied excerpts，其余状态不得把缺失事实或用户引文当成已确认答案。
 
-依次阅读当前输入、权威语义和候选中的全部消息，判断每句话回应的对象以及前后句如何承接。先判断候选是否构成一条与 selected_surface_intent 一致的完整语义弧线，再判断具体作用。分别提取开场与收尾的主体、行动或关系对象、肯定或否定极性。针对提问时机、直接程度、标签或情绪的反应，按其真实对象判断。惊讶、羞赧、防御、调侃、嘴硬、表面勉强、间接表达以及其他角色化情绪可以先于决定；当这些表达的对象是时机、直接程度、标签或情绪，且行动或关系极性与收尾一致时，给出高分。
+依次阅读当前输入、权威语义和候选中的全部消息，不论位于同一消息或多条消息，判断每句话回应的对象以及前后句如何承接。先判断候选是否构成一条与 selected_surface_intent 一致的完整语义弧线，再判断具体作用。分别提取开场与收尾的主体、行动或关系对象、肯定或否定极性。针对提问时机、直接程度、标签或情绪的反应，按其真实对象判断。惊讶、羞赧、防御、调侃、嘴硬、表面勉强、间接表达以及其他角色化情绪可以先于决定；当这些表达的对象是时机、直接程度、标签或情绪，且行动或关系极性与收尾一致时，给出高分。
 
 # 分数标准
-score 是连续的序数排序信号，不是概率，也不是五档枚举。参考锚点为：1.0 表示完整保持权威语义且没有具体冲突；0.75 表示整体忠实但存在轻微可解释的不确定性；0.5 表示语义证据混合或弧线不完整；0.25 表示有明确且重要的语义偏差；0.0 表示明确冲突、颠倒或把缺失事实写成已确认答案。锚点只提供校准方向，允许任意有限小数。
-selected_surface_intent、content_plan 和 content_requirements 是必须保留的语义约束，不只是写作建议。逐项检查候选是否完成或明确保留每一项约束；候选把限定范围扩大、把具体请求改成无条件许可、把“仅 X”改成“任何事情”，或用泛化承诺替代指定对象时，必须显著降低 score，并用候选原文和相反的权威约束填写 hard_errors。例如，权威语义要求“只调整这一条通知的音量”，候选说“好，你想做什么都行”时，候选没有保持限定范围，score 应为 0.25 或更低。
+score 是连续序数信号，不是概率或五档枚举。锚点：1.0 完整忠实且无具体冲突；0.75 整体忠实但有轻微不确定；0.5 证据混合或弧线不完整；0.25 有重要语义偏差；0.0 明确冲突、颠倒或把缺失事实写成已确认答案。允许任意有限小数。
+selected_surface_intent、content_plan、content_requirements 是必须保留的约束。逐项检查；扩大范围、把具体请求变无条件许可、把“仅 X”变“任何事情”，或用泛化承诺替代指定对象时，显著降低 score，并用候选原文和相反权威约束填写 hard_errors。
 以下情况应显著降低 score，并在有具体证据时填写 hard_errors：
 1. 候选回应内部存在冲突，或与当前用户输入/权威语义直接冲突；
 2. 行动者、动作、对象、受益者或主语形成唯一明确的颠倒；
-3. 不论位于同一消息或多条消息，候选对同一主体、同一行动或关系先明确拒绝或不愿，后明确接受或愿意，而权威语义没有支持变化的事实、动机、条件、让步或约束；
+3. 候选对同一主体、同一行动或关系先明确拒绝或不愿，后明确接受或愿意，而权威语义没有支持变化的事实、动机、条件、让步或约束；
 4. 候选用权威语义未提供的新动机、条件或约束削弱、推迟或改变立场；
-5. 不完整 evidence_state 下把 remaining_needs 所指内容写成已确认答案，或添加权威语义未提供的可外部核查事实。
+5. 不完整 evidence_state 下把 remaining_needs 写成已确认答案，或添加权威语义未提供的外部核查事实。
 
-并列动作覆盖度属于内容完整性检查；hard_errors 必须引用候选原文，说明具体冲突及相反权威语义。角色自己的拒绝、协商或附加条件与权威语义一致时保持高分；合理虚构、创造性语言、玩笑、双关、省略或多种合理角色读法仍保持权威语义时保持高分。tool_result 中的产品规格、价格、库存、数量、时间、因果关系等外部事实必须有权威来源，不属于合理虚构。
+并列动作覆盖度属于内容完整性检查；hard_errors 必须引用候选原文，说明具体冲突及相反权威语义。角色自己的拒绝、协商或附加条件与权威语义一致时保持高分；合理虚构、创造性语言、玩笑、双关、省略或多种合理角色读法若保持权威语义（aligned true）也保持高分。tool_result 的产品规格、价格、库存、数量、时间、因果关系等外部事实必须有权威来源，不属于合理虚构。
 
 # 输出格式
 只返回字段恰好为 score 和 hard_errors 的 JSON 对象。score 必须是有限 JSON number，且位于 [0.0, 1.0]；hard_errors 是零到四条不重复、每条≤300字符的证据字符串。字段名必须为小写 ASCII token hard_errors。'''
@@ -1131,50 +1131,23 @@ async def _verify_dialog_semantic_fidelity(
 
 
 _V2_DIALOG_ROLE_DIRECTION_PROMPT = '''只核对一份角色回应的选择所有者、行动者和对象方向，并给出连续排序分数。
-candidate_role_frame 定义回应中的代词归属；required_role_operations 只包含当前检查所需的结构化
-角色元组，不包含内容完整性要求；authoritative_surface_semantics 提供当前角色已经选择的回应意图、
-内容和角色立场。其中“当前角色”表示当前角色，“当前用户”表示当前用户。
+candidate_role_frame 定义代词归属；required_role_operations 只含本次检查所需的结构化角色元组；authoritative_surface_semantics 提供当前角色已选的回应意图、内容和立场。
 
 # 判定边界
-角色方向只有以下两种明确错误可以显著降低 score，并在有证据时填写 violations：
-1. 候选明确要求 selection_owner_role 之外的角色决定“选择哪项动作”，从而转移选择所有者；
-2. 候选在唯一明确的角色读法下颠倒 embedded_actor_role 与 embedded_target_role。
-除此之外不得报告遗漏、未完成、不充分、不具体、过短、语气或文风问题。authoritative_surface_semantics
-只能帮助理解当前角色已经选择的语义方向，不能把 operation fidelity、内容完成度或表达质量变成
-typed_operation_role_reversal。
+只有两类明确错误可显著降低 score 并写入 violations：
+1. 候选要求 selection_owner_role 之外的角色决定“选择哪项动作”，转移选择所有者；
+2. 在唯一明确的角色读法下颠倒 embedded_actor_role 与 embedded_target_role。
+除此不得报告遗漏、未完成、不充分、不具体、过短、语气、文风或 operation fidelity 问题；authoritative_surface_semantics 不能把内容或表达质量变成 typed_operation_role_reversal。
 
-当前角色可以拒绝、协商、附加条件或不执行某项动作，而不改变角色方向。当前角色拥有回应和选择所有者
-时，可以在拒绝或 deflection 中要求当前用户执行一个用户方向的动作；只要当前角色仍是回应者和选择者，
-这种角色拥有的拒绝、谈判或转移安排保持高分，不能报告为 role reversal。无论候选是否充分完成
-authoritative_surface_semantics，operation fidelity 由其他语义分数负责。笑话、双关、省略以及存在多种
-合理角色读法的措辞按高分处理。文风、新颖度、亲密程度、安全、动作执行与文笔质量不属于本阶段。
-当 typed_addressee_plan 含有 wording_policy 为 named_or_third_person_required 的 pN 行时，
-候选把该行的明确控制、调侃或关系对象唯一地写成当前用户第二人称，属于
-typed_operation_role_reversal；候选使用该行的 display_name 或明确第三人称则保持高分。
-当 selection_owner_role 是当前角色且 embedded_actor_role 是当前用户时，当前角色用明确的
-愿望、请求或祈使句说出希望用户做的动作，就已经完成选择；不要求额外写成执行说明，也不因使用
-“想要”“希望”“请”之类的请求表达而降低角色方向分数。
-当前角色对第二人称说出的祈使句，表示当前角色已经选定该句谓语所指的动作；它不是把选择权交给
-当前用户。
-具体动作既可以是身体行为，也可以是说出、回答、选择或发送等语言与交流行为；只要回应明确命名
-希望用户完成的这类下一步，就已满足 required operation。
-selection_owner_role 决定选择哪项动作，embedded_actor_role 执行已选动作。当前角色选定具体动作
-并要求当前用户执行，选择仍由当前角色作出；只有要求当前用户决定要选哪项动作，才是转移选择权。
-解析“当前角色希望或要求当前用户做 X”一类嵌套从句时，当前用户是 X 的行动者，当前角色是
-要求和选择的所有者。
+当前角色可以拒绝、协商、附加条件或不执行动作而保持方向；拥有回应和选择所有者时，也可在拒绝或 deflection 中要求当前用户执行动作，不能报告为 role reversal。笑话、双关、省略或多种合理读法按高分处理。
+typed_addressee_plan 中 wording_policy 为 named_or_third_person_required 的 pN 行，其明确对象若被唯一写成当前用户第二人称，属于 typed_operation_role_reversal；使用 display_name 或明确第三人称则保持高分。
+当 selection_owner_role 是当前角色且 embedded_actor_role 是当前用户时，角色用明确的愿望、请求或祈使句说出希望用户做的动作，就已完成选择；说出、回答、选择或发送等语言动作也算 required operation，不因请求语气或缺少执行细节降分。selection_owner_role 决定选择哪项动作，embedded_actor_role 执行已选动作；只有要求用户决定选择哪项动作才是转移选择权。解析当前角色希望或要求当前用户做 X 时，用户是 X 的行动者，角色是要求和选择的所有者。
 
-score 是连续的序数排序信号，不是概率，也不是五档枚举。参考锚点为：1.0 表示方向清晰且保留当前
-角色的回应和选择所有者；0.75 表示方向基本清晰但有轻微可解释的不确定性；0.5 表示证据混合；
-0.25 表示有重要方向风险；0.0 表示明确的选择所有者转移或行动者/对象颠倒。锚点只提供校准方向，
-允许任意有限小数。
-
+score 是连续序数排序信号，不是概率或五档枚举。锚点：1.0 方向清晰；0.75 基本清晰但有轻微不确定；0.5 证据混合；0.25 有重要方向风险；0.0 明确转移选择所有者或颠倒行动者/对象。允许任意有限小数。
 violations 只能报告明确的选择所有者转移或行动者/对象颠倒；祈使句已命名动作时不因缺少细节而拒绝。
 
 # 输出格式
-只返回一个 JSON 对象，字段必须恰好是 score 和 violations。score 必须是有限 JSON number，且位于
-[0.0, 1.0]；violations 是零到四个互不重复的对象，每个对象必须恰好包含 kind、evidence 和
-explanation。kind 只能是 selection_owner_transfer 或 typed_operation_role_reversal。evidence
-必须逐字复制候选回应中的非空文字；explanation 用一句话说明角色方向冲突。'''
+只返回字段恰好为 score 和 violations 的 JSON 对象。score 是位于 [0.0, 1.0] 的有限 JSON number；violations 是零到四个互不重复的对象，每个恰好含 kind、evidence、explanation。kind 只能是 selection_owner_transfer 或 typed_operation_role_reversal；evidence 逐字复制候选中的非空文字，explanation 用一句话说明方向冲突。'''
 _dialog_role_direction_llm = LLInterface()
 _dialog_role_direction_llm_config = LLMCallConfig(
     stage_name=f"{__name__}.role_direction",

@@ -455,6 +455,7 @@ def test_evidence_provenance_roles_map_every_supported_metadata() -> None:
 
     expected = {
         ('episode', None): 'current_episode',
+        ('scheduler_event', None): 'current_episode',
         ('tool_result', None): 'current_episode',
         (
             'promoted_memory',

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 from dataclasses import replace
 import json
 from typing import Any
@@ -41,6 +42,27 @@ from tests.llm_trace import write_llm_trace
 
 
 _TRACE_SUITE = 'cognition_core_v2_required_selection_live_llm'
+
+
+_SELECTED_RESPONSE_OPERATION_FIELDS = {
+    'operation',
+    'response_owner_role',
+    'selection_owner_role',
+    'selection_required',
+    'embedded_actor_role',
+    'embedded_target_role',
+}
+
+
+_REQUIRED_SELECTION_AGENT_RUBRIC = (
+    '1. 当前角色是否仍然是 response_owner_role 和 selection_owner_role？',
+    '2. selected_response_operation.operation 是否描述一个具体的嵌入行动，而不是只重复选择、告诉或决定？',
+    '3. 去掉选择、告诉、要求等 wrapper verbs 后，嵌入行动是否与当前用户对当前角色执行的方向一致？',
+    '4. 是否出现明确的行动者或目标反转，或把选择权转移给其他角色？',
+    '只有四项均满足时才给出 PASS；结构上明确但语义存在唯一反转时给出 FAIL。',
+)
+
+
 class _CapturingLLM:
     """Delegate to configured model routes and retain every raw response."""
 
@@ -140,6 +162,158 @@ def _add_contract_diagnostics(
         call['validation_error'] = validation_error
 
 
+def _inspect_goal_output_contract(
+    calls: list[dict[str, Any]],
+    *,
+    evidence: list[dict[str, Any]],
+    role_handles: set[str],
+    branch_id: str,
+) -> dict[str, Any]:
+    """Inspect the dynamic required-selection contract emitted to the model."""
+
+    diagnostics: dict[str, Any] = {
+        'passed': False,
+        'errors': [],
+        'initial_payload': {},
+    }
+    if not calls:
+        diagnostics['errors'].append('the producer made no live model call')
+        return diagnostics
+    try:
+        initial_payload = json.loads(calls[0]['messages'][-1]['content'])
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        diagnostics['errors'].append(
+            f'initial goal payload is not JSON: {type(exc).__name__}: {exc}'
+        )
+        return diagnostics
+    diagnostics['initial_payload'] = initial_payload
+    if not isinstance(initial_payload, Mapping):
+        diagnostics['errors'].append('initial goal payload is not an object')
+        return diagnostics
+    contract = initial_payload.get('goal_output_contract')
+    if not isinstance(contract, Mapping):
+        diagnostics['errors'].append(
+            'goal_output_contract is missing from the dynamic goal payload'
+        )
+        return diagnostics
+    expected_fields = {
+        'selection',
+        'selected_response_operation',
+        'reason',
+        'private_monologue',
+        'target_role_handles',
+        'evidence_handles',
+        'expected_consequences',
+        'confidence',
+    }
+    if branch_id == 'ordinary_response':
+        expected_fields.add('relational_willingness')
+    actual_fields = contract.get('top_level_fields')
+    if not isinstance(actual_fields, list) or set(actual_fields) != (
+        expected_fields
+    ):
+        diagnostics['errors'].append(
+            'goal_output_contract.top_level_fields does not match the '
+            f'required-selection schema: expected={sorted(expected_fields)} '
+            f'observed={actual_fields!r}'
+        )
+    operation_fields = contract.get('selected_response_operation_fields')
+    if not isinstance(operation_fields, list) or set(operation_fields) != (
+        _SELECTED_RESPONSE_OPERATION_FIELDS
+    ):
+        diagnostics['errors'].append(
+            'selected response operation contract does not expose exactly '
+            f'the six canonical fields: observed={operation_fields!r}'
+        )
+    if contract.get('selection_required') is not True:
+        diagnostics['errors'].append(
+            'goal output contract does not preserve selection_required=true'
+        )
+    required_operations = _required_selection_operations(evidence)
+    expected_evidence_handles = {
+        row['evidence_handle']
+        for row in evidence
+    }
+    expected_required_handles = {
+        row['evidence_handle']
+        for row in required_operations
+    }
+    expected_episode_handles = {
+        row['evidence_handle']
+        for row in evidence
+        if row['evidence_ref']['source_kind'] == 'episode'
+    }
+    for field_name, expected in (
+        ('allowed_role_handles', role_handles),
+        ('allowed_evidence_handles', expected_evidence_handles),
+        ('required_evidence_handles', expected_required_handles),
+        ('current_episode_evidence_handles', expected_episode_handles),
+    ):
+        observed = contract.get(field_name)
+        if not isinstance(observed, list) or set(observed) != set(expected):
+            diagnostics['errors'].append(
+                f'{field_name} is not the exact current-run domain: '
+                f'expected={sorted(expected)} observed={observed!r}'
+            )
+    if contract.get('confidence_type') != 'string_descriptor':
+        diagnostics['errors'].append(
+            'confidence is missing its descriptor-only contract'
+        )
+    diagnostics['contract'] = dict(contract)
+    diagnostics['passed'] = not diagnostics['errors']
+    return diagnostics
+
+
+def _inspect_selected_operation(
+    bid: Mapping[str, Any] | None,
+    response_operation: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Inspect the concrete selected operation without losing the raw bid."""
+
+    diagnostics: dict[str, Any] = {
+        'passed': False,
+        'errors': [],
+    }
+    if bid is None:
+        diagnostics['errors'].append(
+            'no bid was produced for selected-operation inspection'
+        )
+        return diagnostics
+    selected_operation = bid.get('selected_response_operation')
+    if not isinstance(selected_operation, Mapping):
+        diagnostics['errors'].append(
+            'selected_response_operation is missing from the bid'
+        )
+        return diagnostics
+    for field_name in (
+        'response_owner_role',
+        'selection_owner_role',
+        'embedded_actor_role',
+        'embedded_target_role',
+    ):
+        if selected_operation.get(field_name) != response_operation.get(
+            field_name
+        ):
+            diagnostics['errors'].append(
+                f'{field_name} changed from the authoritative input operation'
+            )
+    if selected_operation.get('selection_required') is not True:
+        diagnostics['errors'].append(
+            'selected operation does not preserve selection_required=true'
+        )
+    selected_text = selected_operation.get('operation')
+    if not isinstance(selected_text, str) or not selected_text.strip():
+        diagnostics['errors'].append(
+            'selected operation text is empty'
+        )
+    elif selected_text == response_operation.get('operation'):
+        diagnostics['errors'].append(
+            'selected operation only repeats the outer selection wrapper'
+        )
+    diagnostics['passed'] = not diagnostics['errors']
+    return diagnostics
+
+
 async def _run_live_required_selection_case(
     *,
     case_id: str,
@@ -147,7 +321,7 @@ async def _run_live_required_selection_case(
     branch_id: str = 'ordinary_response',
     semantic_context_updates: dict[str, Any] | None = None,
     role_explicit_content: str = (
-        '当前用户要求当前角色亲口说出希望当前用户执行的下一步。'
+        '当前用户要求当前角色亲口选择并说明一项由当前用户对当前角色执行的下一步。'
     ),
     response_operation: dict[str, Any] | None = None,
 ) -> tuple[
@@ -164,7 +338,9 @@ async def _run_live_required_selection_case(
     expected_config = production_services.goal_ordinary_response_config
     if response_operation is None:
         response_operation = {
-            'operation': '当前角色选择并告诉当前用户下一步',
+            'operation': (
+                '当前角色选择并告诉当前用户一项由当前用户对当前角色执行的下一步'
+            ),
             'response_owner_role': '当前角色',
             'selection_owner_role': '当前角色',
             'selection_required': True,
@@ -272,22 +448,16 @@ async def _run_live_required_selection_case(
         role_handles=set(semantic_context['_role_bindings']),
         require_relational_willingness=(branch_id == 'ordinary_response'),
     )
-    if bid is not None:
-        selected_operation = bid['selected_response_operation']
-        for field_name in (
-            'response_owner_role',
-            'selection_owner_role',
-            'embedded_actor_role',
-            'embedded_target_role',
-        ):
-            assert selected_operation[field_name] == response_operation[
-                field_name
-            ]
-        assert selected_operation['selection_required'] is True
-        assert selected_operation['operation'].strip()
-        assert selected_operation['operation'] != response_operation[
-            'operation'
-        ]
+    selected_operation_diagnostics = _inspect_selected_operation(
+        bid,
+        response_operation,
+    )
+    contract_diagnostics = _inspect_goal_output_contract(
+        capturing_llm.calls,
+        evidence=evidence,
+        role_handles=set(semantic_context['_role_bindings']),
+        branch_id=branch_id,
+    )
     trace_path = write_llm_trace(
         _TRACE_SUITE,
         case_id,
@@ -301,6 +471,15 @@ async def _run_live_required_selection_case(
             'expected_model': expected_config.model,
             'model_calls': capturing_llm.calls,
             'attempt_ledger': attempt_ledger,
+            'selected_operation_diagnostics': (
+                selected_operation_diagnostics
+            ),
+            'agent_review_rubric': {
+                'questions': list(_REQUIRED_SELECTION_AGENT_RUBRIC),
+                'verdict_rule': 'PASS requires all four questions to pass',
+                'semantic_judgment_owner': 'independent agent reviewer',
+            },
+            'goal_output_contract_diagnostics': contract_diagnostics,
             'action_bid': bid,
             'failure': failure,
             'behavior_contract': (
@@ -315,6 +494,15 @@ async def _run_live_required_selection_case(
         and call['model'] == expected_config.model
         for call in capturing_llm.calls
     ), f'required selection used the wrong model route; trace={trace_path}'
+    assert contract_diagnostics['passed'], (
+        'required-selection dynamic output contract is incomplete; '
+        f'errors={contract_diagnostics["errors"]}; trace={trace_path}'
+    )
+    assert selected_operation_diagnostics['passed'], (
+        'required-selection operation is not concrete and authoritative; '
+        f'errors={selected_operation_diagnostics["errors"]}; '
+        f'trace={trace_path}'
+    )
     result = bid, failure, capturing_llm.calls, trace_path
     return result
 
@@ -384,7 +572,7 @@ def _third_party_reply_case_args() -> dict[str, Any]:
             'selection_owner_role': '当前角色',
             'selection_required': True,
             'embedded_actor_role': '当前角色',
-            'embedded_target_role': '第三方',
+            'embedded_target_role': '其他参与者',
         },
         'semantic_context_updates': {
             'current_event': (
@@ -712,9 +900,13 @@ async def test_live_autonomy_selection_with_multiple_required_operations(
     """Dense selection must cite multiple required operations."""
 
     second_operation_text = json.dumps({
-        'role_explicit_content': '当前用户同时要求当前角色明确说明互动边界。',
+        'role_explicit_content': (
+            '当前用户还要求当前角色选择并说明一项由当前用户对当前角色遵守的互动边界。'
+        ),
         'response_operation': {
-            'operation': '当前角色选择并说明互动边界',
+            'operation': (
+                '当前角色选择并告诉当前用户：当前用户不得亲吻当前角色'
+            ),
             'response_owner_role': '当前角色',
             'selection_owner_role': '当前角色',
             'selection_required': True,
@@ -1179,14 +1371,18 @@ async def test_live_autonomy_selection_with_compound_evidence_pressure(
         'affect': cognition_state['affect_activations'],
     }
     second_operation_text = json.dumps({
-        'role_explicit_content': '当前用户还要求当前角色明确说明自己的互动边界。',
+            'role_explicit_content': (
+                '当前用户还要求当前角色选择并说明一项由当前用户对当前角色遵守的互动边界。'
+            ),
         'response_operation': {
-            'operation': '当前角色选择并说明自己的互动边界',
+            'operation': (
+                '当前角色选择并告诉当前用户：当前用户不得亲吻当前角色'
+            ),
             'response_owner_role': '当前角色',
             'selection_owner_role': '当前角色',
             'selection_required': True,
-            'embedded_actor_role': '当前角色',
-            'embedded_target_role': '当前用户',
+            'embedded_actor_role': '当前用户',
+            'embedded_target_role': '当前角色',
         },
     }, ensure_ascii=False)
     second_operation_row = {
@@ -1264,14 +1460,18 @@ async def test_live_autonomy_selection_with_ten_visible_evidence_rows(
     """Cite two operations while eight progress rows remain visible."""
 
     second_operation_text = json.dumps({
-        'role_explicit_content': '当前用户还要求当前角色明确说明自己的互动边界。',
+        'role_explicit_content': (
+            '当前用户还要求当前角色选择并说明一项由当前用户对当前角色遵守的互动边界。'
+        ),
         'response_operation': {
-            'operation': '当前角色选择并说明自己的互动边界',
+            'operation': (
+                '当前角色选择并告诉当前用户：当前用户不得亲吻当前角色'
+            ),
             'response_owner_role': '当前角色',
             'selection_owner_role': '当前角色',
             'selection_required': True,
-            'embedded_actor_role': '当前角色',
-            'embedded_target_role': '当前用户',
+            'embedded_actor_role': '当前用户',
+            'embedded_target_role': '当前角色',
         },
     }, ensure_ascii=False)
     second_operation_row = {

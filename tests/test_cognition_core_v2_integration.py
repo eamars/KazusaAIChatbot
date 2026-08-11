@@ -4,6 +4,7 @@ import asyncio
 import json
 from copy import deepcopy
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -29,6 +30,9 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     EVIDENCE_SOURCE_QUESTION_IDS,
     TextSurfaceServicesV2,
     VisualSurfaceServicesV2,
+)
+from kazusa_ai_chatbot.cognition_core_v2.parallel_executor import (
+    ParallelExecutionResult,
 )
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     build_acquaintance_user_state,
@@ -255,6 +259,40 @@ def _input(
         },
         "private_continuity_context": "I remain attentive to this exchange.",
     }
+
+
+@pytest.mark.asyncio
+async def test_required_selection_without_admitted_bid_fails_closed_before_action(
+    monkeypatch,
+) -> None:
+    """A rejected required-selection episode stops before route execution."""
+
+    payload = _input()
+    payload["episode"]["percepts"][0]["content"]["response_operation"] = {
+        "operation": "the current character chooses and tells the user the next step",
+        "response_owner_role": "当前角色",
+        "selection_owner_role": "当前角色",
+        "selection_required": True,
+        "embedded_actor_role": "无",
+        "embedded_target_role": "无",
+    }
+    action_plan = AsyncMock()
+
+    async def no_branches(*_args, **_kwargs) -> ParallelExecutionResult:
+        return ParallelExecutionResult()
+
+    monkeypatch.setattr(facade_module, "plan_semantic_questions", lambda *_args: [])
+    monkeypatch.setattr(facade_module, "execute_dependency_graph", no_branches)
+    monkeypatch.setattr(facade_module, "plan_actions", action_plan)
+
+    with pytest.raises(CognitionExecutionError) as error_info:
+        await run_cognition(payload, _core_services(_ScriptedLLM()))
+
+    assert error_info.value.error_code == (
+        "required_selection_without_admitted_bid"
+    )
+    assert error_info.value.stage == "workspace_collapse"
+    assert action_plan.await_count == 0
 
 
 @pytest.mark.asyncio

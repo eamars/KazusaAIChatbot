@@ -33,24 +33,21 @@ _CAPTURED_TRACE_PATH = (
     _ROOT
     / 'test_artifacts'
     / 'diagnostics'
-    / (
-        'cognition_v2_run_llmtrace_fab989d622da48a89c6e5566e2121251_'
-        '20260805.json'
-    )
+    / 'cognition_v2_action_planning_current.json'
 )
 _ARTIFACT_ROOT = (
     _ROOT
     / 'test_artifacts'
     / 'cognition_core_v2_captured_run_failures'
 )
-_TRACE_ID = 'llmtrace_fab989d622da48a89c6e5566e2121251'
+_TRACE_ID = 'llmtrace_e86e2bda365e49aca2d0ad54fb0fd066'
 _STAGE_NAME = 'goal_cognition.ordinary_response.initial'
 _CASE_ID = 'current_run_goal_relational_willingness_contract'
 _EXPECTED_ERROR = (
     'non-sensitive relational willingness must be not_applicable with '
     'not_applicable relationship state'
 )
-_CAPTURED_OCCURRED_AT = '2026-08-05T15:33:55Z'
+_CAPTURED_OCCURRED_AT = '2026-08-11T04:17:02Z'
 
 
 class _CapturingLLM:

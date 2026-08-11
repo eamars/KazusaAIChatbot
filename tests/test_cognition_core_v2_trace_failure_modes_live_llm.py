@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import json
 from collections.abc import Mapping
 from copy import deepcopy
@@ -34,7 +36,7 @@ from kazusa_ai_chatbot.cognition_core_v2.facade import (
 from kazusa_ai_chatbot.cognition_core_v2.semantic_appraisal import (
     SEMANTIC_APPRAISAL_PROMPT,
     SEMANTIC_APPRAISAL_REPAIR_PROMPT_CAP,
-    _appraise_semantic_item,
+    appraise_semantic_question,
 )
 from kazusa_ai_chatbot.cognition_core_v2.semantic_source_planner import (
     plan_semantic_questions,
@@ -52,6 +54,14 @@ from kazusa_ai_chatbot.cognition_core_v2.state_reducers import (
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
     build_cognition_core_services,
 )
+from kazusa_ai_chatbot.utils import parse_llm_json_output
+from tests.test_cognition_core_v2_trace_failure_mode_matrix import (
+    _load_capacity_replay_input,
+    _replay_capacity_trace,
+)
+from tests.cognition_core_v2_appraisal_replay_harness import (
+    replay_appraisal_through_public_boundary,
+)
 
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm]
@@ -61,16 +71,23 @@ _TRACE_STEPS_PATH = (
     _ROOT
     / "test_artifacts"
     / "diagnostics"
-    / "llm_trace_steps_2026-08-04.json"
+    / "cognition_failure_capsules_today_20260811_latest_full.json"
 )
+_CAPACITY_REPLAY_EXPORTS = {
+    "8d0d4295": _ROOT
+    / "test_artifacts"
+    / "diagnostics"
+    / "llmtrace_8d0d42952b76450c9e1dc32574f9fd44_replay_export.json",
+    "9164e957": _ROOT
+    / "test_artifacts"
+    / "diagnostics"
+    / "llmtrace_9164e957298e4cffb68db7911bcd28b1_replay_export.json",
+}
 _CURRENT_RUN_TRACE_PATH = (
     _ROOT
     / "test_artifacts"
     / "diagnostics"
-    / (
-        "cognition_v2_run_llmtrace_fab989d622da48a89c6e5566e2121251_"
-        "20260805.json"
-    )
+    / "cognition_failure_capsules_today_20260811_latest_full.json"
 )
 _A1A573_TRACE_PATH = (
     _ROOT
@@ -88,50 +105,53 @@ _RAW_ARTIFACT_ROOT = _ARTIFACT_ROOT / "raw"
 
 _SEMANTIC_CASES: dict[str, dict[str, object]] = {
     "semantic_delta_path_not_owned": {
-        "trace_id": "llmtrace_198a113af3b843e4b334345ff1c0620f",
+        "trace_id": "llmtrace_b047a15900a548fd8a692fbc1eccf14e",
         "stage_name": (
-            "semantic_appraisal.q:relationship_social.item_1"
+            "semantic_appraisal.q:epistemic_comparison_memory.item_1"
         ),
         "attempt_index": 1,
-        "question_id": "q:relationship_social",
+        "question_id": "q:epistemic_comparison_memory",
         "expected_error": "semantic delta path",
     },
     "selected_evidence_unknown_handle": {
-        "trace_id": "llmtrace_4d896d405f8140a6ac4b731cc8d1ad4d",
-        "stage_name": "semantic_appraisal.q:relationship_social.item_1",
+        "trace_id": "llmtrace_f5290a02ce7e45a4834483d1358e5487",
+        "stage_name": "semantic_appraisal.q:moral_identity.item_1",
         "attempt_index": 1,
-        "question_id": "q:relationship_social",
+        "question_id": "q:moral_identity",
         "expected_error": "selected evidence contains",
     },
     "terminal_event_transition_rejected": {
-        "trace_id": "llmtrace_6e00180ecaf54289a5b21153a3ff3d6c",
+        "trace_id": "llmtrace_b6fe7e50e9574b48b17252b7897886a9",
         "stage_name": (
             "semantic_appraisal.q:goal_threat_outcome.item_1"
         ),
         "attempt_index": 1,
         "question_id": "q:goal_threat_outcome",
         "expected_error": "terminal event cannot transition",
+        "allowed_error_fragments": (
+            "terminal event cannot transition",
+            "selected roles contains unknown handles",
+        ),
+        "require_repair_call": False,
     },
     "candidate_origin_evidence_missing": {
-        "trace_id": "llmtrace_7f6bf91853df403d95ec8c4e767e22ef",
-        "stage_name": (
-            "semantic_appraisal.q:epistemic_comparison_memory.item_1.repair"
-        ),
-        "attempt_index": 2,
-        "question_id": "q:epistemic_comparison_memory",
+        "trace_id": "llmtrace_56ad102f8f07411bafa9b74cca38fdf8",
+        "stage_name": "semantic_appraisal.q:event_agency.item_1",
+        "attempt_index": 1,
+        "question_id": "q:event_agency",
         "expected_error": "causal candidates must cite originating evidence",
     },
     "semantic_role_value_invalid": {
-        "trace_id": "llmtrace_f75c08f10903487e881cbdceb7a94d00",
-        "stage_name": "semantic_appraisal.q:moral_identity.item_1",
+        "trace_id": "llmtrace_573f5a5cde4c42b5b57ceafc5323ae63",
+        "stage_name": "semantic_appraisal.q:event_agency.item_2",
         "attempt_index": 1,
-        "question_id": "q:moral_identity",
+        "question_id": "q:event_agency",
         "expected_error": "semantic role value is invalid",
     },
     "current_run_event_agency_role_value_invalid": {
-        "trace_id": "llmtrace_fab989d622da48a89c6e5566e2121251",
+        "trace_id": "llmtrace_c2c1c57036e4407db64d57b89ac23853",
         "trace_path": _CURRENT_RUN_TRACE_PATH,
-        "stage_name": "semantic_appraisal.q:event_agency.item_1",
+        "stage_name": "semantic_appraisal.q:event_agency.item_2",
         "attempt_index": 1,
         "question_id": "q:event_agency",
         "expected_error": "semantic role value is invalid",
@@ -147,25 +167,38 @@ _SEMANTIC_CASES: dict[str, dict[str, object]] = {
         "expected_error": "semantic delta path",
         "replay_historical_candidate": True,
         "require_repair_call": True,
+        "repair_error_fragments": (
+            "knowledge_gaps.k7.uncertainty",
+            "selected roles contains unknown handles",
+        ),
+        "allowed_error_fragments": (
+            "semantic delta path",
+            "selected roles contains unknown handles",
+        ),
     },
     "resolved_knowledge_gap_transition_rejected": {
-        "trace_id": "llmtrace_b2935ecd4361456a9bfb10deeaa790b1",
+        "trace_id": "llmtrace_cb81df68e0ad421ea894b82f428bfa51",
         "stage_name": (
             "semantic_appraisal.q:goal_threat_outcome.item_1"
         ),
         "attempt_index": 1,
         "question_id": "q:goal_threat_outcome",
         "expected_error": "resolved knowledge gap cannot transition",
+        "allowed_error_fragments": (
+            "resolved knowledge gap cannot transition",
+            "selected roles contains unknown handles",
+        ),
+        "require_repair_call": False,
     },
     "selected_roles_unknown_handle": {
-        "trace_id": "llmtrace_31ae8b9c1d9e4afcb0b7e7bcd33c72e0",
-        "stage_name": "semantic_appraisal.q:event_agency.item_1",
+        "trace_id": "llmtrace_fe3631d5cd6a493994930e1e8919abf4",
+        "stage_name": "semantic_appraisal.q:relationship_social.item_1",
         "attempt_index": 1,
-        "question_id": "q:event_agency",
+        "question_id": "q:relationship_social",
         "expected_error": "selected roles contains unknown handles",
     },
     "semantic_proposition_subject_kind_mismatch": {
-        "trace_id": "llmtrace_3bfd68d36df6471daa96f197ca078fd9",
+        "trace_id": "llmtrace_88b4205f0fb34af29faa4c69435660da",
         "stage_name": (
             "semantic_appraisal.q:goal_threat_outcome.item_1.repair"
         ),
@@ -174,38 +207,49 @@ _SEMANTIC_CASES: dict[str, dict[str, object]] = {
         "expected_error": (
             "semantic proposition kind requires subject kind"
         ),
+        "allowed_error_fragments": (
+            "semantic proposition kind requires subject kind",
+            "selected roles contains unknown handles",
+        ),
     },
     "semantic_proposition_object_handle_not_permitted": {
-        "trace_id": "llmtrace_2a4a4b5f1d6c492cb69800b7f7558f1c",
-        "stage_name": "semantic_appraisal.q:relationship_social.item_1",
+        "trace_id": "llmtrace_8d0d42952b76450c9e1dc32574f9fd44",
+        "trace_path": _CAPACITY_REPLAY_EXPORTS["8d0d4295"],
+        "stage_name": "semantic_appraisal.q:event_agency.item_1",
         "attempt_index": 1,
-        "question_id": "q:relationship_social",
-        "expected_error": (
-            "semantic proposition object handle is not permitted"
-        ),
+        "question_id": "q:event_agency",
+        "expected_error": "semantic proposition object handle",
+        "allow_successful_source": True,
+        "historical_response_transform": "object_handle_not_permitted",
+        "replay_historical_candidate": True,
+        "require_live_repair": True,
     },
     "delta_reason_invalid": {
-        "trace_id": "llmtrace_90bf8dda523c4f54befc4480991aafbd",
-        "stage_name": (
-            "semantic_appraisal.q:epistemic_comparison_memory.item_1"
-        ),
+        "trace_id": "llmtrace_8d0d42952b76450c9e1dc32574f9fd44",
+        "trace_path": _CAPACITY_REPLAY_EXPORTS["8d0d4295"],
+        "stage_name": "semantic_appraisal.q:event_agency.item_1",
         "attempt_index": 1,
-        "question_id": "q:epistemic_comparison_memory",
+        "question_id": "q:event_agency",
         "expected_error": "reason must be non-empty text up to 300 characters",
+        "allow_successful_source": True,
+        "historical_response_transform": "delta_reason_invalid",
+        "replay_historical_candidate": True,
+        "require_live_repair": True,
     },
     "semantic_delta_type_invalid": {
-        "trace_id": "llmtrace_9362f66e63af48be85be587c9d858808",
-        "stage_name": (
-            "semantic_appraisal.q:goal_threat_outcome.item_1.repair"
-        ),
-        "attempt_index": 2,
-        "question_id": "q:goal_threat_outcome",
-        "expected_error": (
-            "semantic delta must be a JSON integer from -40 through 40"
-        ),
+        "trace_id": "llmtrace_8d0d42952b76450c9e1dc32574f9fd44",
+        "trace_path": _CAPACITY_REPLAY_EXPORTS["8d0d4295"],
+        "stage_name": "semantic_appraisal.q:event_agency.item_1",
+        "attempt_index": 1,
+        "question_id": "q:event_agency",
+        "expected_error": "semantic delta must be a JSON integer",
+        "allow_successful_source": True,
+        "historical_response_transform": "delta_type_invalid",
+        "replay_historical_candidate": True,
+        "require_live_repair": True,
     },
     "semantic_micro_appraisal_fields_not_exact": {
-        "trace_id": "llmtrace_3faf12a8ac244089b5c538671e6e79dd",
+        "trace_id": "llmtrace_1d124e68e53447ee8f0cc7c6e3184148",
         "stage_name": "semantic_appraisal.q:existential_drive.item_2",
         "attempt_index": 1,
         "question_id": "q:existential_drive",
@@ -258,6 +302,96 @@ class _HistoricalFirstThenLiveLLM:
         return response
 
 
+class _LiveCaptureLLM:
+    """Capture one real Appraisal probe without changing its output."""
+
+    def __init__(self, delegate: Any) -> None:
+        self.delegate = delegate
+        self.calls: list[dict[str, Any]] = []
+
+    async def ainvoke(
+        self,
+        messages: list[object],
+        *args: object,
+        config: object,
+        **kwargs: object,
+    ) -> Any:
+        response = await self.delegate.ainvoke(
+            messages,
+            *args,
+            config=config,
+            **kwargs,
+        )
+        self.calls.append({
+            "messages": [
+                {
+                    "type": type(message).__name__,
+                    "content": str(getattr(message, "content", "")),
+                }
+                for message in messages
+            ],
+            "raw_output": str(getattr(response, "content", "")),
+        })
+        return response
+
+
+def _transform_historical_response(
+    raw_response: str,
+    mutation: object,
+) -> str:
+    """Create one controlled invalid candidate from a preserved model output."""
+
+    parsed = parse_llm_json_output(
+        raw_response,
+        deterministic_only=True,
+    )
+    if not isinstance(parsed, dict):
+        raise AssertionError("preserved semantic candidate is not an object")
+    proposition = parsed.get("proposition")
+    delta = parsed.get("delta")
+    if not isinstance(proposition, dict) or not isinstance(delta, dict):
+        raise AssertionError(
+            "preserved semantic candidate lacks singular proposition/delta"
+        )
+    if mutation == "object_handle_not_permitted":
+        proposition["object_handle"] = "role_not_in_prompt"
+    elif mutation == "delta_reason_invalid":
+        delta["reason"] = ""
+    elif mutation == "delta_type_invalid":
+        delta["delta"] = "not-an-integer"
+    else:
+        raise AssertionError(f"unsupported semantic replay mutation: {mutation}")
+    return json.dumps(parsed, ensure_ascii=False)
+
+
+def _load_capacity_probe_payload(
+    short_trace_id: str,
+) -> tuple[dict[str, Any], str, Path]:
+    """Load the real input used by one preserved capacity replay."""
+
+    export_path = _CAPACITY_REPLAY_EXPORTS[short_trace_id]
+    export = json.loads(export_path.read_text(encoding="utf-8"))
+    query = export.get("query")
+    if not isinstance(query, Mapping):
+        raise AssertionError("capacity replay query metadata is missing")
+    trace_id = query.get("trace_id")
+    if not isinstance(trace_id, str):
+        raise AssertionError("capacity replay trace id is missing")
+    capsules = export.get("cognition_failure_capsules")
+    if not isinstance(capsules, list):
+        raise AssertionError("capacity replay capsules are missing")
+    capsule = next(
+        capsule
+        for capsule in capsules
+        if isinstance(capsule, Mapping)
+        and capsule.get("trace_id") == trace_id
+    )
+    input_payload = capsule.get("input_payload")
+    if not isinstance(input_payload, dict):
+        raise AssertionError("capacity replay input is not an object")
+    return input_payload, trace_id, export_path
+
+
 def _load_case_capsule(
     case: Mapping[str, object],
 ) -> tuple[dict[str, Any], dict[str, Any], str, str]:
@@ -298,9 +432,10 @@ def _load_case_capsule(
             if attempt.get("attempt_index") != case["attempt_index"]:
                 continue
             validation_error = str(attempt.get("validation_error") or "")
-            if not validation_error:
-                continue
-            if str(case["expected_error"]) not in validation_error:
+            if validation_error:
+                if str(case["expected_error"]) not in validation_error:
+                    continue
+            elif not case.get("allow_successful_source"):
                 continue
             base_stage_name = str(case["stage_name"]).split(
                 ".repair",
@@ -424,7 +559,7 @@ def _normalize_archival_input(
     return normalized
 
 
-async def _run_semantic_case(case_id: str) -> None:
+async def _run_semantic_case_legacy(case_id: str) -> None:
     """Run one case through current generation and validation."""
 
     case = _SEMANTIC_CASES[case_id]
@@ -463,6 +598,12 @@ async def _run_semantic_case(case_id: str) -> None:
             raise AssertionError(
                 "historical semantic candidate is not text"
             )
+        mutation = case.get("historical_response_transform")
+        if mutation is not None:
+            historical_response = _transform_historical_response(
+                historical_response,
+                mutation,
+            )
         historical_llm = _HistoricalFirstThenLiveLLM(
             base_services.llm,
             historical_response,
@@ -494,7 +635,7 @@ async def _run_semantic_case(case_id: str) -> None:
         )[0]
     )
     try:
-        await _appraise_semantic_item(
+        await appraise_semantic_question(
             question=question,
             item_question=question,
             evidence=payload["evidence"],
@@ -594,17 +735,33 @@ async def _run_semantic_case(case_id: str) -> None:
             "allowed_values",
         }
         contract_error = str(repair_payload["contract_error"])
-        assert "knowledge_gaps.k7.uncertainty" in contract_error
+        repair_error_fragments = tuple(
+            str(fragment)
+            for fragment in case.get(
+                "repair_error_fragments",
+                ("knowledge_gaps.k7.uncertainty",),
+            )
+        )
+        assert any(
+            fragment in contract_error
+            for fragment in repair_error_fragments
+        )
         assert "permitted paths:" not in contract_error
         assert (
             "permitted_delta_path_domains"
             in repair_payload["allowed_values"]
         )
         assert any(
-            stage.get("error") == historical_error
+            stage.get("error") == contract_error
             for stage in stages
             if isinstance(stage, Mapping)
         )
+    if case.get("require_live_repair"):
+        assert historical_llm is not None
+        assert len(historical_llm.calls) >= 2, (
+            "controlled semantic replay did not reach live repair"
+        )
+        assert failed_stages, "controlled invalid candidate was accepted"
     if not failed_stages:
         assert caught_error is None
         return
@@ -618,10 +775,21 @@ async def _run_semantic_case(case_id: str) -> None:
     if caught_error is None and successful_stages:
         return
     expected_error = str(case["expected_error"])
+    allowed_error_fragments = tuple(
+        str(fragment)
+        for fragment in case.get(
+            "allowed_error_fragments",
+            (expected_error,),
+        )
+    )
     observed_errors = [
         str(stage.get("error") or "") for stage in failed_stages
     ]
-    if not any(expected_error in error for error in observed_errors):
+    if not any(
+        fragment in error
+        for error in observed_errors
+        for fragment in allowed_error_fragments
+    ):
         pytest.fail(
             "current live model produced a different terminal contract "
             f"failure: {observed_errors}"
@@ -632,113 +800,389 @@ async def _run_semantic_case(case_id: str) -> None:
             caught_error.error_code
             == "semantic_appraisal_contract_exhausted"
         )
-        assert expected_error in str(caught_error)
+        if not case.get("require_live_repair"):
+            assert expected_error in str(caught_error)
 
 
-async def test_semantic_delta_path_not_owned_live_llm() -> None:
+async def _run_semantic_case(
+    case_id: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Replay one preserved candidate through every public downstream boundary."""
+
+    case = _SEMANTIC_CASES[case_id]
+    capsule, representative, _, _ = _load_case_capsule(case)
+    input_payload = capsule.get("input_payload")
+    if not isinstance(input_payload, Mapping):
+        raise AssertionError("failure capsule input payload is not an object")
+    normalized_input = _normalize_archival_input(input_payload)
+    _, _, _, questions = _build_appraisal_context(normalized_input)
+    question_id = case.get("question_id")
+    if not isinstance(question_id, str):
+        raise AssertionError("semantic replay question id is invalid")
+    question = next(
+        question for question in questions
+        if question.get("question_id") == question_id
+    )
+    raw_response = representative.get("raw_response_text")
+    if not isinstance(raw_response, str) or not raw_response:
+        raise AssertionError("preserved semantic candidate is missing")
+    mutation = case.get("historical_response_transform")
+    controlled_mutation: dict[str, object] | None = None
+    if mutation is not None:
+        before = parse_llm_json_output(
+            raw_response,
+            deterministic_only=True,
+        )
+        transformed = _transform_historical_response(raw_response, mutation)
+        after = json.loads(transformed)
+        pointer_by_mutation = {
+            "object_handle_not_permitted": "/proposition/object_handle",
+            "delta_reason_invalid": "/delta/reason",
+            "delta_type_invalid": "/delta/delta",
+        }
+        pointer = pointer_by_mutation.get(str(mutation))
+        if not isinstance(before, Mapping) or not isinstance(after, Mapping):
+            raise AssertionError("controlled mutation candidate is not an object")
+        if pointer is None:
+            raise AssertionError(f"unsupported mutation {mutation}")
+        field_name = pointer.rsplit("/", maxsplit=1)[-1]
+        parent_name = "proposition" if pointer.startswith("/proposition") else "delta"
+        before_parent = before.get(parent_name)
+        before_present = (
+            isinstance(before_parent, Mapping)
+            and field_name in before_parent
+        )
+        controlled_mutation = {
+            "classification": "controlled_candidate_mutation",
+            "source": "preserved_historical_candidate",
+            "json_pointer": pointer,
+            "before": (
+                before_parent[field_name]
+                if before_present
+                else None
+            ),
+            "before_present": before_present,
+            "after": after[parent_name][field_name],
+            "first_attempt_performance_evidence": False,
+        }
+        raw_response = transformed
+    trace_path = case.get("trace_path", _TRACE_STEPS_PATH)
+    if not isinstance(trace_path, Path):
+        trace_path = _TRACE_STEPS_PATH
+    result = await replay_appraisal_through_public_boundary(
+        input_payload=normalized_input,
+        question=question,
+        first_response_text=raw_response,
+        case_id=case_id,
+        expected_error_fragments=tuple(
+            str(fragment)
+            for fragment in case.get(
+                "allowed_error_fragments",
+                (str(case["expected_error"]),),
+            )
+        ),
+        source_trace_id=str(case["trace_id"]),
+        source_path=trace_path,
+        source_sha256=hashlib.sha256(trace_path.read_bytes()).hexdigest(),
+        candidate_classification=(
+            "controlled_candidate_mutation"
+            if controlled_mutation is not None
+            else "preserved_failed_candidate"
+        ),
+        controlled_mutation=controlled_mutation,
+        require_repair_call=bool(case.get("require_repair_call", True)),
+        monkeypatch=monkeypatch,
+    )
+    assert result["artifact_path"].exists()
+
+
+async def test_semantic_delta_path_not_owned_live_llm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Reproduce the captured relationship delta-path exhaustion."""
 
-    await _run_semantic_case("semantic_delta_path_not_owned")
+    await _run_semantic_case("semantic_delta_path_not_owned", monkeypatch)
 
 
-async def test_selected_evidence_unknown_handle_live_llm() -> None:
+async def test_selected_evidence_unknown_handle_live_llm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Reproduce the captured selected-evidence handle exhaustion."""
 
-    await _run_semantic_case("selected_evidence_unknown_handle")
+    await _run_semantic_case("selected_evidence_unknown_handle", monkeypatch)
 
 
-async def test_terminal_event_transition_rejected_live_llm() -> None:
+async def test_terminal_event_transition_rejected_live_llm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Reproduce the captured terminal-event transition exhaustion."""
 
-    await _run_semantic_case("terminal_event_transition_rejected")
+    await _run_semantic_case("terminal_event_transition_rejected", monkeypatch)
 
 
-async def test_candidate_origin_evidence_missing_live_llm() -> None:
+async def test_candidate_origin_evidence_missing_live_llm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Reproduce the captured candidate-origin evidence exhaustion."""
 
-    await _run_semantic_case("candidate_origin_evidence_missing")
+    await _run_semantic_case("candidate_origin_evidence_missing", monkeypatch)
 
 
-async def test_semantic_role_value_invalid_live_llm() -> None:
+async def test_semantic_role_value_invalid_live_llm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Reproduce the captured semantic-role exhaustion."""
 
-    await _run_semantic_case("semantic_role_value_invalid")
+    await _run_semantic_case("semantic_role_value_invalid", monkeypatch)
 
 
-async def test_current_run_event_agency_role_value_invalid_live_llm() -> None:
+async def test_current_run_event_agency_role_value_invalid_live_llm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Replay the current run's event-agency role-value failure."""
 
     await _run_semantic_case(
-        "current_run_event_agency_role_value_invalid"
+        "current_run_event_agency_role_value_invalid",
+        monkeypatch,
     )
 
 
-async def test_a1a573_goal_threat_unowned_path_live_llm() -> None:
+async def test_a1a573_goal_threat_unowned_path_live_llm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Replay the unowned knowledge-gap path from the plan evidence."""
 
     await _run_semantic_case(
-        "a1a573_goal_threat_unowned_knowledge_gap_path"
+        "a1a573_goal_threat_unowned_knowledge_gap_path",
+        monkeypatch,
     )
 
 
-async def test_resolved_knowledge_gap_transition_rejected_live_llm() -> None:
+async def test_resolved_knowledge_gap_transition_rejected_live_llm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Reproduce the captured resolved-gap transition exhaustion."""
 
-    await _run_semantic_case("resolved_knowledge_gap_transition_rejected")
+    await _run_semantic_case(
+        "resolved_knowledge_gap_transition_rejected",
+        monkeypatch,
+    )
 
 
-async def test_selected_roles_unknown_handle_live_llm() -> None:
+async def test_selected_roles_unknown_handle_live_llm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Reproduce the captured selected-role handle exhaustion."""
 
-    await _run_semantic_case("selected_roles_unknown_handle")
+    await _run_semantic_case("selected_roles_unknown_handle", monkeypatch)
 
 
-async def test_semantic_proposition_subject_kind_mismatch_live_llm() -> None:
+async def test_semantic_proposition_subject_kind_mismatch_live_llm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Reproduce the captured semantic subject-kind exhaustion."""
 
-    await _run_semantic_case("semantic_proposition_subject_kind_mismatch")
+    await _run_semantic_case(
+        "semantic_proposition_subject_kind_mismatch",
+        monkeypatch,
+    )
 
 
 async def test_semantic_proposition_object_handle_not_permitted_live_llm(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Reproduce the captured semantic object-handle exhaustion."""
 
     await _run_semantic_case(
-        "semantic_proposition_object_handle_not_permitted"
+        "semantic_proposition_object_handle_not_permitted",
+        monkeypatch,
     )
 
 
-async def test_delta_reason_invalid_live_llm() -> None:
+async def test_delta_reason_invalid_live_llm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Reproduce the captured semantic reason exhaustion."""
 
-    await _run_semantic_case("delta_reason_invalid")
+    await _run_semantic_case("delta_reason_invalid", monkeypatch)
 
 
-async def test_semantic_delta_type_invalid_live_llm() -> None:
+async def test_semantic_delta_type_invalid_live_llm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Reproduce the captured semantic delta-type exhaustion."""
 
-    await _run_semantic_case("semantic_delta_type_invalid")
+    await _run_semantic_case("semantic_delta_type_invalid", monkeypatch)
 
 
-async def test_semantic_micro_appraisal_fields_not_exact_live_llm() -> None:
+async def test_semantic_micro_appraisal_fields_not_exact_live_llm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Reproduce the captured singular semantic-item exhaustion."""
 
-    await _run_semantic_case("semantic_micro_appraisal_fields_not_exact")
-
-
-async def test_captured_trace_8d0d4295_capacity_path_live_llm() -> None:
-    """Reserve the one-at-a-time live capacity replay gate."""
-
-    pytest.skip(
-        "supplemental live capacity replay requires explicit live-gate "
-        "enablement after deterministic evidence review"
+    await _run_semantic_case(
+        "semantic_micro_appraisal_fields_not_exact",
+        monkeypatch,
     )
 
 
-async def test_captured_trace_9164e957_capacity_path_live_llm() -> None:
-    """Reserve the second one-at-a-time live capacity replay gate."""
+async def _run_capacity_live_replay_legacy(
+    short_trace_id: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Probe the live boundary, then replay the protected capacity candidate."""
 
-    pytest.skip(
-        "supplemental live capacity replay requires explicit live-gate "
-        "enablement after deterministic evidence review"
+    input_payload, trace_id, export_path = _load_capacity_probe_payload(
+        short_trace_id
+    )
+    payload, preliminary_state, projection, questions = (
+        _build_appraisal_context(input_payload)
+    )
+    question = next(
+        question
+        for question in questions
+        if question.get("question_id") == "q:event_agency"
+    )
+    base_services = build_cognition_core_services()
+    live_llm = _LiveCaptureLLM(base_services.llm)
+    services = replace(base_services, llm=live_llm)
+    live_result: object | None = None
+    live_error: dict[str, str] | None = None
+    try:
+        live_result = await appraise_semantic_question(
+            question,
+            payload["evidence"],
+            projection,
+            services,
+            validation_state=preliminary_state,
+        )
+    except (CognitionExecutionError, CognitionContextLimitError) as exc:
+        live_error = {
+            "type": type(exc).__name__,
+            "message": str(exc),
+        }
+    assert live_llm.calls, "capacity replay did not reach a real LLM call"
+
+    await asyncio.to_thread(
+        _replay_capacity_trace,
+        short_trace_id,
+        monkeypatch,
+    )
+    replay_path = (
+        _ROOT
+        / "test_artifacts"
+        / "diagnostics"
+        / f"cognition_failure_replay_{short_trace_id}.json"
+    )
+    assert replay_path.exists()
+    replay = json.loads(replay_path.read_text(encoding="utf-8"))
+    assert replay["rejection"]["failure_code"] == (
+        "semantic_appraisal_reduction_rejected"
+    )
+    assert replay["rejection"]["finalization_step"] == "apply_state_update"
+    assert replay["state_counts"]["active_events_before"] == 32
+    assert replay["state_counts"]["active_events_after"] <= 32
+    assert replay["failure_capsule_outcome"] == "partial_failure"
+    artifact_path = write_diagnostic_artifact(
+        f"capacity_live_replay_{short_trace_id}_{time_ns()}",
+        {
+            "schema_version": "cognition_core_v2_capacity_live_replay.v1",
+            "source_trace_id": trace_id,
+            "source_export": str(export_path),
+            "live_probe": {
+                "question_id": question["question_id"],
+                "model_calls": live_llm.calls,
+                "result": live_result,
+                "error": live_error,
+            },
+            "deterministic_replay_artifact": str(replay_path),
+            "replay_result": replay,
+            "quality_notes": (
+                "The live probe exercises the current Appraisal boundary; "
+                "the preserved candidate then exercises authoritative "
+                "capacity finalization without downstream mutation."
+            ),
+        },
+        artifact_root=_ARTIFACT_ROOT / "capacity",
+    )
+    assert artifact_path.exists()
+
+
+async def _run_capacity_live_replay(
+    short_trace_id: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Replay a protected capacity candidate through the public boundary."""
+
+    input_payload, candidate, export_path, source_trace_id = (
+        _load_capacity_replay_input(short_trace_id)
+    )
+    export = json.loads(export_path.read_text(encoding="utf-8"))
+    capsules = export.get("cognition_failure_capsules")
+    if not isinstance(capsules, list):
+        raise AssertionError("capacity replay capsules are missing")
+    capsule = next(
+        row for row in capsules
+        if isinstance(row, Mapping) and row.get("trace_id") == source_trace_id
+    )
+    attempts = capsule.get("attempts")
+    if not isinstance(attempts, list):
+        raise AssertionError("capacity replay attempts are missing")
+    raw_response = next(
+        attempt.get("raw_response_text")
+        for attempt in attempts
+        if (
+            isinstance(attempt, Mapping)
+            and str(attempt.get("stage_name", "")).startswith(
+                "semantic_appraisal.q:event_agency."
+            )
+            and attempt.get("parse_status") == "succeeded"
+            and attempt.get("parsed_output") == candidate
+            and isinstance(attempt.get("raw_response_text"), str)
+        )
+    )
+    _, _, _, questions = _build_appraisal_context(input_payload)
+    question = next(
+        question for question in questions
+        if question.get("question_id") == "q:event_agency"
+    )
+    replay = await replay_appraisal_through_public_boundary(
+        input_payload=input_payload,
+        question=question,
+        first_response_text=raw_response,
+        case_id=f"capacity_{short_trace_id}",
+        expected_error_fragments=(
+            "active_events capacity",
+            "protected by active causes",
+        ),
+        source_trace_id=source_trace_id,
+        source_path=export_path,
+        source_sha256=hashlib.sha256(export_path.read_bytes()).hexdigest(),
+        candidate_classification="preserved_failed_candidate",
+        require_repair_call=False,
+        monkeypatch=monkeypatch,
+    )
+    assert replay["artifact_path"].exists()
+
+
+async def test_captured_trace_8d0d4295_capacity_path_live_llm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The first protected capacity failure is contained after live probing."""
+
+    await _run_capacity_live_replay(
+        "8d0d4295",
+        monkeypatch,
+    )
+
+
+async def test_captured_trace_9164e957_capacity_path_live_llm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The second protected capacity failure is contained after live probing."""
+
+    await _run_capacity_live_replay(
+        "9164e957",
+        monkeypatch,
     )

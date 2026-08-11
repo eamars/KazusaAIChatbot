@@ -81,6 +81,9 @@ from kazusa_ai_chatbot.cognition_core_v2.workspace import (
     collapse_authoritative_relational_bid,
     collapse_bids,
 )
+from kazusa_ai_chatbot.cognition_episode import (
+    project_dialog_response_operation,
+)
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     RESOLVER_PENDING_RESOLUTION_VERSION,
     ResolverValidationError,
@@ -94,6 +97,7 @@ from kazusa_ai_chatbot.time_boundary import parse_storage_utc_datetime
 _DEGRADABLE_APPRAISAL_ERROR_CODES = frozenset({
     "semantic_appraisal_provider_exhausted",
     "semantic_appraisal_contract_exhausted",
+    "semantic_appraisal_state_incompatibility",
 })
 AUTHORITATIVE_RELATIONAL_COLLAPSE_REASON = (
     "authoritative_relational_stance_preserved_ordinary_response"
@@ -403,6 +407,18 @@ async def _run_cognition(
             ) from exc
     primary_bid = collapse.get("primary_bid")
     supporting_bids = collapse.get("supporting_bids", [])
+    episode_operation = project_dialog_response_operation(payload["episode"])
+    if (
+        primary_bid is None
+        and episode_operation is not None
+        and episode_operation["selection_required"]
+    ):
+        raise CognitionExecutionError(
+            "required selection has no admitted bid",
+            error_code="required_selection_without_admitted_bid",
+            stage="workspace_collapse",
+            safe_checkpoint="final_reduction",
+        )
     try:
         action_plan = await plan_actions(
             primary_bid=primary_bid,
@@ -1584,14 +1600,29 @@ async def _collect_appraisals(
                 raise result
             else:
                 error_code = result.error_code
+            failure_details = {
+                "question_id": question["question_id"],
+                "question_kind": question["question_kind"],
+                "failure_code": error_code,
+            }
+            if error_code == "semantic_appraisal_state_incompatibility":
+                original_state_error = result.__cause__
+                exception_text = (
+                    str(original_state_error)
+                    if isinstance(original_state_error, CognitionStateError)
+                    else str(result)
+                )
+                failure_details.update({
+                    "attempt_count": result.attempt_count,
+                    "disposition": "question_omitted",
+                    "exception_text": exception_text[
+                        :MAX_APPRAISAL_REJECTION_ERROR_CHARS
+                    ],
+                })
             failure_capsule.mark_current_failure(
                 failure_kind="semantic_appraisal_failure",
                 stage_name="semantic_appraisal",
-                details={
-                    "question_id": question["question_id"],
-                    "question_kind": question["question_kind"],
-                    "failure_code": error_code,
-                },
+                details=failure_details,
                 exception=result,
             )
             failures[question["question_id"]] = error_code
