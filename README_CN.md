@@ -620,7 +620,9 @@ Kazusa 不把所有上下文压平成一个提示词。即时表面文本、对�
 | [docs/HOWTO.md](docs/HOWTO.md) | 本地设置、环境变量、运行命令、适配器、测试 |
 | [文档指南](docs/DOCUMENTATION_GUIDE.md) | 文档角色、事实来源层级、模块 README 规则和中英文一致性 |
 | [子智能体接口指南](docs/SUBAGENT_INTERFACES.md) | 跨家族子智能体和 worker 文档词汇 |
-| [开发计划注册表](development_plans/README.md) | 活跃、归档、参考和路线图文档 |
+| [未来架构](docs/FUTURE_ARCHITECTURE.md) | 独立维护的未来架构方向 |
+| [架构参考](docs/architecture/) | 当前架构和合约参考 |
+| [开发计划注册表](development_plans/README.md) | 活跃计划、历史归档和长期路线图 |
 
 ## 快速开始
 
@@ -710,7 +712,9 @@ src/
   scripts/                     运维和维护 CLI
 docs/
   HOWTO.md                     设置、运行命令、环境变量、测试
-development_plans/             已批准、已归档和参考计划注册表
+  FUTURE_ARCHITECTURE.md       独立维护的未来架构
+  architecture/                当前架构和合约参考
+development_plans/             活跃计划、历史归档和长期路线图
 tests/                         确定性、live DB 和 live LLM 测试套件
 resources/
   avatar.png                   README 头像资源

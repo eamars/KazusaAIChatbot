@@ -8,8 +8,9 @@ _ROOT = Path(__file__).resolve().parents[1]
 _CANONICAL_README = _ROOT / "src/kazusa_ai_chatbot/self_cognition/README.md"
 _COGNITION_README = _ROOT / "src/kazusa_ai_chatbot/cognition_core_v2/README.md"
 _COGNITION_CONTRACTS_DOC = (
-    _ROOT / "development_plans/reference/designs/cognition_contracts_design.md"
+    _ROOT / "docs/architecture/cognition_contracts_design.md"
 )
+_FUTURE_ARCHITECTURE_DOC = _ROOT / "docs/FUTURE_ARCHITECTURE.md"
 _LEGACY_DOCS = [
     _ROOT / "development_plans/archive/superseded/self_cognition_tracking_icd.md",
     _ROOT / "development_plans/archive/superseded/self_cognition_reasoning_basis.md",
@@ -22,6 +23,17 @@ def _read_text(path: Path) -> str:
 
     content = path.read_text(encoding="utf-8")
     return content
+
+
+def test_future_architecture_doc_is_independent_of_plan_lifecycle() -> None:
+    """Future direction should live outside the executable plan registry."""
+
+    content = _read_text(_FUTURE_ARCHITECTURE_DOC)
+
+    assert "Status: living future architecture" in content
+    assert "Execution authority: none" in content
+    assert "development_plans/archive/" not in content
+    assert "development_plans/reference/" not in content
 
 
 def test_legacy_private_candidate_docs_have_superseded_banner() -> None:

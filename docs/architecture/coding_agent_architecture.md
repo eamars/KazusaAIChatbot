@@ -2,24 +2,12 @@
 
 ## Status
 
-- Type: reference architecture and decision record.
+- Type: current architecture reference and decision record.
 - Status: current reference.
-- Execution rule: use this document as context only. Implementation requires
-  an approved or in-progress plan under `development_plans/active/`.
-- Related execution and direction plans:
-  - `development_plans/archive/completed/short_term/coding_agent_phase0_fetching_plan.md`
-  - `development_plans/archive/completed/short_term/coding_agent_phase1_code_reading_final_plan.md`
-  - `development_plans/archive/completed/short_term/coding_agent_phase2_code_writing_plan.md`
-  - `development_plans/archive/completed/short_term/coding_agent_phase2_5_security_boundary_plan.md`
-  - `development_plans/archive/completed/short_term/coding_agent_phase3_background_worker_integration_plan.md`
-  - `development_plans/archive/completed/short_term/coding_agent_phase4_code_modifying_and_patching_plan.md`
-  - `development_plans/archive/completed/short_term/coding_agent_phase5_patch_apply_plan.md`
-  - `development_plans/archive/completed/short_term/coding_agent_phase6_code_executing_plan.md`
-  - `development_plans/archive/completed/short_term/coding_agent_phase7_existing_source_planning_plan.md`
-  - `development_plans/archive/completed/short_term/coding_agent_phase8_verify_repair_loop_plan.md`
-  - `development_plans/archive/completed/short_term/coding_agent_phase9_run_supervisor_plan.md`
-  - `development_plans/reference/designs/coding_agent_phase9_run_supervisor_architecture.md`
-  - `development_plans/reference/designs/coding_agent_phase10_repository_scale_reading_architecture.md`
+- Execution authority: none; implementation requires an approved or in-progress
+  plan under `development_plans/active/`.
+- Current implementation anchor:
+  `development_plans/active/short_term/coding_agent_assessment_gap_phase_d_plan.md`
 
 ## Cleanup Note
 

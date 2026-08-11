@@ -211,18 +211,20 @@ def test_selected_compact_module_readmes_keep_icd_sections() -> None:
             assert f"## {section}" in content
 
 
-def test_audit_report_preserves_historical_and_code_boundaries() -> None:
-    """The audit should keep historical plans and production code out of scope."""
+def test_current_doc_surfaces_are_explicit() -> None:
+    """The documentation guide should expose only current tracked surfaces."""
 
-    content = _read_doc(
-        "development_plans/reference/documentation_harmonization_audit_report.md"
-    )
+    content = _read_doc("docs/DOCUMENTATION_GUIDE.md")
 
     required_phrases = (
-        "development_plans/archive/completed/**/*.md",
-        "historical completed plan",
-        "Do not edit production Python code",
-        "Do not add a shared runtime subagent abstraction",
+        "docs/FUTURE_ARCHITECTURE.md",
+        "docs/architecture/**/*.md",
+        "development_plans/active/**/*.md",
+        "development_plans/long_term/todo.md",
+        "development_plans/archive/**/*.md",
+        "Historical plan record",
     )
     for phrase in required_phrases:
         assert phrase in content
+
+    assert "development_plans/reference/**/*.md" not in content

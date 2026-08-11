@@ -1,23 +1,18 @@
-# cognition core evolution progression
+# Future Architecture
 
 ## Document Control
 
-- Status: reference
-- Type: architectural progression
-- Execution rule: this document is not an implementation contract. Promote any
-  item below into `active/short_term/` or `active/bugfix/` before production
-  work.
-- Related references:
-  - `development_plans/archive/superseded/self_cognition_loop_architecture.md`
-  - `development_plans/archive/superseded/self_cognition_reasoning_basis.md`
-  - `development_plans/archive/superseded/self_cognition_tracking_icd.md`
-  - `development_plans/archive/completed/short_term/multi_source_cognition_architecture_plan.md`
-  - `development_plans/archive/completed/short_term/global_character_growth_from_reflection_plan.md`
+- Status: living future architecture
+- Type: independently maintained architecture direction
+- Execution authority: none
+- Change policy: update this document when the intended future architecture
+  changes. Implementation work belongs in an approved or in-progress plan
+  under `development_plans/active/`.
 - Scope: review the current character growth and cognition-core architecture
   against industrial cognition/agent frameworks, and define a sequenced
   progression toward a self-driven evolving system that interacts with the
   world more richly.
-- Audience: planners drafting the next short-term plans for cognition,
+- Audience: maintainers deciding the next architecture direction for cognition,
   reflection, growth, dispatcher, and self-cognition surfaces.
 
 ## Summary
@@ -598,6 +593,6 @@ later item presupposes this pair has landed.
 The natural next reference is `cognition_contracts_design.md`, which locks
 the seven contracts above as concrete schemas, interfaces, and registry
 shapes. No expansion plan derived from this progression should be
-promoted to `active/short_term/` before that contracts reference exists
-and is approved — otherwise the architecture will accumulate parallel
+assigned to an active implementation plan before that contracts reference
+exists and is approved — otherwise the architecture will accumulate parallel
 ad-hoc shapes faster than they can be unified.
