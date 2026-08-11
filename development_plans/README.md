@@ -90,7 +90,6 @@ long_term/todo.md
 | [qq_group_public_scene_response_ordering_bugfix_plan.md](archive/completed/bugfix/qq_group_public_scene_response_ordering_bugfix_plan.md) | QQ multi-user public-scene composition and same-group response-ordering bugfix | completed |
 | [cognition_core_v2_first_pass_robustness_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_first_pass_robustness_bugfix_plan.md) | Core V2 first-pass generation grounding, evaluator feedback, per-stage token/character budget rebalance, and deterministic failure-path recovery bugfix plan | completed |
 | [cognition_core_v2_context_fade_and_sleep_phase_plan.md](archive/completed/bugfix/cognition_core_v2_context_fade_and_sleep_phase_plan.md) | Deterministic age-based discard of group-scene turns and conversation-progress topics before projection, plus cognition V2 ownership of the character sleep phase and morning refresh | completed |
-| [relevance_pre_active_answer_attribution_bugfix_plan.md](active/bugfix/relevance_pre_active_answer_attribution_bugfix_plan.md) | Large settled-relevance pre-active answer attribution bugfix plan | completed |
 
 ## Reference Documents
 
@@ -574,6 +573,18 @@ residuals as passing.
 |---|---|
 | Moved from active bugfix to completed archive by explicit user acceptance with recorded residuals | `cognition_core_v2_first_pass_robustness_bugfix_plan.md` |
 
+### 2026-08-11 relevance pre-active answer attribution lifecycle closure
+
+The settled-relevance pre-active answer attribution bugfix has a completed
+execution record: all five stages are checked off, deterministic and live
+verification evidence is recorded, and the independent review disposition is
+approved for closeout. The active registry entry was stale; the plan is now
+preserved as completed historical evidence.
+
+| Outcome | Plan |
+|---|---|
+| Moved from active bugfix to completed archive | `relevance_pre_active_answer_attribution_bugfix_plan.md` |
+
 ## Archive
 
 Completed and superseded records live under `archive/`. Use them for historical
@@ -648,6 +659,7 @@ plans.
 | [rag_retrieval_top_k_embedding_tuning_plan.md](archive/completed/bugfix/rag_retrieval_top_k_embedding_tuning_plan.md) |
 | [relevance_input_scope_robustness_bugfix_plan.md](archive/completed/bugfix/relevance_input_scope_robustness_bugfix_plan.md) |
 | [relevance_evidence_grounded_admission_over_sensitivity_bugfix_plan.md](archive/completed/bugfix/relevance_evidence_grounded_admission_over_sensitivity_bugfix_plan.md) |
+| [relevance_pre_active_answer_attribution_bugfix_plan.md](archive/completed/bugfix/relevance_pre_active_answer_attribution_bugfix_plan.md) |
 | [required_selection_partial_recovery_bugfix_plan.md](archive/completed/bugfix/required_selection_partial_recovery_bugfix_plan.md) |
 | [reflection_group_scene_digest_self_cognition_bugfix_plan.md](archive/completed/bugfix/reflection_group_scene_digest_self_cognition_bugfix_plan.md) |
 | [reflection_global_promotion_replay_bugfix_plan.md](archive/completed/bugfix/reflection_global_promotion_replay_bugfix_plan.md) |
