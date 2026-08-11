@@ -691,7 +691,9 @@ Other project documents:
 | [docs/HOWTO.md](docs/HOWTO.md)                          | Local setup, environment variables, run commands, adapters, tests |
 | [Documentation Guide](docs/DOCUMENTATION_GUIDE.md)      | Document roles, source hierarchy, module README rules, parity     |
 | [Subagent Interface Guide](docs/SUBAGENT_INTERFACES.md) | Cross-family subagent and worker documentation vocabulary         |
-| [Development Plans Registry](development_plans/README.md) | Active, archived, reference, and roadmap documents              |
+| [Future Architecture](docs/FUTURE_ARCHITECTURE.md)      | Independently maintained future architecture direction           |
+| [Architecture References](docs/architecture/)            | Current architecture and contract references                     |
+| [Development Plans Registry](development_plans/README.md) | Active plans, archive, and long-term roadmap                    |
 
 ## Quick Start
 
@@ -783,7 +785,9 @@ src/
   scripts/                     Operator and maintenance CLIs
 docs/
   HOWTO.md                     Setup, runtime commands, environment, tests
-development_plans/             Approved, archived, and reference plan registry
+  FUTURE_ARCHITECTURE.md       Independently maintained future architecture
+  architecture/                Current architecture and contract references
+development_plans/             Active plans, historical archive, and roadmap
 tests/                         Deterministic, live DB, and live LLM test suites
 resources/
   avatar.png                   README avatar asset

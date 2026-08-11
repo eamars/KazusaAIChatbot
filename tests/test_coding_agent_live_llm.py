@@ -34,10 +34,7 @@ _HARD_GATE_WORKSPACE_ROOT = (
     / "normal_deep_workspace_root"
     / "managed_checkout_area"
 )
-_REMEDIATION_PLAN_PATH = Path(
-    "development_plans/archive/completed/short_term/"
-    "coding_agent_phase1_real_repo_retrieval_remediation_plan.md"
-)
+_ARCHITECTURE_DOC_PATH = Path("docs/architecture/coding_agent_architecture.md")
 
 
 def _write_text(path: Path, lines: list[str]) -> None:
@@ -311,15 +308,17 @@ async def _require_llm_available() -> None:
             )
 
 
-def _read_plan_for_hard_gate() -> dict[str, object]:
-    plan_text = _REMEDIATION_PLAN_PATH.read_text(encoding="utf-8")
-    plan_sha256 = hashlib.sha256(plan_text.encode("utf-8")).hexdigest()
-    plan_snapshot = {
-        "path": _REMEDIATION_PLAN_PATH.as_posix(),
-        "sha256": plan_sha256,
-        "line_count": len(plan_text.splitlines()),
+def _read_architecture_for_hard_gate() -> dict[str, object]:
+    architecture_text = _ARCHITECTURE_DOC_PATH.read_text(encoding="utf-8")
+    architecture_sha256 = hashlib.sha256(
+        architecture_text.encode("utf-8")
+    ).hexdigest()
+    architecture_snapshot = {
+        "path": _ARCHITECTURE_DOC_PATH.as_posix(),
+        "sha256": architecture_sha256,
+        "line_count": len(architecture_text.splitlines()),
     }
-    return plan_snapshot
+    return architecture_snapshot
 
 
 def _trace_payload(
@@ -388,7 +387,7 @@ def _write_hard_gate_trace(
     case_id: str,
     question: str,
     source_url: str,
-    plan_snapshot: dict[str, object],
+    architecture_snapshot: dict[str, object],
     fetching_result: dict[str, object],
     reading_trace: dict[str, object],
     response: dict[str, object],
@@ -399,7 +398,7 @@ def _write_hard_gate_trace(
         "gate_type": "phase1_hard_real_github_gate",
         "question": question,
         "source_url": source_url,
-        "plan_snapshot": plan_snapshot,
+        "architecture_snapshot": architecture_snapshot,
         "effective_route_base_url": _effective_route_base_url(),
         "effective_route_base_urls": _effective_route_base_urls(),
         "workspace_root": "<redacted>",
@@ -472,7 +471,7 @@ async def _run_hard_real_github_gate(
     question: str,
 ) -> dict[str, object]:
     await _require_llm_available()
-    plan_snapshot = _read_plan_for_hard_gate()
+    architecture_snapshot = _read_architecture_for_hard_gate()
 
     from kazusa_ai_chatbot.coding_agent import code_fetching
     from kazusa_ai_chatbot.coding_agent.code_reading.supervisor import (
@@ -528,7 +527,7 @@ async def _run_hard_real_github_gate(
         case_id=case_id,
         question=question,
         source_url=source_url,
-        plan_snapshot=plan_snapshot,
+        architecture_snapshot=architecture_snapshot,
         fetching_result=fetching_result,
         reading_trace=reading_trace,
         response=response,

@@ -7,8 +7,8 @@
   docs, and development-plan records
 - Source evidence: current source code, deterministic tests, module ICDs,
   `docs/HOWTO.md`, and `development_plans/README.md`
-- Change policy: keep living docs current; leave completed and superseded
-  development-plan bodies as historical records
+- Change policy: keep living docs current; keep completed and superseded
+  plan bodies under `development_plans/archive/` as historical records
 
 ## Purpose
 
@@ -27,10 +27,12 @@ execution evidence.
 | `AGENTS.md` | Agent instruction | Project owner | Own process rules and architecture guardrails for agent work. |
 | `src/**/README.md` | Module ICD or package guide | Module owner | Own module purpose, boundary, public interfaces, runtime flow, failure behavior, and tests. |
 | `tests/**/README.md` | Test documentation | Test owner | Explain harness setup or manual expectations for that test family. |
-| `development_plans/README.md` | Plan lifecycle registry | Development plans | Own active, reference, historical, and triage lifecycle classification. |
+| `docs/FUTURE_ARCHITECTURE.md` | Independent future architecture direction | Project architecture | Own long-horizon architecture direction without becoming an execution plan. |
+| `docs/architecture/**/*.md` | Current architecture and contract reference | Architecture owner | Describe stable current ownership and contract decisions. |
+| `development_plans/README.md` | Current plan lifecycle registry | Development plans | Own active and long-term planning classification. |
 | `development_plans/active/**/*.md` | Active execution contract | Plan owner | Execute only when the registry and plan status allow it. |
-| `development_plans/reference/**/*.md` | Reference design | Plan owner | Use as context only. |
-| `development_plans/archive/**/*.md` | Historical evidence | Plan owner | Do not rewrite for style or current terminology. |
+| `development_plans/long_term/todo.md` | Living roadmap | Plan owner | Use as direction only; promote work before implementation. |
+| `development_plans/archive/**/*.md` | Historical plan record | Plan owner | Read for provenance; do not execute or rewrite as current architecture. |
 
 ## Source-Of-Truth Hierarchy
 
@@ -42,8 +44,11 @@ Use the narrowest authoritative source for the claim being edited:
    runbook endpoint notes.
 4. Top-level READMEs summarize current system knowledge and link to the
    contract docs.
-5. Development plans record lifecycle-bound intent and evidence; archived plans
-   do not define current runtime behavior.
+5. `docs/FUTURE_ARCHITECTURE.md` records independent future direction and does
+   not authorize implementation.
+6. Active development plans record lifecycle-bound intent and evidence.
+7. Archived plans preserve historical execution evidence without defining
+   current runtime behavior.
 
 When source and docs disagree, document the current implemented behavior and
 record suspected runtime defects as follow-up work instead of changing code
@@ -88,9 +93,9 @@ subsystem named by the English README.
 ## Historical Plan Policy
 
 Completed and superseded plans under `development_plans/archive/**` are
-historical evidence. Do not rewrite their bodies for style, route names, module
-vocabulary, or current architecture. Correct only registry mistakes or explicit
-supersession metadata when a separate approved plan scopes that change.
+historical evidence. Read them for provenance and prior decisions, but use
+current source, module ICDs, architecture references, and active plans for
+present behavior and implementation.
 
 Active plans under `development_plans/active/**` are lifecycle contracts, not
 general documentation pages. Update their status and evidence only according to
@@ -120,10 +125,11 @@ general documentation pages. Update their status and evidence only according to
   stance or final dialog.
 - Do not expose raw prompts, secrets, database rows, adapter wire syntax, raw
   platform ids, embeddings, or protected trace payloads in public docs.
-- Do not rewrite archived plans as if they were living architecture docs.
+- Do not recreate tracked `reference/`, `triage/`, or external-tool
+  documentation folders under the current working tree.
 
 ## Verification
 
-Use `venv\Scripts\python.exe -m pytest tests\test_documentation_harmonization.py -q`
-for the focused documentation contract. Then run the existing doc-sensitive
+Use `venv\Scripts\python.exe -m pytest tests\test_documentation_harmonization.py tests\test_self_cognition_architecture_docs.py -q`
+for the focused documentation contracts. Then run the existing doc-sensitive
 tests named by the active plan before final sign-off.

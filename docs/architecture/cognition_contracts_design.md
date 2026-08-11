@@ -1,16 +1,17 @@
 # Cognition Contracts Design
 
-## Status
+## Document Control
 
 - Type: authoritative reference design
-- Status: approved reference
+- Status: current contract reference
 - Scope: registry-level schemas, ownership rules, and extension patterns for the
   seven cognition contracts
-- Execution rule: do not execute directly from this document
+- Execution authority: none; production changes require an active development
+  plan
 
-This document consolidates the forward-looking contract decisions from
-`cognition_core_evolution_progression.md`, the self-cognition architecture
-references, and the action-spec effector-expansion design discussion.
+This document consolidates the contract decisions from
+`docs/FUTURE_ARCHITECTURE.md`, the self-cognition module ICD, and the action
+spec effector-expansion design discussion.
 
 This document is the authoritative source for contract-level shape and
 ownership. Where it conflicts with older forward-looking design notes, this
@@ -1192,10 +1193,8 @@ Plans may be approved once:
 
 ## Relationship To The Stage 3 Adoption Plan
 
-The active draft
-`development_plans/archive/completed/short_term/cognition_core_v2_stage_3_system_adoption_plan.md`
-and its mandatory companions define the next native runtime slice of contracts
-1, 2, 3, 4, 6, and 7:
+The current implementation plan and its mandatory companions define the next
+native runtime slice of contracts 1, 2, 3, 4, 6, and 7:
 
 - contract 1: self-cognition and future cognition requests enter as typed
   trigger-source episodes;
@@ -1208,16 +1207,15 @@ and its mandatory companions define the next native runtime slice of contracts
   memory owner;
 - contract 7: capability spec plus handler and audit pattern.
 
-That plan becomes executable only after approval and a separate implementation
-command. Its stages keep this reference authoritative and update downstream
-architecture documents when the contract surface changes.
+The implementation plan becomes executable only after approval and a separate
+implementation command. Its stages keep this reference authoritative and
+update downstream architecture documents when the contract surface changes.
 
 ## Independent Reference Review Resolution
 
 The 2026-05-16 independent review identified three approval blockers:
 
-- `reflection_promoted` conflicted with
-  `self_cognition_reasoning_basis.md`;
+- `reflection_promoted` conflicted with an earlier self-cognition rationale;
 - the trigger-source lists disagreed about `system_event`;
 - several referenced registry payloads were missing.
 
