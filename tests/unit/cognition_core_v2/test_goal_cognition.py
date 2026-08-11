@@ -7,6 +7,7 @@ from importlib import import_module
 import pytest
 
 from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
+    GOAL_COGNITION_PROMPT,
     validate_selection_goal_draft,
 )
 from kazusa_ai_chatbot.cognition_episode import (
@@ -113,3 +114,12 @@ def test_required_selection_rejects_fixed_role_conflict() -> None:
             }],
             maximum_evidence_handles=4,
         )
+
+
+def test_goal_prompt_labels_confidence_as_descriptor() -> None:
+    """Goal prompts distinguish semantic confidence from evaluator scores."""
+
+    prompt = GOAL_COGNITION_PROMPT
+
+    assert "confidence 是有界的置信度描述" in prompt
+    assert "不是 score" in prompt

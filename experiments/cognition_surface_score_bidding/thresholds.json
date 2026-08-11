@@ -1,0 +1,21 @@
+{
+  "schema_version": "cognition_surface_score_thresholds.v1",
+  "status": "blocked_pending_calibration",
+  "accepted_for_production": false,
+  "owners": {
+    "surface_content_plan": {
+      "threshold": 0.75,
+      "threshold_status": "placeholder_not_calibrated",
+      "score_samples": [],
+      "calibration_contexts": 0,
+      "held_out_contexts": 0
+    },
+    "surface_dialog_compliance_repair": {
+      "threshold": 0.75,
+      "threshold_status": "placeholder_not_calibrated",
+      "score_samples": [],
+      "calibration_contexts": 0,
+      "held_out_contexts": 0
+    }
+  }
+}

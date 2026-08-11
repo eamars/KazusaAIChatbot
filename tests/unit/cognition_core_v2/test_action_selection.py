@@ -6,7 +6,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_core_v2.action_selection import plan_actions
+from kazusa_ai_chatbot.cognition_core_v2.action_selection import (
+    ACTION_PLANNING_PROMPT,
+    plan_actions,
+)
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     EVIDENCE_SOURCE_QUESTION_IDS,
 )
@@ -186,3 +189,12 @@ def test_action_selection_exposes_owned_contract() -> None:
     """Keep the action planner entrypoint attached to this owner."""
 
     assert callable(plan_actions)
+
+
+def test_action_planning_keeps_confidence_descriptor_advisory() -> None:
+    """Action planning cannot treat confidence context as a quality score."""
+
+    prompt = ACTION_PLANNING_PROMPT
+
+    assert "confidence 是有界的置信度描述" in prompt
+    assert "不是 score" in prompt

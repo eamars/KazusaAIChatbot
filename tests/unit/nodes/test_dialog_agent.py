@@ -16,6 +16,7 @@ from kazusa_ai_chatbot.cognition_episode import (
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
 from kazusa_ai_chatbot.nodes.dialog_agent import (
     DialogGenerationContractError,
+    StateContractError,
     dialog_generator,
 )
 from tests.unit.nodes.dialog_fixtures import build_dialog_state
@@ -157,3 +158,26 @@ def test_dialog_agent_exposes_owned_contract() -> None:
     """Keep terminal dialog generation attached to this source owner."""
 
     assert callable(dialog_generator)
+
+
+def test_dialog_score_is_numeric_quality_signal() -> None:
+    """Dialog quality uses evaluator-owned numeric scores, not confidence."""
+
+    score = dialog_module._validate_numeric_score(
+        0.75,
+        label="dialog",
+    )
+
+    assert score == 0.75
+    assert isinstance(score, float)
+
+
+def test_numeric_score_rejects_boolean_and_out_of_range_values() -> None:
+    """Boolean, non-finite, and out-of-range scores fail closed."""
+
+    for value in (True, False, -0.1, 1.1, float("nan"), float("inf")):
+        with pytest.raises(StateContractError, match="score"):
+            dialog_module._validate_numeric_score(
+                value,
+                label="dialog",
+            )

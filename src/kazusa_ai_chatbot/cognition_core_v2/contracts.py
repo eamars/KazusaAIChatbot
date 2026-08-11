@@ -527,7 +527,11 @@ class SelfCognitionResponseDecisionV1(TypedDict):
 
 
 class GroupEngagementActionContextV2(TypedDict):
-    """Bounded advisory participation guidance for one group scene."""
+    """Bounded advisory participation guidance for one group scene.
+
+    ``confidence`` is a bounded semantic confidence descriptor, not a numeric
+    score or a ranking signal.
+    """
 
     engagement_guidelines: list[str]
     confidence: str
@@ -632,7 +636,11 @@ class SemanticAppraisalResultV2(TypedDict):
 
 
 class ActionBidV2(TypedDict):
-    """Complete branch-owned bid copied without model-authored authority."""
+    """Complete branch-owned bid copied without model-authored authority.
+
+    ``confidence`` is a bounded semantic descriptor used as advisory context;
+    it is not a score and never ranks, thresholds, authorizes, or gates output.
+    """
 
     branch_id: str
     goal_ref: EntityRefV2
@@ -650,7 +658,10 @@ class ActionBidV2(TypedDict):
 
 
 class GoalBidDraftV2(TypedDict):
-    """Model-owned branch draft before deterministic handle mapping."""
+    """Model-owned branch draft before deterministic handle mapping.
+
+    ``confidence`` remains a bounded descriptor and not a quality score.
+    """
 
     intention: str
     desired_outcome: str
@@ -806,7 +817,11 @@ class CognitionAppraisalObservationV2(TypedDict):
 
 
 class CognitionBranchObservationV2(TypedDict):
-    """Safe semantic result from one preliminary or final goal branch."""
+    """Safe semantic result from one preliminary or final goal branch.
+
+    The optional ``confidence`` field is advisory descriptor context, never a
+    numeric score used for branch ranking or thresholding.
+    """
 
     phase: Literal["preliminary", "final"]
     branch_index: int
@@ -2227,7 +2242,7 @@ def _validate_intention(value: Any) -> None:
 
 
 def validate_action_bid(value: Any) -> None:
-    """Validate one complete branch-owned bid at the public boundary."""
+    """Validate one complete bid and keep confidence descriptor-only."""
 
     if not isinstance(value, Mapping):
         raise CognitionContractError("action bid must be a mapping")
@@ -2259,7 +2274,12 @@ def validate_action_bid(value: Any) -> None:
         "private_monologue",
         "confidence",
     ):
-        _require_text(value[field_name], f"action bid.{field_name}")
+        field_label = (
+            "action bid.confidence descriptor"
+            if field_name == "confidence"
+            else f"action bid.{field_name}"
+        )
+        _require_text(value[field_name], field_label)
     _validate_entity_ref(value["goal_ref"], "action bid.goal_ref")
     _validate_roles(value["target_roles"], "action bid.target_roles")
     _validate_text_list(value["evidence_handles"], "action bid.evidence_handles")
@@ -2629,7 +2649,10 @@ def _validate_cognition_appraisal_observation(value: Any) -> None:
 
 
 def _validate_cognition_branch_observation(value: Any) -> None:
-    """Validate one branch result while excluding persistent handles."""
+    """Validate one branch result while excluding persistent handles.
+
+    Confidence remains bounded text advisory context rather than a score.
+    """
 
     required = {
         "phase",
@@ -2691,7 +2714,11 @@ def _validate_cognition_branch_observation(value: Any) -> None:
         if field_name in value:
             _require_text(
                 value[field_name],
-                f"cognition branch observation.{field_name}",
+                (
+                    "cognition branch observation.confidence descriptor"
+                    if field_name == "confidence"
+                    else f"cognition branch observation.{field_name}"
+                ),
                 maximum=1500,
             )
     if "expected_consequences" in value:
@@ -3318,7 +3345,7 @@ def _validate_scene_participant_bindings(value: Any) -> None:
 
 
 def _validate_group_engagement_action_context(value: Any) -> None:
-    """Validate bounded advisory guidance from one group style image."""
+    """Validate advisory guidance with a descriptor-only confidence field."""
 
     if not isinstance(value, Mapping):
         raise CognitionContractError(
@@ -3346,7 +3373,7 @@ def _validate_group_engagement_action_context(value: Any) -> None:
         )
     _require_bounded_text(
         value["confidence"],
-        "group engagement confidence",
+        "group engagement confidence descriptor",
         maximum=GROUP_ENGAGEMENT_CONFIDENCE_MAX_CHARS,
     )
     if not guidelines and value["confidence"]:

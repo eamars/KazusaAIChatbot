@@ -7,12 +7,17 @@
   the existing normal response and deterministic fallback behavior.
 - Plan class: medium, evidence-gated quality experiment with a conditional
   production follow-up; no database migration.
-- Status: draft.
+- Status: completed.
 - Acceptance state: the original five-stage score-fallback proposal was
   independently rejected by a gpt-5.6-sol high-reasoning reviewer. This
   revised plan records the review decision and narrows the candidate scope to
-  two surface-quality experiments. It is not an authorization to edit
-  production code.
+  two surface-quality experiments. The user explicitly authorized execution
+  on 2026-08-11. The required evidence gate then failed: both owner artifacts
+  have zero trace-backed contexts and unaccepted placeholder thresholds. The
+  parent therefore retained the baseline first-valid/degraded runtime and
+  closed the production score cutover as unapproved; descriptor and workspace
+  boundary fixes remain active. Final gpt-5.6-sol signoff approved no-cutover
+  historical closeout on 2026-08-11.
 - Decision: zero current owners can adopt the completed dialog fix directly
   under their current contracts. Two owners are defensible research
   candidates: surface_content_plan and
@@ -184,9 +189,9 @@ interaction-style eligibility contract.
 
 ## Mandatory Rules
 
-- Production implementation requires this plan to be promoted to approved or
-  in_progress and requires explicit user authorization. The current draft
-  only authorizes planning and evidence definition.
+- Production implementation requires this plan to be in_progress and requires
+  explicit user authorization. The current execution retains the evidence and
+  calibration gates defined below.
 - Use venv\Scripts\python.exe for Python and pytest commands. Use apply_patch
   for manual file edits. Keep .env outside inspection.
 - Preserve the current three-attempt cap and the current owner-specific retry
@@ -460,14 +465,14 @@ semantic owner set.
 
 | Repository path | Changed symbol/contract | Semantic owner | Deterministic pytest node IDs | Supplemental integration/live nodes | Mode | Regression prevented |
 |---|---|---|---|---|---|---|
-| src/kazusa_ai_chatbot/cognition_core_v2/surface_stages.py | _run_surface_stage; owner-local candidate ledger and threshold/exhaustion selection for the two included owners | surface-stage quality selection | tests/unit/cognition_core_v2/test_surface_stages.py::test_surface_score_contract_rejects_invalid_scores; tests/unit/cognition_core_v2/test_surface_stages.py::test_surface_score_selection_uses_threshold_and_highest_exhaustion; tests/unit/cognition_core_v2/test_surface_stages.py::test_surface_score_tie_breaking_is_deterministic; tests/unit/cognition_core_v2/test_surface_stages.py::test_surface_stages_exposes_owned_contract | tests/test_cognition_core_v2_model_retry_continuity.py::test_text_surface_retry_or_validated_degraded_projection; tests/test_cognition_core_v2_model_retry_continuity.py::test_dialog_surface_repair_exhaustion_retains_valid_surface; tests/test_cognition_core_v2_surface_score_bidding_live_llm.py::test_live_surface_content_score_orders_candidates; tests/test_cognition_core_v2_surface_score_bidding_live_llm.py::test_live_dialog_compliance_repair_score_orders_candidates | deterministic unit, regression integration, one-at-a-time live | Prevents a malformed, uncalibrated, or lower-quality candidate from being selected, while preventing avoidable quality exhaustion from crashing the surface path. |
+| src/kazusa_ai_chatbot/cognition_core_v2/surface_stages.py | baseline first-valid retry and fallback retained after the score evidence gate failed | surface-stage quality selection | tests/unit/cognition_core_v2/test_surface_stages.py::test_surface_stages_exposes_owned_contract | tests/test_cognition_core_v2_model_retry_continuity.py::test_text_surface_retry_or_validated_degraded_projection; tests/test_cognition_core_v2_model_retry_continuity.py::test_dialog_surface_repair_exhaustion_retains_valid_surface; tests/test_cognition_core_v2_surface_score_bidding_live_llm.py::test_live_surface_content_score_orders_candidates; tests/test_cognition_core_v2_surface_score_bidding_live_llm.py::test_live_dialog_compliance_repair_score_orders_candidates | deterministic unit, regression integration, one-at-a-time live gate reserved | Prevents an uncalibrated score path from changing the existing surface fallback. |
 | src/kazusa_ai_chatbot/cognition_core_v2/surface.py | run_text_surface_planning, repair_text_surface_planning, and degraded-surface routing | canonical surface truth and fallback | tests/unit/cognition_core_v2/test_surface.py::test_surface_score_fallback_preserves_canonical_intent_and_limits; tests/unit/cognition_core_v2/test_surface.py::test_surface_output_preserves_relational_willingness_v2; tests/unit/cognition_core_v2/test_surface.py::test_surface_exposes_owned_contract | tests/integration/cognition_core_v2/test_relational_stance_propagation.py::test_relational_stance_preserves_polarity_through_surface_and_dialog; tests/test_cognition_core_v2_model_retry_continuity.py::test_degraded_text_surface_projects_only_validated_v2_truth | deterministic unit and integration | Prevents score selection from changing authoritative cognition truth, relational willingness, limits, or downstream dialog inputs. |
-| src/kazusa_ai_chatbot/cognition_core_v2/workspace.py | workspace candidate prompt projection excludes producer confidence from quality comparison | workspace relevance partition | tests/unit/cognition_core_v2/test_workspace.py::test_workspace_collapse_does_not_rank_by_confidence_descriptor; tests/unit/cognition_core_v2/test_workspace.py::test_workspace_exposes_owned_contract | tests/test_cognition_core_v2_workspace_collapse.py::test_workspace_collapse_preserves_relevance_partition | deterministic unit and integration | Prevents a free-form producer descriptor from becoming an implicit quality bid. |
+| src/kazusa_ai_chatbot/cognition_core_v2/workspace.py | workspace candidate prompt projection excludes producer confidence from quality comparison | workspace relevance partition | tests/unit/cognition_core_v2/test_workspace.py::test_workspace_collapse_does_not_rank_by_confidence_descriptor; tests/unit/cognition_core_v2/test_workspace.py::test_workspace_exposes_owned_contract | none | deterministic unit | Prevents a free-form producer descriptor from becoming an implicit quality bid. |
 | src/kazusa_ai_chatbot/cognition_core_v2/contracts.py | confidence descriptor type and non-ranking boundary for V2 contracts | canonical V2 contract validator | tests/unit/cognition_core_v2/test_contracts.py::test_goal_and_action_confidence_reject_numeric_values; tests/unit/cognition_core_v2/test_contracts.py::test_group_confidence_rejects_numeric_values; tests/unit/cognition_core_v2/test_contracts.py::test_contracts_exposes_owned_contract | tests/test_cognition_core_v2_contracts.py::test_group_context_rejects_every_invalid_shape_and_bound | deterministic unit and integration | Prevents numeric confidence from crossing a semantic contract boundary. |
 | src/kazusa_ai_chatbot/cognition_core_v2/goal_cognition.py | goal prompt and selection contract labels confidence as descriptor-only | cognition stance and goal owner | tests/unit/cognition_core_v2/test_goal_cognition.py::test_goal_prompt_labels_confidence_as_descriptor; tests/unit/cognition_core_v2/test_goal_cognition.py::test_goal_cognition_exposes_owned_contract | tests/test_cognition_core_v2_prompt_contract_guidance.py::test_nonordinary_generic_goal_prompt_excludes_relational_contract | deterministic unit and prompt-contract regression | Prevents goal self-assessment from being mistaken for evaluator score. |
 | src/kazusa_ai_chatbot/cognition_core_v2/action_selection.py | action-planning projection retains confidence only as labeled advisory context | action proposal owner | tests/unit/cognition_core_v2/test_action_selection.py::test_action_planning_keeps_confidence_descriptor_advisory; tests/unit/cognition_core_v2/test_action_selection.py::test_action_selection_exposes_owned_contract | tests/test_cognition_core_v2_action_planning_bugfix.py::test_action_plan_exhaustion_returns_empty_control_output | deterministic unit and regression integration | Prevents descriptor propagation from becoming numeric action ranking or authorization. |
 | src/kazusa_ai_chatbot/reflection_cycle/interaction_style.py and src/kazusa_ai_chatbot/db/interaction_style_images.py | existing semantic overlay confidence and separate daily eligibility confidence | interaction-style semantic context | tests/test_interaction_style_images.py::test_validate_interaction_style_overlay_accepts_semantic_confidence; tests/test_interaction_style_images.py::test_validate_interaction_style_overlay_caps_confidence_descriptor; tests/test_interaction_style_images.py::test_validate_interaction_style_overlay_rejects_confident_empty_overlay | none | deterministic regression | Prevents the persisted interaction-style descriptor or daily eligibility enum from being conflated with V2 evaluator score. |
-| src/kazusa_ai_chatbot/nodes/dialog_agent.py | existing evaluator score remains the sole dialog quality-ranking field | dialog quality evaluator | tests/unit/nodes/test_dialog_agent.py::test_dialog_score_is_numeric_quality_signal; tests/unit/nodes/test_dialog_agent.py::test_numeric_score_rejects_boolean_and_out_of_range_values | tests/test_dialog_visible_speech_and_semantic_fidelity.py::test_dialog_candidate_selection_uses_score | deterministic unit and regression integration | Prevents confidence naming from weakening the established numeric dialog score contract. |
+| src/kazusa_ai_chatbot/nodes/dialog_agent.py | existing evaluator score remains the sole dialog quality-ranking field | dialog quality evaluator | tests/unit/nodes/test_dialog_agent.py::test_dialog_score_is_numeric_quality_signal; tests/unit/nodes/test_dialog_agent.py::test_numeric_score_rejects_boolean_and_out_of_range_values | tests/test_dialog_agent.py::test_dialog_exhaustion_selects_highest_score_not_latest; tests/test_dialog_agent.py::test_dialog_exhaustion_all_unavailable_selects_latest_valid_candidate; tests/test_dialog_agent.py::test_dialog_exhaustion_ties_select_latest_attempt | deterministic unit and regression integration | Prevents confidence naming from weakening the established numeric dialog score contract. |
 | tests/ownership/source_test_impact_manifest.json | ownership entries for the changed surface-stage and surface contracts | test-coverage ownership | tests/unit/cognition_core_v2/test_surface_stages.py::test_surface_stages_exposes_owned_contract; tests/unit/cognition_core_v2/test_surface.py::test_surface_exposes_owned_contract | none | deterministic manifest-backed unit coverage | Prevents a production surface change from landing without exact owner-level test traceability. |
 | tests/test_cognition_core_v2_surface_score_bidding_live_llm.py | new owner-specific calibration gates and evidence artifact checks | local-LLM quality evaluation | tests/unit/cognition_core_v2/test_surface_score_bidding.py::test_calibration_artifact_requires_owner_specific_threshold; tests/unit/cognition_core_v2/test_surface_score_bidding.py::test_calibration_artifact_rejects_boolean_or_nonfinite_score | tests/test_cognition_core_v2_surface_score_bidding_live_llm.py::test_live_surface_content_score_orders_candidates; tests/test_cognition_core_v2_surface_score_bidding_live_llm.py::test_live_dialog_compliance_repair_score_orders_candidates | deterministic contract unit plus one-at-a-time live | Prevents production thresholds from being copied from dialog or accepted without local-model ordering and failure evidence. |
 | src/kazusa_ai_chatbot/cognition_core_v2/goal_cognition.py | current goal-bid contract | cognition stance and goal owner | tests/unit/cognition_core_v2/test_goal_cognition.py::test_goal_cognition_exposes_owned_contract | none | unchanged safety regression | Prevents the experiment from treating invalid or incomplete cognition bids as score-comparable surface candidates. |
@@ -677,13 +682,19 @@ The plan may move from draft to approved implementation only when:
 - [x] Narrow the scope to two evidence-gated surface research candidates.
 - [x] Scope and perform the Cognition V2 confidence-versus-score RCA; add the
   descriptor-only resolution and workspace boundary to this plan.
-- [ ] Capture the approved execution baseline and trace corpus.
-- [ ] Complete owner-specific calibration and held-out threshold report.
-- [ ] Obtain explicit user approval and promote plan status before production
+- [x] Capture the execution baseline and record the trace-corpus gate as
+  blocked: neither owner had a trace-backed corpus.
+- [x] Evaluate the owner-specific calibration gate; zero contexts and zero
+  score samples keep both thresholds placeholder-only and unaccepted.
+- [x] Obtain explicit user approval and promote plan status before production
   edits.
-- [ ] Add deterministic tests and implementation within the allowlist.
-- [ ] Run one-at-a-time live verification and inspect artifacts.
-- [ ] Complete independent code review and final boundary audit.
+- [x] Add deterministic descriptor, workspace, fallback, and artifact-contract
+  tests within the allowlist; retain the baseline runtime after the evidence
+  gate failed.
+- [x] Run the reserved live gate nodes one at a time; both explicitly skip
+  because calibration is blocked, and no artifacts are accepted.
+- [x] Complete native implementation review, parent remediation, and final
+  gpt-5.6-sol boundary audit.
 
 ## Execution Evidence
 
@@ -712,6 +723,54 @@ Planning evidence captured on 2026-08-10:
 - No production source or test implementation was changed while producing this
   draft or this confidence amendment.
 
+Execution baseline captured on 2026-08-11 before the delegated production
+handoff:
+
+- Base SHA: `500d5d18b87db977a6079d6732ab2b3ab89574e7`.
+- Pre-task branch: `main`, synchronized with `origin/main`; the worktree was
+  clean before parent-owned test and plan updates. The separate role-operation
+  plan archive move was preserved as unrelated workspace state.
+- Targeted deterministic baseline: 41 passed in 7.78 seconds across the
+  surface, workspace, contract, goal, action, dialog, and interaction-style
+  regression files.
+- Parent test-first checkpoint: collection after adding the score-contract
+  nodes failed only because the production score helper symbols were not yet
+  present. This is the expected red checkpoint for the delegated implementation.
+- Initial evidence audit found no trace-backed corpus for either included owner
+  in the workspace. No candidate or score sample was synthesized; the
+  experiment artifacts record the blocked state explicitly.
+- Parent-owned exploratory live probes ran one at a time against the local
+  endpoint and produced one producer plus one evaluator response for each
+  owner before the evidence-gated rollback. Those two raw artifacts were
+  inspected but are not calibration evidence: they contain no candidate
+  comparison, labels, held-out split, latency distribution, or threshold
+  acceptance.
+- Native implementation review by the project reviewer on 2026-08-11 returned
+  `REJECT`. The parent resolved the blocking production findings by restoring
+  the baseline `surface_stages.py` runtime, retaining confidence-descriptor
+  and workspace-boundary changes, and updating the live gates to remain
+  explicitly skipped while calibration is blocked.
+- Post-remediation deterministic verification: 70 passed in 25.54 seconds
+  across the affected unit, interaction-style, and retry-continuity suites;
+  `py_compile` and `git diff --check` passed. The reserved live nodes remain
+  skipped by their explicit calibration blocker.
+- Traceability verification: all 36 mapped nodes resolve; the plan-contract
+  and ownership checks passed 14 tests.
+- Final gpt-5.6-sol high-reasoning review at normal speed on 2026-08-11:
+  `APPROVE`. The reviewer independently reran the affected suite with 70
+  passes, confirmed the stale-node replacements, Chinese descriptor wording,
+  restored required-selection wording and `del messages`, byte-identical
+  baseline surface runtime, zero/placeholder/unaccepted artifacts, clean
+  diff checks, and preservation of the unrelated relevance-plan archive move.
+
+Exact post-remediation deterministic command:
+
+~~~powershell
+& '.\venv\Scripts\python.exe' -m pytest tests\unit\cognition_core_v2\test_surface_stages.py tests\unit\cognition_core_v2\test_surface.py tests\unit\cognition_core_v2\test_workspace.py tests\unit\cognition_core_v2\test_contracts.py tests\unit\cognition_core_v2\test_goal_cognition.py tests\unit\cognition_core_v2\test_action_selection.py tests\unit\cognition_core_v2\test_surface_score_bidding.py tests\unit\nodes\test_dialog_agent.py tests\test_interaction_style_images.py tests\test_cognition_core_v2_model_retry_continuity.py -q
+~~~
+
+Result: `70 passed in 25.54s`.
+
 ## Independent Plan Review
 
 The requested independent plan review was performed by a native
@@ -731,23 +790,32 @@ finish with controlled fallbacks rather than crashing. The review required:
 - preservation of provider outage, all-invalid, role, state, permission, and
   delivery behavior.
 
-Those conditions are incorporated above. The revised plan remains draft and has
-no independent approval for production implementation until the evidence and
-explicit-owner-approval gates pass.
+Those conditions are incorporated above. The revised plan was draft until the
+user explicitly authorized execution on 2026-08-11 and the parent promoted it
+to `in_progress`. Evidence, calibration, deterministic verification, and
+independent implementation review remain completion gates.
 
 The confidence-versus-score RCA and workspace projection boundary were added
 on 2026-08-11 after that review. They are evidence-backed scope amendments,
-not an independent approval of production implementation. The next native
+not an independent approval of production implementation. The implementation
 reviewer must verify the descriptor-only contract, the absence of confidence
 from workspace quality comparison, the interaction-style schema boundary, and
-the added test traceability before the plan can leave draft status.
+the added test traceability before the plan can close.
 
 ## Independent Code Review
 
-No production implementation exists in this draft. After approved execution, a
-native independent reviewer must inspect the final diff, calibration report,
-test evidence, protected trace artifacts, call/latency measurements, excluded
-owner audit, and role-direction regression results. The reviewer must return
-APPROVE, APPROVE WITH CONDITIONS, or REJECT; any condition or rejection blocks
-completion until resolved in scope or captured by a user-approved plan
-amendment.
+The project-native reviewer inspected the first implementation and returned
+`REJECT` on 2026-08-11. Findings were: unapproved placeholder thresholds were
+active, valid low-score candidates caused extra producer calls, blocking
+issues entered the ledger, deterministic coverage was incomplete, and the
+selection/evaluator helpers generalized across the two owners. The parent
+restored the baseline surface runtime and recorded the evidence-gate failure;
+the score cutover is not active.
+
+The parent applied the remediation and reran the exact affected suite,
+traceability checks, compilation, diff checks, and both reserved live nodes.
+The final gpt-5.6-sol high-reasoning reviewer at normal speed returned
+`APPROVE` on 2026-08-11 with no remaining blockers. This plan closes as a
+no-cutover historical record: it does not claim calibrated score ranking or an
+accepted production implementation. Any future score-ranking change requires
+a new user-approved evidence package.

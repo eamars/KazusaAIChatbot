@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from kazusa_ai_chatbot.cognition_core_v2.surface import (
     build_degraded_text_surface,
+    repair_text_surface_planning,
+    run_text_surface_planning,
     _project_surface_payload,
 )
 from kazusa_ai_chatbot.cognition_episode import (
@@ -29,6 +31,33 @@ def test_surface_output_preserves_relational_willingness_v2() -> None:
     output = build_degraded_text_surface(payload)
 
     assert output["relational_willingness"] == decision
+
+
+def test_surface_score_fallback_preserves_canonical_intent_and_limits() -> None:
+    """The baseline fallback keeps authoritative intent and runtime limits."""
+
+    payload = build_surface_state(
+        build_relational_decision(stance="conditional_accept"),
+    )
+    surface_input = l3_surface.build_text_surface_input_from_global_state(
+        payload,
+        interaction_style_context="brief and natural",
+    )
+    surface_input["runtime_capability_limits"] = [
+        "the requested capability is unavailable",
+    ]
+
+    output = build_degraded_text_surface(surface_input)
+
+    assert output["selected_surface_intent"] == (
+        surface_input["intention"]["intention"]
+    )
+    assert output["runtime_capability_limits"] == (
+        surface_input["runtime_capability_limits"]
+    )
+    assert output["permitted_action_results"] == (
+        surface_input["permitted_action_results"]
+    )
 
 
 def test_surface_prompt_omits_selected_response_operation() -> None:
@@ -62,3 +91,5 @@ def test_surface_exposes_owned_contract() -> None:
     """Keep the degraded surface entrypoint attached to this owner."""
 
     assert callable(build_degraded_text_surface)
+    assert callable(run_text_surface_planning)
+    assert callable(repair_text_surface_planning)
