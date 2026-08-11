@@ -167,7 +167,8 @@
         "tests/test_self_cognition_group_visible_reply_boundary.py::test_group_action_planning_requires_explicit_silence_or_reply_decision",
         "tests/unit/cognition_core_v2/test_action_selection.py::test_non_accepting_stance_suppresses_downstream_effects",
         "tests/unit/cognition_core_v2/test_action_selection.py::test_selected_intention_preserves_selected_response_operation",
-        "tests/unit/cognition_core_v2/test_action_selection.py::test_action_selection_exposes_owned_contract"
+        "tests/unit/cognition_core_v2/test_action_selection.py::test_action_selection_exposes_owned_contract",
+        "tests/unit/cognition_core_v2/test_action_selection.py::test_action_planning_keeps_confidence_descriptor_advisory"
       ],
       "supplemental_tests": [
         "tests/test_self_cognition_group_visible_reply_live_llm.py::test_live_group_self_cognition_latest_case_stays_silent",
@@ -203,7 +204,9 @@
         "tests/unit/cognition_core_v2/test_contracts.py::test_sensitive_relational_willingness_accepts_all_real_states_and_stances",
         "tests/unit/cognition_core_v2/test_contracts.py::test_selected_response_operation_has_exact_contract",
         "tests/unit/cognition_core_v2/test_contracts.py::test_selected_response_operation_rejects_missing_required_fields",
-        "tests/unit/cognition_core_v2/test_contracts.py::test_contracts_exposes_owned_contract"
+        "tests/unit/cognition_core_v2/test_contracts.py::test_contracts_exposes_owned_contract",
+        "tests/unit/cognition_core_v2/test_contracts.py::test_goal_and_action_confidence_reject_numeric_values",
+        "tests/unit/cognition_core_v2/test_contracts.py::test_group_confidence_rejects_numeric_values"
       ],
       "supplemental_tests": []
     },
@@ -274,7 +277,8 @@
       "required_unit_tests": [
         "tests/unit/cognition_core_v2/test_goal_cognition.py::test_goal_cognition_exposes_owned_contract",
         "tests/unit/cognition_core_v2/test_goal_cognition.py::test_required_selection_emits_selected_response_operation",
-        "tests/unit/cognition_core_v2/test_goal_cognition.py::test_required_selection_rejects_fixed_role_conflict"
+        "tests/unit/cognition_core_v2/test_goal_cognition.py::test_required_selection_rejects_fixed_role_conflict",
+        "tests/unit/cognition_core_v2/test_goal_cognition.py::test_goal_prompt_labels_confidence_as_descriptor"
       ],
       "supplemental_tests": []
     },
@@ -393,7 +397,8 @@
       "required_unit_tests": [
         "tests/unit/cognition_core_v2/test_surface.py::test_surface_output_preserves_relational_willingness_v2",
         "tests/unit/cognition_core_v2/test_surface.py::test_surface_prompt_omits_selected_response_operation",
-        "tests/unit/cognition_core_v2/test_surface.py::test_surface_exposes_owned_contract"
+        "tests/unit/cognition_core_v2/test_surface.py::test_surface_exposes_owned_contract",
+        "tests/unit/cognition_core_v2/test_surface.py::test_surface_score_fallback_preserves_canonical_intent_and_limits"
       ],
       "supplemental_tests": [
         "tests/integration/cognition_core_v2/test_relational_stance_propagation.py::test_relational_stance_preserves_polarity_through_surface_and_dialog"
@@ -432,7 +437,8 @@
       "contract": "ordinary response stance ownership",
       "required_unit_tests": [
         "tests/unit/cognition_core_v2/test_workspace.py::test_ordinary_response_remains_authoritative_stance_owner",
-        "tests/unit/cognition_core_v2/test_workspace.py::test_workspace_exposes_owned_contract"
+        "tests/unit/cognition_core_v2/test_workspace.py::test_workspace_exposes_owned_contract",
+        "tests/unit/cognition_core_v2/test_workspace.py::test_workspace_collapse_does_not_rank_by_confidence_descriptor"
       ],
       "supplemental_tests": []
     },
@@ -525,6 +531,8 @@
         "tests/unit/nodes/test_dialog_agent.py::test_dialog_role_direction_uses_selected_response_operation",
         "tests/unit/nodes/test_dialog_agent.py::test_dialog_role_direction_rejects_selected_actor_target_reversal",
         "tests/unit/nodes/test_dialog_agent.py::test_dialog_agent_exposes_owned_contract",
+        "tests/unit/nodes/test_dialog_agent.py::test_dialog_score_is_numeric_quality_signal",
+        "tests/unit/nodes/test_dialog_agent.py::test_numeric_score_rejects_boolean_and_out_of_range_values",
         "tests/test_dialog_agent.py::test_dialog_score_validation_rejects_non_finite_or_out_of_range",
         "tests/test_dialog_agent.py::test_dialog_score_aggregate_uses_available_dimensions",
         "tests/test_dialog_agent.py::test_dialog_exhaustion_selects_highest_score_not_latest",

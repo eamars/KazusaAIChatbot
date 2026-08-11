@@ -65,7 +65,7 @@ long_term/todo.md
 |---|---|---|
 | [cognition_core_v2_selected_response_operation_role_contract_bugfix_plan_20260810.md](archive/completed/bugfix/cognition_core_v2_selected_response_operation_role_contract_bugfix_plan_20260810.md) | Post-selection response-operation role contract repair for required-selection dialog exhaustion | completed |
 | [cognition_core_v2_atomic_appraisal_finalization_and_terminal_eligibility_bugfix_plan_20260811.md](archive/completed/bugfix/cognition_core_v2_atomic_appraisal_finalization_and_terminal_eligibility_bugfix_plan_20260811.md) | Atomic Cognition V2 appraisal finalization, lifecycle-eligible terminal planning, and bounded failure evidence | completed |
-| [cognition_surface_score_ranking_followup_plan_20260810.md](active/bugfix/cognition_surface_score_ranking_followup_plan_20260810.md) | Evidence-gated surface quality ranking follow-up for bounded retry exhaustion | draft |
+| [cognition_surface_score_ranking_followup_plan_20260810.md](archive/completed/bugfix/cognition_surface_score_ranking_followup_plan_20260810.md) | Evidence-gated surface quality ranking follow-up for bounded retry exhaustion | completed |
 | [self_cognition_trigger_state_contract_recovery_bugfix_plan.md](archive/completed/bugfix/self_cognition_trigger_state_contract_recovery_bugfix_plan.md) | Group-chat and commitment self-cognition V2 state-contract recovery | completed |
 | [reflection_recursive_root_timestamp_canonicalization_bugfix_plan.md](archive/completed/bugfix/reflection_recursive_root_timestamp_canonicalization_bugfix_plan.md) | Recursive reflection root timestamp canonicalization and guarded group-ledger recovery | completed |
 | [cognition_core_v2_goal_bid_live_llm_regression_remediation_20260810.md](archive/completed/bugfix/cognition_core_v2_goal_bid_live_llm_regression_remediation_20260810.md) | Goal-bid live-LLM failure classification, frozen-fixture recovery, prompt remediation, and 95% regression gate | completed |
@@ -91,7 +91,6 @@ long_term/todo.md
 | [qq_group_public_scene_response_ordering_bugfix_plan.md](archive/completed/bugfix/qq_group_public_scene_response_ordering_bugfix_plan.md) | QQ multi-user public-scene composition and same-group response-ordering bugfix | completed |
 | [cognition_core_v2_first_pass_robustness_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_first_pass_robustness_bugfix_plan.md) | Core V2 first-pass generation grounding, evaluator feedback, per-stage token/character budget rebalance, and deterministic failure-path recovery bugfix plan | completed |
 | [cognition_core_v2_context_fade_and_sleep_phase_plan.md](archive/completed/bugfix/cognition_core_v2_context_fade_and_sleep_phase_plan.md) | Deterministic age-based discard of group-scene turns and conversation-progress topics before projection, plus cognition V2 ownership of the character sleep phase and morning refresh | completed |
-| [relevance_pre_active_answer_attribution_bugfix_plan.md](active/bugfix/relevance_pre_active_answer_attribution_bugfix_plan.md) | Large settled-relevance pre-active answer attribution bugfix plan | completed |
 
 ## Reference Documents
 
@@ -575,6 +574,18 @@ residuals as passing.
 |---|---|
 | Moved from active bugfix to completed archive by explicit user acceptance with recorded residuals | `cognition_core_v2_first_pass_robustness_bugfix_plan.md` |
 
+### 2026-08-11 relevance pre-active answer attribution lifecycle closure
+
+The settled-relevance pre-active answer attribution bugfix has a completed
+execution record: all five stages are checked off, deterministic and live
+verification evidence is recorded, and the independent review disposition is
+approved for closeout. The active registry entry was stale; the plan is now
+preserved as completed historical evidence.
+
+| Outcome | Plan |
+|---|---|
+| Moved from active bugfix to completed archive | `relevance_pre_active_answer_attribution_bugfix_plan.md` |
+
 ## Archive
 
 Completed and superseded records live under `archive/`. Use them for historical
@@ -649,6 +660,7 @@ plans.
 | [rag_retrieval_top_k_embedding_tuning_plan.md](archive/completed/bugfix/rag_retrieval_top_k_embedding_tuning_plan.md) |
 | [relevance_input_scope_robustness_bugfix_plan.md](archive/completed/bugfix/relevance_input_scope_robustness_bugfix_plan.md) |
 | [relevance_evidence_grounded_admission_over_sensitivity_bugfix_plan.md](archive/completed/bugfix/relevance_evidence_grounded_admission_over_sensitivity_bugfix_plan.md) |
+| [relevance_pre_active_answer_attribution_bugfix_plan.md](archive/completed/bugfix/relevance_pre_active_answer_attribution_bugfix_plan.md) |
 | [required_selection_partial_recovery_bugfix_plan.md](archive/completed/bugfix/required_selection_partial_recovery_bugfix_plan.md) |
 | [reflection_group_scene_digest_self_cognition_bugfix_plan.md](archive/completed/bugfix/reflection_group_scene_digest_self_cognition_bugfix_plan.md) |
 | [reflection_global_promotion_replay_bugfix_plan.md](archive/completed/bugfix/reflection_global_promotion_replay_bugfix_plan.md) |

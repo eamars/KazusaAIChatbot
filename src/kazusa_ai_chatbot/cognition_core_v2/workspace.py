@@ -38,7 +38,7 @@ WORKSPACE_CONTEXT_TEXT_FLOOR = 256
 
 
 COLLAPSE_PROMPT = '''把完整的目标候选划分为本轮主目标、支持目标和抑制目标。先依据 current_event
-判断每个候选及其 persistent_goal 是否与本轮直接相关，再比较候选质量。ordinary_response 是当前
+判断每个候选及其 persistent_goal 是否与本轮直接相关，再依据相关性分区。ordinary_response 是当前
 回应的基线候选。非 ordinary_response 的持久目标只有在当前事件直接推进、阻碍、威胁或要求处理
 同一具体事项时才可成为主目标或支持目标。仅有目标仍在进行中、同一用户、一般关系互动、关系
 appraisal 存在、角色重视某项驱动，或分支 action tendency，不能证明当前相关。若
@@ -161,7 +161,6 @@ async def collapse_bids(
                 "intention": bid["intention"],
                 "desired_outcome": bid["desired_outcome"],
                 "reason": bid["reason"],
-                "confidence": bid["confidence"],
             }
             for handle, bid in handles.items()
         }

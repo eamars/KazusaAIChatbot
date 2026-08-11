@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+import kazusa_ai_chatbot.cognition_core_v2.contracts as contracts_module
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionContractError,
     CURRENT_EPISODE_EVIDENCE_SOURCE_KINDS,
@@ -129,3 +130,25 @@ def test_scheduler_events_are_current_episode_evidence() -> None:
     """Scheduled self-cognition can cite its current trigger event."""
 
     assert "scheduler_event" in CURRENT_EPISODE_EVIDENCE_SOURCE_KINDS
+
+
+def test_goal_and_action_confidence_reject_numeric_values() -> None:
+    """V2 confidence stays a bounded descriptor rather than a quality score."""
+
+    for value in (0.5, True):
+        bid = _bid_with_selected_operation(_selected_operation())
+        bid["confidence"] = value
+
+        with pytest.raises(CognitionContractError, match="confidence"):
+            validate_action_bid(bid)
+
+
+def test_group_confidence_rejects_numeric_values() -> None:
+    """Group participation confidence rejects numeric and boolean values."""
+
+    for value in (0.5, True):
+        with pytest.raises(CognitionContractError, match="confidence"):
+            contracts_module._validate_group_engagement_action_context({
+                "engagement_guidelines": ["scene guidance"],
+                "confidence": value,
+            })

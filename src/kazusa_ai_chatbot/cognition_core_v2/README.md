@@ -432,6 +432,26 @@ terminal private evidence; it has no downstream image or dialog model. Raw
 episode traces retain those directives for audit, while every model-facing
 consolidation projection excludes their fragments.
 
+### Surface score and confidence boundary
+
+Only `surface_content_plan` and
+`surface_dialog_compliance_repair` are research candidates for an owner-local
+score-selection contract. The current execution has no accepted calibration
+corpus or thresholds, so production keeps the existing first-valid and
+degraded-surface behavior; the evaluator and selection path is not active.
+Future activation requires the plan's independent held-out evidence, finite
+`score` contract, bounded blocking issues, three-call producer cap, evaluator
+cap, threshold return, highest-score exhaustion, and deterministic tie order.
+
+The V2 `confidence` field remains a bounded semantic descriptor and advisory
+context. It is not a score, ranking input, threshold input, authorization
+signal, or delivery gate. Goal, action, group-engagement, and branch
+observation contracts reject numeric or boolean confidence values. Workspace
+candidate-quality comparison does not receive confidence. Preference, visual,
+goal, action, authorization, persistence, queue, delivery, and stateful retry
+owners remain outside this score contract, and the dialog renderer keeps its
+existing numeric evaluator behavior.
+
     `lexical_avoidances` contains only concrete current-turn expression fragments
     such as a repeated recent opening, stale filler, stale address, or wording
     that obscures the selected intent. It is a surface-owned continuity hint,

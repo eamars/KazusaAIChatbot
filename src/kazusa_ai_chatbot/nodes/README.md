@@ -309,6 +309,16 @@ selects a character stance. The list flows through normal, degraded, repaired,
 and dialog-verifier surfaces; a literal hit enters the existing bounded repair
 path.
 
+Surface quality ranking is evidence-gated. `surface_content_plan` and
+`surface_dialog_compliance_repair` remain research candidates, but the current
+blocked calibration artifact keeps production on the existing first-valid and
+degraded paths. The V2 `confidence` field remains advisory descriptor context,
+not a quality score; it is excluded from workspace quality comparison and
+cannot change cognition truth, action authorization, role direction,
+addressee, persistence, queue, delivery, or state. Future activation requires
+the plan's accepted owner-specific held-out evidence and bounded score
+contract.
+
 When visual directives are enabled, `run_visual_surface_planning(...)` runs as
 an independent sibling call. It alone receives the isolated bounded
 visual-character context and emits exact image-generation directives. No

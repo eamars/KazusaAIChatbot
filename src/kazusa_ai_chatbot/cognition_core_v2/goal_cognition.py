@@ -100,7 +100,7 @@ GOAL_COGNITION_PROMPT = '''你是一个独立的目标认知分支。请为当�
 
 # 输出与最后检查
 只返回一个 JSON 对象，字段恰好是 intention、desired_outcome、concrete_detail、reason、private_monologue、target_role_handles、evidence_handles、expected_consequences 和 confidence；当 `branch.goal_kind` 为 `ordinary_response` 时还含 `relational_willingness`。其字段恰好是 schema_version（`relational_willingness.v2`）、applicability（`relationship_sensitive` 或 `not_relationship_sensitive`）、stance（reject、deflect、negotiate、conditional_accept、accept 或 not_applicable）、current_user_relationship_state（not_applicable、unestablished、developing_or_uncertain 或 established）、reason（简体中文，≤300字）和 evidence_handles（一到四个已提供 handle，至少一个来自当前 episode）。
-叙述字段与 confidence 为字符串，handle 字段为字符串数组，expected_consequences 是非空字符串数组；`evidence_handles` 最多九项，`target_role_handles` 最多八项。每个元素必须逐个等于一个已提供的 handle，不得使用范围、通配符、组合写法或 source ID。确认角色、行动者、对象和受益者方向没有反转；确认缺失证据时保留“取得所需证据后回应”；确认请求只形成言语立场，不写执行细节，不输出 target_roles、role_handles、semantic_text、数值 confidence、route、action/resolver handle 或其他字段。
+叙述字段与 confidence 为字符串；confidence 是有界的置信度描述，仅作提示语境使用，不是 score，不能用于排序、阈值、授权或发言门控。handle 字段为字符串数组，expected_consequences 是非空字符串数组；`evidence_handles` 最多九项，`target_role_handles` 最多八项。每个元素必须逐个等于一个已提供的 handle，不得使用范围、通配符、组合写法或 source ID。确认角色、行动者、对象和受益者方向没有反转；确认缺失证据时保留“取得所需证据后回应”；确认请求只形成言语立场，不写执行细节，不输出 target_roles、role_handles、semantic_text、数值 confidence、route、action/resolver handle 或其他字段。
 '''
 
 
@@ -110,7 +110,7 @@ ORDINARY_RECURRENCE_GOAL_COGNITION_PROMPT = '''你是普通回应目标分支的
 
 保持 response_operation 的行动者、对象、受益者、选择权和回应意图方向。当前 episode 比旧关系、共享记忆和一般角色习惯更权威；缺失事实时保留取得所需证据后回应，不把执行能力或运行时约束改写为目标。
 
-只返回一个严格 JSON 对象，字段必须恰好是 intention、desired_outcome、concrete_detail、reason、private_monologue、target_role_handles、evidence_handles、expected_consequences 和 confidence。叙述字段与 confidence 为字符串，handle 字段为字符串数组，expected_consequences 是非空字符串数组；每个 handle 必须逐个等于输入中提供的值，不得使用 source ID、范围、通配符或其他字段。自由文本使用简体中文，不写最终对话、执行路由或能力句柄。
+只返回一个严格 JSON 对象，字段必须恰好是 intention、desired_outcome、concrete_detail、reason、private_monologue、target_role_handles、evidence_handles、expected_consequences 和 confidence。叙述字段与 confidence 为字符串；confidence 是有界的置信度描述，仅作提示语境使用，不是 score，不能用于排序或阈值。handle 字段为字符串数组，expected_consequences 是非空字符串数组；每个 handle 必须逐个等于输入中提供的值，不得使用 source ID、范围、通配符或其他字段。自由文本使用简体中文，不写最终对话、执行路由或能力句柄。
 '''
 
 
@@ -120,7 +120,7 @@ ORDINARY_RECURRENCE_SELECTION_GOAL_COGNITION_PROMPT = '''你是普通回应的�
 
 `selected_response_operation` 是必填的完整对象；它的 operation 必须具体写出 selection 对应的动作和对象，不得只复述外层选择包装。四个角色字段是 `response_owner_role`、`selection_owner_role`、`embedded_actor_role` 和 `embedded_target_role`，值只能使用中文角色枚举 `当前角色`、`当前用户`、`其他参与者` 或 `无`；`selection_required` 必须是 JSON 布尔值并与输入保持一致；`current_user`、`self` 和 `pN` 只属于 role handle。已知角色不得被改写；输入为“无”的行动者或对象才可由本次选择补全；无嵌套动作时两个端点都使用“无”。
 
-只返回一个严格 JSON 对象，字段必须恰好是 selection、selected_response_operation、reason、private_monologue、target_role_handles、evidence_handles、expected_consequences 和 confidence。selection 必须直接写出当前角色的具体选择、拒绝、协商结果或条件；selected_response_operation 必须完整描述本次具体选择，复制 required operation 中已知的回应所有者、选择所有者、selection_required、行动者和对象角色；输入为“无”的行动者或对象才可由本次选择补全，无嵌套动作时两个端点都使用“无”。叙述字段和 confidence 为字符串，handle 字段为字符串数组，expected_consequences 是非空字符串数组；每个 handle 必须逐个等于输入中提供的值，不得使用 source ID、范围、通配符或其他字段。自由文本使用简体中文。
+只返回一个严格 JSON 对象，字段必须恰好是 selection、selected_response_operation、reason、private_monologue、target_role_handles、evidence_handles、expected_consequences 和 confidence。selection 必须直接写出当前角色的具体选择、拒绝、协商结果或条件；selected_response_operation 必须完整描述本次具体选择，复制 required operation 中已知的回应所有者、选择所有者、selection_required、行动者和对象角色；输入为“无”的行动者或对象才可由本次选择补全，无嵌套动作时两个端点都使用“无”。叙述字段和 confidence 为字符串；confidence 是有界的置信度描述，仅作提示语境使用，不是 score，不能用于排序或阈值。handle 字段为字符串数组，expected_consequences 是非空字符串数组；每个 handle 必须逐个等于输入中提供的值，不得使用 source ID、范围、通配符或其他字段。自由文本使用简体中文。
 '''
 
 
@@ -138,7 +138,7 @@ NON_ORDINARY_GOAL_COGNITION_PROMPT = '''你是一个独立的目标认知分支�
 
 # 输出与最后检查
 只返回一个 JSON 对象，字段恰好是 intention、desired_outcome、concrete_detail、reason、private_monologue、target_role_handles、evidence_handles、expected_consequences 和 confidence。
-叙述字段与 confidence 为字符串，handle 字段为字符串数组，expected_consequences 是非空字符串数组；`evidence_handles` 最多九项，`target_role_handles` 最多八项。每个元素必须逐个等于一个已提供的 handle，不得使用范围、通配符、组合写法或 source ID。确认角色、行动者、对象和受益者方向没有反转；确认缺失证据时保留“取得所需证据后回应”；确认请求只形成言语立场，不写执行细节，不输出 target_roles、role_handles、semantic_text、数值 confidence、route、action/resolver handle 或其他字段。
+叙述字段与 confidence 为字符串；confidence 是有界的置信度描述，仅作提示语境使用，不是 score，不能用于排序或阈值。handle 字段为字符串数组，expected_consequences 是非空字符串数组；`evidence_handles` 最多九项，`target_role_handles` 最多八项。每个元素必须逐个等于一个已提供的 handle，不得使用范围、通配符、组合写法或 source ID。确认角色、行动者、对象和受益者方向没有反转；确认缺失证据时保留“取得所需证据后回应”；确认请求只形成言语立场，不写执行细节，不输出 target_roles、role_handles、semantic_text、数值 confidence、route、action/resolver handle 或其他字段。
 '''
 
 GENERIC_GOAL_REPAIR_INSTRUCTIONS = (
@@ -150,7 +150,7 @@ GENERIC_GOAL_REPAIR_INSTRUCTIONS = (
     '当语义对象是 `role_summaries` 中本轮可见的第三方 `pN` 时，保留该 `pN` 作为 target_role_handles；不要因为当前用户是传输收件人或观察者而改用 `current_user`。',
     '每个元素必须逐个等于一个允许的 handle；不得使用范围、通配符、组合写法或 source ID。角色 handle 不能放入 evidence_handles，evidence handle 不能放入 target_role_handles。',
     '存在 `repair_feedback.relational_willingness_contract` 时，完整填写 relational_willingness，并遵守其字段、schema、枚举、证据范围和 `current_episode_evidence_handles`；关系状态是描述性语境，三个真实状态都可配合五种敏感立场。',
-    '叙述字段与 confidence 是字符串；target_role_handles、evidence_handles 是字符串数组；expected_consequences 是非空字符串数组。',
+    'confidence 是有界的置信度描述，仅作提示语境使用，不是 score；叙述字段与 confidence 是字符串；target_role_handles、evidence_handles 是字符串数组；expected_consequences 是非空字符串数组。',
     '`evidence_handles` 最多九项，`target_role_handles` 最多八项。只返回一个完整 JSON 对象，不加代码围栏、解释、注释或其他字段。',
 )
 
@@ -164,7 +164,7 @@ NON_ORDINARY_GENERIC_GOAL_REPAIR_INSTRUCTIONS = (
     '`evidence_handles` 只能使用 `repair_feedback.allowed_evidence_handles`；`target_role_handles` 只能使用 `repair_feedback.allowed_role_handles`。',
     '当语义对象是 `role_summaries` 中本轮可见的第三方 `pN` 时，保留该 `pN` 作为 target_role_handles；不要因为当前用户是传输收件人或观察者而改用 `current_user`。',
     '每个元素必须逐个等于一个允许的 handle；不得使用范围、通配符、组合写法或 source ID。角色 handle 不能放入 evidence_handles，evidence handle 不能放入 target_role_handles。',
-    '叙述字段与 confidence 是字符串；target_role_handles、evidence_handles 是字符串数组；expected_consequences 是非空字符串数组。',
+    'confidence 是有界的置信度描述，仅作提示语境使用，不是 score；叙述字段与 confidence 是字符串；target_role_handles、evidence_handles 是字符串数组；expected_consequences 是非空字符串数组。',
     '`evidence_handles` 最多九项，`target_role_handles` 最多八项。只返回一个完整 JSON 对象，不加代码围栏、解释、注释或其他字段。',
 )
 
@@ -181,7 +181,7 @@ SELECTION_GOAL_REPAIR_INSTRUCTIONS = (
     '角色 handle 不能放入 evidence_handles，evidence handle 不能放入 target_role_handles；不得使用范围、通配符、组合写法或 source ID。',
     '`repair_feedback.role_handles_forbidden_in_evidence_handles` 中的 handle 绝不能写入 `evidence_handles`。',
     '存在 `repair_feedback.relational_willingness_contract` 时，完整遵守其字段、schema、枚举、证据范围和 `repair_feedback.current_episode_evidence_handles`；关系状态是描述性语境，三个真实状态都可配合五种敏感立场。',
-    '叙述字段和 confidence 是字符串；target_role_handles、evidence_handles 是字符串数组；expected_consequences 是非空字符串数组。',
+    'confidence 是有界的置信度描述，仅作提示语境使用，不是 score；叙述字段和 confidence 是字符串；target_role_handles、evidence_handles 是字符串数组；expected_consequences 是非空字符串数组。',
     '只返回一个严格 JSON 对象，不加代码围栏、解释、注释或其他字段；关系判断只在反馈提供 relational_willingness_contract 时输出。',
 )
 
@@ -198,7 +198,7 @@ REQUIRED_SELECTION_GOAL_PROMPT = '''你负责在选择权属于当前角色时�
 
 # 输出与最后检查
 只返回一个严格 JSON 对象，字段恰好是 `selection`、`selected_response_operation`、`reason`、`private_monologue`、`target_role_handles`、`evidence_handles`、`expected_consequences`、`confidence` 和 `relational_willingness`。`selection` 直接写出当前角色的具体选择、拒绝、协商结果或条件；`selected_response_operation.operation` 具体写出该选择的动作和对象，不复述外层包装，并复制 required operation 的已知方向。四个角色字段（`response_owner_role`、`selection_owner_role`、`embedded_actor_role`、`embedded_target_role`）只能取 `当前角色`、`当前用户`、`其他参与者`、`无`；`selection_required` 是与输入相同的 JSON 布尔值；`current_user`、`self`、`pN` 只能作 handle。输入为“无”的端点才可补全；其余字段按上述类型输出。
-`relational_willingness` 的字段恰好是 schema_version（`relational_willingness.v2`）、applicability、stance、current_user_relationship_state、reason 和 evidence_handles；reason 使用简体中文且不超过 300 字，evidence_handles 是一到四个已提供 handle，至少一个来自当前 episode。输出前逐项检查：selection 和每个 expected consequence 都不包含排除清单中的事项或其同义表达；evidence_handles 引用直接说明这些事项已经完成、拒绝或被替代的终态行。确认角色、行动者和对象方向正确，完整引用每个 required operation，并只保留与选择有关的证据。
+`relational_willingness` 的字段恰好是 schema_version（`relational_willingness.v2`）、applicability、stance、current_user_relationship_state、reason 和 evidence_handles；reason 使用简体中文且不超过 300 字，evidence_handles 是一到四个已提供 handle，至少一个来自当前 episode。输出前逐项检查：selection 和每个 expected consequence 都不包含排除清单中的事项或其同义表达；evidence_handles 引用直接说明这些事项已经完成、拒绝或被替代的终态行。确认角色、行动者和对象方向正确，完整引用每个 required operation，只保留与选择有关的证据。confidence 是有界的置信度描述，仅作提示语境使用，不是 score，不能用于排序、阈值、授权或发言门控。
 '''
 
 _ACTIVE_REQUIRED_SELECTION_GOAL_PROMPT = '''你负责在选择权属于当前角色时，直接产出角色的一个具体选择、拒绝、协商结果或条件。这是目标认知，不是候选检查；本阶段不选择执行能力或路由，也不写最终对话。
@@ -214,7 +214,7 @@ _ACTIVE_REQUIRED_SELECTION_GOAL_PROMPT = '''你负责在选择权属于当前角
 5. 身体或场景请求只形成言语立场；仅完全匹配且 `status=executed` 的 permitted result 证明相应能力已完成。`selection` 必须直接写出一个具体选择，不把决定交给其他角色或后续阶段；`selection`、`reason` 和 `private_monologue` 使用简体中文，输入引文、专有名词、代码和 URL 保持原样。
 
 # 输出与最后检查
-只返回一个严格 JSON 对象，字段恰好是 `selection`、`selected_response_operation`、`reason`、`private_monologue`、`target_role_handles`、`evidence_handles`、`expected_consequences` 和 `confidence`。`selection` 必须直接写出当前角色的一个选择、拒绝、协商结果或条件；`selected_response_operation` 的 operation 必须具体写出 selection 对应的动作和对象，不得只复述外层选择包装；复制 required operation 中已知的回应所有者、选择所有者、selection_required、行动者和对象角色。四个角色字段是 `response_owner_role`、`selection_owner_role`、`embedded_actor_role` 和 `embedded_target_role`，值只能使用中文角色枚举 `当前角色`、`当前用户`、`其他参与者` 或 `无`；`selection_required` 必须是 JSON 布尔值并与输入保持一致；`current_user`、`self` 和 `pN` 只属于 role handle。已知角色不得被改写；输入为“无”的行动者或对象才可由本次选择补全，无嵌套动作时两个端点都使用“无”。叙述字段和 confidence 是字符串，target_role_handles、evidence_handles 是字符串数组，expected_consequences 是非空字符串数组。输出前逐项检查：selection 和每个 expected consequence 都不包含排除清单中的事项或其同义表达；evidence_handles 引用直接说明这些事项已经完成、拒绝或被替代的终态行。每个 handle 必须逐个等于已提供的值；只返回 JSON，不加代码围栏、解释、注释或额外字段。
+只返回一个严格 JSON 对象，字段恰好是 `selection`、`selected_response_operation`、`reason`、`private_monologue`、`target_role_handles`、`evidence_handles`、`expected_consequences` 和 `confidence`。`selection` 必须直接写出当前角色的一个选择、拒绝、协商结果或条件；`selected_response_operation` 的 operation 必须具体写出 selection 对应的动作和对象，不得只复述外层选择包装；复制 required operation 中已知的回应所有者、选择所有者、selection_required、行动者和对象角色。四个角色字段是 `response_owner_role`、`selection_owner_role`、`embedded_actor_role` 和 `embedded_target_role`，值只能使用中文角色枚举 `当前角色`、`当前用户`、`其他参与者` 或 `无`；`selection_required` 必须是 JSON 布尔值并与输入保持一致；`current_user`、`self` 和 `pN` 只属于 role handle。已知角色不得被改写；输入为“无”的行动者或对象才可由本次选择补全，无嵌套动作时两个端点都使用“无”。叙述字段和 confidence 是字符串，target_role_handles、evidence_handles 是字符串数组，expected_consequences 是非空字符串数组。confidence 是有界的置信度描述，仅作提示语境使用，不是 score，不能用于排序、阈值、授权或发言门控。输出前逐项检查：selection 和每个 expected consequence 都不包含排除清单中的事项或其同义表达；evidence_handles 引用直接说明这些事项已经完成、拒绝或被替代的终态行。每个 handle 必须逐个等于已提供的值；只返回 JSON，不加代码围栏、解释、注释或额外字段。
 '''
 
 
