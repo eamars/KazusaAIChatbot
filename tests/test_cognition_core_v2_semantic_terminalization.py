@@ -635,9 +635,16 @@ def test_final_reduction_isolates_one_residual_invalid_appraisal() -> None:
             "g1": {"kind": "goal", "entity_id": "goal:primary"},
             "g2": {"kind": "goal", "entity_id": "goal:blocked"},
         },
+        updated_at=_TIMESTAMP,
+        character_constraints=_character_constraints(),
+        relationship_context=None,
     )
 
-    assert updated == state
+    assert updated["goals"][0]["entity_id"] == "goal:primary"
+    assert any(
+        goal["entity_id"] == "goal:obstruction_resolution:user:goal:blocked"
+        for goal in updated["goals"]
+    )
     assert accepted_results == [accepted]
     assert failures == {
         "q:goal_threat_outcome": "semantic_appraisal_reduction_rejected"
@@ -689,6 +696,9 @@ def test_final_reduction_preserves_cross_appraisal_composition() -> None:
         [materializer, delta_result],
         [_evidence()],
         handle_to_ref,
+        updated_at=_TIMESTAMP,
+        character_constraints=_character_constraints(),
+        relationship_context=None,
     )
 
     assert accepted_results == [materializer, delta_result]

@@ -222,7 +222,7 @@ def test_current_doc_surfaces_are_explicit() -> None:
         "development_plans/active/**/*.md",
         "development_plans/long_term/todo.md",
         "development_plans/archive/**/*.md",
-        "Git history",
+        "Historical plan record",
     )
     for phrase in required_phrases:
         assert phrase in content

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from copy import deepcopy
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -12,11 +15,19 @@ import pytest
 from kazusa_ai_chatbot.cognition_core_v2.action_selection import (
     _validate_action_plan_decision,
 )
+from kazusa_ai_chatbot.cognition_core_v2 import facade
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    validate_cognition_core_input,
     validate_relational_willingness,
+)
+from kazusa_ai_chatbot.cognition_core_v2.diagnostics import (
+    write_diagnostic_artifact,
 )
 from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
     validate_goal_bid_draft,
+)
+from kazusa_ai_chatbot.cognition_core_v2.parallel_executor import (
+    ParallelExecutionResult,
 )
 from kazusa_ai_chatbot.cognition_core_v2.semantic_appraisal import (
     _canonicalize_semantic_appraisal_item,
@@ -24,6 +35,7 @@ from kazusa_ai_chatbot.cognition_core_v2.semantic_appraisal import (
 )
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     CognitionStateError,
+    validate_cognition_state,
 )
 from kazusa_ai_chatbot.cognition_core_v2.transition_guards import (
     transition_event,
@@ -38,6 +50,16 @@ _TRACE_INVENTORY_PATH = (
     / "diagnostics"
     / "trace_failure_mode_inventory_2026-08-04.json"
 )
+_CAPACITY_REPLAY_EXPORTS = {
+    "8d0d4295": _ROOT
+    / "test_artifacts"
+    / "diagnostics"
+    / "llmtrace_8d0d42952b76450c9e1dc32574f9fd44_replay_export.json",
+    "9164e957": _ROOT
+    / "test_artifacts"
+    / "diagnostics"
+    / "llmtrace_9164e957298e4cffb68db7911bcd28b1_replay_export.json",
+}
 
 _EXPECTED_TRACE_FAMILIES = frozenset({
     "evidence_handles_not_permitted",
@@ -736,3 +758,243 @@ def test_pending_resolution_invalid_is_rejected() -> None:
         ),
         "pending resolution decision is invalid",
     )
+
+
+def _load_capacity_replay_input(
+    short_trace_id: str,
+) -> tuple[dict[str, Any], dict[str, Any], Path, str]:
+    """Load one protected capacity trace and its first valid candidate."""
+
+    export_path = _CAPACITY_REPLAY_EXPORTS[short_trace_id]
+    if not export_path.exists():
+        pytest.skip(f"protected replay export is missing: {export_path}")
+    export = json.loads(export_path.read_text(encoding="utf-8"))
+    query = export.get("query")
+    assert isinstance(query, Mapping)
+    expected_trace_id = query.get("trace_id")
+    assert isinstance(expected_trace_id, str)
+    capsules = export.get("cognition_failure_capsules")
+    assert isinstance(capsules, list)
+    capsule = next(
+        capsule
+        for capsule in capsules
+        if isinstance(capsule, Mapping)
+        and capsule.get("trace_id") == expected_trace_id
+    )
+    input_payload = capsule.get("input_payload")
+    assert isinstance(input_payload, Mapping)
+    payload = validate_cognition_core_input(input_payload)
+    attempts = capsule.get("attempts")
+    assert isinstance(attempts, list)
+    candidate = next(
+        attempt["parsed_output"]
+        for attempt in attempts
+        if isinstance(attempt, Mapping)
+        and str(attempt.get("stage_name", "")).startswith(
+            "semantic_appraisal.q:event_agency."
+        )
+        and attempt.get("parse_status") == "succeeded"
+        and isinstance(attempt.get("parsed_output"), Mapping)
+        and (
+            attempt["parsed_output"].get("propositions")
+            or attempt["parsed_output"].get("deltas")
+        )
+        and any(
+            isinstance(delta, Mapping)
+            and isinstance(delta.get("delta"), int)
+            and abs(delta["delta"]) >= 25
+            for delta in attempt["parsed_output"].get("deltas", [])
+        )
+    )
+    assert isinstance(candidate, Mapping)
+    payload_value = dict(payload)
+    candidate_value = dict(candidate)
+    return_value = (
+        payload_value,
+        candidate_value,
+        export_path,
+        expected_trace_id,
+    )
+    return return_value
+
+
+def _replay_capacity_trace(
+    short_trace_id: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Run a captured candidate through the public cognition facade."""
+
+    payload, candidate, export_path, source_trace_id = (
+        _load_capacity_replay_input(short_trace_id)
+    )
+    state = validate_cognition_state(payload["mutable_state"])
+    persisted_capsules: list[dict[str, Any]] = []
+
+    async def captured_appraisal(
+        *_args: Any,
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        """Return the protected candidate at the semantic appraisal seam."""
+
+        candidate_copy = deepcopy(candidate)
+        return candidate_copy
+
+    async def empty_dependency_graph(
+        *_args: Any,
+        **_kwargs: Any,
+    ) -> ParallelExecutionResult:
+        """Keep downstream branch execution deterministic and side-effect free."""
+
+        execution = ParallelExecutionResult()
+        return execution
+
+    async def silence_action_plan(**_: Any) -> dict[str, Any]:
+        """Return the canonical no-admitted-bid action decision."""
+
+        return {
+            "intention": {
+                "route": "silence",
+                "intention": "remain silent",
+                "target_roles": [],
+                "reason": "no valid admitted bid",
+            },
+            "action_requests": [],
+            "resolver_requests": [],
+            "goal_resolution": "blocked",
+            "resolver_pending_resolution": None,
+            "resolver_goal_progress": None,
+        }
+
+    monkeypatch.setattr(
+        facade,
+        "plan_semantic_questions",
+        lambda *_args, **_kwargs: [{
+            "question_id": candidate["question_id"],
+            "question_kind": "event_agency",
+            "semantic_question": "Assess the captured event candidate.",
+        }],
+    )
+    monkeypatch.setattr(
+        facade,
+        "appraise_semantic_question",
+        captured_appraisal,
+    )
+    monkeypatch.setattr(
+        facade,
+        "execute_dependency_graph",
+        empty_dependency_graph,
+    )
+    monkeypatch.setattr(facade, "plan_actions", silence_action_plan)
+    monkeypatch.setattr(
+        facade.failure_capsule,
+        "LLM_TRACE_CAPTURE_MODE",
+        "metadata",
+    )
+    monkeypatch.setattr(
+        facade.llm_tracing,
+        "current_trace_id",
+        lambda: source_trace_id,
+    )
+    monkeypatch.setattr(
+        facade.failure_capsule,
+        "_schedule_persistence",
+        lambda document: persisted_capsules.append(deepcopy(document)),
+    )
+    output = asyncio.run(
+        facade.run_cognition(
+            payload,
+            SimpleNamespace(),
+        )
+    )
+    updated = output["state_update"]["replacement_state"]
+    assert len(state["active_events"]) == 32
+    assert len(updated["active_events"]) <= 32
+    assert output["schema_version"] == "cognition_core_output.v2"
+    assert output["diagnostics"]["stage_status"]["final_reduction"] == (
+        "completed"
+    )
+    before_event_ids = {
+        event["entity_id"] for event in state["active_events"]
+    }
+    after_event_ids = {
+        event["entity_id"] for event in updated["active_events"]
+    }
+    assert before_event_ids <= after_event_ids
+    assert persisted_capsules
+    assert len(persisted_capsules) == 1
+    capsule = persisted_capsules[0]["capsule"]
+    assert capsule["outcome"] == "partial_failure"
+    assert capsule["exception"] is None
+    question_id = str(candidate["question_id"])
+    rejection_event = next(
+        event
+        for event in capsule["failure_events"]
+        if (
+            isinstance(event.get("details"), Mapping)
+            and event["details"].get("failure_code")
+            == "semantic_appraisal_reduction_rejected"
+        )
+    )
+    rejection = rejection_event["details"]
+    assert rejection["question_id"] == question_id
+    assert rejection["failure_code"] == (
+        "semantic_appraisal_reduction_rejected"
+    )
+    assert len(rejection["exception_text"]) <= 500
+    appraisal_rows = output["cognition_observability"]["appraisals"]
+    assert appraisal_rows == [{
+        "question_kind": "event_agency",
+        "semantic_question": "Assess the captured event candidate.",
+        "status": "failed",
+        "failure_code": "semantic_appraisal_reduction_rejected",
+    }]
+    artifact = {
+        "schema_version": "cognition_failure_replay.v2",
+        "source_trace_id": source_trace_id,
+        "source_export": str(export_path),
+        "replay_mode": "captured_candidate_through_run_cognition",
+        "candidate": {
+            "question_id": question_id,
+            "proposition_count": len(candidate.get("propositions", [])),
+            "delta_count": len(candidate.get("deltas", [])),
+        },
+        "accepted_prefix": {
+            "question_ids": [],
+            "comparison_count": 0,
+        },
+        "rejection": dict(rejection),
+        "state_counts": {
+            "active_events_before": len(state["active_events"]),
+            "active_events_after": len(updated["active_events"]),
+            "active_events_cap": 32,
+        },
+        "final_output_status": output["schema_version"],
+        "failure_capsule_outcome": capsule["outcome"],
+        "terminal_capsule_status": (
+            "terminal_failure"
+            if capsule["outcome"] == "terminal_failure"
+            else "none"
+        ),
+    }
+    artifact_path = write_diagnostic_artifact(
+        f"cognition_failure_replay_{short_trace_id}",
+        artifact,
+        artifact_root=_ROOT / "test_artifacts" / "diagnostics",
+    )
+    assert artifact_path.exists()
+
+
+def test_captured_trace_8d0d4295_stays_within_active_event_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The first protected capacity failure is contained by admission."""
+
+    _replay_capacity_trace("8d0d4295", monkeypatch)
+
+
+def test_captured_trace_9164e957_stays_within_active_event_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The second protected capacity failure is contained by admission."""
+
+    _replay_capacity_trace("9164e957", monkeypatch)

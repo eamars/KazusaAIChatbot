@@ -596,6 +596,7 @@ MSG_DECONTEXTUALIZER_ATTEMPT_LIMIT = V2_MODEL_TOTAL_ATTEMPTS
 MSG_DECONTEXTUALIZER_REPAIR_OUTPUT_CAP = 8000
 MAX_DECONTEXTUALIZED_INPUT_CHARS = 4000
 MAX_DECONTEXTUALIZER_REASONING_CHARS = 500
+MAX_DECONTEXTUALIZER_VALIDATION_ERROR_CHARS = 500
 _DECONTEXTUALIZER_OUTPUT_FIELDS = frozenset({
     "output",
     "role_explicit_content",
@@ -781,6 +782,13 @@ async def call_msg_decontextualizer(state: GlobalPersonaState) -> dict:
     if participant_bindings:
         input_msg["scene_participant_bindings"] = participant_bindings
     human_message = HumanMessage(content=json.dumps(input_msg, ensure_ascii=False))
+    failure_capsule_session = (
+        llm_tracing.failure_capsule.begin_failure_capsule(
+            trace_id=str(state.get("llm_trace_id", "")),
+            entrypoint="message_decontextualizer",
+            input_payload=input_msg,
+        )
+    )
 
     # logger.debug(
     #     "Decontextualizer input: user=%s platform_user=%s history=%d topic=%s indirect=%s input=%s",
@@ -856,6 +864,9 @@ async def call_msg_decontextualizer(state: GlobalPersonaState) -> dict:
                 status="failed",
                 started_at=started_at,
                 attempt_index=attempt_index,
+                validation_error=(
+                    str(exc)[:MAX_DECONTEXTUALIZER_VALIDATION_ERROR_CHARS]
+                ),
             )
             if attempt_index + 1 >= MSG_DECONTEXTUALIZER_ATTEMPT_LIMIT:
                 logger.warning(
@@ -923,6 +934,10 @@ async def call_msg_decontextualizer(state: GlobalPersonaState) -> dict:
                 response_operation,
             )
         )
+    llm_tracing.failure_capsule.finish_failure_capsule(
+        failure_capsule_session,
+        outcome=None,
+    )
     return return_value
 
 
@@ -1076,6 +1091,7 @@ async def _record_decontextualizer_trace_step(
     status: str,
     started_at: float,
     attempt_index: int,
+    validation_error: str = "",
 ) -> None:
     """Record one producing-stage candidate and its contract disposition."""
 
@@ -1097,6 +1113,7 @@ async def _record_decontextualizer_trace_step(
             "decontextualized_input",
             "referents",
         ],
+        validation_error=validation_error,
     )
 
 

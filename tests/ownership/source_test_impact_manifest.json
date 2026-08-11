@@ -251,9 +251,24 @@
       "owner": "cognition_core_v2 owner",
       "contract": "facade public contract",
       "required_unit_tests": [
-        "tests/unit/cognition_core_v2/test_facade.py::test_facade_exposes_owned_contract"
+        "tests/unit/cognition_core_v2/test_facade.py::test_facade_exposes_owned_contract",
+        "tests/unit/cognition_core_v2/test_facade.py::test_reduction_rejects_over_cap_candidate_during_full_finalization",
+        "tests/unit/cognition_core_v2/test_facade.py::test_reduction_rejects_affect_protected_terminal_during_finalization",
+        "tests/unit/cognition_core_v2/test_facade.py::test_reduction_accepts_candidate_when_terminal_row_is_removable",
+        "tests/unit/cognition_core_v2/test_facade.py::test_reduction_rejects_goal_capacity_during_finalization",
+        "tests/unit/cognition_core_v2/test_facade.py::test_reduction_preserves_accepted_prefix_and_comparison_rows",
+        "tests/unit/cognition_core_v2/test_facade.py::test_reduction_records_bounded_rejection_evidence",
+        "tests/unit/cognition_core_v2/test_facade.py::test_reduction_runs_finalization_once_per_admitted_prefix"
       ],
-      "supplemental_tests": []
+      "supplemental_tests": [
+        "tests/test_cognition_core_v2_semantic_terminalization.py::test_appraisal_retries_a_reducer_incompatible_candidate",
+        "tests/test_cognition_core_v2_semantic_terminalization.py::test_final_reduction_isolates_one_residual_invalid_appraisal",
+        "tests/test_cognition_core_v2_semantic_terminalization.py::test_final_reduction_preserves_cross_appraisal_composition",
+        "tests/test_cognition_core_v2_trace_failure_mode_matrix.py::test_captured_trace_8d0d4295_stays_within_active_event_cap",
+        "tests/test_cognition_core_v2_trace_failure_mode_matrix.py::test_captured_trace_9164e957_stays_within_active_event_cap",
+        "tests/test_cognition_core_v2_trace_failure_modes_live_llm.py::test_captured_trace_8d0d4295_capacity_path_live_llm",
+        "tests/test_cognition_core_v2_trace_failure_modes_live_llm.py::test_captured_trace_9164e957_capacity_path_live_llm"
+      ]
     },
     {
       "source": "src/kazusa_ai_chatbot/cognition_core_v2/goal_cognition.py",
@@ -337,9 +352,16 @@
       "contract": "moral_identity permitted role handles",
       "required_unit_tests": [
         "tests/unit/cognition_core_v2/test_semantic_source_planner.py::test_moral_identity_questions_exclude_standard_handles",
-        "tests/unit/cognition_core_v2/test_semantic_source_planner.py::test_semantic_source_planner_exposes_owned_contract"
+        "tests/unit/cognition_core_v2/test_semantic_source_planner.py::test_semantic_source_planner_exposes_owned_contract",
+        "tests/unit/cognition_core_v2/test_semantic_source_planner.py::test_goal_outcome_filters_terminal_handles_and_delta_paths",
+        "tests/unit/cognition_core_v2/test_semantic_source_planner.py::test_goal_outcome_keeps_eligible_handles_and_candidates"
       ],
-      "supplemental_tests": []
+      "supplemental_tests": [
+        "tests/test_cognition_core_v2_alignment_gates.py::test_scheduler_evidence_selects_only_goal_threat_outcome",
+        "tests/test_cognition_core_v2_alignment_gates.py::test_each_question_receives_only_family_local_handles_and_state",
+        "tests/test_cognition_core_v2_trace_failure_mode_matrix.py::test_resolved_knowledge_gap_transition_is_rejected",
+        "tests/test_cognition_core_v2_trace_failure_mode_matrix.py::test_terminal_event_transition_is_rejected"
+      ]
     },
     {
       "source": "src/kazusa_ai_chatbot/cognition_core_v2/state_models.py",
@@ -528,9 +550,13 @@
     {
       "source": "src/kazusa_ai_chatbot/nodes/persona_supervisor2_msg_decontextualizer.py",
       "owner": "message decontextualizer owner",
-      "contract": "response-operation role direction prompt guidance",
+      "contract": "response-operation role direction prompt guidance and protected bounded contract-error evidence",
       "required_unit_tests": [
-        "tests/test_msg_decontextualizer.py::test_decontextualizer_prompt_explains_reply_ellipsis_decision_owner"
+        "tests/test_msg_decontextualizer.py::test_decontextualizer_prompt_explains_reply_ellipsis_decision_owner",
+        "tests/test_msg_decontextualizer.py::test_decontextualizer_trace_records_bounded_validation_error",
+        "tests/test_msg_decontextualizer.py::test_decontextualizer_actual_capsule_captures_validation_error",
+        "tests/test_msg_decontextualizer.py::test_decontextualizer_fallback_on_malformed_json",
+        "tests/test_msg_decontextualizer.py::test_decontextualizer_recovers_on_third_contract_attempt"
       ],
       "supplemental_tests": [
         "tests/test_decontextualizer_live_llm.py::test_live_decontextualizer_reward_offer_preserves_user_actor_character_target"

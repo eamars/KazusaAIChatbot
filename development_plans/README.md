@@ -1,8 +1,8 @@
 # development plans registry
 
-This directory contains current implementation planning work and the living
-long-term roadmap. Agents must read this registry before opening an active
-plan.
+This directory contains current implementation planning work, historical plan
+records, and the living long-term roadmap. Agents must read this registry
+before opening an active plan.
 
 ## Directory Contract
 
