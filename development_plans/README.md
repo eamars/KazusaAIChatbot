@@ -64,6 +64,7 @@ long_term/todo.md
 | Document | Type | Status |
 |---|---|---|
 | [cognition_core_v2_selected_response_operation_role_contract_bugfix_plan_20260810.md](archive/completed/bugfix/cognition_core_v2_selected_response_operation_role_contract_bugfix_plan_20260810.md) | Post-selection response-operation role contract repair for required-selection dialog exhaustion | completed |
+| [cognition_core_v2_atomic_appraisal_finalization_and_terminal_eligibility_bugfix_plan_20260811.md](archive/completed/bugfix/cognition_core_v2_atomic_appraisal_finalization_and_terminal_eligibility_bugfix_plan_20260811.md) | Atomic Cognition V2 appraisal finalization, lifecycle-eligible terminal planning, and bounded failure evidence | completed |
 | [cognition_surface_score_ranking_followup_plan_20260810.md](active/bugfix/cognition_surface_score_ranking_followup_plan_20260810.md) | Evidence-gated surface quality ranking follow-up for bounded retry exhaustion | draft |
 | [self_cognition_trigger_state_contract_recovery_bugfix_plan.md](archive/completed/bugfix/self_cognition_trigger_state_contract_recovery_bugfix_plan.md) | Group-chat and commitment self-cognition V2 state-contract recovery | completed |
 | [reflection_recursive_root_timestamp_canonicalization_bugfix_plan.md](archive/completed/bugfix/reflection_recursive_root_timestamp_canonicalization_bugfix_plan.md) | Recursive reflection root timestamp canonicalization and guarded group-ledger recovery | completed |

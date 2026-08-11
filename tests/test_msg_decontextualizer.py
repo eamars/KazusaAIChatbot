@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from copy import deepcopy
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -20,6 +21,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer import (
     multimedia_descriptor_agent,
     select_media_for_turn,
 )
+from kazusa_ai_chatbot.llm_tracing import failure_capsule
 
 _FAILURE_INPUT = '等她有了机械臂，她说她不喜欢你，第一个被解决的就是你'
 _RESOLVED_FAILURE_INPUT = (
@@ -402,12 +404,12 @@ def _decontextualizer_payload(
 def _decontextualizer_response(**kwargs: object) -> MagicMock:
     """Build one mock response with the complete decontextualizer contract."""
 
-    return _llm_response(
-        json.dumps(
-            _decontextualizer_payload(**kwargs),
-            ensure_ascii=False,
-        )
+    response_text = json.dumps(
+        _decontextualizer_payload(**kwargs),
+        ensure_ascii=False,
     )
+    response = _llm_response(response_text)
+    return response
 
 
 def _qq_failure_history() -> list[dict]:
@@ -967,6 +969,88 @@ async def test_decontextualizer_fallback_on_malformed_json():
     assert result["decontextualized_input"] == "他在干啥？"
     assert result["referents"] == []
     assert mock_llm.ainvoke.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_decontextualizer_trace_records_bounded_validation_error():
+    """Contract failures retain a bounded reason in protected trace calls."""
+
+    invalid_response = _llm_response("{}")
+    with patch(
+        "kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer."
+        "_msg_decontextualizer_llm"
+    ) as mock_llm, patch.object(
+        decontextualizer_module.llm_tracing,
+        "record_llm_trace_step",
+        new_callable=AsyncMock,
+    ) as record_step:
+        mock_llm.ainvoke = AsyncMock(
+            side_effect=[invalid_response, invalid_response, invalid_response]
+        )
+
+        result = await call_msg_decontextualizer(_base_state())
+
+    assert result["decontextualized_input"] == "他在干啥？"
+    assert mock_llm.ainvoke.await_count == 3
+    contract_calls = [
+        call.kwargs
+        for call in record_step.await_args_list
+        if call.kwargs["parse_status"] == "contract_error"
+    ]
+    assert len(contract_calls) == 3
+    assert all(
+        0 < len(call["validation_error"]) <= 500
+        for call in contract_calls
+    )
+
+
+@pytest.mark.asyncio
+async def test_decontextualizer_actual_capsule_captures_validation_error():
+    """Stage 0 failure capsules retain the real bounded contract detail."""
+
+    invalid_response = _llm_response("{}")
+    captured_capsules: list[dict[str, object]] = []
+    state = _base_state()
+    state["llm_trace_id"] = "llmtrace_decontextualizer_capsule_test"
+    with patch(
+        "kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer."
+        "_msg_decontextualizer_llm"
+    ) as mock_llm, patch.object(
+        decontextualizer_module.llm_tracing,
+        "LLM_TRACE_CAPTURE_MODE",
+        "off",
+    ), patch.object(
+        failure_capsule,
+        "LLM_TRACE_CAPTURE_MODE",
+        "metadata",
+    ), patch.object(
+        failure_capsule,
+        "_schedule_persistence",
+        side_effect=lambda document: captured_capsules.append(
+            deepcopy(document)
+        ),
+    ):
+        mock_llm.ainvoke = AsyncMock(
+            side_effect=[invalid_response, invalid_response, invalid_response]
+        )
+
+        result = await call_msg_decontextualizer(state)
+
+    assert result["decontextualized_input"] == "他在干啥？"
+    assert len(captured_capsules) == 1
+    capsule = captured_capsules[0]["capsule"]
+    assert capsule["entrypoint"] == "message_decontextualizer"
+    assert capsule["outcome"] == "partial_failure"
+    attempts = [
+        attempt
+        for attempt in capsule["attempts"]
+        if attempt["stage_name"].startswith("message_decontextualizer")
+    ]
+    assert len(attempts) == 3
+    assert all(
+        0 < len(attempt["validation_error"]) <= 500
+        for attempt in attempts
+    )
 
 
 @pytest.mark.asyncio

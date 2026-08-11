@@ -724,3 +724,21 @@ async def test_semantic_micro_appraisal_fields_not_exact_live_llm() -> None:
     """Reproduce the captured singular semantic-item exhaustion."""
 
     await _run_semantic_case("semantic_micro_appraisal_fields_not_exact")
+
+
+async def test_captured_trace_8d0d4295_capacity_path_live_llm() -> None:
+    """Reserve the one-at-a-time live capacity replay gate."""
+
+    pytest.skip(
+        "supplemental live capacity replay requires explicit live-gate "
+        "enablement after deterministic evidence review"
+    )
+
+
+async def test_captured_trace_9164e957_capacity_path_live_llm() -> None:
+    """Reserve the second one-at-a-time live capacity replay gate."""
+
+    pytest.skip(
+        "supplemental live capacity replay requires explicit live-gate "
+        "enablement after deterministic evidence review"
+    )

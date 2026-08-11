@@ -98,6 +98,7 @@ _DEGRADABLE_APPRAISAL_ERROR_CODES = frozenset({
 AUTHORITATIVE_RELATIONAL_COLLAPSE_REASON = (
     "authoritative_relational_stance_preserved_ordinary_response"
 )
+MAX_APPRAISAL_REJECTION_ERROR_CHARS = 500
 
 
 def _deduplicate_diagnostics_warnings(
@@ -284,47 +285,25 @@ async def _run_cognition(
     warnings.extend(preliminary_execution.warnings)
     stage_status["branch_cognition"] = "completed"
 
-    comparison_results: list[dict[str, Any]] = []
-    final_state = preliminary_state
-    if appraisal_results:
-        (
-            final_state,
-            appraisal_results,
-            reduction_failures,
-            comparison_results,
-        ) = _reduce_appraisals_with_isolation(
-            final_state,
-            appraisal_results,
-            payload["evidence"],
-            projection.handle_to_ref,
-        )
-        appraisal_failures.update(reduction_failures)
-        warnings.extend(
-            f"semantic_appraisal_failed:{error_code}"
-            for error_code in reduction_failures.values()
-        )
-    relief_transitions = _semantic_relief_transitions(
-        preliminary_state,
+    (
         final_state,
+        appraisal_results,
+        reduction_failures,
+        comparison_results,
+    ) = _reduce_appraisals_with_isolation(
+        preliminary_state,
         appraisal_results,
         payload["evidence"],
         projection.handle_to_ref,
-    )
-    final_state = apply_state_update(
-        final_state,
         updated_at=updated_at,
         character_constraints=payload["character_constraints"],
         relationship_context=reducer_relationship_context,
-        transition_contexts=relief_transitions,
     )
-    final_state = create_deterministic_goals(
-        final_state,
-        character_constraints=payload["character_constraints"],
-        relationship_context=reducer_relationship_context,
-        evidence=payload["evidence"],
-        updated_at=updated_at,
+    appraisal_failures.update(reduction_failures)
+    warnings.extend(
+        f"semantic_appraisal_failed:{error_code}"
+        for error_code in reduction_failures.values()
     )
-    final_state = validate_cognition_state(final_state)
     stage_status["final_reduction"] = "completed"
     final_projection = project_state_for_prompt(
         final_state,
@@ -1469,6 +1448,10 @@ def _reduce_appraisals_with_isolation(
     results: Sequence[SemanticAppraisalResultV2],
     evidence: Sequence[Mapping[str, Any]],
     handle_to_ref: Mapping[str, Mapping[str, str]],
+    *,
+    updated_at: str,
+    character_constraints: Mapping[str, Any] | None,
+    relationship_context: Mapping[str, Any] | None,
 ) -> tuple[
     dict[str, Any],
     list[SemanticAppraisalResultV2],
@@ -1482,19 +1465,27 @@ def _reduce_appraisals_with_isolation(
         results: Producer-validated semantic appraisal results.
         evidence: Typed evidence available to the appraisal batch.
         handle_to_ref: Private prompt-handle bindings for native reduction.
+        updated_at: Canonical timestamp for the final state transaction.
+        character_constraints: Read-only character constraints for affect and
+            deterministic goal derivation.
+        relationship_context: Native relationship context for affect and goal
+            derivation.
 
     Returns:
-        The last valid state, accepted results, rejected question diagnostics,
-        and comparison rows produced only by accepted reductions.
+        The last finalized state, accepted results, rejected question
+        diagnostics, and comparison rows produced only by accepted reductions.
     """
 
     updated_state = dict(state)
     accepted_results: list[SemanticAppraisalResultV2] = []
     failures: dict[str, str] = {}
     comparison_results: list[dict[str, Any]] = []
-    for result in results:
-        candidate_results = [*accepted_results, result]
+    for result in [None, *results]:
+        candidate_results = list(accepted_results)
+        if result is not None:
+            candidate_results.append(result)
         candidate_comparisons: list[dict[str, Any]] = []
+        finalization_step = "apply_semantic_appraisals"
         try:
             candidate_state = apply_semantic_appraisals(
                 state,
@@ -1503,8 +1494,37 @@ def _reduce_appraisals_with_isolation(
                 handle_to_ref,
                 candidate_comparisons,
             )
+            finalization_step = "_semantic_relief_transitions"
+            relief_transitions = _semantic_relief_transitions(
+                state,
+                candidate_state,
+                candidate_results,
+                evidence,
+                handle_to_ref,
+            )
+            finalization_step = "apply_state_update"
+            candidate_state = apply_state_update(
+                candidate_state,
+                updated_at=updated_at,
+                character_constraints=character_constraints,
+                relationship_context=relationship_context,
+                transition_contexts=relief_transitions,
+            )
+            finalization_step = "create_deterministic_goals"
+            candidate_state = create_deterministic_goals(
+                candidate_state,
+                character_constraints=character_constraints,
+                relationship_context=relationship_context,
+                evidence=evidence,
+                updated_at=updated_at,
+            )
+            finalization_step = "validate_cognition_state"
+            candidate_state = validate_cognition_state(candidate_state)
         except CognitionStateError as exc:
+            if result is None:
+                raise
             error_code = "semantic_appraisal_reduction_rejected"
+            exception_text = str(exc)[:MAX_APPRAISAL_REJECTION_ERROR_CHARS]
             failures[result["question_id"]] = error_code
             failure_capsule.mark_current_failure(
                 failure_kind="semantic_appraisal_reduction_failure",
@@ -1512,6 +1532,8 @@ def _reduce_appraisals_with_isolation(
                 details={
                     "question_id": result["question_id"],
                     "failure_code": error_code,
+                    "finalization_step": finalization_step,
+                    "exception_text": exception_text,
                 },
                 exception=exc,
             )
@@ -1521,13 +1543,15 @@ def _reduce_appraisals_with_isolation(
                     "question_id": result["question_id"],
                     "status": "rejected",
                     "error_code": error_code,
-                    "error": str(exc),
+                    "finalization_step": finalization_step,
+                    "error": exception_text,
                 },
             )
             continue
         updated_state = candidate_state
-        accepted_results.append(result)
         comparison_results = candidate_comparisons
+        if result is not None:
+            accepted_results.append(result)
     return (
         updated_state,
         accepted_results,
